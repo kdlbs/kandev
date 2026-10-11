@@ -47,22 +47,20 @@ export function buildSidebarTaskEditTarget(
   };
 }
 
-export function useSidebarTaskEdit() {
+export function useSidebarTaskEdit(pageTasks: KanbanState["tasks"] = []) {
   const store = useAppStoreApi();
   const [editingTask, setEditingTask] = useState<SidebarTaskEditTarget | null>(null);
 
   const handleEditTask = useCallback(
     (item: TaskSwitcherItem) => {
       const state = store.getState();
-      const sourceTask = findTaskInSnapshots(
-        item.id,
-        state.kanbanMulti.snapshots,
-        state.kanban.tasks,
-      );
+      const sourceTask =
+        pageTasks.find((task) => task.id === item.id) ??
+        findTaskInSnapshots(item.id, state.kanbanMulti.snapshots, state.kanban.tasks);
       const target = buildSidebarTaskEditTarget(item, sourceTask);
       if (target) setEditingTask(target);
     },
-    [store],
+    [pageTasks, store],
   );
 
   return { editingTask, setEditingTask, handleEditTask };

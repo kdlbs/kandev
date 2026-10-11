@@ -346,3 +346,8 @@ User requested no commit.
 
 The [settings storage tabs package](../settings-storage-tabs/plan.md) completed the header tabs and maintenance presentation changes.
 This package retains its historical implementation results. Its route and copy references are current.
+
+## Guarded message update optimization
+
+The [message update writer package](../message-update-writer-occupancy/plan.md) removes redundant SQLite reservation work while preserving the replay guard.
+Its pending implementation and checks are separate from this package's recorded results.

@@ -124,3 +124,17 @@ func TestDeliveryRecoveryPartialNoticePreservesStreamBinding(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, stream, stored.DeliveryStreamID)
 }
+
+func TestNativeResumeMissingDeliveryMetadataKeepsBlockOpen(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	fixture := newSilentRestoreFixture(t, repo, "resume-absent", models.TaskSessionStateWaitingForInput)
+	_, err := repo.DB().ExecContext(ctx, `UPDATE task_sessions SET metadata = '{}' WHERE id = ?`, fixture.session.ID)
+	require.NoError(t, err)
+	changed, err := repo.ResolveSessionRecoveryBlock(ctx, fixture.block.ID, "resume", time.Now().UTC())
+	require.NoError(t, err)
+	require.False(t, changed)
+	block, err := repo.GetSessionRecoveryBlock(ctx, fixture.block.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RecoveryBlockOpen, block.State)
+}

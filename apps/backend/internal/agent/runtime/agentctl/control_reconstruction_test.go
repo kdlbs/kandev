@@ -37,10 +37,11 @@ func TestControlClientReadsRetainedReconstructionEvidenceAndPayload(t *testing.T
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			if request.Root != "/backend/session-data" || request.SessionID != "session" || request.IncarnationID != "incarnation" || request.HarnessGeneration != 7 {
+			if request.Root != "/backend/session-data" || request.SessionID != "session" || request.IncarnationID != "incarnation" || request.HarnessGeneration != 7 || request.RetiredSubmissionID != "historical" {
 				t.Errorf("evidence request = %+v", request)
 			}
 			_ = json.NewEncoder(w).Encode(journal.RetainedReconstructionEvidence{
+				RetiredSubmission: &journal.Submission{ID: "historical", State: journal.SubmissionInterruptedUnknown, Retired: true},
 				Descriptor: journal.RecoveryDescriptor{
 					StorageCapability: journal.StorageCapability{Version: journal.CurrentVersion, Durable: true},
 					SessionID:         "session", IncarnationID: "incarnation", HarnessGeneration: 7,
@@ -67,13 +68,16 @@ func TestControlClientReadsRetainedReconstructionEvidenceAndPayload(t *testing.T
 	client := newTestControlClient(t, server, WithControlAuthToken("retained-secret"))
 
 	evidence, err := client.ReadRetainedReconstructionEvidence(context.Background(), journal.RetainedReconstructionEvidenceRequest{
-		Root: "/backend/session-data", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 7,
+		Root: "/backend/session-data", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 7, RetiredSubmissionID: "historical",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if evidence.Descriptor.SubmissionCount != 1 || evidence.Descriptor.Submissions[0].ID != candidate.ID || evidence.ProcessTerminated != nil {
 		t.Fatalf("evidence = %+v", evidence)
+	}
+	if evidence.RetiredSubmission == nil || !evidence.RetiredSubmission.Retired || evidence.RetiredSubmission.ID != "historical" {
+		t.Fatalf("selected retirement evidence = %+v", evidence.RetiredSubmission)
 	}
 	selected, err := client.ReadRetainedReconstructionSubmission(context.Background(), journal.RetainedReconstructionSubmissionRequest{
 		Root: "/backend/session-data", SessionID: "session", IncarnationID: "incarnation",

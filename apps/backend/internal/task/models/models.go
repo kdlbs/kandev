@@ -81,6 +81,23 @@ type ListMessagesOptions struct {
 	Around      string
 }
 
+// MessageTurnCoverage identifies the message rows whose turn context was read
+// from the same database snapshot, plus the active turn observed by that read.
+type MessageTurnCoverage struct {
+	MessageIDs   []string
+	ActiveTurnID string
+}
+
+// MessageTurnWindow is a bounded transcript page and the turn rows needed to
+// render it. Turns are limited to distinct message turn IDs plus the active
+// turn, regardless of how much older turn history exists.
+type MessageTurnWindow struct {
+	Messages []*Message
+	Turns    []*Turn
+	HasMore  bool
+	Coverage *MessageTurnCoverage
+}
+
 // SearchMessagesOptions defines options for searching a session's messages.
 type SearchMessagesOptions struct {
 	Query string

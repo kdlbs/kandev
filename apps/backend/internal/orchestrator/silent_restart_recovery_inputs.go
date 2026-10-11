@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -237,7 +238,10 @@ func (s *Service) restoreSilentRestartCandidate(
 	if err != nil || inputs == nil {
 		return err
 	}
-	attemptID := silentRestoreAttemptID(inputs.session.ID, inputs.recovery.IncarnationID, inputs.generation.Generation)
+	attemptID, err := silentRestoreIncidentAttemptID(ctx, store, inputs)
+	if err != nil {
+		return err
+	}
 	attempt, err := s.ensureSilentRestoreAttempt(ctx, store, attemptID, inputs)
 	if err != nil || attempt == nil || attempt.Checkpoint == nil {
 		return err
@@ -525,4 +529,17 @@ func silentRestoreSessionEligible(session *models.TaskSession) bool {
 	default:
 		return false
 	}
+}
+
+func silentRestoreIncidentAttemptID(ctx context.Context, store taskrepo.SilentRestoreRepository, inputs *silentRestoreInputs) (string, error) {
+	legacyID := silentRestoreAttemptID(inputs.session.ID, inputs.recovery.IncarnationID, inputs.generation.Generation)
+	legacy, err := store.GetRestoreAttempt(ctx, legacyID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	if legacy != nil && legacy.Checkpoint != nil && legacy.Checkpoint.SourceRecovery.SubmissionID == inputs.recovery.SubmissionID {
+		return legacyID, nil
+	}
+	return silentRestoreAttemptID(inputs.session.ID, inputs.recovery.IncarnationID, inputs.generation.Generation) + "-" +
+		silentRestoreAttemptID(inputs.recovery.SubmissionID, inputs.recovery.AgentExecutionID, inputs.generation.Generation), nil
 }

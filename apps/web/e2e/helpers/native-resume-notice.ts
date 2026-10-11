@@ -40,7 +40,8 @@ export async function verifyNativeResumeClearsRecoveryNotice(
         (await api.listTaskSessions(task.id)).sessions.find((item) => item.id === active.id)?.state,
     )
     .toBe("WAITING_FOR_INPUT");
-  const native = active.metadata?.acp;
+  const native = (await api.getTaskSession(active.id)).session.metadata?.acp;
+  expect(native).toMatchObject({ session_id: expect.any(String) });
   await api.stopSession({ session_id: active.id, force: true });
   await expect
     .poll(
@@ -72,27 +73,22 @@ export async function verifyNativeResumeClearsRecoveryNotice(
       contentType: "text/plain",
     });
     await test.info().attach("native-resume-session", {
-      body: JSON.stringify(await api.listTaskSessions(task.id)),
+      body: JSON.stringify(await api.getTaskSession(active.id)),
       contentType: "application/json",
     });
     throw error;
   }
   await expect
     .poll(async () => {
-      const current = (await api.listTaskSessions(task.id)).sessions.find(
-        (item) => item.id === active.id,
-      );
-      return (current?.metadata?.agent_delivery_recovery as { phase?: string } | undefined)?.phase;
+      const { session: current } = await api.getTaskSession(active.id);
+      return (current.metadata?.agent_delivery_recovery as { phase?: string } | undefined)?.phase;
     })
     .toBe("restored");
   await page.reload();
   await session.waitForLoad();
   await expect(page.getByTestId("failed-session-banner")).toHaveCount(0);
   await expect(page.getByTestId("delivery-recovery-result")).toHaveCount(0);
-  expect(
-    (await api.listTaskSessions(task.id)).sessions.find((item) => item.id === active.id)?.metadata
-      ?.acp,
-  ).toEqual(native);
+  expect((await api.getTaskSession(active.id)).session.metadata?.acp).toEqual(native);
   expect(readRecovery(tmpDir, seeded.blockId, seeded.submissionId)).toMatchObject({
     block: { state: "resolved", authorized_action: "resume" },
     submission: { state: "interrupted_unknown" },

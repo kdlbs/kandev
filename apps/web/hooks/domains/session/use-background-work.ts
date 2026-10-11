@@ -29,7 +29,10 @@ export interface UseBackgroundWorkReturn {
   fetchWorkloads: () => Promise<void>;
 }
 
-export function useBackgroundWork(sessionId: string | null): UseBackgroundWorkReturn {
+export function useBackgroundWork(
+  sessionId: string | null,
+  { detailActive = true }: { detailActive?: boolean } = {},
+): UseBackgroundWorkReturn {
   const store = useAppStoreApi();
   const enabled = useFeature("agentBackgroundWork");
 
@@ -51,7 +54,7 @@ export function useBackgroundWork(sessionId: string | null): UseBackgroundWorkRe
   const lastFetchedSessionIdRef = useRef<string | null>(null);
 
   const fetchWorkloads = useCallback(async () => {
-    if (!sessionId || !enabled) return;
+    if (!detailActive || !sessionId || !enabled) return;
     try {
       store.getState().setBackgroundWorkLoading?.(sessionId, true);
       const response = await listBackgroundWorkloads(sessionId);
@@ -59,17 +62,17 @@ export function useBackgroundWork(sessionId: string | null): UseBackgroundWorkRe
     } catch {
       store.getState().setBackgroundWorkLoading?.(sessionId, false);
     }
-  }, [sessionId, enabled, store]);
+  }, [detailActive, sessionId, enabled, store]);
 
   useEffect(() => {
-    if (!sessionId || !enabled) {
+    if (!detailActive || !sessionId || !enabled) {
       lastFetchedSessionIdRef.current = null;
       return;
     }
     if (lastFetchedSessionIdRef.current === sessionId) return;
     lastFetchedSessionIdRef.current = sessionId;
     fetchWorkloads();
-  }, [sessionId, enabled, fetchWorkloads]);
+  }, [detailActive, sessionId, enabled, fetchWorkloads]);
 
   const activeWorkload = useMemo(() => {
     if (!activeWorkId) return workloads[0] ?? null;

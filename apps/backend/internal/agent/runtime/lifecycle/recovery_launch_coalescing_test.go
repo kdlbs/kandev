@@ -97,3 +97,19 @@ func TestRecoveryLaunchDoesNotInheritConcurrentWorkspaceAdmissionFailure(t *test
 		})
 	}
 }
+
+func TestCancelledRecoveryLaunchDoesNotStartSharedOperation(t *testing.T) {
+	mgr := newTestManager(t)
+	resolver := &countingProfileResolver{err: errors.New("profile unavailable")}
+	mgr.profileResolver = resolver
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := mgr.coalesceSessionLaunch(ctx, &LaunchRequest{SessionID: "cancelled-session", AgentProfileID: "profile", RecoveryAction: "resume"})
+	require.ErrorIs(t, err, context.Canceled)
+	// Joining the same singleflight key waits for any operation admitted above.
+	_, err = mgr.doCoalescedExecution(context.Background(), "cancelled-session", func(context.Context) (interface{}, error) { return nil, nil })
+	if err != nil {
+		require.ErrorContains(t, err, "profile unavailable")
+	}
+	require.Zero(t, resolver.calls.Load(), "an already cancelled recovery must not launch caller-independent work")
+}

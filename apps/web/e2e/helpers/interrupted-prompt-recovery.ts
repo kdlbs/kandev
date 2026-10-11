@@ -7,7 +7,11 @@ import { readdirSync, existsSync } from "node:fs";
 
 const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
 type TestDatabase = {
-  prepare(sql: string): { get(...args: unknown[]): unknown; run(...args: unknown[]): unknown };
+  prepare(sql: string): {
+    get(...args: unknown[]): unknown;
+    all(...args: unknown[]): unknown[];
+    run(...args: unknown[]): unknown;
+  };
   close(): void;
 };
 

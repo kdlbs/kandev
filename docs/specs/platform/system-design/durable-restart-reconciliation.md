@@ -140,9 +140,22 @@ transaction pins the current notice, native generation, observed block timestamp
 and the sole open admission fence. Foreign bindings and independent blocks remain unchanged.
 The production lifecycle adapter exposes the already-loaded-native recovery seam explicitly.
 
+Native identity and recovery-snapshot verification use the authorized session detail read.
+Compact navigation rows omit rich metadata and cannot prove native continuity or restoration.
+
 Explicit recovery shares the session infrastructure slot with workspace readers. If it joins
 a reader that rejects unresolved recovery, it reacquires that slot and performs its own
 launch admission. It never inherits the reader's recovery rejection as the outcome of a
 native restore. Ordinary launches, unrelated failures, cancellation, and failures from the
 recovery's own launch remain authoritative. Workspace admission stays blocked until the
 matching recovery commits its restored snapshot.
+
+Recovery attempts are scoped to the interrupted submission and original execution as well
+as the session, incarnation, and harness generation. Retries of one incident reuse its
+checkpoint; a later incident in an already loaded conversation gets its own identity.
+Existing generation-scoped checkpoints remain authoritative for their matching source.
+Historical SQL unknown outcomes may be excluded from unresolved work only after an
+authenticated, owner-scoped journal read proves that exact submission retired with the
+same hash, incarnation, and generation. This read omits the prompt payload and never
+acknowledges events. Missing-metadata reconstruction carries the verified immutable
+canonical snapshots into its write transaction; changed or live historical rows block it.

@@ -427,10 +427,10 @@ export function useTaskRowActions(
   const { renameTaskById } = useTaskActions();
   const archiveActions = useArchiveActions(store, pageTasks);
   const deleteActions = useDeleteActions(store, pageTasks);
-  const detachActions = useTaskDetachDialog(store);
-  const handleNestTask = useNestTaskByDrag();
-  const linkActions = useSidebarLinkActions(store);
-  const editActions = useSidebarTaskEdit();
+  const detachActions = useTaskDetachDialog(store, pageTasks);
+  const handleNestTask = useNestTaskByDrag(pageTasks);
+  const linkActions = useSidebarLinkActions(store, pageTasks);
+  const editActions = useSidebarTaskEdit(pageTasks);
 
   const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);
   const [creatingSubtask, setCreatingSubtask] = useState<{ id: string; title: string } | null>(

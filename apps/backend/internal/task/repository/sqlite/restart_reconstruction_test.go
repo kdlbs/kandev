@@ -16,7 +16,7 @@ func TestRestartRecoveryRepairsMissingCanonicalProjection(t *testing.T) {
 }
 
 func TestRestartRecoveryPreservesCanonicalLiveDispatch(t *testing.T) {
-	for _, condition := range []string{"live", "no death proof", "dead"} {
+	for _, condition := range []string{"live", "no death proof", "dead", "lost CAS", "retired verified", "retired changed", "retired live"} {
 		t.Run(condition, func(t *testing.T) { testMissingProjectionReconstruction(t, condition) })
 	}
 }
@@ -55,10 +55,51 @@ func testMissingProjectionReconstruction(t *testing.T, condition string) {
 	request.Submission.State = models.DeliverySubmissionInterruptedUnknown
 	request.Submission.Outcome = "reconstructed_unknown"
 	if condition != "unknown" && condition != "no death proof" {
-		terminated := condition == "dead"
+		terminated := condition != "live"
 		request.Recovery.Reconstruction.ProcessTerminated = &terminated
 	}
+	if condition == "lost CAS" {
+		_, err = repo.DB().ExecContext(ctx, `CREATE TRIGGER skip_dispatch_repair BEFORE UPDATE ON agent_delivery_submissions
+			WHEN OLD.state = 'dispatching' BEGIN SELECT RAISE(IGNORE); END`)
+		require.NoError(t, err)
+	}
+	if condition == "retired verified" || condition == "retired changed" || condition == "retired live" {
+		_, err = repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{ID: "historical", SessionID: "session",
+			IncarnationID: "incarnation", HarnessGeneration: 1, OwnerGeneration: 1, PayloadHash: "historical-hash",
+			Payload: []byte("history"), State: models.DeliverySubmissionInterruptedUnknown})
+		require.NoError(t, err)
+		historical, readErr := repo.GetAgentDeliverySubmission(ctx, "historical")
+		require.NoError(t, readErr)
+		request.VerifiedRetiredSubmissions = []models.AgentDeliverySubmission{*historical}
+		if condition == "retired changed" {
+			_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET payload_hash = 'changed' WHERE id = 'historical'`)
+			require.NoError(t, err)
+		}
+		if condition == "retired live" {
+			_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET state = 'dispatching' WHERE id = 'historical'`)
+			require.NoError(t, err)
+		}
+	}
 	result, err := repo.ReconstructAgentDeliverySubmission(ctx, request)
+	if condition == "retired changed" || condition == "retired live" {
+		require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryReconstructionConflict)
+		current, readErr := repo.GetTaskSession(ctx, "session")
+		require.NoError(t, readErr)
+		_, exists := models.LoadAgentDeliveryRecovery(current.Metadata)
+		require.False(t, exists)
+		return
+	}
+	if condition == "lost CAS" {
+		require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryReconstructionStale)
+		current, readErr := repo.GetTaskSession(ctx, "session")
+		require.NoError(t, readErr)
+		_, exists := models.LoadAgentDeliveryRecovery(current.Metadata)
+		require.False(t, exists)
+		unchanged, readErr := repo.GetSessionRecoveryBlock(ctx, "block")
+		require.NoError(t, readErr)
+		require.Empty(t, unchanged.DeliverySubmissionID)
+		return
+	}
 	if condition == "live" || condition == "no death proof" {
 		require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryReconstructionConflict)
 		retained, readErr := repo.GetAgentDeliverySubmission(ctx, submission.ID)

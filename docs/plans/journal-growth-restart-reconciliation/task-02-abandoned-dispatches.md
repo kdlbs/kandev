@@ -51,7 +51,7 @@ Add `TestNewManagerReopenClassifiesAbandonedDispatch` before the correction. The
 ## Verification
 
 ```bash
-(cd apps/backend && go test -trimpath -tags fts5 -trimpath -race ./internal/agentctl/journal ./internal/agentctl/server/process -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agentctl/journal ./internal/agentctl/server/process -count=1)
 git diff --check
 ```
 

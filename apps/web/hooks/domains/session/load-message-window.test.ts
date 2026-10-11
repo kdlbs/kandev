@@ -7,6 +7,7 @@ const listTaskSessionMessages = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/domains/session-api", () => ({ listTaskSessionMessages }));
 
 import { loadMessageWindowAround } from "./load-message-window";
+const WINDOW_TURN_ID = "turn-window";
 const SESSION = "session";
 const TARGET_TIME = "2026-08-22T00:00:00Z";
 const MIDDLE_TIME = "2026-08-22T00:00:01Z";
@@ -19,11 +20,14 @@ function message(id: string, created_at: string): Message {
 }
 
 const mergeMessages = vi.fn();
+const mergeTurnsWindow = vi.fn();
 let existingMessages = [message("new", NEW_TIME)];
 const store = {
   getState: () => ({
     messages: { bySession: { [SESSION]: existingMessages } },
+    turns: { reconcileEpochBySession: {}, activeBySession: {}, bySession: {} },
     mergeMessages,
+    mergeTurnsWindow,
   }),
 } as unknown as StoreApi<AppState>;
 
@@ -45,12 +49,31 @@ describe("loadMessageWindowAround merging", () => {
       around: "target",
       limit: 100,
       sort: "desc",
+      include_turns: true,
     });
     expect(mergeMessages).toHaveBeenCalledWith(SESSION, [
       message("target", TARGET_TIME),
       message("middle", MIDDLE_TIME),
       message("new", NEW_TIME),
     ]);
+  });
+
+  it("merges turn context with the around window", async () => {
+    listTaskSessionMessages.mockResolvedValue({
+      messages: [message("target", TARGET_TIME)],
+      turns: [{ id: WINDOW_TURN_ID }],
+      turn_coverage: { message_ids: ["target"], active_turn_id: WINDOW_TURN_ID },
+    });
+
+    await loadMessageWindowAround(SESSION, "target", () => true, store);
+
+    expect(mergeTurnsWindow).toHaveBeenCalledWith(
+      SESSION,
+      [{ id: WINDOW_TURN_ID }],
+      { message_ids: ["target"], active_turn_id: WINDOW_TURN_ID },
+      0,
+      { activeTurnId: null, reconcileEpoch: 0, updatedAt: undefined },
+    );
   });
 
   it("preserves a newer transcript row when the around response is stale", async () => {

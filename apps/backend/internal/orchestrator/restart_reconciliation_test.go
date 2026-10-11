@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 	"github.com/kandev/kandev/internal/common/processidentity"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"testing"
 	"time"
 
@@ -30,7 +32,7 @@ func TestRestartRecoveryRepairsDispatchStateDisagreement(t *testing.T) {
 }
 
 func TestRestartRecoveryRejectsConflictingDispatchEvidence(t *testing.T) {
-	for _, condition := range []string{"hash", "stream", "extra SQL", "live owner"} {
+	for _, condition := range []string{"hash", "stream", "extra SQL", "live owner", "retired hash", "retired owner", "missing retirement"} {
 		t.Run(condition, func(t *testing.T) { testRestartDispatchReconciliation(t, condition) })
 	}
 }
@@ -52,6 +54,31 @@ func testRestartDispatchReconciliation(t *testing.T, condition string) {
 		IncarnationID: session.QueueIncarnationID, StreamID: peerStream, HarnessGeneration: 1,
 		Hash: journal.SubmissionHash(payload), Payload: payload, State: journal.SubmissionDispatching})
 	require.NoError(t, err)
+	if condition == "retired hash" || condition == "retired owner" || condition == "missing retirement" {
+		oldHash, oldIncarnation := journal.SubmissionHash(payload), session.QueueIncarnationID
+		oldState := journal.SubmissionInterruptedUnknown
+		if condition == "missing retirement" {
+			oldState = journal.SubmissionAccepted
+		}
+		if condition == "retired hash" {
+			oldHash = "foreign-hash"
+		}
+		if condition == "retired owner" {
+			oldIncarnation = "foreign-incarnation"
+		}
+		_, err = store.PutSubmission(ctx, journal.Submission{ID: "historical", SessionID: session.ID,
+			IncarnationID: oldIncarnation, HarnessGeneration: 1, StreamID: "old-stream",
+			Hash: oldHash, Payload: payload, State: oldState})
+		require.NoError(t, err)
+		if condition != "missing retirement" {
+			_, err = store.RetireSubmission(ctx, "historical", 1)
+			require.NoError(t, err)
+		}
+		_, err = repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{ID: "historical", SessionID: session.ID,
+			IncarnationID: session.QueueIncarnationID, HarnessGeneration: 1, OwnerGeneration: 1,
+			PayloadHash: journal.SubmissionHash(payload), Payload: payload, State: models.DeliverySubmissionInterruptedUnknown})
+		require.NoError(t, err)
+	}
 	require.NoError(t, store.Close())
 	_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET state = ?, payload_hash = ?, payload = ? WHERE id = ?`,
 		models.DeliverySubmissionDispatching, journal.SubmissionHash(payload), payload, "restart-submission")
@@ -103,6 +130,7 @@ func (m *alreadyResumedRestartManager) ReconcileAlreadyResumedDelivery(ctx conte
 	return err == nil, err
 }
 
+// @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.2
 func TestRestartRecoveryUsesAlreadyLoadedNativeConversation(t *testing.T) {
 	testAlreadyLoadedRestartRecovery(t, false, false, false)
 }
@@ -208,4 +236,62 @@ func testAlreadyLoadedRestartRecovery(t *testing.T, missingMetadata, independent
 	}
 	require.NoError(t, err)
 	require.Equal(t, 1, manager.retirementCalls, "another restart must not retire or replay the old prompt again")
+	verifyLaterLoadedRestartIncident(t, service, repo, store, manager, updated, payload, missingMetadata)
+
+}
+
+func verifyLaterLoadedRestartIncident(t *testing.T, service *Service, repo *sqliterepo.Repository, store taskrepo.SilentRestoreRepository, manager *alreadyResumedRestartManager, session *models.TaskSession, payload []byte, missingMetadata bool) {
+	t.Helper()
+	ctx := context.Background()
+	recovery, _ := models.LoadAgentDeliveryRecovery(session.Metadata)
+	recovery.SubmissionID = "prompt:second-message"
+	recovery.StreamID = "second-stream"
+	recovery.AgentExecutionID = "replacement"
+	recovery.Phase = models.AgentDeliveryRecoveryUncertain
+	recovery.PromptGeneration++
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "second-turn", TaskID: session.TaskID, TaskSessionID: session.ID, StartedAt: time.Now().UTC()}))
+	require.NoError(t, repo.CreateMessage(ctx, &models.Message{ID: "second-message", TaskID: session.TaskID, TaskSessionID: session.ID,
+		TurnID: "second-turn", AuthorType: models.MessageAuthorUser, Content: "original prompt"}))
+	_, err := repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
+		DispatchAttemptID: "second-message", ID: recovery.SubmissionID, SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
+		HarnessGeneration: 1, OwnerGeneration: 1, PayloadHash: journal.SubmissionHash(payload),
+		Payload: payload, State: models.DeliverySubmissionDispatching})
+	require.NoError(t, err)
+	opened, err := repo.UpsertAgentDeliveryRecovery(ctx, &recovery, &models.SessionRecoveryBlock{
+		SessionID: session.ID, IncarnationID: session.QueueIncarnationID, ExpectedGeneration: 1,
+		ConsumerReference: agentDeliveryConsumer, Reason: "unknown_prompt_outcome", State: models.RecoveryBlockOpen,
+		DeliverySubmissionID: recovery.SubmissionID, DeliveryStreamID: recovery.StreamID})
+	require.NoError(t, err)
+	require.True(t, opened)
+	if missingMetadata {
+		_, err = repo.DB().ExecContext(ctx, `UPDATE task_sessions SET metadata = '{}' WHERE id = ?`, session.ID)
+		require.NoError(t, err)
+		_, err = repo.DB().ExecContext(ctx, `UPDATE session_recovery_blocks SET delivery_submission_id = '', delivery_stream_id = '' WHERE session_id = ? AND state = 'open'`, session.ID)
+		require.NoError(t, err)
+	}
+	j, err := journal.Open(journal.Config{Path: journal.CheckStorage(manager.root, session.ID).Path})
+	require.NoError(t, err)
+	_, err = j.PutSubmission(ctx, journal.Submission{ID: recovery.SubmissionID, SessionID: session.ID,
+		IncarnationID: session.QueueIncarnationID, StreamID: recovery.StreamID, HarnessGeneration: 1,
+		Hash: journal.SubmissionHash(payload), Payload: payload, State: journal.SubmissionDispatching})
+	require.NoError(t, err)
+	require.NoError(t, j.Close())
+	manager.controlIdentity = &lifecycle.AgentDeliveryRecoveryIdentity{TaskID: session.TaskID, SessionID: session.ID,
+		ExecutionID: recovery.AgentExecutionID, IncarnationID: session.QueueIncarnationID, HarnessGeneration: 1,
+		SubmissionID: recovery.SubmissionID, StreamID: recovery.StreamID, PromptGeneration: recovery.PromptGeneration,
+		OriginalRuntime: recovery.OriginalRuntime}
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "second-replacement", TaskID: session.TaskID,
+		SessionID: session.ID, AgentExecutionID: "second-replacement", Status: models.ExecutorRunningStatusRunning}))
+	require.NoError(t, service.restoreSilentRestartCandidate(ctx, store, models.SilentRestoreCandidate{
+		TaskID: session.TaskID, SessionID: session.ID, WorkspaceID: "ws1"}), "a new interrupted prompt must recover in the same harness generation")
+	current, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	restored, exists := models.LoadAgentDeliveryRecovery(current.Metadata)
+
+	require.True(t, exists)
+	require.Equal(t, models.AgentDeliveryRecoveryRestored, restored.Phase)
+	require.Equal(t, recovery.SubmissionID, restored.SubmissionID)
+	require.Equal(t, "second-replacement", current.AgentExecutionID)
+	require.Equal(t, 2, manager.retirementCalls)
+	require.Empty(t, manager.capturedPromptCalls)
 }

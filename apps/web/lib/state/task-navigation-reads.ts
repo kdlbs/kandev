@@ -3,6 +3,7 @@ import type { StoreApi } from "zustand";
 import { ApiError } from "@/lib/api/client";
 import { fetchTask, listTaskSessions } from "@/lib/api";
 import { getBackendConfig } from "@/lib/config";
+import { getTaskSessionReads, type TaskSessionReads } from "@/lib/state/task-session-reads";
 import type { Task, TaskSessionsResponse } from "@/lib/types/http";
 import type { AppState } from "./store";
 
@@ -84,7 +85,16 @@ function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(abortError());
     signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
   });
 }
 
@@ -435,10 +445,23 @@ export function createTaskNavigationReads(
 function fetchTaskNavigationIdentity(
   taskId: string,
   signal: AbortSignal,
+  sessionReads?: TaskSessionReads,
 ): Promise<TaskNavigationIdentity> {
+  const taskRequest = fetchTask(taskId, { cache: "no-store", init: { signal } });
+  const sessionList = sessionReads
+    ? (() => {
+        const release = sessionReads.retain(taskId);
+        return raceAbort(
+          sessionReads.read(taskId, (readSignal) =>
+            listTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
+          ),
+          signal,
+        ).finally(release);
+      })()
+    : listTaskSessions(taskId, { cache: "no-store", init: { signal } });
   return Promise.all([
-    fetchTask(taskId, { cache: "no-store", init: { signal } }),
-    listTaskSessions(taskId, { cache: "no-store", init: { signal } }).then(
+    taskRequest,
+    sessionList.then(
       (allSessionsResponse) => ({ allSessionsResponse, sessionListUnavailable: false }),
       (error) => {
         if (isTaskNavigationAbort(error) || signal.aborted) throw abortError();
@@ -480,8 +503,9 @@ function getTaskNavigationOwner(store: StoreApi<AppState>): NavigationReadOwner 
       identity,
       token: Object.freeze({}),
     } as NavigationReadOwner;
+    const sessionReads = getTaskSessionReads(store);
     nextOwner.reads = new TaskNavigationReads(
-      fetchTaskNavigationIdentity,
+      (taskId, signal) => fetchTaskNavigationIdentity(taskId, signal, sessionReads),
       () => owners.get(store) === nextOwner && storeIdentity(store.getState()) === identity,
     );
     owner = nextOwner;

@@ -31,7 +31,7 @@ func (r *Repository) HasResolvedNativeResumeRecovery(ctx context.Context, recove
 // The matching notice and admission fence must become usable in one commit.
 func (r *Repository) restoreNativeResumeMetadataTx(ctx context.Context, tx *sqlx.Tx, blockID string, completedAt time.Time) (bool, error) {
 	query := `SELECT ts.task_id, ts.id, ts.queue_incarnation_id, ts.state, ts.metadata,
-		b.incarnation_id, b.expected_generation, b.delivery_submission_id, b.delivery_stream_id
+		b.incarnation_id, b.expected_generation, b.delivery_submission_id, b.delivery_stream_id, b.consumer_reference
 		FROM task_sessions ts JOIN session_recovery_blocks b ON b.session_id = ts.id
 		WHERE b.id = ? AND b.state = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
@@ -40,9 +40,10 @@ func (r *Repository) restoreNativeResumeMetadataTx(ctx context.Context, tx *sqlx
 	var taskID, sessionID, incarnationID, blockIncarnation, submissionID, streamID string
 	var state models.TaskSessionState
 	var generation int64
+	var consumer string
 	var metadataRaw sql.NullString
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(query), blockID, models.RecoveryBlockOpen).Scan(
-		&taskID, &sessionID, &incarnationID, &state, &metadataRaw, &blockIncarnation, &generation, &submissionID, &streamID)
+		&taskID, &sessionID, &incarnationID, &state, &metadataRaw, &blockIncarnation, &generation, &submissionID, &streamID, &consumer)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
 	}
@@ -58,7 +59,7 @@ func (r *Repository) restoreNativeResumeMetadataTx(ctx context.Context, tx *sqlx
 		return false, err
 	}
 	if !exists {
-		return true, nil
+		return consumer != reconstructionDeliveryConsumer, nil
 	}
 	if recovery.SessionID != sessionID || recovery.IncarnationID != incarnationID || incarnationID != blockIncarnation ||
 		recovery.HarnessGeneration != generation || recovery.SubmissionID != submissionID || recovery.StreamID != streamID ||

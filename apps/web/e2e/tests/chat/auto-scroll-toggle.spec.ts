@@ -402,8 +402,8 @@ test.describe("Transcript auto-scroll toggle", () => {
       .toBeLessThan(10);
 
     // Deliver new content while that bottom-following transcript is hidden.
-    // Wait for the store event before switching back so the assertion proves
-    // activation reconciliation, not a delayed initial fetch.
+    // Hidden transcripts release rich demand. Activation must hydrate the
+    // persisted message and reconcile auto-follow without a hidden stream.
     await refreshedSession.sessionTabBySessionId(secondSessionId).click();
     await waitForStableActiveSession(testPage, secondSessionId);
     await apiClient.seedSessionMessage(firstSessionId, {
@@ -411,24 +411,22 @@ test.describe("Transcript auto-scroll toggle", () => {
       content: INACTIVE_SESSION_MARKER,
       authorType: "agent",
     });
-    await expect
-      .poll(
-        async () =>
-          testPage.evaluate(
-            ({ sid, marker }) => {
-              const store = (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__;
-              return store
-                ?.getState()
-                .messages.bySession[sid]?.some((message) => message.content === marker);
-            },
-            { sid: firstSessionId, marker: INACTIVE_SESSION_MARKER },
-          ),
-        {
-          timeout: 15_000,
-          message: "hidden message should arrive in the inactive transcript cache",
+    expect(
+      (await apiClient.listSessionMessages(firstSessionId)).messages.some(
+        (message) => message.content === INACTIVE_SESSION_MARKER,
+      ),
+    ).toBe(true);
+    expect(
+      await testPage.evaluate(
+        ({ sid, marker }) => {
+          const store = (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__;
+          return store
+            ?.getState()
+            .messages.bySession[sid]?.some((message) => message.content === marker);
         },
-      )
-      .toBe(true);
+        { sid: firstSessionId, marker: INACTIVE_SESSION_MARKER },
+      ),
+    ).toBe(false);
 
     await refreshedSession.sessionTabBySessionId(firstSessionId).click();
     await waitForStableActiveSession(testPage, firstSessionId);

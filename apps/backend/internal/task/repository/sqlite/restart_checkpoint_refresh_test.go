@@ -37,7 +37,7 @@ func testPreparedRestoreNoticeRefresh(t *testing.T, repo *Repository) {
 	require.NoError(t, err, "a pending reconnecting notice must not permanently fence its later uncertain revision")
 	require.False(t, created)
 	require.Equal(t, attempt.Checkpoint.SourceRecovery.Revision, stored.Checkpoint.SourceRecovery.Revision)
-	for _, condition := range []string{"foreign owner", "foreign block", "stale revision"} {
+	for _, condition := range []string{"foreign owner", "foreign block", "stale revision", "same revision notice change", "block timestamp rollback"} {
 		t.Run(condition, func(t *testing.T) {
 			copyAttempt := *attempt
 			copyCheckpoint := *attempt.Checkpoint
@@ -50,6 +50,12 @@ func testPreparedRestoreNoticeRefresh(t *testing.T, repo *Repository) {
 				copyCheckpoint.SourceBlock.DeliveryTurnID = "other-turn"
 			case "stale revision":
 				copyCheckpoint.SourceRecovery.Revision = stored.Checkpoint.SourceRecovery.Revision - 1
+			case "same revision notice change":
+				copyCheckpoint.SourceRecovery.Revision = stored.Checkpoint.SourceRecovery.Revision
+				copyCheckpoint.SourceRecovery.Message = "unversioned change"
+				copyCheckpoint.SourceBlock.UpdatedAt = stored.Checkpoint.SourceBlock.UpdatedAt.Add(time.Second)
+			case "block timestamp rollback":
+				copyCheckpoint.SourceBlock.UpdatedAt = stored.Checkpoint.SourceBlock.UpdatedAt.Add(-time.Second)
 			}
 			_, _, err := repo.EnsureRestoreAttempt(ctx, &copyAttempt)
 			require.ErrorIs(t, err, repoerrors.ErrSilentRestoreAttemptConflict)
@@ -59,6 +65,9 @@ func testPreparedRestoreNoticeRefresh(t *testing.T, repo *Repository) {
 	attempt.Checkpoint.SourceBlock.UpdatedAt = stored.Checkpoint.SourceBlock.UpdatedAt.Add(time.Second)
 	stored, _, err = repo.EnsureRestoreAttempt(ctx, attempt)
 	require.NoError(t, err, "an identical block rewritten by the later notice is still the same unallocated source")
+	attempt.Checkpoint.SourceBlock.UpdatedAt = stored.Checkpoint.SourceBlock.UpdatedAt.Add(time.Second)
+	stored, _, err = repo.EnsureRestoreAttempt(ctx, attempt)
+	require.NoError(t, err, "a same-revision block timestamp rewrite must not permanently fence an unallocated recovery")
 	allocated := *stored.Checkpoint
 	allocated.Stage, allocated.CandidateExecutionID = models.SilentRestoreStageCandidateAllocated, "candidate"
 	changed, err := repo.CompareAndSwapSilentRestoreCheckpoint(ctx, attempt.ID, *stored.Checkpoint, allocated)

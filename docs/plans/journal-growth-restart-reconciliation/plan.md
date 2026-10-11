@@ -31,7 +31,7 @@ This package extends the existing [journal shutdown repair](../agentctl-journal-
 - The crash bypassed dispatch-error handling. Retained journal submissions stayed `dispatching` while SQL became `interrupted_unknown`. Exact native-resume evidence validation correctly rejected the mismatch; replacement initialization did not normalize abandoned journal dispatches.
 - Native Resume subsequently returned success and resolved SQL blocks, but six sessions retained `agent_delivery_recovery.phase=uncertain`. Browser recovery controls read that structured snapshot and continued showing interruption. A separate idle session kept a client pinned to the retired runtime lease, causing repeated reclaim warnings.
 - User-authorized repair backed up owner journals and exact SQL rows, released only blocked idle instances, normalized exact abandoned submissions, and resumed ten existing native conversations. Six proved resumes needed revisioned restored metadata. No historical uncertainty was changed into completion and no interrupted prompt was resent.
-- Host evidence is private under `/home/jcfs/.kandev/repairs/post-crash-20261011T130738Z`; isolated reproduction is copied to ignored `.kandev/diagnostics/mmap-growth-20261011/`. Credentials are excluded.
+- Host evidence is retained in a private host repair directory (not committed); isolated reproduction is copied to ignored `.kandev/diagnostics/mmap-growth-20261011/`. Credentials are excluded.
 
 ## Scope
 

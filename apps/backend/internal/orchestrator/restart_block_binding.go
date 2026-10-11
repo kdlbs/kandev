@@ -31,7 +31,7 @@ func (s *Service) repairKnownRestartBlock(ctx context.Context, session *models.T
 		return err
 	}
 	inputs := &silentRestoreInputs{session: session, recovery: recovery}
-	if err := validateRestartSubmissionEvidence(inputs, rows, evidence); err != nil {
+	if err := s.validateRestartSubmissionEvidence(ctx, inputs, rows, evidence); err != nil {
 		return err
 	}
 	repairer, ok := s.repo.(restartRecoveryBlockRepairer)

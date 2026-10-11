@@ -1543,6 +1543,12 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	payload.RouteData = routeData
 	payload.Plugins = bootActivePlugins(p)
 	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken
+	if err := webapp.NormalizeBootPayloadGraph(&payload); err != nil {
+		if p.log != nil {
+			p.log.Error("failed to normalize boot entities; using version 1 payload", zap.Error(err))
+		}
+		payload.Version = 1
+	}
 	return payload
 }
 

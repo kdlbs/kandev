@@ -106,3 +106,19 @@ The stores cannot atomically commit journal retirement and SQL settlement. Requi
 ## Results
 
 SQLite/PostgreSQL tests pass for atomic restored metadata and block settlement, rollback, exact resolution proof, and preservation of unrelated or newer errors. Desktop and phone explicit native Resume pass through reload and normal follow-up. A deterministic regression reproduced recovery inheriting a concurrent workspace reader's unresolved-admission failure; the corrected shared-slot handling now passes while normal admission and unrelated or own failures remain authoritative. Desktop and phone automatic recovery also pass through another backend restart without replay. Final backend regression and lint checks pass. Delivery continues through PR checks and merge.
+
+After main introduced compact session listings, native Resume verification reads rich session
+detail explicitly and requires a nonempty original native identity. Compact rows remain valid
+for state and membership checks, while omitted metadata never counts as restoration evidence.
+
+The user requires all further browser/E2E validation to run in CI only because local
+runs exhaust the host. No further local E2E runs are permitted. Duplicate crash/restart
+scenarios were removed from survival specs; desktop and phone reattachment specs retain
+their single owning scenarios. Recovery launch retries are bounded and respect cancellation
+before admitting shared work. Bound delivery blocks with missing recovery metadata remain
+open until reconstruction succeeds. CI checks and merge remain pending.
+
+CI shard 5 exposed a lifecycle launch guard projected as interactive recovery despite
+its unresolved durable delivery reason. The backend publication regression requires that
+specific guard to retain the delivery consumer; other native failures retain their existing
+consumer. The existing desktop/phone live-block E2E cases validate the full surface in CI.

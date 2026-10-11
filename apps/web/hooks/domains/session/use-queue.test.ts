@@ -140,6 +140,27 @@ afterEach(() => {
 
 // eslint-disable-next-line max-lines-per-function -- queue admission and lifecycle cases share one hook contract.
 describe("useQueue", () => {
+  it("keeps cached queue rows without reading while detail demand is inactive", async () => {
+    const cached = entry({ id: "cached-detail-queue" });
+    mockState.queue.bySessionId[SESSION_ID] = [cached];
+    mockState.queue.metaBySessionId[SESSION_ID] = {
+      count: 1,
+      max: 10,
+      mergeEnabled: true,
+      autoRun: true,
+    };
+    const { result, rerender } = renderHook(
+      ({ detailActive }: { detailActive: boolean }) => useQueue(SESSION_ID, { detailActive }),
+      { initialProps: { detailActive: false } },
+    );
+
+    expect(result.current.entries).toEqual([cached]);
+    expect(queueApiMock.getQueueStatus).not.toHaveBeenCalled();
+
+    rerender({ detailActive: true });
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalledTimes(1));
+  });
+
   it("reports queue readiness only when the session has a complete identity", async () => {
     const { result, rerender } = renderHook(() => useQueue(SESSION_ID));
 

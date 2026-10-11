@@ -13,6 +13,7 @@ import {
   expectSilentRestartRestoration,
 } from "./silent-restart-recovery";
 
+// @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.2
 // @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.3
 // @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.5
 export async function verifyAutomaticRestartReconciliation(

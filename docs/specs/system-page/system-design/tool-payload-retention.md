@@ -229,6 +229,28 @@ read can race cleanup. Inspect all metadata replacement and fallback-create
 paths, including turn recovery. Keep tool-call identity to preserve deduplication.
 New tool calls after resumption remain normal messages.
 
+### Guarded message replacement
+
+Ordinary message updates, conversation-receipt updates, and changed agent-plan
+upserts share `updateMessageWithPayloadGuardTx`. Its retained-metadata read,
+field merge, and message replacement remain in the caller's genuine transaction.
+The [Platform writer factory](../../platform/system-design/postgres-domain-store-parity.md#sqlite-writer-transaction-admission)
+acquires SQLite's writer at BEGIN. A message-row no-op UPDATE is therefore not
+needed to reserve that writer. Guarded replacement performs the actual message
+UPDATE once, after reading current metadata. PostgreSQL retains its message-row
+`FOR UPDATE` and existing caller lock order.
+
+Map a missing row from the metadata SELECT to the existing message-not-found
+error on both engines. Preserve removal markers, payload identity, retained
+fields, timestamps, and conversation revision/receipt behavior. Failed writes
+roll back through the existing transaction owner. This does not change insert
+replay guards or session identity locks.
+
+The [message update optimization package](../../../plans/message-update-writer-occupancy/plan.md)
+tracks implementation and verification. Its deterministic row-write count tests
+supplement existing stale-read and transaction-admission coverage. Performance
+comparisons are evidence, not machine-dependent test thresholds.
+
 The shell output endpoint checks the marker before returning output. Return
 410 with code `tool_payload_removed`, removal time, and retained summary.
 Client reducers and lazy-output caches must discard removed details when the

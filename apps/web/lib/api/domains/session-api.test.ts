@@ -88,3 +88,19 @@ it("requests a task session with its owner-scoped validator and bypasses the bro
     }),
   );
 });
+
+const { listTaskSessionMessages } = await import("./session-api");
+
+it("requests bounded turn context alongside a message page when requested", async () => {
+  await listTaskSessionMessages("sess-1", {
+    limit: 50,
+    before: "message-1",
+    sort: "desc",
+    include_turns: true,
+  });
+
+  expect(fetchJson).toHaveBeenLastCalledWith(
+    "/api/v1/task-sessions/sess-1/messages?limit=50&before=message-1&sort=desc&include_turns=true",
+    undefined,
+  );
+});

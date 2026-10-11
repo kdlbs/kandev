@@ -321,6 +321,7 @@ export const defaultSessionState: SessionSliceState = {
   turns: {
     bySession: {},
     activeBySession: {},
+    windowCoverageBySession: {},
     loadedBySession: {},
     reconcileEpochBySession: {},
     settledBoundaryBySession: {},
@@ -455,6 +456,17 @@ function buildSetMessagesMetadata(set: ImmerSet) {
     });
 }
 
+function pruneTurnWindowCoverage(
+  draft: Draft<SessionSlice>,
+  sessionId: string,
+  messages: Message[],
+): void {
+  const coverage = draft.turns.windowCoverageBySession?.[sessionId];
+  if (!coverage) return;
+  const retainedIds = new Set(messages.map((message) => message.id));
+  coverage.messageIds = coverage.messageIds.filter((id) => retainedIds.has(id));
+}
+
 /** Builds the transcript update action. */
 function buildUpdateMessage(set: ImmerSet) {
   return (message: Parameters<SessionSlice["updateMessage"]>[0]) =>
@@ -508,6 +520,7 @@ function buildMessageActions(set: ImmerSet) {
           draft.messages.bySession[sessionId],
           messages,
         );
+        pruneTurnWindowCoverage(draft, sessionId, draft.messages.bySession[sessionId]);
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
         fanOutTranscriptPrompts(draft, messages);
@@ -543,6 +556,8 @@ function buildMessageActions(set: ImmerSet) {
       set((draft) => {
         const messages = draft.messages.bySession[sessionId];
         if (messages) draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
+        const coverage = draft.turns.windowCoverageBySession?.[sessionId];
+        if (coverage) coverage.messageIds = coverage.messageIds.filter((id) => id !== messageId);
         removePromptMessage(draft, sessionId, messageId);
       }),
     mergeMessages: (
@@ -561,6 +576,7 @@ function buildMessageActions(set: ImmerSet) {
         if (reconciled !== prev) {
           draft.messages.bySession[sessionId] = reconciled;
         }
+        pruneTurnWindowCoverage(draft, sessionId, draft.messages.bySession[sessionId] ?? []);
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
         fanOutTranscriptPrompts(draft, messages);
@@ -577,6 +593,7 @@ function buildMessageActions(set: ImmerSet) {
           ...messages.filter((m) => !existingIds.has(m.id)),
           ...existing,
         ];
+        pruneTurnWindowCoverage(draft, sessionId, draft.messages.bySession[sessionId]);
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
         fanOutTranscriptPrompts(draft, messages);
@@ -862,6 +879,9 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       generations[sessionId] = (generations[sessionId] ?? 0) + 1;
       delete draft.turns.bySession[sessionId];
       delete draft.turns.activeBySession[sessionId];
+      if (draft.turns.windowCoverageBySession) {
+        delete draft.turns.windowCoverageBySession[sessionId];
+      }
       delete draft.turns.loadedBySession[sessionId];
       delete draft.turns.reconcileEpochBySession[sessionId];
       delete draft.turns.settledBoundaryBySession[sessionId];

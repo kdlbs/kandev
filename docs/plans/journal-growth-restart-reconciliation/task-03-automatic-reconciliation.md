@@ -102,3 +102,19 @@ Never substitute a retired client error or reused port for original-process deat
 ## Results
 
 The exact host-crash regression passes with both stores dispatching, missing metadata, an empty block, and an already loaded replacement conversation. Source process birth proof, authenticated complete SQL/journal comparison, and guarded partial-block binding repair preserve independent live or unknown owners. Startup and replacement-triggered bounded sweeps restore original native continuity without replay. Desktop and phone automatic recovery pass, including a second backend restart and a distinct new instruction. Final SQLite/PostgreSQL recovery regressions and backend lint pass. Delivery continues through PR checks and merge.
+
+## CI review remediation
+
+Consecutive crashes in a preserved harness generation now use distinct incident
+checkpoints, while legacy checkpoints remain reusable for their pinned submission.
+Recovery checks retained retirement evidence for prior SQL unknown outcomes rather than
+requiring them in the unresolved descriptor. Missing-metadata reconstruction also validates
+those exact canonical snapshots under its SQL write lock. Regressions cover consecutive
+incidents with and without metadata, conflicting retired history, changed/live historical
+rows, and a lost dispatch compare-and-set. Focused backend regressions pass under the race detector. CI browser validation remains pending.
+
+CI shard 8 provided a prepared checkpoint whose recovery revision and identity were
+unchanged while an identical block's updated timestamp advanced. A SQLite/PostgreSQL
+regression reproduced its permanent identity conflict. Unclaimed checkpoints now accept
+that timestamp advance while rejecting same-revision notice changes, timestamp rollback,
+foreign owners, and every change after candidate allocation.

@@ -637,6 +637,9 @@ func (s *Service) recordSessionRecoveryBlock(
 	block.State = models.RecoveryBlockOpen
 	if block.ConsumerReference == "" {
 		block.ConsumerReference = consumer
+		if consumer == "interactive" && reason == durableDeliveryUnresolvedReason {
+			block.ConsumerReference = agentDeliveryConsumer
+		}
 	}
 	if block.CreatedAt.IsZero() {
 		block.CreatedAt = time.Now().UTC()

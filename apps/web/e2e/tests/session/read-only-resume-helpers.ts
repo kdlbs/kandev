@@ -299,8 +299,7 @@ async function runReadOnlyResumeScenario(input: {
     )
     .toBe(true);
   await waitForSessionDone(api, task.id, sessionId, "Seeded user turn did not settle", 30_000);
-
-  const original = (await api.listTaskSessions(task.id)).sessions.find((s) => s.id === sessionId)!;
+  const { session: original } = await api.getTaskSession(sessionId);
   expect(original.metadata?.acp).toBeTruthy();
   const originalIdentity = await readSessionRuntimeIdentity(api, task.id, sessionId);
   const historyUserMessageIds = (await api.listSessionMessages(sessionId)).messages
@@ -437,7 +436,7 @@ async function runReadOnlyResumeScenario(input: {
   else await resume.click();
   await recovered;
   await expect(recoveryCard).toHaveCount(0);
-  const resumed = (await api.listTaskSessions(task.id)).sessions.find((s) => s.id === sessionId)!;
+  const { session: resumed } = await api.getTaskSession(sessionId);
   expect(resumed.metadata?.acp).toEqual(original.metadata?.acp);
   expect(await readSessionRuntimeIdentity(api, task.id, sessionId)).toMatchObject({
     acpSessionId: originalIdentity.acpSessionId,

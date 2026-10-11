@@ -232,6 +232,9 @@ been acknowledged. Request settlement alone must not reopen stale content.
 2. For a detail view, reuse candidate ordering and HTTP liveness checks from
    `use-task-removal.ts`. Restrict candidates to the captured workspace and
    exclude all batch targets and descendants before mutation can prune caches.
+   When cached candidates are exhausted, request bounded active-task pages in
+   ascending creation order, matching the canonical board list. Recent-use
+   priority and authoritative liveness checks still apply.
    Revalidate current eligibility at commit. Missing or ambiguous candidates
    lead to the overview; never synthesize a candidate from an ID alone.
 3. For cascades, a candidate with unknown ancestry cannot be proven outside the

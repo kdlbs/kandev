@@ -118,6 +118,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
   return {
     onSubmit: handleSubmit,
     sessionId: resolvedSessionId,
+    detailActive: panelState.detailActive,
     taskId,
     workspaceId: composerWorkspaceId,
     workspaceResolutionFailed,
