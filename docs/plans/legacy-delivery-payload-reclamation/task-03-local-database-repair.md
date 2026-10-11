@@ -168,3 +168,10 @@ history and recovery assertions passed on phone after that readiness correction.
 This changes only the fixture setup; queue startup behavior is outside this
 retention repair. The final desktop rerun passed (one test, optional frozen-binary
 case skipped), phone passed (one test), and final typecheck passed for the new helper.
+
+PR #4418 CI found a pre-existing frontend lint failure on the rebased main:
+`useSecrets` contained 105 lines against the 100-line limit. The failure reproduced
+locally. Extracting its existing item selection into a private pure helper preserved
+scope filtering, stale workspace suppression and array identity. All 44 existing
+secret-hook tests, full frontend lint and typecheck passed. This is behavior-preserving
+CI remediation, with no new user-facing contract or documentation requirement.
