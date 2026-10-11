@@ -6,6 +6,7 @@ import type { ApiClient } from "./api-client";
 import { DatabaseSync } from "./node-sqlite";
 import { retentionEvidence } from "./delivery-retention-compatibility";
 import { attachGatewayTrafficCapture } from "./ws-traffic";
+import { watchWs } from "./causal-waits";
 import {
   observeAgentRuntimeAvailability,
   waitForAgentRuntimeReplacement,
@@ -187,6 +188,46 @@ async function waitForProjectedRecoveryPrompt(
     .toBeGreaterThan(0);
 }
 
+// An independent native recovery cause keeps this control test blocked while
+// the shared runtime recovers after process loss.
+function seedRetentionRecoveryBlock(backend: BackendContext, sessionId: string) {
+  const db = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+  const blockId = `retention-native-recovery:${sessionId}`;
+  try {
+    const inserted = db
+      .prepare(
+        `INSERT INTO session_recovery_blocks
+       (id, session_id, incarnation_id, expected_generation, reason, state,
+        consumer_reference, created_at, updated_at)
+       SELECT ?, h.session_id, h.incarnation_id, h.generation, 'native_state_missing',
+        'open', 'native_resume', datetime('now', '-1 minute'), datetime('now')
+       FROM harness_session_generations h JOIN task_sessions s
+        ON s.id = h.session_id AND s.queue_incarnation_id = h.incarnation_id
+       WHERE h.session_id = ? ORDER BY h.generation DESC LIMIT 1`,
+      )
+      .run(blockId, sessionId);
+    expect(Number(inserted.changes)).toBe(1);
+  } finally {
+    db.close();
+  }
+  return blockId;
+}
+
+function assertRetentionRecoveryBlockPreserved(backend: BackendContext, blockId: string) {
+  const db = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+  try {
+    expect(
+      db
+        .prepare(
+          "SELECT state, consumer_reference, authorized_action FROM session_recovery_blocks WHERE id = ?",
+        )
+        .get(blockId),
+    ).toEqual({ state: "open", consumer_reference: "native_resume", authorized_action: "" });
+  } finally {
+    db.close();
+  }
+}
+
 export async function assertRetentionRecoveryControls(
   page: Page,
   api: ApiClient,
@@ -196,16 +237,19 @@ export async function assertRetentionRecoveryControls(
 ) {
   const { backend, touch } = controls;
   const traffic = attachGatewayTrafficCapture(page);
+  const ws = watchWs(page);
   await page.reload();
   await session.waitForLoad();
   const previousIds = new Set(retentionEvidence(backend, sessionId).prompts.map((row) => row.id));
   await session.sendMessageViaButton("/slow 120");
   await waitForProjectedRecoveryPrompt(backend, sessionId, previousIds);
+  const independentBlockId = seedRetentionRecoveryBlock(backend, sessionId);
   const bootID = await api.getBackendBootID();
   await observeAgentRuntimeAvailability(page);
   const killed = await api.killLocalAgentRuntimeChild();
   expect(killed.killed).toBe(true);
   await waitForAgentRuntimeReplacement(page, killed.runtime_epoch, bootID);
+  assertRetentionRecoveryBlockPreserved(backend, independentBlockId);
   const banner = page.getByTestId("failed-session-banner");
   await expect(banner).toBeVisible({ timeout: 60_000 });
   const promptCount = traffic.frames.filter(
@@ -221,6 +265,7 @@ export async function assertRetentionRecoveryControls(
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
   }
+  const recoveryResponse = ws.waitForResponse("session.recover");
   if (touch) await retry.tap();
   else await retry.click();
   await expect
@@ -233,9 +278,14 @@ export async function assertRetentionRecoveryControls(
       ),
     )
     .toBe(true);
+  expect((await recoveryResponse).payload).toMatchObject({
+    session_id: sessionId,
+    outcome: "blocked",
+    reason: "independent_recovery_block",
+  });
+  assertRetentionRecoveryBlockPreserved(backend, independentBlockId);
   await expect(banner.getByTestId("delivery-recovery-result")).toHaveText(
     "Recovery is blocked. Resolve the recovery issue before retrying.",
-    { timeout: 30_000 },
   );
   expect(
     traffic.frames.filter((frame) => frame.direction === "sent" && frame.action === "message.add"),
@@ -259,6 +309,7 @@ export async function assertRetentionRecoveryControls(
   await expect(banner.getByTestId("delivery-stop-outcome-unconfirmed")).toBeVisible({
     timeout: 10_000,
   });
+  assertRetentionRecoveryBlockPreserved(backend, independentBlockId);
   await expect
     .poll(() =>
       traffic.frames.some(

@@ -226,3 +226,27 @@ receipts after the gap. It passed on SQLite and PostgreSQL under the race detect
 The other focused retention and query-plan regressions remain. Full CI remains
 owned by the user after the remediation push; no live database maintenance or
 restart was performed in this CI remediation.
+
+
+The next CI run (`38169809017`, head `ab28e56691`) passed backend and frontend
+checks but failed the desktop retention recovery scenario in all four attempts.
+After runtime loss, Retry raced automatic restoration: it returned an ownership
+change and the banner disappeared once restoration committed, while the test
+expected a permanent generic block. The unmodified focused test passed locally,
+confirming the expectation depended on timing.
+
+The shared desktop/phone retention fixture now seeds an independent native-resume
+block for the current session incarnation before killing the runtime. SQLite
+creates its timestamp in the same sortable form as the stored recovery rows so
+the earlier independent cause is selected consistently. The test awaits the
+correlated Retry response, requires `blocked` with `independent_recovery_block`,
+and checks that Retry and Stop preserve the independent cause. Existing actual
+payload cleanup, protected historical gap, saved history, capacity continuation,
+no-resend, and phone touch-target assertions remain. This is fixture-only CI
+remediation; production cleanup and recovery behavior are unchanged.
+
+The corrected desktop and phone retention scenarios each passed with retries
+disabled. Changed-file ESLint and web typecheck passed. All 20 CI blob reports
+were inspected; the retry summary identified this one failing test plus two
+flaky tests in passing jobs. CI and review verification for the next pushed head
+remain pending with the user. No live database maintenance or restart occurred.
