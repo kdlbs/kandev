@@ -287,7 +287,7 @@ func executeDeliveryRetention(
 	execution.DeliveryBatches++
 	execution.PurgedRetiredDeliveryRows = retirement.RowsPurged
 	execution.DeliveryRetirementJobsCompleted = retirement.Completed
-	execution.Partial = execution.Partial || retirement.Suspended > 0 ||
+	execution.Partial = execution.Partial || retirement.Pending || retirement.Suspended > 0 ||
 		retirement.RowsPurged >= deliveryCandidateLimit(options.MaxCandidates)
 	return execution, nil
 }

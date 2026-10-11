@@ -221,7 +221,7 @@ Budgets apply to candidate scanning as well as changed rows:
 Use one 250 ms batch context for BEGIN and SQL; admit only when it fits remaining pass time. Never reset it after entry. SQLite native BEGIN can outlast cancellation up to its 5-second busy timeout plus scheduling overhead. Check cancellation before predicates; join entry/rollback before Stop or reuse. Measure admission separately.
 The byte budget fits 1 MiB events.
 Skip over-budget legacy payloads with diagnostics rather than loading them repeatedly.
-Persist fair keyset/high-water progress across scans/jobs/restarts; wrap and revisit protected rows without starving other streams.
+Persist fair scan progress; select retirement jobs by indexed oldest `updated_at`, then identity. Committed phase progress rotates jobs.
 No OFFSET, per-tick global COUNT, full JSON scan or entire-session submission reload.
 Discovery indexes due projection times for raw payloads and stream sequences for compact receipts. Locked reload evaluates proofs and bounded payloads. Separate cursors and alternating priority share 200 candidates. Recent rows cannot skip due payloads.
 
@@ -240,7 +240,7 @@ MVCC/TOAST and WAL need ordinary maintenance; no worker VACUUM or full-table UPD
 
 Transient lock/busy/serialization errors rollback and retry next pass with jittered cancellable backoff capped at five minutes.
 Disk-full, hash corruption, unsupported format or missing required schema suspend destructive work and emit a structural error.
-Resume only after a valid repository readiness check or corrected data; retain all recovery guards.
+Reset backoff/report recovery only after successful committed cleanup; readiness permits a probe. Keep all recovery guards.
 
 ## Migration and rollback
 
@@ -290,7 +290,7 @@ No enable boolean, profiles override, SQLite feature toggle or runtime flag is i
 Configured values apply on restart and do not reach agentctl child environments.
 
 Offline `maintenance database` adds separate projected-event payload, settled-prompt payload, event-receipt and retired-session categories.
-Dry-run remains read-only and displays bounded sample counts/bytes with truncation indicators, never full-count claims from a limited sample.
+Read-only previews bound retired rows before aggregation across tables and mark sample limits. Pending jobs make execution partial.
 Execute calls the shared eligibility/batch logic, not stale candidate-ID deletion without revalidation.
 Existing three categories retain their safety behavior. Delivery cleanup can partially complete across bounded transactions; report per-category progress and backup path.
 Compaction remains the existing explicitly requested SQLite offline stage. PostgreSQL uses the live worker and operator database tooling; this CLI remains SQLite-only.

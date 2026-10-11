@@ -190,26 +190,28 @@ func (w *Worker) loop(ctx context.Context) {
 	for ctx.Err() == nil {
 		if w.suspended {
 			readiness := w.checkReadiness(ctx)
-			w.report(readiness)
 			if !readiness.ReadinessRecovered {
+				w.report(readiness)
 				w.retryAttempt++
 				if !wait(ctx, w.opts.After, w.opts.RetryDelay(w.retryAttempt)) {
 					return
 				}
 				continue
 			}
-			w.suspended = false
-			w.retryAttempt = 0
 		}
 		snapshot := w.runPass(ctx)
+		if w.suspended && snapshot.FailedBatches == 0 && snapshot.CommittedBatches > 0 {
+			w.suspended = false
+			snapshot.ReadinessRecovered = true
+		}
 		w.report(snapshot)
 		delay := w.opts.Interval
 		switch {
 		case snapshot.StructuralFailure:
 			w.suspended = true
-			w.retryAttempt = 0
-			delay = w.opts.RetryDelay(1)
-		case snapshot.FailedBatches > 0:
+			w.retryAttempt++
+			delay = w.opts.RetryDelay(w.retryAttempt)
+		case snapshot.FailedBatches > 0 || w.suspended:
 			w.retryAttempt++
 			delay = w.opts.RetryDelay(w.retryAttempt)
 		default:

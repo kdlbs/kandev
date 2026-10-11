@@ -279,6 +279,14 @@ func seedRetentionPromptSubmission(
 	t *testing.T,
 	engine, suffix string,
 ) (*Repository, models.AgentDeliveryEvent, func(time.Duration)) {
+	return seedRetentionPromptOutcome(t, engine, suffix, models.DeliverySubmissionCompleted)
+}
+
+func seedRetentionPromptOutcome(
+	t *testing.T,
+	engine, suffix string,
+	outcome models.DeliverySubmissionState,
+) (*Repository, models.AgentDeliveryEvent, func(time.Duration)) {
 	t.Helper()
 	repo := newRetentionTestRepo(t, engine)
 	ctx := context.Background()
@@ -313,7 +321,14 @@ func seedRetentionPromptSubmission(
 	}); err != nil {
 		t.Fatalf("create delivery recovery block: %v", err)
 	}
-	payload, err := json.Marshal(streams.AgentEvent{Type: streams.EventTypeComplete, TurnID: "retention-turn-" + suffix})
+	data := map[string]any{}
+	switch outcome {
+	case models.DeliverySubmissionCancelled:
+		data["stop_reason"] = "cancelled"
+	case models.DeliverySubmissionFailed:
+		data["is_error"] = true
+	}
+	payload, err := json.Marshal(streams.AgentEvent{Type: streams.EventTypeComplete, TurnID: "retention-turn-" + suffix, Data: data})
 	if err != nil {
 		t.Fatalf("marshal terminal event: %v", err)
 	}
@@ -328,7 +343,7 @@ func seedRetentionPromptSubmission(
 	if _, err := repo.ProjectAgentDeliveryEvent(ctx, &event, nil); err != nil {
 		t.Fatalf("project terminal event: %v", err)
 	}
-	settled, err := repo.SettleAgentDeliveryTerminal(ctx, event.StreamID, event.Sequence, models.DeliverySubmissionCompleted, now)
+	settled, err := repo.SettleAgentDeliveryTerminal(ctx, event.StreamID, event.Sequence, outcome, now)
 	if err != nil || !settled {
 		t.Fatalf("settle terminal outcome = %v, %v", settled, err)
 	}

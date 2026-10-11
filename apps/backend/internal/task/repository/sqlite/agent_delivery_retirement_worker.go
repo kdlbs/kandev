@@ -67,10 +67,14 @@ func (r *Repository) RunAgentDeliveryRetirementBatch(
 			return result, err
 		}
 		result.Suspended = 1
+		result.Pending = true
 		return result, nil
 	}
 	if err := r.purgeAgentDeliveryRetirementJobTx(workCtx, tx, job, options.MaxCandidates, &result); err != nil {
 		return models.AgentDeliveryRetirementBatchResult{}, err
+	}
+	if err := tx.QueryRowxContext(workCtx, `SELECT EXISTS (SELECT 1 FROM agent_delivery_cleanup_jobs LIMIT 1)`).Scan(&result.Pending); err != nil {
+		return models.AgentDeliveryRetirementBatchResult{}, fmt.Errorf("check remaining agent delivery retirement jobs: %w", err)
 	}
 	if err := workCtx.Err(); err != nil {
 		return models.AgentDeliveryRetirementBatchResult{}, err
@@ -85,7 +89,7 @@ func (r *Repository) nextAgentDeliveryRetirementJobTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 ) (*agentDeliveryRetirementJob, error) {
-	query := `SELECT session_id, incarnation_id, phase, last_stream_id FROM agent_delivery_cleanup_jobs ORDER BY session_id, incarnation_id LIMIT 1`
+	query := `SELECT session_id, incarnation_id, phase, last_stream_id FROM agent_delivery_cleanup_jobs ORDER BY updated_at, session_id, incarnation_id LIMIT 1`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR UPDATE SKIP LOCKED`
 	}

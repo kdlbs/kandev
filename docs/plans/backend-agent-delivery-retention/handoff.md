@@ -1,7 +1,8 @@
 # Backend delivery retention handoff
 
-This is an implementation draft, not a merge-ready change. Tasks 01–07 are complete. Task 08 remains in progress.
-The user requested a draft PR on 2026-10-10 so a colleague can continue. This authorizes the handoff commit and push, superseding the earlier no-publication constraint. No acceptance limit is waived.
+PR #4407 is delivering the current retention/session/recovery issue fix. Tasks 01–07 are complete; Task 08 retains historical integration evidence and practical validation limits.
+
+On 2026-10-11 the user instructed: “ignore that part, let's just fix the issue.” Original frozen-N and benchmark-artifact transfer is no longer a prerequisite for this delivery. Preserve the maintainer's Ready edit. Merge still requires current-head required CI, valid existing findings, ownership/recovery/retention regressions and protection checks. Historical rollback and latency acceptance are not claimed passed; the original-only browser check is explicitly optional when its binary is unavailable. No replacement is reported as an original. See Task 08 for the updated scope and receipts.
 
 ## Shutdown handoff (2026-10-10)
 
@@ -41,15 +42,11 @@ All 18 commands and data-preservation assertions passed in that window. Command 
 
 CI fixture reconciliation now passes focused race checks for owner/receipt shutdown publication, audited configuration aliases, managed retirement admission/replacement, maintenance, and exact workflow settlement. Browser fixture corrections remain local and uncommitted while rollback validation is open. Recent desktop matrices pass eight cases and fail the frozen-N case. The PostgreSQL witness preserves the agent runtime; browser restarts still kill it. The next fixture correction must preserve the runtime across the rollback and return to baseline during teardown. Kubernetes compatibility CI reports cancelled-session failures with no established cause; keep those failures open. No production/native code changed in these CI fixture corrections.
 
-## Remaining work, in order
+## Current delivery and historical acceptance
 
-1. Resolve the SQLite receipt-plan latency failures. Preserve the same predeclared baseline/idle/active interleaving, production pools, matched 100000-event history, and all 4500 samples in further comparisons. Resolve any remaining regression before calling Task 08 complete.
-2. Measure concurrent replacement/deletion against final source. Actual million-event 1KiB/4KiB and protected-gap race fixtures now pass on both engines, with canonical equality and the full-drain reopen/maintenance receipts recorded below.
-3. Run the exact three-package retention race selector with all PostgreSQL/native/backup prerequisites. Allow a 90-minute overall Go test timeout for database-scale fixtures; retain the unchanged 250ms batch, five-second pass and 100ms yield limits.
-4. Repeat store conformance and the Task 08 orchestrator/managed-deletion selectors on final source.
-5. Run the nine desktop tests, then seven mobile tests, through the guarded projects on a fresh native/helper/web/plugin build. Earlier smoke/static passes do not replace them.
-6. Repeat real PostgreSQL backup, frozen-N retained-session rollback/new writes/deletion and forward upgrade against the final native artifact. Preserve the witness scope below.
-7. Reconcile final results/statuses, inspect the diff, and signal workflow completion only after every required gate passes. Do not merge this draft while these items remain open.
+Fix the actual current pipeline and existing review findings, run affected checks on both engines, record normal commit/push evidence and merge the checked green head. Do not request extra reviews or impose a new broad audit.
+
+The broader original Task 08 benchmark interleaving, full native rollback/backup and nine-desktop/seven-mobile matrix remain historical acceptance context. They are not mandatory prerequisites for the user-directed issue-fix delivery. Recorded SQLite ratios above still failed 1.10; no reconstructed baseline or skipped frozen-N test establishes those historical results. Current source tests must preserve authenticated ownership, generation/projected cursors, foreign/uncertain-work fences, canonical history and no-resend behavior.
 
 If adding foreground-priority scheduling, first strengthen benchmark progress to require committed cleanup during timed samples; the existing final nonzero checkpoint can include setup. Add real authenticated Receive+Project at 20 events/s concurrently with worker passes. Current capacity tests bulk-seed arrivals and cannot prove fairness under that new scheduling policy. No priority scheduling is implemented here.
 
@@ -83,7 +80,7 @@ Merged the current main after the journal shutdown and interrupted-session recov
 
 Local conflict validation passed: race-enabled repository recovery-block/reconstruction/harness/retention-integration selection (5.041s); watcher and orchestrator delivery/recovery/terminal selections (1.085s / 15.517s); lifecycle durable/reconstruction and the two retained/remote replay regressions (6.612s). Backend lint against the merged base reported zero issues. Catalog, full specification lint and package validation passed. These checks do not complete storage, latency, native rollback or browser acceptance.
 
-The original compatibility and pre-retention benchmark artifacts are not available in the accessible task directories on this runner. Their recorded `/root` location is inaccessible to this account, so its contents are unverified. The original artifacts must be transferred before the unchanged compatibility and latency acceptance can run. Keep this PR draft and Task 08 in progress; the prior failed storage and browser CI evidence is not waived.
+The original compatibility and pre-retention benchmark artifacts are not available in the accessible task directories on this runner. Their recorded `/root` location is inaccessible to this account, so its contents are unverified. This transfer prerequisite was superseded by the 2026-10-11 user-directed issue-fix scope above. Historical compatibility/latency results remain accurately labelled; actual CI defects remain in scope.
 
 ### CI remediation on the reconciled source
 

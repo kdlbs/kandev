@@ -439,10 +439,15 @@ func installRetentionDeleteFailure(t *testing.T, repo *Repository, table string)
 func newDeliveryRetentionDeletionRepo(t *testing.T, engine string) *Repository {
 	t.Helper()
 	repo := newRetentionTestRepo(t, engine)
+	initializeRetentionDeletionQueue(t, repo)
+	return repo
+}
+
+func initializeRetentionDeletionQueue(t *testing.T, repo *Repository) {
+	t.Helper()
 	if _, err := messagequeue.NewSQLiteRepository(repo.db, repo.db); err != nil {
 		t.Fatalf("initialize queue schema: %v", err)
 	}
-	return repo
 }
 
 func createRetentionSession(t *testing.T, repo *Repository, ctx context.Context, taskID, sessionID string, ephemeral bool, agentProfileID string) *models.TaskSession {

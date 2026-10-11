@@ -296,6 +296,7 @@ The report marks sample limits and unavailable retention schemas.
 A legacy-schema dry run does not migrate the database.
 Delivery samples default to at most 200 candidates, even without `--candidate-limit`.
 They are not exact database-wide totals.
+Retired-session evidence shares the candidate row budget across its sampled tables.
 
 **Execute.** `--execute` requires exclusive access to the database: it takes
 the same ownership lock a live backend takes at boot, so it refuses to run
@@ -305,6 +306,7 @@ takes and verifies a fresh backup before deleting anything, written to
 unverified backup aborts before any delete. The three legacy categories use one transaction.
 Delivery cleanup uses separate bounded transactions with fresh eligibility checks.
 A run can finish partially and reports committed counts plus the backup path.
+Pending deletion jobs also produce the partial-progress notice, even when the current job removed few rows.
 Repeat the command to continue delivery cleanup.
 The configured delivery policy applies to both analysis and execution.
 This command remains SQLite-only. PostgreSQL uses automatic cleanup and operator database tools.

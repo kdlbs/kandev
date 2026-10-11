@@ -40,8 +40,9 @@ const agentDeliveryRetainedTerminalProofSQL = `EXISTS (
   AND term.session_id = terminal.session_id AND term.incarnation_id = terminal.incarnation_id
   AND term.harness_generation = terminal.harness_generation AND term.submission_id = settled.id
   AND term.turn_id <> ''
-  AND term.outcome = CASE terminal.event_type WHEN 'complete' THEN 'completed'
-   WHEN 'error' THEN 'failed' WHEN 'cancelled' THEN 'cancelled' WHEN 'canceled' THEN 'cancelled' ELSE '' END
+  AND ((terminal.event_type = 'complete' AND term.outcome IN ('completed', 'failed', 'cancelled'))
+   OR (terminal.event_type = 'error' AND term.outcome = 'failed')
+   OR (terminal.event_type IN ('cancelled', 'canceled') AND term.outcome = 'cancelled'))
   AND (settled.terminal_sequence > terminal.sequence OR
    (settled.terminal_turn_id = term.turn_id AND settled.outcome = term.outcome))
   AND workflow.effect_type = 'workflow.on_turn_complete' AND workflow.state = 'completed'

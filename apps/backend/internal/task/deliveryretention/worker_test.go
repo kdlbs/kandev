@@ -140,11 +140,17 @@ func TestDeliveryRetentionWorker(t *testing.T) {
 			t.Fatal(err)
 		}
 		fireAfter(t, clock, initialDelay)
-		if recovered := receiveSnapshot(t, snapshots); !recovered.ReadinessRecovered {
-			t.Fatalf("readiness snapshot = %+v", recovered)
-		}
 		if got := receiveCall(t, repo.calls); got != "retention" {
 			t.Fatalf("first post-readiness batch = %q", got)
+		}
+		for _, phase := range []string{"orphans", "retirements"} {
+			fireAfter(t, clock, betweenBatches)
+			if got := receiveCall(t, repo.calls); got != phase {
+				t.Fatalf("post-readiness phase = %q, want %q", got, phase)
+			}
+		}
+		if recovered := receiveSnapshot(t, snapshots); !recovered.ReadinessRecovered {
+			t.Fatalf("readiness snapshot = %+v", recovered)
 		}
 		if readinessCalls != 1 {
 			t.Fatalf("readiness checks = %d, want 1", readinessCalls)

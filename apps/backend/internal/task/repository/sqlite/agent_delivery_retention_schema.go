@@ -122,6 +122,11 @@ var agentDeliveryRetentionIndexes = []struct {
 		query: `CREATE INDEX IF NOT EXISTS idx_agent_delivery_cleanup_jobs_phase
 			ON agent_delivery_cleanup_jobs(phase, session_id, incarnation_id)`,
 	},
+	{
+		name: "idx_agent_delivery_cleanup_jobs_fair",
+		query: `CREATE INDEX IF NOT EXISTS idx_agent_delivery_cleanup_jobs_fair
+			ON agent_delivery_cleanup_jobs(updated_at, session_id, incarnation_id)`,
+	},
 }
 
 func (r *Repository) initAgentDeliveryRetentionSchema() error {

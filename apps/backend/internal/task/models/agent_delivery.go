@@ -40,6 +40,7 @@ type AgentDeliveryRetirementBatchResult struct {
 	RowsPurged int
 	Completed  int
 	Suspended  int
+	Pending    bool
 }
 
 // AgentDeliveryOrphanBatchOptions bounds authoritative orphan discovery.

@@ -21,6 +21,10 @@ Remove redundant backend delivery payloads while retaining authenticated replay,
 Build format/fencing and receipt-aware consumers before activating cleanup. Work orders progress sequentially; the current boundary is recorded below.
 Implementation was authorized by the user on 2026-10-09. No feature flag is planned.
 
+## Current PR delivery scope (2026-10-11)
+
+The user removed the original-artifact transfer prerequisite and authorized delivery of the current issue fix. Current-head required CI, valid existing findings and ownership/recovery/retention regressions remain the gates. Historical original rollback and matched-baseline latency acceptance are not claimed passed and do not block this delivery. Preserve the Ready user edit; Task 08 records the evidence limits and remaining broader validation. No extra review or broad audit is required.
+
 ## Baseline and assumptions
 
 - Original investigation baseline: `f2668750bf6a17792b58d423f6b5b99cfeabf78e` on `feature/investigate-durable-cce`; the October 5 receipts below remain historical.
@@ -47,7 +51,7 @@ Platform owns this feature because its durable transport contract controls authe
 - [SQLite writer admission ADR](../../decisions/2026-10-05-sqlite-writer-transaction-admission.md) and [managed deletion design](../../specs/plugins/system-design/managed-deletion-admission.md): existing transaction entry, owner/marker and external-I/O boundaries.
 - [Runtime continuity](../../specs/platform/requirements/transient-turn-runtime-continuity.md) and [provider continuation](../../specs/platform/requirements/provider-interruption-continuation.md): cleanup grants no new recovery authority.
 
-Links to this pending extension do not reopen completed companion orders or replace their recorded verification.
+Links to this implemented extension do not reopen completed companion orders or replace their recorded verification.
 At implementation time re-read overlapping work orders and current source. This refresh incorporates the explicitly authorized rebase; reconcile future base changes before implementation rather than relying on the historical October 5 receipts.
 
 ## Scope
