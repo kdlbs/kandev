@@ -91,6 +91,7 @@ func TestTaskCatalogIncludesDurableSessionTables(t *testing.T) {
 		"session_continuation_snapshots": {}, "session_recovery_blocks": {},
 		"agent_delivery_submissions": {}, "agent_delivery_inbox": {},
 		"agent_delivery_cursors": {}, "agent_delivery_effects": {},
+		"agent_delivery_cleanup_jobs": {}, "agent_delivery_retention_state": {},
 	}
 	for _, table := range task.RequiredTables {
 		delete(want, table)

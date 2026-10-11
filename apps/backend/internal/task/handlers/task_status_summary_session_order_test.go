@@ -83,6 +83,92 @@ func TestTaskDTOEnrichmentReconcilesWithSessionsReadAfterStatusSummary(t *testin
 	}
 }
 
+func TestTaskSummaryProjectionCombinesPrimaryAndSessionListReads(t *testing.T) {
+	repo := &taskSummaryProjectionNavigationRepo{
+		httpTaskRepo: &httpTaskRepo{},
+		observations: map[string][]*models.TaskSessionSummaryObservation{
+			"task-projection": {{
+				ID: "session-projection-primary", TaskID: "task-projection", IsPrimary: true,
+				State: models.TaskSessionStateWaitingForInput, ReviewStatus: models.ReviewStatusApproved,
+				ExecutorID: "executor-projection", ExecutorProfileID: "executor-profile-projection",
+				ExecutorType: "local", ExecutorName: "Local runner", AgentProfileID: "agent-profile-projection",
+				AgentProfileName: "Coding agent", RepositoryPath: "/workspace/project",
+			}, {
+				ID: "session-projection-secondary", TaskID: "task-projection",
+				State: models.TaskSessionStateRunning,
+			}},
+		},
+	}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo, Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo, Executors: repo, Environments: repo,
+		TaskEnvironments: repo, Reviews: repo, ResourceCleanups: repo,
+	}, nil, newTestLogger(t), service.RepositoryDiscoveryConfig{})
+
+	got, err := buildTaskDTOsWithSessionInfo(
+		context.Background(), svc, newTestLogger(t), nil, nil,
+		[]*models.Task{{ID: "task-projection", WorkspaceID: "ws-projection", Title: "Projection"}},
+	)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.NotNil(t, got[0].PrimarySessionID)
+	require.NotNil(t, got[0].SessionCount)
+	require.Equal(t, "session-projection-primary", *got[0].PrimarySessionID)
+	require.Equal(t, 2, *got[0].SessionCount)
+	require.Equal(t, "WAITING_FOR_INPUT", *got[0].PrimarySessionState)
+	require.Equal(t, models.ReviewStatusApproved, got[0].ReviewStatus)
+	require.Equal(t, "executor-projection", *got[0].PrimaryExecutorID)
+	require.Equal(t, "Local runner", *got[0].PrimaryExecutorName)
+	require.Equal(t, "Coding agent", *got[0].PrimaryAgentName)
+	require.Equal(t, "/workspace/project", *got[0].PrimaryWorkingDirectory)
+	require.Equal(t, 2, repo.summaryCalls, "the post-status-summary observation must use the same narrow projection")
+	require.Zero(t, repo.fullSessionBatchCalls, "navigation must not decode full session rows")
+	require.Zero(t, repo.primaryInfoCalls, "primary information must come from the existing summary batch")
+}
+
+type taskSummaryProjectionNavigationRepo struct {
+	*httpTaskRepo
+	observations          map[string][]*models.TaskSessionSummaryObservation
+	summaryCalls          int
+	fullSessionBatchCalls int
+	primaryInfoCalls      int
+}
+
+func (r *taskSummaryProjectionNavigationRepo) BatchGetTaskSessionSummaryObservations(
+	_ context.Context,
+	taskIDs []string,
+) (map[string][]*models.TaskSessionSummaryObservation, error) {
+	r.summaryCalls++
+	result := make(map[string][]*models.TaskSessionSummaryObservation, len(taskIDs))
+	for _, taskID := range taskIDs {
+		result[taskID] = r.observations[taskID]
+	}
+	return result, nil
+}
+
+func (r *taskSummaryProjectionNavigationRepo) ListTaskSessionSummaryObservations(
+	_ context.Context,
+	taskID string,
+) ([]*models.TaskSessionSummaryObservation, error) {
+	return r.observations[taskID], nil
+}
+
+func (r *taskSummaryProjectionNavigationRepo) BatchGetSessionsByTaskIDs(
+	ctx context.Context,
+	taskIDs []string,
+) (map[string][]*models.TaskSession, error) {
+	r.fullSessionBatchCalls++
+	return r.httpTaskRepo.BatchGetSessionsByTaskIDs(ctx, taskIDs)
+}
+
+func (r *taskSummaryProjectionNavigationRepo) GetPrimarySessionInfoByTaskIDs(
+	ctx context.Context,
+	taskIDs []string,
+) (map[string]*models.TaskSession, error) {
+	r.primaryInfoCalls++
+	return r.httpTaskRepo.GetPrimarySessionInfoByTaskIDs(ctx, taskIDs)
+}
+
 type statusSummarySessionOrderRepo struct {
 	*httpTaskRepo
 	calls   *[]string

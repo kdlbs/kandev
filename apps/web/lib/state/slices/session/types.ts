@@ -13,6 +13,12 @@ import type {
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { ObservedPrompts } from "@/lib/session-last-prompt";
 
+export type ActiveTurnWindowObservation = {
+  activeTurnId: string | null;
+  reconcileEpoch: number;
+  updatedAt?: string;
+};
+
 export type MessagesState = {
   bySession: Record<string, Message[]>;
   metaBySession: Record<
@@ -44,6 +50,8 @@ export type PromptsState = MessagesState & {
 export type TurnsState = {
   bySession: Record<string, Turn[]>;
   activeBySession: Record<string, string | null>; // sessionId -> active turnId
+  /** Message IDs whose matching turn rows were read with the same message window. */
+  windowCoverageBySession?: Record<string, { messageIds: string[]; activeTurnObserved: boolean }>;
   /**
    * Sessions whose FULL persisted turn history has entered the store (SSR
    * hydration or a complete REST fetch). Distinct from `bySession` presence:
@@ -371,6 +379,14 @@ export type SessionSliceActions = {
     turns: Turn[],
     hydrationEpoch: number,
     options?: { replace?: boolean },
+  ) => void;
+  /** Merges a bounded message-window turn snapshot without claiming full history. */
+  mergeTurnsWindow: (
+    sessionId: string,
+    turns: Turn[],
+    coverage: { message_ids: string[]; active_turn_id: string | null },
+    hydrationEpoch: number,
+    observationAtRequestStart?: ActiveTurnWindowObservation,
   ) => void;
   completeTurn: (
     sessionId: string,

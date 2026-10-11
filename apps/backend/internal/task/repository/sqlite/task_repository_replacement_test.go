@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -123,12 +127,17 @@ func TestTaskRepositoryReplacementCancellation(t *testing.T) {
 
 func independentReplacementSQLite(t *testing.T, path string) *Repository {
 	t.Helper()
-	conn, err := sqlx.Open("sqlite3", "file:"+path+"?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=250&_cache=private")
-	require.NoError(t, err)
-	conn.SetMaxOpenConns(1)
-	conn.SetMaxIdleConns(1)
-	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+	conn := replacementSQLiteDB(t, path)
 	return NewWithInitializedDB(conn, conn, nil)
+}
+
+func replacementSQLiteDB(t *testing.T, path string) *sqlx.DB {
+	t.Helper()
+	raw, err := db.OpenSQLite(path)
+	require.NoError(t, err)
+	conn := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+	return conn
 }
 
 // @covers AC-TASKS-ATTACH-WORKSPACE-SOURCES-002.5
@@ -138,6 +147,9 @@ func TestTaskRepositoryReplacementSQLiteSerialization(t *testing.T) {
 	require.NoError(t, holder.initSchemaContext(context.Background()))
 	seedReplacementStore(t, holder)
 	worker := independentReplacementSQLite(t, path)
+	observer := replacementSQLiteDB(t, path)
+	_, err := observer.Exec(`PRAGMA busy_timeout=0`)
+	require.NoError(t, err)
 	held, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	holderFinished := make(chan struct{})
 	go func() {
@@ -153,36 +165,64 @@ func TestTaskRepositoryReplacementSQLiteSerialization(t *testing.T) {
 	var once sync.Once
 	unblock := func() { once.Do(func() { close(release) }) }
 	t.Cleanup(func() { unblock(); <-holderFinished })
-	// A real independent writer conflict proves database serialization, rather
-	// than shared-pool queueing or scheduler delay.
-	_, err := worker.db.Exec(`UPDATE tasks SET updated_at=updated_at WHERE id='replacement-task'`)
-	require.ErrorContains(t, err, "locked")
+	// The independent zero-timeout observer proves that the holder owns SQLite's
+	// writer; the successor below must then enter the actual SQLite lock wait.
+	_, err = observer.Exec(`UPDATE tasks SET updated_at=updated_at WHERE id='replacement-task'`)
+	var busy sqlite3.Error
+	require.ErrorAs(t, err, &busy)
+	require.Equal(t, sqlite3.ErrBusy, busy.Code)
 
-	var called atomic.Bool
-	ctx, cancel := context.WithCancel(context.Background())
-	cancelled := make(chan error, 1)
+	var cancelledCallback atomic.Bool
+	cancelCtx, cancelRequest := context.WithCancel(context.Background())
+	var busyTimeout int
+	require.NoError(t, worker.db.Get(&busyTimeout, `PRAGMA busy_timeout`))
+	require.Equal(t, 5000, busyTimeout)
+	cancelWaitCtx, cancelWait := context.WithTimeout(context.Background(), time.Duration(busyTimeout+1000)*time.Millisecond)
+	cancelResult := make(chan error, 1)
 	cancelFinished := make(chan struct{})
-	t.Cleanup(func() { cancel(); <-cancelFinished })
+	cancelStarted := make(chan struct{})
 	go func() {
 		defer close(cancelFinished)
-		_, err := worker.ReplaceTaskRepositories(ctx, "replacement-task", func(models.TaskRepositoryReplacementSnapshot) ([]*models.TaskRepository, error) {
-			called.Store(true)
+		close(cancelStarted)
+		_, err := worker.ReplaceTaskRepositories(cancelCtx, "replacement-task", func(models.TaskRepositoryReplacementSnapshot) ([]*models.TaskRepository, error) {
+			cancelledCallback.Store(true)
 			return nil, nil
 		})
-		cancelled <- err
+		cancelResult <- err
 	}()
-	require.Eventually(t, func() bool { return worker.db.Stats().InUse == 1 }, time.Second, time.Millisecond)
-	cancel()
-	require.ErrorIs(t, <-cancelled, context.Canceled)
-	require.False(t, called.Load())
+	t.Cleanup(func() { cancelRequest(); cancelWait(); unblock(); <-cancelFinished })
+	select {
+	case <-cancelStarted:
+	case <-cancelWaitCtx.Done():
+		t.Fatal("cancellation waiter did not start", cancelWaitCtx.Err())
+	}
+	waitingCancelWorker := waitTaskRepositoryReplacementSQLiteBegin(t, cancelWaitCtx, cancelFinished, "cancellation waiter")
+	_, err = observer.ExecContext(cancelWaitCtx, `UPDATE tasks SET updated_at=updated_at WHERE id='replacement-task'`)
+	require.ErrorAs(t, err, &busy)
+	require.Equal(t, sqlite3.ErrBusy, busy.Code)
+	require.Equal(t, waitingCancelWorker, taskRepositoryReplacementSQLiteBeginWorker(), "same cancellation waiter remains in SQLite's writer wait")
+	cancelRequest()
+	select {
+	case err = <-cancelResult:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-cancelWaitCtx.Done():
+		t.Fatal("canceled replacement did not settle while the holder remained locked", cancelWaitCtx.Err())
+	}
+	<-cancelFinished
+	_, err = observer.ExecContext(cancelWaitCtx, `UPDATE tasks SET updated_at=updated_at WHERE id='replacement-task'`)
+	require.ErrorAs(t, err, &busy)
+	require.Equal(t, sqlite3.ErrBusy, busy.Code)
+	require.False(t, cancelledCallback.Load())
 
 	successful := make(chan error, 1)
 	successorFinished := make(chan struct{})
 	successCtx, successCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(func() { successCancel(); unblock(); <-successorFinished })
 	var successorCalled atomic.Bool
+	successorStarted := make(chan struct{})
 	go func() {
 		defer close(successorFinished)
+		close(successorStarted)
 		_, err := worker.ReplaceTaskRepositories(successCtx, "replacement-task", func(snapshot models.TaskRepositoryReplacementSnapshot) ([]*models.TaskRepository, error) {
 			successorCalled.Store(true)
 			if len(snapshot.Repositories) != 2 || snapshot.Repositories[0].BranchPolicyName != "Complete" {
@@ -192,7 +232,16 @@ func TestTaskRepositoryReplacementSQLiteSerialization(t *testing.T) {
 		})
 		successful <- err
 	}()
-	require.Eventually(t, func() bool { return worker.db.Stats().InUse == 1 }, time.Second, time.Millisecond)
+	select {
+	case <-successorStarted:
+	case <-successCtx.Done():
+		t.Fatal("successor did not start", successCtx.Err())
+	}
+	waitingWorker := waitTaskRepositoryReplacementSQLiteBegin(t, successCtx, successorFinished, "successor")
+	_, err = observer.ExecContext(successCtx, `UPDATE tasks SET updated_at=updated_at WHERE id='replacement-task'`)
+	require.ErrorAs(t, err, &busy)
+	require.Equal(t, sqlite3.ErrBusy, busy.Code)
+	require.Equal(t, waitingWorker, taskRepositoryReplacementSQLiteBeginWorker(), "same successor remains in SQLite's writer wait")
 	require.False(t, successorCalled.Load())
 	unblock()
 	require.NoError(t, <-done)
@@ -202,4 +251,38 @@ func TestTaskRepositoryReplacementSQLiteSerialization(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "winner", rows[0].BaseBranch)
+}
+
+func waitTaskRepositoryReplacementSQLiteBegin(t *testing.T, ctx context.Context, finished <-chan struct{}, operation string) string {
+	t.Helper()
+	for {
+		if worker := taskRepositoryReplacementSQLiteBeginWorker(); worker != "" {
+			return worker
+		}
+		select {
+		case <-finished:
+			t.Fatalf("%s returned before waiting for SQLite's writer", operation)
+		case <-ctx.Done():
+			t.Fatalf("%s SQLite writer wait was not observed: %v", operation, ctx.Err())
+		default:
+			runtime.Gosched()
+		}
+	}
+}
+
+func taskRepositoryReplacementSQLiteBeginWorker() string {
+	buffer := make([]byte, 1<<20)
+	sections := strings.Split(string(buffer[:runtime.Stack(buffer, true)]), "\n\n")
+	for _, parent := range sections {
+		if !strings.Contains(parent, ".ReplaceTaskRepositories(") || !strings.Contains(parent, "(*SQLiteConn).begin(") {
+			continue
+		}
+		owner := strings.Fields(parent)[1]
+		for _, child := range sections {
+			if strings.Contains(child, "_Cfunc__sqlite3_step_row_internal(") && strings.Contains(child, "created by github.com/mattn/go-sqlite3.(*SQLiteStmt).exec in goroutine "+owner+"\n") {
+				return owner + "/" + strings.Fields(child)[1]
+			}
+		}
+	}
+	return ""
 }

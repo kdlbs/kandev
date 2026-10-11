@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- AppState keeps the explicit cross-slice store contract in one type. */
+import type { ActiveTurnWindowObservation } from "./slices/session/types";
 import type { HydrationOptions } from "./hydration/hydrator";
 import type {
   Repository,
@@ -466,6 +467,14 @@ export type AppState = KanbanSlice & {
     turns: Turn[],
     hydrationEpoch: number,
     options?: { replace?: boolean },
+  ) => void;
+  /** Merges turn rows covered by one retained message window. */
+  mergeTurnsWindow: (
+    sessionId: string,
+    turns: Turn[],
+    coverage: { message_ids: string[]; active_turn_id: string | null },
+    hydrationEpoch: number,
+    observationAtRequestStart?: ActiveTurnWindowObservation,
   ) => void;
   completeTurn: (
     sessionId: string,

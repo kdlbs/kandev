@@ -363,10 +363,19 @@ jobs:
           fi
 
           echo "Running ${#shard_packages[@]} packages in shard ${SHARD_NUMBER}/2"
+          # Covered million-event fixtures share a two-hour package budget.
+          # Per-batch deadlines and preservation assertions remain independent.
+          test_timeout=10m
+          for package in "${shard_packages[@]}"; do
+            if [[ "${package}" == github.com/kandev/kandev/internal/task/repository/sqlite ]]; then
+              test_timeout=120m
+            fi
+          done
           # Keep complete JSON for reports/artifacts while limiting live output
           # to compiler/process lines and package-level pass/fail summaries.
           go test \
             -race \
+            -timeout="${test_timeout}" \
             -coverprofile="coverage-${SHARD_NUMBER}.out" \
             -covermode=atomic \
             -json \
@@ -573,9 +582,9 @@ jobs:
     permissions:
       contents: read
       packages: read
-    # Allow the full race-enabled persistence suite twenty minutes per package,
+    # Million-event retention fixtures need the ninety-minute suite budget,
     # plus time for the service, cold compilation, and job cleanup.
-    timeout-minutes: 40
+    timeout-minutes: 120
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
       postgres:
@@ -591,7 +600,10 @@ jobs:
           POSTGRES_USER: kandev
           POSTGRES_PASSWORD: kandev
           POSTGRES_DB: kandev_admin
+        # PostgreSQL parallel checks of million-row fixtures exceed Docker
+        # default shared memory even after logical row retirement.
         options: >-
+          --shm-size=256m
           --health-cmd "pg_isready -U kandev -d kandev_admin"
           --health-interval 5s
           --health-timeout 5s
@@ -651,7 +663,11 @@ jobs:
             ./internal/workflowsync
             ./internal/worktree
           )
-          go test -v -race -timeout 20m "${POSTGRES_PACKAGES[@]}"
+          # SQLite million-event fixtures run in test_shards. Keep all other
+          # SQLite cases and every PostgreSQL case in this persistence gate.
+          go test -v -race -timeout 90m \
+            -skip '^TestDeliveryRetentionStorage(ProtectedGap)?$/SQLite$' \
+            "${POSTGRES_PACKAGES[@]}"
 
   sidebar-resources:
     name: Sidebar resource bounds (${{ matrix.mode }})

@@ -1,3 +1,4 @@
+import { captureActiveTurnWindowObservation } from "@/lib/state/slices/session/turn-actions";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { listTaskSessionMessages } from "@/lib/api/domains/session-api";
@@ -43,10 +44,13 @@ export async function loadMessageWindowAround(
   guard: () => boolean,
   store: SessionStore,
 ): Promise<LoadMessageWindowResult> {
+  const turnWindowObservation = captureActiveTurnWindowObservation(store.getState(), sessionId);
+  const turnHydrationEpoch = turnWindowObservation.reconcileEpoch;
   const response = await listTaskSessionMessages(sessionId, {
     around: targetMessageId,
     limit: 100,
     sort: "desc",
+    include_turns: true,
   });
   if (!guard()) return { kind: "stale", merged: false, current: false, targetFound: false };
   const window = (response.messages ?? []).filter((message) => message.session_id === sessionId);
@@ -55,5 +59,16 @@ export async function loadMessageWindowAround(
   }
   const existing = store.getState().messages.bySession[sessionId] ?? [];
   store.getState().mergeMessages(sessionId, mergeWindowRows(existing, window));
+  if (response.turn_coverage) {
+    store
+      .getState()
+      .mergeTurnsWindow(
+        sessionId,
+        response.turns ?? [],
+        response.turn_coverage,
+        turnHydrationEpoch,
+        turnWindowObservation,
+      );
+  }
   return { kind: "merged", merged: true, current: true, targetFound: true };
 }

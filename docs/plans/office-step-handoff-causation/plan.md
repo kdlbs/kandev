@@ -1,6 +1,6 @@
 ---
 created: 2026-09-26
-status: planned
+status: done
 requirements:
   - REQ-OFFICE-RUN-CAUSATION-001
   - REQ-OFFICE-LAUNCH-SAFETY-003
@@ -34,3 +34,16 @@ cd apps/backend && go test ./internal/workflow/engine ./internal/office/service 
 python3 scripts/lint-spec-files.py --all
 python3 scripts/list-docs.py validate
 ```
+
+## PR Integration Results
+
+The current-main integration preserves trusted causing-run identity alongside
+landed delivery identity, interrupted-prompt recovery, and retention behavior.
+Completion handlers retain delivery settlement and cancellation classification
+while carrying the causing run into the transition ledger. Lifecycle and watcher
+regressions assert both identities in the same completion event.
+
+Task 01 records the integration validation and its local timeout limitation.
+Current-head CI and merge receipt remain delivery checks outside this work order.
+No public documentation change is needed for this integration: the existing
+causation requirement and design remain the behavior contract.

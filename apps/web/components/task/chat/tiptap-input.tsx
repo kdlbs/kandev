@@ -20,7 +20,8 @@ import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { EditorContextProvider } from "./editor-context";
 import { TipTapPopups } from "./tiptap-popups";
 import { useReverseSearchSelectHandler } from "./use-reverse-search-select-handler";
-import { buildTaskMentionItems } from "./task-mention-items";
+import { storeReadScopeIdentity } from "@/lib/state/shared-resource-reads";
+import { loadTaskMentionItems } from "./task-mention-items";
 import { createMessageHistorySelector, type MessageHistoryEntry } from "./message-history";
 import { useDrainOlderMessages } from "./use-drain-older-messages";
 import {
@@ -66,6 +67,7 @@ type TipTapInputProps = {
   onBlur?: () => void;
   // TipTap-specific
   sessionId: string | null;
+  detailActive?: boolean;
   taskId?: string | null;
   workspaceId?: string | null;
   entityReferencesEnabled?: boolean;
@@ -106,6 +108,7 @@ function handleMenuKeyDown<T>(
 // ── Mention items fetcher hook ───────────────────────────────────────
 
 type FileSearchOwner = {
+  taskController?: AbortController;
   sessionId: string | null;
   lookup: number;
   completed: { sessionId: string; query: string; results: string[] } | null;
@@ -142,9 +145,10 @@ function useMentionItems(
   useLayoutEffect(() => {
     lastFileSearchRef.current = { sessionId, lookup: 0, completed: null };
     return () => {
+      lastFileSearchRef.current?.taskController?.abort();
       lastFileSearchRef.current = null;
     };
-  }, [sessionId]);
+  }, [sessionId, taskId, workspaceId]);
   useLayoutEffect(() => {
     promptsRef.current = prompts;
     taskIdRef.current = taskId;
@@ -154,7 +158,25 @@ function useMentionItems(
   return useCallback(
     async (query: string): Promise<MentionItem[]> => {
       const workspace = workspaceIdRef.current;
-      const allItems = buildTaskMentionItems(storeApi.getState(), taskIdRef.current);
+      const owner = lastFileSearchRef.current;
+      if (!owner) return [];
+      const lookup = ++owner.lookup;
+      owner.taskController?.abort();
+      const controller = new AbortController();
+      owner.taskController = controller;
+      const scope = storeReadScopeIdentity(storeApi);
+      const isCurrent = () =>
+        lastFileSearchRef.current === owner &&
+        owner.lookup === lookup &&
+        storeReadScopeIdentity(storeApi) === scope;
+      const allItems = await loadTaskMentionItems(
+        storeApi.getState(),
+        taskIdRef.current,
+        workspace,
+        query,
+        { signal: controller.signal, isCurrent },
+      );
+      if (!isCurrent()) return [];
       allItems.push({
         id: "__plan__",
         kind: "plan",
@@ -171,13 +193,10 @@ function useMentionItems(
           onSelect: () => {},
         });
       }
-      const owner = lastFileSearchRef.current;
-      if (owner?.sessionId) {
-        const lookup = ++owner.lookup;
-        const isCurrent = () => lastFileSearchRef.current === owner && owner.lookup === lookup;
+      if (owner.sessionId) {
         try {
           const files = await fetchFileResults(owner.sessionId, query, owner, isCurrent);
-          if (!isCurrent()) return rankMentionItems(allItems, query, workspace);
+          if (!isCurrent()) return [];
           for (const filePath of files) {
             allItems.push({
               id: filePath,
@@ -189,7 +208,7 @@ function useMentionItems(
           }
         } catch {}
       }
-      return rankMentionItems(allItems, query, workspace);
+      return isCurrent() ? rankMentionItems(allItems, query, workspace) : [];
     },
     [storeApi],
   );
@@ -409,6 +428,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     onFocus,
     onBlur,
     sessionId,
+    detailActive = true,
     taskId,
     workspaceId = null,
     entityReferencesEnabled = false,
@@ -484,17 +504,37 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
         onReverseSearchSelect={handleReverseSearchSelect}
         onEntityReferenceClose={closeEntityReferenceMenu}
       />
-      <EditorContextProvider value={{ sessionId, taskId: taskId ?? null }}>
-        <div ref={editorWrapperRef} className="h-full">
-          <EditorContent
-            editor={editor}
-            className="h-full [&_.tiptap]:h-full [&_.tiptap]:outline-none"
-          />
-        </div>
-      </EditorContextProvider>
+      <TipTapEditorArea
+        editor={editor}
+        editorWrapperRef={editorWrapperRef}
+        sessionId={sessionId}
+        taskId={taskId ?? null}
+        detailActive={detailActive}
+      />
     </>
   );
 });
+
+function TipTapEditorArea(p: {
+  editor: Editor | null;
+  editorWrapperRef: RefObject<HTMLDivElement | null>;
+  sessionId: string | null;
+  taskId: string | null;
+  detailActive: boolean;
+}) {
+  return (
+    <EditorContextProvider
+      value={{ sessionId: p.sessionId, taskId: p.taskId, detailActive: p.detailActive }}
+    >
+      <div ref={p.editorWrapperRef} className="h-full">
+        <EditorContent
+          editor={p.editor}
+          className="h-full [&_.tiptap]:h-full [&_.tiptap]:outline-none"
+        />
+      </div>
+    </EditorContextProvider>
+  );
+}
 
 export type MenuHandlers = ReturnType<typeof useMenuHandlers>;
 export type ReverseSearchOverlay = Omit<

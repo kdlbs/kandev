@@ -5604,7 +5604,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIden
 		return queueDrainSkipped
 	}
 	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
-		ctx, taskID, sessionID, identity,
+		ctx, taskID, sessionID, identity, nil,
 	)
 }
 
@@ -5632,7 +5632,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(
 	taskID, sessionID string,
 ) queueDrainOutcome {
 	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
-		ctx, taskID, sessionID, nil,
+		ctx, taskID, sessionID, nil, nil,
 	)
 }
 
@@ -5669,6 +5669,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	ctx context.Context,
 	taskID, sessionID string,
 	identity *messagequeue.QueueSessionIdentity,
+	completionEffect *models.AgentDeliveryEffect,
 ) queueDrainOutcome {
 	if s.messageQueue == nil || s.isCancelInFlight(sessionID) ||
 		s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
@@ -5708,6 +5709,17 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	}
 	if !autoRun {
 		return queueDrainPaused
+	}
+	if ok && queuedMsg != nil && completionEffect != nil {
+		hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, queuedMsg)
+		if hasInput && inputErr == nil {
+			if err := s.settleQueuedDeliveryPredecessor(ctx, taskID, sessionID, completionEffect); err != nil {
+				s.logger.Warn("failed to settle delivery before queued successor",
+					zap.String("session_id", sessionID), zap.Error(err))
+				s.requeueMessageForReservation(ctx, &queuedDispatchReservation{identity: queueIdentity}, queuedMsg, queuedMsg.QueuedBy)
+				return queueDrainSkipped
+			}
+		}
 	}
 	if s.dispatchTakenQueuedMessageForSession(ctx, queueIdentity, queuedMsg, ok) {
 		return queueDrainDispatched
@@ -7583,7 +7595,20 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	session *models.TaskSession,
 	cause turnCompletionCause,
 ) bool {
-	if session == nil || models.IsCompletionFollowUpSession(session.Metadata) {
+	if session == nil {
+		return false
+	}
+	effect := workflowEffectFromContext(ctx)
+	if effect != nil && agentDeliveryEffectCarriesDeliveryIdentity(effect) && !isBoundAgentDeliveryWorkflowEffect(effect) {
+		s.logger.Warn("deferring workflow completion with incomplete delivery identity",
+			zap.String("task_id", taskID), zap.String("effect_key", effect.EffectKey))
+		return false
+	}
+	if models.IsCompletionFollowUpSession(session.Metadata) {
+		if err := s.recordNotRequiredDeliveryWorkflowOutcome(ctx, taskID, effect); err != nil {
+			s.logger.Warn("failed to record non-workflow completion outcome",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
 		return false
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
@@ -7603,17 +7628,36 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		s.settleReplayedTurnWithoutSuccessor(ctx, taskID, session.ID)
 		return false
 	}
-
-	if s.workflowEngine == nil {
-		return s.processOnTurnCompleteWithCause(ctx, task, session, cause)
-	}
-
-	if !s.prepareEngineTurnCompletion(ctx, taskID, task, session, cause) {
+	if task.WorkflowStepID == "" || task.IsEphemeral {
+		if !s.recordDeliveryWorkflowNoOp(ctx, task, effect, "not_required") {
+			return false
+		}
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return false
 	}
 
-	state := s.buildMachineState(ctx, task, session)
-	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
+	if s.workflowEngine == nil {
+		if isBoundAgentDeliveryWorkflowEffect(effect) {
+			s.logger.Warn("leaving delivery terminal pending because workflow engine is unavailable",
+				zap.String("task_id", taskID), zap.String("effect_key", effect.EffectKey))
+			return false
+		}
+		return s.processOnTurnCompleteWithCause(ctx, task, session, cause)
+	}
+
+	currentStep, eligible := s.prepareEngineTurnCompletion(ctx, taskID, task, session, cause)
+	if !eligible {
+		if cause == turnCompletionCauseUserCancellation && currentStep != nil && !currentStep.CancelTriggersTurnComplete {
+			if !s.recordDeliveryWorkflowNoOp(ctx, task, effect, "not_required") {
+				return false
+			}
+		}
+		return false
+	}
+	evaluationCtx := withWorkflowPolicy(ctx, task, currentStep.UpdatedAt)
+
+	state := s.buildMachineState(evaluationCtx, task, session)
+	result, err := s.workflowEngine.HandleTrigger(evaluationCtx, engine.HandleInput{
 		TaskID:         taskID,
 		SessionID:      session.ID,
 		Trigger:        engine.TriggerOnTurnComplete,
@@ -7630,6 +7674,9 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	}
 
 	if !result.Transitioned {
+		if !s.recordDeliveryWorkflowNoOp(evaluationCtx, task, workflowEffectFromContext(evaluationCtx), "no_automatic_transition") {
+			return false
+		}
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return false
 	}
@@ -7641,9 +7688,10 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		zap.String("to_step_id", result.ToStepID))
 
 	if cause == turnCompletionCauseUserCancellation {
-		ctx = cancellationTransitionAttribution(ctx)
+		evaluationCtx = cancellationTransitionAttribution(evaluationCtx)
 	}
-	return s.applyEngineTransitionWithMode(ctx, taskID, session, result, engine.TriggerOnTurnComplete, task.Description, transitionLifecycleWithOnEnter)
+	transitionCtx := withWorkflowOutcome(evaluationCtx, "applied")
+	return s.applyEngineTransitionWithMode(transitionCtx, taskID, session, result, engine.TriggerOnTurnComplete, task.Description, transitionLifecycleWithOnEnter)
 }
 
 func (s *Service) settleReplayedTurnWithoutSuccessor(ctx context.Context, taskID, sessionID string) {
@@ -7764,9 +7812,9 @@ func (s *Service) prepareEngineTurnCompletion(
 	task *models.Task,
 	session *models.TaskSession,
 	cause turnCompletionCause,
-) bool {
+) (*wfmodels.WorkflowStep, bool) {
 	if s.shouldSkipEngineTurnCompletion(ctx, taskID, task, session, cause) {
-		return false
+		return nil, false
 	}
 
 	// ADR 0015 — explicit completion signal gating. Steps marked
@@ -7788,19 +7836,19 @@ func (s *Service) prepareEngineTurnCompletion(
 			zap.String("step_id", task.WorkflowStepID),
 			zap.Error(stepErr))
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-		return false
+		return nil, false
 	}
 	if s.turnCompleteBlockedByUserInput(ctx, taskID, session.ID, session) {
-		return false
+		return currentStep, false
 	}
 	if cause == turnCompletionCauseUserCancellation && !currentStep.CancelTriggersTurnComplete {
 		s.logger.Debug("user cancellation completion is disabled for step",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.String("step_id", currentStep.ID))
-		return false
+		return currentStep, false
 	}
-	return s.allowEngineSignalCompletion(ctx, taskID, session, currentStep, cause)
+	return currentStep, s.allowEngineSignalCompletion(ctx, taskID, session, currentStep, cause)
 }
 
 func (s *Service) shouldSkipEngineTurnCompletion(

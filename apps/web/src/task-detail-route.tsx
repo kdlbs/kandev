@@ -23,6 +23,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { isDetachedManagedConversation } from "@/lib/plugins/retained-managed-conversation";
 import { RetainedManagedConversationTranscript } from "@/components/plugins/retained-managed-conversation-transcript";
+import { captureActiveTurnWindowObservations } from "@/lib/state/slices/session/turn-actions";
 import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types";
 import {
@@ -146,6 +147,7 @@ function TaskDetailRouteBody({
           initialState={route.initialState}
           sessionId={route.forceMergeSession ? (route.activeSessionId ?? undefined) : undefined}
           taskSessionHydrationEpochsAtRequestStart={route.hydrationEpochsAtRequestStart}
+          turnWindowObservationsAtRequestStart={route.turnWindowObservationsAtRequestStart}
           onHydrated={onRouteHydrated}
         />
       ) : null}
@@ -316,6 +318,7 @@ function useTaskDetailRouteEnrichment(args: {
       forceMergeSession: false,
       navigationContext,
       hydrationEpochsAtRequestStart: view.hydrationEpochsAtRequestStart,
+      turnWindowObservationsAtRequestStart: view.turnWindowObservationsAtRequestStart,
     };
     previousLoadedRouteRef.current = shellState;
     setRouteState((current) =>
@@ -329,6 +332,9 @@ function useTaskDetailRouteEnrichment(args: {
       store.getState(),
       view.data.task.id,
     );
+    const turnWindowObservationsAtRequestStart = captureActiveTurnWindowObservations(
+      store.getState(),
+    );
     void fetchTaskNavigationEnrichment(identity, view.data.sessionId ?? undefined, { store })
       .then((enriched) => {
         if (!isTaskNavigationCurrent(store, navigationContext)) return;
@@ -336,6 +342,7 @@ function useTaskDetailRouteEnrichment(args: {
           ...shellState,
           data: enriched,
           hydrationEpochsAtRequestStart,
+          turnWindowObservationsAtRequestStart,
         };
         const previousLoadedRoute = previousLoadedRouteRef.current;
         if (
@@ -369,6 +376,7 @@ function useTaskDetailRouteEnrichment(args: {
     view.displayedRouteKey,
     view.enrichmentIdentity,
     view.hydrationEpochsAtRequestStart,
+    view.turnWindowObservationsAtRequestStart,
     view.navigationContext,
     view.routeKey,
     view.currentRouteStatus,

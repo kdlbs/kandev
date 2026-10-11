@@ -38,6 +38,7 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/profiles"
 	"github.com/kandev/kandev/internal/startup"
+	"github.com/kandev/kandev/internal/task/deliveryretention"
 	"github.com/kandev/kandev/internal/task/inventoryrepair"
 
 	// Event bus
@@ -791,7 +792,7 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	sessionCapacityEnvironment := sessioncapacity.ReadEnvironment()
-	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
+	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.Auth, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
 		repos.SystemSettings, sessionCapacityEnvironment, repos.RequiredStores)
 	if err != nil {
@@ -800,9 +801,10 @@ func startAgentInfrastructure(
 	}
 	services.Task.SetWorkflowMovePreflight(orchestratorSvc)
 	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
-	// The checker is populated by lifecycleMgr.Start below before the
-	// orchestrator's startup reconciliation runs.
+	// These queries distinguish successfully re-tracked executions from remote
+	// owners whose guarded retry is still pending during startup reconciliation.
 	orchestratorSvc.SetRetrackedSessionChecker(lifecycleMgr.WasSessionRetracked)
+	orchestratorSvc.SetPendingRemoteRecoveryChecker(lifecycleMgr.HasPendingRemoteRecovery)
 	orchestratorSvc.SetRouteActionHandler(dynamicRouteActionHandler(
 		repos.Task,
 		repos.AgentSettings,
@@ -1021,7 +1023,12 @@ func startAgentInfrastructure(
 	// stops workers registered here, and a restore checkpoints, closes,
 	// and replaces the shared database pool. A five-minute sweep pass
 	// overlapping that would race the pool swap.
-	databaseQuiesce = addRuntimeCleanup(deliveryCleanup)
+	deliveryQuiesce := addRuntimeCleanup(deliveryCleanup)
+	databaseQuiesce = quiesceDeliveryRetention(func() {
+		if services.DeliveryRetention != nil {
+			services.DeliveryRetention.Stop()
+		}
+	}, deliveryQuiesce)
 
 	// Recovery publishes agent events synchronously. Subscribe the orchestrator
 	// after all event-handler dependencies are wired, but before lifecycle
@@ -1313,6 +1320,21 @@ func startGatewayAndServe(
 	// ============================================
 	// HTTP SERVER (Router & MCP Route Registration)
 	// ============================================
+	retentionConfig := cfg.Tasks.DeliveryRetention
+	services.DeliveryRetention = deliveryretention.New(repos.Task, dbPool, deliveryretention.Options{
+		Interval:     retentionConfig.Interval,
+		BatchRows:    retentionConfig.BatchRows,
+		BatchBytes:   int64(retentionConfig.BatchBytes),
+		PayloadGrace: retentionConfig.PayloadGrace,
+		ReplayAge:    retentionConfig.ReplayAge,
+		ReplayEvents: retentionConfig.ReplayEvents,
+		Readiness:    repos.Task.CheckAgentDeliveryRetentionReady,
+		Logger:       log,
+	})
+	stopDeliveryRetention := func() error { services.DeliveryRetention.Stop(); return nil }
+	addCleanup(stopDeliveryRetention)
+	restoreCleanups = append(restoreCleanups, stopDeliveryRetention)
+
 	e2eRuntimeUpdateHooks := newE2ERuntimeUpdateHooks()
 	if e2eRuntimeUpdateHooks != nil {
 		agentSettingsController.SetRuntimeUpdateStatusResolver(e2eRuntimeUpdateHooks.resolveLatestVersion)
@@ -1473,7 +1495,6 @@ func startGatewayAndServe(
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
 	services.Task.StartSessionReconciliationLoop(ctx)
 	services.Task.StartQuickChatExpirationLoop(ctx)
-
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
 	hostUtilityReady := make(chan struct{})
 	var hostUtilityWG sync.WaitGroup
@@ -1588,6 +1609,10 @@ func startGatewayAndServe(
 			bootstrap.ready.Store(true)
 		}, func() { handler.Store(builtServer.Handler) })
 	})
+	if err := services.DeliveryRetention.Start(ctx); err != nil && ctx.Err() == nil {
+		log.Error("failed to start durable delivery retention worker", zap.Error(err))
+		return false
+	}
 	if agentRuntimeRecovery != nil {
 		agentRuntimeRecovery.Start(ctx)
 	}

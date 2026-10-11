@@ -172,3 +172,23 @@ func waitForSessionExit(ctx context.Context, sessionToken uintptr, rootBirth str
 		}
 	}
 }
+
+// OwnedSessionTerminated verifies process and descendant termination without signaling them.
+func OwnedSessionTerminated(identity Identity) (bool, error) {
+	state, err := Inspect(identity)
+	if err != nil {
+		return false, err
+	}
+	if state == StateAlive {
+		return false, nil
+	}
+	if state != StateExited || identity.SessionID != identity.PID {
+		return false, ErrUnverifiableIdentity
+	}
+	_, _, token, err := parseDarwinBirthToken(identity.BirthToken)
+	if err != nil {
+		return false, err
+	}
+	groups, err := processGroupsInSession(token, identity.BirthToken)
+	return len(groups) == 0, err
+}

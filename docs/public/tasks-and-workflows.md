@@ -538,12 +538,17 @@ preference applies in two situations:
   prepared session and the agent stays stopped until you select **Start agent**.
   Opening the same task with the preference off keeps the workflow step's
   normal auto-start behavior.
-- **Opening a task whose agent was interrupted by a Kandev restart.** Kandev
-  restores the selected session when the task opens, unless this preference is
-  enabled. It restores the existing conversation and workspace without
-  replaying the previous prompt. A new message continues that conversation,
-  including while the agent is starting. Opening the application does not
-  resume every interrupted task; each task starts recovery when you focus it.
+- **Opening an idle session that needs a resume after a restart.** When this
+  preference is off, opening the task can resume its existing conversation.
+  When it is on, the agent stays stopped until you select **Start agent** or
+  send a message. The previous prompt is not replayed.
+
+Separately, after a backend restart Kandev runs a bounded background pass over
+eligible interrupted sessions. It does not wait for you to open or focus each
+task, and this preference does not disable that recovery. Kandev restores a
+session only after it verifies the saved owner and native conversation. If the
+owner, conversation, or delivery evidence is missing or changed, that session
+stays blocked with its available recovery controls. See [Manage session state](sessions-and-review.md#manage-session-state) for those controls and recovery details.
 
 The preference only gates opening a task. Choosing **Start agent** (or a
 workflow step transition) always starts the agent as usual, and a failed or

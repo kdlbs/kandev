@@ -450,11 +450,19 @@ describe("task navigation attempt cancellation", () => {
     const owner = {};
     const context = beginTaskNavigation(store, owner, "/t/task-a");
     const result = readTaskNavigationIdentity(store, "task-a", { context });
+    const outcome = result.then(
+      () => "resolved",
+      (error) => error,
+    );
     beginTaskNavigation(store, owner, "/t/task-b");
 
+    await Promise.resolve();
     expect(taskRequestSignal?.aborted).toBe(true);
-    expect(sessionRequestSignal).toBe(taskRequestSignal);
-    await expect(result).rejects.toMatchObject({ name: "AbortError" });
+    expect(sessionRequestSignal).toBeDefined();
+    expect(sessionRequestSignal).not.toBe(taskRequestSignal);
+    await expect(outcome).resolves.toMatchObject({ name: "AbortError" });
+    await Promise.resolve();
+    expect(sessionRequestSignal?.aborted).toBe(true);
   });
 });
 

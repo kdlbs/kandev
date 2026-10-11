@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
@@ -159,6 +160,9 @@ func (r *PluginRemoteExecutor) attachRecoveredPluginExecutor(
 		return nil, err
 	}
 	if record.TransientAuthToken == "" {
+		if state.inventory.Phase == pluginExecutorPhaseReady {
+			return nil, errors.New("established plugin executor cannot be attached without its saved agentctl credential")
+		}
 		if err := r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, "incomplete_bootstrap"); err != nil {
 			return nil, err
 		}
@@ -281,13 +285,57 @@ func (r *PluginRemoteExecutor) newRecoveredPluginExecutorInstance(ctx context.Co
 		client.Close()
 		return nil, errors.New("plugin executor agentctl readiness check failed")
 	}
+	info, err := r.readRecoveredAgentctlInstance(ctx, record, state)
+	if err != nil {
+		client.Close()
+		return nil, err
+	}
 	metadata := clonePluginExecutorMetadata(record.Metadata)
 	metadata[MetadataKeyPluginExecutor] = state.inventory
 	return &ExecutorInstance{
 		InstanceID: record.AgentExecutionID, TaskID: record.TaskID, SessionID: record.SessionID,
-		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: pluginExecutorWorkspacePath,
+		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: info.WorkspacePath,
 		Metadata: metadata, AuthToken: record.TransientAuthToken, AgentProfileID: record.ExecutionProfileID,
+		Env: clonePluginRecoveredEnvironment(info.Env), WorkspaceSourceRoots: append([]string(nil), info.WorkspaceSourceRoots...),
+		ProviderSessionID: info.ProviderSessionID,
 	}, nil
+}
+
+func (r *PluginRemoteExecutor) readRecoveredAgentctlInstance(
+	ctx context.Context,
+	record *models.ExecutorRunning,
+	state *pluginExecutorRecoveryState,
+) (*agentctl.InstanceInfo, error) {
+	if record == nil || state == nil || r.recoveredAgentctlInfoReader == nil {
+		return nil, errors.New("plugin executor instance metadata reader is unavailable")
+	}
+	info, err := r.recoveredAgentctlInfoReader(
+		ctx,
+		r.connectionResolver(state.operationContext, state.inventory.Resource, pluginExecutorRuntimePort),
+		r.logger,
+		record.AgentExecutionID,
+		record.TransientAuthToken,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("read authenticated plugin agentctl instance metadata: %w", err)
+	}
+	if info == nil || info.ID != record.AgentExecutionID || info.TaskID != record.TaskID ||
+		info.SessionID != record.SessionID || info.Port < 1 || uint32(info.Port) != state.inventory.InstancePort ||
+		strings.TrimSpace(info.WorkspacePath) == "" {
+		return nil, errors.New("authenticated plugin agentctl instance metadata does not match persisted owner")
+	}
+	return info, nil
+}
+
+func clonePluginRecoveredEnvironment(env map[string]string) map[string]string {
+	if len(env) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(env))
+	for key, value := range env {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func decodePluginExecutorInventory(metadata map[string]interface{}) (pluginExecutorInventory, error) {

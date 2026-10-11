@@ -204,6 +204,7 @@ jobs:
         run: |
           # PR merge refs are untagged; helper manifests require a SemVer version.
           VERSION="0.0.0-e2e.${GITHUB_SHA}" make build-backend
+          make build-e2e-delivery-fixture
           make build-web-e2e
 
       # Fixture plugin package consumed by the plugin E2E specs. Built here
@@ -230,6 +231,7 @@ jobs:
           const artifacts = [
             "bin/kandev",
             "bin/mock-agent",
+            "bin/e2e-delivery-fixture",
             "bin/agentctl-linux-amd64",
             "bin/mock-agent-linux-amd64",
             ".build/kandev-plugin-e2e-1.0.0.tar.gz",

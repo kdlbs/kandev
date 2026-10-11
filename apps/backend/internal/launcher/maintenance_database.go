@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/maintenance"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const maintenanceHelp = `kandev maintenance database — offline SQLite retention and compaction
@@ -18,15 +19,16 @@ Usage:
   kandev maintenance database [--execute] [--compact]
       [--keep-plan-revisions <n>] [--candidate-limit <n>] [--home-dir <path>]
 
-Without --execute, this is a read-only dry run: it reports how many
-duplicate git-snapshot, obsolete plan-revision, and orphaned message-payload
-rows are eligible for removal (and their estimated bytes), and never
-acquires a lock, takes a backup, or changes anything.
+Without --execute, this is a read-only dry run: it reports legacy retention
+categories and a bounded sample of eligible delivery payloads, receipts,
+retired-session evidence, and attributable orphan identities. It never
+acquires a lock, takes a backup, migrates a schema, or changes anything.
 
 --execute requires exclusive access to the database (kandev must not be
 running against the same home/database) and always takes and verifies a
 fresh backup before deleting anything. Backups are written under
-<database-dir>/backups/kandev-pre-maintenance-<timestamp>.db.
+<database-dir>/backups/kandev-pre-maintenance-<timestamp>.db. Delivery work
+uses bounded transactions and may be partial; rerun the command to continue.
 
 --compact additionally stages a VACUUM INTO compacted copy after retention
 deletes commit, verifies it with an integrity check, and atomically
@@ -38,7 +40,7 @@ Options:
   --execute                    Perform retention deletes (default: dry run).
   --compact                    Also stage and swap in a compacted copy (requires --execute).
   --keep-plan-revisions <n>    Additionally protect the n most recent non-HEAD plan revisions per task (default 0).
-  --candidate-limit <n>        Cap candidates reported/deleted per category (default: unlimited).
+  --candidate-limit <n>        Cap candidates reported/deleted per category. A capped delivery run may need another invocation.
   --home-dir <path>            Kandev home directory override (default: $KANDEV_HOME_DIR or ~/.kandev).
   --help, -h                   Print this help.
 `
@@ -86,6 +88,13 @@ func runMaintenance(argv []string, _ BuildInfo) int {
 		Compact:           args.Compact,
 		KeepPlanRevisions: args.KeepPlanRevisions,
 		CandidateLimit:    args.CandidateLimit,
+		DeliveryRetention: models.AgentDeliveryRetentionBatchOptions{
+			MaxCandidates:   cfg.Tasks.DeliveryRetention.BatchRows,
+			MaxPayloadBytes: int64(cfg.Tasks.DeliveryRetention.BatchBytes),
+			PayloadGrace:    cfg.Tasks.DeliveryRetention.PayloadGrace,
+			ReplayAge:       cfg.Tasks.DeliveryRetention.ReplayAge,
+			ReplayEvents:    cfg.Tasks.DeliveryRetention.ReplayEvents,
+		},
 	}
 
 	outcome, err := maintenance.Run(context.Background(), homeDir, cfg.Database.Driver, databasePath, opts, nil)
@@ -210,6 +219,15 @@ func printMaintenanceOutcome(outcome maintenance.Outcome) {
 	fmt.Printf("  duplicate git snapshots:      %d rows, ~%d bytes\n", report.DuplicateGitSnapshots.RowCount, report.DuplicateGitSnapshots.EstBytes)
 	fmt.Printf("  obsolete plan revisions:      %d rows, ~%d bytes\n", report.ObsoletePlanRevisions.RowCount, report.ObsoletePlanRevisions.EstBytes)
 	fmt.Printf("  orphaned message payloads:    %d rows, ~%d bytes\n", report.OrphanedMessagePayloads.RowCount, report.OrphanedMessagePayloads.EstBytes)
+	if !report.DeliveryRetentionAvailable {
+		fmt.Printf("  durable delivery retention:   unavailable (%s)\n", report.DeliveryRetentionUnavailableReason)
+	} else {
+		printMaintenanceGroup("projected delivery payloads", report.ProjectedDeliveryPayloads)
+		printMaintenanceGroup("settled prompt payloads", report.SettledDeliveryPrompts)
+		printMaintenanceGroup("retired event receipts", report.RetiredDeliveryEventReceipts)
+		printMaintenanceGroup("retired session evidence", report.RetiredDeliverySessionEvidence)
+		printMaintenanceGroup("orphaned delivery identities", report.OrphanedDeliveryIdentities)
+	}
 	fmt.Printf("  total candidates:             %d rows, ~%d bytes\n", report.TotalCandidateRows(), report.TotalEstBytes())
 
 	if !outcome.Executed {
@@ -222,6 +240,15 @@ func printMaintenanceOutcome(outcome maintenance.Outcome) {
 	fmt.Printf("  deleted git snapshots:        %d\n", outcome.Execution.DeletedGitSnapshots)
 	fmt.Printf("  deleted plan revisions:       %d\n", outcome.Execution.DeletedPlanRevisions)
 	fmt.Printf("  deleted message payloads:     %d\n", outcome.Execution.DeletedMessagePayloads)
+	fmt.Printf("  deleted delivery payloads:    %d\n", outcome.Execution.DeletedDeliveryEventPayloads)
+	fmt.Printf("  deleted settled prompts:      %d\n", outcome.Execution.DeletedSettledDeliveryPrompts)
+	fmt.Printf("  retired event receipts:       %d\n", outcome.Execution.RetiredDeliveryEventReceipts)
+	fmt.Printf("  purged session evidence rows: %d\n", outcome.Execution.PurgedRetiredDeliveryRows)
+	fmt.Printf("  orphan jobs scheduled:        %d\n", outcome.Execution.DeliveryOrphanJobsScheduled)
+	fmt.Printf("  retirement jobs completed:    %d\n", outcome.Execution.DeliveryRetirementJobsCompleted)
+	if outcome.Execution.Partial {
+		fmt.Println("  delivery execution:           partial; rerun to continue bounded work")
+	}
 
 	if outcome.Compaction == nil {
 		return
@@ -231,4 +258,12 @@ func printMaintenanceOutcome(outcome maintenance.Outcome) {
 	fmt.Printf("  size after:                   %d bytes\n", outcome.Compaction.SizeAfterBytes)
 	fmt.Printf("  rollback artifact:            %s\n", outcome.Compaction.RollbackPath)
 	fmt.Println("  to roll back: stop kandev (if running), then move the rollback artifact back over the live database path.")
+}
+
+func printMaintenanceGroup(name string, group maintenance.CandidateGroup) {
+	limit := ""
+	if group.SampleLimitReached {
+		limit = ", sample limit reached"
+	}
+	fmt.Printf("  %-30s %d rows, ~%d bytes%s\n", name+":", group.RowCount, group.EstBytes, limit)
 }

@@ -1,7 +1,7 @@
 ---
 id: "01-step-entry-causation-from-ledger"
 title: "Resolve step-entry wake causation from the step-transition ledger"
-status: complete
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -52,3 +52,46 @@ cd apps/backend && go test ./internal/steptelemetry ./internal/task/repository/s
 python3 scripts/lint-spec-files.py --all
 python3 scripts/list-docs.py validate
 ```
+
+## PR Integration Verification Results
+
+The conflict resolution keeps the causing run separate from runtime ownership
+and durable delivery identity. It preserves delivery settlement before and after
+workflow evaluation and the cancellation-specific completion cause.
+
+The following combined race run passed eleven packages. Its task repository
+package reached Go's ten-minute default timeout in the unchanged, landed
+`TestDeliveryRetentionStorage/SQLite/1024_bytes` million-event storage test.
+This is a local full-package validation limit, not a passing result.
+
+```bash
+cd apps/backend
+go test -trimpath -race ./internal/steptelemetry ./internal/task/repository/sqlite \
+  ./internal/runs/repository/sqlite ./internal/office/repository/sqlite \
+  ./internal/office/service ./internal/orchestrator/watcher ./internal/orchestrator \
+  ./internal/workflow/engine ./internal/runs/service ./internal/backendapp \
+  ./internal/agent/runtime/lifecycle ./internal/orchestrator/executor
+```
+
+All 48 tests declared in `step_transitions*_test.go` passed in a focused race
+run using an anchored alternation of their test names:
+
+```bash
+step_transition_tests="^($(rg --no-filename '^func Test' \
+  internal/task/repository/sqlite/step_transitions*_test.go \
+  | sed -E 's/^func (Test[[:alnum:]_]+).*/\1/' | sort | paste -sd '|'))$"
+go test -trimpath -race ./internal/task/repository/sqlite \
+  -run "$step_transition_tests" -count=1
+go test -trimpath -race ./internal/agent/runtime/lifecycle \
+  -run '^TestHandleAgentEvent_CompleteConsumesCausingRunIDAfterReady$' -count=1
+go run ./cmd/sqlguard ./internal
+go test -trimpath -race ./internal/persistence/storeconformance -count=1
+golangci-lint run ./... --new-from-rev=add376a2af17753ec349d9e7b042306c0f91100b --timeout=5m
+```
+
+These focused checks passed. Lint first reported zero issues but timed out;
+the retry completed with zero issues. No PostgreSQL test DSN was configured,
+so PostgreSQL-gated coverage was skipped locally. Specification lint, catalog
+validation, harness lint, and the harness/spec validator tests passed.
+Required CI must pass for the pushed integration head before merge; these
+local results do not waive any remote failure.

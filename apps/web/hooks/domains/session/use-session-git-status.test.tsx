@@ -1,30 +1,71 @@
 import { cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "@/lib/state/store";
-import { useSessionGitPendingScope, useSessionGitStatusSnapshots } from "./use-session-git-status";
+import {
+  useSessionGitPendingScope,
+  useSessionGitStatus,
+  useSessionGitStatusSnapshots,
+} from "./use-session-git-status";
 
 const mocks = vi.hoisted(() => ({
   state: {} as AppState,
+  unsubscribeSession: vi.fn(),
+  subscribeSession: vi.fn(() => mocks.unsubscribeSession),
 }));
+const FIRST_SESSION_ID = "session-1";
+const FIRST_ENVIRONMENT_ID = "environment-1";
 const READY_PATCH = "ready patch";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: AppState) => unknown) => selector(mocks.state),
 }));
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: () => ({ subscribeSession: mocks.subscribeSession }),
+}));
+
+describe("useSessionGitStatus", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("subscribes only while the session detail is active", () => {
+    mocks.state.environmentIdBySessionId = { [FIRST_SESSION_ID]: FIRST_ENVIRONMENT_ID };
+    mocks.state.gitStatus = { byEnvironmentId: {} } as AppState["gitStatus"];
+    mocks.state.connection = { status: "connected" } as AppState["connection"];
+
+    const hook = renderHook(
+      ({ detailActive }) => useSessionGitStatus(FIRST_SESSION_ID, { detailActive }),
+      {
+        initialProps: { detailActive: false },
+      },
+    );
+
+    expect(mocks.subscribeSession).not.toHaveBeenCalled();
+
+    hook.rerender({ detailActive: true });
+    expect(mocks.subscribeSession).toHaveBeenCalledOnce();
+    expect(mocks.subscribeSession).toHaveBeenCalledWith(FIRST_SESSION_ID);
+
+    hook.rerender({ detailActive: false });
+    expect(mocks.subscribeSession).toHaveBeenCalledOnce();
+    expect(mocks.unsubscribeSession).toHaveBeenCalledOnce();
+  });
+});
 
 describe("useSessionGitPendingScope", () => {
   afterEach(cleanup);
 
   it("changes across session and environment scopes but ignores commit refetches", () => {
-    mocks.state.environmentIdBySessionId = { "session-1": "environment-1" };
+    mocks.state.environmentIdBySessionId = { [FIRST_SESSION_ID]: FIRST_ENVIRONMENT_ID };
     mocks.state.sessionCommits = {
       byEnvironmentId: {},
       loading: {},
-      refetchTrigger: { "environment-1": 0 },
+      refetchTrigger: { [FIRST_ENVIRONMENT_ID]: 0 },
     };
 
     const hook = renderHook(({ sessionId }) => useSessionGitPendingScope(sessionId), {
-      initialProps: { sessionId: "session-1" as string | null },
+      initialProps: { sessionId: FIRST_SESSION_ID as string | null },
     });
     const initial = hook.result.current;
 
@@ -79,13 +120,13 @@ describe("useSessionGitStatusSnapshots", () => {
       snapshot_revision: 4,
       repository_name: "",
     };
-    mocks.state.environmentIdBySessionId = { "session-1": "environment-1" };
+    mocks.state.environmentIdBySessionId = { [FIRST_SESSION_ID]: FIRST_ENVIRONMENT_ID };
     mocks.state.connection = { status: "disconnected" } as AppState["connection"];
     mocks.state.gitStatus = {
-      byEnvironmentId: { "environment-1": status },
-      byEnvironmentRepo: { "environment-1": { "": status } },
+      byEnvironmentId: { [FIRST_ENVIRONMENT_ID]: status },
+      byEnvironmentRepo: { [FIRST_ENVIRONMENT_ID]: { "": status } },
       refreshByEnvironmentId: {
-        "environment-1": {
+        [FIRST_ENVIRONMENT_ID]: {
           state: "unavailable",
           request_id: "request-a",
           error_code: "status_unavailable",
@@ -94,7 +135,7 @@ describe("useSessionGitStatusSnapshots", () => {
     } as AppState["gitStatus"];
     mocks.state.gitStatusDisplay = {
       byEnvironmentRepo: {
-        "environment-1": {
+        [FIRST_ENVIRONMENT_ID]: {
           "": {
             checkoutGeneration: 0,
             branch: "main",
@@ -111,10 +152,10 @@ describe("useSessionGitStatusSnapshots", () => {
       },
     };
     mocks.state.gitCheckoutGeneration = {
-      byEnvironmentId: { "environment-1": { "": 0 } },
+      byEnvironmentId: { [FIRST_ENVIRONMENT_ID]: { "": 0 } },
     } as AppState["gitCheckoutGeneration"];
 
-    const { result } = renderHook(() => useSessionGitStatusSnapshots("session-1"));
+    const { result } = renderHook(() => useSessionGitStatusSnapshots(FIRST_SESSION_ID));
 
     expect(result.current.gitStatus?.files["src/a.ts"]).toMatchObject({
       diff: READY_PATCH,
@@ -132,7 +173,7 @@ describe("useSessionGitStatusSnapshots display scope", () => {
   afterEach(cleanup);
 
   it("keeps the display scope when an absent comparison target arrives as an empty string", () => {
-    mocks.state.environmentIdBySessionId = { "session-1": "environment-1" };
+    mocks.state.environmentIdBySessionId = { [FIRST_SESSION_ID]: FIRST_ENVIRONMENT_ID };
     mocks.state.connection = { status: "disconnected" } as AppState["connection"];
     mocks.state.gitStatus = {
       byEnvironmentId: {},
@@ -150,14 +191,14 @@ describe("useSessionGitStatusSnapshots display scope", () => {
       files: {},
     };
     mocks.state.gitStatusDisplay = {
-      byEnvironmentRepo: { "environment-1": { "": display } },
+      byEnvironmentRepo: { [FIRST_ENVIRONMENT_ID]: { "": display } },
     };
-    const hook = renderHook(() => useSessionGitStatusSnapshots("session-1"));
+    const hook = renderHook(() => useSessionGitStatusSnapshots(FIRST_SESSION_ID));
     const initialScope = hook.result.current.displayScopeByRepo[""];
 
     mocks.state.gitStatusDisplay = {
       byEnvironmentRepo: {
-        "environment-1": { "": { ...display, comparisonTarget: "" } },
+        [FIRST_ENVIRONMENT_ID]: { "": { ...display, comparisonTarget: "" } },
       },
     };
     hook.rerender();
@@ -165,7 +206,7 @@ describe("useSessionGitStatusSnapshots display scope", () => {
 
     mocks.state.gitStatusDisplay = {
       byEnvironmentRepo: {
-        "environment-1": { "": { ...display, comparisonTarget: "origin/main" } },
+        [FIRST_ENVIRONMENT_ID]: { "": { ...display, comparisonTarget: "origin/main" } },
       },
     };
     hook.rerender();

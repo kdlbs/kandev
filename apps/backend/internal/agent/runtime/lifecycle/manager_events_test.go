@@ -303,9 +303,14 @@ func TestHandleAgentEvent_CompleteConsumesCausingRunIDAfterReady(t *testing.T) {
 	}
 
 	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
-		Type:             streams.EventTypeComplete,
-		SessionID:        execution.SessionID,
-		PromptGeneration: generation,
+		Type:                      streams.EventTypeComplete,
+		SessionID:                 execution.SessionID,
+		PromptGeneration:          generation,
+		DeliveryStreamID:          "stream-office",
+		DeliveryIncarnationID:     "incarnation-office",
+		DeliveryHarnessGeneration: 3,
+		DeliverySequence:          9,
+		DeliverySubmissionID:      "submission-office",
 	})
 
 	var readyPayload *AgentEventPayload
@@ -323,6 +328,12 @@ func TestHandleAgentEvent_CompleteConsumesCausingRunIDAfterReady(t *testing.T) {
 	}
 	if readyPayload.CausingRunID != "office-run-1" {
 		t.Fatalf("ready event causing run ID = %q, want office-run-1", readyPayload.CausingRunID)
+	}
+	if readyPayload.DeliveryStreamID != "stream-office" ||
+		readyPayload.DeliveryIncarnationID != "incarnation-office" ||
+		readyPayload.DeliveryHarnessGeneration != 3 || readyPayload.DeliverySequence != 9 ||
+		readyPayload.DeliverySubmissionID != "submission-office" || readyPayload.DeliveryOutcome != "completed" {
+		t.Fatalf("ready event lost delivery identity: %+v", readyPayload)
 	}
 	if execution.CausingRunID != "" {
 		t.Fatalf("execution causing run ID after ready = %q, want empty", execution.CausingRunID)

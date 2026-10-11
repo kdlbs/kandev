@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Contract tests for persistence gates and bounded backend test summaries."""
 
+import json
 import re
+import shlex
+import subprocess
+import tempfile
 from pathlib import Path
 import unittest
 
@@ -42,10 +46,42 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(test_name, self.workflow)
 
+    def test_postgres_16_scale_service_has_parallel_query_shared_memory(self) -> None:
+        job = self.workflow.partition("  postgres-boot:\n")[2].partition("  sidebar-resources:\n")[0]
+        self.assertIn("--shm-size=256m", job.partition("    defaults:\n")[0])
+
     def test_sql_guard_and_local_conformance_are_explicit(self) -> None:
         self.assertIn("go run ./cmd/sqlguard ./internal", self.workflow)
         self.assertIn("Run catalog and SQLite conformance gates", self.workflow)
         self.assertIn("TestUpgradeFixtureManifest", self.workflow)
+
+    def test_postgres_scale_filter_preserves_other_sqlite_and_all_postgres_cases(self) -> None:
+        gate = step_block(self.workflow, "Run fixed PostgreSQL 16 persistence gates")
+        skip = "^TestDeliveryRetentionStorage(ProtectedGap)?$/SQLite$"
+        self.assertIn("-skip '" + skip + "'", gate)
+        with tempfile.TemporaryDirectory(prefix="backend-workflow-contract-") as directory:
+            root = Path(directory)
+            (root / "go.mod").write_text("module workflowcontract\n\ngo 1.20\n")
+            source = 'package workflowcontract\nimport "testing"\n'
+            for name in ("Storage", "StorageProtectedGap", "StorageAccounting", "StorageQueryPlan"):
+                source += f'func TestDeliveryRetention{name}(t *testing.T) {{\n'
+                source += 'for _, engine := range []string{"SQLite", "Postgres"} { t.Run(engine, func(t *testing.T) {}) }\n}\n'
+            (root / "filter_test.go").write_text(source)
+            result = subprocess.run(
+                ["go", "test", "-json", "-count=1", "-skip", skip, "./"],
+                cwd=root, capture_output=True, text=True, timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            passed = {
+                event["Test"] for line in result.stdout.splitlines()
+                if (event := json.loads(line)).get("Action") == "pass" and "Test" in event
+            }
+        for name in ("Storage", "StorageProtectedGap"):
+            self.assertNotIn(f"TestDeliveryRetention{name}/SQLite", passed)
+            self.assertIn(f"TestDeliveryRetention{name}/Postgres", passed)
+        for name in ("StorageAccounting", "StorageQueryPlan"):
+            for engine in ("SQLite", "Postgres"):
+                self.assertIn(f"TestDeliveryRetention{name}/{engine}", passed)
 
     def test_postgres_18_is_a_required_pinned_gate(self) -> None:
         self.assertIn("postgres-18:", self.workflow)
@@ -110,10 +146,29 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn("if: matrix.suite == 'native'", step)
         self.assertIn("TestRuntimeObservationRunsWindowsCommandShimWithSpaces", step)
 
-    def test_linux_sharded_tests_use_go_default_package_timeout(self) -> None:
+    def test_linux_shards_allow_scale_budget_only_with_retention_package(self) -> None:
         test_step = step_block(self.workflow, "Run tests")
         self.assertIn("go test \\", test_step)
-        self.assertNotIn("-timeout", test_step)
+        self.assertIn('-timeout="${test_timeout}"', test_step)
+        selection = test_step.partition("          test_timeout=")[2].partition(
+            "          # Keep complete JSON"
+        )[0]
+        self.assertTrue(selection)
+        selection = "test_timeout=" + selection
+        retention = "github.com/kandev/kandev/internal/task/repository/sqlite"
+        for packages, expected in (
+            (["github.com/kandev/kandev/internal/orchestrator"], "10m"),
+            ([retention], "120m"),
+            ([retention, "github.com/kandev/kandev/internal/db"], "120m"),
+            ([retention + "/other"], "10m"),
+        ):
+            with self.subTest(packages=packages):
+                script = "shard_packages=(" + " ".join(map(shlex.quote, packages)) + ")\n"
+                script += selection + '\nprintf "%s" "$test_timeout"\n'
+                result = subprocess.run(
+                    ["bash", "-euc", script], check=True, capture_output=True, text=True
+                )
+                self.assertEqual(result.stdout, expected)
 
     def test_base_image_mirrors_postgres_18_at_the_same_digest(self) -> None:
         self.assertIn("POSTGRES_18_DIGEST: " + POSTGRES_18_DIGEST, self.base_image_workflow)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -15,23 +16,34 @@ import (
 // identifiers, or any other field that could leak conversation or PR data
 // into a report that might be logged or printed.
 type CandidateGroup struct {
-	RowCount int
-	EstBytes int64
+	RowCount           int
+	EstBytes           int64
+	SampleLimitReached bool
 }
 
 // Report is the dry-run (and pre-execution) summary of retention
 // candidates and current storage size. Safe to print or log verbatim.
 type Report struct {
-	GeneratedAt             time.Time
-	DatabaseSizeBytes       int64
-	DuplicateGitSnapshots   CandidateGroup
-	ObsoletePlanRevisions   CandidateGroup
-	OrphanedMessagePayloads CandidateGroup
+	GeneratedAt                        time.Time
+	DatabaseSizeBytes                  int64
+	DuplicateGitSnapshots              CandidateGroup
+	ObsoletePlanRevisions              CandidateGroup
+	OrphanedMessagePayloads            CandidateGroup
+	DeliveryRetentionAvailable         bool
+	DeliveryRetentionUnavailableReason string
+	ProjectedDeliveryPayloads          CandidateGroup
+	SettledDeliveryPrompts             CandidateGroup
+	RetiredDeliveryEventReceipts       CandidateGroup
+	RetiredDeliverySessionEvidence     CandidateGroup
+	OrphanedDeliveryIdentities         CandidateGroup
 }
 
 // TotalCandidateRows sums the row counts across every retention category.
 func (r Report) TotalCandidateRows() int {
-	return r.DuplicateGitSnapshots.RowCount + r.ObsoletePlanRevisions.RowCount + r.OrphanedMessagePayloads.RowCount
+	return r.DuplicateGitSnapshots.RowCount + r.ObsoletePlanRevisions.RowCount + r.OrphanedMessagePayloads.RowCount +
+		r.ProjectedDeliveryPayloads.RowCount + r.SettledDeliveryPrompts.RowCount +
+		r.RetiredDeliveryEventReceipts.RowCount + r.RetiredDeliverySessionEvidence.RowCount +
+		r.OrphanedDeliveryIdentities.RowCount
 }
 
 // TotalEstBytes sums the estimated reclaimable bytes across every retention
@@ -39,7 +51,10 @@ func (r Report) TotalCandidateRows() int {
 // space reclaimed by a VACUUM (which depends on page layout); the report
 // clarifies that distinction to callers.
 func (r Report) TotalEstBytes() int64 {
-	return r.DuplicateGitSnapshots.EstBytes + r.ObsoletePlanRevisions.EstBytes + r.OrphanedMessagePayloads.EstBytes
+	return r.DuplicateGitSnapshots.EstBytes + r.ObsoletePlanRevisions.EstBytes + r.OrphanedMessagePayloads.EstBytes +
+		r.ProjectedDeliveryPayloads.EstBytes + r.SettledDeliveryPrompts.EstBytes +
+		r.RetiredDeliveryEventReceipts.EstBytes + r.RetiredDeliverySessionEvidence.EstBytes +
+		r.OrphanedDeliveryIdentities.EstBytes
 }
 
 // candidateSet holds the concrete row identifiers behind a Report so a
@@ -61,7 +76,8 @@ type AnalyzeOptions struct {
 	// CandidateLimit caps how many rows each category query returns. Zero
 	// means unlimited. Intended for very large databases where a bounded
 	// dry-run report is preferable to scanning every candidate row.
-	CandidateLimit int
+	CandidateLimit    int
+	DeliveryRetention models.AgentDeliveryRetentionBatchOptions
 }
 
 // analyze computes the current Report and the concrete candidate ID sets
@@ -83,7 +99,8 @@ func analyze(ctx context.Context, repo *sqlite.Repository, opts AnalyzeOptions) 
 	if err != nil {
 		return Report{}, candidateSet{}, fmt.Errorf("estimate duplicate git snapshot bytes: %w", err)
 	}
-	report.DuplicateGitSnapshots = CandidateGroup{RowCount: len(dupSnapshots), EstBytes: gitBytes}
+	report.DuplicateGitSnapshots = CandidateGroup{RowCount: len(dupSnapshots), EstBytes: gitBytes,
+		SampleLimitReached: opts.CandidateLimit > 0 && len(dupSnapshots) >= opts.CandidateLimit}
 
 	taskIDs, err := distinctPlanRevisionTaskIDs(ctx, repo.DB())
 	if err != nil {
@@ -111,7 +128,8 @@ func analyze(ctx context.Context, repo *sqlite.Repository, opts AnalyzeOptions) 
 			remaining -= len(revisions)
 		}
 	}
-	report.ObsoletePlanRevisions = CandidateGroup{RowCount: len(set.planRevisionIDs), EstBytes: planRevisionBytes}
+	report.ObsoletePlanRevisions = CandidateGroup{RowCount: len(set.planRevisionIDs), EstBytes: planRevisionBytes,
+		SampleLimitReached: opts.CandidateLimit > 0 && len(set.planRevisionIDs) >= opts.CandidateLimit}
 
 	orphanedPayloads, err := repo.ListOrphanedMessagePayloadCandidates(ctx, opts.CandidateLimit)
 	if err != nil {
@@ -122,7 +140,25 @@ func analyze(ctx context.Context, repo *sqlite.Repository, opts AnalyzeOptions) 
 		set.payloadDigests = append(set.payloadDigests, c.Digest)
 		payloadBytes += c.CompressedSize
 	}
-	report.OrphanedMessagePayloads = CandidateGroup{RowCount: len(orphanedPayloads), EstBytes: payloadBytes}
+	report.OrphanedMessagePayloads = CandidateGroup{RowCount: len(orphanedPayloads), EstBytes: payloadBytes,
+		SampleLimitReached: opts.CandidateLimit > 0 && len(orphanedPayloads) >= opts.CandidateLimit}
+
+	preview, err := repo.AnalyzeAgentDeliveryRetention(ctx, opts.DeliveryRetention)
+	if err != nil {
+		return Report{}, candidateSet{}, fmt.Errorf("analyze agent delivery retention: %w", err)
+	}
+	report.DeliveryRetentionAvailable = preview.Available
+	report.DeliveryRetentionUnavailableReason = preview.UnavailableReason
+	if preview.Available {
+		group := func(rows int, bytes int64) CandidateGroup {
+			return CandidateGroup{RowCount: rows, EstBytes: bytes, SampleLimitReached: preview.SampleLimitReached}
+		}
+		report.ProjectedDeliveryPayloads = group(preview.EventPayloadCandidates, preview.EventPayloadBytes)
+		report.SettledDeliveryPrompts = group(preview.SettledPromptCandidates, preview.SettledPromptBytes)
+		report.RetiredDeliveryEventReceipts = group(preview.EventReceiptCandidates, preview.EventReceiptBytes)
+		report.RetiredDeliverySessionEvidence = group(preview.RetiredSessionEvidenceRows, preview.RetiredSessionEvidenceBytes)
+		report.OrphanedDeliveryIdentities = group(preview.OrphanedIdentities, 0)
+	}
 
 	return report, set, nil
 }

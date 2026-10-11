@@ -63,6 +63,7 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 		return
 	}
 	if s.settleRetainedTurnFailure(ctx, data, session) {
+		s.settleFailedDeliveryWorkflowOutcome(context.WithoutCancel(ctx), data)
 		s.acknowledgeRetainedTurnFailure(data)
 	} else {
 		s.logger.Warn("retained turn failure settlement did not complete; successor admission remains fenced",
@@ -114,6 +115,7 @@ func (s *Service) handleAutomationOwnedTurnFailure(
 	// failure in interactive Chat state.
 	dispatch := s.handleAgentFailedLocked(ctx, data)
 	releaseGuard()
+	s.settleFailedDeliveryWorkflowOutcome(context.WithoutCancel(ctx), data)
 	if dispatch != nil {
 		s.startAgentFailureRecovery(dispatch)
 	}

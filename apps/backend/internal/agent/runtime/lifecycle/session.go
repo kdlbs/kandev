@@ -64,15 +64,16 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
-	logger               *logger.Logger
-	eventPublisher       *EventPublisher
-	streamManager        *StreamManager
-	executionStore       *ExecutionStore
-	promptStarter        func(executionID string) (uint64, error)
-	initialPromptFailure func(failure InitialPromptFailure)
-	historyManager       *SessionHistoryManager
-	attachmentReader     AttachmentReader
-	stopCh               <-chan struct{} // For graceful shutdown coordination
+	logger                   *logger.Logger
+	eventPublisher           *EventPublisher
+	streamManager            *StreamManager
+	executionStore           *ExecutionStore
+	promptStarter            func(executionID string) (uint64, error)
+	persistPromptTurnBinding func(context.Context, *AgentExecution) error
+	initialPromptFailure     func(failure InitialPromptFailure)
+	historyManager           *SessionHistoryManager
+	attachmentReader         AttachmentReader
+	stopCh                   <-chan struct{} // For graceful shutdown coordination
 	// beforeSteerDispatchHook, when set (tests only), runs inside tryDispatchSteer
 	// after the active generation is selected but before the steer RPC, while
 	// promptLifecycleMu is held — used to drive the completion-vs-dispatch race
@@ -242,6 +243,7 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		// Publish the negotiated mode before session/new or session/load can
 		// emit events on the already-connected updates stream.
 		execution.DeliveryMode = deliveryDecision.Mode
+		execution.deliveryNegotiation.Load().finish(nil)
 	}
 	sm.logger.Info("agentctl delivery capability negotiated",
 		zap.String("agent_type", agentConfig.ID()),
@@ -536,6 +538,14 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	runtimeConfigOptions map[string]string,
 	startModelPolicy StartModelPolicy,
 ) error {
+	negotiation := execution.beginDeliveryNegotiation()
+	defer negotiation.finish(ErrDurableAdoptionBlocked)
+	execution.deliveryBootstrap.Store(execution.ACPSessionID == "" && execution.DeliveryHarnessGeneration == 1)
+	defer func() {
+		if !execution.isSessionInitialized() {
+			execution.deliveryBootstrap.Store(false)
+		}
+	}()
 	ctx, result, err := sm.initializeACPConnection(ctx, execution, agentConfig, mcpServers)
 	if err != nil {
 		return err
@@ -543,6 +553,11 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	startModelPolicy = strictAuggieTaskStartModelPolicy(startModelPolicy, execution, agentConfig)
 
 	execution.ACPSessionID = result.SessionID
+	if sm.eventPublisher != nil {
+		sm.eventPublisher.PublishACPSessionCreatedWithAttempt(
+			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
+		)
+	}
 	if !cacheFreshSessionModelState(execution) && (profileModel != "" || runtimeModel != "") {
 		waitForFreshSessionModelState(ctx, sm.logger, execution)
 	}
@@ -605,13 +620,6 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	execution.setSessionInitialized(true)
 	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID, providerDefaultConfig)
 	sm.publishWorkflowSessionConfigFailures(execution, result.SessionID, runtimeFailures)
-
-	// Publish session created event
-	if sm.eventPublisher != nil {
-		sm.eventPublisher.PublishACPSessionCreatedWithAttempt(
-			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
-		)
-	}
 
 	// Send the task prompt if provided, or mark the execution as ready.
 	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, attachments, markReady)
@@ -750,6 +758,13 @@ func (sm *SessionManager) initializeACPConnection(
 			NativeStateReference: execution.ACPSessionID,
 		},
 	)
+	if err == nil && execution.InterruptedSubmissionID != "" {
+		if result == nil || result.SessionID != execution.RequiredNativeConversationID {
+			err = ErrDeliveryOwnerMismatch
+		} else {
+			err = retireInterruptedDeliverySubmission(ctx, client, execution)
+		}
+	}
 	if err == nil && execution.ForceContextContinuation {
 		if retireErr := retireUnresolvedDeliverySubmissions(ctx, client, execution); retireErr != nil {
 			err = retireErr
@@ -1929,8 +1944,19 @@ func (sm *SessionManager) sendPrompt(
 			return nil, err
 		}
 	}
+	if err := sm.persistInitialDeliveryBeforeDispatch(preparedCtx, execution, effectivePrompt, materializedAttachments, callbacks.deliverySubmissionID); err != nil {
+		sm.reportPromptFailure(execution, 0, err, callbacks.onAdmissionRejected)
+		return nil, err
+	}
 	promptGeneration, err := sm.admitPrompt(execution, validateStatus)
 	if err != nil {
+		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
+		return nil, err
+	}
+	if callbacks.deliverySubmissionID != "" {
+		execution.setDeliverySubmissionID(deliverySubmissionIdentityForPrompt(callbacks.deliverySubmissionID, ""))
+	}
+	if err := sm.persistDurablePromptTurnBinding(preparedCtx, execution, callbacks.deliverySubmissionID); err != nil {
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}

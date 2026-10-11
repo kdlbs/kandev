@@ -41,6 +41,7 @@ export type ChatInputEditorAreaProps = {
   submitKey: "enter" | "cmd_enter";
   setIsInputFocused: (focused: boolean) => void;
   sessionId: string | null;
+  detailActive: boolean;
   taskId: string | null;
   workspaceId?: string | null;
   entityReferencesEnabled?: boolean;
@@ -192,8 +193,6 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
     p;
   const { isSending, onCancel, contextCount, contextPopoverOpen, setContextPopoverOpen } = p;
   const { contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt } = p;
-  const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar, hideAgentControls } = p;
-  const { hidePlanMode } = p;
   // Exclude auto-added plan context from the count — it's always present in plan mode
   // and shouldn't by itself enable the send button.
   const userContextCount = planContextEnabled ? Math.max(0, contextCount - 1) : contextCount;
@@ -235,6 +234,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
           onFocus={() => setIsInputFocused(true)}
           onBlur={() => setIsInputFocused(false)}
           sessionId={sessionId}
+          detailActive={p.detailActive}
           taskId={taskId}
           workspaceId={p.workspaceId ?? null}
           entityReferencesEnabled={p.entityReferencesEnabled ?? false}
@@ -253,6 +253,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         mcpAttachmentHistory={p.mcpAttachmentHistory}
         onPlanModeChange={onPlanModeChange}
         sessionId={sessionId}
+        detailActive={p.detailActive}
         taskId={taskId}
         taskTitle={taskTitle}
         taskDescription={taskDescription}
@@ -277,12 +278,12 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         onImplementPlan={onImplementPlan}
         onEnhancePrompt={onEnhancePrompt}
         isEnhancingPrompt={isEnhancingPrompt}
-        isUtilityConfigured={isUtilityConfigured}
+        isUtilityConfigured={p.isUtilityConfigured}
         onAttachFiles={handleAttachFiles}
-        hideSessionsDropdown={hideSessionsDropdown}
-        minimalToolbar={minimalToolbar}
-        hideAgentControls={hideAgentControls}
-        hidePlanMode={hidePlanMode}
+        hideSessionsDropdown={p.hideSessionsDropdown}
+        minimalToolbar={p.minimalToolbar}
+        hideAgentControls={p.hideAgentControls}
+        hidePlanMode={p.hidePlanMode}
       />
     </div>
   );

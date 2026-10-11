@@ -1,0 +1,60 @@
+{
+  "note": "Simplified representative shapes, not exact full production SQL",
+  "queries": [
+    {
+      "sql": "SELECT * FROM tasks WHERE workflow_id=? AND archived_at IS NULL AND is_ephemeral=0 ORDER BY created_at ASC",
+      "args": [
+        "journey-workflow-0"
+      ],
+      "plan": [
+        [
+          4,
+          0,
+          0,
+          "SEARCH tasks USING INDEX idx_tasks_workflow_id (workflow_id=?)"
+        ],
+        [
+          50,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT id,task_id,state FROM task_sessions WHERE task_id IN (?,?) ORDER BY task_id,started_at DESC",
+      "args": [
+        "journey-task-0000",
+        "journey-task-0001"
+      ],
+      "plan": [
+        [
+          4,
+          0,
+          0,
+          "SEARCH task_sessions USING INDEX idx_sessions_task_started (task_id=?)"
+        ],
+        [
+          38,
+          0,
+          0,
+          "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM task_session_turns WHERE task_session_id=? ORDER BY started_at",
+      "args": [
+        "journey-task-0001-session-0"
+      ],
+      "plan": [
+        [
+          4,
+          0,
+          0,
+          "SEARCH task_session_turns USING INDEX idx_turns_session_times (task_session_id=?)"
+        ]
+      ]
+    }
+  ]
+}

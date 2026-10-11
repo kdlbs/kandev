@@ -1337,8 +1337,8 @@ test.describe("Subtask inheritance", () => {
           .toBe(creatorProfile.id);
 
         const { sessions } = await apiClient.listTaskSessions(task.id);
-        const createdSession = sessions[0] as SessionInfo;
-        expect(effectiveRuntimeConfig(createdSession)).toEqual({
+        const { session: createdSession } = await apiClient.getTaskSession(sessions[0].id);
+        expect(effectiveRuntimeConfig(createdSession as SessionInfo)).toEqual({
           model: "mock-smart",
           mode: "plan-mock",
           config_options: { effort: "max" },

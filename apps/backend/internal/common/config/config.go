@@ -64,7 +64,18 @@ type TasksConfig struct {
 	// session reconciliation sweep classifies an active session with no live
 	// execution as stalled (issue #3712). The orphaned-session healing grace
 	// window is twice this value.
-	StallDetectionThreshold time.Duration `mapstructure:"stallDetectionThreshold"`
+	StallDetectionThreshold time.Duration           `mapstructure:"stallDetectionThreshold"`
+	DeliveryRetention       DeliveryRetentionConfig `mapstructure:"deliveryRetention"`
+}
+
+// DeliveryRetentionConfig bounds the backend's redundant durable-delivery evidence.
+type DeliveryRetentionConfig struct {
+	PayloadGrace time.Duration `mapstructure:"payloadGrace"`
+	ReplayAge    time.Duration `mapstructure:"replayAge"`
+	ReplayEvents int           `mapstructure:"replayEvents"`
+	Interval     time.Duration `mapstructure:"interval"`
+	BatchRows    int           `mapstructure:"batchRows"`
+	BatchBytes   int           `mapstructure:"batchBytes"`
 }
 
 // CredentialsConfig contains operator-managed credential file settings.
@@ -888,6 +899,9 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
+	if err := applyDeliveryRetentionEnvironment(&cfg, envSnapshot, sources); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
 	if err := applySurvivalRecoveryEnv(&cfg, envSnapshot, sources); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}

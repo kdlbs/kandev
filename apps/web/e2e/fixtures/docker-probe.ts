@@ -1,9 +1,10 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dwell } from "../helpers/causal-waits";
+import { runFixtureCommand } from "./fixture-command";
 
 /**
  * Image used by the Docker E2E project. Built once per machine and reused.
@@ -70,9 +71,7 @@ function buildImage(tag: string, dockerfile: string): void {
     fs.writeFileSync(path.join(tmpDir, "Dockerfile"), dockerfile);
     fs.copyFileSync(FAKE_LSP_SERVER, path.join(tmpDir, "fake-lsp-server.mjs"));
     fs.copyFileSync(MANAGED_RUNTIME_NPX_WRAPPER, path.join(tmpDir, "managed-runtime-npx.sh"));
-    execFileSync("docker", ["build", "-t", tag, tmpDir], {
-      stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",
-    });
+    runFixtureCommand("docker", ["build", "-t", tag, tmpDir]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

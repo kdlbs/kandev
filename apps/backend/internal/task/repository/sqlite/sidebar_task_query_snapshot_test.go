@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -235,4 +236,36 @@ func TestSidebarQueryQueueHydrationKeepsPageSnapshot(t *testing.T) {
 	var admitted int
 	require.NoError(t, repo.db.GetContext(t.Context(), &admitted, "SELECT wip_admitted FROM tasks WHERE id = 'first'"))
 	require.Equal(t, 1, admitted, "the writer advances independently of the read snapshot")
+}
+
+func TestSidebarFlatForestUsesParentIndex(t *testing.T) {
+	repo := newSidebarReaderPool(t)
+	seedWorkspace(t, repo, "flat-forest")
+	insertSidebarScaleTasks(t, repo, "flat-forest", "flat", 1000)
+	_, err := repo.db.ExecContext(t.Context(), "UPDATE tasks SET parent_id = '' WHERE workspace_id = 'flat-forest'")
+	require.NoError(t, err)
+	snapshot, err := beginSidebarQuerySnapshot(t.Context(), repo.ro)
+	require.NoError(t, err)
+	defer snapshot.close()
+	query := sidebarTaskQuery(1)
+	query.Sort = models.SidebarTaskViewSort{Key: "state", Direction: "asc"}
+	query.Group = "repository"
+	base, args, err := snapshot.prepare(t.Context(), repo.ro.DriverName(), "flat-forest", query)
+	require.NoError(t, err)
+	ctes, more := sidebarPageCTEs(repo.ro.DriverName(), query, models.SidebarTaskViewPreferences{})
+	statement := base + ctes + sidebarPageSelectSQL(false)
+	rows, err := snapshot.tx.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+statement, append(args, more...)...)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	indexed := false
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+		if strings.Contains(detail, "SEARCH temp.kandev_sidebar_filtered USING INDEX kandev_sidebar_parent_id (parent_id=?)") {
+			indexed = true
+		}
+	}
+	require.NoError(t, rows.Err())
+	require.True(t, indexed, "recursive child lookup must search its parent index even when every task is a root")
 }
