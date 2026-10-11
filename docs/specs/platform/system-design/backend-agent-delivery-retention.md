@@ -20,7 +20,7 @@ The [checkpoint ADR](../../../decisions/2026-10-05-backend-delivery-retirement-c
 Journal policy, wire version and runtime flags remain unchanged.
 Contiguous checkpoints replace permanent generic event-effect retention. Other parent delivery boundaries remain authoritative.
 
-Payload proof: [draft](backend-agent-delivery-retention-payloads.md).
+Payload proof: [details](backend-agent-delivery-retention-payloads.md).
 
 ## Requirement mapping
 

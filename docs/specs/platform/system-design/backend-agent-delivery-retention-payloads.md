@@ -28,8 +28,8 @@ prompt admission, terminal settlement, wire format and identity ownership are un
 
 ## Independent raw-output proof
 
-`agent_delivery_retention_candidates.go` currently applies both an existing-submission
-probe and `first_terminal_sequence` to `can_prune` and `can_retire`. This prevents an
+Before this repair, `agent_delivery_retention_candidates.go` applied an existing-submission
+probe and `first_terminal_sequence` to both `can_prune` and `can_retire`. This prevented an
 unsettled historical terminal from losing its evidence, but also keeps independently
 projected later output bodies. The proof for clearing a nonterminal body must be
 independent from the proof for deleting its receipt and advancing a contiguous prefix.
@@ -90,8 +90,8 @@ supplies the boundary; this correction does not introduce a new retention author
 
 ## Discovery progress and budgets
 
-`deliveryretention.Worker.runPass` currently repeats a phase only after deletion or
-pruning. A protected-only page can advance the durable discovery frontier without
+Before this repair, `deliveryretention.Worker.runPass` repeated a phase only after deletion or
+pruning. A protected-only page could advance the durable discovery frontier without
 removing anything, then leave later eligible payloads until another minute.
 
 Repository batch results must distinguish committed discovery advancement from mutation

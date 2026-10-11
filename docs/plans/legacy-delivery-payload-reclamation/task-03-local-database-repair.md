@@ -156,3 +156,15 @@ take hours for this backlog; SQLite file shrinkage still requires Vacuum after
 logical reclamation. No downtime option was selected, so no live maintenance,
 runtime replacement or restart was started. The coordinator refuses a changed
 runtime base until its maintenance procedure is revalidated.
+
+PR preparation rebased the repair onto the current main. Retention race tests,
+typecheck, documentation validation and desktop history/recovery passed there.
+The phone capacity-continuation fixture then failed twice: the post-restart send
+raced lazy agent startup, entered the ordinary queue path, and was blocked as
+an unknown prompt outcome rather than exercising retained-runtime continuation.
+The fixture now completes a normal warm-up turn and waits for idle before
+capturing its capacity trace. The unchanged continuation, side-effect, touch,
+history and recovery assertions passed on phone after that readiness correction.
+This changes only the fixture setup; queue startup behavior is outside this
+retention repair. The final desktop rerun passed (one test, optional frozen-binary
+case skipped), phone passed (one test), and final typecheck passed for the new helper.
