@@ -27,6 +27,12 @@ Kandev does not currently provide a user-login boundary for the web application,
 
 See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for mode-specific prerequisites and commands.
 
+## Recover sessions after a restart
+
+Kandev automatically checks interrupted sessions at startup and after replacement of a crashed local agent runtime. When retained delivery records agree with the session's saved identity and the original process is proven terminated, Kandev restores the same native conversation without resending its interrupted prompt. Recovery checks continue while Kandev runs, so a temporarily unavailable runtime can recover later.
+
+The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
+
 ## Prevent host sleep during active tasks
 
 Administrators can open **Settings > Preferences > Task Behavior > Runtime** and enable

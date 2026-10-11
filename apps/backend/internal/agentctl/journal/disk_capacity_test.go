@@ -589,7 +589,7 @@ func TestConcurrentWritesCannotDoubleReserveReusablePages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	freePages := reusableJournalPageBytes(db)
+	freePages := reusableJournalPageBytes(db, int64(db.Info().PageSize))
 	const writeBytes int64 = 4096
 	if freePages <= writeBytes {
 		t.Fatalf("free bbolt pages = %d, want more than one write credit %d", freePages, writeBytes)

@@ -449,6 +449,10 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	}
 	if cfg.DurableJournalPath != "" {
 		m.deliveryJournal, m.deliveryJournalErr = journal.Open(journal.Config{Path: cfg.DurableJournalPath})
+		if m.deliveryJournalErr == nil {
+			sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+			m.deliveryJournalErr = m.deliveryJournal.ClassifyAbandonedDispatches(lifetimeCtx, sessionID, incarnationID, m.DeliveryStreamID(), generation)
+		}
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named

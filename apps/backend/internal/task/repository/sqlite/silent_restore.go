@@ -59,13 +59,23 @@ func (r *Repository) ListSilentRestoreCandidates(
 		WHERE %s > ?
 		  AND t.archived_at IS NULL
 		  AND ts.state IN (?, ?, ?, ?)
-		  AND EXISTS (
+		  AND (EXISTS (
 			SELECT 1 FROM session_recovery_blocks b
 			WHERE b.session_id = ts.id
 			  AND b.incarnation_id = ts.queue_incarnation_id
 			  AND b.state = ?
 			  AND b.consumer_reference = 'agent_delivery'
-		  )
+		  ) OR EXISTS (
+			SELECT 1 FROM agent_delivery_submissions d
+			WHERE d.session_id = ts.id AND d.incarnation_id = ts.queue_incarnation_id
+			  AND d.state IN ('dispatching', 'interrupted_unknown')
+			  AND d.harness_generation = (SELECT MAX(h.generation) FROM harness_session_generations h
+				WHERE h.session_id = ts.id AND h.incarnation_id = ts.queue_incarnation_id)
+			  AND NOT EXISTS (SELECT 1 FROM session_recovery_blocks settled
+				WHERE settled.session_id = ts.id AND settled.incarnation_id = ts.queue_incarnation_id
+				  AND settled.delivery_submission_id = d.id AND settled.state = 'resolved'
+				  AND settled.authorized_action IN ('resume', 'silent_restart_restore'))
+		  ))
 		ORDER BY %s
 		LIMIT ?`, sessionID, sessionID)),
 		afterSessionID,
@@ -168,8 +178,24 @@ func (r *Repository) EnsureRestoreAttempt(
 	}
 	if stored.Action != attempt.Action || stored.SessionID != attempt.SessionID ||
 		stored.IncarnationID != attempt.IncarnationID || stored.ExpectedGeneration != attempt.ExpectedGeneration ||
-		stored.Checkpoint == nil || !sameSilentRestoreCheckpointSource(*stored.Checkpoint, *attempt.Checkpoint) {
+		stored.Checkpoint == nil {
 		return nil, false, repoerrors.ErrSilentRestoreAttemptConflict
+	}
+	if !sameSilentRestoreCheckpointSource(*stored.Checkpoint, *attempt.Checkpoint) {
+		if stored.Outcome != models.SilentRestoreOutcomePending || !validPreparedRestoreNoticeRefresh(*stored.Checkpoint, *attempt.Checkpoint) {
+			return nil, false, repoerrors.ErrSilentRestoreAttemptConflict
+		}
+		changed, err := r.CompareAndSwapSilentRestoreCheckpoint(ctx, attempt.ID, *stored.Checkpoint, *attempt.Checkpoint)
+		if err != nil {
+			return nil, false, err
+		}
+		if !changed {
+			return nil, false, repoerrors.ErrSilentRestoreAttemptConflict
+		}
+		stored, err = r.GetRestoreAttempt(ctx, attempt.ID)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 	return stored, rows == 1, nil
 }
@@ -276,6 +302,9 @@ func (r *Repository) CompareAndSwapSilentRestoreCheckpoint(
 }
 
 func validSilentRestoreCheckpointTransition(expected, next models.SilentRestoreCheckpoint) bool {
+	if validPreparedRestoreNoticeRefresh(expected, next) {
+		return true
+	}
 	if !sameSilentRestoreCheckpointSource(expected, next) || next.CandidateExecutionID == "" {
 		return false
 	}

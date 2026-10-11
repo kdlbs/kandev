@@ -1851,15 +1851,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		}
 		return execution, launchErr
 	}
-	value, err := m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
-		activityLease, acquireErr := m.acquireActivity(sharedCtx, activity.KindExecutionStarting)
-		if acquireErr != nil {
-			return nil, acquireErr
-		}
-		defer activityLease.Release()
-		activityLease.SetKind(activity.KindExecutionPreparing)
-		return m.launchInternal(sharedCtx, req)
-	})
+	value, err := m.coalesceSessionLaunch(ctx, req)
 	if err != nil {
 		return nil, err
 	}

@@ -44,16 +44,34 @@ func (s *Service) startSilentRestoreRecovery(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
 	s.silentRestoreMu.Lock()
 	if s.silentRestoreStopped || s.silentRestoreCancel != nil {
+		if !s.silentRestoreStopped && s.silentRestoreWake != nil {
+			select {
+			case s.silentRestoreWake <- struct{}{}:
+			default:
+			}
+		}
 		s.silentRestoreMu.Unlock()
 		cancel()
 		return
 	}
 	s.silentRestoreCancel = cancel
+	wake := make(chan struct{}, 1)
+	s.silentRestoreWake = wake
 	s.silentRestoreWorkers.Add(1)
 	s.silentRestoreMu.Unlock()
 	go func() {
 		defer s.silentRestoreWorkers.Done()
-		s.runSilentRestoreRecoveryPass(ctx, store)
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for ctx.Err() == nil {
+			s.runSilentRestoreRecoveryPass(ctx, store)
+			select {
+			case <-ctx.Done():
+				return
+			case <-wake:
+			case <-ticker.C:
+			}
+		}
 	}()
 }
 
@@ -62,6 +80,7 @@ func (s *Service) stopSilentRestoreRecovery() {
 	s.silentRestoreStopped = true
 	cancel := s.silentRestoreCancel
 	s.silentRestoreCancel = nil
+	s.silentRestoreWake = nil
 	s.silentRestoreMu.Unlock()
 	if cancel != nil {
 		cancel()

@@ -202,6 +202,10 @@ A crash between journal retirement and SQL commit resumes the same checkpoint af
 If a new execution already owns that checkpoint, reconcile it instead of comparing it only with the old execution ID.
 A foreign execution, generation, or native identity remains blocked.
 
+Automatic repair of provable journal/SQL/execution inconsistencies and coherent restored metadata
+follow [restart reconciliation](durable-restart-reconciliation.md). The existing restore-only
+checkpoint, admission, native identity, and process-termination boundaries remain authoritative.
+
 Workspace reads must not allocate a competing execution while durable recovery is unresolved.
 Check this at the workspace-only creation boundary, preserving access through an existing owned workspace execution.
 The restore launch keeps its pinned candidate identity and allocation checkpoint; it must not adopt an unrelated workspace-only successor.

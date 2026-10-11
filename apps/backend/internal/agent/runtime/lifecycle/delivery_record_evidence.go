@@ -90,7 +90,12 @@ func (m *Manager) InspectDeliveryRecordEvidence(
 	if result.Descriptor.SubmissionsTruncated {
 		return result, errors.Join(ErrDeliveryRecordEvidenceTruncated, ErrDeliveryRecoveryBlocked)
 	}
-	result.ControlIdentity = m.deliveryRecordControlIdentity(request, result.Descriptor)
+	result.ControlIdentity = m.deliveryRecordControlIdentity(ctx, request, result.Descriptor)
+	if identity := result.ControlIdentity; identity != nil {
+		result.ProcessTerminated = historicalProcessTermination(DeliveryRecordEvidenceRequest{
+			ExecutionID: identity.ExecutionID, OriginalRuntime: &identity.OriginalRuntime,
+		}, result.LiveExecutionID)
+	}
 	if err = lease.CheckCurrent(); err != nil {
 		return nil, err
 	}

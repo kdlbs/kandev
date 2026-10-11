@@ -119,12 +119,9 @@ Cancellation responses and permission responses cannot wait for the event-consum
 The implementation preserves the existing notification FIFO barrier before prompt completion.
 It replaces the unbounded client queue with bounded intake into the SQL inbox.
 
-The default logical limits are 256 MiB per stream and 2 GiB per journal.
-Each journal reserves 1 MiB for health and terminal metadata.
-Acknowledged event pruning precedes new admission.
-At the limit, agentctl refuses new prompts and requests cancellation of active owned work.
-An out-of-band health error reports a full journal if even the reserved write fails.
-The active submission then remains uncertain.
+Delivery pressure and usable-disk reserves follow AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.4.
+Persistence failure preserves uncertainty and control access rather than cancelling at fixed logical thresholds.
+[Restart reconciliation](durable-restart-reconciliation.md) defines mapping-safe accounting and abandoned dispatch classification.
 
 Files use mode 0600 inside a 0700 directory.
 The exclusive file lock prevents concurrent agentctl writers.

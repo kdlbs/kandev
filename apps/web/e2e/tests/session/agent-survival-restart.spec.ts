@@ -7,6 +7,17 @@ import {
   expectRestartConversationIdentity,
 } from "../../helpers/silent-restart-recovery";
 import { SessionPage } from "../../pages/session-page";
+import { verifyAutomaticRestartReconciliation } from "../../helpers/restart-reconciliation";
+
+test("automatically restores a crashed runtime and survives another backend restart", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(180_000);
+  await verifyAutomaticRestartReconciliation(testPage, apiClient, seedData, backend);
+});
 
 async function localExecutorProfileId(apiClient: {
   listExecutors: () => Promise<{

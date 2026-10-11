@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/kandev/kandev/internal/common/processidentity"
+	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
@@ -39,9 +40,16 @@ func (m *Manager) RecoverAgentPromptStreamWithIdentity(
 	}
 	if execution, exists := m.GetExecutionBySessionID(requested.SessionID); exists {
 		if !agentDeliveryRecoveryExecutionMatches(execution, requested) {
+			if execution.ID != requested.ExecutionID && loadedRecoverySuccessorMatches(execution, requested) &&
+				proveHistoricalDeliveryOwnerDead(requested) == nil {
+				return m.recoverLoadedSuccessorDelivery(ctx, execution, requested)
+			}
 			return deliveryRecoveryResult(identity, DeliveryReconciliationOwnerMismatch,
 				"execution_identity_changed", ErrDeliveryOwnerMismatch)
 		}
+		m.logger.Debug("selecting durable delivery recovery route", zap.String("execution_id", execution.ID),
+			zap.String("runtime", string(execution.RuntimeName)), zap.Uint64("execution_epoch", execution.runtimeEpoch),
+			zap.Bool("retired", m.isRetiredLocalExecution(execution)), zap.Bool("has_runtime_owner", m.runtimeOwner != nil))
 		if m.isRetiredLocalExecution(execution) {
 			return m.recoverRetainedAgentDeliveryWithoutExecution(ctx, requested, identity)
 		}
@@ -126,6 +134,7 @@ func (m *Manager) recoverRetainedInstance(ctx context.Context, lease *agentctl.R
 		}
 		result := deliveryRecoveryResult(identity, DeliveryReconciliationUncertain,
 			"terminal_outcome_missing", ErrUncertainPromptDelivery)
+		result.ProcessTerminated = proveHistoricalDeliveryOwnerDead(requested) == nil
 		return result
 	}
 	if descriptor.Stream == nil || submission.TerminalSequence > descriptor.Stream.HighWater {
