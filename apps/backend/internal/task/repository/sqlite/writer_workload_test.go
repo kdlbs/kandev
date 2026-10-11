@@ -35,7 +35,9 @@ func newWriterWorkload(t testing.TB, sessions, payloadBytes, batch int) *writerW
 		require.NoError(t, r.CreateTask(context.Background(), &models.Task{
 			ID: id, WorkspaceID: "writer-workload", Title: id,
 		}))
-		require.NoError(t, r.CreateTaskSession(context.Background(), &models.TaskSession{ID: id, TaskID: id}))
+		require.NoError(t, r.CreateTaskSession(context.Background(), &models.TaskSession{
+			ID: id, TaskID: id, QueueIncarnationID: id,
+		}))
 		now := time.Now().UTC()
 		_, err := r.db.Exec(`INSERT INTO task_session_turns
 			(id, task_session_id, task_id, started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,

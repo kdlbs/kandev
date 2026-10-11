@@ -216,6 +216,33 @@ func TestDeliveryRetentionStorageTerminalPlan(t *testing.T) {
 type retentionStorageRepository interface {
 	RunAgentDeliveryRetentionBatch(context.Context, models.AgentDeliveryRetentionBatchOptions) (models.AgentDeliveryRetentionBatchResult, error)
 	GetAgentDeliveryCursor(context.Context, string) (*models.AgentDeliveryCursor, error)
+	awaitRetentionStorageSettlement(context.Context) error
+}
+
+func (r *Repository) awaitRetentionStorageSettlement(ctx context.Context) error {
+	if r.db.DriverName() != "pgx" {
+		return nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// A client deadline can precede the server's COMMIT. Acquire the same
+	// lease before measuring so a previous pass cannot enter the next sample.
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_delivery_retention_state SET updated_at=updated_at WHERE id=1`); err != nil {
+		return err
+	}
+	return tx.Rollback()
+}
+
+func settledRetentionStorageCursor(repo retentionStorageRepository, streamID string) (*models.AgentDeliveryCursor, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := repo.awaitRetentionStorageSettlement(ctx); err != nil {
+		return nil, err
+	}
+	return repo.GetAgentDeliveryCursor(ctx, streamID)
 }
 
 func runRetentionStorageBatch(t *testing.T, repo retentionStorageRepository, batchRows int) (models.AgentDeliveryRetentionBatchResult, int) {
@@ -237,7 +264,7 @@ func runRetentionStorageBatchWithCursor(t *testing.T, repo retentionStorageRepos
 		lastErr = err
 		// A deadline may hide a committed transaction's acknowledgement.
 		if streamID != "" {
-			cursor, readErr := repo.GetAgentDeliveryCursor(context.Background(), streamID)
+			cursor, readErr := settledRetentionStorageCursor(repo, streamID)
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
@@ -262,7 +289,7 @@ func runRetentionStorageAccountedBatch(t *testing.T, repo retentionStorageReposi
 		t.Fatal(err)
 	}
 	result, retries := runRetentionStorageBatchWithCursor(t, repo, batchRows, event.StreamID, before.RetiredSequence)
-	after, err := repo.GetAgentDeliveryCursor(context.Background(), event.StreamID)
+	after, err := settledRetentionStorageCursor(repo, event.StreamID)
 	if err != nil {
 		t.Fatal(err)
 	}

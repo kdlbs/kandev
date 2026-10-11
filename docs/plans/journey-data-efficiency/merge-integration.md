@@ -88,3 +88,61 @@ The unchanged managed build also passed both desktop counterparts under
 `pnpm e2e:run --host --no-build --project chromium
 tests/session/durable-record-recovery.spec.ts --retries=0`. Hosted checks are
 still pending; these local passes do not replace required CI evidence.
+
+The subsequent hosted desktop shard 3/14 (job `114467826746`, same run and
+head) failed the same two fixture assertions on every attempt. The shared
+correction and the passing local desktop scenarios cover those failures too.
+
+## Backend fixture CI corrections
+
+At the same head, Backend Postgres job `114466613029` (run `38138234720`)
+exposed two fixture defects. Writer workload events used the session ID as
+their incarnation, but the fixture omitted the session's incarnation and
+therefore received a generated different ID. Explicitly seeding the matching
+fixture incarnation preserves the landed admission and post-purge protections.
+`TestWriterWorkloadIsolated` and `TestWriterWorkloadAttribution` reproduced the
+identity mismatch, then passed with `-race` after this fixture-only correction.
+
+Million-row retention accounting measured a cursor before a deadline-returning
+transaction had finished on PostgreSQL. A subsequent pass then included that
+late commit in its own delta and reported 100 retired rows against a 50-row
+single-pass budget. `TestDeliveryRetentionStorageDelayedCommitAccounting`
+reproduced the exact `before=50 after=150 retries=0` failure using a held
+state-row lease. Test-only cursor observations after a deadline or completed
+pass now acquire that existing lease before measuring. Worker limits,
+transactions, ownership, projected-cursor and canonical preservation rules are
+unchanged.
+
+The focused race run of delayed-commit, accounting, retry-lock settlement and
+writer workload tests passed on SQLite and an isolated PostgreSQL 16 instance:
+`go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run
+'^Test(DeliveryRetentionStorage(DelayedCommitAccounting|Accounting|RetryLockSettlement)|WriterWorkload(Isolated|Attribution))$' -count=1`.
+Backend lint with the integrated base revision reported zero issues.
+
+The exact PostgreSQL protected-gap million-row case passed with `-race`, keeping
+the retirement frontier at 499,999 and the protected backlog at 500,001 while
+preserving canonical content. The storage 1024-byte case drained all one
+million rows with exact removed-byte accounting and preserved canonical content
+through reopening, then failed manual VACUUM because the local validation
+container's default 64 MiB shared-memory segment was exhausted (SQLSTATE
+53100). This partial run is not recorded as a full pass. Its rerun uses a fresh
+owned PostgreSQL container with 1 GiB shared memory; no repository or product
+settings changed for that local resource limit.
+
+That fresh-container storage rerun passed completely, including exact byte
+accounting, canonical preservation, reopening and manual VACUUM:
+`go test -trimpath -tags fts5 -race -timeout 45m -v
+./internal/task/repository/sqlite -run
+'^TestDeliveryRetentionStorage$/^Postgres$/^1024_bytes$' -count=1`.
+The preceding protected-gap pass used the same package, race and timeout flags
+with `^TestDeliveryRetentionStorageProtectedGap$/^Postgres$` included in the
+test selection. Both commands used `KANDEV_TEST_POSTGRES_DSN` for the isolated
+PostgreSQL 16 fixture and `GOMAXPROCS=2`. These are repository test results,
+not real-provider or transferred benchmark claims.
+
+An initial local accounting implementation synchronized the baseline too early
+and stalled the existing intentional lock-settlement fixture. The owned test
+process was diagnosed and stopped, the baseline ordering was corrected, and
+the successful focused race run above covers the final implementation. No
+public behavior, runtime flag or documentation contract changed in these
+backend test-fixture corrections. Remote CI remains a delivery gate.
