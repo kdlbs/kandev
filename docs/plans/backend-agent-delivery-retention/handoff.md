@@ -142,3 +142,5 @@ CI on `4c66caac9554be9b68bd758566855fa4ed459ac5` exposed three fixture failures:
 The rebuilt-source targeted rerun passed all four desktop/mobile runtime and relocation cases, no retries/skips/failures, 1.1 minutes (14.3s, 16.8s, 13.5s, 15.7s). All four owned backend processes and roots were removed. The checked-head retention shard passed 284 cases; its sole failure, on all four attempts, was the missing original `KANDEV_RETENTION_COMPAT_BINARY`. Required CI and Task 08 remain open; these fixture receipts do not waive original artifact transfer or the 1.10 latency limit.
 
 The PostgreSQL fixture now verifies committed cursor progress after a lost acknowledgement. Eight race controls and the exact million-row 4 KiB case pass (508.774s). Task 08 records provenance; all original acceptance blockers remain open.
+
+Task 08 records the warning/action selector and traced touch correction. Original acceptance gates remain open.

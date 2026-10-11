@@ -238,11 +238,15 @@ test.describe("worktree branch resume recovery", () => {
       });
       await fixture.session.recoveryResumeButton().click();
 
-      const recoveryCard = testPage
+      const recoveryWarning = testPage
         .getByRole("main")
-        .locator('[data-testid="session-recovery-card"]:visible');
-      await expect(recoveryCard).toContainText("local changes", { timeout: 30_000 });
-      const relocate = recoveryCard.getByTestId("managed-clone-relocate-button");
+        .getByText("This worktree belongs to an older repository clone and has local changes.", {
+          exact: false,
+        });
+      await expect(recoveryWarning).toBeVisible({ timeout: 30_000 });
+      const relocate = testPage
+        .getByRole("main")
+        .getByRole("button", { name: "Move files and resume", exact: true });
       await expect(relocate).toBeVisible({ timeout: 30_000 });
       await expect
         .poll(() => {
