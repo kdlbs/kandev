@@ -22,6 +22,8 @@ legacy_specs: []
 Repair the confirmed streaming and storage defects in PR #3598 before release.
 This package follows the completed session and adoption packages. Their prior results remain historical evidence.
 The source baseline is `62851c51fa2d347bbc0d162634c25c541c441d21` on 2026-09-15.
+The October same-stream ACK/client replacement and capacity recurrence is tracked in [Task 04 of the shutdown/recovery package](../agentctl-journal-shutdown-recovery/task-04-acknowledgment-capacity.md).
+This package's prior results do not establish coverage of that recurrence or completion of its repair.
 The change after reviewed head `98ed9c555` only adjusts E2E assertions; the reviewed production paths remain unchanged.
 The checkout was clean before planning. Recheck HEAD and concurrent edits before implementation.
 

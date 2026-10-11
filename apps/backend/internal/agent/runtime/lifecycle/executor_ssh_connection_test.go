@@ -790,6 +790,7 @@ func TestSSHManagedBrokerResumeForcesFreshAgentctlWithNewLease(t *testing.T) {
 	for _, key := range []string{
 		MetadataKeySSHRemoteSessionDir,
 		MetadataKeySSHRemoteAgentctlPort,
+		MetadataKeySSHRemoteControlPort,
 		MetadataKeySSHRemoteAgentctlPID,
 		MetadataKeySSHLocalForwardPort,
 		MetadataKeySSHRemoteAgentctlURL,

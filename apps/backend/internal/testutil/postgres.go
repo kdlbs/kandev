@@ -50,3 +50,13 @@ func PostgresDSNFromEnv(t testing.TB) string {
 	}
 	return dsn
 }
+
+// PostgresDSNWithSearchPath retains schema scope on every replacement connection.
+func PostgresDSNWithSearchPath(t testing.TB, dsn, schema string) string {
+	t.Helper()
+	scopedDSN, err := isolatedPostgresDSN(dsn, schema)
+	if err != nil {
+		t.Fatal("scope PostgreSQL test connection")
+	}
+	return scopedDSN
+}

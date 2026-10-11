@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- session WebSocket handlers share one event registry. */
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type { AppState } from "@/lib/state/store";
 import type { QueueMeta } from "@/lib/state/slices/session/types";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
@@ -226,9 +227,9 @@ export function isStaleSessionStateEvent(
   payloadUpdatedAt: string | undefined,
 ): boolean {
   if (!payloadUpdatedAt || !existing?.updated_at) return false;
-  const payloadTime = Date.parse(payloadUpdatedAt);
-  const existingTime = Date.parse(existing.updated_at);
-  if (Number.isNaN(payloadTime) || Number.isNaN(existingTime)) return false;
+  const payloadTime = parseStrictRfc3339Timestamp(payloadUpdatedAt);
+  const existingTime = parseStrictRfc3339Timestamp(existing.updated_at);
+  if (payloadTime === null || existingTime === null) return false;
   // Strict less-than: equal timestamps are treated as not-stale so identical
   // events upsert idempotently rather than being silently dropped.
   return payloadTime < existingTime;
@@ -242,6 +243,7 @@ export function isStaleSessionStateEvent(
 // composer can switch affordance without a refetch; cancellation_* carry the
 // backend-owned cancellation projection.
 const CARRIED_WHEN_DEFINED = [
+  "session_recovery_blocks",
   "review_status",
   "error_message",
   "is_passthrough",

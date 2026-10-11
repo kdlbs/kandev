@@ -47,6 +47,29 @@ type durableDeliveryCapabilityProvider interface {
 	) (runtimeapi.DurableDeliveryCapability, bool)
 }
 
+type identityAwarePromptStreamRecoverer interface {
+	RecoverAgentPromptStreamWithIdentity(
+		context.Context,
+		lifecycle.AgentDeliveryRecoveryIdentity,
+	) lifecycle.DeliveryReconciliationResult
+}
+
+func TestLifecycleAdapter_SatisfiesIdentityAwareDeliveryRecoverySeam(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	var client orchestratorexecutor.AgentManagerClient = newLifecycleAdapter(mgr, nil, newTestLogger())
+
+	provider, ok := client.(identityAwarePromptStreamRecoverer)
+	if !ok {
+		t.Fatal("production lifecycleAdapter does not forward identity-aware durable delivery recovery")
+	}
+	result := provider.RecoverAgentPromptStreamWithIdentity(context.Background(), lifecycle.AgentDeliveryRecoveryIdentity{
+		TaskID: "task-1", SessionID: "missing-session",
+	})
+	if result.Outcome != lifecycle.DeliveryReconciliationBlocked || result.Reason != "recovery_identity_incomplete" {
+		t.Fatalf("adapter did not forward the manager result: outcome=%q reason=%q", result.Outcome, result.Reason)
+	}
+}
+
 // acpSessionIDProvider mirrors the unexported interface
 // orchestrator.Service.currentACPSessionID asserts s.agentManager against.
 // Declaring it independently here — instead of importing an orchestrator
@@ -248,4 +271,12 @@ func TestBuildLifecycleLaunchRequestCarriesInitialDeliverySubmissionID(t *testin
 	if launch.InitialDeliverySubmissionID != "message-1" {
 		t.Fatalf("initial delivery submission ID = %q, want message-1", launch.InitialDeliverySubmissionID)
 	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesBootStatusSuppression(t *testing.T) {
+	launch := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		SuppressBootStatusMessage: true,
+	}, "/workspace", "profile-1")
+
+	require.True(t, launch.SuppressBootStatusMessage)
 }

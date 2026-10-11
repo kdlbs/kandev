@@ -272,3 +272,11 @@ No production or permanent application test changed during package creation.
 - Partial turn coverage can appear globally complete unless every consumer respects its new scope.
 - Deduplication can suppress necessary gap repair or mix authorization/response-option scopes.
 - Shared-host benchmark variance and remaining writer saturation limit latency claims.
+
+## Landed-fix integration
+
+The conflict resolution preserves active-session recovery blocks in the moved
+bounded boot helper and the compact sibling contract. Targeted race tests,
+43 web tests, TypeScript, lint and desktop/phone Resume checks passed. See
+[the integration record](merge-integration.md) for exact commands and limitations.
+Remote CI and verified merge remain pending until the delivery report.

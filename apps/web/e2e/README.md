@@ -84,6 +84,12 @@ artifact, and each shard validates that immutable identity after download.
 `KANDEV_E2E_BIN` selects a custom backend binary. The setup still checks the
 local mock agent and other required artifacts.
 
+Recovery tests also require `bin/e2e-delivery-fixture`. The managed runner builds
+it with `make build-e2e-delivery-fixture`. CI and Docker runs use the compiled
+fixture, so test execution does not require Go. Its test-only source has its own
+freshness check. The fixture fills an isolated, stopped session's retained
+journal to the shipped 256 MiB limit and checks pruning after Retry.
+
 ## Playwright projects
 
 The suite is split into six projects. Pick one with `--project=<name>`.
@@ -839,3 +845,7 @@ finite preparation failure, retained/replaced workspaces, independent daemons,
 Pod cgroup ancestry and exact cleanup including an untouched existing claim.
 The cgroup case fails if nested work escapes the Pod budget. Missing image input
 skips the suite; skips and test discovery do not count as execution acceptance.
+
+### Original-artifact retention rollback evidence
+
+The frozen format-1 rollback case in `tests/session/delivery-retention.spec.ts` is optional for the current retention issue fix. It reports a skip when `KANDEV_RETENTION_COMPAT_BINARY` is absent; the required suite still exercises current delivery cleanup, saved-history recovery and provider continuation on desktop and mobile. When the original binary is supplied, the test verifies its fixed hash and retains all rollback/new-write/deletion/forward-upgrade assertions. A skip is not original rollback acceptance. The 2026-10-11 user-directed scope change is recorded in `docs/plans/backend-agent-delivery-retention/task-08-integration-and-storage.md`; historical benchmark failures remain labelled there.

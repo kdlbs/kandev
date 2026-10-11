@@ -122,8 +122,12 @@ raw npm output.
 7. For npm-classified failures, Kandev changes `--prefer-offline` to `--prefer-online`; unexplained early exit preserves the original preference.
 8. Kandev starts the replacement child and initializes the original ACP session.
 
-The startup generation rejects delayed events from the first child. The
-existing cancellation and shutdown gates remain authoritative during recovery.
+The startup generation rejects delayed callbacks from the first child. Retained
+events replayed through the replacement stream also retain their originating
+agentctl process generation. When it is older than the authenticated client’s
+current process generation, lifecycle ignores the callback after ordinary durable
+receipt and projection. Missing or malformed process evidence never proves that
+an event is stale. Existing cancellation and shutdown gates remain authoritative.
 
 For a host capability probe, the equivalent flow is:
 

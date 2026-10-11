@@ -506,6 +506,57 @@ Removal is permanent within the current database. Restoring a backup replaces
 the whole database and can remove newer changes. Keep any backup you need before
 deleting it. Other database engines show this feature as unavailable.
 
+## Backend delivery retention
+
+Kandev automatically removes redundant backend transport data on SQLite and PostgreSQL.
+It preserves canonical messages, tool history, turns, and unresolved recovery evidence.
+This cleanup is separate from **Message compaction** and agentctl journal pruning.
+
+The default payload grace is one hour. Eligible projected event payloads and fully settled prompt payloads expire after this grace.
+Cleanup retains compact identities, hashes, outcomes, and settlement evidence.
+Recent duplicate receipts remain for up to 24 hours or 10000 events per stream.
+Contiguous retirement checkpoints reject older events without applying them again.
+A lost ACK uses the persisted projected cursor. Cleanup never resends a prompt or a tool action.
+
+Unprojected events, uncertain prompts, pending claims, and incomplete terminal or workflow settlement remain protected.
+Archive and Stop preserve this evidence. Explicit deletion retires the session identity and schedules bounded removal of its delivery records.
+Protected backlog and canonical history can continue to grow. Retention is not a database quota.
+
+Cleanup starts after the first normal interval, which defaults to one minute.
+Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
+Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work, with a 100 ms pause between batches. A pass starts no further batch after five seconds.
+SQLite native writer admission can wait through its existing five-second busy timeout after cancellation.
+Stop joins that work before database closure. The 250 ms deadline is not a wall-clock completion promise during contention.
+Startup [configuration](configuration.md#backend-delivery-retention) controls grace, replay limits, cadence, and batch size.
+
+Production structured `agent_delivery.retention.*` logs report aggregate progress, removed bytes, bounded backlog samples, and skip or error reasons.
+Development or pprof diagnostics also expose `agent_delivery_retention_*` counters through `/debug/vars`.
+There is no production metrics endpoint. A bounded sample is not an exact database-wide total.
+Unavailable backlog or age values use `-1`. These counters do not label session identities or contain payloads.
+
+### Delivery retention upgrades and rollback
+
+**Preserve a verified pre-pruning backup before the pruning upgrade.** Removed transport payloads cannot be restored within the live database.
+SQLite version changes create a `VACUUM INTO` snapshot before migration.
+Automatic rotation retains only the newest two snapshots. Copy the verified pre-pruning snapshot outside that directory.
+PostgreSQL has no automatic upgrade snapshot. Create a `pg_dump` before the upgrade and verify restoration into an isolated database.
+
+The rollout uses two releases. Release N provides format-1 readers, writers, checkpoints, and deletion fences without a collector.
+Release N+1 activates pruning only after the actual Release N artifact passes the pruned-database rollback matrix.
+Release N pauses collection and preserves pending deletion jobs until a forward upgrade.
+The implementation plan records the artifact digest and required compatibility evidence.
+Do not treat a pre-retention binary as a supported rollback reader.
+A rollback to that binary requires a verified pre-pruning backup and loses changes after that snapshot.
+A restored snapshot cannot prove that external actions did not occur. It never authorizes their automatic replay.
+
+### Delivery retention and disk space
+
+Logical removal makes database space reusable. It does not guarantee a smaller file or secure erasure.
+SQLite file shrinkage uses the existing **Vacuum** action or verified offline [CLI compaction](cli.md#database-maintenance).
+PostgreSQL operators use normal vacuum or autovacuum for reusable space. The worker never runs `VACUUM FULL`.
+WAL, dead tuples, indexes, backups, and retained copies need separate capacity planning.
+Backups can still contain payload bytes removed from the live database.
+
 ## Database operation
 
 > **Single-owner rule:** SQLite uses one writer connection in WAL mode; only one Kandev backend should own the file. **Factory reset** is destructive and removes managed data after creating a pre-reset backup.

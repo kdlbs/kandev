@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func deliveryTerminalSettlementEffect(event *models.AgentDeliveryEvent) (*models.AgentDeliveryEffect, error) {
@@ -23,8 +24,12 @@ func deliveryTerminalSettlementEffect(event *models.AgentDeliveryEvent) (*models
 	}
 	var payload streams.AgentEvent
 	_ = json.Unmarshal(event.Payload, &payload)
-	if event.EventType == streams.EventTypeComplete && payload.Data["stop_reason"] == string(models.DeliverySubmissionCancelled) {
-		outcome = models.DeliverySubmissionCancelled
+	if event.EventType == streams.EventTypeComplete {
+		if isError, _ := payload.Data["is_error"].(bool); isError {
+			outcome = models.DeliverySubmissionFailed
+		} else if payload.Data["stop_reason"] == string(models.DeliverySubmissionCancelled) {
+			outcome = models.DeliverySubmissionCancelled
+		}
 	}
 	now := time.Now().UTC()
 	return &models.AgentDeliveryEffect{
@@ -77,6 +82,23 @@ func (r *Repository) SettleAgentDeliveryTerminal(
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	var sessionID string
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT session_id FROM agent_delivery_effects
+		WHERE stream_id = ? AND sequence = ? AND effect_type = ?`),
+		streamID, sequence, models.DeliveryTerminalEffectType).Scan(&sessionID)
+	if err == sql.ErrNoRows {
+		return false, tx.Commit()
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, []string{streamID}); err != nil {
+		return false, err
+	}
 	return r.settleAgentDeliveryTerminalTx(ctx, tx, streamID, sequence, outcome, settledAt)
 }
 
@@ -282,6 +304,11 @@ func (r *Repository) resolveBoundDeliveryBlocksTx(
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	if len(blocks) > 0 {
+		if err := r.advanceRecoverySessionRevisionTx(ctx, tx, effect.SessionID); err != nil {
+			return err
+		}
+	}
 	for _, block := range blocks {
 		result, err := tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE session_recovery_blocks
@@ -376,23 +403,148 @@ func (r *Repository) CompleteAgentDeliveryTerminalSettlement(
 	if completedAt.IsZero() {
 		completedAt = r.nowUTC()
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var effect models.AgentDeliveryEffect
+	var completedAtValue sql.NullTime
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT effect_key, session_id, stream_id, sequence, incarnation_id, harness_generation,
+		       submission_id, turn_id, outcome, state, completed_at
+		FROM agent_delivery_effects WHERE effect_key = ? AND effect_type = ?`),
+		effectKey, models.DeliveryTerminalEffectType).Scan(
+		&effect.EffectKey, &effect.SessionID, &effect.StreamID, &effect.Sequence,
+		&effect.IncarnationID, &effect.HarnessGeneration, &effect.SubmissionID,
+		&effect.TurnID, &effect.Outcome, &effect.State, &completedAtValue)
+	if err == sql.ErrNoRows {
+		return false, repoerrors.ErrAgentDeliveryEffectNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), effect.SessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{effect.SessionID}, []string{effect.StreamID}); err != nil {
+		return false, err
+	}
+	completed, err := r.completeAgentDeliveryTerminalSettlementTx(ctx, tx, &effect, completedAt)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return completed, nil
+}
+
+func (r *Repository) completeAgentDeliveryTerminalSettlementTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	effect *models.AgentDeliveryEffect,
+	completedAt time.Time,
+) (bool, error) {
+	if effect.State == models.DeliveryEffectCompleted {
+		return r.agentDeliveryTerminalFullySettledTx(ctx, tx, effect)
+	}
+	if effect.State != models.DeliveryEffectBlockResolved {
+		return false, nil
+	}
+	if !r.hasExactAgentDeliveryWorkflowOutcomeTx(ctx, tx, effect) {
+		return false, nil
+	}
+	updated, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_delivery_submissions SET fully_settled_at = ?, terminal_stream_id = ?,
+			terminal_sequence = ?, terminal_turn_id = ?, updated_at = ?
+		WHERE id = ? AND session_id = ? AND incarnation_id = ? AND harness_generation = ?
+		  AND state = ? AND outcome = ?
+		  AND (terminal_stream_id = '' OR (terminal_stream_id = ? AND
+		       (terminal_sequence < ? OR (terminal_sequence = ? AND terminal_turn_id = ?))))`),
+		completedAt, effect.StreamID, effect.Sequence, effect.TurnID, completedAt,
+		effect.SubmissionID, effect.SessionID, effect.IncarnationID, effect.HarnessGeneration,
+		effect.Outcome, effect.Outcome, effect.StreamID, effect.Sequence, effect.Sequence, effect.TurnID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := updated.RowsAffected()
+	if err != nil || rows != 1 {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_delivery_effects SET state = ?, completed_at = ?
 		WHERE effect_key = ? AND effect_type = ? AND state = ?`),
-		models.DeliveryEffectCompleted, completedAt, effectKey,
+		models.DeliveryEffectCompleted, completedAt, effect.EffectKey,
 		models.DeliveryTerminalEffectType, models.DeliveryEffectBlockResolved)
 	if err != nil {
 		return false, err
 	}
-	count, err := result.RowsAffected()
-	if err != nil || count == 1 {
-		return count == 1, err
+	rows, err = result.RowsAffected()
+	return rows == 1, err
+}
+
+func (r *Repository) hasExactAgentDeliveryWorkflowOutcomeTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	terminal *models.AgentDeliveryEffect,
+) bool {
+	if !hasExactAgentDeliveryTerminalIdentity(terminal) {
+		return false
 	}
-	effect, getErr := r.GetAgentDeliveryEffect(ctx, effectKey)
-	if getErr != nil {
-		return false, getErr
+	var effect models.AgentDeliveryEffect
+	var completedAt sql.NullTime
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT effect_key, stream_id, sequence, effect_type, state, completed_at,
+		       session_id, incarnation_id, harness_generation, submission_id, turn_id, outcome
+		FROM agent_delivery_effects WHERE effect_key = ?`),
+		"workflow.on_turn_complete:"+terminal.TurnID).Scan(
+		&effect.EffectKey, &effect.StreamID, &effect.Sequence, &effect.EffectType,
+		&effect.State, &completedAt, &effect.SessionID, &effect.IncarnationID,
+		&effect.HarnessGeneration, &effect.SubmissionID, &effect.TurnID, &effect.Outcome)
+	if err != nil || !completedAt.Valid || effect.State != models.DeliveryEffectCompleted ||
+		!agentDeliveryWorkflowIdentityMatchesTerminal(&effect, terminal) {
+		return false
 	}
-	return effect.EffectType == models.DeliveryTerminalEffectType && effect.State == models.DeliveryEffectCompleted, nil
+	switch effect.Outcome {
+	case "applied", "no_automatic_transition", "not_required":
+		return true
+	default:
+		return false
+	}
+}
+
+func agentDeliveryWorkflowIdentityMatchesTerminal(effect, terminal *models.AgentDeliveryEffect) bool {
+	return effect.EffectType == "workflow.on_turn_complete" && effect.StreamID == terminal.StreamID &&
+		effect.Sequence == terminal.Sequence && effect.SessionID == terminal.SessionID &&
+		effect.IncarnationID == terminal.IncarnationID && effect.HarnessGeneration == terminal.HarnessGeneration &&
+		effect.SubmissionID == terminal.SubmissionID && effect.TurnID == terminal.TurnID
+}
+
+func (r *Repository) agentDeliveryTerminalFullySettledTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	effect *models.AgentDeliveryEffect,
+) (bool, error) {
+	var streamID, turnID string
+	var sequence int64
+	var fullySettledAt sql.NullTime
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT terminal_stream_id, terminal_sequence, terminal_turn_id, fully_settled_at
+		FROM agent_delivery_submissions
+		WHERE id = ? AND session_id = ? AND incarnation_id = ? AND harness_generation = ?`),
+		effect.SubmissionID, effect.SessionID, effect.IncarnationID, effect.HarnessGeneration).Scan(
+		&streamID, &sequence, &turnID, &fullySettledAt)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !fullySettledAt.Valid || streamID != effect.StreamID || sequence != effect.Sequence || turnID != effect.TurnID {
+		return false, nil
+	}
+	return r.hasExactAgentDeliveryWorkflowOutcomeTx(ctx, tx, effect), nil
 }
 
 func (r *Repository) bindProjectedTerminalToRecoveryBlock(

@@ -42,5 +42,13 @@ func (r *Repository) managedSessionStateWriter(ctx context.Context, id string, s
 		_ = tx.Rollback()
 		return nil, nil, err
 	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), id); err != nil {
+		_ = tx.Rollback()
+		return nil, nil, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{id}, nil); err != nil {
+		_ = tx.Rollback()
+		return nil, nil, err
+	}
 	return tx, tx, nil
 }

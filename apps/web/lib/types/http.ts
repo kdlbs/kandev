@@ -664,6 +664,18 @@ export type WorkspaceRecoveryProjection = {
   reason_code?: string;
 };
 
+/** Path-free identity and cause for one currently open session recovery block. */
+export type SessionRecoveryBlockProjection = {
+  id: string;
+  incarnation_id: string;
+  expected_generation: number;
+  reason: string;
+  consumer_reference?: string;
+  delivery_submission_id?: string;
+  delivery_stream_id?: string;
+  updated_at: string;
+};
+
 export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
@@ -708,6 +720,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   task_environment_id?: string;
   /** Latest path-free managed workspace recovery operation for this environment. */
   workspace_recovery?: WorkspaceRecoveryProjection | null;
+  /** Current native-generation recovery causes; an empty array clears stale blocks. */
+  session_recovery_blocks?: SessionRecoveryBlockProjection[];
   state: TaskSessionState;
   /** Backend-owned runtime cancellation projection; API responses include it explicitly. */
   cancellation_pending?: boolean;

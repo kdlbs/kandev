@@ -156,3 +156,9 @@ This package authorizes no commit, push, merge, or delegation by itself.
 The [reattachment package](../durable-agent-reattachment/plan.md) owns the five review items promised to @nova28.
 Its work orders remain pending. Preserve this package's recorded results and outstanding release gates.
 Live remote reattachment remains distinct from confirmed local runtime replacement.
+
+## Journal shutdown and recovery follow-up (2026-10-09)
+
+The [repair package](../agentctl-journal-shutdown-recovery/plan.md) owns the observed journal-close panic and retry failure after execution removal.
+It also covers recovery-control alignment and the complete post-crash desktop/phone interaction.
+Its four work orders are completed. The repair package records the backend, desktop, and phone validation results. Earlier results and outstanding release gates remain unchanged.

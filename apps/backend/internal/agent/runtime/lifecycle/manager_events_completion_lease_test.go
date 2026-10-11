@@ -175,6 +175,49 @@ func TestCompletionStartupLease_SyntheticStates(t *testing.T) {
 	}
 }
 
+func TestAgentReadyRetainsDurableTerminalIdentity(t *testing.T) {
+	execution := createTestExecution("exec-durable-terminal", "task-durable-terminal", "session-durable-terminal")
+	execution.setSessionInitialized(true)
+	execution.beginStartupAttemptWithID("attempt-durable-terminal")
+	execution.setDeliverySubmissionID("submission-durable-terminal")
+	mgr, eventBus := createCompletionSignalTestManager(execution)
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	promptGeneration, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin prompt: %v", err)
+	}
+	mgr.handleAgentEventWithStartupGeneration(execution, agentctl.AgentEvent{
+		Type:                      streams.EventTypeComplete,
+		TurnID:                    "turn-durable-terminal",
+		PromptGeneration:          promptGeneration,
+		DeliveryStreamID:          "stream-durable-terminal",
+		DeliveryIncarnationID:     "incarnation-durable-terminal",
+		DeliveryHarnessGeneration: 7,
+		DeliverySequence:          11,
+		DeliverySubmissionID:      "submission-durable-terminal",
+		Data:                      map[string]any{"stop_reason": "end_turn"},
+	}, execution.startupAttemptSnapshot())
+
+	for _, published := range eventBus.PublishedEvents {
+		if published.Subject != events.AgentReady {
+			continue
+		}
+		payload, ok := published.Event.Data.(AgentEventPayload)
+		if !ok {
+			t.Fatalf("ready payload has type %T, want AgentEventPayload", published.Event.Data)
+		}
+		if payload.TurnID != "turn-durable-terminal" || payload.DeliveryStreamID != "stream-durable-terminal" ||
+			payload.DeliveryIncarnationID != "incarnation-durable-terminal" || payload.DeliveryHarnessGeneration != 7 ||
+			payload.DeliverySequence != 11 || payload.DeliverySubmissionID != "submission-durable-terminal" {
+			t.Fatalf("ready payload lost terminal identity: %+v", payload)
+		}
+		return
+	}
+	t.Fatal("AgentReady was not published")
+}
+
 // Covers AC-TASKS-SESSION-TURN-SETTLEMENT-001.4.
 func TestCompletionStartupLease_StaleAndPending(t *testing.T) {
 	t.Run("stale startup callback", func(t *testing.T) {

@@ -576,6 +576,7 @@ func agentProfileOptionStates(agents []agentsettingsdto.AgentDTO) []map[string]a
 
 func (b bootStateBuilder) taskDetailActiveSessionDTO(ctx context.Context, session *taskmodels.TaskSession, pending map[string]taskmodels.TaskPendingAction, projections bootSessionRuntimeProvider) taskdto.TaskSessionDTO {
 	fullDTO := taskdto.FromTaskSession(session)
+	b.enrichSessionRecoveryBlocks(ctx, &fullDTO, session)
 	if session.TaskEnvironmentID != "" {
 		operation, runnerLive, err := b.p.taskSvc.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
 		if err != nil {

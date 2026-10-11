@@ -1,0 +1,39 @@
+# PR #4404 integration with landed session and retention fixes
+
+Integrated authoritative main `e6692746b0b825c543e6c5f5fb3cb183d65c24bd`
+into the existing PR head `9b5bee67142a412bd692814d07c42b8dfe0d31d3`.
+The REST pull metadata still reported the old base, so integration used the
+verified Git branch tip. No additional semantic review was requested.
+
+The boot-state conflict came from moving task-detail helpers. Keep the moved,
+bounded implementation and enrich its selected full session with the landed
+current-generation recovery blocks. Compact siblings remain summaries. The
+extended boot regression failed because the active recovery block was absent,
+then passed after restoring enrichment at the new helper owner.
+
+The Resume fixture keeps the landed recovery-card assertions and reads metadata
+through session detail rather than the compact session list. Landed database
+retention, projected-cursor, settlement and post-purge write protections remain
+in the merge. No public contract or operator instructions changed in this
+integration; existing public documentation remains applicable.
+
+## Local validation
+
+Commands ran in the attached PR worktree on 2026-10-11, after resolution:
+
+- Backend: `go test -trimpath -tags fts5 -race ./internal/backendapp ./internal/webapp -run 'Test(Boot|.*Boot|HandlerInjects|DevHandler|Journey|NormalizeBootPayloadGraph|TaskDetailSidebarQuery)' -count=1`: both packages passed.
+- Backend: `golangci-lint run ./... --new-from-rev=e6692746b0b825c543e6c5f5fb3cb183d65c24bd --timeout=5m`: zero issues.
+- Web: `pnpm exec vitest run src/boot-payload.test.ts lib/ssr/session-page-state.test.ts`: 43 tests passed in two files.
+- Web: `pnpm run typecheck`: passed.
+- Web: `pnpm exec eslint --max-warnings 0 e2e/tests/session/read-only-resume-helpers.ts` and `pnpm exec prettier --check e2e/tests/session/read-only-resume-helpers.ts`: passed.
+- Web: `pnpm e2e:run --project chromium tests/session/read-only-resume.spec.ts`: one test passed, with a fresh managed build.
+- Web: `pnpm e2e:run --no-build --project mobile-chrome tests/session/mobile-read-only-resume.spec.ts`: one test passed using the unchanged preceding build.
+- Root: `python3 scripts/list-docs.py validate`: 374 decisions and 1,527 specifications validated.
+- Root: harness and specification lint, their 19 and 36 unit tests, and `pre-commit run harness-lint --files AGENTS.md apps/backend/AGENTS.md`: passed.
+- Conflict markers, unmerged index entries and whitespace: clear.
+
+The first root-invoked browser command selected an incompatible global pnpm
+version and ran no tests. The successful commands ran from `apps/web`, using
+the workspace-pinned package manager. Historical measurements and provider
+claims were not refreshed or expanded. Remote CI and actual merge evidence
+remain delivery gates and are reported after the integration push.

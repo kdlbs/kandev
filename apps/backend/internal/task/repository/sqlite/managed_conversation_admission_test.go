@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,18 @@ func TestManagedConversationAdmissionPostgresRollback(t *testing.T) {
 				require.NoError(t, err)
 				if mode == "repair" {
 					require.NoError(t, b.DeleteTaskSession(ctx, before))
+					_, _, err = svc.EnsureManaged(ctx, "plugin", "installation", spec, "update", "update-digest")
+					require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryIdentityRetiring)
+					completed := false
+					for range 8 {
+						result, err := b.RunAgentDeliveryRetirementBatch(ctx, models.AgentDeliveryRetirementBatchOptions{})
+						require.NoError(t, err)
+						if result.Completed == 1 {
+							completed = true
+							break
+						}
+					}
+					require.True(t, completed, "retired identity must be fully purged before deterministic repair")
 				}
 			}
 			_, err := a.DB().ExecContext(ctx, `CREATE FUNCTION fail_managed_admission() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'admission rollback'; END $$`)

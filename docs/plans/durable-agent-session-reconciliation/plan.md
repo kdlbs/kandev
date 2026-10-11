@@ -234,3 +234,10 @@ Release readiness requires the follow-up evidence; earlier green CI does not cov
 The [runtime replacement package](../agentctl-runtime-replacement/plan.md) adds in-process agentctl recovery to PR #3598.
 Its six work orders are pending. Prior implementation results remain historical and do not verify this extension.
 The new package explicitly replaces the old mandatory-backend-restart availability policy while preserving durable uncertainty guards.
+
+## Backend retention implementation (2026-10-05)
+
+The [backend delivery retention package](../backend-agent-delivery-retention/plan.md) starts from verified `f2668750bf6a17792b58d423f6b5b99cfeabf78e`.
+Retention Tasks 01–07 are complete; Task 08 records integration/storage validation in progress.
+The implementation preserves completed predecessor results and labels historical or environment-dependent evidence separately.
+It owns new payload/receipt cleanup, checkpoint replay and retention validation; historical recovery evidence is not retention acceptance.

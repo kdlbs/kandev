@@ -7,6 +7,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/events"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // turnOutcomeApplier is the optional capability satisfied by
@@ -173,4 +174,90 @@ func (m *Manager) publishRecoveredExecutionReady(ctx context.Context, execution 
 			zap.String("session_id", execution.SessionID),
 			zap.Error(err))
 	}
+}
+
+func (m *Manager) prepareRecoveredAvailability(
+	ctx context.Context,
+	execution *AgentExecution,
+) (*AgentEventPayload, error) {
+	if execution == nil || !m.runtimeExecutionCurrent(execution) {
+		return nil, nil
+	}
+	var payload AgentEventPayload
+	prepared := false
+	if err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		if current != execution {
+			return
+		}
+		if current.Status != v1.AgentStatusReady {
+			current.Status = v1.AgentStatusReady
+		}
+		current.recoveredPromptGenerationPending.Store(false)
+		payload = newAgentEventPayload(current)
+		payload.Status = string(v1.AgentStatusReady)
+		payload.RecoveredAvailabilityOnly = true
+		prepared = true
+	}); err != nil {
+		return nil, err
+	}
+	if !prepared {
+		return nil, nil
+	}
+	payload.AttemptID = ResumeAttemptIDFromContext(ctx)
+	m.persistExecutorRunning(context.WithoutCancel(ctx), execution)
+	return &payload, nil
+}
+
+func (m *Manager) publishRecoveredAvailabilityIfCurrent(
+	ctx context.Context,
+	execution *AgentExecution,
+	payload *AgentEventPayload,
+) {
+	if !m.recoveredAvailabilityContextAllowed(ctx) ||
+		!m.recoveredAvailabilityMatchesExecution(execution, payload) ||
+		m.pendingRemoteRecoveryForSession(execution.SessionID) != nil {
+		return
+	}
+	if err := m.recoveryGuard.CheckLaunchAllowed(execution.SessionID); err != nil {
+		return
+	}
+	current, exists := m.executionStore.GetBySessionID(execution.SessionID)
+	if !exists || current != execution {
+		return
+	}
+	if !m.recoveredAvailabilityReadyAtSnapshot(execution, payload) {
+		return
+	}
+	if !m.recoveredAvailabilityContextAllowed(ctx) {
+		return
+	}
+	if err := m.eventPublisher.publishAgentEventPayload(ctx, events.AgentBootReady, *payload); err != nil {
+		m.logger.Error("failed to publish recovered remote availability",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.Error(err))
+	}
+}
+
+func (m *Manager) recoveredAvailabilityContextAllowed(ctx context.Context) bool {
+	return ctx != nil && ctx.Err() == nil && !m.recoveredAvailabilityPublicationStopped()
+}
+
+func (m *Manager) recoveredAvailabilityMatchesExecution(execution *AgentExecution, payload *AgentEventPayload) bool {
+	return execution != nil && payload != nil && payload.SessionID == execution.SessionID &&
+		payload.AgentExecutionID == execution.ID && m.runtimeExecutionCurrent(execution)
+}
+
+func (m *Manager) recoveredAvailabilityReadyAtSnapshot(
+	execution *AgentExecution,
+	payload *AgentEventPayload,
+) bool {
+	readyAtSnapshot := false
+	if err := m.executionStore.WithRLock(execution.ID, func(current *AgentExecution) {
+		readyAtSnapshot = current == execution && current.Status == v1.AgentStatusReady &&
+			current.promptGeneration == payload.PromptGeneration
+	}); err != nil {
+		return false
+	}
+	return readyAtSnapshot
 }

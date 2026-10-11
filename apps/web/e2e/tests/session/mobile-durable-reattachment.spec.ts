@@ -4,7 +4,7 @@ import { triggerActualDeliveryDisconnect } from "../../helpers/durable-reattachm
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("mobile durable delivery reattachment", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("keeps actual disconnect recovery usable after reload on a phone", async ({
     testPage,
@@ -30,6 +30,8 @@ test.describe("mobile durable delivery reattachment", () => {
     await expect(banner).toContainText(
       "Delivery was interrupted. The prompt outcome is uncertain.",
     );
+    await expect(testPage.getByTestId("interrupted-sessions-notice")).toHaveCount(0);
+    await expect(testPage.getByTestId("interrupted-session-continuation")).toHaveCount(0);
 
     const stop = banner.getByTestId("recovery-stop-button");
     await expect(stop).toBeVisible();
@@ -43,7 +45,11 @@ test.describe("mobile durable delivery reattachment", () => {
         /prompt|message\.added|chat\.submit/i.test(frame.action ?? ""),
     ).length;
     await banner.getByTestId("recovery-retry-connection-button").tap();
-    await expect(banner.getByTestId("session-recovery-error")).toBeVisible({ timeout: 30_000 });
+    await expect(banner.getByTestId("delivery-recovery-result")).toHaveText(
+      "Recovery is blocked. Resolve the recovery issue before retrying.",
+      { timeout: 30_000 },
+    );
+    await expect(banner.getByTestId("interrupted-session-continuation")).toHaveCount(0);
     await expect
       .poll(() =>
         traffic.frames.some(

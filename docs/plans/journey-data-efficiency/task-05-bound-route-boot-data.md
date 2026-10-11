@@ -129,3 +129,11 @@ PR #4404 fixup restricts task entity expansion to normalized board, task-page, d
 ## PR #4404 browser CI remediation
 
 Normalized task membership is decoded in both top-level and nested task-detail state. Saved-view filter values remain unchanged. Authorized workflow metadata makes the board route ready while its demand owner loads task data. This keeps the phone navigator mounted and preserves All Workflows during SPA return.
+
+## Landed-fix integration
+
+The conflict resolution preserves active-session recovery blocks in the moved
+bounded boot helper and the compact sibling contract. Targeted race tests,
+43 web tests, TypeScript, lint and desktop/phone Resume checks passed. See
+[the integration record](merge-integration.md) for exact commands and limitations.
+Remote CI and verified merge remain pending until the delivery report.
