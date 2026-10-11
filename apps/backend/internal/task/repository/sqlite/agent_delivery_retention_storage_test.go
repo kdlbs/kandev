@@ -245,8 +245,11 @@ func runRetentionStorageBatchWithCursor(t *testing.T, repo retentionStorageRepos
 				return result, retries + 1
 			}
 		}
-		timer := time.NewTimer(100 * time.Millisecond)
-		<-timer.C
+		// Failed worker passes use exponential backoff before retrying.
+		if retries < 2 {
+			timer := time.NewTimer(time.Second << retries)
+			<-timer.C
+		}
 	}
 	t.Fatalf("retention did not make progress after three bounded deadline retries: %v", lastErr)
 	return models.AgentDeliveryRetentionBatchResult{}, 0
@@ -294,7 +297,7 @@ func TestDeliveryRetentionStorageProtectedGap(t *testing.T) {
 				t.Fatal(err)
 			}
 			for batch := 0; batch < count/batchRows+1; batch++ {
-				runRetentionStorageBatch(t, repo, batchRows)
+				runRetentionStorageAccountedBatch(t, repo, events[0], 1024, batchRows)
 			}
 			cursor, err := repo.GetAgentDeliveryCursor(context.Background(), events[0].StreamID)
 			if err != nil || cursor.RetiredSequence != gap-1 {

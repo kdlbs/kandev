@@ -2,8 +2,11 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/deliveryretention"
 	"github.com/kandev/kandev/internal/task/models"
@@ -60,6 +63,60 @@ func (r *retentionStorageCommitAckRepository) RunAgentDeliveryRetentionBatch(ctx
 	if err == nil && (r.loseAck || r.loseEveryAck) {
 		r.loseAck = false
 		return models.AgentDeliveryRetentionBatchResult{}, fmt.Errorf("commit acknowledgement: %w", context.DeadlineExceeded)
+	}
+	return result, err
+}
+
+func TestDeliveryRetentionStorageRetryLockSettlement(t *testing.T) {
+	repo, events := seedRetentionBoundsStream(t, "Postgres", "retry-lock", 1, 0)
+	repo.db.SetMaxOpenConns(4)
+	const rows, payloadSize = deliveryretention.BackgroundBatchRows, 1024
+	seedRetentionStorageRows(t, repo, events[0], rows*2, payloadSize)
+	before := retentionCanonicalContent(t, repo, events[0].SessionID)
+	locked, err := repo.db.Beginx()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = locked.Rollback() }()
+	if _, err := locked.Exec(`UPDATE agent_delivery_retention_state SET updated_at=updated_at WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	firstDeadline, released := make(chan struct{}), make(chan error, 1)
+	go func() {
+		<-firstDeadline
+		// A server-side lease can outlive the client's deadline. This bounded delay
+		// models settlement within the worker's first retry-backoff window.
+		timer := time.NewTimer(time.Second)
+		<-timer.C
+		released <- locked.Rollback()
+	}()
+	t.Cleanup(func() {
+		if err := <-released; err != nil && !errors.Is(err, sql.ErrTxDone) {
+			t.Error(err)
+		}
+	})
+	measured := &retentionStorageLockRepository{Repository: repo, firstDeadline: firstDeadline}
+	result, retries, removed := runRetentionStorageAccountedBatch(t, measured, events[0], payloadSize, rows)
+	wantBytes := int64((rows-1)*payloadSize + len(events[0].Payload))
+	if retries != 1 || result.EventRowsRetired != rows || removed != wantBytes {
+		t.Fatalf("settled lock recovery: retries=%d result=%+v removed=%d want=%d", retries, result, removed, wantBytes)
+	}
+	assertRetentionRowCount(t, repo, "agent_delivery_inbox", "stream_id=?", events[0].StreamID, rows)
+	if retentionCanonicalContent(t, repo, events[0].SessionID) != before {
+		t.Fatal("lock settlement changed canonical history")
+	}
+}
+
+type retentionStorageLockRepository struct {
+	*Repository
+	firstDeadline chan struct{}
+}
+
+func (r *retentionStorageLockRepository) RunAgentDeliveryRetentionBatch(ctx context.Context, options models.AgentDeliveryRetentionBatchOptions) (models.AgentDeliveryRetentionBatchResult, error) {
+	result, err := r.Repository.RunAgentDeliveryRetentionBatch(ctx, options)
+	if errors.Is(err, context.DeadlineExceeded) && r.firstDeadline != nil {
+		close(r.firstDeadline)
+		r.firstDeadline = nil
 	}
 	return result, err
 }
