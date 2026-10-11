@@ -16,3 +16,8 @@ Verification: `cd apps/backend && go test ./internal/mcp/server -run TestSpawnSe
 ## Results
 
 Tool contract red confirmed against old description. Focused handler/server run passes, including tool description contract. `node --test scripts/validate-public-docs.test.mjs` passes 63/63; `node scripts/validate-public-docs.mjs` validates 47 pages; spec/catalog checks pass; `git diff --check` passes. Independent Review and QA follow committed candidate; only MAIN fixes and routes.
+
+
+## Fixed during review
+
+DOC-1 (Review R-001 and QA QA-001): removed the adjacent obsolete public-doc bullet claiming workflow pins override explicit spawn profiles. The response explanation now states actual persisted/launched profile. Both independent sessions passed focused runtime checks on ef37dbf297; re-verification must account for the documentation-only correction commit. No production or test change.
