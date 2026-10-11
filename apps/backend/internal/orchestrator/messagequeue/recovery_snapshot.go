@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	taskcontract "github.com/kandev/kandev/internal/task/contract"
 	"io"
 	"time"
 	"unicode/utf8"
@@ -17,7 +18,7 @@ const (
 	DefaultRecoveryBodyBytes = 65536
 	MinRecoveryBodyBytes     = 1024
 	MaxRecoveryBodyBytes     = 262144
-	MaxRecoveryResponseBytes = 2 * 1024 * 1024
+	MaxRecoveryResponseBytes = taskcontract.MaxQueueRecoveryResponseBytes
 	MaxRecoveryFragments     = 256
 	MaxRecoveryCursorBytes   = 4096
 )

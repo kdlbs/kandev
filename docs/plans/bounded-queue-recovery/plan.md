@@ -162,3 +162,38 @@ Focused commands passed on this worktree before candidate freeze:
 TEST_RUNTIME: TRANSIENT. Tests use repository-owned isolated SQLite/memory fixtures and unique temporary paths; no server, production queue, Docker executor, LAN endpoint or deployment was used. PostgreSQL requires Coordinator-delivered task-owned endpoint/receipt; requests are pending. KANDEV_TEST_POSTGRES_DSN is absent, postgres/initdb are not on PATH, and PostgreSQL remains UNVERIFIED. Do not borrow ca015838's DSN or credentials. No submodules. UI_VISUAL_CHANGE: NO (MCP read API only, no rendered state changes); screenshots are inapplicable.
 
 REVIEW_RESULT: PENDING. QA_RESULT: PENDING. Two distinct Kandev sessions will inspect the frozen candidate; neither gate is waived. No PR/routing/completion signal before source checks and independent gates pass. Release artifact acceptance and physical overlay removal remain outside this work phase.
+
+
+## Fixed during review
+
+Round 1 on 513fd1a943511720fc0767a720fef1b16cd5a82f returned two confirmed in-scope findings. REVIEW session 58c8aff8-48f8-4418-a0b7-f327348402d8 reported QR-REVIEW-001: SQL float64 metadata decoding hid changes between adjacent integers above 2^53. QA session 1e04753d-dce9-417b-a297-787fb3cff81f reported QAR-001: final inventory wrappers could exceed 2 MiB although domain manifests passed their cap. Both sessions reached WAITING_FOR_INPUT before correction.
+
+MAIN reproduced both with permanent tests before production edits. The large-number setting regression passed memory, failed SQLite (no changed-snapshot rejection), and skipped unavailable PostgreSQL. The final inventory regression returned a successful 2,097,287-byte payload above its 2,097,152-byte cap. A separate MCP text-wrapper regression also failed because nested encoding exceeded the cap.
+
+Corrections stay in recovery-only paths: scanRecoveryRow decodes metadata losslessly with UseNumber without changing the shared delivery scanner. The shared scalar contract internal/task/contract/queue_recovery.go defines the 2 MiB limit across producer/transport boundaries; serialized WebSocket response and MCP tool-result wrappers are included, transport framing excluded. Final envelope bounds return safe errors rather than body data. Permanent regressions now reject changed large settings, verify equivalent changed-metadata hashes across repositories, and cover final inventory and MCP wrapper overflow. Existing dispatcher/profile registration hooks and census/removal/routine files remain unchanged by these corrections.
+
+Targeted correction and focused race checks passed memory/SQLite in all affected packages. Changed-code lint: zero issues. PostgreSQL remains operationally UNVERIFIED, not a source failure claim. Final new candidate and both re-verification verdicts must be recorded in task metadata; old reports do not cover the correction commit until both sessions inspect/retest its delta.
+
+## Follow-up tasks created
+
+None. Both findings fixed in scope; no duplicate census/retirement/terminal tasks.
+
+## Action required by author
+
+No new product/security decision. Coordinator-delivered task-owned PostgreSQL fixture/receipt remains an essential execution prerequisite. No borrowed credentials, host Docker access or live data are permitted.
+
+## QA fixes worth reviewer attention
+
+The response bound now includes wrapper bytes and lossless number decoding preserves immutable settings evidence. Public docs and system design explain both boundaries.
+
+## Assumptions made during QA
+
+MCP tool-result and WebSocket response serialization include their wrappers in the 2 MiB bound; lower transport framing is excluded. This safe interpretation tightens the approved output bound.
+
+## Pre-existing issues found
+
+None established. Missing PostgreSQL endpoint/server binaries is an environment limitation.
+
+## UI screenshots for PR/MR
+
+Not applicable: UI_VISUAL_CHANGE NO. No rendered feature change or persistent runtime.

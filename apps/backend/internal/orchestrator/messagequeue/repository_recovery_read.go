@@ -128,7 +128,7 @@ func (r *sqliteRepository) recoveryEntries(ctx context.Context, tx *sqlx.Tx, ide
 	defer func() { _ = rows.Close() }()
 	entries := make([]QueuedMessage, 0)
 	for rows.Next() {
-		entry, err := scanQueuedRow(rows)
+		entry, err := scanRecoveryRow(rows)
 		if err != nil {
 			return nil, err
 		}

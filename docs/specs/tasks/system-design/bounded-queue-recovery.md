@@ -19,6 +19,8 @@ Derive mcpscope.Principal server-side and validate live task/session/workspace. 
 ## Pagination
 Versioned canonical identity/order/body/attachment/settings/reservation evidence defines hash; QueuedMessage JSON alone omits private fields. Cursor binds source/digest/offset, never grants authority. Validate length/version/schema/index/UTF-8 boundary; reauthorize before comparing complete hash. Optional expected_snapshot_sha256 pins inventory-to-first-page. Enforce source/fragments/raw-body/serialized-response bounds. No persisted cache or generation mutation.
 
+Recovery-only SQL scanning decodes metadata with lossless JSON numbers; adjacent large integer settings must change the evidence digest. The shared task contract caps serialized WebSocket responses and MCP tool-result objects including their wrappers; transport framing is excluded. Both transport boundaries reject oversized complete envelopes before returning data.
+
 ## Transport and failures
 Register exact terminal/child readers with read-only/idempotent annotations. #3377 owns exact current census; coordinate reuse without disposal/wake imports. Internal mcp.* actions remain raw-WS denied. Only existing task surfaces/managed policies expose readers. Safe typed errors distinguish invalid page, changed snapshot, limits and unavailable storage; logs contain bounded counts/identities, not content.
 

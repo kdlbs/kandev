@@ -158,7 +158,7 @@ func (h *Handlers) handleQueueRecoveryPage(ctx context.Context, msg *ws.Message)
 	if after != authority {
 		return queueRecoveryError(msg, messagequeue.ErrRecoveryChanged)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"task_id": request.TaskID, "session_id": request.SessionID, "page": page})
+	return queueRecoveryResponse(msg, map[string]interface{}{"task_id": request.TaskID, "session_id": request.SessionID, "page": page})
 }
 
 type queueRecoverySessionReader interface {
@@ -206,7 +206,22 @@ func (h *Handlers) handleChildQueueInventory(ctx context.Context, msg *ws.Messag
 	for i, session := range sessions {
 		result = append(result, map[string]interface{}{"session_id": session.ID, "state": session.State, "manifest": manifests[i]})
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"task_id": request.TaskID, "sessions": result, "total_sessions": len(sessions)})
+	return queueRecoveryResponse(msg, map[string]interface{}{"task_id": request.TaskID, "sessions": result, "total_sessions": len(sessions)})
+}
+
+func queueRecoveryResponse(msg *ws.Message, payload interface{}) (*ws.Message, error) {
+	response, err := ws.NewResponse(msg.ID, msg.Action, payload)
+	if err != nil {
+		return queueRecoveryError(msg, err)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return queueRecoveryError(msg, err)
+	}
+	if len(encoded) > messagequeue.MaxRecoveryResponseBytes {
+		return queueRecoveryError(msg, messagequeue.ErrRecoveryLimit)
+	}
+	return response, nil
 }
 
 func queueRecoverySessionIdentities(sessions []*models.TaskSession, taskID string) ([]messagequeue.QueueSessionIdentity, error) {

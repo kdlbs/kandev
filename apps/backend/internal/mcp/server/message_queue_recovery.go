@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	taskcontract "github.com/kandev/kandev/internal/task/contract"
 	"math"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -61,10 +62,22 @@ func (s *Server) queueRecoveryHandler(action string, child, page bool) server.To
 		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		encoded, err := json.Marshal(result)
-		if err != nil {
-			return mcp.NewToolResultError("queue recovery response unavailable"), nil
-		}
-		return mcp.NewToolResultText(string(encoded)), nil
+		return boundedQueueRecoveryToolResult(result), nil
 	}
+}
+
+func boundedQueueRecoveryToolResult(payload map[string]interface{}) *mcp.CallToolResult {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return mcp.NewToolResultError("queue recovery response unavailable")
+	}
+	result := mcp.NewToolResultText(string(encoded))
+	wire, err := json.Marshal(result)
+	if err != nil {
+		return mcp.NewToolResultError("queue recovery response unavailable")
+	}
+	if len(wire) > taskcontract.MaxQueueRecoveryResponseBytes {
+		return mcp.NewToolResultError("queue recovery limit exceeded")
+	}
+	return result
 }
