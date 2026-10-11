@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -48,13 +49,24 @@ func TestRecoverSessionUnknownPromptKeepsNativeHistory(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, models.DeliverySubmissionInterruptedUnknown, stored.State)
 			require.Equal(t, submission.Payload, stored.Payload)
+			require.Equal(t, submission.Outcome, stored.Outcome)
+			currentSession, err := service.repo.GetTaskSession(ctx, sessionID)
+			require.NoError(t, err)
+			delivery, exists := models.LoadAgentDeliveryRecovery(currentSession.Metadata)
+			require.True(t, exists)
+			require.Equal(t, submission.ID, delivery.SubmissionID)
+			require.Equal(t, block.DeliveryStreamID, delivery.StreamID)
 			recovery, err := repo.GetSessionRecoveryBlock(ctx, block.ID)
 			require.NoError(t, err)
 			if scenario.failLaunch || scenario.failAcknowledgement {
 				require.Equal(t, models.RecoveryBlockOpen, recovery.State)
+				require.Equal(t, models.AgentDeliveryRecoveryUncertain, delivery.Phase)
 			} else {
 				require.Equal(t, models.RecoveryBlockResolved, recovery.State)
 				require.Equal(t, "resume", recovery.AuthorizedAction)
+				require.Equal(t, models.AgentDeliveryRecoveryRestored, delivery.Phase)
+				require.NotNil(t, recovery.ResolvedAt)
+				require.True(t, recovery.ResolvedAt.Equal(delivery.UpdatedAt))
 			}
 		})
 	}
@@ -420,7 +432,7 @@ func nativeResumeFixture(t *testing.T, reason string, failLaunch, failAcknowledg
 	submission := &models.AgentDeliverySubmission{
 		ID: "prompt:interrupted", SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
 		PayloadHash: "original-hash", Payload: []byte("original prompt"), State: models.DeliverySubmissionInterruptedUnknown,
-		Outcome: "prompt_dispatch_failed",
+		HarnessGeneration: 1, OwnerGeneration: 1, Outcome: "prompt_dispatch_failed",
 	}
 	_, err = repo.PrepareAgentDeliverySubmission(ctx, submission)
 	require.NoError(t, err)
@@ -428,8 +440,10 @@ func nativeResumeFixture(t *testing.T, reason string, failLaunch, failAcknowledg
 		SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
 		Reason: reason, State: models.RecoveryBlockOpen,
 		ConsumerReference: "agent_delivery", DeliverySubmissionID: submission.ID,
+		ExpectedGeneration: submission.HarnessGeneration, DeliveryStreamID: "native-resume-stream",
 	}
 	require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, block))
+	seedNativeResumeDeliveryMetadata(t, repo, session, block, submission, now)
 	var launched *executor.LaunchAgentRequest
 	started := false
 	manager := &sessionUpdatingAgentManager{
@@ -457,6 +471,30 @@ func nativeResumeFixture(t *testing.T, reason string, failLaunch, failAcknowledg
 	service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), resumer)
 	service.executor = executor.NewExecutor(resumer, repo, testLogger(), executor.ExecutorConfig{})
 	return service, resumer, block, submission, &launched, &started
+}
+
+func seedNativeResumeDeliveryMetadata(t *testing.T, repo *sqliterepo.Repository, session *models.TaskSession, block *models.SessionRecoveryBlock, submission *models.AgentDeliverySubmission, now time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID: session.ID, IncarnationID: session.QueueIncarnationID, Generation: submission.HarnessGeneration,
+		NativeSessionID: "native-conversation", AgentType: "codex", CreationReason: "initial",
+		CreatedAt: now, CommittedAt: now,
+	}))
+	recovery := &models.AgentDeliveryRecovery{
+		Phase: models.AgentDeliveryRecoveryUncertain, Revision: 1, PromptGeneration: 1,
+		SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
+		AgentExecutionID: "old-execution", SubmissionID: submission.ID,
+		StreamID: block.DeliveryStreamID, HarnessGeneration: submission.HarnessGeneration, UpdatedAt: now,
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[models.SessionMetaKeyAgentDeliveryRecovery] = recovery
+	encoded, err := json.Marshal(session.Metadata)
+	require.NoError(t, err)
+	_, err = repo.DB().ExecContext(ctx, `UPDATE task_sessions SET metadata = ? WHERE id = ?`, string(encoded), session.ID)
+	require.NoError(t, err)
 }
 
 func TestNativeResumeRefusesUnresolvedLiveBackendWork(t *testing.T) {

@@ -122,3 +122,12 @@ CI shard 5 exposed a lifecycle launch guard projected as interactive recovery de
 its unresolved durable delivery reason. The backend publication regression requires that
 specific guard to retain the delivery consumer; other native failures retain their existing
 consumer. The existing desktop/phone live-block E2E cases validate the full surface in CI.
+
+CI backend shard 2 exposed an older native Resume fixture that supplied a delivery
+block and unknown submission without canonical recovery metadata. The fixture now
+includes its native generation and matching delivery identity. Successful Resume
+asserts restored metadata and matching block-resolution timestamps while preserving
+the unknown outcome and payload; launch/acknowledgment failures retain uncertainty.
+Focused race checks covering every shared fixture case, reconstruction, checkpoint
+refresh, and native recovery guards pass. This follow-up changes tests only; absent
+production recovery metadata still fails closed until guarded reconstruction succeeds.
