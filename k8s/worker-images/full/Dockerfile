@@ -43,6 +43,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/full-worker/browsers \
     GOFLAGS=-p=1 \
     CARGO_BUILD_JOBS=2
 ENV PATH=/workspace/.npm-global/bin:/workspace/.pnpm:/usr/local/cargo/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+COPY check.py /opt/full-worker/check.py
 COPY smoke.sh /opt/full-worker/smoke.sh
 RUN chmod 0755 /opt/full-worker/smoke.sh
 USER 1000:1000

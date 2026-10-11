@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   assertRuntimeImageTagAvailable,
   FixtureResourceOwnership,
+  cleanupFailedFixture,
   redactKubernetesDiagnosticText,
   WORKLOAD_RBAC_PROBES,
   WORKLOAD_RBAC_RULES,
@@ -110,7 +111,7 @@ describe("Kubernetes E2E fixture safety policy", () => {
     );
     const release = source.indexOf('ownership.release("cluster")', removeMarker);
     const cleanupAfterCreateFailure = source.indexOf(
-      "try {\n      deleteCluster();",
+      "cleanupFailedFixture(error, [deleteCluster, removeRuntimeImage])",
       reserveAndCreate,
     );
 
@@ -121,6 +122,37 @@ describe("Kubernetes E2E fixture safety policy", () => {
     expect(removeMarker).toBeGreaterThan(deleteCluster);
     expect(release).toBeGreaterThan(removeMarker);
     expect(cleanupAfterCreateFailure).toBeGreaterThan(reserveAndCreate);
+  });
+
+  it("preserves setup failure and attempts every cleanup when deletion also fails", () => {
+    const setup = new Error("image transfer timed out");
+    const deletion = new Error("cluster deletion failed");
+    const image = new Error("image deletion failed");
+    const cleanups = [
+      vi.fn(() => {
+        throw deletion;
+      }),
+      vi.fn(() => {
+        throw image;
+      }),
+    ];
+    let result: unknown;
+    try {
+      cleanupFailedFixture(setup, cleanups);
+    } catch (error) {
+      result = error;
+    }
+    expect(result).toBeInstanceOf(AggregateError);
+    expect((result as AggregateError).errors).toEqual([setup, deletion, image]);
+    expect((result as AggregateError).cause).toBe(setup);
+    for (const cleanup of cleanups) expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the original setup error when cleanup succeeds", () => {
+    const setup = new Error("image transfer timed out");
+    const cleanup = vi.fn();
+    expect(() => cleanupFailedFixture(setup, [cleanup])).toThrow(setup);
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
   it("redacts every exact bearer-token occurrence from Kubernetes diagnostics", () => {

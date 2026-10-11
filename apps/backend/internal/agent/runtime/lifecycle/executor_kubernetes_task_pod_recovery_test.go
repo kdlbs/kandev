@@ -225,9 +225,10 @@ func TestKubernetesTaskPodConcurrentStopAndAttach(t *testing.T) {
 		close(release)
 		t.Fatal("stop did not reach remote deletion")
 	}
-	_, attachErr := f.runtime.CreateInstance(ctx, taskPodRequest(3))
+	attached := make(chan error, 1)
+	go func() { _, err := f.runtime.CreateInstance(ctx, taskPodRequest(3)); attached <- err }()
 	close(release)
-	require.NoError(t, attachErr)
+	require.NoError(t, <-attached)
 	require.NoError(t, <-stopped)
 	_, active, _ := f.control.snapshot()
 	require.NotContains(t, active, "instance-1")

@@ -3,18 +3,31 @@ package lifecycle
 import (
 	"context"
 	"errors"
+
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 
 	"github.com/kandev/kandev/internal/task/models"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
-func (r *KubernetesExecutor) stopSharedKubernetesInstance(ctx context.Context, instance *ExecutorInstance) error {
+func (r *KubernetesExecutor) stopSharedKubernetesInstance(ctx context.Context, instance *ExecutorInstance) (returnedErr error) {
 	unlock := r.lockInstance(instance.InstanceID)
 	defer unlock()
 	ctx, cancel := kubernetesDurableContext(ctx)
 	defer cancel()
-	session := r.closeSharedKubernetesSessions(instance)
+	attachments := r.sharedKubernetesSessionSnapshot(instance)
+	defer func() {
+		if returnedErr == nil {
+			r.closeSharedKubernetesSessionSnapshot(attachments)
+		}
+	}()
+	session := attachments[instance.InstanceID]
+	if session == nil {
+		for _, candidate := range attachments {
+			session = candidate
+			break
+		}
+	}
 	if r.environmentStore == nil || r.secretStore == nil {
 		return errors.New("kubernetes task environment store is unavailable")
 	}
@@ -29,6 +42,13 @@ func (r *KubernetesExecutor) stopSharedKubernetesInstance(ctx context.Context, i
 	if record.TaskID != instance.TaskID {
 		return models.ErrWorkspaceReuseUnsafe
 	}
+
+	return r.stopSharedKubernetesRemote(ctx, instance, record, session)
+}
+
+func (r *KubernetesExecutor) stopSharedKubernetesRemote(ctx context.Context, instance *ExecutorInstance, record *models.KubernetesEnvironment, session *kubernetesSession) error {
+	environmentID := getMetadataString(instance.Metadata, MetadataKeyKubernetesResourceEnvironmentID)
+	var err error
 
 	instance, err = r.taskKubernetesStopInstance(ctx, instance, record)
 	if err != nil {
@@ -52,17 +72,21 @@ func (r *KubernetesExecutor) stopSharedKubernetesInstance(ctx context.Context, i
 	if err := verifyRecordedPod(pod, recorded.namespace, recorded.podName, recorded.podUID, identity); err != nil {
 		return err
 	}
-	token, err := r.secretStore.Reveal(ctx, record.ControlSecretID)
-	if err != nil {
-		return err
+	if record.ControlSecretID == "" {
+		return models.ErrWorkspaceReuseUnsafe
 	}
 	forward, control, err := r.connectHealthyKubernetesControl(ctx, runtime, pod)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = forward.Close() }()
-	control.SetAuthToken(token)
-	return control.DeleteInstance(ctx, getMetadataString(instance.Metadata, MetadataKeyKubernetesAgentctlInstanceID))
+	req := &ExecutorCreateRequest{TaskEnvironmentID: environmentID, Metadata: cloneKubernetesMetadata(instance.Metadata)}
+	req.Metadata[MetadataKeyAuthTokenSecret] = record.ControlSecretID
+	req.Metadata[MetadataKeyBootstrapNonceSecret] = record.BootstrapSecretID
+	_, err = r.withSharedKubernetesControlAuth(ctx, req, control, func() error {
+		return control.DeleteInstance(ctx, getMetadataString(instance.Metadata, MetadataKeyKubernetesAgentctlInstanceID))
+	})
+	return err
 }
 
 // Rollback owns only the newly attached agent, even if credential persistence failed.
@@ -136,13 +160,25 @@ func (r *KubernetesExecutor) taskKubernetesStopInstance(ctx context.Context, ins
 	return &copyInstance, nil
 }
 
-// A resumed execution can have a new local ID while agentctl retains the remote
-// session ID. Release every local connection for that exact remote session.
-func (r *KubernetesExecutor) closeSharedKubernetesSessions(instance *ExecutorInstance) *kubernetesSession {
+// Capture exact attachments before remote work; a later refresh must not be
+// removed by completion of an older stop.
+func (r *KubernetesExecutor) sharedKubernetesSessionSnapshot(instance *ExecutorInstance) map[string]*kubernetesSession {
 	r.mu.Lock()
-	var closing []*kubernetesSession
+	defer r.mu.Unlock()
+	snapshot := make(map[string]*kubernetesSession)
 	for id, session := range r.sessions {
 		if id == instance.InstanceID || matchesSharedKubernetesSession(session, instance) {
+			snapshot[id] = session
+		}
+	}
+	return snapshot
+}
+
+func (r *KubernetesExecutor) closeSharedKubernetesSessionSnapshot(snapshot map[string]*kubernetesSession) {
+	r.mu.Lock()
+	var closing []*kubernetesSession
+	for id, session := range snapshot {
+		if r.sessions[id] == session {
 			delete(r.sessions, id)
 			closing = append(closing, session)
 		}
@@ -151,12 +187,6 @@ func (r *KubernetesExecutor) closeSharedKubernetesSessions(instance *ExecutorIns
 	for _, session := range closing {
 		_ = closeKubernetesSessionResources(session)
 	}
-	if len(closing) == 0 {
-		return nil
-	}
-	// Every matching connection uses the same pod and executor configuration;
-	// any one supplies the fallback runtime client after its forward is closed.
-	return closing[0]
 }
 
 func matchesSharedKubernetesSession(session *kubernetesSession, instance *ExecutorInstance) bool {

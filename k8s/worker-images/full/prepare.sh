@@ -17,6 +17,14 @@ until timeout 3 docker info >/dev/null 2>&1; do
   sleep 1
 done
 
+if [ "${FULL_WORKER_CHECK_MODE:-}" = isolated ]; then
+  proof_deadline=$(( $(date +%s) + 240 ))
+  until timeout 10 python3 /opt/full-worker/check.py --preflight; do
+    [ "$(date +%s)" -lt "$proof_deadline" ] || exit 1
+    sleep 1
+  done
+fi
+
 create_workspace_caches() {
   mkdir -p "$workspace/.cache/npm" "$workspace/.cache/pip" "$workspace/.cache/go-build" \
     "$workspace/.cache/go-mod" "$workspace/.npm-global" "$workspace/.pnpm" \

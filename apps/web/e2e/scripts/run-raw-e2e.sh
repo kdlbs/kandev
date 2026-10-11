@@ -4,6 +4,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ ${FULL_WORKER_CHECK_MODE:-} == isolated ]]; then
+  source "$SCRIPT_DIR/worker-isolation.sh"
+  worker_isolation_dispatch run-raw-e2e.sh "$@" || exit $?
+fi
 source "$SCRIPT_DIR/resource-guard.sh"
 
 PW_ARGS=()

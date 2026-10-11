@@ -52,8 +52,9 @@ Schedule these Pods only on a worker node pool isolated from trusted workloads.
 
 The daemon reads the Pod interface MTU and applies it to default and
 user-defined bridges. It selects Docker's cgroupfs driver with a relative
-`docker` parent so nested container cgroups remain below the daemon container's
-cgroup on compatible cgroup-v2 runtimes. Verify both properties on the actual
+`docker` parent in the default template. This requires a compatible namespace;
+the isolated renderer resolves and verifies the companion's actual bounded group
+before placing nested containers under its `docker` descendant. Verify both properties on the actual
 CNI and container runtime before rollout.
 
 The preparation script waits at most 60 seconds (plus a bounded client call)
@@ -104,3 +105,67 @@ callbacks, SSH fixtures and arbitrary Docker plugins are not promised to work.
 This recipe does not establish full Kandev Docker-executor parity, provision a
 control plane or update an existing service. The backend must contain the
 explicit workspace-grant implementation before accepting this template.
+
+
+## Isolate repository validation
+
+Render an explicitly enabled profile after building and distributing the verified
+image. Existing rendering remains unchanged:
+
+```bash
+bash k8s/worker-images/full/render-template.sh --isolated registry/image@sha256:<digest>
+```
+
+The companion resolves its own cgroup rather than assuming the mount root is
+bounded, then verifies cgroup-v2 ancestry and memory charging with a bounded
+64 MiB probe before preparation enables validation. Startup refuses a mismatched
+3 GiB parent budget and reports its failed preflight stage. A missing/mismatched receipt,
+unavailable image or incompatible runtime fails preparation; checks do not fall
+back into agent memory. This requires the updated worker image containing
+`/opt/full-worker/check.py` and the rendered startup command. Do not paste a
+partial prepare script into an existing running task.
+
+On an enabled worker, repository Make build/test/lint goals and both `e2e:run`
+and `e2e:raw` package entry points dispatch through `scripts/worker-check` before
+heavy work. All sibling sessions share one Docker name reservation. An explicit
+runner command supports other workspace validation:
+
+```bash
+scripts/worker-check --kind lint -- make -C apps/backend lint
+scripts/worker-check --kind build -- make -C apps/backend build
+(cd apps/web && ../../scripts/worker-check --kind browser -- pnpm e2e:run --host --shards 1)
+```
+
+Each child has a 2 GiB memory/no-extra-swap limit, 2 CPUs, 512 PIDs and a 30-minute
+execution deadline. Admission waits at most 60 seconds. The 3 GiB companion budget
+reserves 1 GiB for the daemon and conservatively deducts other running containers'
+configured memory limits; unbounded workloads block admission. A child OOM fails
+its check while the agent container remains separate. The temporary HOME and
+`/tmp` are disposable; workspace artifacts/cache survive. Go uses two runtime
+threads and a soft heap target below the hard limit; backend lint concurrency is
+two and browser validation is one worker/shard.
+
+Policy environment keys are `FULL_WORKER_CHECK_IMAGE`, `_MEMORY_BYTES`,
+`_BUDGET_BYTES`, `_RESERVE_BYTES`, `_CPUS`, `_PIDS`, `_QUEUE_SECONDS`, and
+`_JOB_SECONDS` (each suffix follows `FULL_WORKER_CHECK`). Budgets must match the
+measured companion hard limit and its rendered `validation_budget`. Change the
+companion limit, rendered budget and main-container policy together, then verify
+on a disposable task before rollout. Images require immutable digests; exact
+local image IDs are accepted only when deliberately loaded for disposable tests.
+
+Children receive workspace access and the explicit test allowlist in `check.py`:
+locale/timezone, CI, mock/strict test selectors, instrumentation, port offset and
+PR artifact capture. They receive neither the daemon socket nor Kandev auth,
+control files, native-agent HOME, provider tokens or inherited managed Git leases.
+Daemon-dependent Docker/Kind/SSH suites and agent-only callback fixtures are
+unsupported inside this runner. Make options/explicit variables are passed as
+arguments, with host jobserver descriptors removed. The internal
+`FULL_WORKER_CHECK_INSIDE` marker prevents recursion among trusted commands.
+
+Direct `go`, `golangci-lint`, `pnpm build`, custom provider shell commands and
+raw Docker users bypass entry-point routing. Use guarded Make/package commands
+or the explicit runner. This is cooperative resource protection within the task
+trust boundary, not adversarial isolation. Node-wide memory pressure can still
+restart Pods. Stale exited or expired never-started slots are reconciled by exact
+ID and labels; running slots cannot be stolen. Publishing images and enabling
+production profiles require separate operational rollout after live acceptance.

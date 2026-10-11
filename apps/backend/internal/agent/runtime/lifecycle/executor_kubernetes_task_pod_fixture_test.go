@@ -27,6 +27,7 @@ type taskPodControl struct {
 	handshakes   int
 	token        string
 	failID       string
+	deleteStatus int
 	beforeDelete func()
 }
 
@@ -78,6 +79,11 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodDelete {
+		if c.deleteStatus != 0 {
+			w.WriteHeader(c.deleteStatus)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid auth token"})
+			return
+		}
 		delete(c.active, id)
 		w.WriteHeader(http.StatusNoContent)
 		return

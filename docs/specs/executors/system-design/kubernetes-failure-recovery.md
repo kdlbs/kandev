@@ -11,8 +11,9 @@ requirements:
 
 Implements [retained failure recovery](../requirements/kubernetes-failure-recovery.md)
 within the existing [resource ownership decision](../../../decisions/2026-08-24-kubernetes-executor-resource-ownership.md).
-No new storage, credential rotation, public endpoint, or resource ownership rule
-is needed. The foundation's inventory and identity checks remain authoritative.
+No new database table, public endpoint, or resource ownership rule is needed.
+Reuse the existing per-boot token generation, bootstrap handshake, and encrypted
+credential recovery protocol for both attachment and stop. The foundation's inventory and identity checks remain authoritative.
 
 ## Failure teardown
 
@@ -88,6 +89,62 @@ Current profile environment edits therefore apply to resumed processes.
 other repository failures and executor ownership mismatches return an error.
 No missing profile is replaced with a different profile.
 
+## Shared stop after control-server restart
+
+Criteria .9-.13 repair the task-owned stop path. On 2026-10-07 a container OOM
+restarted agentctl with a fresh token. `stopSharedKubernetesInstance` used the
+saved token and removed `sharedSessions` before DELETE returned 401. Manager
+cleanup retained the execution, but subsequent refresh had lost its connection
+inventory. This section supersedes the assumption that attachment-only token
+recovery is sufficient. It does not change error propagation or UI diagnostics.
+
+Keep the exact instance lock and bounded service-owned cleanup context. Read the
+canonical environment runtime, verify task/executor ownership and recorded Pod
+UID/labels before opening control transport. Stop must not create a replacement
+Pod, PVC, or remote agent instance. Existing missing-Pod handling remains separate
+and must prove absence through the Kubernetes API; connection failure is not
+absence.
+
+Extract the authenticated control-operation boundary currently used by
+`connectSharedKubernetesAgentctl`. Under the existing `control:<environment>`
+lock, load pending/recovery/canonical credentials, open a healthy control forward,
+and attempt the requested operation. On typed authentication failure (401),
+re-handshake once using only the recorded bootstrap nonce, persist the issued
+token through `persistSharedKubernetesControlToken`, and retry the same operation
+once. Do not treat arbitrary 403, timeout, or identity errors as permission to
+bootstrap. Do not recover by minting a replacement nonce. Attachment continues
+to create instances; stop only deletes its recorded instance ID. HTTP 404 from
+that authenticated DELETE is success, including when the restarted server has
+no instance registry.
+
+Retain existing in-memory pending-token and deterministic encrypted recovery
+secret handling for a consumed nonce. Canonical persistence must finish before
+cleanup declares success. If canonical persistence fails, save the token in the
+existing recovery secret with a bounded durable context and leave execution
+ownership available for retry. If all durable writes fail, retain in-memory
+pending state and report failure; recovery across a simultaneous backend crash
+cannot be guaranteed without durable storage. Tests distinguish that limitation
+from successful recovery-secret persistence. Never log nonce/token values.
+
+Do not close/remove session inventory at the start of stop. Keep an immutable
+snapshot or generation-checked recovery handle while remote deletion is pending.
+Transient transport may be replaced without discarding recorded recovery inputs.
+After authenticated deletion/absence and credential persistence succeed, remove
+only the matching `(execution, session, environment, remote instance)` attachment
+and close its clients/forwards. A late completion cannot remove a replacement
+attachment. On failure retain or reconstruct a usable recovery handle; a dead
+socket alone is not useful retained state. Environment credentials are shared,
+while connections remain per execution. Manager cleanup releases its execution
+slot only after this stop returns success; its existing stop-error retention
+requires no public state contract change.
+
+Use one lock order across attach, refresh and stop: instance lock, then existing
+environment control lock. Do not acquire instance locks from inside the control
+lock or hold database transactions during network operations. Follow existing
+bounded persistence behavior and do not call lifecycle callbacks while either
+lock is held. Task-terminal cleanup retains generation claims, sibling checks,
+exact UID deletion, and recovery-secret teardown.
+
 ## Validation
 
 Map criteria .1-.3 to orchestrator failure-handler, teardown ownership, and
@@ -110,3 +167,11 @@ covers .7 with deleted, absent, lookup-error, and foreign-executor cases.
 [Kubernetes recoverable failure cleanup](../../../plans/kubernetes-recoverable-failure-cleanup/plan.md)
 
 [Resume profile environment repair](../../../plans/kubernetes-resume-profile-env/plan.md)
+
+
+[Restart-safe cleanup and isolated validation delivery](../../../plans/kubernetes-session-resilience/plan.md)
+owns criteria .9-.13. Its lifecycle regressions cover stop before polling,
+concurrent sibling recovery, consumed-nonce persistence failure, backend restart,
+stale completion, and authenticated absence. Disposable Kind acceptance retains
+Pod/PVC and workspace bytes, uses the same native conversation, and observes one
+continuation execution. Production recovery is not a fault-injection test.

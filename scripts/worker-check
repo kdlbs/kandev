@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+runner=/opt/full-worker/check.py
+if [[ ! -f "$runner" ]]; then runner="$script_dir/../k8s/worker-images/full/check.py"; fi
+exec python3 "$runner" "$@"

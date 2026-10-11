@@ -87,3 +87,19 @@ export class FixtureResourceOwnership {
     this.owned.delete(resource);
   }
 }
+
+export function cleanupFailedFixture(error: unknown, cleanups: Array<() => void>): never {
+  const failures = [error];
+  for (const cleanup of cleanups) {
+    try {
+      cleanup();
+    } catch (failure) {
+      failures.push(failure);
+    }
+  }
+  if (failures.length > 1)
+    throw new AggregateError(failures, "Kubernetes fixture setup and cleanup failed", {
+      cause: error,
+    });
+  throw error;
+}

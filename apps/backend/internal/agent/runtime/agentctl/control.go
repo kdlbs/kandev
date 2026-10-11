@@ -332,9 +332,9 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 			Error string `json:"error"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
-			return nil, fmt.Errorf("failed to decode error response: %w", err)
+			return nil, &ControlHTTPError{Status: resp.StatusCode, Message: fmt.Sprintf("failed to decode error response: %v", err)}
 		}
-		return nil, fmt.Errorf("failed to create instance: %s (status %d)", errResp.Error, resp.StatusCode)
+		return nil, &ControlHTTPError{Status: resp.StatusCode, Message: fmt.Sprintf("failed to create instance: %s (status %d)", errResp.Error, resp.StatusCode)}
 	}
 
 	var result CreateInstanceResponse
@@ -373,9 +373,9 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 			Error string `json:"error"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
-			return fmt.Errorf("failed to decode error response: %w", err)
+			return &ControlHTTPError{Status: resp.StatusCode, Message: fmt.Sprintf("failed to decode error response: %v", err)}
 		}
-		return fmt.Errorf("failed to delete instance: %s (status %d)", errResp.Error, resp.StatusCode)
+		return &ControlHTTPError{Status: resp.StatusCode, Message: fmt.Sprintf("failed to delete instance: %s (status %d)", errResp.Error, resp.StatusCode)}
 	}
 
 	c.logger.Info("deleted agent instance", zap.String("instance_id", instanceID))
@@ -402,7 +402,7 @@ func (c *ControlClient) GetInstance(ctx context.Context, instanceID string) (*In
 		return nil, fmt.Errorf("%w: %q", ErrInstanceNotFound, instanceID)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get instance: status %d", resp.StatusCode)
+		return nil, &ControlHTTPError{Status: resp.StatusCode, Message: fmt.Sprintf("failed to get instance: status %d", resp.StatusCode)}
 	}
 
 	var info InstanceInfo
