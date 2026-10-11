@@ -16,13 +16,13 @@ func (m *Manager) inspectDeliveryRecordTransport(ctx context.Context, lease *age
 func (m *Manager) inspectRetainedDeliveryRecord(ctx context.Context, lease *agentctl.RuntimeLease, control *agentctl.ControlClient, request DeliveryRecordEvidenceRequest) (*DeliveryRecordEvidence, error) {
 	retained, readErr := control.ReadRetainedReconstructionEvidence(ctx, journal.RetainedReconstructionEvidenceRequest{
 		Root: m.dataDir, SessionID: request.SessionID, IncarnationID: request.IncarnationID,
-		HarnessGeneration: request.HarnessGeneration, OriginalRuntime: request.OriginalRuntime,
+		HarnessGeneration: request.HarnessGeneration, OriginalRuntime: request.OriginalRuntime, RetiredSubmissionID: request.RetiredSubmissionID,
 	})
 	if readErr != nil {
 		return nil, deliveryEvidenceReadError(lease, readErr)
 	}
 	return &DeliveryRecordEvidence{
-		Descriptor: retained.Descriptor, ProcessTerminated: retained.ProcessTerminated,
+		Descriptor: retained.Descriptor, ProcessTerminated: retained.ProcessTerminated, RetiredSubmission: retained.RetiredSubmission,
 	}, nil
 }
 
@@ -40,10 +40,26 @@ func (m *Manager) inspectLiveDeliveryRecord(ctx context.Context, lease *agentctl
 	if readErr != nil {
 		return nil, deliveryEvidenceReadError(lease, readErr)
 	}
-	return &DeliveryRecordEvidence{
+	result := &DeliveryRecordEvidence{
 		Descriptor: *descriptor, LiveExecutionID: instance.ID,
 		ProcessTerminated: historicalProcessTermination(request, instance.ID),
-	}, nil
+	}
+	if request.RetiredSubmissionID != "" {
+		retired, err := client.GetDeliverySubmission(ctx, request.RetiredSubmissionID)
+		if err != nil {
+			return nil, deliveryEvidenceReadError(lease, err)
+		}
+		after, err := client.GetDeliveryStatus(ctx, "")
+		if err != nil {
+			return nil, deliveryEvidenceReadError(lease, err)
+		}
+		if !sameDeliveryRecordDescriptor(*descriptor, *after) {
+			return nil, ErrDeliveryRecordEvidenceStale
+		}
+		retired.Payload = nil
+		result.RetiredSubmission = retired
+	}
+	return result, nil
 }
 
 func validDeliveryRecordSubmissionRequest(request DeliveryRecordSubmissionRequest) bool {

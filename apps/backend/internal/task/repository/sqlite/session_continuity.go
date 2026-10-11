@@ -397,7 +397,12 @@ func (r *Repository) upsertSessionRecoveryBlockTx(
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
 		   AND excluded.consumer_reference = 'agent_delivery'
 		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
-		   THEN session_recovery_blocks.delivery_stream_id ELSE excluded.delivery_stream_id END,
+		   THEN session_recovery_blocks.delivery_stream_id
+           WHEN session_recovery_blocks.consumer_reference = 'agent_delivery'
+           AND excluded.consumer_reference = 'agent_delivery'
+           AND session_recovery_blocks.delivery_submission_id = excluded.delivery_submission_id
+           AND excluded.delivery_stream_id = '' THEN session_recovery_blocks.delivery_stream_id
+           ELSE excluded.delivery_stream_id END,
 		 delivery_sequence = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
 		   AND excluded.consumer_reference = 'agent_delivery'
@@ -549,6 +554,11 @@ func (r *Repository) ResolveSessionRecoveryBlock(ctx context.Context, id, action
 			return false, err
 		}
 		if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, []string{streamID}); err != nil {
+			return false, err
+		}
+	}
+	if consumerReference == "agent_delivery" && action == nativeResumeRecoveryAction {
+		if valid, err := r.restoreNativeResumeMetadataTx(ctx, tx, id, resolvedAt); err != nil || !valid {
 			return false, err
 		}
 	}

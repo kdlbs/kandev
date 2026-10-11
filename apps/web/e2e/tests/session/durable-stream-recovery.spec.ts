@@ -6,6 +6,17 @@ import { routeSessionEntryRecovery } from "../../helpers/session-entry-recovery"
 import { assertDeliveryRecoveryGeometry } from "../../helpers/delivery-recovery-controls";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { verifyNativeResumeClearsRecoveryNotice } from "../../helpers/native-resume-notice";
+
+test("native resume clears the uncertain notice after reload and accepts another prompt", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await verifyNativeResumeClearsRecoveryNotice(testPage, apiClient, seedData, backend.tmpDir);
+});
 
 async function seedUncertainDeliverySession(apiClient: ApiClient, seedData: SeedData) {
   const task = await apiClient.createTask(seedData.workspaceId, "Durable stream recovery", {

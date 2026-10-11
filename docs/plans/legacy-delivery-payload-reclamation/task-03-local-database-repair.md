@@ -175,3 +175,11 @@ locally. Extracting its existing item selection into a private pure helper prese
 scope filtering, stale workspace suppression and array identity. All 44 existing
 secret-hook tests, full frontend lint and typecheck passed. This is behavior-preserving
 CI remediation, with no new user-facing contract or documentation requirement.
+
+Conflict resolution merged main at `e8c1761cb5b7006b905c0aa995925372ce8664e1`.
+Both branches had extracted the same secret-selection helper; the resolution keeps
+main's typed helper and matching call. All 44 secret-hook tests, typecheck, full web
+lint, documentation checks, retention race tests (with the previously documented
+million-row exclusions), and desktop cleanup/recovery E2E passed on the merge.
+The phone rerun was interrupted when the user requested immediate commit and push;
+CI owns the remaining validation.

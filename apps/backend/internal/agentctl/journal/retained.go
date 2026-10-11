@@ -41,16 +41,18 @@ type RetainedRecoveryResponse struct {
 // set for one retained session. Process identity is optional because older
 // records do not always contain enough information to prove termination.
 type RetainedReconstructionEvidenceRequest struct {
-	Root              string                    `json:"root"`
-	SessionID         string                    `json:"session_id"`
-	IncarnationID     string                    `json:"incarnation_id"`
-	HarnessGeneration uint64                    `json:"harness_generation"`
-	OriginalRuntime   *processidentity.Identity `json:"original_runtime,omitempty"`
+	RetiredSubmissionID string                    `json:"retired_submission_id,omitempty"`
+	Root                string                    `json:"root"`
+	SessionID           string                    `json:"session_id"`
+	IncarnationID       string                    `json:"incarnation_id"`
+	HarnessGeneration   uint64                    `json:"harness_generation"`
+	OriginalRuntime     *processidentity.Identity `json:"original_runtime,omitempty"`
 }
 
 // RetainedReconstructionEvidence keeps process proof tri-state: nil means
 // that termination could not be established from retained evidence.
 type RetainedReconstructionEvidence struct {
+	RetiredSubmission *Submission        `json:"retired_submission,omitempty"`
 	Descriptor        RecoveryDescriptor `json:"descriptor"`
 	ProcessTerminated *bool              `json:"process_terminated,omitempty"`
 }
@@ -88,6 +90,18 @@ func ReadRetainedReconstructionEvidence(
 		return nil, err
 	}
 	result := &RetainedReconstructionEvidence{Descriptor: descriptor}
+	if request.RetiredSubmissionID != "" {
+		retired, err := journal.GetSubmission(ctx, request.RetiredSubmissionID)
+		if err != nil {
+			return nil, err
+		}
+		if !retired.Retired || retired.State != SubmissionInterruptedUnknown || retired.SessionID != request.SessionID ||
+			retired.IncarnationID != request.IncarnationID || retired.HarnessGeneration == 0 || retired.HarnessGeneration > request.HarnessGeneration {
+			return nil, ErrOwnerMismatch
+		}
+		retired.Payload = nil
+		result.RetiredSubmission = &retired
+	}
 	if request.OriginalRuntime != nil {
 		if err := request.OriginalRuntime.Validate(); err == nil {
 			if terminated, err := processidentity.OwnedSessionTerminated(*request.OriginalRuntime); err == nil {

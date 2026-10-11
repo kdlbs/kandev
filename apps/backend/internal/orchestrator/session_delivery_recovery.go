@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"go.uber.org/zap"
 	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -121,7 +122,17 @@ func (s *Service) retryRecoverySuccessor(
 			recoveryStateUnavailableReason, recovery.Revision, identity), true, nil
 	}
 	creationReason, outcome := recoverySuccessorOutcome(recovery.Phase)
-	if !sameRecoverySuccessorGeneration(generation, recovery, creationReason) {
+	matches := sameRecoverySuccessorGeneration(generation, recovery, creationReason)
+	if !matches && recovery.Phase == models.AgentDeliveryRecoveryRestored && generation != nil &&
+		generation.Generation == recovery.HarnessGeneration && generation.NativeSessionID != "" {
+		if verifier, ok := s.repo.(nativeResumeRecoveryVerifier); ok {
+			matches, err = verifier.HasResolvedNativeResumeRecovery(ctx, recovery)
+			if err != nil {
+				return nil, true, err
+			}
+		}
+	}
+	if !matches {
 		return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
 			"recovery_identity_mismatch", recovery.Revision, identity), true, nil
 	}
@@ -316,6 +327,9 @@ func (s *Service) runSessionDeliveryRecovery(
 ) sessionDeliveryRecoveryAttempt {
 	if recoverer, ok := s.agentManager.(agentPromptStreamIdentityRecoverer); ok {
 		result := recoverer.RecoverAgentPromptStreamWithIdentity(ctx, identity)
+		s.logger.Debug("durable delivery reconciliation result", zap.String("session_id", identity.SessionID),
+			zap.String("execution_id", identity.ExecutionID), zap.String("outcome", string(result.Outcome)),
+			zap.String("reason", result.Reason), zap.Bool("process_terminated", result.ProcessTerminated), zap.Error(result.Err))
 		attempt := sessionDeliveryRecoveryAttempt{
 			outcome:           mapDeliveryRecoveryOutcome(result.Outcome),
 			reason:            publicDeliveryRecoveryReason(result.Reason),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -45,4 +46,33 @@ func TestDeliveryBlockPublicationWithoutPriorError(t *testing.T) {
 	resolvedSession, err := repo.GetTaskSession(ctx, session.ID)
 	require.NoError(t, err)
 	require.True(t, resolvedSession.UpdatedAt.After(blockedSession.UpdatedAt), "resolution must fence older block snapshots")
+}
+
+func TestLifecycleLaunchGuardPublishesDeliveryRecoveryOwner(t *testing.T) {
+	for _, reason := range []string{"unresolved_durable_work", "native_state_missing"} {
+		t.Run(reason, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
+			session, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+				SessionID: session.ID, IncarnationID: session.QueueIncarnationID, Generation: 1,
+				NativeSessionID: "native", CreationReason: "initial"}))
+			eb := &recordingEventBus{}
+			svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+			svc.eventBus = eb
+			guard := &lifecycle.RestoreRequiredError{Decision: lifecycle.RestoreDecision{Reason: lifecycle.RestoreReason(reason)}}
+			require.NoError(t, svc.recordSessionRecoveryBlock(ctx, session.ID, "interactive", guard))
+			require.NotEmpty(t, eb.events)
+			data := eb.events[len(eb.events)-1].event.Data.(map[string]interface{})
+			blocks := data["session_recovery_blocks"].([]dto.SessionRecoveryBlockDTO)
+			require.Len(t, blocks, 1)
+			wantOwner := "interactive"
+			if reason == "unresolved_durable_work" {
+				wantOwner = "agent_delivery"
+			}
+			require.Equal(t, wantOwner, blocks[0].ConsumerReference, "the open chat chooses delivery recovery controls from their durable owner")
+		})
+	}
 }

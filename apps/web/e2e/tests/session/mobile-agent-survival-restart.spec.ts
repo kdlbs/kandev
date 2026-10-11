@@ -9,7 +9,6 @@ import {
   expectRestartConversationIdentity,
 } from "../../helpers/silent-restart-recovery";
 import { SessionPage } from "../../pages/session-page";
-
 // The mobile surface uses the same recovery state as desktop. This test keeps
 // the touch path in the real session chat while proving that backend restart
 // does not replace a surviving worktree agent or expose a recovery action.

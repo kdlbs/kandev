@@ -7,7 +7,11 @@ import { readdirSync, existsSync } from "node:fs";
 
 const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
 type TestDatabase = {
-  prepare(sql: string): { get(...args: unknown[]): unknown; run(...args: unknown[]): unknown };
+  prepare(sql: string): {
+    get(...args: unknown[]): unknown;
+    all(...args: unknown[]): unknown[];
+    run(...args: unknown[]): unknown;
+  };
   close(): void;
 };
 
@@ -27,6 +31,7 @@ type JournalRecord = {
   id: string;
   session_id: string;
   incarnation_id: string;
+  stream_id: string;
   harness_generation: number;
   hash: string;
   payload: string;
@@ -73,7 +78,11 @@ function findSessionJournal(tmpDir: string, sessionId: string) {
   throw new Error(`No retained journal found for session ${sessionId}`);
 }
 
-export function seedInterruptedPrompt(tmpDir: string, sessionId: string) {
+export function seedInterruptedPrompt(
+  tmpDir: string,
+  sessionId: string,
+  recoveryExecutionId?: string,
+) {
   const journalPath = findSessionJournal(tmpDir, sessionId);
   const seeded = withDatabase(tmpDir, (db) => {
     const source = db
@@ -89,11 +98,13 @@ export function seedInterruptedPrompt(tmpDir: string, sessionId: string) {
       payload: string | Uint8Array;
     };
     const blockId = randomUUID();
+    const sourcePeer = journalFixture("read", journalPath, { id: source.id });
     const submissionId = `prompt:${randomUUID()}`;
     const submission: JournalRecord = {
       id: submissionId,
       session_id: sessionId,
       incarnation_id: source.incarnation_id,
+      stream_id: sourcePeer.stream_id,
       harness_generation: source.harness_generation,
       hash: source.payload_hash,
       payload: Buffer.from(source.payload).toString("base64"),
@@ -108,17 +119,47 @@ export function seedInterruptedPrompt(tmpDir: string, sessionId: string) {
     ).run(submissionId, source.id);
     db.prepare(
       `INSERT INTO session_recovery_blocks
-      (id, session_id, incarnation_id, expected_generation, reason, state, consumer_reference, delivery_submission_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'unknown_prompt_outcome', 'open', 'agent_delivery', ?, ?, ?)`,
+      (id, session_id, incarnation_id, expected_generation, reason, state, consumer_reference, delivery_submission_id, delivery_stream_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'unknown_prompt_outcome', 'open', 'agent_delivery', ?, ?, ?, ?)`,
     ).run(
       blockId,
       sessionId,
       source.incarnation_id,
       source.harness_generation,
       submissionId,
+      sourcePeer.stream_id,
       new Date().toISOString(),
       new Date().toISOString(),
     );
+    if (recoveryExecutionId) {
+      const session = db
+        .prepare("SELECT metadata FROM task_sessions WHERE id = ?")
+        .get(sessionId) as { metadata: string };
+      const metadata = JSON.parse(session.metadata || "{}");
+      metadata.agent_delivery_recovery = {
+        phase: "uncertain",
+        revision: 1,
+        session_id: sessionId,
+        agent_execution_id: recoveryExecutionId,
+        submission_id: submissionId,
+        stream_id: sourcePeer.stream_id,
+        incarnation_id: source.incarnation_id,
+        harness_generation: source.harness_generation,
+        prompt_generation: 1,
+        updated_at: new Date().toISOString(),
+      };
+      metadata.last_agent_error = {
+        code: "DURABLE_DELIVERY_UNCERTAIN",
+        details: submissionId,
+        agent_execution_id: recoveryExecutionId,
+        message: "Delivery was interrupted.",
+        occurred_at: new Date().toISOString(),
+      };
+      db.prepare("UPDATE task_sessions SET metadata = ? WHERE id = ?").run(
+        JSON.stringify(metadata),
+        sessionId,
+      );
+    }
     return { blockId, submissionId, journalPath, submission };
   });
   expect(journalFixture("read", journalPath, seeded.submission)).toMatchObject({

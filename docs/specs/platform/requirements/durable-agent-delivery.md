@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-09-10
-updated: 2026-10-10
+updated: 2026-10-11
 owners:
   - kandev
 ---
@@ -155,6 +155,7 @@ This requirement extends recovery for existing installations. It does not change
 ## Implementation records
 
 - [Journal shutdown and interrupted-session recovery repair](../../../plans/agentctl-journal-shutdown-recovery/plan.md).
+- [Journal growth and automatic inconsistency repair](../../../plans/journal-growth-restart-reconciliation/plan.md).
 
 - [Delivery record recovery design](../system-design/durable-agent-record-recovery.md).
 - [Missing delivery record fix package](../../../plans/durable-agent-record-recovery/plan.md).
@@ -170,7 +171,3 @@ This requirement extends recovery for existing installations. It does not change
 
 [Backend delivery retention](backend-agent-delivery-retention.md) defines bounded transport cleanup while preserving this delivery contract.
 Its [work package](../../../plans/backend-agent-delivery-retention/plan.md) has Tasks 01-07 implemented and Task 08 acceptance in progress. It does not change current implementation status.
-
-## Implementation records
-
-- [Journal shutdown and interrupted-session recovery repair](../../../plans/agentctl-journal-shutdown-recovery/plan.md).

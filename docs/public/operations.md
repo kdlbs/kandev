@@ -27,6 +27,12 @@ Kandev does not currently provide a user-login boundary for the web application,
 
 See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for mode-specific prerequisites and commands.
 
+## Recover sessions after a restart
+
+Kandev automatically checks interrupted sessions at startup and after replacement of a crashed local agent runtime. When retained delivery records agree with the session's saved identity and the original process is proven terminated, Kandev restores the same native conversation without resending its interrupted prompt. Recovery checks continue while Kandev runs, so a temporarily unavailable runtime can recover later. These checks are enabled by default; the Agent Survival feature toggle separately controls whether local agents survive a graceful backend shutdown.
+
+The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
+
 ## Prevent host sleep during active tasks
 
 Administrators can open **Settings > Preferences > Task Behavior > Runtime** and enable
@@ -147,12 +153,14 @@ Keep the page open during recovery. Existing route data stays available in the
 browser. If automatic recovery stops, an administrator can select **Retry agent
 runtime** in the alert. This action does not restart Kandev.
 
-A session with an uncertain prompt outcome stays blocked after runtime recovery.
-Use that session's recovery card to reconnect or stop the original work. **Retry
-connection** checks the existing delivery and does not send the prompt again.
-Kandev keeps the composer blocked until it can confirm the delivery outcome. A
-Stop request does not prove cancellation; if Kandev cannot reach the original
-process, the card reports that the outcome is still unknown.
+After runtime replacement, Kandev automatically reconciles interrupted sessions
+as described in [Recover sessions after a restart](#recover-sessions-after-a-restart).
+A session remains blocked when termination cannot be verified, retained records
+conflict, or native state is missing. Use its recovery card to reconnect or stop
+the original work. **Retry connection** checks retained evidence without sending
+the prompt again. A successful native recovery admits new prompts while keeping
+the interrupted prompt's historical outcome unknown. Stop does not prove
+cancellation; an unreachable original process still has an unknown outcome.
 
 ![Settings > System > Status showing health checks, the running version, and disk usage.](../screenshots/system-status.png)
 

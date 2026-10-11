@@ -280,3 +280,18 @@ func TestBuildLifecycleLaunchRequestCarriesBootStatusSuppression(t *testing.T) {
 
 	require.True(t, launch.SuppressBootStatusMessage)
 }
+
+func TestLifecycleAdapter_ForwardsAlreadyResumedDeliveryRecovery(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	var client orchestratorexecutor.AgentManagerClient = newLifecycleAdapter(mgr, nil, newTestLogger())
+	provider, ok := client.(interface {
+		ReconcileAlreadyResumedDelivery(context.Context, lifecycle.AgentDeliveryRecoveryIdentity, string) (bool, error)
+	})
+	require.True(t, ok, "production adapter must expose already loaded native recovery")
+	if !ok {
+		return
+	}
+	restored, err := provider.ReconcileAlreadyResumedDelivery(context.Background(), lifecycle.AgentDeliveryRecoveryIdentity{SessionID: "missing"}, "native")
+	require.NoError(t, err)
+	require.False(t, restored)
+}

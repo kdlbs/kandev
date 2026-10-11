@@ -46,10 +46,8 @@ func (r *Repository) ReconstructAgentDeliverySubmission(
 	if err != nil {
 		return nil, err
 	}
-	for id, other := range rows {
-		if id != request.Submission.ID && isUnresolvedReconstructionSubmission(other.State) {
-			return nil, repoerrors.ErrAgentDeliveryReconstructionConflict
-		}
+	if err := validateReconstructionHistory(rows, request); err != nil {
+		return nil, err
 	}
 	if existing, exists := rows[request.Submission.ID]; exists {
 		return r.reconcileExistingReconstructionTx(ctx, tx, owner, existing, block, request)
@@ -101,6 +99,16 @@ func (r *Repository) loadReconstructionOwnerAndBlockTx(ctx context.Context, tx *
 }
 
 func (r *Repository) reconcileExistingReconstructionTx(ctx context.Context, tx *sqlx.Tx, owner *agentDeliveryReconstructionOwner, existing models.AgentDeliverySubmission, block *models.SessionRecoveryBlock, request *models.AgentDeliveryReconstructionRequest) (*models.AgentDeliveryReconstructionResult, error) {
+	if !sameReconstructionPayload(existing, request.Submission) {
+		return nil, repoerrors.ErrAgentDeliveryReconstructionConflict
+	}
+	copy := *request
+	copy.Submission = existing
+	request = &copy
+	if !owner.exists && (existing.State == models.DeliverySubmissionDispatching || existing.State == models.DeliverySubmissionInterruptedUnknown) {
+		return r.reconstructExistingDispatchTx(ctx, tx, request, owner, block)
+
+	}
 	if reconstructionAlreadyCommitted(owner, existing, block, request) {
 		return commitIdempotentReconstruction(tx, owner.current, *block)
 	}
@@ -112,6 +120,13 @@ func (r *Repository) reconcileExistingReconstructionTx(ctx context.Context, tx *
 		return commitIdempotentReconstruction(tx, recovery, *block)
 	}
 	return nil, repoerrors.ErrAgentDeliveryReconstructionConflict
+}
+
+func sameReconstructionPayload(existing, expected models.AgentDeliverySubmission) bool {
+	return existing.ID == expected.ID && existing.SessionID == expected.SessionID &&
+		existing.IncarnationID == expected.IncarnationID && existing.HarnessGeneration == expected.HarnessGeneration &&
+		existing.OwnerGeneration == expected.OwnerGeneration && existing.DispatchAttemptID == expected.DispatchAttemptID &&
+		existing.PayloadHash == expected.PayloadHash && string(existing.Payload) == string(expected.Payload)
 }
 
 func (r *Repository) lockAgentDeliveryReconstructionTx(
@@ -548,3 +563,62 @@ func (r *Repository) bindReconstructedBlockTx(
 var _ interface {
 	ReconstructAgentDeliverySubmission(context.Context, *models.AgentDeliveryReconstructionRequest) (*models.AgentDeliveryReconstructionResult, error)
 } = (*Repository)(nil)
+
+func (r *Repository) reconstructExistingDispatchTx(ctx context.Context, tx *sqlx.Tx, request *models.AgentDeliveryReconstructionRequest, owner *agentDeliveryReconstructionOwner, block *models.SessionRecoveryBlock) (*models.AgentDeliveryReconstructionResult, error) {
+	existing := request.Submission
+	if existing.State == models.DeliverySubmissionDispatching {
+		proof := request.Recovery.Reconstruction.ProcessTerminated
+		if proof == nil || !*proof {
+			return nil, repoerrors.ErrAgentDeliveryReconstructionConflict
+		}
+		result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE agent_delivery_submissions SET state = ? WHERE id = ? AND state = ?`),
+			models.DeliverySubmissionInterruptedUnknown, existing.ID, existing.State)
+		if err != nil {
+			return nil, err
+		}
+		if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+			return nil, repoerrors.ErrAgentDeliveryReconstructionStale
+		}
+	}
+	recovery, err := r.persistReconstructedRecoveryTx(ctx, tx, request, owner, r.nowUTC())
+	if err != nil {
+		return nil, err
+	}
+	bound, err := r.bindReconstructedBlockTx(ctx, tx, request, block, recovery.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return commitIdempotentReconstruction(tx, recovery, bound)
+}
+
+func validateReconstructionHistory(rows map[string]models.AgentDeliverySubmission, request *models.AgentDeliveryReconstructionRequest) error {
+	verified := make(map[string]models.AgentDeliverySubmission, len(request.VerifiedRetiredSubmissions))
+	for _, snapshot := range request.VerifiedRetiredSubmissions {
+		if _, duplicate := verified[snapshot.ID]; duplicate {
+			return repoerrors.ErrAgentDeliveryReconstructionConflict
+		}
+		verified[snapshot.ID] = snapshot
+	}
+	for id, other := range rows {
+		if id == request.Submission.ID || !isUnresolvedReconstructionSubmission(other.State) {
+			continue
+		}
+		snapshot, found := verified[id]
+		if !found || other.State != models.DeliverySubmissionInterruptedUnknown || snapshot.State != other.State ||
+			!sameRetiredReconstructionSnapshot(other, snapshot) {
+			return repoerrors.ErrAgentDeliveryReconstructionConflict
+		}
+		delete(verified, id)
+	}
+	if len(verified) != 0 {
+		return repoerrors.ErrAgentDeliveryReconstructionStale
+	}
+	return nil
+}
+
+func sameRetiredReconstructionSnapshot(a, b models.AgentDeliverySubmission) bool {
+	return a.ID == b.ID && a.SessionID == b.SessionID && a.IncarnationID == b.IncarnationID &&
+		a.HarnessGeneration == b.HarnessGeneration && a.OwnerGeneration == b.OwnerGeneration &&
+		a.DispatchAttemptID == b.DispatchAttemptID && a.PayloadHash == b.PayloadHash && a.State == b.State &&
+		a.Outcome == b.Outcome && a.CreatedAt.Equal(b.CreatedAt) && a.UpdatedAt.Equal(b.UpdatedAt)
+}

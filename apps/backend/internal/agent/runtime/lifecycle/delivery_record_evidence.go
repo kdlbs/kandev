@@ -27,17 +27,19 @@ var (
 // historical execution whose process proof may be available. It contains no
 // storage path and is not a browser-facing request.
 type DeliveryRecordEvidenceRequest struct {
-	TaskID            string
-	SessionID         string
-	ExecutionID       string
-	IncarnationID     string
-	HarnessGeneration uint64
-	OriginalRuntime   *processidentity.Identity
+	RetiredSubmissionID string
+	TaskID              string
+	SessionID           string
+	ExecutionID         string
+	IncarnationID       string
+	HarnessGeneration   uint64
+	OriginalRuntime     *processidentity.Identity
 }
 
 // DeliveryRecordEvidence separates the live session instance from proof about
 // the historical process that owned a candidate prompt.
 type DeliveryRecordEvidence struct {
+	RetiredSubmission *journal.Submission
 	Descriptor        journal.RecoveryDescriptor
 	ProcessTerminated *bool
 	LiveExecutionID   string
@@ -90,7 +92,12 @@ func (m *Manager) InspectDeliveryRecordEvidence(
 	if result.Descriptor.SubmissionsTruncated {
 		return result, errors.Join(ErrDeliveryRecordEvidenceTruncated, ErrDeliveryRecoveryBlocked)
 	}
-	result.ControlIdentity = m.deliveryRecordControlIdentity(request, result.Descriptor)
+	result.ControlIdentity = m.deliveryRecordControlIdentity(ctx, request, result.Descriptor)
+	if identity := result.ControlIdentity; identity != nil {
+		result.ProcessTerminated = historicalProcessTermination(DeliveryRecordEvidenceRequest{
+			ExecutionID: identity.ExecutionID, OriginalRuntime: &identity.OriginalRuntime,
+		}, result.LiveExecutionID)
+	}
 	if err = lease.CheckCurrent(); err != nil {
 		return nil, err
 	}

@@ -69,22 +69,25 @@ type AgentDeliveryReconstructionProvenance struct {
 // AgentDeliveryReconstructionRequest is the validated owner snapshot passed
 // to the transaction that restores one retained prompt's canonical association.
 type AgentDeliveryReconstructionRequest struct {
-	TaskID                    string
-	SessionID                 string
-	IncarnationID             string
-	HarnessGeneration         int64
-	ExpectedExecutionID       string
-	ExpectedSessionState      TaskSessionState
-	ExpectedWorkspacePath     string
-	NativeSessionID           string
-	MessageID                 string
-	ExpectedBlock             SessionRecoveryBlock
-	SourceStreamHighWater     int64
-	SourceStreamAcknowledged  int64
-	SourceStreamFirstRetained int64
-	ExpectedCursor            *AgentDeliveryCursor
-	Submission                AgentDeliverySubmission
-	Recovery                  AgentDeliveryRecovery
+	// Retirement evidence is verified through the authenticated runtime before
+	// these immutable canonical snapshots are checked under the SQL write lock.
+	VerifiedRetiredSubmissions []AgentDeliverySubmission
+	TaskID                     string
+	SessionID                  string
+	IncarnationID              string
+	HarnessGeneration          int64
+	ExpectedExecutionID        string
+	ExpectedSessionState       TaskSessionState
+	ExpectedWorkspacePath      string
+	NativeSessionID            string
+	MessageID                  string
+	ExpectedBlock              SessionRecoveryBlock
+	SourceStreamHighWater      int64
+	SourceStreamAcknowledged   int64
+	SourceStreamFirstRetained  int64
+	ExpectedCursor             *AgentDeliveryCursor
+	Submission                 AgentDeliverySubmission
+	Recovery                   AgentDeliveryRecovery
 }
 
 // AgentDeliveryReconstructionResult reports the committed recovery identity.

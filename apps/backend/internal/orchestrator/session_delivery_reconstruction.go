@@ -84,6 +84,9 @@ func (s *Service) retryMissingCanonicalDeliverySubmission(ctx context.Context, s
 	if reason := enrichReconstructionControlIdentity(ctx, client, selected.evidence, request); reason != "" {
 		return blocked(reason)
 	}
+	if err := s.verifyReconstructionRetiredHistory(ctx, session, request, selected.evidence); err != nil {
+		return blocked(deliveryIdentityMismatchReason)
+	}
 	return s.commitDeliveryReconstruction(ctx, session, store, request)
 }
 
@@ -213,4 +216,28 @@ func deliveryRecordEvidenceReason(err error) string {
 	default:
 		return recoveryUnavailableReason
 	}
+}
+
+func (s *Service) verifyReconstructionRetiredHistory(ctx context.Context, session *models.TaskSession, request *models.AgentDeliveryReconstructionRequest, evidence *agentruntime.DeliveryRecordEvidence) error {
+	lister, ok := s.repo.(nativeResumeDeliverySubmissionReader)
+	if !ok {
+		return errors.New("reconstruction submission inventory is unavailable")
+	}
+	rows, err := lister.ListAgentDeliverySubmissions(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row.ID == request.Submission.ID || terminalDeliverySubmission(row.State) {
+			continue
+		}
+		if row.State != models.DeliverySubmissionInterruptedUnknown {
+			return errors.New("independent reconstruction work remains live")
+		}
+		if err := s.verifyRetiredRestartHistory(ctx, &silentRestoreInputs{session: session, recovery: request.Recovery}, row, evidence); err != nil {
+			return err
+		}
+		request.VerifiedRetiredSubmissions = append(request.VerifiedRetiredSubmissions, *row)
+	}
+	return nil
 }

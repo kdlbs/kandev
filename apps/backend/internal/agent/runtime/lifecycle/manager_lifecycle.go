@@ -1049,6 +1049,11 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	execution.agentctlLifecycleMu.Lock()
 	sessionID := execution.SessionID
+	retired := m.isRetiredLocalExecution(execution)
+	if retired && !retiredExecutionProcessTerminated(execution) {
+		execution.agentctlLifecycleMu.Unlock()
+		return fmt.Errorf("stale runtime owner termination is unproven: %w", agentctl.ErrRuntimeStopUnconfirmed)
+	}
 
 	m.logger.Info("cleaning up stale agent execution",
 		zap.String("session_id", sessionID),
@@ -1058,9 +1063,11 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	// goroutines. Without this, the old agentctl instance keeps running when a new
 	// execution is created for the same session, causing git polling on deleted worktrees.
 	// This is idempotent — returns success if the instance is already gone.
-	if err := m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false); err != nil {
-		execution.agentctlLifecycleMu.Unlock()
-		return fmt.Errorf("stop stale runtime %s: %w", execution.ID, err)
+	if !retired {
+		if err := m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false); err != nil {
+			execution.agentctlLifecycleMu.Unlock()
+			return fmt.Errorf("stop stale runtime %s: %w", execution.ID, err)
+		}
 	}
 
 	// End session trace span only after the runtime has stopped. A failed stop
@@ -1080,7 +1087,9 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	// Delete the persistence row in lockstep with store removal so we never
 	// leave a phantom executors_running row pointing at a non-existent
 	// execution. Best-effort; "not found" is expected and silently swallowed.
-	m.deleteExecutorRunning(ctx, sessionID, execution.ID)
+	if !retired {
+		m.deleteExecutorRunning(ctx, sessionID, execution.ID)
+	}
 
 	return nil
 }

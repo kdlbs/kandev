@@ -198,3 +198,16 @@ read/copied, and no backend, Global owner, value, copy, or layout contract chang
 Final documentation coverage uses all seven actual paths, replacing the
 design-only projected preflight. Normal hooks and hosted delivery remain
 separate receipts; `done` means local implementation, not publication or merge.
+
+
+### Delivery compatibility on 2026-10-11
+
+Full frontend CI in recovery PR #4416 exposed the combined Global and Workspace
+publication guards pushing `useSecrets` past its 100-line limit. The exact scoped
+ESLint command reproduced the warning before a behavior-preserving extraction of
+the existing displayed-item selector. The same command now passes with zero
+warnings, and all eight secret-hook and settings compatibility suites pass
+(71 tests), preserving global filtering, pending scope changes, mutation
+publication, and lifetime behavior. Rendered layout, copy, responsive behavior,
+and public contracts are unchanged, so no new mobile composition or screenshots
+are required for this extraction.

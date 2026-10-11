@@ -7,7 +7,6 @@ import {
   expectRestartConversationIdentity,
 } from "../../helpers/silent-restart-recovery";
 import { SessionPage } from "../../pages/session-page";
-
 async function localExecutorProfileId(apiClient: {
   listExecutors: () => Promise<{
     executors: Array<{ type: string; profiles?: Array<{ id: string }> }>;

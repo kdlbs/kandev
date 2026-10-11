@@ -30,12 +30,12 @@ func (m *retainedJournalRecoveryManager) InspectDeliveryRecordEvidence(
 	m.inspectCalls++
 	retained, err := journal.ReadRetainedReconstructionEvidence(ctx, journal.RetainedReconstructionEvidenceRequest{
 		Root: m.root, SessionID: request.SessionID, IncarnationID: request.IncarnationID,
-		HarnessGeneration: request.HarnessGeneration,
+		HarnessGeneration: request.HarnessGeneration, RetiredSubmissionID: request.RetiredSubmissionID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &lifecycle.DeliveryRecordEvidence{Descriptor: retained.Descriptor, ControlIdentity: m.controlIdentity}, nil
+	return &lifecycle.DeliveryRecordEvidence{Descriptor: retained.Descriptor, ControlIdentity: m.controlIdentity, RetiredSubmission: retained.RetiredSubmission}, nil
 }
 
 func (m *retainedJournalRecoveryManager) ReadDeliveryRecordSubmission(
