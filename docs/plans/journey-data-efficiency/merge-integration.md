@@ -62,3 +62,29 @@ differed. Debug logs established that setup failure, and the fresh managed
 build resolved it. Those failed attempts are not represented as passing tests.
 This is a test-fixture correction with no production behavior or public
 documentation change. New-head remote CI remains pending after push.
+
+## Durable-record recovery fixture CI correction
+
+At head `b671c1faf1b8cca60db04c16ed72c817488c776e`, hosted E2E Shard
+4/14 (job `114467826807`, run `38138234732`) failed both phone durable-record
+recovery scenarios on all four attempts. The snapshot read recovery revision
+from the compact session list, which intentionally omits that metadata. The
+live-block setup also expected an absent metadata key to be `undefined`, while
+the cleared key was serialized as `null`.
+
+The shared fixture now reads full session detail, verifies session and task
+ownership, and accepts only null or absent cleared metadata. Reconstruction
+revision, message count, no-prompt-replay, restart and recovery-block assertions
+remain intact. No production behavior, mobile layout, touch interaction or
+public contract changed; existing public and mobile design guidance applies.
+
+`pnpm exec vitest run e2e/helpers/delivery-record-recovery.test.ts` first
+reproduced the missing revision and unchecked ownership, then passed both
+regressions. Targeted ESLint, Prettier and `pnpm typecheck` passed. The exact
+phone scenarios passed, two tests with retries disabled, under a fresh managed
+build: `pnpm e2e:run --host --project mobile-chrome
+tests/session/mobile-durable-record-recovery.spec.ts --retries=0`.
+The unchanged managed build also passed both desktop counterparts under
+`pnpm e2e:run --host --no-build --project chromium
+tests/session/durable-record-recovery.spec.ts --retries=0`. Hosted checks are
+still pending; these local passes do not replace required CI evidence.
