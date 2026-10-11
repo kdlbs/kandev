@@ -138,3 +138,62 @@ func TestNativeResumeMissingDeliveryMetadataKeepsBlockOpen(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.RecoveryBlockOpen, block.State)
 }
+
+func TestNativeResumeLegacyRecoveryRequiresMatchingNativeEvidence(t *testing.T) {
+	testNativeResumeLegacyEvidence(t, newRepoForSessionTests(t))
+}
+
+func TestNativeResumeLegacyRecoveryRequiresMatchingNativeEvidencePostgres(t *testing.T) {
+	database := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 4)
+	repo, err := NewWithDB(database, database, nil)
+	require.NoError(t, err)
+	testNativeResumeLegacyEvidence(t, repo)
+}
+
+func testNativeResumeLegacyEvidence(t *testing.T, repo *Repository) {
+	ctx := context.Background()
+	for _, condition := range []string{"matching", "wrong native", "newer generation", "wrong submission", "missing stream"} {
+		t.Run(condition, func(t *testing.T) {
+			fixture := newSilentRestoreFixture(t, repo, "legacy-"+condition, models.TaskSessionStateWaitingForInput)
+			nativeID := fixture.generation.NativeSessionID
+			if condition == "wrong native" {
+				nativeID = "unrelated-native"
+			}
+			metadata := map[string]any{"acp": map[string]any{"session_id": nativeID}}
+			raw, err := json.Marshal(metadata)
+			require.NoError(t, err)
+			_, err = repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE task_sessions SET metadata = ? WHERE id = ?`), string(raw), fixture.session.ID)
+			require.NoError(t, err)
+			if condition == "newer generation" {
+				generation := fixture.generation
+				generation.Generation++
+				require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &generation))
+			}
+			if condition == "wrong submission" {
+				_, err = repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE agent_delivery_submissions SET harness_generation = 2 WHERE id = ?`), fixture.recovery.SubmissionID)
+				require.NoError(t, err)
+			}
+			if condition == "missing stream" {
+				_, err = repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE session_recovery_blocks SET delivery_stream_id = '' WHERE id = ?`), fixture.block.ID)
+				require.NoError(t, err)
+			}
+			changed, err := repo.ResolveSessionRecoveryBlock(ctx, fixture.block.ID, "resume", time.Now().UTC())
+			require.NoError(t, err)
+			require.Equal(t, condition == "matching", changed)
+			block, err := repo.GetSessionRecoveryBlock(ctx, fixture.block.ID)
+			require.NoError(t, err)
+			if condition == "matching" {
+				require.Equal(t, models.RecoveryBlockResolved, block.State)
+				require.Equal(t, "resume", block.AuthorizedAction)
+			} else {
+				require.Equal(t, models.RecoveryBlockOpen, block.State)
+			}
+			session, err := repo.GetTaskSession(ctx, fixture.session.ID)
+			require.NoError(t, err)
+			require.Equal(t, metadata, session.Metadata)
+			submission, err := repo.GetAgentDeliverySubmission(ctx, fixture.recovery.SubmissionID)
+			require.NoError(t, err)
+			require.Equal(t, models.DeliverySubmissionInterruptedUnknown, submission.State)
+		})
+	}
+}

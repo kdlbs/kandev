@@ -10,6 +10,7 @@ import {
   captureSilentRestartSnapshot,
   countSessionMessageAdds,
   expectSilentRestartRestoration,
+  expectRestartConversationIdentity,
 } from "../../helpers/silent-restart-recovery";
 import { SessionPage } from "../../pages/session-page";
 
@@ -28,12 +29,11 @@ type RuntimeStoreWindow = Window & {
 test.describe("Mobile agent runtime replacement", () => {
   test.describe.configure({ retries: 0 });
 
-  test("restores the interrupted conversation silently after backend restart", async ({
+  test("restores the interrupted conversation and preserves it after browser reload", async ({
     testPage,
     apiClient,
     seedData,
     prCapture,
-    backend,
   }) => {
     test.setTimeout(300_000);
     const traffic = attachGatewayTrafficCapture(testPage);
@@ -67,6 +67,10 @@ test.describe("Mobile agent runtime replacement", () => {
     const pageTimeOrigin = await testPage.evaluate(() => performance.timeOrigin);
     await observeAgentRuntimeAvailability(testPage);
 
+    if (!task.session_id) throw new Error("missing interrupted session");
+    const sessionId = task.session_id;
+    const beforeReplacement = await captureSilentRestartSnapshot(apiClient, task.id, sessionId);
+
     const killed = await apiClient.killLocalAgentRuntimeChild();
     expect(killed.killed).toBe(true);
     await waitForAgentRuntimeReplacement(testPage, runtime.runtime_epoch, bootID);
@@ -88,34 +92,38 @@ test.describe("Mobile agent runtime replacement", () => {
     const stopBox = await stop.boundingBox();
     expect(stopBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile runtime replacement");
-    if (!task.session_id) throw new Error("missing interrupted session");
-    const sessionId = task.session_id;
-    const beforeRestart = await captureSilentRestartSnapshot(apiClient, task.id, sessionId);
-    const messageAddsBeforeRestart = countSessionMessageAdds(
-      messageAdds.frames,
+    await expectSilentRestartRestoration(
+      testPage,
+      apiClient,
       task.id,
-      sessionId,
+      beforeReplacement,
+      traffic.frames,
     );
-    const sessionRecoveriesBeforeRestart = traffic.frames.filter(
+    await session.waitForChatIdle({ timeout: 60_000, requireEditable: true });
+    const beforeReload = await captureSilentRestartSnapshot(apiClient, task.id, sessionId);
+    const messageAddsBeforeReload = countSessionMessageAdds(messageAdds.frames, task.id, sessionId);
+    const sessionRecoveriesBeforeReload = traffic.frames.filter(
       (frame) =>
         frame.direction === "sent" &&
         frame.action === "session.recover" &&
         frame.sessionId === sessionId,
     ).length;
 
-    await backend.restart();
-    expect(await apiClient.getBackendBootID()).not.toBe(bootID);
+    expect(await apiClient.getBackendBootID()).toBe(bootID);
     await testPage.reload();
     await session.waitForLoad();
-    await expectSilentRestartRestoration(
-      testPage,
-      apiClient,
-      task.id,
-      beforeRestart,
-      traffic.frames,
-    );
+    await expectRestartConversationIdentity({
+      page: testPage,
+      api: apiClient,
+      taskId: task.id,
+      snapshot: beforeReload,
+      traffic: traffic.frames,
+      expectedState: "WAITING_FOR_INPUT",
+      executionDisposition: "preserved",
+    });
+    await expect(testPage.getByTestId("failed-session-banner")).toHaveCount(0);
     expect(countSessionMessageAdds(messageAdds.frames, task.id, sessionId)).toBe(
-      messageAddsBeforeRestart,
+      messageAddsBeforeReload,
     );
     expect(
       traffic.frames.filter(
@@ -124,20 +132,20 @@ test.describe("Mobile agent runtime replacement", () => {
           frame.action === "session.recover" &&
           frame.sessionId === sessionId,
       ),
-    ).toHaveLength(sessionRecoveriesBeforeRestart);
+    ).toHaveLength(sessionRecoveriesBeforeReload);
 
     await session.waitForChatIdle({ timeout: 60_000, requireEditable: true });
     await expect(session.chat.getByText(/Started agent|Resumed agent/i)).toHaveCount(1);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile silent restart recovery");
     await prCapture.screenshot("phone-silent-restart-restoration", {
-      caption: "The existing conversation is ready after a backend restart",
+      caption: "The existing conversation is ready after runtime replacement",
     });
 
     await session.sendMessageViaButton("/e2e:simple-message");
     await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
     await session.waitForChatIdle({ timeout: 45_000 });
     expect(countSessionMessageAdds(messageAdds.frames, task.id, sessionId)).toBe(
-      messageAddsBeforeRestart + 1,
+      messageAddsBeforeReload + 1,
     );
     expect(
       (await apiClient.listSessionMessages(sessionId)).messages.filter(
@@ -145,7 +153,7 @@ test.describe("Mobile agent runtime replacement", () => {
       ),
     ).toHaveLength(1);
     expect((await apiClient.listSessionTurns(sessionId)).turns).toHaveLength(
-      beforeRestart.turnIds.length + 1,
+      beforeReload.turnIds.length + 1,
     );
   });
 });

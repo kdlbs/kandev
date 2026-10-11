@@ -1,7 +1,6 @@
 package sqlite
 
 import (
-	"fmt"
 	"os"
 	"testing"
 
@@ -96,10 +95,6 @@ func measureRetentionSQLiteStorage(t testing.TB, repo *Repository, result *reten
 	}
 }
 
-func retentionStorageMeasurementLabel(engine string, payloadSize int, phase string) string {
-	return fmt.Sprintf("engine=%s payload_bytes=%d phase=%s", engine, payloadSize, phase)
-}
-
 func reopenRetentionStorageRepository(t *testing.T, repo *Repository) *Repository {
 	t.Helper()
 	var path, schema string
@@ -142,17 +137,4 @@ func reopenRetentionStorageRepository(t *testing.T, repo *Repository) *Repositor
 	}
 	reopened.clockNow = clock
 	return reopened
-}
-
-func compactRetentionStorageFixture(t *testing.T, repo *Repository) {
-	t.Helper()
-	if repo.db.DriverName() == "pgx" {
-		for _, query := range []string{`VACUUM (ANALYZE) agent_delivery_inbox`, `VACUUM (ANALYZE) agent_delivery_effects`} {
-			if _, err := repo.db.Exec(query); err != nil {
-				t.Fatal(err)
-			}
-		}
-	} else if _, err := repo.db.Exec(`VACUUM`); err != nil {
-		t.Fatal(err)
-	}
 }

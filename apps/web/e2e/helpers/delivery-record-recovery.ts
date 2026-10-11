@@ -104,7 +104,7 @@ export async function createDeliveryRecordRecoverySession(
         task_id: task.id,
         agent_profile_id: profile.id,
         executor_profile_id: seedData.worktreeExecutorProfileId,
-        intent: "prepare",
+        intent: "start",
         launch_workspace: true,
       })
     : await apiClient.seedTaskSession(task.id, {
@@ -119,6 +119,11 @@ export async function createDeliveryRecordRecoverySession(
         timeout: 60_000,
       })
       .toBe("ready");
+    await expect
+      .poll(async () => (await apiClient.getTaskSession(seeded.session_id)).session.state, {
+        timeout: 30_000,
+      })
+      .toBe("WAITING_FOR_INPUT");
     await apiClient.stopSession({ session_id: seeded.session_id, force: true });
   }
   let action: FixtureAction = "seed";

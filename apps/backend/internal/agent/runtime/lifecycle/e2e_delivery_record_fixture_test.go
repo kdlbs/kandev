@@ -68,12 +68,22 @@ func seedDeliveryRecordIncident(t *testing.T, repo *tasksqlite.Repository, root,
 	if incarnationID == "" {
 		incarnationID = session.ID
 	}
-	const generation = int64(7)
+	generation := int64(7)
 	nativeSessionID := "native-e2e-record-" + session.ID
-	require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
-		SessionID: session.ID, IncarnationID: incarnationID, Generation: generation,
-		NativeSessionID: nativeSessionID, CreationReason: "initial",
-	}))
+	if !blocked {
+		current, err := repo.GetCurrentHarnessSessionGeneration(ctx, session.ID, incarnationID)
+		require.NoError(t, err)
+		require.NotNil(t, current)
+		generation = current.Generation
+		require.NotEmpty(t, current.NativeSessionID)
+		streamID = fmt.Sprintf("%s:g%d", incarnationID, generation)
+	} else {
+		require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+			SessionID: session.ID, IncarnationID: incarnationID, Generation: generation,
+			NativeSessionID: nativeSessionID, CreationReason: "initial",
+		}))
+	}
+
 	now := time.Now().UTC()
 	turn := &models.Turn{
 		ID: "turn-e2e-record-" + session.ID, TaskID: session.TaskID,
@@ -128,27 +138,29 @@ func seedDeliveryRecordIncident(t *testing.T, repo *tasksqlite.Repository, root,
 	}
 	_, err = retained.PutSubmission(ctx, journal.Submission{
 		ID: "prompt:completed-e2e-record-" + session.ID, StreamID: "stream-e2e-record-history",
-		SessionID: session.ID, IncarnationID: incarnationID, HarnessGeneration: uint64(generation - 1),
+		SessionID: session.ID, IncarnationID: incarnationID, HarnessGeneration: uint64(max(generation-1, 1)),
 		Hash:    journal.SubmissionHash([]byte(`{"text":"completed history"}`)),
 		Payload: []byte(`{"text":"completed history"}`), State: journal.SubmissionCompleted,
 		TerminalEventRetained: true, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
-	_, err = retained.Append(ctx, journal.Event{
-		SessionID: session.ID, IncarnationID: incarnationID, HarnessGeneration: uint64(generation),
-		StreamID:     streamID,
-		SubmissionID: "prompt:message-e2e-record-" + session.ID + "-1",
-		Type:         "assistant_message", Payload: []byte(`{"text":"Retained output from the interrupted turn"}`),
-	})
-	require.NoError(t, err)
-	require.NoError(t, retained.Acknowledge(ctx, streamID, 1))
-	_, err = repo.ReceiveAgentDeliveryEvent(ctx, &models.AgentDeliveryEvent{
-		SessionID: session.ID, IncarnationID: incarnationID, HarnessGeneration: generation,
-		StreamID: streamID, Sequence: 1,
-		SubmissionID: "prompt:message-e2e-record-" + session.ID + "-1",
-		EventType:    "assistant_message", Payload: []byte(`{"text":"Retained output from the interrupted turn"}`),
-	}, 1)
-	require.NoError(t, err)
+	if blocked {
+		event, err := retained.Append(ctx, journal.Event{
+			SessionID: session.ID, IncarnationID: incarnationID, HarnessGeneration: uint64(generation),
+			StreamID:     streamID,
+			SubmissionID: "prompt:message-e2e-record-" + session.ID + "-1",
+			Type:         "assistant_message", Payload: []byte(`{"text":"Retained output from the interrupted turn"}`),
+		})
+		require.NoError(t, err)
+		require.NoError(t, retained.Acknowledge(ctx, streamID, event.Sequence))
+		_, err = repo.ReceiveAgentDeliveryEvent(ctx, &models.AgentDeliveryEvent{
+			SessionID: session.ID, IncarnationID: incarnationID, HarnessGeneration: generation,
+			StreamID: streamID, Sequence: int64(event.Sequence),
+			SubmissionID: "prompt:message-e2e-record-" + session.ID + "-1",
+			EventType:    "assistant_message", Payload: []byte(`{"text":"Retained output from the interrupted turn"}`),
+		}, 1)
+		require.NoError(t, err)
+	}
 
 	var canonicalCount int
 	require.NoError(t, repo.DB().QueryRowContext(ctx,

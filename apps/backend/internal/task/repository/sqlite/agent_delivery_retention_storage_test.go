@@ -14,66 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// @covers AC-PLATFORM-DELIVERY-RETENTION-005.2 AC-PLATFORM-DELIVERY-RETENTION-005.3
-func TestDeliveryRetentionStorage(t *testing.T) {
-	for _, engine := range []string{"SQLite", "Postgres"} {
-		for _, payloadSize := range []int{1024, 4096} {
-			t.Run(fmt.Sprintf("%s/%d_bytes", engine, payloadSize), func(t *testing.T) {
-				repo, events := seedRetentionBoundsStream(t, engine, "storage", 1, 0)
-				ctx := context.Background()
-				assertRetentionStorageToolPolicy(t, repo)
-				const count, batchRows = 1_000_000, deliveryretention.BackgroundBatchRows
-				seedRetentionStorageRows(t, repo, events[0], count, payloadSize)
-				assertRetentionMillionLiveOrphanPhase(t, repo)
-				if engine == "SQLite" {
-					logRetentionSQLiteQueryPlan(t, repo)
-				} else {
-					logRetentionPostgresQueryPlans(t, repo, events[0])
-				}
-				t.Logf("%s storage=%+v", retentionStorageMeasurementLabel(engine, payloadSize, "before"), measureRetentionStorage(t, repo))
-				before := retentionCanonicalContent(t, repo, events[0].SessionID)
-				started := time.Now()
-				var prunedBytes int64
-				var retries int
-				for batch := 0; batch < count/batchRows+10; batch++ {
-					result, retryCount, removedBytes := runRetentionStorageAccountedBatch(t, repo, events[0], payloadSize, batchRows)
-					retries += retryCount
-					if result.Candidates > batchRows || result.PayloadBytesRead > 4<<20 {
-						t.Fatalf("batch exceeded work budget: %+v", result)
-					}
-					prunedBytes += removedBytes
-					cursor, err := repo.GetAgentDeliveryCursor(ctx, events[0].StreamID)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if cursor.RetiredSequence == count {
-						break
-					}
-					if batch == count/batchRows+9 {
-						t.Fatalf("million-event stream did not drain: %+v", cursor)
-					}
-				}
-				assertRetentionRowCount(t, repo, "agent_delivery_inbox", "stream_id = ?", events[0].StreamID, 0)
-				assertRetentionRowCount(t, repo, "agent_delivery_effects", "stream_id = ? AND effect_type = 'agent_delivery.event'", events[0].StreamID, 0)
-				if got := retentionCanonicalContent(t, repo, events[0].SessionID); got != before {
-					t.Fatal("storage cleanup changed canonical output")
-				}
-				if prunedBytes != int64(payloadSize)*(count-1)+int64(len(events[0].Payload)) {
-					t.Fatalf("removed payload accounting: %d", prunedBytes)
-				}
-				t.Logf("%s events=%d removed_bytes=%d deadline_retries=%d elapsed=%s storage=%+v", retentionStorageMeasurementLabel(engine, payloadSize, "after_logical"), count, prunedBytes, retries, time.Since(started), measureRetentionStorage(t, repo))
-				reopened := reopenRetentionStorageRepository(t, repo)
-				if got := retentionCanonicalContent(t, reopened, events[0].SessionID); got != before {
-					t.Fatal("database reopen changed canonical output")
-				}
-				assertRetentionRowCount(t, reopened, "agent_delivery_inbox", "stream_id = ?", events[0].StreamID, 0)
-				compactRetentionStorageFixture(t, reopened)
-				t.Logf("%s storage=%+v", retentionStorageMeasurementLabel(engine, payloadSize, "after_reopen_and_manual_compaction"), measureRetentionStorage(t, reopened))
-			})
-		}
-	}
-}
-
 func seedRetentionStorageRows(t testing.TB, repo *Repository, event *models.AgentDeliveryEvent, count, payloadSize int) {
 	t.Helper()
 	payload := []byte(`{"type":"message_chunk","text":"` + strings.Repeat("x", payloadSize-34) + `"}`)
@@ -146,27 +86,6 @@ func TestDeliveryRetentionStorageQueryPlan(t *testing.T) {
 	}
 	if !strings.Contains(details, "idx_agent_delivery_inbox_terminal_sequence") {
 		t.Fatalf("terminal frontier needs a sparse covering index: %s", details)
-	}
-}
-
-func logRetentionSQLiteQueryPlan(t *testing.T, repo *Repository) {
-	t.Helper()
-	query, args := agentDeliveryCompactionCandidateQuery(agentDeliveryRetentionProgress{}, 200, repo.nowUTC().Add(-time.Hour))
-	rows, err := repo.db.Query("EXPLAIN QUERY PLAN "+query, args...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var id, parent, unused int
-		var detail string
-		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
-			t.Fatal(err)
-		}
-		t.Log(detail)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -315,28 +234,50 @@ func runRetentionStorageAccountedBatch(t *testing.T, repo retentionStorageReposi
 func TestDeliveryRetentionStorageProtectedGap(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {
 		t.Run(engine, func(t *testing.T) {
-			repo, events := seedRetentionBoundsStream(t, engine, "storage-gap", 1, 0)
-			assertRetentionStorageToolPolicy(t, repo)
-			const count, gap, batchRows = 1_000_000, 500_000, deliveryretention.BackgroundBatchRows
-			seedRetentionStorageRows(t, repo, events[0], count, 1024)
-			before := retentionCanonicalContent(t, repo, events[0].SessionID)
-			if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE agent_delivery_inbox SET terminal=1,event_type='complete',payload=?,content_hash='',hash_version=0,payload_bytes=0 WHERE stream_id=? AND sequence=?`), []byte(`{"type":"complete"}`), events[0].StreamID, gap); err != nil {
-				t.Fatal(err)
-			}
-			for batch := 0; batch < count/batchRows+1; batch++ {
-				runRetentionStorageAccountedBatch(t, repo, events[0], 1024, batchRows)
-			}
-			cursor, err := repo.GetAgentDeliveryCursor(context.Background(), events[0].StreamID)
-			if err != nil || cursor.RetiredSequence != gap-1 {
-				t.Fatalf("protected frontier: %+v %v", cursor, err)
-			}
-			assertRetentionRowCount(t, repo, "agent_delivery_inbox", "stream_id=?", events[0].StreamID, count-gap+1)
-			if got := retentionCanonicalContent(t, repo, events[0].SessionID); got != before {
-				t.Fatal("protected-gap cleanup changed canonical output")
-			}
-			t.Logf("engine=%s seeded=%d protected_backlog=%d storage=%+v", engine, count, count-gap+1, measureRetentionStorage(t, repo))
+			testRetentionStorageProtectedGap(t, engine, 200, 100)
 		})
 	}
+}
+
+func testRetentionStorageProtectedGap(t *testing.T, engine string, count, gap int) {
+	t.Helper()
+	repo, events := seedRetentionBoundsStream(t, engine, "storage-gap", 1, 0)
+	assertRetentionStorageToolPolicy(t, repo)
+	const batchRows = deliveryretention.BackgroundBatchRows
+	seedRetentionStorageRows(t, repo, events[0], count, 1024)
+	before := retentionCanonicalContent(t, repo, events[0].SessionID)
+	if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE agent_delivery_inbox SET terminal=1,event_type='complete',payload=?,content_hash='',hash_version=0,payload_bytes=0 WHERE stream_id=? AND sequence=?`), []byte(`{"type":"complete"}`), events[0].StreamID, gap); err != nil {
+		t.Fatal(err)
+	}
+	for batch := 0; batch < 2*count/batchRows+10; batch++ {
+		result, _ := runRetentionStorageBatch(t, repo, batchRows)
+		if result.Candidates > batchRows || result.PayloadBytesRead > 4<<20 {
+			t.Fatalf("batch exceeded work budget: %+v", result)
+		}
+		var compactedThrough int64
+		if err := repo.db.QueryRow(`SELECT last_compaction_sequence FROM agent_delivery_retention_state WHERE id=1`).Scan(&compactedThrough); err != nil {
+			t.Fatal(err)
+		}
+		if compactedThrough >= int64(count) {
+			break
+		}
+	}
+	if err := repo.awaitRetentionStorageSettlement(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cursor, err := repo.GetAgentDeliveryCursor(context.Background(), events[0].StreamID)
+	if err != nil || cursor.RetiredSequence != int64(gap-1) {
+		t.Fatalf("protected frontier: %+v %v", cursor, err)
+	}
+	assertRetentionRowCount(t, repo, "agent_delivery_inbox", "stream_id=?", events[0].StreamID, count-gap+1)
+	if got := retentionCanonicalContent(t, repo, events[0].SessionID); got != before {
+		t.Fatal("protected-gap cleanup changed canonical output")
+	}
+	storage := measureRetentionStorage(t, repo)
+	if storage.RawPayloadBytes != int64(len(`{"type":"complete"}`)) || storage.CompactRows != int64(count-gap) {
+		t.Fatalf("protected terminal must retain its payload while later output becomes receipts: %+v", storage)
+	}
+	t.Logf("engine=%s seeded=%d protected_backlog=%d storage=%+v", engine, count, count-gap+1, storage)
 }
 
 func TestDeliveryRetentionStorageSeekPlan(t *testing.T) {

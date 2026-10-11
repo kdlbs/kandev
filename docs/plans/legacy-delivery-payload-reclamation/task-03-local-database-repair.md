@@ -183,3 +183,46 @@ lint, documentation checks, retention race tests (with the previously documented
 million-row exclusions), and desktop cleanup/recovery E2E passed on the merge.
 The phone rerun was interrupted when the user requested immediate commit and push;
 CI owns the remaining validation.
+
+
+CI remediation on merge head `f2d5da2504c6f7da27288ce8ea4d174efa9067f0`
+reproduced all three browser failure scenarios from E2E run `38162790010`.
+The Quick Chat Resume guard rejected historical blocks without a delivery recovery
+notice. Resolution now requires the persisted ACP identity to match the current
+harness generation and the exact interrupted SQL submission; the authenticated
+journal retirement prerequisite is unchanged. Missing native metadata, mismatched
+identity, superseding generation, and mismatched submission remain blocked. A
+failing legacy regression preceded the repository change; SQLite and PostgreSQL
+native-resume tests passed under the race detector, including existing rollback,
+newer-notice, missing-metadata, and stream-binding tests.
+
+The live-block fixture now retains a real native conversation, uses its generation
+and stream, and seeds an un-emitted journal-only submission. The separate record
+reconstruction fixture keeps its retained output, using the actual journal append
+sequence rather than assuming an empty stream. Both preserve the no-resend checks.
+The runtime replacement tests capture history before killing the runtime and await
+automatic restoration before checking browser reload persistence and follow-up.
+They verify replacement without restarting the backend during candidate launch;
+these scenarios cover runtime replacement and reload rather than a second backend
+restart incident. Native identity, original turns/messages, no implicit recovery
+request, no interrupted-prompt replay, and phone geometry remain asserted.
+
+All affected desktop scenarios passed with retries disabled in focused runs. The
+phone Quick Chat Resume, automatic runtime replacement/reload, missing-record
+reconstruction, and live-block tests passed together (four tests, zero retries).
+Web typecheck and changed-file ESLint, backend lint against `e8c1761cb5`, SQL guard,
+store-conformance race tests, documentation validation, and specification lint
+passed. The original CI blob audit accounted for all 20 shards and all failed
+attempts; the current-head review snapshot contained no unresolved threads.
+
+Backend Postgres job `114539277378` subsequently reported a protected-gap stress
+assertion that measured reclaimed bytes only from the contiguous retirement cursor.
+That measurement is valid for prefix deletion, but not for independent compaction
+past a protected terminal. At the user's request, both million-row storage tests
+and their exclusive measurement/query-plan helpers were removed. A 200-row
+protected-gap regression checks bounded batches, the unchanged protected frontier,
+canonical content, the protected terminal payload, and the exact count of compact
+receipts after the gap. It passed on SQLite and PostgreSQL under the race detector.
+The other focused retention and query-plan regressions remain. Full CI remains
+owned by the user after the remediation push; no live database maintenance or
+restart was performed in this CI remediation.

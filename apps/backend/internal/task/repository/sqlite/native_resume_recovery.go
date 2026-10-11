@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -59,7 +60,13 @@ func (r *Repository) restoreNativeResumeMetadataTx(ctx context.Context, tx *sqlx
 		return false, err
 	}
 	if !exists {
-		return consumer != reconstructionDeliveryConsumer, nil
+		if consumer != reconstructionDeliveryConsumer {
+			return true, nil
+		}
+		if incarnationID != blockIncarnation || submissionID == "" || streamID == "" {
+			return false, nil
+		}
+		return r.hasLegacyNativeResumeEvidenceTx(ctx, tx, metadata["acp"], sessionID, incarnationID, generation, submissionID)
 	}
 	if recovery.SessionID != sessionID || recovery.IncarnationID != incarnationID || incarnationID != blockIncarnation ||
 		recovery.HarnessGeneration != generation || recovery.SubmissionID != submissionID || recovery.StreamID != streamID ||
@@ -69,4 +76,30 @@ func (r *Repository) restoreNativeResumeMetadataTx(ctx context.Context, tx *sqlx
 	return writeSilentRestoreRecoveryTx(ctx, tx, r.db.Rebind, &silentRestoreSessionRow{
 		taskID: taskID, state: state, metadata: metadata, current: recovery,
 	}, metadataRaw, completedAt)
+}
+
+// Historical blocks can lack a recovery notice, but still require the current
+// native conversation and exact interrupted submission after journal retirement.
+func (r *Repository) hasLegacyNativeResumeEvidenceTx(
+	ctx context.Context, tx *sqlx.Tx, acpRaw json.RawMessage,
+	sessionID, incarnationID string, generation int64, submissionID string,
+) (bool, error) {
+	var acp struct {
+		SessionID string `json:"session_id"`
+	}
+	if len(acpRaw) == 0 || json.Unmarshal(acpRaw, &acp) != nil || acp.SessionID == "" {
+		return false, nil
+	}
+	var found bool
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (
+		SELECT 1 FROM harness_session_generations g JOIN agent_delivery_submissions s
+		ON s.session_id = g.session_id AND s.incarnation_id = g.incarnation_id
+		AND s.harness_generation = g.generation
+		WHERE g.session_id = ? AND g.incarnation_id = ? AND g.generation = ?
+		AND g.native_session_id = ? AND s.id = ? AND s.state = ?
+		AND NOT EXISTS (SELECT 1 FROM harness_session_generations newer
+		WHERE newer.session_id = g.session_id AND newer.incarnation_id = g.incarnation_id
+		AND newer.generation > g.generation))`), sessionID, incarnationID, generation,
+		acp.SessionID, submissionID, models.DeliverySubmissionInterruptedUnknown).Scan(&found)
+	return found, err
 }

@@ -85,6 +85,13 @@ generation, and payload hash. Missing or conflicting evidence prevents every ret
 It then re-reads both stores and requires retained retirement for each unresolved SQL row
 before clearing the database block. Already-retired matching records make this idempotent.
 The eligible journal records belong to the current incarnation at or before the current generation.
+Historical blocks may predate recovery-notice metadata. After the same authenticated retirement
+check, SQL resolution accepts that case only when persisted ACP native identity matches the
+current harness generation, the block uses that incarnation and generation, and its exact
+submission remains interrupted-unknown in that session and generation. A stream identity is
+required. Missing native metadata, a superseding generation, or mismatched submission keeps
+the block open. Resolution preserves metadata and historical uncertainty rather than creating
+a recovery snapshot whose original process identity is unavailable.
 The process owner serializes retirement against prompt dispatch and checks the trusted owner. Retirement preserves unknown
 state and payload and makes duplicate admission or dispatch of that ID fail. Existing newer
 generation retirement records unfinished superseded work as interrupted-unknown and retains
