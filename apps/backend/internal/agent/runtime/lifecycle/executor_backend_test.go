@@ -83,6 +83,13 @@ func TestOfficeAgentIdentityMetadataIsSessionScoped(t *testing.T) {
 		"Office identity must not leak to a sibling session")
 }
 
+func TestPassthroughMCPClaimsArePersistentAndSessionScoped(t *testing.T) {
+	require.True(t, ShouldPersistMetadataKey(metadataKeyPassthroughMCPClaims),
+		"project MCP ownership must survive same-session backend recovery")
+	require.True(t, IsSessionScopedMetadataKey(metadataKeyPassthroughMCPClaims),
+		"project MCP ownership must not be copied into a sibling session")
+}
+
 func TestSSHRuntimeAPIMetadataIsPersistentAndSessionScoped(t *testing.T) {
 	for _, key := range []string{
 		MetadataKeySSHRuntimeAPILocalURL,

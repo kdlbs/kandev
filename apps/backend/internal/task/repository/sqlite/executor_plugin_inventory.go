@@ -65,6 +65,12 @@ func (r *Repository) validatePluginExecutorCheckpointOwner(ctx context.Context, 
 	if err := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), running.TaskID); err != nil && !errors.Is(err, kandevdb.ErrTaskRowNotFound) {
 		return err
 	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), running.SessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{running.SessionID}, nil); err != nil {
+		return err
+	}
 	if _, err := lockTaskSessionRow(ctx, tx, running.SessionID); err != nil {
 		return err
 	}
@@ -213,6 +219,12 @@ func verifyPluginExecutorDeleteTarget(ctx context.Context, tx *sqlx.Tx, db *sqlx
 
 func verifyPluginExecutorDeleteOwner(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, claim *models.TaskEnvironmentRecoveryClaim, sessionID string, ownershipGeneration int64) error {
 	if err := kandevdb.LockTaskRowInTx(ctx, tx, db.DriverName(), claim.OwnerTaskID); err != nil {
+		return err
+	}
+	if err := lockSessionTurnWrites(ctx, tx, db.DriverName(), sessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, db.DriverName(), []string{sessionID}, nil); err != nil {
 		return err
 	}
 	if _, err := lockTaskSessionRow(ctx, tx, sessionID); err != nil {

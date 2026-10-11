@@ -113,6 +113,8 @@ No exactly-once execution guarantee is implied.
 
 **Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
 
+If automatic resume restores the workspace in read-only mode, select **Resume session** in the notice to continue the saved conversation. The action stays visible while **Recovery details** is collapsed. Resume does not resend an interrupted instruction; send your next instruction after recovery succeeds. If a recovery card is already shown in Chat, use its Resume action.
+
 The recovery card places the recommended action first and shows every available alternative as an individual button, including **Restore read-only workspace** and **Start fresh session** when eligible. Buttons wrap on desktop and stack at touch size on phones. Runtime installation failures offer **Retry**; provider quota failures show reset guidance, while Archive and Delete remain in the task menu. Restoring the workspace does not restart the agent. Expand **Technical details** for wrapped, bounded diagnostics; **Copy details** copies the same redacted text you see. When a workspace pane can identify the same failure and its visible recovery entry, **View recovery** opens Chat and focuses the recovery card. Independent workspace failures retain their own retry.
 
 Failures during task or workspace preparation appear as one task error strip below the task header and above the session and Plan tabs. The strip remains visible when you switch sessions or tabs and disappears only after task recovery succeeds. Select **Show details** to open the available guarded actions in a desktop dialog or phone drawer.
@@ -121,6 +123,8 @@ If Kandev cannot prove that the native conversation is available, it keeps the
 session blocked and shows **Continue from saved context** when that action is
 safe. This action starts a new native conversation from bounded Kandev history.
 It does not restore private harness state, running tools, or old provider paths.
+This option applies to other recovery paths. Automatic restart recovery does
+not replace missing or unverified native state with a new conversation.
 Kandev does not resend a prompt when its outcome is uncertain. Resolve the
 recovery notice before sending new work.
 
@@ -138,10 +142,61 @@ not resend the prompt or start a replacement conversation. Legacy streams use
 bounded intake and can show the same uncertain state when their missing output
 cannot be replayed.
 
+After a backend restart, Kandev uses durable evidence to verify the saved owner
+and native conversation. If they match, Kandev restores the same task session
+when its agentctl process has terminated. It does not send another prompt, add
+a user message, or create a new turn. Send your next message when the composer
+is ready. If queued messages remain, restoration turns **Auto-run** off and
+keeps those messages. You can turn **Auto-run** on when you want them to run.
+
+If the saved prompt record is missing, **Retry connection** checks the retained
+delivery record. Kandev restores it only when one saved user message matches one
+retained record. The original message stays in the conversation with a blocked
+delivery label. Retry does not send that message again, and the prompt outcome
+stays unknown. If the original agent process cannot be verified, Kandev keeps
+the session blocked and shows the reason. Record repair alone does not allow
+continuation.
+
+Automatic restoration stays blocked when Kandev cannot verify the saved owner,
+native conversation, generation, or journal. A missing native conversation,
+unknown or changed owner, or locked or corrupt journal does not start a
+replacement conversation. The session keeps its safe recovery controls, such
+as **Stop**, while other eligible sessions can recover independently.
+
+**Stop** remains available while Retry is pending. The card reports a failed
+Stop request or an unconfirmed cancellation. Retry reconnects and reconciles
+the saved delivery state; it does not create a new instruction.
+
+Agentctl saves output in a journal on the executor's disk until the backend
+confirms that it saved the output. The journal also operates while the backend
+is connected. During a disconnect, the journal grows as the agent produces
+output. After reconnection, Kandev replays the output and acknowledges saved
+records, including when the agent has no new output.
+
+The journal has no default 256 MiB stream limit or 2 GiB total limit.
+Unacknowledged output does not expire after a week or another fixed interval.
+The agent can continue independent work while usable disk space remains.
+Requests that need the Kandev backend, such as backend tools, can wait or fail
+during the outage.
+
+Memory buffers and replay batches remain bounded. Agentctl reserves disk space
+for control and recovery records. If usable space approaches that reserve,
+agentctl blocks new prompts and requests cancellation of the affected turn.
+Committed output remains available for replay. A failed cancellation does not
+prove that the agent stopped. The journal never discards unacknowledged output
+to make room.
+
+Backend delivery cleanup preserves saved conversation output on desktop and phones.
+It removes redundant transport payloads after safe projection and settlement.
+If an ACK was lost after cleanup, **Retry connection** uses the persisted cursor without resending the prompt.
+Uncertain work remains protected. **Stop** and the existing recovery actions remain available.
+See [delivery retention operations](operations.md#backend-delivery-retention) for expiry, deletion, and rollback limits.
+
 Kandev can replace the local agent runtime while the backend and browser
 connection stay active. This restores runtime service only. A session with an
-uncertain prompt outcome remains blocked until you resolve its recovery card.
-Runtime recovery does not resend that prompt or resolve its external effects.
+uncertain prompt outcome remains blocked until a safe recovery action or the
+next backend restart restores it. Runtime replacement does not resend that
+prompt or resolve its external effects.
 
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 

@@ -43,6 +43,8 @@ var ErrAgentDeliverySubmissionNotFound = repoerrors.ErrAgentDeliverySubmissionNo
 var ErrAgentDeliveryEventConflict = repoerrors.ErrAgentDeliveryEventConflict
 var ErrAgentDeliveryEffectConflict = repoerrors.ErrAgentDeliveryEffectConflict
 var ErrAgentDeliveryEffectNotFound = repoerrors.ErrAgentDeliveryEffectNotFound
+var ErrAgentDeliveryReconstructionConflict = repoerrors.ErrAgentDeliveryReconstructionConflict
+var ErrAgentDeliveryReconstructionStale = repoerrors.ErrAgentDeliveryReconstructionStale
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -683,12 +685,27 @@ type SessionContinuityRepository interface {
 	ResolveSessionRecoveryBlock(ctx context.Context, id, action string, resolvedAt time.Time) (bool, error)
 }
 
+// SessionRecoveryBlockListRepository reads every open cause for one session
+// so delivery recovery can bind its own block without hiding independent ones.
+type SessionRecoveryBlockListRepository interface {
+	ListOpenSessionRecoveryBlocks(ctx context.Context, sessionID, incarnationID string, expectedGeneration int64) ([]*models.SessionRecoveryBlock, error)
+}
+
 // AgentDeliveryRecoveryRepository persists the revisioned session notice for
 // an uncertain durable prompt outcome.
 type AgentDeliveryRecoveryRepository interface {
 	UpsertAgentDeliveryRecovery(ctx context.Context, recovery *models.AgentDeliveryRecovery, block *models.SessionRecoveryBlock) (bool, error)
 	ResolveAgentDeliveryRecovery(ctx context.Context, recovery *models.AgentDeliveryRecovery, action string) (bool, error)
 	ClearAgentDeliveryRecovery(ctx context.Context, sessionID, incarnationID, submissionID string, harnessGeneration int64) (bool, error)
+}
+
+// AgentDeliveryReconstructionRepository restores one verified journal-backed
+// submission, its recovery projection, and the exact admission block atomically.
+type AgentDeliveryReconstructionRepository interface {
+	ReconstructAgentDeliverySubmission(
+		ctx context.Context,
+		request *models.AgentDeliveryReconstructionRequest,
+	) (*models.AgentDeliveryReconstructionResult, error)
 }
 
 // AgentDeliveryRepository owns the backend side of the durable agentctl
@@ -705,6 +722,28 @@ type AgentDeliveryRepository interface {
 	GetAgentDeliveryEffect(ctx context.Context, effectKey string) (*models.AgentDeliveryEffect, error)
 }
 
+// AgentDeliveryRetentionRepository executes one bounded, atomic retention
+// batch against the task-owned delivery journal.
+type AgentDeliveryRetentionRepository interface {
+	RunAgentDeliveryRetentionBatch(
+		ctx context.Context,
+		options models.AgentDeliveryRetentionBatchOptions,
+	) (models.AgentDeliveryRetentionBatchResult, error)
+}
+
+// AgentDeliveryRetirementRepository purges explicitly retired identities and
+// discovers attributable orphans in bounded transactions.
+type AgentDeliveryRetirementRepository interface {
+	RunAgentDeliveryRetirementBatch(
+		ctx context.Context,
+		options models.AgentDeliveryRetirementBatchOptions,
+	) (models.AgentDeliveryRetirementBatchResult, error)
+	RunAgentDeliveryOrphanBatch(
+		ctx context.Context,
+		options models.AgentDeliveryOrphanBatchOptions,
+	) (models.AgentDeliveryOrphanBatchResult, error)
+}
+
 // AgentDeliverySettlementRepository exposes the durable outbox used to finish
 // exact terminal submissions after ordered projection. Implementations retain
 // non-completed effects until queue-claim cleanup succeeds.
@@ -712,6 +751,14 @@ type AgentDeliverySettlementRepository interface {
 	SettleAgentDeliveryTerminal(ctx context.Context, streamID string, sequence int64, outcome models.DeliverySubmissionState, settledAt time.Time) (bool, error)
 	ListPendingAgentDeliverySettlements(ctx context.Context, sessionID string) ([]*models.AgentDeliveryEffect, error)
 	CompleteAgentDeliveryTerminalSettlement(ctx context.Context, effectKey string, completedAt time.Time) (bool, error)
+}
+
+// AgentDeliveryWorkflowOutcomeRepository records a guarded workflow no-op for
+// a projected terminal. Applied transitions record their receipt in the
+// transition transaction instead.
+type AgentDeliveryWorkflowOutcomeRepository interface {
+	RecordAgentDeliveryWorkflowOutcome(ctx context.Context, taskID string, effect *models.AgentDeliveryEffect) (bool, error)
+	BackfillLegacyAgentDeliveryWorkflowEffect(ctx context.Context, effect *models.AgentDeliveryEffect) (bool, error)
 }
 
 // SessionWorktreeRepository exposes session-scoped worktree projections over

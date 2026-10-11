@@ -369,9 +369,9 @@ checks, and Agents-page authorization behavior remain unchanged.
 - A detached session may exit on its own (for example the user runs `exit` or the shell process
   crashes). It is not reaped by an idle or hard timeout. Reattaching to a session that no longer
   exists marks the tab exited or unavailable; it does not create a replacement implicitly.
-- A descriptor whose PTY disappeared during a backend restart or while no client was attached is
-  retained with an exited/unavailable status and a cleared session association. The user must
-  choose **New Terminal** to create a replacement.
+- Missing PTYs retain an unavailable descriptor with no session. **New Terminal** creates a replacement.
+  Reconnect reads preserve an in-flight local start until its request settles. Bound sessions and
+  restored descriptors remain authoritative.
 - A successful stop or an already-missing session removes the tab. Any other stop failure is
   surfaced and keeps the tab available so the user can retry.
 - A descriptor create/update failure is visible on the affected tab and never causes a shell to be

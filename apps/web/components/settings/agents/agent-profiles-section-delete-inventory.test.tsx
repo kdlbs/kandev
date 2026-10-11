@@ -520,3 +520,25 @@ describe("ProfileRow deletion failure and management controls", () => {
     expect(screen.getByRole("link", { name: TARGET_NAME })).toBeTruthy();
   });
 });
+
+it("rejects a list snapshot started before an accepted deletion without a WS event", async () => {
+  const fixture = mountInventory();
+  const before = fixture.store.getState();
+  const pending = await confirmDelete();
+  await act(async () => pending.resolve());
+  const deleted = fixture.store.getState();
+  expect(deleted.agentProfiles.version).toBe(before.agentProfiles.version + 1);
+  act(() => {
+    expect(
+      fixture.store
+        .getState()
+        .applyAgentListSnapshot(before.settingsAgents.items, before.agentProfiles.version),
+    ).toBe(false);
+  });
+  expect(fixture.store.getState().agentProfiles.items.map((profile) => profile.id)).toEqual([
+    SIBLING,
+  ]);
+  expect(
+    fixture.store.getState().settingsAgents.items[0].profiles.map((profile) => profile.id),
+  ).toEqual([SIBLING]);
+});

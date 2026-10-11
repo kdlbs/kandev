@@ -616,6 +616,24 @@ func (m *continuationAdmissionAgentManager) CleanupStaleExecutionBySessionID(
 	return m.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
 }
 
+func (m *continuationAdmissionAgentManager) CleanupStaleExecutionBySessionIDIfCurrent(
+	ctx context.Context,
+	sessionID, expectedExecutionID string,
+	expectedUpdatedAt time.Time,
+) error {
+	running, err := m.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if running.AgentExecutionID != expectedExecutionID || !running.UpdatedAt.Equal(expectedUpdatedAt) {
+		return nil
+	}
+	return m.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
+}
+
 type continuationGenerationCASFailureRepository struct {
 	*sqliterepo.Repository
 	commitErr error

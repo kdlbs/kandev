@@ -26,7 +26,7 @@ async function captureSelectors(page: Page, taskId: string, sessionId: string, n
   const quickSelector = quickChat.getByTestId("agent-profile-selector");
   const quickOptions = await selectorProfileNames(page, quickSelector, names);
   const quickDefault = await quickSelector.textContent();
-  await quickChat.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.keyboard.press("Escape");
   await expect(quickChat).not.toBeVisible();
 
   await page.goto(`/t/${taskId}?sessionId=${sessionId}`);

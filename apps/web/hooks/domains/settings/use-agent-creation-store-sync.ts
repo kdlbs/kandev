@@ -6,11 +6,12 @@ import {
 } from "@/lib/settings/agent-profile-selector-order";
 import { syncSavedAgentToStore } from "@/app/settings/agents/[agentId]/agent-save-store-sync";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
+import { wasSettingsAgentRemoved } from "@/lib/state/settings-agent-removals";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 
 export type AgentCreationPublication = {
   profiles: AgentProfile[];
-  newAgent?: true;
+  ownerCreated?: boolean;
   agentPatch?: Pick<Agent, "workspace_id" | "mcp_config_path">;
 };
 
@@ -56,8 +57,8 @@ export function useAgentCreationStoreSync() {
     if (!creation) return syncSavedAgentToStore(storeApi, agent, profileVersionAtSaveStart);
     const agents = storeApi.getState().settingsAgents.items;
     const current = agents.find((item) => item.id === agent.id);
-    if (!current && !creation.newAgent) return;
-    const target = publishCreatedProfiles(current ?? agent, creation);
+    if (!current && (!creation.ownerCreated || wasSettingsAgentRemoved(storeApi, agent.id))) return;
+    const target = creation && current ? publishCreatedProfiles(current, creation) : agent;
     const next = current
       ? agents.map((item) => (item.id === agent.id ? target : item))
       : [...agents, target];

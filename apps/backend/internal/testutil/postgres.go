@@ -11,14 +11,18 @@ import (
 	internaldb "github.com/kandev/kandev/internal/db"
 )
 
-// OpenIsolatedPostgres opens dsn with a unique schema on a single connection.
+// OpenIsolatedPostgres opens dsn with a unique schema on every pooled connection.
 // It lets package tests share one Postgres database without racing on
 // DROP SCHEMA public when Go runs packages in parallel.
 func OpenIsolatedPostgres(t testing.TB, dsn string) *sqlx.DB {
 	t.Helper()
 
 	schema := "kandev_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	raw, err := internaldb.OpenPostgres(dsn, 1, 1)
+	scopedDSN, err := isolatedPostgresDSN(dsn, schema)
+	if err != nil {
+		t.Fatalf("scope postgres connection: %v", err)
+	}
+	raw, err := internaldb.OpenPostgres(scopedDSN, 1, 1)
 	if err != nil {
 		t.Fatalf("open postgres: %v", err)
 	}
@@ -35,9 +39,6 @@ func OpenIsolatedPostgres(t testing.TB, dsn string) *sqlx.DB {
 		_ = db.Close()
 	})
 
-	if _, err := db.Exec("SET search_path TO " + schema); err != nil {
-		t.Fatalf("set postgres search_path %s: %v", schema, err)
-	}
 	return db
 }
 
@@ -48,4 +49,14 @@ func PostgresDSNFromEnv(t testing.TB) string {
 		t.Skip("set KANDEV_TEST_POSTGRES_DSN to run Postgres tests")
 	}
 	return dsn
+}
+
+// PostgresDSNWithSearchPath retains schema scope on every replacement connection.
+func PostgresDSNWithSearchPath(t testing.TB, dsn, schema string) string {
+	t.Helper()
+	scopedDSN, err := isolatedPostgresDSN(dsn, schema)
+	if err != nil {
+		t.Fatal("scope PostgreSQL test connection")
+	}
+	return scopedDSN
 }

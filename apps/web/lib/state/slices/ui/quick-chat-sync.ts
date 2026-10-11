@@ -319,9 +319,21 @@ export function reconcileQuickTerminalTabs(
       !tab.sessionId,
   );
 
+  // A reconnect read can observe a newly created descriptor before the
+  // local start binds its PTY. Keep that start mounted until its own request
+  // settles; descriptors restored without a local start remain authoritative.
+  const startingById = new Map(
+    state.terminalTabs
+      .filter(
+        (tab) => tab.workspaceId === workspaceId && tab.status === "connecting" && !tab.sessionId,
+      )
+      .map((tab) => [tab.tabId, tab]),
+  );
   const nextTabs = [
     ...otherWorkspaces,
-    ...[...serverTabs].sort((a, b) => a.sequence - b.sequence),
+    ...[...serverTabs]
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((tab) => (!tab.sessionId ? (startingById.get(tab.tabId) ?? tab) : tab)),
     ...pendingLocal,
   ];
   const validIds = new Set(nextTabs.map((tab) => tab.tabId));

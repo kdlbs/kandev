@@ -32,7 +32,7 @@ SAME primary/task/session, one sequential worker/no file parallelism/delegates.
 ## Inputs
 
 - [Unchanged requirement](../../specs/agents/requirements/creation-catalogue.md), all six creation ACs.
-- [Design](../../specs/agents/system-design/creation-catalogue.md#new-agent-publication-across-profile-order-reconciliation).
+- [Design](../../specs/agents/system-design/creation-catalogue.md#current-store-publication).
 - [Existing-owner guard](../../specs/agents/system-design/target-profile-creation-catalogue.md#accepted-creation-publication).
 - Exact saved tested/main/candidate source deltas and full final Frontend log,
   corrected `frontend-failure-classification.json`; original hosted actual joins.
@@ -180,3 +180,56 @@ omitted the two unchanged reused requirements from its input map; corrected
 complete inputs passed without modifying those requirements.
 
 Normal hooks/one batched publication and fresh hosted current-head acceptance remain.
+
+
+## Required main integration recovery (2026-10-11)
+
+ROOT reviewed and released the bounded normal main integration under exclusive
+lease111. Authoritative main `61bcaf280304924072e46e8be5d4cbfc3830b30f` includes
+merged PR4399's accepted-owner correction. Its `ownerCreated` provenance and
+store-lifetime removal observation supersede this package's earlier `newAgent`
+marker. Preserve that landed production implementation, real-provider page
+fixtures and removal/unmount/independent-store controls. Keep the independent
+no-event new-owner control and precise missing-owner assertion; do not duplicate
+the upstream causal tests. Preserve the upstream deletion snapshot epoch test.
+The owning requirement is unchanged; current-store publication in the owning
+design describes the landed authority.
+
+The full dependency graph is unchanged; the web manifest adds only a browser-demo
+build script. Retained dependencies are used without reinstall. Global-secrets
+and native-scroll production, tests and owning documents are retained verbatim.
+Upstream integration is recorded separately from owned changes relative to this
+exact main. Selector Quick Chat dismissal uses upstream's existing Escape action
+and retains the invisible-dialog assertion. No new copy or interaction is added.
+
+Historical local results above remain historical. Their original temporary files
+are unavailable after interruption; original hosted native17074's actual JOIN
+cannot be recovered and is not claimed. Current recovery checks and acceptance
+are pending: eight affected Agents suites, the one exact failed selector case
+with one Chromium worker/no retries, scoped lint, staged i18n and documentation
+checks. No passing Global or desktop/phone replay or old-head observer restart.
+
+
+### Recovery local acceptance
+
+All eight affected Agents suites passed (97 cases), including accepted new-owner
+publication, ordinary saves, observed removal, editor unmount and independent-store
+isolation. The exact unchanged selector compatibility case passed first attempt
+with one Chromium worker and zero retries through the managed host runner; its
+necessary backend/Vite/fixture-plugin builds and teardown completed normally.
+Scoped lint, staged i18n check/ratchet (zero added/two modified production files),
+catalogue, full specification lint and staged whitespace checks passed.
+
+One complete unfiltered cached/tracked/untracked NUL inventory retained111637
+entries. Actual owned delta relative integrated main contains16 paths and only
+two production owners, both covered by their Global-secrets/native-scroll work
+orders; documentation exemptions are separate. All35 checked local links exist,
+coverage errors[]. The Agents production implementation and owning design match
+landed main exactly; this package now records its superseded implementation and
+integration validation rather than claiming another Agents production fix.
+
+Original native Agents64286, selector81222 and checks64059 all actually joined0;
+their known process groups are absent. Full logs, initial/native join results and
+process receipts are retained under
+`/tmp/kandev-global-secrets-recovery-20261011/`. Normal merge hooks/publication
+and fresh hosted acceptance remain pending; no hosted merge is authorized.

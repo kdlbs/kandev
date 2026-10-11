@@ -130,6 +130,7 @@
   "featureToggleUnavailableGeneric": "此功能目前无法在此安装上启用。",
   "featureToggleUnavailablePlatform": "此功能在此操作系统上不受支持。",
   "featureToggleUseDefault": "使用默认值",
+  "browserDemoOpen": "打开浏览器演示",
   "healthAllPass": "所有系统检查通过。",
   "healthHealthy": "健康",
   "healthIssue": "问题",

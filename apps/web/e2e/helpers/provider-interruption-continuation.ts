@@ -140,6 +140,21 @@ export function assertNativeNoContinuationTrace(tracePath: string, scenario: str
   expect(records.filter((record) => record.event === "prompt")).toHaveLength(1);
 }
 
+export async function waitForNativeContinuationPrompt(tracePath: string) {
+  await pollUntil(
+    () =>
+      fs
+        .readFileSync(tracePath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Trace)
+        .some((record) => record.event === "prompt" && record.prompt === "continue"),
+    Boolean,
+    30_000,
+    "waiting for the native agent to receive the continuation prompt",
+  );
+}
+
 export function assertNativeContinuationTrace(tracePath: string, scenario: string, loads = 0) {
   const records: Trace[] = fs
     .readFileSync(tracePath, "utf8")

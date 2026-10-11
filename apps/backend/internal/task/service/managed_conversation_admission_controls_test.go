@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -93,6 +94,18 @@ func TestManagedConversationAdmissionControls(t *testing.T) {
 				require.NoError(t, repos[1].DeleteTaskSession(ctx, primary))
 				operation, digest = "create", "create-digest"
 				spec.ExpectedRevision, spec.BasePrompt = 0, "untrusted replay settings"
+				_, _, err = services[0].EnsureManaged(ctx, "plugin", "installation", spec, operation, digest)
+				require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryIdentityRetiring)
+				completed := false
+				for range 8 {
+					result, err := repos[1].RunAgentDeliveryRetirementBatch(ctx, models.AgentDeliveryRetirementBatchOptions{})
+					require.NoError(t, err)
+					if result.Completed == 1 {
+						completed = true
+						break
+					}
+				}
+				require.True(t, completed, "retired identity must be fully purged before deterministic repair")
 			case "raw_metadata":
 				require.NoError(t, repos[1].CreateTurn(ctx, &models.Turn{ID: "retained-turn", TaskID: first.TaskID, TaskSessionID: first.SessionID}))
 				require.NoError(t, repos[1].CreateMessage(ctx, &models.Message{ID: "retained-message", TurnID: "retained-turn", TaskID: first.TaskID, TaskSessionID: first.SessionID, AuthorType: models.MessageAuthorAgent, Content: "retained transcript"}))

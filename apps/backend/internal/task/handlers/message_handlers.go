@@ -1610,7 +1610,9 @@ func (h *MessageHandlers) dispatchPromptAsync(
 			}
 		}
 		if steer {
-			h.forwardMessageAsSteer(promptCtx, taskID, sessionID, content, model, planMode, attachments)
+			h.forwardMessageAsSteer(
+				promptCtx, taskID, sessionID, content, model, planMode, attachments, req.deliverySubmissionID,
+			)
 			return
 		}
 		h.forwardMessageAsPrompt(
@@ -1661,6 +1663,7 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 	taskID, sessionID, content, model string,
 	planMode bool,
 	attachments []v1.MessageAttachment,
+	deliverySubmissionID string,
 ) {
 	var err error
 	if steerer, ok := h.orchestrator.(recordedMessageSteerer); ok {
@@ -1679,7 +1682,12 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 		// agentProfileID/references/startCreated are irrelevant: a steer only
 		// targets a RUNNING session, never a CREATED one, so this takes the
 		// ordinary prompt branch (PromptTask + resume + error handling).
-		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false, "")
+		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false, "",
+			canvasGuidanceProjection{deliverySubmissionID: deliverySubmissionID})
+		return
+	}
+	if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+		h.markDeliveryMessageBlocked(ctx, deliverySubmissionID)
 		return
 	}
 	if !isAgentReportedError(err) {
@@ -1756,7 +1764,11 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 			)
 		}
 		if err != nil {
-			if isPromptErrorOwnedByRecovery(err) || errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+			if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+				h.markDeliveryMessageBlocked(ctx, projection.deliverySubmissionID)
+				return
+			}
+			if isPromptErrorOwnedByRecovery(err) {
 				return
 			}
 			h.logger.Warn("failed to start created session from message",
@@ -1826,6 +1838,10 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		)
 	}
 	if err != nil {
+		if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+			h.markDeliveryMessageBlocked(ctx, deliverySubmissionID)
+			return
+		}
 		// Don't create a prompt error message if the agent itself reported the error.
 		// The agent failure path (handleAgentFailed) already sets the session to FAILED
 		// with the error_message, which the UI displays via agent-status.
@@ -1844,6 +1860,34 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 // delivery once the runtime comes up instead of being reported as failed.
 // Returns true when the message was queued, so the caller must not also
 // report promptErr as an error.
+func (h *MessageHandlers) markDeliveryMessageBlocked(ctx context.Context, messageID string) {
+	if messageID == "" || h.service == nil {
+		return
+	}
+	message, err := h.service.GetMessage(ctx, messageID)
+	if err != nil || message == nil {
+		h.logger.Warn("failed to load saved prompt for delivery recovery status",
+			zap.String("message_id", messageID), zap.Error(err))
+		return
+	}
+	if message.AuthorType != models.MessageAuthorUser {
+		return
+	}
+	metadata := make(map[string]interface{}, len(message.Metadata)+1)
+	for key, value := range message.Metadata {
+		metadata[key] = value
+	}
+	if metadata[models.MessageMetaKeyDeliveryStatus] == models.MessageDeliveryStatusBlocked {
+		return
+	}
+	metadata[models.MessageMetaKeyDeliveryStatus] = models.MessageDeliveryStatusBlocked
+	message.Metadata = metadata
+	if err := h.service.UpdateMessage(ctx, message); err != nil {
+		h.logger.Warn("failed to persist saved prompt delivery recovery status",
+			zap.String("message_id", messageID), zap.Error(err))
+	}
+}
+
 func (h *MessageHandlers) queuePromptIfRuntimeUnavailable(
 	ctx context.Context,
 	taskID, sessionID, content, model string,

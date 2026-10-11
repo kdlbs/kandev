@@ -124,8 +124,12 @@ func (r *recordingAgentDeliveryRepository) ProjectAgentDeliveryEvent(_ context.C
 		return false, r.projectErr
 	}
 	if r.cursor == nil {
-		r.cursor = &models.AgentDeliveryCursor{}
+		r.cursor = &models.AgentDeliveryCursor{
+			StreamID: event.StreamID, SessionID: event.SessionID,
+			IncarnationID: event.IncarnationID, HarnessGeneration: event.HarnessGeneration,
+		}
 	}
+	r.cursor.ReceivedSequence = event.Sequence
 	r.cursor.ProjectedSequence = event.Sequence
 	return true, nil
 }
@@ -204,7 +208,11 @@ func TestDurableAgentEventEffectReadFailureBlocksProcessing(t *testing.T) {
 		DeliverySequence:          1,
 	}
 
-	err := sm.processAgentEvent(context.Background(), &AgentExecution{SessionID: "session-1"}, nil, repository, event, 0)
+	err := sm.processAgentEvent(context.Background(), &AgentExecution{
+		SessionID: "session-1", DeliveryMode: DurableDeliveryV1,
+		DeliveryStreamID: event.DeliveryStreamID, DeliveryIncarnationID: event.DeliveryIncarnationID,
+		DeliveryHarnessGeneration: event.DeliveryHarnessGeneration,
+	}, nil, repository, event, 0)
 	if !errors.Is(err, effectErr) {
 		t.Fatalf("error = %v, want effect read error", err)
 	}
@@ -235,7 +243,11 @@ func TestDurableAgentEventCanonicalProjectionFailureBlocksProcessing(t *testing.
 		DeliverySequence:          1,
 	}
 
-	err := sm.processAgentEvent(context.Background(), &AgentExecution{SessionID: "session-1"}, nil, repository, event, 0)
+	err := sm.processAgentEvent(context.Background(), &AgentExecution{
+		SessionID: "session-1", DeliveryMode: DurableDeliveryV1,
+		DeliveryStreamID: event.DeliveryStreamID, DeliveryIncarnationID: event.DeliveryIncarnationID,
+		DeliveryHarnessGeneration: event.DeliveryHarnessGeneration,
+	}, nil, repository, event, 0)
 	if !errors.Is(err, projectionErr) {
 		t.Fatalf("error = %v, want canonical projection error", err)
 	}
@@ -264,7 +276,11 @@ func TestCanonicalProjectionNotifiesWhenAckTransportFails(t *testing.T) {
 	// A nil client models an ACK transport that is unavailable after the
 	// canonical repository commit. The callback must still observe the output.
 	if err := sm.processAgentEvent(
-		context.Background(), &AgentExecution{SessionID: "session-1"}, nil, repository, event, 0,
+		context.Background(), &AgentExecution{
+			SessionID: "session-1", DeliveryMode: DurableDeliveryV1,
+			DeliveryStreamID: event.DeliveryStreamID, DeliveryIncarnationID: event.DeliveryIncarnationID,
+			DeliveryHarnessGeneration: event.DeliveryHarnessGeneration,
+		}, nil, repository, event, 0,
 	); err != nil {
 		t.Fatalf("process canonical event: %v", err)
 	}
@@ -402,7 +418,7 @@ func TestDurableAgentEventProjectionUsesAdmissionSnapshot(t *testing.T) {
 	}
 	durableEvent := durableAgentEvent(execution, event)
 	process, _, effect, err := sm.prepareDurableAgentDeliveryEvent(
-		context.Background(), execution, durableEvent, repository,
+		context.Background(), execution, durableEvent, repository, nil,
 	)
 	if err != nil {
 		t.Fatalf("prepare durable event: %v", err)

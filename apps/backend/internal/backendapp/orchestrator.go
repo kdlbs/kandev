@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/kandev/kandev/internal/authz"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,6 +16,9 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	automationpkg "github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/gitref"
@@ -66,6 +68,7 @@ func provideOrchestrator(
 	eventBus bus.EventBus,
 	taskRepo *sqliterepo.Repository,
 	taskSvc *taskservice.Service,
+	authSvc *auth.Service,
 	userSvc *userservice.Service,
 	lifecycleMgr *lifecycle.Manager,
 	agentRegistry *registry.Registry,
@@ -150,6 +153,9 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetStartupRecoveryOwnerContextResolver(func(ctx context.Context, ownerID, orgID string) (context.Context, error) {
+		return startupRecoveryOwnerContext(ctx, authSvc, ownerID, orgID)
+	})
 	orchestratorSvc.SetCanvasesEnabled(cfg != nil && cfg.Features.Canvases)
 	orchestratorSvc.SetAgentProfileRecentUseRecorder(userSvc)
 	if gitCredentialBroker != nil {
@@ -170,13 +176,14 @@ func provideOrchestrator(
 	// Runtime-aware liveness lets durable cleanup treat a not-found stop for a
 	// confirmed-dead local runtime as already stopped instead of retrying forever.
 	taskSvc.SetRowLivenessProber(agentManagerClient)
-	// The orphan-session sweep preserves stale STARTING/RUNNING sessions when no
-	// live in-memory execution backs them, so the conversation can recover on
-	// task focus after a backend restart.
+	// The orphan-session sweep preserves stale sessions unless neither a live
+	// local execution nor an exact pending remote owner backs them, so a remote
+	// conversation remains available for authenticated recovery after restart.
 	taskSvc.SetExecutionLivenessChecker(agentManagerClient)
+	taskSvc.SetPendingRemoteRecoveryChecker(agentManagerClient.HasPendingRemoteRecovery)
 	// The session reconciliation sweep's active-task pass (stall detection and
-	// orphaned-session healing) verifies "no live execution" against the agent
-	// runtime's in-memory execution store through this registry.
+	// orphaned-session healing) checks local execution liveness through this
+	// registry and separately checks exact pending remote ownership above.
 	taskSvc.SetSessionExecutionRegistry(agentManagerClient)
 	taskSvc.SetContextWindowResetter(orchestratorSvc.ResetContextWindow)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)
@@ -334,6 +341,24 @@ func provideOrchestrator(
 	orchestratorSvc.SetTaskRepositoryBaseBranchUpdater(&repoLocalPathUpdater{svc: taskSvc})
 
 	return orchestratorSvc, msgCreator, nil
+}
+
+func startupRecoveryOwnerContext(
+	ctx context.Context,
+	authSvc *auth.Service,
+	ownerID, orgID string,
+) (context.Context, error) {
+	if authSvc == nil {
+		return nil, errors.New("startup recovery authentication service is unavailable")
+	}
+	if authSvc.Mode() == auth.ModeDisabled {
+		return ctx, nil
+	}
+	identity, ok := authSvc.IdentityForUser(ctx, ownerID)
+	if !ok || identity.UserID != ownerID || identity.OrgID != orgID {
+		return nil, errors.New("workspace owner identity is unavailable or changed organizations")
+	}
+	return authn.WithIdentity(ctx, identity), nil
 }
 
 type githubCredentialPolicyService interface {
