@@ -37,3 +37,28 @@ version and ran no tests. The successful commands ran from `apps/web`, using
 the workspace-pinned package manager. Historical measurements and provider
 claims were not refreshed or expanded. Remote CI and actual merge evidence
 remain delivery gates and are reported after the integration push.
+
+## SSH restart snapshot CI correction
+
+At integration head `99f2b29a1410314e4f05ccdcc6447fb42c1966c4`, hosted
+E2E Containers Shard 6/6 failed in `captureSilentRestartSnapshot`: compact
+session membership omits ACP metadata. The blob report from job
+`114461796540` (run `38136330680`) showed the same missing-native-ID failure
+on all four attempts. The shared restart helper now reads session detail and
+checks both session ID and task ID before capturing native identity.
+
+Two focused snapshot regressions reproduced the old mismatch and then passed
+with the corrected helper. `pnpm exec vitest run
+e2e/helpers/silent-restart-recovery.test.ts`, targeted ESLint and TypeScript
+passed. The exact SSH recovery scenario passed with retries disabled under
+`KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --project containers
+tests/ssh/recovery.spec.ts --grep 'remote execution replays completed output
+after backend downtime with local survival disabled' --retries=0`. The managed
+runner freshly built matching backend/helper artifacts for this passing run.
+
+Earlier local attempts did not reach the hosted assertion: the first lacked
+the Linux mock-agent binary, and retained backend/helper build identities then
+differed. Debug logs established that setup failure, and the fresh managed
+build resolved it. Those failed attempts are not represented as passing tests.
+This is a test-fixture correction with no production behavior or public
+documentation change. New-head remote CI remains pending after push.
