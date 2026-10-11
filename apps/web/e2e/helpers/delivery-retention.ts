@@ -17,7 +17,11 @@ export async function pruneSavedDelivery(
   api: ApiClient,
   seed: SeedData,
   backend: BackendContext,
-  options: { profileId?: string; restartOverrides?: Record<string, string> } = {},
+  options: {
+    profileId?: string;
+    restartOverrides?: Record<string, string>;
+    historicalGap?: boolean;
+  } = {},
 ) {
   const task = await api.createTaskWithAgent(
     seed.workspaceId,
@@ -59,6 +63,7 @@ export async function pruneSavedDelivery(
     )
     .toBeGreaterThan(0);
   const db = new DatabaseSync(dbPath);
+  let historicalGap: { stream_id: string; sequence: number; payload: string } | undefined;
   try {
     const policy = db
       .prepare("SELECT value FROM settings WHERE key = 'tool_payload_retention'")
@@ -69,6 +74,9 @@ export async function pruneSavedDelivery(
         "SELECT COUNT(*) AS count FROM agent_delivery_inbox WHERE session_id = ? AND LENGTH(payload) > 0",
       ),
     ).toBeGreaterThan(0);
+    if (options.historicalGap) {
+      historicalGap = seedHistoricalDeliveryGap(db, primary.id);
+    }
     db.prepare(
       "UPDATE agent_delivery_inbox SET projected_at = datetime('now', '-48 hours') WHERE session_id = ? AND projected_at IS NOT NULL",
     ).run(primary.id);
@@ -99,10 +107,55 @@ export async function pruneSavedDelivery(
     );
   }
   expect((await api.listSessionMessages(primary.id)).messages).toEqual(canonicalBefore);
+  if (historicalGap) {
+    assertHistoricalDeliveryGap(backend, primary.id, historicalGap);
+  }
   await page.reload();
   await session.waitForLoad();
   await expect(session.chat.getByText(output, { exact: false })).toBeVisible({ timeout: 30_000 });
   return { task, session, sessionId: primary.id, output };
+}
+
+// Model a projected historical terminal whose prompt authority was never retained.
+// All fixture writes are confined to this worker's disposable database.
+function seedHistoricalDeliveryGap(db: InstanceType<typeof DatabaseSync>, sessionId: string) {
+  const gap = db
+    .prepare(
+      "SELECT stream_id, sequence FROM agent_delivery_inbox WHERE session_id = ? AND terminal = 0 AND projected_at IS NOT NULL AND EXISTS (SELECT 1 FROM agent_delivery_inbox later WHERE later.stream_id = agent_delivery_inbox.stream_id AND later.sequence > agent_delivery_inbox.sequence AND later.terminal = 0) ORDER BY stream_id, sequence LIMIT 1",
+    )
+    .get(sessionId) as { stream_id: string; sequence: number } | undefined;
+  expect(gap).toBeTruthy();
+  if (!gap) throw new Error("historical gap fixture needs later canonical output");
+  const payload = JSON.stringify({ type: "complete", turn_id: "historical-unsettled-turn" });
+  db.prepare(
+    "UPDATE agent_delivery_inbox SET terminal = 1, event_type = 'complete', submission_id = 'missing-historical-submission', payload = ?, payload_bytes = 0, hash_version = 0, content_hash = '' WHERE stream_id = ? AND sequence = ?",
+  ).run(Buffer.from(payload), gap.stream_id, gap.sequence);
+  return { ...gap, payload };
+}
+
+function assertHistoricalDeliveryGap(
+  backend: BackendContext,
+  sessionId: string,
+  gap: { stream_id: string; sequence: number; payload: string },
+) {
+  const db = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+  try {
+    const protectedRow = db
+      .prepare(
+        "SELECT CAST(payload AS TEXT) AS payload, payload_pruned_at FROM agent_delivery_inbox WHERE stream_id = ? AND sequence = ?",
+      )
+      .get(gap.stream_id, gap.sequence) as { payload: string; payload_pruned_at: unknown };
+    expect(protectedRow.payload).toBe(gap.payload);
+    expect(protectedRow.payload_pruned_at).toBeNull();
+    const cleaned = db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM agent_delivery_inbox WHERE session_id = ? AND stream_id = ? AND sequence > ? AND terminal = 0 AND payload_pruned_at IS NOT NULL",
+      )
+      .get(sessionId, gap.stream_id, gap.sequence) as { count: number };
+    expect(Number(cleaned.count)).toBeGreaterThan(0);
+  } finally {
+    db.close();
+  }
 }
 
 async function waitForProjectedRecoveryPrompt(

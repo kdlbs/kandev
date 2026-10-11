@@ -34,6 +34,7 @@ Implementation is in progress. The paired [design](../system-design/backend-agen
 - **AC-PLATFORM-DELIVERY-RETENTION-001.1:** After the configured grace, eligible projected event payloads shall be removed, subject to cleanup capacity and protected dependencies, while canonical messages, tool history and turns remain unchanged.
 - **AC-PLATFORM-DELIVERY-RETENTION-001.2:** Unprojected events and evidence required by active or uncertain submissions, pending effects or unsettled terminals shall remain available until their dependencies finish.
 - **AC-PLATFORM-DELIVERY-RETENTION-001.3:** Fully settled completed, failed or cancelled prompt payloads shall be removed after the grace. Immutable submission identity, hash, outcome and claim association shall remain available.
+- **AC-PLATFORM-DELIVERY-RETENTION-001.4:** Independently committed, authenticated nonterminal output shall remain eligible for raw-payload cleanup after the grace when an earlier terminal is unsettled or legacy prompt bookkeeping is absent. Cleanup shall retain its replay identity and required effects, preserve the unresolved terminal and prompt evidence, and shall not manufacture missing authority or completion.
 
 ### REQ-PLATFORM-DELIVERY-RETENTION-002: Authenticated replay after cleanup
 
@@ -76,6 +77,7 @@ Implementation is in progress. The paired [design](../system-design/backend-agen
 - **AC-PLATFORM-DELIVERY-RETENTION-005.2:** Without protected gaps and with sufficient cleanup capacity, retained replay evidence shall fit the configured recent window. Long streams shall not retain one permanent receipt per streaming event.
 - **AC-PLATFORM-DELIVERY-RETENTION-005.3:** Reported bounds shall distinguish recent payloads, pinned backlog, compact prompt/terminal/workflow evidence and canonical history. Cleanup shall not claim that total database growth stops.
 - **AC-PLATFORM-DELIVERY-RETENTION-005.4:** Logical cleanup shall not claim physical file shrinkage or secure erasure. Physical reclamation shall use the established database-specific maintenance contract.
+- **AC-PLATFORM-DELIVERY-RETENTION-005.5:** Protected-only discovery pages shall not prevent later eligible output from being visited. Cleanup shall persist fair progress while retaining its transaction, payload, pass-duration and cancellation limits.
 
 ### REQ-PLATFORM-DELIVERY-RETENTION-006: Upgrade, operations and surface parity
 
@@ -88,6 +90,14 @@ Implementation is in progress. The paired [design](../system-design/backend-agen
 - **AC-PLATFORM-DELIVERY-RETENTION-006.3:** Operators shall receive aggregate progress, removed bytes, backlog and bounded skip/error reasons through production structured logs on both engines. Development/pprof expvar shall supplement logs; no production metrics endpoint is required. Neither surface shall expose payloads, credentials or identity labels.
 - **AC-PLATFORM-DELIVERY-RETENTION-006.4:** Supported rollback shall preserve checkpoints and recovery guards. A pre-retention binary shall not operate on a pruned database.
 - **AC-PLATFORM-DELIVERY-RETENTION-006.5:** Existing desktop and phone history and recovery controls shall remain complete and usable after cleanup and reload. Public guidance shall distinguish backend retention, journal pruning and physical reclamation.
+- **AC-PLATFORM-DELIVERY-RETENTION-006.6:** After upgrade, automatic cleanup shall revisit eligible historical output without requiring manual session deletion or a database reset. Restarts and partial passes shall resume cleanup; absent historical bookkeeping shall never authorize prompt resend or inferred settlement.
+
+## Implementation records
+
+The [historical payload reclamation plan](../../../plans/legacy-delivery-payload-reclamation/plan.md)
+addresses independently committed output held by legacy settlement gaps. Its
+[payload proof design](../system-design/backend-agent-delivery-retention-payloads.md)
+clarifies eligibility without weakening protected terminal or replay boundaries.
 
 ## Out of scope
 

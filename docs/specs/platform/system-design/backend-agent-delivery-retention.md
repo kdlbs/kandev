@@ -18,9 +18,9 @@ Platform owns retained delivery evidence; Tasks owns schema, lifecycle authentic
 Extends [delivery](durable-agent-delivery.md), [reattachment](durable-agent-reattachment.md) and [stream processing](durable-agent-stream-processing.md).
 The [checkpoint ADR](../../../decisions/2026-10-05-backend-delivery-retirement-checkpoints.md) records replay; the [barrier ADR](../../../decisions/2026-10-10-delivery-event-retention-barriers.md) defines scoped serialization.
 Journal policy, wire version and runtime flags remain unchanged.
-For this extension, contiguous checkpoints replace permanent generic event-effect retention. Other parent delivery boundaries remain authoritative.
+Contiguous checkpoints replace permanent generic event-effect retention. Other parent delivery boundaries remain authoritative.
 
-Cache only SQL syntax; reload proofs after locks.
+Payload proof: [draft](backend-agent-delivery-retention-payloads.md).
 
 ## Requirement mapping
 

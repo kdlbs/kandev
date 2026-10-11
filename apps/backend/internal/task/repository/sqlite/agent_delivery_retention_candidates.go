@@ -83,6 +83,7 @@ const agentDeliveryRetentionCandidateSQL = `
 				CASE WHEN (
 					SELECT 1 FROM agent_delivery_effects effect
 					WHERE effect.stream_id = i.stream_id AND effect.sequence = i.sequence
+					  AND effect.effect_key = 'agent_delivery.event:' || i.stream_id || ':' || CAST(i.sequence AS TEXT)
 					  AND effect.effect_type = 'agent_delivery.event'
 					  AND effect.state = 'completed' AND effect.completed_at IS NOT NULL
 					LIMIT 1
@@ -115,8 +116,8 @@ const agentDeliveryRetentionCandidateSQL = `
 					AND sequence <= projected_sequence
 					AND projected_at IS NOT NULL AND eligible_at <= ?
 					AND event_type IN ('message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan', 'complete', 'error', 'cancelled', 'canceled')
-					AND /* settled event */
-					AND (first_terminal_sequence IS NULL OR sequence < first_terminal_sequence)
+					AND ((terminal = 0 AND event_type IN ('message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan'))
+						OR (/* settled event */ AND (first_terminal_sequence IS NULL OR sequence < first_terminal_sequence)))
 					AND generic_effect_complete = 1 AND has_pending_effect = 0
 					AND has_unknown_effect = 0
 					AND payload_pruned_at IS NULL THEN 1 ELSE 0 END AS can_prune,

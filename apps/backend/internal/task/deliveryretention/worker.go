@@ -75,6 +75,7 @@ type Snapshot struct {
 	Duration                 time.Duration
 	Batches                  int
 	CommittedBatches         int
+	DiscoveryBatches         int
 	BusyBatches              int
 	FailedBatches            int
 	Candidates               int
@@ -359,6 +360,9 @@ func (w *Worker) runBatch(ctx context.Context, phase string, snapshot *Snapshot)
 		if err != nil {
 			return false, err
 		}
+		if result.DiscoveryAdvanced {
+			snapshot.DiscoveryBatches++
+		}
 		snapshot.Candidates += result.Candidates
 		snapshot.BacklogSampleAvailable = true
 		snapshot.BacklogSampleRows += result.EligibleCandidates
@@ -410,7 +414,7 @@ func (w *Worker) runBatch(ctx context.Context, phase string, snapshot *Snapshot)
 
 func committedRetentionWork(snapshot Snapshot) int {
 	return snapshot.EventPayloadsPruned + snapshot.PromptPayloadsPruned + snapshot.EventRowsRetired +
-		snapshot.RetirementRowsPurged + snapshot.OrphanJobsScheduled + snapshot.RetirementJobsCompleted
+		snapshot.RetirementRowsPurged + snapshot.OrphanJobsScheduled + snapshot.RetirementJobsCompleted + snapshot.DiscoveryBatches
 }
 
 func (w *Worker) report(snapshot Snapshot) {
@@ -424,6 +428,7 @@ func (w *Worker) report(snapshot Snapshot) {
 		zap.Duration("duration", snapshot.Duration),
 		zap.Int("batches", snapshot.Batches),
 		zap.Int("committed_batches", snapshot.CommittedBatches),
+		zap.Int("discovery_batches", snapshot.DiscoveryBatches),
 		zap.Int("busy_batches", snapshot.BusyBatches),
 		zap.Int("failed_batches", snapshot.FailedBatches),
 		zap.Int("candidate_sample_rows", snapshot.Candidates),

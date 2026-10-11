@@ -514,6 +514,10 @@ This cleanup is separate from **Message compaction** and agentctl journal prunin
 
 The default payload grace is one hour. Eligible projected event payloads and fully settled prompt payloads expire after this grace.
 Cleanup retains compact identities, hashes, outcomes, and settlement evidence.
+Independently projected nonterminal output can lose its redundant raw body even when
+an older terminal is unresolved or legacy submission bookkeeping is missing. Its
+exact committed projection receipt, authenticated cursor and replay hash must survive.
+The unresolved terminal and prompt keep their stronger recovery protections.
 Recent duplicate receipts remain for up to 24 hours or 10000 events per stream.
 Contiguous retirement checkpoints reject older events without applying them again.
 A lost ACK uses the persisted projected cursor. Cleanup never resends a prompt or a tool action.
@@ -524,7 +528,7 @@ Protected backlog and canonical history can continue to grow. Retention is not a
 
 Cleanup starts after the first normal interval, which defaults to one minute.
 Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
-Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work, with a 100 ms pause between batches. A pass starts no further batch after five seconds.
+Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, with a 100 ms pause between batches. Frontier wrap alone does not repeat a phase. A pass starts no further batch after five seconds.
 SQLite native writer admission can wait through its existing five-second busy timeout after cancellation.
 Stop joins that work before database closure. The 250 ms deadline is not a wall-clock completion promise during contention.
 Startup [configuration](configuration.md#backend-delivery-retention) controls grace, replay limits, cadence, and batch size.
@@ -535,6 +539,11 @@ There is no production metrics endpoint. A bounded sample is not an exact databa
 Unavailable backlog or age values use `-1`. These counters do not label session identities or contain payloads.
 
 ### Delivery retention upgrades and rollback
+
+After upgrade, the normal worker revisits eligible historical payloads in bounded
+batches using its persisted scan frontiers. No session reset or manual bookkeeping
+deletion is needed. Large backlogs take multiple passes; unresolved recovery evidence
+and canonical history remain protected.
 
 **Preserve a verified pre-pruning backup before the pruning upgrade.** Removed transport payloads cannot be restored within the live database.
 SQLite version changes create a `VACUUM INTO` snapshot before migration.
