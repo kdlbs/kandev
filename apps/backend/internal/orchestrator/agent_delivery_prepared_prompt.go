@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"context"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -37,7 +37,7 @@ func (s *Service) configureInitialDeliveryAdmission(session *models.TaskSession,
 			if options.onInitialPromptAdmissionFailed != nil {
 				options.onInitialPromptAdmissionFailed(admissionErr)
 			}
-			return &lifecycle.PromptAdmissionPersistenceError{Err: admissionErr}
+			return &agentruntime.PromptAdmissionPersistenceError{Err: admissionErr}
 		}
 		return nil
 	}

@@ -24,3 +24,6 @@ var ErrCancelEscalated = lifecycle.ErrCancelEscalated
 
 // ErrVirtualProfile marks a logical routing profile that has no concrete execution profile.
 var ErrVirtualProfile = lifecycle.ErrVirtualProfile
+
+// PromptAdmissionPersistenceError identifies durable admission failures before provider dispatch.
+type PromptAdmissionPersistenceError = lifecycle.PromptAdmissionPersistenceError
