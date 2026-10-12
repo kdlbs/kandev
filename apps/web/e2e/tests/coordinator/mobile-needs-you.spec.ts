@@ -111,22 +111,25 @@ test.describe("Coordinator screens on a phone viewport", () => {
     await cardA.getByTestId("needs-you-answer-here").tap();
     const overlay = cardA.getByTestId("clarification-overlay");
     await expect(overlay).toBeVisible();
-    const disclosure = cardA.getByTestId("clarification-collapse-toggle");
+    const disclosure = overlay.getByRole("button", { name: "Collapse clarification", exact: true });
     const disclosureBox = await disclosure.boundingBox();
     expect(disclosureBox).not.toBeNull();
     expect(disclosureBox!.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
     expect(disclosureBox!.width).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
     await disclosure.tap();
     await expect(overlay).toBeHidden();
-    await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    const expand = cardA.getByRole("button", { name: "Expand clarification", exact: true });
+    await expect(expand).toHaveCount(1);
+    await expect(expand).toHaveAttribute("aria-expanded", "false");
     await waitForSessionState(apiClient, {
       taskId: taskA.id,
       sessionId: taskA.session_id,
       expectedState: "WAITING_FOR_INPUT",
       message: "collapsing a phone question must not answer or reject it",
     });
-    await disclosure.tap();
+    await expand.tap();
     await expect(overlay).toBeVisible();
+    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
     await expectNoHorizontalScroll(testPage);
   });
 

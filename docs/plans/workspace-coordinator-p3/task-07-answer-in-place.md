@@ -99,6 +99,14 @@ cd apps/web && pnpm e2e:run tests/coordinator/answer-in-place.spec.ts
 
 ## Current integration verification
 
+Hosted E2E on PR #4044 head a31096c9 failed the phone collapse regression
+because its test-id locator included both the card's expand button and the
+hidden overlay's collapse button. The regression now targets the overlay's
+accessible Collapse control and the card's accessible Expand control separately.
+It retains the 44-pixel geometry, hidden overlay, collapsed/expanded ARIA state,
+waiting session and reopen assertions. The 90-second test limit is unchanged.
+Actual updated-head browser verification remains pending; no local E2E ran.
+
 Source implementation is present in the current-main integration for PR #4044.
 Review remediation and complete exact-head hosted verification are still in
 progress. Historical contributor CI and focused dependency projections do not
