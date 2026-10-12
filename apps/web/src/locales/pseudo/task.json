@@ -2742,5 +2742,19 @@
   "promptHistoryEmpty": "Ńō ƥŕōḿƥţś ŷēţ.",
   "expandPrompt": "Ēxƥàńď ƥŕōḿƥţ",
   "collapsePrompt": "Ćōĺĺàƥśē ƥŕōḿƥţ",
-  "showFullTimestamp": "Śĥōŵ ƒũĺĺ ţĩḿēśţàḿƥ: {{absoluteTime}}"
+  "showFullTimestamp": "Śĥōŵ ƒũĺĺ ţĩḿēśţàḿƥ: {{absoluteTime}}",
+  "prMergedNoticeMobile": "ƤŔ #{{number}} ḿēŕĝēď",
+  "prMergedNotice": "ƤŔ #{{number}} ĥàś ƀēēń ḿēŕĝēď. Ŷōũ ćàń àŕćĥĩvē ţĥĩś ţàśķ.",
+  "prClosedNoticeMobile": "ƤŔ #{{number}} ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ",
+  "prClosedNotice": "ƤŔ #{{number}} ŵàś ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ. Ŷōũ ćàń àŕćĥĩvē ţĥĩś ţàśķ.",
+  "allPRsMergedNoticeMobile_one": "Àĺĺ {{count}} ƤŔ ḿēŕĝēď",
+  "allPRsMergedNoticeMobile_other": "Àĺĺ {{count}} ƤŔś ḿēŕĝēď",
+  "allPRsMergedNotice_one": "Àĺĺ {{count}} ƤŔ ĥàś ƀēēń ḿēŕĝēď. Ŷōũ ćàń àŕćĥĩvē ţĥĩś ţàśķ.",
+  "allPRsMergedNotice_other": "Àĺĺ {{count}} ƤŔś ĥàvē ƀēēń ḿēŕĝēď. Ŷōũ ćàń àŕćĥĩvē ţĥĩś ţàśķ.",
+  "allPRsClosedNoticeMobile_one": "Àĺĺ {{count}} ƤŔ ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ",
+  "allPRsClosedNoticeMobile_other": "Àĺĺ {{count}} ƤŔś ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ",
+  "allPRsClosedNotice_one": "Àĺĺ {{count}} ƤŔ ŵàś ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ. Ŷōũ ćàń àŕćĥĩvē ţĥĩś ţàśķ.",
+  "allPRsClosedNotice_other": "Àĺĺ {{count}} ƤŔś ŵēŕē ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ. Ŷōũ ćàń àŕćĥĩvē ţĥĩś ţàśķ.",
+  "turnOffTranscriptAutoScroll": "Ţũŕń ōƒƒ ţŕàńśćŕĩƥţ àũţō-śćŕōĺĺ",
+  "turnOnTranscriptAutoScroll": "Ţũŕń ōń ţŕàńśćŕĩƥţ àũţō-śćŕōĺĺ"
 }

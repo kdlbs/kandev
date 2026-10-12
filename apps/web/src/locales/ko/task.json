@@ -2742,5 +2742,19 @@
   "promptHistoryEmpty": "아직 프롬프트가 없습니다.",
   "expandPrompt": "프롬프트 펼치기",
   "collapsePrompt": "프롬프트 접기",
-  "showFullTimestamp": "전체 타임스탬프 표시: {{absoluteTime}}"
+  "showFullTimestamp": "전체 타임스탬프 표시: {{absoluteTime}}",
+  "prMergedNoticeMobile": "PR #{{number}} 병합됨",
+  "prMergedNotice": "PR #{{number}}이(가) 병합되었습니다. 이 작업을 보관할 수 있습니다.",
+  "prClosedNoticeMobile": "PR #{{number}} 병합 없이 종료됨",
+  "prClosedNotice": "PR #{{number}}이(가) 병합 없이 종료되었습니다. 이 작업을 보관할 수 있습니다.",
+  "allPRsMergedNoticeMobile_one": "PR {{count}}개 모두 병합됨",
+  "allPRsMergedNoticeMobile_other": "PR {{count}}개 모두 병합됨",
+  "allPRsMergedNotice_one": "PR {{count}}개가 모두 병합되었습니다. 이 작업을 보관할 수 있습니다.",
+  "allPRsMergedNotice_other": "PR {{count}}개가 모두 병합되었습니다. 이 작업을 보관할 수 있습니다.",
+  "allPRsClosedNoticeMobile_one": "PR {{count}}개 모두 병합 없이 종료됨",
+  "allPRsClosedNoticeMobile_other": "PR {{count}}개 모두 병합 없이 종료됨",
+  "allPRsClosedNotice_one": "PR {{count}}개가 모두 병합 없이 종료되었습니다. 이 작업을 보관할 수 있습니다.",
+  "allPRsClosedNotice_other": "PR {{count}}개가 모두 병합 없이 종료되었습니다. 이 작업을 보관할 수 있습니다.",
+  "turnOffTranscriptAutoScroll": "대화 기록 자동 스크롤 끄기",
+  "turnOnTranscriptAutoScroll": "대화 기록 자동 스크롤 켜기"
 }

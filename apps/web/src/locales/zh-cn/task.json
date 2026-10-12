@@ -2742,5 +2742,19 @@
   "promptHistory": "提示历史",
   "promptHistoryPromptLabel": "提示 {{number}}",
   "promptHistoryPromptLabelGeneric": "提示",
-  "promptHistoryEmpty": "暂无提示。"
+  "promptHistoryEmpty": "暂无提示。",
+  "prMergedNoticeMobile": "PR #{{number}} 已合并",
+  "prMergedNotice": "PR #{{number}} 已合并。您可以归档此任务。",
+  "prClosedNoticeMobile": "PR #{{number}} 已关闭，未合并",
+  "prClosedNotice": "PR #{{number}} 已关闭但未合并。您可以归档此任务。",
+  "allPRsMergedNoticeMobile_one": "全部 {{count}} 个 PR 已合并",
+  "allPRsMergedNoticeMobile_other": "全部 {{count}} 个 PR 已合并",
+  "allPRsMergedNotice_one": "全部 {{count}} 个 PR 已合并。您可以归档此任务。",
+  "allPRsMergedNotice_other": "全部 {{count}} 个 PR 已合并。您可以归档此任务。",
+  "allPRsClosedNoticeMobile_one": "全部 {{count}} 个 PR 已关闭，未合并",
+  "allPRsClosedNoticeMobile_other": "全部 {{count}} 个 PR 已关闭，未合并",
+  "allPRsClosedNotice_one": "全部 {{count}} 个 PR 已关闭但未合并。您可以归档此任务。",
+  "allPRsClosedNotice_other": "全部 {{count}} 个 PR 已关闭但未合并。您可以归档此任务。",
+  "turnOffTranscriptAutoScroll": "关闭对话记录自动滚动",
+  "turnOnTranscriptAutoScroll": "开启对话记录自动滚动"
 }

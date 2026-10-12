@@ -2742,5 +2742,19 @@
   "promptHistoryEmpty": "まだプロンプトなし。",
   "expandPrompt": "プロンプトを展開",
   "collapsePrompt": "プロンプトを折りたたむ",
-  "showFullTimestamp": "完全なタイムスタンプを表示: {{absoluteTime}}"
+  "showFullTimestamp": "完全なタイムスタンプを表示: {{absoluteTime}}",
+  "prMergedNoticeMobile": "PR #{{number}} をマージ済み",
+  "prMergedNotice": "PR #{{number}} はマージされました。このタスクをアーカイブできます。",
+  "prClosedNoticeMobile": "PR #{{number}} は未マージで終了",
+  "prClosedNotice": "PR #{{number}} はマージされずにクローズされました。このタスクをアーカイブできます。",
+  "allPRsMergedNoticeMobile_one": "全 {{count}} 件の PR をマージ済み",
+  "allPRsMergedNoticeMobile_other": "全 {{count}} 件の PR をマージ済み",
+  "allPRsMergedNotice_one": "全 {{count}} 件の PR がマージされました。このタスクをアーカイブできます。",
+  "allPRsMergedNotice_other": "全 {{count}} 件の PR がマージされました。このタスクをアーカイブできます。",
+  "allPRsClosedNoticeMobile_one": "全 {{count}} 件の PR は未マージで終了",
+  "allPRsClosedNoticeMobile_other": "全 {{count}} 件の PR は未マージで終了",
+  "allPRsClosedNotice_one": "全 {{count}} 件の PR がマージされずにクローズされました。このタスクをアーカイブできます。",
+  "allPRsClosedNotice_other": "全 {{count}} 件の PR がマージされずにクローズされました。このタスクをアーカイブできます。",
+  "turnOffTranscriptAutoScroll": "会話の自動スクロールを無効にする",
+  "turnOnTranscriptAutoScroll": "会話の自動スクロールを有効にする"
 }

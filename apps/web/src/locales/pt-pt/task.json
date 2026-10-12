@@ -2742,5 +2742,19 @@
   "promptHistory": "Histórico de prompts",
   "promptHistoryPromptLabel": "Prompt {{number}}",
   "promptHistoryPromptLabelGeneric": "Prompt",
-  "promptHistoryEmpty": "Ainda sem prompts."
+  "promptHistoryEmpty": "Ainda sem prompts.",
+  "prMergedNoticeMobile": "PR #{{number}} integrado",
+  "prMergedNotice": "O PR #{{number}} foi integrado. Pode arquivar esta tarefa.",
+  "prClosedNoticeMobile": "PR #{{number}} fechado sem integração",
+  "prClosedNotice": "O PR #{{number}} foi fechado sem integração. Pode arquivar esta tarefa.",
+  "allPRsMergedNoticeMobile_one": "{{count}} PR integrado",
+  "allPRsMergedNoticeMobile_other": "Todos os {{count}} PRs integrados",
+  "allPRsMergedNotice_one": "O {{count}} PR foi integrado. Pode arquivar esta tarefa.",
+  "allPRsMergedNotice_other": "Todos os {{count}} PRs foram integrados. Pode arquivar esta tarefa.",
+  "allPRsClosedNoticeMobile_one": "{{count}} PR fechado sem integração",
+  "allPRsClosedNoticeMobile_other": "Todos os {{count}} PRs fechados sem integração",
+  "allPRsClosedNotice_one": "O {{count}} PR foi fechado sem integração. Pode arquivar esta tarefa.",
+  "allPRsClosedNotice_other": "Todos os {{count}} PRs foram fechados sem integração. Pode arquivar esta tarefa.",
+  "turnOffTranscriptAutoScroll": "Desativar o deslocamento automático da transcrição",
+  "turnOnTranscriptAutoScroll": "Ativar o deslocamento automático da transcrição"
 }
