@@ -1373,6 +1373,7 @@ func TestRefreshAutomationContinuationMetadataOnResume(t *testing.T) {
 			models.MetaKeyAutomationRepositoryMode: string(automation.RepositoryModeNone),
 			models.MetaKeyAutomationTargetTaskID:   "target-task-1",
 			models.MetaKeyDeferredLaunch:           "must-survive",
+			models.MetaKeyAutomationStartOwned:     "original-owner",
 		},
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -1402,7 +1403,8 @@ func TestRefreshAutomationContinuationMetadataOnResume(t *testing.T) {
 		// actually executes. Without this key in the input map, the assertion
 		// below would pass even with no skip at all — a merge trivially
 		// preserves a key the source map never mentions.
-		models.MetaKeyDeferredLaunch: "attacker-supplied-value",
+		models.MetaKeyDeferredLaunch:       "attacker-supplied-value",
+		models.MetaKeyAutomationStartOwned: "successor-owner",
 	}
 
 	task, session, action, reason, err := svc.prepareAutomationTask(ctx, a, evt, "title", "prompt", metadata)
@@ -1423,6 +1425,8 @@ func TestRefreshAutomationContinuationMetadataOnResume(t *testing.T) {
 		"deferred launch ownership is server-managed and must not be clobbered by a metadata refresh, even when the firing's own metadata map carries a value for it")
 	require.Equal(t, "must-survive", task.Metadata[models.MetaKeyDeferredLaunch],
 		"the in-memory task must also keep the original value, not the firing's attempted overwrite")
+	require.Equal(t, "original-owner", task.Metadata[models.MetaKeyAutomationStartOwned])
+	require.Equal(t, "original-owner", persisted.Metadata[models.MetaKeyAutomationStartOwned])
 }
 
 func TestPrepareAutomationTask_DefersRefreshUntilDispatchAdmission(t *testing.T) {

@@ -2749,5 +2749,19 @@
   "deliveryHistoryGapBody": "恢復現有對話。中斷提示的結果仍然未知。",
   "deliveryHistoryGapArchived": "部分較早的輸出不可用。中斷提示的結果仍然未知。",
   "deliveryHistoryGapUnsupported": "此執行時無法安全恢復缺失的輸出。請更新執行時，然後再次嘗試恢復。",
-  "deliveryHistoryGapRange": "缺失的輸出事件：{{first}} 至 {{last}}。"
+  "deliveryHistoryGapRange": "缺失的輸出事件：{{first}} 至 {{last}}。",
+  "prMergedNoticeMobile": "PR #{{number}} 已合併",
+  "prMergedNotice": "PR #{{number}} 已合併。您可以歸檔此任務。",
+  "prClosedNoticeMobile": "PR #{{number}} 已關閉，未合併",
+  "prClosedNotice": "PR #{{number}} 已關閉但未合併。您可以歸檔此任務。",
+  "allPRsMergedNoticeMobile_one": "全部 {{count}} 個 PR 已合併",
+  "allPRsMergedNoticeMobile_other": "全部 {{count}} 個 PR 已合併",
+  "allPRsMergedNotice_one": "全部 {{count}} 個 PR 已合併。您可以歸檔此任務。",
+  "allPRsMergedNotice_other": "全部 {{count}} 個 PR 已合併。您可以歸檔此任務。",
+  "allPRsClosedNoticeMobile_one": "全部 {{count}} 個 PR 已關閉，未合併",
+  "allPRsClosedNoticeMobile_other": "全部 {{count}} 個 PR 已關閉，未合併",
+  "allPRsClosedNotice_one": "全部 {{count}} 個 PR 已關閉但未合併。您可以歸檔此任務。",
+  "allPRsClosedNotice_other": "全部 {{count}} 個 PR 已關閉但未合併。您可以歸檔此任務。",
+  "turnOffTranscriptAutoScroll": "關閉對話記錄自動滾動",
+  "turnOnTranscriptAutoScroll": "開啟對話記錄自動滾動"
 }

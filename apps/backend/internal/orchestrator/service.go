@@ -3374,6 +3374,7 @@ func (s *Service) reconcileStartupState(ctx context.Context) error {
 		return err
 	}
 	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
+	s.releaseAbandonedAutomationStartOwnership(ctx)
 	// Recover routes orphaned at "starting" by a launch failure that never
 	// reached a terminal route status. Must run before
 	// reconcileExecutorSessionsOnStartup and scheduler.Start: the former

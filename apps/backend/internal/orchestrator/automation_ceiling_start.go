@@ -78,6 +78,9 @@ func (s *Service) startQueuedAutomationRun(
 		execution, startErr = start()
 		return automationRunDispatchFor(taskID, execution, startErr)
 	})
+	if err == nil {
+		s.reconcileAutomationStartOwnershipForRun(ctx, taskID, run.RunID)
+	}
 	switch {
 	case errors.Is(err, automation.ErrRunDeferred):
 		return nil, ErrCeilingLaunchDeferred

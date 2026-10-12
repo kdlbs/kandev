@@ -261,3 +261,14 @@ and five desktop repeats. Seven neighboring phone tests passed, including
 shared-state pagination, workspace isolation, saved views and Quick Chat
 cancellation. Targeted lint and formatting passed. Temporary store probes
 were removed; no production read-reconciliation boundary was changed.
+
+Later main integration: preserved upstream automation-start ownership,
+terminal-font draft handling and mobile task controls. Main independently added
+the same nonmodal workspace-menu setting; the sole textual conflict was
+resolved by retaining that setting and its invariant comment. The combined
+backend tree is byte-identical to an isolated merge already verified by 911
+root Go tests under `-race` across eight packages. Frontend verification passed
+55 tests across six files, full typecheck, schema drift and documentation/spec
+validation. Fresh managed builds passed seven desktop and six phone browser
+cases, including historical CSV replay and reconnect recovery. New-head CI and
+late review monitoring remain pending until publication completes.

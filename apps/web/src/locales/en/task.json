@@ -2749,5 +2749,19 @@
   "deliveryHistoryGapBody": "Resume the existing conversation. The interrupted prompt outcome remains unknown.",
   "deliveryHistoryGapArchived": "Some earlier output is unavailable. The interrupted prompt outcome remains unknown.",
   "deliveryHistoryGapUnsupported": "This runtime cannot safely recover the missing output. Update the runtime and try Resume again.",
-  "deliveryHistoryGapRange": "Missing output events: {{first}} to {{last}}."
+  "deliveryHistoryGapRange": "Missing output events: {{first}} to {{last}}.",
+  "prMergedNoticeMobile": "PR #{{number}} merged",
+  "prMergedNotice": "PR #{{number}} has been merged. You can archive this task.",
+  "prClosedNoticeMobile": "PR #{{number}} closed without merging",
+  "prClosedNotice": "PR #{{number}} was closed without merging. You can archive this task.",
+  "allPRsMergedNoticeMobile_one": "All {{count}} PR merged",
+  "allPRsMergedNoticeMobile_other": "All {{count}} PRs merged",
+  "allPRsMergedNotice_one": "All {{count}} PR has been merged. You can archive this task.",
+  "allPRsMergedNotice_other": "All {{count}} PRs have been merged. You can archive this task.",
+  "allPRsClosedNoticeMobile_one": "All {{count}} PR closed without merging",
+  "allPRsClosedNoticeMobile_other": "All {{count}} PRs closed without merging",
+  "allPRsClosedNotice_one": "All {{count}} PR was closed without merging. You can archive this task.",
+  "allPRsClosedNotice_other": "All {{count}} PRs were closed without merging. You can archive this task.",
+  "turnOffTranscriptAutoScroll": "Turn off transcript auto-scroll",
+  "turnOnTranscriptAutoScroll": "Turn on transcript auto-scroll"
 }
