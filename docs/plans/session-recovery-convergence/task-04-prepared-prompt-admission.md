@@ -51,4 +51,17 @@ follow-up PR and address CI/review through merge. No delegation or new sessions.
 
 The temporary pre-fix reproduction failed at the exact reported error, with
 unchanged SQL bytes and no native dispatch. Its normalized control passed.
-Implementation and permanent regressions are in progress.
+Permanent lifecycle/SQLite tests pass for metadata hydration, collision renaming,
+exact SQL/agentctl-request payload equality, rejection before dispatch and
+immutable duplicate refusal. Focused executor/backend adapter checks and
+orchestrator delivery-retention, initial-admission, transformed-retry and
+fallback tests pass. The broader focused orchestrator run passed every assertion
+but exposed a fallback simulator leak; explicit cancellation and cleanup joining
+fixed that leak, and the affected package rerun passes. Documentation catalog
+validation and specification lint pass. CI owns PostgreSQL, browser E2E and
+broader validation. Follow-up PR: https://github.com/kdlbs/kandev/pull/4435.
+
+Focused commands use `go -C apps/backend test -p 1 -trimpath -tags fts5` with
+`GOMEMLIMIT=2048MiB GOMAXPROCS=2`. Final orchestrator selection:
+`Test(DeliveryRetention|PromptTask_LegacyCallerComposesSavedPromptOnFreshFallback)`.
+No local E2E or PostgreSQL ran.
