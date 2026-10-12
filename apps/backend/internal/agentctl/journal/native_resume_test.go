@@ -97,3 +97,17 @@ func TestNativeResumeRetiresUnprovenTerminalLabelsWithoutChangingThem(t *testing
 		})
 	}
 }
+
+func TestNativeResumeRetiresUnknownWithRetainedTerminal(t *testing.T) {
+	j, event := terminalSubmissionFixture(t, SubmissionInterruptedUnknown, false)
+	_, appendErr := j.Append(context.Background(), event)
+	require.NoError(t, appendErr)
+	before, err := j.GetSubmission(context.Background(), event.SubmissionID)
+	require.NoError(t, err)
+	require.True(t, before.TerminalEventRetained)
+	after, err := j.RetireSubmission(context.Background(), event.SubmissionID, event.HarnessGeneration)
+	require.NoError(t, err)
+	require.True(t, after.Retired)
+	require.Equal(t, before.State, after.State)
+	require.Equal(t, before.TerminalSequence, after.TerminalSequence)
+}

@@ -18,3 +18,7 @@ func (a *lifecycleAdapter) ReconcileAlreadyResumedDelivery(ctx context.Context, 
 func (a *lifecycleAdapter) GetNativeResumeDeliveryEvidence(ctx context.Context, sessionID string) (*models.NativeResumeDeliveryEvidence, error) {
 	return a.mgr.GetNativeResumeDeliveryEvidence(ctx, sessionID)
 }
+
+func (a *lifecycleAdapter) ReconcileLoadedNativeDelivery(ctx context.Context, sessionID string) (*models.NativeResumeDeliveryEvidence, error) {
+	return a.mgr.ReconcileLoadedNativeDelivery(ctx, sessionID)
+}

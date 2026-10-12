@@ -1,5 +1,17 @@
 ---
+id: "01-shutdown-settlement"
+title: "Shutdown settlement"
 status: in_progress
+wave: 1
+depends_on: []
+plan: plan.md
+requirements:
+  - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-002
+acceptance_criteria:
+  - AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.1
+  - AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.2
+system_design:
+  - ../../specs/platform/system-design/session-recovery-convergence.md
 ---
 
 # Task 01: Shutdown settlement
@@ -30,6 +42,8 @@ From apps/backend:
 ## Results
 
 Real graceful-stop regression confirmed red before production correction.
-Focused TestSubmission race suite passed after initial correction; controls pending.
+Focused producer race checks pass, including deterministic rejection, cancelled
+RequestError, retained error settlement and queued terminal draining. Shutdown
+intent is independent of update-forwarder termination. CI remains authoritative.
 
 [Parent plan](plan.md). [Requirements](../../specs/platform/requirements/durable-restart-reconciliation.md).

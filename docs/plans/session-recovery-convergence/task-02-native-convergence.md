@@ -1,5 +1,19 @@
 ---
+id: "02-native-convergence"
+title: "Native convergence"
 status: in_progress
+wave: 2
+depends_on:
+  - 01-shutdown-settlement
+plan: plan.md
+requirements:
+  - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-002
+acceptance_criteria:
+  - AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.2
+  - AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.3
+  - AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.4
+system_design:
+  - ../../specs/platform/system-design/session-recovery-convergence.md
 ---
 
 # Task 02: Native convergence
@@ -32,6 +46,9 @@ PostgreSQL variants run in CI against real PostgreSQL.
 
 ## Results
 
-Pending.
+The 49-pair lifecycle matrix and SQLite authenticated-binding suite pass.
+Foreign/missing submission streams and reconstructed unknown outcomes were
+reproduced before correction. Automatic entrypoint checks and final CI are
+in progress.
 
 [Parent plan](plan.md). [Requirements](../../specs/platform/requirements/durable-restart-reconciliation.md).

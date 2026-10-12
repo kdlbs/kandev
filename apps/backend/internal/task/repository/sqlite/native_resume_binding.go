@@ -14,8 +14,7 @@ import (
 // ResolveSessionRecoveryBlockWithNativeEvidence commits only after authenticated
 // native retirement. All incident fences are verified before any becomes usable.
 func (r *Repository) ResolveSessionRecoveryBlockWithNativeEvidence(ctx context.Context, id string, proof *models.NativeResumeDeliveryEvidence, completedAt time.Time) (bool, error) {
-	if proof == nil || proof.SessionID == "" || proof.IncarnationID == "" || proof.HarnessGeneration <= 0 ||
-		proof.NativeSessionID == "" || proof.StreamID == "" || proof.ExecutionID == "" {
+	if !validNativeResumeProof(proof) {
 		return false, nil
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -44,23 +43,9 @@ func (r *Repository) ResolveSessionRecoveryBlockWithNativeEvidence(ctx context.C
 	if err := r.advanceRecoverySessionRevisionTx(ctx, tx, proof.SessionID); err != nil {
 		return false, err
 	}
-	for _, block := range blocks {
-		stream := block.DeliveryStreamID
-		if block.DeliverySubmissionID != "" && stream == "" {
-			stream = proof.StreamID
-		}
-		result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE session_recovery_blocks SET delivery_stream_id = ?, state = ?, authorized_action = ?, updated_at = ?, resolved_at = ? WHERE id = ? AND state = ?`),
-			stream, models.RecoveryBlockResolved, nativeResumeRecoveryAction, completedAt, completedAt, block.ID, models.RecoveryBlockOpen)
-		if err != nil {
-			return false, err
-		}
-		count, err := result.RowsAffected()
-		if err != nil {
-			return false, err
-		}
-		if count != 1 {
-			return false, nil
-		}
+	changed, err := r.resolveNativeIncidentBlocksTx(ctx, tx, blocks, proof, completedAt)
+	if err != nil || !changed {
+		return false, err
 	}
 	return true, tx.Commit()
 }
@@ -87,15 +72,9 @@ func (r *Repository) verifyNativeResumeSnapshotTx(ctx context.Context, tx *sqlx.
 }
 
 func (r *Repository) verifyNativeResumeInventoryTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
-	retired := make(map[string]models.NativeResumeSubmissionEvidence, len(proof.Submissions))
-	for _, row := range proof.Submissions {
-		if row.ID == "" || row.PayloadHash == "" || row.HarnessGeneration <= 0 || row.HarnessGeneration > proof.HarnessGeneration {
-			return false, nil
-		}
-		if _, duplicate := retired[row.ID]; duplicate {
-			return false, nil
-		}
-		retired[row.ID] = row
+	retired, valid := nativeResumeSubmissionMap(proof)
+	if !valid {
+		return false, nil
 	}
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`SELECT id, incarnation_id, harness_generation, payload_hash, state, terminal_stream_id, terminal_sequence FROM agent_delivery_submissions WHERE session_id = ? AND state IN ('prepared', 'accepted', 'dispatching', 'interrupted_unknown')`), proof.SessionID)
 	if err != nil {
@@ -164,9 +143,7 @@ func (r *Repository) nativeResumeIncidentBlocksTx(ctx context.Context, tx *sqlx.
 }
 
 func nativeResumeIncidentBlockMatches(block models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence) bool {
-	if block.IncarnationID != proof.IncarnationID || block.ExpectedGeneration != proof.HarnessGeneration || block.ConsumerReference != reconstructionDeliveryConsumer ||
-		(block.Reason != "unknown_prompt_outcome" && block.Reason != "unresolved_durable_work") ||
-		block.DeliverySequence != 0 || block.DeliveryTurnID != "" || block.DeliveryOutcome != "" {
+	if !nativeResumeIncidentOwnerMatches(block, proof) {
 		return false
 	}
 	if block.DeliverySubmissionID == "" {
@@ -176,7 +153,7 @@ func nativeResumeIncidentBlockMatches(block models.SessionRecoveryBlock, proof *
 		return false
 	}
 	for _, row := range proof.Submissions {
-		if row.ID == block.DeliverySubmissionID && row.HarnessGeneration == proof.HarnessGeneration {
+		if row.ID == block.DeliverySubmissionID && row.HarnessGeneration == proof.HarnessGeneration && row.StreamID == proof.StreamID {
 			return true
 		}
 	}
@@ -214,15 +191,7 @@ func (r *Repository) restoreAuthenticatedNativeNoticeTx(ctx context.Context, tx 
 		}
 		return nativeResumeProofCoversNotice(proof, recovery), nil
 	}
-	if recovery.HarnessGeneration != proof.HarnessGeneration || (recovery.StreamID != "" && recovery.StreamID != proof.StreamID) ||
-		(recovery.Phase != models.AgentDeliveryRecoveryUncertain && recovery.Phase != models.AgentDeliveryRecoveryReconnecting) {
-		return false, nil
-	}
-	found := false
-	for _, row := range proof.Submissions {
-		found = found || row.ID == recovery.SubmissionID && row.HarnessGeneration == recovery.HarnessGeneration
-	}
-	if !found {
+	if !nativeResumeNoticeMatches(proof, recovery) {
 		return false, nil
 	}
 	recovery.StreamID = proof.StreamID
@@ -236,4 +205,68 @@ func nativeResumeProofCoversNotice(proof *models.NativeResumeDeliveryEvidence, r
 		}
 	}
 	return false
+}
+
+func validNativeResumeProof(proof *models.NativeResumeDeliveryEvidence) bool {
+	return proof != nil && proof.SessionID != "" && proof.IncarnationID != "" && proof.HarnessGeneration > 0 && proof.NativeSessionID != "" && proof.StreamID != "" && proof.ExecutionID != ""
+}
+func (r *Repository) resolveNativeIncidentBlocksTx(ctx context.Context, tx *sqlx.Tx, blocks []models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence, completedAt time.Time) (bool, error) {
+	for _, block := range blocks {
+		stream := block.DeliveryStreamID
+		if block.DeliverySubmissionID != "" && stream == "" {
+			stream = proof.StreamID
+		}
+		result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE session_recovery_blocks SET delivery_stream_id = ?, state = ?, authorized_action = ?, updated_at = ?, resolved_at = ? WHERE id = ? AND state = ?`),
+			stream, models.RecoveryBlockResolved, nativeResumeRecoveryAction, completedAt, completedAt, block.ID, models.RecoveryBlockOpen)
+		if err != nil {
+			return false, err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		if count != 1 {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func nativeResumeSubmissionMap(proof *models.NativeResumeDeliveryEvidence) (map[string]models.NativeResumeSubmissionEvidence, bool) {
+	retired := make(map[string]models.NativeResumeSubmissionEvidence, len(proof.Submissions))
+	for _, row := range proof.Submissions {
+		if row.ID == "" || row.PayloadHash == "" || row.StreamID == "" || row.HarnessGeneration <= 0 || row.HarnessGeneration > proof.HarnessGeneration ||
+			(row.HarnessGeneration == proof.HarnessGeneration && row.StreamID != proof.StreamID) {
+			return nil, false
+		}
+		if _, duplicate := retired[row.ID]; duplicate {
+			return nil, false
+		}
+		retired[row.ID] = row
+	}
+	return retired, true
+}
+
+func nativeResumeIncidentOwnerMatches(block models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence) bool {
+	if block.IncarnationID != proof.IncarnationID || block.ExpectedGeneration != proof.HarnessGeneration || block.ConsumerReference != reconstructionDeliveryConsumer ||
+		(block.Reason != "unknown_prompt_outcome" && block.Reason != "unresolved_durable_work") ||
+		block.DeliverySequence != 0 || block.DeliveryTurnID != "" || (block.DeliveryOutcome != "" && block.DeliveryOutcome != "unknown") {
+		return false
+	}
+	return true
+}
+
+func nativeResumeNoticeMatches(proof *models.NativeResumeDeliveryEvidence, recovery models.AgentDeliveryRecovery) bool {
+	if recovery.HarnessGeneration != proof.HarnessGeneration || (recovery.StreamID != "" && recovery.StreamID != proof.StreamID) ||
+		(recovery.Phase != models.AgentDeliveryRecoveryUncertain && recovery.Phase != models.AgentDeliveryRecoveryReconnecting) {
+		return false
+	}
+	found := false
+	for _, row := range proof.Submissions {
+		found = found || row.ID == recovery.SubmissionID && row.HarnessGeneration == recovery.HarnessGeneration
+	}
+	if !found {
+		return false
+	}
+	return true
 }

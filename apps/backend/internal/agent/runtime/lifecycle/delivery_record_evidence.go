@@ -93,6 +93,13 @@ func (m *Manager) InspectDeliveryRecordEvidence(
 		return result, errors.Join(ErrDeliveryRecordEvidenceTruncated, ErrDeliveryRecoveryBlocked)
 	}
 	result.ControlIdentity = m.deliveryRecordControlIdentity(ctx, request, result.Descriptor)
+	if result.ControlIdentity == nil && result.Descriptor.SubmissionCount == 0 && result.RetiredSubmission != nil {
+		selected := result.RetiredSubmission
+		if selected.ID == request.RetiredSubmissionID && selected.SessionID == request.SessionID && selected.IncarnationID == request.IncarnationID && selected.HarnessGeneration == request.HarnessGeneration {
+			result.ControlIdentity = m.persistedDeliveryRecordControlIdentity(ctx, request, journal.SubmissionSummary{
+				ID: selected.ID, SessionID: selected.SessionID, IncarnationID: selected.IncarnationID, HarnessGeneration: selected.HarnessGeneration, StreamID: selected.StreamID})
+		}
+	}
 	if identity := result.ControlIdentity; identity != nil {
 		result.ProcessTerminated = historicalProcessTermination(DeliveryRecordEvidenceRequest{
 			ExecutionID: identity.ExecutionID, OriginalRuntime: &identity.OriginalRuntime,

@@ -1,5 +1,19 @@
 ---
-status: pending
+id: "03-recovery-contract"
+title: "Recovery contract and delivery"
+status: in_progress
+wave: 3
+depends_on:
+  - 02-native-convergence
+plan: plan.md
+requirements:
+  - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-002
+acceptance_criteria:
+  - AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.3
+  - AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.4
+  - AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.5
+system_design:
+  - ../../specs/platform/system-design/session-recovery-convergence.md
 ---
 
 # Task 03: Recovery contract and delivery
@@ -32,6 +46,10 @@ Desktop and phone E2E are CI-only; never run locally.
 
 ## Results
 
-Pending. PR #4425 is merged; overall recovery remains in progress.
+PR #4432 is open and running CI. Documentation coverage passes locally after
+correcting work-order metadata. Review remediation covers terminal drain ordering,
+complete stream snapshot validation, exact submission stream binding and unknown
+reconstruction outcomes. Final automatic restart checks, CI and review remain
+in progress. No local E2E has run.
 
 [Parent plan](plan.md). [Requirements](../../specs/platform/requirements/durable-restart-reconciliation.md).

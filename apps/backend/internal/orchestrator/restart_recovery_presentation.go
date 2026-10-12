@@ -27,6 +27,11 @@ func (s *Service) repairRestartRecoveryPresentation(ctx context.Context, session
 	if !ok {
 		return session, nil
 	}
+	if open, readErr := blocks.GetOpenSessionRecoveryBlock(ctx, session.ID, session.QueueIncarnationID, generation.Generation); readErr == nil && open != nil {
+		if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, open); resolved {
+			return s.repo.GetTaskSession(ctx, session.ID)
+		}
+	}
 	block, reason, err := s.deliveryReconstructionBlock(ctx, session.ID, session.QueueIncarnationID, generation.Generation, nil)
 	if err != nil {
 		return nil, err

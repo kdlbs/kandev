@@ -50,6 +50,8 @@ No completion claim follows merely from recovering the four observed records.
 
 ## Results
 
-In progress. Real shutdown regression was red; initial focused producer race
-suite is green. Comprehensive assessment, binding convergence and delivery
-remain incomplete. No local E2E has run.
+PR #4432 is open. Focused producer, SQL and lifecycle race checks pass, including
+the 49-state-pair matrix. CI identified documentation metadata and function
+complexity failures; corrections and review regressions are in progress.
+Automatic restart/admission closure and final CI remain pending. No local E2E
+has run.

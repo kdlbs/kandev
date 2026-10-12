@@ -29,7 +29,7 @@ func TestPostgresNativeResumeAuthenticatedMissingBinding(t *testing.T) {
 }
 
 func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testing.T) *Repository) {
-	for _, scenario := range []string{"absent notice", "partial notice", "resolved earlier notice", "matching fences", "independent fence", "foreign native", "hash changed", "active work", "unmatched unknown", "foreign stream", "rollback"} {
+	for _, scenario := range []string{"absent notice", "partial notice", "resolved earlier notice", "matching fences", "independent fence", "foreign native", "hash changed", "active work", "unmatched unknown", "foreign stream", "foreign submission stream", "missing submission stream", "reconstructed unknown", "known outcome", "rollback"} {
 		t.Run(scenario, func(t *testing.T) {
 			repo := open(t)
 			ctx := context.Background()
@@ -86,9 +86,20 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 			if scenario == "resolved earlier notice" {
 				current, err := repo.GetAgentDeliverySubmission(ctx, fixture.block.DeliverySubmissionID)
 				require.NoError(t, err)
-				proof.Submissions = append(proof.Submissions, models.NativeResumeSubmissionEvidence{ID: current.ID, HarnessGeneration: 1, PayloadHash: current.PayloadHash})
+				proof.Submissions = append(proof.Submissions, models.NativeResumeSubmissionEvidence{ID: current.ID, HarnessGeneration: 1, PayloadHash: current.PayloadHash, StreamID: proof.StreamID})
 			}
 			switch scenario {
+			case "reconstructed unknown", "known outcome":
+				outcome := "unknown"
+				if scenario == "known outcome" {
+					outcome = "completed"
+				}
+				_, err = repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE session_recovery_blocks SET delivery_outcome = ? WHERE id = ?`), outcome, fixture.block.ID)
+				require.NoError(t, err)
+			case "foreign submission stream":
+				proof.Submissions[0].StreamID = "foreign"
+			case "missing submission stream":
+				proof.Submissions[0].StreamID = ""
 			case "foreign native":
 				proof.NativeSessionID = "foreign"
 			case "hash changed":
@@ -120,7 +131,7 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 			} else {
 				require.NoError(t, err)
 			}
-			want := scenario == "absent notice" || scenario == "partial notice" || scenario == "resolved earlier notice" || scenario == "matching fences"
+			want := scenario == "reconstructed unknown" || scenario == "absent notice" || scenario == "partial notice" || scenario == "resolved earlier notice" || scenario == "matching fences"
 			require.Equal(t, want, changed)
 			block, err := repo.GetSessionRecoveryBlock(ctx, fixture.block.ID)
 			require.NoError(t, err)

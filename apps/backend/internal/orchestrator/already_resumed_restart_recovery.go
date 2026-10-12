@@ -51,7 +51,10 @@ func (s *Service) finishAlreadyResumedRestartRecovery(ctx context.Context, input
 	if !ok {
 		return false, errors.New("restart recovery block store is unavailable")
 	}
-	changed, err := blocks.ResolveSessionRecoveryBlock(ownerCtx, inputs.block.ID, "resume", time.Now().UTC())
+	changed, handled, err := s.resolveNativeDeliveryBlock(ownerCtx, inputs.block, time.Now().UTC())
+	if !handled {
+		changed, err = blocks.ResolveSessionRecoveryBlock(ownerCtx, inputs.block.ID, "resume", time.Now().UTC())
+	}
 	if err == nil && !changed {
 		err = errors.New("restart recovery block changed before resolution")
 	}

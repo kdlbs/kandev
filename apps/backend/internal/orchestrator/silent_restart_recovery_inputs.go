@@ -38,6 +38,13 @@ func (s *Service) loadSilentRestoreInputs(
 	if err != nil || !eligible {
 		return nil, err
 	}
+	current, err := s.repo.GetTaskSession(owner.ctx, candidate.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if restored, err := s.resumeLegacyNativeRestart(owner.ctx, current); err != nil || restored {
+		return nil, err
+	}
 	session, recovery, eligible, err := s.loadSilentRestoreSession(
 		owner.ctx, candidate, owner.task.ID,
 	)

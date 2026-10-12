@@ -14,7 +14,7 @@ import (
 // admission fence. The snapshot cannot authorize dispatch or alter old outcomes.
 func (m *Manager) GetNativeResumeDeliveryEvidence(ctx context.Context, sessionID string) (*models.NativeResumeDeliveryEvidence, error) {
 	execution, exists := m.GetExecutionBySessionID(sessionID)
-	if !exists || execution == nil {
+	if !exists {
 		return nil, ErrDurableAdoptionEvidenceUnavailable
 	}
 	client, release := execution.AcquireAgentCtlClient()
@@ -56,7 +56,7 @@ func (m *Manager) GetNativeResumeDeliveryEvidence(ctx context.Context, sessionID
 	if err != nil {
 		return nil, err
 	}
-	if after == nil || !sameDeliveryRecordDescriptor(*status, *after) {
+	if !sameNativeResumeProofStatus(status, after) {
 		return nil, ErrDeliveryRecordEvidenceStale
 	}
 	return proof, nil
@@ -74,8 +74,12 @@ func (m *Manager) nativeResumeProofRows(ctx context.Context, execution *AgentExe
 	if err := validateNativeResumeSQLRows(execution, status, peer, rows, true); err != nil {
 		return nil, nil, err
 	}
-	if ids, err := nativeResumeRetirementIDs(execution, status, peer, rows); err != nil || len(ids) != 0 {
-		return nil, nil, fmt.Errorf("%w: native resume inventory has unsettled work: %v", ErrDurableAdoptionBlocked, err)
+	ids, err := nativeResumeRetirementIDs(execution, status, peer, rows)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(ids) != 0 {
+		return nil, nil, fmt.Errorf("%w: native resume inventory has %d unsettled submissions", ErrDurableAdoptionBlocked, len(ids))
 	}
 	streams := make(map[string]string, len(peer))
 	for _, submission := range peer {
@@ -102,4 +106,14 @@ func nativeResumeProofCursor(ctx context.Context, repository AgentDeliveryReposi
 		return nil, fmt.Errorf("%w: native resume projection is incomplete", ErrDurableAdoptionBlocked)
 	}
 	return cursor, nil
+}
+
+func sameNativeResumeProofStatus(before, after *agentctl.DeliveryStatus) bool {
+	if before == nil || after == nil || !sameDeliveryRecordDescriptor(*before, *after) || before.StreamID != after.StreamID || before.Unresolved != after.Unresolved {
+		return false
+	}
+	if before.Stream == nil || after.Stream == nil {
+		return before.Stream == nil && after.Stream == nil
+	}
+	return *before.Stream == *after.Stream
 }

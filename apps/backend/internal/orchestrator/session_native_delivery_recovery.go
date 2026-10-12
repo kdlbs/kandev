@@ -102,3 +102,32 @@ func (s *Service) resolveNativeDeliveryBlock(ctx context.Context, block *models.
 	changed, err := resolver.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, block.ID, proof, completedAt)
 	return changed, true, err
 }
+
+type loadedNativeDeliveryReconciler interface {
+	ReconcileLoadedNativeDelivery(context.Context, string) (*models.NativeResumeDeliveryEvidence, error)
+}
+
+func (s *Service) finishLoadedNativeDeliveryBlock(ctx context.Context, block *models.SessionRecoveryBlock) (bool, error) {
+	manager, supported := s.agentManager.(loadedNativeDeliveryReconciler)
+	resolver, canResolve := s.repo.(nativeResumeEvidenceBlockResolver)
+	if !supported || !canResolve || block == nil || block.ConsumerReference != agentDeliveryConsumer {
+		return false, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, block.SessionID)
+	if err != nil || session == nil {
+		return false, err
+	}
+	office, err := s.lookupOfficeTask(ctx, session.TaskID)
+	if err != nil || office {
+		return false, err
+	}
+	proof, err := manager.ReconcileLoadedNativeDelivery(ctx, block.SessionID)
+	if err != nil || proof == nil {
+		return false, err
+	}
+	changed, err := resolver.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, block.ID, proof, time.Now().UTC())
+	if err == nil && changed {
+		s.publishAgentDeliveryRecoveryState(ctx, block.SessionID)
+	}
+	return changed, err
+}

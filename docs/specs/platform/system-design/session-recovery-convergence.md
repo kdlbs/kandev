@@ -40,9 +40,10 @@ with exact authenticated journal evidence; repeat adoption uses the same rule.
 
 ## Producer ordering
 
-Capture the admitted child's stop channel for dispatch. Publish interruption
-before closing its writer or adapter, so a teardown-generated RequestError is
-uncertain. Do not consult mutable replacement status or acquire the teardown
+Capture the admitted child's shutdown-intent flag for dispatch. Publish interruption
+before closing its adapter, so a teardown-generated RequestError is uncertain.
+Keep the update forwarder and journal writer open through adapter closure and
+drain already-queued events before closing the writer. Do not consult mutable replacement status or acquire the teardown
 mutex inside settlement. A deterministic provider rejection remains a failure;
 a retained terminal wins over a late transport error. Settle with a bounded
 cancellation-independent context. Journal close or failed writes leave retained
@@ -70,7 +71,10 @@ of the binding, notice or fence. A retry reuses retired journal proof.
 Startup/runtime replacement and explicit Resume reuse existing restore ownership
 and source-death checks. Normal launch/open and direct/queued prompt admission
 consume the same committed disposition; read-only inspection cannot grant
-admission. An already-loaded idle native successor is reused. Recovery supplies
+admission. An already-loaded idle native successor is reused after verifying the persisted
+original prompt binding and original process death. Legacy failed history with
+no recovery notice uses the same native Resume transaction only after retained
+source evidence, exact SQL history and complete stream projection are rechecked. Recovery supplies
 no prompt and does not revive a dispatched queue entry. A distinct new prompt
 requires a new immutable submission and normal workflow/queue authority.
 
