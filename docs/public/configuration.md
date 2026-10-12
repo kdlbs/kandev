@@ -214,6 +214,8 @@ Environment values override YAML. These values do not configure the agentctl jou
 | `tasks.deliveryRetention.batchRows` | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_ROWS` | `200` | 1 to 200 |
 | `tasks.deliveryRetention.batchBytes` | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_BYTES` | `4194304` | 1048576 to 4194304 |
 
+`interval` controls idle rechecks after work is exhausted or maintenance is busy. Productive cleanup continues immediately without inter-batch or inter-pass sleeps.
+
 `batchRows` sets a candidate ceiling. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings. Other cleanup batches can use the configured ceiling.
 
 Automatic cleanup preserves canonical history and unresolved recovery evidence.
