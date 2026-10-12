@@ -73,8 +73,7 @@ existing dedicated Terminal & Editors page. Maps to .1/.2/.4 above.
 
 ROOT completed the full design review and issued the later implementation
 release with exclusive heavy lease113 on 2026-10-11. Execute in the same primary
-session/model; preserve upstream changes. Node 24 is supplied by
-`/home/jcfs/.nvm/versions/node/v24.18.0/bin` in the local PATH.
+session/model; preserve upstream changes. Use Node 24 on PATH.
 
 ### Once-only dependency bootstrap after release
 
@@ -262,3 +261,11 @@ Both pre-commit and commit-msg hooks are installed and active. The normal commit
 receipt and hosted exact-head evidence are retained in the external task delivery
 checkpoint after their actual exits; no hook bypass or additional validation
 phase. ROOT's later expected-head merge grant remains separate.
+
+
+### Hosted review documentation correction
+
+Corrected the owning design's stale closing note after automatic review and
+made the Node prerequisite portable. Runtime, tests, requirement and captures
+are unchanged. Targeted specification catalog/lint passed; normal commit hooks
+and exact-head hosted delivery receipts remain in the external task checkpoint.

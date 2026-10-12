@@ -114,5 +114,5 @@ rendered action, store, and PATCH payloads; no new telemetry is needed.
 - [Save-surface refinement](../../../plans/settings-save-action-redesign/plan.md)
 - [Custom-font draft repair](../../../plans/preserve-custom-terminal-font/plan.md)
 
-This draft fills the missing vertical design paired with the existing active
-requirement. Its terminal-editor refinement awaits design review and implementation.
+This design fills the missing vertical design paired with the existing active
+requirement. Its terminal-editor refinement was reviewed, implemented, and locally validated.
