@@ -84,6 +84,9 @@ func resumedBootstrapReceipt(execution *AgentExecution, streamID string, first j
 	if event.Type != first.Type || event.Type == "" {
 		return nil, ErrDurableAdoptionIdentityMismatch
 	}
+	if _, isTurnContent := turnContentEventTypes[event.Type]; isTurnContent {
+		return nil, ErrDurableAdoptionIdentityMismatch
+	}
 	event.DeliveryStreamID, event.DeliveryIncarnationID = first.StreamID, first.IncarnationID
 	event.DeliveryHarnessGeneration, event.DeliverySequence = first.HarnessGeneration, first.Sequence
 	event.DeliverySubmissionID = ""

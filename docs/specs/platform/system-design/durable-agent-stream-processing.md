@@ -146,8 +146,9 @@ For a native generation-one bootstrap that never received its first event,
 explicit startup may establish a checkpoint by receiving the actual retained
 sequence-one setup event. Require the matching committed native conversation,
 authenticated stream and current execution, a fully retained prefix from one,
-and zero peer acknowledgments. The first event must have no submission or terminal
-outcome. The normal SQL receive transaction rejects orphaned receipts, retired
-sessions and changed owners; checkpoint creation accompanies the real receipt.
+and zero peer acknowledgments. The first event must have no submission, turn
+content or terminal outcome. The normal SQL receive transaction rejects orphaned
+receipts, retired sessions and changed owners; checkpoint creation accompanies
+the real receipt.
 Preflight performs no projection, acknowledgment, prompt dispatch or block resolution.
 Subsequent replay projects retained events through the normal idempotent pipeline.

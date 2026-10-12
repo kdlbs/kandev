@@ -13,7 +13,7 @@ import (
 )
 
 func TestResumedDeliveryCheckpointReceivesAuthenticatedFirstEvent(t *testing.T) {
-	for _, scenario := range []string{"unreceived", "acknowledged", "pruned", "foreign_native", "foreign_execution", "foreign_event", "missing_first", "terminal_envelope", "conflicting_type", "owner_replaced_during_replay", "orphan_receipt"} {
+	for _, scenario := range []string{"unreceived", "acknowledged", "pruned", "foreign_native", "foreign_execution", "foreign_event", "missing_first", "terminal_envelope", "conflicting_type", "message_chunk", "tool_call", "owner_replaced_during_replay", "orphan_receipt"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			repo, database := runOwnerTestRepository(t)
@@ -44,6 +44,9 @@ func TestResumedDeliveryCheckpointReceivesAuthenticatedFirstEvent(t *testing.T) 
 				first.Terminal = true
 			case "conflicting_type":
 				first.Type = "complete"
+			case "message_chunk", "tool_call":
+				first.Type = scenario
+				first.Payload = []byte(`{"type":"` + scenario + `"}`)
 			case "orphan_receipt":
 				_, err := repo.ReceiveAgentDeliveryEvent(ctx, &models.AgentDeliveryEvent{SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "incarnation:g1", Sequence: 2, EventType: "agent_capabilities", Payload: first.Payload}, 2)
 				require.NoError(t, err)

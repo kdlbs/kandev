@@ -59,6 +59,8 @@ RED: native-resume initialization rejected a setup event before SQL generation
 commit, and processor failure left a quiet stream connected. The checkpoint
 regression failed with `agent delivery checkpoint missing`. Additional negative
 cases initially demonstrated acceptance of contradictory terminal/type envelopes.
+Review regression tests also reproduced acceptance of unbound message/tool
+content as the first setup event; bootstrap checkpoint recovery now rejects it.
 
 GREEN: the targeted lifecycle race tests, complete agentctl race suite, targeted
 orchestrator recovery tests, full backend lint, specification/catalog validation,
