@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/tasks/requirements/portable-workspace-adoption.md
 created: 2026-10-11
-status: in_progress
+status: complete
 ---
 
 # Portable workspace adoption implementation
@@ -38,5 +38,22 @@ Step 1 isolated gate passed against current main 1bba2c18 in the previous turn.
 Implementation tasks 1-3 are complete. MAIN targeted race checks passed across
 worktree, task handlers, repository and backend composition. SQLite and task-owned
 PostgreSQL 18.6 publication, rollback, schema replay and exclusive claim checks
-passed. Independent Review and QA remain pending for the frozen candidate.
+passed. Independent Review session 34c401ff-c5c1-4345-90bc-156eac6b5e7c and QA
+session 16e162e7-dce3-4341-8968-fc7368b03559 passed source candidate
+7cb27830c637ba2969c99271b9e982f3a29093ea after MAIN fixed replacement-ancestry
+and escaped-ref findings. QA reran 37 focused tests and four independent probes
+(21 scenarios), with no failures, skips or race warnings, including PostgreSQL.
+Review reran the original two failure probes and committed metadata regressions.
+
+QA command: `go test -C apps/backend -tags fts5 -race ./internal/task/handlers
+./internal/task/repository/sqlite ./internal/worktree ./internal/backendapp
+-run 'TestWorkspaceAdoption|TestMainCheckout|TestManager_AdmitTaskRecovery|TestRecoveryOperationLockIsExclusiveAndReleasesForAdoption'
+-count=1 -v`, using the private task-owned PostgreSQL fixture. Reports and logs:
+`.kandev/portable-adoption/review/round2-report.txt` and
+`.kandev/portable-adoption/qa/round2-report.md`. Final documentation-only candidate
+SHA and both sessions' delta verdicts are recorded in Kandev plan metadata.
+
+Acceptance is synthetic HTTP/Git/SQLite/PostgreSQL and manager-level continuity.
+Real agent resume, process kill/restart, full auth-enabled service, unsupported
+platforms, release binary and deployment acceptance remain unverified.
 No submodules or live deployment involved. No PR or overlay retirement claim.
