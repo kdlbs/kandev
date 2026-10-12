@@ -42,7 +42,7 @@ remain blocked with a specific supported action; they are not fabricated away.
 
 ## Validation and delivery
 
-Focused Go tests use GOMEMLIMIT=768MiB GOMAXPROCS=2, -p 1, -race, -trimpath,
+Focused Go tests use GOMEMLIMIT=2048MiB GOMAXPROCS=2, -p 1, -race, -trimpath,
 -tags fts5; only one heavy local operation runs at once. Required PostgreSQL and
 all desktop/phone browser suites run in CI. Push and open a follow-up PR promptly,
 address every actionable CI/review finding, and merge the actual passing head.
@@ -50,8 +50,11 @@ No completion claim follows merely from recovering the four observed records.
 
 ## Results
 
-PR #4432 is open. Focused producer, SQL and lifecycle race checks pass, including
-the 49-state-pair matrix. CI identified documentation metadata and function
-complexity failures; corrections and review regressions are in progress.
-Automatic restart/admission closure and final CI remain pending. No local E2E
+PR #4432 implements all three work orders. Focused producer, journal, SQL,
+lifecycle and orchestrator race checks pass, including the 49-state-pair matrix,
+legacy shutdown history, prepared checkpoints, missing/stale fences and repeated
+recovery. The four established recovery regressions reported by CI now pass
+after separating stored-record inspection from retired-record proof.
+All eight initial review threads were addressed and resolved. Final-head CI,
+any subsequent review findings and merge remain the delivery gate. No local E2E
 has run.

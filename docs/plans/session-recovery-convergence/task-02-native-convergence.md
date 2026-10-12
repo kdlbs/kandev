@@ -52,7 +52,7 @@ reproduced before correction. Automatic loaded-successor and legacy restart chec
 and retired-history cases. Prepared checkpoint and stale composer-error SQL
 controls pass. CI exposed the distinction between stored-record inspection and
 retirement proof; the retained-reader correction passes its focused journal test,
-with the affected established restart/gap regressions being rechecked. Final CI
-is pending.
+and the affected established restart/gap regressions pass with race detection.
+Final CI is pending.
 
 [Parent plan](plan.md). [Requirements](../../specs/platform/requirements/durable-restart-reconciliation.md).

@@ -107,22 +107,8 @@ func ReadRetainedReconstructionEvidence(
 		retired.Payload = nil
 		result.RetiredSubmission = &retired
 	}
-	if request.StoredSubmissionID != "" {
-		stored, err := journal.GetSubmission(ctx, request.StoredSubmissionID)
-		if err != nil {
-			return nil, err
-		}
-		if !storedSubmissionOwnerMatches(stored, request) {
-			return nil, ErrOwnerMismatch
-		}
-		stored.Payload = nil
-		result.StoredSubmission = &stored
-		if result.Descriptor.StreamID == "" && stored.HarnessGeneration == request.HarnessGeneration {
-			result.Descriptor, err = journal.RecoveryDescriptor(ctx, request.SessionID, request.IncarnationID, request.HarnessGeneration, stored.StreamID)
-			if err != nil {
-				return nil, err
-			}
-		}
+	if err := journal.readStoredReconstructionEvidence(ctx, request, result); err != nil {
+		return nil, err
 	}
 	if request.OriginalRuntime != nil {
 		if err := request.OriginalRuntime.Validate(); err == nil {
@@ -132,6 +118,26 @@ func ReadRetainedReconstructionEvidence(
 		}
 	}
 	return result, nil
+}
+
+func (j *Journal) readStoredReconstructionEvidence(ctx context.Context, request RetainedReconstructionEvidenceRequest, result *RetainedReconstructionEvidence) error {
+	if request.StoredSubmissionID == "" {
+		return nil
+	}
+	stored, err := j.GetSubmission(ctx, request.StoredSubmissionID)
+	if err != nil {
+		return err
+	}
+	if !storedSubmissionOwnerMatches(stored, request) {
+		return ErrOwnerMismatch
+	}
+	stored.Payload = nil
+	result.StoredSubmission = &stored
+	if result.Descriptor.StreamID != "" || stored.HarnessGeneration != request.HarnessGeneration {
+		return nil
+	}
+	result.Descriptor, err = j.RecoveryDescriptor(ctx, request.SessionID, request.IncarnationID, request.HarnessGeneration, stored.StreamID)
+	return err
 }
 
 // ReadRetainedReconstructionSubmission returns the payload only when the

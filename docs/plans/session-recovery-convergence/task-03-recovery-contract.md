@@ -49,7 +49,9 @@ Desktop and phone E2E are CI-only; never run locally.
 PR #4432 is open and running CI. Documentation coverage passes locally after
 correcting work-order metadata. Review remediation covers terminal drain ordering,
 complete stream snapshot validation, exact submission stream binding and unknown
-reconstruction outcomes. Final automatic restart checks, CI and review remain
-in progress. No local E2E has run.
+reconstruction outcomes. Focused automatic restart and repeated recovery checks pass. CI-reported
+recovery fixtures pass after correcting metadata-only retained inspection.
+All eight initial review findings are resolved; final-head CI and any new
+review findings remain the delivery gate. No local E2E has run.
 
 [Parent plan](plan.md). [Requirements](../../specs/platform/requirements/durable-restart-reconciliation.md).
