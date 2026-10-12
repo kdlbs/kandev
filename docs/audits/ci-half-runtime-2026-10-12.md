@@ -181,3 +181,64 @@ budgets remain unchanged.
 
 No test was made optional, no retry count increased, and no worker budget or
 isolation boundary relaxed. The 50% hosted execution target is still open.
+
+## Port-forwarding setup consolidation
+
+A further pass at `b81c562` compared the original 17 cases in
+`session/port-forward-dialog.spec.ts` with nine keepers. All 17 original
+scenario titles appear either as unchanged tests or executed named steps; the
+[coverage map](port-forward-consolidation-2026-10-12.csv) records each owner.
+The local guarded one-worker, zero-retry comparison passed both selections:
+145.105 to 86.923 seconds, **40.1% less time for this file**. Neither run skipped
+or retried a case. This is not an estimate of whole-suite savings.
+
+The local-executor journey now checks default-hidden, enable and reload
+persistence together. The remote-executor journey checks default-hidden,
+enable and disable together. One remote dialog journey retains open/discovery,
+manual badge, invalid input, duplicate input, exact session/port proxy URL and
+Enter submission. Each manual-input scenario uses its original port value.
+Only repeated session creation, navigation and already-established dialog
+visibility checks disappear.
+
+Independent cases retain actual tunnel survival across visibility changes,
+delayed tunnel hydration, active-first ordering, failed stop, keyboard focus,
+and opening a proxy in an existing versus a newly created Browser panel.
+`mobile-port-forwarding.spec.ts` retains its drawer, tap, touch-target,
+scrolling and viewport proofs. No shared fixture or production code changes.
+The reviewed owners are `port-forward-dialog.tsx`, port visibility helpers and
+the discovery, active-first and proxy/Browser-panel requirements. The previous
+source history includes executor parity (#2704), active-first ports (#4265),
+and durable continuity (#3598); their distinct boundaries remain covered.
+
+A temporary mutation removed the input range guard while retaining numeric
+parsing. The combined journey failed at the original invalid-port assertion:
+port 99999 was visible. The production source was restored byte for byte and
+the normal E2E application rebuilt before final verification.
+
+## Further rejected loading experiments
+
+Another fixed 75-file sample compared the accepted setup with additional
+Markdown, drag/query and translation dependency bundles. Markdown bundling
+failed seven suites at collection (`util.deprecate` was unavailable). Drag/query
+and translation bundles passed identical outcomes but took 28.33 and 27.88
+seconds versus 27.04 seconds without those additions. A separate React/testing
+library bundle pair took 28.11 versus 27.48 seconds, too small a difference
+relative to observed run variation to justify broader bundling. None of these
+experiments changes the committed configuration.
+
+The slowest reference normal E2E shard recorded no recovery reload or automatic
+resume click from `SessionPage.waitForLoad` or `waitForChatIdle`. Its explicit
+reloads verify persistence or reconnection, so removing recovery fallbacks
+would not explain away that shard's runtime. Likewise, the million-event
+protected-gap loop scans candidates beyond the pinned frontier; stopping at
+the first stationary cursor would remove the retained-tail proof. Both remain
+outside the measured reductions.
+
+After restoring the range guard and rebuilding, all nine port-forwarding
+keepers passed again in 85.420 seconds, without retries or skips. Changed-file
+ESLint and formatting passed. Complete Playwright discovery found 3,963
+configured cases with no collection errors (Chromium 2,705; mobile 1,059;
+auth 37; routing 9; containers 152; Kubernetes compatibility 1). This follow-up
+removes eight additional Chromium instances; all other project counts remain
+unchanged. The whole-branch discovery reduction is 4,113 to 3,963 (150 fewer
+configured instances), which is not a runtime percentage.
