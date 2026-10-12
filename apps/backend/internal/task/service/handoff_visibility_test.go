@@ -240,3 +240,39 @@ func visibilityPersistedState(t *testing.T, db *sqlx.DB) map[string]string {
 	}
 	return state
 }
+
+func TestArchiveTaskTreeKeepsCommittedChildReceiptWhenLaterRootReceiptFails(t *testing.T) {
+	ctx := context.Background()
+	_, _, repo := createTestService(t)
+	workspaceID := "cascade-prefix-workspace"
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Cascade prefix"}))
+	root := &models.Task{ID: "cascade-prefix-root", WorkspaceID: workspaceID, Title: "Root"}
+	child := &models.Task{ID: "cascade-prefix-child", WorkspaceID: workspaceID, ParentID: root.ID, Title: "Child"}
+	require.NoError(t, repo.CreateTask(ctx, root))
+	require.NoError(t, repo.CreateTask(ctx, child))
+	_, err := repo.DB().Exec(`CREATE TRIGGER fail_root_receipt BEFORE INSERT ON task_lifecycle_receipts WHEN NEW.task_id = 'cascade-prefix-root' BEGIN SELECT RAISE(ABORT, 'receipt write failure'); END`)
+	require.NoError(t, err)
+
+	handoff := NewHandoffService(repo, nil, nil, nil, nil, nil)
+	_, err = handoff.ArchiveTaskTree(ctx, root.ID, true)
+	require.ErrorContains(t, err, "receipt write failure")
+
+	storedRoot, err := repo.GetTask(ctx, root.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedRoot)
+	require.Nil(t, storedRoot.ArchivedAt)
+	storedChild, err := repo.GetTask(ctx, child.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedChild)
+	require.NotNil(t, storedChild.ArchivedAt)
+
+	rootReceipt, err := repo.GetTaskLifecycleReceipt(ctx, workspaceID, root.ID)
+	require.NoError(t, err)
+	require.Equal(t, "active", rootReceipt.Disposition)
+	require.EqualValues(t, 1, rootReceipt.Revision)
+	childReceipt, err := repo.GetTaskLifecycleReceipt(ctx, workspaceID, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, "archived", childReceipt.Disposition)
+	require.Equal(t, "archive", childReceipt.Provenance)
+	require.EqualValues(t, 2, childReceipt.Revision)
+}

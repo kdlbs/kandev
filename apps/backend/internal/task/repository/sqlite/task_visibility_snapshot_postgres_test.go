@@ -120,9 +120,27 @@ func TestPostgresTaskVisibilitySnapshotReadDoesNotMutateAllowedOrForeignScopedRo
 	task := &models.Task{ID: "postgres-visibility-read-task", WorkspaceID: workspaceID, Title: "Read invariant"}
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Postgres visibility read"}))
 	require.NoError(t, repo.CreateTask(ctx, task))
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "postgres-visibility-read-session", TaskID: task.ID, State: models.TaskSessionStateCompleted,
+		StartedAt: now, CompletedAt: &now, UpdatedAt: now,
+	}))
+	_, err = db.Exec(db.Rebind(`
+		INSERT INTO task_documents (id, task_id, key, type, title, content, author_kind, author_name, filename, mime_type, size_bytes, disk_path, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), "postgres-visibility-read-document", task.ID, "visibility", "plan", "Visibility", "content", "agent", "test", "", "", 0, "", now, now)
+	require.NoError(t, err)
+	_, err = db.Exec(db.Rebind(`
+		INSERT INTO task_document_revisions (id, task_id, document_key, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+	`), "postgres-visibility-read-document-revision", task.ID, "visibility", 1, "Visibility", "content", "agent", "test", now, now)
+	require.NoError(t, err)
 	before := map[string][]string{
 		"tasks":                   lifecycleTableRows(t, repo, "tasks", "id"),
 		"task_lifecycle_receipts": lifecycleTableRows(t, repo, "task_lifecycle_receipts", "task_id"),
+		"task_sessions":           lifecycleTableRows(t, repo, "task_sessions", "id"),
+		"task_documents":          lifecycleTableRows(t, repo, "task_documents", "id"),
+		"task_document_revisions": lifecycleTableRows(t, repo, "task_document_revisions", "id"),
 	}
 	stored, receipt, err := repo.GetTaskVisibilitySnapshot(ctx, workspaceID, task.ID)
 	require.NoError(t, err)
@@ -132,6 +150,11 @@ func TestPostgresTaskVisibilitySnapshotReadDoesNotMutateAllowedOrForeignScopedRo
 	require.NoError(t, err)
 	require.NotNil(t, foreignTask, "the repository returns the live row; service enforces foreign ownership")
 	require.Nil(t, foreignReceipt, "receipt lookup is bound to the requested workspace")
-	require.Equal(t, before["tasks"], lifecycleTableRows(t, repo, "tasks", "id"))
-	require.Equal(t, before["task_lifecycle_receipts"], lifecycleTableRows(t, repo, "task_lifecycle_receipts", "task_id"))
+	for table, beforeRows := range before {
+		key := "id"
+		if table == "task_lifecycle_receipts" {
+			key = "task_id"
+		}
+		require.Equal(t, beforeRows, lifecycleTableRows(t, repo, table, key), table)
+	}
 }

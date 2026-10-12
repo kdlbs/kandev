@@ -334,3 +334,30 @@ func snapshotSQLRows(t *testing.T, db *sql.DB, query string) [][]string {
 	require.NoError(t, rows.Err())
 	return result
 }
+
+func TestGetTaskVisibilityDispatcherHidesLiveTaskWithoutReceipt(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	log := testLogger(t)
+	handoff := service.NewHandoffService(repo, repo, nil, nil, nil, log)
+	handlers := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
+	handlers.SetHandoffService(handoff)
+	dispatcher := ws.NewDispatcher()
+	handlers.RegisterHandlers(dispatcher)
+	seedRelatedReadTasks(t, repo)
+	_, err := repo.DB().ExecContext(context.Background(), `DELETE FROM task_lifecycle_receipts WHERE task_id = ?`, "stranger")
+	require.NoError(t, err)
+
+	call := func(taskID string) *ws.Message {
+		response, dispatchErr := dispatcher.Dispatch(context.Background(), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
+			"task_id": taskID, "caller_task_id": "child-a", "caller_session_id": "session-caller",
+			"related_read_scope": "workspace-task-tree", "mcp_surface": "office-task",
+		}))
+		require.NoError(t, dispatchErr)
+		return response
+	}
+	liveWithoutReceipt := call("stranger")
+	missing := call("not-a-task")
+	require.Equal(t, ws.MessageTypeError, liveWithoutReceipt.Type)
+	require.Equal(t, ws.MessageTypeError, missing.Type)
+	require.Equal(t, string(missing.Payload), string(liveWithoutReceipt.Payload))
+}
