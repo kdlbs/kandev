@@ -17,3 +17,19 @@ func TestPostgresLifecycleReceiptPromotionRollsBackOnReceiptFailure(t *testing.T
 func TestPostgresLifecycleReceiptPromotionSuccessAndReplayAdvanceOnce(t *testing.T) {
 	testLifecycleReceiptPromotionSuccessAndReplayAdvanceOnce(t, newPostgresLifecycleReceiptMatrixRepo(t), "postgres-promotion-success")
 }
+
+func TestPostgresLifecycleReceiptCascadeArchiveRollsBackOnReceiptFailure(t *testing.T) {
+	testLifecycleReceiptCascadeArchiveRollsBackOnReceiptFailure(t, newPostgresLifecycleReceiptMatrixRepo(t), "postgres-cascade-archive")
+}
+
+func TestPostgresLifecycleReceiptCascadeArchiveSuccessAndReplayAdvanceOnce(t *testing.T) {
+	testLifecycleReceiptCascadeArchiveSuccessAndReplayAdvanceOnce(t, newPostgresLifecycleReceiptMatrixRepo(t), "postgres-cascade-archive-success")
+}
+
+func TestPostgresLifecycleReceiptCascadeUnarchiveRollsBackOnReceiptFailure(t *testing.T) {
+	testLifecycleReceiptCascadeUnarchiveRollsBackOnReceiptFailure(t, newPostgresLifecycleReceiptMatrixRepo(t), "postgres-cascade-unarchive")
+}
+
+func TestPostgresLifecycleReceiptCascadeUnarchiveSuccessAndReplayAdvanceOnce(t *testing.T) {
+	testLifecycleReceiptCascadeUnarchiveSuccessAndReplayAdvanceOnce(t, newPostgresLifecycleReceiptMatrixRepo(t), "postgres-cascade-unarchive-success")
+}

@@ -22,6 +22,7 @@ func testLifecycleReceiptExactMoveRollsBackOnReceiptFailure(t *testing.T, repo *
 		context.Background(), move, move.WorkspaceID, version, prefix+"-operation", prefix+"-digest",
 	)
 	require.Error(t, err)
+	require.ErrorContains(t, err, "receipt write failure")
 	require.False(t, replayed)
 	require.Equal(t, before, lifecycleMutationRows(t, repo))
 }
@@ -65,12 +66,83 @@ func testLifecycleReceiptPromotionRollsBackOnReceiptFailure(t *testing.T, repo *
 		context.Background(), queued, prefix+"-target", prefix+"-target", 1,
 	)
 	require.Error(t, err)
+	require.ErrorContains(t, err, "receipt write failure")
 	require.False(t, promoted)
 	require.Equal(t, before, lifecycleMutationRows(t, repo))
 }
 
 func TestLifecycleReceiptPromotionSuccessAndReplayAdvanceOnce(t *testing.T) {
 	testLifecycleReceiptPromotionSuccessAndReplayAdvanceOnce(t, newRepoForEntityTests(t), "sqlite-promotion-success")
+}
+
+func TestLifecycleReceiptCascadeArchiveRollsBackOnReceiptFailure(t *testing.T) {
+	testLifecycleReceiptCascadeArchiveRollsBackOnReceiptFailure(t, newRepoForEntityTests(t), "sqlite-cascade-archive")
+}
+
+func testLifecycleReceiptCascadeArchiveRollsBackOnReceiptFailure(t *testing.T, repo *Repository, prefix string) {
+	t.Helper()
+	task := prepareCascadeReceiptTask(t, repo, prefix)
+	before := lifecycleMutationRows(t, repo)
+	installLifecycleReceiptFailure(t, repo)
+	changed, err := repo.ArchiveTaskIfActive(context.Background(), task.ID, prefix+"-cascade")
+	require.Error(t, err)
+	require.ErrorContains(t, err, "receipt write failure")
+	require.False(t, changed)
+	require.Equal(t, before, lifecycleMutationRows(t, repo))
+}
+
+func TestLifecycleReceiptCascadeArchiveSuccessAndReplayAdvanceOnce(t *testing.T) {
+	testLifecycleReceiptCascadeArchiveSuccessAndReplayAdvanceOnce(t, newRepoForEntityTests(t), "sqlite-cascade-archive-success")
+}
+
+func testLifecycleReceiptCascadeArchiveSuccessAndReplayAdvanceOnce(t *testing.T, repo *Repository, prefix string) {
+	t.Helper()
+	task := prepareCascadeReceiptTask(t, repo, prefix)
+	changed, err := repo.ArchiveTaskIfActive(context.Background(), task.ID, prefix+"-cascade")
+	require.NoError(t, err)
+	require.True(t, changed)
+	requireCascadeReceipt(t, repo, task, "archived", "archive", 2)
+	beforeReplay := lifecycleMutationRows(t, repo)
+	changed, err = repo.ArchiveTaskIfActive(context.Background(), task.ID, prefix+"-cascade")
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, beforeReplay, lifecycleMutationRows(t, repo))
+}
+
+func TestLifecycleReceiptCascadeUnarchiveRollsBackOnReceiptFailure(t *testing.T) {
+	testLifecycleReceiptCascadeUnarchiveRollsBackOnReceiptFailure(t, newRepoForEntityTests(t), "sqlite-cascade-unarchive")
+}
+
+func testLifecycleReceiptCascadeUnarchiveRollsBackOnReceiptFailure(t *testing.T, repo *Repository, prefix string) {
+	t.Helper()
+	task := prepareCascadeReceiptTask(t, repo, prefix)
+	require.NoError(t, archiveCascadeReceiptTask(repo, task, prefix))
+	before := lifecycleMutationRows(t, repo)
+	installLifecycleReceiptFailure(t, repo)
+	changed, err := repo.UnarchiveTaskByCascade(context.Background(), task.ID, prefix+"-cascade")
+	require.Error(t, err)
+	require.ErrorContains(t, err, "receipt write failure")
+	require.False(t, changed)
+	require.Equal(t, before, lifecycleMutationRows(t, repo))
+}
+
+func TestLifecycleReceiptCascadeUnarchiveSuccessAndReplayAdvanceOnce(t *testing.T) {
+	testLifecycleReceiptCascadeUnarchiveSuccessAndReplayAdvanceOnce(t, newRepoForEntityTests(t), "sqlite-cascade-unarchive-success")
+}
+
+func testLifecycleReceiptCascadeUnarchiveSuccessAndReplayAdvanceOnce(t *testing.T, repo *Repository, prefix string) {
+	t.Helper()
+	task := prepareCascadeReceiptTask(t, repo, prefix)
+	require.NoError(t, archiveCascadeReceiptTask(repo, task, prefix))
+	changed, err := repo.UnarchiveTaskByCascade(context.Background(), task.ID, prefix+"-cascade")
+	require.NoError(t, err)
+	require.True(t, changed)
+	requireCascadeReceipt(t, repo, task, "active", "unarchive", 3)
+	beforeReplay := lifecycleMutationRows(t, repo)
+	changed, err = repo.UnarchiveTaskByCascade(context.Background(), task.ID, prefix+"-cascade")
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, beforeReplay, lifecycleMutationRows(t, repo))
 }
 
 func testLifecycleReceiptPromotionSuccessAndReplayAdvanceOnce(t *testing.T, repo *Repository, prefix string) {
@@ -133,6 +205,29 @@ func prepareQueuedReceiptPromotion(t *testing.T, repo *Repository, prefix string
 	queued.QueuedForStepID = ""
 	queued.QueuedAt = nil
 	return queued, occupant.ID
+}
+
+func prepareCascadeReceiptTask(t *testing.T, repo *Repository, prefix string) *models.Task {
+	t.Helper()
+	workspaceID := prefix + "-workspace"
+	seedWorkspace(t, repo, workspaceID)
+	task := &models.Task{ID: prefix + "-task", WorkspaceID: workspaceID, Title: "Cascade receipt"}
+	require.NoError(t, repo.CreateTask(context.Background(), task))
+	return task
+}
+
+func archiveCascadeReceiptTask(repo *Repository, task *models.Task, prefix string) error {
+	_, err := repo.ArchiveTaskIfActive(context.Background(), task.ID, prefix+"-cascade")
+	return err
+}
+
+func requireCascadeReceipt(t *testing.T, repo *Repository, task *models.Task, disposition, provenance string, revision int64) {
+	t.Helper()
+	receipt, err := repo.GetTaskLifecycleReceipt(context.Background(), task.WorkspaceID, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, disposition, receipt.Disposition)
+	require.Equal(t, provenance, receipt.Provenance)
+	require.EqualValues(t, revision, receipt.Revision)
 }
 
 func installLifecycleReceiptFailure(t *testing.T, repo *Repository) {
