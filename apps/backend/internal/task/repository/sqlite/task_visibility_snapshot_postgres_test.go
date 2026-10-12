@@ -85,3 +85,53 @@ func TestPostgresTaskVisibilitySnapshotKeepsTaskAndReceiptCoherentAcrossDelete(t
 	require.Equal(t, "delete", nextReceipt.Provenance)
 	require.EqualValues(t, 2, nextReceipt.Revision)
 }
+
+func TestPostgresDeletedTaskLifecycleReceiptSurvivesRepositoryReopen(t *testing.T) {
+	ctx := context.Background()
+	openDB := newIsolatedPostgresMultiConnFactory(t, testutil.PostgresDSNFromEnv(t), 3)
+	firstDB := openDB()
+	first, err := NewWithDB(firstDB, firstDB, nil)
+	require.NoError(t, err)
+	workspaceID := "postgres-deleted-reopen-workspace"
+	task := &models.Task{ID: "postgres-deleted-reopen-task", WorkspaceID: workspaceID, Title: "Deleted then reopened"}
+	require.NoError(t, first.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Postgres deleted reopen"}))
+	require.NoError(t, first.CreateTask(ctx, task))
+	require.NoError(t, first.DeleteTask(ctx, task.ID))
+	require.NoError(t, firstDB.Close())
+
+	secondDB := openDB()
+	second, err := NewWithDB(secondDB, secondDB, nil)
+	require.NoError(t, err)
+	stored, receipt, err := second.GetTaskVisibilitySnapshot(ctx, workspaceID, task.ID)
+	require.NoError(t, err)
+	require.Nil(t, stored)
+	require.NotNil(t, receipt)
+	require.Equal(t, "deleted", receipt.Disposition)
+	require.Equal(t, "delete", receipt.Provenance)
+	require.EqualValues(t, 2, receipt.Revision)
+}
+
+func TestPostgresTaskVisibilitySnapshotReadDoesNotMutateAllowedOrForeignScopedRows(t *testing.T) {
+	ctx := context.Background()
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 3)
+	repo, err := NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	workspaceID := "postgres-visibility-read-workspace"
+	task := &models.Task{ID: "postgres-visibility-read-task", WorkspaceID: workspaceID, Title: "Read invariant"}
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Postgres visibility read"}))
+	require.NoError(t, repo.CreateTask(ctx, task))
+	before := map[string][]string{
+		"tasks":                   lifecycleTableRows(t, repo, "tasks", "id"),
+		"task_lifecycle_receipts": lifecycleTableRows(t, repo, "task_lifecycle_receipts", "task_id"),
+	}
+	stored, receipt, err := repo.GetTaskVisibilitySnapshot(ctx, workspaceID, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.NotNil(t, receipt)
+	foreignTask, foreignReceipt, err := repo.GetTaskVisibilitySnapshot(ctx, "other-workspace", task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, foreignTask, "the repository returns the live row; service enforces foreign ownership")
+	require.Nil(t, foreignReceipt, "receipt lookup is bound to the requested workspace")
+	require.Equal(t, before["tasks"], lifecycleTableRows(t, repo, "tasks", "id"))
+	require.Equal(t, before["task_lifecycle_receipts"], lifecycleTableRows(t, repo, "task_lifecycle_receipts", "task_id"))
+}

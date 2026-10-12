@@ -248,6 +248,17 @@ func TestHandoffTaskTreeLifecycleReconcilesCommittedPartialMutations(t *testing.
 			if len(reconciler.stepIDs) != 1 || reconciler.stepIDs[0] != "review-step" {
 				t.Fatalf("vacated step reconciliations = %v, want [review-step]", reconciler.stepIDs)
 			}
+			child := repo.base.tasks["child"]
+			root := repo.base.tasks["root"]
+			if tt.name == "archive" && (child == nil || child.ArchivedAt == nil) {
+				t.Fatal("committed child archive must remain visible after the later parent mutation fails")
+			}
+			if tt.name == "delete" && child != nil {
+				t.Fatal("committed child deletion must remain visible after the later parent mutation fails")
+			}
+			if root == nil || root.ArchivedAt != nil {
+				t.Fatal("the failing parent mutation must not leave a partially committed parent row")
+			}
 		})
 	}
 }
