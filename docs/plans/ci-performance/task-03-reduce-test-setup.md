@@ -156,3 +156,23 @@ pairs also passed: 96 files and 925 tests per run, exact identity/outcome parity
 median command elapsed 60.608s baseline versus 20.400s candidate (66.3% lower).
 The curated full and sample reports are linked from the October evidence.
 Hosted acceptance remains pending, so this work order stays in progress.
+
+### October 12 continuation
+
+Reviewed 581 additional files: 47 Node and 534 English browser assignments. The
+registry now contains 468 Node and 1,401 browser files; 995 unreviewed/multilingual
+files retain full setup at this 2,864-file source snapshot. Test bodies, assertions,
+skips, setup implementations, isolation and worker budgets are unchanged for this
+batch. See [the review ledger](../../audits/frontend-test-setup-2026-10-12.md) and
+[per-file evidence](../../audits/frontend-test-setup-2026-10-12.csv).
+
+The complete production-environment pair passed identical files, test identities,
+and outcomes: 25,554 passed and four skipped. Vitest elapsed time fell 1,455.77 to
+1,350.39 seconds (7.2% less). Three alternating 36-file/234-test sample pairs at
+two workers reduced median wall time from 25.625 to 9.602 seconds (62.5%). These
+are separate measurements; the sample percentage does not describe the full suite.
+A missing Portuguese preload deliberately failed its announcement assertion, and
+the restored full-setup keeper passed. Raw report hashes are recorded in the ledger.
+
+Hosted Actions comparison is pending. Three comparable hosted full samples and
+the 40% execution target remain unmet; keep this work order in progress.
