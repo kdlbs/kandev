@@ -271,7 +271,7 @@ function ChatStatusBarActions({
           nextStepName={nextStepName}
           onProceed={onProceed}
           isMoving={isMoving}
-          className="h-6 max-w-full max-md:ml-auto max-md:h-auto max-md:min-h-11 max-md:whitespace-normal max-md:break-words [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-11"
+          className="h-6 max-w-full max-md:ml-auto max-md:h-auto max-md:min-h-11 max-md:whitespace-normal max-md:break-words [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:whitespace-normal [@media(pointer:coarse)]:break-words"
           testId="proceed-next-step"
         />
       )}

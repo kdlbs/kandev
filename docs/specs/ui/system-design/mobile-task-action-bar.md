@@ -81,7 +81,9 @@ navigation recovery remain owned by Tasks.
 Retain existing feature components and callbacks. Make both right controls and
 the transcript-navigation subgroup able to wrap complete controls. Keep Proceed
 at the trailing edge, allow a long step label to wrap inside a contained button,
-and preserve its full accessible name. Do not squeeze icons or make a
+and preserve its full accessible name. Override nowrap for both phone widths
+and coarse pointers, including tablets at or above 768px, and verify that the
+label stays inside its button. Do not squeeze icons or make a
 nonshrinking group wider than its parent.
 
 Apply the existing [control sizing design](control-sizing.md) contract to affected

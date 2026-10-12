@@ -177,3 +177,21 @@ Completed on 2026-10-12 in the primary conversation. No delegated agents.
 - Documentation coverage preflight: both work orders covered, no errors.
 - `git diff --check`: passed. Rendered results match UI-01/UI-02/UI-03; existing
   confirmation and usage/share surfaces remain the feature owners.
+
+### PR remediation validation
+
+Frontend CI found that the new eligibility test's array rows were unpacked as
+individual arguments. Named object rows now pass the complete PR arrays to the
+real eligibility branches. The final `pnpm run typecheck` passes.
+
+A valid review finding identified nowrap text on coarse tablets. The stronger
+800px regression failed with `white-space: nowrap` before the change. Coarse
+pointer labels now wrap; the browser checks both the computed style and text
+containment inside the button. The desktop regression also measures zero
+left auto-margin on Proceed at 768px and 1280px.
+
+After those changes, the two affected component suites passed all 21 tests,
+typecheck and zero-warning scoped ESLint passed, and the four action-bar E2E
+scenarios passed with a fresh production build. Log:
+`/tmp/kandev-run.e2e.r6APtnGY.log`. A post-commit capture recheck is recorded
+externally with the final media/head evidence.

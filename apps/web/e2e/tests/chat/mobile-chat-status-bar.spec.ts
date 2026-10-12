@@ -223,6 +223,7 @@ test("retains phone targets on fine pointers and compact desktop controls", asyn
       await expect(session.prMergedBanner()).toHaveCSS("order", "0");
       await expect(bar.getByTestId("share-task-button")).toHaveCSS("height", "24px");
       await expect(bar.getByTestId("proceed-next-step")).toHaveCSS("height", "24px");
+      await expect(bar.getByTestId("proceed-next-step")).toHaveCSS("margin-left", "0px");
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -243,6 +244,7 @@ test("wraps a long workflow action and preserves coarse tablet targets", async (
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   test.setTimeout(90_000);
   const { taskId, session } = await openConversationUsageTask(
@@ -257,7 +259,7 @@ test("wraps a long workflow action and preserves coarse tablet targets", async (
   const nextName = (await proceed.innerText()).trim();
   const nextStep = seedData.steps.find((step) => step.name === nextName)!;
   expect(nextStep).toBeTruthy();
-  const longName = "Review and complete the mobile task controls with the team";
+  const longName = "Review and complete the mobile task controls with the team. ".repeat(4).trim();
   try {
     const updated = await apiClient.rawRequest("PUT", `/api/v1/workflow/steps/${nextStep.id}`, {
       id: nextStep.id,
@@ -271,6 +273,10 @@ test("wraps a long workflow action and preserves coarse tablet targets", async (
     await expectPhoneControls(testPage, session.prMergedBanner());
     await expect(proceed).toHaveCSS("white-space", "normal");
     await testPage.setViewportSize({ width: 800, height: 900 });
+    await expect(proceed).toHaveCSS("white-space", "normal");
+    expect(
+      await proceed.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true);
     for (const control of [
       proceed,
       session.prMergedArchiveButton(),
@@ -284,6 +290,10 @@ test("wraps a long workflow action and preserves coarse tablet targets", async (
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true);
+    await waitForFiniteAnimations(session.chatStatusBar());
+    await prCapture.screenshot("tablet-task-action-bar-long-label", {
+      caption: "Touch tablet keeps a long workflow label inside its action",
+    });
   } finally {
     const restored = await apiClient.rawRequest("PUT", `/api/v1/workflow/steps/${nextStep.id}`, {
       id: nextStep.id,

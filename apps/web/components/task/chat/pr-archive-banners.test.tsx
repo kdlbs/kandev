@@ -244,13 +244,16 @@ describe("PRClosedBanner", () => {
 
 describe("terminal notice eligibility", () => {
   it.each([
-    [],
-    [{ pr_number: 42, state: "open" }],
-    [
-      { pr_number: 42, state: "merged" },
-      { pr_number: 43, state: "closed" },
-    ],
-  ])("does not offer terminal archive for absent, open, or mixed PRs: %j", (prs) => {
+    { label: "absent", prs: [] },
+    { label: "open", prs: [{ pr_number: 42, state: "open" }] },
+    {
+      label: "mixed",
+      prs: [
+        { pr_number: 42, state: "merged" },
+        { pr_number: 43, state: "closed" },
+      ],
+    },
+  ])("does not offer terminal archive for $label PRs", ({ prs }) => {
     taskPRsByTaskId.value = { "task-1": prs };
     render(
       <>

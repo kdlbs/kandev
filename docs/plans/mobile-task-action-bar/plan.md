@@ -157,8 +157,11 @@ Design validation passed on 2026-10-12:
 
 Implementation and rendered checks passed: 116 unit tests, 10 mobile scenarios,
 7 desktop scenarios, and 4 final capture regressions. Typecheck, scoped lint,
-i18n, public-doc and specification gates passed. Four screenshots were captured
-and inspected. GitHub publication/review/merge are externally pending.
+i18n, public-doc and specification gates passed. The PR is published with inspected screenshots. A CI test-row typing fix and
+coarse-tablet wrapping correction passed 21 affected component tests, final
+typecheck/scoped lint, and 4 fresh-build E2E regressions. A fifth screenshot
+shows the coarse-tablet label containment. Final CI/review/merge evidence is
+tracked externally in the task plan.
 Exact execution commands live in Task 01; Task 02 records screenshot and GitHub
 evidence. Promote specs only after implementation matches their criteria and
 all required focused checks pass. The shell initially lacked Node/pnpm on PATH;

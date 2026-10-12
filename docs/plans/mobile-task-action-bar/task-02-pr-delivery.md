@@ -107,8 +107,9 @@ branch cleanup so embedded screenshots stay available.
 ## Results
 
 Capture completed on 2026-10-12 using the isolated managed fixtures. The final
-four-regression capture run passed; its manifest contains exactly four fresh
-PNGs: common phone, dense phone, translated closed notice, and desktop. All were
+four-regression capture run passed; its manifest contains the intended fresh
+PNGs: common phone, dense phone, translated closed notice, desktop, and the
+coarse-tablet long-label state added during review remediation. All were
 visually inspected and contain synthetic fixture data. PNG compression uses
 `pnpm dlx pngquant-bin@9.0.0 --quality 65-90 --ext .png --force web/.pr-assets/*.png`
 from `apps/`.
