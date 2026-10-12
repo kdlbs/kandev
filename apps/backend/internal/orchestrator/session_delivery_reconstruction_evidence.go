@@ -11,11 +11,11 @@ import (
 )
 
 type reconstructionSelection struct {
-	evidence     *agentruntime.DeliveryRecordEvidence
-	submission   *journal.Submission
-	stream       *journal.Stream
-	messageID    string
-	existingOnly bool
+	evidence   *agentruntime.DeliveryRecordEvidence
+	submission *journal.Submission
+	stream     *journal.Stream
+	messageID  string
+	canonical  *models.AgentDeliverySubmission
 }
 
 func (s *Service) readReconstructionSelection(ctx context.Context, client deliveryRecordEvidenceClient, session *models.TaskSession, incarnationID string, generation int64, block *models.SessionRecoveryBlock) (*reconstructionSelection, string, error) {
@@ -35,7 +35,7 @@ func (s *Service) readReconstructionSelection(ctx context.Context, client delive
 	if !ok {
 		return blocked(deliveryIdentityMismatchReason)
 	}
-	existingOnly, reason, err := s.reconstructionMessageAuthority(ctx, session, candidate, messageID)
+	canonical, reason, err := s.reconstructionMessageAuthority(ctx, session, candidate, messageID)
 	if err != nil {
 		return nil, "", err
 	} else if reason != "" {
@@ -51,7 +51,7 @@ func (s *Service) readReconstructionSelection(ctx context.Context, client delive
 	if selected == nil || journal.VerifyReconstructionSubmission(*selected, candidate) != nil {
 		return blocked(deliveryIdentityMismatchReason)
 	}
-	return &reconstructionSelection{evidence: evidence, submission: selected, stream: stream, messageID: messageID, existingOnly: existingOnly}, "", nil
+	return &reconstructionSelection{evidence: evidence, submission: selected, stream: stream, messageID: messageID, canonical: canonical}, "", nil
 }
 
 func (s *Service) prepareReconstructionRequest(ctx context.Context, session *models.TaskSession, incarnationID string, generation int64, block *models.SessionRecoveryBlock, selection *reconstructionSelection) (*models.AgentDeliveryReconstructionRequest, string, error) {
@@ -85,10 +85,14 @@ func (s *Service) prepareReconstructionRequest(ctx context.Context, session *mod
 	if !okHigh || !okAcknowledged || !okFirst {
 		return blocked(deliveryIdentityMismatchReason)
 	}
+	dispatchAttemptID := messageID
+	if selection.canonical != nil {
+		dispatchAttemptID = selection.canonical.DispatchAttemptID
+	}
 	payloadHash := selected.Hash
 	state := models.DeliverySubmissionInterruptedUnknown
 	request := &models.AgentDeliveryReconstructionRequest{
-		ExistingSubmissionOnly: selection.existingOnly,
+		ExistingSubmissionOnly: selection.canonical != nil,
 		TaskID:                 session.TaskID, SessionID: session.ID, IncarnationID: incarnationID,
 		HarnessGeneration: generation, ExpectedExecutionID: session.AgentExecutionID,
 		ExpectedSessionState: session.State, ExpectedWorkspacePath: session.WorkspacePath,
@@ -98,7 +102,7 @@ func (s *Service) prepareReconstructionRequest(ctx context.Context, session *mod
 		Submission: models.AgentDeliverySubmission{
 			ID: selected.ID, SessionID: selected.SessionID, IncarnationID: selected.IncarnationID,
 			HarnessGeneration: int64(selected.HarnessGeneration), OwnerGeneration: int64(selected.HarnessGeneration),
-			DispatchAttemptID: messageID, PayloadHash: payloadHash, Payload: append([]byte(nil), selected.Payload...),
+			DispatchAttemptID: dispatchAttemptID, PayloadHash: payloadHash, Payload: append([]byte(nil), selected.Payload...),
 			State: state, Outcome: "reconstructed_unknown", CreatedAt: selected.CreatedAt, UpdatedAt: selected.UpdatedAt,
 		},
 		Recovery: models.AgentDeliveryRecovery{

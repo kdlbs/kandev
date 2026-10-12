@@ -10,21 +10,21 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 )
 
-func (s *Service) reconstructionMessageAuthority(ctx context.Context, session *models.TaskSession, candidate journal.SubmissionSummary, messageID string) (bool, string, error) {
+func (s *Service) reconstructionMessageAuthority(ctx context.Context, session *models.TaskSession, candidate journal.SubmissionSummary, messageID string) (*models.AgentDeliverySubmission, string, error) {
 	store, ok := s.repo.(repository.AgentDeliveryRepository)
 	if !ok {
-		return false, recoveryStateUnavailableReason, nil
+		return nil, recoveryStateUnavailableReason, nil
 	}
 	canonical, err := store.GetAgentDeliverySubmission(ctx, candidate.ID)
 	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, repository.ErrAgentDeliverySubmissionNotFound) {
 		reason, messageErr := s.validateReconstructionMessage(ctx, session, messageID)
-		return false, reason, messageErr
+		return nil, reason, messageErr
 	}
 	if err != nil {
-		return false, "", err
+		return nil, "", err
 	}
-	if canonical == nil || canonical.SessionID != session.ID || canonical.IncarnationID != candidate.IncarnationID || canonical.HarnessGeneration != int64(candidate.HarnessGeneration) || canonical.DispatchAttemptID != messageID || canonical.PayloadHash != candidate.Hash {
-		return false, deliveryIdentityMismatchReason, nil
+	if canonical == nil || canonical.ID != candidate.ID || canonical.SessionID != session.ID || canonical.IncarnationID != candidate.IncarnationID || canonical.HarnessGeneration != int64(candidate.HarnessGeneration) || canonical.DispatchAttemptID == "" || canonical.PayloadHash != candidate.Hash {
+		return nil, deliveryIdentityMismatchReason, nil
 	}
-	return true, "", nil
+	return canonical, "", nil
 }

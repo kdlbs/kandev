@@ -24,9 +24,16 @@ func validReconstructionSubmission(request *models.AgentDeliveryReconstructionRe
 	submission := request.Submission
 	return submission.ID == "prompt:"+request.MessageID && submission.SessionID == request.SessionID &&
 		submission.IncarnationID == request.IncarnationID && submission.HarnessGeneration == request.HarnessGeneration &&
-		submission.OwnerGeneration == request.HarnessGeneration && submission.DispatchAttemptID == request.MessageID &&
+		submission.OwnerGeneration == request.HarnessGeneration && validReconstructionDispatchAttempt(request) &&
 		submission.State == models.DeliverySubmissionInterruptedUnknown &&
 		!submission.CreatedAt.IsZero() && !submission.UpdatedAt.IsZero() && validReconstructionSubmissionPayload(submission)
+}
+
+func validReconstructionDispatchAttempt(request *models.AgentDeliveryReconstructionRequest) bool {
+	if request.ExistingSubmissionOnly {
+		return request.Submission.DispatchAttemptID != ""
+	}
+	return request.Submission.DispatchAttemptID == request.MessageID
 }
 
 func validReconstructionSubmissionPayload(submission models.AgentDeliverySubmission) bool {

@@ -56,6 +56,11 @@ on reconstructed dispatch and a canonical internal continuation incorrectly
 requiring a user-message row. Both desktop and phone pruned-history failures
 share the former cause. Focused regressions cover empty-outcome settlement and
 existing-only continuation repair, including deleted/changed canonical controls.
+The next CI run exposed initial prompts whose canonical dispatch attempt is the
+original execution ID rather than the message-derived identity. Recovery now
+preserves that stored identity, with initial-prompt and changed-attempt controls.
+The same CI run also exposed a substring collision in the sidebar filter test;
+its selection now uses the exact option name.
 Final-head CI and any new review findings remain the delivery gate. No local E2E has run.
 
 [Parent plan](plan.md). [Requirements](../../specs/platform/requirements/durable-restart-reconciliation.md).

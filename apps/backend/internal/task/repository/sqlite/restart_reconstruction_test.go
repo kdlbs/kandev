@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ func TestRestartRecoveryRepairsMissingCanonicalProjection(t *testing.T) {
 }
 
 func TestRestartRecoveryPreservesCanonicalLiveDispatch(t *testing.T) {
-	for _, condition := range []string{"live", "no death proof", "dead", "lost CAS", "retired verified", "retired changed", "retired live", "continuation", "continuation missing", "continuation changed"} {
+	for _, condition := range []string{"live", "no death proof", "dead", "lost CAS", "retired verified", "retired changed", "retired live", "continuation", "continuation missing", "continuation changed", "initial", "initial attempt changed"} {
 		t.Run(condition, func(t *testing.T) { testMissingProjectionReconstruction(t, condition) })
 	}
 }
@@ -54,11 +55,15 @@ func testMissingProjectionReconstruction(t *testing.T, condition string) {
 	if continuation {
 		submission.ID, submission.DispatchAttemptID = "prompt:continuation:attempt", "continuation:attempt"
 	}
+	initial := strings.HasPrefix(condition, "initial")
+	if initial {
+		submission.ID, submission.DispatchAttemptID = "prompt:initial:session:1:execution", "execution"
+	}
 	_, err := repo.PrepareAgentDeliverySubmission(ctx, &submission)
 	require.NoError(t, err)
 	request := &models.AgentDeliveryReconstructionRequest{TaskID: "task", SessionID: "session", IncarnationID: "incarnation",
 		HarnessGeneration: 1, ExpectedSessionState: models.TaskSessionStateWaitingForInput, NativeSessionID: "native",
-		ExistingSubmissionOnly: continuation, MessageID: submission.DispatchAttemptID, ExpectedBlock: *block, Submission: submission, SourceStreamFirstRetained: 1,
+		ExistingSubmissionOnly: continuation || initial, MessageID: strings.TrimPrefix(submission.ID, "prompt:"), ExpectedBlock: *block, Submission: submission, SourceStreamFirstRetained: 1,
 		Recovery: models.AgentDeliveryRecovery{Phase: models.AgentDeliveryRecoveryUncertain, SessionID: "session",
 			SubmissionID: submission.ID, StreamID: "stream", IncarnationID: "incarnation", HarnessGeneration: 1,
 			Reconstruction: &models.AgentDeliveryReconstructionProvenance{SourceSessionID: "session", SourceIncarnationID: "incarnation",
@@ -117,8 +122,12 @@ func testMissingProjectionReconstruction(t *testing.T, condition string) {
 		_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET payload_hash = 'changed' WHERE id = ?`, submission.ID)
 		require.NoError(t, err)
 	}
+	if condition == "initial attempt changed" {
+		_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET dispatch_attempt_id = 'replacement' WHERE id = ?`, submission.ID)
+		require.NoError(t, err)
+	}
 	result, err := repo.ReconstructAgentDeliverySubmission(ctx, request)
-	if condition == "continuation missing" || condition == "continuation changed" {
+	if condition == "continuation missing" || condition == "continuation changed" || condition == "initial attempt changed" {
 		require.Error(t, err, "canonical-only repair must not insert missing or overwrite changed evidence")
 		current, readErr := repo.GetTaskSession(ctx, "session")
 		require.NoError(t, readErr)
@@ -165,6 +174,7 @@ func testMissingProjectionReconstruction(t *testing.T, condition string) {
 	require.Equal(t, submission.ID, result.Recovery.SubmissionID)
 	retained, err := repo.GetAgentDeliverySubmission(ctx, submission.ID)
 	require.NoError(t, err)
+	require.Equal(t, submission.DispatchAttemptID, retained.DispatchAttemptID)
 	require.Equal(t, "unknown", retained.Outcome, "projection repair preserves the canonical historical outcome")
 	repeated, err := repo.ReconstructAgentDeliverySubmission(ctx, request)
 	require.NoError(t, err)

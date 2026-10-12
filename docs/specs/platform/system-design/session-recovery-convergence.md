@@ -68,7 +68,9 @@ of the binding, notice or fence. A retry reuses retired journal proof. Retained 
 metadata-only stored-submission request for unretired legacy history; retirement
 proof still requires the actual retired marker and preserves the original label.
 A retained submission with an existing canonical SQL row can repair its recovery
-presentation without a user-message row, including internal continuations. The
+presentation without a user-message row, including initial prompts and internal
+continuations. It preserves the stored dispatch-attempt identity: an initial
+prompt uses the original execution ID, independently of its submission ID. The
 request marks this as existing-record-only, and the SQL transaction refuses a
 missing or changed canonical row instead of inserting one. Reconstruction from
 journal-only evidence still requires the exact user-message association. A

@@ -132,26 +132,30 @@ func (m *alreadyResumedRestartManager) ReconcileAlreadyResumedDelivery(ctx conte
 
 // @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.2
 func TestRestartRecoveryUsesAlreadyLoadedNativeConversation(t *testing.T) {
-	testAlreadyLoadedRestartRecovery(t, false, false, false, false)
+	testAlreadyLoadedRestartRecovery(t, false, false, false, "")
 }
 
 func TestRestartRecoveryRepairsBothDispatchingWithoutMetadata(t *testing.T) {
-	testAlreadyLoadedRestartRecovery(t, true, false, false, false)
+	testAlreadyLoadedRestartRecovery(t, true, false, false, "")
 }
 
 func TestAlreadyLoadedRestartRecoveryPreservesIndependentBlock(t *testing.T) {
-	testAlreadyLoadedRestartRecovery(t, false, true, false, false)
+	testAlreadyLoadedRestartRecovery(t, false, true, false, "")
 }
 
 func TestRestartRecoveryRepairsIncompleteBlockWithKnownOwner(t *testing.T) {
-	testAlreadyLoadedRestartRecovery(t, false, false, true, false)
+	testAlreadyLoadedRestartRecovery(t, false, false, true, "")
 }
 
 func TestRestartRecoveryRepairsCanonicalContinuationWithoutUserMessage(t *testing.T) {
-	testAlreadyLoadedRestartRecovery(t, true, false, false, true)
+	testAlreadyLoadedRestartRecovery(t, true, false, false, "continuation")
 }
 
-func testAlreadyLoadedRestartRecovery(t *testing.T, missingMetadata, independentBlock, partialBlock, continuation bool) {
+func TestRestartRecoveryPreservesInitialPromptDispatchAttempt(t *testing.T) {
+	testAlreadyLoadedRestartRecovery(t, true, false, false, "initial")
+}
+
+func testAlreadyLoadedRestartRecovery(t *testing.T, missingMetadata, independentBlock, partialBlock bool, internalPrompt string) {
 	service, repo, base, session, store := newSilentRestoreEligibilityFixture(t, "native", "loaded")
 	ctx := context.Background()
 	root := t.TempDir()
@@ -162,16 +166,20 @@ func testAlreadyLoadedRestartRecovery(t *testing.T, missingMetadata, independent
 	state := journal.SubmissionInterruptedUnknown
 	if missingMetadata {
 		messageID := "crash-message"
-		if continuation {
+		if internalPrompt == "continuation" {
 			messageID = "continuation:crash"
+		}
+		dispatchAttemptID := messageID
+		if internalPrompt == "initial" {
+			messageID, dispatchAttemptID = "initial:"+session.ID+":1:loaded-execution", "loaded-execution"
 		}
 		submissionID, state = "prompt:"+messageID, journal.SubmissionDispatching
 		require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "crash-turn", TaskID: session.TaskID, TaskSessionID: session.ID, StartedAt: time.Now().UTC()}))
-		if !continuation {
+		if internalPrompt == "" {
 			require.NoError(t, repo.CreateMessage(ctx, &models.Message{ID: messageID, TaskID: session.TaskID, TaskSessionID: session.ID,
 				TurnID: "crash-turn", AuthorType: models.MessageAuthorUser, Content: "original prompt"}))
 		}
-		_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET id = ?, dispatch_attempt_id = ?, state = 'dispatching' WHERE id = ?`, submissionID, messageID, "loaded-submission")
+		_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET id = ?, dispatch_attempt_id = ?, state = 'dispatching' WHERE id = ?`, submissionID, dispatchAttemptID, "loaded-submission")
 		require.NoError(t, err)
 		_, err = repo.DB().ExecContext(ctx, `UPDATE task_sessions SET metadata = '{}' WHERE id = ?`, session.ID)
 		require.NoError(t, err)
@@ -227,6 +235,9 @@ func testAlreadyLoadedRestartRecovery(t *testing.T, missingMetadata, independent
 	require.NoError(t, err)
 	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, canonical.State)
 	require.Equal(t, payload, canonical.Payload)
+	if internalPrompt == "initial" {
+		require.Equal(t, "loaded-execution", canonical.DispatchAttemptID)
+	}
 	if missingMetadata {
 		require.Equal(t, "unknown", canonical.Outcome)
 	} else {
