@@ -30,12 +30,14 @@ func TestStopTaskExecutionPersistsStoppedRuntimeAndResumeToken(t *testing.T) {
 	require.NoError(t, err)
 	running.ResumeToken = "saved-conversation-token"
 	running.Resumable = true
+	running.LocalPID = 424242
 	require.NoError(t, repo.UpsertExecutorRunning(ctx, running))
 
 	require.NoError(t, mgr.StopAgentWithReason(ctx, execution.ID, "user stop", true))
 	running, err = repo.GetExecutorRunningBySessionID(ctx, execution.SessionID)
 	require.NoError(t, err)
 	require.Equal(t, models.ExecutorRunningStatusStopped, running.Status)
+	require.Zero(t, running.LocalPID, "a stopped task must not retain a live local process attestation")
 	require.Equal(t, "saved-conversation-token", running.ResumeToken)
 	require.True(t, running.Resumable)
 }

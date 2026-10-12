@@ -867,9 +867,10 @@ func (r *Repository) UpdateExecutorRunningStatus(ctx context.Context, sessionID,
 	return tx.Commit()
 }
 
-// UpdateExecutorRunningStatusIfCurrent narrowly updates status only when the
+// UpdateExecutorRunningStatusIfCurrent updates status and stopped process ownership when the
 // caller still owns the execution row. A terminal callback from a replaced
-// execution must never mark its successor stopped.
+// execution must never mark its successor stopped. Stopped rows relinquish their
+// local process attestation while preserving conversation recovery metadata.
 func (r *Repository) UpdateExecutorRunningStatusIfCurrent(ctx context.Context, sessionID, expectedExecID, status string) error {
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required")
@@ -880,10 +881,12 @@ func (r *Repository) UpdateExecutorRunningStatusIfCurrent(ctx context.Context, s
 	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE executors_running
-		   SET status = ?, updated_at = ?
+		   SET status = ?,
+		       local_pid = CASE WHEN ? = ? THEN 0 ELSE local_pid END,
+		       updated_at = ?
 		 WHERE session_id = ?
 		   AND agent_execution_id = ?
-	`), status, now, sessionID, expectedExecID)
+	`), status, status, models.ExecutorRunningStatusStopped, now, sessionID, expectedExecID)
 	if err != nil {
 		return err
 	}
