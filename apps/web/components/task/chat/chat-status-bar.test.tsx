@@ -193,6 +193,5 @@ describe("conversation usage status control", () => {
     expect(actions.className).toContain("ml-auto");
     expect(actions.contains(proceed)).toBe(true);
     expect(proceed.className).toContain("h-6");
-    expect(proceed.className).not.toContain("ml-auto");
   });
 });

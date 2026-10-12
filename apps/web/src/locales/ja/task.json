@@ -2735,5 +2735,19 @@
   "deliveryHistoryGapBody": "既存の会話を再開してください。中断されたプロンプトの結果は不明のままです。",
   "deliveryHistoryGapArchived": "以前の出力の一部を利用できません。中断されたプロンプトの結果は不明のままです。",
   "deliveryHistoryGapUnsupported": "このランタイムでは欠落した出力を安全に復元できません。ランタイムを更新して、再開を再試行してください。",
-  "deliveryHistoryGapRange": "欠落した出力イベント：{{first}} から {{last}}。"
+  "deliveryHistoryGapRange": "欠落した出力イベント：{{first}} から {{last}}。",
+  "prMergedNoticeMobile": "PR #{{number}} をマージ済み",
+  "prMergedNotice": "PR #{{number}} はマージされました。このタスクをアーカイブできます。",
+  "prClosedNoticeMobile": "PR #{{number}} は未マージで終了",
+  "prClosedNotice": "PR #{{number}} はマージされずにクローズされました。このタスクをアーカイブできます。",
+  "allPRsMergedNoticeMobile_one": "全 {{count}} 件の PR をマージ済み",
+  "allPRsMergedNoticeMobile_other": "全 {{count}} 件の PR をマージ済み",
+  "allPRsMergedNotice_one": "全 {{count}} 件の PR がマージされました。このタスクをアーカイブできます。",
+  "allPRsMergedNotice_other": "全 {{count}} 件の PR がマージされました。このタスクをアーカイブできます。",
+  "allPRsClosedNoticeMobile_one": "全 {{count}} 件の PR は未マージで終了",
+  "allPRsClosedNoticeMobile_other": "全 {{count}} 件の PR は未マージで終了",
+  "allPRsClosedNotice_one": "全 {{count}} 件の PR がマージされずにクローズされました。このタスクをアーカイブできます。",
+  "allPRsClosedNotice_other": "全 {{count}} 件の PR がマージされずにクローズされました。このタスクをアーカイブできます。",
+  "turnOffTranscriptAutoScroll": "会話の自動スクロールを無効にする",
+  "turnOnTranscriptAutoScroll": "会話の自動スクロールを有効にする"
 }

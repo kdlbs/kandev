@@ -19,7 +19,7 @@ type Props = {
 // Matches the ghost-style action buttons in the dockview header bar so the
 // share entry point sits flush with the maximize/split/browser icons.
 const TOP_BAR_BUTTON_CLASS =
-  "h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
+  "h-6 w-6 max-md:h-11 max-md:w-11 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
 
 /**
  * Renders the "Share" entry point. Callers are responsible for gating
