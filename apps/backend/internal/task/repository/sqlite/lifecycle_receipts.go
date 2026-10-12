@@ -20,7 +20,8 @@ type lifecycleReceiptQueryer interface {
 func (r *Repository) taskLifecycleSnapshotInTx(ctx context.Context, tx lifecycleReceiptQueryer, taskID string) (*models.Task, error) {
 	var task models.Task
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, workspace_id, workflow_id, workflow_step_id, title, state, identifier, updated_at
+		SELECT id, workspace_id, COALESCE(workflow_id, ''), COALESCE(workflow_step_id, ''),
+			COALESCE(title, ''), state, COALESCE(identifier, ''), updated_at
 		FROM tasks WHERE id = ?
 	`), taskID).Scan(&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID,
 		&task.Title, &task.State, &task.Identifier, &task.UpdatedAt)
