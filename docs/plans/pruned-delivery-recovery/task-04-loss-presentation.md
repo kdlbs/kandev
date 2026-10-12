@@ -167,3 +167,6 @@ convention. No local E2E was run; final remote CI remains pending.
 
 
 CI found lock contention in the mobile settings-recovery metadata fixture. Its direct SQLite write now uses a bounded busy timeout and an immediate transaction encompassing the metadata read and update, preserving concurrent backend metadata. Container recovery failures now retain backend logs as CI artifacts. These E2E scenarios are evaluated only in CI, with all existing assertions intact.
+
+
+The next CI run passed backend, frontend, and container gates. Both pruned-history browser scenarios stopped at setup because the successful Go seed helper omitted the completion marker expected by the subprocess wrapper. The helper now emits the marker after its SQL/journal setup succeeds, matching the existing fixture protocol. Existing browser assertions cover that marker; recovery and subsequent-restart assertions remain unchanged and pending CI execution. No local E2E ran for this correction.

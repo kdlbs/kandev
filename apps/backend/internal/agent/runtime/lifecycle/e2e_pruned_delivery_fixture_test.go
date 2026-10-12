@@ -69,6 +69,7 @@ func seedPrunedDeliveryIncident(t *testing.T, repo *tasksqlite.Repository, root,
 	session.Metadata["acp"] = map[string]interface{}{"session_id": current.NativeSessionID}
 	delete(session.Metadata, models.SessionMetaKeyAgentDeliveryRecovery)
 	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	fmt.Println("KANDEV_E2E_RECORD_FIXTURE:seeded")
 }
 
 func assertPrunedDeliveryRestored(t *testing.T, repo *tasksqlite.Repository, sessionID string) {
