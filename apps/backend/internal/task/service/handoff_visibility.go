@@ -26,8 +26,8 @@ type TaskVisibility struct {
 	Visibility     TaskVisibilityReceipt  `json:"visibility"`
 }
 
-type taskLifecycleReceiptReader interface {
-	GetTaskLifecycleReceipt(context.Context, string, string) (*models.TaskLifecycleReceipt, error)
+type taskVisibilitySnapshotReader interface {
+	GetTaskVisibilitySnapshot(context.Context, string, string) (*models.Task, *models.TaskLifecycleReceipt, error)
 }
 
 type TaskVisibilityIdentity struct {
@@ -54,21 +54,19 @@ func (s *HandoffService) GetTaskVisibilityForRequest(ctx context.Context, req Re
 		}
 		return nil, err
 	}
-	task, err := s.tasks.GetTask(ctx, req.TargetTaskID)
-	if err != nil && !errors.Is(err, repository.ErrTaskNotFound) {
+	snapshots, ok := s.tasks.(taskVisibilitySnapshotReader)
+	if !ok {
+		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "target lifecycle snapshot unavailable")
+	}
+	task, receipt, err := snapshots.GetTaskVisibilitySnapshot(ctx, caller.WorkspaceID, req.TargetTaskID)
+	if err != nil {
 		return nil, err
 	}
 	if task != nil && task.WorkspaceID != caller.WorkspaceID {
 		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "target unavailable after authorization")
 	}
-	if receipts, ok := s.tasks.(taskLifecycleReceiptReader); ok {
-		receipt, receiptErr := receipts.GetTaskLifecycleReceipt(ctx, caller.WorkspaceID, req.TargetTaskID)
-		if receiptErr != nil {
-			return nil, receiptErr
-		}
-		if receipt != nil {
-			return taskVisibilityFromEvidence(task, receipt)
-		}
+	if receipt != nil {
+		return taskVisibilityFromEvidence(task, receipt)
 	}
 	// A task without durable lifecycle evidence is deliberately indistinguishable
 	// from an unavailable target. Reads must never synthesize a receipt.

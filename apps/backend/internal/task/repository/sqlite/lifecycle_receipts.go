@@ -98,3 +98,40 @@ func (r *Repository) GetTaskLifecycleReceipt(ctx context.Context, workspaceID, t
 	}
 	return &receipt, nil
 }
+
+// GetTaskVisibilitySnapshot reads the current compact task projection and its
+// workspace-bound lifecycle evidence from one read transaction. The caller
+// uses the pair together, so a lifecycle write cannot combine one version of
+// the task with another version of its receipt.
+func (r *Repository) GetTaskVisibilitySnapshot(ctx context.Context, workspaceID, taskID string) (*models.Task, *models.TaskLifecycleReceipt, error) {
+	tx, err := r.ro.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	task, err := r.taskLifecycleSnapshotInTx(ctx, tx, taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var receipt models.TaskLifecycleReceipt
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT task_id, workspace_id, identifier, title, workflow_id, workflow_step_id,
+			state, disposition, changed_at, revision, provenance
+		FROM task_lifecycle_receipts WHERE workspace_id = ? AND task_id = ?
+	`), workspaceID, taskID).Scan(&receipt.TaskID, &receipt.WorkspaceID, &receipt.Identifier,
+		&receipt.Title, &receipt.WorkflowID, &receipt.WorkflowStepID, &receipt.State,
+		&receipt.Disposition, &receipt.ChangedAt, &receipt.Revision, &receipt.Provenance)
+	if errors.Is(err, sql.ErrNoRows) {
+		receipt = models.TaskLifecycleReceipt{}
+	} else if err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	if receipt.TaskID == "" {
+		return task, nil, nil
+	}
+	return task, &receipt, nil
+}
