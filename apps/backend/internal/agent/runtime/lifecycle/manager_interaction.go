@@ -1472,7 +1472,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 			return fmt.Errorf("persist terminal status for execution %q: %w", executionID, err)
 		}
 	}
-	m.finishStoppedExecution(ctx, execution)
+	m.finishStoppedExecution(ctx, execution, pendingRecovery)
 
 	return nil
 }
@@ -1516,19 +1516,22 @@ func (m *Manager) scheduleStoppedExecutorPersistence(execution *AgentExecution) 
 					zap.String("execution_id", execution.ID), zap.Error(err))
 				continue
 			}
-			m.finishStoppedExecution(context.Background(), execution)
+			m.finishStoppedExecution(context.Background(), execution, m.remoteRecoveryForExecution(execution.ID))
 			return
 		}
 	}()
 }
 
-func (m *Manager) finishStoppedExecution(ctx context.Context, execution *AgentExecution) {
+func (m *Manager) finishStoppedExecution(ctx context.Context, execution *AgentExecution, pendingRecovery *remoteRecoveryRetry) {
 	current, exists := m.executionStore.Get(execution.ID)
 	if !exists || current != execution {
 		return
 	}
 	execution.EndSessionSpan()
 	m.RemoveExecution(execution.ID)
+	if pendingRecovery != nil {
+		m.completeRemoteRecovery(pendingRecovery)
+	}
 	m.clearRemoteStatus(execution.SessionID)
 	m.logger.Info("agent stopped and removed from tracking",
 		zap.String("execution_id", execution.ID), zap.String("task_id", execution.TaskID))
