@@ -199,3 +199,10 @@ the original seven example positions; the nine-file catalog/generator/full-consu
 run then passed all 169 tests. Regenerated schema, retained the same guidance,
 and rebuilt native binaries. Live trial receipts remain valid for their actual
 advertised schema; no model trials were repeated or replaced.
+
+PR review follow-up: schema generation declares only the Kandev-owned `root`
+and `elements` fields. A regression injects a future library `state` field and
+confirms it cannot widen the closed MCP spec. The test failed before removing
+the redundant library-property spread, then passed. Generated artifacts are
+unchanged and the drift check passes. Private lab references and final stopped
+state were reconciled in response to the aggregate review.

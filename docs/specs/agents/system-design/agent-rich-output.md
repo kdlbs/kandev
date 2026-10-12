@@ -164,14 +164,12 @@ CSV descriptors retain the exact path/repo/column mapping and label limits.
 ## Validation and generated schemas
 
 The TypeScript catalog is the source of component names and property contracts.
-Add a deterministic generator under `apps/web/scripts/` that exports
-`catalog.jsonSchema({ strict: false })`, applies the closed Kandev envelope and
-literal-element restrictions, and writes an embedded backend schema plus
-versioned examples. Check these generated artifacts for drift in the frontend
-build/CI path used for this feature. `--check` compares without writing.
+The deterministic generator under `apps/web/scripts/` exports property schemas
+from the catalog components and applies the closed Kandev envelope and literal
+restrictions. Its `spec` declares only `root` and `elements`; library exports
+cannot widen that boundary. It writes the embedded backend schema and examples.
+Check artifacts for drift in the frontend build/CI path. `--check` does not write.
 
-Do not use `strict: true`: the published API documents that dynamic-key records
-become empty closed objects in that mode, which would forbid the element map.
 Do not change the shared portable-schema contract to accommodate this feature.
 The MCP root remains `type: object` with no root combinators. The completed
 backend advertises only version 2 and catalog version 1. The compatibility period

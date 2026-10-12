@@ -112,7 +112,7 @@ func validateRichOutputTree(input richOutputComposition) error {
 		if element.Type == richOutputComponentChart || element.Type == richOutputComponentFile || element.Type == "Metrics" || element.Type == richOutputComponentTable || element.Type == "StatusList" {
 			contentCount++
 			if contentCount > 4 {
-				return fmt.Errorf("composition exceeds 4 chart/metric/file/table elements")
+				return fmt.Errorf("composition exceeds 4 Chart/Metrics/FilePreview/Table/StatusList elements")
 			}
 		}
 		if err := validateRichOutputContent(element); err != nil {

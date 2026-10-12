@@ -154,7 +154,7 @@ and phone browser checks, including every table field and literal cell.
 
 Final receipts and commands are in [Task 01](task-01-validation-feedback.md#results)
 and [Task 02](task-02-discovery-and-recovery.md#results). Main :9998 remained
-unchanged; the isolated instance remains running. Changes are uncommitted.
+unchanged; the isolated instance was later stopped (see PR preparation below).
 The six-trial usability gate passed; broader provider reliability remains
 unmeasured.
 
@@ -201,3 +201,27 @@ mobile-chrome suites passed five, using fresh managed E2E builds and isolated
 fixtures. The full typecheck passed with an 8 GiB Node heap after the default
 heap exhausted memory. Two incoming documentation whitespace defects were
 corrected for the normal hooks. The disposable user demo remains stopped.
+
+
+Review and CI follow-up (2026-10-12): the four-data-component diagnostic now
+names every counted catalog component, including StatusList. The generator
+owns the closed `root`/`elements` spec boundary; a future library `state` field
+cannot enter the MCP contract. Both regressions failed before correction, then
+passed. The stopped-demo receipt is consistent throughout the plan.
+
+The full CI frontend suite exposed a stale reviewed-test entry for the retired
+rich-output parser; the test inventory is reconciled. The PostgreSQL retention
+job exposed a direct-acknowledgement assumption in its due-discovery fixture.
+Twenty local PostgreSQL runs passed, while deterministic lost-commit-ack cases
+reproduced the fixture failure in both engines. The test now uses existing
+bounded retries and durable payload measurements, retaining the row/read
+limits and production deadlines. This is a test-only CI repair, with no new
+retention behavior or public contract.
+
+Follow-up verification: 235 focused frontend tests passed, followed by the
+three-file catalog/generator/inventory run (nine tests) after the type-only test
+correction. Typecheck, schema drift and targeted web lint passed. MCP/server
+and sysprompt tests passed; affected Go lint reported zero issues. The corrected
+retention discovery fixture passed under `-race` for five repeats of all four
+SQLite/PostgreSQL acknowledgement cases (20 cases, 43.056s). Specification
+catalog/lint, documentation coverage and diff whitespace checks passed.

@@ -70,7 +70,7 @@ discovery-refresh guidance without reading CSV files.
 
 The generator under `apps/web/scripts/generate-rich-output-catalog.ts` emits
 `apps/backend/internal/mcp/server/rich_output_catalog_v1.schema.json` from the
-catalog's non-strict JSON Schema export. Close the exposed literal subset and
+catalog's component property schemas. Close the Kandev-owned spec fields and
 exclude dynamic/interaction fields. Add a deterministic `--check` mode and wire
 it into build/CI through the owning web package scripts. The MCP root remains a
 portable object without root combinators. The handler enforces branch-exclusive

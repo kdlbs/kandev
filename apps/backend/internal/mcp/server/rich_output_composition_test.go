@@ -69,6 +69,12 @@ func TestRichOutputSharedCompositionContract(t *testing.T) {
 				result := callTool(t, s, richOutputToolName, c.Input)
 				assert.True(t, result.IsError)
 				assert.Empty(t, backend.lastAction)
+				if c.Name == "StatusList content limit 5" {
+					content := result.Content[0].(mcp.TextContent)
+					for _, component := range []string{"Chart", "Metrics", "FilePreview", "Table", "StatusList"} {
+						assert.Contains(t, content.Text, component)
+					}
+				}
 			}
 		})
 	}

@@ -115,3 +115,8 @@ Go commands used `GOFLAGS='-trimpath -p=4'`, private `GOCACHE` and
 `GOLANGCI_LINT_CACHE` under the privately retained isolated environment. Full authoritative
 validation still runs before source reads; only its diagnostic projection
 selects relevant branches. No argument repair or new dependencies.
+
+PR review follow-up: the four-data-component error lists Chart, Metrics,
+FilePreview, Table and StatusList. The shared five-StatusList regression now
+checks all counted type names through the wrapped tool. It failed before the
+message correction and passed with the full MCP/server and sysprompt suites.

@@ -70,7 +70,6 @@
     "components/task/chat/messages/agent-error-label.test.ts",
     "components/task/chat/messages/interruption-recovery-feedback.test.ts",
     "components/task/chat/messages/kandev/parse.test.ts",
-    "components/task/chat/messages/kandev/rich-output/parse.test.ts",
     "components/task/chat/messages/message-debug-metadata.test.ts",
     "components/task/chat/messages/message-session-config.test.ts",
     "components/task/chat/messages/permission-action-summary.test.ts",

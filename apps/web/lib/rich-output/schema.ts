@@ -9,9 +9,6 @@ const idSchema = {
 };
 
 export function createRichOutputToolSchema() {
-  const platformSchema = catalog.jsonSchema({ strict: false }) as {
-    properties: Record<string, unknown>;
-  };
   const variants = Object.entries(catalog.data.components).map(([name, component]) => {
     const { $schema: _dialect, ...props } = z.toJSONSchema(component.props);
     const container = "slots" in component;
@@ -49,7 +46,6 @@ export function createRichOutputToolSchema() {
       spec: {
         type: "object",
         properties: {
-          ...platformSchema.properties,
           root: idSchema,
           elements: {
             type: "object",

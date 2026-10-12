@@ -1,5 +1,5 @@
-import { expect, it } from "vitest";
-import { componentProps, type ComponentName } from "./catalog";
+import { expect, it, vi } from "vitest";
+import { catalog, componentProps, type ComponentName } from "./catalog";
 import { createRichOutputToolSchema } from "./schema";
 // @covers AC-AGENTS-AGENT-RICH-OUTPUT-002.2, AC-AGENTS-AGENT-RICH-OUTPUT-002.10
 it("exports actual component property contracts for backend validation", () => {
@@ -27,5 +27,23 @@ it("provides complete component-local examples from valid reports", () => {
       );
       expect(Array.isArray(example.children)).toBe(true);
     }
+  }
+});
+
+// @covers AC-AGENTS-AGENT-RICH-OUTPUT-002.2
+it("keeps future library fields outside the closed agent spec", () => {
+  const exported = catalog.jsonSchema({ strict: false }) as {
+    properties: Record<string, unknown>;
+  };
+  const spy = vi.spyOn(catalog, "jsonSchema").mockReturnValue({
+    ...exported,
+    properties: { ...exported.properties, state: { type: "object" } },
+  });
+  try {
+    const spec = createRichOutputToolSchema().properties.spec;
+    expect(spec.additionalProperties).toBe(false);
+    expect(spec.properties).not.toHaveProperty("state");
+  } finally {
+    spy.mockRestore();
   }
 });
