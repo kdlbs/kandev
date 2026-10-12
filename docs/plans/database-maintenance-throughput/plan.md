@@ -75,8 +75,9 @@ Design validation passed: list-docs validate, lint-spec-files --all, git diff --
 and PR-documentation coverage preflight against the planned source paths.
 Implementation complete. Affected package race tests, small historical sweep/protected-gap
 regressions, SQL guard, persistence store conformance, targeted lint (0 issues), and
-public-doc/harness/spec validation passed. Per the user's focused-test instruction,
-unchanged browser and PostgreSQL layers were not rerun. See work-order results.
+public-doc/harness/spec validation passed. Initial local verification omitted unchanged
+browser and PostgreSQL layers. CI remediation subsequently reran the affected recovery
+browser scenarios and worker fixtures; see work-order results.
 The isolated backup experiment above is feasibility evidence only.
 
 ## Risks

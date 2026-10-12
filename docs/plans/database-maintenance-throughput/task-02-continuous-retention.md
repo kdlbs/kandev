@@ -40,8 +40,8 @@ No UI, schema, new settings or live database replacement is included.
    assumptions are updated; production logs expose continuation_pending (.006.3).
 3. Existing small historical sweep and protected-gap SQLite tests preserve repository
    proof coverage. No repository predicate, dialect logic or rendered UI changed;
-   per the user's focused-test instruction, reuse earlier desktop/phone and PostgreSQL
-   evidence rather than rerun those unchanged layers. No million-row CI tests.
+   initial local verification reused earlier desktop/phone and PostgreSQL evidence.
+   Rerun affected scenarios when CI identifies stale fixture assumptions. No million-row CI tests.
 
 ## Files likely touched
 
@@ -84,8 +84,8 @@ rest periods. Ordinary reconciliation alone does not delete redundant raw payloa
 Passed: deliveryretention race suite and the two targeted repository regressions;
 changed-package golangci-lint (0 issues); all listed documentation/diff gates. The
 new drain-before-wait regression failed on the old initial timer, then passed for
-both deletion and forward discovery. No browser or PostgreSQL rerun: those layers
-were unchanged and the user requested focused verification.
+both deletion and forward discovery. Initial verification omitted unchanged browser
+and PostgreSQL layers per the user's focused-test instruction. CI remediation follows.
 
 ## CI remediation
 
@@ -105,3 +105,16 @@ the affected fixtures is recorded below before pushing.
 Final affected-fixture race run passed (20.97 seconds); full backend lint passed
 again with zero issues. PostgreSQL-specific branches were skipped locally; the
 reported CI failure was the SQLite holder case in both jobs.
+
+The recovery browser failures reproduced with retries disabled. The pruned-history
+fixture now accepts the two existing uncertain-outcome representations: reconstruction
+preserves the empty outcome, while native-resume reconciliation writes `unknown`. It
+still requires interrupted-unknown state, zero terminal sequence, exact gap/cursors,
+and preserved native identity. The composer readiness predicate checks `contenteditable`
+without throwing while the editor is temporarily disabled after cancellation.
+
+Verification: the full pause/resume and desktop pruned-recovery specs passed together
+(4 tests, 50.4 seconds), and mobile pruned recovery passed (1 test, 18.8 seconds),
+using one worker, retries disabled, and a fresh managed production build. Full backend
+lint passed with zero issues. No production behavior or timeout was changed for these
+browser fixture corrections.
