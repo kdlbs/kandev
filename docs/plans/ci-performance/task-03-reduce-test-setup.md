@@ -176,3 +176,31 @@ the restored full-setup keeper passed. Raw report hashes are recorded in the led
 
 Hosted Actions comparison is pending. Three comparable hosted full samples and
 the 40% execution target remain unmet; keep this work order in progress.
+
+### Additional 50% target
+
+The October 12 user request raises the execution target to 50%. Use committed
+head `dc36fe3f709ebe35bce51dbdb203c66ae213f4eb` as this continuation's reference:
+2,008 seconds for frontend Run tests, with a target of 1,004 seconds. Report
+workflow elapsed time and runner-minutes separately. The E2E continuation uses
+2,159 seconds for its longest normal test step, targeting 1,079.5 seconds.
+These targets are not achieved by a sample benchmark or an earlier baseline.
+
+The next batch reviews 897 additional English-browser assignments, restores two
+interop-sensitive browser suites to full setup, and measures
+JSON catalog parsing plus a cold Node compile cache. No test-body,
+isolation, worker-budget or selection-trigger change is included. A VM-thread
+experiment was slower and rejected; global dependency optimization was rejected after
+full verification exposed module-identity and mock-interoperability failures.
+The scoped candidate bundles dependencies only in the explicitly reviewed browser
+project; the three affected suites retain native loading in the full project.
+Complete corrected-suite verification and hosted measurements remain pending; see [the continuation audit](../../audits/ci-half-runtime-2026-10-12.md).
+
+The scoped complete run passes 2,864 files, 25,554 tests and four skips, with
+exact file/title/outcome parity. Vitest time is 731.89 seconds versus 1,350.39
+seconds at the reference head (45.8% lower locally). Three alternating 75-file
+pairs preserve 617 passes and four skips each; median command time is 39.882
+versus 30.506 seconds (23.5% lower). These are separate measurements. A forks
+pool experiment was slower and rejected. Typecheck, ESLint, formatting, the
+nine frontend workflow contract tests, discovery and documentation validation
+pass. Hosted acceptance and the 50% target remain open.

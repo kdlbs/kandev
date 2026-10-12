@@ -382,6 +382,7 @@ jobs:
       - name: Run tests
         env:
           NODE_ENV: production
+          NODE_COMPILE_CACHE: ${{ runner.temp }}/kandev-node-compile-cache
         run: pnpm --filter @kandev/web test
 
       - name: Build
