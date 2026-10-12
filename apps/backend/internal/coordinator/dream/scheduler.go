@@ -84,10 +84,12 @@ type Deps struct {
 type Scheduler struct {
 	d Deps
 
-	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
-	closed  bool
-	wg      sync.WaitGroup
+	mu            sync.Mutex
+	cancels       map[string]context.CancelFunc
+	closed        bool
+	wg            sync.WaitGroup
+	workerCtx     context.Context
+	cancelWorkers context.CancelFunc
 }
 
 // New returns a Scheduler; zero Clock, Bound and Refresh take their defaults.
@@ -104,18 +106,31 @@ func New(d Deps) *Scheduler {
 	if d.Log == nil {
 		d.Log = zap.NewNop()
 	}
-	return &Scheduler{d: d, cancels: map[string]context.CancelFunc{}}
+	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	return &Scheduler{d: d, cancels: map[string]context.CancelFunc{}, workerCtx: workerCtx, cancelWorkers: cancelWorkers}
 }
 
 // Stop cancels every running dream goroutine and waits for them. Idempotent.
 func (s *Scheduler) Stop() {
 	s.mu.Lock()
 	s.closed = true
+	s.cancelWorkers()
 	for _, cancel := range s.cancels {
 		cancel()
 	}
 	s.mu.Unlock()
 	s.wg.Wait()
+}
+
+// workerWriteContext preserves episode values and permits failure recording
+// after episode cancellation, while scheduler shutdown cancels the I/O.
+func (s *Scheduler) workerWriteContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
+	stop := context.AfterFunc(s.workerCtx, cancel)
+	if s.workerCtx.Err() != nil {
+		cancel()
+	}
+	return ctx, func() { stop(); cancel() }
 }
 
 // Cancel cancels the in-process goroutine of one dream.

@@ -190,3 +190,9 @@ Review remediation and complete exact-head hosted verification are still in
 progress. Historical contributor CI and focused dependency projections do not
 complete this work order. Merge and completion remain blocked until the full
 integrated suites and every review finding are resolved.
+
+Shutdown review adds real SQLite writer-pool contention regressions for both
+successful report finalization and failure recording. These writes preserve
+episode cancellation behavior but cancel when the scheduler stops; a cancelled
+final write leaves lease-expiry recovery responsible for the running row.
+The regression's actual package execution remains pending hosted CI.

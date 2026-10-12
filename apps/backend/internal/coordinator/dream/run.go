@@ -44,7 +44,9 @@ func (s *Scheduler) run(ctx context.Context, c *coordinator.Coordinator, p plan)
 		return
 	}
 	now := s.d.Clock()
-	if ok, err := s.d.Store.FinishDream(context.WithoutCancel(ctx), d, items, now); err != nil {
+	writeCtx, cancelWrite := s.workerWriteContext(ctx)
+	defer cancelWrite()
+	if ok, err := s.d.Store.FinishDream(writeCtx, d, items, now); err != nil {
 		s.d.Log.Warn("dream finish", zap.String("dream_id", d.ID), zap.Error(err))
 		s.fail(d.ID, ReasonStoreError, ctx)
 	} else if !ok {
@@ -55,7 +57,9 @@ func (s *Scheduler) run(ctx context.Context, c *coordinator.Coordinator, p plan)
 // fail stores a failure on a context that outlives the dream's own. A fallback
 // write that fails leaves the row to lease expiry.
 func (s *Scheduler) fail(id, reason string, ctx context.Context) {
-	if _, err := s.d.Store.FailDream(context.WithoutCancel(ctx), id, reason, s.d.Clock()); err != nil {
+	writeCtx, cancelWrite := s.workerWriteContext(ctx)
+	defer cancelWrite()
+	if _, err := s.d.Store.FailDream(writeCtx, id, reason, s.d.Clock()); err != nil {
 		s.d.Log.Warn("dream fail write", zap.String("dream_id", id), zap.Error(err))
 	}
 }
@@ -124,12 +128,14 @@ func (s *Scheduler) breach(ctx context.Context, coordinatorID string) string {
 func (s *Scheduler) episode(ctx context.Context, c *coordinator.Coordinator, p plan) (string, coordinator.Dream, []coordinator.DreamItem) {
 	d := p.dream
 	st := s.d.Store
+	writeCtx, cancelWrite := s.workerWriteContext(ctx)
+	defer cancelWrite()
 	taskID, err := s.d.Episode.CreateTask(ctx, c)
 	if err != nil {
 		s.archiveUnbound(ctx, taskID)
 		return ReasonRunError, d, nil
 	}
-	bound, err := st.SetDreamEpisodeTask(context.WithoutCancel(ctx), d.ID, taskID)
+	bound, err := st.SetDreamEpisodeTask(writeCtx, d.ID, taskID)
 	if err != nil {
 		s.archiveUnbound(ctx, taskID)
 		return ReasonStoreError, d, nil
@@ -142,7 +148,7 @@ func (s *Scheduler) episode(ctx context.Context, c *coordinator.Coordinator, p p
 	if err != nil {
 		return ReasonRunError, d, nil
 	}
-	if linked, err := st.SetDreamEpisodeSession(context.WithoutCancel(ctx), d.ID, sessionID); err != nil {
+	if linked, err := st.SetDreamEpisodeSession(writeCtx, d.ID, sessionID); err != nil {
 		return ReasonStoreError, d, nil
 	} else if !linked {
 		return ReasonLeaseLost, d, nil
@@ -176,7 +182,9 @@ func (s *Scheduler) archiveUnbound(ctx context.Context, taskID string) {
 	if taskID == "" {
 		return
 	}
-	if err := s.d.Episode.Archive(context.WithoutCancel(ctx), taskID); err != nil {
+	writeCtx, cancelWrite := s.workerWriteContext(ctx)
+	defer cancelWrite()
+	if err := s.d.Episode.Archive(writeCtx, taskID); err != nil {
 		s.d.Log.Warn("dream episode: archive unbound task", zap.String("task_id", taskID), zap.Error(err))
 	}
 }

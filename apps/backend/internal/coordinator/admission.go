@@ -127,8 +127,7 @@ func (s *Service) admitConversation(ctx context.Context, coord *Coordinator) (Ad
 	if err != nil || task == nil || task.ArchivedAt != nil {
 		return held(admitNoConversation, ""), false
 	}
-	if task.ID != *coord.ConversationTaskID || task.WorkspaceID != coord.WorkspaceID ||
-		task.Origin != taskmodels.TaskOriginCoordinator || conversationTaskCoordinatorID(task) != coord.ID || isDreamTask(task) {
+	if !ownsConversationTask(coord, task) {
 		return held(admitNoConversation, ""), false
 	}
 	if s.convReader == nil {
@@ -150,6 +149,11 @@ func (s *Service) admitConversation(ctx context.Context, coord *Coordinator) (Ad
 	a, ok := s.admitIdle(ctx, coord.ID, sess)
 	a.TaskID, a.SessionID = task.ID, sess.ID
 	return a, ok
+}
+
+func ownsConversationTask(coord *Coordinator, task *taskmodels.Task) bool {
+	return task.ID == *coord.ConversationTaskID && task.WorkspaceID == coord.WorkspaceID &&
+		task.Origin == taskmodels.TaskOriginCoordinator && conversationTaskCoordinatorID(task) == coord.ID && !isDreamTask(task)
 }
 
 func (s *Service) admitIdle(ctx context.Context, coordinatorID string, sess *ConversationSession) (Admission, bool) {

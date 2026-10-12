@@ -213,7 +213,7 @@ func parseEvidenceEntry(entry json.RawMessage) (improvementEvidence, error) {
 		switch key {
 		case "run_id":
 			return improvementEvidence{RunID: id}, nil
-		case "task_id":
+		case fieldTaskID:
 			return improvementEvidence{TaskID: id}, nil
 		}
 	}

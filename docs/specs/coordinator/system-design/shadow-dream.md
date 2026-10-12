@@ -89,7 +89,12 @@ isolation level, so the lease needs no read-then-insert. Tick first expires stal
 rows (below), then inserts the `running` row with a plain `INSERT`; a
 unique-violation means another dream holds the lease and the tick ends, storing
 nothing. A single orchestrating goroutine owns the whole dream (episode, gate, replays,
-report) and refreshes `refreshed_at` every minute for all of it. The refresh is a
+report) and refreshes `refreshed_at` every minute for all of it.
+Scheduler shutdown cancels and joins the episode, lease refresh and database
+I/O. Failure recording and episode binding may outlive episode cancellation,
+but their contexts still end when the scheduler stops. A final write cancelled
+at shutdown leaves the running row for the existing lease-expiry recovery.
+The refresh is a
 conditional statement, `UPDATE coordinator_dreams SET refreshed_at = ? WHERE id
 = ? AND status = 'running'`; zero rows changed means the backstop expired the
 lease, and the goroutine cancels the episode or replay itself and stops writing.
