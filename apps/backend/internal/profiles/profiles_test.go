@@ -454,3 +454,31 @@ func clearAppliedEnvVars(t *testing.T) {
 		appliedEnvVars.Unlock()
 	})
 }
+
+func TestEnvironmentDefaults_CoordinatorPhase2PerProfile(t *testing.T) {
+	cases := []struct {
+		name     string
+		selector map[string]string
+		want     string
+	}{
+		{"prod", nil, "false"},
+		{"dev", map[string]string{"KANDEV_DEBUG_DEV_MODE": "true"}, "false"},
+		{"e2e", map[string]string{"KANDEV_E2E_MOCK": "true"}, "true"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearProfileSelectors(t)
+			clearProfilesYAMLVars(t)
+			for k, v := range tc.selector {
+				t.Setenv(k, v)
+			}
+			defaults, err := EnvironmentDefaults()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := defaults["KANDEV_FEATURES_COORDINATOR_PHASE2"]; got != tc.want {
+				t.Fatalf("KANDEV_FEATURES_COORDINATOR_PHASE2 = %q in %s, want %q", got, tc.name, tc.want)
+			}
+		})
+	}
+}

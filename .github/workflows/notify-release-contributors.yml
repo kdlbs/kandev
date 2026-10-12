@@ -1,0 +1,65 @@
+name: Notify release contributors
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Leave empty to use the latest published Stable release"
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: "Preview targets and comments without posting"
+        required: false
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "Published Stable release tag, or empty for latest"
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: "Preview targets and comments without posting"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  notify:
+    name: Notify eligible release contributors
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: release-contributor-notifications-${{ github.repository }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - name: Check out the workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record helper checkout identity
+        run: echo "HELPER_CHECKOUT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Select and notify release contributors
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+          GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          HELPER_CHECKOUT_SHA: ${{ env.HELPER_CHECKOUT_SHA }}
+        run: python3 .github/scripts/notify-release-contributors.py

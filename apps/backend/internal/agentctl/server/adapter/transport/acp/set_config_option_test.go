@@ -26,6 +26,9 @@ func TestEmitAuthoritativeConfigOptionsUsesCompleteResponseState(t *testing.T) {
 	a.emitAuthoritativeConfigOptions("sess-1", "reasoning_effort", response, nil, false)
 
 	event := findSessionModelsEvent(t, drainEvents(a))
+	if event.SessionSettingsGeneration == 0 {
+		t.Fatal("authoritative config response event has no settings generation")
+	}
 	if got := currentConfigValue(event.ConfigOptions, "reasoning_effort"); got != "low" {
 		t.Errorf("reasoning_effort = %q, want response value low", got)
 	}
@@ -35,6 +38,11 @@ func TestEmitAuthoritativeConfigOptionsUsesCompleteResponseState(t *testing.T) {
 	if event.Data["config_options_source"] != "provider_response" ||
 		event.Data["config_options_config_id"] != "reasoning_effort" {
 		t.Fatalf("authoritative metadata = %#v", event.Data)
+	}
+	a.emitSetConfigOptionEvent("sess-1", "reasoning_effort", "high", nil, event.ConfigOptions)
+	next := findSessionModelsEvent(t, drainEvents(a))
+	if next.SessionSettingsGeneration <= event.SessionSettingsGeneration {
+		t.Fatalf("next selector generation = %d, want > authoritative generation %d", next.SessionSettingsGeneration, event.SessionSettingsGeneration)
 	}
 }
 
@@ -212,6 +220,25 @@ func TestEmitSetConfigOptionEvent_RewritesChangedOptionAndKeepsModel(t *testing.
 	// Cached config must not be mutated — emitSetConfigOptionEvent copies before rewriting.
 	if cachedConfig[1].CurrentValue != "low" {
 		t.Errorf("cachedConfig[reasoning_effort] mutated to %q; expected event-local copy only", cachedConfig[1].CurrentValue)
+	}
+}
+
+func TestSetConfigOptionEventPreservesProviderRestoredRequestPolicy(t *testing.T) {
+	a, _, _ := newSetModeTestAdapter(t, func(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+		return acp.SetSessionModeResponse{}, nil
+	})
+	a.availableConfigOptions = []streams.ConfigOption{
+		{Type: "select", ID: "model", Category: "model", CurrentValue: "provider-model"},
+		{Type: "select", ID: "reasoning_effort", CurrentValue: "medium"},
+	}
+	ctx := streams.WithSessionSettingsPolicy(context.Background(), streams.SessionSettingsPolicyProviderRestored)
+	if err := a.SetConfigOption(ctx, "reasoning_effort", "high"); err != nil {
+		t.Fatalf("SetConfigOption: %v", err)
+	}
+
+	event := findSessionModelsEvent(t, drainEvents(a))
+	if event.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("session settings policy = %q, want provider_restored", event.SessionSettingsPolicy)
 	}
 }
 

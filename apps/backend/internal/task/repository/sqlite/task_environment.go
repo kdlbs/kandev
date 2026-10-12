@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 )
 
 const taskEnvironmentOwnershipQuery = `SELECT task_id, ownership_generation FROM task_environments WHERE id = ?`
@@ -734,7 +735,7 @@ func (r *Repository) TransferTaskEnvironmentOwnership(
 	expectedGeneration int64,
 	taskID string,
 ) error {
-	return r.transferTaskEnvironmentOwnership(ctx, envID, expectedTaskID, expectedGeneration, taskID)
+	return r.transferTaskEnvironmentOwnershipWithDeletion(ctx, envID, expectedTaskID, expectedGeneration, taskID, nil)
 }
 
 func (r *Repository) transferTaskEnvironmentOwnership(
@@ -743,6 +744,17 @@ func (r *Repository) transferTaskEnvironmentOwnership(
 	expectedGeneration int64,
 	taskID string,
 ) error {
+	return r.transferTaskEnvironmentOwnershipWithDeletion(ctx, envID, expectedTaskID, expectedGeneration, taskID, nil)
+}
+
+func (r *Repository) TransferManagedDeletionEnvironment(ctx context.Context, claim managed.DeleteClaim, envID, expectedTaskID string, expectedGeneration int64, taskID string) error {
+	if claim.TaskID != expectedTaskID {
+		return managed.ErrDeletionOwned
+	}
+	return r.transferTaskEnvironmentOwnershipWithDeletion(ctx, envID, expectedTaskID, expectedGeneration, taskID, &claim)
+}
+
+func (r *Repository) transferTaskEnvironmentOwnershipWithDeletion(ctx context.Context, envID, expectedTaskID string, expectedGeneration int64, taskID string, claim *managed.DeleteClaim) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -775,7 +787,7 @@ func (r *Repository) transferTaskEnvironmentOwnership(
 	if currentTaskID == taskID {
 		return tx.Commit()
 	}
-	if err := r.taskCleanupBarrierLocked(ctx, tx, currentTaskID); err != nil {
+	if err := r.validateEnvironmentTransferCleanupTx(ctx, tx, currentTaskID, claim); err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -793,6 +805,16 @@ func (r *Repository) transferTaskEnvironmentOwnership(
 		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, envID)
 	}
 	return tx.Commit()
+}
+
+func (r *Repository) validateEnvironmentTransferCleanupTx(ctx context.Context, tx *sqlx.Tx, taskID string, claim *managed.DeleteClaim) error {
+	if claim == nil {
+		return r.taskCleanupBarrierLocked(ctx, tx, taskID)
+	}
+	if _, _, err := r.validateDeletionOwnerTx(ctx, tx, *claim); err != nil {
+		return err
+	}
+	return r.rejectOtherCleanupJobsTx(ctx, tx, taskID, claim.JobID)
 }
 
 // ClaimTaskEnvironmentReset reserves destructive environment reset behind the

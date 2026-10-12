@@ -1,5 +1,43 @@
 import type { RemoteRepository } from "@/hooks/domains/integrations/use-remote-repositories";
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
+import type { RepositoryInspection } from "@/lib/plugins/types";
+
+/**
+ * Row fields that a provider inspection of a pasted URL settles: the verified
+ * descriptor, the canonical clone URL, and (when the row has no branch yet)
+ * the inspected head or default branch.
+ */
+export function inspectedRemoteRepositoryUpdate(
+  inspection: RepositoryInspection,
+  row: TaskRemoteRepoRow,
+): Partial<TaskRemoteRepoRow> {
+  return {
+    remoteUrl: inspection.cloneUrl,
+    provider: inspection.providerId,
+    providerHost: inspection.providerHost,
+    providerScope: inspection.providerScope,
+    providerRepoId: inspection.repositoryId,
+    providerOwner: inspection.ownerOrProject,
+    providerName: inspection.repositoryName,
+    fullName: `${inspection.ownerOrProject}/${inspection.repositoryName}`,
+    prNumber: inspection.pullRequest?.number,
+    prBaseBranch: inspection.baseBranch,
+    prHeadBranch: inspection.headBranch,
+    ...(!row.branch && (inspection.headBranch || inspection.defaultBranch)
+      ? { branch: inspection.headBranch || inspection.defaultBranch }
+      : {}),
+  };
+}
+
+/** True when applying `update` would change at least one field of `row`. */
+export function remoteRepositoryUpdateNeeded(
+  row: TaskRemoteRepoRow,
+  update: Partial<TaskRemoteRepoRow>,
+): boolean {
+  return Object.entries(update).some(
+    ([key, value]) => row[key as keyof TaskRemoteRepoRow] !== value,
+  );
+}
 
 export function selectedRemoteRepositoryIdentity(row: TaskRemoteRepoRow): string | undefined {
   if (row.provider && row.providerRepoId) return `${row.provider}:id:${row.providerRepoId}`;

@@ -65,7 +65,7 @@ $env:KANDEV_SERVER_HOST = '127.0.0.1'
 kandev
 ```
 
-Without that override, the backend default is `0.0.0.0`; Windows Firewall may prompt for network access. Do not allow public/private-network exposure unless you deliberately built an authenticated network boundary. See [Configuration](configuration.md).
+Without that override, the backend default is `0.0.0.0`; Windows Firewall may prompt for network access. Do not allow public/private-network exposure unless you deliberately built an authenticated network boundary. The core `agentctl` service does not listen on all interfaces by default: it listens on `agent.standaloneHost`, which is `127.0.0.1` by default, so it should not need an inbound firewall rule. See [Configuration](configuration.md).
 
 ## Windows paths and command discovery
 
@@ -111,7 +111,7 @@ Kandev supports native Git repositories and worktrees. Windows still imposes fil
 
 Windows long-path policy and each application's long-path awareness still apply. External Git clients and tools do not inherit Kandev's command-scoped setting. If Kandev still reports `Filename too long`, enable Win32 long paths when allowed by local policy or use a shorter `KANDEV_HOME_DIR`. Configure `core.longpaths` separately only when an external Git client needs it.
 
-Kandev uses Windows Job Objects and process-tree termination for managed child cleanup. An abruptly killed terminal or externally launched child can still outlive a session; inspect Task Manager and executor resources before deleting a worktree.
+Kandev uses Windows Job Objects and process-tree termination for managed child cleanup. These managed helpers, including Git commands, agentctl, and the agent and script processes it starts, keep their console windows hidden when they run in the background. An abruptly killed terminal or externally launched child can still outlive a session; inspect Task Manager and executor resources before deleting a worktree.
 
 See [Git operations](git-operations.md) for branch/worktree lifecycle and [Executors](executors.md) for prepare scripts and copied files.
 

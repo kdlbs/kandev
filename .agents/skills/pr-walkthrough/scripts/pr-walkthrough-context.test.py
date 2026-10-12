@@ -3,10 +3,12 @@
 
 import json
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
@@ -141,6 +143,69 @@ class PRWalkthroughContextTest(unittest.TestCase):
             sorted(str(path.relative_to(first)) for path in (first / "head" / "files").rglob("*")),
             sorted(str(path.relative_to(second)) for path in (second / "head" / "files").rglob("*")),
         )
+
+    def test_large_change_uses_bounded_git_processes(self) -> None:
+        for index in range(200):
+            (self.repo / f"batch-{index:03d}.txt").write_text(f"head file {index}\n")
+        self.git("add", ".")
+        self.git("commit", "-m", "large change")
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        prepare = runpy.run_path(str(SCRIPT))["prepare"]
+        original = prepare.__globals__["subprocess"].Popen
+        with patch.object(prepare.__globals__["subprocess"], "Popen", wraps=original) as launches:
+            output = Path(self.temp.name) / "batch-context"
+            prepare(str(self.repo), self.base, head, output)
+        self.assertLessEqual(launches.call_count, 20)
+        for index in range(200):
+            self.assertEqual(
+                (output / "head" / "files" / f"batch-{index:03d}.txt").read_text(),
+                f"head file {index}\n",
+            )
+
+    def test_batch_framing_preserves_literal_paths_empty_files_and_unterminated_text(self) -> None:
+        samples = {"a-empty.txt": b"", "b-[*]-ü\n.txt": b"no final newline", "c-after.txt": b"following record\n"}
+        for name, content in samples.items():
+            (self.repo / name).write_bytes(content)
+        self.git("add", ".")
+        self.git("commit", "-m", "batch framing")
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        output = Path(self.temp.name) / "framing-context"
+        result = self.run_context(output, head=head)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name, content in samples.items():
+            self.assertEqual((output / "head" / "files" / name).read_bytes(), content)
+
+    def test_partial_clone_fetches_changed_blobs_in_one_batch_without_moving_refs(self) -> None:
+        for index in range(50):
+            (self.repo / f"partial-{index:03d}.txt").write_text(f"promised file {index}\n")
+        self.git("add", ".")
+        self.git("commit", "-m", "promised blobs")
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("config", "uploadpack.allowFilter", "true")
+        self.git("config", "uploadpack.allowAnySHA1InWant", "true")
+        clone = Path(self.temp.name) / "partial"
+        subprocess.run(["git", "clone", "--filter=blob:none", "--no-checkout", self.repo.as_uri(), str(clone)], check=True, capture_output=True)
+        counter = Path(self.temp.name) / "upload-pack-count"
+        wrapper = Path(self.temp.name) / "count-upload-pack"
+        wrapper.write_text(
+            "#!/usr/bin/env python3\nimport os, sys\n"
+            + f"with open({str(counter)!r}, 'a') as log: log.write('fetch\\n')\n"
+            + "os.execvp('git', ['git', 'upload-pack', *sys.argv[1:]])\n"
+        )
+        wrapper.chmod(0o755)
+        subprocess.run(["git", "-C", str(clone), "config", "remote.origin.uploadpack", str(wrapper)], check=True)
+        before = subprocess.check_output(["git", "-C", str(clone), "for-each-ref"])
+        missing = subprocess.check_output(["git", "-C", str(clone), "rev-list", "--objects", "--missing=print", "--no-object-names", head + "^{tree}"])
+        self.assertGreaterEqual(missing.count(b"?"), 50)
+        prepare = runpy.run_path(str(SCRIPT))["prepare"]
+        output = Path(self.temp.name) / "partial-context"
+        prepare(str(clone), self.base, head, output)
+        self.assertLessEqual(len(counter.read_text().splitlines()), 2)
+        self.assertEqual(subprocess.check_output(["git", "-C", str(clone), "for-each-ref"]), before)
+        self.assertEqual(subprocess.check_output(["git", "-C", str(clone), "rev-parse", "HEAD"]).decode().strip(), head)
+        self.assertFalse((clone / ".git" / "FETCH_HEAD").exists())
+        for index in range(50):
+            self.assertEqual((output / "head" / "files" / f"partial-{index:03d}.txt").read_text(), f"promised file {index}\n")
 
     def test_rejects_invalid_shas_and_missing_merge_base(self) -> None:
         output = Path(self.temp.name) / "context"

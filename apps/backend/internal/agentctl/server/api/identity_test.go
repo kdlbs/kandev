@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -145,5 +146,11 @@ func TestGetServerDetailsRoundTripsThroughTheRealClientAndRequiresAuth(t *testin
 	}
 	if details.DiagnosticLogPath != cfg.DiagnosticLogPath {
 		t.Errorf("DiagnosticLogPath = %q, want %q", details.DiagnosticLogPath, cfg.DiagnosticLogPath)
+	}
+	if details.ProcessIdentity == nil {
+		t.Fatal("ProcessIdentity = nil, want authenticated process birth evidence")
+	}
+	if details.ProcessIdentity.PID != os.Getpid() || details.ProcessIdentity.BirthToken == "" {
+		t.Fatalf("ProcessIdentity = %#v, want current PID and a birth token", details.ProcessIdentity)
 	}
 }

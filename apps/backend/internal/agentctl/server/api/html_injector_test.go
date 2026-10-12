@@ -125,6 +125,14 @@ func TestInspectorScript_OwnsDragGesturesOnlyInScreenshotMode(t *testing.T) {
 	}
 }
 
+func TestInspectorScript_AcknowledgesCaptureModeAfterInstallingListeners(t *testing.T) {
+	textListener := strings.Index(inspectorScript, "document.addEventListener('mouseup', onTextMouseUp, true);")
+	modeAcknowledgement := strings.Index(inspectorScript, "send('capture-mode-changed', { mode: mode });")
+	if textListener < 0 || modeAcknowledgement < textListener {
+		t.Fatal("inspector should acknowledge capture mode after installing its listeners")
+	}
+}
+
 func TestStripIframeSecurityHeaders_RemovesBlockingHeaders(t *testing.T) {
 	h := http.Header{}
 	h.Set("Content-Security-Policy", "default-src 'none'")

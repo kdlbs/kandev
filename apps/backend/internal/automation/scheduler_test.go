@@ -259,10 +259,24 @@ func TestCronScheduler_DailyTrigger_DoesNotRefireNextTick(t *testing.T) {
 	}
 	updated := triggers[0]
 
-	// One minute later — well within the @daily interval — the scheduler
-	// must not treat the trigger as due again.
-	if cs.shouldFire(&updated, now.Add(time.Minute)) {
-		t.Fatal("expected shouldFire to be false one minute after a skipped evaluation of a daily trigger")
+	if updated.LastEvaluatedAt == nil {
+		t.Fatal("expected the skipped evaluation to be persisted")
+	}
+	evaluatedAt := updated.LastEvaluatedAt.UTC()
+	nextMidnight := time.Date(evaluatedAt.Year(), evaluatedAt.Month(), evaluatedAt.Day()+1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		at   time.Time
+		due  bool
+	}{
+		{"before next daily occurrence", nextMidnight.Add(-time.Nanosecond), false},
+		{"at next daily occurrence", nextMidnight, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cs.shouldFire(&updated, tc.at); got != tc.due {
+				t.Fatalf("shouldFire at %s = %v, want %v", tc.at, got, tc.due)
+			}
+		})
 	}
 }
 

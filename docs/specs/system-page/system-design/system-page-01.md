@@ -178,6 +178,10 @@ per-process to one call per 30 seconds. If the GitHub or npm call fails (offline
 
 ### Disk-usage cache
 
+The frontend snapshot owner and job-event recovery path are defined in the
+[Disk Usage Query Cache design](disk-usage-query-cache.md). This section
+continues to own the backend cache and endpoint behavior.
+
 Cache is an in-memory `{ value *Breakdown, computedAt time.Time, computing bool }` guarded by a mutex. The walk is lazy — never runs at boot. `GET /api/v1/system/disk-usage` returns immediately:
 
 - If `value == nil && !computing` → start the walk in a goroutine, return `{ data: null, computing: true }`.
@@ -185,7 +189,7 @@ Cache is an in-memory `{ value *Breakdown, computedAt time.Time, computing bool 
 - If `value != nil && time.Since(computedAt) < 2h` → return `{ data: value, computing: false }`.
 - If `value != nil && time.Since(computedAt) >= 2h` → return `{ data: value, computing: true }` and start a background refresh.
 
-`POST /api/v1/system/disk-usage/refresh` forces a refresh regardless of TTL. The job publishes a `system.job.update` event so the frontend can swap the cached value for the fresh one without polling.
+`POST /api/v1/system/disk-usage/refresh` forces a refresh regardless of TTL. The job publishes a `system.job.update` event. The frontend revalidates the disk snapshot on terminal success or failure and keeps a 1.5-second recovery interval only while its latest snapshot says `computing=true`; see the [Disk Usage Query Cache design](disk-usage-query-cache.md).
 
 ### Licenses generation
 
@@ -203,7 +207,7 @@ The page reads the JSON statically; no backend endpoint is needed.
 
 ## Scenarios
 
-- **GIVEN** a user opens `/settings/system/status` for the first time after backend boot, **WHEN** the page mounts, **THEN** the Disk Usage card shows a spinner and "Calculating…", the backend kicks off the walk, and the value populates within seconds without further interaction (via WS job update or 5s poll fallback).
+- **GIVEN** a user opens `/settings/system/status` for the first time after backend boot, **WHEN** the page mounts, **THEN** the Disk Usage card shows a spinner and "Calculating…", the backend kicks off the walk, and the value populates without further interaction via a terminal job update or conditional 1.5-second recovery polling after a `computing=true` response.
 - **GIVEN** the disk-usage cache is 30 minutes old, **WHEN** the user reopens the Status page, **THEN** the cached value renders instantly with "as of <30 min ago>" and **no** refresh kicks off.
 - **GIVEN** the disk-usage cache is 3 hours old, **WHEN** the user reopens the Status page, **THEN** the stale value renders immediately, the page badge shows "Refreshing…", and the value updates when the background walk completes.
 - **GIVEN** the user is on `1.2.3` and the GitHub latest release is `1.2.4`, **WHEN** they open `/settings/system/updates`, **THEN** an "Update available" badge renders next to the version, the changelog list shows `1.2.4` highlighted as the new entry, and the System sidebar group shows a `1` badge.

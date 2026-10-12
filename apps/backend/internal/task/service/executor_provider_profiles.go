@@ -25,6 +25,30 @@ type executorProviderField struct {
 	maximum  *float64
 }
 
+// kandevExecutorProfileKeys are executor profile keys owned by Kandev rather than
+// the provider: agent credential delivery and git identity, shared with the other
+// remote executors. The value returns a target for the JSON shape a key holds,
+// or is nil for plain text. They are validated here and never sent to the provider.
+var kandevExecutorProfileKeys = map[string]func() any{
+	"remote_credentials":      func() any { return &[]string{} },
+	"remote_auth_secrets":     func() any { return &map[string]string{} },
+	"agent_config_bundles":    func() any { return &[]string{} },
+	"remote_auth_target_home": nil,
+	"git_user_name":           nil,
+	"git_user_email":          nil,
+}
+
+func validateKandevExecutorProfileValue(key, value string) error {
+	shape := kandevExecutorProfileKeys[key]
+	if shape == nil {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(value), shape()); err != nil {
+		return fmt.Errorf("%w: %s has an invalid value", ErrInvalidExecutorConfig, key)
+	}
+	return nil
+}
+
 func executorProviderSchemaFields(schema map[string]any) (map[string]executorProviderField, []string, error) {
 	properties, ok := schemaMap(schema["properties"])
 	if !ok || len(properties) == 0 {
@@ -32,6 +56,9 @@ func executorProviderSchemaFields(schema map[string]any) (map[string]executorPro
 	}
 	fields := make(map[string]executorProviderField, len(properties))
 	for name, raw := range properties {
+		if _, reserved := kandevExecutorProfileKeys[name]; reserved {
+			return nil, nil, fmt.Errorf("%w: provider profile field %q is reserved by Kandev", ErrInvalidExecutorConfig, name)
+		}
 		property, ok := schemaMap(raw)
 		if !ok {
 			return nil, nil, fmt.Errorf("%w: invalid provider field schema", ErrInvalidExecutorConfig)
@@ -125,6 +152,12 @@ func validatePluginExecutorProfileSchema(provider models.ExecutorProvider, confi
 		return err
 	}
 	for key, value := range config {
+		if _, kandevKey := kandevExecutorProfileKeys[key]; kandevKey {
+			if err := validateKandevExecutorProfileValue(key, value); err != nil {
+				return err
+			}
+			continue
+		}
 		field, exists := fields[key]
 		if !exists {
 			return fmt.Errorf("%w: undeclared provider profile field %q", ErrInvalidExecutorConfig, key)
@@ -234,6 +267,14 @@ func (s *Service) normalizePluginExecutorProfileConfig(
 	}
 	var createdSecrets []string
 	for key, value := range incoming {
+		if _, kandevKey := kandevExecutorProfileKeys[key]; kandevKey {
+			if value == "" {
+				delete(config, key)
+			} else {
+				config[key] = value
+			}
+			continue
+		}
 		field, exists := fields[key]
 		if !exists {
 			return nil, createdSecrets, fmt.Errorf("%w: undeclared provider profile field %q", ErrInvalidExecutorConfig, key)
@@ -485,7 +526,7 @@ func publicExecutorProviderConfig(provider models.ExecutorProvider, stored map[s
 	fields, _, _ := executorProviderSchemaFields(provider.ProfileSchema)
 	config := make(map[string]string, len(stored))
 	for key, value := range stored {
-		if fields[key].secret {
+		if _, kandevKey := kandevExecutorProfileKeys[key]; kandevKey || fields[key].secret {
 			continue
 		}
 		config[key] = value

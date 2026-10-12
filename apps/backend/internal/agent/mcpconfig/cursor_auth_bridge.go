@@ -21,13 +21,14 @@ const (
 var cursorMCPAuthMutex sync.Mutex
 
 type cursorMCPAuthSource struct {
-	path    string
-	modTime int64
-	servers map[string]json.RawMessage
+	projectID string
+	modTime   int64
+	servers   map[string]json.RawMessage
 }
 
 type cursorMCPAuthSnapshot struct {
-	data       []byte
+	servers    map[string]json.RawMessage
+	provenance map[string]cursorMCPAuthProvenanceEntry
 	hasSources bool
 }
 
@@ -54,16 +55,19 @@ func isCursorSlugASCIIAlphaNumeric(char rune) bool {
 }
 
 // AggregateCursorMCPAuth publishes the latest valid project auth snapshot.
-// It leaves the existing master unchanged when no eligible source is valid.
+// It removes the bridge-owned snapshot when no eligible source remains.
 func AggregateCursorMCPAuth(cursorHome string, excludedWorkspaceRoots ...string) error {
 	cursorMCPAuthMutex.Lock()
 	defer cursorMCPAuthMutex.Unlock()
 
 	snapshot, err := aggregateCursorMCPAuth(cursorHome, excludedWorkspaceRoots...)
-	if err != nil || !snapshot.hasSources {
+	if err != nil {
 		return err
 	}
-	return publishCursorMCPAuth(cursorHome, snapshot.data)
+	if !snapshot.hasSources {
+		return clearCursorMCPAuthSnapshot(cursorHome)
+	}
+	return publishCursorMCPAuth(cursorHome, snapshot)
 }
 
 // LinkCursorMCPAuth refreshes the shared snapshot and links a canonical
@@ -92,13 +96,13 @@ func linkCursorMCPAuth(workspacePath, cursorHome string, excludedWorkspaceRoots 
 		return err
 	}
 	if !snapshot.hasSources {
-		return nil
+		return clearCursorMCPAuthSnapshot(cursorHome)
 	}
 	masterPath, err := cursorMasterPath(cursorHome)
 	if err != nil {
 		return err
 	}
-	if err := publishCursorMCPAuth(cursorHome, snapshot.data); err != nil {
+	if err := publishCursorMCPAuth(cursorHome, snapshot); err != nil {
 		return err
 	}
 	destination, err := cursorProjectAuthPath(workspacePath, cursorHome, true)
@@ -168,21 +172,94 @@ func aggregateCursorMCPAuth(cursorHome string, excludedWorkspaceRoots ...string)
 		if sources[i].modTime != sources[j].modTime {
 			return sources[i].modTime > sources[j].modTime
 		}
-		return sources[i].path < sources[j].path
+		return sources[i].projectID < sources[j].projectID
 	})
 	servers := make(map[string]json.RawMessage)
+	provenance := make(map[string]cursorMCPAuthProvenanceEntry)
+	authenticated := make(map[string]bool)
 	for _, source := range sources {
 		for name, value := range source.servers {
-			if _, exists := servers[name]; !exists {
-				servers[name] = value
+			if authenticated[name] {
+				continue
 			}
+			credentialBearing := cursorMCPAuthHasCredential(value)
+			if _, exists := servers[name]; exists && !credentialBearing {
+				continue
+			}
+			servers[name] = value
+			provenance[name] = cursorMCPAuthProvenanceEntry{
+				SourceID:             source.projectID,
+				SourceFingerprint:    cursorAuthFingerprint(value),
+				ProjectedFingerprint: cursorAuthFingerprint(value),
+			}
+			authenticated[name] = credentialBearing
 		}
 	}
-	data, err := json.MarshalIndent(servers, "", "  ")
-	if err != nil {
-		return cursorMCPAuthSnapshot{}, err
+	return cursorMCPAuthSnapshot{servers: servers, provenance: provenance, hasSources: true}, nil
+}
+
+func cursorMCPAuthHasCredential(server json.RawMessage) bool {
+	var entry struct {
+		Tokens json.RawMessage `json:"tokens"`
 	}
-	return cursorMCPAuthSnapshot{data: append(data, '\n'), hasSources: true}, nil
+	if err := json.Unmarshal(server, &entry); err != nil {
+		return false
+	}
+	var tokens map[string]json.RawMessage
+	if err := json.Unmarshal(entry.Tokens, &tokens); err != nil || tokens == nil {
+		return false
+	}
+	for _, name := range []string{"access_token", "refresh_token"} {
+		var token string
+		if err := json.Unmarshal(tokens[name], &token); err == nil && strings.TrimSpace(token) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// CursorMCPAuthCredentialsAvailable reports whether any eligible existing
+// Cursor project auth object contains credentials for the exact native server ID.
+// It is a read-only host preview and never writes the shared auth snapshot.
+func CursorMCPAuthCredentialsAvailable(cursorHome, serverID string) bool {
+	return CursorMCPAuthCredentialAvailability(cursorHome, []string{serverID})[serverID]
+}
+
+// CursorMCPAuthCredentialAvailability scans eligible Cursor project auth
+// objects once and reports credential availability for exact native IDs.
+func CursorMCPAuthCredentialAvailability(cursorHome string, serverIDs []string) map[string]bool {
+	availability := make(map[string]bool, len(serverIDs))
+	wanted := make(map[string]struct{}, len(serverIDs))
+	for _, serverID := range serverIDs {
+		availability[serverID] = false
+		if strings.TrimSpace(serverID) != "" {
+			wanted[serverID] = struct{}{}
+		}
+	}
+	if len(wanted) == 0 {
+		return availability
+	}
+	projectsPath := filepath.Join(cursorHome, "projects")
+	projectsInfo, err := os.Lstat(projectsPath)
+	if err != nil || projectsInfo.Mode()&os.ModeSymlink != 0 || !projectsInfo.IsDir() {
+		return availability
+	}
+	entries, err := os.ReadDir(projectsPath)
+	if err != nil {
+		return availability
+	}
+	for _, source := range collectCursorMCPAuthSources(projectsPath, entries, nil) {
+		for serverID, server := range source.servers {
+			if _, requested := wanted[serverID]; requested && cursorMCPAuthHasCredential(server) {
+				availability[serverID] = true
+				delete(wanted, serverID)
+			}
+		}
+		if len(wanted) == 0 {
+			break
+		}
+	}
+	return availability
 }
 
 func collectCursorMCPAuthSources(projectsPath string, entries []os.DirEntry, excludedSlugs []string) []cursorMCPAuthSource {
@@ -265,7 +342,7 @@ func readCursorMCPAuthSource(path string) (cursorMCPAuthSource, bool) {
 	if !valid {
 		return cursorMCPAuthSource{}, false
 	}
-	return cursorMCPAuthSource{path: path, modTime: info.ModTime().UnixNano(), servers: servers}, true
+	return cursorMCPAuthSource{projectID: filepath.Base(filepath.Dir(path)), modTime: info.ModTime().UnixNano(), servers: servers}, true
 }
 
 func decodeCursorMCPAuth(data []byte) (map[string]json.RawMessage, bool) {
@@ -292,37 +369,6 @@ func isJSONObject(data []byte) bool {
 	}
 	var object map[string]json.RawMessage
 	return json.Unmarshal(trimmed, &object) == nil && object != nil
-}
-
-func publishCursorMCPAuth(cursorHome string, data []byte) error {
-	masterPath, err := cursorMasterPath(cursorHome)
-	if err != nil {
-		return err
-	}
-	if err := ensureReplaceableMaster(masterPath); err != nil {
-		return err
-	}
-	tempFile, err := os.CreateTemp(cursorHome, ".kandev-mcp-auth-*")
-	if err != nil {
-		return err
-	}
-	tempPath := tempFile.Name()
-	defer func() { _ = os.Remove(tempPath) }()
-	if err := tempFile.Chmod(0o600); err != nil {
-		_ = tempFile.Close()
-		return err
-	}
-	if _, err := tempFile.Write(data); err != nil {
-		_ = tempFile.Close()
-		return err
-	}
-	if err := tempFile.Close(); err != nil {
-		return err
-	}
-	if err := ensureReplaceableMaster(masterPath); err != nil {
-		return err
-	}
-	return os.Rename(tempPath, masterPath)
 }
 
 func ensureReplaceableMaster(path string) error {

@@ -149,6 +149,9 @@ func provideGateway(
 	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
+		if terminalSvc != nil {
+			gateway.SetTerminalService(terminalSvc)
+		}
 		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspMaxConnections...)
 		if lspContinuityEnabled {
 			gateway.LSPHandler.EnableContinuity(acquireSessionFence, eventBus)
@@ -195,7 +198,7 @@ func provideGateway(
 		agentHandlers := agenthandlers.NewHandlers(agentCtrl, log)
 		agentHandlers.RegisterHandlers(gateway.Dispatcher)
 
-		workspaceFileHandlers := agenthandlers.NewWorkspaceFileHandlers(lifecycleMgr, log)
+		workspaceFileHandlers := agenthandlers.NewWorkspaceFileHandlers(lifecycleMgr, log, taskRepo)
 		workspaceFileHandlers.RegisterHandlers(gateway.Dispatcher)
 
 		shellHandlers := agenthandlers.NewShellHandlers(lifecycleMgr, scriptSvc, log)

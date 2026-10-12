@@ -39,7 +39,7 @@ func (c *Controller) CreatePrompt(ctx context.Context, req dto.CreatePromptReque
 }
 
 func (c *Controller) UpdatePrompt(ctx context.Context, promptID string, req dto.UpdatePromptRequest) (dto.PromptDTO, error) {
-	prompt, err := c.service.UpdatePrompt(ctx, promptID, req.Name, req.Content)
+	prompt, err := c.service.UpdatePromptWithPermission(ctx, promptID, req.Name, req.Content, req.AllowAgentEdits)
 	if err != nil {
 		return dto.PromptDTO{}, err
 	}

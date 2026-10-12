@@ -57,6 +57,7 @@ type SubmenuEntry = {
   testId?: string;
   className?: string;
   children: KanbanCardMenuEntry[];
+  stepTarget?: { workflowId: string; onSelect: (stepId: string) => void };
 };
 
 export type KanbanCardMenuEntry = ItemEntry | SeparatorEntry | SubmenuEntry;
@@ -319,11 +320,11 @@ function buildWorkflowTargetEntry({
   onSendToWorkflow,
 }: {
   workflow: TaskMoveWorkflow;
-  steps: TaskMoveStep[];
+  steps?: TaskMoveStep[];
   disabled?: boolean;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 }): KanbanCardMenuEntry {
-  if (steps.length === 0 || !onSendToWorkflow) {
+  if (steps?.length === 0 || !onSendToWorkflow) {
     return {
       kind: "item",
       key: `workflow-${workflow.id}`,
@@ -345,7 +346,11 @@ function buildWorkflowTargetEntry({
     label: <span className="truncate">{workflow.name}</span>,
     disabled,
     className: "w-48",
-    children: steps.map((step) =>
+    stepTarget:
+      steps === undefined
+        ? { workflowId: workflow.id, onSelect: (stepId) => onSendToWorkflow(workflow.id, stepId) }
+        : undefined,
+    children: (steps ?? []).map((step) =>
       buildStepEntry(step, null, (stepId) => onSendToWorkflow(workflow.id, stepId)),
     ),
   };
@@ -377,7 +382,7 @@ function buildSendToWorkflowSubmenu({
     children: targets.map((workflow) =>
       buildWorkflowTargetEntry({
         workflow,
-        steps: stepsByWorkflowId[workflow.id] ?? [],
+        steps: stepsByWorkflowId[workflow.id],
         disabled,
         onSendToWorkflow,
       }),

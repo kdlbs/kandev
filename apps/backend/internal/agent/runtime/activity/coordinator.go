@@ -46,11 +46,13 @@ type Coordinator struct {
 	active       map[Kind]int
 	lastActivity time.Time
 	maintenance  *maintenanceState
+	busyCleanup  bool
 }
 
 type maintenanceState struct {
-	cancel context.CancelFunc
-	done   chan struct{}
+	cancel      context.CancelFunc
+	done        chan struct{}
+	preemptible bool
 }
 
 func NewCoordinator(options Options) *Coordinator {
@@ -132,7 +134,9 @@ func (c *Coordinator) AcquireTask(ctx context.Context, kind Kind) (*TaskLease, e
 			c.mu.Unlock()
 			return &TaskLease{coordinator: c, kind: kind}, nil
 		}
-		maintenance.cancel()
+		if maintenance.preemptible {
+			maintenance.cancel()
+		}
 		done := maintenance.done
 		c.mu.Unlock()
 		select {
@@ -159,14 +163,56 @@ func (c *Coordinator) TryAcquireMaintenanceForce(
 	return c.tryAcquireMaintenance(ctx, 0, true)
 }
 
+// TryAcquireExclusiveMaintenance reserves a short, non-preemptible admission
+// window after all task activity has stopped. New task work waits until the
+// returned lease is released, so a caller can make an atomic decision that
+// must not race with a newly admitted task.
+func (c *Coordinator) TryAcquireExclusiveMaintenance(
+	ctx context.Context,
+) (*MaintenanceLease, []Kind, error) {
+	return c.tryAcquireMaintenanceWithPolicy(ctx, 0, false, false)
+}
+
+// TryAcquireMaintenanceWhileBusy reserves the maintenance slot for a resource
+// cleanup that is allowed to overlap task activity. It does not block new task
+// admission, but it remains mutually exclusive with every other maintenance run.
+func (c *Coordinator) TryAcquireMaintenanceWhileBusy(ctx context.Context) (func(), []Kind, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.maintenance != nil || c.busyCleanup {
+		return nil, []Kind{KindMaintenanceRunning}, ErrBusy
+	}
+	c.busyCleanup = true
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			c.mu.Lock()
+			c.busyCleanup = false
+			c.mu.Unlock()
+		})
+	}, nil, nil
+}
+
 func (c *Coordinator) tryAcquireMaintenance(
 	ctx context.Context,
 	quietPeriod time.Duration,
 	ignoreActive bool,
 ) (*MaintenanceLease, []Kind, error) {
+	return c.tryAcquireMaintenanceWithPolicy(ctx, quietPeriod, ignoreActive, true)
+}
+
+func (c *Coordinator) tryAcquireMaintenanceWithPolicy(
+	ctx context.Context,
+	quietPeriod time.Duration,
+	ignoreActive bool,
+	preemptible bool,
+) (*MaintenanceLease, []Kind, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.maintenance != nil {
+	if c.maintenance != nil || c.busyCleanup {
 		return nil, []Kind{KindMaintenanceRunning}, ErrBusy
 	}
 	if busy := c.busyKindsLocked(); !ignoreActive && len(busy) > 0 {
@@ -176,7 +222,7 @@ func (c *Coordinator) tryAcquireMaintenance(
 		return nil, []Kind{KindQuietPeriod}, ErrBusy
 	}
 	maintenanceCtx, cancel := context.WithCancel(ctx)
-	state := &maintenanceState{cancel: cancel, done: make(chan struct{})}
+	state := &maintenanceState{cancel: cancel, done: make(chan struct{}), preemptible: preemptible}
 	c.maintenance = state
 	return &MaintenanceLease{coordinator: c, state: state, ctx: maintenanceCtx}, nil, nil
 }

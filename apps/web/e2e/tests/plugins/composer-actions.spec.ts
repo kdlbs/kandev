@@ -18,6 +18,7 @@ import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { SessionPage } from "../../pages/session-page";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 import { KanbanPage } from "../../pages/kanban-page";
+import { openQuickChatSetup, selectAgentIfNeeded } from "../chat/quick-chat-helpers";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Locator, Page } from "@playwright/test";
 
@@ -282,6 +283,60 @@ test.describe("Plugins — composer capability", () => {
         timeout: 45_000,
       })
       .toBeGreaterThan(before);
+  });
+
+  test("Quick Chat setup: inserts at the selection and submits through the native create path", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(120_000);
+    await installFixturePlugin(testPage);
+    const dialog = await openQuickChatSetup(testPage);
+    const editor = dialog.getByTestId("task-description-input");
+    const composerAction = action(dialog);
+    await selectAgentIfNeeded(dialog, testPage);
+
+    await expect(composerAction).toHaveAttribute("data-surface", "quick-chat");
+    await expect(composerAction).toHaveAttribute("data-presentation", "desktop");
+    await expect(composerAction).toHaveAttribute("data-task-id", "");
+    await expect(composerAction).toHaveAttribute("data-session-id", "");
+    await expect(composerAction).toHaveAttribute("data-submittable", "false");
+
+    await editor.fill("head tail");
+    await caretBackFromEnd(editor, " tail".length);
+    await composerAction.getByTestId("e2e-composer-insert").click();
+    await expect(editor).toHaveText(`head ${DICTATED} tail`);
+    await expect(composerAction).toHaveAttribute("data-submittable", "true");
+
+    const startResponse = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/quick-chat") &&
+        response.request().method() === "POST" &&
+        response.ok(),
+    );
+    await composerAction.getByTestId("e2e-composer-submit").click();
+    const started = (await (await startResponse).json()) as {
+      task_id: string;
+      session_id: string;
+    };
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(started.session_id);
+          return messages.filter(
+            (message) =>
+              message.author_type === "user" && message.content === `head ${DICTATED} tail`,
+          ).length;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(1);
+    await expect(
+      dialog
+        .getByTestId("quick-chat-messages")
+        .getByTestId("user-message-bubble")
+        .filter({ hasText: `head ${DICTATED} tail` }),
+    ).toBeVisible();
   });
 
   test("an uninstalled plugin leaves no composer action behind", async ({

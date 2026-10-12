@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -37,6 +38,32 @@ var ErrMalformedParticipantRole = errors.New("ensure_participant_seat: malformed
 // wraps when ParticipantSeatCaster could not resolve any agent for the role
 // (REQ-002 step 2's no-runner branch). The callback writes no seat.
 var ErrParticipantSeatUnfillable = errors.New("ensure_participant_seat: role unfillable")
+
+// ErrCommentFanOutIncomplete is the sentinel QueueRunForEachParticipantCallback
+// wraps around every error it returns when the trigger is TriggerOnComment.
+// Dashboard dispatch uses errors.Is against this sentinel to distinguish a
+// gate comment fan-out failure — which must not fall back to the legacy
+// assignee wake — from every other comment-handler failure, which keeps
+// that wake.
+var ErrCommentFanOutIncomplete = errors.New("queue_run_for_each_participant: comment fan-out incomplete")
+
+// CommentFanOutIncompleteError records the workflow-step visit that a failed
+// comment fan-out evaluated. The dashboard carries this identity with the
+// subscriber retry so a later step cannot consume the old comment.
+type CommentFanOutIncompleteError struct {
+	WorkflowStepID           string
+	WorkflowStepTransitionID int64
+	Err                      error
+}
+
+func (e *CommentFanOutIncompleteError) Error() string {
+	if e == nil || e.Err == nil {
+		return ErrCommentFanOutIncomplete.Error()
+	}
+	return e.Err.Error()
+}
+
+func (e *CommentFanOutIncompleteError) Unwrap() error { return e.Err }
 
 // Target prefixes / sentinels recognised by QueueRunCallback.
 const (
@@ -402,12 +429,13 @@ func idempotencyKey(in ActionInput, agentID, taskID string) string {
 
 func queueActionDigest(in ActionInput) string {
 	key := struct {
-		Kind    ActionKind     `json:"kind"`
-		Target  string         `json:"target,omitempty"`
-		TaskID  string         `json:"task_id,omitempty"`
-		Role    string         `json:"role,omitempty"`
-		Reason  string         `json:"reason"`
-		Payload map[string]any `json:"payload,omitempty"`
+		Kind        ActionKind     `json:"kind"`
+		Target      string         `json:"target,omitempty"`
+		TaskID      string         `json:"task_id,omitempty"`
+		Role        string         `json:"role,omitempty"`
+		Reason      string         `json:"reason"`
+		Payload     map[string]any `json:"payload,omitempty"`
+		SkipDecided bool           `json:"skip_decided,omitempty"`
 	}{
 		Kind: in.Action.Kind,
 	}
@@ -425,6 +453,7 @@ func queueActionDigest(in ActionInput) string {
 			key.Role = strings.TrimSpace(cfg.Role)
 			key.Reason = queueRunForEachParticipantReason(in)
 			key.Payload = cfg.Payload
+			key.SkipDecided = cfg.SkipDecided
 		}
 	}
 	b, err := json.Marshal(key)
@@ -471,6 +500,12 @@ func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID 
 		targetTaskID != in.State.TaskID &&
 		(ok || commentkeys.HasTaskCommentPrefix(in.OperationID)) {
 		out["source_task_id"] = in.State.TaskID
+	}
+	// Comment-triggered runs must retain the exact source-step visit. A task
+	// can leave a step and later return to the same step ID before launch, so
+	// the step ID alone is not a sufficient staleness check.
+	if ok && targetTaskID == in.State.TaskID {
+		out["workflow_step_transition_id"] = strconv.FormatInt(in.State.WorkflowStepTransitionID, 10)
 	}
 	if len(out) == 0 {
 		return nil
@@ -537,29 +572,50 @@ func (c ClearDecisionsCallback) Execute(ctx context.Context, in ActionInput) (Ac
 }
 
 // QueueRunForEachParticipantCallback fans out queue_run over every participant
-// in the task's workflow-scoped participant slate matching the configured role.
+// in the task's workflow-scoped participant slate matching the configured
+// role.
+//
+// Decisions and Logger are both optional and nil-safe. Decisions is
+// consulted only when the action's SkipDecided is true; a nil store or a
+// read error fails open, waking every seat left after author exclusion, and
+// a nil Logger just skips the accompanying warning.
 type QueueRunForEachParticipantCallback struct {
 	Adapter      RunQueueAdapter
 	Participants ParticipantStore
+	Decisions    DecisionStore
+	Logger       *logger.Logger
 }
 
-// Execute satisfies ActionCallback.
+// Execute satisfies ActionCallback. Under TriggerOnComment every returned
+// error wraps ErrCommentFanOutIncomplete so the dashboard can tell a
+// fan-out failure apart from every other comment-handler failure without
+// new dispatcher plumbing.
 func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in ActionInput) (ActionResult, error) {
-	if c.Adapter == nil {
-		return ActionResult{}, fmt.Errorf("%w: queue_run_for_each_participant requires RunQueueAdapter", ErrActionNotYetWired)
-	}
-	if c.Participants == nil {
-		return ActionResult{}, fmt.Errorf("%w: queue_run_for_each_participant requires ParticipantStore", ErrActionNotYetWired)
-	}
 	cfg := in.Action.QueueRunForEachParticipant
-	if cfg == nil || cfg.Role == "" {
-		return ActionResult{}, fmt.Errorf("queue_run_for_each_participant missing role")
+	var role string
+	if cfg != nil {
+		role = cfg.Role
 	}
 	taskID := in.State.TaskID
+
+	if c.Adapter == nil {
+		return ActionResult{}, c.wrapCommentFanOut(in, taskID, role,
+			fmt.Errorf("%w: queue_run_for_each_participant requires RunQueueAdapter", ErrActionNotYetWired))
+	}
+	if c.Participants == nil {
+		return ActionResult{}, c.wrapCommentFanOut(in, taskID, role,
+			fmt.Errorf("%w: queue_run_for_each_participant requires ParticipantStore", ErrActionNotYetWired))
+	}
+	if cfg == nil || cfg.Role == "" {
+		return ActionResult{}, c.wrapCommentFanOut(in, taskID, role,
+			fmt.Errorf("queue_run_for_each_participant missing role"))
+	}
 	seats, err := roleSeatsForFanOut(ctx, c.Participants, in.Step.ID, taskID, in.State.WorkflowID, cfg.Role)
 	if err != nil {
-		return ActionResult{}, fmt.Errorf("queue_run_for_each_participant list participants: %w", err)
+		return ActionResult{}, c.wrapCommentFanOut(in, taskID, role,
+			fmt.Errorf("queue_run_for_each_participant list participants: %w", err))
 	}
+	seats = c.filterFanOutSeats(ctx, in, taskID, role, cfg, seats)
 	reason := queueRunForEachParticipantReason(in)
 	var waveKey, waveString string
 	if reason == reasonTaskChildrenCompleted {
@@ -608,9 +664,104 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 		}
 	}
 	if len(errs) > 0 {
-		return ActionResult{}, errors.Join(errs...)
+		return ActionResult{}, c.wrapCommentFanOut(in, taskID, role, errors.Join(errs...))
 	}
 	return ActionResult{}, nil
+}
+
+// wrapCommentFanOut wraps a non-nil error with ErrCommentFanOutIncomplete
+// when the trigger is a comment. The wrap uses Go's multi-%w form so an
+// inner error that already wraps ErrActionNotYetWired keeps matching
+// errors.Is for both sentinels. role is quoted so a missing role (empty
+// string) renders as `role ""`.
+func (c QueueRunForEachParticipantCallback) wrapCommentFanOut(in ActionInput, taskID, role string, err error) error {
+	if err == nil || in.Trigger != TriggerOnComment {
+		return err
+	}
+	return fmt.Errorf("%w: task %s step %s role %q: %w", ErrCommentFanOutIncomplete, taskID, in.Step.ID, role, err)
+}
+
+// filterFanOutSeats applies two filters over the fan-out population, in
+// order: author exclusion (unconditional, comment triggers only), then the
+// decided-seat filter (only when cfg.SkipDecided is true). Both preserve
+// the population's order.
+func (c QueueRunForEachParticipantCallback) filterFanOutSeats(
+	ctx context.Context, in ActionInput, taskID, role string, cfg *QueueRunForEachParticipantAction, seats []ParticipantInfo,
+) []ParticipantInfo {
+	seats = excludeCommentAuthor(in, seats)
+	if !cfg.SkipDecided {
+		return seats
+	}
+	return c.excludeDecidedSeats(ctx, in, taskID, role, seats)
+}
+
+// excludeCommentAuthor drops the comment's own author from the population.
+// It only excludes anyone when the trigger payload is an OnCommentPayload
+// carrying a non-empty AuthorID — a human author's id never equals an agent
+// profile id, and a missing author excludes nobody. Any other trigger's
+// payload never matches commentPayload, so this never runs outside
+// on_comment.
+func excludeCommentAuthor(in ActionInput, seats []ParticipantInfo) []ParticipantInfo {
+	comment, ok := commentPayload(in.Payload)
+	if !ok || comment.AuthorID == "" {
+		return seats
+	}
+	out := make([]ParticipantInfo, 0, len(seats))
+	for _, s := range seats {
+		if s.AgentProfileID == comment.AuthorID {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// excludeDecidedSeats drops every seat holding a non-superseded decision at
+// the step. A nil Decisions store or a read error fails open — logging a
+// warning and returning the population unfiltered — because a wasted run is
+// cheaper than a gate left parked.
+func (c QueueRunForEachParticipantCallback) excludeDecidedSeats(
+	ctx context.Context, in ActionInput, taskID, role string, seats []ParticipantInfo,
+) []ParticipantInfo {
+	if c.Decisions == nil {
+		c.warnDecisionReadFailed(taskID, in.Step.ID, role, ErrActionNotYetWired)
+		return seats
+	}
+	decisions, err := c.Decisions.ListStepDecisions(ctx, taskID, in.Step.ID)
+	if err != nil {
+		c.warnDecisionReadFailed(taskID, in.Step.ID, role, err)
+		return seats
+	}
+	active := make([]DecisionInfo, 0, len(decisions))
+	for _, d := range decisions {
+		if d.SupersededAt != nil {
+			continue
+		}
+		active = append(active, d)
+	}
+	decided := mapDecisionsToSeats(seats, active)
+	out := make([]ParticipantInfo, 0, len(seats))
+	for _, s := range seats {
+		if _, ok := decided[s.ID]; ok {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// warnDecisionReadFailed logs a warning naming the task, step, role and
+// error. Nil-safe: a nil Logger skips emission.
+func (c QueueRunForEachParticipantCallback) warnDecisionReadFailed(taskID, stepID, role string, err error) {
+	if c.Logger == nil {
+		return
+	}
+	c.Logger.Warn("queue_run_for_each_participant: decision read failed, waking every seat",
+		zap.String("task_id", taskID),
+		zap.String("step_id", stepID),
+		zap.String("role", role),
+		zap.Error(err),
+	)
 }
 
 func queueRunForEachParticipantReason(in ActionInput) string {

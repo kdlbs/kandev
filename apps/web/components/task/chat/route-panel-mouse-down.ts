@@ -23,7 +23,7 @@ function focusRoutePanel(
   defer: boolean,
 ): void {
   const target = event.target as HTMLElement | null;
-  if (!target || target.closest(interactiveSelector)) return;
+  if (!target || !ref.current?.contains(target) || target.closest(interactiveSelector)) return;
   const focus = () => ref.current?.focus({ preventScroll: true });
   if (defer) requestAnimationFrame(focus);
   else focus();

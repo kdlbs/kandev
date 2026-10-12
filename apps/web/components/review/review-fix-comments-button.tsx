@@ -24,12 +24,14 @@ type FixCommentsButtonProps = {
   commentCount: number;
   getPendingComments: () => ReviewComment[];
   onFixComments: () => void;
+  sendingComments?: boolean;
 };
 
 export function FixCommentsButton({
   commentCount,
   getPendingComments,
   onFixComments,
+  sendingComments = false,
 }: FixCommentsButtonProps) {
   const { t } = useTranslation();
   const { open, onOpenChange, onTriggerEnter, onTriggerLeave, onContentEnter, onContentLeave } =
@@ -66,6 +68,8 @@ export function FixCommentsButton({
             variant="outline"
             className="cursor-pointer"
             onClick={handleClick}
+            disabled={sendingComments}
+            aria-busy={sendingComments}
             data-testid="review-fix-comments-button"
           >
             <IconMessageForward className="h-4 w-4" />

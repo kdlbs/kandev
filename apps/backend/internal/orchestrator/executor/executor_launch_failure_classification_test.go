@@ -2,7 +2,9 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +60,23 @@ func TestWorktreeRecoveryFailureIsActionableWithoutRetryActions(t *testing.T) {
 	}
 	if len(errorValue.RecoveryActions) != 0 {
 		t.Fatalf("recovery actions = %#v, want no retry actions", errorValue.RecoveryActions)
+	}
+}
+
+func TestMainCheckoutInspectionTimeoutRemainsRetryable(t *testing.T) {
+	inspectionErr := fmt.Errorf("git inspection timed out: %w", context.DeadlineExceeded)
+	classification := classifyLaunchFailure(inspectionErr)
+	if classification.noRetry {
+		t.Fatal("inspection timeout was classified as a no-retry metadata refusal")
+	}
+	if classification.code != models.LaunchErrorCategoryGenericLaunchFailure {
+		t.Fatalf("classification code = %q, want generic launch failure", classification.code)
+	}
+
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	persisted := exec.buildLastAgentError(context.Background(), "task-1", "task-repo-1", inspectionErr)
+	if len(persisted.RecoveryActions) != 1 || persisted.RecoveryActions[0] != models.RecoveryActionRetryLaunch {
+		t.Fatalf("persisted recovery actions = %#v, want ordinary retry action", persisted.RecoveryActions)
 	}
 }
 
@@ -226,6 +245,40 @@ func TestBuildBootstrapLastAgentErrorUsesSafeCorrelatedProjection(t *testing.T) 
 	if len(errorValue.Causes) != 1 || errorValue.Causes[0].Operation != models.AgentErrorCauseOperationResume ||
 		errorValue.Causes[0].Code != models.AgentErrorCauseCodePermissionDenied {
 		t.Fatalf("bootstrap causes = %#v", errorValue.Causes)
+	}
+}
+
+func TestBuildBootstrapLastAgentErrorProjectsTypedSelectionEvidence(t *testing.T) {
+	promptNotSent := true
+	launchErr := &lifecycle.BootstrapFailure{
+		Code:           models.AgentErrorCauseCodeModelUnavailable,
+		Reason:         models.AgentErrorCauseReasonRequestedNotAdvertised,
+		RequestedModel: "anthropic/claude-opus-4-8",
+		EffectiveModel: "provider-default",
+		PromptNotSent:  &promptNotSent,
+		Cause:          errors.New("provider diagnostic token=must-not-leak"),
+	}
+
+	errorValue := (&Executor{}).buildBootstrapLastAgentError(
+		context.Background(), "task-1", "session-1", "execution-1", launchErr, false,
+	)
+	if len(errorValue.Causes) != 1 {
+		t.Fatalf("bootstrap causes = %#v", errorValue.Causes)
+	}
+	cause := errorValue.Causes[0]
+	if cause.Operation != models.AgentErrorCauseOperationStart ||
+		cause.Code != models.AgentErrorCauseCodeModelUnavailable ||
+		cause.Reason != models.AgentErrorCauseReasonRequestedNotAdvertised ||
+		cause.RequestedModel != "anthropic/claude-opus-4-8" ||
+		cause.EffectiveModel != "provider-default" || cause.PromptNotSent == nil || !*cause.PromptNotSent {
+		t.Fatalf("bootstrap selection cause = %+v", cause)
+	}
+	encoded, err := json.Marshal(errorValue)
+	if err != nil {
+		t.Fatalf("marshal safe bootstrap projection: %v", err)
+	}
+	if strings.Contains(string(encoded), "must-not-leak") || strings.Contains(string(encoded), "token=") {
+		t.Fatalf("bootstrap projection exposed provider diagnostic: %s", encoded)
 	}
 }
 

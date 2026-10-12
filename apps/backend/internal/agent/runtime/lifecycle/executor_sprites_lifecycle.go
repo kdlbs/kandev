@@ -45,8 +45,8 @@ func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorIn
 	// Plain "stop the agent" runs (e.g. user clicks Stop, then later wants to
 	// resume) must NOT destroy the cloud sandbox: the user's working tree,
 	// installed deps, and any in-progress files live there. Only destroy the
-	// sandbox for explicit terminal lifecycle events (task/session deleted or
-	// archived). Resume then re-attaches the same sandbox in seconds.
+	// sandbox for explicit terminal lifecycle events or a failed launch. Resume
+	// then re-attaches the same sandbox in seconds.
 	if !shouldRunExecutorCleanup(instance.StopReason) {
 		r.logger.Info("preserving sprite sandbox after agent stop",
 			zap.String(MetadataKeySpriteName, spriteName),
@@ -129,8 +129,8 @@ func (r *SpritesExecutor) runTerminalCleanupScript(ctx context.Context, sprite *
 		zap.String("reason", instance.StopReason))
 }
 
-// Terminal stop reasons that trigger destructive executor cleanup
-// (sandbox teardown, container removal, per-instance session-dir removal).
+// Stop reasons that trigger destructive executor cleanup (sandbox teardown,
+// container removal, per-instance session-dir removal).
 // Anything outside this set is treated as a "preserve" stop — see
 // shouldRunExecutorCleanup. Stale execution cleanup is intentionally excluded
 // from this shared set: Docker has a runtime-specific helper to remove local
@@ -146,12 +146,16 @@ const (
 	StopReasonCascadeDelete    = "cascade delete"
 	StopReasonTaskTreeArchived = "task tree archived"
 	StopReasonTaskTreeDeleted  = "task tree deleted"
+	// StopReasonLaunchRollback marks a fresh runtime instance whose launch failed.
+	// Executors release its inventory only after destructive cleanup succeeds.
+	StopReasonLaunchRollback = "launch rollback"
 )
 
 func shouldRunExecutorCleanup(reason string) bool {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
 	case StopReasonTaskArchived, StopReasonTaskDeleted, StopReasonSessionArchived, StopReasonSessionDeleted,
-		StopReasonCascadeArchive, StopReasonCascadeDelete, StopReasonTaskTreeArchived, StopReasonTaskTreeDeleted:
+		StopReasonCascadeArchive, StopReasonCascadeDelete, StopReasonTaskTreeArchived, StopReasonTaskTreeDeleted,
+		StopReasonLaunchRollback:
 		return true
 	default:
 		return false

@@ -11,6 +11,8 @@
 selection to one shipped default generation. A changed package or default
 activates the new Kandev default before runtime consumers start.
 
+**OpenCode adoption amendment:** [ADR-2026-09-27](2026-09-27-opencode-runtime-adoption.md) adds an explicit, persisted family/source boundary and managed-source priority after migration. OpenCode uses the same distribution for its interactive CLI and ACP; other providers retain the separate-package rule below.
+
 ## Context
 
 Kandev originally invoked managed npm ACP runtimes by an unversioned package

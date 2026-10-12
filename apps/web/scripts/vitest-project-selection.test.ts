@@ -42,14 +42,19 @@ function withFixture<T>(files: Record<string, string>, callback: (root: string) 
 
 describe("Vitest project selection", () => {
   it("keeps every test file in exactly one project", async () => {
-    const { discoverTestFiles, matchingProjects } = await loadSelection();
-    const files = discoverTestFiles(WEB_ROOT);
+    const selection = await loadSelection();
+    const files = selection.discoverTestFiles(WEB_ROOT);
+    const { REVIEWED_NODE_TEST_FILES: node, REVIEWED_BROWSER_TEST_FILES: browser } = selection;
+    const reviewed = [...node, ...browser];
+
+    expect(new Set(reviewed).size).toBe(reviewed.length);
+    for (const file of reviewed) expect(files, file).toContain(file);
 
     expect(files.length).toBeGreaterThan(1000);
     expect(files.some((file) => file.startsWith("e2e/") && file.endsWith(".test.ts"))).toBe(true);
 
     for (const file of files) {
-      expect(matchingProjects(file), file).toHaveLength(1);
+      expect(selection.matchingProjects(file), file).toHaveLength(1);
     }
   });
 

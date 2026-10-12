@@ -3,6 +3,8 @@ import {
   taskId as toTaskId,
   workflowId as toWorkflowId,
   workspaceId as toWorkspaceId,
+  repositoryId as toRepositoryId,
+  sessionId as toSessionId,
   type Repository,
   type Task,
 } from "@/lib/types/http";
@@ -38,6 +40,7 @@ export function shouldReservePageLevelMobileFeedbackOffset(params: {
   hasTaskMoveError: boolean;
   hasEnsureSessionError: boolean;
   hasBootstrapRecoveryError: boolean;
+  hasComposerRecoveryOwner?: boolean;
   effectiveSessionId: string | null;
   isSessionPassthrough: boolean;
   hasResumptionError: boolean;
@@ -46,7 +49,9 @@ export function shouldReservePageLevelMobileFeedbackOffset(params: {
 }): boolean {
   const hasPageRecoveryFeedback = params.hasBootstrapRecoveryError
     ? Boolean(params.effectiveSessionId && params.isSessionPassthrough)
-    : params.hasResumptionError || params.hasResumptionNotice || params.hasStatusUnavailable;
+    : params.hasStatusUnavailable ||
+      (!params.hasComposerRecoveryOwner &&
+        (params.hasResumptionError || params.hasResumptionNotice));
   return (
     params.isMobile &&
     (params.hasTaskMoveError || params.hasEnsureSessionError || hasPageRecoveryFeedback)
@@ -254,11 +259,39 @@ export function buildTaskFromKanban(kanbanTask: KanbanState["tasks"][number]): T
     workflow_step_id: kanbanTask.workflowStepId,
     position: kanbanTask.position,
     state: kanbanTask.state ?? "CREATED",
-    workspace_id: toWorkspaceId(""),
+    workspace_id: toWorkspaceId(kanbanTask.workspaceId ?? ""),
     workflow_id: toWorkflowId(kanbanTask.workflowId ?? ""),
     priority: kanbanTask.priority ?? "medium",
-    repositories: [],
-    created_at: "",
+    repositories:
+      kanbanTask.repositories?.map((repository) => ({
+        ...repository,
+        task_id: toTaskId(kanbanTask.id),
+        repository_id: toRepositoryId(repository.repository_id),
+        created_at: "",
+        updated_at: "",
+      })) ?? [],
+    workspace_folders: kanbanTask.workspaceFolders?.map((folder) => ({
+      ...folder,
+      task_id: toTaskId(kanbanTask.id),
+    })),
+    primary_session_id: kanbanTask.primarySessionId
+      ? toSessionId(kanbanTask.primarySessionId)
+      : null,
+    primary_session_pending_action: kanbanTask.primarySessionPendingAction,
+    task_pending_action: kanbanTask.taskPendingAction,
+    status_summary: kanbanTask.statusSummary,
+    foreground_activity: kanbanTask.foregroundActivity,
+    interrupted: kanbanTask.interrupted,
+    workspace_orphaned: kanbanTask.workspaceOrphaned,
+    auto_start_failed: kanbanTask.autoStartFailed,
+    is_from_office: kanbanTask.isFromOffice,
+    is_remote_executor: kanbanTask.isRemoteExecutor,
+    runner_editable: kanbanTask.runnerEditable,
+    runner_ineligible_reason: kanbanTask.runnerIneligibleReason,
+    autopilot: kanbanTask.autopilot,
+    workflow_agent_overrides: kanbanTask.workflowAgentOverrides,
+    parent_id: kanbanTask.parentTaskId ? toTaskId(kanbanTask.parentTaskId) : undefined,
+    created_at: kanbanTask.createdAt ?? "",
     updated_at: kanbanTask.updatedAt ?? "",
     metadata: kanbanTask.metadata,
   };
@@ -279,9 +312,11 @@ export function buildArchivedValue(task: Task | null, repository: Repository | n
 export function resolveTaskContentState(params: {
   isMounted: boolean;
   hasTask: boolean;
+  hasTaskDetails: boolean;
   hasTaskLoadError: boolean;
 }) {
   if (!params.isMounted) return "loading";
+  if (params.hasTaskDetails) return "ready";
   if (params.hasTaskLoadError) return "error";
   if (params.hasTask) return "ready";
   return "loading";

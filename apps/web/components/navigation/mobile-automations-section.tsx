@@ -26,43 +26,47 @@ export function MobileAutomationsSection({
       className="flex flex-col gap-2 border-t border-border pt-2"
       data-testid="mobile-automations-section"
     >
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          className="cursor-pointer h-11 min-w-11 flex-1 justify-start gap-2 px-0 text-sm font-medium hover:bg-transparent aria-expanded:bg-transparent"
-          aria-expanded={expanded}
-          aria-controls="mobile-automations-body"
-          onClick={() => setExpanded(!expanded)}
-        >
-          {t("automations:automations")}
-          {expanded ? (
-            <IconChevronDown className="size-3.5 text-muted-foreground" />
-          ) : (
-            <IconChevronRight className="size-3.5 text-muted-foreground" />
+      <Button
+        variant="ghost"
+        className="cursor-pointer h-11 w-full justify-start gap-2 px-0 text-sm font-medium hover:bg-transparent aria-expanded:bg-transparent"
+        aria-expanded={expanded}
+        aria-controls="mobile-automations-body"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {t("automations:automations")}
+        {expanded ? (
+          <IconChevronDown className="size-3.5 text-muted-foreground" />
+        ) : (
+          <IconChevronRight className="size-3.5 text-muted-foreground" />
+        )}
+      </Button>
+      {expanded && (
+        <div id="mobile-automations-body" className="flex flex-col gap-2">
+          {children ?? (
+            <MobileAutomationRows
+              key={workspaceId}
+              workspaceId={workspaceId}
+              onNavigate={onNavigate}
+            />
           )}
-        </Button>
-        <Button
-          asChild
-          variant="ghost"
-          className="cursor-pointer size-11 shrink-0 text-muted-foreground"
-        >
-          <Link
-            href={AUTOMATIONS_HREF}
-            onClick={onNavigate}
-            aria-label={t("automations:openAutomations")}
+          <Button
+            asChild
+            variant="outline"
+            className="cursor-pointer h-11 w-full justify-start gap-3 px-3 text-sm"
           >
-            <IconListDetails className="size-4" />
-          </Link>
-        </Button>
-      </div>
-      {expanded &&
-        (children ?? (
-          <MobileAutomationRows
-            key={workspaceId}
-            workspaceId={workspaceId}
-            onNavigate={onNavigate}
-          />
-        ))}
+            <Link href={AUTOMATIONS_HREF} onClick={onNavigate}>
+              <IconListDetails className="size-4 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-left">
+                {t("automations:openAutomations")}
+              </span>
+              <IconChevronRight
+                className="size-3.5 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+            </Link>
+          </Button>
+        </div>
+      )}
     </section>
   );
 }
@@ -82,7 +86,7 @@ function MobileAutomationRows({
   const pending = list.loading || activity.loading;
   const error = list.error || activity.error;
   return (
-    <div id="mobile-automations-body" className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2">
       {pending && (
         <p role="status" className="text-sm text-muted-foreground">
           {t("common:loading")}

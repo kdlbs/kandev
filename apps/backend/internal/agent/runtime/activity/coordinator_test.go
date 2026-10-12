@@ -140,6 +140,53 @@ func TestForcedMaintenanceIgnoresCurrentTaskButRemainsPreemptible(t *testing.T) 
 	}
 }
 
+func TestExclusiveMaintenanceBlocksNewTaskUntilRelease(t *testing.T) {
+	coordinator := NewCoordinator(Options{})
+	maintenance, busy, err := coordinator.TryAcquireExclusiveMaintenance(context.Background())
+	if err != nil || len(busy) != 0 {
+		t.Fatalf("TryAcquireExclusiveMaintenance = (%v, %v), want lease", busy, err)
+	}
+	if err := maintenance.Context().Err(); err != nil {
+		t.Fatalf("exclusive lease context = %v, want active", err)
+	}
+
+	acquired := make(chan *TaskLease, 1)
+	go func() {
+		lease, acquireErr := coordinator.AcquireTask(context.Background(), KindExecutionStarting)
+		if acquireErr == nil {
+			acquired <- lease
+		}
+	}()
+	select {
+	case <-acquired:
+		t.Fatal("task entered while exclusive maintenance was held")
+	case <-time.After(20 * time.Millisecond):
+	}
+	if err := maintenance.Context().Err(); err != nil {
+		t.Fatalf("exclusive lease was preempted by task admission: %v", err)
+	}
+
+	maintenance.Release()
+	select {
+	case lease := <-acquired:
+		lease.Release()
+	case <-time.After(time.Second):
+		t.Fatal("task did not enter after exclusive maintenance release")
+	}
+}
+
+func TestExclusiveMaintenanceRefusesActiveTask(t *testing.T) {
+	coordinator := NewCoordinator(Options{})
+	task, err := coordinator.AcquireTask(context.Background(), KindExecutionRunning)
+	if err != nil {
+		t.Fatalf("AcquireTask: %v", err)
+	}
+	defer task.Release()
+	if _, busy, err := coordinator.TryAcquireExclusiveMaintenance(context.Background()); !errors.Is(err, ErrBusy) || len(busy) != 1 {
+		t.Fatalf("TryAcquireExclusiveMaintenance = (%v, %v), want ErrBusy", busy, err)
+	}
+}
+
 func TestBusyResourcesExposeStableLabels(t *testing.T) {
 	coordinator := NewCoordinator(Options{})
 	lease, err := coordinator.AcquireTask(context.Background(), KindDockerImageBuild)

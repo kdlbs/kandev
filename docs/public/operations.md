@@ -27,6 +27,26 @@ Kandev does not currently provide a user-login boundary for the web application,
 
 See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for mode-specific prerequisites and commands.
 
+## Recover sessions after a restart
+
+Kandev automatically checks interrupted sessions at startup and after replacement of a crashed local agent runtime. When retained delivery records agree with the session's saved identity and the original process is proven terminated, Kandev restores the same native conversation without resending its interrupted prompt. Recovery checks continue while Kandev runs, so a temporarily unavailable runtime can recover later. These checks are enabled by default; the Agent Survival feature toggle separately controls whether local agents survive a graceful backend shutdown.
+
+The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Recovery also reconciles a shutdown failure label that lacks terminal evidence with the backend's unknown outcome. It preserves both historical records and repairs missing recovery associations only after verifying the saved conversation and retired work. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
+
+If an older crash left journal acknowledgments ahead of saved output, Kandev
+can restore a verified conversation on a new delivery generation while keeping
+the missing history explicit. **Resume** uses the same guarded recovery. A
+notice remains beside the composer when some earlier output is unavailable;
+the interrupted prompt's outcome remains unknown. Only a new instruction you
+send starts new work. Available retained output is synchronized normally.
+
+Recovery remains blocked if the original or replacement process cannot be
+proven terminated, native state is missing, records conflict, or retained work
+still needs acknowledgment. An older agent runtime may require an update
+before Resume can verify a history gap. Backend SQLite commits use FULL
+synchronization before output acknowledgments so new acknowledgments do not
+outlive their committed receipts after a power loss.
+
 ## Prevent host sleep during active tasks
 
 Administrators can open **Settings > Preferences > Task Behavior > Runtime** and enable
@@ -140,6 +160,22 @@ available. The Stats page retries failed sections and keeps successful sections
 visible. If `persistence_unavailable` appears instead, inspect the persistence
 diagnostic because a required store failed its health check.
 
+## Local agent runtime recovery
+
+Kandev can replace a failed local agent runtime without restarting the backend.
+Keep the page open during recovery. Existing route data stays available in the
+browser. If automatic recovery stops, an administrator can select **Retry agent
+runtime** in the alert. This action does not restart Kandev.
+
+After runtime replacement, Kandev automatically reconciles interrupted sessions
+as described in [Recover sessions after a restart](#recover-sessions-after-a-restart).
+A session remains blocked when termination cannot be verified, retained records
+conflict, or native state is missing. Use its recovery card to reconnect or stop
+the original work. **Retry connection** checks retained evidence without sending
+the prompt again. A successful native recovery admits new prompts while keeping
+the interrupted prompt's historical outcome unknown. Stop does not prove
+cancellation; an unreachable original process still has an unknown outcome.
+
 ![Settings > System > Status showing health checks, the running version, and disk usage.](../screenshots/system-status.png)
 
 For a managed service, also check its process manager:
@@ -216,9 +252,10 @@ or cleanup jobs still exist.
 Open **Settings > System > Storage > Host** to inspect Kandev-managed disk usage and
 configure cleanup. Open **Storage > Office retention** for Office history policy and status.
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
-while another maintenance run owns the cleanup gate. If task resources are active, the page names
-the active work and offers **Run anyway** after an explicit disruption warning. Use that override
-only when the active task work can tolerate cleanup running alongside it.
+while another maintenance run owns the cleanup gate. Cleanup normally waits for active task
+resources to become idle. If they are active, the page names the work and offers **Run anyway**
+after an explicit disruption warning. Use that override only when the active work can tolerate
+cleanup running alongside it.
 
 ![Settings > System > Storage showing disk capacity, storage analysis, and cleanup controls.](../screenshots/system-storage.png)
 
@@ -255,12 +292,33 @@ measured size and explains that only the distinct bytes contribute. An unavailab
 added to the total and is marked as unavailable. Database rows are not applicable for non-SQLite
 drivers. During a first scan, pending or active rows show their measurement progress.
 
-Scheduled cleanup is disabled by default and runs only after the configured resource-idle quiet
-period. Orphaned task workspaces and rotated Go caches move into Kandev's quarantine before
-permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and
+Scheduled cleanup is disabled by default. It normally starts only after the configured resource-idle
+period. Orphaned task workspaces and eligible temporary artifacts move into Kandev's quarantine
+before permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and
 **Clear eligible** cannot remove it before that time. The deadline is the earliest safe deletion
-time, not an exact promise, the first successful scheduled or full manual maintenance run after the
-deadline performs the purge, subject to the idle gate and any preemption.
+time, not an exact promise. The first scheduled or full manual maintenance run that reaches the
+quarantine provider after the deadline performs the purge. That provider still must pass the idle
+gate and avoid preemption. A run that cleans only the Go cache does not purge quarantine entries.
+
+Go-cache cleanup uses a separate policy. When managed-cache use is enabled, new host-local
+executions share the selected Go build-cache path. The displayed physical size includes Go's `fuzz`
+corpus, while the cleanup-eligible size and trigger exclude it.
+
+- The configured size is a cleanup trigger, not a quota. The cache can grow between maintenance
+  runs.
+- Cleanup permanently deletes eligible build-cache data without a restorable quarantine entry. It
+  keeps the cache root and ownership marker, and preserves Go's `fuzz` corpus.
+- Deleted build-cache data cannot be restored.
+
+The Go-cache policy includes an off-by-default **Allow cleanup while tasks are running** switch.
+When enabled, Go-cache cleanup skips task-activity and idle-period checks, but it still waits for
+other maintenance runs to finish. Scheduled cleanup still requires scheduling and Go-cache cleanup
+to be enabled and the cleanup-eligible size to exceed its trigger. Explicit Go-cache cleanup can
+also use this setting without a second force prompt.
+
+Other cleanup providers keep their existing admission rules. A build can fail if cleanup removes a
+file that it needs, and Kandev does not retry the build automatically. A later build can repopulate
+the same cache path.
 
 Each full maintenance run also revisits at most 100 Kandev-managed local branches retained when a
 task was archived before its work was integrated. Kandev considers only durable rows that still
@@ -280,18 +338,17 @@ checks still apply.
 
 ![Settings > System > Storage showing quarantined resources with restore, delete, and force-clear controls.](../screenshots/system-quarantine.png)
 
-Kandev keeps at most one restorable Go-cache generation for each original cache path. If that
-generation is still active when the replacement cache exceeds its limit, the next rotation is
-deferred. The maintenance run succeeds and reports `active_quarantine`; both the live cache and
-the retained generation stay unchanged.
+New Go-cache cleanup does not rotate or retain cache generations. Historical Go-cache quarantine
+entries created by older versions remain subject to their saved retention deadline and the existing
+restore and deletion safety checks.
 
-If a Go-cache quarantine payload is already missing, **Delete**, **Clear eligible**, or **Force
-clear all** can close its durable entry without changing the live replacement cache. The purge
-reports zero deleted bytes for that entry. **Restore** remains unavailable because Kandev cannot
-prove which cache generation is currently live.
+If a historical Go-cache quarantine payload is already missing, **Delete**, **Clear eligible**, or
+**Force clear all** can close its durable entry without changing the live cache. The purge reports
+zero deleted bytes for that entry. **Restore** remains unavailable because Kandev cannot prove which
+cache contents are currently live.
 
-If scheduled cleanup is disabled, no independent quarantine sweeper runs: use a full **Run now** or
-one of the quarantine actions when you want cleanup.
+If scheduled cleanup is disabled, no independent quarantine sweeper runs. Use a full **Run now** or
+a quarantine action to purge eligible historical entries.
 
 Archived Git worktrees use the task cleanup worker, not the optional storage schedule. A clean
 worktree can be removed during archive. A worktree with tracked or untracked Git changes remains
@@ -387,7 +444,12 @@ service temp path short enough for local Unix-domain socket paths; an excessivel
 exceed the platform socket-address limit.
 
 Persistent Go build caching is separate: Go's default `GOCACHE` is not derived from `TMPDIR`, and
-Kandev injects its managed Go-cache location only when that opt-in Storage setting is enabled.
+Kandev injects its managed Go-cache location only when that opt-in Storage setting is enabled. If
+Kandev cannot prepare that cache for a host-local execution, the agent still starts without the
+managed override. This fallback does not change the saved setting or cache data. Go tools then use
+an independently configured `GOCACHE` or Go's normal default; a tool can still fail if that cache
+is unusable. Adoption, cleanup, restore, and deletion keep strict path checks and reject unsafe
+symlinks.
 Scratch cleanup in the inherited temporary directory belongs to the operating system or the host's
 temporary-file policy. Archive and delete stop and reap the task's host-local processes, but do not
 recursively delete shared temporary files.
@@ -465,6 +527,66 @@ file. Existing backups keep their size, and creating a backup needs more disk sp
 Removal is permanent within the current database. Restoring a backup replaces
 the whole database and can remove newer changes. Keep any backup you need before
 deleting it. Other database engines show this feature as unavailable.
+
+## Backend delivery retention
+
+Kandev automatically removes redundant backend transport data on SQLite and PostgreSQL.
+It preserves canonical messages, tool history, turns, and unresolved recovery evidence.
+This cleanup is separate from **Message compaction** and agentctl journal pruning.
+
+The default payload grace is one hour. Eligible projected event payloads and fully settled prompt payloads expire after this grace.
+Cleanup retains compact identities, hashes, outcomes, and settlement evidence.
+Independently projected nonterminal output can lose its redundant raw body even when
+an older terminal is unresolved or legacy submission bookkeeping is missing. Its
+exact committed projection receipt, authenticated cursor and replay hash must survive.
+The unresolved terminal and prompt keep their stronger recovery protections.
+Recent duplicate receipts remain for up to 24 hours or 10000 events per stream.
+Contiguous retirement checkpoints reject older events without applying them again.
+A lost ACK uses the persisted projected cursor. Cleanup never resends a prompt or a tool action.
+
+Unprojected events, uncertain prompts, pending claims, and incomplete terminal or workflow settlement remain protected.
+Archive and Stop preserve this evidence. Explicit deletion retires the session identity and schedules bounded removal of its delivery records.
+Protected backlog and canonical history can continue to grow. Retention is not a database quota.
+
+Cleanup starts when the background worker starts, without an initial delay.
+Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
+Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, without artificial sleeps between batches. Frontier wrap alone does not repeat a phase. Passes are bounded to five seconds. When productive work remains, the next pass starts immediately; exhausted or busy-only passes wait for the configured idle interval (one minute by default). Errors use bounded retry backoff.
+SQLite native writer admission can wait through its existing five-second busy timeout after cancellation.
+Stop joins that work before database closure. The 250 ms deadline is not a wall-clock completion promise during contention.
+Startup [configuration](configuration.md#backend-delivery-retention) controls grace, replay limits, cadence, and batch size.
+
+Production structured `agent_delivery.retention.*` logs report aggregate progress, removed bytes, bounded backlog samples, and skip or error reasons.
+Development or pprof diagnostics also expose `agent_delivery_retention_*` counters through `/debug/vars`.
+There is no production metrics endpoint. A bounded sample is not an exact database-wide total.
+Unavailable backlog or age values use `-1`. These counters do not label session identities or contain payloads.
+
+### Delivery retention upgrades and rollback
+
+After upgrade, the normal worker revisits eligible historical payloads in bounded
+batches using its persisted scan frontiers. No session reset or manual bookkeeping
+deletion is needed. Large backlogs take multiple passes; unresolved recovery evidence
+and canonical history remain protected.
+
+**Preserve a verified pre-pruning backup before the pruning upgrade.** Removed transport payloads cannot be restored within the live database.
+SQLite version changes create a consistent page-copy snapshot before migration and verify its integrity. Backup copying does not rebuild the database or reclaim free pages; explicit physical compaction remains separate.
+Automatic rotation retains only the newest two snapshots. Copy the verified pre-pruning snapshot outside that directory.
+PostgreSQL has no automatic upgrade snapshot. Create a `pg_dump` before the upgrade and verify restoration into an isolated database.
+
+The rollout uses two releases. Release N provides format-1 readers, writers, checkpoints, and deletion fences without a collector.
+Release N+1 activates pruning only after the actual Release N artifact passes the pruned-database rollback matrix.
+Release N pauses collection and preserves pending deletion jobs until a forward upgrade.
+The implementation plan records the artifact digest and required compatibility evidence.
+Do not treat a pre-retention binary as a supported rollback reader.
+A rollback to that binary requires a verified pre-pruning backup and loses changes after that snapshot.
+A restored snapshot cannot prove that external actions did not occur. It never authorizes their automatic replay.
+
+### Delivery retention and disk space
+
+Logical removal makes database space reusable. It does not guarantee a smaller file or secure erasure.
+SQLite file shrinkage uses the existing **Vacuum** action or verified offline [CLI compaction](cli.md#database-maintenance).
+PostgreSQL operators use normal vacuum or autovacuum for reusable space. The worker never runs `VACUUM FULL`.
+WAL, dead tuples, indexes, backups, and retained copies need separate capacity planning.
+Backups can still contain payload bytes removed from the live database.
 
 ## Database operation
 
@@ -746,6 +868,18 @@ Before archive, delete, reset, or manual cleanup:
 5. check logs and the remote provider afterward, because timeout, network, or permission failures can leave a container, directory, or sandbox behind.
 
 Never delete a managed task directory merely because its database row looks terminal. A borrowed environment or pending asynchronous cleanup can still own it.
+
+### Recover a preserved Worktree inventory mismatch
+
+If a session resume reports that canonical workspace repository inventory is incomplete, first preserve the checkout exactly as it is. Record its branch and HEAD, and inspect tracked, dirty, untracked, and ignored files. Do not use **Reset Environment**, archive/delete cleanup, `git clean`, worktree removal, or a provider reset as an inventory repair.
+
+The task-scoped `repair_workspace_inventory` session recovery action is safe only for a Kandev-managed local Git worktree with exactly one missing or stale repository/branch slot. It performs read-only reciprocal Git inspection, hashes the checkout state, compares current database revisions, rejects another active session, changes only the proven inventory row, appends an immutable receipt identity, verifies the checkout again, durably records monotonic matching post-repair evidence on that receipt, and resumes once through the ordinary validator. Retrying the same operation requires the same idempotency key. See [WebSocket API](websocket-api.md#repair-preserved-workspace-inventory) for the request and receipt contract.
+
+Stop and investigate manually when the action returns a conflict. Common causes are multiple unmatched rows, duplicate repository/branch attachments, a moved or symlinked path, a detached or unexpected branch, a missing Git worktree registration, a user-owned local repository, a Docker/SSH/Sprites-only checkout, another active session (including a child sharing the environment), configured external Git clean/process filters, or state that changed during inspection. A conflict is intentionally preservation-first: Kandev leaves checkout files and provider resources untouched and does not fall back to rematerialization.
+
+A fresh or additional-session launch (a brand-new session, `spawn_session_kandev`, or on-entry auto-start) runs this same guarded repair automatically when it hits the identical single-slot mismatch, using a server-derived idempotency key scoped to that session; no manual action is needed. If automatic repair cannot prove a safe single match, the launch fails exactly as it did before this behavior existed, with no orphaned STARTING/RUNNING session and no primary-session change, and the manual `repair_workspace_inventory` action above remains available.
+
+If Kandev commits the inventory row but cannot durably store positive post-repair evidence, the launch or resume remains blocked and retryable. Use the same idempotency key for manual retries; Kandev re-inspects the preserved checkout and proceeds only after it records matching evidence. Once divergent evidence is durably recorded, retries cannot replace it with a match; preserve the checkout and investigate manually.
 
 ## Updates
 

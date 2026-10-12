@@ -9,15 +9,22 @@ import {
   type ReactNode,
 } from "react";
 import { ScrollArea } from "@kandev/ui/scroll-area";
+import { cn } from "@/lib/utils";
 
 const SCROLL_END_TOLERANCE_PX = 1;
 
 export function TaskSidebarScrollArea({
   children,
   viewportRef,
+  className,
+  contentClassName = "space-y-4",
+  testId = "task-sidebar-scroll",
 }: {
   children: ReactNode;
   viewportRef?: MutableRefObject<HTMLDivElement | null>;
+  className?: string;
+  contentClassName?: string;
+  testId?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -53,7 +60,7 @@ export function TaskSidebarScrollArea({
   return (
     <ScrollArea
       type="auto"
-      className="task-sidebar-scroll-root min-h-0 flex-1"
+      className={cn("task-sidebar-scroll-root min-h-0 flex-1", className)}
       viewportProps={{
         ref: (element: HTMLDivElement | null) => {
           scrollRef.current = element;
@@ -65,10 +72,10 @@ export function TaskSidebarScrollArea({
         // never overflows its own ScrollOnOverflow container.
         className: "task-sidebar-scroll [&>div]:!block [&>div]:!min-w-0 [&>div]:!w-full",
         "data-can-scroll-down": canScrollDown,
-        "data-testid": "task-sidebar-scroll",
+        "data-testid": testId,
       }}
     >
-      <div ref={contentRef} className="space-y-4">
+      <div ref={contentRef} className={contentClassName}>
         {children}
       </div>
     </ScrollArea>

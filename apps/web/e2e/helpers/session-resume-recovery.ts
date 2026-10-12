@@ -9,7 +9,7 @@ import type { CreateTaskResponse } from "../../lib/types/http";
 import type { ApiClient } from "./api-client";
 import { GitHelper, makeGitEnv } from "./git-helper";
 import { SessionPage } from "../pages/session-page";
-import { waitForSessionState } from "./session";
+import { waitForAgentMessage, waitForSessionDone } from "./session";
 
 type SqliteTestDatabase = {
   exec(sql: string): void;
@@ -46,9 +46,11 @@ function forEachSessionRecoveryFrame(
   }
 }
 
-/** Capture request IDs and responses for explicit session.recover requests. */
+/** Capture requests and responses for explicit session.recover requests. */
 export function captureSessionRecoveryMessages(page: Page) {
   const requestIds: Record<string, string> = {};
+  const requestCounts: Record<string, number> = {};
+  const requests = new Map<string, unknown>();
   const responses = new Map<string, { type?: string; payload?: unknown }>();
   page.on("websocket", (socket) => {
     if (!socket.url().endsWith("/ws")) return;
@@ -57,6 +59,8 @@ export function captureSessionRecoveryMessages(page: Page) {
         const action = (frame.payload as { action?: unknown } | null)?.action;
         if (frame.type === "request" && typeof action === "string") {
           requestIds[action] = frame.id!;
+          requestCounts[action] = (requestCounts[action] ?? 0) + 1;
+          requests.set(action, frame.payload);
         }
       });
     });
@@ -68,7 +72,38 @@ export function captureSessionRecoveryMessages(page: Page) {
       });
     });
   });
-  return { requestIds, responses };
+  return { requestIds, requestCounts, requests, responses };
+}
+
+/** Wait for both the live runtime and its durable inventory to settle after Stop. */
+export async function waitForStoppedRecoveryRuntime(
+  apiClient: ApiClient,
+  tmpDir: string,
+  fixture: WorktreeRecoveryFixture,
+) {
+  const sessionId = fixture.task.session_id!;
+  await expect
+    .poll(
+      async () => {
+        const status = await apiClient.wsRequest<{ is_agent_running: boolean }>(
+          "task.session.status",
+          { task_id: fixture.task.id, session_id: sessionId },
+        );
+        return status.is_agent_running;
+      },
+      { timeout: 30_000, message: "Waiting for the stopped recovery runtime to exit" },
+    )
+    .toBe(false);
+  await expect
+    .poll(() => readManagedCloneRecoveryConsumers(tmpDir, fixture.environment.id), {
+      timeout: 30_000,
+      message: "Waiting for the stopped recovery runtime inventory to settle",
+    })
+    .toEqual([{ sessionId, state: "CANCELLED", runtimeStatus: "stopped" }]);
+}
+
+export function capturedSessionRecoveryRequest(requests: Map<string, unknown>, action: string) {
+  return requests.get(action);
 }
 
 export function capturedSessionRecoveryResponse(
@@ -143,6 +178,104 @@ export function readManagedCloneRecoveryConsumers(
   } finally {
     db.close();
   }
+}
+
+export function readPrivateManagedCloneRecoveryArtifacts(
+  tmpDir: string,
+  environmentId: string,
+  repositoryId: string,
+): { relocationPath: string; recoveryPath: string; original: string; snapshot: string } {
+  const { DatabaseSync } = nodeRequire("node:sqlite") as {
+    DatabaseSync: new (databasePath: string) => SqliteTestDatabase;
+  };
+  const db = new DatabaseSync(path.join(tmpDir, "kandev.db"));
+  let artifactPaths: string[];
+  try {
+    const row = db
+      .prepare(
+        `SELECT artifact_paths_json AS artifactPaths
+         FROM task_environment_recovery_artifacts
+         WHERE task_environment_id = ? AND repository_id = ?
+         ORDER BY updated_at DESC LIMIT 1`,
+      )
+      .get(environmentId, repositoryId) as { artifactPaths?: unknown } | undefined;
+    if (typeof row?.artifactPaths !== "string") {
+      throw new Error(`Recovery artifacts are not registered for repository ${repositoryId}`);
+    }
+    const parsed = JSON.parse(row.artifactPaths) as unknown;
+    if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== "string")) {
+      throw new Error(`Recovery artifact paths are invalid for repository ${repositoryId}`);
+    }
+    artifactPaths = parsed;
+  } finally {
+    db.close();
+  }
+
+  const relocationPath = artifactPaths.find(
+    (artifactPath) => path.basename(artifactPath) === "relocation.json",
+  );
+  const recoveryPath = artifactPaths.find(
+    (artifactPath) => path.basename(artifactPath) === "recovery.json",
+  );
+  if (!relocationPath || !recoveryPath) {
+    throw new Error(`Private relocation records are missing for repository ${repositoryId}`);
+  }
+  const relocation = JSON.parse(fs.readFileSync(relocationPath, "utf8")) as {
+    original?: unknown;
+  };
+  const recovery = JSON.parse(fs.readFileSync(recoveryPath, "utf8")) as {
+    snapshot?: unknown;
+  };
+  if (typeof relocation.original !== "string" || typeof recovery.snapshot !== "string") {
+    throw new Error(`Private recovery record is incomplete for repository ${repositoryId}`);
+  }
+  return {
+    relocationPath,
+    recoveryPath,
+    original: relocation.original,
+    snapshot: recovery.snapshot,
+  };
+}
+
+/** Read the durable state of the task's cascade archive cleanup job. */
+export function readCascadeArchiveCleanupState(tmpDir: string, taskId: string): string | null {
+  const { DatabaseSync } = nodeRequire("node:sqlite") as {
+    DatabaseSync: new (databasePath: string) => SqliteTestDatabase;
+  };
+  const db = new DatabaseSync(path.join(tmpDir, "kandev.db"));
+  try {
+    const row = db
+      .prepare(
+        `
+        SELECT state
+        FROM task_resource_cleanup_jobs
+        WHERE task_id = ? AND trigger = 'cascade_archive'
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      )
+      .get(taskId) as { state?: unknown } | undefined;
+    return typeof row?.state === "string" ? row.state : null;
+  } finally {
+    db.close();
+  }
+}
+
+export async function waitForCascadeArchiveCleanup(tmpDir: string, taskId: string) {
+  await expect
+    .poll(() => readCascadeArchiveCleanupState(tmpDir, taskId), {
+      timeout: 30_000,
+      intervals: [250, 500, 1_000],
+      message: `Waiting for cascade archive cleanup job row to be created for task ${taskId}`,
+    })
+    .not.toBeNull();
+  await expect
+    .poll(() => readCascadeArchiveCleanupState(tmpDir, taskId), {
+      timeout: 60_000,
+      intervals: [250, 500, 1_000],
+      message: `Waiting for cascade archive cleanup to finish for task ${taskId}`,
+    })
+    .toBe("succeeded");
 }
 
 /** Remove relocation test tasks and return the worker's shared repository to its local fixture. */
@@ -353,13 +486,14 @@ export async function prepareArchiveRecoverySession(
 ): Promise<string> {
   const sessionId = fixture.task.session_id;
   if (!sessionId) throw new Error("worktree recovery fixture has no primary session");
-  await waitForSessionState(apiClient, {
-    taskId: fixture.task.id,
+  await waitForSessionDone(
+    apiClient,
+    fixture.task.id,
     sessionId,
-    expectedState: "WAITING_FOR_INPUT",
-    message: "Waiting for the archive recovery session to become active",
-    timeout: 60_000,
-  });
+    "Waiting for the archive recovery session to settle",
+    60_000,
+  );
+  await waitForAgentMessage(apiClient, sessionId, "simple mock response", 60_000);
   return sessionId;
 }
 

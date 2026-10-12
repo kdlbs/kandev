@@ -121,12 +121,25 @@ func normalizeOriginBranchName(branch string) string {
 // acquiring the lifecycle throttle. The timeout starts after admission so
 // queue wait does not consume the command's inspection budget.
 func (m *Manager) runBoundedGitInspect(ctx context.Context, repoPath string, args ...string) (string, error) {
+	return m.runBoundedGitInspectWithEnvironment(ctx, repoPath, nil, args...)
+}
+
+func (m *Manager) runBoundedGitInspectWithEnvironment(
+	ctx context.Context,
+	repoPath string,
+	prepareEnvironment func([]string) []string,
+	args ...string,
+) (string, error) {
 	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
 		ctx,
 		subproc.GitLifecycle,
 		m.inspectTimeout,
 		func(execCtx context.Context) *exec.Cmd {
-			return m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
+			cmd := m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
+			if prepareEnvironment != nil {
+				cmd.Env = prepareEnvironment(cmd.Env)
+			}
+			return cmd
 		},
 	)
 	if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {

@@ -142,13 +142,17 @@ function useUnavailableOwner(
   const dependentSession = !restoration ? failedSessionId : null;
   const correlatedRestore = correlatedRestorationSession(context, restoration);
   const candidateSession = dependentSession ?? correlatedRestore;
-  const sessionOwner =
+  const durableSessionOwner =
     candidateSession &&
     candidate?.scope === "session" &&
     candidate.session_id === candidateSession &&
     candidate.stamp
       ? candidateSession
       : null;
+  const sessionOwner =
+    correlatedRestore && context?.automaticRecoveryOwnerSessionId === correlatedRestore
+      ? correlatedRestore
+      : durableSessionOwner;
   const { ownerId: restoreOwnerId, invalidateOwner } = useWorkspaceRecoveryOwner(restoration);
   const ownerId = sessionOwner ? `session-recovery-${sessionOwner}` : restoreOwnerId;
   return { context, sessionOwner, ownerId, invalidateOwner };

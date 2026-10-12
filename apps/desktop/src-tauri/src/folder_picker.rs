@@ -143,6 +143,7 @@ mod tests {
         fs::remove_dir_all(home).expect("remove test directories");
     }
 
+    #[cfg(feature = "desktop-runtime")]
     #[test]
     fn maps_selection_cancellation_and_closed_callback_channel() {
         let selection = async_channel_outcome(Some(Ok(PathBuf::from("/Users/example/Code"))));
@@ -164,6 +165,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "desktop-runtime")]
     fn async_channel_outcome(value: Option<Result<PathBuf, String>>) -> FolderPickerOutcome {
         let (sender, receiver) = tauri::async_runtime::channel(1);
         sender

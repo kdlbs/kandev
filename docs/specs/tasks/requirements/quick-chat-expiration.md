@@ -240,7 +240,9 @@ deletion.
   Chat, **THEN** configuration mode is not offered and configuration entry points reopen the
   existing session.
 - **GIVEN** Settings Configuration Chat is open, **WHEN** setup or the existing conversation is
-  shown, **THEN** the floating panel has no session tabs or new-configuration-session action.
+  shown, **THEN** the floating panel has no session tabs or parallel-configuration-session action.
+  The confirmed recovery action replaces the existing conversation, as defined in
+  [Configuration Chat restart](configuration-chat-restart.md).
 - **GIVEN** any application route, **WHEN** the user chooses Configuration Chat from the Command
   Palette, **THEN** the same unified configuration setup/session opens in Quick Chat.
 - **GIVEN** a configuration setup tab, **WHEN** it renders, **THEN** it shows configuration copy,

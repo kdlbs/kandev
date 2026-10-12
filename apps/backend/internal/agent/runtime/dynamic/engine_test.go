@@ -129,6 +129,61 @@ func TestEngineRoutesCodexUsageLimitThroughHardPolicy(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-CLAUDE-SESSION-LIMIT-001.6
+func TestEngineRoutesClaudeSessionLimitThroughHardPolicy(t *testing.T) {
+	failure := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: "claude-acp",
+		Stderr:     "Internal error: You've hit your session limit · resets 11:10am (Europe/Helsinki)",
+	})
+	if failure.Code != routingerr.CodeQuotaLimited || failure.Class != routingerr.ClassHard || failure.ResetHint == nil {
+		t.Fatalf("classification = %+v, want hard quota with reset hint", failure)
+	}
+
+	resetAt := *failure.ResetHint
+	now := resetAt.Add(-time.Hour)
+	profile := Profile{
+		ID: "dynamic-claude-quota", Version: 1,
+		Candidates: []Candidate{
+			{ID: "claude-primary", Enabled: true, BindingKey: "credential:claude-shared", Policies: routingpolicy.DefaultDocument()},
+			{ID: "claude-sibling", Enabled: true, BindingKey: "credential:claude-shared", Policies: routingpolicy.DefaultDocument()},
+			{ID: "healthy", Enabled: true, BindingKey: "credential:other", Policies: routingpolicy.DefaultDocument()},
+		},
+	}
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	initial, err := engine.Select("claude-quota-session", profile, 0, "")
+	if err != nil || initial.ExecutionProfileID != "claude-primary" {
+		t.Fatalf("initial selection = %#v, %v; want claude-primary", initial, err)
+	}
+
+	decision, err := engine.ApplyFailure(
+		"claude-quota-session", profile, initial.Generation, initial.ExecutionProfileID, failure,
+	)
+	if err != nil {
+		t.Fatalf("ApplyFailure: %v", err)
+	}
+	if decision.ExecutionProfileID != "healthy" || decision.Reason != "policy_skip" {
+		t.Fatalf("decision = %#v, want healthy candidate after shared-binding siblings are skipped", decision)
+	}
+	if !engine.Circuits().IsOpen("credential:claude-shared", now) {
+		t.Fatal("Claude shared credential circuit is not open before the reset deadline")
+	}
+
+	now = resetAt
+	probe, err := engine.Select("claude-reset-probe", profile, 0, "")
+	if err != nil || probe.ExecutionProfileID != "claude-primary" {
+		t.Fatalf("selection at reset = %#v, %v; want the first shared-binding candidate to probe", probe, err)
+	}
+	whileProbeHeld, err := engine.Select("claude-reset-probe-sibling", profile, 0, "")
+	if err != nil || whileProbeHeld.ExecutionProfileID != "healthy" {
+		t.Fatalf("selection while probe is held = %#v, %v; want healthy candidate", whileProbeHeld, err)
+	}
+	engine.ReleaseProbe(probe, true)
+	if engine.Circuits().IsOpen("credential:claude-shared", now) {
+		t.Fatalf("Claude shared credential circuit remains open after successful probe at reset %s", resetAt)
+	}
+}
+
 // A quota failure is scoped to the shared credential binding, not just the
 // execution profile that happened to run. Every candidate on the same account
 // must be skipped so the route advances to a different provider instead of

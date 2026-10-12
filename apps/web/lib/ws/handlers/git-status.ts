@@ -11,8 +11,39 @@ import type {
 } from "@/lib/types/git-events";
 import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { acceptsGitStatusOrdering } from "@/lib/state/slices/session-runtime/git-status-state";
 
 const debug = createDebugLogger("git-status:ws");
+
+function logStatusUpdate(event: GitStatusUpdateEvent, changed: boolean) {
+  if (!isDebug()) return;
+  const taskEnvironmentId = event.task_environment_id;
+  const statusState = event.status.status_state;
+  const filesComplete =
+    event.status.files_complete ?? (statusState === undefined && event.status.files !== undefined);
+  debug("status_update", {
+    sessionId: event.session_id,
+    repositoryName: event.status.repository_name ?? null,
+    branch: event.status.branch,
+    fileCount: Object.keys(event.status.files ?? {}).length,
+    modified: event.status.modified?.length ?? 0,
+    added: event.status.added?.length ?? 0,
+    deleted: event.status.deleted?.length ?? 0,
+    untracked: event.status.untracked?.length ?? 0,
+    ahead: event.status.ahead,
+    behind: event.status.behind,
+    remoteAhead: event.status.remote_ahead,
+    remoteBehind: event.status.remote_behind,
+    headCommit: event.status.head_commit,
+    baseCommit: event.status.base_commit,
+    remoteHeadCommit: event.status.remote_head_commit,
+    envKey: taskEnvironmentId,
+    envMapped: false,
+    statusState,
+    filesComplete,
+    changed,
+  });
+}
 
 // Handler functions for each event type
 type GitEventHandlers = {
@@ -29,6 +60,13 @@ function resolveEnvKey(store: StoreApi<AppState>, sessionId: string): string {
 
 function buildGitStatusEntry(event: GitStatusUpdateEvent): GitStatusEntry {
   return {
+    status_state: event.status.status_state,
+    files_complete: event.status.files_complete,
+    detail_state: event.status.detail_state,
+    error_code: event.status.error_code,
+    tracker_id: event.status.tracker_id,
+    tracker_epoch: event.status.tracker_epoch,
+    snapshot_revision: event.status.snapshot_revision,
     branch: event.status.branch,
     remote_branch: event.status.remote_branch,
     modified: event.status.modified,
@@ -57,39 +95,127 @@ function buildGitStatusEntry(event: GitStatusUpdateEvent): GitStatusEntry {
   };
 }
 
+/** Applies only complete membership snapshots; transient frames update refresh state. */
+export function applyGitStatusUpdate(
+  store: StoreApi<AppState>,
+  event: GitStatusUpdateEvent,
+): boolean {
+  return applyGitStatusUpdateWithOutcome(store, event).changed;
+}
+
+export type GitStatusUpdateOutcome = { accepted: boolean; changed: boolean };
+
+export function applyGitStatusUpdateWithOutcome(
+  store: StoreApi<AppState>,
+  event: GitStatusUpdateEvent,
+): GitStatusUpdateOutcome {
+  const taskEnvironmentId = event.task_environment_id;
+  if (!taskEnvironmentId) return { accepted: false, changed: false };
+  const state = store.getState();
+
+  const repositoryName = event.status.repository_name ?? "";
+  const existing = getAcceptedGitStatus(state, taskEnvironmentId, repositoryName);
+  const refresh = getGitStatusRefresh(state, taskEnvironmentId, repositoryName);
+  const ordering = statusOrdering(event);
+  if (
+    !acceptsGitStatusOrdering(existing, ordering) ||
+    !acceptsGitStatusOrdering(refresh, ordering)
+  ) {
+    return { accepted: false, changed: false };
+  }
+  return {
+    accepted: true,
+    changed: applyAcceptedGitStatus(store, event, taskEnvironmentId, repositoryName, ordering),
+  };
+}
+
+function getAcceptedGitStatus(state: AppState, environmentId: string, repositoryName: string) {
+  const scoped = state.gitStatus.byEnvironmentRepo[environmentId]?.[repositoryName];
+  if (scoped || repositoryName) return scoped;
+  const legacy = state.gitStatus.byEnvironmentId[environmentId];
+  return legacy?.repository_name ? undefined : legacy;
+}
+
+function getGitStatusRefresh(state: AppState, environmentId: string, repositoryName: string) {
+  return repositoryName
+    ? state.gitStatus.refreshByEnvironmentRepo?.[environmentId]?.[repositoryName]
+    : (state.gitStatus.refreshByEnvironmentRepo?.[environmentId]?.[""] ??
+        state.gitStatus.refreshByEnvironmentId?.[environmentId]);
+}
+
+function statusOrdering(event: GitStatusUpdateEvent) {
+  return {
+    tracker_id: event.status.tracker_id,
+    tracker_epoch: event.status.tracker_epoch,
+    snapshot_revision: event.status.snapshot_revision,
+    timestamp: event.timestamp,
+  };
+}
+
+function applyAcceptedGitStatus(
+  store: StoreApi<AppState>,
+  event: GitStatusUpdateEvent,
+  environmentId: string,
+  repositoryName: string,
+  ordering: ReturnType<typeof statusOrdering>,
+): boolean {
+  const state = store.getState();
+  if (isTransientStatus(event)) {
+    state.setGitStatusRefresh(environmentId, repositoryName, {
+      state: event.status.status_state === "unavailable" ? "unavailable" : "pending",
+      error_code: event.status.error_code,
+      ...ordering,
+    });
+    return false;
+  }
+  const filesComplete =
+    event.status.files_complete ??
+    (event.status.status_state === undefined && event.status.files !== undefined);
+  if (!filesComplete) {
+    state.setGitStatusRefresh(environmentId, repositoryName, {
+      state: "pending",
+      error_code: event.status.error_code,
+      ...ordering,
+    });
+    return false;
+  }
+
+  const changed = state.setGitStatus(environmentId, buildGitStatusEntry(event));
+  state.setGitStatusRefresh(
+    environmentId,
+    repositoryName,
+    refreshForAcceptedStatus(event, ordering),
+  );
+  if (repositoryName === "") {
+    state.setGitStatusRefresh(environmentId, undefined, null);
+  }
+  return changed;
+}
+
+function isTransientStatus(event: GitStatusUpdateEvent): boolean {
+  return event.status.status_state === "unavailable" || event.status.status_state === "loading";
+}
+
+function refreshForAcceptedStatus(
+  event: GitStatusUpdateEvent,
+  ordering: ReturnType<typeof statusOrdering>,
+) {
+  return event.status.detail_state === "unavailable"
+    ? { state: "unavailable" as const, error_code: event.status.error_code, ...ordering }
+    : null;
+}
+
 const gitEventHandlers: GitEventHandlers = {
   status_update: (store, event) => {
     const taskEnvironmentId = event.task_environment_id;
     if (!taskEnvironmentId) {
       return;
     }
-    const gitStatus = buildGitStatusEntry(event);
     // setGitStatus performs the deep change comparison once and reports back
     // whether anything changed; reuse that instead of comparing again here.
     // Under a massive rebase the comparison is the dominant CPU cost.
-    const changed = store.getState().setGitStatus(taskEnvironmentId, gitStatus);
-    if (isDebug()) {
-      debug("status_update", {
-        sessionId: event.session_id,
-        repositoryName: event.status.repository_name ?? null,
-        branch: event.status.branch,
-        fileCount: Object.keys(event.status.files ?? {}).length,
-        modified: event.status.modified?.length ?? 0,
-        added: event.status.added?.length ?? 0,
-        deleted: event.status.deleted?.length ?? 0,
-        untracked: event.status.untracked?.length ?? 0,
-        ahead: event.status.ahead,
-        behind: event.status.behind,
-        remoteAhead: event.status.remote_ahead,
-        remoteBehind: event.status.remote_behind,
-        headCommit: event.status.head_commit,
-        baseCommit: event.status.base_commit,
-        remoteHeadCommit: event.status.remote_head_commit,
-        envKey: taskEnvironmentId,
-        envMapped: false,
-        changed,
-      });
-    }
+    const changed = applyGitStatusUpdate(store, event);
+    logStatusUpdate(event, changed);
     if (changed) {
       invalidateCumulativeDiffCache(store, taskEnvironmentId);
     }

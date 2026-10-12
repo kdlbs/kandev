@@ -85,6 +85,10 @@ type workflowQueuedPullRepository interface {
 	NextQueuedTaskForStepExcluding(ctx context.Context, feederStepID, destinationStepID string, excludeTaskIDs []string) (*models.Task, error)
 }
 
+type workflowTaskStepEntryReader interface {
+	GetTaskWorkflowStepEntry(ctx context.Context, taskID string) (workflowID, stepID string, transitionID int64, err error)
+}
+
 type workflowStepTaskLister interface {
 	ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error)
 }
@@ -209,7 +213,7 @@ func (s *workflowStore) LoadState(ctx context.Context, taskID, sessionID string)
 	}
 
 	if sessionID == "" {
-		return assembleMachineState(task, nil, false), nil
+		return s.assembleMachineStateWithStepEntry(ctx, task, nil, false)
 	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -222,7 +226,28 @@ func (s *workflowStore) LoadState(ctx context.Context, taskID, sessionID string)
 		isPassthrough = s.agentManager.IsPassthroughSession(ctx, sessionID)
 	}
 
-	return assembleMachineState(task, session, isPassthrough), nil
+	return s.assembleMachineStateWithStepEntry(ctx, task, session, isPassthrough)
+}
+
+func (s *workflowStore) assembleMachineStateWithStepEntry(
+	ctx context.Context,
+	task *models.Task,
+	session *models.TaskSession,
+	isPassthrough bool,
+) (engine.MachineState, error) {
+	state := assembleMachineState(task, session, isPassthrough)
+	reader, ok := s.repo.(workflowTaskStepEntryReader)
+	if !ok {
+		return state, nil
+	}
+	workflowID, stepID, transitionID, err := reader.GetTaskWorkflowStepEntry(ctx, task.ID)
+	if err != nil {
+		return engine.MachineState{}, fmt.Errorf("load workflow step entry for task %s: %w", task.ID, err)
+	}
+	state.WorkflowID = workflowID
+	state.CurrentStepID = stepID
+	state.WorkflowStepTransitionID = transitionID
+	return state, nil
 }
 
 // LoadStep returns stepID's compiled spec, serving it from the process-local
@@ -393,8 +418,10 @@ func (s *workflowStore) applyTransition(
 		); err != nil {
 			return 0, fmt.Errorf("update task workflow step: %w", err)
 		}
-	} else if err := s.updateTransitionTask(transitionCtx, task, fromStepID, targetStep); err != nil {
+	} else if applied, err := s.updateTransitionTask(transitionCtx, task, fromStepID, targetStep); err != nil {
 		return 0, fmt.Errorf("update task workflow step: %w", err)
+	} else if !applied {
+		return 0, nil
 	}
 
 	// Pass the pre-move workflow ID through so cross-workflow transitions
@@ -579,9 +606,22 @@ func (s *workflowStore) applyTransitionIfAtStepRaw(
 	}
 	task.UpdatedAt = time.Now().UTC()
 
-	applied, err := casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
-		ctx, task, expectedStepID, toStepID, targetStep.WIPLimit,
-	)
+	var applied bool
+	if effect := workflowEffectFromContext(ctx); effect != nil {
+		if effectRepo, ok := s.repo.(workflowMoveAdmissionCASEffectRepository); ok {
+			applied, err = effectRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect(
+				ctx, task, expectedStepID, toStepID, targetStep.WIPLimit, effect,
+			)
+		} else {
+			applied, err = casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
+				ctx, task, expectedStepID, toStepID, targetStep.WIPLimit,
+			)
+		}
+	} else {
+		applied, err = casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
+			ctx, task, expectedStepID, toStepID, targetStep.WIPLimit,
+		)
+	}
 	if err != nil {
 		return nil, "", false, fmt.Errorf("update task workflow step (CAS): %w", err)
 	}
@@ -610,16 +650,24 @@ func markDeferredMoveApplied(task *models.Task, moveID string) error {
 	return nil
 }
 
-func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.Task, fromStepID string, targetStep *wfmodels.WorkflowStep) error {
+func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.Task, fromStepID string, targetStep *wfmodels.WorkflowStep) (bool, error) {
 	if targetStep == nil {
-		return s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
+		return true, s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
+	}
+	if effect := workflowEffectFromContext(ctx); effect != nil {
+		if effectRepo, ok := s.repo.(workflowMoveAdmissionEffectRepository); ok {
+			_, applied, err := effectRepo.UpdateTaskWithWorkflowStepAdmissionAndEffect(
+				ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit, effect,
+			)
+			return applied, err
+		}
 	}
 	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {
-		return fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
+		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
 	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit)
-	return err
+	return true, err
 }
 
 func (s *workflowStore) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, excludeTaskID string) {

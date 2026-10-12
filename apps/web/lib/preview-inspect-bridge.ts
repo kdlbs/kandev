@@ -59,6 +59,13 @@ interface PreviewCandidateChangedMessage {
   payload: { label: string | null };
 }
 
+interface PreviewCaptureModeChangedMessage {
+  source: typeof INSPECTOR_SOURCE;
+  version: typeof INSPECTOR_PROTOCOL_VERSION;
+  type: "capture-mode-changed";
+  payload: { mode: PreviewCaptureMode | null };
+}
+
 interface PreviewCaptureCompletedMessage {
   source: typeof INSPECTOR_SOURCE;
   version: typeof INSPECTOR_PROTOCOL_VERSION;
@@ -112,6 +119,7 @@ export type InspectorMessage =
   | InspectorReadyMessage
   | PreviewRouteChangedMessage
   | PreviewCandidateChangedMessage
+  | PreviewCaptureModeChangedMessage
   | PreviewCaptureCompletedMessage
   | PreviewCaptureCancelledMessage
   | PreviewScreenshotRegionSelectedMessage
@@ -150,6 +158,8 @@ export function isInspectorMessage(data: unknown): data is InspectorMessage {
       return isPageIdentity(data.payload);
     case "candidate-changed":
       return data.payload.label === null || isBoundedString(data.payload.label, MAX_LABEL_LENGTH);
+    case "capture-mode-changed":
+      return isCaptureModePayload(data.payload);
     case "capture-completed":
       return isCaptureDraft(data.payload);
     case "capture-cancelled":
@@ -177,6 +187,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isBoundedString(value: unknown, maximum: number): value is string {
   return typeof value === "string" && value.length <= maximum;
+}
+
+function isPreviewCaptureMode(value: unknown): value is PreviewCaptureMode {
+  return value === "text" || value === "element" || value === "screenshot";
+}
+
+function isCaptureModePayload(payload: Record<string, unknown>): boolean {
+  return payload.mode === null || isPreviewCaptureMode(payload.mode);
 }
 
 function isPageIdentity(value: Record<string, unknown>): boolean {

@@ -783,6 +783,15 @@ func (s *profileUpdateSignalStore) UpdateAgentProfile(ctx context.Context, p *mo
 	return err
 }
 
+func (s *profileUpdateSignalStore) UpdateAgentProfileWithEnabledIntent(ctx context.Context, p *models.AgentProfile, enabled *bool) error {
+	err := s.fakeStore.UpdateAgentProfileWithEnabledIntent(ctx, p, enabled)
+	select {
+	case s.models <- p.Model:
+	default:
+	}
+	return err
+}
+
 func (s *profileUpdateSignalStore) UpdateAgentProfileModelIfEmpty(
 	ctx context.Context,
 	profileID, model string,

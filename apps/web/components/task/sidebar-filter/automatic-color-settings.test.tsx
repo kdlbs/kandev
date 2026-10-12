@@ -130,6 +130,35 @@ describe("AutomaticColorSettings rule headings", () => {
 });
 
 describe("AutomaticColorSettings", () => {
+  it("moves complete color rules through the explicit menu without changing them on open", () => {
+    const redRule: SidebarTaskColorAutomation["rules"][number] = {
+      id: "red",
+      enabled: true,
+      condition: { dimension: "task_state", value: "TODO", label: "To do" },
+      output: { kind: "fixed", color: "red" },
+    };
+    const blueRule: SidebarTaskColorAutomation["rules"][number] = {
+      id: "blue",
+      enabled: false,
+      condition: { dimension: "priority", value: 1, label: "High" },
+      output: { kind: "fixed", color: "blue" },
+    };
+    mocks.value = { enabled: true, rules: [redRule, blueRule] };
+    renderSettings();
+    fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));
+
+    fireEvent.pointerDown(screen.getByTestId("automatic-color-rule-more-blue"), {
+      button: 0,
+      pointerType: "mouse",
+    });
+    expect(mocks.update).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("automatic-color-rule-more-blue-move-up"));
+
+    expect(mocks.update).toHaveBeenCalledWith({ enabled: true, rules: [blueRule, redRule] });
+  });
+});
+
+describe("AutomaticColorSettings rules", () => {
   it("adds a disabled incomplete rule without enabling the global setting", () => {
     renderSettings();
     fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));

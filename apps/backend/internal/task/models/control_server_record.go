@@ -3,6 +3,8 @@ package models
 import (
 	"errors"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/processidentity"
 )
 
 // ErrControlServerRecordNotFound is returned when no control-server record
@@ -40,7 +42,10 @@ type ControlServerRecord struct {
 	// DiagnosticLogPath is the location of the control server's detached
 	// diagnostic-output log sink, so both the next backend and an operator
 	// can find it.
-	DiagnosticLogPath string    `json:"diagnostic_log_path"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	DiagnosticLogPath string `json:"diagnostic_log_path"`
+	// ProcessIdentity is optional host evidence for the server's birth and
+	// containment group. Legacy records omit it and cannot authorize cleanup.
+	ProcessIdentity processidentity.Identity `json:"process_identity,omitempty"`
+	CreatedAt       time.Time                `json:"created_at"`
+	UpdatedAt       time.Time                `json:"updated_at"`
 }

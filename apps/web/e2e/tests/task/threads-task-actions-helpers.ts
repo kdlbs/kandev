@@ -25,7 +25,7 @@ export async function withTaskActionSettings(api: ApiClient, run: () => Promise<
 }
 
 export async function seedActionThreads(api: ApiClient, seed: SeedData) {
-  const profile = await createStandardProfile(api, "thread-task-actions");
+  const profile = await createStandardProfile(api, "thread-task-actions", seed.agentProfileId);
   const source = await api.createWorkflow(seed.workspaceId, "Thread actions source", "simple");
   const { steps } = await api.listWorkflowSteps(source.id);
   const start = steps.find((step) => step.is_start_step);

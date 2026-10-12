@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-09-11
-updated: 2026-09-20
+updated: 2026-10-06
 requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-005
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006
@@ -25,9 +25,8 @@ to own contribution admission and durable bootstrap failure projection.
 | REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006 | Recovery presentation ownership; post-start recoverable failure detail; responsive amendment |
 | REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007 | Attempt isolation; accepted-turn ownership |
 
-The following amendments are implemented in the
-[contribution resume recovery package](../../../plans/contribution-resume-recovery/plan.md).
-They qualify the older recovery-surface descriptions below.
+[Planned startup failure explanations](session-startup-failure-explanations.md)
+extend requirement 006. The remaining sections describe implemented recovery behavior.
 
 ### Workspace-only registration (requirement 005)
 
@@ -66,14 +65,13 @@ Carry an optional error stamp in recovery error details so the client can match
 the request failure to its durable record. Do not deduplicate by message text
 or by session alone. Without correlation, retain a distinct historical error.
 
-One shared recovery view model selects the active record and fallback request
-state. Task detail, preview, and Quick Chat consume it. In a mounted chat, the
-composer recovery region owns active presentation when messaging is blocked;
-chronological rows retain history without mutation controls. See the September 20
-amendment. The outer `SessionRecoveryFeedback`
-renders only when there is no matching chat owner; initial session creation
-keeps its current ensure-error surface. Do not mount duplicate action hooks
-that can issue equivalent requests from separate renderers.
+Task detail, preview and Quick Chat share one model for active and fallback
+recovery. Blocked-session feedback belongs in the composer region; historical
+rows retain details without mutation controls. Preview Plan replaces the
+transcript but keeps the shared recovery card below its scrolling content, never
+above agent tabs. Only the displayed surface mounts manual recovery actions;
+pending state is shared across tabs. Outer `SessionRecoveryFeedback` is only for
+cases without a matching card owner. Initial creation keeps its ensure-error UI.
 
 Reuse `TaskLaunchErrorEntry`, `SessionStoppedBanner`, and their existing
 handlers behind this ownership decision. Do not route session Resume through
@@ -313,12 +311,10 @@ It does not roll back an accepted claim, decorate it as recovery failure, or
 call `cleanupCancelledResumeAttempt`. Apply the same rule to model-switch paths
 that bypass the ordinary prompt callback.
 
-Retain normal deferred attempt completion so outer compound calls can finish
-without treating the successful transfer as a missing registry owner.
-Successful tombstones continue to authorize matching execution callbacks.
-Both direct and identity-based startup cleanup reject accepted attempts.
-Old cancelled attempts remain fenced, including reused execution IDs and retries.
-Do not weaken execution generation checks or accept unknown callback identities.
+Keep deferred completion and successful tombstones across compound calls. Direct
+and identity-based cleanup reject accepted attempts. Fence old cancelled
+attempts and reused execution IDs; preserve generation checks and reject unknown
+callbacks.
 
 ### Entry points and failure boundaries
 
@@ -334,20 +330,24 @@ A provider that cannot settle cancellation retains the existing bounded escalati
 policy. Archive, workflow parking, explicit stop, crash, and backend restart
 remain independent reasons for runtime removal or recovery.
 
+Cancelled startup teardown has one owner per exact execution for service
+cancellation and late `StartAgentProcess` results. Revalidate the attempt and
+claim under the session guard; release only that claim on failed stop and
+complete it on success or exact absence. Publish a per-session in-flight fence
+atomically with the claim. Resume admission waits outside the guard for the
+fence to settle, then retries; guard-held admission fails closed. Clear the
+captured fence only after `StopExecution` returns. Never project a startup
+failure or stop a successor reusing the execution ID.
+This process-local correction adds no durable state, public API, runtime flag, or UI control.
+
 ### Compatibility, presentation, and evidence
 
-The change is process-local. It adds no durable state, public API, runtime flag,
-locale string, or new interface control. Desktop and phone retain their existing
-composer, pause control, cancellation progress, and transcript scroll owner.
-Tests use those surfaces and require a successful follow-up on the same execution.
-Visible boot-row count alone is insufficient because the UI deduplicates resume entries.
-
-Barrier-controlled service tests prove both acceptance orderings and process
-survival. They also prove valid events after cancellation and stale-event rejection.
-The existing backend cancellation ADR remains authoritative. This local lifecycle
-correction needs no separate ADR. Removing attempt tracking at initial readiness
-is insufficient for compound resume because it leaves a pre-dispatch cancellation gap.
-Removing all attempt checks would lose stale-callback protection.
+Desktop and phone keep the composer, pause/cancel controls and transcript scroll.
+Tests require a same-execution follow-up; boot-row count alone is inconclusive
+because resume rows deduplicate. Barrier tests prove both acceptance orders,
+process survival, valid post-cancel events and stale-event rejection. Attempt
+tracking spans compound resume through pre-dispatch acceptance; initial readiness
+alone leaves a cancellation gap. The cancellation ADR remains authoritative.
 
 ## Uniform active recovery presentation (September 20)
 

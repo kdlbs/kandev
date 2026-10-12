@@ -94,9 +94,9 @@ function CopyWorkspacePathButton({
             )}
           />
           {copied ? (
-            <IconCheck className="absolute inset-0 h-3.5 w-3.5 text-green-600/70" />
+            <IconCheck className="absolute inset-0 m-auto h-3.5 w-3.5 text-green-600/70" />
           ) : (
-            <IconCopy className="absolute inset-0 h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover/header:opacity-100 hover:text-foreground transition-opacity" />
+            <IconCopy className="absolute inset-0 m-auto h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover/header:opacity-100 hover:text-foreground transition-opacity" />
           )}
         </button>
       </TooltipTrigger>

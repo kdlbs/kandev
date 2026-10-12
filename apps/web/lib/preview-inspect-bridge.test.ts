@@ -127,6 +127,27 @@ describe("preview inspector protocol validation", () => {
       }),
     ).toBe(true);
   });
+
+  it("accepts capture-mode readiness only for supported modes", () => {
+    for (const mode of ["text", "element", "screenshot", null]) {
+      expect(
+        isInspectorMessage({
+          source: INSPECTOR_SOURCE,
+          version: INSPECTOR_PROTOCOL_VERSION,
+          type: "capture-mode-changed",
+          payload: { mode },
+        }),
+      ).toBe(true);
+    }
+    expect(
+      isInspectorMessage({
+        source: INSPECTOR_SOURCE,
+        version: INSPECTOR_PROTOCOL_VERSION,
+        type: "capture-mode-changed",
+        payload: { mode: "unknown" },
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("preview inspector commands", () => {

@@ -93,6 +93,16 @@ Implementation belongs to the [error scope package](../../../plans/error-scope-a
 Session action presentation remains owned by the
 [agent recovery requirement](../../agents/requirements/session-recovery-failures.md).
 
+### REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003: Retained Quick Chat setup failures
+
+Draft amendment, 2026-10-02. Delivery: [Setup recovery UX](../../../plans/setup-recovery-ux/plan.md).
+
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.1:** Once a Quick Chat session exists, a synchronous or asynchronous setup failure shall retain its task, session, tab, preparation details, and safe error. Reload and reconnect shall restore the failed conversation without placing it on the task board.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.2:** Navigating tabs, opening another chat, or dismissing the Quick Chat surface during creation shall not delete a created conversation. A late creation result shall reconcile its identity without stealing the user's newer selection or reopening a dismissed surface. Explicit deletion and existing expiration policy remain available.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.3:** A failed chat shall expose the existing valid recovery actions and allow explicit deletion. Opening or restoring it shall not automatically retry away the error. Retrying shall reuse its task/conversation and preserve prior failure history.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.4:** A failure before a session exists shall retain the setup form, selected agent, repositories, and an inline safe error with a retry action. A toast alone shall not be the error surface. No nonexistent conversation shall be advertised as restorable.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.5:** Desktop and phone shall expose the same failure and recovery outcomes. Phone users shall retain the full-height Quick Chat surface, scroll to error details, and reach actions with at least 44px touch targets without horizontal page overflow.
+
 ## Out of scope
 
 - A background poller for all repository defaults.

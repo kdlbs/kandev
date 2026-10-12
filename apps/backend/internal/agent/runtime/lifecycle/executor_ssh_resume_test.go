@@ -69,7 +69,7 @@ func TestSSHBuildInstanceCarriesRuntimeAPITunnelMetadata(t *testing.T) {
 		}},
 		&SSHTarget{Host: "ssh.example", Port: 22, User: "agent"},
 		&SSHPortForwarder{localPort: 43124},
-		"/remote/task", "/remote/session", 43123, 99, "/home/agent/.kandev", "token",
+		"/remote/task", "/remote/session", 43123, 43122, 99, "/home/agent/.kandev", "token",
 	)
 
 	if got := instance.Metadata[MetadataKeySSHRuntimeAPILocalURL]; got != "http://127.0.0.1:38429/api/v1" {
@@ -226,6 +226,13 @@ func TestSSHStopInstanceKillsRemoteAgentctlOnlyWhenCleanupIsRequired(t *testing.
 			name: "terminal task deletion kills agentctl",
 			instance: &ExecutorInstance{
 				StopReason: StopReasonTaskDeleted,
+			},
+			want: true,
+		},
+		{
+			name: "idle suspension stops only the session agentctl",
+			instance: &ExecutorInstance{
+				StopReason: StopReasonIdleSuspension,
 			},
 			want: true,
 		},

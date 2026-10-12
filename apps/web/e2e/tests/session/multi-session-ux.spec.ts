@@ -20,6 +20,7 @@ async function createTaskAndNavigate(
   apiClient: import("../../helpers/api-client").ApiClient,
   seedData: import("../../fixtures/test-base").SeedData,
   title: string,
+  navigateViaKanban = true,
 ) {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -43,9 +44,16 @@ async function createTaskAndNavigate(
     )
     .toBe(true);
 
-  // The task API is already authoritative here. Direct navigation avoids a
-  // race with the kanban snapshot refresh after the first agent session ends.
-  await testPage.goto(`/t/${task.id}`);
+  if (navigateViaKanban) {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const card = kanban.taskCardByTitle(title);
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.click();
+  } else {
+    await testPage.goto(`/t/${task.id}`);
+  }
+  await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -65,6 +73,7 @@ test.describe("Multi-session UX", () => {
       apiClient,
       seedData,
       "Tab Naming Task",
+      false,
     );
 
     // Create a second session
@@ -642,15 +651,15 @@ test.describe("Multi-session UX", () => {
         .toBe(true);
     }
 
-    // Navigate to task 1
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const card1 = kanban.taskCardByTitle("Task Switch A");
-    await expect(card1).toBeVisible({ timeout: 10_000 });
-    await card1.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // The Kanban snapshot can lag behind a just-completed session. Open the
+    // known task directly; this test covers sidebar switching, not board refresh.
+    await testPage.goto(`/t/${task1.id}`);
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task1.id}(?:[/?#]|$)`), {
+      timeout: 15_000,
+    });
 
     const session = new SessionPage(testPage);
+    await session.waitForLoad();
 
     // After the AppSidebar overhaul, switching tasks via the sidebar restores
     // each task's dockview env layout. The restored layout can land the chat
@@ -674,7 +683,9 @@ test.describe("Multi-session UX", () => {
     await session.clickTaskInSidebar("Task Switch B");
 
     // Wait for URL to change to task 2's session
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task2.id}(?:[/?#]|$)`), {
+      timeout: 15_000,
+    });
 
     // Verify chat loads for task 2
     await session.showSessionContext();
@@ -686,6 +697,9 @@ test.describe("Multi-session UX", () => {
 
     // Switch back to task 1
     await session.clickTaskInSidebar("Task Switch A");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task1.id}(?:[/?#]|$)`), {
+      timeout: 15_000,
+    });
     await session.showSessionContext();
     await expect(
       session.activeChat().getByText("simple mock response", { exact: false }),

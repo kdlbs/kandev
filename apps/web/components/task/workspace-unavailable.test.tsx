@@ -2,7 +2,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  ownerContext.current = null;
+});
 
 describe("WorkspaceUnavailable", () => {
   it("keeps the raw session error behind a collapsed disclosure", () => {
@@ -139,3 +142,36 @@ it("navigates a dependent failed-session pane to Chat while preserving independe
 const DETAILS_LABEL = "Technical details";
 
 const VIEW_RECOVERY = "View recovery";
+
+it("routes automatic restore failure to the composer without bootstrap metadata", () => {
+  const revealSessionRecovery = vi.fn();
+  ownerContext.current = {
+    taskId: "task-1",
+    automaticRecoveryOwnerSessionId: "session-1",
+    automaticRecovery: {
+      recoveryFailure: { outcome: "recovery_failed", workspaceAttemptId: "restore-2" },
+    },
+    revealSessionRecovery,
+  };
+  const restoration = {
+    taskId: "task-1",
+    sessionId: "session-1",
+    environmentId: "env-1",
+    attemptId: "restore-2",
+    revision: 1,
+    status: "error" as const,
+    details: "Restore failed",
+  };
+  const { rerender } = render(<WorkspaceUnavailable restoration={restoration} onRetry={vi.fn()} />);
+  fireEvent.click(screen.getByRole("link", { name: VIEW_RECOVERY }));
+  expect(revealSessionRecovery).toHaveBeenCalledWith("session-1");
+  expect(screen.queryByTestId(WORKSPACE_RETRY_ID)).toBeNull();
+  rerender(
+    <WorkspaceUnavailable
+      restoration={{ ...restoration, attemptId: "unrelated" }}
+      onRetry={vi.fn()}
+    />,
+  );
+  expect(screen.getByTestId(WORKSPACE_RETRY_ID)).toBeTruthy();
+  ownerContext.current = null;
+});

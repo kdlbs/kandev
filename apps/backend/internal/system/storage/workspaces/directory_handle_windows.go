@@ -21,6 +21,7 @@ type windowsDirectoryHandle struct {
 	parentHandle windows.Handle
 	targetHandle windows.Handle
 	target       string
+	path         string
 	once         sync.Once
 }
 
@@ -45,7 +46,7 @@ func OpenDirectoryNoFollow(root, target string) (DirectoryHandle, error) {
 	}
 	return &windowsDirectoryHandle{
 		rootHandle: rootHandle, parentHandle: parentHandle, targetHandle: targetHandle,
-		target: filepath.Base(filepath.Clean(relative)),
+		target: filepath.Base(filepath.Clean(relative)), path: filepath.Clean(target),
 	}, nil
 }
 
@@ -67,7 +68,7 @@ func CreateDirectoryNoFollow(root, target string, _ os.FileMode) (DirectoryHandl
 	}
 	return &windowsDirectoryHandle{
 		rootHandle: rootHandle, parentHandle: parentHandle, targetHandle: targetHandle,
-		target: filepath.Base(filepath.Clean(relative)),
+		target: filepath.Base(filepath.Clean(relative)), path: filepath.Clean(target),
 	}, nil
 }
 
@@ -285,8 +286,79 @@ func (h *windowsDirectoryHandle) OpenSubdirectory(name string) (DirectoryHandle,
 		return nil, err
 	}
 	return &windowsDirectoryHandle{
-		rootHandle: rootHandle, parentHandle: parentHandle, targetHandle: targetHandle, target: name,
+		rootHandle: rootHandle, parentHandle: parentHandle, targetHandle: targetHandle,
+		target: name, path: filepath.Join(h.path, name),
 	}, nil
+}
+
+func (h *windowsDirectoryHandle) CreateSubdirectory(name string, _ os.FileMode) (DirectoryHandle, error) {
+	if h == nil || h.targetHandle == 0 {
+		return nil, errors.New("directory handle is closed")
+	}
+	if err := validateDirectoryEntryName(name); err != nil {
+		return nil, err
+	}
+	guardHandle, err := openWindowsDependencyHandleWithSharing(
+		h.parentHandle,
+		h.target,
+		windowsDependencyReadAccess,
+		windows.FILE_OPEN,
+		windows.FILE_DIRECTORY_FILE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("pin parent directory against rename: %w", err)
+	}
+	same, err := windowsDependencyHandlesSameFile(h.targetHandle, guardHandle)
+	if err != nil || !same {
+		_ = windows.CloseHandle(guardHandle)
+		if err != nil {
+			return nil, err
+		}
+		return nil, errors.New("parent directory changed before child creation")
+	}
+	createdHandle, err := openWindowsDependencyHandleWithSharing(
+		guardHandle,
+		name,
+		windowsDependencyWriteAccess,
+		windows.FILE_CREATE,
+		windows.FILE_DIRECTORY_FILE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+	)
+	if err != nil {
+		_ = windows.CloseHandle(guardHandle)
+		return nil, err
+	}
+	if reparse, checkErr := windowsDependencyHandleIsReparsePoint(createdHandle); checkErr != nil || reparse {
+		_ = windows.CloseHandle(createdHandle)
+		_ = windows.CloseHandle(guardHandle)
+		if checkErr != nil {
+			return nil, checkErr
+		}
+		return nil, errors.New("created subdirectory is a reparse point")
+	}
+	rootHandle, err := duplicateWindowsDependencyHandle(guardHandle)
+	if err != nil {
+		_ = windows.CloseHandle(createdHandle)
+		_ = windows.CloseHandle(guardHandle)
+		return nil, err
+	}
+	return &windowsDirectoryHandle{
+		rootHandle: rootHandle, parentHandle: guardHandle, targetHandle: createdHandle,
+		target: name, path: filepath.Join(h.path, name),
+	}, nil
+}
+
+// ProcessPath returns the canonical path held against rename by the directory
+// handle's no-delete-sharing open.
+func (h *windowsDirectoryHandle) ProcessPath(inheritedFD int) (string, *os.File, error) {
+	if h == nil || h.targetHandle == 0 || h.path == "" {
+		return "", nil, errors.New("directory handle is closed")
+	}
+	if inheritedFD < 3 {
+		return "", nil, errors.New("inherited directory descriptor must be at least 3")
+	}
+	return h.path, nil, nil
 }
 
 func (h *windowsDirectoryHandle) LstatEntry(name string) (os.FileMode, error) {

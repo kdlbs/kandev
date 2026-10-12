@@ -153,3 +153,14 @@ regression evidence that the path naming no target is unchanged.
 
 Verified with `go test -tags fts5 ./internal/agentctl/server/process/...` and
 `make -C apps/backend lint`.
+
+
+### CI cleanup follow-up (2026-10-07)
+
+The push fixtures now register `WorkspaceTracker.Stop` before the temporary
+checkout cleanup. Push-triggered status enrichment must finish or cancel before
+Go deletes its Git directory. The hosted rejected-non-force push case passed
+its assertions but failed temporary-directory removal. The affected push tests
+passed `GOMAXPROCS=4 go test -trimpath -race -count=10 -timeout=10m
+./internal/agentctl/server/process -run '^TestGitOperatorPush'` from
+`apps/backend`. Hosted verification of the replacement head remains pending.

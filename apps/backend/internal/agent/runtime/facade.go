@@ -107,6 +107,32 @@ func (f *facade) Resume(ctx context.Context, executionID string, prompt string) 
 	return err
 }
 
+func (f *facade) InspectDeliveryRecordEvidence(
+	ctx context.Context,
+	request DeliveryRecordEvidenceRequest,
+) (*DeliveryRecordEvidence, error) {
+	backend, ok := f.backend.(interface {
+		InspectDeliveryRecordEvidence(context.Context, lifecycle.DeliveryRecordEvidenceRequest) (*lifecycle.DeliveryRecordEvidence, error)
+	})
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend.InspectDeliveryRecordEvidence(ctx, request)
+}
+
+func (f *facade) ReadDeliveryRecordSubmission(
+	ctx context.Context,
+	request DeliveryRecordSubmissionRequest,
+) (*DeliveryRecordSubmission, error) {
+	backend, ok := f.backend.(interface {
+		ReadDeliveryRecordSubmission(context.Context, lifecycle.DeliveryRecordSubmissionRequest) (*lifecycle.DeliveryRecordSubmission, error)
+	})
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend.ReadDeliveryRecordSubmission(ctx, request)
+}
+
 // Stop terminates an execution.
 func (f *facade) Stop(ctx context.Context, executionID string, reason string) error {
 	if executionID == "" {
@@ -117,6 +143,21 @@ func (f *facade) Stop(ctx context.Context, executionID string, reason string) er
 		return errors.Join(ErrNotFound, err)
 	}
 	return err
+}
+
+// SuspendIdle delegates to the lifecycle backend's conditional suspension
+// operation without widening the legacy backend contract used by test fakes.
+func (f *facade) SuspendIdle(ctx context.Context, identity IdleSuspensionIdentity) error {
+	if identity.ExecutionID == "" || identity.SessionID == "" {
+		return fmt.Errorf("runtime: idle suspension identity is required")
+	}
+	backend, ok := f.backend.(interface {
+		SuspendIdle(context.Context, lifecycle.IdleSuspensionIdentity) error
+	})
+	if !ok {
+		return ErrUnsupported
+	}
+	return backend.SuspendIdle(ctx, identity)
 }
 
 // GetExecution returns a snapshot view of an execution.

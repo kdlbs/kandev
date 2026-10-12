@@ -1,21 +1,19 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from "react";
 import type React from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { requestFileTree, searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import type { FileTreeNode } from "@/lib/types/backend";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { getFilesPanelExpandedPaths, setFilesPanelExpandedPaths } from "@/lib/local-storage";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
-import { mergeTreeNodes } from "./file-browser-parts";
 import { compareTreeNodes, sortRootChildren } from "./file-tree-utils";
 import { retainExpandedChildren, restoredExpandedPaths } from "./file-browser-restore";
 import { useTreeLoader } from "./file-browser-tree-loader";
 import { useFileTreeState } from "./file-browser-tree-state";
 import type { FileTreeCacheBinding } from "./file-browser-tree-cache";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
-import { isWorkspaceTreePath } from "@/lib/workspace-file-path";
+import { applyFileChanges, invalidateFileChanges, FolderRefreshes } from "./file-browser-refresh";
 
 const debugLoad = createDebugLogger("file-browser:load");
 const debugChanges = createDebugLogger("file-browser:changes");
@@ -45,6 +43,9 @@ type FileBrowserTreeResult = {
   hideLoading: (path: string) => void;
   isLoading: (path: string) => boolean;
   collapseAll: () => void;
+  isCurrentTree: () => boolean;
+  invalidateChanges: (changes: Array<{ path: string }>) => void;
+  refreshChanges: (changes: Array<{ path: string }>) => void;
 };
 
 function useMemoizedFileBrowserTreeResult(result: FileBrowserTreeResult) {
@@ -66,201 +67,16 @@ function useMemoizedFileBrowserTreeResult(result: FileBrowserTreeResult) {
       result.hideLoading,
       result.isLoading,
       result.collapseAll,
+      result.isCurrentTree,
+      result.invalidateChanges,
+      result.refreshChanges,
     ],
   );
 }
 
-/** Hook encapsulating file search state and handlers. */
-export function useFileBrowserSearch(sessionId: string) {
-  const [isSearchActive, setIsSearchActive] = useState(false);
-  const [localSearchQuery, setLocalSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<string[] | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+export { useFileBrowserSearch } from "./file-browser-search";
 
-  useEffect(() => {
-    if (isSearchActive && searchInputRef.current) {
-      searchInputRef.current.focus();
-    }
-  }, [isSearchActive]);
-
-  useEffect(() => {
-    if (!isSearchActive) {
-      setLocalSearchQuery("");
-      setSearchResults(null);
-      setIsSearching(false);
-      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    }
-  }, [isSearchActive]);
-
-  useEffect(() => {
-    return () => {
-      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    };
-  }, []);
-
-  const handleSearchChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value;
-      setLocalSearchQuery(value);
-      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-      if (!value.trim()) {
-        setSearchResults(null);
-        setIsSearching(false);
-        return;
-      }
-      setIsSearching(true);
-      searchTimeoutRef.current = setTimeout(async () => {
-        try {
-          const client = getWebSocketClient();
-          if (!client) return;
-          const response = await searchWorkspaceFiles(client, sessionId, value, 50);
-          setSearchResults(response.files || []);
-        } catch (error) {
-          console.error("Failed to search files:", error);
-          setSearchResults([]);
-        } finally {
-          setIsSearching(false);
-        }
-      }, 300);
-    },
-    [sessionId],
-  );
-
-  const handleCloseSearch = useCallback(() => {
-    setIsSearchActive(false);
-    setLocalSearchQuery("");
-    setSearchResults(null);
-    setIsSearching(false);
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-  }, []);
-
-  return {
-    isSearchActive,
-    setIsSearchActive,
-    localSearchQuery,
-    searchResults,
-    isSearching,
-    searchInputRef,
-    handleSearchChange,
-    handleCloseSearch,
-  };
-}
-
-function nearestExpandedFolder(parentPath: string, expandedPaths: ReadonlySet<string>): string {
-  let candidate = parentPath;
-  while (candidate) {
-    if (expandedPaths.has(candidate)) return candidate;
-    const lastSlash = candidate.lastIndexOf("/");
-    candidate = lastSlash === -1 ? "" : candidate.substring(0, lastSlash);
-  }
-  return "";
-}
-
-function isExpandedPathInRefreshScope(path: string, repositoryName?: string): boolean {
-  if (!isWorkspaceTreePath(path)) return false;
-  return !repositoryName || path === repositoryName || path.startsWith(`${repositoryName}/`);
-}
-
-/** Apply incoming file changes to the tree by refreshing affected folders. */
-export function applyFileChanges(ctx: {
-  client: ReturnType<typeof getWebSocketClient>;
-  sessionId: string;
-  expandedPaths: ReadonlySet<string>;
-  changes: Array<{ path: string; operation?: string; repository_name?: string }>;
-  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
-  setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
-  isCurrent?: () => boolean;
-}) {
-  const {
-    client,
-    sessionId,
-    expandedPaths,
-    changes,
-    setTree,
-    setLoadState,
-    isCurrent = () => true,
-  } = ctx;
-  const foldersToRefresh = new Set<string>();
-  for (const change of changes) {
-    if (change.operation === "refresh") {
-      foldersToRefresh.add("");
-      const repo = change.repository_name;
-      for (const exp of expandedPaths) {
-        if (isExpandedPathInRefreshScope(exp, repo)) {
-          foldersToRefresh.add(exp);
-        }
-      }
-      continue;
-    }
-    const p = change.path;
-    if (!isWorkspaceTreePath(p)) continue;
-    const lastSlash = p.lastIndexOf("/");
-    const parent = lastSlash === -1 ? "" : p.substring(0, lastSlash);
-    foldersToRefresh.add(nearestExpandedFolder(parent, expandedPaths));
-    if (p === "" || expandedPaths.has(p)) foldersToRefresh.add(p);
-  }
-  if (foldersToRefresh.size === 0) {
-    if (isDebug())
-      debugChanges("no-folders-to-refresh", {
-        sessionId,
-        candidates: changes.length,
-        expandedPaths: expandedPaths.size,
-      });
-    return;
-  }
-  if (isDebug())
-    debugChanges("refresh", {
-      sessionId,
-      folders: Array.from(foldersToRefresh).slice(0, 5),
-      total: foldersToRefresh.size,
-    });
-
-  void (async () => {
-    try {
-      const folderUpdates = new Map<string, FileTreeNode[] | undefined>();
-      await Promise.all(
-        Array.from(foldersToRefresh).map(async (folder) => {
-          try {
-            const res = await requestFileTree(client!, sessionId, folder || "", 1);
-            folderUpdates.set(folder, res.root?.children);
-          } catch {
-            /* Folder may have been removed */
-          }
-        }),
-      );
-      if (!isCurrent()) return;
-      setTree((prev) => {
-        if (!prev || !isCurrent()) return prev;
-        let updated = prev;
-        if (folderUpdates.has("")) {
-          const freshRootChildren = folderUpdates.get("");
-          const existingByPath = new Map((updated.children ?? []).map((c) => [c.path, c]));
-          const mergedRootChildren = freshRootChildren?.map((incoming) => {
-            const existing = existingByPath.get(incoming.path);
-            return existing && existing.is_dir && incoming.is_dir
-              ? mergeTreeNodes(existing, incoming)
-              : incoming;
-          });
-          updated = { ...updated, children: mergedRootChildren };
-        }
-        const subFolders = Array.from(folderUpdates.keys()).filter((k) => k !== "");
-        if (subFolders.length === 0) return updated;
-        const patchNode = (node: FileTreeNode): FileTreeNode => {
-          if (node.is_dir && folderUpdates.has(node.path)) {
-            return { ...node, children: folderUpdates.get(node.path)?.map(patchNode) };
-          }
-          return node.children ? { ...node, children: node.children.map(patchNode) } : node;
-        };
-        return { ...updated, children: updated.children?.map(patchNode) };
-      });
-      setLoadState("loaded");
-    } catch (error) {
-      console.error("[FileBrowser] Failed to refresh file tree:", error);
-    }
-  })();
-}
+export { applyFileChanges } from "./file-browser-refresh";
 
 function useLoadingTimers() {
   const loadingTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
@@ -418,10 +234,46 @@ function useFileChangeSubscription({
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
 }) {
-  useEffect(() => {
+  const refreshes = useMemo(() => new FolderRefreshes(), [sessionId, resetKey, cacheBinding]);
+  const ownerRef = useRef(refreshes);
+  ownerRef.current = refreshes;
+  const subscribedRef = useRef(false);
+  const isCurrentTree = useCallback(
+    () =>
+      subscribedRef.current &&
+      ownerRef.current === refreshes &&
+      (!cacheBinding || cacheBinding.isCurrent()),
+    [refreshes, cacheBinding],
+  );
+  const invalidateChanges = useCallback(
+    (changes: Array<{ path: string }>) => {
+      if (!isCurrentTree()) return;
+      invalidateFileChanges({ changes, expandedPaths: expandedPathsRef.current }, refreshes);
+    },
+    [expandedPathsRef, refreshes, isCurrentTree],
+  );
+  const refreshChanges = useCallback(
+    (changes: Array<{ path: string }>) => {
+      const client = getWebSocketClient();
+      if (!client || !isCurrentTree() || changes.length === 0) return;
+      applyFileChanges({
+        client,
+        sessionId,
+        expandedPaths: expandedPathsRef.current,
+        changes,
+        setTree,
+        setLoadState,
+        refreshes,
+        isCurrent: isCurrentTree,
+      });
+    },
+    [sessionId, expandedPathsRef, setTree, setLoadState, refreshes, isCurrentTree],
+  );
+  useEffect(() => refreshes.committed());
+  useLayoutEffect(() => {
     const client = getWebSocketClient();
     if (!client) return;
-    let current = true;
+    subscribedRef.current = true;
     const unsubscribe = client.on("session.workspace.file.changes", (msg) => {
       const changes = msg.payload?.changes;
       if (!changes || changes.length === 0) {
@@ -435,21 +287,15 @@ function useFileChangeSubscription({
           expandedPaths: expandedPathsRef.current.size,
           firstPaths: changes.slice(0, 3).map((c: { path: string }) => c.path),
         });
-      applyFileChanges({
-        client,
-        sessionId,
-        expandedPaths: expandedPathsRef.current,
-        changes,
-        setTree,
-        setLoadState,
-        isCurrent: () => current && (!cacheBinding || cacheBinding.isCurrent()),
-      });
+      refreshChanges(changes);
     });
     return () => {
-      current = false;
+      subscribedRef.current = false;
+      refreshes.retire();
       unsubscribe();
     };
-  }, [sessionId, resetKey, cacheBinding, expandedPathsRef, setTree, setLoadState]);
+  }, [sessionId, expandedPathsRef, refreshes, refreshChanges]);
+  return { refreshChanges, invalidateChanges, isCurrentTree };
 }
 
 function useExpandedFileTree(tree: FileTreeNode | null) {
@@ -538,7 +384,7 @@ export function useFileBrowserTree(
     if (isLoadingTree || hasInitializedExpandedRef.current !== effectiveResetKey) return;
     setFilesPanelExpandedPaths(effectiveResetKey, Array.from(expandedPaths));
   }, [expandedPaths, effectiveResetKey, isLoadingTree]);
-  useFileChangeSubscription({
+  const { refreshChanges, invalidateChanges, isCurrentTree } = useFileChangeSubscription({
     sessionId,
     resetKey: effectiveResetKey,
     cacheBinding,
@@ -562,6 +408,9 @@ export function useFileBrowserTree(
     hideLoading,
     isLoading,
     collapseAll: treeApi.collapseAll,
+    refreshChanges,
+    invalidateChanges,
+    isCurrentTree,
   });
 }
 

@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 const OWNER = "acme";
 
@@ -149,8 +150,29 @@ async function openTaskAndWait(
   await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
+  const primaryPRAccess =
+    (testPage.viewportSize()?.width ?? 1280) < 768
+      ? session.prStatusChip()
+      : session.prTopbarButton();
+  await expect(primaryPRAccess).toBeVisible({ timeout: 15_000 });
   return session;
+}
+
+async function openTwoPRSession(
+  testPage: import("@playwright/test").Page,
+  apiClient: ApiClient,
+  seedData: import("../../fixtures/test-base").SeedData,
+  title: string,
+): Promise<SessionPage> {
+  const seed = await seedTask(
+    apiClient,
+    seedData.workspaceId,
+    seedData.agentProfileId,
+    seedData.repositoryId,
+    title,
+  );
+  await associateTwoPRs(apiClient, seedData.workspaceId, seed.taskId);
+  return openTaskAndWait(testPage, apiClient, seed, title);
 }
 
 async function selectOnlyMissingPRFromAddPanel(
@@ -321,12 +343,37 @@ test.describe("Multi-PR CI popover", () => {
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
 
     await session.hoverPRTopbar();
-    await prCapture.screenshot("desktop-pr-unlink-popover", {
-      caption: "Desktop multi-PR popover with per-tab unlink controls",
-    });
     const removeWeb = session.prMultiPopoverRemove(OWNER, "web", 42);
     await expect(removeWeb).toBeVisible();
+
+    let releaseDelete!: () => void;
+    let notifyDeleteStarted!: () => void;
+    const deleteGate = new Promise<void>((resolve) => {
+      releaseDelete = resolve;
+    });
+    const deleteStarted = new Promise<void>((resolve) => {
+      notifyDeleteStarted = resolve;
+    });
+    await testPage.route("**/api/v1/github/task-prs/*", async (route) => {
+      if (route.request().method() !== "DELETE") return route.continue();
+      notifyDeleteStarted();
+      await deleteGate;
+      await route.continue();
+    });
+    await removeWeb.locator("..").hover();
+    await expect(removeWeb).toHaveCSS("opacity", "1");
+    await waitForFiniteAnimations(testPage.getByTestId("pr-multi-popover"));
+    await prCapture.screenshot("desktop-pr-unlink-popover", {
+      caption: "Desktop multi-PR popover with the unlink control inside the hovered tab",
+    });
     await removeWeb.click();
+    await deleteStarted;
+    await expect(removeWeb).toBeDisabled();
+    await expect(removeWeb.locator("svg")).toHaveClass(/animate-spin/);
+    await session.prMultiPopoverTab(OWNER, "api", 77).hover();
+    await expect(removeWeb).toHaveCSS("opacity", "0.6");
+    await expect(removeWeb).toHaveCSS("pointer-events", "auto");
+    releaseDelete();
 
     // Removing the first association collapses the multi-PR control to the
     // remaining single PR without touching the remote PR itself.
@@ -340,6 +387,59 @@ test.describe("Multi-PR CI popover", () => {
     const reloaded = new SessionPage(testPage);
     await reloaded.waitForLoad();
     await expect(reloaded.prTopbarButton()).toHaveAttribute("data-pr-number", "77");
+  });
+
+  test("keeps the unlink control inside a stable tab outline and reveals it on hover or focus", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Multi Popover Unlink Geometry";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associateTwoPRs(apiClient, seedData.workspaceId, seed.taskId);
+    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    await session.hoverPRTopbar();
+
+    const activeTab = session.prMultiPopoverTab(OWNER, "web", 42);
+    const inactiveTab = session.prMultiPopoverTab(OWNER, "api", 77);
+    await testPage.evaluate(() => document.fonts.ready);
+    await waitForFiniteAnimations(session.prTopbarPopover());
+    for (const tab of [activeTab, inactiveTab]) {
+      const wrapper = tab.locator("..");
+      const remove = wrapper.getByTestId(/^pr-popover-remove-/);
+      await expect(remove).toHaveCSS("opacity", "0");
+      await expect(remove).toHaveCSS("pointer-events", "none");
+      const widthBeforeReveal = (await wrapper.boundingBox())?.width;
+
+      await wrapper.hover();
+      await expect(remove).toHaveCSS("opacity", "1");
+      await expect(remove).toHaveCSS("pointer-events", "auto");
+      const [wrapperBox, removeBox] = await Promise.all([
+        wrapper.boundingBox(),
+        remove.boundingBox(),
+      ]);
+      expect(wrapperBox).not.toBeNull();
+      expect(removeBox).not.toBeNull();
+      expect(Math.abs(wrapperBox!.width - (widthBeforeReveal ?? 0))).toBeLessThan(0.5);
+      expect(removeBox!.x).toBeGreaterThanOrEqual(wrapperBox!.x);
+      expect(removeBox!.y).toBeGreaterThanOrEqual(wrapperBox!.y);
+      expect(removeBox!.x + removeBox!.width).toBeLessThanOrEqual(
+        wrapperBox!.x + wrapperBox!.width,
+      );
+      expect(removeBox!.y + removeBox!.height).toBeLessThanOrEqual(
+        wrapperBox!.y + wrapperBox!.height,
+      );
+    }
+
+    await activeTab.focus();
+    await expect(session.prMultiPopoverRemove(OWNER, "web", 42)).toHaveCSS("opacity", "1");
   });
 
   test("clicking the multi-PR button still opens the dropdown with per-PR rows", async ({
@@ -385,10 +485,11 @@ test.describe("Multi-PR CI popover", () => {
 
     await session.hoverPRTopbar();
     const inactiveChip = session.prMultiPopoverTab(OWNER, "api", 77);
+    const inactiveOutline = inactiveChip.locator("..");
     const inactiveChipIcon = inactiveChip.locator("svg");
     const chipIconColor = await computedStyle(inactiveChipIcon, "color");
     await inactiveChip.hover();
-    await expect.poll(() => computedStyle(inactiveChip, "backgroundColor")).toBe(expectedMuted);
+    await expect.poll(() => computedStyle(inactiveOutline, "backgroundColor")).toBe(expectedMuted);
     expect(await computedStyle(inactiveChipIcon, "color")).toBe(chipIconColor);
 
     await session.prTopbarButton().click();
@@ -436,5 +537,74 @@ test.describe("Multi-PR CI popover", () => {
     await session.addPanelButton().click();
     await expect(testPage.getByTestId(/^add-panel-pr-item-/)).toHaveCount(0);
     await expect(testPage.getByTestId("add-panel-pr-submenu")).toHaveCount(0);
+  });
+});
+
+test.describe("responsive multi-PR unlink controls", () => {
+  test.describe("fine pointer at phone width", () => {
+    test.use({ viewport: { width: 767, height: 900 } });
+
+    test("keeps unlink visible and touch-sized below the desktop breakpoint", async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(120_000);
+      expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+      const session = await openTwoPRSession(
+        testPage,
+        apiClient,
+        seedData,
+        "Fine pointer phone width unlink",
+      );
+      await session.prStatusChip().hover();
+      await expect(session.prTopbarPopoverAggregate()).toBeVisible();
+
+      const remove = session.prMultiPopoverRemove(OWNER, "web", 42);
+      await expect(remove).toHaveCSS("opacity", "1");
+      const [removeBox, tabBox] = await Promise.all([
+        remove.boundingBox(),
+        remove.locator("..").boundingBox(),
+      ]);
+      expect(removeBox).not.toBeNull();
+      expect(tabBox).not.toBeNull();
+      expect(removeBox!.width).toBeGreaterThanOrEqual(44);
+      expect(removeBox!.height).toBeGreaterThanOrEqual(44);
+      expect(removeBox!.x).toBeGreaterThanOrEqual(tabBox!.x);
+      expect(removeBox!.x + removeBox!.width).toBeLessThanOrEqual(tabBox!.x + tabBox!.width);
+    });
+  });
+
+  test.describe("coarse pointer at desktop width", () => {
+    test.use({ hasTouch: true, viewport: { width: 1280, height: 900 } });
+
+    test("keeps unlink visible and touch-sized on a wide coarse-pointer surface", async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(120_000);
+      expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+      const session = await openTwoPRSession(
+        testPage,
+        apiClient,
+        seedData,
+        "Coarse pointer desktop width unlink",
+      );
+      await session.tapPRStatusChip();
+
+      const remove = session.prMultiPopoverRemove(OWNER, "web", 42);
+      await expect(remove).toHaveCSS("opacity", "1");
+      const [removeBox, tabBox] = await Promise.all([
+        remove.boundingBox(),
+        remove.locator("..").boundingBox(),
+      ]);
+      expect(removeBox).not.toBeNull();
+      expect(tabBox).not.toBeNull();
+      expect(removeBox!.width).toBeGreaterThanOrEqual(44);
+      expect(removeBox!.height).toBeGreaterThanOrEqual(44);
+      expect(removeBox!.x).toBeGreaterThanOrEqual(tabBox!.x);
+      expect(removeBox!.x + removeBox!.width).toBeLessThanOrEqual(tabBox!.x + tabBox!.width);
+    });
   });
 });

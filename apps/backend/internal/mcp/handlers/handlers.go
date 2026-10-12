@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -31,6 +32,7 @@ import (
 	"github.com/kandev/kandev/internal/settingscatalog"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
+	taskcontract "github.com/kandev/kandev/internal/task/contract"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/planws"
@@ -316,6 +318,8 @@ type Handlers struct {
 	messageQueue           MessageQueuer
 	promptResolver         PromptReferenceResolver
 	promptReader           PromptReader
+	promptWriter           PromptWriter
+	promptAuthEnabled      func() bool
 	userSettingsProvider   UserSettingsProvider
 	agentProfileVerifier   AgentProfileVerifier
 	settingsRegistry       *settingscatalog.Registry
@@ -370,6 +374,14 @@ type Handlers struct {
 	agentPermissionSvc   AgentPermissionService
 	pendingMoveCanceller PendingMoveCanceller
 	pendingMoveReader    PendingMoveReader
+	taskTransferSvc      TaskTransferService
+	transferAuthorizer   TaskTransferCoordinatorAuthorizer
+
+	// Optional coordinator.propose_task dependency (coordinator MCP surface
+	// only, set via SetCoordinatorService). Without it the action is not
+	// registered and a coordinator principal's propose call 404s via the
+	// guard's nil-service check.
+	coordinatorSvc *coordinator.Service
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -420,6 +432,7 @@ func NewHandlers(
 	}
 	if taskSvc != nil {
 		h.stopTaskGetter = taskSvc.GetTask
+		h.taskTransferSvc = taskSvc
 	}
 	if stopper, ok := sessionLauncher.(TaskStopper); ok {
 		h.taskStopper = stopper
@@ -431,6 +444,12 @@ func NewHandlers(
 		h.pendingMoveReader = reader
 	}
 	return h
+}
+
+// SetTaskTransferCoordinatorAuthorizer wires server-side Office coordinator
+// attestation. Request payloads never supply coordinator identity.
+func (h *Handlers) SetTaskTransferCoordinatorAuthorizer(authorizer TaskTransferCoordinatorAuthorizer) {
+	h.transferAuthorizer = authorizer
 }
 
 // SetClarificationInputPauser wires the orchestrator-owned hard pause used when
@@ -529,6 +548,13 @@ func (h *Handlers) SetCanvasAuthoringService(svc CanvasAuthoringService) {
 	h.canvasAuthoringSvc = svc
 }
 
+// SetCoordinatorService wires coordinator.propose_task and
+// coordinator.get_item. Leave it unset when features.coordinator is
+// disabled so neither action is registered either.
+func (h *Handlers) SetCoordinatorService(svc *coordinator.Service) {
+	h.coordinatorSvc = svc
+}
+
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(dispatcher *ws.Dispatcher) {
 	d := &guardedMCPDispatcher{Dispatcher: dispatcher, handlers: h}
@@ -571,6 +597,14 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
+	if h.coordinatorSvc != nil {
+		d.RegisterFunc(coordinator.ActionProposeTask, h.handleProposeTask)
+		d.RegisterFunc(coordinator.ActionProposeResume, h.proposeKindHandler(coordinator.ProposalKindResume))
+		d.RegisterFunc(coordinator.ActionProposeMessage, h.proposeKindHandler(coordinator.ProposalKindMessage))
+		d.RegisterFunc(coordinator.ActionProposeMove, h.proposeKindHandler(coordinator.ProposalKindMove))
+		d.RegisterFunc(coordinator.ActionGetItem, h.handleGetCoordinatorItem)
+		d.RegisterFunc(coordinator.ActionListActivity, h.handleListCoordinatorActivity)
+	}
 }
 
 func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
@@ -638,6 +672,10 @@ func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
 	if h.promptReader != nil {
 		h.registerPromptHandlers(d)
 	}
+	if h.promptWriter != nil {
+		d.RegisterFunc(ws.ActionMCPCreateSharedPrompt, h.handleCreateSharedPrompt)
+		d.RegisterFunc(ws.ActionMCPUpdateSharedPrompt, h.handleUpdateSharedPrompt)
+	}
 	if h.workflowSvc != nil {
 		h.registerWorkflowHandlers(d)
 	}
@@ -688,6 +726,8 @@ func (h *Handlers) registerAgentHandlers(d *guardedMCPDispatcher) {
 
 func (h *Handlers) registerTaskConfigMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
+	d.RegisterFunc(ws.ActionMCPTransferTask, h.handleTransferTask)
+	d.RegisterFunc(ws.ActionMCPAuditTaskTransferAttempt, h.handleAuditTaskTransferAttempt)
 	d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
 	d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
@@ -779,8 +819,15 @@ func (h *Handlers) handleListWorkflows(ctx context.Context, msg *ws.Message) (*w
 			if err != nil {
 				return nil, err
 			}
+			filter, err := h.coordinatorWatchFilter(ctx)
+			if err != nil {
+				return nil, err
+			}
 			dtos := make([]dto.WorkflowDTO, 0, len(workflows))
 			for _, w := range workflows {
+				if filter != nil && !filter.Contains(w.ID) {
+					continue
+				}
 				dtos = append(dtos, dto.FromWorkflow(w))
 			}
 			return dto.ListWorkflowsResponse{Workflows: dtos, Total: len(dtos)}, nil
@@ -1009,7 +1056,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			SessionID: req.SourceSessionID,
 		})
 	}
-	result, err := h.taskSvc.CreateTask(createCtx, &service.CreateTaskRequest{
+	createReq := &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
 		WorkspaceID:            req.WorkspaceID,
 		WorkflowID:             req.WorkflowID,
@@ -1026,7 +1073,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		StartAgent:             startAgent,
 		ExternalID:             req.ExternalID,
 		WorkspacePolicy:        &workspacePolicy,
-	})
+	}
+	result, err := h.taskSvc.CreateTask(createCtx, createReq)
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
 		code := classifyCreateTaskError(err)
@@ -1058,6 +1106,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			TaskDTO:          dto.FromTask(result.Task),
 			Deduplicated:     true,
 			CreationComplete: result.Outcome == service.CreateTaskOutcomeFoundSettled,
+			ParentResolution: admission.parentResolution.forOutcome(false),
 		})
 	}
 	task := result.Task
@@ -1087,8 +1136,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	// Settlement (create-sequence step 7): after policy attach, before
-	// auto-start dispatch.
-	settled, survivor, settleErr := h.taskSvc.SettleExternalID(ctx, task.ID, task.ExternalID)
+	// auto-start dispatch. The normalized request identity survives a release
+	// during synchronous creation, even when the refreshed task has lost it.
+	settled, survivor, settleErr := h.taskSvc.SettleExternalID(ctx, task.ID, createReq.ExternalID)
 	if settleErr != nil {
 		if errors.Is(settleErr, taskrepo.ErrTaskNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
@@ -1105,6 +1155,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			TaskDTO:          dto.FromTask(survivor),
 			Deduplicated:     false,
 			CreationComplete: true,
+			ParentResolution: admission.parentResolution.forOutcome(true),
 		})
 	}
 
@@ -1133,6 +1184,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		TaskDTO:          response,
 		Deduplicated:     false,
 		CreationComplete: true,
+		ParentResolution: admission.parentResolution.forOutcome(true),
 	})
 }
 
@@ -1142,8 +1194,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 // booleans, not presence-only markers, mirroring the REST create response.
 type mcpCreateTaskResult struct {
 	dto.TaskDTO
-	Deduplicated     bool `json:"deduplicated"`
-	CreationComplete bool `json:"creation_complete"`
+	Deduplicated     bool                           `json:"deduplicated"`
+	CreationComplete bool                           `json:"creation_complete"`
+	ParentResolution *mcpCreateTaskParentResolution `json:"parent_resolution,omitempty"`
 }
 
 func classifyCreateTaskError(err error) string {
@@ -1155,6 +1208,7 @@ func classifyCreateTaskError(err error) string {
 	case errors.Is(err, service.ErrSubtaskDepthExceeded),
 		errors.Is(err, service.ErrInvalidTaskWorkflow),
 		errors.Is(err, service.ErrExternalIDInvalid),
+		errors.Is(err, service.ErrReservedMetadata),
 		// A reference the caller supplied that does not resolve is a
 		// validation failure, not an internal one. Classifying it as
 		// INTERNAL_ERROR discarded err.Error() and left the caller with a
@@ -2637,9 +2691,11 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 // actually move the task, alongside the accepted:true response
 // handleStepComplete always returns. accepted only means the signal was
 // durably recorded — a step whose AutoAdvanceRequiresSignal is false never
-// reads it, so the caller can accept a signal that changes nothing. ok is
-// false (both other return values ignored) when the current step cannot be
-// resolved: the caller must never guess this field into existence.
+// reads it, and a signal-gated step whose on_turn_complete has no move that
+// runs automatically reads it without transitioning, so the caller can accept
+// a signal that changes nothing. ok is false (both other return values
+// ignored) when the current step cannot be resolved: the caller must never
+// guess this field into existence.
 func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowStepID string) (advances bool, note string, ok bool) {
 	if h.workflowCtrl == nil || workflowStepID == "" {
 		return false, "", false
@@ -2648,10 +2704,14 @@ func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowSt
 	if err != nil || resp == nil || resp.Step == nil {
 		return false, "", false
 	}
-	if resp.Step.AutoAdvanceRequiresSignal {
-		return true, "", true
+	if !resp.Step.AutoAdvanceRequiresSignal {
+		return false, "this step does not advance on a completion signal", true
 	}
-	return false, "this step does not advance on a completion signal", true
+	if !resp.Step.AdvancesOnTurnComplete() {
+		return false, "this step has no on_turn_complete move that runs automatically, " +
+			"so the signal will not move the task", true
+	}
+	return true, "", true
 }
 
 func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {
@@ -4787,117 +4847,6 @@ func (h *Handlers) publishQueueStatusEvent(
 	))
 }
 
-// handleAskUserQuestion creates a clarification request and blocks until the user responds.
-// The agent's MCP tool call stays open (same turn) while waiting. If the agent times out,
-// the event-based fallback in the orchestrator handles resuming with a new turn.
-func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		SessionID         string                   `json:"session_id"`
-		TaskID            string                   `json:"task_id"`
-		Questions         []clarification.Question `json:"questions"`
-		Context           string                   `json:"context"`
-		AllowFreeTextOnly bool                     `json:"allow_free_text_only,omitempty"`
-	}
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-	// Single source of truth — same validator the HTTP handler uses, so
-	// duplicate IDs / bad option counts / empty prompts can't slip through
-	// either path.
-	validateQuestions := clarification.NormalizeAndValidateQuestions
-	if req.AllowFreeTextOnly {
-		validateQuestions = clarification.NormalizeAndValidateQuestionsAllowFreeTextOnly
-	}
-	if errMsg := validateQuestions(req.Questions); errMsg != "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
-	}
-
-	// Look up task ID from session if not provided
-	taskID := req.TaskID
-	if taskID == "" {
-		session, err := h.sessionRepo.GetTaskSession(ctx, req.SessionID)
-		if err != nil {
-			h.logger.Warn("failed to look up task for session",
-				zap.String("session_id", req.SessionID),
-				zap.Error(err))
-		} else if session != nil {
-			taskID = session.TaskID
-		}
-	}
-
-	// Create the clarification request
-	clarificationReq := &clarification.Request{
-		SessionID: req.SessionID,
-		TaskID:    taskID,
-		Questions: req.Questions,
-		Context:   req.Context,
-	}
-	pendingID, isNew := h.clarificationSvc.CreateRequest(clarificationReq)
-
-	// Create one chat message per question (triggers WS events to frontend).
-	// If the create fails, the in-store pending entry must be cancelled too —
-	// otherwise the agent's WaitForResponse would block for the full 2-hour
-	// timeout while the user never sees clarification cards.
-	// When dedup fires (isNew=false) the messages already exist, so skip creation.
-	if isNew && h.messageCreator != nil {
-		if _, err := h.messageCreator.CreateClarificationRequestMessages(
-			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
-		); err != nil {
-			h.logger.Error("failed to create clarification request messages",
-				zap.String("pending_id", pendingID),
-				zap.String("session_id", req.SessionID),
-				zap.Error(err))
-			h.clarificationSvc.CancelRequest(pendingID)
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-				"failed to create clarification messages: "+err.Error(), nil)
-		}
-	}
-
-	// Update session and task states to waiting for input
-	h.setSessionWaitingForInput(ctx, taskID, req.SessionID)
-
-	h.logger.Info("clarification request created, waiting for user response",
-		zap.String("pending_id", pendingID),
-		zap.String("session_id", req.SessionID),
-		zap.String("task_id", taskID))
-
-	// WaitForResponse can outlast the agent client's idle watchdog because the
-	// MCP server emits progress while this call is blocked. If the agent
-	// cancels, cleanup and the event fallback resume the interaction on a new
-	// turn.
-	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)
-	if err != nil {
-		if h.inputPauser != nil {
-			if _, pauseErr := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID); pauseErr != nil {
-				h.logger.Warn("failed to pause session after clarification ended without answer",
-					zap.String("pending_id", pendingID),
-					zap.String("session_id", req.SessionID),
-					zap.Error(pauseErr))
-			}
-		}
-		h.logger.Warn("clarification wait ended without response",
-			zap.String("pending_id", pendingID),
-			zap.String("session_id", req.SessionID),
-			zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-			"Clarification request timed out or was cancelled", nil)
-	}
-
-	// User responded — set session back to running
-	h.setSessionRunning(ctx, taskID, req.SessionID)
-
-	h.logger.Info("clarification answered, returning to agent",
-		zap.String("pending_id", pendingID),
-		zap.String("session_id", req.SessionID),
-		zap.Bool("rejected", resp.Rejected))
-
-	// Return response in format expected by agentctl's extractQuestionAnswer
-	return ws.NewResponse(msg.ID, msg.Action, resp)
-}
-
 // setSessionRunning restores the session state to running after a clarification is answered.
 func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID string) {
 	changed, updatedAt, err := h.updateClarificationSessionState(
@@ -5174,16 +5123,26 @@ func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 
-	plan, err := h.planService.GetPlanSnapshot(ctx, req.TaskID)
+	options, err := taskcontract.ParsePlanReadOptions(msg.Payload)
 	if err != nil {
 		return planws.GetError(msg, err)
 	}
-	if plan == nil {
+	result, err := h.planService.GetPlanRead(ctx, req.TaskID, options)
+	if err != nil {
+		return planws.GetError(msg, err)
+	}
+	if result == nil {
 		// Return empty object if no plan exists
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{})
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, planReadPayload(plan))
+	if result.Range != nil {
+		return ws.NewResponse(msg.ID, msg.Action, struct {
+			planReadResponse
+			*service.PlanReadRange
+		}{planReadResponse{TaskPlanDTO: dto.TaskPlanFromModel(result.Plan), Version: result.Plan.WriteVersion}, result.Range})
+	}
+	return ws.NewResponse(msg.ID, msg.Action, planReadPayload(result.Plan))
 }
 
 // handleUpdateTaskPlan updates an existing task plan.

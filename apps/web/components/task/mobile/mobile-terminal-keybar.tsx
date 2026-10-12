@@ -11,21 +11,29 @@ import { refocusXtermTextarea } from "@/lib/terminal/refocus-xterm";
 import { useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
 import { KEYS, KeybarButton, ModifierButton } from "./mobile-terminal-keybar-helpers";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 
 export type MobileTerminalKeybarProps = {
   sessionId: string | null | undefined;
   visible: boolean;
   /** CSS length used as minimum bottom offset when the on-screen keyboard is closed (e.g., to clear the bottom nav). */
   baseBottomOffset?: string;
+  /** Inline host terminals supply their own socket and xterm focus target. */
+  inline?: boolean;
+  onSend?: (data: string) => void;
+  onFocus?: () => void;
 };
 
-/** Height of the bar in px (border-t + py-1.5 + h-8 button). Used by the mobile layout to pad the terminal so content doesn't hide behind the bar. */
-export const KEYBAR_HEIGHT_PX = 48;
+/** Includes 44px touch targets, vertical padding, and the top border. */
+export const KEYBAR_HEIGHT_PX = 58;
 
 export function MobileTerminalKeybar({
   sessionId,
   visible,
   baseBottomOffset,
+  inline = false,
+  onSend,
+  onFocus = refocusXtermTextarea,
 }: MobileTerminalKeybarProps) {
   const { t } = useTranslation();
   const send = useShellKeySender(sessionId);
@@ -37,21 +45,21 @@ export function MobileTerminalKeybar({
 
   const tapSend = useCallback(
     (data: string) => {
-      refocusXtermTextarea();
-      send(data);
+      onFocus();
+      (onSend ?? send)(data);
     },
-    [send],
+    [onFocus, onSend, send],
   );
 
   const onCtrlTap = useCallback(() => {
-    refocusXtermTextarea();
+    onFocus();
     toggleCtrl();
-  }, [toggleCtrl]);
+  }, [onFocus, toggleCtrl]);
 
   const onShiftTap = useCallback(() => {
-    refocusXtermTextarea();
+    onFocus();
     toggleShift();
-  }, [toggleShift]);
+  }, [onFocus, toggleShift]);
 
   if (!visible || !sessionId) return null;
 
@@ -65,8 +73,11 @@ export function MobileTerminalKeybar({
   return (
     <div
       data-testid="mobile-terminal-keybar"
-      className="fixed left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur"
-      style={{ ...position, height: `${KEYBAR_HEIGHT_PX}px` }}
+      className={cn(
+        "z-40 border-t border-border bg-background/95 backdrop-blur",
+        inline ? "shrink-0" : "fixed left-0 right-0",
+      )}
+      style={{ ...(inline ? {} : position), height: `${KEYBAR_HEIGHT_PX}px` }}
     >
       <div className="flex w-full gap-1 overflow-x-auto px-2 py-1.5">
         <ModifierButton

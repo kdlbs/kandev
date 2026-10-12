@@ -26,8 +26,7 @@ import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-
 import { useToast } from "@/components/toast-provider";
 import { isMessageSendError, MessageSendError } from "@/lib/chat/message-send-error";
 import { QueueAdmissionError, QueueFullError } from "@/lib/api/domains/queue-api";
-import type { ReviewComment } from "@/lib/state/slices/comments";
-import type { AgentMessageComment } from "@/lib/state/slices/comments";
+import type { ReviewComment, AgentMessageComment } from "@/lib/state/slices/comments";
 import type { ChatPanelState } from "./use-chat-panel-state";
 import { useComposerProps } from "./use-composer-props";
 import { cn } from "@/lib/utils";
@@ -35,11 +34,7 @@ import { useComposerWorkspace } from "@/hooks/domains/task/use-composer-workspac
 import { t } from "@/lib/i18n";
 import { ChatStatusBar, ComposerCIStatus, resolveStatusRowTaskId } from "./chat-status-bar";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
-import {
-  hasPendingClarification,
-  shouldHideChatInputForLaunchError,
-  shouldRenderStoppedSessionBanner,
-} from "./types";
+import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
 import { toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
 import { toTaskPreviewFeedbackRefs } from "@/lib/preview-feedback-refs";
 import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
@@ -202,16 +197,19 @@ function usePanelMessageHandler(panelState: ChatPanelState) {
   });
 }
 
-function completeChatSubmission(payload: ChatSubmitPayload, panelState: ChatPanelState) {
+function completeChatSubmission(
+  payload: ChatSubmitPayload,
+  panelState: ChatPanelState,
+  submittedContext: { sessionId: string | null; files: ChatPanelState["contextFiles"] },
+) {
   const {
-    resolvedSessionId,
     pendingPRFeedback,
     walkthroughComments,
     messageComments,
     markCommentsSent,
     handleClearPRFeedback,
     handleClearWalkthroughComments,
-    clearEphemeral,
+    consumeSubmittedEphemeral,
     addContextFile,
     planModeEnabled,
   } = panelState;
@@ -219,10 +217,10 @@ function completeChatSubmission(payload: ChatSubmitPayload, panelState: ChatPane
   if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
   if (pendingPRFeedback.length > 0) handleClearPRFeedback();
   if (walkthroughComments.length > 0) handleClearWalkthroughComments();
-  if (!resolvedSessionId) return true;
-  clearEphemeral(resolvedSessionId);
+  if (!submittedContext.sessionId) return true;
+  consumeSubmittedEphemeral(submittedContext.sessionId, submittedContext.files);
   if (planModeEnabled) {
-    addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
+    addContextFile(submittedContext.sessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
   }
   return true;
 }
@@ -233,13 +231,19 @@ async function submitChatPayload({
   onSend,
   storeApi,
   handleSendMessage,
+  transformOutgoing,
 }: {
   payload: ChatSubmitPayload;
   panelState: ChatPanelState;
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
   storeApi: ReturnType<typeof useAppStoreApi>;
   handleSendMessage: (payload: ChatSubmitPayload) => Promise<void | boolean>;
+  transformOutgoing?: (message: string) => string;
 }) {
+  const submittedContext = {
+    sessionId: panelState.resolvedSessionId,
+    files: panelState.contextFiles.filter((file) => file.pinned !== true),
+  };
   const {
     planComments,
     previewFeedback,
@@ -248,8 +252,9 @@ async function submitChatPayload({
     messageComments,
     pendingClarification,
   } = panelState;
+  const message = transformOutgoing ? transformOutgoing(payload.message) : payload.message;
   const finalMessage = buildSubmitMessage({
-    message: payload.message,
+    message,
     reviewComments: payload.reviewComments,
     pendingPRFeedback,
     planComments,
@@ -274,19 +279,29 @@ async function submitChatPayload({
     submissionResult = await handleSendMessage(outbound);
   }
   if (submissionResult === false) return false;
-  return completeChatSubmission(payload, panelState);
+  return completeChatSubmission(payload, panelState, submittedContext);
 }
+
+export type SubmitHandlerOptions = {
+  /** Applied to the composer message once per submit, before
+   *  {@link buildSubmitMessage}, on both the `onSend` and direct send paths.
+   *  Never changes the composer text; if it throws, the existing catch shows
+   *  the send-error toast and nothing is sent. */
+  transformOutgoing?: (message: string) => string;
+};
 
 /** Builds the composer's submit handler, tracking in-flight sends and
  *  routing errors to a toast. */
 export function useSubmitHandler(
   panelState: ChatPanelState,
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult,
+  options: SubmitHandlerOptions = {},
 ) {
   const [isSending, setIsSending] = useState(false);
   const storeApi = useAppStoreApi();
   const { toast } = useToast();
   const { handleSendMessage } = usePanelMessageHandler(panelState);
+  const { transformOutgoing } = options;
 
   const handleSubmit = useCallback(
     // eslint-disable-next-line complexity -- submission owns the shared cleanup and failure-preservation branches.
@@ -310,6 +325,7 @@ export function useSubmitHandler(
           onSend,
           storeApi,
           handleSendMessage,
+          transformOutgoing,
         });
       } catch (error) {
         showMessageSendToast(error, toast);
@@ -326,6 +342,7 @@ export function useSubmitHandler(
       toast,
       panelState,
       panelState.planCommentMigration,
+      transformOutgoing,
     ],
   );
 
@@ -539,7 +556,7 @@ function ComposerStatusNotices({
         show={showAgentStartHint}
         needsRecovery={panelState.needsRecovery}
         executorUnavailable={executorUnavailable}
-        hasPendingClarification={Boolean(panelState.pendingClarification)}
+        hasPendingClarification={panelState.hasPendingClarification}
       />
       <PlanCommentMigrationNotice {...panelState.planCommentMigration} />
     </>
@@ -570,17 +587,11 @@ export function ChatInputArea(props: ChatInputAreaProps) {
   const { resolvedSessionId, taskId, isAgentBusy } = panelState;
   const disclosure = useComposerDisclosureContext();
   useComposerActivity({ required: Boolean(panelState.session?.pending_action) });
-  const statusRowTaskId = resolveStatusRowTaskId(taskId, statusTaskId);
   const composerWorkspace = useComposerWorkspace(resolvedSessionId, taskId);
-  const sessionState = panelState.session?.state ?? null;
   const { planActions, executor, placeholder } = useChatInputDerived(
     panelState,
     chatInputRef,
     placeholderOverride,
-  );
-  const clarificationPending = hasPendingClarification(
-    Boolean(panelState.pendingClarification),
-    panelState.session?.pending_action,
   );
   const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
   const composerProps = useComposerProps({
@@ -604,7 +615,11 @@ export function ChatInputArea(props: ChatInputAreaProps) {
       )}
     >
       {disclosure?.enabled && (
-        <ComposerCIStatus taskId={statusRowTaskId} sessionId={resolvedSessionId} standalone />
+        <ComposerCIStatus
+          taskId={resolveStatusRowTaskId(taskId, statusTaskId)}
+          sessionId={resolvedSessionId}
+          standalone
+        />
       )}
       <ComposerDisclosureRegion className={disclosure?.enabled ? "px-2 pb-2 pt-1" : undefined}>
         <ComposerStatusNotices
@@ -614,17 +629,19 @@ export function ChatInputArea(props: ChatInputAreaProps) {
         />
         <QueueAffordance
           sessionId={resolvedSessionId}
+          detailActive={panelState.detailActive}
           renderStatusBar={(queueChip) => (
             <ChatStatusBar
               todoItems={panelState.todoItems}
-              taskId={statusRowTaskId}
+              taskId={resolveStatusRowTaskId(taskId, statusTaskId)}
               sessionId={resolvedSessionId}
-              sessionState={sessionState}
+              detailActive={panelState.detailActive}
+              sessionState={panelState.session?.state ?? null}
               previewTarget={planActions.proceedPreviewTarget}
               nextStepName={proceedStepName}
               onProceed={proceed}
               isAgentBusy={isAgentBusy}
-              hasPendingClarification={clarificationPending}
+              hasPendingClarification={panelState.hasPendingClarification}
               isMoving={isMoving}
               queueChip={queueChip}
               showScrollToLastPrompt={showScrollToLastPrompt}

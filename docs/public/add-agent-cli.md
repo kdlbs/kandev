@@ -98,6 +98,7 @@ Optional interfaces add specific capabilities:
 | `PassthroughAgent` | Optional direct terminal mode |
 | `NativeBinaryAgent` | Prefer an installed native binary over a package launch |
 | `LoginAgent` | Interactive PTY-backed authentication |
+| `HarnessUpdateAgent` | Optional trusted host self-update command and metadata package, separate from managed npm pinning |
 
 ### Build the runtime command
 
@@ -118,6 +119,19 @@ The native Codex transport is a separate, experimental integration behind `featu
 Declare remote credential methods through `RemoteAuth`, required environment through `RuntimeConfig.RequiredEnv`, and variables that must never reach the child through `StripEnv`. `InstallScript` runs in remote environments; keep it deterministic, pinned where possible, and free of embedded secrets.
 
 Permission settings must map to actual CLI or agentctl behavior. Test supervised, autonomous, and plan-shaped policies when supported. Do not advertise a permission toggle that only changes the UI.
+
+### Declare a harness-owned updater
+
+Only a built-in agent with a trusted CLI self-updater implements
+`HarnessUpdateAgent`. Its `HarnessUpdateSpec` declares a fixed metadata package
+for the stable-release status reference and tokenized update argv. OMP
+declares `@oh-my-pi/pi-coding-agent` and `omp update`; Kandev runs the latter
+directly on the host, then probes `omp acp`. Request input cannot replace the
+package, command, channel, or update version. Do not implement
+`ManagedNPMRuntimeAgent` for such an agent: that interface activates exact
+Kandev-managed npm versions, whereas a self-updater follows its own installed
+package manager and configured channel. This Settings capability does not
+change `BuildCommand`, `Runtime`, or the remote `InstallScript`.
 
 ### Discover models and modes
 

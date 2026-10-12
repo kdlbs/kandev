@@ -1,0 +1,71 @@
+// AC-COORDINATOR-COPILOT-004.3, -004.4: full screen below the mobile breakpoint
+// (docs/plans/workspace-coordinator/task-06-copilot-wired.md).
+import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
+import { linkToCoordinatorNeedsYou } from "../../../lib/coordinator/links";
+
+test.describe("Mobile coordinator copilot", () => {
+  test("opens full screen below the mobile breakpoint and answers a question", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+    await testPage.setViewportSize({ width: 390, height: 667 });
+
+    const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Mobile Copilot Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+
+    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+
+    const coordinatorRead = waitForHttp(testPage, "GET", /\/coordinators\/[^/]+$/);
+    const conversationOpened = waitForHttp(
+      testPage,
+      "POST",
+      /\/coordinators\/[^/]+\/conversation$/,
+    );
+    const launcher = testPage.getByTestId("coordinator-copilot-launcher");
+    await expect(launcher).toBeVisible({ timeout: 10_000 });
+    await launcher.tap();
+    await coordinatorRead;
+    await conversationOpened;
+
+    const popover = testPage.getByTestId("coordinator-copilot-popover");
+    await expect(popover).toBeVisible();
+
+    const box = await popover.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBe(0);
+    expect(box!.width).toBe(390);
+    expect(box!.y).toBe(0);
+    // Covers the viewport down to the status bar, with no backdrop and no
+    // resize handle at this size.
+    expect(box!.y + box!.height).toBeLessThanOrEqual(667);
+    expect(box!.height).toBeGreaterThan(667 - 60);
+    await expect(testPage.getByTestId("coordinator-copilot-popover-backdrop")).toHaveCount(0);
+    await expect(testPage.getByTestId("coordinator-copilot-popover-resize-handle")).toHaveCount(0);
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+
+    const editor = popover.getByTestId("chat-input-editor");
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });
+    await editor.pressSequentially("/e2e:simple-message", { timeout: 15_000 });
+    await expect(editor).toContainText("/e2e:simple-message");
+    // Coarse-pointer devices submit via the inline Send button, not the
+    // desktop Cmd/Ctrl+Enter shortcut (see mobile-clarification.spec.ts).
+    await popover.getByTestId("submit-message-button").tap();
+
+    await expect(
+      popover.getByText("simple mock response for e2e testing", { exact: false }),
+    ).toBeVisible({ timeout: 30_000 });
+
+    // Escape closes the panel only while focus is inside it.
+    await popover.getByRole("button", { name: "Close" }).focus();
+    await testPage.keyboard.press("Escape");
+    await expect(popover).not.toBeVisible();
+  });
+});

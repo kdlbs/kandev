@@ -23,11 +23,13 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 		}
 		return nil, err
 	}
-	profiles, err := c.repo.ListAgentProfiles(ctx, agent.ID)
+	snapshots, err := c.repo.GetAgentProfileOrderSnapshots(ctx, []string{agent.ID})
 	if err != nil {
 		return nil, err
 	}
-	result := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
+	snapshot := snapshots[agent.ID]
+	result := c.toAgentDTO(agent, filterGlobalProfiles(snapshot.Profiles))
+	result.ProfileOrderRevision = snapshot.Revision
 	if err := c.decorateAgentDTO(ctx, &result); err != nil {
 		return nil, err
 	}
@@ -42,13 +44,19 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 	if err != nil {
 		return nil, err
 	}
+	agentIDs := make([]string, 0, len(agents))
+	for _, agent := range agents {
+		agentIDs = append(agentIDs, agent.ID)
+	}
+	snapshots, err := c.repo.GetAgentProfileOrderSnapshots(ctx, agentIDs)
+	if err != nil {
+		return nil, err
+	}
 	payload := make([]dto.AgentDTO, 0, len(agents))
 	for _, agent := range agents {
-		profiles, err := c.repo.ListAgentProfiles(ctx, agent.ID)
-		if err != nil {
-			return nil, err
-		}
-		entry := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
+		snapshot := snapshots[agent.ID]
+		entry := c.toAgentDTO(agent, filterGlobalProfiles(snapshot.Profiles))
+		entry.ProfileOrderRevision = snapshot.Revision
 		if err := c.decorateAgentDTO(ctx, &entry); err != nil {
 			return nil, err
 		}
@@ -121,13 +129,14 @@ type CreateAgentRequest struct {
 }
 
 type CreateAgentProfileRequest struct {
-	Name                 string
-	Model                string
-	FallbackModel        string
-	AutoFallback         bool
-	RequireExactModel    bool
-	CursorMCPAuthEnabled *bool
-	Mode                 string
+	Name                    string
+	Model                   string
+	FallbackModel           string
+	AutoFallback            bool
+	RequireExactModel       bool
+	CursorMCPAuthEnabled    *bool
+	CursorPluginsMCPEnabled *bool
+	Mode                    string
 	// CLIFlags is the explicit list to persist. When nil the list is seeded
 	// from the agent's curated PermissionSettings() catalogue (all disabled
 	// by default) so a fresh profile opens with the agent's suggestions.
@@ -272,18 +281,19 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 			cliFlags = seedCLIFlags(agentConfig)
 		}
 		profile := &models.AgentProfile{
-			AgentID:              agentID,
-			Name:                 profileReq.Name,
-			AgentDisplayName:     displayName,
-			Model:                profileReq.Model,
-			FallbackModel:        strings.TrimSpace(profileReq.FallbackModel),
-			AutoFallback:         profileReq.AutoFallback,
-			RequireExactModel:    profileReq.RequireExactModel,
-			CursorMCPAuthEnabled: cursorMCPAuthEnabled(profileReq.CursorMCPAuthEnabled),
-			Mode:                 profileReq.Mode,
-			CLIFlags:             cliFlags,
-			EnvVars:              envVarsFromDTO(profileReq.EnvVars),
-			CommandPrefix:        strings.TrimSpace(profileReq.CommandPrefix),
+			AgentID:                 agentID,
+			Name:                    profileReq.Name,
+			AgentDisplayName:        displayName,
+			Model:                   profileReq.Model,
+			FallbackModel:           strings.TrimSpace(profileReq.FallbackModel),
+			AutoFallback:            profileReq.AutoFallback,
+			RequireExactModel:       profileReq.RequireExactModel,
+			CursorMCPAuthEnabled:    cursorMCPAuthEnabled(profileReq.CursorMCPAuthEnabled),
+			CursorPluginsMCPEnabled: cursorPluginsMCPEnabled(profileReq.CursorPluginsMCPEnabled),
+			Mode:                    profileReq.Mode,
+			CLIFlags:                cliFlags,
+			EnvVars:                 envVarsFromDTO(profileReq.EnvVars),
+			CommandPrefix:           strings.TrimSpace(profileReq.CommandPrefix),
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 			return nil, err

@@ -2,6 +2,9 @@ import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
+import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
+import type { ApiClient } from "../../helpers/api-client";
 
 const START_AGENT_TEST_ID = "submit-start-agent";
 const WRAPPER_TEST_ID = "submit-start-agent-wrapper";
@@ -9,6 +12,24 @@ const START_ENABLED_TIMEOUT = 30_000;
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
+
+async function withExpandedTaskNavigation(
+  testPage: Page,
+  apiClient: ApiClient,
+  workspaceId: string,
+  action: () => Promise<void>,
+): Promise<void> {
+  const initialLayout = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+    workspaceId
+  ];
+  try {
+    await new KanbanPage(testPage).goto();
+    await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
+    await action();
+  } finally {
+    await restoreSidebarLayout(apiClient, workspaceId, initialLayout);
+  }
+}
 
 async function ensureSeedRepositorySelected(testPage: Page, repositoryId: string) {
   const repoChipWrapper = testPage.getByTestId("repo-chip").first();
@@ -24,82 +45,85 @@ async function ensureSeedRepositorySelected(testPage: Page, repositoryId: string
 }
 
 test.describe("Create task button: disabled-reason tooltip", () => {
-  test("shows 'Add a task title' when title is empty", async ({ testPage }) => {
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+  test("shows 'Add a task title' when title is empty", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await withExpandedTaskNavigation(testPage, apiClient, seedData.workspaceId, async () => {
+      await testPage.getByTestId("create-task-button").first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
 
-    await kanban.createTaskButton.first().click();
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
+      // Leave title empty; fill description so the split button renders (showStartTask)
+      await testPage.getByTestId("task-description-input").fill("some description");
 
-    // Leave title empty; fill description so the split button renders (showStartTask)
-    await testPage.getByTestId("task-description-input").fill("some description");
+      const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+      await expect(startBtn).toBeDisabled();
 
-    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
-    await expect(startBtn).toBeDisabled();
-
-    // Hover the wrapper span (disabled button has pointer-events-none, tooltip
-    // won't fire on the button itself — hover the span that wraps it).
-    await testPage.getByTestId(WRAPPER_TEST_ID).hover();
-    await expect(testPage.getByRole("tooltip")).toContainText("Add a task title", {
-      timeout: 5_000,
+      // Hover the wrapper span (disabled button has pointer-events-none, tooltip
+      // won't fire on the button itself — hover the span that wraps it).
+      await testPage.getByTestId(WRAPPER_TEST_ID).hover();
+      await expect(testPage.getByRole("tooltip")).toContainText("Add a task title", {
+        timeout: 5_000,
+      });
     });
   });
 
   test("tooltip omits any disabled reason once the form is valid", async ({
     testPage,
+    apiClient,
     seedData,
   }) => {
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    await withExpandedTaskNavigation(testPage, apiClient, seedData.workspaceId, async () => {
+      await testPage.getByTestId("create-task-button").first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await ensureSeedRepositorySelected(testPage, seedData.repositoryId);
 
-    await kanban.createTaskButton.first().click();
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
-    await ensureSeedRepositorySelected(testPage, seedData.repositoryId);
+      await testPage.getByTestId("task-title-input").fill("Valid Task");
+      await testPage.getByTestId("task-description-input").fill("doing a thing");
 
-    await testPage.getByTestId("task-title-input").fill("Valid Task");
-    await testPage.getByTestId("task-description-input").fill("doing a thing");
+      const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+      await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
-    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
-    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
-
-    // Hover still shows the keyboard shortcut tooltip, but none of the
-    // disabled-reason strings should appear.
-    await testPage.getByTestId(WRAPPER_TEST_ID).hover();
-    const tooltip = testPage.getByRole("tooltip");
-    await expect(tooltip).toBeVisible({ timeout: 5_000 });
-    await expect(tooltip).not.toContainText("Add a task title");
-    await expect(tooltip).not.toContainText("Select a repository");
-    await expect(tooltip).not.toContainText("Select a branch");
-    await expect(tooltip).not.toContainText("Select an agent");
+      // Hover still shows the keyboard shortcut tooltip, but none of the
+      // disabled-reason strings should appear.
+      await testPage.getByTestId(WRAPPER_TEST_ID).hover();
+      const tooltip = testPage.getByRole("tooltip");
+      await expect(tooltip).toBeVisible({ timeout: 5_000 });
+      await expect(tooltip).not.toContainText("Add a task title");
+      await expect(tooltip).not.toContainText("Select a repository");
+      await expect(tooltip).not.toContainText("Select a branch");
+      await expect(tooltip).not.toContainText("Select an agent");
+    });
   });
 
   test("shows 'Add a task title' after clearing a previously-filled title", async ({
     testPage,
+    apiClient,
     seedData,
   }) => {
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    await withExpandedTaskNavigation(testPage, apiClient, seedData.workspaceId, async () => {
+      await testPage.getByTestId("create-task-button").first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await ensureSeedRepositorySelected(testPage, seedData.repositoryId);
 
-    await kanban.createTaskButton.first().click();
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
-    await ensureSeedRepositorySelected(testPage, seedData.repositoryId);
+      const titleInput = testPage.getByTestId("task-title-input");
+      await titleInput.fill("Temp Title");
+      await testPage.getByTestId("task-description-input").fill("description text");
 
-    const titleInput = testPage.getByTestId("task-title-input");
-    await titleInput.fill("Temp Title");
-    await testPage.getByTestId("task-description-input").fill("description text");
+      const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+      await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
-    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
-    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
+      await titleInput.fill("");
+      await expect(startBtn).toBeDisabled();
 
-    await titleInput.fill("");
-    await expect(startBtn).toBeDisabled();
-
-    await testPage.getByTestId(WRAPPER_TEST_ID).hover();
-    await expect(testPage.getByRole("tooltip")).toContainText("Add a task title", {
-      timeout: 5_000,
+      await testPage.getByTestId(WRAPPER_TEST_ID).hover();
+      await expect(testPage.getByRole("tooltip")).toContainText("Add a task title", {
+        timeout: 5_000,
+      });
     });
   });
 });

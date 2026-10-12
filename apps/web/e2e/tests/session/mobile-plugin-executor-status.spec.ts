@@ -8,8 +8,9 @@ import { SessionPage } from "../../pages/session-page";
 async function expectTouchTarget(locator: Locator, label: string) {
   const box = await locator.boundingBox();
   expect(box, `${label} must have geometry`).not.toBeNull();
-  expect(box!.height, `${label} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
-  expect(box!.width, `${label} must be at least 44px wide`).toBeGreaterThanOrEqual(44);
+  // Fractional device scale factors can report a 44px CSS box a few ten-thousandths short.
+  expect(box!.height + 0.001, `${label} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
+  expect(box!.width + 0.001, `${label} must be at least 44px wide`).toBeGreaterThanOrEqual(44);
 }
 
 test("phone drawer exposes cleanup retry and status with touch-sized actions", async ({

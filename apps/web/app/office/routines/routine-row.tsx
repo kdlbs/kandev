@@ -20,6 +20,7 @@ import Link from "@/components/routing/app-link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { Routine, AgentProfile, RoutineTrigger } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
+import { formatCompactDuration } from "@/lib/i18n/formats";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { CONCURRENCY_POLICY_LABEL_KEYS } from "../lib/label-keys";
@@ -78,10 +79,10 @@ function nextFireText(t: TFunction, triggers: RoutineTrigger[]): string {
   if (cron.length === 0) return "";
   const ms = cron[0] - Date.now();
   if (ms <= 0) return t("office:firesNow");
-  if (ms < 60_000) return "<1m";
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
-  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h`;
-  return `${Math.round(ms / 86_400_000)}d`;
+  if (ms < 60_000) return `<${formatCompactDuration(1, "minute")}`;
+  if (ms < 3_600_000) return formatCompactDuration(Math.round(ms / 60_000), "minute");
+  if (ms < 86_400_000) return formatCompactDuration(Math.round(ms / 3_600_000), "hour");
+  return formatCompactDuration(Math.round(ms / 86_400_000), "day");
 }
 
 export function RoutineRow({

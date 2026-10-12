@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-19
-updated: 2026-09-22
+updated: 2026-09-29
 owners:
   - kandev
 ---
@@ -181,8 +181,8 @@ an optional session name remains best effort after a successful launch.
   an additional launch.
 - A terminal primary or zero-session task can reuse its retained ready
   environment.
-- A preparing or unsafe environment fails before lifecycle preparation and does
-  not silently repair or replace the workspace.
+- A preparing or unsafe environment fails attachment. Separate recovery must
+  establish a valid environment before read-only attachment proceeds.
 - Every current repository/branch slot must have exactly one active canonical
   row before an attach-only launch begins.
 
@@ -190,6 +190,8 @@ an optional session name remains best effort after a successful launch.
 
 - Preventing concurrent agents from editing the same file.
 - A trusted filesystem read-only agent mode.
-- Automatic workspace repair, reset, branch switching, or replacement during
-  session spawn.
+- Workspace repair, reset, branch switching, or replacement inside attach-only
+  preparation. A separate guarded recovery operation can restore an eligible
+  checkout before attachment, as defined in
+  [worktree recovery](worktree-metadata-recovery.md).
 - Reconstructing a missing physical worktree from filesystem guesses.

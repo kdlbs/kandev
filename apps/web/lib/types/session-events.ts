@@ -2,7 +2,11 @@ import type { BackendMessage } from "./backend-message";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type { ForegroundActivity } from "./activity";
-import type { TaskPendingAction, TaskPendingActionRevision } from "./http";
+import type {
+  TaskPendingAction,
+  TaskPendingActionRevision,
+  WorkspaceRecoveryProjection,
+} from "./http";
 import type {
   AgentCapabilitiesPayload,
   SessionInfoPayload,
@@ -63,6 +67,7 @@ export type TaskSessionStateChangedPayload = {
   downstream_acp_session_id?: string;
   metadata?: Record<string, unknown>;
   session_metadata?: Record<string, unknown>;
+  session_recovery_blocks?: import("./http").SessionRecoveryBlockProjection[];
   is_passthrough?: boolean;
   error_message?: string;
   /** User-supplied session tab label; present (possibly "") on rename broadcasts. */
@@ -111,6 +116,14 @@ export type SessionPendingActionChangedPayload = {
   session_id: string;
   pending_action: TaskPendingAction | null;
   pending_action_revision: TaskPendingActionRevision;
+};
+
+export type SessionWorkspaceRecoveryChangedPayload = {
+  task_id: string;
+  environment_id: string;
+  session_id: string;
+  session_ids?: string[];
+  workspace_recovery: WorkspaceRecoveryProjection;
 };
 
 export type TaskSessionNotificationPayload = {
@@ -167,6 +180,7 @@ export type SessionModeChangedPayload = {
   session_id: string;
   agent_id: string;
   current_mode_id: string;
+  session_settings_policy?: "strict" | "provider_restored";
   /**
    * Set only when the session is not in the mode Kandev asked for. Empty means
    * the reported mode is exactly the requested one.
@@ -251,6 +265,13 @@ export type AvailableCommandPayload = {
   name: string;
   description?: string;
   input_hint?: string;
+  kind?: string;
+  action?: {
+    kind: string;
+    config_id: string;
+    value: string;
+    reset_value: string;
+  };
 };
 
 export type SessionBackendMessageMap = {
@@ -271,6 +292,10 @@ export type SessionBackendMessageMap = {
   "session.pending_action_changed": BackendMessage<
     "session.pending_action_changed",
     SessionPendingActionChangedPayload
+  >;
+  "session.workspace_recovery.changed": BackendMessage<
+    "session.workspace_recovery.changed",
+    SessionWorkspaceRecoveryChangedPayload
   >;
   "session.clarification_requested": BackendMessage<
     "session.clarification_requested",

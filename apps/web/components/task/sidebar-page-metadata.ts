@@ -14,15 +14,24 @@ export function applySidebarPageMetadata(
       maps.titleById.set(entry.parent_id, entry.parent_title);
       continue;
     }
-    if (entry.kind !== "task" || !entry.task) continue;
-    if (entry.workflow_name && entry.task.workflow_id) {
-      maps.workflowNameById.set(entry.task.workflow_id, entry.workflow_name);
-    }
-    if (entry.workflow_step_name && entry.task.workflow_step_id) {
-      maps.stepTitleById.set(entry.task.workflow_step_id, entry.workflow_step_name);
-    }
-    if (entry.workflow_step_color && entry.task.workflow_step_id) {
-      maps.stepColorById.set(entry.task.workflow_step_id, entry.workflow_step_color);
-    }
+    if (entry.kind !== "task") continue;
+    applyTaskMetadata(entry, maps);
+  }
+}
+
+function applyTaskMetadata(
+  entry: SidebarTaskPageResponse["entries"][number],
+  maps: Parameters<typeof applySidebarPageMetadata>[1],
+) {
+  const workflowId = entry.workflow_id ?? entry.task?.workflow_id;
+  const stepId = entry.workflow_step_id ?? entry.task?.workflow_step_id;
+  if (entry.workflow_name && workflowId) {
+    maps.workflowNameById.set(workflowId, entry.workflow_name);
+  }
+  if (entry.workflow_step_name && stepId) {
+    maps.stepTitleById.set(stepId, entry.workflow_step_name);
+  }
+  if (entry.workflow_step_color && stepId) {
+    maps.stepColorById.set(stepId, entry.workflow_step_color);
   }
 }

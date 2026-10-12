@@ -120,6 +120,7 @@ test.describe("Improve Kandev dialog", () => {
     await mockImproveKandevApis(testPage, seedData);
     await testPage.goto("/");
 
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
     const introDialog = testPage.getByRole("dialog", { name: "Improve Kandev" });
     const dismissPreference = introDialog.getByTestId("improve-kandev-skip-intro");
@@ -141,6 +142,7 @@ test.describe("Improve Kandev dialog", () => {
       .getByRole("button", { name: "Cancel", exact: true })
       .click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeHidden();
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible({ timeout: 10_000 });
@@ -167,6 +169,7 @@ test.describe("Improve Kandev dialog", () => {
     await apiClient.saveUserSettings({ agent_generated_task_titles: false });
     await mockImproveKandevApis(testPage, seedData, { issueWorkflowId: issueWorkflow.id });
     await testPage.goto("/");
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
     const contribute = testPage.getByTestId("improve-kandev-proceed");
     await expect(contribute).toBeEnabled({ timeout: 10_000 });
@@ -225,14 +228,20 @@ test.describe("Improve Kandev dialog", () => {
     await apiClient.updateWorkspace(staging.id, { name: "Improve Kandev" });
     await apiClient.saveUserSettings({ agent_generated_task_titles: false });
     const dedicated = staging;
+    let releaseBootstrap: () => void = () => {};
+    const bootstrapHold = new Promise<void>((resolve) => {
+      releaseBootstrap = resolve;
+    });
     await mockImproveKandevApis(testPage, seedData, {
       workspaceId: dedicated.id,
       workflowId: dedicatedWorkflow.id,
       issueWorkflowId: dedicatedWorkflow.id,
       repositoryId: dedicatedRepo.id,
+      bootstrapHold,
     });
 
     await testPage.goto("/");
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
     const contribute = testPage.getByTestId("improve-kandev-proceed");
     await expect(contribute).toBeEnabled({ timeout: 10_000 });
@@ -240,14 +249,22 @@ test.describe("Improve Kandev dialog", () => {
 
     const createDialog = testPage.getByTestId("create-task-dialog");
     await expect(createDialog).toBeVisible({ timeout: 10_000 });
+    await expect(
+      createDialog.getByText(/Preparing kandev repository in background/i),
+    ).toBeVisible();
 
     const title = "Isolate improve tasks in their own workspace";
-    await createDialog.getByTestId("task-title-input").fill(title);
-    await createDialog
-      .getByTestId("task-description-input")
-      .fill("Improve Kandev tasks must not mix with regular work.");
+    const titleInput = createDialog.getByTestId("task-title-input");
+    const descriptionInput = createDialog.getByTestId("task-description-input");
+    await titleInput.fill(title);
+    await descriptionInput.fill("Improve Kandev tasks must not mix with regular work.");
+    releaseBootstrap();
     const submit = createDialog.getByTestId("submit-start-agent");
     await expect(submit).toBeEnabled({ timeout: 10_000 });
+    await expect(titleInput).toHaveValue(title);
+    await expect(descriptionInput).toContainText(
+      "Improve Kandev tasks must not mix with regular work.",
+    );
     await submit.click();
     await expect(createDialog).toBeHidden({ timeout: 10_000 });
 
@@ -380,6 +397,7 @@ test.describe("Improve Kandev dialog", () => {
     await testPage.goto("/");
 
     // Post-overhaul: the Improve Kandev opener moved to the AppSidebar footer.
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     // Intro screen
@@ -434,6 +452,7 @@ test.describe("Improve Kandev dialog", () => {
 
     await testPage.goto("/");
     // Post-overhaul: the Improve Kandev opener moved to the AppSidebar footer.
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     const contribute = testPage.getByTestId("improve-kandev-proceed");
@@ -464,6 +483,7 @@ test.describe("Improve Kandev dialog", () => {
 
     await testPage.goto("/");
     // Post-overhaul: the Improve Kandev opener moved to the AppSidebar footer.
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     const contribute = testPage.getByTestId("improve-kandev-proceed");
@@ -498,6 +518,7 @@ test.describe("Improve Kandev dialog", () => {
     });
 
     await testPage.goto("/");
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
     await testPage.getByTestId("improve-kandev-proceed").click();
 
@@ -531,6 +552,7 @@ test.describe("Improve Kandev dialog", () => {
 
     await testPage.goto("/");
     // Post-overhaul: the Improve Kandev opener moved to the AppSidebar footer.
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     const contribute = testPage.getByTestId("improve-kandev-proceed");
@@ -569,6 +591,7 @@ test.describe("Improve Kandev dialog", () => {
 
     await testPage.goto("/");
     // Post-overhaul: the Improve Kandev opener moved to the AppSidebar footer.
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     const contribute = testPage.getByTestId("improve-kandev-proceed");
@@ -631,6 +654,7 @@ test.describe("Improve Kandev dialog", () => {
     await mockImproveKandevApis(testPage, seedData);
     await testPage.goto("/");
 
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
     const introDialog = testPage.getByRole("dialog", { name: "Improve Kandev" });
     const choice = introDialog.getByTestId("improve-kandev-create-workspace");
@@ -660,6 +684,7 @@ test.describe("Improve Kandev dialog", () => {
     );
     await testPage.goto("/");
 
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     // The dedicated workspace does not exist: the choice panel gates the
@@ -700,7 +725,7 @@ test.describe("Improve Kandev dialog", () => {
     await testPage.goto(`/settings/workspaces/${dedicated.id}/repositories`);
 
     await expect(testPage.getByText(/cannot be changed/i)).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByRole("button", { name: /Add Local Repository/i })).toHaveCount(0);
+    await expect(testPage.getByRole("button", { name: /Add repository/i })).toHaveCount(0);
   });
 
   // The gate must ask "is there any GitHub credential at all", not "is every
@@ -726,6 +751,7 @@ test.describe("Improve Kandev dialog", () => {
     });
 
     await testPage.goto("/");
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     await expect(testPage.getByRole("dialog", { name: "Improve Kandev" })).toBeVisible();
@@ -757,6 +783,7 @@ test.describe("Improve Kandev dialog", () => {
     });
 
     await testPage.goto("/");
+    await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     const dialog = testPage.getByRole("dialog", { name: "Improve Kandev" });

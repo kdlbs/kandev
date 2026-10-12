@@ -164,6 +164,7 @@ function buildGroupSectionProps(
   const { group, rowProps, pinnedSet, collapsedSet, showHeader, getNestHierarchyTasks } = options;
   return {
     group,
+    grouping: grouped.groupKey,
     subTasksByParentId: grouped.subTasksByParentId,
     getNestHierarchyTasks,
     rowProps,
@@ -173,6 +174,7 @@ function buildGroupSectionProps(
     collapsedSubtaskParentIds: props.collapsedSubtaskParentIds,
     onToggleSubtasks: props.onToggleSubtasks,
     showHeader,
+    groupIndent: props.groupIndent,
     onReorderGroup: props.onReorderGroup,
     onReorderSubtasks: props.onReorderSubtasks,
     onNestTask: props.onNestTask,
@@ -191,8 +193,7 @@ function LoadErrorNotice({
   if (!error) return null;
   return (
     <div
-      role="status"
-      aria-live="polite"
+      role="alert"
       className="flex items-center gap-2 px-3 py-2 text-xs text-destructive"
       data-testid="sidebar-task-load-error"
     >

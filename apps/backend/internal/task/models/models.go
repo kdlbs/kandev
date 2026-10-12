@@ -59,6 +59,13 @@ const (
 	createdAtField                = "created_at"
 )
 
+const (
+	ExecutorIdleSuspensionNone         = ""
+	ExecutorIdleSuspensionInProgress   = "suspending"
+	ExecutorIdleSuspensionAgentStopped = "agent_stopped"
+	ExecutorIdleSuspensionSuspended    = "suspended"
+)
+
 // ListMessagesOptions defines pagination options for listing messages
 type ListMessagesOptions struct {
 	Limit      int
@@ -72,6 +79,23 @@ type ListMessagesOptions struct {
 	AuthorTypes []string
 	TaskID      string
 	Around      string
+}
+
+// MessageTurnCoverage identifies the message rows whose turn context was read
+// from the same database snapshot, plus the active turn observed by that read.
+type MessageTurnCoverage struct {
+	MessageIDs   []string
+	ActiveTurnID string
+}
+
+// MessageTurnWindow is a bounded transcript page and the turn rows needed to
+// render it. Turns are limited to distinct message turn IDs plus the active
+// turn, regardless of how much older turn history exists.
+type MessageTurnWindow struct {
+	Messages []*Message
+	Turns    []*Turn
+	HasMore  bool
+	Coverage *MessageTurnCoverage
 }
 
 // SearchMessagesOptions defines options for searching a session's messages.
@@ -127,6 +151,10 @@ const (
 	MetaKeyAutomationTaskMode       = "automation_task_mode"
 	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
 	MetaKeyDeferredLaunch           = "deferred_launch"
+	// MetaKeyCoordinatorID records the coordinator that owns a conversation
+	// task, set at creation and read by the startup cleanup pass that
+	// archives/deletes conversation tasks whose coordinator no longer exists.
+	MetaKeyCoordinatorID = "coordinator_id"
 	// MetaKeyWorkflowInitialSession is a write-once task-local snapshot of
 	// the first session identity used by workflow session targeting.
 	MetaKeyWorkflowInitialSession = "workflow_initial_session"
@@ -550,6 +578,10 @@ const (
 	// latest successful agent boot. Recovery cards compare this timestamp with
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
+	// SessionMetaKeyRecoveryResolutions stores bounded success records tied to
+	// the exact failure stamp each owned resume resolved.
+	SessionMetaKeyRecoveryResolutions = "recovery_resolutions"
+	maxSessionRecoveryResolutions     = 16
 	// SessionMetaKeyInterruptedRecoveryPending is a durable token written by
 	// session reconciliation when execution loss returns a conversation to
 	// WAITING_FOR_INPUT. It distinguishes an interrupted waiting session from
@@ -580,6 +612,72 @@ type InterruptedRecoverySettlement struct {
 	ExpectedExecutorID               string    `json:"expected_executor_id,omitempty"`
 	ExpectedExecutorAgentExecutionID string    `json:"expected_executor_agent_execution_id,omitempty"`
 	ExpectedExecutorUpdatedAt        time.Time `json:"expected_executor_updated_at,omitempty"`
+}
+
+// SessionRecoveryResolution is durable proof that one owned resume attempt
+// successfully re-established the conversation after a specific failure.
+type SessionRecoveryResolution struct {
+	ErrorStamp string    `json:"error_stamp"`
+	AttemptID  string    `json:"attempt_id"`
+	ResolvedAt time.Time `json:"resolved_at"`
+}
+
+// NormalizeSessionRecoveryResolutions bounds and deduplicates exact recovery
+// proofs before they are persisted or read by the frontend.
+func NormalizeSessionRecoveryResolutions(items []SessionRecoveryResolution) []SessionRecoveryResolution {
+	result := make([]SessionRecoveryResolution, 0, min(len(items), maxSessionRecoveryResolutions))
+	positions := make(map[string]int, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item.ErrorStamp) != item.ErrorStamp || strings.TrimSpace(item.AttemptID) != item.AttemptID {
+			continue
+		}
+		if item.ErrorStamp == "" || len(item.ErrorStamp) > maxLaunchErrorStampBytes ||
+			!validRecoveryAttemptID(item.AttemptID) || item.ResolvedAt.IsZero() ||
+			strings.IndexFunc(item.ErrorStamp, func(char rune) bool { return char < 0x20 || char == 0x7f }) >= 0 {
+			continue
+		}
+		if index, exists := positions[item.ErrorStamp]; exists {
+			result[index] = item
+			continue
+		}
+		positions[item.ErrorStamp] = len(result)
+		result = append(result, item)
+	}
+	if len(result) > maxSessionRecoveryResolutions {
+		result = result[len(result)-maxSessionRecoveryResolutions:]
+	}
+	return result
+}
+
+// LoadSessionRecoveryResolutions decodes the bounded stamp-specific success
+// records from task-session metadata.
+func LoadSessionRecoveryResolutions(metadata map[string]interface{}) []SessionRecoveryResolution {
+	if metadata == nil || metadata[SessionMetaKeyRecoveryResolutions] == nil {
+		return nil
+	}
+	payload, err := json.Marshal(metadata[SessionMetaKeyRecoveryResolutions])
+	if err != nil {
+		return nil
+	}
+	var items []SessionRecoveryResolution
+	if err := json.Unmarshal(payload, &items); err != nil {
+		return nil
+	}
+	return NormalizeSessionRecoveryResolutions(items)
+}
+
+func validRecoveryAttemptID(value string) bool {
+	if !strings.HasPrefix(value, "resume-") || len(value) > 27 {
+		return false
+	}
+	sequence := strings.TrimPrefix(value, "resume-")
+	if sequence == "" || (len(sequence) > 1 && sequence[0] == '0') {
+		return false
+	}
+	if _, err := strconv.ParseUint(sequence, 10, 64); err != nil {
+		return false
+	}
+	return true
 }
 
 // HasInterruptedRecoveryPending reports whether metadata carries a valid
@@ -1024,21 +1122,25 @@ const SessionMetaKeyLastAgentError = "last_agent_error"
 // RemediationURL is only ever set from an adapter-validated provider
 // diagnostic; it is never reconstructed from the error message.
 type LastAgentError struct {
-	Message          string            `json:"message"`
-	OccurredAt       time.Time         `json:"occurred_at"`
-	Scope            string            `json:"scope,omitempty"`
-	AgentExecutionID string            `json:"agent_execution_id,omitempty"`
-	ExecutionID      string            `json:"execution_id,omitempty"`
-	Phase            string            `json:"phase,omitempty"`
-	AttemptID        string            `json:"attempt_id,omitempty"`
-	Causes           []AgentErrorCause `json:"causes,omitempty"`
-	RemediationURL   string            `json:"remediation_url,omitempty"`
-	Code             string            `json:"code,omitempty"`
-	Details          string            `json:"details,omitempty"`
-	RecoveryActions  []string          `json:"recovery_actions,omitempty"`
-	TaskRepositoryID string            `json:"task_repository_id,omitempty"`
-	StampValue       string            `json:"stamp,omitempty"`
-	DismissedAt      *time.Time        `json:"dismissed_at,omitempty"`
+	Message              string            `json:"message"`
+	OccurredAt           time.Time         `json:"occurred_at"`
+	Scope                string            `json:"scope,omitempty"`
+	AgentExecutionID     string            `json:"agent_execution_id,omitempty"`
+	ExecutionID          string            `json:"execution_id,omitempty"`
+	Phase                string            `json:"phase,omitempty"`
+	AttemptID            string            `json:"attempt_id,omitempty"`
+	Causes               []AgentErrorCause `json:"causes,omitempty"`
+	RemediationURL       string            `json:"remediation_url,omitempty"`
+	Code                 string            `json:"code,omitempty"`
+	Details              string            `json:"details,omitempty"`
+	DeliverySubmissionID string            `json:"delivery_submission_id,omitempty"`
+	StartupReason        string            `json:"startup_reason,omitempty"`
+	StartupAttempts      int               `json:"startup_attempts,omitempty"`
+	StartupNPMCode       string            `json:"startup_npm_code,omitempty"`
+	RecoveryActions      []string          `json:"recovery_actions,omitempty"`
+	TaskRepositoryID     string            `json:"task_repository_id,omitempty"`
+	StampValue           string            `json:"stamp,omitempty"`
+	DismissedAt          *time.Time        `json:"dismissed_at,omitempty"`
 }
 
 func LoadLastAgentError(metadata map[string]interface{}) (LastAgentError, bool) {
@@ -1069,7 +1171,9 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 	// Optional bootstrap fields are deliberately decoded independently. A
 	// malformed optional field must not hide a valid legacy session error.
 	optional := map[string]json.RawMessage{}
-	for _, key := range []string{"execution_id", "phase", "attempt_id", "causes"} {
+	for _, key := range []string{
+		"execution_id", "phase", "attempt_id", "causes", "startup_reason", "startup_attempts", "startup_npm_code",
+	} {
 		if value, ok := fields[key]; ok {
 			optional[key] = value
 			delete(fields, key)
@@ -1101,12 +1205,70 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 		}
 	}
 	if value, ok := optional["causes"]; ok {
-		var causes []AgentErrorCause
-		if json.Unmarshal(value, &causes) == nil {
-			out.Causes = causes
+		out.Causes = decodeAgentErrorCauses(value)
+	}
+	if value, ok := optional["startup_reason"]; ok {
+		var reason string
+		if json.Unmarshal(value, &reason) == nil {
+			out.StartupReason = reason
+		}
+	}
+	if value, ok := optional["startup_attempts"]; ok {
+		var attempts int
+		if json.Unmarshal(value, &attempts) == nil && attempts >= 0 {
+			out.StartupAttempts = attempts
+		}
+	}
+	if value, ok := optional["startup_npm_code"]; ok {
+		var npmCode string
+		if json.Unmarshal(value, &npmCode) == nil {
+			out.StartupNPMCode = npmCode
 		}
 	}
 	return nil
+}
+
+func decodeAgentErrorCauses(raw json.RawMessage) []AgentErrorCause {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil
+	}
+	causes := make([]AgentErrorCause, 0, min(len(items), maxAgentErrorCauses))
+	for _, item := range items {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(item, &fields); err != nil {
+			continue
+		}
+		var cause AgentErrorCause
+		if json.Unmarshal(fields["operation"], &cause.Operation) != nil ||
+			json.Unmarshal(fields["code"], &cause.Code) != nil {
+			continue
+		}
+		decodeOptionalErrorCauseString(fields, "detail", &cause.Detail)
+		decodeOptionalErrorCauseString(fields, "reason", &cause.Reason)
+		decodeOptionalErrorCauseString(fields, "requested_model", &cause.RequestedModel)
+		decodeOptionalErrorCauseString(fields, "effective_model", &cause.EffectiveModel)
+		decodeOptionalErrorCauseString(fields, "attempted_model", &cause.AttemptedModel)
+		decodeOptionalErrorCauseString(fields, "requested_mode", &cause.RequestedMode)
+		decodeOptionalErrorCauseString(fields, "effective_mode", &cause.EffectiveMode)
+		if value, ok := fields["prompt_not_sent"]; ok {
+			var promptNotSent bool
+			if json.Unmarshal(value, &promptNotSent) == nil {
+				cause.PromptNotSent = &promptNotSent
+			}
+		}
+		causes = append(causes, cause)
+	}
+	return causes
+}
+
+func decodeOptionalErrorCauseString(fields map[string]json.RawMessage, key string, target *string) {
+	if value, ok := fields[key]; ok {
+		var decoded string
+		if json.Unmarshal(value, &decoded) == nil {
+			*target = decoded
+		}
+	}
 }
 
 func (e LastAgentError) Stamp() string {
@@ -1320,7 +1482,16 @@ const (
 	// TaskOriginAutomationTask is a normal, user-visible task created by an
 	// automation. Unlike automation_run, it remains in Kanban/sidebar flows.
 	TaskOriginAutomationTask = "automation_task"
+	// TaskOriginCoordinator marks a coordinator's conversation task, created
+	// on popover open and archived/deleted alongside the coordinator.
+	TaskOriginCoordinator = "coordinator"
 )
+
+// IsAutomationTaskOrigin reports whether origin identifies work whose turn
+// lifecycle is owned by the automation coordinator.
+func IsAutomationTaskOrigin(origin string) bool {
+	return origin == TaskOriginAutomationRun || origin == TaskOriginAutomationTask
+}
 
 // Task represents a task in the database
 type Task struct {
@@ -1697,6 +1868,8 @@ type Workspace struct {
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled    bool      `json:"acp_idle_suspension_enabled"`
+	ACPIdleTimeoutMinutes       int       `json:"acp_idle_timeout_minutes"`
 	CreatedAt                   time.Time `json:"created_at"`
 	UpdatedAt                   time.Time `json:"updated_at"`
 
@@ -1765,6 +1938,11 @@ type WorkspaceSource struct {
 
 // MessageAuthorType represents who authored a message
 type MessageAuthorType string
+
+const (
+	MessageMetaKeyDeliveryStatus = "delivery_status"
+	MessageDeliveryStatusBlocked = "blocked"
+)
 
 const (
 	// MessageAuthorUser indicates a message from a human user
@@ -2226,6 +2404,21 @@ type TaskSession struct {
 	TokensOut      int64 `json:"tokens_out"`
 }
 
+// WorkspaceRecoveryErrorObservation is the session and environment identity
+// captured before selected-workspace inspection. Repository writers compare
+// every field in the same transaction that records the recovery error.
+type WorkspaceRecoveryErrorObservation struct {
+	TaskID                 string
+	SessionID              string
+	TaskEnvironmentID      string
+	EnvironmentOwnerTaskID string
+	OwnershipGeneration    int64
+	SelectionSnapshot      WorkspaceRecoverySelectionSnapshot
+	SessionState           TaskSessionState
+	AgentExecutionID       string
+	ExpectedErrorStamp     string
+}
+
 // ActiveSessionCancellationCandidate is the compare-and-set snapshot used by
 // the active-session stall healer. An empty ExpectedTurnID means that no turn
 // may be active when the cancellation is written.
@@ -2655,24 +2848,29 @@ type Executor struct {
 
 // ExecutorRunning tracks an active executor instance for a session.
 type ExecutorRunning struct {
-	ID                 string               `json:"id"`
-	SessionID          string               `json:"session_id"`
-	TaskID             string               `json:"task_id"`
-	ExecutionProfileID string               `json:"execution_profile_id"`
-	ExecutorID         string               `json:"executor_id"`
-	Runtime            agentruntime.Runtime `json:"runtime,omitempty"`
-	Status             string               `json:"status"`
-	Resumable          bool                 `json:"resumable"`
-	ResumeToken        string               `json:"resume_token,omitempty"`
-	LastMessageUUID    string               `json:"last_message_uuid,omitempty"`
-	AgentExecutionID   string               `json:"agent_execution_id,omitempty"`
+	ID                            string               `json:"id"`
+	SessionID                     string               `json:"session_id"`
+	TaskID                        string               `json:"task_id"`
+	ExecutionProfileID            string               `json:"execution_profile_id"`
+	ExecutorID                    string               `json:"executor_id"`
+	Runtime                       agentruntime.Runtime `json:"runtime,omitempty"`
+	Status                        string               `json:"status"`
+	IdleSuspensionState           string               `json:"-" db:"idle_suspension_state"`
+	IdleSuspensionPolicyUpdatedAt time.Time            `json:"-" db:"idle_suspension_policy_updated_at"`
+	Resumable                     bool                 `json:"resumable"`
+	ResumeToken                   string               `json:"resume_token,omitempty"`
+	LastMessageUUID               string               `json:"last_message_uuid,omitempty"`
+	AgentExecutionID              string               `json:"agent_execution_id,omitempty"`
 	// TransientAuthToken carries a decrypted agentctl token only between the
 	// lifecycle recovery inventory read and the matching remote runtime. It is
 	// excluded from JSON and database persistence.
 	TransientAuthToken string `json:"-" db:"-"`
-	ContainerID        string `json:"container_id,omitempty"`
-	AgentctlURL        string `json:"agentctl_url,omitempty"`
-	AgentctlPort       int    `json:"agentctl_port,omitempty"`
+	// TransientBootstrapNonce is a decrypted, one-time reconnect credential
+	// passed only to a remote runtime's authenticated control-client refresh.
+	TransientBootstrapNonce string `json:"-" db:"-"`
+	ContainerID             string `json:"container_id,omitempty"`
+	AgentctlURL             string `json:"agentctl_url,omitempty"`
+	AgentctlPort            int    `json:"agentctl_port,omitempty"`
 	// PID is SSH-only: the agentctl PID on the *remote* host, used by the SSH
 	// executor's remote-pid stop path. It is 0 for local/standalone rows.
 	PID int `json:"pid,omitempty"`
@@ -2866,6 +3064,56 @@ type TaskEnvironmentRecoveryClaim struct {
 	ExecutorType        string    `json:"executor_type"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+// TaskEnvironmentRecoveryOperation is the latest path-free managed recovery
+// projection for one environment. Runner identity and selected repository
+// inventory stay internal and are never sent to clients.
+type TaskEnvironmentRecoveryOperation struct {
+	TaskEnvironmentID     string     `json:"task_environment_id" db:"task_environment_id"`
+	OwnerTaskID           string     `json:"owner_task_id" db:"owner_task_id"`
+	OwnershipGeneration   int64      `json:"ownership_generation" db:"ownership_generation"`
+	SessionID             string     `json:"session_id" db:"session_id"`
+	OperationID           string     `json:"operation_id" db:"operation_id"`
+	AttemptID             string     `json:"attempt_id" db:"attempt_id"`
+	ErrorStamp            string     `json:"-" db:"error_stamp"`
+	Kind                  string     `json:"kind" db:"kind"`
+	Revision              int64      `json:"revision" db:"revision"`
+	RunnerInstanceID      string     `json:"-" db:"runner_instance_id"`
+	State                 string     `json:"state" db:"state"`
+	Phase                 string     `json:"phase" db:"phase"`
+	RepositoryID          string     `json:"repository_id,omitempty" db:"repository_id"`
+	RepositoryPosition    int        `json:"repository_position" db:"repository_position"`
+	RepositoryTotal       int        `json:"repository_total" db:"repository_total"`
+	CompletedSlots        int        `json:"completed_slots" db:"completed_slots"`
+	WorkspaceComplete     bool       `json:"workspace_complete" db:"workspace_complete"`
+	AgentReady            bool       `json:"agent_ready" db:"agent_ready"`
+	StartedAt             time.Time  `json:"started_at" db:"started_at"`
+	UpdatedAt             time.Time  `json:"updated_at" db:"updated_at"`
+	EndedAt               *time.Time `json:"ended_at,omitempty" db:"ended_at"`
+	ReasonCode            string     `json:"reason_code,omitempty" db:"reason_code"`
+	SelectedRepositoryIDs []string   `json:"-" db:"-"`
+}
+
+// TaskEnvironmentRecoveryOperationUpdate is a revision-fenced full projection
+// update for the current operation attempt.
+type TaskEnvironmentRecoveryOperationUpdate struct {
+	TaskEnvironmentID   string
+	OperationID         string
+	AttemptID           string
+	OwnershipGeneration int64
+	RunnerInstanceID    string
+	ExpectedRevision    int64
+	State               string
+	Phase               string
+	RepositoryID        string
+	RepositoryPosition  int
+	RepositoryTotal     int
+	CompletedSlots      int
+	WorkspaceComplete   bool
+	AgentReady          bool
+	EndedAt             *time.Time
+	ReasonCode          string
 }
 
 // ToAPI converts internal TaskEnvironment to API map.

@@ -125,6 +125,7 @@ export function persistQuickChatSelection(
     ...order,
     ...Object.keys(selections).filter((workspaceId) => !order.includes(workspaceId)),
   ].filter((workspaceId, index, all) => all.indexOf(workspaceId) === index);
+  const persistedAt = Date.now();
   const entries: StoredSelectionEntry[] = orderedWorkspaceIds
     .filter((workspaceId) => selections[workspaceId])
     .slice(0, MAX_WORKSPACES)
@@ -134,7 +135,7 @@ export function persistQuickChatSelection(
         workspaceId,
         ...(selection.chat ? { chat: selection.chat } : {}),
         ...(selection.config ? { config: selection.config } : {}),
-        lastSelectedAt: Date.now() - index,
+        lastSelectedAt: persistedAt - index,
       };
     });
 

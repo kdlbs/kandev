@@ -3,7 +3,9 @@ import { expectTouchControl } from "../../helpers/control-sizing";
 
 // @covers AC-UI-MOBILE-MENU-006.1 AC-UI-MOBILE-MENU-006.2
 for (const route of ["/", "/tasks", "/threads"]) {
-  test(`Home owns ${route} and Tasks keeps an independent create action`, async ({ testPage }) => {
+  test(`Home owns ${route} and New Task remains independent of the Tasks disclosure`, async ({
+    testPage,
+  }) => {
     await testPage.goto(route);
     await testPage.getByTestId("app-nav-trigger").tap();
     const menu = testPage.getByTestId("app-nav-sheet");
@@ -16,7 +18,7 @@ for (const route of ["/", "/tasks", "/threads"]) {
     const toggle = menu.getByTestId("mobile-navigation-tasks-toggle");
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await menu.getByRole("button", { name: "New task", exact: true }).tap();
+    await menu.getByTestId("mobile-new-task-button").tap();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
   });
 }
@@ -125,6 +127,9 @@ for (const surface of ["home", "workbench"]) {
       });
       expect(home.y + home.height).toBeLessThanOrEqual(quickChat.y);
       expect(quickChat.y).toBeCloseTo(quickTerminal.y);
+      const utilities = menu.getByRole("group", { name: "Utilities", exact: true });
+      await expect(utilities.getByRole("button")).toHaveCount(2);
+      expect(Math.abs(quickChat.width - quickTerminal.width)).toBeLessThan(1);
       expect(quickChat.x + quickChat.width).toBeLessThanOrEqual(quickTerminal.x);
       expect(quickChat.y + quickChat.height).toBeLessThanOrEqual(heading.y);
       for (const box of [quickChat, quickTerminal]) {
@@ -178,6 +183,7 @@ test("translated quick actions fit their phone targets", async ({ testPage }) =>
     for (const id of ["mobile-quick-chat-button", "mobile-quick-terminal-button"]) {
       const button = testPage.getByTestId(id);
       await expect(button).toBeVisible();
+      await expect(button).toHaveAttribute("data-variant", "ghost");
       expect(
         await button.evaluate(
           (el) => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight,

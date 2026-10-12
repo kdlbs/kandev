@@ -1,6 +1,6 @@
 "use client";
 
-import { IconAlertTriangleFilled, IconGitPullRequest } from "@tabler/icons-react";
+import { IconAlertTriangleFilled, IconGitPullRequest, IconLockFilled } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 
 export function AutomationIndicatorDots({
@@ -33,12 +33,14 @@ export function AutomationIndicatorDots({
 export function PRStatusGlyph({
   colorClassName,
   hasMergeConflicts = false,
+  hasWorkflowApprovalRequired = false,
   autoFixEnabled = false,
   autoMergeEnabled = false,
   size = "task",
 }: {
   colorClassName?: string;
   hasMergeConflicts?: boolean;
+  hasWorkflowApprovalRequired?: boolean;
   autoFixEnabled?: boolean;
   autoMergeEnabled?: boolean;
   size?: "task" | "topbar";
@@ -62,6 +64,14 @@ export function PRStatusGlyph({
           className="absolute -right-1 -top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-background text-red-500"
         >
           <IconAlertTriangleFilled className="h-2 w-2" />
+        </span>
+      )}
+      {!hasMergeConflicts && hasWorkflowApprovalRequired && (
+        <span
+          data-testid="pr-workflow-approval-warning"
+          className="absolute -right-1 -top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-background text-[#D97706] dark:text-[#FBBF24]"
+        >
+          <IconLockFilled className="h-2 w-2" />
         </span>
       )}
     </span>

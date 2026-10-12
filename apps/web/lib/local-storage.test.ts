@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupTaskStorage,
   clearGlobalSidebarWidth,
-  getGlobalSidebarWidth,
+  getEnvLayout,
   getEnvLayoutProfile,
+  getGlobalSidebarWidth,
   getManualRightWidth,
   getOpenFileTabs,
   getStoredAutoScrollEnabled,
@@ -14,6 +15,7 @@ import {
   markPRPanelOffered,
   restoreAttachmentPreview,
   removeEnvLayoutProfile,
+  setEnvLayout,
   setGlobalSidebarWidth,
   setEnvLayoutProfile,
   setManualRightWidth,
@@ -196,6 +198,27 @@ describe("manual right width storage", () => {
 
     expect(getManualRightWidth("env-a")).toBeNull();
     expect(getManualRightWidth("env-b")).toBe(420);
+  });
+});
+
+describe("dockview environment layout storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("reports whether an environment layout write reached session storage", () => {
+    const layout = { panels: {} };
+    expect(setEnvLayout("env-a", layout)).toBe(true);
+    expect(getEnvLayout("env-a")).toEqual(layout);
+
+    const setItem = vi.spyOn(window.sessionStorage, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    try {
+      expect(setEnvLayout("env-b", layout)).toBe(false);
+    } finally {
+      setItem.mockRestore();
+    }
   });
 });
 

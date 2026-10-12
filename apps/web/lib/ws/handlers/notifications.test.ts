@@ -99,11 +99,29 @@ describe("notification handler registration", () => {
       registerNotificationsHandlers(store) as Record<string, (message: unknown) => void>
     )[NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE]!;
     const payload = {
-      version: "v1.2.3",
-      url: "https://example.test/releases/v1.2.3",
-      title: "Kandev update available",
-      body: "Kandev v1.2.3 is available.",
-      occurrence_id: "v1.2.3",
+      notification_kind: "agent_runtime_summary",
+      runtime_updates: [
+        {
+          occurrence_id: "codex-3",
+          agent_name: "codex-app-server",
+          runtime_id: "npm:@openai/codex",
+          display_name: "Codex",
+          previous_version: "1.0.0",
+          version: "3.0.0",
+        },
+        {
+          occurrence_id: "gemini-2",
+          agent_name: "gemini",
+          runtime_id: "npm:@google/gemini-cli",
+          display_name: "Gemini",
+          previous_version: "1.0.0",
+          version: "2.0.0",
+        },
+      ],
+      url: "/settings/agents#runtime-updates",
+      title: "2 agent runtime updates available",
+      body: "Review runtime versions in Settings > Agents.",
+      occurrence_id: "summary-gemini-codex",
     };
 
     handler({ payload });

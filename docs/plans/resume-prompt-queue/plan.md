@@ -147,3 +147,10 @@ Task 01 verification on 2026-09-09:
 - A silent admission no-op can clear an unsaved draft.
 - Browser-only delays can conceal a backend readiness race in E2E.
 - Queue admission must preserve initial-prompt order during normal startup.
+
+## Follow-up repair
+
+The [session resume transition package](../session-resume-turn-start-race/plan.md)
+extends the same requirement/design pair with concurrent turn-start coverage.
+It preserves this package's completed status and recorded results.
+Its work orders own the new regression matrix and verification evidence.

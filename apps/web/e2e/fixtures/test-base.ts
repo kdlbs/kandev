@@ -3,10 +3,13 @@ import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { backendFixture, type BackendContext } from "./backend";
+import { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
+export { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
 import { ApiClient } from "../helpers/api-client";
 import { dwell } from "../helpers/causal-waits";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
+import { restoreSidebarLayout } from "../helpers/sidebar-layout";
 import type { WorkflowStep } from "../../lib/types/http";
 
 const DEFAULT_SIDEBAR_VIEW = {
@@ -360,13 +363,24 @@ export const test = backendFixture.extend<
       // previous tests in this worker. Keep the seeded workflow and the seed
       // agent profile so the worker-scoped seedData fixture remains valid.
       await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+      // Refresh tracking refs after reset has stopped the previous tasks.
+      restoreSeedRepositoryOrigin(seedData);
       await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
       await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
+      await restoreSidebarLayout(apiClient, seedData.workspaceId, undefined);
 
+      const { settings } = await apiClient.getUserSettings();
       await apiClient.saveUserSettings({
+        // Each test owns its sidebar layout, including collapsed navigation.
+        sidebar_layout_state: {
+          workspace_id: seedData.workspaceId,
+          expected_revision:
+            settings.sidebar_layouts_by_workspace?.[seedData.workspaceId]?.revision ?? 0,
+        },
         workspace_id: seedData.workspaceId,
         workflow_filter_id: seedData.workflowId,
         keyboard_shortcuts: {},
+        message_time_display: "relative",
         enable_preview_on_click: false,
         confirm_task_archive: true,
         agent_generated_task_titles: false,
@@ -509,38 +523,17 @@ export const test = backendFixture.extend<
       // GitLab reset removes origin from the shared seed checkout. Restore the
       // fixture's offline origin before the test so pull-enabled worktree
       // preparation starts from the same valid repository state every time.
-      restoreSeedRepositoryOrigin(seedData);
+      restoreSeedRepositoryOrigin(seedData, { refreshTrackingRefs: false });
       try {
         await use();
       } finally {
         await apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined);
-        restoreSeedRepositoryOrigin(seedData);
+        restoreSeedRepositoryOrigin(seedData, { refreshTrackingRefs: false });
       }
     },
     { auto: true },
   ],
 });
-
-/**
- * Restores the fixture's offline origin after a GitLab E2E cleanup removes it.
- * Refresh the remote-tracking refs because branch recovery must offer remote
- * branches, not only the local branch that remains checked out.
- */
-export function restoreSeedRepositoryOrigin(seedData: SeedData) {
-  const baseArgs = ["-C", seedData.repositoryPath, "remote"];
-  try {
-    execFileSync("git", [...baseArgs, "set-url", "origin", seedData.repositoryRemoteURL], {
-      stdio: "ignore",
-    });
-  } catch {
-    execFileSync("git", [...baseArgs, "add", "origin", seedData.repositoryRemoteURL], {
-      stdio: "ignore",
-    });
-  }
-  execFileSync("git", ["-C", seedData.repositoryPath, "fetch", "--no-tags", "origin"], {
-    stdio: "ignore",
-  });
-}
 
 /** Restores the shared seed checkout to the immutable fixture baseline. */
 export function resetSeedRepositoryCheckout(seedData: SeedData, tmpDir: string) {
@@ -628,6 +621,7 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
+      message_time_display: "relative",
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
       confirm_task_archive: true,

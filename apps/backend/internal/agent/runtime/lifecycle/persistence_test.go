@@ -2,7 +2,10 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -288,6 +291,45 @@ func (w *executionCASStatusWriter) UpdateExecutorRunningStatusIfCurrent(
 	w.executionID = executionID
 	w.status = status
 	return w.statusErr
+}
+
+func TestPersistExecutorRunningDoesNotRestoreRevokedPassthroughMCPClaim(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".pi", "mcp.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	content := []byte(`{"mcpServers":{"kandev":{"url":"http://localhost:43210/mcp"}}}`)
+	require.NoError(t, os.WriteFile(path, content, 0o600))
+
+	prior := &models.ExecutorRunning{
+		AgentExecutionID: "exec-old",
+		SessionID:        "session-1",
+		Metadata: map[string]interface{}{
+			metadataKeyPassthroughMCPClaims: []interface{}{
+				map[string]interface{}{
+					"path":        path,
+					"fingerprint": passthroughMCPFingerprint(content),
+					"owned":       true,
+				},
+			},
+		},
+	}
+	writer := &captureExecutorRunningWriter{prior: prior}
+	manager := newTestManager(t)
+	manager.SetExecutorRunningWriter(writer)
+	require.NoError(t, manager.persistExecutorRunningResult(context.Background(), &AgentExecution{
+		ID: "exec-current", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusRunning,
+	}))
+	require.NotNil(t, writer.running)
+
+	encoded, err := json.Marshal(writer.running.Metadata)
+	require.NoError(t, err)
+	var recoveredMetadata map[string]interface{}
+	require.NoError(t, json.Unmarshal(encoded, &recoveredMetadata))
+	recovered := &AgentExecution{ID: "exec-current", SessionID: "session-1", metadata: recoveredMetadata}
+	newTestManager(t).cleanupPassthroughMCPConfig(recovered)
+
+	_, err = os.Stat(path)
+	require.NoError(t, err, "recovery must not restore a revoked claim and delete the user file")
 }
 
 func TestBuildRunningFromExecutionPersistsSSHRuntimePID(t *testing.T) {

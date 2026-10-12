@@ -254,6 +254,19 @@ func (a *testMessageCreatorAdapter) CreateSessionMessageIdempotent(ctx context.C
 	return err
 }
 
+func (a *testMessageCreatorAdapter) CreateLifecycleSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}) error {
+	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		CompletedTurn: true,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+	})
+	return err
+}
+
 func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
 	metadata := map[string]interface{}{
 		"request_id":     requestID,

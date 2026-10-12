@@ -244,6 +244,7 @@ Inspect the rendered phone surface against the preview; record discrepancies or 
 - [x] [Task 08: Expose retention, expiry and cleanup outcomes](task-08-retention-status.md)
 - [x] [Task 09: Prove packaged provider behavior and document the API](task-09-provider-conformance.md)
 - [x] [Task 10: Close review findings for provider lifecycle and contract validation](task-10-review-remediations.md)
+- [ ] [Task 11: Close the gaps that stop a plugin session end to end](task-11-end-to-end-session-gaps.md)
 
 ## Verification results
 

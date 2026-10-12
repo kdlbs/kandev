@@ -3,22 +3,32 @@ package websocket
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	gorillaws "github.com/gorilla/websocket"
+	"github.com/jmoiron/sqlx"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
+	terminalservice "github.com/kandev/kandev/internal/terminal/service"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestStripTerminalResponses(t *testing.T) {
@@ -102,6 +112,142 @@ func TestStripTerminalResponses(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStartUserShellProcessExecutesPersistedTerminalCommand(t *testing.T) {
+	log := testTerminalLogger(t)
+	manager := lifecycle.NewManager(nil, bus.NewMemoryEventBus(log), nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), log)
+	execution := &lifecycle.AgentExecution{
+		ID: "exec-auth", TaskID: "task-auth", SessionID: "session-auth",
+		TaskEnvironmentID: "env-auth", WorkspacePath: t.TempDir(),
+	}
+	if err := manager.ExecutionStoreForTesting().Add(execution); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetExecutionEnv(context.Background(), execution.ID, map[string]string{"PATH": os.Getenv("PATH")}); err != nil {
+		t.Fatal(err)
+	}
+
+	rawDB, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "terminals.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawDB.SetMaxOpenConns(1)
+	db := sqlx.NewDb(rawDB, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	repo, err := terminalrepo.NewWithDB(db, db, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := process.NewInteractiveRunner(nil, log, 2*1024*1024)
+	terminals := terminalservice.New(repo, terminalservice.NewInteractiveRunnerBackend(runner), log)
+	marker := filepath.Join(t.TempDir(), "login-command-ran")
+	command := "printf x >> " + shellQuoteForTerminalTest(marker) + "; exit"
+	terminal, err := terminals.CreateWithOneShotInitialCommand(context.Background(), execution.TaskID, execution.TaskEnvironmentID, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	label := "Sign in to MCP"
+	if err := terminals.Rename(context.Background(), execution.TaskID, terminal.ID, &label); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewTerminalHandler(manager, nil, nil, log)
+	handler.SetTerminalService(terminals)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/terminal/environment/env-auth?terminalId="+terminal.ID+"&label=untrusted", nil)
+	processID, status, message := handler.startUserShellProcess(c, execution, execution.TaskEnvironmentID, terminal.ID, runner)
+	if message != "" || status != 0 || processID == "" {
+		t.Fatalf("startUserShellProcess() = (%q, %d, %q)", processID, status, message)
+	}
+	if err := runner.ResizeUserShell(execution.TaskEnvironmentID, terminal.ID, 80, 24); err != nil {
+		t.Fatalf("start initial PTY: %v", err)
+	}
+	waitForTerminalMarker(t, marker, "x")
+	waitForTerminalProcessExit(t, runner, processID)
+
+	// The terminal WebSocket reconnects after the login process exits. It gets
+	// an explicit normal close reason rather than a blank shell that would look
+	// live to Authenticate and suppress the next login attempt.
+	terminalRouter := gin.New()
+	terminalRouter.GET("/terminal", func(c *gin.Context) {
+		handler.handleUserShellWS(c, execution, execution.TaskEnvironmentID, terminal.ID, runner)
+	})
+	terminalServer := httptest.NewServer(terminalRouter)
+	t.Cleanup(terminalServer.Close)
+	wsURL := "ws" + strings.TrimPrefix(terminalServer.URL, "http") + "/terminal?terminalId=" + terminal.ID
+	wsConn, _, err := gorillaws.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("reconnect WebSocket: %v", err)
+	}
+	_, _, err = wsConn.ReadMessage()
+	_ = wsConn.Close()
+	var closeErr *gorillaws.CloseError
+	if !errors.As(err, &closeErr) || closeErr.Code != gorillaws.CloseNormalClosure || closeErr.Text != "initial_command_completed" {
+		t.Fatalf("reconnect close = %#v, error %v", closeErr, err)
+	}
+	if got := readTerminalMarker(t, marker); got != "x" {
+		t.Fatalf("automatic reconnect replayed one-shot login: marker = %q, want x", got)
+	}
+
+	// A later explicit Authenticate creates a new terminal and may run a fresh
+	// one-shot login command.
+	nextTerminal, err := terminals.CreateWithOneShotInitialCommand(context.Background(), execution.TaskID, execution.TaskEnvironmentID, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := terminals.Rename(context.Background(), execution.TaskID, nextTerminal.ID, &label); err != nil {
+		t.Fatal(err)
+	}
+	nextRecorder := httptest.NewRecorder()
+	nextContext, _ := gin.CreateTestContext(nextRecorder)
+	nextContext.Request = httptest.NewRequest(http.MethodGet, "/terminal/environment/env-auth?terminalId="+nextTerminal.ID, nil)
+	nextProcessID, status, message := handler.startUserShellProcess(nextContext, execution, execution.TaskEnvironmentID, nextTerminal.ID, runner)
+	if message != "" || status != 0 || nextProcessID == "" {
+		t.Fatalf("explicit next startUserShellProcess() = (%q, %d, %q)", nextProcessID, status, message)
+	}
+	if err := runner.ResizeUserShell(execution.TaskEnvironmentID, nextTerminal.ID, 80, 24); err != nil {
+		t.Fatalf("start explicit next PTY: %v", err)
+	}
+	waitForTerminalMarker(t, marker, "xx")
+	waitForTerminalProcessExit(t, runner, nextProcessID)
+}
+
+func waitForTerminalMarker(t *testing.T, marker, want string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := readTerminalMarker(t, marker); got == want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("terminal command marker = %q, want %q", readTerminalMarker(t, marker), want)
+}
+
+func readTerminalMarker(t *testing.T, marker string) string {
+	t.Helper()
+	data, err := os.ReadFile(marker)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read marker: %v", err)
+	}
+	return string(data)
+}
+
+func waitForTerminalProcessExit(t *testing.T, runner *process.InteractiveRunner, processID string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !runner.IsProcessRunning(processID) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("terminal process %s did not exit", processID)
+}
+
+func shellQuoteForTerminalTest(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 func TestParseTerminalRoute(t *testing.T) {

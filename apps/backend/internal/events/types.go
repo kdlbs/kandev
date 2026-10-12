@@ -1,6 +1,9 @@
 // Package events provides event types and utilities for the Kandev event system.
 package events
 
+// PromptsChanged invalidates instance-wide saved prompt caches without carrying content.
+const PromptsChanged = "prompts.changed"
+
 // Event types for tasks
 const (
 	TaskCreated       = "task.created"
@@ -46,6 +49,13 @@ const (
 	CanvasRestored                  = "canvas.restored"
 	CanvasRemoved                   = "canvas.removed"
 )
+
+// CoordinatorUpdated fires after a proposal write (insert, claim, reclaim,
+// complete, fail or reject) or a stall upsert, never plain coordinator CRUD.
+// Payload: {workspace_id, coordinator_id, open_proposals}
+// (docs/specs/coordinator/system-design/proposals.md#events, Build decision
+// 13). Publishing sites land with tasks 03, 04 and 07.
+const CoordinatorUpdated = "coordinator.updated"
 
 // Event types for office task tree controls.
 const (
@@ -100,6 +110,9 @@ const (
 	// pending-action projection for one session. It contains no transcript
 	// content and lets inactive session selectors stay current.
 	SessionPendingActionChanged = "session.pending_action_changed"
+	// SessionWorkspaceRecoveryChanged carries the path-free recovery projection
+	// to every subscribed conversation bound to the same task environment.
+	SessionWorkspaceRecoveryChanged = "session.workspace_recovery.changed"
 	// TaskSessionActivityChanged fires when a session's fine-grained activity
 	// flips — a RUNNING foreground turn moving between actively generating and
 	// idle-on-background-work, or detached background work starting/finishing
@@ -256,8 +269,9 @@ const (
 const (
 	AgentStarted           = "agent.started"
 	AgentRunning           = "agent.running"
-	AgentBootReady         = "agent.boot_ready" // Agent's ACP session initialized, ready to receive its first prompt. Distinct from AgentReady so the orchestrator can tell a boot signal apart from a turn-end without flag-based disambiguation.
-	AgentReady             = "agent.ready"      // Agent finished a prompt turn, ready for follow-up
+	AgentBootReady         = "agent.boot_ready"  // Agent's ACP session initialized, ready to receive its first prompt. Distinct from AgentReady so the orchestrator can tell a boot signal apart from a turn-end without flag-based disambiguation.
+	AgentReady             = "agent.ready"       // Agent finished a prompt turn, ready for follow-up
+	AgentTurnFailed        = "agent.turn_failed" // Prompt failed while the execution remains usable
 	AgentCompleted         = "agent.completed"
 	AgentFailed            = "agent.failed"
 	AgentStalled           = "agent.stalled"

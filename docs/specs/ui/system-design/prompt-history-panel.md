@@ -1,5 +1,5 @@
 ---
-status: draft
+status: superseded
 system: ui
 requirements:
   - REQ-UI-PROMPT-HISTORY-PANEL-001
@@ -9,6 +9,12 @@ owners:
 ---
 
 # Prompt History Panel System Design
+
+> Superseded on 2026-09-23 by
+> [Prompt History Extraction System Design](../../plugins/system-design/prompt-history-extraction.md),
+> which removes the built-in panel and records what core keeps for the
+> replacement plugin. This document preserves the technical source detail of
+> the removed implementation.
 
 ## Purpose and boundaries
 
@@ -135,6 +141,8 @@ None.
 
 ## Related plugin prerequisites
 
-The current core implementation remains authoritative. The typed browser Host
-boundary required before an external plugin can replace it is defined by
-[Prompt History Plugin Host Prerequisites](../../plugins/system-design/prompt-history-extraction-host.md).
+The removed core implementation is preserved here for reference. The typed
+browser Host boundary the replacement plugin uses is defined by
+[Prompt History Plugin Host Prerequisites](../../plugins/system-design/prompt-history-extraction-host.md),
+and the removal itself is owned by
+[Prompt History Extraction System Design](../../plugins/system-design/prompt-history-extraction.md).

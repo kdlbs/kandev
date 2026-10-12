@@ -6,6 +6,8 @@ import {
   removeQuickChatSession,
   removeQuickChatSessionsForTask,
   upsertQuickChatSession,
+  replaceConfigChatSession,
+  applyConfigChatRestartSnapshot,
 } from "./quick-chat-sync";
 import { getQuickChatSetupSessionId } from "./quick-chat-session";
 import type { QuickChatSession, QuickChatState, QuickTerminalTab } from "./types";
@@ -44,6 +46,7 @@ function state(sessions: QuickChatSession[], overrides: Partial<QuickChatState> 
     lastSettledAtBySession: {},
     sessionOwnership: {},
     syncRevisionByWorkspace: {},
+    configChatRestarts: {},
     tombstonedSessions: {},
     tabOrderByWorkspace: {},
     tabOrderSyncErrorByWorkspace: {},
@@ -60,6 +63,49 @@ function state(sessions: QuickChatSession[], overrides: Partial<QuickChatState> 
 
 beforeEach(() => {
   mockStoredNames.value = {};
+});
+
+describe("configuration chat replacement", () => {
+  it("clears the old prompt, deduplicates a hydrated replacement and ignores late old deletion", () => {
+    const old = chat("old", { kind: "config", taskId: "old-task", initialPrompt: "old prompt" });
+    const replacement = chat("new", { kind: "config", taskId: "new-task" });
+    const before = state([old, replacement, chat("ordinary")], { activeSessionId: "old" });
+    const after = replaceConfigChatSession(before, WS, "old", replacement);
+    expect(after.sessions).toEqual([replacement, chat("ordinary")]);
+    expect(after.activeSessionId).toBe("new");
+    expect(removeQuickChatSessionsForTask(after, "old-task").sessions).toEqual(after.sessions);
+  });
+
+  it("preserves a closed modal and another workspace's active conversation", () => {
+    const other = chat("other", { workspaceId: OTHER_WS });
+    const before = state([chat("old", { kind: "config" }), other], {
+      isOpen: false,
+      activeSessionId: "other",
+    });
+    const after = replaceConfigChatSession(before, WS, "old", chat("new", { kind: "config" }));
+    expect(after.isOpen).toBe(false);
+    expect(after.activeSessionId).toBe("other");
+    expect(after.sessions).toContainEqual(other);
+  });
+
+  it("projects remote retirement but does not settle a local request from an earlier snapshot", () => {
+    const before = state([]);
+    const pending = applyConfigChatRestartSnapshot(before, WS, true, "old");
+    expect(pending.configChatRestarts[WS]).toMatchObject({
+      sessionId: "old",
+      status: "restarting",
+      source: "server",
+    });
+    expect(
+      applyConfigChatRestartSnapshot(pending, WS, false).configChatRestarts[WS],
+    ).toBeUndefined();
+    const local = state([], {
+      configChatRestarts: { [WS]: { sessionId: "old", source: "local", status: "restarting" } },
+    });
+    expect(applyConfigChatRestartSnapshot(local, WS, false).configChatRestarts[WS]).toEqual(
+      local.configChatRestarts[WS],
+    );
+  });
 });
 
 describe("reconcileQuickChatSessions", () => {
@@ -186,6 +232,24 @@ describe("reconcileQuickTerminalTabs", () => {
     expect(after.activeTerminalTabId).toBe(restored.tabId);
     expect(after.lastTerminalTabIdByWorkspace[WS]).toBe(restored.tabId);
     expect(after.lastTerminalTabIdByWorkspace[OTHER_WS]).toBe(foreign.tabId);
+  });
+
+  it("keeps an in-flight local start when resync observes its unbound descriptor", () => {
+    const pending = terminal("pending", { sessionId: null, status: "connecting" });
+    const before = state([], { terminalTabs: [pending] });
+    const unavailable = terminal("pending", {
+      sessionId: null,
+      status: "exited",
+      error: "terminal session unavailable",
+    });
+
+    expect(reconcileQuickTerminalTabs(before, WS, [unavailable]).terminalTabs).toEqual([pending]);
+    // A bound session, or a descriptor restored without a local start, remains authoritative.
+    const running = terminal("pending");
+    expect(reconcileQuickTerminalTabs(before, WS, [running]).terminalTabs).toEqual([running]);
+    expect(reconcileQuickTerminalTabs(state([]), WS, [unavailable]).terminalTabs).toEqual([
+      unavailable,
+    ]);
   });
 
   it("uses a conversation or closes when the active workspace has no terminal left", () => {

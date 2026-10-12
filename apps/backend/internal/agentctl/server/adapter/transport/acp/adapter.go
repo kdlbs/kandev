@@ -279,15 +279,22 @@ type Adapter struct {
 	// modeObserved closes on each mode report so a waiter can settle.
 	modeObserved chan struct{}
 	// A timed-out set_mode can report after the next request starts. ACP mode
-	// reports have no request ID, so that next request cannot claim the report.
+	// reports have no request ID, so an uncorrelated report cannot resolve an
+	// earlier uncertain result, even if it arrives while the adapter is idle.
 	modeOutcomeUncertain bool
-	modeChangeActive     bool
 
 	// Available config options from the most recent session creation/load.
 	// Used by emitSetModelEvent to include cached options in the convergence
 	// event emitted after SetModel succeeds so the frontend doesn't lose
 	// the options list when the model is changed.
 	availableConfigOptions []streams.ConfigOption
+
+	// sessionSettingsPolicy is host-selected provenance for unsolicited
+	// settings reports from the currently loaded session. Explicit setter
+	// outcomes are emitted separately without this marker.
+	sessionSettingsPolicy streams.SessionSettingsPolicy
+	// sessionSettingsGeneration is monotonic for this adapter across session transitions.
+	sessionSettingsGeneration uint64
 
 	dialect acpDialect
 
@@ -353,22 +360,31 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn           context.CancelCauseFunc
-	rpcDone           chan struct{}
-	abortCh           chan struct{}
-	handoffCh         chan struct{}
-	providerErrorCh   chan openCodeStderrDiagnostic
-	promptGeneration  uint64
-	evidenceMu        sync.Mutex
-	codexSystemError  bool
-	codexCapacity     bool
-	codexUsageLimit   *streams.ProviderError
-	cursorRetriable   bool
-	cursorRetriableAt time.Time
-	allowHandoff      bool
-	handedOff         bool
-	gateOwned         bool
-	finishing         bool
+	endTurn                     context.CancelCauseFunc
+	rpcDone                     chan struct{}
+	abortCh                     chan struct{}
+	handoffCh                   chan struct{}
+	providerErrorCh             chan openCodeStderrDiagnostic
+	promptGeneration            uint64
+	evidenceMu                  sync.Mutex
+	codexSystemError            bool
+	codexCapacity               bool
+	codexUsageLimit             *streams.ProviderError
+	cursorRetriableMsg          string
+	cursorRetriableComplete     bool
+	cursorRetriableAt           time.Time
+	continuationTools           map[string]bool
+	continuationPermissions     uint16
+	continuationPermissionTools map[string]struct{}
+	continuationUnsafe          bool
+	capacityTools               map[string]capacityToolEvidence
+	capacityUnknown             bool
+	capacityBackground          bool
+	capacityPermissions         int
+	allowHandoff                bool
+	handedOff                   bool
+	gateOwned                   bool
+	finishing                   bool
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
@@ -424,15 +440,16 @@ func (t *promptTurnState) hasCodexSystemError() bool {
 	return t.codexSystemError
 }
 
-func (t *promptTurnState) setCursorRetriable() {
+func (t *promptTurnState) setCursorRetriable(msg string, complete bool) {
 	if t == nil {
 		return
 	}
 	t.evidenceMu.Lock()
-	if !t.cursorRetriable {
+	if t.cursorRetriableMsg == "" {
 		t.cursorRetriableAt = time.Now().UTC()
 	}
-	t.cursorRetriable = true
+	t.cursorRetriableMsg = msg
+	t.cursorRetriableComplete = complete
 	t.evidenceMu.Unlock()
 }
 
@@ -441,23 +458,29 @@ func (t *promptTurnState) clearCursorRetriable() {
 		return
 	}
 	t.evidenceMu.Lock()
-	t.cursorRetriable = false
+	t.cursorRetriableMsg = ""
+	t.cursorRetriableComplete = false
 	t.cursorRetriableAt = time.Time{}
 	t.evidenceMu.Unlock()
 }
 
 func (t *promptTurnState) cursorRetriableFailure() bool {
-	failure, _ := t.cursorRetriableFailureAt()
+	failure, _, _, _ := t.cursorRetriableFailureDetails()
 	return failure
 }
 
 func (t *promptTurnState) cursorRetriableFailureAt() (bool, time.Time) {
+	failure, _, occurredAt, _ := t.cursorRetriableFailureDetails()
+	return failure, occurredAt
+}
+
+func (t *promptTurnState) cursorRetriableFailureDetails() (bool, string, time.Time, bool) {
 	if t == nil {
-		return false, time.Time{}
+		return false, "", time.Time{}, false
 	}
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
-	return t.cursorRetriable, t.cursorRetriableAt
+	return t.cursorRetriableMsg != "", t.cursorRetriableMsg, t.cursorRetriableAt, t.cursorRetriableComplete
 }
 
 type asyncTurnFinalizer struct {

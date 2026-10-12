@@ -39,22 +39,31 @@ const database: DatabaseStats = {
   last_backup_at: null,
 };
 
+type DatabaseStatsResult = {
+  database: DatabaseStats | null;
+  isLoading: boolean;
+  error: string | null;
+  reload: () => Promise<void>;
+  retry: () => Promise<void>;
+};
+
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.value = { database, isLoading: false, error: null, reload: vi.fn(), retry: vi.fn() };
+  mocks.value = { database: null, isLoading: false, error: null, reload: vi.fn(), retry: vi.fn() };
 });
 afterEach(cleanup);
 
-function renderCard() {
+function renderCard(stats: DatabaseStatsResult) {
   return render(
     <TooltipProvider>
-      <DatabaseStatsCard />
+      <DatabaseStatsCard stats={stats} />
     </TooltipProvider>,
   );
 }
 
+// @covers AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001.5
 it("keeps database details and maintenance actions visible when logical totals are unavailable", () => {
-  renderCard();
+  renderCard({ ...mocks.value, database });
 
   expect(screen.getByTestId("system-db-path").textContent).toBe("/data/kandev.db");
   expect(screen.getByTestId("system-db-logical-stats-status").textContent).toMatch(
@@ -68,19 +77,21 @@ it("keeps database details and maintenance actions visible when logical totals a
 });
 
 it("offers a retry when the logical snapshot is unavailable", () => {
-  renderCard();
+  const retry = vi.fn().mockResolvedValue(undefined);
+  const reload = vi.fn().mockResolvedValue(undefined);
+  renderCard({ ...mocks.value, database, retry, reload });
   fireEvent.click(screen.getByTestId("system-db-logical-stats-retry"));
-  expect(mocks.value.retry).toHaveBeenCalledOnce();
-  expect(mocks.value.reload).not.toHaveBeenCalled();
+  expect(retry).toHaveBeenCalledOnce();
+  expect(reload).not.toHaveBeenCalled();
 });
 
 it("shows the last measurement time while an expired snapshot refreshes", () => {
-  mocks.value.database = {
+  const refreshing: DatabaseStats = {
     ...database,
     logical_stats_state: "refreshing",
     logical_stats_measured_at: "2026-09-27T10:00:00Z",
   };
-  renderCard();
+  renderCard({ ...mocks.value, database: refreshing });
   expect(screen.getByTestId("system-db-logical-stats-status").textContent).toMatch(
     /Logical totals measured .* Updating/i,
   );

@@ -376,34 +376,16 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
-	task, err := s.tasks.GetTask(ctx, id)
-	if err != nil {
+	if _, err := s.tasks.GetTask(ctx, id); err != nil {
 		return nil, err
 	}
-
-	// Merge metadata (existing keys are preserved, new keys are added/updated)
-	if task.Metadata == nil {
-		task.Metadata = make(map[string]interface{})
-	}
-	for k, v := range metadata {
-		// Lifecycle and handoff provenance are server-managed. Preserve them even
-		// if a future metadata endpoint forwards the whole request map here.
-		if k == models.MetaKeyDeferredLaunch || k == models.MetaKeyStepHandoffCarry ||
-			k == models.MetaKeyHandoffSource || k == models.MetaKeyHandoffs {
-			continue
-		}
-		task.Metadata[k] = v
-	}
-	task.UpdatedAt = time.Now().UTC()
-
-	if err := s.tasks.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
+	if err := s.tasks.MergeTaskMetadata(ctx, id, metadata); err != nil {
 		s.logger.Error("failed to update task metadata", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
 
-	// Reload rather than publish/return the pre-write snapshot: the
-	// preserving update can win a concurrent ceiling CAS on deferred_launch,
-	// and that field lives only in the database row from this point on.
+	// Responses and events share this postcommit observation, which may
+	// include a later write. A read failure does not undo the committed merge.
 	current, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err

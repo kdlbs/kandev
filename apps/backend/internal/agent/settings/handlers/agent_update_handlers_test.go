@@ -287,7 +287,7 @@ func TestAgentUpdateEndpointDoesNotCreateAlreadyActiveHealthyJob(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 		t.Fatalf("decode no-op response: %v", err)
 	}
-	if result.JobID != "" || result.Operation != string(managedruntime.OperationUpToDate) {
+	if result.JobID != "" || result.Operation != string(managedruntime.OperationUpToDate) || result.UpdateMode != dto.AgentUpdateModePinned {
 		t.Fatalf("no-op response = %#v, want terminal up_to_date without job ID", result)
 	}
 
@@ -387,6 +387,54 @@ func TestAgentUpdateEndpointRequiresExactTargetVersion(t *testing.T) {
 		))
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("body %q status = %d, want 400: %s", body, response.Code, response.Body.String())
+		}
+	}
+}
+
+type handlerHarnessUpdater struct {
+	handlerRuntimeUpdater
+	current string
+}
+
+func (u *handlerHarnessUpdater) CurrentCapabilities(string) (hostutility.AgentCapabilities, bool) {
+	return hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: u.current}, true
+}
+
+func (u *handlerHarnessUpdater) ResolveHarnessLatest(context.Context, string) (string, error) {
+	return "1.1.0", nil
+}
+
+// A stable reference does not suppress the harness updater; target fields remain rejected.
+func TestHarnessUpdateHTTPApprovalAndRejectedTargets(t *testing.T) {
+	router, ctrl, completed := newAgentUpdateRouter(t, &handlerHarnessUpdater{current: "1.1.0"})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, updateJSONRequest(http.MethodPost, "/api/v1/agent-update/omp-acp", `{}`))
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("approval status %d: %s", response.Code, response.Body.String())
+	}
+	var job dto.AgentUpdateJobDTO
+	if err := json.Unmarshal(response.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	if job.JobID == "" || job.UpdateMode != dto.AgentUpdateModeSelfUpdate {
+		t.Fatalf("stable version suppressed update job: %+v", job)
+	}
+	finished := waitForTerminalUpdate(t, completed, job.JobID)
+	if finished.Status != dto.AgentUpdateJobStatusFailed || !strings.Contains(finished.Error, "probe unavailable") {
+		t.Errorf("harness without candidate probe result = %+v", finished)
+	}
+	jobCount := len(ctrl.ListAgentUpdateJobs())
+	if jobCount != 1 {
+		t.Fatalf("retained jobs = %d, want accepted job", jobCount)
+	}
+	for _, body := range []string{`{"target_version":"1.2.0"}`, `{"use_default":true}`, `{"command":["sh","-c","exit 0"],"target_version":"1.2.0"}`} {
+		rejected := httptest.NewRecorder()
+		router.ServeHTTP(rejected, updateJSONRequest(http.MethodPost, "/api/v1/agent-update/omp-acp", body))
+		if rejected.Code != http.StatusBadRequest {
+			t.Errorf("body %s status = %d: %s", body, rejected.Code, rejected.Body.String())
+		}
+		if jobs := ctrl.ListAgentUpdateJobs(); len(jobs) != jobCount {
+			t.Errorf("rejected body %s changed retained jobs to %d", body, len(jobs))
 		}
 	}
 }

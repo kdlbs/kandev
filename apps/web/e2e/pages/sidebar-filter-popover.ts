@@ -174,9 +174,12 @@ export class SidebarFilterPopoverPage {
     await keyTrigger.click();
     await this.page.getByRole("option", { name: keyLabel, exact: true }).click();
     if (direction) {
-      const toggle = this.popover.getByTestId("sort-direction-toggle");
-      const current = (await toggle.getAttribute("data-direction")) as "asc" | "desc" | null;
-      if (current && current !== direction) await toggle.click();
+      const directionSelect = this.popover.getByTestId("sort-rule-direction-0");
+      const current = await directionSelect.getAttribute("data-direction");
+      if (current !== direction) {
+        await directionSelect.click();
+        await this.page.getByTestId(`sort-rule-direction-option-0-${direction}`).click();
+      }
     }
   }
 

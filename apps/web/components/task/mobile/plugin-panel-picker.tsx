@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { IconHistory, IconLayoutGrid } from "@tabler/icons-react";
+import { IconLayoutGrid } from "@tabler/icons-react";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { pluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
@@ -15,7 +15,6 @@ type PluginPanelPickerProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect: (panel: MobileSessionPanel) => void;
-  showPromptHistory?: boolean;
   taskCanvases?: Canvas[];
   onOpenCanvas?: (canvasId: string) => void;
   taskId?: string | null;
@@ -28,7 +27,6 @@ export function PluginPanelPicker({
   open,
   onOpenChange,
   onSelect,
-  showPromptHistory = false,
   taskCanvases = [],
   onOpenCanvas,
   taskId = null,
@@ -71,20 +69,6 @@ export function PluginPanelPicker({
             <span className="min-w-0 truncate">{canvas.title}</span>
           </button>
         ))}
-        {showPromptHistory && (
-          <button
-            type="button"
-            data-testid="mobile-prompt-history-option"
-            className="flex min-h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => {
-              onSelect("prompt-history");
-              onOpenChange(false);
-            }}
-          >
-            <IconHistory className="h-5 w-5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 truncate">{t("task:promptHistory")}</span>
-          </button>
-        )}
         {registrations.map((registration) => {
           const panelId = pluginPanelId(registration.pluginId, registration.id);
           const Icon = resolvePluginIcon(registration.icon);

@@ -9,6 +9,7 @@
  */
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 import { getEnvLayout, getManualRightWidth } from "@/lib/local-storage";
+import { getEnvHiddenSessions, resolveVisibleSessionId } from "@/lib/env-hidden-sessions";
 import { applyLayoutFixups } from "./dockview-layout-builders";
 import { isLayoutShapeHealthy } from "./dockview-layout-health";
 import {
@@ -31,6 +32,7 @@ import {
 } from "./dockview-env-switch-active-views";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "./dockview-env-scoped-components";
 import { stripHiddenRightPaneMetadata } from "./dockview-right-pane";
+import { sanitizeSerializedLayout } from "./layout-manager/sanitize-serialized-layout";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
   snapshotColumnWidths,
@@ -99,6 +101,15 @@ function savedLayoutHasEphemeralPanels(serialized: SerializedDockview): boolean 
   return Object.values(panels).some((p) => EPHEMERAL_COMPONENTS.has(p.contentComponent ?? ""));
 }
 
+export type SessionListRestoreState = {
+  loaded: boolean;
+  knownForeignSessionIds: Set<string>;
+};
+export type EnvSwitchOptions = {
+  initialLayout?: string | null;
+  sessionListRestoreState?: SessionListRestoreState;
+};
+
 export type EnvSwitchParams = {
   api: DockviewApi;
   oldEnvId: string | null;
@@ -107,6 +118,8 @@ export type EnvSwitchParams = {
   activeSessionId: string | null;
   /** All sessions for the active task, so slow-path restores keep sibling chat tabs. */
   currentSessionIds?: string[];
+  /** Readiness and known foreign sessions for a partially hydrated task list. */
+  sessionListRestoreState?: SessionListRestoreState;
   safeWidth: number;
   safeHeight: number;
   /** Build the effective default, optionally honoring a route layout intent. */
@@ -153,15 +166,26 @@ export function replaceStaleSessionPanels(
   api: DockviewApi,
   keepSessionId: string | null,
   currentSessionIds: string[] = [],
+  sessionListRestoreState?: SessionListRestoreState,
+  envId: string | null = null,
 ): void {
-  const keepId = keepSessionId ? `session:${keepSessionId}` : null;
-  // keepId=null (sessionless task) → strips all session panels. In practice
-  // sessionless tasks should have no session panels; useAutoSessionTab re-adds
-  // the panel when a session arrives.
-  const stale = api.panels.filter(
-    (p) => p.api.component === "chat" && p.id.startsWith("session:") && p.id !== keepId,
+  keepSessionId = resolveVisibleSessionId(
+    keepSessionId,
+    currentSessionIds,
+    envId ? getEnvHiddenSessions(envId) : [],
   );
-
+  const keepId = keepSessionId ? `session:${keepSessionId}` : null;
+  const sessionListLoaded = sessionListRestoreState?.loaded ?? true;
+  const knownForeignSessionIds = sessionListRestoreState?.knownForeignSessionIds;
+  // Until the task list is authoritative, only remove sessions proven to
+  // belong to another environment.
+  const stale = api.panels.filter((panel) => {
+    if (panel.api.component !== "chat" || !panel.id.startsWith("session:") || panel.id === keepId) {
+      return false;
+    }
+    const sessionId = panel.id.slice("session:".length);
+    return sessionListLoaded || knownForeignSessionIds?.has(sessionId) === true;
+  });
   // Anchor the active session to the first stale's (group, index) so co-tabbed
   // siblings (pr-detail etc.) stay grouped with the agent tab. Skipped when:
   //   - no keepSessionId (sessionless task)
@@ -197,7 +221,7 @@ export function replaceStaleSessionPanels(
     }
   }
 
-  addCurrentSessionSiblings(api, keepSessionId, currentSessionIds);
+  addCurrentSessionSiblings(api, keepSessionId, currentSessionIds, envId);
 }
 
 const RESTORED_SESSION_ANCHOR_IDS = ["plan"];
@@ -229,6 +253,7 @@ function addCurrentSessionSiblings(
   api: DockviewApi,
   keepSessionId: string | null,
   currentSessionIds: string[],
+  envId: string | null,
 ): void {
   if (!keepSessionId) return;
   const activePanel = api.getPanel(`session:${keepSessionId}`);
@@ -238,7 +263,9 @@ function addCurrentSessionSiblings(
     (sessionId, index, sessionIds) =>
       sessionId && sessionId !== keepSessionId && sessionIds.indexOf(sessionId) === index,
   );
+  const hiddenSessionIds = new Set(envId ? getEnvHiddenSessions(envId) : []);
   for (const sessionId of uniqueSessionIds) {
+    if (hiddenSessionIds.has(sessionId)) continue;
     if (api.getPanel(`session:${sessionId}`)) continue;
     addIncomingSessionPanel(api, sessionId, activePanel.group.id, activePanel.group.panels.length, {
       inactive: true,
@@ -336,7 +363,13 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
     addIncomingSessionPanel(api, activeSessionId, outgoingGroupId, outgoingIndex);
   }
   removeEphemeralPanels(api);
-  replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
+  replaceStaleSessionPanels(
+    api,
+    activeSessionId,
+    currentSessionIds,
+    params.sessionListRestoreState,
+    newEnvId,
+  );
 
   // The fast path skips `fromJSON`, so per-group active tabs from the
   // outgoing env would otherwise persist into the incoming env. Reapply
@@ -558,17 +591,20 @@ function applyInitialRouteLayout(params: EnvSwitchParams): LayoutGroupIds | null
  * The caller is responsible for saving the old env's layout and releasing
  * env-scoped portals before calling this function.
  */
-export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
-  const {
-    api,
-    oldEnvId,
-    newEnvId,
-    activeSessionId,
-    currentSessionIds = [],
-    safeWidth,
-    safeHeight,
-    buildDefault,
-  } = params;
+export function performEnvSwitch({
+  currentSessionIds = [],
+  ...input
+}: EnvSwitchParams): LayoutGroupIds {
+  const params = {
+    ...input,
+    currentSessionIds,
+    activeSessionId: resolveVisibleSessionId(
+      input.activeSessionId,
+      currentSessionIds,
+      getEnvHiddenSessions(input.newEnvId),
+    ),
+  };
+  const { api, oldEnvId, newEnvId, activeSessionId, safeWidth, safeHeight, buildDefault } = params;
   if (isDebug()) {
     debug("performEnvSwitch: entry", {
       oldEnvId,
@@ -597,7 +633,7 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
     return fastResult;
   }
 
-  const saved = getHealthyEnvLayout(newEnvId);
+  const saved = sanitizeSerializedLayout(getHealthyEnvLayout(newEnvId));
   if (saved) {
     try {
       if (isDebug()) {
@@ -623,7 +659,13 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
       // editors, etc.). File editors/diffs/etc. on their own are legitimately
       // part of this env's saved state and must NOT be touched.
       // useAutoSessionTab will still no-op if the panel was just added here.
-      replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
+      replaceStaleSessionPanels(
+        api,
+        activeSessionId,
+        currentSessionIds,
+        params.sessionListRestoreState,
+        params.newEnvId,
+      );
       if (activeSessionId) restoreMissingSessionPanel(api, activeSessionId);
       restoreSavedActiveViews(api, saved as SerializedDockview, activeSessionId);
       api.layout(safeWidth, safeHeight);

@@ -95,7 +95,7 @@ func (r *adapterStartStepResolver) ResolveFirstStep(ctx context.Context, workflo
 }
 
 func TestTaskCreatorAdapterPersistsOriginByCreationPath(t *testing.T) {
-	adapter, taskSvc := newOfficeTaskAdapterHarness(t)
+	adapter, taskSvc, _ := newOfficeTaskAdapterHarness(t)
 	ctx := context.Background()
 
 	agentTaskID, err := adapter.CreateOfficeTaskAsAgent(
@@ -134,7 +134,7 @@ func TestTaskCreatorAdapterPersistsOriginByCreationPath(t *testing.T) {
 }
 
 func TestOfficeWorkspaceCreatorDoesNotBootstrapKanbanWorkflow(t *testing.T) {
-	_, taskSvc := newOfficeTaskAdapterHarness(t)
+	_, taskSvc, _ := newOfficeTaskAdapterHarness(t)
 	adapter := &taskWorkspaceCreatorAdapter{taskSvc: taskSvc}
 	ctx := context.Background()
 
@@ -199,7 +199,7 @@ func TestCreateWorkspaceKanbanBootstrapCreatesUsableSteps(t *testing.T) {
 // method is that opt-in's only production setter, so both cases here —
 // with and without an assignee — must always stamp it true.
 func TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata(t *testing.T) {
-	adapter, taskSvc := newOfficeTaskAdapterHarness(t)
+	adapter, taskSvc, _ := newOfficeTaskAdapterHarness(t)
 	ctx := context.Background()
 
 	workflows, err := taskSvc.ListWorkflows(ctx, "ws-1", true)
@@ -282,7 +282,7 @@ func assertRoutineFireCarrier(t *testing.T, metadata map[string]interface{}, wan
 // created child task's persisted metadata, exactly as CreateOfficeTaskAsAgent
 // already does for a root task.
 func TestTaskCreatorAdapterCreateOfficeSubtaskPassesMetadataThrough(t *testing.T) {
-	adapter, taskSvc := newOfficeTaskAdapterHarness(t)
+	adapter, taskSvc, _ := newOfficeTaskAdapterHarness(t)
 	ctx := context.Background()
 
 	parentTaskID, err := adapter.CreateOfficeTaskAsAgent(
@@ -333,7 +333,7 @@ func TestTaskCreatorAdapterCreateOfficeSubtaskPassesMetadataThrough(t *testing.T
 	}
 }
 
-func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservice.Service) {
+func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservice.Service, *officesqlite.Repository) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "office-adapter.db"))
 	if err != nil {
@@ -373,6 +373,7 @@ func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservic
 		Reviews:          repo,
 		ResourceCleanups: repo,
 	}, bus.NewMemoryEventBus(log), log, taskservice.RepositoryDiscoveryConfig{})
+	taskSvc.SetProjectRepositorySourceReader(emptyOfficeProjectSourceReader{})
 	// Mirrors production wiring (registerRoutes in helpers.go): CreateChildTask
 	// requires a WorkspacePolicyAttacher to attach the child's workspace-group
 	// membership before returning.
@@ -386,5 +387,5 @@ func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservic
 		t.Fatalf("ensure office workflow: %v", err)
 	}
 	taskSvc.SetStartStepResolver(&adapterStartStepResolver{repo: repo})
-	return &taskCreatorAdapter{taskSvc: taskSvc}, taskSvc
+	return &taskCreatorAdapter{taskSvc: taskSvc}, taskSvc, officeRepo
 }

@@ -1,9 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import type { Page } from "@playwright/test";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -29,18 +27,6 @@ async function createTaskAndWaitForDone(apiClient: ApiClient, seedData: SeedData
     )
     .toBe(true);
   return task;
-}
-
-async function navigateToTaskViaKanban(page: Page, title: string): Promise<SessionPage> {
-  const kanban = new KanbanPage(page);
-  await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 15_000 });
-  await card.click();
-  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
-  const session = new SessionPage(page);
-  await session.waitForLoad();
-  return session;
 }
 
 type ListItem = {
@@ -153,7 +139,9 @@ test.describe("Terminals — first-class persistent entities", () => {
     test.setTimeout(90_000);
     const task = await createTaskAndWaitForDone(apiClient, seedData, "Rename Park Persist");
     const envID = await getEnvID(apiClient, task.id);
-    const session = await navigateToTaskViaKanban(testPage, "Rename Park Persist");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 

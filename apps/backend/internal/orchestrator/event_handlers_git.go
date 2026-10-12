@@ -29,6 +29,8 @@ const gitSnapshotPersistInterval = 30 * time.Second
 
 const gitSnapshotTriggeredByAgentCompleted = "agent_completed"
 
+const gitSnapshotStatusReady = "ready"
+
 const automaticPermissionMessageWriteMaxAttempts = 3
 
 // gitSnapshotCacheMaxEntries bounds the in-memory throttle map so a long-lived
@@ -120,9 +122,10 @@ func (c *gitSnapshotCache) forget(taskEnvironmentID string) {
 
 func gitStatusHash(s *lifecycle.GitStatusData) string {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d",
+	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%s|%s|%t|%s|%d|%d|%d|%d|%d|%d",
 		s.RepositoryName, s.Branch, s.RemoteBranch, s.HeadCommit, s.BaseCommit,
 		s.ComparisonTarget, s.ComparisonStatus, s.ComparisonErrorCode,
+		s.StatusState, s.FilesComplete, s.DetailState, s.TrackerEpoch, s.SnapshotRevision,
 		s.Ahead, s.Behind, s.BranchAdditions, s.BranchDeletions)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -184,7 +187,9 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 	s.syncPRWatchBranch(ctx, data.TaskID, data.SessionID, data.Status.RepositoryName, data.Status.Branch)
 
 	// Push detection: when ahead goes from >0 to 0, a push happened
-	s.trackPushAndAssociatePR(ctx, data)
+	if gitStatusDetailsAreKnown(data.Status) {
+		s.trackPushAndAssociatePR(ctx, data)
+	}
 
 	// Persist a throttled cache of the live status so the sidebar diff badge
 	// works for tasks whose executor isn't currently running (and across
@@ -197,6 +202,9 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 // appendDBSnapshotGitStatus when no live execution is available.
 func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.GitEventData) {
 	if s.repo == nil || data.SessionID == "" || data.Status == nil {
+		return
+	}
+	if !gitStatusDetailsAreKnown(data.Status) {
 		return
 	}
 	if s.gitSnapshotCache == nil {
@@ -239,6 +247,9 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 			"untracked":             st.Untracked,
 			"renamed":               st.Renamed,
 			"timestamp":             data.Timestamp,
+			"status_state":          gitSnapshotStatusReady,
+			"files_complete":        false,
+			"detail_state":          gitSnapshotStatusReady,
 		},
 	}
 	if err := s.repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
@@ -247,6 +258,11 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
 	}
+}
+
+func gitStatusDetailsAreKnown(status *lifecycle.GitStatusData) bool {
+	return status != nil && (status.StatusState == "" || status.StatusState == gitSnapshotStatusReady) &&
+		(status.DetailState == "" || status.DetailState == gitSnapshotStatusReady)
 }
 
 func (s *Service) resolveGitSnapshotEnvironmentID(ctx context.Context, sessionID string) (string, bool) {

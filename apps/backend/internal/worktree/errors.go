@@ -25,6 +25,31 @@ type ManagedCloneRelocationRequiredError struct {
 	TaskID string
 }
 
+// RecoveryInspectionContentionError reports that a selected worktree is
+// already being inspected and the caller's bounded wait has expired.
+type RecoveryInspectionContentionError struct{}
+
+func (*RecoveryInspectionContentionError) Error() string {
+	return "workspace recovery inspection is busy"
+}
+
+// IsRecoveryInspectionContentionOnly reports contention that is not joined
+// with another failure. Callers may offer a retry only when contention is the
+// complete error outcome.
+func IsRecoveryInspectionContentionOnly(err error) bool {
+	for err != nil {
+		if _, ok := err.(*RecoveryInspectionContentionError); ok {
+			return true
+		}
+		unwrapped := errors.Unwrap(err)
+		if unwrapped == nil {
+			return false
+		}
+		err = unwrapped
+	}
+	return false
+}
+
 func (e *ManagedCloneRelocationRequiredError) Error() string {
 	return "managed repository worktree needs an explicit file-preserving recovery"
 }

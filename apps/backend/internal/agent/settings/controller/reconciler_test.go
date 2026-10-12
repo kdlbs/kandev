@@ -301,6 +301,19 @@ func (f *fakeStore) UpdateAgentProfile(_ context.Context, p *models.AgentProfile
 	return nil
 }
 
+func (f *fakeStore) UpdateAgentProfileWithEnabledIntent(ctx context.Context, p *models.AgentProfile, enabled *bool) error {
+	if enabled == nil {
+		current, err := f.GetAgentProfile(ctx, p.ID)
+		if err != nil {
+			return err
+		}
+		p.Enabled = current.Enabled
+	} else {
+		p.Enabled = *enabled
+	}
+	return f.UpdateAgentProfile(ctx, p)
+}
+
 func (f *fakeStore) UpdateAgentProfileModelIfEmpty(
 	ctx context.Context,
 	profileID, model string,
@@ -400,6 +413,17 @@ func (f *fakeStore) ListAgentProfiles(_ context.Context, agentID string) ([]*mod
 		out = append(out, copyProfile(p))
 	}
 	return out, nil
+}
+func (f *fakeStore) ReorderAgentProfiles(context.Context, string, []string) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (f *fakeStore) GetAgentProfileOrderSnapshots(_ context.Context, agentIDs []string) (map[string]store.AgentProfileOrderSnapshot, error) {
+	result := make(map[string]store.AgentProfileOrderSnapshot, len(agentIDs))
+	for _, id := range agentIDs {
+		result[id] = store.AgentProfileOrderSnapshot{Profiles: f.profiles[id], Revision: 0}
+	}
+	return result, nil
 }
 
 func (f *fakeStore) Close() error { return nil }

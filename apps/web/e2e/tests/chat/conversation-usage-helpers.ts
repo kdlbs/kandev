@@ -146,5 +146,5 @@ export async function openConversationUsageTask(
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
-  return { sessionId, session };
+  return { taskId: task.id, sessionId, session };
 }

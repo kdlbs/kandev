@@ -1,6 +1,8 @@
 package dto
 
 import (
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -44,8 +46,11 @@ type AgentProfileDTO struct {
 	ProviderBaseURL string `json:"provider_base_url,omitempty"`
 	// ProviderAPIKeySecretID references the Kandev global secret holding the
 	// bearer key. The value is never returned.
-	ProviderAPIKeySecretID string `json:"provider_api_key_secret_id,omitempty"`
-	CursorMCPAuthEnabled   bool   `json:"cursor_mcp_auth_enabled"`
+	ProviderAPIKeySecretID  string   `json:"provider_api_key_secret_id,omitempty"`
+	CursorMCPAuthEnabled    bool     `json:"cursor_mcp_auth_enabled"`
+	CursorPluginsMCPEnabled bool     `json:"cursor_plugins_mcp_enabled"`
+	MCPSelectionMode        string   `json:"mcp_selection_mode"`
+	MCPSelectedServers      []string `json:"mcp_selected_servers"`
 	// ProviderSupported is computed at read time: true when the profile's
 	// agent advertises OpenAI-compatible provider support. Not persisted.
 	ProviderSupported bool `json:"provider_supported"`
@@ -75,9 +80,15 @@ type DynamicAgentProfileDTO struct {
 // for one dynamic candidate. The two classes are deliberately explicit so a
 // missing class can never silently inherit another class's behavior.
 type DynamicAgentPolicyDTO struct {
-	Version   int64                 `json:"version"`
-	Transient DynamicErrorPolicyDTO `json:"transient"`
-	Hard      DynamicErrorPolicyDTO `json:"hard"`
+	Version      int64                         `json:"version"`
+	Transient    DynamicErrorPolicyDTO         `json:"transient"`
+	Hard         DynamicErrorPolicyDTO         `json:"hard"`
+	Unclassified *DynamicUnclassifiedPolicyDTO `json:"unclassified,omitempty"`
+}
+
+type DynamicUnclassifiedPolicyDTO struct {
+	Enabled                     bool  `json:"enabled"`
+	ConsecutiveFailureThreshold int64 `json:"consecutive_failure_threshold"`
 }
 
 type DynamicErrorPolicyDTO struct {
@@ -153,13 +164,14 @@ type TUIConfigDTO struct {
 }
 
 type AgentDTO struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	WorkspaceID   *string           `json:"workspace_id,omitempty"`
-	SupportsMCP   bool              `json:"supports_mcp"`
-	MCPConfigPath string            `json:"mcp_config_path,omitempty"`
-	TUIConfig     *TUIConfigDTO     `json:"tui_config,omitempty"`
-	Profiles      []AgentProfileDTO `json:"profiles"`
+	ID                   string            `json:"id"`
+	Name                 string            `json:"name"`
+	WorkspaceID          *string           `json:"workspace_id,omitempty"`
+	SupportsMCP          bool              `json:"supports_mcp"`
+	MCPConfigPath        string            `json:"mcp_config_path,omitempty"`
+	TUIConfig            *TUIConfigDTO     `json:"tui_config,omitempty"`
+	Profiles             []AgentProfileDTO `json:"profiles"`
+	ProfileOrderRevision int64             `json:"profile_order_revision"`
 	// CapabilityStatus mirrors the host utility probe status so clients can
 	// flag agents that need login or reinstallation without fetching the
 	// full model config separately. "" for agents that aren't probed
@@ -171,6 +183,24 @@ type AgentDTO struct {
 	InferenceCapable bool      `json:"inference_capable"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// AgentMCPDiscoveryDTO exposes a credential-free host preview of one agent's
+// native MCP sources. Host paths and server connection definitions stay local.
+type AgentMCPDiscoveryDTO struct {
+	AgentID    string                       `json:"agent_id"`
+	ProviderID string                       `json:"provider_id"`
+	Status     string                       `json:"status"`
+	Reason     string                       `json:"reason,omitempty"`
+	Servers    []AgentMCPDiscoveryServerDTO `json:"servers"`
+}
+
+type AgentMCPDiscoveryServerDTO struct {
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	PluginName           string `json:"plugin_name,omitempty"`
+	SourceKind           string `json:"source_kind"`
+	CredentialsAvailable bool   `json:"credentials_available"`
 }
 
 type ListAgentsResponse struct {
@@ -186,14 +216,20 @@ type AgentDiscoveryDTO struct {
 	Available         bool             `json:"available"`
 	MatchedPath       string           `json:"matched_path,omitempty"`
 	LoginCommand      *LoginCommandDTO `json:"login_command,omitempty"`
+
+	// Vendor CLI state. Present only for agent types that declare a host CLI;
+	// every other agent omits both fields.
+	CLIVersion      string `json:"cli_version,omitempty"`
+	CLIVersionError string `json:"cli_version_error,omitempty"`
 }
 
 // LoginCommandDTO describes an interactive login command surfaced to the UI.
 // The frontend uses it to render a "Login" button that opens a PTY terminal
 // running the named command.
 type LoginCommandDTO struct {
-	Cmd         []string `json:"cmd"`
-	Description string   `json:"description,omitempty"`
+	Variants    map[string][]string `json:"variants,omitempty"`
+	Cmd         []string            `json:"cmd"`
+	Description string              `json:"description,omitempty"`
 }
 
 type ListDiscoveryResponse struct {
@@ -234,6 +270,27 @@ type ModelConfigDTO struct {
 	// "probing" | "ok" | "auth_required" | "not_installed" | "failed".
 	Status string `json:"status,omitempty"`
 	Error  string `json:"error,omitempty"`
+	// Discovery describes where the model list came from. Absent for agent
+	// types without a vendor CLI.
+	Discovery *ModelDiscoveryDTO `json:"discovery,omitempty"`
+}
+
+// ModelDiscoveryDTO reports how Kandev assembled an agent type's model list
+// and whether the operator may type a model identifier that is not in it.
+type ModelDiscoveryDTO struct {
+	// Source is "cli_command" when the vendor CLI supplied models and
+	// "acp_probe" when only the managed runtime did.
+	Source string `json:"source"`
+	// Executable and CLIVersion identify the vendor CLI that was consulted.
+	Executable string `json:"executable,omitempty"`
+	CLIVersion string `json:"cli_version,omitempty"`
+	// Status is "ok", "skipped" (the CLI publishes no list), or a failure:
+	// "not_installed", "not_logged_in", "timeout", "failed".
+	Status    string     `json:"status"`
+	Error     string     `json:"error,omitempty"`
+	CheckedAt *time.Time `json:"checked_at,omitempty"`
+	// AllowsCustomModel permits a typed model identifier in the selector.
+	AllowsCustomModel bool `json:"allows_custom_model"`
 }
 
 type ConfigOptionDTO struct {
@@ -304,15 +361,25 @@ type AvailableAgentDTO struct {
 	UpdatedAt          time.Time                       `json:"updated_at"`
 }
 
+// AgentUpdateMode selects the built-in runtime update contract.
+type AgentUpdateMode string
+
+const (
+	AgentUpdateModePinned     AgentUpdateMode = "pinned"
+	AgentUpdateModeSelfUpdate AgentUpdateMode = "self_update"
+)
+
 // RuntimeUpdateDTO describes a Kandev-managed npm runtime. Package is
 // informational; update requests select only the built-in agent name.
 type RuntimeUpdateDTO struct {
-	Supported        bool   `json:"supported"`
-	Package          string `json:"package"`
-	CurrentVersion   string `json:"current_version,omitempty"`
-	DefaultVersion   string `json:"default_version"`
-	ActiveVersion    string `json:"active_version,omitempty"`
-	EffectiveVersion string `json:"effective_version"`
+	ManagedFallback  bool            `json:"managed_fallback,omitempty"`
+	Supported        bool            `json:"supported"`
+	UpdateMode       AgentUpdateMode `json:"update_mode"`
+	Package          string          `json:"package"`
+	CurrentVersion   string          `json:"current_version,omitempty"`
+	DefaultVersion   string          `json:"default_version"`
+	ActiveVersion    string          `json:"active_version,omitempty"`
+	EffectiveVersion string          `json:"effective_version"`
 }
 
 // AgentUpdateCheckState describes the result of the cached npm latest-version
@@ -330,14 +397,32 @@ const (
 // runtime. ActiveVersion is the optional persisted operator selection; the
 // default is never persisted and remains the fallback effective version.
 type AgentUpdateStatusDTO struct {
-	AgentName        string                `json:"agent_name"`
-	Package          string                `json:"package"`
-	DefaultVersion   string                `json:"default_version"`
-	ActiveVersion    string                `json:"active_version,omitempty"`
-	EffectiveVersion string                `json:"effective_version"`
-	LatestVersion    string                `json:"latest_version,omitempty"`
-	CheckedAt        *time.Time            `json:"checked_at,omitempty"`
-	CheckState       AgentUpdateCheckState `json:"check_state"`
+	UpdateMode          AgentUpdateMode               `json:"update_mode,omitempty"`
+	ManagedFallback     bool                          `json:"managed_fallback,omitempty"`
+	AutoUpdate          bool                          `json:"auto_update"`
+	LastOutcome         *managedruntime.UpdateOutcome `json:"last_outcome,omitempty"`
+	DisplayName         string                        `json:"display_name"`
+	RuntimeID           string                        `json:"runtime_id"`
+	Owner               string                        `json:"owner"`
+	Mechanism           string                        `json:"mechanism"`
+	Management          string                        `json:"management"`
+	Source              string                        `json:"source,omitempty"`
+	GuidanceURL         string                        `json:"guidance_url,omitempty"`
+	CurrentVersion      string                        `json:"current_version,omitempty"`
+	Available           bool                          `json:"available"`
+	Enabled             bool                          `json:"enabled"`
+	AutoUpdateSupported bool                          `json:"auto_update_supported"`
+	AgentName           string                        `json:"agent_name"`
+	Package             string                        `json:"package"`
+	DefaultVersion      string                        `json:"default_version"`
+	ActiveVersion       string                        `json:"active_version,omitempty"`
+	EffectiveVersion    string                        `json:"effective_version"`
+	LatestVersion       string                        `json:"latest_version,omitempty"`
+	CheckedAt           *time.Time                    `json:"checked_at,omitempty"`
+	CheckState          AgentUpdateCheckState         `json:"check_state"`
+	Family              string                        `json:"family,omitempty"`
+	RuntimeRevision     uint64                        `json:"runtime_revision,omitempty"`
+	MigrationAvailable  bool                          `json:"migration_available,omitempty"`
 }
 
 type ListAgentUpdateStatusResponse struct {
@@ -392,6 +477,8 @@ const (
 	AgentUpdateJobStatusQueued     AgentUpdateJobStatus = "queued"
 	AgentUpdateJobStatusResolving  AgentUpdateJobStatus = "resolving"
 	AgentUpdateJobStatusUpdating   AgentUpdateJobStatus = "updating"
+	AgentUpdateJobStatusProbing    AgentUpdateJobStatus = "probing"
+	AgentUpdateJobStatusSaving     AgentUpdateJobStatus = "saving"
 	AgentUpdateJobStatusRefreshing AgentUpdateJobStatus = "refreshing"
 	AgentUpdateJobStatusSucceeded  AgentUpdateJobStatus = "succeeded"
 	AgentUpdateJobStatusFailed     AgentUpdateJobStatus = "failed"
@@ -399,6 +486,10 @@ const (
 
 // AgentUpdateJobDTO is the retained HTTP and WebSocket update snapshot.
 type AgentUpdateJobDTO struct {
+	UpdateMode       AgentUpdateMode      `json:"update_mode,omitempty"`
+	RuntimeID        string               `json:"runtime_id,omitempty"`
+	Automatic        bool                 `json:"automatic"`
+	PreviousVersion  string               `json:"previous_version,omitempty"`
 	JobID            string               `json:"job_id"`
 	AgentName        string               `json:"agent_name"`
 	Status           AgentUpdateJobStatus `json:"status"`
@@ -408,6 +499,9 @@ type AgentUpdateJobDTO struct {
 	ActiveVersion    string               `json:"active_version,omitempty"`
 	EffectiveVersion string               `json:"effective_version"`
 	TargetVersion    string               `json:"target_version,omitempty"`
+	TargetFamily     string               `json:"target_family,omitempty"`
+	RuntimeRevision  uint64               `json:"runtime_revision,omitempty"`
+	Migration        bool                 `json:"migration,omitempty"`
 	Output           string               `json:"output,omitempty"`
 	Error            string               `json:"error,omitempty"`
 	RefreshError     string               `json:"refresh_error,omitempty"`
@@ -418,17 +512,25 @@ type AgentUpdateJobDTO struct {
 // AgentUpdatePreviewDTO is a read-only representation of the next managed
 // runtime update. The command is derived from trusted built-in agent metadata.
 type AgentUpdatePreviewDTO struct {
-	AgentName         string                  `json:"agent_name"`
-	Package           string                  `json:"package"`
-	CurrentVersion    string                  `json:"current_version,omitempty"`
-	DefaultVersion    string                  `json:"default_version"`
-	ActiveVersion     string                  `json:"active_version,omitempty"`
-	EffectiveVersion  string                  `json:"effective_version"`
-	TargetVersion     string                  `json:"target_version"`
-	Operation         string                  `json:"operation"`
-	AvailableVersions []AgentUpdateVersionDTO `json:"available_versions"`
-	Command           []string                `json:"command"`
-	CommandString     string                  `json:"command_string"`
+	UpdateMode          AgentUpdateMode         `json:"update_mode"`
+	ManagedFallback     bool                    `json:"managed_fallback,omitempty"`
+	AgentName           string                  `json:"agent_name"`
+	Package             string                  `json:"package"`
+	CurrentVersion      string                  `json:"current_version,omitempty"`
+	DefaultVersion      string                  `json:"default_version"`
+	ActiveVersion       string                  `json:"active_version,omitempty"`
+	EffectiveVersion    string                  `json:"effective_version"`
+	TargetVersion       string                  `json:"target_version"`
+	StableLatestVersion string                  `json:"stable_latest_version,omitempty"`
+	Operation           string                  `json:"operation"`
+	AvailableVersions   []AgentUpdateVersionDTO `json:"available_versions"`
+	Command             []string                `json:"command"`
+	CommandString       string                  `json:"command_string"`
+	Family              string                  `json:"family,omitempty"`
+	Source              string                  `json:"source,omitempty"`
+	TargetFamily        string                  `json:"target_family,omitempty"`
+	RuntimeRevision     uint64                  `json:"runtime_revision,omitempty"`
+	MigrationAvailable  bool                    `json:"migration_available,omitempty"`
 }
 
 // AgentUpdateVersionDTO is one stable, selectable package version.
@@ -441,8 +543,10 @@ type AgentUpdateVersionDTO struct {
 // managed-runtime update endpoint. Package identity and command arguments are
 // always resolved from trusted built-in agent metadata.
 type AgentUpdateRequest struct {
-	TargetVersion string `json:"target_version"`
-	UseDefault    bool   `json:"use_default"`
+	TargetVersion           string `json:"target_version"`
+	UseDefault              bool   `json:"use_default"`
+	TargetFamily            string `json:"target_family,omitempty"`
+	ExpectedRuntimeRevision uint64 `json:"expected_runtime_revision,omitempty"`
 }
 
 type ListAgentUpdateJobsResponse struct {
@@ -489,32 +593,56 @@ type CommandPreviewResponse struct {
 // DynamicModelsResponse is the response for the /agent-models/:agentName endpoint.
 // Data now comes from the host utility capability cache populated by ACP probes.
 type DynamicModelsResponse struct {
-	AgentName      string            `json:"agent_name"`
-	Status         string            `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
-	Models         []ModelEntryDTO   `json:"models"`
-	CurrentModelID string            `json:"current_model_id,omitempty"`
-	Modes          []ModeEntryDTO    `json:"modes,omitempty"`
-	CurrentModeID  string            `json:"current_mode_id,omitempty"`
-	Commands       []CommandEntryDTO `json:"commands,omitempty"`
-	Error          *string           `json:"error"`
+	AgentName       string              `json:"agent_name"`
+	Status          string              `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
+	Models          []ModelEntryDTO     `json:"models"`
+	CurrentModelID  string              `json:"current_model_id,omitempty"`
+	Modes           []ModeEntryDTO      `json:"modes,omitempty"`
+	CurrentModeID   string              `json:"current_mode_id,omitempty"`
+	Commands        []CommandEntryDTO   `json:"commands,omitempty"`
+	Error           *string             `json:"error"`
+	Discovery       *ModelDiscoveryDTO  `json:"discovery,omitempty"`
+	ContextRevision string              `json:"context_revision,omitempty"`
+	RuntimeInfo     *agents.RuntimeInfo `json:"runtime_info,omitempty"`
+}
+
+// ProfileLaunchSettingsRequest is a complete, request-only profile snapshot.
+// Pointer fields distinguish an explicit empty value from an omitted field.
+type ProfileLaunchSettingsRequest struct {
+	EnvVars       *[]ProfileEnvVarDTO `json:"env_vars"`
+	CLIFlags      *[]CLIFlagDTO       `json:"cli_flags"`
+	CommandPrefix *string             `json:"command_prefix"`
+}
+
+// ProfileCapabilityRequest asks the host utility to inspect a saved profile
+// or a complete unsaved launch-settings snapshot.
+type ProfileCapabilityRequest struct {
+	ProfileID          string                        `json:"profile_id,omitempty"`
+	LaunchSettings     *ProfileLaunchSettingsRequest `json:"launch_settings,omitempty"`
+	Refresh            bool                          `json:"refresh,omitempty"`
+	AuthorizationScope string                        `json:"-"`
 }
 
 // ResolveAgentModelConfigRequest selects the provider context to resolve.
 type ResolveAgentModelConfigRequest struct {
-	Model         string            `json:"model"`
-	Mode          string            `json:"mode,omitempty"`
-	ConfigOptions map[string]string `json:"config_options,omitempty"`
-	Refresh       bool              `json:"refresh,omitempty"`
+	Model              string                        `json:"model"`
+	Mode               string                        `json:"mode,omitempty"`
+	ConfigOptions      map[string]string             `json:"config_options,omitempty"`
+	Refresh            bool                          `json:"refresh,omitempty"`
+	ProfileID          string                        `json:"profile_id,omitempty"`
+	LaunchSettings     *ProfileLaunchSettingsRequest `json:"launch_settings,omitempty"`
+	AuthorizationScope string                        `json:"-"`
 }
 
 // AgentModelConfigResponse is the complete provider option snapshot for one
 // selected model.
 type AgentModelConfigResponse struct {
-	AgentName     string            `json:"agent_name"`
-	Model         string            `json:"model"`
-	Status        string            `json:"status"`
-	ConfigOptions []ConfigOptionDTO `json:"config_options"`
-	Error         *string           `json:"error"`
+	AgentName       string            `json:"agent_name"`
+	Model           string            `json:"model"`
+	Status          string            `json:"status"`
+	ConfigOptions   []ConfigOptionDTO `json:"config_options"`
+	Error           *string           `json:"error"`
+	ContextRevision string            `json:"context_revision,omitempty"`
 }
 
 // ModeEntryDTO is a single ACP session mode advertised by an agent.

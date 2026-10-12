@@ -1080,6 +1080,150 @@ func TestConvertAvailableCommands_NoDuplicates(t *testing.T) {
 	}
 }
 
+func TestConvertAvailableCommands_CodexSkillsAndSupportedCommandActions(t *testing.T) {
+	a := newTestAdapterForAgent(codexAgentID)
+	planAction := map[string]any{
+		"kind":         "setConfigOption",
+		"configId":     "collaboration_mode",
+		"value":        "plan",
+		"resetValue":   "default",
+		"presentation": "state",
+		"label":        "Plan mode",
+	}
+	update := &acp.SessionAvailableCommandsUpdate{
+		AvailableCommands: []acp.AvailableCommand{
+			{Name: "$retro", Description: "Run the retro skill"},
+			{Name: "$"},
+			{Name: "review", Description: "Review the diff"},
+			{Name: "plan", Description: "Turn plan mode on", Meta: map[string]any{"commandAction": planAction}},
+			{Name: "$plan", Meta: map[string]any{"commandAction": planAction}},
+			{
+				Name:        "goal",
+				Description: "Set a goal to keep pursuing",
+				Input:       &acp.AvailableCommandInput{Unstructured: &acp.UnstructuredCommandInput{Hint: "<objective>|clear|pause|resume"}},
+				Meta:        map[string]any{"commandAction": map[string]any{"kind": "prefixPrompt", "presentation": "state"}},
+			},
+		},
+	}
+
+	result := a.convertAvailableCommands("session-codex", update)
+	encoded, err := json.Marshal(result.AvailableCommands)
+	if err != nil {
+		t.Fatalf("marshal commands: %v", err)
+	}
+	var commands []map[string]any
+	if err := json.Unmarshal(encoded, &commands); err != nil {
+		t.Fatalf("decode commands: %v", err)
+	}
+	if len(commands) != 6 {
+		t.Fatalf("got %d commands, want 6", len(commands))
+	}
+	if commands[0]["name"] != "$retro" || commands[0]["kind"] != "skill" {
+		t.Errorf("Codex skill = %#v, want raw name and kind=skill", commands[0])
+	}
+	if commands[1]["name"] != "$" {
+		t.Errorf("bare dollar command name = %#v", commands[1]["name"])
+	}
+	if _, ok := commands[1]["kind"]; ok {
+		t.Errorf("bare dollar command was classified: %#v", commands[1])
+	}
+	if commands[2]["name"] != "review" {
+		t.Errorf("builtin command name = %#v", commands[2]["name"])
+	}
+	action, ok := commands[3]["action"].(map[string]any)
+	if !ok || action["kind"] != "set_config_option" || action["config_id"] != "collaboration_mode" || action["value"] != "plan" || action["reset_value"] != "default" {
+		t.Errorf("supported plan action = %#v", commands[3]["action"])
+	}
+	if commands[4]["name"] != "$plan" || commands[4]["kind"] != "skill" {
+		t.Errorf("$plan did not take skill precedence: %#v", commands[4])
+	}
+	if _, ok := commands[4]["action"]; ok {
+		t.Errorf("$plan received the builtin plan action: %#v", commands[4])
+	}
+	if commands[5]["input_hint"] != "<objective>|clear|pause|resume" {
+		t.Errorf("goal input hint = %#v", commands[5]["input_hint"])
+	}
+	if _, ok := commands[5]["action"]; ok {
+		t.Errorf("prefixPrompt metadata was normalized as an action: %#v", commands[5])
+	}
+}
+
+func TestConvertAvailableCommands_DoesNotGuessAcrossProviders(t *testing.T) {
+	for _, agentID := range []string{"claude-acp", "opencode-acp", "unknown-agent"} {
+		t.Run(agentID, func(t *testing.T) {
+			a := newTestAdapterForAgent(agentID)
+			update := &acp.SessionAvailableCommandsUpdate{
+				AvailableCommands: []acp.AvailableCommand{
+					{Name: "$retro"},
+					{Name: "retro"},
+					{Name: "plan", Meta: map[string]any{"commandAction": map[string]any{
+						"kind": "setConfigOption", "configId": "collaboration_mode", "value": "plan",
+						"resetValue": "default", "presentation": "state",
+					}}},
+				},
+			}
+			commands := a.convertAvailableCommands("session-provider", update).AvailableCommands
+			for _, command := range commands {
+				encoded, err := json.Marshal(command)
+				if err != nil {
+					t.Fatalf("marshal %q: %v", command.Name, err)
+				}
+				var fields map[string]any
+				if err := json.Unmarshal(encoded, &fields); err != nil {
+					t.Fatalf("decode %q: %v", command.Name, err)
+				}
+				if _, ok := fields["kind"]; ok {
+					t.Errorf("provider %q classified %q: %#v", agentID, command.Name, fields)
+				}
+				if _, ok := fields["action"]; ok {
+					t.Errorf("provider %q inferred action for %q: %#v", agentID, command.Name, fields)
+				}
+			}
+		})
+	}
+}
+
+func TestConvertAvailableCommands_RejectsUnsupportedCodexActionMetadata(t *testing.T) {
+	a := newTestAdapterForAgent(codexAgentID)
+	valid := map[string]any{
+		"kind": "setConfigOption", "configId": "collaboration_mode", "value": "plan",
+		"resetValue": "default", "presentation": "state",
+	}
+	wrongConfig := map[string]any{
+		"kind": "setConfigOption", "configId": "approval_policy", "value": "plan",
+		"resetValue": "default", "presentation": "state",
+	}
+	wrongKind := map[string]any{
+		"kind": "prefixPrompt", "configId": "collaboration_mode", "value": "plan",
+		"resetValue": "default", "presentation": "state",
+	}
+	update := &acp.SessionAvailableCommandsUpdate{
+		AvailableCommands: []acp.AvailableCommand{
+			{Name: "plan", Meta: map[string]any{"commandAction": wrongConfig}},
+			{Name: "plan-default", Meta: map[string]any{"commandAction": valid}},
+			{Name: "plan-alt", Meta: map[string]any{"commandAction": wrongKind}},
+			{Name: "plan-missing", Meta: map[string]any{"commandAction": map[string]any{
+				"kind": "setConfigOption", "configId": "collaboration_mode", "value": "plan",
+				"resetValue": "default",
+			}}},
+		},
+	}
+	commands := a.convertAvailableCommands("session-unsupported-actions", update).AvailableCommands
+	for _, command := range commands {
+		encoded, err := json.Marshal(command)
+		if err != nil {
+			t.Fatalf("marshal %q: %v", command.Name, err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatalf("decode %q: %v", command.Name, err)
+		}
+		if _, ok := fields["action"]; ok {
+			t.Errorf("unsupported action metadata was normalized for %q: %#v", command.Name, fields)
+		}
+	}
+}
+
 func TestConvertAvailableCommands_CursorPlaceholderDescriptionCleared(t *testing.T) {
 	a := newTestAdapterForAgent(acpcompat.CursorAgentID)
 	// cursor-agent sends a bare dash run for commands with no real description.

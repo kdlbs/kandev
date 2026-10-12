@@ -204,7 +204,7 @@ func TestLaunchAfterOnEnterDispatch_PassthroughEmptyPromptDeliversViaDrain(t *te
 	// actual case this test targets. Without this, the first claim on a fresh session
 	// wins and taskDescription becomes the composed prompt, silently exercising the
 	// unrelated autoStartPassthroughPrompt branch instead of the drain-only one.
-	_, err = repo.ClaimInitialPromptFallback(ctx, sessionID)
+	_, err = repo.ClaimInitialPromptFallback(ctx, sessionID, session.QueueIncarnationID)
 	require.NoError(t, err)
 
 	done := make(chan struct{}, 1)

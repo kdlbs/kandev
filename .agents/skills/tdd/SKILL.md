@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: Implement changes using Test-Driven Development (Red-Green-Refactor). Use for bug fixes, new features, or any code change that should have test coverage.
+description: Implement changes using Test-Driven Development (Red-Green-Refactor). Use for code changes that need coverage or requested test-value audits.
 ---
 
 # TDD
@@ -30,6 +30,26 @@ Wrote code before a test? Delete it. Start over from a failing test.
 **Skip** for: pure UI components (we don't test React components), config files, generated code.
 
 For UI rendering bugs, prefer extracting or using a pure helper and testing that helper. Add Playwright only when the behavior is truly visual or integration-level. Avoid adding React component tests just to assert DOM output; that does not match this project's testing convention.
+
+## Test-value gate
+
+Before adding or changing a test, answer these questions:
+
+1. What observable behavior, invariant, or independent contract does it protect?
+2. What credible regression makes its assertion fail?
+3. Why does existing coverage miss that regression?
+4. Does it require a production export, flag, or injection hook that only tests use?
+
+Resolve a missing answer before writing the test. Prefer extending an existing
+case over repeating the same contract. Give each contract a primary test owner
+at the boundary that can expose its failure. Keep additional layers for distinct
+transport, lifecycle, platform, or input-handler risks.
+
+For test-only seams, first look for proof through an existing production boundary.
+Keep necessary performance instrumentation only with a named invariant and no simpler proof.
+
+For a requested test audit or consolidation, load [test-audit.md](references/test-audit.md).
+Do not start a broad cleanup as part of ordinary TDD.
 
 ## Determine test scope
 
@@ -180,9 +200,10 @@ observable state assertion as the proof of behavior.
 3. Run the test and confirm it **fails with the expected assertion error** (not a compile/import error)
    For a brand-new Go package, create the package directory and minimal test package first, then run the focused package test so RED fails on behavior rather than package-selection or import errors.
 4. If it passes immediately, the test is not testing new behavior — revise it.
-   Exception: a reviewer-requested test that documents behavior already present
-   on the current head is valid test-only contract coverage. Label it as such,
-   make no production change, and run the focused suite.
+   Exception: requested test-only contract coverage or an audit assertion repair
+   can pass on the current head. Make no permanent production change.
+   For an assertion repair, demonstrate RED with a deliberate mutation through
+   [test-audit.md](references/test-audit.md), then restore the source.
 
 For bug fixes, use the Prove-It Pattern: reproduce the bug with a failing test before changing production code. A fix without a regression test is not complete unless the change is explicitly untestable and you say why.
 
@@ -263,8 +284,8 @@ a later patch.
 ## Red flags
 
 - Writing production code before a failing test exists — delete and start over
-- Test passes on first run — revise it, except for clearly labelled
-  reviewer-requested test-only contract coverage
+- Test passes on first run — revise it, except for requested test-only
+  contract coverage or an audit assertion repair with mutation proof
 - Fixing a test to make it pass instead of fixing the production code
 - Large jumps — multiple behaviors implemented between test runs
 - Skipping the refactor step

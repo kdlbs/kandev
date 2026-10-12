@@ -1,5 +1,7 @@
 ## Fixed during review
 - apps/backend/internal/orchestrator/messagequeue/pending_move_exact_cancel.go:134 — Redacted a same-workspace pending row when the submitted session resolves to a task outside the authorized task-tree target. (commit 3f221d84f1d1831dc61ef348ab3655cdcdd8eab2)
 - apps/backend/internal/mcp/handlers/pending_move_read.go:30 — Preserved identifier presence and canonicality in malformed census-request audit evidence. (commit 3f221d84f1d1831dc61ef348ab3655cdcdd8eab2)
+- apps/backend/internal/clarification/store.go:340 — closed a retry waiter that could race with cancellation and otherwise wait indefinitely after detached delivery won (commit 3e5fd27b551a6f674604d68d23ff4ef1aff62c97)
+- apps/backend/internal/mcp/handlers/handlers.go:3978 — allowed a finalized detached rejection to reconcile immediately instead of being masked by the delivery-miss receipt (commit 3e5fd27b551a6f674604d68d23ff4ef1aff62c97)
 - apps/backend/internal/agent/runtime/lifecycle/start_model.go:116 -- auto-fallback decisions retained a configured fallback model in provider-default warning metadata; normalized the policy so auto-fallback ignores the fallback model consistently with the runtime contract (commit 649b4fa22)
 - apps/backend/internal/agent/runtime/lifecycle/start_model.go:140 -- auto-fallback profiles failed when ACP model selection was unsupported; restored provider-default continuation with selection_unsupported warning metadata (commit fdfbffc9a)

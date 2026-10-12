@@ -182,6 +182,52 @@ func TestCompleteTurn_ErrorTerminatedTurnReportsHadOutput(t *testing.T) {
 	}
 }
 
+// A synthetic lifecycle turn can legitimately complete with no agent output.
+// Its ownership marker must reach the live event so clients do not present it
+// as an empty user turn.
+func TestCompleteTurn_PublishesLifecycleOnlyOwnershipMetadata(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+
+	turn, err := svc.createCompletedTurn(ctx, session)
+	if err != nil {
+		t.Fatalf("createCompletedTurn: %v", err)
+	}
+	eventBus.ClearEvents()
+	if err := svc.CompleteTurn(ctx, turn.ID); err != nil {
+		t.Fatalf("CompleteTurn: %v", err)
+	}
+
+	hadOutput, found := lastTurnCompletedHadOutput(t, eventBus)
+	if !found {
+		t.Fatal("expected a turn.completed event")
+	}
+	if hadOutput {
+		t.Fatal("had_output = true, want false for lifecycle-only history")
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type != events.TurnCompleted {
+			continue
+		}
+		data, ok := event.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("turn.completed data is %T, want map", event.Data)
+		}
+		metadata, ok := data["metadata"].(map[string]interface{})
+		if !ok || metadata[models.TurnMetaKeyLifecycleOnly] != true {
+			t.Fatalf("turn.completed metadata = %#v, want lifecycle_only=true", data["metadata"])
+		}
+		return
+	}
+	t.Fatal("turn.completed event not found")
+}
+
 // AbandonOpenTurns sweeps orphan turns on resume; it must report had_output=true
 // so the frontend never shows an empty-turn notice for a swept orphan.
 func TestAbandonOpenTurns_PublishesHadOutputTrue(t *testing.T) {

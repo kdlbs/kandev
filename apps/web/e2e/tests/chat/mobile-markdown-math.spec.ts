@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { waitForAgentMessage } from "../../helpers/session";
+import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
 
@@ -29,13 +29,23 @@ async function openMarkdownPreview(
     },
   );
 
+  if (!task.session_id) throw new Error("Markdown preview fixture did not return a session_id");
+  await waitForAgentMessage(apiClient, task.session_id, "Preview formula file", 30_000);
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the Markdown preview workspace and turn to settle",
+    30_000,
+  );
+
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
+  await session.waitForChatIdle({ timeout: 30_000 });
   await testPage.getByRole("button", { name: "Files", exact: true }).tap();
   await expect(session.files).toBeVisible({ timeout: 5_000 });
-  const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${fileName}"]`);
-  await expect(fileNode).toBeVisible({ timeout: 10_000 });
+  const fileNode = await session.fileTree.waitForFileTreeNode(fileName);
   await fileNode.tap();
   const viewer = testPage.getByTestId("mobile-file-viewer-panel");
   await expect(viewer).toBeVisible({ timeout: 10_000 });

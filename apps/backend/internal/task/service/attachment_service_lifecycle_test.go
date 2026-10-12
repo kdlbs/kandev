@@ -468,6 +468,59 @@ func TestAttachmentDeleteOnlyRemovesStagedRows(t *testing.T) {
 	}
 }
 
+func TestRestoreLaunchMessageAttachmentsReturnsClaimToStaging(t *testing.T) {
+	svc, repo, _, _ := newAttachmentTestService(t)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "owner-a"})
+	attachment := stageTestAttachment(t, svc, "owner-a", "trace.png", "image-bytes")
+
+	if err := svc.Claim(ctx, "owner-a", "ws-att", "task-1", "", []string{attachment.ID}); err != nil {
+		t.Fatalf("claim launch attachment: %v", err)
+	}
+	claimed, err := repo.GetMessageAttachment(ctx, attachment.ID)
+	if err != nil {
+		t.Fatalf("read claimed attachment: %v", err)
+	}
+	if claimed.State != models.AttachmentStateClaimed || claimed.TaskID != "task-1" {
+		t.Fatalf("claim = state %q task %q, want claimed task-1", claimed.State, claimed.TaskID)
+	}
+
+	if err := svc.RestoreLaunchClaim(ctx, "owner-a", "task-1", "", []string{attachment.ID}); err != nil {
+		t.Fatalf("restore failed launch attachment: %v", err)
+	}
+	restored, err := repo.GetMessageAttachment(ctx, attachment.ID)
+	if err != nil {
+		t.Fatalf("read restored attachment: %v", err)
+	}
+	if restored.State != models.AttachmentStateStaged || restored.TaskID != "" || restored.SessionID != "" {
+		t.Fatalf("restored attachment = %+v, want staged and unowned by a task", restored)
+	}
+	_, file, err := svc.Open(ctx, "owner-a", attachment.ID)
+	if err != nil {
+		t.Fatalf("open restored attachment: %v", err)
+	}
+	_ = file.Close()
+}
+
+func TestRestoreLaunchMessageAttachmentsDoesNotRestoreAnotherTaskClaim(t *testing.T) {
+	svc, repo, _, _ := newAttachmentTestService(t)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "owner-a"})
+	attachment := stageTestAttachment(t, svc, "owner-a", "trace.png", "image-bytes")
+	if err := svc.Claim(ctx, "owner-a", "ws-att", "task-1", "", []string{attachment.ID}); err != nil {
+		t.Fatalf("claim launch attachment: %v", err)
+	}
+
+	if err := svc.RestoreLaunchClaim(ctx, "owner-a", "task-2", "", []string{attachment.ID}); err != nil {
+		t.Fatalf("restore mismatched launch claim: %v", err)
+	}
+	stillClaimed, err := repo.GetMessageAttachment(ctx, attachment.ID)
+	if err != nil {
+		t.Fatalf("read attachment after mismatched restore: %v", err)
+	}
+	if stillClaimed.State != models.AttachmentStateClaimed || stillClaimed.TaskID != "task-1" {
+		t.Fatalf("mismatched restore changed claim: %+v", stillClaimed)
+	}
+}
+
 func TestAttachmentClaimAuthorizesWorkspace(t *testing.T) {
 	svc, repo, _, auth := newAttachmentTestService(t)
 	ctx := context.Background()

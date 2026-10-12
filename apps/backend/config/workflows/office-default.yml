@@ -80,6 +80,14 @@ steps:
             reason: task_assigned
             payload:
               stage_type: review
+      on_comment:
+        - type: queue_run_for_each_participant
+          config:
+            role: reviewer
+            reason: task_comment
+            skip_decided: true
+            payload:
+              stage_type: review
       on_agent_error:
         - type: queue_run
           config:
@@ -117,6 +125,14 @@ steps:
           config:
             role: approver
             reason: task_assigned
+            payload:
+              stage_type: approval
+      on_comment:
+        - type: queue_run_for_each_participant
+          config:
+            role: approver
+            reason: task_comment
+            skip_decided: true
             payload:
               stage_type: approval
       on_agent_error:

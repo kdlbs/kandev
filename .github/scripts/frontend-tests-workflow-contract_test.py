@@ -131,7 +131,7 @@ class FrontendTestsWorkflowContractTest(unittest.TestCase):
         gate = frontend_gate_job(workflow)
 
         self.assertIn(
-            "needs: [changes, frontend, runner_plan]",
+            "needs: [changes, frontend]",
             gate,
         )
         self.assertNotIn("FRONTEND_TESTS_RESULT:", gate)

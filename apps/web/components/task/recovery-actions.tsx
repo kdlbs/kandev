@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconPlayerPlay,
@@ -18,6 +18,9 @@ import {
   selectPrimaryRecoveryAction,
   type RecoveryActionKind,
 } from "@/lib/session-recovery-actions";
+import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
+import type { WorkspaceRecoveryStatusCheck } from "@/hooks/domains/session/use-session-recovery-actions";
+import { WorkspaceRecoveryProgress } from "./workspace-recovery-progress";
 
 export type RecoveryChoice = {
   kind: RecoveryActionKind;
@@ -26,23 +29,40 @@ export type RecoveryChoice = {
   testId?: string;
   disabled?: boolean;
   tooltip?: string;
+  disclosure?: string;
 };
 
-export function RecoveryActions({
-  actions,
-  busy = false,
-  blocked = false,
-  preferred,
-  busyAction,
-}: {
+type RecoveryActionsProps = {
+  trailingActions?: ReactNode;
   actions: RecoveryChoice[];
   busy?: boolean;
   blocked?: boolean;
   preferred?: RecoveryActionKind;
   busyAction?: RecoveryActionKind | null;
-}) {
-  const { t } = useTranslation();
-  const warningId = useId();
+  workspaceRecovery?: WorkspaceRecoveryProjection | null;
+  workspaceRecoveryReadyApplies?: boolean;
+  workspaceRecoveryRepositoryName?: string | null;
+  workspaceRecoveryStatusCheck?: WorkspaceRecoveryStatusCheck;
+  onCheckWorkspaceRecoveryStatus?: () => void;
+};
+
+type RecoveryActionsView = {
+  warnings: string[];
+  disclosures: string[];
+  primary?: RecoveryChoice;
+  ordered: RecoveryChoice[];
+  controlsBlocked: boolean;
+  shouldHide: boolean;
+};
+
+function buildRecoveryActionsView({
+  actions,
+  blocked = false,
+  preferred,
+  workspaceRecovery,
+  workspaceRecoveryReadyApplies = true,
+  workspaceRecoveryStatusCheck = "idle",
+}: RecoveryActionsProps): RecoveryActionsView {
   const warnings = [
     ...new Set(
       actions.flatMap((action) =>
@@ -50,6 +70,9 @@ export function RecoveryActions({
       ),
     ),
   ].filter(Boolean);
+  const disclosures = [
+    ...new Set(actions.flatMap((action) => (action.disclosure ? [action.disclosure] : []))),
+  ];
   const primaryKind = selectPrimaryRecoveryAction(
     actions.filter((action) => !action.disabled).map((action) => action.kind),
     blocked,
@@ -57,15 +80,102 @@ export function RecoveryActions({
   const primary = actions.find(
     (action) => action.kind === (preferred ?? primaryKind) && !action.disabled,
   );
-  if (blocked || !actions.length) return null;
+  const recoveryInProgress = Boolean(workspaceRecovery?.runner_live);
+  const recoveryAlreadyReady = isRelocationAlreadyReady(
+    workspaceRecovery,
+    workspaceRecoveryReadyApplies,
+    actions,
+  );
+  const statusUnresolved = workspaceRecoveryStatusCheck !== "idle";
+  const controlsBlocked = blocked || recoveryInProgress || statusUnresolved || recoveryAlreadyReady;
   const ordered = primary ? [primary, ...actions.filter((action) => action !== primary)] : actions;
+  return {
+    warnings,
+    disclosures,
+    primary,
+    ordered,
+    controlsBlocked,
+    shouldHide:
+      recoveryAlreadyReady ||
+      ((blocked || !actions.length) && !workspaceRecovery && !statusUnresolved),
+  };
+}
+
+function isRelocationAlreadyReady(
+  projection: WorkspaceRecoveryProjection | null | undefined,
+  readyApplies: boolean,
+  actions: RecoveryChoice[],
+) {
+  return (
+    Boolean(projection?.agent_ready && readyApplies) &&
+    actions.some((action) => action.kind === "relocate_and_resume")
+  );
+}
+
+export function RecoveryActions(props: RecoveryActionsProps) {
+  const warningId = useId();
+  const view = buildRecoveryActionsView(props);
+  if (view.shouldHide && !props.trailingActions) return null;
   return (
     <div>
-      <div
-        className="mt-3 flex min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center"
-        aria-busy={busy || undefined}
-      >
-        {ordered.map((action) => (
+      <WorkspaceRecoveryProgress
+        projection={props.workspaceRecovery}
+        repositoryName={props.workspaceRecoveryRepositoryName}
+        statusCheck={props.workspaceRecoveryStatusCheck}
+        onCheckStatus={props.onCheckWorkspaceRecoveryStatus}
+      />
+      <RecoveryDisclosures disclosures={view.disclosures} />
+      <RecoveryChoiceButtons
+        actions={view.ordered}
+        primary={view.primary}
+        busy={props.busy}
+        controlsBlocked={view.controlsBlocked}
+        warningId={warningId}
+        trailingActions={props.trailingActions}
+      />
+      <RecoveryWarnings id={warningId} warnings={view.warnings} />
+      <RecoveryBusyStatus busy={props.busy ?? false} busyAction={props.busyAction} />
+    </div>
+  );
+}
+
+function RecoveryDisclosures({ disclosures }: { disclosures: string[] }) {
+  return disclosures.map((disclosure) => (
+    <p
+      key={disclosure}
+      data-testid="provider-restored-resume-disclosure"
+      className="mt-2 max-w-prose break-words text-xs text-muted-foreground"
+    >
+      {disclosure}
+    </p>
+  ));
+}
+
+function RecoveryChoiceButtons({
+  actions,
+  primary,
+  busy,
+  controlsBlocked,
+  warningId,
+  trailingActions,
+}: {
+  actions: RecoveryChoice[];
+  primary?: RecoveryChoice;
+  busy?: boolean;
+  controlsBlocked: boolean;
+  warningId: string;
+  trailingActions?: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "mt-3 flex min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center",
+        controlsBlocked && !trailingActions && "hidden",
+      )}
+      aria-busy={busy || undefined}
+    >
+      {(!controlsBlocked || !trailingActions) &&
+        actions.map((action) => (
           <Button
             key={action.kind}
             type="button"
@@ -74,7 +184,7 @@ export function RecoveryActions({
             aria-describedby={action.tooltip ? warningId : undefined}
             title={action.tooltip ? sanitizeSessionErrorDetails(action.tooltip) : undefined}
             data-recommended={action === primary}
-            disabled={busy || action.disabled}
+            disabled={busy || action.disabled || controlsBlocked}
             onClick={action.onClick}
             data-testid={action.testId}
             className={controlSizingClassName(
@@ -86,29 +196,45 @@ export function RecoveryActions({
             {action.label}
           </Button>
         ))}
-      </div>
-      {warnings.length > 0 && (
-        <p id={warningId} className="mt-2 wrap-anywhere text-xs text-muted-foreground">
-          {warnings.join(" ")}
-        </p>
+      {trailingActions}
+    </div>
+  );
+}
+
+function RecoveryWarnings({ id, warnings }: { id: string; warnings: string[] }) {
+  if (!warnings.length) return null;
+  return (
+    <p id={id} className="mt-2 wrap-anywhere text-xs text-muted-foreground">
+      {warnings.join(" ")}
+    </p>
+  );
+}
+
+function RecoveryBusyStatus({
+  busy,
+  busyAction,
+}: {
+  busy: boolean;
+  busyAction?: RecoveryActionKind | null;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="status"
+      className={cn(
+        "flex items-center gap-2 text-xs text-muted-foreground",
+        busy && "mt-2 min-h-5",
       )}
-      <div
-        role="status"
-        className={cn(
-          "flex items-center gap-2 text-xs text-muted-foreground",
-          busy && "mt-2 min-h-5",
-        )}
-      >
-        {busy && (
-          <>
-            <IconLoader2
-              aria-hidden="true"
-              className="size-3.5 animate-spin motion-reduce:animate-none"
-            />
-            {busyAction ? pendingLabel(busyAction, t) : t("task:workflowMovePreviewChecking")}
-          </>
-        )}
-      </div>
+    >
+      {busy && (
+        <>
+          <IconLoader2
+            aria-hidden="true"
+            className="size-3.5 animate-spin motion-reduce:animate-none"
+          />
+          {busyAction ? pendingLabel(busyAction, t) : t("task:workflowMovePreviewChecking")}
+        </>
+      )}
     </div>
   );
 }
@@ -120,6 +246,8 @@ function RecoveryActionIcon({ kind }: { kind: RecoveryActionKind }) {
     runtime_retry: IconRefresh,
     resume_new_branch: IconGitBranch,
     relocate_and_resume: IconFolder,
+    continue_from_history: IconPlayerPlay,
+    retry_connection: IconRefresh,
     resume: IconPlayerPlay,
   };
   const Icon = icons[kind];
@@ -129,6 +257,7 @@ function RecoveryActionIcon({ kind }: { kind: RecoveryActionKind }) {
 function pendingLabel(action: RecoveryActionKind, t: ReturnType<typeof useTranslation>["t"]) {
   if (action === "restore") return t("task:restoring");
   if (action === "fresh_start") return t("task:starting");
+  if (action === "retry_connection") return t("task:retryingConnection");
   if (action === "runtime_retry") return t("task:retrying");
   return t("task:resuming");
 }

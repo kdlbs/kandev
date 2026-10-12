@@ -34,19 +34,21 @@ Agent-facing prompt expansion and persistence are unchanged.
   `apps/web/components/task/chat/messages/` owns the prompt chip, prompt lookup,
   and Markdown component factory currently embedded in `chat-message.tsx`.
   It exposes both the Markdown components used by rich transcript content and a
-  text-segment renderer for single-line Prompt history rows.
+  text-segment renderer for single-line prompt rows, exposed to plugins as
+  `host.ui.PromptMentionText`.
 - `ChatMessage` consumes the shared factory for the existing transcript user
   bubble. Its entity-reference component composition remains transcript-owned.
 - `AnchoredLastPromptBar` passes the shared prompt components to
   `MemoizedMarkdown` after stripping system tags, preserving the existing
   Markdown renderer and height/overflow behavior.
-- `PromptHistoryPanelContent` uses the shared text-segment renderer in both
-  the collapsed and expanded row content. The row keeps its current text span,
-  truncation measurement, expansion cap, navigation, and touch sizing. Content-
-  bearing chips remain keyboard-focusable and intercept activation so keyboard
-  and touch preview access does not navigate the row. Chips rendered inside
-  Markdown links are visual-only, avoiding nested interactive semantics while
-  preserving link activation.
+- `host.ui.PromptMentionText` routes plugin text through the shared segment
+  renderer so a plugin's prompt rows use the same chips. When `interactive` is
+  enabled, content-bearing chips remain keyboard-focusable and handle their own
+  preview activation. Plugin row navigation remains a separate row control.
+  Chips rendered inside Markdown links are visual-only, avoiding nested
+  interactive semantics while preserving link activation. The built-in panel
+  that previously used this renderer is removed by
+  [Prompt History Extraction](../../plugins/system-design/prompt-history-extraction.md).
 - `MemoizedMarkdown` remains the common Markdown renderer and continues to
   normalize content through its existing cache. The change does not add raw HTML
   or alter the Markdown safety policy.
@@ -60,8 +62,8 @@ test ID and `data-prompt-name` attribute. Unknown aliases remain text.
 
 The shared Markdown factory accepts optional entity-reference components so the
 transcript can preserve its current entity chip behavior, while pinned content
-(which has no message metadata) and history rows use the empty entity-reference
-set.
+(which has no message metadata) and plugin text rows use the empty
+entity-reference set.
 
 ## Control flow
 
@@ -70,8 +72,9 @@ set.
    boundary and name rules, excluding code spans and link destinations.
 3. Rich Markdown surfaces pass the shared component map to `MemoizedMarkdown`,
    which injects prompt chips into supported Markdown block children.
-4. Prompt history passes each plain row text through the shared segment renderer,
-   preserving the row's single-line CSS measurement and expanded layout.
+4. `host.ui.PromptMentionText` passes plugin row text through the shared
+   segment renderer, so a plugin keeps its own single-line layout and
+   expansion behavior while the chip itself comes from the Host.
 5. A chip looks up its current saved prompt by name. Existing non-empty prompts
    receive the hover preview; empty or missing content receives the existing
    title-only chip.
@@ -96,8 +99,7 @@ handling is introduced.
 
 No new runtime metrics or logs are required. Unit coverage will assert shared
 recognized/unknown behavior and surface-specific rendering; existing anchored
-bar, ChatMessage, and Prompt history E2E coverage remains the behavioral smoke
-signal.
+bar and ChatMessage coverage remains the behavioral smoke signal.
 
 ## Task creation editor
 

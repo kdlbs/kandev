@@ -43,8 +43,23 @@ type Registry struct {
 // used by host-local managed-runtime recovery probes.
 func (r *Registry) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.managedRuntimeSelections = store
+	registered := make([]agents.Agent, 0, len(r.agents))
+	for _, ag := range r.agents {
+		registered = append(registered, ag)
+	}
+	r.mu.Unlock()
+	reader, ok := store.(managedruntime.OpenCodeSelectionReader)
+	if !ok {
+		return
+	}
+	for _, ag := range registered {
+		if aware, ok := ag.(interface {
+			SetOpenCodeSelectionReader(managedruntime.OpenCodeSelectionReader)
+		}); ok {
+			aware.SetOpenCodeSelectionReader(reader)
+		}
+	}
 }
 
 func (r *Registry) managedRuntimeSelectionReader() managedruntime.SelectionReader {
@@ -81,6 +96,7 @@ func (r *Registry) LoadDefaults(codexAppServerEnabled ...bool) {
 		agents.NewPiACP(),
 		agents.NewCursorACP(),
 		agents.NewKimiACP(),
+		agents.NewMiniMaxACP(),
 		agents.NewKiroACP(),
 		agents.NewQoderACP(),
 		agents.NewTraeACP(),

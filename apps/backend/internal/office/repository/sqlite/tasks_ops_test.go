@@ -167,6 +167,9 @@ func TestUpdateTaskPriorityAndProjectID(t *testing.T) {
 func TestUpdateTaskParentID_NormalisesInheritParentWorkspace(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
+	if _, err := repo.ExecRaw(ctx, `INSERT INTO tasks(id,workspace_id,title) VALUES ('new-parent','ws-1','Parent')`); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := repo.ExecRaw(ctx, `
 		INSERT INTO tasks (id, workspace_id, parent_id, title, metadata, created_at, updated_at) VALUES
@@ -227,6 +230,9 @@ func TestUpdateTaskParentID_NormalisesInheritParentWorkspace(t *testing.T) {
 func TestUpdateTaskParentID_SameParentIsANoOpForWorkspaceMode(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
+	if _, err := repo.ExecRaw(ctx, `INSERT INTO tasks(id,workspace_id,title) VALUES ('parent-1','ws-1','Parent')`); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := repo.ExecRaw(ctx, `
 		INSERT INTO tasks (id, workspace_id, parent_id, title, metadata, created_at, updated_at)

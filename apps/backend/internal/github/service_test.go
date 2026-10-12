@@ -481,12 +481,12 @@ func TestComputeOverallCheckStatus(t *testing.T) {
 			"success",
 		},
 		{
-			"cancelled conclusion counts as failure",
+			"cancelled conclusion is ignored",
 			[]CheckRun{
 				{Status: "completed", Conclusion: "success"},
 				{Status: "completed", Conclusion: "cancelled"},
 			},
-			"failure",
+			"success",
 		},
 		{
 			"timed_out conclusion counts as failure",

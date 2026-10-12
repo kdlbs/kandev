@@ -2,9 +2,12 @@
 // scroll-to-start); the anchored bar is a desktop-only affordance and never
 // renders on mobile, even when "Show anchored prompt bar" is enabled.
 import { test, expect } from "../../fixtures/test-base";
+import { SessionPage } from "../../pages/session-page";
 import {
   FIRST_PROMPT_MARKER,
   LAST_PROMPT_MARKER,
+  expectPromptAlignedAtStart,
+  persistedLastPromptId,
   seedScrolledPastLastPrompt,
 } from "./last-prompt-scroll-helpers";
 
@@ -49,4 +52,41 @@ test("mobile falls back to the scroll buttons even with the anchored bar configu
   await expect(startButton).toBeVisible();
   await startButton.click();
   await expect(firstMarker).toBeInViewport({ timeout: 10_000 });
+});
+
+test("phone reaches an unloaded last prompt without rendering the desktop bar", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(150_000);
+  await apiClient.saveUserSettings({ show_anchored_prompt_bar: true });
+  let sessionId = "";
+  const session = await seedScrolledPastLastPrompt(
+    testPage,
+    apiClient,
+    seedData,
+    "unloaded-last-prompt-phone",
+    {
+      sendViaButton: true,
+      trailingFillerCount: 120,
+      onSessionId: (id) => {
+        sessionId = id;
+      },
+    },
+  );
+  const promptId = await persistedLastPromptId(apiClient, sessionId);
+  await testPage.reload();
+  await session.waitForLoad();
+  await session.waitForChatIdle({ timeout: 30_000 });
+
+  const chat = new SessionPage(testPage).activeChat();
+  const row = chat.locator(`#msg-${promptId}`);
+  await expect(chat.getByTestId("anchored-last-prompt-bar")).toHaveCount(0);
+  await expect(row).toHaveCount(0);
+  const control = chat.getByTestId("scroll-to-last-prompt-button");
+  await expect(control).toBeVisible({ timeout: 15_000 });
+  await control.click();
+  await expect(row).toHaveCount(1);
+  await expectPromptAlignedAtStart(row);
 });

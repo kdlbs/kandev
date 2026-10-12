@@ -1,14 +1,25 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { SessionUsageTotals, UsageTurn } from "@/lib/types/conversation-usage";
 
 const mocks = vi.hoisted(() => ({
-  touch: true,
+  isMobile: false,
+  isFinePointer: true,
+  touchDrawer: false,
   loadTurnDetail: vi.fn(),
   usage: null as unknown,
 }));
 
-vi.mock("@/hooks/use-compact-task-chrome", () => ({ useTouchDrawer: () => mocks.touch }));
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({
+    isMobile: mocks.isMobile,
+    isFinePointer: mocks.isFinePointer,
+  }),
+}));
+vi.mock("@/hooks/use-compact-task-chrome", () => ({
+  useTouchDrawer: () => mocks.touchDrawer,
+}));
 vi.mock("@/hooks/domains/session/use-conversation-usage", () => ({
   useConversationUsage: () =>
     mocks.usage ?? {
@@ -116,13 +127,33 @@ import { ConversationUsageDisplay } from "./conversation-usage-display";
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-  mocks.touch = true;
+  mocks.isMobile = false;
+  mocks.isFinePointer = true;
+  mocks.touchDrawer = false;
   mocks.usage = null;
 });
 
 describe("ConversationUsageDisplay", () => {
+  it("shows an icon-only desktop trigger with its accessible Usage name", () => {
+    render(
+      <TooltipProvider>
+        <ConversationUsageDisplay taskId="task-1" sessionId="session-1" />
+      </TooltipProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Usage" });
+    expect(trigger.textContent).toBe("");
+    expect(trigger.className).toContain("h-6");
+    expect(trigger.className).toContain("w-6");
+  });
+
   it("opens the touch drawer with the latest usage and requests persisted response detail", () => {
-    render(<ConversationUsageDisplay taskId="task-1" sessionId="session-1" />);
+    mocks.touchDrawer = true;
+    render(
+      <TooltipProvider>
+        <ConversationUsageDisplay taskId="task-1" sessionId="session-1" />
+      </TooltipProvider>,
+    );
     const trigger = screen.getByTestId("conversation-usage-trigger");
 
     expect(trigger.className).toContain("h-11");
@@ -138,7 +169,42 @@ describe("ConversationUsageDisplay", () => {
     expect(closeButtons.at(-1)?.className).toContain("min-h-11");
   });
 
+  it("uses the phone drawer and touch-sized trigger at a narrow fine-pointer breakpoint", () => {
+    mocks.isMobile = true;
+    render(
+      <TooltipProvider>
+        <ConversationUsageDisplay taskId="task-1" sessionId="session-1" />
+      </TooltipProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Usage" });
+    expect(trigger.className).toContain("h-11");
+    expect(trigger.className).toContain("w-11");
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole("dialog", { name: "Conversation usage" })).toBeTruthy();
+  });
+
+  it("uses the shared touch drawer policy for a coarse pointer outside the phone breakpoint", () => {
+    mocks.touchDrawer = true;
+    render(
+      <TooltipProvider>
+        <ConversationUsageDisplay taskId="task-1" sessionId="session-1" />
+      </TooltipProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Usage" });
+    expect(trigger.className).toContain("h-11");
+    expect(trigger.className).toContain("w-11");
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole("dialog", { name: "Conversation usage" })).toBeTruthy();
+  });
+});
+
+describe("ConversationUsageDisplay refreshed usage", () => {
   it("keeps the refreshed latest turn ahead of stale loaded detail", () => {
+    mocks.touchDrawer = true;
     const makeTurn = (turnId: string, tokens: number): UsageTurn => {
       const breakdown = {
         input_tokens: tokens,
@@ -204,7 +270,11 @@ describe("ConversationUsageDisplay", () => {
       loadTurnDetail: mocks.loadTurnDetail,
     };
 
-    render(<ConversationUsageDisplay taskId="task-1" sessionId="session-1" />);
+    render(
+      <TooltipProvider>
+        <ConversationUsageDisplay taskId="task-1" sessionId="session-1" />
+      </TooltipProvider>,
+    );
     fireEvent.click(screen.getByTestId("conversation-usage-trigger"));
 
     const summary = screen.getByTestId("usage-turn-summary").textContent;
