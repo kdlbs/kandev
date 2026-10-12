@@ -17,6 +17,21 @@ function setup(props: Partial<Parameters<typeof ReplyForm>[0]> = {}) {
 }
 
 describe("ReplyForm", () => {
+  it("labels each condition field when two cards have reply forms open", () => {
+    const props = { busy: false, serverError: null, onSend: vi.fn(), onCancel: vi.fn() };
+    const { container } = render(
+      <>
+        <ReplyForm {...props} />
+        <ReplyForm {...props} />
+      </>,
+    );
+    const fields = screen.getAllByRole("textbox", { name: LABEL });
+    expect(fields).toHaveLength(2);
+    const labels = Array.from(container.querySelectorAll("label"));
+    expect(labels).toHaveLength(2);
+    labels.forEach((label, index) => expect(label.control).toBe(fields[index]));
+  });
+
   it("focuses the textarea and disables Send reply while empty or whitespace", () => {
     setup();
     expect(document.activeElement).toBe(screen.getByLabelText(LABEL));

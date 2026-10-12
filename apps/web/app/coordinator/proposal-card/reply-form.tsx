@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Field, FieldContent, FieldError, FieldLabel } from "@kandev/ui/field";
@@ -20,6 +20,7 @@ export type ReplyFormProps = {
 
 export function ReplyForm({ busy, serverError, onSend, onCancel }: ReplyFormProps) {
   const { t } = useTranslation();
+  const fieldId = useId();
   const [text, setText] = useState("");
   const textRef = useRef<HTMLTextAreaElement>(null);
   const alertRef = useRef<HTMLDivElement>(null);
@@ -46,9 +47,9 @@ export function ReplyForm({ busy, serverError, onSend, onCancel }: ReplyFormProp
     >
       <Field>
         <FieldContent>
-          <FieldLabel htmlFor="proposal-reply-text">{t("coordinator:replyLabel")}</FieldLabel>
+          <FieldLabel htmlFor={fieldId}>{t("coordinator:replyLabel")}</FieldLabel>
           <Textarea
-            id="proposal-reply-text"
+            id={fieldId}
             className={LONG_TEXT_FIELD_CLASS}
             ref={textRef}
             value={text}

@@ -184,6 +184,10 @@ cd apps/web && pnpm e2e:run tests/coordinator/reply.spec.ts
 
 ## Current integration verification
 
+Reply condition fields now have a per-instance label identity, so two open
+cards keep both textareas accessible by name. A real React regression checks
+both accessible names and each label's control; hosted execution is pending.
+
 Source implementation is present in the current-main integration for PR #4044.
 Review remediation and complete exact-head hosted verification are still in
 progress. Historical contributor CI and focused dependency projections do not
