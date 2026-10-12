@@ -107,6 +107,53 @@ func TestTerminalQueueRecoveryOwnPredecessorAndLiveConflict(t *testing.T) {
 	assertWSError(t, response, ws.ErrorCodeConflict)
 }
 
+func TestTerminalQueueRecoveryDeniesTrustedCrossTaskTarget(t *testing.T) {
+	h, repo, parent, child, predecessor, _ := queueRecoveryFixture(t)
+	ctx := context.Background()
+	caller := &models.TaskSession{ID: "child-caller", TaskID: child.ID, AgentProfileID: "profile", State: models.TaskSessionStateRunning}
+	require.NoError(t, repo.CreateTaskSession(ctx, caller))
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "parent-session", models.TaskSessionStateCompleted, ""))
+	parentSession, err := repo.GetTaskSession(ctx, "parent-session")
+	require.NoError(t, err)
+	queue := h.sessionLauncher.GetMessageQueue()
+	_, err = queue.QueueMessage(ctx, parentSession.ID, parent.ID, "parent private instruction", "", messagequeue.QueuedByAgent, false, nil)
+	require.NoError(t, err)
+	identities := []messagequeue.QueueSessionIdentity{
+		{TaskID: child.ID, SessionID: predecessor.ID, SessionIncarnationID: predecessor.QueueIncarnationID},
+		{TaskID: parent.ID, SessionID: parentSession.ID, SessionIncarnationID: parentSession.QueueIncarnationID},
+	}
+	before := make([]messagequeue.RepositorySnapshot, len(identities))
+	for i, identity := range identities {
+		before[i], err = queue.RecoveryRead(ctx, identity)
+		require.NoError(t, err)
+	}
+	require.Len(t, before[0].Entries, 1)
+	require.Len(t, before[1].Entries, 1)
+	dispatcher := ws.NewDispatcher()
+	h.RegisterHandlers(dispatcher)
+	for _, surface := range []mcpprofile.Surface{mcpprofile.SurfaceKanbanTask, mcpprofile.SurfaceOfficeTask} {
+		t.Run(string(surface), func(t *testing.T) {
+			trusted := mcpscope.WithPrincipal(ctx, mcpscope.Principal{CallerTaskID: child.ID, CallerSessionID: caller.ID, WorkspaceID: child.WorkspaceID, Surface: surface})
+			own := makeWSMessage(t, ws.ActionMCPGetTerminalSessionMessageQueue, map[string]interface{}{"task_id": child.ID, "session_id": predecessor.ID})
+			response, err := dispatcher.Dispatch(trusted, own)
+			require.NoError(t, err)
+			require.Equal(t, ws.MessageTypeResponse, response.Type, string(response.Payload))
+			require.Contains(t, string(response.Payload), "private instruction")
+			foreign := makeWSMessage(t, ws.ActionMCPGetTerminalSessionMessageQueue, map[string]interface{}{"task_id": parent.ID, "session_id": parentSession.ID})
+			response, err = dispatcher.Dispatch(trusted, foreign)
+			require.NoError(t, err)
+			assertWSError(t, response, ws.ErrorCodeForbidden)
+			require.NotContains(t, string(response.Payload), "parent private instruction")
+			require.NotContains(t, string(response.Payload), "fragments")
+			for i, identity := range identities {
+				after, err := queue.RecoveryRead(ctx, identity)
+				require.NoError(t, err)
+				require.Equal(t, before[i], after)
+			}
+		})
+	}
+}
+
 func TestChildQueueRecoverySurfaceAndGraphDenials(t *testing.T) {
 	h, repo, parent, child, session, ctx := queueRecoveryFixture(t)
 	request := makeWSMessage(t, ws.ActionMCPGetChildSessionMessageQueue, map[string]interface{}{"task_id": child.ID, "session_id": session.ID})
