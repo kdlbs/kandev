@@ -178,3 +178,24 @@ func TestCopySQLiteSnapshotAllowsActiveWALWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCopySQLiteSnapshotStopsStalledCopy(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := fileSQLiteDB(t, ":memory:")
+		src.SetMaxOpenConns(1)
+		src.MustExec(`CREATE TABLE items (value TEXT)`)
+		src.MustExec(`BEGIN IMMEDIATE`)
+		src.MustExec(`INSERT INTO items VALUES ('locked')`)
+		path := filepath.Join(t.TempDir(), "stalled.db")
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		_, err := CopySQLiteSnapshotContext(ctx, src, path)
+		if err == nil || errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("copy must stop stalled retries before caller deadline: %v", err)
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("stalled output remains: %v", err)
+		}
+		src.MustExec(`ROLLBACK`)
+	})
+}

@@ -93,3 +93,12 @@ assert partial-file removal and source-connection release, then retry successful
 and verify integrity. TestCopySQLiteSnapshotAllowsActiveWALWriter proves a committed
 snapshot can complete while a separate WAL writer has uncommitted work. Both passed
 under -race (1.04 seconds); fixtures contain only one or two rows.
+
+Persistent contention now fails after five seconds with no copy progress, including
+callers using context.Background. TestCopySQLiteSnapshotStopsStalledCopy first failed
+by reaching its caller deadline, then passed with the finite stall bound. The failure
+includes a clear no-progress reason and removes the incomplete destination.
+
+Post-remediation verification passed: persistence and deliveryretention race suites,
+non-CGO linux/amd64 agentctl build, and full backend golangci-lint against the PR base
+(0 issues). Remote checks remain pending for the next pushed head.

@@ -26,6 +26,7 @@ func TestDeliveryRetentionWorkerDrainsBeforeWaiting(t *testing.T) {
 			defer worker.Stop()
 			select {
 			case calls := <-waited:
+				// Seventy productive batches followed by one exhausted probe.
 				if calls != 71 {
 					t.Fatalf("worker slept before draining backlog: %d of 71 calls", calls)
 				}

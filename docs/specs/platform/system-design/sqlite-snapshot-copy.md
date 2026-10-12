@@ -26,7 +26,9 @@ destination without truncation. Keep source and destination distinct.
 Call destination.Backup("main", source, "main"). Bound each Step by approximately
 4 MiB using the measured source page size. Check context between steps. The driver
 returns false,nil for both progress and BUSY/LOCKED; compare remaining/page counts
-and use a cancellable bounded retry delay for no progress. Completion requires the
+and use a cancellable retry delay for no progress. Abort after five consecutive
+seconds without progress, using the existing SQLite busy-timeout bound, even when
+the caller provides no deadline. Progress resets the stall timer. Completion requires the
 API's done result, not a zero sampled counter. Always Finish and propagate its error;
 close pinned handles before validation or publication. Cancellation and copy errors
 remove only owned incomplete output. Driver mismatch fails closed. Native copy is built only with CGO; non-CGO helper

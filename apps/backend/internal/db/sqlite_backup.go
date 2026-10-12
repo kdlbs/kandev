@@ -86,6 +86,7 @@ func copySQLitePages(ctx context.Context, source, destination *sqlite3.SQLiteCon
 		return err
 	}
 	defer func() { err = errors.Join(err, backup.Finish()) }()
+	lastProgress := time.Now()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -100,6 +101,9 @@ func copySQLitePages(ctx context.Context, source, destination *sqlite3.SQLiteCon
 		}
 		// BUSY/LOCKED return false,nil too. Only wait when the copy did not advance.
 		if backup.Remaining() >= remaining && backup.PageCount() == total {
+			if time.Since(lastProgress) >= defaultBusyTimeout {
+				return fmt.Errorf("SQLite backup made no progress for %s", defaultBusyTimeout)
+			}
 			timer := time.NewTimer(10 * time.Millisecond)
 			select {
 			case <-ctx.Done():
@@ -107,6 +111,8 @@ func copySQLitePages(ctx context.Context, source, destination *sqlite3.SQLiteCon
 				return ctx.Err()
 			case <-timer.C:
 			}
+		} else {
+			lastProgress = time.Now()
 		}
 	}
 }
