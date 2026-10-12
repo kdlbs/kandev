@@ -2,8 +2,11 @@ package sqlite
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -49,6 +52,31 @@ func TestTaskLifecycleReceiptsPersistCreateArchiveUnarchiveAndDelete(t *testing.
 	require.Nil(t, foreign)
 }
 
+func TestTaskLifecycleReceiptSurvivesRepositoryRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "receipt-restart.db")
+	conn, err := db.OpenSQLite(path)
+	require.NoError(t, err)
+	firstDB := sqlx.NewDb(conn, "sqlite3")
+	first, err := NewWithDB(firstDB, firstDB, nil)
+	require.NoError(t, err)
+	seedWorkspace(t, first, "receipt-restart-workspace")
+	require.NoError(t, first.CreateTask(ctx, &models.Task{ID: "receipt-restart-task", WorkspaceID: "receipt-restart-workspace", Title: "persisted"}))
+	require.NoError(t, firstDB.Close())
+
+	conn, err = db.OpenSQLite(path)
+	require.NoError(t, err)
+	secondDB := sqlx.NewDb(conn, "sqlite3")
+	t.Cleanup(func() { _ = secondDB.Close() })
+	second, err := NewWithDB(secondDB, secondDB, nil)
+	require.NoError(t, err)
+	receipt, err := second.GetTaskLifecycleReceipt(ctx, "receipt-restart-workspace", "receipt-restart-task")
+	require.NoError(t, err)
+	require.NotNil(t, receipt)
+	require.Equal(t, "create", receipt.Provenance)
+	require.EqualValues(t, 1, receipt.Revision)
+}
+
 func TestCreateTaskRollsBackWhenLifecycleReceiptWriteFails(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForEntityTests(t)
@@ -60,4 +88,25 @@ func TestCreateTaskRollsBackWhenLifecycleReceiptWriteFails(t *testing.T) {
 	require.Error(t, err)
 	_, err = repo.GetTask(ctx, "receipt-rollback-task")
 	require.Error(t, err, "the task row must roll back with its required receipt")
+}
+
+func TestGetTaskLifecycleReceiptDoesNotMutateStoredReceipt(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForEntityTests(t)
+	seedWorkspace(t, repo, "receipt-read-workspace")
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "receipt-read-task", WorkspaceID: "receipt-read-workspace", Title: "read-only"}))
+
+	var beforeRevision int64
+	var beforeChangedAt string
+	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT revision, changed_at FROM task_lifecycle_receipts WHERE task_id = ?`, "receipt-read-task").Scan(&beforeRevision, &beforeChangedAt))
+	for range 2 {
+		receipt, err := repo.GetTaskLifecycleReceipt(ctx, "receipt-read-workspace", "receipt-read-task")
+		require.NoError(t, err)
+		require.NotNil(t, receipt)
+	}
+	var afterRevision int64
+	var afterChangedAt string
+	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT revision, changed_at FROM task_lifecycle_receipts WHERE task_id = ?`, "receipt-read-task").Scan(&afterRevision, &afterChangedAt))
+	require.Equal(t, beforeRevision, afterRevision)
+	require.Equal(t, beforeChangedAt, afterChangedAt)
 }
