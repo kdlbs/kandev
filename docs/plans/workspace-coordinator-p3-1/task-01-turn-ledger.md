@@ -111,3 +111,5 @@ Review remediation and complete exact-head hosted verification are still in
 progress. Historical contributor CI and focused dependency projections do not
 complete this work order. Merge and completion remain blocked until the full
 integrated suites and every review finding are resolved.
+
+Review integration: worker-owned I/O cancellation now covers call writing, truncation marks, rebuild and delayed completion. Real SQLite writer-pool and PostgreSQL reader/rebuild contention regressions hold the sole connection through Stop and join both callers; full hosted verification is pending.

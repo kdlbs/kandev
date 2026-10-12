@@ -103,7 +103,7 @@ func (l *Ledger) scheduleCompletion(coordinatorID string, te turnEvent, attempt 
 			return
 		case <-timer.C:
 		}
-		l.safe(StageComplete, func() error { return l.complete(context.Background(), coordinatorID, te, attempt) })
+		l.safe(StageComplete, func() error { return l.complete(l.workerCtx, coordinatorID, te, attempt) })
 	}()
 }
 

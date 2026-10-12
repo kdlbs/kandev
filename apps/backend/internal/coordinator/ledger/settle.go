@@ -22,15 +22,7 @@ const (
 
 func (l *Ledger) runJobs() {
 	defer l.wg.Done()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		select {
-		case <-l.stopCh:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
+	ctx := l.workerCtx
 	l.RunDaily(ctx)
 	l.RunPass(ctx)
 	pass, daily := time.NewTicker(passInterval), time.NewTicker(dailyInterval)

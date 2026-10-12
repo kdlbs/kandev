@@ -84,11 +84,13 @@ type Ledger struct {
 	truncMu sync.Mutex
 	events  chan turnJob
 
-	lifeMu  sync.Mutex
-	started bool
-	stopped bool
-	stopCh  chan struct{}
-	wg      sync.WaitGroup
+	lifeMu        sync.Mutex
+	started       bool
+	stopped       bool
+	stopCh        chan struct{}
+	wg            sync.WaitGroup
+	workerCtx     context.Context
+	cancelWorkers context.CancelFunc
 }
 
 type activeEntry struct {
@@ -114,6 +116,7 @@ func New(deps Deps) *Ledger {
 	if l.now == nil {
 		l.now = func() time.Time { return time.Now().UTC() }
 	}
+	l.workerCtx, l.cancelWorkers = context.WithCancel(context.Background())
 	l.calls.init()
 	return l
 }
@@ -132,7 +135,11 @@ func (l *Ledger) Start(ctx context.Context) {
 	l.wg.Add(4)
 	l.lifeMu.Unlock()
 	defer l.wg.Done()
-	l.safe(StageStart, func() error { return l.rebuildActive(ctx) })
+	rebuildCtx, cancel := context.WithCancel(ctx)
+	stopCancellation := context.AfterFunc(l.workerCtx, cancel)
+	defer stopCancellation()
+	defer cancel()
+	l.safe(StageStart, func() error { return l.rebuildActive(rebuildCtx) })
 	go l.runCallWriter()
 	go l.runJobs()
 	go l.runTurnEvents()
@@ -143,6 +150,7 @@ func (l *Ledger) Stop() {
 	l.lifeMu.Lock()
 	if !l.stopped {
 		l.stopped = true
+		l.cancelWorkers()
 		close(l.stopCh)
 	}
 	l.lifeMu.Unlock()

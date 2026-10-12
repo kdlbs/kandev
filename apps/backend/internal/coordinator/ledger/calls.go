@@ -241,7 +241,7 @@ func (l *Ledger) writeOrPark(e callEntry, parked []parkedCall) []parkedCall {
 	}
 	var turnID string
 	l.safe(StageCall, func() error {
-		id, err := l.resolveTurn(context.Background(), e)
+		id, err := l.resolveTurn(l.workerCtx, e)
 		if err != nil {
 			return err
 		}
@@ -249,7 +249,7 @@ func (l *Ledger) writeOrPark(e callEntry, parked []parkedCall) []parkedCall {
 		if id == "" {
 			return nil
 		}
-		return l.insertCall(context.Background(), id, e)
+		return l.insertCall(l.workerCtx, id, e)
 	})
 	if turnID != "" {
 		if !first {
@@ -311,7 +311,7 @@ func (l *Ledger) applyTruncations() {
 	defer l.truncMu.Unlock()
 	for _, id := range l.calls.takeTruncated() {
 		l.safe(StageCall, func() error {
-			_, err := l.deps.DB.ExecContext(context.Background(), l.deps.DB.Rebind(`UPDATE coordinator_turns SET calls_truncated = ? WHERE id = ?`), true, id)
+			_, err := l.deps.DB.ExecContext(l.workerCtx, l.deps.DB.Rebind(`UPDATE coordinator_turns SET calls_truncated = ? WHERE id = ?`), true, id)
 			return err
 		})
 	}

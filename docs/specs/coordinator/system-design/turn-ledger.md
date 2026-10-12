@@ -18,6 +18,8 @@ requirements:
 
 # Coordinator turn ledger System Design
 
+Ledger workers own a cancellable I/O context. Shutdown closes admission, cancels queued database acquisition and active worker reads/writes, then joins registered work. Start rebuild and delayed completion retries share that cancellation boundary. Turn recording never waits on an unrelated request context.
+
 ## Purpose and boundaries
 
 The ledger records one row per coordinator turn plus a call digest and a frozen
