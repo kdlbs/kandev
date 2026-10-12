@@ -29,7 +29,8 @@ returns false,nil for both progress and BUSY/LOCKED; compare remaining/page coun
 and use a cancellable bounded retry delay for no progress. Completion requires the
 API's done result, not a zero sampled counter. Always Finish and propagate its error;
 close pinned handles before validation or publication. Cancellation and copy errors
-remove only owned incomplete output. Driver mismatch fails closed.
+remove only owned incomplete output. Driver mismatch fails closed. Native copy is built only with CGO; non-CGO helper
+binaries retain a stub that reports SQLite backup unavailable without creating a file.
 
 Online callers use a reader/dedicated source connection, avoiding holding the single
 application writer for the entire backup. Startup and offline callers may use their

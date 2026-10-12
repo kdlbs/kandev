@@ -79,3 +79,10 @@ and inventoryrepair; SQL guard; persistence store conformance (53.2 seconds); ta
 changed-package golangci-lint (0 issues). The new startup regression first failed on
 free-page rebuilding, then passed with native copy. All listed documentation and diff
 gates passed. Existing explicit compaction tests passed. No live database mutation.
+
+## CI remediation
+
+Agentctl cross-builds use CGO_ENABLED=0. The native Backup API is absent from that
+driver build. Isolate the implementation behind the cgo build constraint and supply
+an explicit unsupported stub for non-CGO helpers. The failing E2E/preview build was
+reproduced with CGO_ENABLED=0 go build -trimpath ./internal/db. Passed: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/kandev-4433-agentctl ./cmd/agentctl; native persistence backup regressions under -race (1.04 seconds).
