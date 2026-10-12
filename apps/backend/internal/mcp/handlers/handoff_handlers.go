@@ -41,6 +41,32 @@ type relatedReadPayload struct {
 	Verbose          bool   `json:"verbose"`
 }
 
+// handleGetTaskVisibility dispatches mcp.get_task_visibility. It shares the
+// related-read attestation envelope so raw callers cannot forge workspace
+// authority or a caller task identity.
+func (h *Handlers) handleGetTaskVisibility(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if h.handoffSvc == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "handoff service not configured", nil)
+	}
+	var req relatedReadPayload
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	visibility, err := h.handoffSvc.GetTaskVisibilityForRequest(ctx, service.RelatedReadRequest{
+		CallerTaskID: req.CallerTaskID, TargetTaskID: req.TaskID, Scope: service.RelatedReadScope(req.RelatedReadScope),
+	})
+	if err != nil {
+		if reason, ok := service.RelatedReadDenialReasonFor(err); ok {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target unavailable", map[string]interface{}{"reason": string(reason)})
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task visibility lookup failed", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, visibility)
+}
+
 // handleListRelatedTasks dispatches mcp.list_related_tasks.
 func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	if h.handoffSvc == nil {

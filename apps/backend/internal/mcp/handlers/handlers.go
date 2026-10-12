@@ -659,6 +659,7 @@ func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
 	}
 	if h.handoffSvc != nil {
 		d.RegisterFunc(ws.ActionMCPListRelatedTasks, h.handleListRelatedTasks)
+		d.RegisterFunc(ws.ActionMCPGetTaskVisibility, h.handleGetTaskVisibility)
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)

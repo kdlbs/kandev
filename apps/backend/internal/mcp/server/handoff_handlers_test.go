@@ -106,6 +106,28 @@ func TestListRelatedTasks_ToolSchemaExposesVerbose(t *testing.T) {
 	assert.NotContains(t, tool.Tool.Description, "may inspect another task in the same workspace")
 }
 
+// A visibility lookup is deliberately a separate compact tool. It must be
+// available only to the Office task surface, and callers can name just the
+// target task: session, workspace, and scope are backend-attested.
+func TestGetTaskVisibilityToolIsOfficeOnlyAndTakesOnlyTaskID(t *testing.T) {
+	profile := mcpprofile.New(mcpprofile.SurfaceOfficeTask, []mcpprofile.Capability{
+		mcpprofile.CapabilityWorkspaceTaskTreeRead,
+	}, nil)
+	office := NewWithProfile(&testBackend{}, "session-A", "caller-A", 10005, newTestLogger(t), "", false, profile)
+	_, ok := office.mcpServer.ListTools()["get_task_visibility_kandev"]
+	require.True(t, ok)
+
+	props := toolInputProperties(t, office, "get_task_visibility_kandev")
+	assert.Contains(t, props, "task_id")
+	assert.NotContains(t, props, "caller_task_id")
+	assert.NotContains(t, props, "caller_session_id")
+	assert.NotContains(t, props, "workspace_id")
+	assert.NotContains(t, props, "related_read_scope")
+
+	kanban := newTaskModeServer(t, &testBackend{}, "caller-A")
+	assert.NotContains(t, kanban.mcpServer.ListTools(), "get_task_visibility_kandev")
+}
+
 func TestListRelatedTasks_AttestsProfileScopeAndCallerIdentity(t *testing.T) {
 	backend := &testBackend{response: relatedTasksResponse("")}
 	profile := mcpprofile.New(mcpprofile.SurfaceOfficeTask, []mcpprofile.Capability{

@@ -116,6 +116,41 @@ func TestListRelatedTasksDispatcherEnforcesRelatedReadAuthorization(t *testing.T
 	assert.Equal(t, before, snapshotRelatedReadTables(t, repo))
 }
 
+func TestGetTaskVisibilityDispatcherReturnsCompactReceiptAndHidesForeignTargets(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	log := testLogger(t)
+	handoff := service.NewHandoffService(repo, repo, nil, nil, nil, log)
+	handlers := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
+	handlers.SetHandoffService(handoff)
+	dispatcher := ws.NewDispatcher()
+	handlers.RegisterHandlers(dispatcher)
+	seedRelatedReadTasks(t, repo)
+
+	call := func(taskID string) *ws.Message {
+		response, err := dispatcher.Dispatch(context.Background(), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
+			"task_id": taskID, "caller_task_id": "child-a", "caller_session_id": "session-caller",
+			"related_read_scope": "workspace-task-tree", "mcp_surface": "office-task",
+		}))
+		require.NoError(t, err)
+		return response
+	}
+
+	allowed := call("stranger")
+	require.Equal(t, ws.MessageTypeResponse, allowed.Type)
+	var projection service.TaskVisibility
+	require.NoError(t, json.Unmarshal(allowed.Payload, &projection))
+	assert.Equal(t, 1, projection.SchemaVersion)
+	assert.Equal(t, "stranger", projection.TaskID)
+	assert.Equal(t, "active", projection.Visibility.Disposition)
+	assert.Empty(t, projection.Identity.Identifier)
+
+	foreign := call("foreign")
+	missing := call("not-a-task")
+	require.Equal(t, ws.MessageTypeError, foreign.Type)
+	require.Equal(t, ws.MessageTypeError, missing.Type)
+	assert.Equal(t, string(foreign.Payload), string(missing.Payload))
+}
+
 func TestListRelatedTasksDispatcherRejectsExplicitTargetWithoutAttestedIdentity(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	log := testLogger(t)

@@ -54,6 +54,19 @@ func (s *Server) registerRelatedTasksTool() {
 	)
 }
 
+// registerTaskVisibilityTool registers the compact lifecycle projection for a
+// Coordinator's same-workspace task lookup. The caller identity and scope are
+// derived from the MCP profile, never supplied by the tool caller.
+func (s *Server) registerTaskVisibilityTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_task_visibility_kandev",
+			mcp.WithDescription("Get a compact task lifecycle/disposition receipt for an exact task in the Coordinator's workspace. This Office-only tool returns no descriptions, documents, sessions, or task metadata. Foreign and unavailable targets are intentionally indistinguishable."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("Exact target task UUID.")),
+		),
+		s.wrapHandler("get_task_visibility_kandev", s.getTaskVisibilityHandler()),
+	)
+}
+
 // registerTaskDocumentTools registers the cross-task document tools used for
 // office parent/child coordination: list_task_documents_kandev,
 // get_task_document_kandev, write_task_document_kandev. These are office-only
@@ -134,6 +147,31 @@ func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 		// it is not an authorization boundary.
 		if !verbose {
 			stripRelatedTaskDescriptions(result)
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) getTaskVisibilityHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		if s.taskID == "" || s.sessionID == "" {
+			return backendErrorToolResult(&BackendError{
+				Code: ws.ErrorCodeForbidden, Message: "task visibility access denied",
+				Details: map[string]interface{}{"reason": "target_unavailable"},
+			}), nil
+		}
+		payload := map[string]string{
+			"task_id": taskID, "caller_task_id": s.taskID, "caller_session_id": s.sessionID,
+			"mcp_surface": string(s.Profile().Surface), "related_read_scope": s.relatedReadScope(),
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskVisibility, payload, &result); err != nil {
+			return backendErrorToolResult(err), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil

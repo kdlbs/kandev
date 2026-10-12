@@ -738,6 +738,22 @@ func (r *Repository) initTaskSchema() error {
 		updated_at TIMESTAMP NOT NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS task_lifecycle_receipts (
+		task_id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		identifier TEXT NOT NULL DEFAULT '',
+		title TEXT NOT NULL DEFAULT '',
+		workflow_id TEXT NOT NULL DEFAULT '',
+		workflow_step_id TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL DEFAULT '',
+		disposition TEXT NOT NULL,
+		changed_at TIMESTAMP NOT NULL,
+		revision BIGINT NOT NULL,
+		provenance TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_lifecycle_receipts_workspace_task
+		ON task_lifecycle_receipts(workspace_id, task_id);
+
 	CREATE TABLE IF NOT EXISTS repositories (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,

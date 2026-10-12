@@ -281,6 +281,9 @@ func (r *Repository) CreateTaskWithWorkflowStepAdmission(
 	if err != nil {
 		return err
 	}
+	if err := r.recordTaskLifecycleReceipt(ctx, tx, task, "active", "create", task.CreatedAt); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -386,6 +389,9 @@ func (r *Repository) createTask(ctx context.Context, task *models.Task, targetSt
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return fmt.Errorf("failed to rollback task insert: %w", rollbackErr)
 		}
+		return err
+	}
+	if err := r.recordTaskLifecycleReceipt(ctx, tx, task, "active", "create", task.CreatedAt); err != nil {
 		return err
 	}
 
@@ -1062,6 +1068,11 @@ func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, ex
 	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, preservePosition, protectDeferredLaunch, nil)
 	if err != nil {
 		return err
+	}
+	if task.FromWorkflowID != "" && (task.FromWorkflowID != task.WorkflowID || task.FromStepID != task.WorkflowStepID) {
+		if err := r.recordTaskLifecycleReceipt(ctx, tx, task, "active", "move", task.UpdatedAt); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -3697,6 +3708,13 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 	if err := r.validateTaskDeletionTx(ctx, tx, id, claim); err != nil {
 		return "", err
 	}
+	visibilityTask, err := r.taskLifecycleSnapshotInTx(ctx, tx, id)
+	if err != nil {
+		return "", err
+	}
+	if visibilityTask == nil {
+		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {
 		return "", err
@@ -3715,6 +3733,9 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+	}
+	if err := r.recordTaskLifecycleReceipt(ctx, tx, visibilityTask, "deleted", "delete", time.Now().UTC()); err != nil {
+		return "", err
 	}
 	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions, true); err != nil {
 		return "", err
@@ -4717,6 +4738,13 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
 		return err
 	}
+	visibilityTask, err := r.taskLifecycleSnapshotInTx(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if visibilityTask == nil {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`), now, now, id)
 	if err != nil {
 		return err
@@ -4724,6 +4752,10 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+	}
+	visibilityTask.UpdatedAt = now
+	if err := r.recordTaskLifecycleReceipt(ctx, tx, visibilityTask, "archived", "archive", now); err != nil {
+		return err
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {
@@ -4813,8 +4845,19 @@ func (r *Repository) ArchiveTaskExact(
 	if err := r.checkTaskManagementClaimFence(ctx, tx, taskID, fence); err != nil {
 		return false, err
 	}
+	visibilityTask, err := r.taskLifecycleSnapshotInTx(ctx, tx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if visibilityTask == nil {
+		return false, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`), now, now, taskID); err != nil {
+		return false, err
+	}
+	visibilityTask.UpdatedAt = now
+	if err := r.recordTaskLifecycleReceipt(ctx, tx, visibilityTask, "archived", "archive", now); err != nil {
 		return false, err
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, taskID)
@@ -4980,6 +5023,13 @@ func (r *Repository) ArchiveTaskIfActiveWithVacatedStep(
 	if !found {
 		return "", false, tx.Commit()
 	}
+	visibilityTask, err := r.taskLifecycleSnapshotInTx(ctx, tx, id)
+	if err != nil {
+		return "", false, err
+	}
+	if visibilityTask == nil {
+		return "", false, tx.Commit()
+	}
 	now := time.Now().UTC()
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET archived_at = ?, archived_by_cascade_id = ?, updated_at = ?
@@ -4991,6 +5041,10 @@ func (r *Repository) ArchiveTaskIfActiveWithVacatedStep(
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return "", false, tx.Commit()
+	}
+	visibilityTask.UpdatedAt = now
+	if err := r.recordTaskLifecycleReceipt(ctx, tx, visibilityTask, "archived", "archive", now); err != nil {
+		return "", false, err
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {
@@ -5181,14 +5235,28 @@ func (r *Repository) UnarchiveTaskByCascade(ctx context.Context, id, cascadeID s
 	if err := r.ensureArchiveCleanupAbsentInTx(ctx, tx, id); err != nil {
 		return false, err
 	}
+	visibilityTask, err := r.taskLifecycleSnapshotInTx(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+	if visibilityTask == nil {
+		return false, nil
+	}
+	now := time.Now().UTC()
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET archived_at = NULL, archived_by_cascade_id = '', updated_at = ?
 		WHERE id = ? AND archived_by_cascade_id = ?
-	`), time.Now().UTC(), id, cascadeID)
+	`), now, id, cascadeID)
 	if err != nil {
 		return false, err
 	}
 	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		visibilityTask.UpdatedAt = now
+		if err := r.recordTaskLifecycleReceipt(ctx, tx, visibilityTask, "active", "unarchive", now); err != nil {
+			return false, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
@@ -5223,15 +5291,29 @@ func (r *Repository) UnarchiveTask(ctx context.Context, id string) (bool, error)
 	if err := r.ensureArchiveCleanupAbsentInTx(ctx, tx, id); err != nil {
 		return false, err
 	}
+	visibilityTask, err := r.taskLifecycleSnapshotInTx(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+	if visibilityTask == nil {
+		return false, nil
+	}
+	now := time.Now().UTC()
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET archived_at = NULL, archived_by_cascade_id = '', updated_at = ?
 		WHERE id = ? AND archived_at IS NOT NULL
 			AND (archived_by_cascade_id = '' OR archived_by_cascade_id IS NULL)
-	`), time.Now().UTC(), id)
+	`), now, id)
 	if err != nil {
 		return false, err
 	}
 	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		visibilityTask.UpdatedAt = now
+		if err := r.recordTaskLifecycleReceipt(ctx, tx, visibilityTask, "active", "unarchive", now); err != nil {
+			return false, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
