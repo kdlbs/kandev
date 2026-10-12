@@ -246,3 +246,18 @@ The final review regression run passed all 20 renderer/state/file-target tests
 across three files, and targeted lint passed. Public documentation validation,
 specification catalog/lint and diff whitespace checks passed. No production
 renderer change was made; the authentication reset remains intentional.
+
+Browser CI follow-up: the workspace menu no longer acquires a second modal
+pointer lock inside the task picker. Changing workspace can unmount the menu;
+the parent drawer retains modal ownership and releases its lock on dismissal.
+The original mobile reconnect case failed six of ten local repeats. The
+strengthened fixture verifies the open drawer still blocks background input
+and that dismissal restores it. A separate trace proved the fixture began
+switching before WebSocket reconnection invalidated its read journal; it now
+awaits the connected state while keeping old workspace responses held.
+
+With retries disabled, the corrected recovery case passed ten phone repeats
+and five desktop repeats. Seven neighboring phone tests passed, including
+shared-state pagination, workspace isolation, saved views and Quick Chat
+cancellation. Targeted lint and formatting passed. Temporary store probes
+were removed; no production read-reconciliation boundary was changed.
