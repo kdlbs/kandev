@@ -73,8 +73,9 @@ returns, avoiding a pool-close race with in-flight SQL.
 
 ## Persistence safety
 
-Keep `VACUUM INTO`, version-based backup eligibility, and two-snapshot retention.
-Context cancellation applies to the backup SQL. Repository initialization failure
+Keep version-based backup eligibility and two-snapshot retention. The
+[snapshot copy design](sqlite-snapshot-copy.md) replaces backup-time compaction with
+bounded native page copying and retains full integrity validation. Repository initialization failure
 must release previously constructed resources; a completed backup remains intact.
 The successful version marker stays behind the final persistence/router gates.
 

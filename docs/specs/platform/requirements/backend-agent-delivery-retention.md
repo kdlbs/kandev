@@ -79,6 +79,8 @@ Implementation is in progress. The paired [design](../system-design/backend-agen
 - **AC-PLATFORM-DELIVERY-RETENTION-005.4:** Logical cleanup shall not claim physical file shrinkage or secure erasure. Physical reclamation shall use the established database-specific maintenance contract.
 - **AC-PLATFORM-DELIVERY-RETENTION-005.5:** Protected-only discovery pages shall not prevent later eligible output from being visited. Cleanup shall persist fair progress while retaining its transaction, payload, pass-duration and cancellation limits.
 
+- **AC-PLATFORM-DELIVERY-RETENTION-005.6:** When bounded work remains after a productive pass, cleanup shall continue immediately without artificial inter-batch or inter-pass sleeps while preserving all work limits and maintenance priority. The worker shall begin when its normal lifecycle admits it without an additional startup timer. Exhausted or busy-only passes shall return to the configured idle cadence; errors retain bounded backoff.
+
 ### REQ-PLATFORM-DELIVERY-RETENTION-006: Upgrade, operations and surface parity
 
 **Intent:** Provide automatic safe cleanup on both supported database engines with clear operational limits.
@@ -98,6 +100,10 @@ The [historical payload reclamation plan](../../../plans/legacy-delivery-payload
 addresses independently committed output held by legacy settlement gaps. Its
 [payload proof design](../system-design/backend-agent-delivery-retention-payloads.md)
 clarifies eligibility without weakening protected terminal or replay boundaries.
+
+The [throughput design](../system-design/backend-agent-delivery-retention-throughput.md)
+and [delivery plan](../../../plans/database-maintenance-throughput/plan.md) define
+productive continuation scheduling.
 
 ## Out of scope
 

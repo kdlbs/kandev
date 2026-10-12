@@ -548,9 +548,9 @@ Unprojected events, uncertain prompts, pending claims, and incomplete terminal o
 Archive and Stop preserve this evidence. Explicit deletion retires the session identity and schedules bounded removal of its delivery records.
 Protected backlog and canonical history can continue to grow. Retention is not a database quota.
 
-Cleanup starts after the first normal interval, which defaults to one minute.
+Cleanup starts when the background worker starts, without an initial delay.
 Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
-Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, with a 100 ms pause between batches. Frontier wrap alone does not repeat a phase. A pass starts no further batch after five seconds.
+Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, without artificial sleeps between batches. Frontier wrap alone does not repeat a phase. Passes are bounded to five seconds. When productive work remains, the next pass starts immediately; exhausted or busy-only passes wait for the configured idle interval (one minute by default). Errors use bounded retry backoff.
 SQLite native writer admission can wait through its existing five-second busy timeout after cancellation.
 Stop joins that work before database closure. The 250 ms deadline is not a wall-clock completion promise during contention.
 Startup [configuration](configuration.md#backend-delivery-retention) controls grace, replay limits, cadence, and batch size.
@@ -568,7 +568,7 @@ deletion is needed. Large backlogs take multiple passes; unresolved recovery evi
 and canonical history remain protected.
 
 **Preserve a verified pre-pruning backup before the pruning upgrade.** Removed transport payloads cannot be restored within the live database.
-SQLite version changes create a `VACUUM INTO` snapshot before migration.
+SQLite version changes create a consistent page-copy snapshot before migration and verify its integrity. Backup copying does not rebuild the database or reclaim free pages; explicit physical compaction remains separate.
 Automatic rotation retains only the newest two snapshots. Copy the verified pre-pruning snapshot outside that directory.
 PostgreSQL has no automatic upgrade snapshot. Create a `pg_dump` before the upgrade and verify restoration into an isolated database.
 

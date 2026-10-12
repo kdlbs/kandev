@@ -114,7 +114,7 @@ func (s *Service) runFactoryReset(ctx context.Context) (map[string]interface{}, 
 	}, nil
 }
 
-// createPreResetSnapshot performs VACUUM INTO into a stable, time-stamped
+// createPreResetSnapshot copies a consistent image into a stable, time-stamped
 // path inside the backups directory. The "kandev-" prefix is kept so the
 // existing backup retention regex continues to match the file.
 func (s *Service) createPreResetSnapshot(ctx context.Context) (string, error) {
@@ -127,8 +127,8 @@ func (s *Service) createPreResetSnapshot(ctx context.Context) (string, error) {
 	}
 	name := fmt.Sprintf("kandev-pre-reset-%s.db", strconv.FormatInt(time.Now().UTC().Unix(), 10))
 	path := filepath.Join(backupDir, name)
-	if _, err := persistence.SnapshotSQLiteContext(ctx, s.pool.Writer(), path); err != nil {
-		return "", fmt.Errorf("vacuum into %s: %w", path, err)
+	if _, err := persistence.CopySQLiteSnapshotContext(ctx, s.pool.Reader(), path); err != nil {
+		return "", fmt.Errorf("copy snapshot %s: %w", path, err)
 	}
 	if s.log != nil {
 		s.log.Info("pre-reset snapshot created", zap.String("path", path))

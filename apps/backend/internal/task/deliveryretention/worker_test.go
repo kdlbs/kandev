@@ -17,7 +17,7 @@ import (
 func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
 
 func TestDeliveryRetentionWorker(t *testing.T) {
-	t.Run("delays work and can restart", func(t *testing.T) {
+	t.Run("starts immediately and can restart", func(t *testing.T) {
 		clock := newFakeClock()
 		repo := &workerRepository{calls: make(chan string, 8)}
 		pool := db.NewPool(nil, nil)
@@ -28,12 +28,11 @@ func TestDeliveryRetentionWorker(t *testing.T) {
 		if err := worker.Start(ctx); err != nil {
 			t.Fatal(err)
 		}
-		fireAfter(t, clock, initialDelay)
 		if name := receiveCall(t, repo.calls); name != "retention" {
 			t.Fatalf("first repository call = %q", name)
 		}
-		if delay := receiveDelay(t, clock); delay != betweenBatches {
-			t.Fatalf("inter-batch delay = %s, want %s", delay, betweenBatches)
+		if delay := receiveDelay(t, clock); delay != defaultInterval {
+			t.Fatalf("idle delay = %s, want %s", delay, defaultInterval)
 		}
 		worker.Stop()
 		if got := repo.activeCalls(); got != 0 {
@@ -43,8 +42,8 @@ func TestDeliveryRetentionWorker(t *testing.T) {
 		if err := worker.Start(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if delay := receiveDelay(t, clock); delay != initialDelay {
-			t.Fatalf("restart initial delay = %s, want %s", delay, initialDelay)
+		if delay := receiveDelay(t, clock); delay != defaultInterval {
+			t.Fatalf("restart idle delay = %s, want %s", delay, defaultInterval)
 		}
 		worker.Stop()
 	})
@@ -64,9 +63,6 @@ func TestDeliveryRetentionWorker(t *testing.T) {
 		if err := worker.Start(ctx); err != nil {
 			t.Fatal(err)
 		}
-		fireAfter(t, clock, initialDelay)
-		fireAfter(t, clock, betweenBatches)
-		fireAfter(t, clock, betweenBatches)
 		snapshot := receiveSnapshot(t, snapshots)
 		if snapshot.BusyBatches == 0 {
 			t.Fatalf("busy batches = %d, want at least one", snapshot.BusyBatches)
@@ -89,7 +85,6 @@ func TestDeliveryRetentionWorker(t *testing.T) {
 		if err := worker.Start(ctx); err != nil {
 			t.Fatal(err)
 		}
-		fireAfter(t, clock, initialDelay)
 		_ = receiveCall(t, repo.calls)
 		worker.Stop()
 		if got := repo.activeCalls(); got != 0 {
@@ -123,7 +118,6 @@ func TestDeliveryRetentionWorker(t *testing.T) {
 		if err := worker.Start(ctx); err != nil {
 			t.Fatal(err)
 		}
-		fireAfter(t, clock, initialDelay)
 		if got := receiveCall(t, repo.calls); got != "retention" {
 			t.Fatalf("first batch = %q", got)
 		}
@@ -139,12 +133,10 @@ func TestDeliveryRetentionWorker(t *testing.T) {
 		if err := worker.Start(ctx); err != nil {
 			t.Fatal(err)
 		}
-		fireAfter(t, clock, initialDelay)
 		if got := receiveCall(t, repo.calls); got != "retention" {
 			t.Fatalf("first post-readiness batch = %q", got)
 		}
 		for _, phase := range []string{"orphans", "retirements"} {
-			fireAfter(t, clock, betweenBatches)
 			if got := receiveCall(t, repo.calls); got != phase {
 				t.Fatalf("post-readiness phase = %q, want %q", got, phase)
 			}
@@ -295,25 +287,13 @@ func receiveSnapshot(t *testing.T, snapshots <-chan Snapshot) Snapshot {
 func TestDeliveryRetentionMetrics(t *testing.T) {
 	beforeRows := metricValue(rowsTotal, "inbox_payload")
 	beforeBytes := metricValue(bytesTotal, "inbox")
-	clock := newFakeClock()
-	repo := &workerRepository{
-		calls: make(chan string, 4),
-		retentionResult: models.AgentDeliveryRetentionBatchResult{
-			Candidates: 1, EventPayloadsPruned: 1, PayloadBytesPruned: 256,
-		},
-	}
-	worker := New(repo, db.NewPool(nil, nil), Options{After: clock.After})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := worker.Start(ctx); err != nil {
+	var snapshot Snapshot
+	productive := &workerRepository{calls: make(chan string, 1), retentionResult: models.AgentDeliveryRetentionBatchResult{
+		Candidates: 1, EventPayloadsPruned: 1, PayloadBytesPruned: 256,
+	}}
+	worker := New(productive, db.NewPool(nil, nil), Options{})
+	if _, err := worker.runBatch(t.Context(), "retention", &snapshot); err != nil {
 		t.Fatal(err)
-	}
-	fireAfter(t, clock, initialDelay)
-	if got := receiveCall(t, repo.calls); got != "retention" {
-		t.Fatalf("first batch = %q", got)
-	}
-	if delay := receiveDelay(t, clock); delay != betweenBatches {
-		t.Fatalf("inter-batch delay = %s", delay)
 	}
 	if got := metricValue(rowsTotal, "inbox_payload"); got != beforeRows+1 {
 		t.Fatalf("committed row counter = %d, want %d", got, beforeRows+1)
@@ -344,7 +324,6 @@ func TestDeliveryRetentionQuiescence(t *testing.T) {
 	if err := worker.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	fireAfter(t, clock, initialDelay)
 	_ = receiveCall(t, repo.calls)
 	done := make(chan struct{})
 	go func() { worker.Stop(); close(done) }()
