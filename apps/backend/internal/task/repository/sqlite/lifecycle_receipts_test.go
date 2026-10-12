@@ -78,6 +78,34 @@ func TestTaskLifecycleReceiptSurvivesRepositoryRestart(t *testing.T) {
 	require.EqualValues(t, 1, receipt.Revision)
 }
 
+func TestDeletedTaskLifecycleReceiptSurvivesRepositoryRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "deleted-receipt-restart.db")
+	conn, err := db.OpenSQLite(path)
+	require.NoError(t, err)
+	firstDB := sqlx.NewDb(conn, "sqlite3")
+	first, err := NewWithDB(firstDB, firstDB, nil)
+	require.NoError(t, err)
+	seedWorkspace(t, first, "deleted-restart-workspace")
+	task := &models.Task{ID: "deleted-restart-task", WorkspaceID: "deleted-restart-workspace", Title: "deleted"}
+	require.NoError(t, first.CreateTask(ctx, task))
+	require.NoError(t, first.DeleteTask(ctx, task.ID))
+	require.NoError(t, firstDB.Close())
+
+	conn, err = db.OpenSQLite(path)
+	require.NoError(t, err)
+	secondDB := sqlx.NewDb(conn, "sqlite3")
+	t.Cleanup(func() { _ = secondDB.Close() })
+	second, err := NewWithDB(secondDB, secondDB, nil)
+	require.NoError(t, err)
+	receipt, err := second.GetTaskLifecycleReceipt(ctx, task.WorkspaceID, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, receipt)
+	require.Equal(t, "deleted", receipt.Disposition)
+	require.Equal(t, "delete", receipt.Provenance)
+	require.EqualValues(t, 2, receipt.Revision)
+}
+
 func TestCreateTaskRollsBackWhenLifecycleReceiptWriteFails(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForEntityTests(t)
@@ -142,4 +170,24 @@ func TestTaskLifecycleReceiptTracksWorkflowAttachAndQuickChatExpiry(t *testing.T
 	require.Equal(t, "deleted", receipt.Disposition)
 	require.Equal(t, "delete", receipt.Provenance)
 	require.EqualValues(t, 2, receipt.Revision)
+}
+
+func TestArchiveLifecycleReceiptDoesNotAdvanceOnNoOp(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForEntityTests(t)
+	seedWorkspace(t, repo, "receipt-noop-workspace")
+	task := &models.Task{ID: "receipt-noop-task", WorkspaceID: "receipt-noop-workspace", Title: "No-op"}
+	require.NoError(t, repo.CreateTask(ctx, task))
+	changed, err := repo.ArchiveTaskIfActive(ctx, task.ID, "cascade-noop")
+	require.NoError(t, err)
+	require.True(t, changed)
+	first, err := repo.GetTaskLifecycleReceipt(ctx, task.WorkspaceID, task.ID)
+	require.NoError(t, err)
+	changed, err = repo.ArchiveTaskIfActive(ctx, task.ID, "cascade-noop")
+	require.NoError(t, err)
+	require.False(t, changed)
+	second, err := repo.GetTaskLifecycleReceipt(ctx, task.WorkspaceID, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, first.Revision, second.Revision)
+	require.Equal(t, first.ChangedAt, second.ChangedAt)
 }
