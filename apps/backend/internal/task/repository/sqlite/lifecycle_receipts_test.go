@@ -119,6 +119,61 @@ func TestCreateTaskRollsBackWhenLifecycleReceiptWriteFails(t *testing.T) {
 	require.Error(t, err, "the task row must roll back with its required receipt")
 }
 
+func TestLifecycleMutationsRollBackWhenReceiptWriteFails(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		prepare func(*Repository, *models.Task)
+		mutate  func(*Repository, *models.Task) error
+		assert  func(*testing.T, *models.Task)
+	}{
+		{
+			name:   "archive",
+			mutate: func(repo *Repository, task *models.Task) error { return repo.ArchiveTask(ctx, task.ID) },
+			assert: func(t *testing.T, task *models.Task) {
+				require.Nil(t, task.ArchivedAt)
+			},
+		},
+		{
+			name: "unarchive",
+			prepare: func(repo *Repository, task *models.Task) {
+				require.NoError(t, repo.ArchiveTask(ctx, task.ID))
+			},
+			mutate: func(repo *Repository, task *models.Task) error {
+				_, err := repo.UnarchiveTask(ctx, task.ID)
+				return err
+			},
+			assert: func(t *testing.T, task *models.Task) {
+				require.NotNil(t, task.ArchivedAt)
+			},
+		},
+		{
+			name:   "delete",
+			mutate: func(repo *Repository, task *models.Task) error { return repo.DeleteTask(ctx, task.ID) },
+			assert: func(t *testing.T, task *models.Task) {
+				require.Equal(t, "delete", task.Title)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newRepoForEntityTests(t)
+			workspaceID := "receipt-rollback-" + tc.name
+			seedWorkspace(t, repo, workspaceID)
+			task := &models.Task{ID: "receipt-rollback-" + tc.name, WorkspaceID: workspaceID, Title: tc.name}
+			require.NoError(t, repo.CreateTask(ctx, task))
+			if tc.prepare != nil {
+				tc.prepare(repo, task)
+			}
+			_, err := repo.db.Exec(`DROP TABLE task_lifecycle_receipts`)
+			require.NoError(t, err)
+			require.Error(t, tc.mutate(repo, task))
+			stored, err := repo.GetTask(ctx, task.ID)
+			require.NoError(t, err)
+			tc.assert(t, stored)
+		})
+	}
+}
+
 func TestGetTaskLifecycleReceiptDoesNotMutateStoredReceipt(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForEntityTests(t)
