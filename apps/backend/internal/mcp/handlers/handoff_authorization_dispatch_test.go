@@ -13,7 +13,9 @@ import (
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/testutil"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
@@ -360,4 +362,45 @@ func TestGetTaskVisibilityDispatcherHidesLiveTaskWithoutReceipt(t *testing.T) {
 	require.Equal(t, ws.MessageTypeError, liveWithoutReceipt.Type)
 	require.Equal(t, ws.MessageTypeError, missing.Type)
 	require.Equal(t, string(missing.Payload), string(liveWithoutReceipt.Payload))
+}
+
+func TestPostgresGetTaskVisibilityDispatcherDeniedReadsDoNotMutate(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := sqliterepo.NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	log := testLogger(t)
+	handoff := service.NewHandoffService(repo, repo, nil, nil, nil, log)
+	handlers := NewHandlers(nil, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
+	handlers.SetHandoffService(handoff)
+	dispatcher := ws.NewDispatcher()
+	handlers.RegisterHandlers(dispatcher)
+	seedRelatedReadTasks(t, repo)
+	before := snapshotVisibilityNativeTables(t, repo)
+	call := func(taskID string) *ws.Message {
+		response, dispatchErr := dispatcher.Dispatch(ctx, makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
+			"task_id": taskID, "caller_task_id": "child-a", "caller_session_id": "session-caller",
+			"related_read_scope": "workspace-task-tree", "mcp_surface": "office-task",
+		}))
+		require.NoError(t, dispatchErr)
+		return response
+	}
+	foreign := call("foreign")
+	missing := call("missing")
+	require.Equal(t, ws.MessageTypeError, foreign.Type)
+	require.Equal(t, ws.MessageTypeError, missing.Type)
+	require.Equal(t, string(foreign.Payload), string(missing.Payload))
+	require.Equal(t, before, snapshotVisibilityNativeTables(t, repo))
+}
+
+func snapshotVisibilityNativeTables(t *testing.T, repo relatedReadSnapshotRepo) map[string][][]string {
+	t.Helper()
+	db := repo.DB()
+	return map[string][][]string{
+		"tasks":     snapshotSQLRows(t, db, "SELECT * FROM tasks ORDER BY id"),
+		"workflows": snapshotSQLRows(t, db, "SELECT * FROM workflows ORDER BY id"),
+		"sessions":  snapshotSQLRows(t, db, "SELECT * FROM task_sessions ORDER BY id"),
+		"documents": snapshotSQLRows(t, db, "SELECT * FROM task_documents ORDER BY task_id, key"),
+		"revisions": snapshotSQLRows(t, db, "SELECT * FROM task_document_revisions ORDER BY task_id, document_key, revision_number"),
+	}
 }
