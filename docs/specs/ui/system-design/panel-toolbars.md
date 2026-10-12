@@ -19,6 +19,7 @@ owned by Canvases and Plugins. No backend or persistence change is required.
 | 001.1, 001.2 | Shared header shell |
 | 001.3, 001.6 | Caller composition and overflow |
 | 001.4, 001.5 | State preservation and browser regression tests |
+| 001.7 | Icon alignment within toolbar controls |
 
 ## Shared header shell
 
@@ -39,6 +40,17 @@ Use shared control sizing for touch targets. Existing 24px compact desktop
 controls may remain; ordinary actions use 28px. Current 32px editor controls
 cannot fit the 30px row and must be reconciled. Changes to shell size alone
 cannot establish correct control geometry.
+
+## Icon alignment within toolbar controls
+
+The Files header's `CopyWorkspacePathButton` in
+`apps/web/components/task/file-browser-toolbar.tsx` uses a centered flex button.
+Its folder, hover-copy, and copied-check glyphs must share that center while
+their visibility changes. Position overlay glyphs against the button's center;
+an `inset-0` overlay with a smaller explicit icon size places the SVG at the
+top-left of the target. Keep the existing button dimensions, tooltip, label,
+and copy callback. Browser tests compare the visible glyph center with the
+button center in both states on desktop and phone.
 
 ## Source audit and migration inventory
 
@@ -95,3 +107,4 @@ backend authorization rules, or saved preferences are introduced.
 ## Implementation plan
 
 - [Canvas authentication and panel toolbars](../../../plans/canvas-same-origin-auth/plan.md)
+- [Files copy-path alignment](../../../plans/files-copy-path-alignment/plan.md)

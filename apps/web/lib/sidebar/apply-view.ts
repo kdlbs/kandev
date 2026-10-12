@@ -9,6 +9,7 @@ import type {
   GroupKey,
   SidebarView,
   SortKey,
+  SortRule,
   SortSpec,
 } from "@/lib/state/slices/ui/sidebar-view-types";
 import {
@@ -24,6 +25,9 @@ import {
   resolveTaskTreeActivity,
   taskActivitySortValue,
 } from "./task-tree-activity";
+import { resolveTaskTreeRunning } from "./task-tree-running";
+import { sidebarSortRules } from "./sidebar-sort-chain";
+import { sidebarSortHasKey } from "./sidebar-sort-chain";
 
 export type SidebarGroup = {
   key: string;
@@ -129,7 +133,7 @@ export function applyFilters(
 
 type SortComparator = (a: TaskSwitcherItem, b: TaskSwitcherItem) => number;
 
-const SORT_COMPARATORS: Record<Exclude<SortKey, "custom">, SortComparator> = {
+const SORT_COMPARATORS: Record<Exclude<SortKey, "custom" | "running" | "color">, SortComparator> = {
   state: (a, b) => {
     const bucket = STATE_BUCKET_ORDER[getStateBucket(a)] - STATE_BUCKET_ORDER[getStateBucket(b)];
     if (bucket !== 0) return bucket;
@@ -157,6 +161,76 @@ function customComparator(orderedTaskIds: string[]): SortComparator {
   };
 }
 
+type SortEvaluation = {
+  customOrder: SortComparator;
+  rules: SortRule[];
+  resolvedStates?: ReadonlyMap<string, EffectiveTaskTreeState>;
+  latestActivityByTaskId?: ReadonlyMap<string, string>;
+  runningByTaskId?: ReadonlyMap<string, boolean>;
+};
+
+function compareSortState(
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+  evaluation: SortEvaluation,
+): number {
+  const left = evaluation.resolvedStates?.get(a.id)?.bucket ?? getStateBucket(a);
+  const right = evaluation.resolvedStates?.get(b.id)?.bucket ?? getStateBucket(b);
+  const stateOrder = STATE_BUCKET_ORDER[left] - STATE_BUCKET_ORDER[right];
+  if (stateOrder !== 0 || evaluation.rules.length > 1) return stateOrder;
+  return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
+}
+
+function compareSortActivity(
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+  evaluation: SortEvaluation,
+): number {
+  const left = evaluation.latestActivityByTaskId?.get(a.id) ?? taskActivitySortValue(a);
+  const right = evaluation.latestActivityByTaskId?.get(b.id) ?? taskActivitySortValue(b);
+  return compareActivityTimestamps(left, right);
+}
+
+function compareSortRunning(
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+  evaluation: SortEvaluation,
+): number {
+  const left = evaluation.runningByTaskId?.get(a.id) ?? a.sessionState === "RUNNING";
+  const right = evaluation.runningByTaskId?.get(b.id) ?? b.sessionState === "RUNNING";
+  return Number(left) - Number(right);
+}
+
+function compareSortColor(
+  color: string | undefined,
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+): number {
+  return Number(a.effectiveColorToken === color) - Number(b.effectiveColorToken === color);
+}
+
+function compareSortRule(
+  rule: SortRule,
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+  evaluation: SortEvaluation,
+): number {
+  switch (rule.key) {
+    case "custom":
+      return evaluation.customOrder(a, b);
+    case "state":
+      return compareSortState(a, b, evaluation);
+    case "lastActivityAt":
+      return compareSortActivity(a, b, evaluation);
+    case "running":
+      return compareSortRunning(a, b, evaluation);
+    case "color":
+      return compareSortColor(rule.color, a, b);
+    default:
+      return SORT_COMPARATORS[rule.key](a, b);
+  }
+}
+
 export function applySort(
   tasks: TaskSwitcherItem[],
   spec: SortSpec,
@@ -164,41 +238,36 @@ export function applySort(
   subTasksByParentId?: Map<string, TaskSwitcherItem[]>,
   effectiveStateByTaskId?: ReadonlyMap<string, EffectiveTaskTreeState>,
 ): TaskSwitcherItem[] {
-  let cmp: SortComparator;
-  if (spec.key === "state" && subTasksByParentId) {
-    const resolvedStates =
-      effectiveStateByTaskId ?? resolveEffectiveStateMap(tasks, subTasksByParentId);
-    const effectiveOrder = new Map<string, number>();
-    for (const t of tasks) {
-      effectiveOrder.set(
-        t.id,
-        STATE_BUCKET_ORDER[resolvedStates.get(t.id)?.bucket ?? getStateBucket(t)],
-      );
-    }
-    cmp = (a, b) => {
-      const bucket = effectiveOrder.get(a.id)! - effectiveOrder.get(b.id)!;
-      if (bucket !== 0) return bucket;
-      return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
-    };
-  } else if (spec.key === "lastActivityAt" && subTasksByParentId) {
-    const latestActivityByTaskId = resolveTaskTreeActivity(tasks, subTasksByParentId);
-    cmp = (a, b) =>
-      compareActivityTimestamps(
-        latestActivityByTaskId.get(a.id) ?? taskActivitySortValue(a),
-        latestActivityByTaskId.get(b.id) ?? taskActivitySortValue(b),
-      );
-  } else {
-    cmp = spec.key === "custom" ? customComparator(orderedTaskIds) : SORT_COMPARATORS[spec.key];
-  }
-  // "Custom" is a manual order — reversing it on direction=desc would flip
-  // the user's drag, which has no intuitive meaning. The picker hides the
-  // direction toggle for custom; this guard keeps the data layer consistent
-  // even if a stored view ends up with desc direction.
-  const sign = spec.key !== "custom" && spec.direction === "desc" ? -1 : 1;
+  const rules = sidebarSortRules(spec);
+  const needsState = rules.some((rule) => rule.key === "state");
+  const needsActivity = rules.some((rule) => rule.key === "lastActivityAt");
+  const needsRunning = rules.some((rule) => rule.key === "running");
+  const resolvedStates =
+    needsState && subTasksByParentId
+      ? (effectiveStateByTaskId ?? resolveEffectiveStateMap(tasks, subTasksByParentId))
+      : undefined;
+  const latestActivityByTaskId =
+    needsActivity && subTasksByParentId
+      ? resolveTaskTreeActivity(tasks, subTasksByParentId)
+      : undefined;
+  const runningByTaskId =
+    needsRunning && subTasksByParentId
+      ? resolveTaskTreeRunning(tasks, subTasksByParentId)
+      : undefined;
+  const evaluation: SortEvaluation = {
+    customOrder: customComparator(orderedTaskIds),
+    rules,
+    resolvedStates,
+    latestActivityByTaskId,
+    runningByTaskId,
+  };
   const withIndex = tasks.map((t, i) => ({ t, i }));
   withIndex.sort((a, b) => {
-    const primary = cmp(a.t, b.t) * sign;
-    if (primary !== 0) return primary;
+    for (const rule of rules) {
+      const direction = rule.key !== "custom" && rule.direction === "desc" ? -1 : 1;
+      const result = compareSortRule(rule, a.t, b.t, evaluation) * direction;
+      if (result !== 0) return result;
+    }
     return a.i - b.i;
   });
   return withIndex.map((x) => x.t);
@@ -579,7 +648,7 @@ export function applyView(
   const filtered = applyFilters(tasks, view.filters);
   const { subTasksByParentId } = separateSubtasks(filtered);
   const effectiveStateByTaskId =
-    view.sort.key === "state" || view.group === "state"
+    sidebarSortHasKey(view.sort, "state") || view.group === "state"
       ? resolveEffectiveStateMap(filtered, subTasksByParentId)
       : undefined;
   const sorted = applySort(

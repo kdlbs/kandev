@@ -7,23 +7,25 @@ const WORKFLOW_ID = "workflow-1";
 const STEP_ID = "step-1";
 const WORKSPACE_ID = "workspace-1";
 const UPDATED_AT = "2026-08-01T18:00:00Z";
+const SUMMARY_UPDATED_AT = "2026-08-01T18:01:00Z";
+const STATUS_SUMMARY_UPDATED = "task.status_summary.updated" as const;
 
 function summaryMessage(summary: Record<string, unknown>) {
   return {
     id: "summary-message",
     type: "notification" as const,
-    action: "task.status_summary.updated" as const,
+    action: STATUS_SUMMARY_UPDATED,
     payload: {
       task_id: TASK_ID,
       workspace_id: WORKSPACE_ID,
       status_summary: summary,
     },
   } as Parameters<
-    NonNullable<ReturnType<typeof registerTasksHandlers>["task.status_summary.updated"]>
+    NonNullable<ReturnType<typeof registerTasksHandlers>[typeof STATUS_SUMMARY_UPDATED]>
   >[0];
 }
 
-describe("task.status_summary.updated cache replacement", () => {
+describe("status summary cache replacement", () => {
   it("replaces the summary in both single and multi-kanban task caches", () => {
     const store = makeStore({
       kanban: {
@@ -44,7 +46,7 @@ describe("task.status_summary.updated cache replacement", () => {
       },
     } as never);
 
-    registerTasksHandlers(store)["task.status_summary.updated"]!(
+    registerTasksHandlers(store)[STATUS_SUMMARY_UPDATED]!(
       summaryMessage({
         revision: 2,
         updated_at: UPDATED_AT,
@@ -62,7 +64,7 @@ describe("task.status_summary.updated cache replacement", () => {
   });
 });
 
-describe("task.status_summary.updated monotonicity", () => {
+describe("status summary monotonicity", () => {
   it("ignores stale or same-revision replacements", () => {
     const store = makeStore({
       kanban: {
@@ -83,7 +85,7 @@ describe("task.status_summary.updated monotonicity", () => {
       },
       kanbanMulti: { isLoading: false, snapshots: {} },
     } as never);
-    const handler = registerTasksHandlers(store)["task.status_summary.updated"]!;
+    const handler = registerTasksHandlers(store)[STATUS_SUMMARY_UPDATED]!;
 
     handler(
       summaryMessage({
@@ -107,7 +109,7 @@ describe("task.status_summary.updated monotonicity", () => {
   });
 });
 
-describe("task.status_summary.updated archived cache", () => {
+describe("archived status summary cache", () => {
   it("zeros queued_prompt_count on matching sidebarArchivedTasks rows", () => {
     const store = makeStore({
       kanban: { workflowId: WORKFLOW_ID, steps: [], tasks: [] },
@@ -135,10 +137,10 @@ describe("task.status_summary.updated archived cache", () => {
       },
     } as never);
 
-    registerTasksHandlers(store)["task.status_summary.updated"]!(
+    registerTasksHandlers(store)[STATUS_SUMMARY_UPDATED]!(
       summaryMessage({
         revision: 6,
-        updated_at: "2026-08-01T18:01:00Z",
+        updated_at: SUMMARY_UPDATED_AT,
         // omit queued_prompt_count (backend omitempty for 0)
       }),
     );
@@ -149,7 +151,7 @@ describe("task.status_summary.updated archived cache", () => {
   });
 });
 
-describe("task.status_summary.updated sidebar invalidation", () => {
+describe("status summary sidebar invalidation", () => {
   it("patches display-only summaries without refreshing the sidebar query", () => {
     const store = makeStore({
       kanban: {
@@ -179,10 +181,10 @@ describe("task.status_summary.updated sidebar invalidation", () => {
       },
     } as never);
 
-    registerTasksHandlers(store)["task.status_summary.updated"]!(
+    registerTasksHandlers(store)[STATUS_SUMMARY_UPDATED]!(
       summaryMessage({
         revision: 2,
-        updated_at: "2026-08-01T18:01:00Z",
+        updated_at: SUMMARY_UPDATED_AT,
         last_activity_at: UPDATED_AT,
         pending_action: "clarification",
       }),
@@ -222,12 +224,12 @@ describe("task.status_summary.updated sidebar invalidation", () => {
         revisionByWorkspaceId: { [WORKSPACE_ID]: 4 },
       },
     } as never);
-    const handler = registerTasksHandlers(store)["task.status_summary.updated"]!;
+    const handler = registerTasksHandlers(store)[STATUS_SUMMARY_UPDATED]!;
 
     handler(
       summaryMessage({
         revision: 2,
-        updated_at: "2026-08-01T18:01:00Z",
+        updated_at: SUMMARY_UPDATED_AT,
         last_activity_at: "2026-08-01T17:00:00Z",
       }),
     );
@@ -240,6 +242,47 @@ describe("task.status_summary.updated sidebar invalidation", () => {
         last_activity_at: "2026-08-01T19:00:00Z",
       }),
     );
+    expect(store.getState().sidebarArchivedTasks.revisionByWorkspaceId[WORKSPACE_ID]).toBe(5);
+  });
+});
+
+describe("status summary sidebar running invalidation", () => {
+  it("invalidates ordering when an off-page task changes running state", () => {
+    const store = makeStore({
+      kanban: { workflowId: WORKFLOW_ID, steps: [], tasks: [] },
+      kanbanMulti: { isLoading: false, snapshots: {} },
+      sidebarStatusSummaryByWorkspaceId: {
+        [WORKSPACE_ID]: {
+          [TASK_ID]: {
+            revision: 1,
+            updated_at: UPDATED_AT,
+            last_activity_at: UPDATED_AT,
+            has_running_session: false,
+          },
+        },
+      },
+      sidebarArchivedTasks: {
+        itemsByWorkspaceId: {},
+        loadedByWorkspaceId: {},
+        loadingByWorkspaceId: {},
+        errorByWorkspaceId: {},
+        revisionByWorkspaceId: { [WORKSPACE_ID]: 4 },
+      },
+    } as never);
+
+    registerTasksHandlers(store)[STATUS_SUMMARY_UPDATED]!(
+      summaryMessage({
+        revision: 2,
+        updated_at: SUMMARY_UPDATED_AT,
+        last_activity_at: UPDATED_AT,
+        has_running_session: true,
+      }),
+    );
+
+    expect(store.getState().kanban.tasks).toEqual([]);
+    expect(
+      store.getState().sidebarStatusSummaryByWorkspaceId[WORKSPACE_ID]?.[TASK_ID],
+    ).toMatchObject({ has_running_session: true, revision: 2 });
     expect(store.getState().sidebarArchivedTasks.revisionByWorkspaceId[WORKSPACE_ID]).toBe(5);
   });
 });

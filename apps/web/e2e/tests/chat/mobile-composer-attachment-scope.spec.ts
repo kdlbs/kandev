@@ -100,9 +100,11 @@ test.describe("mobile task chat attachment workspace scope", () => {
     await testPage.reload();
     const reloadedChat = testPage.getByTestId("session-chat");
     await expect(reloadedChat).toBeVisible({ timeout: 30_000 });
-    const image = reloadedChat.locator(
-      `img[src*="/api/v1/attachments/${String(attachment?.attachment_id)}/content"]`,
-    );
+    const sentMessage = reloadedChat.getByTestId("user-message-bubble").filter({ hasText: marker });
+    const image = sentMessage
+      .getByRole("button", { name: "Open Attachment 1", exact: true })
+      .locator(`img[src*="/api/v1/attachments/${String(attachment?.attachment_id)}/content"]`);
+    await expect(image).toHaveCount(1);
     await expect(image).toBeVisible();
     await expect
       .poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth))

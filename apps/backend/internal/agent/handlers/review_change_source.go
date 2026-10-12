@@ -39,7 +39,7 @@ func (s *ReviewChangeSource) UncommittedFiles(ctx context.Context, sessionID str
 	if client == nil {
 		return nil, fmt.Errorf("session %s workspace is not ready", sessionID)
 	}
-	status, err := client.GetGitStatus(ctx)
+	status, err := client.GetGitStatusWithDetails(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("git status for session %s: %w", sessionID, err)
 	}
@@ -71,7 +71,7 @@ func (s *ReviewChangeSource) CommittedFiles(ctx context.Context, sessionID strin
 		targetBranch = s.sessionReader.GetSessionBaseBranch(ctx, sessionID)
 	}
 	if baseCommit == "" {
-		status, statusErr := client.GetGitStatus(ctx)
+		status, statusErr := client.GetGitStatusWithDetails(ctx)
 		if statusErr != nil || status == nil || status.BaseCommit == "" {
 			return nil, nil
 		}

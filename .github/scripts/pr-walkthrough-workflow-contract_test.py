@@ -197,32 +197,24 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("ref: ${{ github.workflow_sha }}", self.generation)
         self.assertNotIn("ref: ${{ github.event.pull_request.base.sha }}", self.generation)
         self.assertNotIn("ref: ${{ github.event.pull_request.head.sha }}", self.generation)
-        self.assertIn("fetch-depth: 0", self.generation)
+        self.assertIn("fetch-depth: 1", self.generation)
         self.assertIn("persist-credentials: false", self.generation)
-        self.assertIn('test "$(git rev-parse HEAD)" = "$TRUSTED_SHA"', self.generation)
-        self.assertIn(
-            'git fetch --no-tags --filter=blob:none '
-            '--negotiation-tip="$TRUSTED_SHA" origin "refs/pull/${PR_NUMBER}/head"',
-            self.generation,
+        self.assertIn("bash .github/scripts/pr-walkthrough-history.sh", self.generation)
+        self.assertNotIn('git fetch --no-tags --filter=blob:none', self.generation)
+        history = (REPO_ROOT / ".github" / "scripts" / "pr-walkthrough-history.sh").read_text(
+            encoding="utf-8"
         )
-        self.assertIn(
-            'PR_NUMBER: ${{ github.event.pull_request.number }}',
-            self.generation,
-        )
-        self.assertNotIn("--depth=1", self.generation)
-        self.assertIn('test "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA"', self.generation)
-        self.assertIn('git merge-base "$TRUSTED_SHA" "$HEAD_SHA"', self.generation)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$TRUSTED_SHA"', history)
 
     def test_generation_and_link_use_one_trusted_workflow_sha(self) -> None:
         for job in (self.generation, self.link):
             self.assertIn("ref: ${{ github.workflow_sha }}", job)
             self.assertIn("TRUSTED_SHA: ${{ github.workflow_sha }}", job)
-            self.assertIn('test "$(git rev-parse HEAD)" = "$TRUSTED_SHA"', job)
             self.assertNotIn("github.event.pull_request.base.sha", job)
+        self.assertIn("bash .github/scripts/pr-walkthrough-history.sh", self.generation)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$TRUSTED_SHA"', self.link)
 
         for value in (
-            'git fetch --no-tags --filter=blob:none --negotiation-tip="$TRUSTED_SHA" origin "refs/pull/${PR_NUMBER}/head"',
-            'git merge-base "$TRUSTED_SHA" "$HEAD_SHA"',
             'git archive "$TRUSTED_SHA" .agents/skills/pr-walkthrough | tar -x',
             '--base-sha "$TRUSTED_SHA"',
             'RANGE="$TRUSTED_SHA...$HEAD_SHA"',
@@ -244,23 +236,36 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
 
     def test_generation_retries_only_incomplete_zero_exit_once(self) -> None:
         for value in (
-            "for attempt in 1 2; do",
-            'ATTEMPT_DIR=".pr-walkthrough/attempt-${attempt}"',
-            'rm -f \\\n              "docs/pr-walkthrough/pr-${PR_NUMBER}.json" \\\n              "docs/pr-walkthrough/pr-${PR_NUMBER}.html"',
-            "printf '{}\\n' > .pr-walkthrough/draft.json",
-            '> "$ATTEMPT_DIR/stdout"',
-            '2> "$ATTEMPT_DIR/stderr"',
-            'printf \'%s\\n\' "$opencode_status" > "$ATTEMPT_DIR/status"',
-            'cp .pr-walkthrough/draft.json "$ATTEMPT_DIR/draft.json"',
-            'if [ "$opencode_status" -ne 0 ]; then',
-            'if [ -s "docs/pr-walkthrough/pr-${PR_NUMBER}.json" ] && [ -s "docs/pr-walkthrough/pr-${PR_NUMBER}.html" ]; then',
-            'if [ "$attempt" -eq 2 ]; then',
-            'exit "$opencode_status"',
-            'exit 1',
+            "python3 .github/scripts/pr-walkthrough-runner.py -- \\",
+            '"$HOME/.opencode/bin/opencode" run',
+            "--agent github-pr-walkthrough",
+            '--model "$PR_WALKTHROUGH_MODEL"',
+            '--variant "$PR_WALKTHROUGH_VARIANT"',
+            "--file .pr-walkthrough/guidelines.md",
         ):
             self.assertIn(value, self.generation)
-        self.assertNotIn("> .pr-walkthrough/opencode.stdout", self.generation)
-        self.assertNotIn("2> .pr-walkthrough/opencode.stderr", self.generation)
+        self.assertNotIn("for attempt in 1 2; do", self.generation)
+        self.assertNotIn("opencode_status", self.generation)
+
+    def test_generation_budgets_preparation_and_generation_time(self) -> None:
+        self.assertIn("timeout-minutes: 25", self.generation)
+        budgets = (
+            ("Checkout trusted workflow", "2"),
+            ("Fetch trusted and PR history", "4"),
+            ("Prepare trusted walkthrough context", "3"),
+            ("Install OpenCode", "1"),
+            ("Run OpenCode walkthrough", "11"),
+        )
+        for name, timeout in budgets:
+            step = self.generation.split(f"- name: {name}", 1)[1].split("- name:", 1)[0]
+            self.assertIn(f"timeout-minutes: {timeout}", step)
+        self.assertLessEqual(sum(int(timeout) for _, timeout in budgets), 24)
+        self.assertNotIn("name: Verify agent-built walkthrough", self.generation)
+        runner = (REPO_ROOT / ".github" / "scripts" / "pr-walkthrough-runner.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("TOTAL_DEADLINE_SECONDS = 600", runner)
+        self.assertIn("VERIFIER_TIMEOUT_SECONDS = 30", runner)
 
     def test_generation_uses_trusted_base_skill_renderer_and_helper(self) -> None:
         self.assertIn(
@@ -273,6 +278,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             'test -f "$SKILL_DIR/references/shell.html"',
             'test -f "$SKILL_DIR/scripts/pr-walkthrough-context"',
             'test -f "$SKILL_DIR/scripts/pr-walkthrough-render"',
+            'test -f "$SKILL_DIR/scripts/pr-walkthrough-verify"',
         ):
             self.assertIn(path, self.generation)
         self.assertNotIn('git show "$BASE_SHA:scripts/pr-walkthrough-render"', self.generation)
@@ -333,9 +339,11 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             self.assertIn(value, self.generation)
 
     def test_generation_uploads_agent_built_outputs_and_diagnostics(self) -> None:
-        self.assertIn("Verify agent-built walkthrough", self.generation)
-        self.assertIn('"docs/pr-walkthrough/pr-${PR_NUMBER}.json"', self.generation)
-        self.assertIn('"docs/pr-walkthrough/pr-${PR_NUMBER}.html"', self.generation)
+        self.assertIn("python3 .github/scripts/pr-walkthrough-runner.py --", self.generation)
+        runner = (REPO_ROOT / ".github" / "scripts" / "pr-walkthrough-runner.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("pr-walkthrough/scripts/pr-walkthrough-verify", runner)
         self.assertIn(
             "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
             self.generation,
@@ -564,9 +572,12 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         lint_workflow = LINT_WORKFLOW.read_text(encoding="utf-8")
         for command in (
             "python3 .github/scripts/pr-walkthrough-workflow-contract_test.py",
+            "python3 .github/scripts/pr-walkthrough-runner_test.py",
+            "bash .github/scripts/pr-walkthrough-history_test.sh",
             "python3 scripts/pr-walkthrough-pr-body.test.py",
             "python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-context.test.py",
             "python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-render.test.py",
+            "python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-verify.test.py",
         ):
             self.assertIn(command, lint_workflow)
 

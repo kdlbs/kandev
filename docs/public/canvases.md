@@ -60,6 +60,11 @@ workspace task list before it appears in workspace navigation. Imported and
 older task canvases keep their existing data scope until an authorized review
 widens it.
 
+For an active canvas with task-only data access, the workspace owner can select
+**Enable workspace data** in the canvas host controls. The owner reviews the
+active release and its declared permissions before confirmation. This changes
+data access for that canvas and keeps it in its current task.
+
 A workspace canvas appears in workspace navigation. Promotion changes the
 canvas placement and keeps its identity, active release, state, and release
 history. For a new canvas that already has workspace data access, promotion
@@ -72,13 +77,16 @@ A task read includes a read-only summary of that task's dependencies: whether it
 
 To show recorded workflow movement, read
 `./_kandev/v1/data/tasks/{task_id}/step-transitions`. It returns retained
-moves newest first and preserves the IDs of removed steps. A task canvas can
-read only its own task. After you promote a canvas to workspace scope, it can
-also read `./_kandev/v1/data/workflows/{workflow_id}/transition-groups` when
-the release has both task and workflow read grants. These groups count
-historical routes, including archived tasks. Use the task list for current
-task counts. [Plugin authoring](plugins-authoring.md) covers the browser and
-backend Host readers.
+moves newest first and preserves the IDs of removed steps. The release needs
+a task read grant. With task-only data access, a canvas can read only its own
+task. With workspace data access, one canvas can list tasks and read each
+task's history in the current workspace, even before promotion.
+
+With workspace data access and both task and workflow read grants, a canvas
+can also read `./_kandev/v1/data/workflows/{workflow_id}/transition-groups`.
+These groups count historical routes, including archived tasks. Use the task
+list for current task counts. [Plugin authoring](plugins-authoring.md) covers
+the browser and backend Host readers.
 
 The host shows canvas controls outside the app frame. The app runs in a
 sandboxed same-origin iframe. Canvas source is trusted with the viewing user's

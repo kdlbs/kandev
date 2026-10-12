@@ -226,6 +226,44 @@ func TestTaskSessionDTOsProjectQueueIncarnation(t *testing.T) {
 	}
 }
 
+func TestFromTaskSessionDTOPreservesSelectionCauseMetadata(t *testing.T) {
+	promptNotSent := true
+	session := &models.TaskSession{
+		ID:     "session-selection-cause",
+		TaskID: "task-selection-cause",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyLastAgentError: models.LastAgentError{
+				Message: "The agent could not start.",
+				Causes: []models.AgentErrorCause{{
+					Operation:      models.AgentErrorCauseOperationStart,
+					Code:           models.AgentErrorCauseCodeModelUnavailable,
+					Reason:         models.AgentErrorCauseReasonRequestedNotAdvertised,
+					RequestedModel: "anthropic/claude-opus-4-8",
+					PromptNotSent:  &promptNotSent,
+				}},
+			},
+		},
+	}
+
+	encoded, err := json.Marshal(FromTaskSession(session))
+	if err != nil {
+		t.Fatalf("marshal full session DTO: %v", err)
+	}
+	var payload struct {
+		Metadata map[string]struct {
+			Causes []models.AgentErrorCause `json:"causes"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("decode full session DTO: %v", err)
+	}
+	lastError := payload.Metadata[models.SessionMetaKeyLastAgentError]
+	if len(lastError.Causes) != 1 || lastError.Causes[0].RequestedModel != "anthropic/claude-opus-4-8" ||
+		lastError.Causes[0].PromptNotSent == nil || !*lastError.Causes[0].PromptNotSent {
+		t.Fatalf("session DTO did not preserve selection cause: %+v", lastError)
+	}
+}
+
 // TestFromTaskSession_CopiesRollupColumns pins docs/specs/task-cost-ledger/
 // spec.md AC-28/AC-29: TaskSessionDTO (the full session detail shape) must
 // surface the four usage/cost rollup columns internal/task/usage's writer

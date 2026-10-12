@@ -10,11 +10,13 @@ export function AddRepositoryButton({
   canAddMore,
   addHint,
   addLabel,
+  ariaDescribedBy,
   onAdd,
 }: {
   canAddMore: boolean;
   addHint?: string;
   addLabel?: string;
+  ariaDescribedBy?: string;
   onAdd: () => void;
 }) {
   const { t } = useTranslation();
@@ -27,6 +29,7 @@ export function AddRepositoryButton({
             onClick={onAdd}
             disabled={!canAddMore}
             aria-label={t("task:addRepository")}
+            aria-describedby={ariaDescribedBy}
             data-testid="add-repository"
             className={cn(
               "inline-flex items-center justify-center gap-1.5 rounded-md text-muted-foreground",

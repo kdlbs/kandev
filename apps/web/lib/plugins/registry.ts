@@ -740,7 +740,8 @@ class PluginRegistryStore {
         this.registerSettingsRoute(pluginId, path, Component),
       registerIntegrationSettings: (integration) =>
         this.registerIntegrationSettings(pluginId, integration),
-      registerComponent: (slot, Component) => this.registerComponent(pluginId, slot, Component),
+      registerComponent: (slot, Component) =>
+        this.registerComponent(pluginId, slot, Component as unknown as SlotComponent),
       registerWsHandler: (action, handler) => this.registerWsHandler(pluginId, action, handler),
       registerKeybinding: (id, handler) => this.registerKeybinding(pluginId, id, handler),
       registerRepositoryProvider: (provider) => this.registerRepositoryProvider(pluginId, provider),

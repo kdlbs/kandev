@@ -1,5 +1,6 @@
 import { expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { getMockAgent } from "../../helpers/agent-fixtures";
 import type { SeedData } from "../../fixtures/test-base";
 
 export type WorkflowAgentOverrideFixture = {
@@ -26,8 +27,7 @@ export async function seedWorkflowAgentOverrideFixture(
   suffix: string,
 ): Promise<WorkflowAgentOverrideFixture> {
   const { agents } = await apiClient.listAgents();
-  const agent = agents.find((candidate) => candidate.id !== "dynamic") ?? agents[0];
-  if (!agent) throw new Error("the mock-agent fixture has no launchable agent family");
+  const agent = getMockAgent(agents);
 
   const [profileA, profileB, profileC] = await Promise.all([
     apiClient.createAgentProfile(agent.id, `${suffix} Initial A`, { model: "mock-fast" }),

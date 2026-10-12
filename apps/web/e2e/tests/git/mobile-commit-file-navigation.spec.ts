@@ -81,7 +81,8 @@ test.describe("Mobile commit file navigation", () => {
     const toggle = row.getByTestId("commit-toggle");
     await expect(toggle).toHaveClass(/min-h-11/);
     await expectTouchControl(toggle);
-    const inlineFile = row.getByTestId(`commit-file-${filePath.replaceAll("/", "-")}`);
+    const inlineGroup = testPage.locator(`#${await toggle.getAttribute("aria-controls")}`);
+    const inlineFile = inlineGroup.getByTestId(`commit-file-${filePath.replaceAll("/", "-")}`);
     await expect
       .poll(
         async () => {
@@ -92,7 +93,7 @@ test.describe("Mobile commit file navigation", () => {
       )
       .toBe(true);
     await expect(inlineFile).toContainText("commit-file-navigation-with-a-long-name.ts");
-    const directory = row.getByTestId("commit-file-tree-dir-mobile-deeply-nested");
+    const directory = inlineGroup.getByTestId("commit-file-tree-dir-mobile-deeply-nested");
     await expect(directory).toBeVisible();
     await expectTouchControl(directory);
     await expect(inlineFile).toHaveAttribute("aria-label", filePath);

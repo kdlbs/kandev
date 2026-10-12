@@ -58,6 +58,14 @@ Existing `internal/system/backups` owns snapshot files through
 not run an integrity check. Preparation adds verification of the new snapshot
 through a separate read-only connection. Database maintenance owns explicit `VACUUM`.
 
+The verification connection opens the snapshot as a SQLite `file:` URI with
+`mode=ro`, so it never creates a file. The native path follows `file:` with only
+`%`, `?`, and `#` percent-escaped, because SQLite decodes `%XX`, starts the
+query at `?`, and ignores the rest after `#`. SQLite reads all remaining characters
+literally, including a Windows drive letter and backslashes. The shared path
+escape helper lives in `internal/db`; each caller keeps its own connection mode
+and options.
+
 ## Policy and persistence
 
 Use a dedicated settings key `tool_payload_retention`, version 1:
@@ -220,6 +228,28 @@ reapply its field removal rules. A service-only check is insufficient: a stale
 read can race cleanup. Inspect all metadata replacement and fallback-create
 paths, including turn recovery. Keep tool-call identity to preserve deduplication.
 New tool calls after resumption remain normal messages.
+
+### Guarded message replacement
+
+Ordinary message updates, conversation-receipt updates, and changed agent-plan
+upserts share `updateMessageWithPayloadGuardTx`. Its retained-metadata read,
+field merge, and message replacement remain in the caller's genuine transaction.
+The [Platform writer factory](../../platform/system-design/postgres-domain-store-parity.md#sqlite-writer-transaction-admission)
+acquires SQLite's writer at BEGIN. A message-row no-op UPDATE is therefore not
+needed to reserve that writer. Guarded replacement performs the actual message
+UPDATE once, after reading current metadata. PostgreSQL retains its message-row
+`FOR UPDATE` and existing caller lock order.
+
+Map a missing row from the metadata SELECT to the existing message-not-found
+error on both engines. Preserve removal markers, payload identity, retained
+fields, timestamps, and conversation revision/receipt behavior. Failed writes
+roll back through the existing transaction owner. This does not change insert
+replay guards or session identity locks.
+
+The [message update optimization package](../../../plans/message-update-writer-occupancy/plan.md)
+tracks implementation and verification. Its deterministic row-write count tests
+supplement existing stale-read and transaction-admission coverage. Performance
+comparisons are evidence, not machine-dependent test thresholds.
 
 The shell output endpoint checks the marker before returning output. Return
 410 with code `tool_payload_removed`, removal time, and retained summary.

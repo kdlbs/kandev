@@ -122,3 +122,46 @@ func TestBuildWorktreeCreateRequestScopesCheckoutCredentials(t *testing.T) {
 		t.Fatalf("checkout config = %#v", got)
 	}
 }
+
+func TestBuildWorktreeCreateRequestPreservesGlobalCredentialPath(t *testing.T) {
+	env := map[string]string{
+		"GIT_DIR":                          "/profile/git",
+		"PROFILE_SECRET":                   "must-not-reach-checkout",
+		githubauth.CredentialBrokerURLEnv:  "https://broker.example/resolve",
+		githubauth.CredentialLeaseEnv:      "lease",
+		githubauth.CredentialHelperPathEnv: "/opt/agentctl",
+		"GIT_CONFIG_COUNT":                 "5",
+		"GIT_CONFIG_KEY_0":                 "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0":               "",
+		"GIT_CONFIG_KEY_1":                 "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_1":               githubauth.ManagedGitCredentialHelper,
+		"GIT_CONFIG_KEY_2":                 globalCredentialUseHTTPPathKey,
+		"GIT_CONFIG_VALUE_2":               "true",
+		"GIT_CONFIG_KEY_3":                 "credential.https://github.com.useHttpPath",
+		"GIT_CONFIG_VALUE_3":               "true",
+		"GIT_CONFIG_KEY_4":                 "credential.https://gitlab.example.useHttpPath",
+		"GIT_CONFIG_VALUE_4":               "false",
+	}
+
+	got := buildWorktreeCreateRequest(&EnvPrepareRequest{Env: env}).CheckoutEnv
+	if got["GIT_CONFIG_COUNT"] != "4" ||
+		got["GIT_CONFIG_KEY_0"] != "credential.https://github.com.helper" ||
+		got["GIT_CONFIG_VALUE_0"] != "" ||
+		got["GIT_CONFIG_KEY_1"] != "credential.https://github.com.helper" ||
+		got["GIT_CONFIG_VALUE_1"] != githubauth.ManagedGitCredentialHelper ||
+		got["GIT_CONFIG_KEY_2"] != globalCredentialUseHTTPPathKey ||
+		got["GIT_CONFIG_VALUE_2"] != "true" ||
+		got["GIT_CONFIG_KEY_3"] != "credential.https://github.com.useHttpPath" ||
+		got["GIT_CONFIG_VALUE_3"] != "true" {
+		t.Fatalf("checkout Git config = %#v, want managed helpers and true path settings in source order", got)
+	}
+	for _, key := range []string{"GIT_DIR", "PROFILE_SECRET", "GIT_CONFIG_KEY_4"} {
+		if _, exists := got[key]; exists {
+			t.Errorf("checkout environment retained excluded key %q: %#v", key, got)
+		}
+	}
+	if got[githubauth.CredentialBrokerURLEnv] != env[githubauth.CredentialBrokerURLEnv] ||
+		got[githubauth.CredentialHelperPathEnv] != env[githubauth.CredentialHelperPathEnv] {
+		t.Fatalf("managed credential helper environment = %#v, want helper path and broker URL", got)
+	}
+}

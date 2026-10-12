@@ -309,6 +309,7 @@
   "workflowMutationInProgress": "請等待目前工作流程更改完成。",
   "workflowName": "工作流程名稱",
   "workflowNameIsRequired": "工作流程名稱為必填項",
+  "workflowPreviewStatusAnnouncement": "{{workflowName}}：{{status}}",
   "workflowNamePlaceholder": "我的項目工作流程",
   "workflowPrompt": "工作流程提示詞",
   "workflowPromptCollapsedHint": "可選；展開以新增共享的步驟入口說明",

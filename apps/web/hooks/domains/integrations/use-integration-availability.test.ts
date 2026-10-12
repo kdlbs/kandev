@@ -1,4 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { StateProvider } from "@/components/state-provider";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   invalidateIntegrationAvailability,
@@ -18,7 +20,27 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(StateProvider, null, children);
+}
+
 describe("useIntegrationAuthed", () => {
+  it("lets concurrent null results settle once across consumers", async () => {
+    const fetchConfig = vi.fn(async (): Promise<IntegrationConfigStatus | null> => null);
+    const { result } = renderHook(
+      () =>
+        [
+          useIntegrationAuthed(fetchConfig, { provider: "jira", workspaceId: "ws-1" }),
+          useIntegrationAuthed(fetchConfig, { provider: "jira", workspaceId: "ws-1" }),
+        ] as const,
+      { wrapper },
+    );
+
+    await waitFor(() => expect(fetchConfig).toHaveBeenCalled());
+    expect(fetchConfig).toHaveBeenCalledTimes(1);
+    expect(result.current).toEqual([false, false]);
+  });
+
   it("reports authed once a healthy config resolves", async () => {
     const fetchConfig = vi.fn(
       async (): Promise<IntegrationConfigStatus | null> => ({
@@ -27,7 +49,10 @@ describe("useIntegrationAuthed", () => {
       }),
     );
 
-    const { result } = renderHook(() => useIntegrationAuthed(fetchConfig));
+    const { result } = renderHook(
+      () => useIntegrationAuthed(fetchConfig, { provider: "jira", workspaceId: "ws-1" }),
+      { wrapper },
+    );
 
     await waitFor(() => expect(result.current).toBe(true));
   });
@@ -42,8 +67,9 @@ describe("useIntegrationAuthed", () => {
     );
 
     const { result, rerender } = renderHook(
-      ({ fetchConfig }) => useIntegrationAuthed(fetchConfig),
-      { initialProps: { fetchConfig: first } },
+      ({ fetchConfig, workspaceId }) =>
+        useIntegrationAuthed(fetchConfig, { provider: "jira", workspaceId }),
+      { initialProps: { fetchConfig: first, workspaceId: "ws-1" }, wrapper },
     );
 
     await waitFor(() => expect(result.current).toBe(true));
@@ -54,7 +80,7 @@ describe("useIntegrationAuthed", () => {
     const pending = deferred<IntegrationConfigStatus | null>();
     const second = vi.fn(() => pending.promise);
 
-    rerender({ fetchConfig: second });
+    rerender({ fetchConfig: second, workspaceId: "ws-2" });
 
     expect(result.current).toBe(false);
 
@@ -67,7 +93,7 @@ describe("useIntegrationAuthed", () => {
     await waitFor(() => expect(result.current).toBe(false));
   });
 
-  it("clears authed state when made inactive", async () => {
+  it("does not probe for a disabled consumer", async () => {
     const fetchConfig = vi.fn(
       async (): Promise<IntegrationConfigStatus | null> => ({
         hasSecret: true,
@@ -76,8 +102,9 @@ describe("useIntegrationAuthed", () => {
     );
 
     const { result, rerender } = renderHook(
-      ({ active }) => useIntegrationAuthed(fetchConfig, undefined, active),
-      { initialProps: { active: true } },
+      ({ active }) =>
+        useIntegrationAuthed(fetchConfig, { provider: "jira", workspaceId: "ws-1", active }),
+      { initialProps: { active: true }, wrapper },
     );
 
     await waitFor(() => expect(result.current).toBe(true));
@@ -85,15 +112,19 @@ describe("useIntegrationAuthed", () => {
     rerender({ active: false });
 
     expect(result.current).toBe(false);
+    expect(fetchConfig).toHaveBeenCalledTimes(1);
   });
 
-  it("re-probes immediately when integration availability is invalidated", async () => {
+  it("refreshes after credential availability is invalidated", async () => {
     const fetchConfig = vi
       .fn<() => Promise<IntegrationConfigStatus | null>>()
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ hasSecret: true, lastOk: true });
 
-    const { result } = renderHook(() => useIntegrationAuthed(fetchConfig));
+    const { result } = renderHook(
+      () => useIntegrationAuthed(fetchConfig, { provider: "jira", workspaceId: "ws-1" }),
+      { wrapper },
+    );
 
     await waitFor(() => expect(fetchConfig).toHaveBeenCalledTimes(1));
     expect(result.current).toBe(false);

@@ -8,6 +8,7 @@ const WEB_DIR = path.resolve(__dirname, "..");
 export type BackendArtifact = {
   path: string;
   rebuildTarget: string;
+  sourceFiles?: string[];
 };
 
 export type GlobalSetupOptions = {
@@ -23,6 +24,24 @@ export function runGlobalSetup(options: GlobalSetupOptions = {}): void {
   const kandevBin = customKandevBin ?? path.join(BACKEND_DIR, "bin", "kandev");
   const artifacts: BackendArtifact[] = [
     { path: path.join(BACKEND_DIR, "bin", "mock-agent"), rebuildTarget: "build" },
+    {
+      path: path.join(
+        BACKEND_DIR,
+        "bin",
+        `e2e-delivery-fixture${process.platform === "win32" ? ".exe" : ""}`,
+      ),
+      rebuildTarget: "build-e2e-delivery-fixture",
+      sourceFiles: [
+        path.join(
+          BACKEND_DIR,
+          "internal/agent/runtime/lifecycle/e2e_retained_capacity_fixture_test.go",
+        ),
+        path.join(
+          BACKEND_DIR,
+          "internal/agent/runtime/lifecycle/e2e_delivery_record_fixture_test.go",
+        ),
+      ],
+    },
     {
       path: path.join(BACKEND_DIR, ".build", "kandev-plugin-e2e-1.0.0.tar.gz"),
       rebuildTarget: "e2e-plugin-package",
@@ -127,7 +146,8 @@ const BACKEND_SOURCE_SKIP_DIRS = new Set(["bin", ".build", ".git", "testdata"]);
  * `*_test.go` is compiled only by `go test`; `make -C apps/backend
  * test-coverage` writes coverage.out and coverage.html next to go.mod; and
  * `go test -c` leaves `*.test` binaries wherever it is run. None can affect
- * the backend or helper binaries exercised by E2E.
+ * production binaries exercised by E2E. Test-only fixture artifacts list their
+ * additional source files separately.
  *
  * Without this, the ordinary `make test-coverage` → run E2E sequence aborts
  * demanding a backend rebuild because a coverage profile — which changes
@@ -215,11 +235,15 @@ export function assertBackendArtifactsFresh(
   if (!newestSource) return;
 
   for (const artifact of artifacts) {
+    const artifactSource = (artifact.sourceFiles ?? []).reduce((newest, file) => {
+      const mtimeMs = fs.statSync(file).mtimeMs;
+      return mtimeMs > newest.mtimeMs ? { file, mtimeMs } : newest;
+    }, newestSource);
     const artifactMtimeMs = fs.statSync(artifact.path).mtimeMs;
-    if (artifactMtimeMs < newestSource.mtimeMs) {
+    if (artifactMtimeMs < artifactSource.mtimeMs) {
       throw new Error(
         `Required E2E artifact is older than apps/backend sources: ${artifact.path}. ` +
-          `${newestSource.file} is newer. Run "${backendMakeCommand(
+          `${artifactSource.file} is newer. Run "${backendMakeCommand(
             backendDir,
             artifact.rebuildTarget,
           )}". E2E uses prebuilt backend artifacts. The frontend build does not rebuild them.`,

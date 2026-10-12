@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: executors
 created: 2026-09-07
 owners:
@@ -9,24 +9,13 @@ owners:
 
 ## Overview
 
-An SSH executor points at a host Kandev does not own, which can move, sleep, or
-change address at any time. `SSHExecutor.HealthCheck` returns `nil`
-unconditionally and the registry's health sweep runs once at backend startup, so
-no configured host is re-checked while Kandev runs. The manual "Test
-connection" action is the only reachability signal, and it sits on a settings
-page nobody has open when a host goes away.
+An SSH host can move, sleep, or change address. This capability continuously
+reports whether the backend can open an authenticated connection to the trusted
+host, and presents the answer on that executor's settings page. Reachability
+is evidence for diagnosis, never permission to launch.
 
-On 2026-09-06 an orchestrator host's LAN address changed four times in one day.
-Every agent bound to the SSH runner failed with a message naming a firewall
-while the cause was a stale address; two cards died mid-task.
-
-This capability gives Kandev a continuous, cheap answer to one question per
-configured SSH host: can the backend still open an authenticated SSH connection
-to the host we trusted? The answer goes on the executor's settings page.
-
-The executor system owns this because the durable contract is an executor's
-availability and its failure and recovery behavior, which the
-[executor system boundary](../README.md) already claims.
+The [executor system](../README.md) owns host availability and its failure and
+recovery contract, including the controls that expose each executor's result.
 
 ## Terminology
 
@@ -56,9 +45,7 @@ availability and its failure and recovery behavior, which the
 
 ### REQ-EXECUTORS-SSH-REACHABILITY-001: Continuous SSH host reachability probing
 
-**Intent:** Turn "is this SSH host still there?" from a question answered only
-by a failing launch into a fact Kandev already holds, cheap enough to pay
-continuously, so an operator learns the host moved before a card dies on it.
+**Intent:** Detect host availability changes before a failing launch.
 
 #### Acceptance criteria
 
@@ -94,9 +81,8 @@ continuously, so an operator learns the host moved before a card dies on it.
 
 ### REQ-EXECUTORS-SSH-REACHABILITY-002: Reachability surfacing
 
-**Intent:** Put the answer where the user already is. The 2026-09-06 outage was
-diagnosed from backend logs; a user whose agent is failing should see that the
-runner is unreachable without opening one, and stop debugging the agent.
+**Intent:** Show the executor's availability and immediate-probe controls where
+the user configures that executor.
 
 #### Acceptance criteria
 
@@ -110,6 +96,10 @@ runner is unreachable without opening one, and stop debugging the agent.
 - **AC-EXECUTORS-SSH-REACHABILITY-002.10:** When a reachability surface cannot load a result, it shall report that the reachability of the host is not known and shall not present the failure to load as an unreachable host.
 - **AC-EXECUTORS-SSH-REACHABILITY-002.11:** Every reachability surface shall be operable and legible on mobile viewports and shall expose its state to assistive technology as text, not by color alone.
 - **AC-EXECUTORS-SSH-REACHABILITY-002.12:** All reachability copy shall be localized through the product's translation layer in every supported locale, with the failure reason rendered as translated copy rather than the raw reason token.
+- **AC-EXECUTORS-SSH-REACHABILITY-002.13:** When a reachability view changes executor or application state context, closes, or is replaced, its previous requests and retained actions shall not change the current view's load error, pending probe control, or displayed result, nor publish obsolete responses into application state. Returning to the same executor shall not revive the previous visit's requests or actions. Independently accepted records for any executor shall remain available.
+- **AC-EXECUTORS-SSH-REACHABILITY-002.14:** A current view's immediate-probe action shall be disabled only while that view's own probe requests remain pending. A pending probe from a previous view shall not prevent probing the current executor, and an earlier request's completion shall not release a later pending probe. Current load and probe failures shall retain the not-known behavior of criterion .10; current success shall clear the local failure and present the accepted record. Superseded refresh failures shall not replace the current refresh's outcome. Independent views shall retain independent controls.
+
+- **AC-EXECUTORS-SSH-REACHABILITY-002.15:** Settings surfaces shall validate completion/success timestamps as strict RFC3339 before use. Malformed completion times shall produce no stale clock or badge; malformed completion/success times shall use existing missing-time age fallbacks. Valid offsets/fractions shall preserve the millisecond stale boundary.
 
 ### REQ-EXECUTORS-SSH-REACHABILITY-003: Probe informs launches without gating them
 
@@ -125,13 +115,9 @@ stand between a user and their own machine.
 
 ## Prior art
 
-Two external legs were required and neither was available: the `wiki-query`
-skill and its vault are absent here, and the `saas-kb` / `search_fsm_docs` MCP
-server is not exposed. Both are recorded as unavailable, not as empty results.
-In-repository prior art did inform this specification:
-`internal/integrations/healthpoll` (the Jira and Linear auth-health poller) and
-the existing SSH test-connection endpoint; the four departures are recorded in
-the system design's `## Prior art and departures`.
+External `wiki-query`/vault and `saas-kb`/`search_fsm_docs` sources were
+unavailable. In-repository prior art is `internal/integrations/healthpoll` and
+the SSH test-connection endpoint; departures are in the engine design.
 
 ## Out of scope
 
@@ -139,23 +125,19 @@ The first two entries are *deferred*, not rejected; the rest are permanent.
 A retired criterion ID is never reused.
 
 - **Deferred: task-card reachability indicator.** Cards bound to an
-  `unreachable` executor name that host and clear on return to `reachable`,
-  showing nothing in any other state. No polling and no new join: cards carry the
-  primary executor's id and type, and every `unreachable` entry and exit is
-  already pushed. Retires AC-EXECUTORS-SSH-REACHABILITY-002.8 and 002.9.
+  `unreachable` executor would name the host and clear in other states, using
+  pushed changes and the primary executor's id/type without polling or a join.
+  Retires AC-EXECUTORS-SSH-REACHABILITY-002.8 and 002.9.
 - **Deferred: launch path as a probe producer.** A launch's own dial is stronger
-  evidence than a probe: success writes `reachable`, a dial-step failure writes a
-  classified failure, both under the scheduled probe's rules, while a launch that
-  never dials writes nothing. Until it lands the poller is the only writer, so a
-  host dying between passes lags the settings page by up to the failure threshold
-  times the effective interval. Retires
+  evidence, but currently writes no record. A future dial would write success
+  or classified failure under probe rules; no dial would write nothing. Until
+  then detection can lag by the failure threshold times the interval. Retires
   AC-EXECUTORS-SSH-REACHABILITY-003.4 through 003.7.
 - **Health probing for non-SSH executors.** Local, Docker, Kubernetes, and cloud
   executors have their own availability signals; `HealthCheckAll` is unchanged
   for those runtimes.
 - **Repairing what the probe finds.** Re-resolving a moved address, re-pinning
-  a changed fingerprint, and migrating a session off an unreachable host are
-  excluded: the probe reports, a human decides.
+  a fingerprint, and migrating a session are human decisions.
 - **Gating, deferring, queueing, or re-routing launches on a probe result.**
   Excluded by REQ-EXECUTORS-SSH-REACHABILITY-003, which requires the opposite.
 - **Alerting outside the product surface.** No notification, email, webhook or
@@ -164,12 +146,10 @@ A retired criterion ID is never reused.
   presence, agent binary readiness, shell discovery and the agentctl cache check
   stay on the manual test-connection endpoint.
 - **Changing the existing manual test-connection endpoint.** It keeps dialing
-  unpinned, form-supplied configuration for a host that may not be saved yet, and
-  writes no record. AC-EXECUTORS-SSH-REACHABILITY-002.5 is a separate action
-  against a saved executor and its pin.
-- **Rewriting error text produced by an agent.** The 2026-09-06 firewall message
-  came from the agent. This contract adds Kandev's own attribution alongside it
-  rather than intercepting agent output.
+  unpinned form configuration and writes no record. Criterion 002.5 is a
+  separate action against a saved executor and its pin.
+- **Rewriting agent errors.** Kandev adds its own attribution alongside agent
+  output without intercepting it.
 - **Per-session or per-forward liveness.** Whether a running session's port
   forward still carries traffic is a different question from whether the host
   accepts a new connection.

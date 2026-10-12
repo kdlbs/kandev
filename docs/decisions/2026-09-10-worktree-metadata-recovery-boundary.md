@@ -57,6 +57,10 @@ location.
 - **Rebuild from the task base branch.** This can conceal lost branch history
   and belongs to the separate explicit recovery flow.
 
+The [missing-checkout extension](2026-09-29-missing-worktree-checkout-recovery.md)
+adds guarded restoration of absent canonical checkouts. The surviving-file
+metadata-recovery boundary in this decision remains unchanged.
+
 ## Related specifications
 
 - [Requirements](../specs/tasks/requirements/worktree-metadata-recovery.md)

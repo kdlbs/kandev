@@ -2,6 +2,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { defaultFeatureFlags } from "@/lib/state/slices/features/types";
+import { ApiError } from "@/lib/api/client";
 import type { HydrationState } from "@/lib/state/store";
 
 const listClarificationInboxMock = vi.fn();
@@ -39,6 +40,14 @@ vi.mock("@/src/boot-payload", () => ({
 import { useNeedsYouInboxController } from "./use-needs-you-inbox-controller";
 
 const WORKSPACE_ID = "w1";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
 
 function page(overrides: Partial<Awaited<ReturnType<typeof listClarificationInboxMock>>> = {}) {
   return {
@@ -88,7 +97,9 @@ describe("useNeedsYouInboxController", () => {
   it("reads on mount for the active workspace when the flag is enabled", async () => {
     renderController(true);
 
-    await waitFor(() => expect(listClarificationInboxMock).toHaveBeenCalledWith(WORKSPACE_ID));
+    await waitFor(() =>
+      expect(listClarificationInboxMock).toHaveBeenCalledWith(WORKSPACE_ID, expect.anything()),
+    );
   });
 
   it("never reads when the flag is disabled", async () => {
@@ -115,16 +126,239 @@ describe("useNeedsYouInboxController", () => {
   });
 
   it("re-reads when the WS refresh trigger tick is bumped", async () => {
+    vi.useFakeTimers();
     const { result } = renderController(true);
-    await waitFor(() => expect(listClarificationInboxMock).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
 
     act(() => {
       result.current.getState().bumpNeedsYouInboxRefreshTick();
     });
 
-    await waitFor(() => expect(listClarificationInboxMock).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
   });
 
+  it("shares mixed triggers during a read and runs at most one trailing refresh", async () => {
+    vi.useFakeTimers();
+    const firstRead = deferred<ReturnType<typeof page>>();
+    listClarificationInboxMock.mockImplementationOnce(() => firstRead.promise);
+    listClarificationInboxMock.mockResolvedValue(page({ count: 4 }));
+    const { result } = renderController(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      emitWsEvent(SESSION_STATE_CHANGED);
+      emitWsEvent("session.pending_action_changed");
+      result.current.getState().bumpNeedsYouInboxRefreshTick();
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("online"));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstRead.resolve(page());
+      await firstRead.promise;
+      await vi.advanceTimersByTimeAsync(750);
+    });
+
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID]?.count).toBe(4);
+  });
+});
+
+describe("useNeedsYouInboxController temporary-failure cooldowns", () => {
+  it("keeps WS refreshes inside the temporary-failure cooldown and honors Retry-After", async () => {
+    vi.useFakeTimers();
+    listClarificationInboxMock
+      .mockRejectedValueOnce(new ApiError("busy", 503, null, 3))
+      .mockResolvedValueOnce(page())
+      .mockRejectedValueOnce(new ApiError("busy", 503, null))
+      .mockResolvedValue(page());
+    const { result } = renderController(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    act(() => emitWsEvent(SESSION_STATE_CHANGED));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    for (let i = 0; i < 5; i += 1) {
+      act(() => emitWsEvent(SESSION_STATE_CHANGED));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+    }
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(499);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+
+    act(() => emitWsEvent(SESSION_STATE_CHANGED));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(3);
+
+    act(() => result.current.getState().bumpNeedsYouInboxRefreshTick());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_999);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(3);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("backs off successive temporary failures by 2, 5, 15, and 30 seconds", async () => {
+    vi.useFakeTimers();
+    listClarificationInboxMock.mockRejectedValue(new ApiError("busy", 503, null));
+    const { result } = renderController(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    const delays = [2_000, 5_000, 15_000, 30_000];
+    for (const [index, delay] of delays.entries()) {
+      act(() => result.current.getState().bumpNeedsYouInboxRefreshTick());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(delay - 1);
+      });
+      expect(listClarificationInboxMock).toHaveBeenCalledTimes(index + 1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(listClarificationInboxMock).toHaveBeenCalledTimes(index + 2);
+    }
+  });
+});
+
+describe("useNeedsYouInboxController permanent-failure recovery", () => {
+  it("suspends automatic work after a permanent error but keeps explicit retry available", async () => {
+    vi.useFakeTimers();
+    listClarificationInboxMock
+      .mockRejectedValueOnce(new ApiError("not found", 404, null))
+      .mockResolvedValue(page({ count: 2 }));
+    const { result } = renderController(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      result.current.getState().bumpNeedsYouInboxRefreshTick();
+      emitWsEvent(SESSION_STATE_CHANGED);
+      window.dispatchEvent(new Event("focus"));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.getState().requestNeedsYouInboxRetry());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+    expect(result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID]?.count).toBe(2);
+  });
+});
+
+describe("useNeedsYouInboxController scope cancellation", () => {
+  it("aborts and fences reads when workspace, identity, feature, or lifetime changes", async () => {
+    const reads: Array<{
+      signal: AbortSignal;
+      deferred: ReturnType<typeof deferred<ReturnType<typeof page>>>;
+    }> = [];
+    listClarificationInboxMock.mockImplementation((_workspaceId, options) => {
+      const request = deferred<ReturnType<typeof page>>();
+      reads.push({
+        signal: options?.init?.signal ?? new AbortController().signal,
+        deferred: request,
+      });
+      return request.promise;
+    });
+    const { result, unmount } = renderController(true);
+    const store = result.current;
+
+    await waitFor(() => expect(reads).toHaveLength(1));
+    act(() => store.getState().setActiveWorkspace("w2"));
+    await waitFor(() => expect(reads).toHaveLength(2));
+    expect(reads[0].signal.aborted).toBe(true);
+    await act(async () => {
+      reads[0].deferred.resolve(page({ count: 9 }));
+      await reads[0].deferred.promise;
+    });
+    expect(store.getState().needsYouInbox.byWorkspaceId.w1?.count ?? 0).toBe(0);
+
+    act(() =>
+      store.getState().setAuthState({
+        mode: "enabled",
+        authenticated: true,
+        user: {
+          id: "user-2",
+          email: "user@example.test",
+          display_name: "User",
+          role: "user",
+          status: "active",
+        },
+      }),
+    );
+    await waitFor(() => expect(reads).toHaveLength(3));
+    expect(reads[1].signal.aborted).toBe(true);
+
+    act(() => store.getState().setFeatures({ ...defaultFeatureFlags, needsYouInbox: false }));
+    expect(reads[2].signal.aborted).toBe(true);
+    await act(async () => {
+      reads[2].deferred.resolve(page({ count: 9 }));
+      await reads[2].deferred.promise;
+    });
+    expect(store.getState().needsYouInbox.byWorkspaceId.w2?.count ?? 0).toBe(0);
+
+    act(() => store.getState().setFeatures({ ...defaultFeatureFlags, needsYouInbox: true }));
+    await waitFor(() => expect(reads).toHaveLength(4));
+    unmount();
+    expect(reads[3].signal.aborted).toBe(true);
+    await act(async () => {
+      reads[3].deferred.resolve(page({ count: 9 }));
+      await reads[3].deferred.promise;
+    });
+    expect(store.getState().needsYouInbox.byWorkspaceId.w2?.count ?? 0).toBe(0);
+  });
+});
+
+describe("useNeedsYouInboxController periodic and snooze refreshes", () => {
   it("re-reads once at the periodic interval while the tab stays visible", async () => {
     vi.useFakeTimers();
     renderController(true);
@@ -235,7 +469,9 @@ describe("useNeedsYouInboxController boot-hydration seed (AC .34, .40, .41)", ()
     const seeded = result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID];
     expect(seeded?.count ?? 0).toBe(0);
 
-    await waitFor(() => expect(listClarificationInboxMock).toHaveBeenCalledWith(WORKSPACE_ID));
+    await waitFor(() =>
+      expect(listClarificationInboxMock).toHaveBeenCalledWith(WORKSPACE_ID, expect.anything()),
+    );
   });
 
   it("does not seed when the flag is disabled", async () => {
@@ -263,7 +499,6 @@ describe("useNeedsYouInboxController WS event coalescing", () => {
   it("coalesces a burst into a leading read now and one trailing read for what changed inside the window", async () => {
     vi.useFakeTimers();
     listClarificationInboxMock.mockResolvedValueOnce(page());
-    listClarificationInboxMock.mockResolvedValueOnce(page());
     listClarificationInboxMock.mockResolvedValue(page({ count: 3 }));
     const { result } = renderController(true);
     await act(async () => {
@@ -284,25 +519,23 @@ describe("useNeedsYouInboxController WS event coalescing", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
 
-    // Still inside the window: no second read has fired yet, but one is
-    // armed for the remainder of it.
+    // The WS debounce expires at 250ms, while the shared one-second start
+    // floor holds its single trailing read.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(249);
     });
-    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
 
-    // The window elapses: the trailing read fires and its result is applied,
-    // so nothing from the burst is silently lost.
+    // Once the start floor elapses, the trailing read includes the burst.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(751);
     });
-    expect(listClarificationInboxMock).toHaveBeenCalledTimes(3);
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
     expect(result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID]?.count).toBe(3);
 
-    // Well past the window: a later, separate event still causes its own
-    // leading read.
+    // A later event after the read has settled still causes a bounded read.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(250);
     });
@@ -312,11 +545,19 @@ describe("useNeedsYouInboxController WS event coalescing", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(listClarificationInboxMock).toHaveBeenCalledTimes(4);
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(3);
   });
+});
 
-  it("clears a pending trailing read on unmount", async () => {
+describe("useNeedsYouInboxController WS event cleanup", () => {
+  it("aborts a held read and clears pending WS work on unmount", async () => {
     vi.useFakeTimers();
+    const firstRead = deferred<ReturnType<typeof page>>();
+    listClarificationInboxMock.mockImplementationOnce(() => firstRead.promise);
     const { unmount } = renderController(true);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
@@ -330,18 +571,15 @@ describe("useNeedsYouInboxController WS event coalescing", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
 
-    // A trailing timer is now armed for the second (queued) event. A read
-    // count alone can't tell whether unmount actually cleared it: the effect
-    // that would turn a leaked timer's tick bump into a read is unmounted
-    // right along with it, so the count stays flat either way. Assert the
-    // timer itself.
+    // The second WS event and held request leave timer work pending.
     expect(vi.getTimerCount()).toBeGreaterThan(0);
 
     unmount();
 
     expect(vi.getTimerCount()).toBe(0);
+    firstRead.resolve(page());
   });
 
   // R2-F3: `trailingBumpTimeoutRef` must survive an effect re-run triggered
@@ -352,13 +590,18 @@ describe("useNeedsYouInboxController WS event coalescing", () => {
   it("does not drop a pending trailing read when the WS effect re-runs for an unrelated reason", async () => {
     vi.useFakeTimers();
     listClarificationInboxMock.mockResolvedValueOnce(page());
-    listClarificationInboxMock.mockResolvedValueOnce(page());
+    const secondRead = deferred<ReturnType<typeof page>>();
+    listClarificationInboxMock.mockImplementationOnce(() => secondRead.promise);
     listClarificationInboxMock.mockResolvedValue(page({ count: 3 }));
     const { result } = renderController(true);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
 
     act(() => {
       emitWsEvent(SESSION_STATE_CHANGED);
@@ -380,6 +623,11 @@ describe("useNeedsYouInboxController WS event coalescing", () => {
       await vi.advanceTimersByTimeAsync(250);
     });
 
+    await act(async () => {
+      secondRead.resolve(page());
+      await secondRead.promise;
+      await vi.advanceTimersByTimeAsync(750);
+    });
     expect(listClarificationInboxMock).toHaveBeenCalledTimes(3);
     expect(result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID]?.count).toBe(3);
   });

@@ -168,6 +168,18 @@ describe("AppSidebarPrimaryNav", () => {
 
     expect(screen.queryByRole("link", { name: "Home" })).toBeNull();
   });
+
+  it.each(["/", "/tasks", "/threads"])("marks Home current throughout %s", (path) => {
+    pathname = path;
+    renderNav(false);
+    expect(screen.getByRole("link", { name: "Home" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("does not mark Home current on an integration route", () => {
+    pathname = "/github";
+    renderNav(false);
+    expect(screen.getByRole("link", { name: "Home" }).hasAttribute("aria-current")).toBe(false);
+  });
 });
 
 describe("AppSidebarPrimaryNav — Needs-you Inbox nav entry", () => {

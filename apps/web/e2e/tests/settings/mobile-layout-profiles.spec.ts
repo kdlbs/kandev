@@ -167,12 +167,12 @@ test.describe("Mobile layout profiles", () => {
     await assertNoDescendantOverflowsRight(layouts.root, "mobile layout profile confirmation");
   });
 
-  test("adds Prompt History through the touch layout editor", async ({ testPage }) => {
+  test("adds Todos through the touch layout editor", async ({ testPage }) => {
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.openFromSettingsIndex();
 
-    await expect(layouts.editor.locator(".dv-tab", { hasText: "Prompt History" })).toHaveCount(0);
-    await layouts.addPanel("Prompt History", true);
-    await expect(layouts.editor.locator(".dv-tab", { hasText: "Prompt History" })).toBeVisible();
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "Todos" })).toHaveCount(0);
+    await layouts.addPanel("Todos", true);
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "Todos" })).toBeVisible();
   });
 });

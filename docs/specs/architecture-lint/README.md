@@ -17,8 +17,9 @@ same deterministic checks before committing and during review.
 
 ## Ownership
 
-- Architecture rule identities, scanners, and findings.
-- Exact rule baselines and their shrink-only comparison.
+- Architecture rule identities and their enforcement contracts.
+- Python architecture rule scanners, findings, and exact shrink-only baselines.
+- The bounded frontend ESLint guard contract and its web lint/test integration.
 - Compatibility-ledger schema and validation used by architecture rules.
 - The local and CI entry points that run these repository checks.
 

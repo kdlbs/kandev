@@ -149,6 +149,7 @@ func TestPreparePassthroughRunningDefersAndSnapshotsPublication(t *testing.T) {
 		PassthroughProcessID: "pty-1",
 		Status:               v1.AgentStatusReady,
 		StartedAt:            startedAt,
+		promptTurnID:         "stale-acp-turn",
 	}
 	require.NoError(t, mgr.executionStore.Add(execution))
 
@@ -175,6 +176,7 @@ func TestPreparePassthroughRunningDefersAndSnapshotsPublication(t *testing.T) {
 	require.Equal(t, "run-before", payload.RunID)
 	require.Equal(t, "task-before", payload.TaskID)
 	require.Equal(t, "session-pty", payload.SessionID)
+	require.Empty(t, payload.TurnID, "passthrough running must not carry a stale ACP turn")
 	require.Equal(t, string(v1.AgentStatusRunning), payload.Status)
 }
 

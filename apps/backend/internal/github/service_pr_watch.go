@@ -257,8 +257,8 @@ func (s *Service) checkPRWatchWithClient(
 ) (*PRStatus, bool, error) {
 	ctx = withWorkflowAttentionCollector(ctx, func(
 		collectorCtx context.Context, collectorClient Client, owner, repo string, pr *PR,
-	) (*WorkflowAttention, error) {
-		return s.collectWorkflowAttention(collectorCtx, collectorClient, cacheScope, owner, repo, pr)
+	) (*workflowObservation, error) {
+		return s.collectWorkflowObservation(collectorCtx, collectorClient, cacheScope, owner, repo, pr)
 	})
 	status, err := client.GetPRStatus(ctx, watch.Owner, watch.Repo, watch.PRNumber)
 	if err != nil {

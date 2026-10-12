@@ -219,7 +219,10 @@ function AgentGoalDrawer({ children, detailsId, goal, open, setOpen }: AgentGoal
         data-testid="agent-goal-drawer-content"
         className="max-h-[min(80dvh,calc(100dvh-env(safe-area-inset-bottom)))]"
       >
-        <DrawerHeader className="shrink-0 flex-row items-center justify-between gap-3 text-left">
+        <DrawerHeader
+          data-vaul-no-drag
+          className="shrink-0 flex-row items-center justify-between gap-3 text-left"
+        >
           <div className="min-w-0">
             <DrawerTitle>{t("task:goalDetailsTitle")}</DrawerTitle>
             <DrawerDescription>{t("task:goalDetailsDescription")}</DrawerDescription>

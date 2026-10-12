@@ -130,12 +130,6 @@
     },
     {
       "escape": "as any",
-      "marker": "...createAzureDevOpsSlice(set as any),",
-      "occurrence": 1,
-      "path": "apps/web/lib/state/store.ts"
-    },
-    {
-      "escape": "as any",
       "marker": "...createJiraSlice(set as any, get as any, api as any),",
       "occurrence": 1,
       "path": "apps/web/lib/state/store.ts"

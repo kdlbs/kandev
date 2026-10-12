@@ -41,6 +41,13 @@ The template prompts are product behavior, not merely sample text. Review them b
 
 Choose this for short implementation work with a simple run-and-review loop.
 
+## Reorder workflow steps
+
+Saving a changed step order preserves each step's saved prompt, profile, and
+completion settings, including settings saved concurrently by another caller.
+If the reorder fails, the previous order is preserved. This guarantee applies
+to the reorder operation; saving multiple workflow settings uses separate writes.
+
 ## Duplicate a workflow
 
 Use **Duplicate** to create a new workflow from a saved workflow. The copy starts as a local draft.
@@ -192,6 +199,16 @@ Pull candidates are selected by board position, then priority, queue time, creat
 Workflow and step prompt fields use the inline prompt editor. Type `@` after whitespace to select a saved prompt. In a step prompt, type `{{` to select `{{task_prompt}}` and other tokens supported by that step. The completion menu inserts the reference into the draft; it does not save the workflow. Use **Save changes** when the prompt is ready.
 
 The workflow-level prompt supports saved-prompt references but does not expand step-only variables. `{{task_prompt}}` is available in a step prompt because it is replaced with the task description when that step runs.
+
+Both step prompts and the workflow-level prompt also accept these single-brace placeholders. Type them directly; the completion menu does not offer them.
+
+| Placeholder | Replaced with |
+|-------------|---------------|
+| `{task_id}` | The task's ID. |
+| `{task_title}` | The task's title. Useful when task descriptions are short. |
+| `{step_entry_number}` | How many times the task has entered the current step, starting at 1. |
+
+Each placeholder is replaced everywhere it appears in the prompt you write. Text that arrives through `{{task_prompt}}` is never scanned, so a task description that happens to contain one of these tokens is sent unchanged.
 
 ## Events and actions
 

@@ -334,7 +334,8 @@ Reuse the repository set already resolved for preparation instead of cloning or 
 An environment delivery failure must prevent a claim that the refreshed environment is active.
 
 The agentctl configure boundary has two explicit modes. The existing API mode composes a request-only
-overlay with the instance block, removing only marker-owned bridge entries first. Lifecycle launch and
+overlay with the instance block. It removes obsolete managed authorization and generated helper entries
+before it applies the incoming contract. Lifecycle launch and
 Kubernetes restart pass a composed runtime snapshot through this overlay mode; the indexed merge recognizes
 an already-forwarded snapshot and does not append it to itself. The lifecycle side composes that snapshot
 with a `SetExecutionEnv` overlay only when one has been delivered. Without an overlay the snapshot is the
@@ -349,6 +350,67 @@ A reused executor must replace obsolete generated entries when a policy, token, 
 including when a later preparation supplies no bridge at all.
 A login-shell test covers executable paths with spaces and a replaced `PATH`.
 No global Git file, repository configuration file, token cache, or workspace connection is modified.
+
+### Managed tools at the configure boundary
+
+The integration system owns this contract under
+`AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.15`.
+The [Docker handoff package](../../../plans/docker-managed-git-credential-handoff/plan.md)
+records its repair.
+
+Authorization and installed tools have different lifetimes.
+Each configure request owns the current broker URL, lease, reissue capability,
+task/session identity, repository identity, and scope list.
+`process.Manager` removes the previous authorization before it composes the request.
+A nil, empty, or partial request without a managed broker contract cannot retain
+previous authorization or generated managed Git entries.
+
+The control process installs the tool directory through `prepareGitHubCLIShim`.
+`config.CollectAgentEnvWithError` includes its helper path, shim directory,
+and Bash startup path in the initial instance environment.
+The process manager captures these three non-secret tool paths at construction.
+This private runtime snapshot contains no broker URL, lease, token, scope,
+or task/repository identity. It survives credential removal for the instance lifetime.
+Configuration does not read ambient authorization or restore credentials from PID 1.
+
+After indexed Git composition succeeds, an incoming managed broker contract
+activates the installed tools in the effective environment.
+An explicit worker helper path from the current lifecycle request takes precedence
+over the snapshot fallback. The installed shim directory and startup path remain
+local to this agentctl process.
+Tool activation uses the same path and Bash rules as initial instance construction.
+It prepends the installed shim directory once and composes the parent `BASH_ENV`.
+Parameterized parent hooks use the effective environment and cannot source the shim hook itself.
+A changed request `PATH` or parent hook must work after repeated configuration.
+
+Without the incoming managed contract, the effective environment contains no active
+managed tool metadata. Deactivation removes only Kandev's installed PATH entry.
+If `BASH_ENV` points at the installed shim hook, deactivation restores its parent hook.
+An unrelated PATH entry or explicit user hook remains intact.
+A later managed request can activate the installed tools again without a new instance.
+Shell startup files contain no credential values.
+
+The canonical slice reaches the agent, one-shot adapter, workspace tracker,
+task shells, and task-scoped commands through the existing configure commit.
+A malformed Git block leaves the command and environment unchanged.
+A configure delivery failure prevents agent start.
+
+### Docker worker helper binding
+
+`configureAndStartAgent` binds managed helper paths for explicit Docker runtimes
+before it saves and sends the effective execution environment.
+Both `agentruntime.RuntimeDocker` and `RuntimeRemoteDocker` use
+`remoteAgentctlExecutablePath`, currently `/usr/local/bin/agentctl`.
+`RuntimeKubernetes` retains `kubernetesAgentctlPath` and its restart binding.
+The lifecycle helper generalizes the existing Kubernetes normalizer only for
+these explicit runtime values.
+An unknown, standalone, SSH, Sprites, or plugin runtime does not receive a guessed path.
+
+This binding applies after fresh-snapshot selection or per-run overlay composition.
+It never synthesizes authorization when the effective broker contract is absent.
+Container bootstrap keeps its existing binding for preparation and clone operations.
+The configure path also needs the binding because bootstrap environment values
+are not the authoritative per-run overlay.
 
 ### Compatibility and evidence
 

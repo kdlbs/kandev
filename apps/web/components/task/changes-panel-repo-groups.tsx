@@ -58,7 +58,7 @@ export function RepoGroupItem({
       <div className="flex items-center justify-between gap-2 px-1 py-0.5">
         <button
           type="button"
-          className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground/80 uppercase tracking-wide cursor-pointer hover:text-foreground/80 min-w-0"
+          className="flex min-h-6 items-center gap-1.5 text-[11px] font-medium text-muted-foreground/80 uppercase tracking-wide cursor-pointer hover:text-foreground/80 min-w-0 [@media(pointer:coarse)]:min-h-11"
           data-testid="changes-repo-header"
           aria-expanded={!collapsed}
           onClick={onToggle}
@@ -79,7 +79,7 @@ export function RepoGroupItem({
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-5 text-[10px] px-1.5 cursor-pointer"
+                className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[10px] px-1.5 cursor-pointer"
                 data-testid="repo-group-action"
                 disabled={disabled}
                 onClick={() => onRepoAction(group.repositoryName)}
@@ -91,7 +91,7 @@ export function RepoGroupItem({
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-5 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
+                className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
                 data-testid="repo-group-secondary-action"
                 disabled={disabled}
                 onClick={() => onRepoSecondaryAction(group.repositoryName)}
@@ -131,7 +131,7 @@ export function FileSectionActions({
         <Button
           size="sm"
           variant="ghost"
-          className="h-5 text-[10px] px-1.5 cursor-pointer"
+          className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[10px] px-1.5 cursor-pointer"
           data-testid="repo-group-action"
           disabled={disabled}
           onClick={() => onAction("")}
@@ -143,7 +143,7 @@ export function FileSectionActions({
         <Button
           size="sm"
           variant="ghost"
-          className="h-5 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
+          className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
           data-testid="repo-group-secondary-action"
           disabled={disabled}
           onClick={() => onSecondaryAction("")}
@@ -179,7 +179,7 @@ export function CommitsGroupActions({
         <Button
           size="sm"
           variant="ghost"
-          className="h-5 text-[10px] px-1.5 cursor-pointer gap-1"
+          className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[10px] px-1.5 cursor-pointer gap-1"
           data-testid="commits-repo-push"
           onClick={() => onRepoPush(repositoryName)}
         >
@@ -194,7 +194,7 @@ export function CommitsGroupActions({
             <Button
               size="sm"
               variant="ghost"
-              className="h-5 text-[10px] px-1.5 cursor-pointer gap-1"
+              className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[10px] px-1.5 cursor-pointer gap-1"
               data-testid="commits-repo-create-pr"
               onClick={() => onRepoCreatePR(repositoryName)}
               disabled={!canCreatePR}

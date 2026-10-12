@@ -111,6 +111,9 @@ export type PopupMenuItemProps = {
   icon: ReactNode;
   label: string;
   description?: string;
+  badges?: ReactNode;
+  hint?: string;
+  accessibleLabel?: string;
   isSelected: boolean;
   onClick: () => void;
   onMouseEnter: () => void;
@@ -121,6 +124,9 @@ export function PopupMenuItem({
   icon,
   label,
   description,
+  badges,
+  hint,
+  accessibleLabel,
   isSelected,
   onClick,
   onMouseEnter,
@@ -132,6 +138,7 @@ export function PopupMenuItem({
       type="button"
       role="option"
       aria-selected={isSelected}
+      aria-label={accessibleLabel}
       className={cn(
         "mx-1 flex min-h-11 w-full cursor-pointer select-none items-center gap-3 rounded-[6px] px-2 py-1.5 text-left text-xs",
         "hover:bg-muted/50",
@@ -145,11 +152,19 @@ export function PopupMenuItem({
       <div className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground">
         {icon}
       </div>
-      <div className="flex min-w-0 flex-1 items-baseline gap-2">
-        <span className="max-w-[45%] shrink-0 truncate font-medium">{label}</span>
-        {description && (
-          <span className="min-w-0 truncate whitespace-nowrap text-[11px] text-muted-foreground">
-            {description}
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="max-w-[45%] shrink-0 truncate font-medium">{label}</span>
+          {badges}
+          {description && (
+            <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[11px] text-muted-foreground">
+              {description}
+            </span>
+          )}
+        </div>
+        {hint && (
+          <span className="min-w-0 truncate text-[10px] leading-tight text-muted-foreground">
+            {hint}
           </span>
         )}
       </div>

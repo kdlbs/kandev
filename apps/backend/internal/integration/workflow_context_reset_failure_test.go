@@ -120,6 +120,128 @@ func TestWorkflowResetEscalationLeavesSessionDeletable(t *testing.T) {
 	require.True(t, errors.Is(err, models.ErrTaskSessionNotFound), "session delete error = %v", err)
 }
 
+func TestWorkflowResetConfirmedDispatchCancelStartsStep(t *testing.T) {
+	ts := NewOrchestratorTestServer(t)
+	defer ts.Close()
+
+	ctx := context.Background()
+	taskID := ts.CreateTestTask(t, "augment-agent", 2)
+	task, err := ts.TaskRepo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+
+	steps, err := ts.WorkflowSvc.ListStepsByWorkflow(ctx, task.WorkflowID)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(steps), 2)
+	var target *wfmodels.WorkflowStep
+	for _, step := range steps {
+		if step.ID != task.WorkflowStepID {
+			target = step
+			break
+		}
+	}
+	require.NotNil(t, target)
+	target.Prompt = "distinct confirmed reset workflow prompt"
+	target.Events.OnEnter = []wfmodels.OnEnterAction{
+		{Type: wfmodels.OnEnterResetAgentContext},
+		{Type: wfmodels.OnEnterAutoStartAgent},
+	}
+	require.NoError(t, ts.WorkflowSvc.UpdateStep(ctx, target))
+
+	// Keep the initial simulated turn active while the workflow move runs.
+	ts.AgentManager.SetExecutionTime(30 * time.Second)
+	client := NewOrchestratorWSClient(t, ts.Server.URL)
+	defer client.Close()
+	startResp, err := client.SendRequest("start-confirmed-reset", ws.ActionSessionLaunch, map[string]interface{}{
+		"task_id":          taskID,
+		"agent_profile_id": "augment-agent",
+	})
+	require.NoError(t, err)
+	var startPayload map[string]interface{}
+	require.NoError(t, startResp.ParsePayload(&startPayload))
+	sessionID, ok := startPayload["session_id"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, sessionID)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		session, getErr := ts.TaskRepo.GetTaskSession(ctx, sessionID)
+		if getErr == nil && session.State == models.TaskSessionStateRunning && ts.AgentManager.GetLaunchCount() > 0 {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	session, err := ts.TaskRepo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, session.State)
+	require.True(t, ts.AgentManager.markAgentRunningForSession(sessionID))
+	require.True(t, ts.AgentManager.IsAgentRunningForSession(ctx, sessionID))
+	// This integration server uses a simulated manager instead of the lifecycle
+	// manager that normally writes this inventory row alongside execution state.
+	executionID, err := ts.AgentManager.GetExecutionIDForSession(ctx, sessionID)
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	require.NoError(t, ts.TaskRepo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:                 sessionID,
+		SessionID:          sessionID,
+		TaskID:             taskID,
+		ExecutionProfileID: "simulated-profile",
+		ExecutorID:         "simulated",
+		AgentExecutionID:   executionID,
+		Status:             models.ExecutorRunningStatusRunning,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}))
+	require.Equal(t, sessionID, session.ID)
+	promptCallsBeforeMove := ts.AgentManager.PromptCallCount()
+	launchCountBeforeMove := ts.AgentManager.GetLaunchCount()
+	messagesBeforeMove, err := ts.TaskRepo.ListMessages(ctx, sessionID)
+	require.NoError(t, err)
+	userMessagesBeforeMove := countUserMessages(messagesBeforeMove)
+
+	moveResp, err := client.SendRequest("move-confirmed-reset", ws.ActionTaskMove, map[string]interface{}{
+		"id":               taskID,
+		"workflow_id":      task.WorkflowID,
+		"workflow_step_id": target.ID,
+		"position":         target.Position,
+	})
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, moveResp.Type)
+
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if ts.AgentManager.ResetContextCallCount() == 1 &&
+			ts.AgentManager.PromptCallCount() == promptCallsBeforeMove+1 {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	require.Equal(t, 1, ts.AgentManager.ResetContextCallCount())
+	require.Equal(t, promptCallsBeforeMove+1, ts.AgentManager.PromptCallCount())
+	require.Equal(t, launchCountBeforeMove, ts.AgentManager.GetLaunchCount())
+
+	updatedSession, err := ts.TaskRepo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, sessionID, updatedSession.ID)
+	updatedTask, err := ts.TaskRepo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, updatedTask.WorkflowStepID)
+	if _, found := models.LoadLastAgentError(updatedSession.Metadata); found {
+		t.Fatalf("successful context reset retained reset error metadata: %#v", updatedSession.Metadata)
+	}
+
+	messagesAfterMove, err := ts.TaskRepo.ListMessages(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, userMessagesBeforeMove+1, countUserMessages(messagesAfterMove))
+	var destinationPrompts []string
+	for _, message := range messagesAfterMove {
+		if message != nil && message.AuthorType == models.MessageAuthorUser &&
+			strings.Contains(message.Content, "distinct confirmed reset workflow prompt") {
+			destinationPrompts = append(destinationPrompts, message.Content)
+		}
+	}
+	require.Len(t, destinationPrompts, 1, "the destination step prompt must be recorded exactly once")
+}
+
 func countUserMessages(messages []*models.Message) int {
 	count := 0
 	for _, message := range messages {

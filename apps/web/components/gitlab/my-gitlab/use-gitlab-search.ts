@@ -120,7 +120,7 @@ export function useGitLabSearch({
 
   useEffect(() => {
     setPage(1);
-  }, [preset, customQuery, kind]);
+  }, [workspaceId, preset, customQuery, kind]);
 
   const fetchData = useCallback(
     async (args: FetchArgs) => {

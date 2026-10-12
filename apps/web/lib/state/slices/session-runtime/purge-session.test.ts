@@ -59,6 +59,23 @@ describe("purgeSessionRuntimeState", () => {
       state: "unreachable",
       reason: "timeout",
     });
+    s.setBackgroundWorkloads(SESSION_ID, [
+      {
+        work_id: "work-1",
+        title: "test",
+        kind: "shell",
+        state: "running",
+        capabilities: {
+          discovery: "snapshot",
+          output: "stream",
+          transcript: false,
+          parentage: false,
+          reasoning_summary: false,
+          attributable_usage: false,
+        },
+        revision: 1,
+      },
+    ]);
 
     store.setState((draft) => {
       purgeSessionRuntimeState(draft, SESSION_ID);
@@ -68,6 +85,7 @@ describe("purgeSessionRuntimeState", () => {
     expect(after.environmentIdBySessionId[SESSION_ID]).toBeUndefined();
     expect(after.contextWindow.bySessionId[SESSION_ID]).toBeUndefined();
     expect(after.sessionTodos.bySessionId[SESSION_ID]).toBeUndefined();
+    expect(after.backgroundWork.workloadsBySessionId[SESSION_ID]).toBeUndefined();
     expect(after.processes.processIdsBySessionId[SESSION_ID]).toBeUndefined();
     expect(after.processes.devProcessBySessionId[SESSION_ID]).toBeUndefined();
     expect(after.processes.processesById["proc-1"]).toBeUndefined();

@@ -476,11 +476,14 @@ func TestUpdateProfile_MixedEnabledAndFallbackPersistsBoth(t *testing.T) {
 	enabled := false
 	fallback := "gpt-5-mini"
 	autoFallback := true
+	selectedServers := []string{"plugin-atlassian-atlassian"}
 	updated, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
-		ID:            profile.ID,
-		Enabled:       &enabled,
-		FallbackModel: &fallback,
-		AutoFallback:  &autoFallback,
+		ID:                 profile.ID,
+		Enabled:            &enabled,
+		FallbackModel:      &fallback,
+		AutoFallback:       &autoFallback,
+		MCPSelectionMode:   stringPointer("selected"),
+		MCPSelectedServers: &selectedServers,
 	})
 	if err != nil {
 		t.Fatalf("UpdateProfile: %v", err)
@@ -501,6 +504,9 @@ func TestUpdateProfile_MixedEnabledAndFallbackPersistsBoth(t *testing.T) {
 	if stored.FallbackModel != fallback || !stored.AutoFallback {
 		t.Fatalf("stored fallback fields lost: fallback_model=%q auto_fallback=%v",
 			stored.FallbackModel, stored.AutoFallback)
+	}
+	if stored.MCPSelectionMode != "selected" || len(stored.MCPSelectedServers) != 1 || stored.MCPSelectedServers[0] != "plugin-atlassian-atlassian" {
+		t.Fatalf("stored MCP selection lost on enabled patch: mode=%q servers=%#v", stored.MCPSelectionMode, stored.MCPSelectedServers)
 	}
 }
 

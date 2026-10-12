@@ -28,6 +28,50 @@ Users who create a workspace by mistake, finish an experiment, or consolidate wo
 - **AC-WORKSPACES-DELETION-001.7:** After deletion the user is redirected to `/office/setup?mode=new` if no other workspaces remain. If workspaces remain, another Office workspace is preferred; otherwise the first remaining workspace is selected and the user is redirected to that workspace's native home route (`/office?workspaceId=<id>` for Office, `/?workspaceId=<id>` for Kanban).
 - **AC-WORKSPACES-DELETION-001.8:** The operation is irreversible. There is no soft-delete or undo.
 
+### REQ-WORKSPACES-DELETION-002: Preserve current catalogue during Settings deletion
+
+**Intent:** Accepting a deletion from the shared workspace Settings page shall
+remove the target without discarding independent workspace choices or changes
+already visible while deletion was pending. Workspaces owns this boundary
+because it owns workspace lifecycle and the catalogue consumed by navigation.
+
+This requirement applies only to deletion from the shared Settings workspace
+editor. Requirement 001 retains its existing complete-deletion and Office
+post-delete destination contract. The shared Settings editor retains its
+existing return to `/settings/workspaces`; this adds no routing repair.
+
+#### Acceptance criteria
+
+- **AC-WORKSPACES-DELETION-002.1:** When independent workspaces are added,
+  updated, or removed while Settings deletion is pending, successful
+  acknowledgement shall remove only the target from the current catalogue.
+  Every surviving workspace shall retain its current descriptor and relative
+  order. Added choices shall remain available, removed choices shall stay
+  absent, and earlier names or metadata shall not replace current values.
+- **AC-WORKSPACES-DELETION-002.2:** The actual workspace picker shall expose
+  surviving current choices and names after accepted deletion and the existing
+  return to `/settings/workspaces`. The target shall be absent. Desktop and
+  phone users shall receive the same catalogue outcome through their existing
+  shared controls and state.
+- **AC-WORKSPACES-DELETION-002.3:** Accepted deletion shall preserve the active
+  identity and selection revision current at acknowledgement under the existing
+  catalogue publication policy. A non-null identity shall remain unchanged;
+  with a null identity and survivors, the first survivor shall become active
+  without a new selection revision. Independent selection or deletion-event
+  fallback already applied while the request was pending shall retain its
+  existing effect. This acknowledgement introduces no explicit selection or
+  cookie write beyond the existing catalogue policy.
+- **AC-WORKSPACES-DELETION-002.4:** Ordinary accepted deletion shall retain
+  target removal and the existing Settings return. A rejected deletion shall
+  publish no removal from that request and shall retain independently received
+  catalogue changes, the current selection, confirmation dialog and entered
+  name, existing failure feedback, and the current route.
+- **AC-WORKSPACES-DELETION-002.5:** Settings deletion shall retain the exact
+  workspace-name confirmation guard, existing owner/manage eligibility, and
+  generic-versus-Office request selection. A mismatched confirmation shall send
+  no deletion request. Backend cascade and Office deletion behavior remain
+  governed by their existing contracts.
+
 ## Migrated source detail
 
 ## Why
@@ -61,3 +105,15 @@ Users who create a workspace by mistake, finish an experiment, or consolidate wo
 - Exporting workspace data before deletion.
 - Deleting individual entities within a workspace (agents, projects) — those have their own flows.
 - Multi-workspace bulk deletion.
+
+For requirement 002, changes to backend or Office deletion, selection or route
+policy, stale settings drafts, unrelated catalogue writers, global catalogue
+arbitration, lifecycle cleanup, rendered composition, or product copy are also
+excluded.
+
+## References
+
+- [Deletion system design](../system-design/deletion.md).
+- [Settings save and creation publication](workspace-settings-updates.md).
+- [Per-tab Settings context](per-tab-settings-context.md).
+- [Settings deletion catalogue plan](../../../plans/workspace-delete-catalogue-preservation/plan.md).

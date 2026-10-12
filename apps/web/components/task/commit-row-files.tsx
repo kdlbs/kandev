@@ -37,15 +37,17 @@ function toChangedFile(path: string, file: FileInfo, target: CommitDetailTarget)
 
 const noMutation = () => {};
 
-function CommitFileRow({
+export function CommitFileRow({
   file,
   onOpenFile,
   treeMode = false,
+  keyboardNavigable = false,
   indentPx,
 }: {
   file: ChangedFile;
   onOpenFile?: (path: string) => void;
   treeMode?: boolean;
+  keyboardNavigable?: boolean;
   indentPx?: number;
 }) {
   return (
@@ -53,6 +55,7 @@ function CommitFileRow({
       file={file}
       isPending={false}
       readOnly
+      keyboardNavigable={keyboardNavigable}
       testId={`commit-file-${file.path.replace(/[/\\]/g, "-")}`}
       onOpenDiff={(path) => onOpenFile?.(path)}
       onStage={noMutation}

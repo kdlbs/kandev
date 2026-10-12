@@ -21,6 +21,16 @@ system_design:
 
 # Task 10: Native completion criteria and evidence gates
 
+## Presentation scope correction (2026-09-28)
+
+The user requested removal of the native Manager and Completion requirements
+controls. The [removal package](../remove-native-coordination-ui/plan.md)
+supersedes this record's UI-03 task-detail presentation and its browser
+interaction matrix. The correction was implemented on September 28, 2026. The
+original commands, counts, and results below remain historical UI evidence;
+completion APIs and enforcement remain valid. The new package owns replacement
+browser and recovery coverage.
+
 ## Summary
 
 Add optional task criteria and evidence that every completion path enforces. Preserve completion behavior for tasks without criteria.

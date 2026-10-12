@@ -53,12 +53,47 @@ function classifyContributionRelation(
   return classifyRemoteContribution(input);
 }
 
+function unavailableContributionRelation(
+  providerHead: string | null | undefined,
+): RemoteContributionRelation {
+  return {
+    kind: "unknown",
+    presentation: "unified",
+    action: "unavailable_evidence",
+    providerHead: providerHead ?? null,
+    pushAhead: 0,
+    pullBehind: 0,
+    canPush: false,
+    canPull: false,
+    canReplaceRemote: false,
+    canUseRemote: false,
+  };
+}
+
 function useSelectedPRCommits(selectedPR: TaskPR | null) {
   return usePRCommits(
     selectedPR?.owner ?? null,
     selectedPR?.repo ?? null,
     selectedPR?.pr_number ?? null,
     selectedPR?.last_synced_at ?? null,
+  );
+}
+
+function hasReadyGitStatusDetails(
+  selectedPR: TaskPR | null,
+  gitStatus: ReturnType<typeof useSessionGitStatusByRepo>[number]["status"] | undefined,
+  statuses: ReturnType<typeof useSessionGitStatusByRepo>,
+): boolean {
+  if (selectedPR) {
+    return Boolean(
+      gitStatus && gitStatus.detail_state !== "pending" && gitStatus.detail_state !== "unavailable",
+    );
+  }
+  return (
+    statuses.length > 0 &&
+    statuses.every(
+      ({ status }) => status.detail_state !== "pending" && status.detail_state !== "unavailable",
+    )
   );
 }
 
@@ -92,39 +127,43 @@ export function useRemoteContributionRelation(
     const refreshed = await commitsState.refresh();
     return refreshed?.providerHead ?? null;
   }, [commitsState.refresh]);
-  const gitStatus = selection?.gitStatus;
+  const gitStatus =
+    selection?.gitStatus ??
+    (!selectedPR && statusByRepo.length === 1 ? statusByRepo[0].status : undefined);
   const contributionHistoryTarget = useMemo(
     () =>
       buildContributionHistoryTarget(sessionId, selectedPR, gitStatus, commitsState.providerHead),
     [sessionId, selectedPR, gitStatus, commitsState.providerHead],
   );
 
-  const relation = useMemo(
-    () =>
-      classifyContributionRelation({
-        hasSelectedPR: Boolean(selectedPR),
-        providerCommits: commitsState.authoritativeCommits,
-        providerHead: commitsState.providerHead,
-        providerCommitsComplete: commitsState.providerCommitsComplete,
-        providerLoading: commitsState.loading,
-        providerError: commitsState.error,
-        localHead: gitStatus?.head_commit,
-        upstreamHead: gitStatus?.remote_head_commit,
-        remoteAhead: gitStatus?.remote_ahead ?? 0,
-        remoteBehind: gitStatus?.remote_behind ?? 0,
-        baseAhead: gitStatus?.ahead ?? 0,
-        hasUpstream: Boolean(gitStatus?.remote_branch),
-      }),
-    [
-      selectedPR,
-      commitsState.authoritativeCommits,
-      commitsState.providerHead,
-      commitsState.providerCommitsComplete,
-      commitsState.loading,
-      commitsState.error,
-      gitStatus,
-    ],
-  );
+  const relation = useMemo(() => {
+    const detailsReady = hasReadyGitStatusDetails(selectedPR, gitStatus, statusByRepo);
+    if (!detailsReady) return unavailableContributionRelation(commitsState.providerHead);
+    return classifyContributionRelation({
+      hasSelectedPR: selectedPR !== null,
+      providerCommits: commitsState.authoritativeCommits,
+      providerHead: commitsState.providerHead,
+      providerCommitsComplete: commitsState.providerCommitsComplete,
+      providerLoading: commitsState.loading,
+      providerError: commitsState.error,
+      localHead: gitStatus?.head_commit,
+      upstreamHead: gitStatus?.remote_head_commit,
+      remoteAhead: gitStatus?.remote_ahead ?? 0,
+      remoteBehind: gitStatus?.remote_behind ?? 0,
+      baseAhead: gitStatus?.ahead ?? 0,
+      hasUpstream: Boolean(gitStatus?.remote_branch),
+    });
+  }, [
+    selectedPR,
+    commitsState.authoritativeCommits,
+    commitsState.providerHead,
+    commitsState.providerCommitsComplete,
+    commitsState.loading,
+    commitsState.error,
+    gitStatus,
+    selectedPR,
+    statusByRepo,
+  ]);
 
   return {
     prs: scopedPRs,

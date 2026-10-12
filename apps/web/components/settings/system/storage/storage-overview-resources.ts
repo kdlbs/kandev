@@ -30,6 +30,8 @@ export interface StorageResource {
   sizeBytes?: number;
   barPercent?: number;
   partial?: boolean;
+  systemTemporary?: StorageSystemTemporarySummary;
+  temporaryArtifacts?: StorageTemporaryArtifactsSummary | null;
 }
 
 const STORAGE_UNAVAILABLE_VALUE_KEY = "system:storageUnavailableValue";
@@ -461,6 +463,7 @@ function normalizeTemporaryWarnings(warnings: string[]): {
 function systemTemporaryResource(
   t: Translate,
   summary: StorageSystemTemporarySummary,
+  temporaryArtifacts?: StorageTemporaryArtifactsSummary | null,
 ): StorageResource {
   const normalizedWarnings = normalizeTemporaryWarnings([
     ...(summary.warnings ?? []),
@@ -486,6 +489,8 @@ function systemTemporaryResource(
     source: "system_temporary",
     sizeBytes: temporarySummaryBytes(summary),
     partial: summary.status === "partial",
+    systemTemporary: summary,
+    temporaryArtifacts,
   };
 }
 
@@ -493,6 +498,7 @@ function systemTemporaryResourceOrPending(
   t: Translate,
   summary: StorageSummaryPartial["system_temporary"],
   progress?: StorageSourceProgress,
+  temporaryArtifacts?: StorageSummaryPartial["temporary_artifacts"],
 ): StorageResource {
   if (!summary) {
     return pendingStorageResource(
@@ -503,7 +509,7 @@ function systemTemporaryResourceOrPending(
       "system_temporary",
     );
   }
-  return systemTemporaryResource(t, summary);
+  return systemTemporaryResource(t, summary, temporaryArtifacts);
 }
 
 function dockerResources(
@@ -606,7 +612,12 @@ export function storageResources(
       source: "database_backups",
     }),
     quarantineResourceOrPending(t, summary.quarantine, progress.quarantine),
-    systemTemporaryResourceOrPending(t, summary.system_temporary, progress.system_temporary),
+    systemTemporaryResourceOrPending(
+      t,
+      summary.system_temporary,
+      progress.system_temporary,
+      summary.temporary_artifacts,
+    ),
     ...goCacheResources(
       t,
       summary.go_cache,

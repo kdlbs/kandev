@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
 	"github.com/kandev/kandev/internal/system/storage/filescan"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	"github.com/kandev/kandev/internal/system/storage/tempstore"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/worktree"
@@ -63,7 +64,7 @@ func TestStorageOverviewIncludesQuarantineAndManagedContainers(t *testing.T) {
 	overview := &storageOverview{
 		settings: settings, quarantine: store, workspaceFactory: workspaceFactory,
 		goCache: gocache.New(gocache.Config{
-			HomeDir: home, TrashDir: filepath.Join(home, "trash"), Settings: settings, Store: store,
+			HomeDir: home, TrashDir: filepath.Join(home, "trash"), Settings: settings,
 		}),
 		docker: docker, homeDir: home,
 	}
@@ -105,9 +106,60 @@ func TestSystemTemporaryConfigUsesDisposableE2ERoot(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KANDEV_E2E_SYSTEM_TEMP_ROOT", root)
 
-	configured := systemTemporaryConfig(filescan.NewLimiter(1))
+	configured := systemTemporaryConfig(filescan.NewLimiter(1), nil)
 	if configured.EffectiveRoot != root || configured.UnixRoot != root {
 		t.Fatalf("system temporary config = %#v, want disposable root %q", configured, root)
+	}
+}
+
+func TestSystemTemporaryCapacityRootsUseDisposableE2ERoot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KANDEV_E2E_SYSTEM_TEMP_ROOT", root)
+	provider := tempstore.New(systemTemporaryConfig(filescan.NewLimiter(1), nil))
+
+	roots, err := provider.CapacityRoots(context.Background())
+	if err != nil {
+		t.Fatalf("CapacityRoots: %v", err)
+	}
+	if len(roots) != 1 || roots[0].Path != root {
+		t.Fatalf("capacity roots = %#v, want only the disposable E2E root %q", roots, root)
+	}
+}
+
+func TestClassifyTemporaryArtifactOwnershipUsesExactPathAndMarker(t *testing.T) {
+	root := t.TempDir()
+	_, store := newStorageMaintenanceStores(t)
+	registry := tempartifacts.NewRegistry(tempartifacts.Config{Store: store, TempRoot: root})
+	lease, err := registry.Create(context.Background(), storagepkg.TemporaryArtifactKindHostUtility, nil)
+	if err != nil {
+		t.Fatalf("Create registered artifact: %v", err)
+	}
+	untracked := filepath.Join(root, "kandev-host-utility-lookalike")
+	if err := os.Mkdir(untracked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	registeredPath := lease.Path()
+	lookalikePath := registeredPath + "-suffix"
+	classified := classifyTemporaryArtifactOwnership(
+		context.Background(), registry, []string{registeredPath, untracked, lookalikePath},
+	)
+	if classified[registeredPath] != tempstore.EntryOwnershipRegisteredKandev {
+		t.Fatalf("registered ownership = %q, want registered_kandev", classified[registeredPath])
+	}
+	if classified[untracked] != tempstore.EntryOwnershipUntracked ||
+		classified[lookalikePath] != tempstore.EntryOwnershipUntracked {
+		t.Fatalf("untracked classifications = %#v, want exact-path untracked results", classified)
+	}
+
+	artifact := lease.Artifact()
+	marker := filepath.Join(registeredPath, tempartifacts.MarkerName)
+	if err := os.WriteFile(marker, []byte(`{"id":"wrong","kind":"host_utility","token":"wrong"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	classified = classifyTemporaryArtifactOwnership(context.Background(), registry, []string{artifact.Path})
+	if classified[artifact.Path] != tempstore.EntryOwnershipUnknown {
+		t.Fatalf("invalid marker ownership = %q, want unknown", classified[artifact.Path])
 	}
 }
 
@@ -125,7 +177,7 @@ func TestStorageOverviewIncludesInformationalSystemTemporaryFootprint(t *testing
 				Retention:   time.Duration(current.QuarantineRetentionHours) * time.Hour,
 			})
 		},
-		goCache: gocache.New(gocache.Config{HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings, Store: store}),
+		goCache: gocache.New(gocache.Config{HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings}),
 		docker:  dockerstore.NewProvider(&overviewDockerClient{}, overviewContainerInventory{}, settings),
 		systemTemporary: tempstore.New(tempstore.Config{
 			GOOS: "windows", EffectiveRoot: root,
@@ -169,7 +221,7 @@ func TestStorageOverviewIncludesDatabaseAndBackupMeasurements(t *testing.T) {
 			})
 		},
 		goCache: gocache.New(gocache.Config{
-			HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings, Store: store,
+			HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings,
 		}),
 		docker:  dockerstore.NewProvider(&overviewDockerClient{}, overviewContainerInventory{}, settings),
 		homeDir: root,
@@ -224,7 +276,7 @@ func TestStorageOverviewDoesNotSuppressDatabaseUnderFormerDefaultGoCache(t *test
 			})
 		},
 		goCache: gocache.New(gocache.Config{
-			HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings, Store: store,
+			HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings,
 		}),
 		docker:  dockerstore.NewProvider(&overviewDockerClient{}, overviewContainerInventory{}, settings),
 		homeDir: root,
@@ -477,7 +529,7 @@ func TestStorageOverviewStartsIndependentMeasurementsTogether(t *testing.T) {
 			})
 		},
 		goCache: gocache.New(gocache.Config{
-			HomeDir: home, TrashDir: filepath.Join(home, "trash"), Settings: settings, Store: store,
+			HomeDir: home, TrashDir: filepath.Join(home, "trash"), Settings: settings,
 		}),
 		docker: docker, homeDir: home,
 	}
@@ -772,6 +824,23 @@ func TestQuarantineControllerRetainsGoCacheWhileTaskActivityIsRunning(t *testing
 	}
 	if _, err := os.Stat(artifact); err != nil {
 		t.Fatalf("quarantined cache changed while task active: %v", err)
+	}
+}
+
+func TestGoCacheQuarantineMutationsHonorCancellation(t *testing.T) {
+	controller := &workspaceQuarantineController{
+		goCacheMutations: storagepkg.NewMutationGate(),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := controller.restoreGoCache(ctx, storagepkg.QuarantineEntry{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("restoreGoCache error = %v, want cancellation before entry validation", err)
+	}
+	if _, _, err := controller.deleteGoCacheWithRetention(
+		ctx, storagepkg.QuarantineEntry{}, storagepkg.QuarantineConfirmationDelete, false,
+	); !errors.Is(err, context.Canceled) {
+		t.Fatalf("deleteGoCacheWithRetention error = %v, want cancellation before entry validation", err)
 	}
 }
 

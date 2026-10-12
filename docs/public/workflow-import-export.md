@@ -165,6 +165,7 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
   session_target:
     kind: initial
     # A source-step target uses: kind: step and step_position: 1
+  disable_unclassified_fallback: true
   complete_task_on_enter: false
 ```
 
@@ -183,6 +184,7 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
 | `profile_session_start_policy` | enum | `reuse` or `new`; controls whether this destination step reuses the newest eligible nonterminal session for its profile or always starts a fresh conversation. Missing or unknown values use `reuse`. |
 | `profile_session_end_policy` | enum | `complete` or `park`; controls whether this source step's session is closed or kept available when the workflow leaves it for a different profile. Missing or unknown values use `complete`. |
 | `session_target` | object | Optional explicit recipient. Use `{kind: initial}` for the task's launch conversation. Use `{kind: step, step_position: N}` for an earlier direct-profile step. Source-step references use positions so import can remap step IDs. |
+| `disable_unclassified_fallback` | boolean | Always exported in version 2. `true` vetoes the optional repeated-unclassified policy for this step's task session, even when its dynamic candidate policy is enabled. Missing input defaults to `false`; step create/update API requests accept this field, omitted updates preserve the saved value, and explicit `null` is invalid. |
 | `complete_task_on_enter` | boolean | Always exported in version 2. On the final workflow step, `true` marks the task `COMPLETED` when it enters that step. On non-final steps the value is retained but inactive. Version 1 derives the legacy name-based behavior only when this field is absent. |
 | `auto_advance_requires_signal` | boolean | Always exported. `true` makes `on_turn_complete` transitions wait for `step_complete_kandev`; missing input is `false`. |
 | `cancel_triggers_turn_complete` | boolean | Always exported. `true` lets an explicit user cancellation run the step's normal `on_turn_complete` actions after the cancelled turn settles; missing input is `false`. Pending clarification and non-user interruption/failure paths are not eligible. |
@@ -229,7 +231,7 @@ Portable validation is deliberately narrow. Beyond `set_session_mode` and positi
 
 ### Office / Phase-2 triggers
 
-The seven Office/Phase-2 triggers listed in the table above round-trip through export and import: their actions, including `move_to_step`, are carried the same way as the four Kanban-era triggers. A Phase-2 `move_to_step` uses `config.step_position` and is validated against the workflow's step positions identically to `on_turn_start`/`on_turn_complete`.
+The seven Office/Phase-2 triggers listed in the table above round-trip through export and import: their actions, including `move_to_step`, are carried the same way as the four Kanban-era triggers. A Phase-2 `move_to_step` uses `config.step_position` and is validated against the workflow's step positions identically to `on_turn_start`/`on_turn_complete`. `queue_run_for_each_participant`'s `config.skip_decided` (boolean) excludes any seat that already recorded a decision at the step from that fan-out: the shipped office-default template sets it on `review`/`approval`'s `on_comment` so a gate comment only wakes undecided reviewers/approvers.
 
 What still doesn't round-trip is Office step *metadata* that has no portable representation: `stage_type`, step participants (reviewers/approvers), recorded decisions, task data, and step history (see [Step fields](#step-fields)). The Workflows settings UI filters Office-style workflows from its list and Export All selection because of that metadata gap, not because their trigger events are dropped. Manage participant and decision state through the Office product surface; portable Kanban import/export only carries step behavior, not Office workflow state.
 

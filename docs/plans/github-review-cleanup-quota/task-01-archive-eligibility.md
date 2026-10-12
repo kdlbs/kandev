@@ -98,3 +98,16 @@ behavior.
 
 Verification passed: the targeted GitHub cleanup Go tests, both public-doc
 validators, and `git diff --check`.
+
+### Hosted CI shared-workflow isolation
+
+Four review-watcher cleanup scenarios appended steps to the worker's seeded
+workflow. A new isolation assertion failed on the leaked step. Each scenario
+now creates a private workflow and uses its own step for watch creation and
+board navigation. The assertion requires seeded step identities to remain
+unchanged after every scenario.
+
+`cd apps/web && E2E_PORT_OFFSET=0 pnpm e2e:run --host --no-build --project chromium -- tests/pr/pr-watcher-cleanup-policy.spec.ts tests/task/subtask.spec.ts --retries=0`
+passed all 22 tests. The hosted subtask card failure was not deterministically
+reproduced by the reduced warm-worker sequence; the shared-step leak was
+reproduced directly. Fresh hosted CI is required to confirm the combined repair.

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { useWebSocketClient } from "@/lib/ws/connection";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 
 type PRFilesByKey = Record<string, PRDiffFile[]>;
@@ -81,6 +81,7 @@ export function useActiveTaskPRsWithFiles(scopedPRs?: TaskPR[]): {
 } {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const client = useWebSocketClient();
   const taskPRs = useAppStore((s) => {
     const taskId = s.tasks.activeTaskId;
     if (!taskId) return EMPTY_PRS;
@@ -138,7 +139,6 @@ export function useActiveTaskPRsWithFiles(scopedPRs?: TaskPR[]): {
 
   // Issue one fetch per PR that hasn't been fetched yet under its current key.
   useEffect(() => {
-    const client = getWebSocketClient();
     if (!client || !workspaceId) return;
     for (const pr of prs) {
       const key = fetchKey(pr);
@@ -174,7 +174,7 @@ export function useActiveTaskPRsWithFiles(scopedPRs?: TaskPR[]): {
     // from the previous effect instance — and since the next effect's
     // early-continue saw the key still in inFlightRef, no fresh request
     // was issued either, leaving files permanently empty.
-  }, [activeTaskId, prs, workspaceId]);
+  }, [activeTaskId, client, prs, workspaceId]);
 
   const filesByPRKey = useMemo(() => {
     if (fileCache.workspaceId !== workspaceId || fileCache.taskId !== activeTaskId) {

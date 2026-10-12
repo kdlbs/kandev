@@ -32,6 +32,8 @@ export const PROFILE_EDITABLE_FIELD_PATHS = [
   "env_vars",
   "command_prefix",
   "dynamic",
+  "mcp_selection_mode",
+  "mcp_selected_servers",
 ] as const;
 
 export type ProfileEditableFieldPath = (typeof PROFILE_EDITABLE_FIELD_PATHS)[number];

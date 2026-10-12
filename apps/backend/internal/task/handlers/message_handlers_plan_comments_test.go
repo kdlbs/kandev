@@ -61,8 +61,8 @@ func (r *messageAddSwitchRepo) CreateMessageWithTaskFeedback(
 		return nil, nil, err
 	}
 	message.Content = content
-	message.PromptIndex = 1
 	r.messagesMu.Lock()
+	message.PromptIndex = len(r.messages) + 1
 	r.messages = append(r.messages, message)
 	r.idempotentMessage = message
 	r.messagesMu.Unlock()
@@ -140,8 +140,8 @@ func (r *messageAddSwitchRepo) CreateMessageWithPlanComments(
 		return nil, err
 	}
 	message.Content = content
-	message.PromptIndex = 1
 	r.messagesMu.Lock()
+	message.PromptIndex = len(r.messages) + 1
 	r.messages = append(r.messages, message)
 	r.idempotentMessage = message
 	r.messagesMu.Unlock()

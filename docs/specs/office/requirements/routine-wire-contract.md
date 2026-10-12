@@ -30,9 +30,8 @@ be armed at all, removing the product's only path to an unattended routine. On r
 and only for two fields, so the detail form, the expanded row, the Schedule
 card and the Runs list render blanks.
 
-This capability makes the web client speak the contract the backend publishes.
-It changes no HTTP contract, no Go struct tag, no database column and no
-scheduler behavior.
+The create request adds optional nested `trigger` with snake_case keys. Other
+contract fields, storage and scheduler behavior stay unchanged.
 
 ## Terminology
 
@@ -60,8 +59,8 @@ I pick to be saved, so that a routine does what I configured it to do.
   `description`, `task_template`, `assignee_agent_profile_id`,
   `concurrency_policy`, `catch_up_policy`, `catch_up_max`, `variables`.
 - **AC-OFFICE-ROUTINE-WIRE-001.2:** When the client creates a routine, the
-  system shall send no key outside AC-001.1's set, and in particular no
-  camelCase spelling of any of them.
+  system shall send only AC-001.1 keys plus optional nested `trigger`, whose
+  fields use AC-002.1. Omit it when absent; send no camelCase keys.
 - **AC-OFFICE-ROUTINE-WIRE-001.3:** When the client sends `task_template` or
   `variables`, the system shall send a JSON-encoded string, never a JSON object,
   because the bound fields are Go strings and an object is rejected as a 400.
@@ -84,24 +83,23 @@ I pick to be saved, so that a routine does what I configured it to do.
   resumes a routine, the system shall send `status` alone and shall not widen
   the patch to any other field.
 - **AC-OFFICE-ROUTINE-WIRE-001.9:** When the client updates a routine, the
-  system shall send no key outside AC-001.1's set plus `status`, and in
-  particular no camelCase spelling of any of them. `status` is an update key
-  and not a create key (AC-001.6).
+  system shall send no key outside AC-001.1's routine-field set plus `status`,
+  with no camelCase key. `status` is an update key and not a create key
+  (AC-001.6). The optional `trigger` is create-only and shall not appear in an
+  update body.
 - **AC-OFFICE-ROUTINE-WIRE-001.10:** When a caller supplies an empty
   `concurrency_policy` or `catch_up_policy` on update, the system shall omit
   that key rather than send the empty string, because `Valid()`
   (`models/enums.go`) rejects it with a 400. Those two keys are the only ones
   where empty means omit; every other update key transmits its empty string and
   clears (AC-001.11).
-- **AC-OFFICE-ROUTINE-WIRE-001.11:** When the system builds an update body, the
-  clearable set shall be `name`, `description`, `task_template`,
-  `assignee_agent_profile_id`, `status` and `variables`, not AC-001.5's three:
-  `UpdateRoutineRequest` types all six as pointers and `applyRoutineUpdates`
-  (`routines/handler.go`) assigns each one unvalidated, so an empty string
-  supplied for any of the six is stored rather than ignored. The system shall
-  not send an empty `status` (AC-003.17), and shall omit a `catch_up_max` below 1
-  from a create or an update body rather than send it, because `*int` stores
-  what is sent (AC-003.13).
+- **AC-OFFICE-ROUTINE-WIRE-001.11:** The update body shall transmit empty
+  strings for `name`, `description`, `task_template`,
+  `assignee_agent_profile_id`, `status` and `variables`. `UpdateRoutineRequest`
+  types all six as pointers, and `applyRoutineUpdates` stores them without
+  validation; AC-001.5 lists only three. The system shall omit empty `status`
+  (AC-003.17) and `catch_up_max` below 1 on create or update, because the
+  backend stores the supplied `*int` (AC-003.13).
 
 ### REQ-OFFICE-ROUTINE-WIRE-002: A cron schedule can be armed and changed from the UI
 
@@ -119,8 +117,9 @@ so that the routine runs without me firing it by hand.
   supply.
 - **AC-OFFICE-ROUTINE-WIRE-002.2:** When the create-routine flow is submitted
   with trigger kind `cron` and a non-empty trimmed expression, the system shall
-  arm a cron trigger on the new routine, and the created trigger's `next_run_at`
-  shall be non-null. A next fire time is a trigger field, not a routine field.
+  create the routine and arm its cron trigger in one request, and the created
+  trigger's `next_run_at` shall be non-null. A next fire time is a trigger
+  field, not a routine field.
 - **AC-OFFICE-ROUTINE-WIRE-002.3:** When the detail view opens for a routine
   that has a cron trigger, the system shall seed the form with that trigger's
   stored expression and timezone.
@@ -152,17 +151,17 @@ so that the routine runs without me firing it by hand.
   naming the trigger error and stating that the routine's own fields were saved
   and the schedule was not, shall show no success toast, and shall re-list the
   routine's triggers. A failed re-list is AC-002.11's case, not this one.
-- **AC-OFFICE-ROUTINE-WIRE-002.10:** When the create-routine flow creates the
-  routine and its cron trigger create then fails, the system shall close the
-  create dialog, refresh the routine list so the new routine is visible, and
-  show an error toast naming the trigger error and stating that the routine was
-  created without a schedule. The routine is not deleted.
+- **AC-OFFICE-ROUTINE-WIRE-002.10:** When the create-routine flow carries a
+  cron trigger, the system shall create the routine and its trigger in one
+  request. A rejected trigger shall create no routine, show the server's error
+  in an error toast, show no success toast, leave the create dialog open with
+  the entered values for a retry, and refresh no routine list.
 - **AC-OFFICE-ROUTINE-WIRE-002.11:** When the system creates or deletes a
   trigger, it shall render the routine's triggers from a fresh list response
   rather than from a locally spliced array. When that re-list fails after the
   create and delete both succeeded, the system shall report the save as
   succeeded and state that the displayed schedule may be stale until a reload.
-- **AC-OFFICE-ROUTINE-WIRE-002.12:** When AC-002.7, AC-002.9, AC-002.10 or
+- **AC-OFFICE-ROUTINE-WIRE-002.12:** When AC-002.7, AC-002.9 or
   AC-002.11 shows a message today's code has no string for, that message shall
   be a translated `office`-namespace key present in English, `pt-pt`, `zh-cn`,
   `zh-hk` and `zh-tw`.

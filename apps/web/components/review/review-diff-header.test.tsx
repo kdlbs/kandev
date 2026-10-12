@@ -157,6 +157,66 @@ describe("ReviewDiffHeader path direction", () => {
   });
 });
 
+describe("ReviewDiffHeader retained snapshot controls", () => {
+  it.each([
+    { viewport: "desktop", isMobile: false },
+    { viewport: "mobile", isMobile: true },
+  ])("marks old display freshness and blocks review on $viewport", ({ isMobile }) => {
+    mocks.isMobile = isMobile;
+    render(
+      <ReviewDiffHeader
+        file={{ ...file, diff_state: "pending", display_stale: true }}
+        isReviewed={false}
+        isStale={false}
+        sessionId={SESSION_ID}
+        collapsed={false}
+        wordWrap={false}
+        expandUnchanged={false}
+        baseBranchByRepo={{ frontend: "main" }}
+        onCheckboxChange={vi.fn()}
+        onDiscard={vi.fn()}
+        onToggleCollapse={vi.fn()}
+        onToggleExpandUnchanged={vi.fn()}
+        onToggleWordWrap={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("review-header-refresh-status")).toBeTruthy();
+    expect(screen.getByRole("checkbox").hasAttribute("disabled")).toBe(true);
+  });
+
+  it.each([
+    { viewport: "desktop", isMobile: false, diff_state: "pending" as const },
+    { viewport: "mobile", isMobile: true, diff_state: "pending" as const },
+    { viewport: "desktop", isMobile: false, diff_state: "unavailable" as const },
+    { viewport: "mobile", isMobile: true, diff_state: "unavailable" as const },
+  ])(
+    "blocks review when current detail is $diff_state on $viewport without a stale marker",
+    ({ isMobile, diff_state }) => {
+      mocks.isMobile = isMobile;
+      render(
+        <ReviewDiffHeader
+          file={{ ...file, diff_state }}
+          isReviewed={false}
+          isStale={false}
+          sessionId={SESSION_ID}
+          collapsed={false}
+          wordWrap={false}
+          expandUnchanged={false}
+          baseBranchByRepo={{ frontend: "main" }}
+          onCheckboxChange={vi.fn()}
+          onDiscard={vi.fn()}
+          onToggleCollapse={vi.fn()}
+          onToggleExpandUnchanged={vi.fn()}
+          onToggleWordWrap={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByRole("checkbox").hasAttribute("disabled")).toBe(true);
+    },
+  );
+});
+
 describe("ReviewDiffHeader responsive composition", () => {
   it("uses one compact mobile header with the toolbar embedded as the overflow trigger", () => {
     mocks.isMobile = true;

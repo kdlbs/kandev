@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-09-04
-updated: 2026-09-11
+updated: 2026-10-06
 owners:
   - Kandev
 ---
@@ -87,22 +87,16 @@ fallback-eligible. Every hop after that reads the field:
 | Hop | Carrier |
 | --- | --- |
 | agentctl boundary | `streams.AgentEvent.provider_diagnostic_candidate` |
-| lifecycle publish | `lifecycle.AgentStreamEventData.ProviderDiagnosticCandidate` (`events.go`) |
+| lifecycle evidence publish | `lifecycle.AgentStreamEventData.ProviderDiagnosticCandidate` on unbuffered `message_chunk` events (`events.go`) |
 | lifecycle activity | `lifecycle` `recordActivity` (`manager_events.go`) |
-| orchestrator stream entry | `event_handlers_streaming.go` `handleAgentStreamEvent` |
-| orchestrator message path | `event_handlers_streaming.go` `handleMessageStreamingEvent` |
+| orchestrator stream entry | `event_handlers_streaming.go` `handleAgentStreamEvent`, on original `message_chunk` and `reasoning` events |
+| orchestrator progress | original output events update foreground activity; transcript projections do not observe evidence again |
 | recovery evidence | `orchestrator/dynamic_evidence.go` `observeProviderDiagnostic` |
 
-Two consumers currently re-derive the verdict from message text instead of
-reading the carried field, and both are corrected here:
-
-- `handleAgentStreamEvent` calls `isHighConfidenceProviderDiagnostic(payload.Data.Text)`
-  to choose between `observeProviderDiagnostic` and `observePromptAttempt`. It
-  reads the carried marker instead. `isHighConfidenceProviderDiagnostic` and
-  its second classification of the same bytes are removed.
-- `handleMessageStreamingEvent` flips foreground-generating for any non-empty
-  text. A marked diagnostic chunk does not flip it, matching the turn-progress
-  suppression `recordActivity` already applies on the lifecycle side.
+The orchestrator reads the carried marker on original output events. It does
+not classify transcript projections or use their accumulated text to infer
+diagnostic evidence. Foreground activity follows the same original-event
+decision as lifecycle `recordActivity`.
 
 **What the marker is, and is not.** The marker is a *candidate* flag, and the
 word is load-bearing. No transport-level signal at the ACP boundary separates a
@@ -117,15 +111,65 @@ transport diagnostic from prose about one is
 [Diagnostic text correlation](#diagnostic-text-correlation), which runs where
 both texts are known.
 
-**Accumulation.** `.20` requires the marker carried on every streaming,
-lifecycle and evidence hop, and "carried" means the field survives on the
-in-flight event value each hop receives — which it does, because those hops
-pass the same struct. Message accumulation and flush are a different thing:
-they neither read nor act on the marker, no message-level column is added, and
-the persisted transcript row does not carry it. The diagnostic text is
-persisted and rendered as ordinary transcript content, which Part 1 already
-requires. The marker affects only turn-progress bookkeeping and recovery
-evidence, both of which are per-event.
+**Original-event observation.** Before `handleMessageChunkEvent` or
+`handleReasoningEvent` accumulates eligible output, lifecycle publishes an
+evidence copy through the existing `EventPublisher.PublishAgentStreamEvent`
+carrier. Its type remains `message_chunk` or `reasoning`; it has no transcript
+`MessageID`. The copy retains execution, session, owner, attempt and prompt
+identity. A supplied prompt generation is preserved; an absent generation is
+filled from the active execution at intake, before any delayed publication.
+For a reasoning copy, `Text` receives `ReasoningText`. User-role messages and
+empty output follow the existing admission rules and produce no evidence.
+
+Original output copies use the same per-session agent-stream subject and ordered
+consumer as tools and completion. They are not coalesced. The orchestrator
+applies its existing cancellation, terminal-execution and attempt guards before
+observing them. A marked assistant copy feeds `observeProviderDiagnostic`; an
+unmarked non-empty assistant or reasoning copy feeds `observePromptAttempt`
+and restores foreground generation. Each original output event is observed
+once. Evidence copies do not create, append or broadcast transcript records.
+Office usage consumers continue to ignore these non-usage event types.
+
+**Accumulation.** `.20` applies to the transcript path independently of the
+original-event observation path. `handleMessageChunkEvent`, visible-stream
+publish helpers and the stream coalescer do not read, store or act on the
+marker. Remove `messageBufferDiagnostic`, `flushMessageBufferOnDiagnosticChange`
+and the diagnostic key from visible coalescing. `message_streaming` and
+`thinking_streaming` are transcript projections only; they must not repeat
+output evidence or foreground-activity decisions. The marker remains available
+on the original in-flight evidence event, not on the projection or message row.
+
+For ID-less output, newline emission retains `currentMessageID`, and final
+flushes preserve the established tool, turn and protocol-ID transition
+boundaries. For protocol-ID output, `protocolRecordID` retains its stable
+mapping. A classifier match inside a word, code span or paragraph cannot
+introduce a transcript boundary. A genuine provider diagnostic stays visible
+through this same transcript path. No message-level column, persistence
+migration or frontend merge heuristic is added.
+
+This separation preserves original chunk text and ordering for `.21` and `.23`
+even when the visible transcript combines several chunks. Flushing on marker
+changes while retaining the same message ID would fix the reported cards, but
+would keep recovery semantics coupled to accumulation, contrary to `.20`.
+Narrowing the network catalogue would also change supported error surfaces
+without repairing that coupling.
+
+**Terminal ordering.** A bus publication is not acknowledgement that a remote
+consumer observed evidence. Keep the existing immutable lifecycle
+`PromptAttemptEvidence` snapshot on terminal events and the orchestrator's
+terminal-ordering reconciliation. Test delayed/asynchronous consumption as
+well as the synchronous tracking bus; no recovery decision may depend on the
+transcript flush being the evidence producer.
+
+**Dynamic streak side effects.** Original ordinary output, reasoning and tool
+events still update the current attempt's in-memory safety evidence
+synchronously. They may mark a dynamic-route streak clear as pending, but the
+raw stream callback does not perform route-state database work. The
+orchestrator coalesces the intent and persists it at semantic boundaries; a
+failed or unproven reset keeps automatic fallback closed. Transcript
+projections neither repeat evidence nor trigger another reset. Identity
+fencing, persistence retries and completion ownership are specified in the
+[dynamic unclassified fallback design](../../agents/system-design/dynamic-unclassified-fallback.md#streak-lifecycle).
 
 **Absent marker.** An event that arrives without the field is ordinary output.
 This is a deliberate behaviour change for a version-skewed remote executor
@@ -135,7 +179,7 @@ disagreeing is the exact drift AC `.20` exists to forbid, and the fail-closed
 direction costs an automatic retry, never correctness.
 
 **Concurrency.** Stream handling already serialises per session under
-`acquireCancelInFlightGuard`, and `promptAttemptEvidence` guards its own
+`lockCancelInFlightGuard`, and `promptAttemptEvidence` guards its own
 fields with a mutex. Two chunks for the same session therefore apply in
 delivery order under one lock; two chunks for different sessions are
 independent records. A marked chunk whose execution ID or prompt generation
@@ -373,3 +417,8 @@ One further exclusion belongs to this part: extending the clearing rule so tool
 activity clears the recorded diagnostic code. The effect fence already fails
 such an attempt, so the change would alter a mechanism without altering an
 outcome; [Marker propagation](#marker-propagation) records why.
+
+## Implementation Plans
+
+The transcript/evidence separation repair is tracked in
+[Provider diagnostic message continuity](../../../plans/provider-diagnostic-message-continuity/plan.md).

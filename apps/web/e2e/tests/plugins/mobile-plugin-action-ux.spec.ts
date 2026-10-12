@@ -10,6 +10,11 @@ import {
   type AppStatusBarSettingsBaseline,
 } from "../../helpers/app-status-bar-settings";
 
+function expectTouchDimension(dimension: number) {
+  // Playwright reports fractional CSS pixels; allow only float-rounding noise.
+  expect(dimension + 0.01).toBeGreaterThanOrEqual(44);
+}
+
 async function assertGlyphSize(action: Locator, size: number): Promise<void> {
   const svg = action.locator('[data-slot="surface-action-icon"] > svg');
   await expect(svg).toHaveCount(1);
@@ -67,9 +72,9 @@ test.describe("Plugin action UX, composer on phone", () => {
     expect(stopBox).not.toBeNull();
     expect(attachBox).not.toBeNull();
     for (const box of [actionBox!, stopBox!, attachBox!]) {
-      expect(box.height).toBeGreaterThanOrEqual(44);
+      expectTouchDimension(box.height);
     }
-    expect(actionBox!.width).toBeGreaterThanOrEqual(44);
+    expectTouchDimension(actionBox!.width);
     expect(actionBox!.width).toBeCloseTo(actionBox!.height, 1);
 
     await action.tap();
@@ -120,8 +125,8 @@ test.describe("Plugin action UX, composer on phone", () => {
     for (const action of [taskAction, workspaceAction]) {
       const box = await action.boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expectTouchDimension(box!.height);
+      expectTouchDimension(box!.width);
       await action.tap();
       await expect(action).toHaveAttribute("aria-pressed", "true");
     }
@@ -186,8 +191,8 @@ test.describe("Plugin action UX, composer on phone", () => {
     for (const action of [wideSidebarNative, wideSidebarAction]) {
       const box = await action.boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expectTouchDimension(box!.height);
+      expectTouchDimension(box!.width);
     }
 
     await testPage.setViewportSize({ width: 800, height: 900 });
@@ -200,8 +205,8 @@ test.describe("Plugin action UX, composer on phone", () => {
     for (const action of [tabletNativeAction, tabletPluginAction]) {
       const box = await action.boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expectTouchDimension(box!.height);
+      expectTouchDimension(box!.width);
     }
   });
 
@@ -238,12 +243,82 @@ test.describe("Plugin action UX, composer on phone", () => {
     for (const control of [action, busyAction, disabledAction]) {
       const box = await control.boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expectTouchDimension(box!.height);
     }
 
     await action.tap();
     await expect(action).toHaveAttribute("aria-pressed", "true");
     await busyAction.tap();
     await expect(testPage.getByRole("tooltip")).toHaveCount(0);
+  });
+
+  test("returns focus inside the phone parent surface after plugin modals close", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    statusBarBaseline = await captureAppStatusBarSettings(apiClient);
+    await installFixturePlugin(testPage);
+    await setAppStatusBarEnabled(apiClient, true);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Plugin modal focus return on phone",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await openTaskSession(testPage, task.id);
+    await testPage.getByTestId("app-nav-trigger").tap();
+
+    const pluginSection = testPage.getByTestId("mobile-plugin-nav-section");
+    const drawerAction = pluginSection.getByTestId("e2e-chat-top-bar-focus-action");
+    await expect(drawerAction).toBeVisible();
+    const drawerActionBox = await drawerAction.boundingBox();
+    expect(drawerActionBox).not.toBeNull();
+    expect(drawerActionBox!.height).toBeGreaterThanOrEqual(44);
+    expect(drawerActionBox!.width).toBeGreaterThanOrEqual(44);
+    await drawerAction.focus();
+    await testPage.keyboard.press("Enter");
+
+    const pluginDrawer = testPage.getByRole("dialog", { name: "Fixture task drawer" });
+    await expect(pluginDrawer).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(pluginDrawer).toHaveCount(0);
+    await expect(pluginSection).toBeVisible();
+    await expect(drawerAction).toBeFocused();
+    await testPage.keyboard.press("Escape");
+
+    await testPage.goto("/");
+    await testPage.getByTestId("app-nav-trigger").tap();
+    await testPage.getByTestId("mobile-home-status-button").tap();
+    const statusDrawer = testPage.getByTestId("app-status-drawer");
+    await expect(statusDrawer).toBeVisible();
+    const rightRow = statusDrawer.locator(
+      '[data-status-item-id="plugin:kandev-plugin-e2e:app-status-bar-right:0"]',
+    );
+    const statusAction = rightRow.getByTestId("e2e-status-right-focus-action");
+    await expect(statusAction).toBeVisible();
+    const statusActionBox = await statusAction.boundingBox();
+    expect(statusActionBox).not.toBeNull();
+    expect(statusActionBox!.height).toBeGreaterThanOrEqual(44);
+    expect(statusActionBox!.width).toBeGreaterThanOrEqual(44);
+    await statusAction.focus();
+    await testPage.keyboard.press("Enter");
+
+    const statusModal = testPage.getByRole("dialog", { name: "Fixture status modal" });
+    await expect(statusModal).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(statusModal).toHaveCount(0);
+    await expect(statusDrawer).toBeVisible();
+    await expect(statusAction).toBeFocused();
+    await expect
+      .poll(() => testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true);
   });
 });

@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -39,6 +40,63 @@ func TestWsRecoverSessionCancelRetryReportsServiceResult(t *testing.T) {
 	require.False(t, payload.Cancelled)
 }
 
+func TestWsRecoverWorkspaceInventoryRequiresIdempotencyKeyBeforeServiceAccess(t *testing.T) {
+	handlers := setupOrchestratorHandlers(t)
+	response, err := handlers.wsRecoverSession(context.Background(), createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{
+		"task_id": "t1", "session_id": "s1", "action": "repair_workspace_inventory",
+	}))
+	require.NoError(t, err)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeValidation, payload.Code)
+}
+
+func TestWsRecoverSessionValidatesSettingsPolicyAndOriginalAction(t *testing.T) {
+	handlers := setupOrchestratorHandlers(t)
+	tests := []struct {
+		name   string
+		action string
+		policy string
+	}{
+		{name: "unsupported policy", action: "resume", policy: "future_policy"},
+		{name: "runtime retry alias", action: "runtime_retry", policy: "provider_restored"},
+		{name: "inventory repair", action: "repair_workspace_inventory", policy: "provider_restored"},
+		{name: "branch replacement", action: "resume_new_branch", policy: "provider_restored"},
+		{name: "cancel retry", action: "cancel_retry", policy: "provider_restored"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response, err := handlers.wsRecoverSession(context.Background(), createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{
+				"task_id":         "task-1",
+				"session_id":      "session-1",
+				"action":          tt.action,
+				"settings_policy": tt.policy,
+				"idempotency_key": "inventory-repair",
+			}))
+			require.NoError(t, err)
+			require.Equal(t, ws.ErrorCodeValidation, parseError(t, response).Code)
+		})
+	}
+}
+
+func TestWSForkConversationRequiresIdentityAndMapsServiceError(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+	require.NoError(t, err)
+	handlers := NewHandlers(&orchestrator.Service{}, log)
+
+	missing := createTestMessage(t, ws.ActionSessionFork, map[string]interface{}{"task_id": "task-1"})
+	response, err := handlers.wsForkConversation(context.Background(), missing)
+	require.NoError(t, err)
+	require.Equal(t, ws.ErrorCodeValidation, parseError(t, response).Code)
+
+	valid := createTestMessage(t, ws.ActionSessionFork, map[string]interface{}{
+		"task_id": "task-1", "session_id": "session-1", "turn_id": "turn-1",
+		"request_id": "7e9d7199-15bd-4fe3-897c-0861314a4be2",
+	})
+	response, err = handlers.wsForkConversation(context.Background(), valid)
+	require.NoError(t, err)
+	require.Equal(t, ws.ErrorCodeInternalError, parseError(t, response).Code)
+}
+
 func TestBranchRecoveryConflictResponsePreservesRecoveryDetails(t *testing.T) {
 	msg := createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{})
 	err := &orchestrator.BranchRecoveryError{
@@ -57,6 +115,24 @@ func TestBranchRecoveryConflictResponsePreservesRecoveryDetails(t *testing.T) {
 	require.Equal(t, "feature/lost", payload.Details["original_branch"])
 	require.Equal(t, "main", payload.Details["base_branch"])
 	require.Equal(t, "resume_new_branch", payload.Details["recovery_action"])
+}
+
+func TestRecoveryInspectionConflictResponseIsSanitized(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{})
+	err := &worktree.RecoveryInspectionContentionError{}
+
+	response, responseErr := recoveryInspectionConflictResponse(msg, err)
+	require.NoError(t, responseErr)
+	require.NotNil(t, response)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	require.Equal(t, "workspace recovery inspection is busy", payload.Message)
+	require.Equal(t, "recovery_inspection_busy", payload.Details["kind"])
+
+	joined := errors.Join(err, errors.New("lifecycle cleanup failed"))
+	response, responseErr = recoveryInspectionConflictResponse(msg, joined)
+	require.NoError(t, responseErr)
+	require.Nil(t, response, "joined lifecycle failures must use normal failure handling")
 }
 
 func TestSessionRecoveryGuardConflictResponseMapsRetryableToConflict(t *testing.T) {
@@ -100,6 +176,38 @@ func TestSessionRecoveryGuardConflictResponseIgnoresUnrelatedError(t *testing.T)
 
 	response, responseErr := sessionRecoveryGuardConflictResponse(msg, errors.New("boom"))
 
+	require.NoError(t, responseErr)
+	require.Nil(t, response)
+}
+
+type restoreRequiredTestError struct {
+	reason string
+}
+
+func (e restoreRequiredTestError) Error() string { return "restore is required" }
+
+func (e restoreRequiredTestError) RecoveryReason() string { return e.reason }
+
+func TestRestoreRequiredRecoveryResponseExposesBoundedContinuationDetails(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{})
+	response, responseErr := restoreRequiredRecoveryResponse(msg, restoreRequiredTestError{
+		reason: "native_state_missing",
+	}, "session-1")
+	require.NoError(t, responseErr)
+	require.NotNil(t, response)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	require.Equal(t, "session_restore_required", payload.Details["kind"])
+	require.Equal(t, "continue_from_history", payload.Details["recovery_action"])
+	require.Equal(t, "native_state_missing", payload.Details["reason"])
+	require.Equal(t, "session-1", payload.Details["session_id"])
+}
+
+func TestRestoreRequiredRecoveryResponseDoesNotExposeUnboundedReasons(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{})
+	response, responseErr := restoreRequiredRecoveryResponse(msg, restoreRequiredTestError{
+		reason: "transport_failure",
+	}, "session-1")
 	require.NoError(t, responseErr)
 	require.Nil(t, response)
 }
@@ -162,4 +270,15 @@ func TestWsRespondToPermissionRequiresTaskAndRequestIdentity(t *testing.T) {
 			require.Equal(t, test.want, payload.Message)
 		})
 	}
+}
+
+func TestWsRecoverRelocationRequiresErrorStampBeforeServiceAccess(t *testing.T) {
+	handlers := setupOrchestratorHandlers(t)
+	response, err := handlers.wsRecoverSession(context.Background(), createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{
+		"task_id": "t1", "session_id": "s1", "action": "relocate_and_resume",
+	}))
+	require.NoError(t, err)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	require.Contains(t, payload.Message, "error_stamp")
 }

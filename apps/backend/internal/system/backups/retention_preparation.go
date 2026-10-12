@@ -6,12 +6,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/system/maintenance"
 )
@@ -122,8 +122,7 @@ func (s *Service) VerifyRetentionBackupUnderLease(ctx context.Context, receipt R
 }
 
 func verifySnapshot(ctx context.Context, path string) (string, error) {
-	uri := &url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}
-	reader, err := sqlx.Open("sqlite3", uri.String())
+	reader, err := openSnapshotReader(path)
 	if err != nil {
 		return "", err
 	}
@@ -148,6 +147,12 @@ func verifySnapshot(ctx context.Context, path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// openSnapshotReader opens the snapshot file itself read-only and never
+// creates a file.
+func openSnapshotReader(path string) (*sqlx.DB, error) {
+	return sqlx.Open("sqlite3", "file:"+db.EscapeSQLiteURIPath(path)+"?mode=ro")
 }
 
 type contextReader struct {

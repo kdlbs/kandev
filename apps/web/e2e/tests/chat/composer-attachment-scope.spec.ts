@@ -59,12 +59,22 @@ test.describe("task chat attachment workspace scope", () => {
     });
     expect(attachment?.attachment_id).toBeTruthy();
 
+    await expect(editor).toBeEmpty({ timeout: 15_000 });
+    await expect(chat.getByText(/Image \(/)).toHaveCount(0, { timeout: 15_000 });
     await testPage.reload();
     const reloadedChat = testPage.getByTestId("session-chat");
     await expect(reloadedChat).toBeVisible({ timeout: 30_000 });
-    const image = reloadedChat.locator(
+    const sentMessage = reloadedChat.getByTestId("user-message-bubble").filter({ hasText: marker });
+    await expect(sentMessage).toHaveCount(1);
+    const attachmentButton = sentMessage.getByRole("button", {
+      name: "Open Attachment 1",
+      exact: true,
+    });
+    await expect(attachmentButton).toHaveCount(1);
+    const image = attachmentButton.locator(
       `img[src*="/api/v1/attachments/${String(attachment?.attachment_id)}/content"]`,
     );
+    await expect(image).toHaveCount(1);
     await expect(image).toBeVisible();
     await expect
       .poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth))

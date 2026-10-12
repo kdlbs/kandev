@@ -8,9 +8,7 @@ export async function expectActiveTaskRow(row: Locator): Promise<void> {
     const style = window.getComputedStyle(element);
     return {
       backgroundColor: style.backgroundColor,
-      borderTopStyle: style.borderTopStyle,
       borderTopWidth: style.borderTopWidth,
-      borderBottomStyle: style.borderBottomStyle,
       borderBottomWidth: style.borderBottomWidth,
       borderLeftWidth: style.borderLeftWidth,
       borderRightWidth: style.borderRightWidth,
@@ -19,10 +17,8 @@ export async function expectActiveTaskRow(row: Locator): Promise<void> {
 
   expect(visualState.backgroundColor).not.toBe("transparent");
   expect(visualState.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
-  expect(visualState.borderTopStyle).toBe("solid");
-  expect(visualState.borderTopWidth).toBe("1px");
-  expect(visualState.borderBottomStyle).toBe("solid");
-  expect(visualState.borderBottomWidth).toBe("1px");
+  expect(visualState.borderTopWidth).toBe("0px");
+  expect(visualState.borderBottomWidth).toBe("0px");
   expect(visualState.borderLeftWidth).toBe("0px");
   expect(visualState.borderRightWidth).toBe("0px");
 }

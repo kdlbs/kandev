@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -106,6 +107,9 @@ type persistedWorktreeBranchMetadata struct {
 }
 
 type taskResourceCleanupSnapshot struct {
+	ManagedDelete *managed.DeleteClaim `json:"managed_delete,omitempty"`
+	// InventoryRepair retains the successor's provenance through progress saves.
+	InventoryRepair        json.RawMessage                            `json:"inventory_repair,omitempty"`
 	Sessions               []*models.TaskSession                      `json:"sessions,omitempty"`
 	Worktrees              []*worktree.Worktree                       `json:"worktrees,omitempty"`
 	WorktreeHeadOIDs       map[string]string                          `json:"worktree_head_oids,omitempty"`
@@ -175,7 +179,28 @@ func (s *Service) persistTaskResourceCleanup(
 	collectSSH bool,
 	workspaceID string,
 ) (*models.TaskResourceCleanupJob, error) {
+	return s.persistTaskResourceCleanupWithManagedClaim(ctx, taskID, trigger, operationID, sessions, worktrees, stopTargets, attachments, envCleanup, prepared, collectSSH, workspaceID, nil)
+}
+
+func (s *Service) persistTaskResourceCleanupWithManagedClaim(
+	ctx context.Context,
+	taskID string,
+	trigger models.TaskResourceCleanupTrigger,
+	operationID string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	stopTargets []taskStopTarget,
+	attachments []*models.TaskMessageAttachment,
+	envCleanup taskEnvironmentCleanup,
+	prepared bool,
+	collectSSH bool,
+	workspaceID string,
+	claim *managed.DeleteClaim,
+) (*models.TaskResourceCleanupJob, error) {
 	if s.resourceCleanups == nil {
+		if claim != nil {
+			return nil, managed.ErrUnavailable
+		}
 		return nil, nil
 	}
 	if operationID == "" {
@@ -186,15 +211,7 @@ func (s *Service) persistTaskResourceCleanup(
 	if err != nil {
 		return nil, err
 	}
-	persistedAttachments := make([]persistedTaskAttachment, 0, len(attachments))
-	for _, attachment := range attachments {
-		if attachment == nil {
-			continue
-		}
-		persistedAttachments = append(persistedAttachments, persistedTaskAttachment{
-			ID: attachment.ID, OwnerID: attachment.OwnerID, StorageKey: attachment.StorageKey,
-		})
-	}
+	persistedAttachments := persistCleanupAttachments(attachments)
 	worktreeTaskDirNames := captureWorktreeTaskDirNames(worktrees)
 	worktreeBranchMetadata := captureWorktreeBranchMetadata(worktrees)
 	snapshot := taskResourceCleanupSnapshot{
@@ -222,6 +239,13 @@ func (s *Service) persistTaskResourceCleanup(
 	if err != nil {
 		return nil, fmt.Errorf("encode task resource cleanup snapshot: %w", err)
 	}
+	if claim != nil {
+		native, ok := s.tasks.(managed.DeletionRepository)
+		if !ok {
+			return nil, managed.ErrUnavailable
+		}
+		return native.PrepareManagedDeletion(ctx, *claim, string(encoded))
+	}
 	state := models.TaskResourceCleanupStatePending
 	if prepared {
 		state = models.TaskResourceCleanupStatePrepared
@@ -236,6 +260,18 @@ func (s *Service) persistTaskResourceCleanup(
 	return s.resourceCleanups.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
 }
 
+func persistCleanupAttachments(attachments []*models.TaskMessageAttachment) []persistedTaskAttachment {
+	persisted := make([]persistedTaskAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if attachment == nil {
+			continue
+		}
+		persisted = append(persisted, persistedTaskAttachment{
+			ID: attachment.ID, OwnerID: attachment.OwnerID, StorageKey: attachment.StorageKey,
+		})
+	}
+	return persisted
+}
 func (s *Service) captureWorktreeCleanupHeadOIDs(
 	ctx context.Context, worktrees []*worktree.Worktree,
 ) (map[string]string, error) {
@@ -430,6 +466,20 @@ func (s *Service) startTaskResourceCleanup(job *models.TaskResourceCleanupJob) {
 // StartTaskResourceCleanupWorker owns the install-wide durable task cleanup
 // loop. StopTaskResourceCleanupWorker joins it during backend shutdown.
 func (s *Service) StartTaskResourceCleanupWorker(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("task resource cleanup worker context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.resourceCleanups == nil {
+		return nil
+	}
+	s.cleanupWorkerLifecycleMu.Lock()
+	defer s.cleanupWorkerLifecycleMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if s.resourceCleanups == nil {
 		return nil
 	}
@@ -445,21 +495,33 @@ func (s *Service) StartTaskResourceCleanupWorker(ctx context.Context) error {
 	s.cleanupWorkerWake = wake
 	s.cleanupWorkerWG.Add(1)
 	s.cleanupWorkerMu.Unlock()
-	resumeErr := s.resumeTaskResourceCleanupJobs(workerCtx, startupPreparedCutoff)
-	go s.runTaskResourceCleanupWorker(workerCtx, wake, resumeErr != nil, startupPreparedCutoff)
-	return resumeErr
+	go s.runTaskResourceCleanupWorker(workerCtx, wake, startupPreparedCutoff)
+	return nil
 }
 
 func (s *Service) runTaskResourceCleanupWorker(
 	ctx context.Context,
 	wake <-chan struct{},
-	resumePending bool,
 	startupPreparedCutoff time.Time,
 ) {
 	defer s.cleanupWorkerWG.Done()
 	ticker := time.NewTicker(taskResourceCleanupRetryDelay)
 	defer ticker.Stop()
+	resumePending := true
 	for {
+		if ctx.Err() != nil {
+			return
+		}
+		if resumePending {
+			if err := s.resumeTaskResourceCleanupJobs(ctx, startupPreparedCutoff); err != nil {
+				if ctx.Err() == nil {
+					s.logger.Warn("resume task resource cleanup jobs", zap.Error(err))
+				}
+			} else {
+				resumePending = false
+				continue
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -467,13 +529,6 @@ func (s *Service) runTaskResourceCleanupWorker(
 		case <-wake:
 		}
 		if resumePending {
-			if err := s.resumeTaskResourceCleanupJobs(ctx, startupPreparedCutoff); err != nil {
-				if ctx.Err() == nil {
-					s.logger.Warn("resume task resource cleanup jobs", zap.Error(err))
-				}
-				continue
-			}
-			resumePending = false
 			continue
 		}
 		if err := s.processDueTaskResourceCleanupJobs(ctx); err != nil && ctx.Err() == nil {
@@ -483,6 +538,8 @@ func (s *Service) runTaskResourceCleanupWorker(
 }
 
 func (s *Service) StopTaskResourceCleanupWorker() {
+	s.cleanupWorkerLifecycleMu.Lock()
+	defer s.cleanupWorkerLifecycleMu.Unlock()
 	s.cleanupWorkerMu.Lock()
 	cancel := s.cleanupWorkerCancel
 	s.cleanupWorkerCancel = nil
@@ -617,8 +674,15 @@ func (s *Service) processDueTaskResourceCleanupJobs(ctx context.Context) error {
 	}
 	for _, job := range jobs {
 		if err := s.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
-			s.logger.Warn("resumed task resource cleanup job failed",
-				zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
+			current, reloadErr := s.resourceCleanups.GetTaskResourceCleanupJob(ctx, job.ID)
+			if reloadErr != nil {
+				s.logger.Warn("claim task resource cleanup job reload failed",
+					zap.String("job_id", job.ID), zap.String("task_id", job.TaskID),
+					zap.Error(err), zap.String("reload_error", reloadErr.Error()))
+			} else if current != nil && current.State == models.TaskResourceCleanupStatePending {
+				s.logger.Warn("claim task resource cleanup job failed",
+					zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
+			}
 		}
 	}
 	return reconcileErr
@@ -634,6 +698,14 @@ func (s *Service) reconcilePreparedTaskResourceCleanupJobs(
 	}
 	var errs []error
 	for _, job := range jobs {
+		claim, decodeErr := managed.DeletionEnvelope(job.ResourceSnapshot)
+		if decodeErr != nil {
+			errs = append(errs, decodeErr)
+			continue
+		}
+		if claim != nil && claim.Phase != managed.DeleteCommitted {
+			continue
+		}
 		committed, commitErr := s.preparedTaskCleanupMutationCommitted(ctx, job)
 		if commitErr != nil {
 			errs = append(errs, fmt.Errorf("verify prepared cleanup %s: %w", job.ID, commitErr))
@@ -679,6 +751,21 @@ func (s *Service) preparedTaskCleanupMutationCommitted(
 ) (bool, error) {
 	if job == nil {
 		return false, errors.New("cleanup job is unavailable")
+	}
+	claim, decodeErr := managed.DeletionEnvelope(job.ResourceSnapshot)
+	if decodeErr != nil {
+		return false, decodeErr
+	}
+	if claim != nil {
+		native, ok := s.tasks.(managed.DeletionRepository)
+		if !ok {
+			return false, managed.ErrUnavailable
+		}
+		current, _, inspectErr := native.InspectManagedDeletion(ctx, claim.DeleteRequest)
+		if inspectErr != nil {
+			return false, inspectErr
+		}
+		return current != nil && current.JobID == job.ID && current.Phase == managed.DeleteCommitted, nil
 	}
 	if job.Trigger == models.TaskResourceCleanupTriggerWorkspaceDelete && job.TaskID == "" {
 		if s.workspaces == nil {
@@ -1411,8 +1498,26 @@ func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.T
 		transitionCtx, job.ID, job.Attempts, state, cleanupErr.Error(), nextAttempt,
 	)
 	if err != nil {
+		s.logger.Warn("complete claimed task resource cleanup job failed during retry transition",
+			zap.String("job_id", job.ID), zap.String("task_id", job.TaskID),
+			zap.Int("attempt", job.Attempts), zap.Error(err), zap.String("cleanup_error", cleanupErr.Error()))
 		return errors.Join(cleanupErr, err)
 	}
+	fields := []zap.Field{
+		zap.String("job_id", job.ID),
+		zap.String("task_id", job.TaskID),
+		zap.Int("attempt", job.Attempts),
+		zap.String("state", string(state)),
+		zap.Error(cleanupErr),
+	}
+	var inspErr *worktree.CleanupInspectionError
+	if errors.As(cleanupErr, &inspErr) {
+		fields = append(fields,
+			zap.String("stage", inspErr.Stage),
+			zap.String("reason", inspErr.Reason),
+		)
+	}
+	s.logger.Warn("task resource cleanup job entered retry wait or failed", fields...)
 	return cleanupErr
 }
 

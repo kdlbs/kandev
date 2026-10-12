@@ -339,7 +339,7 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 				} else {
 					r.logger.Debug("wrote initial command to PTY",
 						zap.String("process_id", proc.info.ID),
-						zap.String("command", req.InitialCommand))
+						zap.Bool("has_initial_command", req.InitialCommand != ""))
 				}
 			}
 		}()

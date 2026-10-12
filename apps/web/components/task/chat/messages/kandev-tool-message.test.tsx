@@ -67,6 +67,9 @@ describe("hasKandevRenderer", () => {
     expect(hasKandevRenderer(kandevToolCall({ toolName: "kandev: show_rich_output_kandev" }))).toBe(
       true,
     );
+    expect(
+      hasKandevRenderer(kandevToolCall({ toolName: "mcp__kandev__propose_task_kandev" })),
+    ).toBe(true);
   });
 
   it("does not match unrelated tools", () => {

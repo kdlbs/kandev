@@ -5,11 +5,7 @@ import { RecoveryActions, type RecoveryChoice } from "@/components/task/recovery
 import { SessionErrorDetails } from "@/components/task/session-error-details";
 import type { SessionRecoveryBusyAction } from "@/hooks/domains/session/use-session-recovery-actions";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
-import {
-  causeLabel,
-  operationLabel,
-  type RecoveryCardModel,
-} from "./session-bootstrap-recovery-model";
+import type { RecoveryCardModel } from "./session-bootstrap-recovery-model";
 
 type RecoveryCardCopy = {
   launchNeedsAttention: string;
@@ -17,32 +13,113 @@ type RecoveryCardCopy = {
   sessionRecoveryDetails: string;
 };
 
-function BootstrapRecoveryActions({
+function RecoveryCardNotices({
+  model,
   profileExists,
-  busyAction,
-  hasBranchRecovery,
-  blocked,
-  canRestore,
-  onResume,
-  onRestore,
-  onFreshStart,
-  onNewBranch,
+  copy,
+  t,
 }: {
+  model: RecoveryCardModel;
+  profileExists: boolean;
+  copy: RecoveryCardCopy;
+  t: (key: string) => string;
+}) {
+  return (
+    <>
+      {model.noPromptSent ? (
+        <p className="mt-1 text-xs text-muted-foreground" data-testid="session-bootstrap-no-prompt">
+          {t("task:sessionBootstrapNoPromptSent")}
+        </p>
+      ) : null}
+      {model.workspaceStatus ? (
+        <p
+          className="mt-1 text-xs text-muted-foreground"
+          data-testid="session-recovery-workspace-status"
+        >
+          {model.workspaceStatus}
+        </p>
+      ) : null}
+      {model.freshStartWarning ? (
+        <p
+          className="mt-1 text-xs text-muted-foreground"
+          data-testid="session-recovery-fresh-start-warning"
+        >
+          {t("task:sessionRecoveryFreshStartWarning")}
+        </p>
+      ) : null}
+      <p className="mt-2 text-xs text-muted-foreground" data-testid="session-bootstrap-no-change">
+        {copy.launchErrorNoChanges}
+      </p>
+      {!profileExists ? (
+        <p className="mt-1 text-xs text-muted-foreground">{t("task:agentProfileNoLongerExists")}</p>
+      ) : null}
+    </>
+  );
+}
+
+type BootstrapRecoveryActionProps = {
   profileExists: boolean;
   busyAction: SessionRecoveryBusyAction;
   hasBranchRecovery: boolean;
   blocked: boolean;
   canRestore: boolean;
+  needsManagedCloneRelocation: boolean;
+  workspaceRecovery: import("@/lib/types/http").WorkspaceRecoveryProjection | null;
+  workspaceRecoveryRepositoryName?: string | null;
+  workspaceRecoveryStatusCheck: import("@/hooks/domains/session/use-session-recovery-actions").WorkspaceRecoveryStatusCheck;
+  onCheckWorkspaceRecoveryStatus: () => void;
+  providerRestoredResumeEligible: boolean;
+  inspectionBusy: boolean;
   onResume: () => void;
   onRestore: () => void;
   onFreshStart: () => void;
   onNewBranch: () => void;
-}) {
-  const { t } = useTranslation();
+  onRelocate: () => void;
+};
+
+function buildBootstrapRecoveryChoices(
+  {
+    profileExists,
+    hasBranchRecovery,
+    needsManagedCloneRelocation,
+    providerRestoredResumeEligible,
+    inspectionBusy,
+    onResume,
+    onRestore,
+    onFreshStart,
+    onNewBranch,
+    onRelocate,
+  }: BootstrapRecoveryActionProps,
+  t: ReturnType<typeof useTranslation>["t"],
+): RecoveryChoice[] {
+  if (inspectionBusy) {
+    return [
+      {
+        kind: "resume",
+        label: t("task:resume"),
+        onClick: onResume,
+        disabled: !profileExists,
+        testId: "recovery-resume-button",
+      },
+    ];
+  }
+  if (needsManagedCloneRelocation) {
+    return [
+      {
+        kind: "relocate_and_resume",
+        label: t("task:managedCloneRelocateResume"),
+        onClick: onRelocate,
+        testId: "managed-clone-relocate-button",
+      },
+    ];
+  }
   const actions: RecoveryChoice[] = [
     {
       kind: "resume",
       label: t("task:resume"),
+      disclosure: providerRestoredResumeEligible
+        ? t("task:providerRestoredResumeDisclosure")
+        : undefined,
       onClick: onResume,
       disabled: !profileExists,
       testId: "recovery-resume-button",
@@ -67,86 +144,143 @@ function BootstrapRecoveryActions({
       onClick: onNewBranch,
       testId: "recovery-new-branch-button",
     });
+  return actions;
+}
+
+function BootstrapRecoveryActions(props: BootstrapRecoveryActionProps) {
+  const {
+    busyAction,
+    blocked,
+    canRestore,
+    needsManagedCloneRelocation,
+    workspaceRecovery,
+    workspaceRecoveryRepositoryName,
+    workspaceRecoveryStatusCheck,
+    onCheckWorkspaceRecoveryStatus,
+    inspectionBusy,
+    profileExists,
+  } = props;
+  const { t } = useTranslation();
+  const actions = buildBootstrapRecoveryChoices(props, t);
+  const preferred = inspectionBusy
+    ? "resume"
+    : preferredBootstrapRecoveryAction(needsManagedCloneRelocation, profileExists);
   return (
     <RecoveryActions
       actions={canRestore ? actions : actions.filter((action) => action.kind !== "restore")}
       busy={busyAction !== null}
       busyAction={busyAction}
       blocked={blocked}
-      preferred={!profileExists ? "fresh_start" : undefined}
+      preferred={preferred}
+      workspaceRecovery={workspaceRecovery}
+      workspaceRecoveryRepositoryName={workspaceRecoveryRepositoryName}
+      workspaceRecoveryStatusCheck={workspaceRecoveryStatusCheck}
+      onCheckWorkspaceRecoveryStatus={onCheckWorkspaceRecoveryStatus}
     />
   );
+}
+
+function preferredBootstrapRecoveryAction(
+  needsManagedCloneRelocation: boolean,
+  profileExists: boolean,
+) {
+  if (needsManagedCloneRelocation) return "relocate_and_resume";
+  if (!profileExists) return "fresh_start";
+  return undefined;
 }
 
 export function RecoveryCardContent({
   model,
   error,
   profileExists,
+  providerRestoredResumeEligible,
+  inspectionBusy,
   busyAction,
   hasBranchRecovery,
   blocked,
   canRestore,
+  needsManagedCloneRelocation,
+  workspaceRecovery,
+  workspaceRecoveryRepositoryName,
+  workspaceRecoveryStatusCheck,
+  onCheckWorkspaceRecoveryStatus,
   onResume,
   onRestore,
   onFreshStart,
   onNewBranch,
+  onRelocate,
   copy,
-  translate,
+  t,
 }: {
   model: RecoveryCardModel;
   error: TaskStatusSummaryActiveError;
   profileExists: boolean;
+  providerRestoredResumeEligible: boolean;
+  inspectionBusy: boolean;
   busyAction: SessionRecoveryBusyAction;
   hasBranchRecovery: boolean;
   blocked: boolean;
   canRestore: boolean;
+  needsManagedCloneRelocation: boolean;
+  workspaceRecovery: import("@/lib/types/http").WorkspaceRecoveryProjection | null;
+  workspaceRecoveryRepositoryName?: string | null;
+  workspaceRecoveryStatusCheck: import("@/hooks/domains/session/use-session-recovery-actions").WorkspaceRecoveryStatusCheck;
+  onCheckWorkspaceRecoveryStatus: () => void;
   onResume: () => void;
   onRestore: () => void;
   onFreshStart: () => void;
   onNewBranch: () => void;
+  onRelocate: () => void;
   copy: RecoveryCardCopy;
-  translate: (key: string) => string;
+  t: (key: string) => string;
 }) {
-  const profileMissing = translate("task:agentProfileNoLongerExists");
-  const details = [
-    ...model.causes.map((cause) =>
-      [operationLabel(cause.operation, translate), causeLabel(cause.code, translate), cause.detail]
-        .filter(Boolean)
-        .join("\n"),
-    ),
-    error.details,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const title = needsManagedCloneRelocation
+    ? t("task:managedCloneRelocationTitle")
+    : t(model.titleKey);
+  const summary = needsManagedCloneRelocation
+    ? t("task:managedCloneRelocationBody")
+    : model.summary;
+  const details = model.hasTypedSelectionCause ? "" : (error.details ?? "");
   return (
     <div className="min-w-0 flex-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="text-sm font-medium">{translate(model.titleKey)}</span>
+        <span className="text-sm font-medium">{title}</span>
         {!model.isReadOnly ? (
           <span className="text-xs text-muted-foreground">{copy.launchNeedsAttention}</span>
         ) : null}
       </div>
-      <p className="mt-1 max-w-prose break-words text-sm text-muted-foreground">{model.summary}</p>
-      <p className="mt-2 text-xs text-muted-foreground" data-testid="session-bootstrap-no-change">
-        {copy.launchErrorNoChanges}
-      </p>
-      {!profileExists && <p className="mt-1 text-xs text-muted-foreground">{profileMissing}</p>}
+      {summary &&
+      (model.showSummary || needsManagedCloneRelocation) &&
+      !workspaceRecovery &&
+      (workspaceRecoveryStatusCheck ?? "idle") === "idle" ? (
+        <p className="mt-1 max-w-prose break-words text-sm text-muted-foreground">{summary}</p>
+      ) : null}
+      <RecoveryCardNotices model={model} profileExists={profileExists} copy={copy} t={t} />
       <BootstrapRecoveryActions
         profileExists={profileExists}
+        providerRestoredResumeEligible={providerRestoredResumeEligible}
+        inspectionBusy={inspectionBusy}
         busyAction={busyAction}
         hasBranchRecovery={hasBranchRecovery}
         blocked={blocked}
         canRestore={canRestore}
+        needsManagedCloneRelocation={needsManagedCloneRelocation}
+        workspaceRecovery={workspaceRecovery}
+        workspaceRecoveryRepositoryName={workspaceRecoveryRepositoryName}
+        workspaceRecoveryStatusCheck={workspaceRecoveryStatusCheck}
+        onCheckWorkspaceRecoveryStatus={onCheckWorkspaceRecoveryStatus}
         onResume={onResume}
         onRestore={onRestore}
         onFreshStart={onFreshStart}
         onNewBranch={onNewBranch}
+        onRelocate={onRelocate}
       />
       {model.hasDetails ? (
         <SessionErrorDetails
           testId="session-bootstrap-recovery-details"
           textTestId="session-bootstrap-cause-details"
           label={copy.sessionRecoveryDetails}
+          structuredFields={model.detailFields}
         >
           {details}
         </SessionErrorDetails>

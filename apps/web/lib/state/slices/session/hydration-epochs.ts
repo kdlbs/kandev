@@ -11,6 +11,7 @@ export function captureTaskSessionHydrationEpoch(
   return {
     activity: state.taskSessions.activityEpochBySession?.[sessionId] ?? 0,
     readCursor: state.taskSessions.readCursorEpochBySession?.[sessionId] ?? 0,
+    workspaceRecovery: state.taskSessions.workspaceRecoveryEpochBySession?.[sessionId] ?? 0,
   };
 }
 

@@ -32,18 +32,22 @@ func TestManager_SubscribeWorkspaceStream_MultiRepoEmitsPerRepoStatuses(t *testi
 	if len(mgr.repoTrackers) != 2 {
 		t.Fatalf("expected 2 per-repo trackers, got %d", len(mgr.repoTrackers))
 	}
-
-	// Start the trackers so the subscriber's replayed status is non-empty.
-	mgr.workspaceTracker.Start(context.Background())
-	for _, tr := range mgr.repoTrackers {
-		tr.Start(context.Background())
-	}
 	t.Cleanup(func() {
 		mgr.workspaceTracker.Stop()
 		for _, tr := range mgr.repoTrackers {
 			tr.Stop()
 		}
 	})
+
+	// Populate each per-repository cache synchronously so the subscription
+	// exercises replay rather than racing the trackers' first polling cycle.
+	statusCtx, cancelStatus := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelStatus()
+	for _, tr := range mgr.repoTrackers {
+		if _, err := tr.GetGitStatus(statusCtx, true); err != nil {
+			t.Fatalf("capture initial status for %s: %v", tr.RepositoryName(), err)
+		}
+	}
 
 	sub := mgr.SubscribeWorkspaceStream()
 	defer mgr.UnsubscribeWorkspaceStream(sub)
@@ -132,12 +136,12 @@ func TestManager_StartAllWorkspaceTrackers_StartsRootAndRepoTrackers(t *testing.
 		}
 	})
 
-	// initialScanDone closes once the monitor goroutine ran — confirms Start() actually fired.
+	// Wait for each real Git scan; the timeout guards against a hang rather than slow startup.
 	for i, tr := range append([]*WorkspaceTracker{mgr.workspaceTracker}, mgr.repoTrackers...) {
 		select {
 		case <-tr.initialScanDone:
-		case <-time.After(2 * time.Second):
-			t.Fatalf("tracker %d (workDir=%q) never completed initial scan — Start did not run", i, tr.workDir)
+		case <-time.After(30 * time.Second):
+			t.Fatalf("tracker %d (workDir=%q) timed out waiting for its initial Git scan", i, tr.workDir)
 		}
 	}
 

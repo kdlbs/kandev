@@ -129,6 +129,21 @@ describe("PreviewFeedbackControls", () => {
     expect(capture.startCapture).toHaveBeenCalledWith("element");
   });
 
+  it("marks only the acknowledged capture choice as pressed", () => {
+    render(<PreviewFeedbackControls capture={controller({ mode: "text" })} enabled />);
+
+    expect(screen.getByTestId("preview-feedback-trigger").getAttribute("data-capture-mode")).toBe(
+      "text",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Annotate.*1/i }));
+    expect(screen.getByRole("button", { name: "Select text" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(
+      screen.getByRole("button", { name: "Select element" }).getAttribute("aria-pressed"),
+    ).toBe("false");
+  });
+
   it("offers screenshot-region mode and shows the actual PNG before saving", () => {
     const capture = controller({
       items: [],

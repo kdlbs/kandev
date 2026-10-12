@@ -17,16 +17,18 @@ import { SessionPage } from "../../pages/session-page";
 
 type AdvancedModeFixtures = {
   officeApi: OfficeApiClient;
-  advancedWorkspace: {
-    workspaceId: string;
-    agentId: string;
-    workflowId: string;
-  };
   advancedSeed: {
     workspaceId: string;
     agentId: string;
+    workflowId: string;
     taskId: string;
   };
+};
+
+type OnboardingResult = {
+  workspaceId: string;
+  agentId: string;
+  taskId?: string;
 };
 
 const test = base.extend<{ testPage: Page }, AdvancedModeFixtures>({
@@ -36,103 +38,67 @@ const test = base.extend<{ testPage: Page }, AdvancedModeFixtures>({
     },
     { scope: "worker" },
   ],
-
-  advancedWorkspace: [
-    async ({ officeApi, apiClient, seedData }, use) => {
-      const result = await officeApi.completeOnboarding({
-        workspaceName: "Advanced Mode Workspace",
-        taskPrefix: "AM",
-        agentName: "CEO",
-        agentProfileId: seedData.agentProfileId,
-        executorPreference: "local_pc",
-      });
-
-      const { workspaces } = await apiClient.listWorkspaces();
-      const workflowId = workspaces.find(
-        (workspace) => workspace.id === result.workspaceId,
-      )?.office_workflow_id;
-      if (!workflowId) {
-        throw new Error(`Advanced mode workspace ${result.workspaceId} has no office workflow`);
-      }
-
-      await use({ workspaceId: result.workspaceId, agentId: result.agentId, workflowId });
-    },
-    { scope: "worker" },
-  ],
-
-  advancedSeed: async (
-    { officeApi, apiClient, backend, advancedWorkspace, testPage, seedData },
-    use,
-  ) => {
+  advancedSeed: async ({ officeApi, apiClient, backend, testPage, seedData }, use) => {
+    // Ensure the normal per-test reset has completed before creating a fresh
+    // Office workspace for this test.
     void testPage;
-    try {
-      const task = (await officeApi.createTask(advancedWorkspace.workspaceId, "present yourself", {
-        workflow_id: advancedWorkspace.workflowId,
-        description: "say your name",
-      })) as { id?: string };
-      const taskId = task.id;
-      if (!taskId) throw new Error("Office createTask did not return a taskId");
-      await officeApi.assignTask(taskId, advancedWorkspace.agentId);
+    const result = (await officeApi.completeOnboarding({
+      workspaceName: "Advanced Mode Workspace",
+      taskPrefix: "AM",
+      agentName: "CEO",
+      agentProfileId: seedData.agentProfileId,
+      executorPreference: "local_pc",
+      taskTitle: "present yourself",
+      taskDescription: "say your name",
+    })) as OnboardingResult;
 
-      // Wait for the initial launch and turn to settle before advanced mode
-      // asks the runtime to ensure the execution again.
-      await waitForOfficeTaskSessionLive(apiClient, taskId);
-      await expect
-        .poll(
-          async () => {
-            const [{ sessions }, environment] = await Promise.all([
-              apiClient.listTaskSessions(taskId),
-              apiClient.getTaskEnvironment(taskId),
-            ]);
-            const session = sessions[0];
-            const workspacePath =
-              environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
-            return {
-              sessionReady: ["WAITING_FOR_INPUT", "IDLE", "COMPLETED"].includes(
-                session?.state ?? "",
-              ),
-              workspaceReady: workspacePath.length > 0,
-            };
-          },
-          {
-            timeout: 10_000,
-            message: "Office session and workspace should settle before opening advanced mode",
-          },
-        )
-        .toEqual({ sessionReady: true, workspaceReady: true });
+    let workflowId: string | undefined;
+    try {
+      const taskId = result.taskId;
+      if (!taskId) throw new Error("completeOnboarding did not return a taskId");
+
+      await runWithBackendRecovery(backend, async () => {
+        const { workspaces } = await apiClient.listWorkspaces();
+        workflowId = workspaces.find(
+          (workspace) => workspace.id === result.workspaceId,
+        )?.office_workflow_id;
+        if (!workflowId) {
+          throw new Error(`Advanced mode workspace ${result.workspaceId} has no office workflow`);
+        }
+
+        await apiClient.saveUserSettings({
+          workspace_id: result.workspaceId,
+          workflow_filter_id: seedData.workflowId,
+          keyboard_shortcuts: {},
+          enable_preview_on_click: false,
+        });
+
+        // Wait for the initial launch and turn to settle before advanced mode
+        // asks the runtime to ensure the execution again.
+        await waitForOfficeTaskSessionLive(apiClient, taskId);
+        await expect
+          .poll(async () => (await apiClient.getTaskEnvironment(taskId))?.status, {
+            timeout: 30_000,
+            message: "Waiting for the Office task environment to become ready",
+          })
+          .toBe("ready");
+      });
+      if (!workflowId) throw new Error("Office onboarding workflow was not resolved");
 
       await use({
-        workspaceId: advancedWorkspace.workspaceId,
-        agentId: advancedWorkspace.agentId,
+        workspaceId: result.workspaceId,
+        agentId: result.agentId,
+        workflowId,
         taskId,
       });
     } finally {
       await runWithBackendRecovery(backend, () =>
-        apiClient.e2eReset(advancedWorkspace.workspaceId, [
+        apiClient.e2eReset(result.workspaceId, [
           seedData.workflowId,
-          advancedWorkspace.workflowId,
+          ...(workflowId ? [workflowId] : []),
         ]),
       );
     }
-  },
-
-  testPage: async (
-    { testPage: basePage, backend, apiClient, advancedWorkspace, seedData },
-    use,
-  ) => {
-    await runWithBackendRecovery(backend, async () => {
-      await apiClient.e2eReset(advancedWorkspace.workspaceId, [
-        seedData.workflowId,
-        advancedWorkspace.workflowId,
-      ]);
-      await apiClient.saveUserSettings({
-        workspace_id: advancedWorkspace.workspaceId,
-        workflow_filter_id: seedData.workflowId,
-        keyboard_shortcuts: {},
-        enable_preview_on_click: false,
-      });
-    });
-    await use(basePage);
   },
 });
 

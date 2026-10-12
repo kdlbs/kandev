@@ -13,7 +13,7 @@ export function useLinearAuthed(workspaceId?: string | null): boolean {
     () => getLinearConfig(workspaceId ? { workspaceId } : undefined),
     [workspaceId],
   );
-  return useIntegrationAuthed(fetchConfig);
+  return useIntegrationAuthed(fetchConfig, { provider: "linear", workspaceId });
 }
 
 export function useLinearAvailable(workspaceId?: string | null): boolean {
@@ -22,6 +22,8 @@ export function useLinearAvailable(workspaceId?: string | null): boolean {
     [workspaceId],
   );
   return useIntegrationAvailable({
+    provider: "linear",
+    workspaceId,
     enabledState: useLinearEnabled(workspaceId),
     fetchConfig,
   });

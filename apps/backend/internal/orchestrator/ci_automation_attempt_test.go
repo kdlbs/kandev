@@ -276,6 +276,39 @@ func TestReconcileCIAutoFixQueueAdmissionGapOnStartup(t *testing.T) {
 	require.Equal(t, 1, svc.messageQueue.GetStatus(ctx, sessionID).Count)
 }
 
+func TestReconcileCIAutoFixQueueAdmissionGapPreservesParkedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-parked-recovery", "session-parked-recovery", "step1")
+	session, err := repo.GetTaskSession(ctx, "session-parked-recovery")
+	require.NoError(t, err)
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, &models.SessionRecoveryBlock{
+		ID:                 "block-parked-recovery",
+		SessionID:          session.ID,
+		IncarnationID:      incarnationID,
+		ExpectedGeneration: 0,
+		Reason:             "unknown_prompt_outcome",
+		State:              models.RecoveryBlockOpen,
+	}))
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID: "task-parked-recovery", RepositoryID: "repo-parked-recovery", PRNumber: 42,
+	}
+	metadata := ciAutomationMessageMetadataForPR(pr, "feedback-parked-recovery")
+	_, _, _, err = svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
+		ctx, session.ID, pr.TaskID, "@ci-auto-fix\n\nparked", "", "workflow", false,
+		nil, metadata, ciAutomationCoalesceKey(pr), true,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, svc.reconcileOrphanedCIAutoFixQueueEntries(ctx, &startupCIAutoFixAttemptService{}))
+	require.Equal(t, 1, svc.messageQueue.GetStatus(ctx, session.ID).Count)
+}
+
 func TestBindCIAutoFixAttemptTurnRetriesAndReleasesFailedQueueReservation(t *testing.T) {
 	failure := errors.New("temporary store failure")
 	service := &bindRetryCIAutoFixGitHubService{

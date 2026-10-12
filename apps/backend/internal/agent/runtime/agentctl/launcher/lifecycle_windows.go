@@ -3,11 +3,13 @@
 package launcher
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"sync/atomic"
 
 	"github.com/kandev/kandev/internal/agentctl/server/winproc"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"go.uber.org/zap"
 	"golang.org/x/sys/windows"
 )
@@ -29,7 +31,7 @@ func (l *Launcher) installChildLifecycle(cmd *exec.Cmd) error {
 		return fmt.Errorf("installChildLifecycle: process not started")
 	}
 
-	job, err := winproc.InstallKillOnCloseJobForCommand(cmd)
+	job, err := winproc.InstallKillOnCloseJobForSuspendedCommand(cmd)
 	if err != nil {
 		return err
 	}
@@ -40,7 +42,9 @@ func (l *Launcher) installChildLifecycle(cmd *exec.Cmd) error {
 	// new job is assigned avoids killing the new agentctl before we've stored
 	// its handle — the new job has KILL_ON_JOB_CLOSE so we must hold a
 	// reference at all times.
+	l.childLifecycleMu.Lock()
 	previous := atomic.SwapUintptr(&l.jobHandle, job.RawHandle())
+	l.childLifecycleMu.Unlock()
 	if previous != 0 {
 		if err := windows.CloseHandle(windows.Handle(previous)); err != nil {
 			l.logger.Warn("failed to close stale job object handle", zap.Error(err))
@@ -61,6 +65,8 @@ func (l *Launcher) installChildLifecycle(cmd *exec.Cmd) error {
 // remaining process in the job. Also safe to call when no handle was set or
 // after a previous release.
 func (l *Launcher) releaseChildLifecycle() {
+	l.childLifecycleMu.Lock()
+	defer l.childLifecycleMu.Unlock()
 	handle := atomic.SwapUintptr(&l.jobHandle, 0)
 	if handle == 0 {
 		return
@@ -68,4 +74,22 @@ func (l *Launcher) releaseChildLifecycle() {
 	if err := windows.CloseHandle(windows.Handle(handle)); err != nil {
 		l.logger.Warn("failed to close job object handle", zap.Error(err))
 	}
+}
+
+func (l *Launcher) containOwnedChildren(ctx context.Context, identity processidentity.Identity) error {
+	if err := identity.Validate(); err != nil {
+		return err
+	}
+	l.childLifecycleMu.Lock()
+	handle := atomic.LoadUintptr(&l.jobHandle)
+	if handle == 0 {
+		l.childLifecycleMu.Unlock()
+		return fmt.Errorf("agentctl Job Object is unavailable: %w", processidentity.ErrUnverifiableIdentity)
+	}
+	err := winproc.TerminateJobAndWaitHandle(ctx, handle)
+	l.childLifecycleMu.Unlock()
+	// Closing this owner-held handle is the kernel backstop even when the
+	// accounting wait fails or reaches its deadline.
+	l.releaseChildLifecycle()
+	return err
 }

@@ -384,14 +384,26 @@ type PRComment struct {
 
 // CheckRun represents a CI check result.
 type CheckRun struct {
-	Name        string     `json:"name"`
-	Source      string     `json:"source"`     // check_run, status_context
-	Status      string     `json:"status"`     // queued, in_progress, completed
-	Conclusion  string     `json:"conclusion"` // success, failure, neutral, cancelled, timed_out, action_required, skipped
-	HTMLURL     string     `json:"html_url"`
-	Output      string     `json:"output"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	ID            int64      `json:"id,omitempty"`
+	AppID         int64      `json:"app_id,omitempty"`
+	AppSlug       string     `json:"app_slug,omitempty"`
+	CheckSuiteID  int64      `json:"check_suite_id,omitempty"`
+	WorkflowID    int64      `json:"workflow_id,omitempty"`
+	WorkflowName  string     `json:"workflow_name,omitempty"`
+	WorkflowRunID int64      `json:"workflow_run_id,omitempty"`
+	WorkflowEvent string     `json:"workflow_event,omitempty"`
+	HeadRepoID    int64      `json:"head_repo_id,omitempty"`
+	HeadRepoOwner string     `json:"head_repo_owner,omitempty"`
+	HeadRepoName  string     `json:"head_repo_name,omitempty"`
+	HeadBranch    string     `json:"head_branch,omitempty"`
+	Name          string     `json:"name"`
+	Source        string     `json:"source"`     // check_run, status_context
+	Status        string     `json:"status"`     // queued, in_progress, completed
+	Conclusion    string     `json:"conclusion"` // success, failure, neutral, cancelled, timed_out, action_required, skipped
+	HTMLURL       string     `json:"html_url"`
+	Output        string     `json:"output"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 }
 
 // WorkflowAttentionState describes an Actions workflow observation that is
@@ -432,6 +444,7 @@ type WorkflowAttention struct {
 // to match a run to one pull-request head and classify action_required.
 type WorkflowRun struct {
 	ID            int64                    `json:"id"`
+	CheckSuiteID  int64                    `json:"check_suite_id,omitempty"`
 	RunAttempt    int                      `json:"run_attempt"`
 	WorkflowID    int64                    `json:"workflow_id"`
 	Name          string                   `json:"name"`
@@ -477,6 +490,7 @@ type PRFeedback struct {
 	Reviews           []PRReview         `json:"reviews"`
 	Comments          []PRComment        `json:"comments"`
 	Checks            []CheckRun         `json:"checks"`
+	ChecksState       *string            `json:"checks_state,omitempty"`
 	HasIssues         bool               `json:"has_issues"`
 	WorkflowAttention *WorkflowAttention `json:"workflow_attention,omitempty"`
 }

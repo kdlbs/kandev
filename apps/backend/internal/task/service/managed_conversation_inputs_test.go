@@ -30,7 +30,7 @@ func TestAgentConversationServiceExposesManagedInputOperations(t *testing.T) {
 
 type managedInputTestTarget struct {
 	service    *AgentConversationService
-	deps       acTestDeps
+	deps       acManagedTestDeps
 	storage    messagequeue.ManagedInputStorage
 	queueRepo  messagequeue.Repository
 	identity   messagequeue.QueueSessionIdentity
@@ -41,21 +41,18 @@ type managedInputTestTarget struct {
 func newManagedInputTestTarget(t *testing.T) managedInputTestTarget {
 	t.Helper()
 	ctx := context.Background()
-	svc, deps := newACTestService()
+	svc, deps := newACManagedTestService(t)
 	descriptor, _, err := svc.EnsureManaged(ctx, "plugin-coordinator", "install-1", pluginsdk.ManagedAgentConversationSpec{
 		WorkspaceID: "ws-1", InstanceKey: "coordinator", AgentProfileID: "profile-1",
 		ApprovalRevision: 3, ManifestDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}, "ensure-op", "ensure-digest")
 	require.NoError(t, err)
 
+	session, err := deps.sess.GetTaskSession(ctx, descriptor.SessionID)
+	require.NoError(t, err)
 	identity := messagequeue.QueueSessionIdentity{
-		TaskID: descriptor.TaskID, SessionID: descriptor.SessionID, SessionIncarnationID: "incarnation-1",
+		TaskID: descriptor.TaskID, SessionID: descriptor.SessionID, SessionIncarnationID: session.QueueIncarnationID,
 	}
-	deps.sess.mu.Lock()
-	deps.sess.sessions[descriptor.SessionID].QueueIncarnationID = identity.SessionIncarnationID
-	require.Equal(t, identity.TaskID, deps.sess.sessions[descriptor.SessionID].TaskID)
-	require.Equal(t, identity.SessionIncarnationID, deps.sess.sessions[descriptor.SessionID].QueueIncarnationID)
-	deps.sess.mu.Unlock()
 	identityResolver := func(_ context.Context, taskID, sessionID string) (messagequeue.QueueSessionIdentity, error) {
 		if taskID != identity.TaskID || sessionID != identity.SessionID {
 			return messagequeue.QueueSessionIdentity{}, messagequeue.ErrSessionIdentityMismatch
@@ -299,10 +296,7 @@ func TestManagedInputCancelAcceptedAndRequiresExactStopConfirmation(t *testing.T
 	_, _, err = target.storage.MarkManagedInputRunning(ctx, target.identity,
 		running.HostInputID, "turn-1", "execution-1")
 	require.NoError(t, err)
-	target.deps.sess.mu.Lock()
-	target.deps.sess.sessions[target.descriptor.SessionID].State = models.TaskSessionStateRunning
-	target.deps.sess.sessions[target.descriptor.SessionID].AgentExecutionID = "execution-1"
-	target.deps.sess.mu.Unlock()
+	target.deps.sess.setExecution(target.descriptor.SessionID, models.TaskSessionStateRunning, "execution-1")
 
 	var stopCalls int
 	target.service.SetManagedInputExecutionStopper(func(_ context.Context, taskID, sessionID, executionID string) (bool, error) {
@@ -409,19 +403,15 @@ func TestManagedInputImmediateDispatchReturnsBusyForSessionAndQueuedInput(t *tes
 		OccurrenceKey: "immediate-2", Origin: pluginsdk.ManagedAgentInputHuman, Payload: "Run now",
 	}
 
-	target.deps.sess.mu.Lock()
-	target.deps.sess.sessions[target.descriptor.SessionID].State = models.TaskSessionStateRunning
-	target.deps.sess.sessions[target.descriptor.SessionID].AgentExecutionID = "active-execution"
-	target.deps.sess.mu.Unlock()
+	target.deps.sess.setExecution(target.descriptor.SessionID, models.TaskSessionStateRunning, "active-execution")
+
 	gotStatus, _, err := target.service.DispatchManagedInput(context.Background(), "install-1", request, "dispatch-op", "dispatch-digest")
 	require.NoError(t, err)
 	require.Equal(t, pluginsdk.ManagedAgentDispatchBusy, gotStatus)
 	require.Zero(t, target.deps.dispatcher.callCount())
 
-	target.deps.sess.mu.Lock()
-	target.deps.sess.sessions[target.descriptor.SessionID].State = models.TaskSessionStateCreated
-	target.deps.sess.sessions[target.descriptor.SessionID].AgentExecutionID = ""
-	target.deps.sess.mu.Unlock()
+	target.deps.sess.setExecution(target.descriptor.SessionID, models.TaskSessionStateCreated, "")
+
 	enqueue := managedInputEnqueueRequest("queued first", "queued-before-immediate")
 	_, _, err = target.service.EnqueueManagedInput(context.Background(), "install-1", "input-queued", enqueue, "enqueue-op", "enqueue-digest")
 	require.NoError(t, err)

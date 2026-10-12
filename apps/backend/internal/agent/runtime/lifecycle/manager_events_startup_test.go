@@ -41,7 +41,7 @@ func TestHandleCompleteEventMarkState_DefersUninitializedStartupFailure(t *testi
 		t.Fatalf("add execution: %v", err)
 	}
 
-	mgr.handleCompleteEventMarkState(execution, &agentctl.AgentEvent{
+	callCompletionStateWithStartupLease(t, mgr, execution, &agentctl.AgentEvent{
 		Type:  streams.EventTypeComplete,
 		Error: "Agent process exited with code 1",
 		Data:  map[string]any{"is_error": true},
@@ -134,6 +134,10 @@ func TestStartupGenerationPublishesOriginatingAttemptIDOnReusedExecution(t *test
 	}
 	if streamEvents[0].AttemptID != "attempt-new" {
 		t.Fatalf("replacement stream attempt ID = %q, want attempt-new", streamEvents[0].AttemptID)
+	}
+	if streamEvents[0].SessionSettingsSourceGeneration != newGeneration {
+		t.Fatalf("replacement stream source generation = %d, want %d",
+			streamEvents[0].SessionSettingsSourceGeneration, newGeneration)
 	}
 }
 
@@ -328,10 +332,74 @@ func TestStartupGenerationCapturesAttemptIDForReusedExecutionMessageChunk(t *tes
 		Text: "replacement\n",
 	}, newGeneration)
 	streamEvents := eventBus.getStreamEvents()
-	if len(streamEvents) != 1 {
-		t.Fatalf("replacement message callback published %d stream events, want 1", len(streamEvents))
+	if len(streamEvents) != 2 {
+		t.Fatalf("replacement message callback published %d stream events, want original evidence and transcript projection", len(streamEvents))
 	}
-	if streamEvents[0].AttemptID != "attempt-new" {
-		t.Fatalf("message stream attempt ID = %q, want attempt-new", streamEvents[0].AttemptID)
+	if streamEvents[0].Data.Type != streams.EventTypeMessageChunk || streamEvents[0].Data.Text != "replacement\n" {
+		t.Fatalf("original evidence = %+v, want replacement message_chunk", streamEvents[0].Data)
+	}
+	if streamEvents[1].Data.Type != "message_streaming" {
+		t.Fatalf("transcript projection = %+v, want message_streaming", streamEvents[1].Data)
+	}
+	for _, event := range streamEvents {
+		if event.AttemptID != "attempt-new" {
+			t.Fatalf("message stream attempt ID = %q, want attempt-new", event.AttemptID)
+		}
+	}
+}
+
+func TestReplayedStartupCompletionKeepsItsProcessGeneration(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		generation any
+		stale      bool
+	}{
+		{name: "retired JSON process", generation: float64(1), stale: true},
+		{name: "retired native process", generation: uint64(1), stale: true},
+		{name: "current process", generation: uint64(2)},
+		{name: "unknown process"},
+		{name: "future process", generation: uint64(3)},
+		{name: "malformed process", generation: "1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := newRestartMockAgentctlServer(t, false, false)
+			t.Cleanup(mock.server.Close)
+			client := createTestClient(t, mock.server.URL)
+			t.Cleanup(client.Close)
+			for range 2 {
+				_, err := client.Start(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if client.ProcessGeneration() != 2 {
+				t.Fatalf("client process generation = %d, want actual replacement 2", client.ProcessGeneration())
+			}
+			mgr, eventBus := createTestManagerWithTracking()
+			execution := createTestExecution("exec-retry", "task", "session")
+			execution.agentctl = client
+			execution.setSessionInitialized(true)
+			execution.beginStartupAttempt()
+			generation := execution.beginStartupAttempt()
+			if err := mgr.executionStore.Add(execution); err != nil {
+				t.Fatal(err)
+			}
+			mgr.handleAgentEventWithStartupGeneration(execution, agentctl.AgentEvent{
+				Type: streams.EventTypeComplete, Error: "first child exited", Data: map[string]any{"is_error": true, "process_generation": tc.generation},
+			}, generation)
+			failed := containsSubject(publishedSubjects(eventBus), events.AgentFailed)
+			if tc.stale {
+				if execution.Status != v1.AgentStatusRunning || failed {
+					t.Fatalf("retired process mutated replacement: status=%s failed=%t", execution.Status, failed)
+				}
+				select {
+				case signal := <-execution.promptDoneCh:
+					t.Fatalf("retired process signaled replacement prompt: %+v", signal)
+				default:
+				}
+			} else if !failed {
+				t.Fatal("a failure without proof of a retired process must retain its current handling")
+			}
+		})
 	}
 }

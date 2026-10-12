@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -30,6 +31,21 @@ type testAgent struct {
 	defaultModel       string
 	permissionSettings map[string]agents.PermissionSetting
 	runtimeConfig      *agents.RuntimeConfig
+}
+
+type lifecycleTestCursorNativeMCPRunner struct{}
+
+func (lifecycleTestCursorNativeMCPRunner) Run(_ context.Context, _ string, args []string, _ string, _ map[string]string) (mcpconfig.NativeMCPCommandResult, error) {
+	if len(args) != 3 || args[0] != "mcp" {
+		return mcpconfig.NativeMCPCommandResult{}, mcpconfig.ErrNativeMCPExecutableUnavailable
+	}
+	if args[1] == "enable" {
+		return mcpconfig.NativeMCPCommandResult{ExitCode: 0}, nil
+	}
+	if args[1] == "list-tools" {
+		return mcpconfig.NativeMCPCommandResult{ExitCode: 0, Stdout: []byte("Tools for " + args[2] + " (0):\n")}, nil
+	}
+	return mcpconfig.NativeMCPCommandResult{}, mcpconfig.ErrNativeMCPExecutableUnavailable
 }
 
 func (a *testAgent) ID() string          { return a.id }
@@ -256,6 +272,10 @@ func newTestManager(t *testing.T) *Manager {
 	profileResolver := &MockProfileResolver{}
 	// Pass nil for runtime - tests don't need them
 	mgr := NewManager(reg, eventBus, nil, credsMgr, profileResolver, nil, ExecutorFallbackWarn, "", log)
+	mgr.SetCursorNativeMCPCommandRunner(lifecycleTestCursorNativeMCPRunner{})
+	mgr.cursorInventoryLoader = func(context.Context) (mcpconfig.CursorNativeInventory, error) {
+		return mcpconfig.CursorNativeInventory{}, nil
+	}
 	cleanupManagerStopCh(t, mgr)
 	return mgr
 }

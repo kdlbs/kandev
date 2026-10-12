@@ -57,4 +57,23 @@ describe("registerSystemEventsHandlers", () => {
 
     expect(store.getState().agentRuntime).toEqual(unavailable);
   });
+
+  it("ignores an older runtime WebSocket snapshot from the same boot", () => {
+    const current: AgentRuntimeAvailability = {
+      status: "recovering",
+      boot_id: "boot-1",
+      runtime_epoch: 5,
+      revision: 8,
+    };
+    const store = createAppStore({ agentRuntime: current });
+    const handlers = registerSystemEventsHandlers(store);
+
+    handlers[SYSTEM_AGENT_RUNTIME_STATUS_CHANGED]?.({
+      type: "notification",
+      action: SYSTEM_AGENT_RUNTIME_STATUS_CHANGED,
+      payload: { ...current, status: "unavailable", revision: 7 },
+    });
+
+    expect(store.getState().agentRuntime).toEqual(current);
+  });
 });

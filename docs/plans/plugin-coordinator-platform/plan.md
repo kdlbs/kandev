@@ -30,6 +30,16 @@ legacy_specs:
 
 # Implementation plan: Extensible coordinator plugins
 
+## Presentation scope correction (2026-09-28)
+
+The user requested removal of the native Manager and Completion requirements
+controls. The [removal package](../remove-native-coordination-ui/plan.md)
+supersedes this record's UI-03 task-detail presentation and its browser
+interaction matrix. The correction was implemented on September 28, 2026. The
+original commands, counts, and results below remain historical UI evidence;
+task APIs and enforcement remain valid. The new package owns replacement
+browser and recovery coverage.
+
 ## Overview
 
 Make Kandev a stable host for user-defined coordinators. Deliver generic contracts,
@@ -38,8 +48,8 @@ Kandev owns execution and task invariants; plugins own coordination policy and U
 composition. Users can change prompts, roles, tools, scheduling, approval rules,
 and reports without maintaining a host fork.
 
-This is the approved design package requested on 2026-09-25. Implementation is
-underway in the approved order below. The
+This is the approved design package requested on 2026-09-25. Its implementation
+is complete. The
 [ownership decision](../../decisions/2026-09-25-plugin-coordination-platform.md)
 records the agreed boundary. Work-order status and results track implementation.
 

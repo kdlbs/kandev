@@ -18,6 +18,7 @@ import (
 // ── fakes ────────────────────────────────────────────────────────────────
 
 type acFakeTaskRepo struct {
+	unsupportedTaskFieldUpdater
 	mu        sync.Mutex
 	tasks     []*models.Task
 	nextIdx   int

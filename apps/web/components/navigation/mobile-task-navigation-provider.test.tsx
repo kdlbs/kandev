@@ -10,7 +10,11 @@ import {
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({ workspaces: { activeId: "workspace" }, workflows: { activeId: "workflow" } }),
+    selector({
+      userSettings: { sidebarLayoutsByWorkspace: {} },
+      workspaces: { activeId: "workspace" },
+      workflows: { activeId: "workflow" },
+    }),
 }));
 vi.mock("@/components/task/mobile/session-task-switcher-sheet", () => ({
   SessionTaskSwitcherSheet: () => {

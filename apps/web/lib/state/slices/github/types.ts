@@ -92,7 +92,7 @@ export type PRFeedbackCacheEntry = {
 };
 
 export type PRFeedbackCacheState = {
-  /** Keyed by `${owner}/${repo}#${pr_number}` so multi-PR tasks coexist. */
+  /** Keyed by the auth/workspace/provider/PR identity tuple. */
   byKey: Record<string, PRFeedbackCacheEntry>;
 };
 

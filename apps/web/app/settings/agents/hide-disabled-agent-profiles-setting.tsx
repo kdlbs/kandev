@@ -5,31 +5,43 @@ import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { useHideDisabledAgentProfilesInNav } from "@/hooks/domains/settings/use-hide-disabled-agent-profiles-in-nav";
 
-/**
- * Row for the "Hide disabled agent profiles from left panel navigation"
- * setting on `/settings/agents`. Saves immediately on toggle — the agents
- * page has no settings-floating-save bar, and its profile enabled toggles
- * are immediate-save too (`useProfileEnabledToggle`).
- */
-export function HideDisabledAgentProfilesSetting() {
+export const HIDE_DISABLED_AGENT_PROFILES_SWITCH_ID = "hide-disabled-agent-profiles-in-nav";
+
+/** The Agent options switch saves immediately and keeps the surface open. */
+export function HideDisabledAgentProfilesSetting({
+  isTouchTarget = false,
+}: {
+  isTouchTarget?: boolean;
+}) {
   const { t } = useTranslation();
   const { hideDisabled, setHideDisabled } = useHideDisabledAgentProfilesInNav();
   return (
-    <div className="flex min-h-11 items-center justify-between gap-4 rounded-lg border p-4">
+    <div className="flex items-start justify-between gap-4">
       <div className="min-w-0 space-y-0.5">
-        <Label htmlFor="hide-disabled-agent-profiles-in-nav">
+        <Label htmlFor={HIDE_DISABLED_AGENT_PROFILES_SWITCH_ID}>
           {t("settings:hideDisabledAgentProfilesFromNav")}
         </Label>
-        <p className="text-xs text-muted-foreground">
+        <p id="hide-disabled-agent-profiles-description" className="text-xs text-muted-foreground">
           {t("settings:hideDisabledAgentProfilesFromNavDescription")}
         </p>
       </div>
-      <Switch
-        id="hide-disabled-agent-profiles-in-nav"
-        checked={hideDisabled}
-        onCheckedChange={setHideDisabled}
-        className="shrink-0 cursor-pointer"
-      />
+      <Label
+        htmlFor={HIDE_DISABLED_AGENT_PROFILES_SWITCH_ID}
+        data-testid={isTouchTarget ? "agent-options-switch-target" : undefined}
+        className={
+          isTouchTarget
+            ? "flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-md"
+            : "flex shrink-0 cursor-pointer items-center justify-center"
+        }
+      >
+        <Switch
+          id={HIDE_DISABLED_AGENT_PROFILES_SWITCH_ID}
+          aria-describedby="hide-disabled-agent-profiles-description"
+          checked={hideDisabled}
+          onCheckedChange={setHideDisabled}
+          className="shrink-0 cursor-pointer"
+        />
+      </Label>
     </div>
   );
 }

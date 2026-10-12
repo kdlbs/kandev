@@ -400,6 +400,7 @@ func TestTaskStatusSummaryProjectsTaskOwnedErrorFields(t *testing.T) {
 
 func TestTaskStatusSummaryProjectsBootstrapCorrelationAndCauses(t *testing.T) {
 	now := time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
+	promptNotSent := true
 	got := BuildFromAuthoritative(RebuildInput{
 		Sessions: []RebuildSession{{
 			ID: "session-1",
@@ -413,9 +414,13 @@ func TestTaskStatusSummaryProjectsBootstrapCorrelationAndCauses(t *testing.T) {
 				Preview:     "The agent could not start.",
 				Category:    models.LaunchErrorCategoryGenericLaunchFailure,
 				Causes: []models.AgentErrorCause{{
-					Operation: models.AgentErrorCauseOperationResume,
-					Code:      models.AgentErrorCauseCodePermissionDenied,
-					Detail:    "Contribution access was denied.",
+					Operation:      models.AgentErrorCauseOperationStart,
+					Code:           models.AgentErrorCauseCodeModelUnavailable,
+					Detail:         "The requested model is unavailable.",
+					Reason:         models.AgentErrorCauseReasonRequestedNotAdvertised,
+					RequestedModel: "anthropic/claude-opus-4-8",
+					EffectiveModel: "provider-default",
+					PromptNotSent:  &promptNotSent,
 				}},
 			},
 		}},
@@ -430,11 +435,34 @@ func TestTaskStatusSummaryProjectsBootstrapCorrelationAndCauses(t *testing.T) {
 		t.Fatalf("bootstrap correlation = %+v", got.ActiveError)
 	}
 	if !reflect.DeepEqual(got.ActiveError.Causes, []models.AgentErrorCause{{
-		Operation: models.AgentErrorCauseOperationResume,
-		Code:      models.AgentErrorCauseCodePermissionDenied,
-		Detail:    "Contribution access was denied.",
+		Operation:      models.AgentErrorCauseOperationStart,
+		Code:           models.AgentErrorCauseCodeModelUnavailable,
+		Detail:         "The requested model is unavailable.",
+		Reason:         models.AgentErrorCauseReasonRequestedNotAdvertised,
+		RequestedModel: "anthropic/claude-opus-4-8",
+		EffectiveModel: "provider-default",
+		PromptNotSent:  &promptNotSent,
 	}}) {
 		t.Fatalf("bootstrap causes = %#v", got.ActiveError.Causes)
+	}
+}
+
+func TestTaskStatusSummaryValidatesOptionalPromptEvidenceByValue(t *testing.T) {
+	promptNotSent := true
+	summary := TaskStatusSummary{
+		ActiveError: &ActiveErrorSummary{
+			Category: models.LaunchErrorCategoryGenericLaunchFailure,
+			Causes: []models.AgentErrorCause{{
+				Operation:      models.AgentErrorCauseOperationStart,
+				Code:           models.AgentErrorCauseCodeModelUnavailable,
+				Reason:         models.AgentErrorCauseReasonRequestedNotAdvertised,
+				RequestedModel: "anthropic/claude-opus-4-8",
+				PromptNotSent:  &promptNotSent,
+			}},
+		},
+	}
+	if err := summary.Validate(); err != nil {
+		t.Fatalf("valid selection cause failed summary validation: %v", err)
 	}
 }
 

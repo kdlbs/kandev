@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/singleflight"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/discovery"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -40,10 +42,13 @@ func buildCommandString(cmd []string) string {
 
 var (
 	ErrAgentNotFound                        = errors.New("agent not found")
+	ErrAgentFeatureDisabled                 = errors.New("agent feature is disabled")
 	ErrAgentAlreadyExists                   = errors.New("agent already exists")
 	ErrAgentProfileNotFound                 = errors.New("agent profile not found")
 	ErrAgentMcpUnsupported                  = errors.New("mcp not supported by agent")
 	ErrModelRequired                        = errors.New("model is required for agent profiles")
+	ErrProfileOrderStale                    = errors.New("profile order is stale")
+	ErrProfileOrderUnsupported              = errors.New("profile order unsupported")
 	ErrLogoNotAvailable                     = errors.New("logo not available for agent")
 	ErrInvalidSlug                          = errors.New("display name must produce a valid slug")
 	ErrCommandRequired                      = errors.New("command is required")
@@ -75,11 +80,13 @@ type Controller struct {
 	automationDeps              AutomationDependencyChecker
 	utilityDeps                 UtilityDependencyChecker
 	mcpService                  *mcpconfig.Service
+	cursorMCPDiscoverySource    *cursorMCPDiscoverySource
 	hostUtility                 hostUtilityProvider
 	jobStore                    *JobStore
 	updateJobStore              *AgentUpdateJobStore
 	runtimeUpdater              RuntimeUpdater
 	managedRuntimeSelections    managedruntime.SelectionStore
+	openCodeMigrationGuard      OpenCodeMigrationGuard
 	maintenance                 *maintenanceCoordinator
 	hub                         JobBroadcaster
 	logger                      *logger.Logger
@@ -89,7 +96,20 @@ type Controller struct {
 	runtimeUpdateStatusNow      func() time.Time
 	runtimeUpdateStatusResolver RuntimeUpdateStatusResolver
 	runtimeUpdateStatusLookup   chan struct{}
+	runtimeUpdateStatusFlight   singleflight.Group
+	runtimeAutoUpdateStore      *managedruntime.AutoUpdateStore
+	runtimeUpdateNotifier       RuntimeUpdateNotifier
+	runtimeBackgroundMu         sync.Mutex
+	runtimeBackground           *runtimeUpdateBackground
+	runtimeAutoUpdateMu         sync.Mutex
+	runtimeUpdatePassMu         sync.Mutex
 	dynamicAgentRoutingEnabled  bool
+
+	hostCLIMu         sync.Mutex
+	hostCLIRunner     hostcli.Runner
+	hostCLIModels     map[string]hostCLIModelEntry
+	hostCLIGeneration map[string]uint64
+	hostCLISlots      chan struct{}
 }
 
 // SetDynamicAgentRoutingEnabled applies the authoritative runtime flag to the
@@ -251,6 +271,10 @@ type hostUtilityProvider interface {
 	) (hostutility.ModelConfigResolution, error)
 }
 
+type profileHostUtilityProvider interface {
+	ProbeProfileCapabilities(context.Context, string, hostutility.ProfileCapabilityRequest) (hostutility.ProfileCapabilityResult, error)
+}
+
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,
 ) *Controller {
 	return &Controller{
@@ -259,10 +283,13 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 		agentRegistry:             agentRegistry,
 		sessionChecker:            sessionChecker,
 		mcpService:                mcpconfig.NewService(repo),
+		cursorMCPDiscoverySource:  newCursorMCPDiscoverySource(),
 		logger:                    log.WithFields(zap.String("component", "agent-settings-controller")),
 		runtimeUpdateStatusCache:  make(map[string]runtimeUpdateStatusCacheEntry),
 		runtimeUpdateStatusNow:    time.Now,
 		runtimeUpdateStatusLookup: make(chan struct{}, runtimeUpdateStatusMaxConcurrent),
+		hostCLIRunner:             hostcli.ExecRunner{},
+		hostCLIModels:             make(map[string]hostCLIModelEntry),
 	}
 }
 
@@ -280,6 +307,7 @@ func (c *Controller) SetHostUtility(h *hostutility.Manager) {
 	c.SetRuntimeUpdater(&hostRuntimeUpdater{
 		host:     h,
 		executor: execDirectCommandExecutor{},
+		logger:   c.logger,
 	})
 }
 
@@ -296,6 +324,17 @@ func (c *Controller) SetRuntimeUpdater(updater RuntimeUpdater) {
 func (c *Controller) SetManagedRuntimeSelectionStore(store managedruntime.SelectionStore) {
 	c.managedRuntimeSelections = store
 	c.initializeUpdateJobStore()
+}
+
+// OpenCodeMigrationGuard reserves lifecycle and utility admission around the
+// authoritative selection write.
+type OpenCodeMigrationGuard func(context.Context) (context.Context, func(), error)
+
+func (c *Controller) SetOpenCodeMigrationGuard(guard OpenCodeMigrationGuard) {
+	c.openCodeMigrationGuard = guard
+	if c.updateJobStore != nil {
+		c.updateJobStore.SetOpenCodeMigrationGuard(guard)
+	}
 }
 
 // SetJobBroadcaster initializes the install job store with a WS broadcaster
@@ -315,6 +354,9 @@ func (c *Controller) SetJobBroadcaster(hub JobBroadcaster) {
 	c.jobStore = NewJobStore(hub, c.logger.Zap(), func(agentName string) {
 		c.InvalidateDiscoveryCache()
 		c.kickCapabilityProbe(agentName)
+		// An install re-runs the agent's npm install script, so the vendor CLI
+		// on disk may be a different release with a different model list.
+		c.hostCLIInstallSucceeded(agentName)
 		c.logger.Info("install succeeded", zap.String("agent", agentName))
 	}, c.maintenance)
 	c.initializeUpdateJobStore()
@@ -444,6 +486,14 @@ func (c *Controller) initializeUpdateJobStore() {
 		c.managedRuntimeSelections,
 	)
 	c.updateJobStore.SetStatusInvalidator(c.InvalidateRuntimeUpdateStatus)
+	if reader, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader); ok {
+		c.updateJobStore.SetOpenCodeSelectionReader(reader)
+	}
+	if writer, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionWriter); ok {
+		c.updateJobStore.SetOpenCodeSelections(writer)
+	}
+	c.updateJobStore.SetOpenCodeMigrationGuard(c.openCodeMigrationGuard)
+	c.updateJobStore.onFinished = c.retainAutomaticOutcome
 }
 
 // BroadcastAvailableAgents fetches the current available-agents snapshot and

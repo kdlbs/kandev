@@ -1,16 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useRouter } from "@/lib/routing/client-router";
-import { IconGitBranch } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
-import { SettingsSection } from "@/components/settings/settings-section";
-import { RepositoryCard } from "@/components/settings/repository-card";
-import { settingsActionClassName } from "@/components/settings/settings-control";
+import { WorkspaceRepositoriesSection } from "./workspace-repositories-section";
 import { WorkspaceRepositorySetsSection } from "./workspace-repository-sets-section";
 import { AddLocalRepositoryDialog } from "./workspace-add-local-repository-dialog";
+import { AddRemoteRepositoryDialog } from "./workspace-add-remote-repository-dialog";
 import { generateUUID } from "@/lib/utils";
 import {
   createRepositoryAction,
@@ -29,14 +26,11 @@ import {
   type RepositoryScript,
   type Workspace,
 } from "@/lib/types/http";
-import { useRequest } from "@/lib/http/use-request";
 import { useAppStore } from "@/components/state-provider";
 import type { ManualValidation } from "@/app/settings/workspace/workspace-repositories-dialog";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
 import {
-  areRepositoryScriptsDirty,
   cloneRepository,
-  isRepositoryDirty,
   mergeSavedRepositoryDraft,
   persistedRepositoryItems,
   type RepositoryWithScripts,
@@ -100,28 +94,6 @@ type RepoHandlerArgs = {
   savedRepositoriesById: Map<string, RepositoryWithScripts>;
   clearRepositoryScripts: (id: string) => void;
 };
-
-function selectDiscoveredRepository(
-  path: string,
-  setSelectedRepoPath: React.Dispatch<React.SetStateAction<string | null>>,
-  setManualRepoPath: React.Dispatch<React.SetStateAction<string>>,
-  setManualValidation: React.Dispatch<React.SetStateAction<ManualValidation>>,
-) {
-  setSelectedRepoPath(path);
-  setManualRepoPath("");
-  setManualValidation({ status: "idle" });
-}
-
-function changeManualRepositoryPath(
-  value: string,
-  setSelectedRepoPath: React.Dispatch<React.SetStateAction<string | null>>,
-  setManualRepoPath: React.Dispatch<React.SetStateAction<string>>,
-  setManualValidation: React.Dispatch<React.SetStateAction<ManualValidation>>,
-) {
-  setManualRepoPath(value);
-  setSelectedRepoPath(null);
-  setManualValidation({ status: "idle" });
-}
 
 async function saveNewRepository(
   repo: RepositoryItem,
@@ -338,94 +310,168 @@ function useRepositoryHandlers({
   };
 }
 
-function useDiscoverDialog(workspace: Workspace | null, t: TFunction) {
-  const [localRepoDialogOpen, setLocalRepoDialogOpen] = useState(false);
-  const [repoSearch, setRepoSearch] = useState("");
-  const [selectedRepoPath, setSelectedRepoPath] = useState<string | null>(null);
-  const [manualRepoPath, setManualRepoPath] = useState("");
-  const [manualValidation, setManualValidation] = useState<ManualValidation>({ status: "idle" });
-  const validateRequest = useRequest(validateRepositoryPathAction);
-  const discovery = useRepositoryDiscovery(workspace?.id ?? null, localRepoDialogOpen);
-  const discoveredRepositories = discovery.repositories;
+type LocalRepositoryDialogState = {
+  workspaceId: string | null;
+  context: symbol;
+  attempt: symbol | null;
+  open: boolean;
+  selectedRepoPath: string | null;
+  manualRepoPath: string;
+  manualValidation: ManualValidation;
+};
 
+function emptyRepositoryDialog(workspaceId: string | null): LocalRepositoryDialogState {
+  return {
+    workspaceId,
+    context: Symbol(),
+    attempt: null,
+    open: false,
+    selectedRepoPath: null,
+    manualRepoPath: "",
+    manualValidation: { status: "idle" },
+  };
+}
+
+async function validateManualPath(
+  workspaceId: string,
+  path: string,
+  t: TFunction,
+): Promise<ManualValidation> {
+  try {
+    const result = await validateRepositoryPathAction(workspaceId, path);
+    const isValid = isValidManualRepository(result);
+    return {
+      status: isValid ? "success" : "error",
+      isValid,
+      path: result.path,
+      // Backend diagnostics are data; only missing-message fallbacks are translated.
+      message: isValid
+        ? t("workspaces:validGitRepository")
+        : result.message || t("workspaces:invalidRepositoryPath"),
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      isValid: false,
+      message: error instanceof Error ? error.message : t("common:requestFailed"),
+    };
+  }
+}
+
+function useLocalRepositorySelection(workspaceId: string | null, t: TFunction) {
+  const [state, setState] = useState(() => emptyRepositoryDialog(workspaceId));
+  const owner = useRef<LocalRepositoryDialogState | null>(null);
+  useLayoutEffect(() => {
+    const next = emptyRepositoryDialog(workspaceId);
+    owner.current = next;
+    setState(next);
+    return () => {
+      owner.current = null;
+    };
+  }, [workspaceId]);
+  const view = state.workspaceId === workspaceId ? state : emptyRepositoryDialog(workspaceId);
+  const current = () => (owner.current?.context === view.context ? owner.current : null);
+  const publish = (next: LocalRepositoryDialogState) => {
+    owner.current = next;
+    setState(next);
+  };
+  const setLocalRepoDialogOpen = (open: boolean) => {
+    if (!current()) return;
+    publish({ ...emptyRepositoryDialog(workspaceId), open });
+  };
+  const changeSelection = (manualRepoPath: string, selectedRepoPath: string | null) => {
+    const active = current();
+    if (!active || !active.open) return;
+    const unchanged =
+      active.manualRepoPath.trim() === manualRepoPath.trim() &&
+      active.selectedRepoPath === selectedRepoPath;
+    publish({
+      ...active,
+      manualRepoPath,
+      selectedRepoPath,
+      ...(unchanged
+        ? {}
+        : { context: Symbol(), attempt: null, manualValidation: { status: "idle" as const } }),
+    });
+  };
+  const handleValidateManualPath = async () => {
+    const active = current();
+    if (!active?.open || !active.workspaceId || !active.manualRepoPath.trim()) return;
+    const attempt = Symbol();
+    publish({ ...active, attempt, manualValidation: { status: "loading" } });
+    const manualValidation = await validateManualPath(
+      active.workspaceId,
+      active.manualRepoPath.trim(),
+      t,
+    );
+    const latest = current();
+    if (latest?.attempt === attempt) publish({ ...latest, manualValidation });
+  };
+  const isValid =
+    view.manualValidation.status === "success" &&
+    view.manualValidation.isValid === true &&
+    Boolean(view.manualRepoPath.trim());
+  const canSave = view.open && Boolean(workspaceId) && (Boolean(view.selectedRepoPath) || isValid);
+  const getConfirmedSelection = () => {
+    const active = current();
+    if (
+      !canSave ||
+      !active ||
+      active.attempt !== view.attempt ||
+      active.manualValidation !== view.manualValidation
+    )
+      return null;
+    return {
+      selectedRepoPath: active.selectedRepoPath,
+      manualValidation: active.manualValidation,
+      manualRepoPath: active.manualRepoPath,
+    };
+  };
+  return {
+    localRepoDialogOpen: view.open,
+    setLocalRepoDialogOpen,
+    canSave,
+    getConfirmedSelection,
+    selectedRepoPath: view.selectedRepoPath,
+    manualRepoPath: view.manualRepoPath,
+    manualValidation: view.manualValidation,
+    handleValidateManualPath,
+    isValidating: view.open && view.manualValidation.status === "loading",
+    handleSelectRepoPath: (path: string) => changeSelection("", path),
+    handleManualRepoPathChange: (value: string) => changeSelection(value, null),
+  };
+}
+
+function useDiscoverDialog(workspace: Workspace | null, t: TFunction) {
+  const selection = useLocalRepositorySelection(workspace?.id ?? null, t);
+  const [repoSearch, setRepoSearch] = useState("");
+  const discovery = useRepositoryDiscovery(workspace?.id ?? null, selection.localRepoDialogOpen);
+  const discoveredRepositories = discovery.repositories;
   const filteredRepositories = useMemo(() => {
     const query = repoSearch.trim().toLowerCase();
-    if (!query) return discoveredRepositories;
-    return discoveredRepositories.filter(
-      (repo) => repo.name.toLowerCase().includes(query) || repo.path.toLowerCase().includes(query),
-    );
+    return query
+      ? discoveredRepositories.filter(
+          (repo) =>
+            repo.name.toLowerCase().includes(query) || repo.path.toLowerCase().includes(query),
+        )
+      : discoveredRepositories;
   }, [discoveredRepositories, repoSearch]);
-
-  const handleDiscover = async () => {
-    if (!workspace) return;
-    await discovery.refresh();
-  };
-
   const openDialog = () => {
-    setLocalRepoDialogOpen(true);
+    selection.setLocalRepoDialogOpen(true);
     setRepoSearch("");
-    setSelectedRepoPath(null);
-    setManualRepoPath("");
-    setManualValidation({ status: "idle" });
   };
-
-  const handleValidateManualPath = async () => {
-    if (!workspace || !manualRepoPath.trim()) return;
-    setManualValidation({ status: "loading" });
-    try {
-      const result = await validateRequest.run(workspace.id, manualRepoPath.trim());
-      if (isValidManualRepository(result))
-        setManualValidation({
-          status: "success",
-          isValid: true,
-          message: t("workspaces:validGitRepository"),
-          path: result.path,
-        });
-      else
-        // `result.message` is the backend's diagnostic and stays English by
-        // design; only the fallback for a missing payload is copy.
-        setManualValidation({
-          status: "error",
-          isValid: false,
-          message: result.message || t("workspaces:invalidRepositoryPath"),
-          path: result.path,
-        });
-    } catch (error) {
-      setManualValidation({
-        status: "error",
-        isValid: false,
-        message: error instanceof Error ? error.message : t("common:requestFailed"),
-      });
-    }
-  };
-
-  const handleSelectRepoPath = (path: string) =>
-    selectDiscoveredRepository(path, setSelectedRepoPath, setManualRepoPath, setManualValidation);
-  const handleManualRepoPathChange = (value: string) =>
-    changeManualRepositoryPath(value, setSelectedRepoPath, setManualRepoPath, setManualValidation);
-  const canSave =
-    Boolean(selectedRepoPath) ||
-    (manualValidation.status === "success" && manualValidation.isValid === true);
-
   return {
-    localRepoDialogOpen,
-    setLocalRepoDialogOpen,
+    ...selection,
     filteredRepositories,
     repoSearch,
     setRepoSearch,
-    selectedRepoPath,
-    handleSelectRepoPath,
-    manualRepoPath,
-    handleManualRepoPathChange,
-    manualValidation,
-    handleValidateManualPath,
-    isValidating: validateRequest.isLoading,
-    isDiscovering: discovery.isLoading || discovery.isRefreshing,
-    canSave,
     openDialog,
+    isDiscovering: discovery.isLoading || discovery.isRefreshing,
     discoveredRepositories,
     desktopRuntime: discovery.desktopRuntime,
-    onRefreshDiscovery: () => void handleDiscover(),
+    onRefreshDiscovery: () => {
+      if (workspace) void discovery.refresh();
+    },
     workspaceId: workspace?.id ?? null,
   };
 }
@@ -462,28 +508,43 @@ export function useWorkspaceRepositoriesPage(
   } = handlers;
 
   const discover = useDiscoverDialog(workspace, t);
-  const {
-    setLocalRepoDialogOpen,
-    selectedRepoPath,
-    manualRepoPath,
-    manualValidation,
-    discoveredRepositories,
-  } = discover;
-
   const handleConfirmLocalRepository = () => {
-    if (!workspace) return;
+    const selection = discover.getConfirmedSelection();
+    if (!workspace || !selection) return;
+    const selectedRepo = discover.discoveredRepositories.find(
+      (repo) => repo.path === selection.selectedRepoPath,
+    );
+    if (selection.selectedRepoPath && !selectedRepo) return;
     const draftRepo = buildDraftRepo(
       workspace,
-      discoveredRepositories.find((repo) => repo.path === selectedRepoPath),
-      manualValidation,
-      manualRepoPath,
+      selectedRepo,
+      selection.manualValidation,
+      selection.manualRepoPath,
     );
     if (!draftRepo.local_path) return;
     setRepositoryItems((prev) => [draftRepo, ...prev]);
-    setLocalRepoDialogOpen(false);
+    discover.setLocalRepoDialogOpen(false);
+  };
+
+  const [remoteRepoDialogOpen, setRemoteRepoDialogOpen] = useState(false);
+  // A remote repository is saved by the backend before it reaches the page, so
+  // it joins the saved baseline directly instead of becoming an unsaved draft.
+  // A repository the page already lists keeps its loaded baseline and scripts;
+  // the registration response never carries scripts.
+  const handleRemoteRepositoryRegistered = (repository: Repository) => {
+    const saved: RepositoryWithScripts = { ...repository, scripts: [] };
+    setSavedRepositoryItems((prev) =>
+      prev.some((item) => item.id === saved.id) ? prev : [cloneRepository(saved), ...prev],
+    );
+    setRepositoryItems((prev) =>
+      prev.some((item) => item.id === saved.id) ? prev : [{ ...saved, __autoOpen: true }, ...prev],
+    );
   };
 
   return {
+    remoteRepoDialogOpen,
+    setRemoteRepoDialogOpen,
+    handleRemoteRepositoryRegistered,
     router,
     repositoryItems,
     savedRepositoriesById,
@@ -503,21 +564,15 @@ export function WorkspaceRepositoriesClient({
   repositories,
   isImproveWorkspace = false,
 }: WorkspaceRepositoriesClientProps) {
-  const { t } = useTranslation();
   const state = useWorkspaceRepositoriesPage(workspace, repositories);
   // The add-local-repository dialog reads the rest of `state` directly, so only
   // what this component renders is destructured here.
   const {
     router,
     repositoryItems,
-    savedRepositoriesById,
-    handleUpdateRepository,
-    handleAddRepositoryScript,
-    handleUpdateRepositoryScript,
-    handleDeleteRepositoryScript,
-    handleSaveRepository,
-    handleDeleteRepository,
-    openDialog,
+    remoteRepoDialogOpen,
+    setRemoteRepoDialogOpen,
+    handleRemoteRepositoryRegistered,
   } = state;
 
   if (!workspace)
@@ -528,45 +583,11 @@ export function WorkspaceRepositoriesClient({
       {/* No section header: the Repositories section below already carries the
           name, mark and description, and the tab strip above says which tab you
           are on. A second copy of all three read as the page repeating itself. */}
-      <SettingsSection
-        divided
-        framed={false}
-        icon={<IconGitBranch className="h-5 w-5" />}
-        title={t("workspaces:repositories")}
-        description={
-          isImproveWorkspace
-            ? t("workspaces:repositoriesReadOnlyImprove")
-            : t("workspaces:repositoriesInThisWorkspace")
-        }
-        action={
-          isImproveWorkspace ? undefined : (
-            <Button className={settingsActionClassName("cursor-pointer")} onClick={openDialog}>
-              {t("workspaces:addLocalRepository")}
-            </Button>
-          )
-        }
-      >
-        <div className="grid gap-3">
-          {repositoryItems.map((repo) => (
-            <RepositoryCard
-              key={repo.id}
-              repository={repo}
-              workspaceId={workspace.id}
-              savedRepository={savedRepositoriesById.get(repo.id)}
-              isRepositoryDirty={isRepositoryDirty(repo, savedRepositoriesById.get(repo.id))}
-              areScriptsDirty={areRepositoryScriptsDirty(repo, savedRepositoriesById.get(repo.id))}
-              autoOpen={Boolean(repo.__autoOpen)}
-              readOnly={isImproveWorkspace}
-              onUpdate={handleUpdateRepository}
-              onAddScript={handleAddRepositoryScript}
-              onUpdateScript={handleUpdateRepositoryScript}
-              onDeleteScript={handleDeleteRepositoryScript}
-              onSave={handleSaveRepository}
-              onDelete={handleDeleteRepository}
-            />
-          ))}
-        </div>
-      </SettingsSection>
+      <WorkspaceRepositoriesSection
+        workspaceId={workspace.id}
+        readOnly={isImproveWorkspace}
+        state={state}
+      />
       {/* Sets group the repositories listed above, so they belong on this page
           rather than on a tab of their own. */}
       <WorkspaceRepositorySetsSection
@@ -577,6 +598,14 @@ export function WorkspaceRepositoriesClient({
         readOnly={isImproveWorkspace}
       />
       {!isImproveWorkspace && <AddLocalRepositoryDialog state={state} />}
+      {!isImproveWorkspace && (
+        <AddRemoteRepositoryDialog
+          open={remoteRepoDialogOpen}
+          onOpenChange={setRemoteRepoDialogOpen}
+          workspaceId={workspace.id}
+          onRegistered={handleRemoteRepositoryRegistered}
+        />
+      )}
     </div>
   );
 }

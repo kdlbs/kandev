@@ -421,9 +421,9 @@ test.describe("task launch failure recovery", () => {
           message: "The agent could not start.",
           occurred_at: failureCreatedAt,
           agent_execution_id: "bootstrap-execution-e2e",
-          execution_id: "bootstrap-execution-e2e",
+          execution_id: "650e8400-e29b-41d4-a716-446655440000",
           phase: "bootstrap",
-          attempt_id: "bootstrap-execution-e2e",
+          attempt_id: "resume-1",
           code: "generic_launch_failure",
           details: longDetails,
           scope: "session",
@@ -447,6 +447,16 @@ test.describe("task launch failure recovery", () => {
         scope: "session",
         error_stamp: failureStamp,
         error_output: longDetails,
+        phase: "bootstrap",
+        attempt_id: "resume-1",
+        execution_id: "650e8400-e29b-41d4-a716-446655440000",
+        causes: [
+          {
+            operation: "resume",
+            code: "permission_denied",
+            detail: "The required contribution access was denied.",
+          },
+        ],
         actions: [
           {
             type: "ws_request",
@@ -476,10 +486,10 @@ test.describe("task launch failure recovery", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     const failureText = "Agent startup failed: The agent could not start.";
-    const failureRows = testPage.locator("[id^='msg-']").filter({ hasText: failureText });
+    const failureRows = testPage.getByTestId("session-recovery-history");
     await expect(failureRows).toHaveCount(1, { timeout: 30_000 });
     const failureRow = failureRows.first();
-    await expect(failureRow).toContainText(failureText);
+    await expect(failureRow).toContainText("This failure is explained in the recovery card above.");
     await expect(testPage.getByTestId("task-shared-error")).toHaveCount(0);
     const transcript = session.activeChat().locator(".chat-message-list").first();
     await expect
@@ -490,13 +500,14 @@ test.describe("task launch failure recovery", () => {
     expect(initialScroll.scrollTop).toBeGreaterThan(0);
     await expect(session.activeChat().getByTestId("session-recovery-card")).toBeVisible();
 
-    const details = failureRow.getByText("Technical details", { exact: true });
+    const recoveryCard = session.activeChat().getByTestId("session-recovery-card");
+    const details = recoveryCard.getByText("Technical details", { exact: true });
     await details.click();
-    const detailsPanel = failureRow.locator("details");
+    const detailsPanel = recoveryCard.locator("details");
     await expect(detailsPanel).toHaveAttribute("open", "");
-    await expect(detailsPanel).toContainText(
-      "agent_bootstrap; diagnostic_line=1; cause=permission_denied",
-    );
+    await expect(detailsPanel).toContainText("Attempt: resume-1");
+    await expect(detailsPanel).toContainText("Phase: bootstrap");
+    await expect(detailsPanel).toContainText("The required contribution access was denied.");
     await expect(
       testPage.getByTestId("session-recovery-card").getByTestId("recovery-resume-button"),
     ).toBeVisible();
@@ -510,24 +521,32 @@ test.describe("task launch failure recovery", () => {
     );
     expect(middleScrollTop).toBeGreaterThan(0);
 
+    const resolutionAt = new Date(Date.now() + 1_000).toISOString();
     await apiClient.seedTaskSession(task.id, {
       state: "WAITING_FOR_INPUT",
       errorMessage: "",
       sessionId: task.session_id,
       agentProfileId: seedData.agentProfileId,
       metadata: {
+        recovery_resolved_at: resolutionAt,
+        recovery_resolutions: [
+          {
+            error_stamp: failureStamp,
+            attempt_id: "resume-1",
+            resolved_at: resolutionAt,
+          },
+        ],
         last_agent_error: {
           message: "The agent could not start.",
           occurred_at: failureCreatedAt,
           agent_execution_id: "bootstrap-execution-e2e",
-          execution_id: "bootstrap-execution-e2e",
+          execution_id: "650e8400-e29b-41d4-a716-446655440000",
           phase: "bootstrap",
-          attempt_id: "bootstrap-execution-e2e",
+          attempt_id: "resume-1",
           code: "generic_launch_failure",
           details: longDetails,
           scope: "session",
           stamp: failureStamp,
-          dismissed_at: new Date(Date.now() + 1_000).toISOString(),
         },
       },
     });
@@ -547,7 +566,6 @@ test.describe("task launch failure recovery", () => {
       content: "Recovered agent output",
       createdAt: new Date(Date.now() + 3_000).toISOString(),
     });
-    await expect(failureRow).toContainText(failureText);
     await expect(failureRow.getByTestId("recovery-resume-button")).toHaveCount(0);
     await expect
       .poll(async () => (await readTranscriptScrollState(transcript)).scrollTop)
@@ -561,17 +579,32 @@ test.describe("task launch failure recovery", () => {
       sessionId: task.session_id,
       agentProfileId: seedData.agentProfileId,
       metadata: {
+        recovery_resolved_at: resolutionAt,
+        recovery_resolutions: [
+          {
+            error_stamp: failureStamp,
+            attempt_id: "resume-1",
+            resolved_at: resolutionAt,
+          },
+        ],
         last_agent_error: {
           message: "The agent could not start.",
           occurred_at: nextFailureCreatedAt,
           agent_execution_id: "bootstrap-execution-e2e-new",
-          execution_id: "bootstrap-execution-e2e-new",
+          execution_id: "650e8400-e29b-41d4-a716-446655440001",
           phase: "bootstrap",
-          attempt_id: "bootstrap-execution-e2e-new",
+          attempt_id: "resume-2",
           code: "generic_launch_failure",
           details: longDetails,
           scope: "session",
           stamp: nextFailureStamp,
+          causes: [
+            {
+              operation: "resume",
+              code: "workspace_unavailable",
+              detail: "The project folder could not be opened.",
+            },
+          ],
         },
       },
     });
@@ -584,6 +617,16 @@ test.describe("task launch failure recovery", () => {
         scope: "session",
         error_stamp: nextFailureStamp,
         error_output: longDetails,
+        phase: "bootstrap",
+        attempt_id: "resume-2",
+        execution_id: "650e8400-e29b-41d4-a716-446655440001",
+        causes: [
+          {
+            operation: "resume",
+            code: "workspace_unavailable",
+            detail: "The project folder could not be opened.",
+          },
+        ],
         actions: [
           {
             type: "ws_request",
@@ -600,6 +643,9 @@ test.describe("task launch failure recovery", () => {
     });
     await expect(failureRows).toHaveCount(2);
     const currentFailureRow = failureRows.last();
+    await expect(currentFailureRow).toContainText(
+      "This failure is explained in the recovery card above.",
+    );
     await expect(currentFailureRow.getByTestId("recovery-resume-button")).toHaveCount(0);
     await expect(
       testPage.getByTestId("session-recovery-card").getByTestId("recovery-resume-button"),
@@ -608,8 +654,16 @@ test.describe("task launch failure recovery", () => {
 
     await testPage.reload();
     await session.waitForLoad();
-    const reloadedFailureRows = testPage.locator("[id^='msg-']").filter({ hasText: failureText });
+    const reloadedFailureRows = testPage.getByTestId("session-recovery-history");
     await expect(reloadedFailureRows).toHaveCount(2);
+    await expect(
+      reloadedFailureRows.first().getByTestId("session-recovery-resolved"),
+    ).toBeVisible();
+    await expect(reloadedFailureRows.last()).toContainText(
+      "This failure is explained in the recovery card above.",
+    );
+    await reloadedFailureRows.first().getByText("Technical details", { exact: true }).click();
+    await expect(reloadedFailureRows.first().locator("details")).toContainText("Attempt: resume-1");
     await expect(reloadedFailureRows.first().getByTestId("recovery-resume-button")).toHaveCount(0);
     await expect(reloadedFailureRows.last().getByTestId("recovery-resume-button")).toHaveCount(0);
     await expect(

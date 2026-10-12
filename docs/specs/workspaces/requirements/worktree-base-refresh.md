@@ -109,6 +109,44 @@ refreshes until the user establishes a new comparison-target association.
 Existing comparison-fetch failures keep their non-blocking status behavior
 after workspace creation.
 
+#### Repository checkout defaults
+
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.20:** A request-driven repository
+  settings save that omits the default branch or pull-before-worktree choice
+  shall preserve that choice from another successful save, including when the
+  other save completed after this request first observed the repository. This
+  applies to a rename, other settings edits, and a secret-binding replacement.
+  Branch-only and refresh-only saves shall preserve the omitted companion
+  choice in either write order, including enabling and disabling refresh.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.21:** A supplied valid default branch
+  shall replace that choice; an explicitly blank branch shall retain its
+  existing clear meaning. Explicit false shall disable pull-before-worktree.
+  Omission shall preserve each choice independently, and a later successful
+  explicit write to the same choice shall win. Null shall keep its current
+  per-surface meaning: omission on optional-pointer save surfaces, rejection
+  on a settings surface that declares the choice non-nullable. Creation
+  defaults and other settings' update behavior shall remain unchanged.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.22:** The successful repository
+  save response and its existing update event shall report both checkout
+  choices committed by that mutation, including preserved choices changed
+  before its write. An intervening later save shall not redefine that
+  mutation's response or event. A failed, rejected, or cancelled-before-commit
+  save shall leave no partial changes from that request and emit no success
+  event. Repository settings and an accompanying secret-binding replacement
+  shall succeed or roll back together under the existing failure contract.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.23:** Existing authorization,
+  validation, read-only admission, and error outcomes shall continue to apply.
+  Exact administration saves shall retain their timestamp precondition at the
+  write boundary, including after a disjoint edit. Intentional complete-model
+  writes and conditional default-branch recovery shall retain their established
+  semantics. Desktop and phone users shall receive the same persistence
+  outcome through existing supported save routes.
+
+Delivery: [Preserve repository checkout defaults](../../../plans/preserve-repository-checkout-defaults/plan.md).
+These criteria cover only the two checkout choices in request-driven settings
+saves. They do not promise partial preservation for every repository field,
+global event ordering, or freshness at the time a response is received.
+
 ## Compatibility
 
 This requirement replaces the universal fail-closed refresh behavior from

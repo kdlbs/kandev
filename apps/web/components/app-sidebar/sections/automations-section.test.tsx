@@ -7,6 +7,7 @@ import { LIVE_REFRESH_INTERVAL_MS } from "@/components/runs/use-live-refresh";
 const WORKSPACE_ID = "workspace-1";
 const AUTOMATION_ID = "automation-1";
 const AUTOMATIONS_SECTION = "automations";
+const OPEN_AUTOMATIONS = "Open automations";
 
 const mocks = vi.hoisted(() => ({
   listAutomations: vi.fn(),
@@ -111,6 +112,7 @@ describe("AutomationsSection", () => {
 
     await waitFor(() => expect(screen.getByText("Automations")).toBeTruthy());
     expect(screen.queryByTestId(`sidebar-automation-${AUTOMATION_ID}`)).toBeNull();
+    expect(screen.queryByRole("link", { name: OPEN_AUTOMATIONS })).toBeNull();
   });
 
   it("says how many it is hiding while folded, so it does not read as empty", async () => {
@@ -186,13 +188,6 @@ describe("AutomationsSection", () => {
     await waitFor(() => expect(screen.getByText("Paused.")).toBeTruthy());
   });
 
-  it("keeps the cross-automation view reachable without picking one first", async () => {
-    renderSection();
-
-    const shortcut = await screen.findByTestId("automations-all-runs");
-    expect(shortcut.getAttribute("href")).toBe("/automations");
-  });
-
   it("invites setup when the workspace has no automations", async () => {
     mocks.listAutomations.mockResolvedValue([]);
 
@@ -200,6 +195,9 @@ describe("AutomationsSection", () => {
 
     const empty = await screen.findByTestId("sidebar-automations-empty");
     expect(empty.getAttribute("href")).toBe("/settings/automations");
+    expect(screen.getByRole("link", { name: OPEN_AUTOMATIONS }).getAttribute("href")).toBe(
+      "/automations",
+    );
   });
 
   it("asks for nothing while collapsed to the rail", async () => {
@@ -230,6 +228,19 @@ describe("AutomationsSection", () => {
 
     await waitFor(() => expect(mocks.listAutomations).toHaveBeenCalledWith("workspace-other"));
   });
+});
+
+it("places the labelled cross-automation destination after the expanded rows", async () => {
+  renderOpenSection();
+
+  const row = await screen.findByTestId(`sidebar-automation-${AUTOMATION_ID}`);
+  const shortcut = screen.getByRole("link", { name: OPEN_AUTOMATIONS });
+  expect(shortcut.getAttribute("href")).toBe("/automations");
+  expect(shortcut.textContent).toBe(OPEN_AUTOMATIONS);
+  expect(shortcut.closest("#sidebar-section-automations")).toBe(
+    row.closest("#sidebar-section-automations"),
+  );
+  expect(row.compareDocumentPosition(shortcut) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 describe("AutomationsSection live running state", () => {

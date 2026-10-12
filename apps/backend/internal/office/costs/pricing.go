@@ -7,16 +7,6 @@ import commoncosts "github.com/kandev/kandev/internal/common/costs"
 // call sites and struct literals in this package keep working unchanged.
 type ModelPricing = commoncosts.ModelPricing
 
-// CalculateCostSubcents delegates to internal/common/costs, the single
-// source of truth for the cost formula shared with the task usage ledger
-// writer.
-func CalculateCostSubcents(
-	tokensIn, tokensCachedRead, tokensCachedWrite, tokensOut int64,
-	pricing ModelPricing,
-) int64 {
-	return commoncosts.CalculateCostSubcents(tokensIn, tokensCachedRead, tokensCachedWrite, tokensOut, pricing)
-}
-
 // CalculateCostSubcentsChecked exposes the shared overflow-aware calculation
 // to Office callers that need to distinguish an unpriced result from a real
 // zero-cost calculation.

@@ -95,6 +95,11 @@ rules, so that I understand the first cleanup and its recovery limits.
 - **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.7:** Backup recovery shall use the
   existing database restore process. The page shall explain that restore affects
   the whole database and can replace newer data. No per-message undo is promised.
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.8:** Backup verification shall run
+  its integrity check on the backup file at its native absolute path through a
+  read-only connection. This includes a Windows drive-letter path and a path
+  containing a space, `#`, `%`, or, where file names allow it, `?`. Verification
+  shall not create or check any other file.
 
 ### REQ-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003: Background operation and access
 

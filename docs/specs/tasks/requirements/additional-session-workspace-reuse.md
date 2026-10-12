@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-19
-updated: 2026-09-22
+updated: 2026-09-29
 owners:
   - kandev
 ---
@@ -75,7 +75,9 @@ starting in a stale workspace retained by the previous executor.
 - **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.3:** A missing, non-Git,
   path-mismatched, or executor-mismatched workspace shall fail before agent
   process startup with a typed, recoverable error; it shall not expose the
-  invalid workspace as ready or as the task's current change projection.
+  invalid workspace as ready or as the task's current change projection. A
+  separately authorized recovery can establish a valid replacement before
+  this read-only admission check runs.
 - **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.4:** Rejecting an invalid
   workspace shall not delete, move, reset, clean, checkout, or otherwise modify
   the stale path, the canonical repository, or either environment inventory.
@@ -179,8 +181,8 @@ an optional session name remains best effort after a successful launch.
   an additional launch.
 - A terminal primary or zero-session task can reuse its retained ready
   environment.
-- A preparing or unsafe environment fails before lifecycle preparation and does
-  not silently repair or replace the workspace.
+- A preparing or unsafe environment fails attachment. Separate recovery must
+  establish a valid environment before read-only attachment proceeds.
 - Every current repository/branch slot must have exactly one active canonical
   row before an attach-only launch begins.
 
@@ -188,6 +190,8 @@ an optional session name remains best effort after a successful launch.
 
 - Preventing concurrent agents from editing the same file.
 - A trusted filesystem read-only agent mode.
-- Automatic workspace repair, reset, branch switching, or replacement during
-  session spawn.
+- Workspace repair, reset, branch switching, or replacement inside attach-only
+  preparation. A separate guarded recovery operation can restore an eligible
+  checkout before attachment, as defined in
+  [worktree recovery](worktree-metadata-recovery.md).
 - Reconstructing a missing physical worktree from filesystem guesses.

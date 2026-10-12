@@ -504,10 +504,15 @@ func TestCleanupRejectsSymlinkedOwnershipMarker(t *testing.T) {
 	}
 }
 
+// @covers AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.11
 func TestCleanupSupportsLegacySemanticAndScratchLayouts(t *testing.T) {
 	provider, root, store := newProviderFixture(t, Inventory{Complete: true}, nil)
 	semantic := filepath.Join(root, "legacy-task_abc")
-	scratch := filepath.Join(root, "workspace-legacy", "task-legacy")
+	scratch := filepath.Join(
+		root,
+		"33333333-3333-4333-8333-333333333333",
+		"44444444-4444-4444-8444-444444444444",
+	)
 	for _, path := range []string{semantic, scratch} {
 		if err := os.MkdirAll(filepath.Join(path, ".git"), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%s): %v", path, err)

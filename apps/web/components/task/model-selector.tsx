@@ -31,6 +31,7 @@ type SessionModelsEntry = {
   configOptions: ConfigOptionEntry[];
   configOptionsSettled?: boolean;
   configBaseline?: Record<string, string>;
+  settingsPolicy?: "provider_restored";
   /** Set when the session started on the profile's fallback model. */
   fallbackModel?: string;
 };
@@ -40,6 +41,19 @@ type ModelSelectorProps = {
   triggerClassName?: string;
   showAgentIcon?: boolean;
 };
+
+function shouldHideModelSelector(input: {
+  sessionId: string | null;
+  configHydrated: boolean;
+  currentModel: string | null;
+  modelConfig: SelectConfigOption | undefined;
+  restoredModelUnknown: boolean;
+  modelOptionsCount: number;
+}): boolean {
+  if (!input.sessionId || !input.configHydrated) return true;
+  const restoredOptionsAvailable = input.restoredModelUnknown && input.modelOptionsCount > 0;
+  return !input.currentModel && !input.modelConfig && !restoredOptionsAvailable;
+}
 
 const debug = createDebugLogger("model-selector:gate");
 
@@ -253,12 +267,16 @@ function resolveProfileModel(profileId: string | null | undefined, agents: Agent
   return null;
 }
 
-function resolveCurrentModel(
+export function resolveCurrentModel(
   activeModel: string | null,
   acpCurrentModel: string | null,
   snapshotModel: string | null,
   profileModel: string | null,
+  settingsPolicy?: "provider_restored",
 ): string | null {
+  if (settingsPolicy === "provider_restored") {
+    return acpCurrentModel;
+  }
   return activeModel || acpCurrentModel || snapshotModel || profileModel;
 }
 
@@ -442,6 +460,7 @@ function resolveModelSelectorInputs({
     sessionModelsData?.currentModelId || null,
     resolveSnapshotModel(session?.agent_profile_snapshot),
     profileModel,
+    sessionModelsData?.settingsPolicy,
   );
   return { configOptions, currentModel, availableModels };
 }
@@ -484,6 +503,8 @@ function useModelSelectorState(sessionId: string | null) {
       ),
     [availableModels, currentModel, sessionModelsData?.fallbackModel],
   );
+  const restoredModelUnknown =
+    sessionModelsData?.settingsPolicy === "provider_restored" && !currentModel;
 
   const { handleModelChange, handleConfigChange } = useModelChangeHandlers(
     configOptions,
@@ -499,6 +520,7 @@ function useModelSelectorState(sessionId: string | null) {
     configHydrated: hasCompleteDynamicConfig(session, sessionModelsData, settingsAgents as Agent[]),
     requiredKeys: requiredConfigKeys(session, settingsAgents as Agent[]),
     rawConfigOptionIds: (sessionModelsData?.configOptions ?? []).map((o) => o.id),
+    restoredModelUnknown,
     handleModelChange,
     handleConfigChange,
   };
@@ -519,6 +541,7 @@ export const ModelSelector = memo(function ModelSelector({
     configHydrated,
     requiredKeys,
     rawConfigOptionIds,
+    restoredModelUnknown,
     handleModelChange,
     handleConfigChange,
   } = useModelSelectorState(sessionId);
@@ -540,6 +563,14 @@ export const ModelSelector = memo(function ModelSelector({
     [agentName],
   );
   const modelConfig = configOptions.find(isModelConfigOption);
+  const hideSelector = shouldHideModelSelector({
+    sessionId,
+    configHydrated,
+    currentModel,
+    modelConfig,
+    restoredModelUnknown,
+    modelOptionsCount: modelOptions.length,
+  });
   // Explicit "using fallback" signal: annotate the trigger so the user sees
   // the session is not on the configured start model.
   const currentModelSuffix = fallbackModel ? ` ${t("settings:modelFallbackSuffix")}` : undefined;
@@ -570,10 +601,10 @@ export const ModelSelector = memo(function ModelSelector({
       configOptionIds: configOptions.map((o) => o.id),
       rawConfigOptionIds,
       requiredKeys,
-      willHide: !sessionId || !configHydrated || (!currentModel && !modelConfig),
+      willHide: hideSelector,
     });
   }
-  if (!sessionId || !configHydrated || (!currentModel && !modelConfig)) return null;
+  if (hideSelector) return null;
 
   return (
     <ModelConfigSelector
@@ -583,7 +614,7 @@ export const ModelSelector = memo(function ModelSelector({
       configOptions={configOptions}
       onModelChange={onModelChange}
       onConfigChange={onConfigChange}
-      placeholder={t("common:model")}
+      placeholder={restoredModelUnknown ? t("common:unknown") : t("common:model")}
       ariaLabel={t("task:sessionModelSettings")}
       variant="compact"
       popoverSide="top"

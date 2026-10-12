@@ -23,6 +23,8 @@ export type WorkspaceState = {
     default_environment_id?: string | null;
     default_agent_profile_id?: string | null;
     default_config_agent_profile_id?: string | null;
+    acp_idle_suspension_enabled?: boolean;
+    acp_idle_timeout_minutes?: number;
     office_workflow_id?: string | null;
     created_at: string;
     updated_at: string;

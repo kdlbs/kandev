@@ -50,7 +50,7 @@ export function buildDocumentContext(
     if (!planModeEnabled) return "";
 
     // i18n-exempt: agent-facing prompt sent verbatim to the model, never rendered.
-    return `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nRead the current plan using the get_task_plan_kandev MCP tool to understand the context before responding.\nAny plan modifications should use the update_task_plan_kandev MCP tool.\n</kandev-system>`;
+    return `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nFor focused changes, use get_task_plan_kandev with offset and limit when supported by its discovered schema. Ranges count Unicode code points; continue with next_offset and the first page's version as expected_version. Reconcile conflicts. Omit range arguments for a full read when the whole plan is needed.\nUse edit_task_plan_kandev for exact unique fragment changes, or update_task_plan_kandev with mode="append" for additions. Reuse the current version from a read or successful write. Never submit a fragment as a replacement document. Restart pagination after writes; previous offsets belong to the earlier version. Append is not idempotent; inspect current state after a lost response before retrying. Preserve user edits.\n</kandev-system>`;
   }
 
   // i18n-exempt: agent-facing prompt sent verbatim to the model, never rendered.

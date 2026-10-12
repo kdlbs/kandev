@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -27,6 +28,10 @@ import (
 const gitSnapshotPersistInterval = 30 * time.Second
 
 const gitSnapshotTriggeredByAgentCompleted = "agent_completed"
+
+const gitSnapshotStatusReady = "ready"
+
+const automaticPermissionMessageWriteMaxAttempts = 3
 
 // gitSnapshotCacheMaxEntries bounds the in-memory throttle map so a long-lived
 // backend with many sessions can't grow it without limit. When the cache is
@@ -117,9 +122,10 @@ func (c *gitSnapshotCache) forget(taskEnvironmentID string) {
 
 func gitStatusHash(s *lifecycle.GitStatusData) string {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d",
+	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%s|%s|%t|%s|%d|%d|%d|%d|%d|%d",
 		s.RepositoryName, s.Branch, s.RemoteBranch, s.HeadCommit, s.BaseCommit,
 		s.ComparisonTarget, s.ComparisonStatus, s.ComparisonErrorCode,
+		s.StatusState, s.FilesComplete, s.DetailState, s.TrackerEpoch, s.SnapshotRevision,
 		s.Ahead, s.Behind, s.BranchAdditions, s.BranchDeletions)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -181,7 +187,9 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 	s.syncPRWatchBranch(ctx, data.TaskID, data.SessionID, data.Status.RepositoryName, data.Status.Branch)
 
 	// Push detection: when ahead goes from >0 to 0, a push happened
-	s.trackPushAndAssociatePR(ctx, data)
+	if gitStatusDetailsAreKnown(data.Status) {
+		s.trackPushAndAssociatePR(ctx, data)
+	}
 
 	// Persist a throttled cache of the live status so the sidebar diff badge
 	// works for tasks whose executor isn't currently running (and across
@@ -194,6 +202,9 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 // appendDBSnapshotGitStatus when no live execution is available.
 func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.GitEventData) {
 	if s.repo == nil || data.SessionID == "" || data.Status == nil {
+		return
+	}
+	if !gitStatusDetailsAreKnown(data.Status) {
 		return
 	}
 	if s.gitSnapshotCache == nil {
@@ -236,6 +247,9 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 			"untracked":             st.Untracked,
 			"renamed":               st.Renamed,
 			"timestamp":             data.Timestamp,
+			"status_state":          gitSnapshotStatusReady,
+			"files_complete":        false,
+			"detail_state":          gitSnapshotStatusReady,
 		},
 	}
 	if err := s.repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
@@ -244,6 +258,11 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
 	}
+}
+
+func gitStatusDetailsAreKnown(status *lifecycle.GitStatusData) bool {
+	return status != nil && (status.StatusState == "" || status.StatusState == gitSnapshotStatusReady) &&
+		(status.DetailState == "" || status.DetailState == gitSnapshotStatusReady)
 }
 
 func (s *Service) resolveGitSnapshotEnvironmentID(ctx context.Context, sessionID string) (string, bool) {
@@ -799,38 +818,138 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 		return
 	}
 
-	s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+	// New agentctl instances leave the request pending until the backend has
+	// claimed its durable decision. Older instances can still send a record of
+	// an approval they already delivered.
+	autoCandidate := data.AutoApprovedOptionID != "" && data.AutoApprovalPending
+	autoApproved := data.AutoApprovedOptionID != "" && !autoCandidate
+	var decision *models.PermissionDecision
+	if autoApproved {
+		decision = permissionDecisionFromEvent(data)
+	}
+	if !autoApproved && !autoCandidate {
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+	}
 
 	if s.messageCreator != nil {
-		_, err := s.messageCreator.CreatePermissionRequestMessage(
-			ctx,
-			data.TaskID,
-			data.TaskSessionID,
-			data.RequestID,
-			data.PendingID,
-			data.ToolCallID,
-			data.Title,
-			s.getActiveTurnID(data.TaskSessionID),
-			data.Options,
-			data.ActionType,
-			data.ActionDetails,
-		)
+		turnID := s.getActiveTurnID(data.TaskSessionID)
+		attempts := 0
+		var err error
+	permissionWrite:
+		for attempt := 1; attempt <= automaticPermissionMessageWriteMaxAttempts; attempt++ {
+			attempts = attempt
+			_, err = s.messageCreator.CreatePermissionRequestMessage(
+				ctx,
+				data.TaskID,
+				data.TaskSessionID,
+				data.RequestID,
+				data.PendingID,
+				data.ToolCallID,
+				data.Title,
+				turnID,
+				data.Options,
+				data.ActionType,
+				data.ActionDetails,
+				decision,
+			)
+			if err == nil || (!autoApproved && !autoCandidate) || attempts == automaticPermissionMessageWriteMaxAttempts {
+				break
+			}
+			timer := time.NewTimer(100 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				err = ctx.Err()
+				break permissionWrite
+			case <-timer.C:
+			}
+		}
 		if err != nil {
-			s.logger.Error("failed to create permission request message",
+			message := "failed to create permission request message"
+			fields := []zap.Field{
 				zap.String("task_id", data.TaskID),
 				zap.String("pending_id", data.PendingID),
-				zap.Error(err))
+				zap.Error(err),
+			}
+			if decision != nil {
+				message = "failed to persist automatic permission decision"
+				fields = append(fields,
+					zap.Int("attempts", attempts),
+					zap.String("option_id", decision.OptionID),
+					zap.String("option_kind", decision.OptionKind),
+					zap.String("source", decision.Source),
+				)
+			}
+			s.logger.Error(message, fields...)
+			if autoCandidate {
+				s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+				return
+			}
 		} else {
 			s.logger.Debug("created permission request message",
 				zap.String("task_id", data.TaskID),
 				zap.String("pending_id", data.PendingID))
 		}
+	} else if autoCandidate {
+		s.logger.Error("cannot persist automatic permission candidate without a message creator",
+			zap.String("task_id", data.TaskID), zap.String("pending_id", data.PendingID))
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+		return
+	} else if decision != nil {
+		s.logger.Error("cannot persist automatic permission decision without a message creator",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.TaskSessionID),
+			zap.String("request_id", data.RequestID),
+			zap.String("pending_id", data.PendingID),
+			zap.String("option_id", decision.OptionID),
+			zap.String("option_kind", decision.OptionKind),
+			zap.String("source", decision.Source))
+	}
+
+	if autoCandidate {
+		_, err := s.ResolveAgentPermission(ctx, ResolveAgentPermissionRequest{
+			TaskID: data.TaskID, SessionID: data.TaskSessionID,
+			RequestID: data.RequestID, PendingID: data.PendingID,
+			OptionID: data.AutoApprovedOptionID, Source: models.PermissionSourceAutoApprove,
+		})
+		if err != nil {
+			s.logger.Error("failed to resolve automatic permission decision",
+				zap.String("task_id", data.TaskID), zap.String("pending_id", data.PendingID), zap.Error(err))
+			s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+		}
+		return
+	}
+	if autoApproved {
+		return
 	}
 
 	// Automation tasks are hidden from the kanban, so there is no UI for the
 	// user to answer a permission prompt. Auto-reject and mark the run failed
 	// so the failure shows up in the automation's Recent Runs.
 	s.failAutomationRunOnPermission(ctx, data)
+}
+
+func permissionDecisionFromEvent(data watcher.PermissionRequestData) *models.PermissionDecision {
+	kind := data.AutoApprovedOptionKind
+	if kind == "" {
+		for _, option := range data.Options {
+			optionID, _ := option["option_id"].(string)
+			optionKind, _ := option["kind"].(string)
+			if optionID == data.AutoApprovedOptionID {
+				kind = optionKind
+				break
+			}
+		}
+	}
+	source := data.AutoApprovalSource
+	if source == "" {
+		source = streams.PermissionDecisionSourceAutoApprove
+	}
+	return &models.PermissionDecision{
+		OptionID:   data.AutoApprovedOptionID,
+		OptionKind: kind,
+		Source:     source,
+	}
 }
 
 // failAutomationRunOnPermission checks whether the permission request belongs

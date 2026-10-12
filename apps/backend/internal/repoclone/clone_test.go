@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestGitCredentialRequestCarriesExactTaskScope(t *testing.T) {
@@ -530,6 +531,32 @@ func TestWorkspaceProviderRepositoryPathRejectsScopeWithoutRepoID(t *testing.T) 
 	)
 	if err == nil {
 		t.Fatal("WorkspaceProviderRepositoryPath() error = nil, want an error for scope without repository ID")
+	}
+}
+
+func TestManagedCloneRelocationPathsAreProviderAndWorkspaceScoped(t *testing.T) {
+	t.Parallel()
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", nil)
+	repository := &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", SourceType: "provider", Provider: "github",
+		ProviderHost: "https://github.com", ProviderOwner: "acme", ProviderName: "widget",
+	}
+	root, source, ownerNameSource, destination, ok, err := cloner.ManagedCloneRelocationPaths(repository)
+	if err != nil || !ok {
+		t.Fatalf("ManagedCloneRelocationPaths() = (%q, %q, %q, %q, %t, %v), want managed paths", root, source, ownerNameSource, destination, ok, err)
+	}
+	if want := filepath.Join(root, "_providers", "github", "github.com", "acme", "widget"); source != want {
+		t.Fatalf("source path = %q, want %q", source, want)
+	}
+	if want := filepath.Join(root, "acme", "widget"); ownerNameSource != want {
+		t.Fatalf("legacy owner/name source path = %q, want %q", ownerNameSource, want)
+	}
+	if want := filepath.Join(root, "workspaces", "workspace-1", "github", "acme", "widget"); destination != want {
+		t.Fatalf("destination path = %q, want %q", destination, want)
+	}
+	repository.SourceType = "local"
+	if _, _, _, _, ok, err := cloner.ManagedCloneRelocationPaths(repository); err != nil || ok {
+		t.Fatalf("local source relocation = ok %t, err %v, want unsupported", ok, err)
 	}
 }
 

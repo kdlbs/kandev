@@ -449,6 +449,10 @@ build-backend-quiet:
 ## e2e/global-setup.ts checks the resulting tar.gz exists (like it does for
 ## the kandev/mock-agent binaries) but does not build it itself — this target
 ## is the "make it exist" step, wired into test-e2e* below.
+.PHONY: build-e2e-delivery-fixture
+build-e2e-delivery-fixture:
+	@$(MAKE) -C $(BACKEND_DIR) build-e2e-delivery-fixture
+
 .PHONY: build-e2e-plugin-package
 build-e2e-plugin-package:
 	@printf "$(CYAN)Packaging e2e fixture plugin...$(RESET)\n"
@@ -565,6 +569,8 @@ test-cli:
 test-scripts:
 	@printf "$(CYAN)Running script tests...$(RESET)\n"
 	@python3 .github/scripts/lint-action-pinning_test.py
+	@python3 .github/scripts/notify-release-contributors_test.py
+	@python3 .github/scripts/notify-release-contributors-workflow-contract_test.py
 	@node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs
 	@bash scripts/pr-state.test.sh
 	@bash scripts/pr-await.test.sh
@@ -580,13 +586,14 @@ test-scripts:
 	@bash scripts/release-desktop.test.sh
 	@bash scripts/release/runtime-bundle.test.sh
 	@bash scripts/release/retry-ghcr-command.test.sh
+	@bash scripts/release/signpath-signing-ready.test.sh
 	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
 	@python3 .github/scripts/release-workflow-contract_test.py
 	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs
 	@node --test scripts/validate-public-docs.test.mjs scripts/generic-plugin-host-boundary.test.mjs
 
 .PHONY: test-e2e
-test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package
+test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture
 	@printf "$(CYAN)Running E2E tests (headless, resource-bounded, managed runner)...$(RESET)\n"
 	@cd $(WEB_DIR) && status=0; for project in routing auth chromium mobile-chrome containers; do \
 		printf "$(CYAN)-- project: $$project --$(RESET)\n"; \
@@ -594,12 +601,12 @@ test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plug
 	done; exit $$status
 
 .PHONY: test-e2e-headed
-test-e2e-headed: build-backend build-web-e2e build-e2e-plugin-package
+test-e2e-headed: build-backend build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture
 	@printf "$(CYAN)Running E2E tests (headed)...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:headed
 
 .PHONY: test-e2e-ui
-test-e2e-ui: build-backend build-web-e2e build-e2e-plugin-package
+test-e2e-ui: build-backend build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture
 	@printf "$(CYAN)Opening Playwright UI mode...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:ui
 

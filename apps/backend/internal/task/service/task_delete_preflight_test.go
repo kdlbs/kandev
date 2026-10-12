@@ -235,6 +235,49 @@ func TestTaskDeletePreflightRejectsEmptySelection(t *testing.T) {
 	}
 }
 
+// @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.6
+// @covers AC-TASKS-RUNTIME-CLEANUP-001.9
+func TestTaskDeletePreflightPreservesInspectionCause(t *testing.T) {
+	for _, cause := range []error{errors.New("private Git failure"), context.Canceled, context.DeadlineExceeded} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			svc, eventBus, repo := createTestService(t)
+			seedTaskDeletePreflightTask(t, repo, "inspection", "", false)
+			cleanup := &taskDeletePreflightCleanup{worktreesByTaskID: map[string][]*worktree.Worktree{
+				"inspection": {{ID: "healthy"}, {ID: "broken"}},
+			}}
+			svc.SetWorktreeCleanup(cleanup)
+			ctx := taskDeletePreflightHumanContext()
+			control, err := svc.TaskDeletePreflight(ctx, []string{"inspection"}, false)
+			if err != nil || control.ConfirmationID == "" {
+				t.Fatalf("healthy control = %+v, %v; want a confirmation", control, err)
+			}
+			before, err := repo.GetTask(ctx, "inspection")
+			if err != nil {
+				t.Fatal(err)
+			}
+			inspection := &worktree.CleanupInspectionError{
+				Stage: "working_tree_status", Reason: worktree.CleanupInspectionReasonRepoUnavailable, Err: cause,
+			}
+			cleanup.inspectErr = inspection
+			result, err := svc.TaskDeletePreflight(ctx, []string{"inspection"}, false)
+			var got *worktree.CleanupInspectionError
+			if !errors.Is(err, ErrTaskDeletePreflightUnavailable) || !errors.As(err, &got) || got != inspection || !errors.Is(err, cause) {
+				t.Fatalf("preflight error = %v; want unavailable sentinel and original typed cause", err)
+			}
+			if result != (TaskDeletePreflightResult{}) {
+				t.Fatalf("failed preflight issued a result: %+v", result)
+			}
+			after, readErr := repo.GetTask(ctx, "inspection")
+			if readErr != nil || after.State != before.State || !after.UpdatedAt.Equal(before.UpdatedAt) {
+				t.Fatalf("preflight changed task: %+v, %v", after, readErr)
+			}
+			if len(eventBus.GetPublishedEvents()) != 0 {
+				t.Fatal("preflight published task mutations")
+			}
+		})
+	}
+}
+
 func TestTaskDeletePreflightAuthorizesEveryRootBeforeInspection(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedTaskDeletePreflightTask(t, repo, "foreign", "", false)

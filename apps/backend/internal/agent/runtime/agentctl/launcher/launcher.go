@@ -4,13 +4,15 @@
 package launcher
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +25,7 @@ import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/netprobe"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"go.uber.org/zap"
 )
 
@@ -33,11 +36,17 @@ type Launcher struct {
 	port             int
 	logger           *logger.Logger
 	onUnexpectedExit func()
+	onRuntimeExit    func(ExitReport)
 	startupConfig    commonconfig.AgentctlStartupConfig
 
-	cmd    *exec.Cmd
-	exited chan struct{}
-	mu     sync.Mutex
+	cmd              *exec.Cmd
+	exited           chan struct{}
+	mu               sync.Mutex
+	childLifecycleMu sync.Mutex //nolint:unused // referenced by lifecycle_windows.go
+	processIdentity  processidentity.Identity
+	outputWG         sync.WaitGroup
+	diagnosticMu     sync.Mutex
+	diagnosticTail   string
 
 	// For clean shutdown
 	stopping bool
@@ -68,7 +77,20 @@ type Config struct {
 	Host             string // Host to bind to (default: localhost)
 	Port             int    // Control port (default: 39429)
 	OnUnexpectedExit func() // Called once when the child exits without Stop.
+	OnRuntimeExit    func(ExitReport)
 	StartupConfig    commonconfig.AgentctlStartupConfig
+}
+
+// ExitReport carries the evidence collected after a launched control process
+// exits. Containment is false when its owned process tree could not be proved
+// and stopped safely.
+type ExitReport struct {
+	PID        int
+	ExitCode   int
+	Identity   processidentity.Identity
+	Contained  bool
+	ContainErr error
+	Diagnostic string
 }
 
 // New creates a new Launcher.
@@ -88,6 +110,7 @@ func New(cfg Config, log *logger.Logger) *Launcher {
 		host:             cfg.Host,
 		port:             cfg.Port,
 		onUnexpectedExit: cfg.OnUnexpectedExit,
+		onRuntimeExit:    cfg.OnRuntimeExit,
 		startupConfig:    cfg.StartupConfig,
 		logger:           log.WithFields(zap.String("component", "agentctl-launcher")),
 		exited:           make(chan struct{}),
@@ -115,6 +138,14 @@ func (l *Launcher) Pid() int {
 		return 0
 	}
 	return l.cmd.Process.Pid
+}
+
+// ProcessIdentity returns the verified OS identity captured immediately
+// after the managed child starts. Empty identity fields never authorize a kill.
+func (l *Launcher) ProcessIdentity() processidentity.Identity {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.processIdentity
 }
 
 // AuthToken returns the auth token retrieved via handshake.
@@ -245,15 +276,11 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	// CommandContext sends SIGKILL on cancellation, preventing graceful shutdown.
 	l.cmd = exec.Command(l.binaryPath, fmt.Sprintf("-port=%d", l.port))
 
-	// Inject bootstrap nonce and the resolved child contract. Remove inherited
-	// copies first so a managed child cannot observe a conflicting host value.
-	overrides := []string{"AGENTCTL_BOOTSTRAP_NONCE=" + nonce}
-	if l.startupConfig.Configured {
-		encoded, err := commonconfig.EncodeAgentctlStartupConfig(l.startupConfig)
-		if err != nil {
-			return err
-		}
-		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
+	// Inject the launcher-owned child contract. Remove inherited copies first so
+	// a managed child cannot observe a conflicting host value.
+	overrides, err := l.childEnvOverrides(nonce)
+	if err != nil {
+		return err
 	}
 	l.cmd.Env = environmentWithOverrides(os.Environ(), overrides...)
 	l.cmd.SysProcAttr = buildSysProcAttr(l.startupConfig.AgentSurvivalEnabled)
@@ -267,7 +294,6 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	if l.startupConfig.AgentSurvivalEnabled {
 		clearInheritedLivenessPipeEnv(l.cmd)
 	} else {
-		var err error
 		pipeWrite, err = setupLivenessPipe(l.cmd)
 		if err != nil {
 			return err
@@ -287,6 +313,13 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 		closePipeOnStartFailure(pipeWrite, l.cmd)
 		return fmt.Errorf("failed to start agentctl: %w", err)
 	}
+	identity, identityErr := processidentity.Capture(l.cmd.Process.Pid)
+	if identityErr != nil {
+		l.logger.Warn("could not capture agentctl process identity; descendant cleanup will fail closed",
+			zap.Int("pid", l.cmd.Process.Pid), zap.Error(identityErr))
+	} else {
+		l.processIdentity = identity
+	}
 
 	closeChildPipeEnd(l.cmd)
 	l.parentPipe = pipeWrite
@@ -296,17 +329,46 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	// this). Failure is non-fatal: agentctl still works, but a parent crash
 	// may leak an agentctl.exe that holds the control port (issue #892).
 	if err := l.installChildLifecycle(l.cmd); err != nil {
-		l.logger.Warn("failed to install child lifecycle protection; agentctl may outlive a parent crash",
-			zap.Error(err))
+		_ = l.cmd.Process.Kill()
+		_ = l.cmd.Wait()
+		l.closeParentPipeLocked()
+		return fmt.Errorf("failed to establish agentctl process containment: %w", err)
 	}
 
 	l.logger.Info("agentctl process started", zap.Int("pid", l.cmd.Process.Pid))
 
-	go l.pipeOutput("stdout", bufio.NewScanner(stdout))
-	go l.pipeOutput("stderr", bufio.NewScanner(stderr))
+	l.outputWG.Add(2)
+	go func() {
+		defer l.outputWG.Done()
+		l.pipeOutput("stdout", stdout)
+	}()
+	go func() {
+		defer l.outputWG.Done()
+		l.pipeOutput("stderr", stderr)
+	}()
 	go l.monitorExit()
 
 	return nil
+}
+
+// childEnvOverrides returns the environment entries the launcher owns for the
+// agentctl child: the bootstrap nonce, the listen host, and the resolved
+// startup contract. The listen host is the host the backend dials (l.host), so
+// the control server and every instance server it supervises listen only there
+// rather than on every interface.
+func (l *Launcher) childEnvOverrides(nonce string) ([]string, error) {
+	overrides := []string{
+		"AGENTCTL_BOOTSTRAP_NONCE=" + nonce,
+		"AGENTCTL_LISTEN_HOST=" + l.host,
+	}
+	if l.startupConfig.Configured {
+		encoded, err := commonconfig.EncodeAgentctlStartupConfig(l.startupConfig)
+		if err != nil {
+			return nil, err
+		}
+		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
+	}
+	return overrides, nil
 }
 
 func environmentWithOverrides(base []string, overrides ...string) []string {
@@ -427,37 +489,98 @@ func (l *Launcher) closeParentPipeLocked() {
 	}
 }
 
-// checkPortAvailable reports whether the given port is free, using the same
-// probe contract the process launcher uses (internal/common/netprobe): a
-// dual-stack loopback connect must find nothing listening AND a fresh
-// loopback bind must succeed.
+// checkPortAvailable reports whether the given port is free on the effective
+// listener host, using bounded connect and specific-address bind probes.
 //
-// A bind alone is not enough. A surviving agentctl holds the wildcard
+// A bind alone is not enough. A surviving agentctl can hold the wildcard
 // address, and on macOS/BSD a bind against an active wildcard listener can
 // still succeed, which would report the occupied control port as free and
 // send this launch to a second server on a port the record does not name.
-func checkPortAvailable(port int) error {
-	if !netprobe.PortAvailable(port) {
+func checkPortAvailable(host string, port int) error {
+	if !netprobe.PortAvailableAtHost(host, port) {
 		return fmt.Errorf("port %d is already in use", port)
 	}
 	return nil
 }
 
-// findFreePort asks the OS for an available port by binding to :0.
-func findFreePort() (int, error) {
-	ln, err := net.Listen("tcp", ":0")
+const maxFreePortProbeAttempts = 8
+
+// freePortProbeAddrs returns concrete addresses for bounded temporary binds.
+// Wildcard listeners are expanded to specific interface addresses.
+func freePortProbeAddrs(host string) ([]string, error) {
+	addresses, err := netprobe.ProbeAddresses(host)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	return port, nil
+	probes := make([]string, 0, len(addresses))
+	for _, address := range addresses {
+		probes = append(probes, net.JoinHostPort(address.String(), "0"))
+	}
+	return probes, nil
+}
+
+// findFreePort asks the OS for a port that is free where an agentctl child
+// listening on host will bind. Each probe binds only a concrete interface
+// address; it never opens a temporary wildcard listener.
+func findFreePort(host string) (int, error) {
+	addresses, err := netprobe.ProbeAddresses(host)
+	if err != nil {
+		return 0, fmt.Errorf("resolve probe addresses for %q: %w", host, err)
+	}
+	if len(addresses) == 0 {
+		return 0, fmt.Errorf("no probe addresses for %q", host)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxFreePortProbeAttempts; attempt++ {
+		first := addresses[0]
+		probe, err := net.Listen(networkForProbeAddress(first), net.JoinHostPort(first.String(), "0"))
+		if err != nil {
+			return 0, err
+		}
+		port := probe.Addr().(*net.TCPAddr).Port
+		_ = probe.Close()
+
+		if !netprobe.PortAvailableAtAddresses(addresses, port) {
+			lastErr = fmt.Errorf("port %d became unavailable during fallback selection", port)
+			continue
+		}
+
+		reservations := make([]net.Listener, 0, len(addresses))
+		available := true
+		for _, address := range addresses {
+			listener, err := net.Listen(networkForProbeAddress(address), net.JoinHostPort(address.String(), fmt.Sprint(port)))
+			if err != nil {
+				lastErr = err
+				available = false
+				break
+			}
+			reservations = append(reservations, listener)
+		}
+		for _, listener := range reservations {
+			_ = listener.Close()
+		}
+		if available {
+			return port, nil
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("could not reserve a fallback port after %d attempts", maxFreePortProbeAttempts)
+	}
+	return 0, lastErr
+}
+
+func networkForProbeAddress(address netip.Addr) string {
+	if address.Is4() {
+		return "tcp4"
+	}
+	return "tcp6"
 }
 
 // ensurePortAvailable checks if the configured port is free. If not, it
 // immediately falls back to an OS-assigned free port.
 func (l *Launcher) ensurePortAvailable() error {
-	if err := checkPortAvailable(l.port); err == nil {
+	if err := checkPortAvailable(l.host, l.port); err == nil {
 		return nil
 	}
 
@@ -466,7 +589,7 @@ func (l *Launcher) ensurePortAvailable() error {
 	l.logger.Info("port already in use, selecting a free port",
 		zap.Int("port", l.port))
 
-	freePort, err := findFreePort()
+	freePort, err := findFreePort(l.host)
 	if err != nil {
 		return fmt.Errorf("port %d is in use and failed to find alternative: %w", originalPort, err)
 	}
@@ -531,41 +654,26 @@ func (l *Launcher) waitForHealthy(ctx context.Context) error {
 	return fmt.Errorf("timeout waiting for agentctl to become healthy")
 }
 
-// pipeOutput reads from a scanner and logs each line. stdout is diagnostic
-// noise (ACP travels over the socket, not stdout) so it stays at DEBUG.
-// stderr carries the child's own structured logs; rather than flatten every
-// line to WARN — which turns routine child INFO/DEBUG into shutdown noise in
-// the parent log — it is forwarded at the level the child already tagged it
-// with. Lines without a recognizable level fall back to WARN so unstructured
-// panics/tracebacks stay visible.
-func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
-	for scanner.Scan() {
-		line := scanner.Text()
-		if name != "stderr" {
-			l.logger.Debug(line, zap.String("stream", name))
-			continue
-		}
-		switch childLogLevel(line) {
-		case "DEBUG":
-			l.logger.Debug(line, zap.String("stream", name))
-		case "INFO":
-			l.logger.Info(line, zap.String("stream", name))
-		case "ERROR", "FATAL", "PANIC", "DPANIC":
-			l.logger.Error(line, zap.String("stream", name))
-		default:
-			l.logger.Warn(line, zap.String("stream", name))
-		}
-	}
-}
-
 // childLogLevel extracts a recognized level from the agentctl child's trusted
 // structured log formats. It returns the uppercased level ("INFO"/"WARN"/…)
 // or "" when the line does not match one of those formats.
 func childLogLevel(line string) string {
-	// A well-formed console record is "<ts>\t<LEVEL>\t<caller>\t<msg>", so the
-	// level token must be bounded by at least a following caller field. Requiring
-	// three segments rejects truncated lines (e.g. "<ts>\t<token>") whose second
-	// field is not actually a level, so they fall back to WARN.
+	level, _ := childLogRecord(line)
+	return level
+}
+
+func childLogRecord(line string) (string, string) {
+	if level, sanitized, ok := childJSONLogRecord(line); ok {
+		return level, sanitized
+	}
+	return childTextLogLevel(line), line
+}
+
+// A well-formed console record is "<ts>\t<LEVEL>\t<caller>\t<msg>", so the
+// level token must be bounded by at least a following caller field. Requiring
+// three segments rejects truncated lines (e.g. "<ts>\t<token>") whose second
+// field is not actually a level, so they fall back to WARN.
+func childTextLogLevel(line string) string {
 	fields := strings.SplitN(line, "\t", 4)
 	if len(fields) >= 3 {
 		if level := recognizedChildLogLevel(stripANSI(fields[1])); level != "" {
@@ -587,6 +695,139 @@ func childLogLevel(line string) string {
 		return ""
 	}
 	return recognizedChildLogLevel(stripANSI(defaultFields[2]))
+}
+
+const agentctlJSONTimestampLayout = "2006-01-02T15:04:05.000Z0700"
+
+const (
+	childJSONLevelField = iota
+	childJSONTimestampField
+	childJSONCallerField
+	childJSONMessageField
+)
+
+func childJSONLogLevel(line string) string {
+	level, _, _ := childJSONLogRecord(line)
+	return level
+}
+
+func childJSONLogRecord(line string) (string, string, bool) {
+	values, ok := childJSONLogEnvelope(line)
+	if !ok {
+		return "", "", false
+	}
+
+	declaredLevel, levelOK := childJSONString(values[childJSONLevelField])
+	timestamp, timestampOK := childJSONString(values[childJSONTimestampField])
+	caller, callerOK := childJSONString(values[childJSONCallerField])
+	message, messageOK := childJSONString(values[childJSONMessageField])
+	if !levelOK || !timestampOK || !callerOK || !messageOK || strings.TrimSpace(caller) == "" {
+		return "", "", false
+	}
+	if !validChildJSONLogTimestamp(timestamp) {
+		return "", "", false
+	}
+	level := recognizedChildLogLevel(declaredLevel)
+	if level == "" {
+		return "", "", false
+	}
+	encoded, err := json.Marshal(struct {
+		Level     string `json:"level"`
+		Timestamp string `json:"timestamp"`
+		Caller    string `json:"caller"`
+		Message   string `json:"msg"`
+	}{
+		Level: declaredLevel, Timestamp: timestamp, Caller: caller, Message: message,
+	})
+	if err != nil {
+		return "", "", false
+	}
+	return level, string(encoded), true
+}
+
+func childJSONLogEnvelope(line string) ([4]json.RawMessage, bool) {
+	var empty [4]json.RawMessage
+	decoder := json.NewDecoder(strings.NewReader(line))
+	token, err := decoder.Token()
+	if err != nil {
+		return empty, false
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok || delimiter != '{' {
+		return empty, false
+	}
+
+	values, ok := childJSONLogFields(decoder)
+	if !ok {
+		return empty, false
+	}
+	closing, err := decoder.Token()
+	if err != nil || closing != json.Delim('}') {
+		return empty, false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return empty, false
+	}
+	return values, true
+}
+
+func childJSONLogFields(decoder *json.Decoder) ([4]json.RawMessage, bool) {
+	var values [4]json.RawMessage
+	var seen uint8
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return values, false
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return values, false
+		}
+		field := childJSONLogFieldIndex(key)
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return values, false
+		}
+		if field < 0 {
+			continue
+		}
+		mask := uint8(1 << field)
+		if seen&mask != 0 {
+			return values, false
+		}
+		seen |= mask
+		values[field] = value
+	}
+	return values, seen == 0b1111
+}
+
+func childJSONLogFieldIndex(key string) int {
+	switch key {
+	case "level":
+		return childJSONLevelField
+	case "timestamp":
+		return childJSONTimestampField
+	case "caller":
+		return childJSONCallerField
+	case "msg":
+		return childJSONMessageField
+	default:
+		return -1
+	}
+}
+
+func validChildJSONLogTimestamp(timestamp string) bool {
+	parsedTimestamp, err := time.Parse(agentctlJSONTimestampLayout, timestamp)
+	return err == nil && parsedTimestamp.Format(agentctlJSONTimestampLayout) == timestamp
+}
+
+func childJSONString(raw json.RawMessage) (string, bool) {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", false
+	}
+	text, ok := value.(string)
+	return text, ok
 }
 
 func childSlogTextLevel(line string) string {
@@ -676,23 +917,51 @@ func stripANSI(s string) string {
 // monitorExit waits for the process to exit and signals via the exited channel.
 func (l *Launcher) monitorExit() {
 	err := l.cmd.Wait()
+	l.outputWG.Wait()
 
 	l.mu.Lock()
 	stopping := l.stopping
+	identity := l.processIdentity
+	pid := l.cmd.Process.Pid
+	code := l.cmd.ProcessState.ExitCode()
+	l.mu.Unlock()
+
+	report := ExitReport{PID: pid, ExitCode: code, Identity: identity, Diagnostic: l.diagnostic()}
+	if !stopping {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		report.ContainErr = l.containOwnedChildren(ctx, identity)
+		cancel()
+		report.Contained = report.ContainErr == nil
+	}
+	l.mu.Lock()
+	stopping = l.stopping
 	l.mu.Unlock()
 
 	if err != nil && !stopping {
 		l.logger.Error("agentctl exited unexpectedly",
 			zap.Error(err),
-			zap.Int("pid", l.cmd.Process.Pid),
-			zap.Int("exit_code", l.cmd.ProcessState.ExitCode()))
+			zap.Int("pid", pid),
+			zap.Int("exit_code", code))
 	} else if !stopping {
 		l.logger.Info("agentctl exited",
-			zap.Int("pid", l.cmd.Process.Pid),
-			zap.Int("exit_code", l.cmd.ProcessState.ExitCode()))
+			zap.Int("pid", pid),
+			zap.Int("exit_code", code))
 	}
-	if !stopping && l.onUnexpectedExit != nil {
-		l.onUnexpectedExit()
+	if !stopping && report.Diagnostic != "" {
+		l.logger.Debug("agentctl exit diagnostics",
+			zap.Int("pid", pid), zap.String("diagnostic", report.Diagnostic))
+	}
+	if !stopping {
+		if report.ContainErr != nil {
+			l.logger.Error("could not verify or contain agentctl descendants",
+				zap.Int("pid", pid), zap.Error(report.ContainErr))
+		}
+		if l.onRuntimeExit != nil {
+			l.onRuntimeExit(report)
+		}
+		if l.onUnexpectedExit != nil {
+			l.onUnexpectedExit()
+		}
 	}
 
 	close(l.exited)

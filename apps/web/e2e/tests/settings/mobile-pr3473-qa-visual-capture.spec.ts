@@ -14,6 +14,13 @@ test.describe("PR 3473 QA mobile visual evidence", () => {
       const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
       if (!agent) throw new Error("The E2E fixture must provide a mock agent");
 
+      await expect
+        .poll(async () => {
+          const { agents: available } = await apiClient.listAvailableAgents();
+          return available.find((item) => item.name === agent.name)?.model_config.status;
+        })
+        .toBe("ok");
+
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
       const modelSelector = testPage.getByRole("button", {
         name: "Profile start model settings",

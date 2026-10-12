@@ -196,6 +196,13 @@ func TestCreateTask_Kanban_RequiresWorkflow(t *testing.T) {
 func TestIdentifier_SequentialPerWorkspace(t *testing.T) {
 	svc, repo := setupOfficeTest(t)
 	ctx := context.Background()
+	svc.SetProjectRepositorySourceReader(projectRepositorySourceReaderFunc(func(_ context.Context, projectID string) (ProjectRepositorySources, error) {
+		workspaceID := "ws-1"
+		if projectID == "proj-2" {
+			workspaceID = "ws-2"
+		}
+		return ProjectRepositorySources{WorkspaceID: workspaceID}, nil
+	}))
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Workspace 2"})
 	_, _ = repo.EnsureOfficeWorkflow(ctx, "ws-2")

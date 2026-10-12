@@ -369,6 +369,7 @@ describe("resolveTaskContentState", () => {
       resolveTaskContentState({
         isMounted: false,
         hasTask: false,
+        hasTaskDetails: false,
         hasTaskLoadError: true,
       }),
     ).toBe("loading");
@@ -379,16 +380,29 @@ describe("resolveTaskContentState", () => {
       resolveTaskContentState({
         isMounted: true,
         hasTask: false,
+        hasTaskDetails: false,
         hasTaskLoadError: true,
       }),
     ).toBe("error");
   });
 
-  it("surfaces task load failures even when a placeholder task exists", () => {
+  it("keeps authoritative task details ready when a refresh fails", () => {
     expect(
       resolveTaskContentState({
         isMounted: true,
         hasTask: true,
+        hasTaskDetails: true,
+        hasTaskLoadError: true,
+      }),
+    ).toBe("ready");
+  });
+
+  it("surfaces a read failure when only a projected task row exists", () => {
+    expect(
+      resolveTaskContentState({
+        isMounted: true,
+        hasTask: true,
+        hasTaskDetails: false,
         hasTaskLoadError: true,
       }),
     ).toBe("error");
@@ -399,6 +413,7 @@ describe("resolveTaskContentState", () => {
       resolveTaskContentState({
         isMounted: true,
         hasTask: true,
+        hasTaskDetails: true,
         hasTaskLoadError: false,
       }),
     ).toBe("ready");
@@ -544,6 +559,33 @@ describe("syncActiveTaskSession", () => {
 });
 
 describe("resolveEffectiveTask archived state", () => {
+  it("retains available workspace, repository, and recovery context in a task projection", () => {
+    const task = buildTaskFromKanban(
+      makeKanbanTask({
+        workspaceId: "workspace-1",
+        primarySessionId: "session-1",
+        repositories: [
+          { id: "source-1", repository_id: "repo-1", base_branch: "main", position: 0 },
+        ],
+        workspaceOrphaned: true,
+        interrupted: true,
+        isFromOffice: true,
+        taskPendingAction: "clarification",
+        runnerEditable: false,
+      }),
+    );
+    expect(task).toMatchObject({
+      workspace_id: "workspace-1",
+      primary_session_id: "session-1",
+      repositories: [{ repository_id: "repo-1", task_id: "task-1" }],
+      workspace_orphaned: true,
+      interrupted: true,
+      is_from_office: true,
+      task_pending_action: "clarification",
+      runner_editable: false,
+    });
+  });
+
   it("preserves a non-default priority for kanban-only tasks", () => {
     const resolved = buildTaskFromKanban(makeKanbanTask({ priority: "high" }));
 

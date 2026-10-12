@@ -2,6 +2,14 @@ package runtime
 
 import "github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 
+// RestoreRequiredError is the runtime-boundary form of a native restore
+// failure that requires recovery policy from its caller.
+type RestoreRequiredError = lifecycle.RestoreRequiredError
+
+// RestoreReasonTransport identifies a restore failure that is safe for a
+// bounded transport retry.
+const RestoreReasonTransport = lifecycle.RestoreReasonTransport
+
 // BootstrapFailure is the safe, operation-boundary error produced when an
 // agent execution fails before it becomes ready.
 type BootstrapFailure = lifecycle.BootstrapFailure

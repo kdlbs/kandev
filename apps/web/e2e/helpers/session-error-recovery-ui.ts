@@ -40,6 +40,16 @@ export function sessionErrorDetailsScenario() {
           occurred_at: occurredAt,
           code: "generic_launch_failure",
           details: diagnostics,
+          causes: [
+            {
+              operation: "start",
+              code: "model_unavailable",
+              reason: "requested_not_advertised",
+              requested_model: "mock-model",
+              prompt_not_sent: true,
+              detail: diagnostics,
+            },
+          ],
         },
       },
     });
@@ -78,6 +88,12 @@ export function sessionErrorDetailsScenario() {
     await new SessionPage(testPage).waitForLoad();
     const row = testPage.getByTestId("session-recovery-card");
     await expect(row).toHaveCount(1);
+    await expect(row.getByRole("heading", { name: "Saved model unavailable" })).toBeVisible();
+    await expect(row).toContainText('did not list "mock-model"');
+    await expect(row.getByTestId("session-bootstrap-no-prompt")).toHaveText("No prompt was sent.");
+    await expect(row.getByTestId("session-recovery-fresh-start-warning")).toContainText(
+      "uses your saved selections",
+    );
     await testPage.screenshot({
       path: testInfo.outputPath("recovery-collapsed.png"),
       fullPage: true,
@@ -273,6 +289,13 @@ function resolvedFailureScenario() {
           occurred_at: "2026-09-20T10:00:00Z",
         },
         recovery_resolved_at: "2026-09-20T11:00:00Z",
+        recovery_resolutions: [
+          {
+            error_stamp: "resolved-runtime",
+            resolved_at: "2026-09-20T11:00:00Z",
+            attempt_id: "resume-1",
+          },
+        ],
       },
     });
     await apiClient.seedSessionMessage(sessionId, {

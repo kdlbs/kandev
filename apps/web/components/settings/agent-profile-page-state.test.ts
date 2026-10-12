@@ -2,6 +2,8 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { updateAgentProfileAction } from "@/app/actions/agents";
 import type { Agent } from "@/lib/types/http";
+import { createAppStore } from "@/lib/state/store";
+import { useAppStoreApi } from "@/components/state-provider";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import {
   reconcileAgentProfileOptions,
@@ -152,8 +154,10 @@ describe("useProfileSave Cursor MCP auth preference", () => {
     const savedProfile = { ...agent("a1", "p1").profiles[0], cursorMcpAuthEnabled: true };
     const draft = { ...savedProfile, cursorMcpAuthEnabled: false };
     vi.mocked(updateAgentProfileAction).mockResolvedValue(draft);
-    const syncAgentsToStore = vi.fn();
     const agents = [{ ...agent("a1", "p1"), profiles: [savedProfile] }];
+    vi.mocked(useAppStoreApi).mockReturnValue(
+      createAppStore({ settingsAgents: { items: agents } }),
+    );
 
     const { result } = renderHook(() =>
       useProfileSave({
@@ -163,8 +167,6 @@ describe("useProfileSave Cursor MCP auth preference", () => {
         setSaveStatus: vi.fn(),
         markProfileSubmitted: vi.fn(),
         acceptProfileSaveResponse: () => true,
-        settingsAgents: agents,
-        syncAgentsToStore,
         toast: vi.fn(),
       }),
     );
@@ -179,10 +181,17 @@ describe("useProfileSave Cursor MCP auth preference", () => {
   });
 
   it("omits an unchanged preference from the stale profile draft", async () => {
-    const savedProfile = { ...agent("a1", "p1").profiles[0], cursorMcpAuthEnabled: false };
+    const savedProfile = {
+      ...agent("a1", "p1").profiles[0],
+      cursorMcpAuthEnabled: false,
+      cursorPluginsMcpEnabled: false,
+    };
     const draft = { ...savedProfile, name: "renamed profile" };
     vi.mocked(updateAgentProfileAction).mockResolvedValue(draft);
     const agents = [{ ...agent("a1", "p1"), profiles: [savedProfile] }];
+    vi.mocked(useAppStoreApi).mockReturnValue(
+      createAppStore({ settingsAgents: { items: agents } }),
+    );
 
     const { result } = renderHook(() =>
       useProfileSave({
@@ -192,8 +201,6 @@ describe("useProfileSave Cursor MCP auth preference", () => {
         setSaveStatus: vi.fn(),
         markProfileSubmitted: vi.fn(),
         acceptProfileSaveResponse: () => true,
-        settingsAgents: agents,
-        syncAgentsToStore: vi.fn(),
         toast: vi.fn(),
       }),
     );
@@ -202,7 +209,10 @@ describe("useProfileSave Cursor MCP auth preference", () => {
 
     expect(updateAgentProfileAction).toHaveBeenLastCalledWith(
       "p1",
-      expect.objectContaining({ cursor_mcp_auth_enabled: undefined }),
+      expect.objectContaining({
+        cursor_mcp_auth_enabled: undefined,
+        cursor_plugins_mcp_enabled: undefined,
+      }),
       false,
     );
   });

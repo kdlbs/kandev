@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,9 +32,14 @@ type Health struct {
 	log     *logger.Logger
 
 	mu       sync.Mutex
+	logMu    sync.Mutex
 	interval time.Duration
 	cancel   context.CancelFunc
 	done     chan struct{}
+
+	lastLoggedState    State
+	lastLoggedStoreIDs []string
+	hasLoggedState     bool
 }
 
 type probeFailureDiagnostic struct {
@@ -354,11 +361,47 @@ func (h *Health) logTransition() {
 	if h.log == nil {
 		return
 	}
-	state := h.State()
+	h.logMu.Lock()
+	state, storeIDs := healthTransitionSnapshot(h.tracker)
+	h.mu.Lock()
+	if h.hasLoggedState && state == h.lastLoggedState && slices.Equal(storeIDs, h.lastLoggedStoreIDs) {
+		h.mu.Unlock()
+		h.logMu.Unlock()
+		return
+	}
+	h.lastLoggedState = state
+	h.lastLoggedStoreIDs = append(h.lastLoggedStoreIDs[:0], storeIDs...)
+	h.hasLoggedState = true
+	h.mu.Unlock()
 	h.log.Info("required persistence state updated",
 		zap.String("state", string(state)),
-		zap.Strings("store_ids", h.UnhealthyStoreIDs()),
+		zap.Strings("store_ids", storeIDs),
 		zap.String("error_class", publicErrorClass(state)))
+	h.logMu.Unlock()
+}
+
+func healthTransitionSnapshot(tracker *Tracker) (State, []string) {
+	if tracker == nil {
+		return StateUnhealthy, nil
+	}
+	statuses := tracker.Snapshot()
+	state := StateHealthy
+	storeIDs := make([]string, 0)
+	for _, status := range statuses {
+		if status.State == StateUnhealthy {
+			storeIDs = append(storeIDs, status.ID)
+		}
+		if state == StateHealthy {
+			switch status.State {
+			case StateInitializing:
+				state = StateInitializing
+			case StateUnhealthy:
+				state = StateUnhealthy
+			}
+		}
+	}
+	sort.Strings(storeIDs)
+	return state, storeIDs
 }
 
 // PublicError returns a stable, non-sensitive error for diagnostics.

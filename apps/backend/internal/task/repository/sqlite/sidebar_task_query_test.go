@@ -270,45 +270,70 @@ func BenchmarkSidebarTaskPage100K(b *testing.B) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		b.Run(backend, func(b *testing.B) {
 			repo := newRepoForSidebarBenchmark(b, backend)
-			ctx := context.Background()
 			workspaceID := "ws-sidebar-benchmark-100k"
 			seedWorkspace(b, repo, workspaceID)
 			insertSidebarBenchmarkTasks(b, repo, workspaceID, 100000)
-
-			pageNames := []struct {
-				name string
-				page int
-			}{{name: "first", page: 1}, {name: "middle", page: 500}, {name: "final", page: 1000}}
-			planQuery := sidebarTaskQuery(pageNames[0].page)
-			logSidebarTaskPageQueryPlan(b, repo, workspaceID, planQuery)
-			for _, page := range pageNames {
-				b.Run(page.name, func(b *testing.B) {
-					query := sidebarTaskQuery(page.page)
-					b.ReportAllocs()
-					warmup, err := repo.QuerySidebarTaskPage(ctx, workspaceID, query, models.SidebarTaskViewPreferences{})
-					if err != nil {
-						b.Fatal(err)
+			for _, group := range []string{"none", "state", "repository"} {
+				b.Run(group, func(b *testing.B) {
+					for _, page := range []struct {
+						name   string
+						number int
+					}{{"first", 1}, {"middle", 500}, {"final", 1000}} {
+						b.Run(page.name, func(b *testing.B) {
+							query := sidebarTaskQuery(page.number)
+							query.Sort = models.SidebarTaskViewSort{Key: "lastActivityAt", Direction: "desc"}
+							query.Group = group
+							benchmarkSidebarPage(b, repo, workspaceID, query)
+						})
 					}
-					if _, err := marshalSidebarBenchmarkResponse(warmup); err != nil {
-						b.Fatal(err)
-					}
-					b.ResetTimer()
-					var responseBytes int
-					for range b.N {
-						result, err := repo.QuerySidebarTaskPage(ctx, workspaceID, query, models.SidebarTaskViewPreferences{})
-						if err != nil {
-							b.Fatal(err)
-						}
-						payload, err := marshalSidebarBenchmarkResponse(result)
-						if err != nil {
-							b.Fatal(err)
-						}
-						responseBytes = len(payload)
-					}
-					b.ReportMetric(float64(responseBytes), "response-B")
 				})
 			}
 		})
+	}
+}
+
+func benchmarkSidebarPage(b *testing.B, repo *Repository, workspaceID string, query models.SidebarTaskViewQuery) {
+	b.Helper()
+	if dialect.IsPostgres(repo.ro.DriverName()) {
+		logSidebarTaskPageQueryPlan(b, repo, workspaceID, query)
+	}
+	baselineNative, baselineRSS := sidebarBenchmarkMemory(b, true)
+	started := time.Now()
+	warmup, err := benchmarkSidebarColdRead(b, repo, workspaceID, query)
+	if err != nil {
+		b.Fatal(err)
+	}
+	cold := time.Since(started)
+	if len(warmup.Tasks) != 100 || warmup.TotalVisibleTasks != 100000 || warmup.Page != query.Page {
+		b.Fatalf("unexpected benchmark page bounds: tasks=%d total=%d page=%d", len(warmup.Tasks), warmup.TotalVisibleTasks, warmup.Page)
+	}
+	b.Logf("cold_execution=%s dialect=%s group=%s page=%d", cold, repo.ro.DriverName(), query.Group, query.Page)
+	b.ReportAllocs()
+	b.ResetTimer()
+	var responseBytes int
+	for range b.N {
+		ctx, cancel := context.WithTimeout(b.Context(), 30*time.Second)
+		result, err := repo.QuerySidebarTaskPage(ctx, workspaceID, query, models.SidebarTaskViewPreferences{})
+		cancel()
+		if err != nil {
+			b.Fatal(err)
+		}
+		payload, err := marshalSidebarBenchmarkResponse(result)
+		if err != nil {
+			b.Fatal(err)
+		}
+		responseBytes = len(payload)
+	}
+	b.StopTimer()
+	peak, rss := sidebarBenchmarkMemory(b, false)
+	b.ReportMetric(float64(responseBytes), "response-B")
+	b.ReportMetric(float64(cold.Nanoseconds()), "cold-ns")
+	b.ReportMetric(float64(peak-baselineNative), "native-peak-B")
+	b.ReportMetric(float64(rss-baselineRSS), "rss-delta-B")
+	if !dialect.IsPostgres(repo.ro.DriverName()) {
+		logSidebarTaskPageQueryPlan(b, repo, workspaceID, query)
+	} else if query.Page == 1 {
+		logSidebarPostgresExecution(b, repo, workspaceID, query)
 	}
 }
 
@@ -370,6 +395,7 @@ func insertSidebarBenchmarkTasks(b *testing.B, repo *Repository, workspaceID str
 	b.Helper()
 	ctx := context.Background()
 	base := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	seedSidebarBenchmarkRepositories(b, repo, workspaceID)
 	tx, err := repo.db.BeginTxx(ctx, nil)
 	if err != nil {
 		b.Fatalf("begin sidebar benchmark fixture: %v", err)
@@ -379,7 +405,7 @@ func insertSidebarBenchmarkTasks(b *testing.B, repo *Repository, workspaceID str
 	for start := 0; start < count; start += batchSize {
 		end := min(start+batchSize, count)
 		taskValues := make([]string, 0, end-start)
-		taskArgs := make([]any, 0, (end-start)*7)
+		taskArgs := make([]any, 0, (end-start)*8)
 		summaryValues := make([]string, 0, end-start)
 		summaryArgs := make([]any, 0, (end-start)*5)
 		for index := start; index < end; index++ {
@@ -389,23 +415,27 @@ func insertSidebarBenchmarkTasks(b *testing.B, repo *Repository, workspaceID str
 				parentID = fmt.Sprintf("bench-task-%06d", index-index%10)
 			}
 			activity := base.Add(time.Duration(index) * time.Second)
-			taskValues = append(taskValues, "(?, ?, ?, ?, ?, ?, ?)")
-			taskArgs = append(taskArgs, id, workspaceID, fmt.Sprintf("Sidebar benchmark task %06d", index), parentID, nil, activity, activity)
+			taskValues = append(taskValues, "(?, ?, ?, ?, ?, ?, ?, ?)")
+			state := []string{"TODO", "IN_PROGRESS", "COMPLETED"}[(index/10)%3]
+			taskArgs = append(taskArgs, id, workspaceID, fmt.Sprintf("Sidebar benchmark task %06d", index), parentID, nil, activity, activity, state)
 			summaryValues = append(summaryValues, "(?, ?, ?, ?, ?)")
 			summaryArgs = append(summaryArgs, id, workspaceID, 1, fmt.Sprintf(`{"last_activity_at":%q}`, activity.Format(time.RFC3339Nano)), activity)
 		}
-		if _, err := tx.ExecContext(ctx, repo.db.Rebind(`INSERT INTO tasks (id, workspace_id, title, parent_id, archived_at, created_at, updated_at) VALUES `+strings.Join(taskValues, ", ")), taskArgs...); err != nil {
+		if _, err := tx.ExecContext(ctx, repo.db.Rebind(`INSERT INTO tasks (id, workspace_id, title, parent_id, archived_at, created_at, updated_at, state) VALUES `+strings.Join(taskValues, ", ")), taskArgs...); err != nil {
 			b.Fatalf("insert sidebar benchmark tasks %d through %d: %v", start, end-1, err)
 		}
 		if _, err := tx.ExecContext(ctx, repo.db.Rebind(`INSERT INTO task_status_summaries (task_id, workspace_id, revision, summary, updated_at) VALUES `+strings.Join(summaryValues, ", ")), summaryArgs...); err != nil {
 			b.Fatalf("insert sidebar benchmark summaries %d through %d: %v", start, end-1, err)
 		}
 	}
+	if err := insertSidebarBenchmarkRepositories(b.Context(), tx, repo.db, workspaceID); err != nil {
+		b.Fatal(err)
+	}
 	if err := tx.Commit(); err != nil {
 		b.Fatalf("commit sidebar benchmark fixture: %v", err)
 	}
 	if dialect.IsPostgres(repo.db.DriverName()) {
-		for _, table := range []string{"tasks", "task_status_summaries"} {
+		for _, table := range []string{"tasks", "task_status_summaries", "repositories", "task_repositories"} {
 			if _, err := repo.db.ExecContext(ctx, "ANALYZE "+table); err != nil {
 				b.Fatalf("analyze sidebar benchmark %s: %v", table, err)
 			}
@@ -416,16 +446,15 @@ func insertSidebarBenchmarkTasks(b *testing.B, repo *Repository, workspaceID str
 func logSidebarTaskPageQueryPlan(b *testing.B, repo *Repository, workspaceID string, query models.SidebarTaskViewQuery) {
 	b.Helper()
 	driver := repo.ro.DriverName()
-	baseSQL := sidebarBaseCTE(driver, "'__all__'", "'__all__'", query)
-	filterSQL, filterArgs, err := sidebarFilterSQL(driver, query.Filters)
+	snapshot, err := beginSidebarQuerySnapshot(b.Context(), repo.ro)
 	if err != nil {
 		b.Fatal(err)
 	}
-	baseSQL += ", filtered AS MATERIALIZED (SELECT * FROM candidate WHERE " + filterSQL + ")"
-	baseArgs := append([]any{workspaceID}, filterArgs...)
-	visibleSQL, visibleArgs := sidebarVisibleCTE(query)
-	baseSQL += visibleSQL
-	baseArgs = append(baseArgs, visibleArgs...)
+	defer snapshot.close()
+	baseSQL, baseArgs, err := snapshot.prepare(b.Context(), driver, workspaceID, query)
+	if err != nil {
+		b.Fatal(err)
+	}
 	pageCTEs, cteArgs := sidebarPageCTEs(driver, query, models.SidebarTaskViewPreferences{})
 	args := append(append([]any(nil), baseArgs...), cteArgs...)
 	explain := "EXPLAIN "
@@ -433,13 +462,13 @@ func logSidebarTaskPageQueryPlan(b *testing.B, repo *Repository, workspaceID str
 		explain = "EXPLAIN QUERY PLAN "
 	}
 	pageSQL := sidebarPageSelectSQL(query.Group == "none")
-	rows, err := repo.db.QueryContext(context.Background(), repo.db.Rebind(explain+baseSQL+pageCTEs+pageSQL), args...)
+	rows, err := snapshot.tx.QueryContext(b.Context(), repo.ro.Rebind(explain+baseSQL+pageCTEs+pageSQL), args...)
 	if err != nil {
 		b.Fatalf("explain sidebar benchmark page query: %v", err)
 	}
 	defer func() { _ = rows.Close() }()
 	var plan []string
-	for rows.Next() && len(plan) < 100 {
+	for rows.Next() && len(plan) < 500 {
 		if dialect.IsPostgres(driver) {
 			var line string
 			if err := rows.Scan(&line); err != nil {
@@ -458,7 +487,7 @@ func logSidebarTaskPageQueryPlan(b *testing.B, repo *Repository, workspaceID str
 	if err := rows.Err(); err != nil {
 		b.Fatalf("read sidebar benchmark query plan: %v", err)
 	}
-	b.Logf("%s page query plan (first 100 nodes):\n%s", driver, strings.Join(plan, "\n"))
+	b.Logf("%s page query plan (first 500 nodes):\n%s", driver, strings.Join(plan, "\n"))
 }
 
 func TestQuerySidebarTaskPageClampsAndAppliesCollapsedVisibility(t *testing.T) {
