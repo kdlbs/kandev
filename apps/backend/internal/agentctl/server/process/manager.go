@@ -712,7 +712,8 @@ func (m *Manager) DispatchDeliverySubmission(
 		m.deliveryActiveID = ""
 		m.deliveryActiveMu.Unlock()
 	}()
-	return (&SubmissionDelivery{Journal: deliveryJournal}).Dispatch(ctx, id, call)
+	stopped, _ := m.stopChSnapshot.Load().(chan struct{})
+	return (&SubmissionDelivery{Journal: deliveryJournal, Stopped: stopped}).Dispatch(ctx, id, call)
 }
 
 func (m *Manager) activeDeliverySubmissionID() string {
@@ -785,7 +786,7 @@ func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recov
 	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
 	if submission.SessionID != sessionID || submission.IncarnationID != incarnationID ||
 		generation != recoveryGeneration || submission.HarnessGeneration > generation ||
-		(submission.HarnessGeneration == generation && submission.State != journal.SubmissionInterruptedUnknown) {
+		(submission.HarnessGeneration == generation && !journal.HasUnprovenOutcome(submission)) {
 		return journal.ErrOwnerMismatch
 	}
 	_, err = deliveryJournal.RetireSubmission(ctx, id, recoveryGeneration)
@@ -2908,6 +2909,12 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) error {
 // It reports whether this call closed stopCh, i.e. whether goroutines were just
 // released and still need draining.
 func (m *Manager) closeAdapterAndStdin() bool {
+	// Publish this child's interruption before closing the adapter can release a prompt RPC.
+	closedStopCh := false
+	if m.stopCh != nil && m.stopChClosed.CompareAndSwap(false, true) {
+		close(m.stopCh)
+		closedStopCh = true
+	}
 	m.deliveryJournalMu.RLock()
 	writer := m.deliveryWriter
 	m.deliveryJournalMu.RUnlock()
@@ -2922,12 +2929,6 @@ func (m *Manager) closeAdapterAndStdin() bool {
 	}
 	m.logger.Debug("adapter closed")
 
-	m.logger.Debug("closing stop channel")
-	closedStopCh := false
-	if m.stopCh != nil && m.stopChClosed.CompareAndSwap(false, true) {
-		close(m.stopCh)
-		closedStopCh = true
-	}
 	m.logger.Debug("stop channel closed", zap.Bool("closed_now", closedStopCh))
 
 	// Close stdin to signal EOF to agent

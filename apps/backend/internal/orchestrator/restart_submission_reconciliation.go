@@ -148,7 +148,7 @@ func (s *Service) verifyRetiredRestartHistory(ctx context.Context, inputs *silen
 }
 
 func matchingRetiredRestartSubmission(inputs *silentRestoreInputs, row *models.AgentDeliverySubmission, peer *journal.Submission) bool {
-	return peer != nil && peer.Retired && peer.State == journal.SubmissionInterruptedUnknown && peer.ID == row.ID &&
+	return peer != nil && peer.Retired && journal.HasUnprovenOutcome(*peer) && row.State == models.DeliverySubmissionInterruptedUnknown && row.TerminalSequence == 0 && peer.ID == row.ID &&
 		peer.StreamID != "" && peer.SessionID == inputs.session.ID && row.SessionID == peer.SessionID &&
 		peer.IncarnationID == inputs.recovery.IncarnationID && row.IncarnationID == peer.IncarnationID &&
 		row.HarnessGeneration > 0 && row.HarnessGeneration <= inputs.recovery.HarnessGeneration &&

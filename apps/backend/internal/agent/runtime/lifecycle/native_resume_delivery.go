@@ -8,6 +8,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // AcknowledgeNativeResumeDelivery seals uncertain prior prompts after an
@@ -36,10 +37,13 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if err := m.reconcileNativeResumeSQLDispatch(ctx, execution, status, submissions); err != nil {
 		return err
 	}
+	if _, err := authenticatedDeliveryReplayCursor(ctx, execution, m.streamManager.deliveryRepository(), status); err != nil {
+		return err
+	}
 	if err := m.validateNativeResumeSQLHistory(ctx, execution, status, submissions, false); err != nil {
 		return err
 	}
-	ids, err := nativeResumeInterruptedSubmissionIDs(execution, submissions)
+	ids, err := m.nativeResumeInterruptedSubmissionIDs(ctx, execution, status, submissions)
 	if err != nil {
 		return err
 	}
@@ -79,25 +83,44 @@ func validateNativeResumeDeliveryOwner(execution *AgentExecution, status *agentc
 	return nil
 }
 
-func nativeResumeInterruptedSubmissionIDs(execution *AgentExecution, submissions []journal.Submission) ([]string, error) {
+func (m *Manager) nativeResumeInterruptedSubmissionIDs(ctx context.Context, execution *AgentExecution, status *agentctl.DeliveryStatus, submissions []journal.Submission) ([]string, error) {
+	rows, err := activeBackendSubmissions(ctx, m.streamManager.deliveryRepository(), execution.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	return nativeResumeRetirementIDs(execution, status, submissions, rows)
+}
+
+func nativeResumeRetirementIDs(execution *AgentExecution, status *agentctl.DeliveryStatus, submissions []journal.Submission, rows []*models.AgentDeliverySubmission) ([]string, error) {
 	var ids []string
+	backend := make(map[string]*models.AgentDeliverySubmission, len(rows))
+	for _, row := range rows {
+		backend[row.ID] = row
+	}
 	for _, submission := range submissions {
+		if submission.Retired {
+			continue
+		}
 		switch submission.State {
 		case journal.SubmissionPrepared, journal.SubmissionAccepted, journal.SubmissionDispatching:
 			return nil, fmt.Errorf("native resume cannot acknowledge live delivery work")
-		case journal.SubmissionCompleted:
-			if !submission.TerminalEventRetained {
-				return nil, fmt.Errorf("native resume cannot acknowledge incomplete terminal evidence")
-			}
-		case journal.SubmissionInterruptedUnknown:
-			if submission.Retired {
+		case journal.SubmissionInterruptedUnknown, journal.SubmissionCompleted, journal.SubmissionFailed, journal.SubmissionCancelled:
+			if !journal.HasUnprovenOutcome(submission) {
 				continue
 			}
-			if submission.SessionID != execution.SessionID || submission.IncarnationID != execution.DeliveryIncarnationID ||
-				submission.HarnessGeneration == 0 || submission.HarnessGeneration > execution.DeliveryHarnessGeneration {
-				return nil, journal.ErrOwnerMismatch
+			sqlSubmission, found := backend[submission.ID]
+			if !found || sqlSubmission.State != models.DeliverySubmissionInterruptedUnknown {
+				if submission.State == journal.SubmissionFailed || submission.State == journal.SubmissionCancelled {
+					continue
+				}
+				return nil, fmt.Errorf("%w: native resume requires uncertain SQL history", ErrDurableAdoptionBlocked)
+			}
+			if !peerMatchesUnknownHistory(execution, status, submission, sqlSubmission) {
+				return nil, fmt.Errorf("%w: native resume submission identity changed", ErrDurableAdoptionBlocked)
 			}
 			ids = append(ids, submission.ID)
+		default:
+			return nil, fmt.Errorf("%w: unsupported native resume submission state", ErrDurableAdoptionBlocked)
 		}
 	}
 	return ids, nil

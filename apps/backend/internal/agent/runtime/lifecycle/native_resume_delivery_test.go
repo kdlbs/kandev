@@ -63,7 +63,7 @@ func nativeResumeJournalPeer(t *testing.T, store *journal.Journal, rejectRetirem
 
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.12
 func TestNativeResumeAcknowledgesRealJournalBeforeNewWork(t *testing.T) {
-	for _, condition := range []string{"interrupted", "earlier generation", "live work", "retirement rejected", "uninitialized", "wrong incarnation"} {
+	for _, condition := range []string{"interrupted", "earlier generation", "legacy failure", "live work", "retirement rejected", "uninitialized", "wrong incarnation"} {
 		t.Run(condition, func(t *testing.T) {
 			ctx := context.Background()
 			store, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "delivery.bbolt")})
@@ -72,6 +72,9 @@ func TestNativeResumeAcknowledgesRealJournalBeforeNewWork(t *testing.T) {
 			original := journal.Submission{ID: "interrupted", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 2, StreamID: "stream", Hash: "hash", Payload: []byte("original prompt"), State: journal.SubmissionInterruptedUnknown}
 			if condition == "earlier generation" {
 				original.HarnessGeneration = 1
+			}
+			if condition == "legacy failure" {
+				original.State = journal.SubmissionFailed
 			}
 			_, err = store.PutSubmission(ctx, original)
 			require.NoError(t, err)
@@ -96,18 +99,25 @@ func TestNativeResumeAcknowledgesRealJournalBeforeNewWork(t *testing.T) {
 			resumer, ok := any(mgr).(nativeDeliveryResumer)
 			require.True(t, ok, "explicit native resume must reconcile the retained journal")
 			err = resumer.AcknowledgeNativeResumeDelivery(ctx, execution.SessionID)
-			if condition == "interrupted" || condition == "earlier generation" {
+			if condition == "interrupted" || condition == "earlier generation" || condition == "legacy failure" {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
 			}
 			stored, err := store.GetSubmission(ctx, original.ID)
 			require.NoError(t, err)
-			require.Equal(t, condition == "interrupted" || condition == "earlier generation", stored.Retired)
+			require.Equal(t, condition == "interrupted" || condition == "earlier generation" || condition == "legacy failure", stored.Retired)
 			require.Equal(t, original.State, stored.State)
 			require.Equal(t, original.Payload, stored.Payload)
 			require.Equal(t, "native-conversation", execution.ACPSessionID)
 			if stored.Retired {
+				proof, err := mgr.GetNativeResumeDeliveryEvidence(ctx, execution.SessionID)
+				require.NoError(t, err)
+				require.Equal(t, execution.ACPSessionID, proof.NativeSessionID)
+				require.Equal(t, execution.DeliveryStreamID, proof.StreamID)
+				require.Len(t, proof.Submissions, 1)
+				require.Equal(t, original.Hash, proof.Submissions[0].PayloadHash)
+				require.NoError(t, mgr.AcknowledgeNativeResumeDelivery(ctx, execution.SessionID), "repeated recovery must use retained evidence")
 				status, err := execution.agentctl.GetDeliveryStatus(ctx, execution.DeliveryStreamID)
 				require.NoError(t, err)
 				require.NoError(t, newAdoptionManager(repository).restoreRecoveredSubmission(ctx, execution, status, repository, execution.agentctl))

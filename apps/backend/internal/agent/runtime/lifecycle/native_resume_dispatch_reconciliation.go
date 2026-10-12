@@ -36,7 +36,7 @@ func (m *Manager) reconcileNativeResumeSQLDispatch(ctx context.Context, executio
 			abandoned = append(abandoned, row)
 		}
 		evidence, found := retained[row.ID]
-		if !found || !peerMatchesUnknownHistory(execution, status, evidence, &candidate) {
+		if !found || (row.State == models.DeliverySubmissionDispatching && evidence.State != journal.SubmissionInterruptedUnknown) || !peerMatchesUnknownHistory(execution, status, evidence, &candidate) {
 			return fmt.Errorf("%w: native resume peer and SQL submission evidence disagree", ErrDurableAdoptionBlocked)
 		}
 	}

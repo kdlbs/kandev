@@ -31,6 +31,7 @@ func isKnownSubmissionFailure(err error) bool {
 type SubmissionDelivery struct {
 	Journal *journal.Journal
 	Now     func() time.Time
+	Stopped <-chan struct{}
 }
 
 func (d *SubmissionDelivery) Admit(ctx context.Context, submission journal.Submission) (journal.Submission, error) {
@@ -102,21 +103,35 @@ func (d *SubmissionDelivery) prepareDispatch(ctx context.Context, id string) (jo
 }
 
 func (d *SubmissionDelivery) handleDispatchError(ctx context.Context, id string, dispatchErr error) (journal.Submission, error) {
-	submission, err := d.Journal.GetSubmission(ctx, id)
+	interrupted := ctx.Err() != nil
+	select {
+	case <-d.Stopped:
+		interrupted = true
+	default:
+	}
+	// Settling an external call survives cancellation of the request that made it.
+	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	submission, err := d.Journal.GetSubmission(settleCtx, id)
 	if err != nil {
 		return journal.Submission{}, errors.Join(ErrSubmissionUncertain, err)
 	}
 	if submission.State == journal.SubmissionCompleted && submission.TerminalEventRetained {
 		return submission, nil
 	}
-	if isKnownSubmissionFailure(dispatchErr) {
-		failed, transitionErr := d.Journal.TransitionSubmission(ctx, id, journal.SubmissionFailed, d.now())
+	if submission.TerminalEventRetained {
+		return submission, dispatchErr
+	}
+	var providerFailure deterministicPromptFailure
+	knownProviderFailure := errors.As(dispatchErr, &providerFailure) && providerFailure.DeterministicPromptFailure()
+	if knownProviderFailure || (!interrupted && isKnownSubmissionFailure(dispatchErr)) {
+		failed, transitionErr := d.Journal.TransitionSubmission(settleCtx, id, journal.SubmissionFailed, d.now())
 		if transitionErr != nil {
 			return journal.Submission{}, errors.Join(ErrSubmissionUncertain, transitionErr)
 		}
 		return failed, dispatchErr
 	}
-	unknown, transitionErr := d.Journal.TransitionSubmission(ctx, id, journal.SubmissionInterruptedUnknown, d.now())
+	unknown, transitionErr := d.Journal.TransitionSubmission(settleCtx, id, journal.SubmissionInterruptedUnknown, d.now())
 	journal.RecordUncertainSubmission("dispatch_error")
 	if transitionErr != nil {
 		return journal.Submission{}, errors.Join(ErrSubmissionUncertain, transitionErr)

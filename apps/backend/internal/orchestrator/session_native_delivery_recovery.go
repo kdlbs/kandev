@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -75,4 +76,29 @@ func (s *Service) acknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 
 func nativeResumeSubmissionMatchesBlock(submission *models.AgentDeliverySubmission, block *models.SessionRecoveryBlock) bool {
 	return submission != nil && submission.IncarnationID == block.IncarnationID && submission.HarnessGeneration == block.ExpectedGeneration
+}
+
+type nativeResumeDeliveryEvidenceReader interface {
+	GetNativeResumeDeliveryEvidence(context.Context, string) (*models.NativeResumeDeliveryEvidence, error)
+}
+
+type nativeResumeEvidenceBlockResolver interface {
+	ResolveSessionRecoveryBlockWithNativeEvidence(context.Context, string, *models.NativeResumeDeliveryEvidence, time.Time) (bool, error)
+}
+
+func (s *Service) resolveNativeDeliveryBlock(ctx context.Context, block *models.SessionRecoveryBlock, completedAt time.Time) (bool, bool, error) {
+	reader, canRead := s.agentManager.(nativeResumeDeliveryEvidenceReader)
+	resolver, canResolve := s.repo.(nativeResumeEvidenceBlockResolver)
+	if !canRead || !canResolve || block.ConsumerReference != agentDeliveryConsumer {
+		return false, false, nil
+	}
+	proof, err := reader.GetNativeResumeDeliveryEvidence(ctx, block.SessionID)
+	if err != nil {
+		return false, true, err
+	}
+	if proof == nil {
+		return false, false, nil
+	}
+	changed, err := resolver.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, block.ID, proof, completedAt)
+	return changed, true, err
 }

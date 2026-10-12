@@ -80,7 +80,7 @@ func (j *Journal) ListSubmissions(ctx context.Context, sessionID string) ([]Subm
 
 // RetireSubmission seals an explicitly recovered submission. Native resume
 // may acknowledge an interrupted unknown outcome in the same generation;
-// retiring other work requires a newer generation.
+// unproven terminal labels retain their state; live work requires a newer generation.
 func (j *Journal) RetireSubmission(ctx context.Context, id string, recoveryGeneration uint64) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
@@ -125,7 +125,7 @@ func (j *Journal) RetireSubmission(ctx context.Context, id string, recoveryGener
 
 func canRetireSubmissionAtGeneration(submission Submission, recoveryGeneration uint64) bool {
 	return recoveryGeneration > 0 && (recoveryGeneration > submission.HarnessGeneration ||
-		(recoveryGeneration == submission.HarnessGeneration && submission.State == SubmissionInterruptedUnknown))
+		(recoveryGeneration == submission.HarnessGeneration && HasUnprovenOutcome(submission)))
 }
 
 func retireSubmissionTx(ctx context.Context, tx *bolt.Tx, id string, recoveryGeneration uint64, updatedAt time.Time) (Submission, error) {
