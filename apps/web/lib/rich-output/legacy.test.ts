@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRichOutput } from "./parse";
+import { decodeLegacyRichOutput as parseRichOutput } from "./legacy";
 
 function validPayload(): Record<string, unknown> {
   return {

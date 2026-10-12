@@ -286,6 +286,12 @@ importers:
       '@floating-ui/dom':
         specifier: ^1.7.4
         version: 1.7.4
+      '@json-render/core':
+        specifier: 0.21.0
+        version: 0.21.0(zod@4.3.6)
+      '@json-render/react':
+        specifier: 0.21.0
+        version: 0.21.0(react@19.2.3)(zod@4.3.6)
       '@kandev/plugin-sdk':
         specifier: workspace:*
         version: link:../packages/plugin-sdk
@@ -550,6 +556,9 @@ importers:
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
       zustand:
         specifier: ^5.0.8
         version: 5.0.10(@types/react@19.2.8)(immer@10.2.0)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
@@ -1232,6 +1241,16 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@json-render/core@0.21.0':
+    resolution: {integrity: sha512-vysEbTjO1y8mEgAsp0tztRyaWCkNsBrG8MhAqbndGK3qmMXjMRdCNtk21+AQRNKdRelFGVAwBgtUNW8tfjQlsw==}
+    peerDependencies:
+      zod: ^4.0.0
+
+  '@json-render/react@0.21.0':
+    resolution: {integrity: sha512-z/fZg0L8fJe2dnnQjWkmMw409iBclSWcOqdjoBy8eLHeBr/7F7VipzkY1CfgA2Fa5uW+zxZ54OvWMtdDcsp/yg==}
+    peerDependencies:
+      react: ^19.2.3
 
   '@kdlbs/runtime-darwin-arm64@0.0.0-bootstrap':
     resolution: {integrity: sha512-i3H7KOcw5m1KEhXhTSa9+jNBlAh0Vc8NVkiGL9BpKB5n/COrhBol7YcN1WNkxs/6WdpD9LFo2My+51wODrC9tQ==}
@@ -5638,8 +5657,8 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+  zod@4.3.6:
+    resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
 
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
@@ -6362,6 +6381,17 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@json-render/core@0.21.0(zod@4.3.6)':
+    dependencies:
+      zod: 4.3.6
+
+  '@json-render/react@0.21.0(react@19.2.3)(zod@4.3.6)':
+    dependencies:
+      '@json-render/core': 0.21.0(zod@4.3.6)
+      react: 19.2.3
+    transitivePeerDependencies:
+      - zod
 
   '@kdlbs/runtime-darwin-arm64@0.0.0-bootstrap':
     optional: true
@@ -9009,8 +9039,8 @@ snapshots:
       '@babel/parser': 7.28.6
       eslint: 9.39.2(jiti@2.7.0)
       hermes-parser: 0.25.1
-      zod: 3.25.76
-      zod-validation-error: 4.0.2(zod@3.25.76)
+      zod: 4.3.6
+      zod-validation-error: 4.0.2(zod@4.3.6)
     transitivePeerDependencies:
       - supports-color
 
@@ -11154,11 +11184,11 @@ snapshots:
   yoctocolors-cjs@2.1.3:
     optional: true
 
-  zod-validation-error@4.0.2(zod@3.25.76):
+  zod-validation-error@4.0.2(zod@4.3.6):
     dependencies:
-      zod: 3.25.76
+      zod: 4.3.6
 
-  zod@3.25.76: {}
+  zod@4.3.6: {}
 
   zod@4.4.3: {}
 

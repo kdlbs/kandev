@@ -2677,5 +2677,19 @@
   "sortOldestFirst": "Ōĺďēśţ ƒĩŕśţ",
   "sortAscending": "Àśćēńďĩńĝ",
   "sortMatchingFirst": "Ḿàţćĥĩńĝ ƒĩŕśţ",
-  "sortRuleColor": "Ćōĺōŕ ƒōŕ śōŕţ ƒĩēĺď {{position}}"
+  "sortRuleColor": "Ćōĺōŕ ƒōŕ śōŕţ ƒĩēĺď {{position}}",
+  "richOutputTableName": "Ţàƀĺē",
+  "richOutputNoRows": "Ńō ŕōŵś",
+  "richOutputEmptyCell": "Ēḿƥţŷ",
+  "richOutputVerification": "Vēŕĩƒĩćàţĩōń",
+  "richOutputNoChecks": "Ńō ćĥēćķś",
+  "richOutputStatusPassed": "Ƥàśśēď",
+  "richOutputStatusFailed": "Ƒàĩĺēď",
+  "richOutputStatusRunning": "Ŕũńńĩńĝ",
+  "richOutputStatusPending": "Ƥēńďĩńĝ",
+  "richOutputStatusSkipped": "Śķĩƥƥēď",
+  "richOutputCalloutInfo": "Ĩńƒōŕḿàţĩōń",
+  "richOutputCalloutSuccess": "Śũććēśś",
+  "richOutputCalloutWarning": "Ŵàŕńĩńĝ",
+  "richOutputCalloutError": "Ēŕŕōŕ"
 }

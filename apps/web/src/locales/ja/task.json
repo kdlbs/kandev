@@ -2677,5 +2677,19 @@
   "sortOldestFirst": "古い順",
   "sortAscending": "昇順",
   "sortMatchingFirst": "一致する項目を優先",
-  "sortRuleColor": "並べ替え項目 {{position}} の色"
+  "sortRuleColor": "並べ替え項目 {{position}} の色",
+  "richOutputTableName": "表",
+  "richOutputNoRows": "行がありません",
+  "richOutputEmptyCell": "空",
+  "richOutputVerification": "検証",
+  "richOutputNoChecks": "チェックなし",
+  "richOutputStatusPassed": "成功",
+  "richOutputStatusFailed": "失敗",
+  "richOutputStatusRunning": "実行中",
+  "richOutputStatusPending": "待機中",
+  "richOutputStatusSkipped": "スキップ",
+  "richOutputCalloutInfo": "情報",
+  "richOutputCalloutSuccess": "成功",
+  "richOutputCalloutWarning": "警告",
+  "richOutputCalloutError": "エラー"
 }

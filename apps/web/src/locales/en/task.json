@@ -2677,5 +2677,19 @@
   "sortOldestFirst": "Oldest first",
   "sortAscending": "Ascending",
   "sortMatchingFirst": "Matching first",
-  "sortRuleColor": "Color for sort field {{position}}"
+  "sortRuleColor": "Color for sort field {{position}}",
+  "richOutputTableName": "Table",
+  "richOutputNoRows": "No rows",
+  "richOutputEmptyCell": "Empty",
+  "richOutputVerification": "Verification",
+  "richOutputNoChecks": "No checks",
+  "richOutputStatusPassed": "Passed",
+  "richOutputStatusFailed": "Failed",
+  "richOutputStatusRunning": "Running",
+  "richOutputStatusPending": "Pending",
+  "richOutputStatusSkipped": "Skipped",
+  "richOutputCalloutInfo": "Information",
+  "richOutputCalloutSuccess": "Success",
+  "richOutputCalloutWarning": "Warning",
+  "richOutputCalloutError": "Error"
 }

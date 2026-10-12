@@ -11,7 +11,7 @@ import type {
   RichOutputInputBlock,
   RichOutputMetric,
   RichOutputMetricsBlock,
-} from "./types";
+} from "./legacy-types";
 
 const MAX_PAYLOAD_BYTES = 64 * 1024;
 
@@ -307,7 +307,7 @@ function resolveCSVCharts(input: RichOutputInput, result: unknown): RichOutput |
   return { ...input, blocks };
 }
 
-export function parseRichOutput(value: unknown, result?: unknown): RichOutput | null {
+export function decodeLegacyRichOutput(value: unknown, result?: unknown): RichOutput | null {
   const input = parseRichOutputInput(value);
   return input ? resolveCSVCharts(input, result) : null;
 }

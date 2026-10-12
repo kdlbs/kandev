@@ -434,98 +434,139 @@ or task tree.
 
 Task and Office agents can call `show_rich_output_kandev` when a workspace file,
 trend, comparison, or small metric group is materially clearer as a native
-presentation than as prose. The injected agent context requires this tool when
-the user explicitly asks for a chart, graph, plot, or file preview and suitable
-data is available. Prefer plain text or Markdown for ordinary answers. Small
-row-and-column comparisons should remain Markdown tables; native tables would
-duplicate that capability while adding another layout and accessibility
-contract.
+presentation than as prose. The injected agent context requires this tool for
+structured comparisons, recorded checks, charts, graphs, plots, file previews
+and KPI or metric requests when suitable data is available. Prefer plain text or Markdown for ordinary answers. Small textual comparisons can remain Markdown tables. For structured multi-row
+comparisons, verification findings or a prominent observation, agents can use
+Table, StatusList and Callout from the discovered catalog. Users can ask about
+their data without naming a tool or component.
 
-Version 1 accepts a title, an optional description, and one to four ordered
-blocks:
+New calls use `version: 2` and `catalog_version: 1`. A presentation has a title,
+an optional description, and a `spec` containing a `root` element ID and an
+`elements` map. Each element has a catalog `type`, literal `props`, and ordered
+`children` IDs. Discover the tool schema for exact properties and examples.
 
-- `file` references a task-workspace-relative path. It can include an optional
-  repository discriminator, title, caption, and MIME type. Kandev never accepts
-  absolute paths, traversal, URLs, data URIs, or inline file bytes.
-- `chart` renders a line or bar chart and includes a plain-text summary for
-  nonvisual interpretation. Data can be supplied in either of two ways:
-  - Inline `labels` plus 1 to 4 `series`, with one finite numeric or `null`
-    value per label.
-  - A `csv` descriptor with a workspace-relative `.csv` `path`, optional
-    `repo`, exact `x_column`, and 1 to 4 numeric `series` column mappings.
-    Kandev reads 1 to 100 rows in file order. Empty numeric cells become gaps.
-- `metrics` renders 1 to 6 plain-text label/value pairs with optional details.
+Malformed calls fail before workspace reads. Validation feedback identifies the
+field and expected shape for the selected component and source form. Ambiguous
+forms report separate alternatives. Agents can correct a rejected call using
+that feedback and discovered examples; rejected values and file contents are
+not included in the diagnostic.
 
-Kandev renders visible x/y values and automatically shortens ISO date/time
-labels, large numbers, and long categories on the axes. Tooltips retain the
-original x label and full values. Give every series a clear label and include
-its unit when useful, for example `p95 (ms)`. A one-series chart displays that
-label as an informational legend; a multi-series chart renders local keyboard-
-and touch-operable legend filters. Those filters change only the current view,
-not the persisted result or agent context.
+| Component | Purpose |
+| --- | --- |
+| `Stack` | Ordered vertical or horizontal children. Horizontal groups stack below 768px. |
+| `Group` | Children with an optional plain-text title. |
+| `Text` | A plain-text explanation, up to 500 characters. |
+| `Chart` | A line or bar chart with a required nonvisual summary and inline or CSV data. |
+| `Table` | One to eight labelled columns and up to 100 literal-text rows, inline or selected from a workspace CSV. Phone rows retain every field. |
+| `StatusList` | Up to 20 ordered, static verification findings with visible status labels and icons. |
+| `Callout` | A static info, success, warning or error note with optional title and plain text. |
+| `Metrics` | One to six label/value pairs with optional details. |
+| `FilePreview` | A workspace-relative file path with optional `repo`, title, and caption. |
 
-The complete tool input is limited to 64 KiB. Titles are limited to 120
-characters and the optional presentation description to 500 characters.
-Unknown fields and unsupported versions are rejected. Agents cannot choose
-HTML, Markdown, JavaScript, CSS, colors, animation, component names, or layout;
-Kandev owns those details so results remain consistent, accessible, and
-responsive.
+Agents choose hierarchy and ordering from this catalog. Kandev owns styling,
+axes, legends, tooltips, and responsive behavior. HTML, Markdown, JavaScript,
+CSS, arbitrary components, state bindings, event handlers, and actions are not
+accepted. Use Markdown for small textual comparisons.
+
+The input is limited to 64 KiB, 64 elements, eight levels, and four total
+`Chart`, `Metrics`, `FilePreview`, `Table` or `StatusList` elements. Callout is
+explanatory text under the same byte, node and depth limits. Element IDs start with an ASCII
+letter and contain at most 64 letters, digits, underscores, or hyphens;
+`constructor` and `prototype` are reserved. Every element must be reachable
+exactly once from the root. Containers require children, leaves have none, and
+cycles, shared children, unknown fields, and unsupported versions are rejected.
+Titles are limited to 120 characters and the presentation description to 500.
+
+This composition groups verification metrics beside an explanation:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "catalog_version": 1,
   "title": "Build health",
-  "description": "Latest local verification",
-  "blocks": [
-    {
-      "type": "metrics",
-      "items": [
-        { "label": "Passed", "value": "38" },
-        { "label": "Duration", "value": "12.4s", "detail": "Warm cache" }
-      ]
-    },
-    {
-      "type": "chart",
-      "chart_type": "line",
-      "title": "Runtime by run",
-      "summary": "Runtime fell across the last five runs.",
-      "labels": ["1", "2", "3", "4", "5"],
-      "series": [
-        { "label": "Runtime (s)", "values": [18.2, 16.4, 15.1, 13.8, 12.4] }
-      ]
-    },
-    {
-      "type": "file",
-      "path": "reports/build.json",
-      "title": "Raw report",
-      "mime_type": "application/json"
+  "spec": {
+    "root": "report",
+    "elements": {
+      "report": { "type": "Stack", "props": { "direction": "horizontal" }, "children": ["checks", "context"] },
+      "checks": { "type": "Group", "props": { "title": "Checks" }, "children": ["counts"] },
+      "counts": { "type": "Metrics", "props": { "items": [{ "label": "Passed", "value": "38" }] }, "children": [] },
+      "context": { "type": "Text", "props": { "text": "All focused checks passed." }, "children": [] }
     }
-  ]
+  }
 }
 ```
 
-Use a CSV-backed line chart for a time series already present in the workspace:
+Tables use unique `columns` containing a `key` and visible `label`, each 1 to
+120 Unicode code points. Supply either `rows` of strings or `csv` with a
+workspace-relative path and optional `repo`. A CSV column key selects its exact
+normalized header. Each row has one cell per column, with at most 500 code
+points per cell. Numeric formatting, blanks and markup characters remain
+literal text; empty cells and header-only tables receive localized empty copy.
+Desktop uses column headers, while phone rows show every field with its label.
+
+StatusList items contain a `label` (1 to 120 code points), `status` and optional
+`detail` (up to 500). Status is `passed`, `failed`, `running`, `pending` or
+`skipped`. These are recorded findings supplied by the agent, including running
+and pending; they do not poll executions or change workflow state. An empty
+list shows localized empty copy.
+
+Callout uses `kind` (`info`, `success`, `warning` or `error`), optional `title`
+(up to 120 code points) and `text` (1 to 500). Every kind has a localized label
+and icon. Notes stay static on replay and are not live alert announcements.
+Table and StatusList also accept an optional title of up to 120 code points.
+
+This report selects service fields from CSV, records a check and highlights a
+finding:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "catalog_version": 1,
+  "title": "Service verification",
+  "spec": {
+    "root": "report",
+    "elements": {
+      "report": { "type": "Stack", "props": { "direction": "vertical" }, "children": ["services", "checks", "finding"] },
+      "services": { "type": "Table", "props": { "columns": [{ "key": "service", "label": "Service" }, { "key": "monthly_cost_usd", "label": "Monthly cost (USD)" }], "csv": { "path": "services.csv" } }, "children": [] },
+      "checks": { "type": "StatusList", "props": { "items": [{ "label": "Load budget", "status": "failed", "detail": "Payments p95 exceeds the target." }] }, "children": [] },
+      "finding": { "type": "Callout", "props": { "kind": "warning", "title": "Investigate Payments", "text": "Highest cost and latency in this sample." }, "children": [] }
+    }
+  }
+}
+```
+
+For inline tables, replace `csv` with `rows`, for example
+`[["API", "00420"], ["Payments", "680"]]` for the two columns above.
+
+Charts accept inline `labels` and one to four `series`, each with a label and
+one finite numeric or `null` value per x label. Up to 100 labels are accepted.
+Alternatively, reference a workspace CSV and map its exact headers:
+
+```json
+{
+  "version": 2,
+  "catalog_version": 1,
   "title": "API latency",
-  "blocks": [
-    {
-      "type": "chart",
-      "chart_type": "line",
-      "title": "p50 and p95 latency",
-      "summary": "Tail latency fell across the recorded samples.",
-      "csv": {
-        "path": "reports/latency.csv",
-        "x_column": "recorded_at",
-        "series": [
-          { "column": "p50_ms", "label": "p50 (ms)" },
-          { "column": "p95_ms", "label": "p95 (ms)" }
-        ]
+  "spec": {
+    "root": "latency",
+    "elements": {
+      "latency": {
+        "type": "Chart",
+        "props": {
+          "chart_type": "line",
+          "title": "p95 latency",
+          "summary": "Latency across recorded samples.",
+          "csv": {
+            "path": "reports/latency.csv",
+            "x_column": "recorded_at",
+            "series": [{ "column": "p95_ms", "label": "p95 (ms)" }]
+          }
+        },
+        "children": []
       }
     }
-  ]
+  }
 }
 ```
 
@@ -537,44 +578,49 @@ recorded_at,p50_ms,p95_ms
 2026-08-14T10:00:00Z,16.4,25.1
 ```
 
-Use the same CSV form for a categorical bar comparison:
+For a categorical comparison, use `chart_type: "bar"`, an x column such as
+`route`, and numeric series such as `requests`. CSV descriptors can include a
+`repo` discriminator and one to four numeric column mappings. Sources must
+be workspace-relative `.csv` paths. File references reject absolute paths,
+traversal, URLs, data URIs, and inline bytes.
 
-```json
-{
-  "version": 1,
-  "title": "Traffic mix",
-  "blocks": [
-    {
-      "type": "chart",
-      "chart_type": "bar",
-      "title": "Requests by route",
-      "summary": "The API route carries most request volume.",
-      "csv": {
-        "path": "reports/routes.csv",
-        "x_column": "route",
-        "series": [{ "column": "requests", "label": "Requests" }]
-      }
-    }
-  ]
-}
-```
+CSV files must be UTF-8 text with unique headers, no more than 256 KiB,
+and at most 100 data rows. Chart sources require at least one data row;
+Table sources allow header-only files. Blank/duplicate headers and malformed
+row widths are rejected. Named columns must exist exactly. Chart x values must be
+nonempty and at most 120 characters. Selected chart numeric cells must be finite
+numbers or empty; empty cells become gaps. Malformed rows and invalid values
+reject the tool call with the source row and column when available.
 
-CSV files must be UTF-8 text with one unique header row, no more than 256 KiB,
-and 1 to 100 data rows. Named columns must exist exactly. X values must be
-non-empty and at most 120 characters. Selected numeric cells must be finite
-numbers or empty; malformed rows and invalid values reject the tool call with
-the source row and column when available.
+Kandev displays visible x/y values and shortens ISO dates, large numbers, and
+long categories on the axes. Tooltips retain original labels and full values.
+Label series with units, for example `p95 (ms)`. A single series has an
+informational legend; multiple series have keyboard- and touch-operable local
+filters. Those filters change the current view, not the accepted result.
 
 A completed presentation persists with the conversation and replays after a
-reload. For a CSV chart, Kandev resolves selected columns during the tool call
-and persists only bounded labels plus numeric or `null` values. It never stores
-the raw CSV and never re-reads it during replay, so later edits or workspace
-cleanup do not change the accepted chart.
+reload. CSV results store bounded labels and numeric or `null` chart values in
+`resolved_charts`, and selected column definitions/literal cells in
+`resolved_tables`, addressed by exact `element_id`. The envelope uses
+`version: 2` and `catalog_version: 1` and stays within 64 KiB. Mixed sources
+resolve atomically; a source failure produces no partial report. They never store raw
+CSV or reread the source on replay. Later edits or workspace cleanup do not
+change the accepted chart or table.
 
-File-preview bytes do not persist: Kandev fetches a referenced file only after
-the user selects **Preview**, and **Open file** uses the existing desktop or
-mobile file viewer. If the task workspace later disappears, the presentation
-remains while that file block reports that its preview is unavailable.
+File bytes do not persist. Kandev fetches a referenced file only after the user
+selects **Preview**; **Open file** uses the native desktop or mobile viewer.
+If the workspace disappears, the report remains and the file preview reports
+that it is unavailable.
+
+Historical version 1 reports still render, including their stored CSV snapshots.
+New version 1 calls are rejected with guidance to refresh tool discovery and
+send the version 2 composition. Retained history does not enable the old
+`blocks` authoring format or its unused MIME hint in new calls.
+
+Catalog version 1 can gain optional capabilities without changing existing
+meaning. Breaking component or property changes require a new catalog version
+and an explicit historical-reader migration. Agents must follow the schema
+returned by the running Kandev instance.
 
 This is a Kandev-native MCP tool, not a portable MCP rich-content standard or an
 MCP App. Portable MCP content uses protocol-level content and resource types that

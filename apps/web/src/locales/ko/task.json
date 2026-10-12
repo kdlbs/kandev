@@ -2677,5 +2677,19 @@
   "sortOldestFirst": "오래된 순",
   "sortAscending": "오름차순",
   "sortMatchingFirst": "일치 항목 우선",
-  "sortRuleColor": "정렬 기준 {{position}}의 색상"
+  "sortRuleColor": "정렬 기준 {{position}}의 색상",
+  "richOutputTableName": "표",
+  "richOutputNoRows": "행이 없습니다",
+  "richOutputEmptyCell": "비어 있음",
+  "richOutputVerification": "검증",
+  "richOutputNoChecks": "검사 없음",
+  "richOutputStatusPassed": "통과",
+  "richOutputStatusFailed": "실패",
+  "richOutputStatusRunning": "실행 중",
+  "richOutputStatusPending": "대기 중",
+  "richOutputStatusSkipped": "건너뜀",
+  "richOutputCalloutInfo": "정보",
+  "richOutputCalloutSuccess": "성공",
+  "richOutputCalloutWarning": "경고",
+  "richOutputCalloutError": "오류"
 }

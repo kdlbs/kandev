@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { KandevRendererProps } from "../types";
 import { RichOutputRenderer } from "./rich-output-renderer";
-import type { RichOutputFileBlock } from "./types";
+import type { FilePreviewProps } from "@/lib/rich-output/catalog";
 
 const transport = vi.hoisted(() => ({ read: vi.fn(), client: {} }));
 
@@ -19,7 +19,7 @@ const initial: Target = { sessionId: "session-a", path: "a.txt", repo: "alpha" }
 
 function propsFor(
   target: Target,
-  metadata: Partial<Pick<RichOutputFileBlock, "title" | "caption">> = {},
+  metadata: Partial<Pick<FilePreviewProps, "title" | "caption">> = {},
 ): KandevRendererProps {
   return {
     status: "complete",

@@ -1,0 +1,88 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import type { KandevRendererProps } from "../types";
+import { RichOutputRenderer } from "./rich-output-renderer";
+const TOGGLE = "rich-output-file-preview-toggle";
+const EXPANDED = "aria-expanded";
+const owner = {};
+const transport = vi.hoisted(() => ({ read: vi.fn(), client: {} }));
+vi.mock("@/components/state-provider", () => ({
+  useOptionalAppStoreApi: () => owner,
+  useOptionalAppStore: () => "user-a",
+}));
+vi.mock("@/lib/ws/connection", () => ({ getWebSocketClient: () => transport.client }));
+vi.mock("@/lib/ws/workspace-files", () => ({ requestFileContent: transport.read }));
+function Harness(props: KandevRendererProps) {
+  return RichOutputRenderer(props);
+}
+afterEach(() => {
+  cleanup();
+  transport.read.mockReset();
+});
+
+// @covers AC-AGENTS-AGENT-RICH-OUTPUT-003.9
+it("restores disclosure preferences across layout remounts without retaining file bytes", async () => {
+  const props: KandevRendererProps = {
+    sessionId: "session",
+    messageId: "message",
+    status: "complete",
+    result: undefined,
+    args: {
+      version: 2,
+      catalog_version: 1,
+      title: "Report",
+      spec: {
+        root: "file",
+        elements: { file: { type: "FilePreview", props: { path: "notes.txt" }, children: [] } },
+      },
+    },
+  };
+  transport.read.mockResolvedValueOnce({ content: "Old file bytes", is_binary: false });
+  const view = render(<Harness {...props} />);
+  fireEvent.click(screen.getByTestId(TOGGLE));
+  await screen.findByText("Old file bytes");
+  view.unmount();
+  transport.read.mockResolvedValueOnce({ content: "Fresh file bytes", is_binary: false });
+  const restored = render(<Harness {...props} />);
+  expect(screen.getByTestId(TOGGLE).getAttribute(EXPANDED)).toBe("true");
+  await screen.findByText("Fresh file bytes");
+  expect(transport.read).toHaveBeenCalledTimes(2);
+  restored.rerender(<Harness {...props} messageId="another-message" />);
+  expect(screen.getByTestId(TOGGLE).getAttribute(EXPANDED)).toBe("false");
+  expect(screen.queryByText("Fresh file bytes")).toBeNull();
+});
+
+it("keeps identical file leaves independent by element identity", async () => {
+  const leaf = { type: "FilePreview", props: { path: "same.txt" }, children: [] };
+  transport.read.mockResolvedValue({ content: "Shared source", is_binary: false });
+  render(
+    <Harness
+      sessionId="s2"
+      messageId="m2"
+      status="complete"
+      result={undefined}
+      args={{
+        version: 2,
+        catalog_version: 1,
+        title: "Files",
+        spec: {
+          root: "report",
+          elements: {
+            report: {
+              type: "Stack",
+              props: { direction: "vertical" },
+              children: ["first", "second"],
+            },
+            first: structuredClone(leaf),
+            second: structuredClone(leaf),
+          },
+        },
+      }}
+    />,
+  );
+  const [first, second] = screen.getAllByTestId(TOGGLE);
+  fireEvent.click(first);
+  await screen.findByText("Shared source");
+  expect(first.getAttribute(EXPANDED)).toBe("true");
+  expect(second.getAttribute(EXPANDED)).toBe("false");
+});

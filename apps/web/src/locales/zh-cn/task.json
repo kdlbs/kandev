@@ -2677,5 +2677,19 @@
   "sortOldestFirst": "最早优先",
   "sortAscending": "升序",
   "sortMatchingFirst": "匹配项优先",
-  "sortRuleColor": "排序字段 {{position}} 的颜色"
+  "sortRuleColor": "排序字段 {{position}} 的颜色",
+  "richOutputTableName": "表格",
+  "richOutputNoRows": "没有数据行",
+  "richOutputEmptyCell": "空",
+  "richOutputVerification": "验证",
+  "richOutputNoChecks": "无检查",
+  "richOutputStatusPassed": "已通过",
+  "richOutputStatusFailed": "失败",
+  "richOutputStatusRunning": "运行中",
+  "richOutputStatusPending": "待处理",
+  "richOutputStatusSkipped": "已跳过",
+  "richOutputCalloutInfo": "信息",
+  "richOutputCalloutSuccess": "成功",
+  "richOutputCalloutWarning": "警告",
+  "richOutputCalloutError": "错误"
 }

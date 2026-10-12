@@ -2677,5 +2677,19 @@
   "sortOldestFirst": "Mais antigas primeiro",
   "sortAscending": "Ascendente",
   "sortMatchingFirst": "Correspondentes primeiro",
-  "sortRuleColor": "Cor do campo de ordenação {{position}}"
+  "sortRuleColor": "Cor do campo de ordenação {{position}}",
+  "richOutputTableName": "Tabela",
+  "richOutputNoRows": "Sem linhas",
+  "richOutputEmptyCell": "Vazio",
+  "richOutputVerification": "Verificação",
+  "richOutputNoChecks": "Sem verificações",
+  "richOutputStatusPassed": "Aprovado",
+  "richOutputStatusFailed": "Falhou",
+  "richOutputStatusRunning": "Em execução",
+  "richOutputStatusPending": "Pendente",
+  "richOutputStatusSkipped": "Ignorado",
+  "richOutputCalloutInfo": "Informação",
+  "richOutputCalloutSuccess": "Sucesso",
+  "richOutputCalloutWarning": "Aviso",
+  "richOutputCalloutError": "Erro"
 }
