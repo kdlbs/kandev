@@ -73,3 +73,9 @@ worker. Typed persistence failures use initial-turn failure handling, while
 ownership/cancellation rejections retain their existing cleanup. Regressions cover
 all three claim outcomes, ordinary and callback-owned failure routing, retained
 continuation ordering, and MCP readiness. CI remains responsible for E2E.
+
+CI also exposed an outdated MCP initial-launch fake. It now invokes prepared
+admission before reporting prompt acceptance, preserving the real startup order.
+The focused `TestPeerMessageInitialLaunch_` suite passes, including queued
+follow-ups during startup and workflow-turn ownership. This remediation changes
+test support only; production admission guards remain unchanged.
