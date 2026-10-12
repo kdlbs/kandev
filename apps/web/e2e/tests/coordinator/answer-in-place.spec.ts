@@ -49,7 +49,23 @@ test.describe("Coordinator answer in place: question", () => {
     await card.getByTestId("needs-you-answer-here").click();
     const overlay = card.getByTestId("clarification-overlay");
     await expect(overlay).toBeVisible({ timeout: 15_000 });
-    await overlay.getByTestId("clarification-option").filter({ hasText: "PostgreSQL" }).click();
+    const databaseOption = overlay
+      .getByTestId("clarification-option")
+      .filter({ hasText: "PostgreSQL" });
+    await databaseOption.focus();
+    await databaseOption.press("Escape");
+    await expect(overlay).toBeHidden();
+    const disclosure = card.getByTestId("clarification-collapse-toggle");
+    await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Escape must leave the question unanswered and its agent waiting",
+    });
+    await disclosure.click();
+    await expect(overlay).toBeVisible();
+    await databaseOption.click();
 
     await expect(card).toHaveCount(0, { timeout: 30_000 });
     await waitForAgentMessage(apiClient, task.session_id, "You answered:", 30_000);

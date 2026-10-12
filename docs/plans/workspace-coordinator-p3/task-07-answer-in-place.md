@@ -104,3 +104,5 @@ Review remediation and complete exact-head hosted verification are still in
 progress. Historical contributor CI and focused dependency projections do not
 complete this work order. Merge and completion remain blocked until the full
 integrated suites and every review finding are resolved.
+
+Review verification: desktop Escape and native phone disclosure regressions leave the real clarification session waiting, reopen it, and retain the existing answer/resume assertions. Full hosted execution is pending.

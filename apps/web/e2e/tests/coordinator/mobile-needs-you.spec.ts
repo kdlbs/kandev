@@ -107,6 +107,27 @@ test.describe("Coordinator screens on a phone viewport", () => {
       (el) => getComputedStyle(el.parentElement ?? el).position,
     );
     expect(stripPosition).toBe("sticky");
+
+    await cardA.getByTestId("needs-you-answer-here").tap();
+    const overlay = cardA.getByTestId("clarification-overlay");
+    await expect(overlay).toBeVisible();
+    const disclosure = cardA.getByTestId("clarification-collapse-toggle");
+    const disclosureBox = await disclosure.boundingBox();
+    expect(disclosureBox).not.toBeNull();
+    expect(disclosureBox!.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
+    expect(disclosureBox!.width).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
+    await disclosure.tap();
+    await expect(overlay).toBeHidden();
+    await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    await waitForSessionState(apiClient, {
+      taskId: taskA.id,
+      sessionId: taskA.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "collapsing a phone question must not answer or reject it",
+    });
+    await disclosure.tap();
+    await expect(overlay).toBeVisible();
+    await expectNoHorizontalScroll(testPage);
   });
 
   // The phone nav's Inbox/Coordinator rows live in the "saved sidebar layout"
