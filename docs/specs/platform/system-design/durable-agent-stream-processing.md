@@ -133,3 +133,21 @@ Stop remains reachable. Retry connection only queries and reconnects the origina
 Storage failure alone does not authorize context continuation.
 
 The [journal shutdown and recovery package](../../../plans/agentctl-journal-shutdown-recovery/plan.md) owns the October ACK replacement and capacity recurrence repairs.
+
+## Resumed bootstrap recovery
+
+Generation-one admission includes native conversations first entering durable
+delivery; a saved native resume token does not prove SQL authority has committed.
+The processor owns its connection context. Processing failure cancels that
+connection immediately and reaches disconnect reconciliation with its original
+error, even if no later frame arrives. A replacement connection remains independent.
+
+For a native generation-one bootstrap that never received its first event,
+explicit startup may establish a checkpoint by receiving the actual retained
+sequence-one setup event. Require the matching committed native conversation,
+authenticated stream and current execution, a fully retained prefix from one,
+and zero peer acknowledgments. The first event must have no submission or terminal
+outcome. The normal SQL receive transaction rejects orphaned receipts, retired
+sessions and changed owners; checkpoint creation accompanies the real receipt.
+Preflight performs no projection, acknowledgment, prompt dispatch or block resolution.
+Subsequent replay projects retained events through the normal idempotent pipeline.

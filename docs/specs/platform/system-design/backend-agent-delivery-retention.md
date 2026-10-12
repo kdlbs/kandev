@@ -18,7 +18,7 @@ Platform owns retained delivery evidence; Tasks owns schema, lifecycle authentic
 Extends [delivery](durable-agent-delivery.md), [reattachment](durable-agent-reattachment.md) and [stream processing](durable-agent-stream-processing.md).
 The [checkpoint ADR](../../../decisions/2026-10-05-backend-delivery-retirement-checkpoints.md) records replay; the [barrier ADR](../../../decisions/2026-10-10-delivery-event-retention-barriers.md) defines scoped serialization.
 Journal policy, wire version and runtime flags remain unchanged.
-Contiguous checkpoints replace permanent generic event-effect retention. Other parent delivery boundaries remain authoritative.
+Contiguous checkpoints replace permanent generic receipts; parent delivery boundaries remain authoritative.
 
 Payload proof: [details](backend-agent-delivery-retention-payloads.md).
 
@@ -134,7 +134,7 @@ Within one serialized receive transaction, apply this order:
 5. For an identical compact duplicate, return `inserted=false` and the committed projected cursor. Do not invoke projection or manufacture terminal effects.
 6. For a conflict, return the existing conflict family. For genuinely new later events, use normal contiguous receive and projection.
 
-A missing row above retirement but within received/projected range is corruption. Missing retained-generation cursor is `delivery_checkpoint_missing`, never zero.
+Missing received receipts are corruption. Missing cursors fail closed, except [verified bootstrap receipt](durable-agent-stream-processing.md#resumed-bootstrap-recovery).
 Projection checks compact duplicates/expired prefixes under shared serialization, including callers holding an event fetched before cleanup; no canonical/effect reapplication.
 
 Maintain `0 <= retired_sequence <= projected_sequence <= received_sequence`.

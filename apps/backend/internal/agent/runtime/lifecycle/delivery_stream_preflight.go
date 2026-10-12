@@ -9,6 +9,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 type deliveryStreamFailure struct {
@@ -56,7 +57,14 @@ func (sm *StreamManager) initialDeliveryReplayCursor(ctx context.Context, execut
 	if err := sm.projectReceivedDeliveryPrefix(ctx, execution, delivery, status); err != nil {
 		return 0, err
 	}
-	return authenticatedDeliveryReplayCursor(ctx, execution, delivery, status)
+	after, err = authenticatedDeliveryReplayCursor(ctx, execution, delivery, status)
+	if errors.Is(err, repoerrors.ErrAgentDeliveryCheckpointMissing) {
+		if bootstrapErr := sm.receiveResumedBootstrapCheckpoint(ctx, execution, delivery, client, status); bootstrapErr != nil {
+			return 0, bootstrapErr
+		}
+		return authenticatedDeliveryReplayCursor(ctx, execution, delivery, status)
+	}
+	return after, err
 }
 
 // A first child can exit before ACP initialization commits the native owner.

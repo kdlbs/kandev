@@ -427,15 +427,10 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 
 	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration)
-	err := client.StreamUpdatesFrom(ctx, func(event agentctl.AgentEvent) {
-		if !processor.enqueue(event) {
-			sm.logger.Error("durable agent event processor is unavailable",
-				zap.String("instance_id", execution.ID))
-			if processor.ctx.Err() == nil {
-				processor.fail(errStreamEventProcessorQueueFull)
-				client.CloseUpdatesStream()
-			}
-		}
+	// Processor failure cancels only this connection, including when no later
+	// frame arrives. Disconnect handling reports the original processing error.
+	err := client.StreamUpdatesFrom(processor.ctx, func(event agentctl.AgentEvent) {
+		processor.enqueue(event)
 	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
 		processErr := processor.close()
 		if processErr != nil {
@@ -486,6 +481,8 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 
 	if err != nil {
+		processor.fail(err)
+		_ = processor.close()
 		sm.logger.Error("failed to connect to updates stream",
 			zap.String("instance_id", execution.ID),
 			zap.Error(err))
