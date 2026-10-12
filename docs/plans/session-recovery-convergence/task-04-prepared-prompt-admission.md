@@ -67,8 +67,8 @@ Focused commands use `go -C apps/backend test -p 1 -trimpath -tags fts5` with
 No local E2E or PostgreSQL ran.
 
 Review remediation preserves created-session Send Now claims until actual prompt
-acceptance. Confirmed admission rejection restores input; shutdown or uncertain
-acceptance retains a recovery claim and prevents delayed admission by the stopped
+acceptance. Confirmed admission rejection or cancellation before admission restores input;
+cancellation after admission or uncertain acceptance retains a recovery claim and prevents delayed admission by the stopped
 worker. Typed persistence failures use initial-turn failure handling, while
 ownership/cancellation rejections retain their existing cleanup. Regressions cover
 all three claim outcomes, ordinary and callback-owned failure routing, retained

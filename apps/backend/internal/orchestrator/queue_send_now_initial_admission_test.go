@@ -14,7 +14,7 @@ import (
 )
 
 func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
-	for _, outcome := range []string{"accepted", "sql_failure", "shutdown"} {
+	for _, outcome := range []string{"accepted", "sql_failure", "shutdown_before_admission", "shutdown_after_admission"} {
 		t.Run(outcome, func(t *testing.T) {
 			ctx := t.Context()
 			repo := setupTestRepo(t)
@@ -70,7 +70,7 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 				t.Fatal("claim worker finished before admission")
 			default:
 			}
-			if outcome == "shutdown" {
+			if outcome == "shutdown_before_admission" {
 				cancel()
 			} else {
 				manager.mu.Lock()
@@ -83,7 +83,11 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 					failed()
 				} else {
 					require.NoError(t, err)
-					accepted()
+					if outcome == "shutdown_after_admission" {
+						cancel()
+					} else {
+						accepted()
+					}
 				}
 			}
 			select {
@@ -93,7 +97,7 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 			}
 			pending, err = queue.ListPendingSendNowClaims(ctx)
 			require.NoError(t, err)
-			if outcome == "shutdown" {
+			if outcome == "shutdown_after_admission" {
 				require.Len(t, pending, 1, "uncertainty must retain the original claim")
 				block, err := svc.GetOpenSessionRecoveryBlock(ctx, "session")
 				require.NoError(t, err)
@@ -104,12 +108,21 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 				require.ErrorIs(t, lateAdmission(ctx, "late prompt", nil), context.Canceled)
 				submissions, err := repo.ListAgentDeliverySubmissions(ctx, "session")
 				require.NoError(t, err)
-				require.Empty(t, submissions, "stopped worker cannot admit a delayed initial prompt")
+				require.Len(t, submissions, 1, "stopped worker cannot admit a second initial prompt")
 			} else {
 				require.Empty(t, pending)
 			}
+			if outcome == "shutdown_before_admission" {
+				manager.mu.Lock()
+				lateAdmission := manager.initialPromptAdmissionCallback
+				manager.mu.Unlock()
+				require.ErrorIs(t, lateAdmission(ctx, "late prompt", nil), context.Canceled)
+				submissions, err := repo.ListAgentDeliverySubmissions(ctx, "session")
+				require.NoError(t, err)
+				require.Empty(t, submissions)
+			}
 			status := queue.GetStatus(ctx, "session")
-			if outcome == "sql_failure" {
+			if outcome == "sql_failure" || outcome == "shutdown_before_admission" {
 				require.Len(t, status.Entries, 1)
 				require.Equal(t, source.ID, status.Entries[0].ID)
 			} else {

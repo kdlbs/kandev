@@ -17,12 +17,26 @@ func (s *Service) configureSendNowInitialAdmission(
 ) func() error {
 	outcome := make(chan error, 1)
 	var once sync.Once
-	var closed atomic.Bool
+	const (
+		waiting uint32 = iota
+		admitting
+		closed
+	)
+	var phase atomic.Uint32
+	abort := func(err error) error {
+		if phase.CompareAndSwap(waiting, closed) {
+			return err
+		}
+		return errors.Join(errSendNowInitialPromptUncertain, err)
+	}
 	options.beforeProviderAdmission = func(string) error {
-		if closed.Load() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !phase.CompareAndSwap(waiting, admitting) {
 			return context.Canceled
 		}
-		return ctx.Err()
+		return nil
 	}
 	finish := func(err error) { once.Do(func() { outcome <- err }) }
 	options.onInitialPromptAccepted = func(string) {
@@ -33,20 +47,20 @@ func (s *Service) configureSendNowInitialAdmission(
 		finish(nil)
 	}
 	options.onInitialPromptAdmissionFailed = finish
-	options.onInitialPromptFailed = func() { finish(errSendNowInitialPromptUncertain) }
+	options.onInitialPromptFailed = func() { finish(abort(errors.New("initial Send Now prompt failed before acceptance"))) }
 	return func() error {
-		defer closed.Store(true)
-		// Match the executor's startup deadline. Timeout or shutdown retains the
-		// durable claim because the detached runtime may still accept its prompt.
+		defer phase.Store(closed)
+		// Match startup timing; only a worker that never began admission can
+		// restore its input when cancelled or timed out.
 		timer := time.NewTimer(5 * time.Minute)
 		defer timer.Stop()
 		select {
 		case err := <-outcome:
 			return err
 		case <-ctx.Done():
-			return errors.Join(errSendNowInitialPromptUncertain, ctx.Err())
+			return abort(ctx.Err())
 		case <-timer.C:
-			return errSendNowInitialPromptUncertain
+			return abort(context.DeadlineExceeded)
 		}
 	}
 }
