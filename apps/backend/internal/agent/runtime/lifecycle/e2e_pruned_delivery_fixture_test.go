@@ -93,8 +93,7 @@ func assertPrunedDeliveryRestored(t *testing.T, repo *tasksqlite.Repository, ses
 	original, err := repo.GetAgentDeliverySubmission(ctx, "prompt:message-e2e-record-"+sessionID+"-1")
 	require.NoError(t, err)
 	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, original.State)
-	// Reconstruction preserves the existing outcome; native-resume reconciliation records unknown.
-	require.Contains(t, []string{"", "unknown"}, original.Outcome)
+	require.Equal(t, "unknown", original.Outcome)
 	require.Zero(t, original.TerminalSequence)
 	generation, err := repo.GetCurrentHarnessSessionGeneration(ctx, sessionID, original.IncarnationID)
 	require.NoError(t, err)
