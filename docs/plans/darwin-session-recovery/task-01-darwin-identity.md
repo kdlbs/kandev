@@ -24,7 +24,8 @@ existing recovery admission rules.
 ## In scope
 
 - Birth-token compatibility, live identity inspection, and absent-PID handling.
-- Numeric-session descendant enumeration and existing containment behavior.
+- Numeric-session descendant enumeration, current snapshot verification, and
+  refusal to signal ambiguously owned orphans.
 - Real macOS subprocess regression tests and internal design clarification.
 
 ## Out of scope
@@ -39,8 +40,9 @@ other OS process implementations.
    token suffixes; changed birth time, process group, or session is rejected.
 2. An exited isolated leader permits restoration only after all live descendants
    exit. Malformed identity and failed inspection remain blocked.
-3. Containment terminates the owned descendants while an unrelated isolated
-   process remains alive. Existing durable-recovery admission tests pass.
+3. Containment refuses ambiguous orphan ownership without signaling; both the
+   surviving child and unrelated isolated process remain alive. A changed
+   enumerated birth time/group fails closed. Existing recovery tests pass.
 
 ## Verification
 
@@ -50,6 +52,7 @@ Run from the repository root on macOS:
 (cd apps/backend && go test -trimpath -race ./internal/common/processidentity -count=1)
 (cd apps/backend && go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -run 'Test(DeliveryRecord|WorkspaceOnlyAllocation|Darwin)' -count=1)
 (cd apps/backend && go test -trimpath -race -tags fts5 ./internal/orchestrator -run 'Test(RestartRecovery|AlreadyLoadedRestart|LegacyNativeRestart|WorkspaceRecoveryBlock)' -count=1)
+(cd apps/backend && golangci-lint run ./... --new-from-rev=a789b16d70358a159103c5cb0168017d63b8dfce --timeout=5m)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -102,3 +105,13 @@ from an inspection error to confirmed termination after the correction. Journal
 inspection retained its one interrupted-unknown submission and unchanged 993
 cursor. No live service state was modified. Temporary diagnostic code was removed.
 Commit hook results belong in the PR validation record.
+
+
+PR review remediation: a new failing regression proved that numeric session
+membership must not authorize signaling after leader exit. The correction
+refuses that ambiguous cleanup. A second failing regression rejected stale
+birth/group snapshots before counting a matching session member. The birth
+parser retains legacy suffix validation but no longer returns that unused value.
+All three race-test commands passed after the final production edit. Full
+backend `golangci-lint` against the PR base reported zero issues. Documentation
+catalog, specification lint, and diff checks passed again.

@@ -43,7 +43,9 @@ Use birth time plus the separately persisted numeric process group/session ID.
 Retain compatibility with existing token suffixes, including zero. Require
 `ESRCH` from a separate existence check before classifying an `EIO` PID lookup as
 exited. Enumerate descendants using `getsid` and birth time, preserve zombie
-handling, and fail closed on enumeration errors or changed ownership.
+handling, and fail closed on enumeration errors or changed ownership. Revalidate
+each matching process snapshot. Refuse orphan signaling when numeric session
+membership cannot prove the dead leader's incarnation.
 
 | Runtime | Evidence | Behavior and validation |
 | --- | --- | --- |
@@ -55,7 +57,7 @@ handling, and fail closed on enumeration errors or changed ownership.
 AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.23 is primarily covered by
 `internal/common/processidentity/processidentity_darwin_test.go`: live capture,
 legacy token compatibility, mismatched ownership, exited leader, surviving
-child, containment, and unrelated-process survival. Existing lifecycle and
+child, ambiguous-cleanup refusal, snapshot changes, and unrelated-process survival. Existing lifecycle and
 orchestrator recovery tests exercise the consumers and preserved admission
 fences. These are OS/runtime changes with no rendered UI change, so browser
 screenshots and new browser tests are unnecessary.
@@ -67,8 +69,9 @@ screenshots and new browser tests are unnecessary.
 ## Verification results
 
 All task-defined race tests, specification/catalog checks, diff checks, and the
-PR documentation coverage preflight passed. See the work order for commands
-and results.
+PR documentation coverage preflight passed. Review remediation reran the three
+race-test commands and full backend lint against the PR base: all passed, with
+zero lint issues. See the work order for commands and results.
 
 ## Risks and exclusions
 

@@ -128,7 +128,11 @@ evidence; older birth tokens with a zero or nonzero pointer suffix remain
 readable. An empty PID query reported as `EIO` requires an independent `ESRCH`
 absence check. After the session leader exits, every non-zombie descendant in
 its numeric session must also have exited before restoration; enumeration or
-identity errors keep recovery blocked.
+identity errors keep recovery blocked. Revalidate each enumerated birth time and
+process group against its current PID before accepting session membership.
+Numeric session membership alone does not authorize orphan cleanup after the
+leader exits, because a session ID may have been reused; without retained
+descendant birth evidence, macOS containment refuses to signal those processes.
 Audit proxy teardown and executor-specific stop paths, including Sprites, so preserving an environment cannot mask a stopped agent.
 Explicit Stop and authorized archive/reset/delete cleanup remain separate from backend shutdown.
 

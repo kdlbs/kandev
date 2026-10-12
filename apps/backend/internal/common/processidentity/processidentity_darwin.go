@@ -41,7 +41,7 @@ func Inspect(identity Identity) (State, error) {
 	if identity.GroupID <= 0 || identity.SessionID <= 0 {
 		return StateUnknown, ErrUnverifiableIdentity
 	}
-	startSec, startUSec, _, err := parseDarwinBirthToken(identity.BirthToken)
+	startSec, startUSec, err := parseDarwinBirthToken(identity.BirthToken)
 	if err != nil {
 		return StateUnknown, err
 	}
@@ -75,62 +75,34 @@ func Inspect(identity Identity) (State, error) {
 	return StateAlive, nil
 }
 
-func TerminateOwnedSession(ctx context.Context, identity Identity, grace time.Duration) error {
-	if err := identity.Validate(); err != nil {
+// TerminateOwnedSession never signals orphaned Darwin session members: a numeric
+// session ID cannot bind them to a dead leader's birth identity after ID reuse.
+func TerminateOwnedSession(ctx context.Context, identity Identity, _ time.Duration) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if identity.SessionID != identity.PID {
-		return fmt.Errorf("process is not an isolated session leader: %w", ErrUnverifiableIdentity)
-	}
-	state, err := Inspect(identity)
+	terminated, err := OwnedSessionTerminated(identity)
 	if err != nil {
 		return err
 	}
-	if state == StateAlive {
-		return fmt.Errorf("refusing to contain process group while its owner is alive: %s", identity)
+	if !terminated {
+		return fmt.Errorf("cannot verify orphan ownership for %s: %w", identity, ErrUnverifiableIdentity)
 	}
-	if state == StateUnknown || state == StateReused {
-		return fmt.Errorf("cannot verify owned process %s: %w", identity, ErrUnverifiableIdentity)
-	}
-	if grace < 0 {
-		grace = 0
-	}
-	groups, err := processGroupsInSession(identity.SessionID, identity.BirthToken)
-	if err != nil {
-		return err
-	}
-	for _, groupID := range groups {
-		_ = syscall.Kill(-groupID, syscall.SIGTERM)
-	}
-	graceCtx, cancel := context.WithTimeout(ctx, grace)
-	defer cancel()
-	if err := waitForSessionExit(graceCtx, identity.SessionID, identity.BirthToken); err == nil {
-		return nil
-	} else if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	groups, err = processGroupsInSession(identity.SessionID, identity.BirthToken)
-	if err != nil {
-		return err
-	}
-	for _, groupID := range groups {
-		_ = syscall.Kill(-groupID, syscall.SIGKILL)
-	}
-	return waitForSessionExit(ctx, identity.SessionID, identity.BirthToken)
+	return nil
 }
 
-func parseDarwinBirthToken(token string) (int64, int32, uintptr, error) {
+func parseDarwinBirthToken(token string) (int64, int32, error) {
 	parts := strings.Split(token, ":")
 	if len(parts) != 4 || parts[0] != "darwin" {
-		return 0, 0, 0, ErrUnverifiableIdentity
+		return 0, 0, ErrUnverifiableIdentity
 	}
 	sec, secErr := strconv.ParseInt(parts[1], 10, 64)
 	usec, usecErr := strconv.ParseInt(parts[2], 10, 32)
-	session, sessionErr := strconv.ParseUint(parts[3], 16, 64)
+	_, sessionErr := strconv.ParseUint(parts[3], 16, 64)
 	if secErr != nil || usecErr != nil || sessionErr != nil || sec <= 0 || usec < 0 || usec >= 1_000_000 {
-		return 0, 0, 0, ErrUnverifiableIdentity
+		return 0, 0, ErrUnverifiableIdentity
 	}
-	return sec, int32(usec), uintptr(session), nil
+	return sec, int32(usec), nil
 }
 
 func processGroupsInSession(sessionID int, rootBirth string) ([]int, error) {
@@ -138,7 +110,7 @@ func processGroupsInSession(sessionID int, rootBirth string) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	rootSec, rootUSec, _, err := parseDarwinBirthToken(rootBirth)
+	rootSec, rootUSec, err := parseDarwinBirthToken(rootBirth)
 	if err != nil {
 		return nil, err
 	}
@@ -151,15 +123,12 @@ func processGroupsInSession(sessionID int, rootBirth string) ([]int, error) {
 		if start.Sec < rootSec || (start.Sec == rootSec && start.Usec < rootUSec) {
 			continue
 		}
-		currentSession, err := unix.Getsid(int(proc.Proc.P_pid))
-		if errors.Is(err, syscall.ESRCH) {
-			continue
-		}
+		groupID, err := darwinSessionMemberGroup(proc, sessionID)
 		if err != nil {
 			return nil, err
 		}
-		if currentSession == sessionID && proc.Eproc.Pgid > 0 {
-			groups[int(proc.Eproc.Pgid)] = struct{}{}
+		if groupID > 0 {
+			groups[groupID] = struct{}{}
 		}
 	}
 	result := make([]int, 0, len(groups))
@@ -169,23 +138,32 @@ func processGroupsInSession(sessionID int, rootBirth string) ([]int, error) {
 	return result, nil
 }
 
-func waitForSessionExit(ctx context.Context, sessionID int, rootBirth string) error {
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		groups, err := processGroupsInSession(sessionID, rootBirth)
-		if err != nil {
-			return err
-		}
-		if len(groups) == 0 {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
+func darwinSessionMemberGroup(proc unix.KinfoProc, sessionID int) (int, error) {
+	currentSession, err := unix.Getsid(int(proc.Proc.P_pid))
+	if errors.Is(err, syscall.ESRCH) {
+		return 0, nil
 	}
+	if err != nil {
+		return 0, err
+	}
+	if currentSession != sessionID {
+		return 0, nil
+	}
+	start := proc.Proc.P_starttime
+	state, err := Inspect(Identity{
+		PID: int(proc.Proc.P_pid), GroupID: int(proc.Eproc.Pgid), SessionID: sessionID,
+		BirthToken: fmt.Sprintf("darwin:%d:%d:0", start.Sec, start.Usec),
+	})
+	if err != nil {
+		return 0, err
+	}
+	if state == StateExited {
+		return 0, nil
+	}
+	if state != StateAlive {
+		return 0, ErrUnverifiableIdentity
+	}
+	return int(proc.Eproc.Pgid), nil
 }
 
 // OwnedSessionTerminated verifies process and descendant termination without signaling them.

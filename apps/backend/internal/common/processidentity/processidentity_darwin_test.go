@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.23
@@ -68,7 +69,7 @@ func TestDarwinExitedOwnerHasVerifiableTermination(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnverifiableIdentity)
 }
 
-func TestDarwinSurvivingDescendantBlocksRecoveryAndCanBeContained(t *testing.T) {
+func TestDarwinSurvivingDescendantBlocksRecoveryAndAmbiguousCleanup(t *testing.T) {
 	unrelated := darwinIsolatedProcess(t)
 	read, write, err := os.Pipe()
 	require.NoError(t, err)
@@ -93,10 +94,11 @@ func TestDarwinSurvivingDescendantBlocksRecoveryAndCanBeContained(t *testing.T) 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	require.NoError(t, TerminateOwnedSession(ctx, identity, 100*time.Millisecond))
+	require.ErrorIs(t, TerminateOwnedSession(ctx, identity, 100*time.Millisecond), ErrUnverifiableIdentity)
+	require.NoError(t, syscall.Kill(child, 0), "session membership alone cannot authorize a signal")
 	terminated, err = OwnedSessionTerminated(identity)
 	require.NoError(t, err)
-	require.True(t, terminated)
+	require.False(t, terminated)
 	state, err := Inspect(unrelated)
 	require.NoError(t, err)
 	require.Equal(t, StateAlive, state, "containment must preserve unrelated sessions")
@@ -112,4 +114,26 @@ func darwinIsolatedProcess(t *testing.T) Identity {
 	require.NoError(t, err)
 	require.Equal(t, cmd.Process.Pid, identity.SessionID)
 	return identity
+}
+
+func TestDarwinSessionEnumerationRejectsChangedProcessSnapshot(t *testing.T) {
+	identity := darwinIsolatedProcess(t)
+	proc, err := unix.SysctlKinfoProc("kern.proc.pid", identity.PID)
+	require.NoError(t, err)
+	group, err := darwinSessionMemberGroup(*proc, identity.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, identity.GroupID, group)
+	for _, field := range []string{"birth", "group"} {
+		t.Run(field, func(t *testing.T) {
+			stale := *proc
+			if field == "birth" {
+				stale.Proc.P_starttime.Sec--
+			} else {
+				stale.Eproc.Pgid++
+			}
+			group, err := darwinSessionMemberGroup(stale, identity.SessionID)
+			require.ErrorIs(t, err, ErrUnverifiableIdentity)
+			require.Zero(t, group, "do not mix stale group data with current session membership")
+		})
+	}
 }
