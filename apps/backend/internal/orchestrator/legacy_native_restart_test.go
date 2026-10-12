@@ -27,7 +27,7 @@ func (m *legacyNativeTestManager) ReadDeliveryRecordSubmission(context.Context, 
 }
 
 func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
-	for _, condition := range []string{"dead owner", "live owner", "hash mismatch", "retained terminal", "changed owner", "independent work"} {
+	for _, condition := range []string{"dead owner", "queue", "retired history", "generic history", "unprojected output", "live owner", "hash mismatch", "retained terminal", "changed owner", "independent work"} {
 		t.Run(condition, func(t *testing.T) {
 			ctx := context.Background()
 			service, manager, block, row, launched, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
@@ -36,20 +36,52 @@ func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
 			require.NoError(t, repo.SetSessionMetadataKey(ctx, row.SessionID, models.SessionMetaKeyAgentDeliveryRecovery, nil))
 			_, err := repo.DB().ExecContext(ctx, `UPDATE session_recovery_blocks SET delivery_stream_id = '' WHERE id = ?`, block.ID)
 			require.NoError(t, err)
+			if condition == "queue" {
+				_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET id = 'queue:delivery' WHERE id = ?`, row.ID)
+				require.NoError(t, err)
+				row.ID = "queue:delivery"
+				block.DeliverySubmissionID = row.ID
+				_, err = repo.DB().ExecContext(ctx, `UPDATE session_recovery_blocks SET delivery_submission_id = ? WHERE id = ?`, row.ID, block.ID)
+				require.NoError(t, err)
+			}
 			store, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "journal.bbolt")})
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = store.Close() })
 			peer := journal.Submission{ID: row.ID, SessionID: row.SessionID, IncarnationID: row.IncarnationID, HarnessGeneration: 1, StreamID: block.DeliveryStreamID, Hash: row.PayloadHash, Payload: row.Payload, State: journal.SubmissionFailed}
 			_, err = store.PutSubmission(ctx, peer)
 			require.NoError(t, err)
+			if condition == "unprojected output" {
+				_, err = store.Append(ctx, journal.Event{SessionID: peer.SessionID, IncarnationID: peer.IncarnationID, HarnessGeneration: 1, StreamID: peer.StreamID, SubmissionID: peer.ID, Type: "tool_call", Payload: []byte("unprojected")})
+				require.NoError(t, err)
+			}
+			if condition == "retired history" || condition == "generic history" {
+				older := *row
+				older.ID = "prior"
+				older.PayloadHash = "prior-hash"
+				_, err = repo.PrepareAgentDeliverySubmission(ctx, &older)
+				require.NoError(t, err)
+				retired := peer
+				retired.ID = older.ID
+				retired.Hash = older.PayloadHash
+				retired.Retired = true
+				_, err = store.PutSubmission(ctx, retired)
+				require.NoError(t, err)
+				if condition == "generic history" {
+					_, err = repo.DB().ExecContext(ctx, `UPDATE session_recovery_blocks SET delivery_submission_id = '', reason = 'unresolved_durable_work' WHERE id = ?`, block.ID)
+					require.NoError(t, err)
+				}
+			}
 			calls := 0
 			identity := agentruntime.AgentDeliveryRecoveryIdentity{TaskID: "task1", SessionID: row.SessionID, ExecutionID: "old-execution", IncarnationID: row.IncarnationID, HarnessGeneration: 1, StreamID: peer.StreamID, SubmissionID: peer.ID, PromptGeneration: 1, OriginalRuntime: processidentity.Identity{PID: 42, GroupID: 42, SessionID: 42, BirthToken: "linux:boot:1"}}
 			wrapper := &legacyNativeTestManager{nativeProofTestManager: &nativeProofTestManager{nativeResumeTestManager: manager}}
-			wrapper.inspect = func(ctx context.Context, _ agentruntime.DeliveryRecordEvidenceRequest) (*agentruntime.DeliveryRecordEvidence, error) {
+			wrapper.inspect = func(ctx context.Context, request agentruntime.DeliveryRecordEvidenceRequest) (*agentruntime.DeliveryRecordEvidence, error) {
 				calls++
 				d, err := store.RecoveryDescriptor(ctx, row.SessionID, row.IncarnationID, 1, peer.StreamID)
 				require.NoError(t, err)
-				p, err := store.GetSubmission(ctx, peer.ID)
+				if request.StoredSubmissionID == "" {
+					return &agentruntime.DeliveryRecordEvidence{Descriptor: d}, nil
+				}
+				p, err := store.GetSubmission(ctx, request.StoredSubmissionID)
 				require.NoError(t, err)
 				dead := condition != "live owner"
 				binding := identity
@@ -66,7 +98,7 @@ func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
 				case "independent work":
 					d.SubmissionCount = 1
 				}
-				return &agentruntime.DeliveryRecordEvidence{Descriptor: d, RetiredSubmission: &p, ControlIdentity: &binding, ProcessTerminated: &dead}, nil
+				return &agentruntime.DeliveryRecordEvidence{Descriptor: d, StoredSubmission: &p, ControlIdentity: &binding, ProcessTerminated: &dead}, nil
 			}
 			originalAck := manager.acknowledge
 			manager.acknowledge = func(ctx context.Context, sessionID string) error {
@@ -80,7 +112,11 @@ func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
 				retired, err := store.GetSubmission(ctx, peer.ID)
 				require.NoError(t, err)
 				require.True(t, retired.Retired)
-				return &models.NativeResumeDeliveryEvidence{SessionID: sessionID, IncarnationID: row.IncarnationID, HarnessGeneration: 1, NativeSessionID: "native-conversation", ExecutionID: running.AgentExecutionID, StreamID: peer.StreamID, Submissions: []models.NativeResumeSubmissionEvidence{{ID: peer.ID, HarnessGeneration: 1, PayloadHash: peer.Hash, StreamID: peer.StreamID}}}, nil
+				proof := &models.NativeResumeDeliveryEvidence{SessionID: sessionID, IncarnationID: row.IncarnationID, HarnessGeneration: 1, NativeSessionID: "native-conversation", ExecutionID: running.AgentExecutionID, StreamID: peer.StreamID, Submissions: []models.NativeResumeSubmissionEvidence{{ID: peer.ID, HarnessGeneration: 1, PayloadHash: peer.Hash, StreamID: peer.StreamID}}}
+				if condition == "retired history" || condition == "generic history" {
+					proof.Submissions = append(proof.Submissions, models.NativeResumeSubmissionEvidence{ID: "prior", HarnessGeneration: 1, PayloadHash: "prior-hash", StreamID: peer.StreamID})
+				}
+				return proof, nil
 			}
 			service.agentManager = wrapper
 			session, err := repo.GetTaskSession(ctx, row.SessionID)
@@ -91,7 +127,8 @@ func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			require.Equal(t, condition == "dead owner", restored)
+			want := condition == "dead owner" || condition == "queue" || condition == "retired history" || condition == "generic history"
+			require.Equal(t, want, restored)
 			if restored {
 				require.NotNil(t, *launched)
 				saved, err := store.GetSubmission(ctx, peer.ID)

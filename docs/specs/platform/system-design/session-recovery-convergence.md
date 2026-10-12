@@ -64,7 +64,13 @@ Absent metadata and an earlier already-resolved notice are presentation states,
 not new outcome authority. Restore the current notice and resolve only matching
 incident fences atomically. A changed source, independent fence, pending restore
 or unprojected receipt refuses resolution. A transaction rollback changes none
-of the binding, notice or fence. A retry reuses retired journal proof.
+of the binding, notice or fence. A retry reuses retired journal proof. Retained inspection has a separate
+metadata-only stored-submission request for unretired legacy history; retirement
+proof still requires the actual retired marker and preserves the original label.
+A matching prepared checkpoint with no candidate is completed in that transaction;
+an allocated/launching or unrelated attempt still blocks it. Legacy composer
+uncertainty is cleared only for an exactly retired submission. An explicit null
+propagates that clearing to clients even when no recovery notice existed.
 
 ## Entry points
 

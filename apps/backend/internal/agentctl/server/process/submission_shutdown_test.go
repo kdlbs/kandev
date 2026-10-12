@@ -2,7 +2,7 @@ package process
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -18,6 +18,7 @@ import (
 
 type shutdownRequestAdapter struct {
 	adapter.AgentAdapter
+	ctx          context.Context
 	closing      chan struct{}
 	dispatchDone chan struct{}
 	once         sync.Once
@@ -27,8 +28,8 @@ func (a *shutdownRequestAdapter) Close() error {
 	a.once.Do(func() { close(a.closing) })
 	select {
 	case <-a.dispatchDone:
-	case <-time.After(5 * time.Second):
-		return errors.New("durable dispatch did not settle during adapter shutdown")
+	case <-a.ctx.Done():
+		return fmt.Errorf("durable dispatch did not settle during adapter shutdown: %w", a.ctx.Err())
 	}
 	return a.AgentAdapter.Close()
 }
@@ -43,7 +44,7 @@ func TestSubmissionGracefulStopPreservesUnknownRequestOutcome(t *testing.T) {
 	}, newTestLogger(t))
 	require.NoError(t, mgr.Start(ctx))
 	t.Cleanup(func() { _ = mgr.Stop(context.Background()); _ = mgr.closeDeliveryJournal() })
-	wrapped := &shutdownRequestAdapter{AgentAdapter: mgr.adapter, closing: make(chan struct{}), dispatchDone: make(chan struct{})}
+	wrapped := &shutdownRequestAdapter{ctx: ctx, AgentAdapter: mgr.adapter, closing: make(chan struct{}), dispatchDone: make(chan struct{})}
 	mgr.adapter = wrapped
 	original := journal.Submission{ID: "prompt:old", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1,
 		StreamID: "incarnation:g1", Payload: []byte("do not replay"), Hash: journal.SubmissionHash([]byte("do not replay"))}

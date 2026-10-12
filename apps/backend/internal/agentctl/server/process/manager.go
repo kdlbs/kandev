@@ -2855,6 +2855,9 @@ func (m *Manager) stop(ctx context.Context) error {
 		zap.Int("pid", m.agentPID()),
 		zap.String("protocol", m.agentProtocol()))
 	m.status.Store(StatusStopping)
+	if stopping := m.shutdownIntent.Load(); stopping != nil {
+		stopping.Store(true)
+	}
 
 	auxiliaryStopErr := errors.Join(comparisonStopErr, m.stopShellAndProcesses(ctx))
 	m.closeAdapterAndStdin()

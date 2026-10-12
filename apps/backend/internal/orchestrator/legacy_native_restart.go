@@ -38,7 +38,7 @@ func legacyNativeRestartEvidenceMatches(evidence *agentruntime.DeliveryRecordEvi
 	if evidence == nil || evidence.ControlIdentity == nil || evidence.ProcessTerminated == nil || !*evidence.ProcessTerminated {
 		return false
 	}
-	d, peer, identity := evidence.Descriptor, evidence.RetiredSubmission, evidence.ControlIdentity
+	d, peer, identity := evidence.Descriptor, evidence.StoredSubmission, evidence.ControlIdentity
 	if !legacyNativeDescriptorIdle(d) {
 		return false
 	}
@@ -109,7 +109,7 @@ func readLegacyRestartInventory(ctx context.Context, client deliveryRecordEviden
 		if row.State != models.DeliverySubmissionInterruptedUnknown {
 			return nil, nil
 		}
-		request := agentruntime.DeliveryRecordEvidenceRequest{TaskID: session.TaskID, SessionID: session.ID, IncarnationID: session.QueueIncarnationID, HarnessGeneration: uint64(generation.Generation), RetiredSubmissionID: row.ID}
+		request := agentruntime.DeliveryRecordEvidenceRequest{TaskID: session.TaskID, SessionID: session.ID, IncarnationID: session.QueueIncarnationID, HarnessGeneration: uint64(generation.Generation), StoredSubmissionID: row.ID}
 		evidence, err := client.InspectDeliveryRecordEvidence(ctx, request)
 		if err != nil || evidence == nil {
 			return nil, err
@@ -118,7 +118,7 @@ func readLegacyRestartInventory(ctx context.Context, client deliveryRecordEviden
 			return nil, errors.New("legacy inventory changed")
 		}
 		descriptor = &evidence.Descriptor
-		if matchingRetiredRestartSubmission(inputs, row, evidence.RetiredSubmission) {
+		if matchingRetiredRestartSubmission(inputs, row, evidence.StoredSubmission) {
 			continue
 		}
 		if selected != nil || row.TerminalSequence != 0 || !legacyNativeRestartEvidenceMatches(evidence, row, block) {

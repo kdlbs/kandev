@@ -40,10 +40,15 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if _, err := authenticatedDeliveryReplayCursor(ctx, execution, m.streamManager.deliveryRepository(), status); err != nil {
 		return err
 	}
-	if err := m.validateNativeResumeSQLHistory(ctx, execution, status, submissions, false); err != nil {
+	// Dispatch reconciliation can change SQL state; pin one fresh inventory for validation and retirement selection.
+	rows, err := activeBackendSubmissions(ctx, m.streamManager.deliveryRepository(), sessionID)
+	if err != nil {
 		return err
 	}
-	ids, err := m.nativeResumeInterruptedSubmissionIDs(ctx, execution, status, submissions)
+	if err := validateNativeResumeSQLRows(execution, status, submissions, rows, false); err != nil {
+		return err
+	}
+	ids, err := nativeResumeRetirementIDs(execution, status, submissions, rows)
 	if err != nil {
 		return err
 	}
@@ -81,14 +86,6 @@ func validateNativeResumeDeliveryOwner(execution *AgentExecution, status *agentc
 		return journal.ErrOwnerMismatch
 	}
 	return nil
-}
-
-func (m *Manager) nativeResumeInterruptedSubmissionIDs(ctx context.Context, execution *AgentExecution, status *agentctl.DeliveryStatus, submissions []journal.Submission) ([]string, error) {
-	rows, err := activeBackendSubmissions(ctx, m.streamManager.deliveryRepository(), execution.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	return nativeResumeRetirementIDs(execution, status, submissions, rows)
 }
 
 func nativeResumeRetirementIDs(execution *AgentExecution, status *agentctl.DeliveryStatus, submissions []journal.Submission, rows []*models.AgentDeliverySubmission) ([]string, error) {

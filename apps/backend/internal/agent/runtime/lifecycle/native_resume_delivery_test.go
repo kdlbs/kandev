@@ -138,7 +138,7 @@ func TestAcknowledgedUnknownHistorySurvivesDurableAdoption(t *testing.T) {
 		if id == "earlier" {
 			generation = 1
 		}
-		_, err = store.PutSubmission(ctx, journal.Submission{ID: id, SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: generation, Hash: "hash", Payload: []byte("prompt"), State: journal.SubmissionInterruptedUnknown, Retired: true})
+		_, err = store.PutSubmission(ctx, journal.Submission{ID: id, SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: generation, StreamID: "stream", Hash: "hash", Payload: []byte("prompt"), State: journal.SubmissionInterruptedUnknown, Retired: true})
 		require.NoError(t, err)
 		repository.submissions[id] = &models.AgentDeliverySubmission{ID: id, SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: int64(generation), PayloadHash: "hash", State: models.DeliverySubmissionInterruptedUnknown}
 	}

@@ -48,7 +48,11 @@ PostgreSQL variants run in CI against real PostgreSQL.
 
 The 49-pair lifecycle matrix and SQLite authenticated-binding suite pass.
 Foreign/missing submission streams and reconstructed unknown outcomes were
-reproduced before correction. Automatic entrypoint checks and final CI are
-in progress.
+reproduced before correction. Automatic loaded-successor and legacy restart checks pass, including queue-origin
+and retired-history cases. Prepared checkpoint and stale composer-error SQL
+controls pass. CI exposed the distinction between stored-record inspection and
+retirement proof; the retained-reader correction passes its focused journal test,
+with the affected established restart/gap regressions being rechecked. Final CI
+is pending.
 
 [Parent plan](plan.md). [Requirements](../../specs/platform/requirements/durable-restart-reconciliation.md).

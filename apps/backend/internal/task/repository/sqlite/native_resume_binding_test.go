@@ -29,7 +29,7 @@ func TestPostgresNativeResumeAuthenticatedMissingBinding(t *testing.T) {
 }
 
 func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testing.T) *Repository) {
-	for _, scenario := range []string{"absent notice", "partial notice", "resolved earlier notice", "matching fences", "independent fence", "foreign native", "hash changed", "active work", "unmatched unknown", "foreign stream", "foreign submission stream", "missing submission stream", "reconstructed unknown", "known outcome", "rollback"} {
+	for _, scenario := range []string{"absent notice", "partial notice", "resolved earlier notice", "matching fences", "independent fence", "foreign native", "hash changed", "active work", "unmatched unknown", "foreign stream", "foreign submission stream", "missing submission stream", "reconstructed unknown", "known outcome", "prepared attempt", "independent attempt", "legacy error", "independent error", "rollback"} {
 		t.Run(scenario, func(t *testing.T) {
 			repo := open(t)
 			ctx := context.Background()
@@ -73,6 +73,13 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 				partial.StreamID = ""
 				metadata[models.SessionMetaKeyAgentDeliveryRecovery] = partial
 			}
+			if scenario == "legacy error" || scenario == "independent error" {
+				details := submission.ID
+				if scenario == "independent error" {
+					details = "independent"
+				}
+				metadata[models.SessionMetaKeyLastAgentError] = models.LastAgentError{Code: durableDeliveryUncertainErrorCode, Message: "uncertain", Details: details, AgentExecutionID: "original"}
+			}
 			raw, err := json.Marshal(metadata)
 			require.NoError(t, err)
 			_, err = repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE task_sessions SET metadata = ? WHERE id = ?`), string(raw), fixture.session.ID)
@@ -100,6 +107,15 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 				proof.Submissions[0].StreamID = "foreign"
 			case "missing submission stream":
 				proof.Submissions[0].StreamID = ""
+			case "prepared attempt", "independent attempt":
+				attempt := fixture.attempt("pending-native-attempt")
+				attempt.Authorized = true
+				attempt.Checkpoint.SourceRecovery.AgentExecutionID = "original-owner"
+				if scenario == "independent attempt" {
+					attempt.Checkpoint.Stage = models.SilentRestoreStageCandidateLaunching
+					attempt.Checkpoint.CandidateExecutionID = "independent"
+				}
+				require.NoError(t, repo.CreateRestoreAttempt(ctx, attempt))
 			case "foreign native":
 				proof.NativeSessionID = "foreign"
 			case "hash changed":
@@ -131,8 +147,13 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 			} else {
 				require.NoError(t, err)
 			}
-			want := scenario == "reconstructed unknown" || scenario == "absent notice" || scenario == "partial notice" || scenario == "resolved earlier notice" || scenario == "matching fences"
+			want := scenario == "legacy error" || scenario == "independent error" || scenario == "prepared attempt" || scenario == "reconstructed unknown" || scenario == "absent notice" || scenario == "partial notice" || scenario == "resolved earlier notice" || scenario == "matching fences"
 			require.Equal(t, want, changed)
+			if scenario == "prepared attempt" || scenario == "independent attempt" {
+				attempt, err := repo.GetRestoreAttempt(ctx, "pending-native-attempt")
+				require.NoError(t, err)
+				require.Equal(t, scenario == "prepared attempt", attempt.CompletedAt != nil)
+			}
 			block, err := repo.GetSessionRecoveryBlock(ctx, fixture.block.ID)
 			require.NoError(t, err)
 			if want {
@@ -148,6 +169,11 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 				if scenario != "foreign stream" {
 					require.Empty(t, block.DeliveryStreamID)
 				}
+			}
+			if scenario == "legacy error" || scenario == "independent error" {
+				current, err := repo.GetTaskSession(ctx, proof.SessionID)
+				require.NoError(t, err)
+				require.Equal(t, scenario == "legacy error", current.Metadata[models.SessionMetaKeyLastAgentError] == nil)
 			}
 			stored, err := repo.GetAgentDeliverySubmission(ctx, submission.ID)
 			require.NoError(t, err)

@@ -11,6 +11,11 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+const (
+	deliveryUnknownPromptReason  = "unknown_prompt_outcome"
+	deliveryUnresolvedWorkReason = "unresolved_durable_work"
+)
+
 // ResolveSessionRecoveryBlockWithNativeEvidence commits only after authenticated
 // native retirement. All incident fences are verified before any becomes usable.
 func (r *Repository) ResolveSessionRecoveryBlockWithNativeEvidence(ctx context.Context, id string, proof *models.NativeResumeDeliveryEvidence, completedAt time.Time) (bool, error) {
@@ -22,10 +27,7 @@ func (r *Repository) ResolveSessionRecoveryBlockWithNativeEvidence(ctx context.C
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), proof.SessionID); err != nil {
-		return false, err
-	}
-	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{proof.SessionID}, []string{proof.StreamID}); err != nil {
+	if err := r.lockNativeResumeProofTx(ctx, tx, proof); err != nil {
 		return false, err
 	}
 	valid, err := r.verifyNativeResumeSnapshotTx(ctx, tx, proof)
@@ -36,7 +38,11 @@ func (r *Repository) ResolveSessionRecoveryBlockWithNativeEvidence(ctx context.C
 	if err != nil || len(blocks) == 0 {
 		return false, err
 	}
-	valid, err = r.restoreAuthenticatedNativeNoticeTx(ctx, tx, proof, completedAt)
+	valid, err = r.finishPreparedNativeAttemptTx(ctx, tx, proof, blocks, completedAt)
+	if err != nil || !valid {
+		return false, err
+	}
+	valid, err = r.restoreAuthenticatedNativePresentationTx(ctx, tx, proof, completedAt)
 	if err != nil || !valid {
 		return false, err
 	}
@@ -58,7 +64,6 @@ func (r *Repository) verifyNativeResumeSnapshotTx(ctx context.Context, tx *sqlx.
  WHERE ts.id = ? AND ts.queue_incarnation_id = ? AND ts.state <> 'CANCELLED'
  AND g.generation = ? AND g.native_session_id = ? AND e.agent_execution_id = ?
  AND NOT EXISTS (SELECT 1 FROM harness_session_generations newer WHERE newer.session_id = ts.id AND newer.incarnation_id = g.incarnation_id AND newer.generation > g.generation)
- AND NOT EXISTS (SELECT 1 FROM session_restore_attempts WHERE session_id = ts.id AND completed_at IS NULL)
  AND NOT EXISTS (SELECT 1 FROM agent_delivery_cursors WHERE session_id = ts.id AND incarnation_id = g.incarnation_id AND harness_generation = g.generation AND received_sequence <> projected_sequence)
  )`), proof.SessionID, proof.IncarnationID, proof.HarnessGeneration, proof.NativeSessionID, proof.ExecutionID).Scan(&valid)
 	if err != nil || !valid {
@@ -147,7 +152,7 @@ func nativeResumeIncidentBlockMatches(block models.SessionRecoveryBlock, proof *
 		return false
 	}
 	if block.DeliverySubmissionID == "" {
-		return block.Reason == "unresolved_durable_work" && block.DeliveryStreamID == ""
+		return block.Reason == deliveryUnresolvedWorkReason && block.DeliveryStreamID == ""
 	}
 	if block.DeliveryStreamID != "" && block.DeliveryStreamID != proof.StreamID {
 		return false
@@ -249,8 +254,8 @@ func nativeResumeSubmissionMap(proof *models.NativeResumeDeliveryEvidence) (map[
 
 func nativeResumeIncidentOwnerMatches(block models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence) bool {
 	if block.IncarnationID != proof.IncarnationID || block.ExpectedGeneration != proof.HarnessGeneration || block.ConsumerReference != reconstructionDeliveryConsumer ||
-		(block.Reason != "unknown_prompt_outcome" && block.Reason != "unresolved_durable_work") ||
-		block.DeliverySequence != 0 || block.DeliveryTurnID != "" || (block.DeliveryOutcome != "" && block.DeliveryOutcome != "unknown") {
+		(block.Reason != deliveryUnknownPromptReason && block.Reason != deliveryUnresolvedWorkReason) ||
+		block.DeliverySequence != 0 || block.DeliveryTurnID != "" || (block.DeliveryOutcome != "" && block.DeliveryOutcome != reconstructionUnknownOutcome) {
 		return false
 	}
 	return true
@@ -265,8 +270,15 @@ func nativeResumeNoticeMatches(proof *models.NativeResumeDeliveryEvidence, recov
 	for _, row := range proof.Submissions {
 		found = found || row.ID == recovery.SubmissionID && row.HarnessGeneration == recovery.HarnessGeneration
 	}
-	if !found {
-		return false
+	return found
+}
+
+func (r *Repository) lockNativeResumeProofTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence) error {
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), proof.SessionID); err != nil {
+		return err
 	}
-	return true
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{proof.SessionID}, []string{proof.StreamID}); err != nil {
+		return err
+	}
+	return nil
 }
