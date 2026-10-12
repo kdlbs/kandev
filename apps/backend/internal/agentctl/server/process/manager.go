@@ -2688,7 +2688,7 @@ func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
 		MCPAttachment: &evidence,
 	}
 	if persisted, err := m.persistDeliveryEvent(event); err != nil {
-		m.logger.Error("failed to commit durable MCP attachment event", zap.Error(err))
+		m.logMCPAttachmentCommitError("failed to commit durable MCP attachment event", err)
 		return
 	} else {
 		event = persisted
@@ -2711,7 +2711,7 @@ func (m *Manager) PublishMCPAttachmentAttempt(attempt streams.MCPAttachmentAttem
 		MCPAttachmentAttempt: &attempt,
 	}
 	if persisted, err := m.persistDeliveryEvent(event); err != nil {
-		m.logger.Error("failed to commit durable MCP attachment attempt", zap.Error(err))
+		m.logMCPAttachmentCommitError("failed to commit durable MCP attachment attempt", err)
 		return
 	} else {
 		event = persisted
