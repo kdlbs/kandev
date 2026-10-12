@@ -587,6 +587,13 @@ session and use its normal controls. Kandev resumes it when the session can run;
 the automatic session ceiling still applies unless you explicitly start,
 resume, or message the session.
 
+Opening or refocusing a conversation parked by the ACP idle policy also uses
+automatic admission. With **Limit automatic sessions** enabled and capacity
+full, it stays parked without a manual-override notice. A queued focus resume,
+including a completed conversation, retries when capacity is available and
+only while the same conversation remains idle-suspended. Explicit **Resume**
+and message delivery keep manual admission.
+
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn
 with an ambiguous result does not switch providers automatically. If no

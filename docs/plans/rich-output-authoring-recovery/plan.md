@@ -225,3 +225,9 @@ and sysprompt tests passed; affected Go lint reported zero issues. The corrected
 retention discovery fixture passed under `-race` for five repeats of all four
 SQLite/PostgreSQL acknowledgement cases (20 cases, 43.056s). Specification
 catalog/lint, documentation coverage and diff whitespace checks passed.
+
+Current-main integration: the later upstream admission fix merged cleanly.
+Its five focus/admission regressions passed, and fresh managed rich-output E2E
+runs passed all seven desktop and five phone cases. Temporary PostgreSQL test
+resources were removed. The disposable user demo remains stopped, and main
+:9998/PID 27220 is unchanged.

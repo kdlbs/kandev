@@ -3919,8 +3919,10 @@ func (s *Service) idleSuspensionResumeShortcut(
 	if err != nil || task == nil || task.ArchivedAt != nil {
 		return nil, ErrIdleSuspensionProvenanceRequired
 	}
-	if allowed, _ := s.autoResumeEligibility(ctx, task, session); !allowed {
-		return nil, ErrIdleSuspensionProvenanceRequired
+	// The session's own queued launch does not block the replay that owns it.
+	allowed, reason := s.autoResumeEligibility(ctx, task, session)
+	if !allowed {
+		return nil, s.admitClaimedIdleFocusResume(ctx, taskID, sessionID, reason)
 	}
 	return nil, nil
 }
