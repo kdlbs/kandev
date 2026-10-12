@@ -1,0 +1,54 @@
+---
+id: "04-prepared-prompt-admission"
+title: "Persist the prepared prompt at admission"
+status: in_progress
+wave: 4
+depends_on:
+  - 03-recovery-contract
+plan: plan.md
+requirements:
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003
+acceptance_criteria:
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-003.1
+system_design:
+  - ../../specs/platform/system-design/durable-agent-delivery.md
+---
+
+# Task 04: Prepared prompt admission
+
+## Evidence and scope
+
+A focused lifecycle/SQLite reproduction dispatches an already-normalized
+attachment descriptor successfully. The same descriptor normalized during
+materialization fails before dispatch with a durable submission conflict.
+SQL already contains the pre-materialization payload. Agentctl filename
+collision handling and history-context injection can also change wire bytes.
+The other-machine incident had attachments; its exact changed field and build
+remain unknown. No incident payload is required in regression fixtures.
+
+## Implementation
+
+- Lifecycle passes final text and materialized descriptors into its existing
+  admission callback, after preparation and before provider dispatch.
+- Executor and backend adapter carry that typed callback unchanged. Existing
+  cancellation, ownership and acceptance callbacks retain their ordering.
+- Initial launch binds identity before startup and defers immutable SQL admission
+  until final preparation. Direct and queue admission use the same final payload.
+- Preserve source intent, retry identity, payload conflict and live-owner guards.
+  Do not rewrite previously admitted payloads or replay old prompts.
+
+## Validation
+
+Extend lifecycle and orchestrator regressions for normalized metadata, filename
+collisions, context preparation, queue claims, cancellation before admission,
+SQL failure, and immutable retry refusal. Assert SQL/journal payload equality
+and no provider dispatch on failed admission. Focused Go tests use -p 1 with
+GOMAXPROCS=2 and GOMEMLIMIT=2048MiB. Browser E2E and PostgreSQL run only in CI.
+Run documentation validation and scoped lint, then commit, push, open the
+follow-up PR and address CI/review through merge. No delegation or new sessions.
+
+## Results
+
+The temporary pre-fix reproduction failed at the exact reported error, with
+unchanged SQL bytes and no native dispatch. Its normalized control passed.
+Implementation and permanent regressions are in progress.

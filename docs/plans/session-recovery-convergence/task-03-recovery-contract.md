@@ -1,7 +1,7 @@
 ---
 id: "03-recovery-contract"
 title: "Recovery contract and delivery"
-status: in_progress
+status: done
 wave: 3
 depends_on:
   - 02-native-convergence
@@ -46,7 +46,7 @@ Desktop and phone E2E are CI-only; never run locally.
 
 ## Results
 
-PR #4432 is open and running CI. Documentation coverage passes locally after
+PR #4432 merged as bc0d3b9047 after all 55 CI checks passed. Documentation coverage passes locally after
 correcting work-order metadata. Review remediation covers terminal drain ordering,
 complete stream snapshot validation, exact submission stream binding and unknown
 reconstruction outcomes. Focused automatic restart and repeated recovery checks pass. CI-reported
@@ -61,6 +61,6 @@ original execution ID rather than the message-derived identity. Recovery now
 preserves that stored identity, with initial-prompt and changed-attempt controls.
 The same CI run also exposed a substring collision in the sidebar filter test;
 its selection now uses the exact option name.
-Final-head CI and any new review findings remain the delivery gate. No local E2E has run.
+Final-head CI and review-thread disposition passed before merge. No local E2E ran.
 
 [Parent plan](plan.md). [Requirements](../../specs/platform/requirements/durable-restart-reconciliation.md).

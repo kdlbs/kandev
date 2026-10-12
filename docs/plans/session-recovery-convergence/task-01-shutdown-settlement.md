@@ -1,7 +1,7 @@
 ---
 id: "01-shutdown-settlement"
 title: "Shutdown settlement"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: plan.md

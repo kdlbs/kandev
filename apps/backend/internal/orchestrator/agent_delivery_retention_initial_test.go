@@ -92,12 +92,22 @@ func assertRetentionInitialPromptAdmission(t *testing.T, engine, scenario string
 		manager.mu.Lock()
 		calls := append([]promptCall(nil), manager.setExecutionDescriptionCalls...)
 		boundID := manager.boundID
+		admit := manager.initialPromptAdmissionCallback
 		manager.mu.Unlock()
 		observation := retentionInitialPromptObservation{boundID: boundID}
 		if id != executionID || len(calls) != 1 {
 			observation.err = fmt.Errorf("initial provider dispatch owner/prompt: execution=%q descriptions=%d", id, len(calls))
 		} else {
-			observation.prompt = calls[0].Prompt
+			observation.prompt = calls[0].Prompt + "\nprepared runtime context"
+			submissions, readErr := repo.ListAgentDeliverySubmissions(ctx, sessionID)
+			require.NoError(t, readErr)
+			require.Empty(t, submissions, "source intent must not be hashed before runtime preparation")
+			require.NotNil(t, admit)
+			if admissionErr := admit(ctx, observation.prompt, []v1.MessageAttachment{{Type: "resource", AttachmentID: "attachment", Name: "bundle-2.zip", MimeType: "application/zip", SizeBytes: 16, DeliveryMode: "prompt"}}); admissionErr != nil {
+				observation.err = admissionErr
+				observations <- observation
+				return nil
+			}
 			observation.submission, observation.err = repo.GetAgentDeliverySubmission(ctx, expectedID)
 		}
 		observations <- observation
@@ -114,7 +124,7 @@ func assertRetentionInitialPromptAdmission(t *testing.T, engine, scenario string
 	} else {
 		execution, err = service.StartCreatedSession(t.Context(), taskID, sessionID, "profile-1", "/capacity-after-tools", false, false, true, nil, nil)
 	}
-	if scenario == "unresolved_peer" || scenario == "storage_failure" || scenario == "binding_failure" {
+	if scenario == "unresolved_peer" || scenario == "binding_failure" {
 		require.ErrorIs(t, err, ErrSessionRecoveryRequired, "unprepared durable initial prompt must fail before provider dispatch")
 		manager.mu.Lock()
 		starts := len(manager.startAgentProcessCalls)
@@ -130,19 +140,24 @@ func assertRetentionInitialPromptAdmission(t *testing.T, engine, scenario string
 		}
 		submissions, readErr := repo.ListAgentDeliverySubmissions(t.Context(), sessionID)
 		require.NoError(t, readErr)
-		if scenario == "binding_failure" {
-			require.Len(t, submissions, 1)
-			require.Equal(t, expectedID, submissions[0].ID)
-			require.Equal(t, models.DeliverySubmissionDispatching, submissions[0].State)
-		} else {
-			require.Empty(t, submissions)
-		}
+		require.Empty(t, submissions)
 		return
 	}
 	require.NoError(t, err)
 	require.NotNil(t, execution)
 	select {
 	case observed := <-observations:
+		if scenario == "storage_failure" {
+			require.ErrorIs(t, observed.err, ErrSessionRecoveryRequired)
+			require.Nil(t, observed.submission)
+			block, blockErr := service.GetOpenSessionRecoveryBlock(t.Context(), sessionID)
+			require.NoError(t, blockErr)
+			require.Equal(t, "backend_delivery_admission_failed", block.Reason)
+			submissions, readErr := repo.ListAgentDeliverySubmissions(t.Context(), sessionID)
+			require.NoError(t, readErr)
+			require.Empty(t, submissions)
+			return
+		}
 		manager.mu.Lock()
 		starts := len(manager.startAgentProcessCalls)
 		manager.mu.Unlock()
@@ -168,6 +183,8 @@ func assertRetentionInitialPromptAdmission(t *testing.T, engine, scenario string
 		require.NoError(t, json.Unmarshal(observed.submission.Payload, &payload))
 		require.Equal(t, observed.prompt, payload.Text, "SQL payload must describe the actual system-wrapped provider prompt")
 		require.Contains(t, payload.Text, "/capacity-after-tools")
+		require.Contains(t, payload.Text, "prepared runtime context")
+		require.Equal(t, []v1.MessageAttachment{{Type: "resource", AttachmentID: "attachment", Name: "bundle-2.zip", MimeType: "application/zip", SizeBytes: 16, DeliveryMode: "prompt"}}, payload.Attachments)
 		require.Equal(t, journal.SubmissionHash(observed.submission.Payload), observed.submission.PayloadHash)
 		if scenario == "explicit_identity" {
 			require.Equal(t, "explicit-initial-message", observed.boundID)

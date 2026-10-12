@@ -2,9 +2,11 @@
 created: 2026-10-12
 status: in_progress
 requirements:
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003
   - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-001
   - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-002
 system_design:
+  - ../../specs/platform/system-design/durable-agent-delivery.md
   - ../../specs/platform/system-design/session-recovery-convergence.md
 legacy_specs: []
 ---
@@ -34,6 +36,7 @@ No private payloads or live native conversations belong in fixtures.
 1. [Producer settlement](task-01-shutdown-settlement.md).
 2. [Retirement and fence convergence](task-02-native-convergence.md).
 3. [State/boundary contract and delivery](task-03-recovery-contract.md).
+4. [Prepared prompt admission](task-04-prepared-prompt-admission.md).
 
 Each work order is executed here sequentially. Native restoration and retirement
 are never prompt authority. Historical labels, hashes, cursors and independent
@@ -55,6 +58,10 @@ lifecycle and orchestrator race checks pass, including the 49-state-pair matrix,
 legacy shutdown history, prepared checkpoints, missing/stale fences and repeated
 recovery. The four established recovery regressions reported by CI now pass
 after separating stored-record inspection from retired-record proof.
-All eight initial review threads were addressed and resolved. Final-head CI,
-any subsequent review findings and merge remain the delivery gate. No local E2E
-has run.
+All eight review threads were addressed and resolved. All 55 final-head CI
+checks passed, and the PR merged. No local E2E ran. Task 04 below remains open.
+
+PR #4432 merged as bc0d3b9047 after all 55 CI checks passed and all review
+threads were resolved. A subsequent other-machine fresh-task report confirmed
+attachments were present. Task 04 repairs a separately reproduced pre-dispatch
+payload divergence: SQL admission occurred before attachment materialization.

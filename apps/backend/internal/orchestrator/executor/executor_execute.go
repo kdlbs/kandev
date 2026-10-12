@@ -2874,7 +2874,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	mcpMode string,
 	request *LaunchAgentRequest,
 	onExecutionAdmitted func(string),
-	beforeInitialPromptDispatch func(string) error,
+	beforeInitialPromptDispatch func(context.Context, string, string, []v1.MessageAttachment) error,
 	onInitialPromptAccepted func(string),
 	onInitialPromptFailed func(),
 	refuseIfAgentRunning bool,

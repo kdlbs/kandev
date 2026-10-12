@@ -97,7 +97,7 @@ type InitialPromptFailure struct {
 }
 
 type sendPromptCallbacks struct {
-	beforeAdmission      func() error
+	beforeAdmission      func(context.Context, string, []v1.MessageAttachment) error
 	onAdmissionRejected  func(InitialPromptFailure)
 	onDispatched         func()
 	onFailure            func(InitialPromptFailure)
@@ -1638,7 +1638,7 @@ func (sm *SessionManager) SendPromptWithAdmissionCallback(
 	validateStatus bool,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*PromptResult, error) {
 	return sm.SendPromptWithAdmissionCallbackAndSubmissionID(
@@ -1655,7 +1655,7 @@ func (sm *SessionManager) SendPromptWithAdmissionCallbackAndSubmissionID(
 	validateStatus bool,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 ) (*PromptResult, error) {
@@ -1942,7 +1942,7 @@ func (sm *SessionManager) sendPrompt(
 	}
 	flushStreamingStateWithHistory(execution, sm.historyManager, sm.logger)
 	if callbacks.beforeAdmission != nil {
-		if err := callbacks.beforeAdmission(); err != nil {
+		if err := callbacks.beforeAdmission(preparedCtx, effectivePrompt, materializedAttachments); err != nil {
 			sm.reportPromptFailure(execution, 0, err, callbacks.onAdmissionRejected)
 			return nil, err
 		}

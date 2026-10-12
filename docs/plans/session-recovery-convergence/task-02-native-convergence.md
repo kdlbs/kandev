@@ -1,7 +1,7 @@
 ---
 id: "02-native-convergence"
 title: "Native convergence"
-status: in_progress
+status: done
 wave: 2
 depends_on:
   - 01-shutdown-settlement

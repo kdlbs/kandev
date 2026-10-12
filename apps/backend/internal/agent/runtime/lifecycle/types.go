@@ -353,7 +353,7 @@ type AgentExecution struct {
 	// model-switch launches. Lifecycle sends the initial prompt asynchronously,
 	// so they must be captured before startup begins and consumed once that
 	// prompt is accepted or fails before acceptance.
-	initialPromptAdmissionCallback  func() error
+	initialPromptAdmissionCallback  func(context.Context, string, []v1.MessageAttachment) error
 	initialPromptDispatchCallback   func()
 	initialPromptFailureCallback    func()
 	initialPromptDispatchCallbackMu sync.Mutex
@@ -531,7 +531,7 @@ func (e *AgentExecution) setSessionInitialized(value bool) {
 }
 
 func (e *AgentExecution) setInitialPromptDispatchCallbacks(
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) {
 	e.initialPromptDispatchCallbackMu.Lock()
@@ -541,7 +541,7 @@ func (e *AgentExecution) setInitialPromptDispatchCallbacks(
 	e.initialPromptDispatchCallbackMu.Unlock()
 }
 
-func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func() error, func(), func()) {
+func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func(context.Context, string, []v1.MessageAttachment) error, func(), func()) {
 	e.initialPromptDispatchCallbackMu.Lock()
 	beforeAdmission := e.initialPromptAdmissionCallback
 	onDispatched := e.initialPromptDispatchCallback

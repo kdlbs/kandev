@@ -740,8 +740,8 @@ type LaunchOptions struct {
 	// DeliverySubmissionID binds a persisted direct first message to the
 	// initial agentctl prompt.
 	DeliverySubmissionID string
-	// BeforeAgentStart admits durable first-prompt state after the execution
-	// exists and before any harness prompt can be dispatched.
+	// BeforeAgentStart binds the first-prompt identity after the execution
+	// exists. Final payload admission runs after runtime preparation.
 	BeforeAgentStart func(context.Context, string, string) error
 	// OnExecutionAdmitted runs after the launch path has identified and
 	// persisted the execution that will receive this turn, but before its
@@ -753,7 +753,7 @@ type LaunchOptions struct {
 	// closes that ownership when delivery fails before acceptance.
 	OnInitialPromptAccepted     func(executionID string)
 	OnInitialPromptFailed       func()
-	BeforeInitialPromptDispatch func(executionID string) error
+	BeforeInitialPromptDispatch func(context.Context, string, string, []v1.MessageAttachment) error
 	Prompt                      string
 	PriorACPSession             string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID              string
