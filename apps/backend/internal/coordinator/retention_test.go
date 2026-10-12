@@ -42,30 +42,33 @@ func TestActivityRetention_StartRunsPassAndTickerThenStops(t *testing.T) {
 	})
 	tick := make(chan time.Time)
 	stopped := make(chan struct{})
+	passes := make(chan struct{}, 2)
+	svc.afterRetentionPass = func() { passes <- struct{}{} }
 	svc.startActivityRetention(ctx, tick, func() { close(stopped) })
 	deadline := time.After(5 * time.Second)
-	for retentionRowCount(t, store, c.ID) != 0 || svc.retentionRunning.Load() {
-		select {
-		case <-deadline:
-			t.Fatal("startup pass did not delete")
-		case <-time.After(10 * time.Millisecond):
-		}
+	select {
+	case <-passes:
+	case <-deadline:
+		t.Fatal("startup pass did not delete")
 	}
-	for svc.retentionRunning.Load() {
-		select {
-		case <-deadline:
-			t.Fatal("startup pass did not finish")
-		case <-time.After(10 * time.Millisecond):
-		}
+	if retentionRowCount(t, store, c.ID) != 0 {
+		t.Fatal("startup pass did not delete")
+	}
+	if svc.retentionRunning.Load() {
+		t.Fatal("startup pass did not finish")
 	}
 	seedActivity(t, store, c.ID, "o2", ActionMove, ActivityProposed, old)
 	tick <- time.Now()
-	for retentionRowCount(t, store, c.ID) != 0 {
-		select {
-		case <-deadline:
-			t.Fatal("tick pass did not delete")
-		case <-time.After(10 * time.Millisecond):
-		}
+	select {
+	case <-passes:
+	case <-deadline:
+		t.Fatal("tick pass did not delete")
+	}
+	if retentionRowCount(t, store, c.ID) != 0 {
+		t.Fatal("tick pass did not delete")
+	}
+	if svc.retentionRunning.Load() {
+		t.Fatal("tick pass did not finish")
 	}
 	cancel()
 	svc.WaitActivityRetentionStopped()

@@ -88,6 +88,13 @@ and capture record whether or not the flag is on.
 
 ## Current integration verification
 
+Review follow-up replaces the activity-retention startup/tick test's polling
+with accepted-pass completion channels. The notification follows clearing the
+running state; production leaves the hook unset. Both actual deletion checks,
+running-state assertions, owned-worker shutdown and the existing five-second
+deadlock guard remain. Complete updated-head hosted verification is pending;
+no local backend package test or manual application run is claimed.
+
 Source implementation is present in the current-main integration for PR #4044.
 Review remediation and complete exact-head hosted verification are still in
 progress. Historical contributor CI and focused dependency projections do not

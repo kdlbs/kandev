@@ -136,6 +136,10 @@ type Service struct {
 	// completing instead of sleeping.
 	afterSweepPass func()
 
+	// afterRetentionPass lets tests join an accepted pass after its running
+	// state is cleared. Production leaves it nil.
+	afterRetentionPass func()
+
 	// phase2 is true when the control surface is on. It gates every phase-2
 	// behavior of the service; false leaves the phase-1 product unchanged.
 	phase2 bool

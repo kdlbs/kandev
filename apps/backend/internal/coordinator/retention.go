@@ -99,7 +99,12 @@ func (s *Service) runActivityRetention(ctx context.Context) {
 	if !s.retentionRunning.CompareAndSwap(false, true) {
 		return
 	}
-	defer s.retentionRunning.Store(false)
+	defer func() {
+		s.retentionRunning.Store(false)
+		if s.afterRetentionPass != nil {
+			s.afterRetentionPass()
+		}
+	}()
 	cutoff := s.store.now().UTC().Add(-activityRetentionAge)
 	for ctx.Err() == nil {
 		n, err := s.store.DeleteActivityBatch(ctx, cutoff, activityRetentionBatch)
