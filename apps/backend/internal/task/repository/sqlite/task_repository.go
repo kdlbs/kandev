@@ -249,6 +249,19 @@ func (r *Repository) DeleteTaskRepository(ctx context.Context, id string) error 
 // ListTaskRepositoriesByTaskIDs returns all repository links for the given task IDs,
 // grouped by task ID. This eliminates N+1 queries when loading repositories for multiple tasks.
 func (r *Repository) ListTaskRepositoriesByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskRepository, error) {
+	return listTaskRepositoriesByTaskIDs(ctx, r.ro, taskIDs)
+}
+
+type taskRepositoryQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	Rebind(query string) string
+}
+
+func listTaskRepositoriesByTaskIDs(
+	ctx context.Context,
+	queryer taskRepositoryQueryer,
+	taskIDs []string,
+) (map[string][]*models.TaskRepository, error) {
 	result := make(map[string][]*models.TaskRepository, len(taskIDs))
 	if len(taskIDs) == 0 {
 		return result, nil
@@ -270,7 +283,7 @@ func (r *Repository) ListTaskRepositoriesByTaskIDs(ctx context.Context, taskIDs 
 		ORDER BY position ASC, created_at ASC, id ASC
 	`, strings.Join(placeholders, ","))
 
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	rows, err := queryer.QueryContext(ctx, queryer.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}

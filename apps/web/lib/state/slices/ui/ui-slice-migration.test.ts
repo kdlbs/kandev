@@ -9,6 +9,7 @@ function makeSidebarView(id: string, name: string): SidebarView {
     filters: [],
     sort: { key: "state", direction: "asc" },
     group: "none",
+    groupIndent: false,
     collapsedGroups: [],
   };
 }
@@ -19,6 +20,7 @@ function makeSidebarDraft(baseViewId = "view-a"): SidebarViewDraft {
     filters: [],
     sort: { key: "state", direction: "asc" },
     group: "none",
+    groupIndent: false,
     taskRow: {
       detailsEnabled: true,
       detailOrder: ["relative_time", "repository", "pull_request_number"],
@@ -100,5 +102,45 @@ describe("migrate sidebar activity sort", () => {
 
     expect(migrateView(view).sort).toEqual(view.sort);
     expect(migrateSidebarViewDraft(draft).sort).toEqual(draft.sort);
+  });
+});
+
+describe("migrate sidebar sort chains and group indentation", () => {
+  it("defaults legacy indentation to enabled but preserves explicit false", () => {
+    const missing = makeSidebarView("legacy-indent", "Legacy");
+    delete (missing as Partial<SidebarView>).groupIndent;
+    expect(migrateView(missing).groupIndent).toBe(true);
+    expect(migrateView({ ...missing, groupIndent: false }).groupIndent).toBe(false);
+  });
+
+  it("expands the partial implementation's composite preset", () => {
+    const view = makeSidebarView("legacy-running", "Running");
+    view.sort = { key: "runningFirstActivity" as unknown as "state", direction: "asc" };
+
+    expect(migrateView(view).sort).toEqual({
+      key: "running",
+      direction: "desc",
+      thenBy: [{ key: "lastActivityAt", direction: "desc" }],
+    });
+  });
+
+  it("keeps valid stored rules and records an editor warning for invalid ones", () => {
+    const view = makeSidebarView("malformed", "Malformed");
+    view.sort = {
+      key: "running",
+      direction: "desc",
+      thenBy: [
+        { key: "running", direction: "asc" },
+        { key: "title", direction: "asc" },
+      ],
+    };
+
+    const migrated = migrateView(view);
+    expect(migrated.sort).toEqual({
+      key: "running",
+      direction: "desc",
+      thenBy: [{ key: "title", direction: "asc" }],
+    });
+    expect(migrated.sortWarningCount).toBe(1);
   });
 });

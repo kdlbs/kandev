@@ -94,6 +94,15 @@ func TestJSONExtractPath(t *testing.T) {
 	}
 }
 
+func TestJSONTypeIsBoolean(t *testing.T) {
+	if got := JSONTypeIsBoolean(SQLite3, "summary", "has_running_session"); got != "json_type(summary, '$.has_running_session') IN ('true', 'false')" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := JSONTypeIsBoolean(PGX, "summary", "has_running_session"); got != "jsonb_typeof(summary::jsonb->'has_running_session') = 'boolean'" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestJSONExtractIsNotNull(t *testing.T) {
 	got := JSONExtractIsNotNull(SQLite3, "m", "id")
 	if got != "json_extract(m, '$.id') IS NOT NULL" {

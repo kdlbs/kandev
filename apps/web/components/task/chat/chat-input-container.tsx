@@ -13,6 +13,7 @@ import { SessionRecoveryCard } from "./session-recovery-card";
 import { useSessionComposerRecovery } from "./session-recovery-context";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { SessionStoppedBanner } from "./session-stopped-banner";
+import { DeliveryHistoryNotice } from "./delivery-history-notice";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import {
   ChatInputBody,
@@ -51,6 +52,8 @@ export type ChatInputContainerHandle = {
   getValue: () => string;
   getSelectionStart: () => number;
   insertText: (text: string, from: number, to: number) => void;
+  clearAcceptedPayload?: (payload: Pick<ChatSubmitPayload, "message" | "attachments">) => boolean;
+  restoreStagedAttachments?: (attachments: MessageAttachment[]) => void;
   clear: () => void;
   getAttachments: () => MessageAttachment[];
 };
@@ -73,8 +76,11 @@ export type ChatSubmitPayload = {
 type ChatInputContainerProps = {
   onSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId: string | null;
+  detailActive?: boolean;
   taskId: string | null;
   workspaceId?: string | null;
+  workspaceResolutionFailed?: boolean;
+  onRetryWorkspaceResolution?: () => void;
   entityReferencesEnabled?: boolean;
   taskTitle?: string;
   taskDescription: string;
@@ -113,6 +119,8 @@ type ChatInputContainerProps = {
   isFailed?: boolean;
   isCompleted?: boolean;
   sessionErrorMessage?: string;
+  uncertainDelivery?: boolean;
+  deliveryRecoveryPhase?: "reconnecting" | "uncertain";
   needsRecovery?: boolean;
   /** The task-owned launch card renders the failed-start recovery. */
   launchErrorOwned?: boolean;
@@ -163,10 +171,17 @@ function buildContextAreaProps(
   s: ContainerState,
   p: ChatInputContainerProps,
 ): ChatInputContextAreaProps {
+  const hasPendingFileAttachment = s.allItems.some(
+    (item) =>
+      (item.kind === "image" || item.kind === "file-attachment") &&
+      Boolean(item.attachment.file && !item.attachment.attachmentId),
+  );
   return {
     hasContextZone: s.hasContextZone,
     allItems: s.allItems,
     sessionId: p.sessionId,
+    scopeError: Boolean(p.workspaceResolutionFailed) && hasPendingFileAttachment,
+    onRetryScope: p.onRetryWorkspaceResolution,
   };
 }
 
@@ -204,6 +219,7 @@ function buildEditorAreaProps(
     onAddContextFile: p.onAddContextFile,
     onToggleContextFile: p.onToggleContextFile,
     planContextEnabled: p.planContextEnabled,
+    detailActive: p.detailActive ?? true,
     addFiles: s.addFiles,
     fileInputRef: s.fileInputRef,
     showRequestChangesTooltip: p.showRequestChangesTooltip,
@@ -262,18 +278,21 @@ function useChatPromptEnhancement({
   inputRef,
   taskId,
   sessionId,
+  detailActive,
   taskTitle,
   taskDescription,
 }: {
   inputRef: ContainerState["inputRef"];
   taskId: string | null;
   sessionId: string | null;
+  detailActive: boolean;
   taskTitle?: string;
   taskDescription: string;
 }) {
   const isUtilityConfigured = useIsUtilityConfigured();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
     sessionId,
+    detailActive,
     taskTitle,
     taskDescription,
   });
@@ -304,11 +323,13 @@ function useChatInputRecoveryActions(
   taskId: string | null,
   sessionId: string | null,
   errorStamp?: string,
+  onDeliveryReconciled?: () => void,
 ) {
   return useSessionRecoveryActions({
     taskId: taskId ?? "",
     sessionId: sessionId ?? "",
     errorStamp,
+    onDeliveryReconciled,
   });
 }
 
@@ -321,10 +342,12 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const isMoving = props.isMoving ?? false;
     const executorUnavailable = props.executorUnavailable ?? false;
     const isBusyVisual = isStarting || isMoving;
+    const useUncertainDeliveryControls = props.uncertainDelivery && !p.isCompleted;
 
     const s = useChatInputContainer({
       ref,
       sessionId,
+      taskId,
       workspaceId: props.workspaceId,
       isSending,
       isStarting,
@@ -353,12 +376,14 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       taskId,
       sessionId,
       composerRecovery?.model?.stamp,
+      composerRecovery?.onDeliveryReconciled,
     );
 
     const promptEnhancement = useChatPromptEnhancement({
       inputRef: s.inputRef,
       taskId,
       sessionId,
+      detailActive: p.detailActive ?? true,
       taskTitle,
       taskDescription,
     });
@@ -367,12 +392,13 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       shouldHideChatInputForLaunchError({
         isFailed: p.isFailed,
         launchErrorOwned: p.launchErrorOwned,
+        uncertainDelivery: useUncertainDeliveryControls,
       })
     ) {
       return null;
     }
 
-    if (composerRecovery?.model && taskId) {
+    if (composerRecovery?.model && taskId && !useUncertainDeliveryControls) {
       return (
         <>
           <SessionRecoveryCard
@@ -399,6 +425,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         isCompleted: p.isCompleted,
         executorUnavailable,
         launchErrorOwned: p.launchErrorOwned,
+        uncertainDelivery: useUncertainDeliveryControls,
       })
     ) {
       return (
@@ -409,6 +436,8 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           taskId={taskId}
           sessionId={sessionId}
           workspaceId={props.workspaceId}
+          uncertainDelivery={props.uncertainDelivery}
+          deliveryRecoveryPhase={props.deliveryRecoveryPhase}
           recoveryActions={recoveryActions}
           {...buildStoppedBannerProps(props)}
         />
@@ -416,35 +445,38 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     }
 
     return (
-      <ChatInputBody
-        containerRef={s.containerRef}
-        height={s.height}
-        resizeHandleProps={s.resizeHandleProps}
-        isStarting={isBusyVisual}
-        isAgentBusy={isAgentBusy}
-        hasClarification={s.hasClarification}
-        showRequestChangesTooltip={p.showRequestChangesTooltip}
-        hasPendingComments={s.hasPendingComments}
-        planModeEnabled={props.planModeEnabled}
-        showFocusHint={s.showFocusHint}
-        needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
-        addFiles={s.addFiles}
-        contextAreaProps={buildContextAreaProps(s, p)}
-        promptResultRecovery={
-          promptEnhancement.promptDelivery.pendingResult ? (
-            <PromptResultRecovery
-              pendingResult={promptEnhancement.promptDelivery.pendingResult}
-              onApply={promptEnhancement.promptDelivery.applyPending}
-              onCopy={promptEnhancement.promptDelivery.copyPending}
-            />
-          ) : null
-        }
-        editorAreaProps={buildEditorAreaProps(s, p, {
-          onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
-          isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
-          isUtilityConfigured: promptEnhancement.isUtilityConfigured,
-        })}
-      />
+      <>
+        <DeliveryHistoryNotice sessionId={sessionId} />
+        <ChatInputBody
+          containerRef={s.containerRef}
+          height={s.height}
+          resizeHandleProps={s.resizeHandleProps}
+          isStarting={isBusyVisual}
+          isAgentBusy={isAgentBusy}
+          hasClarification={s.hasClarification}
+          showRequestChangesTooltip={p.showRequestChangesTooltip}
+          hasPendingComments={s.hasPendingComments}
+          planModeEnabled={props.planModeEnabled}
+          showFocusHint={s.showFocusHint}
+          needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
+          addFiles={s.addFiles}
+          contextAreaProps={buildContextAreaProps(s, p)}
+          promptResultRecovery={
+            promptEnhancement.promptDelivery.pendingResult ? (
+              <PromptResultRecovery
+                pendingResult={promptEnhancement.promptDelivery.pendingResult}
+                onApply={promptEnhancement.promptDelivery.applyPending}
+                onCopy={promptEnhancement.promptDelivery.copyPending}
+              />
+            ) : null
+          }
+          editorAreaProps={buildEditorAreaProps(s, p, {
+            onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
+            isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
+            isUtilityConfigured: promptEnhancement.isUtilityConfigured,
+          })}
+        />
+      </>
     );
   },
 );

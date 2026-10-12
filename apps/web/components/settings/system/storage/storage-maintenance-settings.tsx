@@ -21,6 +21,7 @@ import {
 } from "./storage-gating";
 import { StorageDiskCapacityCard } from "./storage-disk-capacity-card";
 import { StorageOverviewCard } from "./storage-overview-card";
+import { storageGoCacheResultSummary } from "./storage-go-cache-result";
 import { StoragePolicyCard } from "./storage-policy-card-root";
 import { StorageQuarantineCard } from "./storage-quarantine-card";
 import { StorageRunHistory } from "./storage-run-history";
@@ -280,6 +281,10 @@ function StoragePolicyState({ loading, error }: { loading: boolean; error?: stri
 
 function StoragePrimarySections({
   controller,
+  temporaryEntriesRequest,
+  temporaryCleanupRequest,
+  onViewTemporary,
+  onReviewTemporaryCleanup,
   disabledReason,
   readOnlyReason,
   draft,
@@ -288,6 +293,10 @@ function StoragePrimarySections({
   onRunTemporaryArtifacts,
 }: {
   controller: ReturnType<typeof useStorageMaintenance>;
+  temporaryEntriesRequest: number;
+  temporaryCleanupRequest: number;
+  onViewTemporary: () => void;
+  onReviewTemporaryCleanup: () => void;
   disabledReason?: string;
   readOnlyReason?: string;
   draft: Settings | null;
@@ -298,12 +307,14 @@ function StoragePrimarySections({
   const controlsPending = policyControlsPending(controller.pendingAction, readOnlyReason);
   const policyLoading = controller.loading?.policy ?? !savedSettings;
   const capabilities = controller.policy?.capabilities ?? controller.overview?.capabilities;
+  const latestGoCacheRun = controller.runs.find((run) => storageGoCacheResultSummary(run.result));
   return (
     <div className="min-w-0 space-y-4" data-testid="storage-primary-sections">
       <StorageDiskCapacityCard
         disk={controller.disk}
         loading={controller.loading?.disk}
         error={controller.sectionErrors?.disk}
+        onViewTemporary={onViewTemporary}
       />
       <StorageOverviewCard
         overview={controller.overview}
@@ -311,8 +322,12 @@ function StoragePrimarySections({
         loading={controller.loading?.overview}
         error={controller.sectionErrors?.overview}
         disabledReason={disabledReason}
+        latestGoCacheRun={latestGoCacheRun}
         onRunGoCache={() => void controller.runNow(["go_cache"])}
         onRunTemporaryArtifacts={onRunTemporaryArtifacts}
+        focusTemporaryEntries={temporaryEntriesRequest}
+        focusTemporaryCleanup={temporaryCleanupRequest}
+        onReviewTemporaryArtifacts={onReviewTemporaryCleanup}
       />
       <StoragePolicyState loading={policyLoading} error={controller.sectionErrors?.policy} />
       {draft && savedSettings && capabilities && (
@@ -363,12 +378,20 @@ function StorageQuarantineSection({
 
 function StoragePageSections({
   controller,
+  temporaryEntriesRequest,
+  temporaryCleanupRequest,
+  onViewTemporary,
+  onReviewTemporaryCleanup,
   disabledReason,
   readOnlyReason,
   isAdmin,
   onRunTemporaryArtifacts,
 }: {
   controller: ReturnType<typeof useStorageMaintenance>;
+  temporaryEntriesRequest: number;
+  temporaryCleanupRequest: number;
+  onViewTemporary: () => void;
+  onReviewTemporaryCleanup: () => void;
   disabledReason?: string;
   readOnlyReason?: string;
   isAdmin: boolean;
@@ -379,6 +402,10 @@ function StoragePageSections({
     <>
       <StoragePrimarySections
         controller={controller}
+        temporaryEntriesRequest={temporaryEntriesRequest}
+        temporaryCleanupRequest={temporaryCleanupRequest}
+        onViewTemporary={onViewTemporary}
+        onReviewTemporaryCleanup={onReviewTemporaryCleanup}
         disabledReason={disabledReason}
         readOnlyReason={readOnlyReason}
         draft={draft}
@@ -400,9 +427,9 @@ function StoragePageSections({
   );
 }
 
-export function StorageMaintenanceSettings() {
+export function StorageMaintenanceSettings({ active = true }: { active?: boolean }) {
   const { t } = useTranslation();
-  const controller = useStorageMaintenance();
+  const controller = useStorageMaintenance(active);
   const isAdmin = useIsAdmin();
   // Every mutating storage route is admin-only on the backend, so a member
   // sees the read-only view with each control disabled and explained rather
@@ -410,6 +437,8 @@ export function StorageMaintenanceSettings() {
   const readOnlyReason = isAdmin ? undefined : t("system:storageAdminOnly");
   const actionDisabledReason = storageActionDisabledReason(t, controller.pendingAction, isAdmin);
   const [temporaryCleanupOpen, setTemporaryCleanupOpen] = useState(false);
+  const [temporaryEntriesRequest, setTemporaryEntriesRequest] = useState(0);
+  const [temporaryCleanupRequest, setTemporaryCleanupRequest] = useState(0);
 
   return (
     <div className="min-w-0 space-y-6" data-testid="storage-settings-page">
@@ -419,6 +448,10 @@ export function StorageMaintenanceSettings() {
 
       <StoragePageSections
         controller={controller}
+        temporaryEntriesRequest={temporaryEntriesRequest}
+        temporaryCleanupRequest={temporaryCleanupRequest}
+        onViewTemporary={() => setTemporaryEntriesRequest((current) => current + 1)}
+        onReviewTemporaryCleanup={() => setTemporaryCleanupRequest((current) => current + 1)}
         disabledReason={actionDisabledReason}
         readOnlyReason={readOnlyReason}
         isAdmin={isAdmin}

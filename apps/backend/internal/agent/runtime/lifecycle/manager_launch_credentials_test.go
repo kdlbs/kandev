@@ -36,7 +36,7 @@ func TestConfigureAndStartAgentKeepsLaunchManagedGitCredentials(t *testing.T) {
 		"GIT_CONFIG_VALUE_1":               githubauth.ManagedGitCredentialHelper,
 	})
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
 	for _, key := range []string{

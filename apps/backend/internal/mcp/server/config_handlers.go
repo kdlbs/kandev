@@ -256,6 +256,7 @@ func (s *Server) registerConfigMcpTools() {
 // --- Saved prompt tools ---
 
 func (s *Server) registerConfigPromptTools() {
+	s.registerConfigPromptWriteTools()
 	listTool := mcp.NewToolWithRawSchema(
 		"list_shared_prompts_kandev",
 		"List saved prompts without their content. Each summary includes the prompt name, whether it is built in, and its UTF-8 content size.",
@@ -708,6 +709,39 @@ func (s *Server) moveTaskHandler() server.ToolHandlerFunc {
 		}
 		return s.forwardToBackend(ctx, ws.ActionMCPMoveTask, payload)
 	}
+}
+
+func (s *Server) transferTaskHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		keys := []string{
+			"task_id", "expected_source_workspace_id", "expected_source_workflow_id",
+			"expected_source_workflow_step_id", "expected_task_updated_at",
+			"destination_workspace_id", "destination_workflow_id", "idempotency_key", "preservation_policy",
+		}
+		payload := make(map[string]string, len(keys)+2)
+		for _, key := range keys {
+			value, err := req.RequireString(key)
+			if err != nil {
+				return mcp.NewToolResultError(key + " is required"), nil
+			}
+			payload[key] = value
+		}
+		payload["destination_workflow_step_id"] = req.GetString("destination_workflow_step_id", "")
+		payload["destination_workflow_step_name"] = req.GetString("destination_workflow_step_name", "")
+		if payload["destination_workflow_step_id"] == "" && payload["destination_workflow_step_name"] == "" {
+			s.auditRejectedTransferTool(ctx, stringMapToAny(payload))
+			return mcp.NewToolResultError("a destination workflow step ID or name is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPTransferTask, payload)
+	}
+}
+
+func stringMapToAny(values map[string]string) map[string]any {
+	result := make(map[string]any, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
 }
 
 func (s *Server) deleteTaskHandler() server.ToolHandlerFunc {

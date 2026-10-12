@@ -1,0 +1,18 @@
+{
+  "tabLabel": "실패",
+  "openTask": "작업 열기",
+  "reasonUnknown": "실패 이유가 기록되지 않았습니다.",
+  "unknownFailureTime": "실패 시각 알 수 없음",
+  "originAgentCreated": "에이전트가 생성",
+  "originRoutine": "루틴이 생성",
+  "originOnboarding": "온보딩 중 생성",
+  "originAutomationRun": "자동화 실행",
+  "originAutomationTask": "자동화가 생성",
+  "originGeneric": "자동화됨",
+  "emptyTitle": "{{workspace}}에서 실패한 항목이 없습니다.",
+  "emptyTitleUnnamedWorkspace": "이 워크스페이스에서 실패한 항목이 없습니다.",
+  "emptyDescription": "실패한 작업은 분류를 위해 여기에 표시됩니다. 사이드바 합계에는 포함되지 않습니다.",
+  "errorTitle": "실패한 작업을 불러올 수 없습니다",
+  "errorDescription": "이 워크스페이스에서 실패한 작업을 불러오는 중 문제가 발생했습니다. 자동으로 다시 시도합니다.",
+  "truncatedNotice": "처음 몇 개의 실패한 작업만 표시 중입니다. 더 대기 중입니다."
+}

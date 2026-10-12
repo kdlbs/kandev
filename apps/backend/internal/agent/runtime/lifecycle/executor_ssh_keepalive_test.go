@@ -775,6 +775,7 @@ func TestSSHExecutorBuildInstanceForLostRaceReusesAResumedWinnersProcess(t *test
 		authToken:      "resumed-token",
 		reusingProcess: true,
 		port:           41234,
+		controlPort:    41235,
 		workdirRoot:    "/custom/workdir",
 	}
 	req := &ExecutorCreateRequest{InstanceID: "instance-1", TaskID: "task-1", SessionID: "session-1"}
@@ -786,6 +787,9 @@ func TestSSHExecutorBuildInstanceForLostRaceReusesAResumedWinnersProcess(t *test
 	}
 	if got := instance.Metadata[MetadataKeyReuseExistingProcess]; got != true {
 		t.Fatalf("Metadata[MetadataKeyReuseExistingProcess] = %v, want true — otherwise the loser's startup spawns a second agent subprocess against the winner's already-running remote process", got)
+	}
+	if got := instance.Metadata[MetadataKeySSHRemoteControlPort]; got != "41235" {
+		t.Fatalf("Metadata[MetadataKeySSHRemoteControlPort] = %v, want the winner's authenticated control listener", got)
 	}
 }
 
@@ -996,6 +1000,7 @@ func TestSSHExecutorStopInstanceAbandonsARemoteCommandThatWedgesAfterTheReading(
 	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
 	client := server.dial(t)
 	server.setSilent(true) // the transport wedges; with no watchdog, the reading alone can't know that (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.8's last sentence)
+	stopCalls := 0
 
 	state := &sshSessionState{client: client, remoteDir: "/remote/session", remoteTaskDir: "/remote/task", pid: 4242}
 	exec.sessions["instance-1"] = state
@@ -1004,27 +1009,45 @@ func TestSSHExecutorStopInstanceAbandonsARemoteCommandThatWedgesAfterTheReading(
 		return err
 	}
 	exec.stopRemote = func(ctx context.Context, client *ssh.Client, _ string, _ int) error {
+		stopCalls++
 		_, _, err := runSSHCommand(ctx, client, "true")
 		return err
 	}
 
 	done := make(chan error, 1)
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		done <- exec.StopInstance(context.Background(), &ExecutorInstance{
 			InstanceID: "instance-1",
 			StopReason: StopReasonTaskDeleted,
 		}, false)
 	}()
+	t.Cleanup(func() {
+		select {
+		case <-finished:
+			return
+		default:
+		}
+		// Unblock StopInstance before the timeout helper restores package
+		// globals. A failed assertion must not leave its goroutine running.
+		_ = client.Close()
+		<-finished
+	})
 	select {
 	case err := <-done:
+		<-finished
 		if err != nil {
 			t.Fatalf("StopInstance: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("StopInstance did not return after its remote command wedged — the backstop must have been missed")
 	}
 	if !exec.isTransportLost(state) {
 		t.Fatal("a command abandoned by its own timeout must mark the client transport-lost")
+	}
+	if stopCalls != 0 {
+		t.Fatalf("stop calls = %d, want 0 after the cleanup command loses transport", stopCalls)
 	}
 }
 

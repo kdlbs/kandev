@@ -3,6 +3,7 @@
 import { memo, type ReactNode } from "react";
 import { IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { Button } from "@kandev/ui/button";
 import type { FileAttachmentContextItem } from "@/lib/types/context";
 import { formatBytes } from "@/lib/utils/format-bytes";
@@ -14,6 +15,7 @@ export const FileAttachmentItem = memo(function FileAttachmentItem({
   item: FileAttachmentContextItem;
 }) {
   const { t } = useTranslation("chat");
+  const { isFinePointer } = useResponsiveBreakpoint();
   const status = item.attachment.uploadStatus;
   let statusIndicator: ReactNode = null;
   if (status === "pending" || status === "uploading") {
@@ -35,8 +37,9 @@ export const FileAttachmentItem = memo(function FileAttachmentItem({
             type="button"
             size="icon"
             variant="ghost"
-            className="h-5 w-5"
+            className={isFinePointer ? "h-5 w-5" : "min-h-11 min-w-11"}
             aria-label={t("chat:retryAttachmentUpload")}
+            data-testid="attachment-upload-retry"
             onClick={(event) => {
               event.stopPropagation();
               item.onRetry?.();

@@ -6,16 +6,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/pluginsdk"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type pluginExecutorOperationsFake struct {
@@ -34,6 +43,7 @@ type pluginExecutorOperationsFake struct {
 	inspectErr         error
 	connectionResponse *pluginsdk.ResolveExecutorConnectionResponse
 	connectionErr      error
+	connectionPorts    []int
 	destroyRequest     *pluginsdk.DestroyExecutorEnvironmentRequest
 	destroyResponse    *pluginsdk.DestroyExecutorEnvironmentResponse
 	destroyErr         error
@@ -67,7 +77,8 @@ func (f *pluginExecutorOperationsFake) InspectExecutorEnvironment(_ context.Cont
 	return nil, errors.New("unexpected inspect")
 }
 
-func (f *pluginExecutorOperationsFake) ResolveExecutorConnection(_ context.Context, _ *pluginsdk.ResolveExecutorConnectionRequest) (*pluginsdk.ResolveExecutorConnectionResponse, error) {
+func (f *pluginExecutorOperationsFake) ResolveExecutorConnection(_ context.Context, req *pluginsdk.ResolveExecutorConnectionRequest) (*pluginsdk.ResolveExecutorConnectionResponse, error) {
+	f.connectionPorts = append(f.connectionPorts, int(req.GetRuntimePort()))
 	return f.connectionResponse, f.connectionErr
 }
 
@@ -84,15 +95,28 @@ func TestPluginExecutorLaunch(t *testing.T) {
 			Capabilities: &pluginsdk.ExecutorProviderCapabilities{Terminal: true, Files: true, Git: true},
 		}},
 		connectionResponse: &pluginsdk.ResolveExecutorConnectionResponse{Lease: &pluginsdk.ExecutorConnectionLease{
-			BaseUrl: "https://executor.example", ExpiresAt: "2026-09-26T14:00:00Z", Generation: "generation-1",
+			BaseUrl: "https://executor.example", ExpiresAt: time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano), Generation: "generation-1",
 		}},
 	}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
-	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, _ string) (*agentctl.Client, string, error) {
+	const instancePort = testPluginExecutorInstancePort
+	var instanceRequest agentctl.CreateInstanceRequest
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/instances" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&instanceRequest)
+		_ = json.NewEncoder(w).Encode(agentctl.CreateInstanceResponse{ID: instanceRequest.ID, Port: instancePort})
+	}))
+	defer control.Close()
+	controlURL, _ := url.Parse(control.URL)
+	controlPort, _ := strconv.Atoi(controlURL.Port())
+	runtime.newAgentctlControlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, _ string) (*agentctl.ControlClient, string, error) {
 		if _, err := resolver(ctx); err != nil {
 			return nil, "", err
 		}
-		return agentctl.NewClient("unused", 0, log, agentctl.WithExecutionID(executionID)), "agentctl-token", nil
+		return agentctl.NewControlClient(controlURL.Hostname(), controlPort, log), "agentctl-token", nil
 	}
 	runtime.ready = func(context.Context, *agentctl.Client) error { return nil }
 
@@ -116,6 +140,15 @@ func TestPluginExecutorLaunch(t *testing.T) {
 	if got := operations.provisionRequest.GetProfile().GetSecretValues()["credential"]; got != "launch-secret" {
 		t.Fatalf("transient secret value = %q", got)
 	}
+	if instanceRequest.ID != request.InstanceID || instanceRequest.SessionID != request.SessionID || instanceRequest.WorkspacePath != pluginExecutorWorkspacePath {
+		t.Fatalf("instance request = %#v", instanceRequest)
+	}
+	if want := []int{pluginExecutorRuntimePort, instancePort}; !slices.Equal(operations.connectionPorts, want) {
+		t.Fatalf("leased runtime ports = %v, want control then instance port %v", operations.connectionPorts, want)
+	}
+	if ready, ok := checkpoints[len(checkpoints)-1][MetadataKeyPluginExecutor].(pluginExecutorInventory); !ok || ready.InstancePort != instancePort {
+		t.Fatalf("ready checkpoint = %#v, want instance port %d", checkpoints[len(checkpoints)-1], instancePort)
+	}
 	if len(checkpoints) != 3 {
 		t.Fatalf("checkpoint count = %d, want allocating, provisioned, and ready", len(checkpoints))
 	}
@@ -136,7 +169,7 @@ func TestPluginExecutorPartialLaunch(t *testing.T) {
 	}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 	runtime.SetRecoveryDependencies(nil, &pluginExecutorInventoryStoreFake{})
-	runtime.newAgentctlClient = func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, string, error) {
+	runtime.newAgentctlControlClient = func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string) (*agentctl.ControlClient, string, error) {
 		return nil, "", errors.New("unexpected agentctl client construction")
 	}
 	request := pluginExecutorLaunchRequest(testPluginExecutorLaunchProvider())
@@ -152,7 +185,7 @@ func TestPluginExecutorPartialLaunch(t *testing.T) {
 	if _, err := runtime.CreateInstance(context.Background(), request); err == nil {
 		t.Fatal("CreateInstance() unexpectedly succeeded")
 	}
-	if operations.destroyRequest == nil || operations.destroyRequest.GetCleanupReason() != "launch_failed" {
+	if operations.destroyRequest == nil || operations.destroyRequest.GetCleanupReason() != pluginExecutorCleanupReasonLaunch {
 		t.Fatalf("cleanup request = %#v", operations.destroyRequest)
 	}
 	if !released {
@@ -160,6 +193,88 @@ func TestPluginExecutorPartialLaunch(t *testing.T) {
 	}
 	if !containsString(strings.Join(phases, ","), "absent") {
 		t.Fatalf("checkpoint phases = %v, want final absent", phases)
+	}
+}
+
+func TestPluginExecutorLaunchFailureLogsSanitizedCause(t *testing.T) {
+	provider := testPluginExecutorLaunchProvider()
+	operations := &pluginExecutorOperationsFake{
+		destroyResponse: &pluginsdk.DestroyExecutorEnvironmentResponse{ConfirmedAbsent: true},
+	}
+	core, observed := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap(): %v", err)
+	}
+	store := &pluginExecutorInventoryStoreFake{}
+	runtime := NewPluginRemoteExecutor(operations, log)
+	runtime.SetRecoveryDependencies(nil, store)
+	request := pluginExecutorLaunchRequest(provider)
+	request.CheckpointRuntimeInventory = func(context.Context, map[string]interface{}) error { return nil }
+	request.ReleaseRuntimeInventory = func(context.Context) error { return nil }
+	profile := request.PluginExecutor.Profile
+	inventory := pluginExecutorLaunchInventory(request, profile, request.InstanceID, "digest")
+	cause := errors.New("control server rejected Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz1234567890AB")
+	resource := &pluginsdk.ExecutorResourceDescriptor{ResourceHandle: "resource-1"}
+	operationContext := pluginExecutorRequestContext(context.Background(), request, profile, request.InstanceID, "digest")
+
+	_ = runtime.cleanupAfterPluginExecutorFailure(context.Background(), request, operationContext, inventory, resource, "control_handshake", cause)
+
+	entries := observed.FilterMessage("plugin executor launch gate failed").All()
+	if len(entries) != 1 {
+		t.Fatalf("launch gate log count = %d, want 1", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	logged := fmt.Sprint(fields)
+	if strings.Contains(logged, "ghp_abcdefghijklmnopqrstuvwxyz") {
+		t.Fatalf("launch gate log exposed provider credential: %s", logged)
+	}
+	if got := fields["cause_type"]; got != "*errors.errorString" {
+		t.Fatalf("launch gate cause_type = %v, want a bounded error type", got)
+	}
+}
+
+func TestPluginExecutorConnectionResolverPreservesProviderRejection(t *testing.T) {
+	operations := &pluginExecutorOperationsFake{
+		connectionResponse: &pluginsdk.ResolveExecutorConnectionResponse{
+			Error: &pluginsdk.ExecutorProviderError{Code: "connection_unavailable", MessageId: "provider.connection.unavailable"},
+		},
+	}
+	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
+	resolver := runtime.connectionResolver(&pluginsdk.ExecutorProviderRequestContext{}, &pluginsdk.ExecutorResourceDescriptor{}, pluginExecutorRuntimePort)
+
+	_, err := resolver(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "connection_unavailable") || !strings.Contains(err.Error(), "provider.connection.unavailable") {
+		t.Fatalf("provider rejection error = %v, want its stable code and message ID", err)
+	}
+}
+
+func TestPluginExecutorInstanceCreationRejectsUnusablePorts(t *testing.T) {
+	for _, port := range []int{0, 65536} {
+		t.Run(strconv.Itoa(port), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"id":"execution-plugin-1","port":%d}`, port)
+			}))
+			defer server.Close()
+			parsed, err := url.Parse(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			controlPort, err := strconv.Atoi(parsed.Port())
+			if err != nil {
+				t.Fatal(err)
+			}
+			control := agentctl.NewControlClient(parsed.Hostname(), controlPort, newTestLogger())
+			defer control.Close()
+
+			_, err = createPluginAgentctlInstance(context.Background(), control, &ExecutorCreateRequest{
+				InstanceID: "execution-plugin-1", SessionID: "session-plugin-1",
+			})
+			if err == nil || !strings.Contains(err.Error(), "without a usable port") {
+				t.Fatalf("createPluginAgentctlInstance() error = %v, want unusable port", err)
+			}
+		})
 	}
 }
 

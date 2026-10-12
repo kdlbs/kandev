@@ -71,6 +71,8 @@ func seedQueueSessionIdentity(t *testing.T, repo Repository, identity QueueSessi
 			t.Fatalf("seed queue session authority: %v", err)
 		}
 		typed.tasksTablePresent = true
+		typed.taskSessionsTaskIDPresent = true
+		typed.queuedMessagesTaskIDPresent = true
 	default:
 		t.Fatalf("unsupported queue repository authority fixture %T", repo)
 	}

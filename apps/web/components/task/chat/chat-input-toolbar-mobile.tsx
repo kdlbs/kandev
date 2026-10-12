@@ -31,6 +31,7 @@ type MobileToolbarProps = {
   mcpServers: string[];
   mcpAttachmentHistory?: MCPAttachmentHistory;
   sessionId: string | null;
+  detailActive: boolean;
   taskId: string | null;
   taskTitle?: string;
   onAttachFiles?: () => void;
@@ -44,6 +45,7 @@ type MobileToolbarProps = {
   canCancelAgent?: boolean;
   hasContent: boolean;
   onImplementPlan?: (fresh: boolean) => void;
+  planActionDisabledReason?: string;
   onEnhancePrompt?: () => void;
   isEnhancingPrompt: boolean;
   isUtilityConfigured: boolean;
@@ -217,9 +219,14 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
       />
       {!resetConfirmationOpen ? (
         <div className="flex shrink-0 items-center gap-1">
-          <TokenUsageDisplay sessionId={props.sessionId} />
+          <TokenUsageDisplay sessionId={props.sessionId} detailActive={props.detailActive} />
           {props.planModeEnabled && !props.isAgentBusy && props.onImplementPlan && (
-            <ImplementPlanButton onClick={props.onImplementPlan} presentation={presentation} />
+            <ImplementPlanButton
+              onClick={props.onImplementPlan}
+              presentation={presentation}
+              disabled={Boolean(props.planActionDisabledReason)}
+              disabledReason={props.planActionDisabledReason}
+            />
           )}
           {!props.hideAgentControls && (
             <ChatInputPluginActions

@@ -137,6 +137,8 @@ func TestCreateProfileEndpoint(t *testing.T) {
 		}{
 			{name: "malformed json", body: "{", wantError: "invalid payload"},
 			{name: "blank name", body: `{"name":"   ","model":"m"}`, wantError: "profile name is required"},
+			{name: "invalid MCP selection mode", body: `{"name":"Fast","mcp_selection_mode":"all"}`, wantError: "mcp_selection_mode must be inherit or selected"},
+			{name: "duplicate MCP selection", body: `{"name":"Fast","mcp_selected_servers":["github","github"]}`, wantError: `mcp_selected_servers contains duplicate identifier "github"`},
 			{
 				name:      "unterminated command prefix",
 				body:      `{"name":"Fast","command_prefix":"greywall \""}`,

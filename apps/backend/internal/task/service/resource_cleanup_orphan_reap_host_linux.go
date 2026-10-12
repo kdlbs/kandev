@@ -4,6 +4,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"strconv"
 )
@@ -18,7 +20,16 @@ func defaultOrphanReapHostSnapshotter() orphanReapHostSnapshotter { return linux
 func defaultOrphanReapVerifier() orphanReapVerifier               { return linuxOrphanReapHost{} }
 
 func (linuxOrphanReapHost) Snapshot(ctx context.Context) ([]hostProcess, error) {
-	entries, err := os.ReadDir("/proc")
+	return snapshotLinuxProc(ctx, "/proc", os.ReadFile, readProcCwdAt)
+}
+
+func snapshotLinuxProc(
+	ctx context.Context,
+	procRoot string,
+	readFile func(string) ([]byte, error),
+	readCwd func(string, int) (string, error),
+) ([]hostProcess, error) {
+	entries, err := os.ReadDir(procRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -31,17 +42,22 @@ func (linuxOrphanReapHost) Snapshot(ctx context.Context) ([]hostProcess, error) 
 		if err != nil {
 			continue
 		}
-		ppid, command, statErr := readProcStat(pid)
+		ppid, command, statErr := readProcStatAt(procRoot, pid, readFile)
 		if statErr != nil {
-			// Gone since the directory listing, or unreadable: no ancestry
-			// or cwd is obtainable at all, so this pid can be neither a
-			// candidate nor an ancestry hop.
+			if errors.Is(statErr, fs.ErrNotExist) {
+				// The process exited after /proc was enumerated, so it cannot
+				// contribute a candidate or an ancestry hop to this snapshot.
+				continue
+			}
+			// Preserve the unknown ancestry hop so descendants fail their
+			// ownership check instead of treating this pid as a chain end.
+			procs = append(procs, hostProcess{PID: pid, PPID: orphanReapUnresolvedPPID})
 			continue
 		}
 		// A cwd read failure still leaves ancestry (ppid) usable for the
 		// ownership walk; leave Cwd empty so this pid never becomes a
 		// candidate (attributeOrphanReapCandidates skips empty-cwd entries).
-		cwd, _ := readProcCwd(pid)
+		cwd, _ := readCwd(procRoot, pid)
 		procs = append(procs, hostProcess{PID: pid, PPID: ppid, Cwd: cwd, Command: command})
 	}
 	return procs, nil
@@ -52,7 +68,11 @@ func (linuxOrphanReapHost) VerifyCwd(ctx context.Context, pid int) (string, erro
 }
 
 func readProcCwd(pid int) (string, error) {
-	target, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/cwd")
+	return readProcCwdAt("/proc", pid)
+}
+
+func readProcCwdAt(procRoot string, pid int) (string, error) {
+	target, err := os.Readlink(procRoot + "/" + strconv.Itoa(pid) + "/cwd")
 	if err != nil {
 		return "", err
 	}
@@ -61,7 +81,11 @@ func readProcCwd(pid int) (string, error) {
 
 // readProcStat reads /proc/<pid>/stat and parses it via parseProcStatLine.
 func readProcStat(pid int) (ppid int, command string, err error) {
-	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	return readProcStatAt("/proc", pid, os.ReadFile)
+}
+
+func readProcStatAt(procRoot string, pid int, readFile func(string) ([]byte, error)) (ppid int, command string, err error) {
+	data, err := readFile(procRoot + "/" + strconv.Itoa(pid) + "/stat")
 	if err != nil {
 		return 0, "", err
 	}

@@ -91,8 +91,22 @@ vi.mock("./context-popover", () => ({
 }));
 
 vi.mock("./implement-plan-button", () => ({
-  ImplementPlanButton: ({ presentation = "desktop" }: { presentation?: "desktop" | "mobile" }) => (
-    <button type="button" data-testid="mock-implement-plan-button" data-presentation={presentation}>
+  ImplementPlanButton: ({
+    presentation = "desktop",
+    disabled,
+    disabledReason,
+  }: {
+    presentation?: "desktop" | "mobile";
+    disabled?: boolean;
+    disabledReason?: string;
+  }) => (
+    <button
+      type="button"
+      data-testid="mock-implement-plan-button"
+      data-presentation={presentation}
+      disabled={disabled}
+      title={disabledReason}
+    >
       Implement plan
     </button>
   ),
@@ -500,15 +514,6 @@ describe("ChatInputToolbar responsive wrapper", () => {
     }
   });
 
-  it("passes the touch presentation to plan implementation on tablets", () => {
-    responsiveMock.breakpoint = "tablet";
-    renderFullToolbar({ planModeEnabled: true, onImplementPlan: () => {} });
-
-    expect(
-      screen.getByTestId("mock-implement-plan-button").getAttribute(PRESENTATION_ATTRIBUTE),
-    ).toBe("mobile");
-  });
-
   it("routes mobile breakpoints to the compact toolbar without a duplicate sessions control", () => {
     responsiveMock.breakpoint = "mobile";
     renderFullToolbar();
@@ -567,6 +572,28 @@ describe("ChatInputToolbar responsive wrapper", () => {
         screen.getByTestId("reset-context-button").getAttribute("data-reset-presentation"),
       ).toBe("desktop");
       expect(screen.queryByTestId(MOBILE_TOOLBAR_TEST_ID)).toBeNull();
+    },
+  );
+});
+
+describe("ChatInputToolbar plan attachment gate", () => {
+  // @covers AC-TASKS-PROMPT-ATTACHMENTS-001.17
+  it.each(["desktop", "tablet", "mobile"] as const)(
+    "preserves %s presentation and disables plan implementation for incomplete attachments",
+    (breakpoint) => {
+      responsiveMock.breakpoint = breakpoint;
+      renderFullToolbar({
+        planModeEnabled: true,
+        onImplementPlan: () => {},
+        planActionDisabledReason: "Finish uploading attachments before sending.",
+      });
+
+      const implement = screen.getByTestId("mock-implement-plan-button") as HTMLButtonElement;
+      expect(implement.getAttribute(PRESENTATION_ATTRIBUTE)).toBe(
+        breakpoint === "desktop" ? "desktop" : "mobile",
+      );
+      expect(implement.disabled).toBe(true);
+      expect(implement.title).toBe("Finish uploading attachments before sending.");
     },
   );
 });

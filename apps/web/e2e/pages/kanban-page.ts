@@ -32,8 +32,9 @@ export class KanbanPage {
     this.viewToggleKanban = page.getByTestId("view-toggle-kanban");
   }
 
-  async goto() {
-    await this.page.goto("/");
+  async goto(workflowId?: string) {
+    const path = workflowId ? `/?workflowId=${encodeURIComponent(workflowId)}` : "/";
+    await this.page.goto(path);
     await this.board.waitFor({ state: "visible" });
   }
 

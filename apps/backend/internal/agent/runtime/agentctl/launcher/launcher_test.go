@@ -52,7 +52,7 @@ func TestLauncherUnexpectedExitCallbackRunsForCleanAndFailedExit(t *testing.T) {
 	}
 }
 
-func TestLauncherUnexpectedExitCallbackSkipsIntentionalStop(t *testing.T) {
+func TestRuntimeShutdownSuppressesRecovery(t *testing.T) {
 	if called := startLauncherMonitorTest(t, 7, true); called {
 		t.Fatal("unexpected-exit callback ran during intentional stop")
 	}

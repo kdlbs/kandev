@@ -1,18 +1,21 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupTaskStorage,
   clearGlobalSidebarWidth,
-  getGlobalSidebarWidth,
+  getEnvLayout,
   getEnvLayoutProfile,
+  getGlobalSidebarWidth,
   getManualRightWidth,
   getOpenFileTabs,
   getStoredAutoScrollEnabled,
   getStoredAutoScrollTop,
+  getChatDraftAttachments,
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
   markPRPanelOffered,
   restoreAttachmentPreview,
   removeEnvLayoutProfile,
+  setEnvLayout,
   setGlobalSidebarWidth,
   setEnvLayoutProfile,
   setManualRightWidth,
@@ -20,6 +23,7 @@ import {
   setOpenFileTabs,
   setStoredAutoScrollEnabled,
   setStoredAutoScrollTop,
+  setChatDraftAttachments,
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
   wasPRPanelOffered,
@@ -197,6 +201,27 @@ describe("manual right width storage", () => {
   });
 });
 
+describe("dockview environment layout storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("reports whether an environment layout write reached session storage", () => {
+    const layout = { panels: {} };
+    expect(setEnvLayout("env-a", layout)).toBe(true);
+    expect(getEnvLayout("env-a")).toEqual(layout);
+
+    const setItem = vi.spyOn(window.sessionStorage, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    try {
+      expect(setEnvLayout("env-b", layout)).toBe(false);
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+});
+
 describe("dockview layout profile storage", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -336,6 +361,27 @@ describe("open file tabs storage", () => {
 });
 
 describe("chat draft attachment storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("does not persist file bytes while an upload is incomplete", () => {
+    const file = new File(["pending"], "pending.txt", { type: "text/plain" });
+    setChatDraftAttachments("session-a", [
+      {
+        id: "pending-file",
+        file,
+        data: "cGVuZGluZw==",
+        mimeType: "text/plain",
+        fileName: file.name,
+        size: file.size,
+        isImage: false,
+      },
+    ]);
+
+    expect(getChatDraftAttachments("session-a")).toEqual([]);
+  });
+
   it("normalizes invalid restored image delivery modes to prompt", () => {
     const restored = restoreAttachmentPreview({
       id: "att-1",

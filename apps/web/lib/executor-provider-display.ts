@@ -3,7 +3,6 @@ import type { ExecutorProfile, ExecutorProvider } from "@/lib/types/http";
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 const UNAVAILABLE_CAUSE_KEYS: Record<string, string> = {
-  feature_disabled: "executors:providerFeatureDisabled",
   plugin_disabled: "executors:providerPluginDisabled",
   plugin_unavailable: "executors:providerPluginUnavailable",
 };

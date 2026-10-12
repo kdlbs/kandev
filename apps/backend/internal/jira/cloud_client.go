@@ -431,6 +431,29 @@ func (c *CloudClient) DoTransition(ctx context.Context, ticketKey, transitionID 
 	return c.do(ctx, http.MethodPost, path, body, nil)
 }
 
+// AddComment adds a plain-text comment to one issue. Cloud REST v3 requires
+// Atlassian Document Format; Server/Data Center REST v2 accepts a string body.
+func (c *CloudClient) AddComment(ctx context.Context, ticketKey, text string) (string, error) {
+	body := map[string]interface{}{"body": text}
+	if strings.HasSuffix(c.apiBase, "/3") {
+		body["body"] = map[string]interface{}{
+			"type": "doc", "version": 1,
+			"content": []interface{}{map[string]interface{}{
+				"type":    "paragraph",
+				"content": []interface{}{map[string]interface{}{"type": "text", "text": text}},
+			}},
+		}
+	}
+	var response struct {
+		ID string `json:"id"`
+	}
+	path := c.apiBase + "/issue/" + url.PathEscape(ticketKey) + "/comment"
+	if err := c.do(ctx, http.MethodPost, path, body, &response); err != nil {
+		return "", err
+	}
+	return response.ID, nil
+}
+
 // ListProjects returns up to 200 projects (the Jira max per page for this
 // endpoint). Fine for the settings dropdown; pagination can be added later if
 // it ever becomes a problem.

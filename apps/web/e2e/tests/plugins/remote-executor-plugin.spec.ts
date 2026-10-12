@@ -1,9 +1,8 @@
-import fs from "node:fs";
-import path from "node:path";
 import { expect, test } from "../../fixtures/test-base";
 import { seedPluginExecutorStatusTask } from "../../helpers/plugin-executor-status";
 import { uninstallFixturePlugin } from "../../helpers/plugin-fixture";
 import { SessionPage } from "../../pages/session-page";
+import { KanbanPage } from "../../pages/kanban-page";
 
 test("packaged provider appears in a live task environment disclosure", async ({
   apiClient,
@@ -12,7 +11,6 @@ test("packaged provider appears in a live task environment disclosure", async ({
   testPage,
 }) => {
   test.setTimeout(120_000);
-  const releaseFeature = await backend.useEnv({ KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS: "true" });
   let taskId = "";
   try {
     const seeded = await seedPluginExecutorStatusTask(testPage, {
@@ -39,40 +37,27 @@ test("packaged provider appears in a live task environment disclosure", async ({
   } finally {
     if (taskId) await apiClient.deleteTask(taskId).catch(() => undefined);
     await uninstallFixturePlugin(apiClient);
-    await releaseFeature();
   }
 });
 
-test("feature-off provider admission disables profile creation without provisioning", async ({
+test("built-in executor selection works when no provider plugin is installed", async ({
   apiClient,
-  backend,
   testPage,
 }) => {
-  test.setTimeout(120_000);
-  const releaseFeature = await backend.useEnv({ KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS: "false" });
-  try {
-    await testPage.goto("/settings/plugins");
-    const { installFixtureExecutorProvider } =
-      await import("../../helpers/plugin-executor-profile");
-    const executor = await installFixtureExecutorProvider(testPage, apiClient);
-    await testPage.goto("/settings/executors");
+  const { executors } = await apiClient.listExecutors();
+  expect(executors.some((executor) => executor.provider)).toBe(false);
+  const worktreeProfile = executors.find((executor) => executor.type === "worktree")?.profiles?.[0];
+  expect(worktreeProfile, "the built-in worktree profile must remain available").toBeDefined();
 
-    const providerCard = testPage.getByTestId(`executor-profiles-card-${executor.id}`);
-    await expect(providerCard).toBeVisible();
-    await expect(providerCard.getByRole("button", { name: "Add" })).toBeDisabled();
-    await expect(providerCard.getByRole("status")).toBeVisible();
-
-    const inventoryPath = path.join(
-      backend.tmpDir,
-      ".kandev",
-      "plugins",
-      "kandev-plugin-e2e",
-      "data",
-      "executor-resources.json",
-    );
-    expect(fs.existsSync(inventoryPath)).toBe(false);
-  } finally {
-    await uninstallFixturePlugin(apiClient);
-    await releaseFeature();
-  }
+  const kanban = new KanbanPage(testPage);
+  await kanban.goto();
+  await kanban.createTaskButton.first().click();
+  const dialog = testPage.getByTestId("create-task-dialog");
+  const selector = dialog.getByTestId("executor-profile-selector");
+  await expect(selector).toBeVisible();
+  await selector.click();
+  const option = testPage.getByRole("option", { name: worktreeProfile!.name });
+  await expect(option).toBeVisible();
+  await option.click();
+  await expect(selector).toContainText(worktreeProfile!.name);
 });

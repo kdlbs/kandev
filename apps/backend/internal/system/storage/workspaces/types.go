@@ -19,6 +19,7 @@ var (
 	ErrInventoryIncomplete = errors.New("workspace inventory is incomplete")
 	ErrRestoreConflict     = errors.New("workspace restore destination already exists")
 	ErrDeleteConfirmation  = errors.New("workspace permanent deletion requires DELETE confirmation")
+	ErrActiveWorktree      = errors.New("workspace contains an active Git worktree")
 )
 
 type OwnershipMarker struct {

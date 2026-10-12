@@ -80,6 +80,7 @@ vi.mock("@/lib/routing/client-router", () => ({
 
 vi.mock("@/hooks/use-in-office", () => ({
   useInOffice: () => true,
+  useOfficeModeState: () => "office",
 }));
 
 vi.mock("@/hooks/use-office-refetch", () => ({

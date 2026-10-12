@@ -92,14 +92,18 @@ func (lease *activeLSPLeaseForTest) StopLSPLeasesForExecution(executionID string
 
 // TestClassifyIdleReclaimDisposition is the single decision-matrix test for
 // the idle-reclaim predicate. Each case names the (state, runtime-live,
-// active-turn) tuple the primitive sees and the disposition it must return;
-// fail-closed means every uncertain input is a Skipped* disposition.
+// active-turn, resume-token, row-status) tuple the primitive sees and the
+// disposition it must return; a case holds a resume token unless
+// noResumeToken is set. Fail-closed means every uncertain input is a
+// Skipped* disposition.
 func TestClassifyIdleReclaimDisposition(t *testing.T) {
 	tests := []struct {
 		name          string
 		state         models.TaskSessionState
 		agentRunning  bool
 		hasActiveTurn bool
+		noResumeToken bool
+		rowStatus     string
 		want          idleReclaimDisposition
 	}{
 		{
@@ -158,10 +162,53 @@ func TestClassifyIdleReclaimDisposition(t *testing.T) {
 			hasActiveTurn: true,
 			want:          idleReclaimDispositionSkippedTurn,
 		},
+		{
+			name:          "prepared waiting_for_input row without resume token is never reclaimed",
+			state:         models.TaskSessionStateWaitingForInput,
+			noResumeToken: true,
+			rowStatus:     models.ExecutorRunningStatusPrepared,
+			want:          idleReclaimDispositionSkippedNoToken,
+		},
+		{
+			name:          "ready idle office row without resume token is never reclaimed",
+			state:         models.TaskSessionStateIdle,
+			noResumeToken: true,
+			rowStatus:     models.ExecutorRunningStatusReady,
+			want:          idleReclaimDispositionSkippedNoToken,
+		},
+		{
+			name:          "running waiting_for_input row without resume token reclaims",
+			state:         models.TaskSessionStateWaitingForInput,
+			noResumeToken: true,
+			rowStatus:     models.ExecutorRunningStatusRunning,
+			want:          idleReclaimDispositionReclaimed,
+		},
+		{
+			name:          "completed session without resume token reclaims",
+			state:         models.TaskSessionStateCompleted,
+			noResumeToken: true,
+			rowStatus:     models.ExecutorRunningStatusReady,
+			want:          idleReclaimDispositionReclaimed,
+		},
+		{
+			name:          "live runtime is reported before a missing resume token",
+			state:         models.TaskSessionStateWaitingForInput,
+			agentRunning:  true,
+			noResumeToken: true,
+			rowStatus:     models.ExecutorRunningStatusPrepared,
+			want:          idleReclaimDispositionSkippedLive,
+		},
+		{
+			name:          "running session without resume token is skipped by state",
+			state:         models.TaskSessionStateRunning,
+			noResumeToken: true,
+			rowStatus:     models.ExecutorRunningStatusRunning,
+			want:          idleReclaimDispositionSkippedState,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := classifyIdleReclaim(tt.state, tt.agentRunning, tt.hasActiveTurn)
+			got := classifyIdleReclaim(tt.state, tt.agentRunning, tt.hasActiveTurn, !tt.noResumeToken, tt.rowStatus)
 			if got != tt.want {
 				t.Fatalf("disposition = %q, want %q", got, tt.want)
 			}

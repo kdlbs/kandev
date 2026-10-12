@@ -3,8 +3,10 @@ import { test, expect } from "../../fixtures/test-base";
 import { SETTINGS_TAKEOVER_TESTID, setSettingsMenuMode } from "../../helpers/settings-menu";
 
 function sidebarGitHubRow(testPage: Page) {
-  const sidebar = testPage.getByTestId("app-sidebar");
-  return sidebar.locator('a[href="/github"]:not([data-testid="integration-header-shortcut"])');
+  return testPage
+    .getByTestId("app-sidebar")
+    .locator("#sidebar-section-integrations")
+    .getByRole("link", { name: "GitHub", exact: true });
 }
 
 async function expandIntegrationsSection(testPage: Page) {

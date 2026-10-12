@@ -100,3 +100,18 @@ func reviewStageTypeForRole(role string) string {
 func isReviewOrApprovalStage(stageType string) bool {
 	return stageType == stageTypeReview || stageType == stageTypeApproval
 }
+
+// resolveGateCommentStage returns the stage type for a task_comment run
+// whose payload carries stage_type — i.e. a gate comment fan-out wake.
+// workflow_step_id names the step the run was queued at, not the task's
+// current step, so a card that moved after the wake was queued still gets
+// the stage of the step it was queued at.
+func (s *Service) resolveGateCommentStage(ctx context.Context, parsed map[string]string) string {
+	stepID := parsed["workflow_step_id"]
+	if stepID != "" {
+		if stageType, err := s.repo.GetWorkflowStepStageType(ctx, stepID); err == nil && stageType != "" {
+			return stageType
+		}
+	}
+	return parsed["stage_type"]
+}

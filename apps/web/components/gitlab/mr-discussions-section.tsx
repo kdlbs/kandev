@@ -56,9 +56,12 @@ function Discussion({
   const { t } = useTranslation();
   const [reply, setReply] = useState("");
   const submitReply = async () => {
-    const body = reply.trim();
+    const submittedReply = reply;
+    const body = submittedReply.trim();
     if (!body) return;
-    if (await onReply(discussion.id, body)) setReply("");
+    if (await onReply(discussion.id, body)) {
+      setReply((current) => (current === submittedReply ? "" : current));
+    }
   };
   const location = discussionLocation(discussion);
 

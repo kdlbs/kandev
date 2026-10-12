@@ -195,6 +195,11 @@ func TestVerifyRemoteAgentctlIdentity(t *testing.T) {
 		if err := client.Close(); err != nil {
 			t.Fatalf("close client: %v", err)
 		}
+		// Close returns before the SSH mux finishes shutting down.
+		// Probe only after the connection is fully closed.
+		if err := client.Wait(); err == nil {
+			t.Fatal("closed SSH connection completed without an error")
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()

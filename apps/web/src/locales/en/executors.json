@@ -331,7 +331,6 @@
   "profileNameIsRequired": "Profile name is required.",
   "profileNotFound": "Profile not found",
   "profileSaved": "Profile saved",
-  "providerFeatureDisabled": "Remote executor plugins are currently disabled.",
   "providerFieldClear": "Clear",
   "providerFieldClearPending": "{{field}} will be cleared when you save.",
   "providerFieldConfigured": "{{field}} is configured.",

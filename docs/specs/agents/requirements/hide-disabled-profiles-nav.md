@@ -37,14 +37,14 @@ profiles.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-HIDE-DISABLED-PROFILES-NAV-001.1:** The agents settings page (`/settings/agents`) SHALL gain one new setting, **"Hide disabled agent profiles from left panel navigation"**, off by default. It is a single, install-wide preference — not per profile.
+- **AC-AGENTS-HIDE-DISABLED-PROFILES-NAV-001.1:** The agents settings page (`/settings/agents`) SHALL provide an Options button immediately before Terminal in the Installed Agents toolbar. It opens the **"Hide disabled profiles from navigation"** preference, off by default. This is one preference shared across agent profiles within the current browser profile.
 - **AC-AGENTS-HIDE-DISABLED-PROFILES-NAV-001.2:** When that setting is **off** (default), a disabled profile MUST still appear in the Settings left panel's Agents tree exactly as it does today, with its "Disabled" badge — only the profile's own `enabled` state and reachability gate selection surfaces, not nav visibility.
 - **AC-AGENTS-HIDE-DISABLED-PROFILES-NAV-001.3:** When that setting is **on**, a profile whose `enabled` is `false` MUST be hidden from the Settings left panel's Agents tree. An enabled profile, and a legacy profile whose `enabled` field is absent (treated as enabled), are unaffected and stay listed.
 - **AC-AGENTS-HIDE-DISABLED-PROFILES-NAV-001.4:** The setting SHALL NOT change any other behavior gated on a profile's `enabled` state (task/session/session-handoff/quick-chat pickers, the "no compatible agent" empty states, pre-selection defaults). Those keep gating on `enabled !== false` exactly as they do today.
 - **AC-AGENTS-HIDE-DISABLED-PROFILES-NAV-001.5:** The setting SHALL NOT hide anything from a settings *page* itself: the `/settings/agents` page keeps listing every profile, and the profile editor page (which owns the enable/disable toggle after the PageShell restructure) stays directly reachable by URL even while its left-panel nav entry is hidden.
 - **AC-AGENTS-HIDE-DISABLED-PROFILES-NAV-001.6:** Toggling the setting SHALL take effect immediately (no reload, no save bar) and SHALL sync across browser tabs.
 - **AC-AGENTS-HIDE-DISABLED-PROFILES-NAV-001.7:** **GIVEN** a profile with `enabled: false` and the "hide disabled" setting off (default), **WHEN** the user opens the Settings left panel's Agents tree, **THEN** the profile is listed with its "Disabled" badge.
-- **AC-AGENTS-HIDE-DISABLED-PROFILES-NAV-001.8:** **GIVEN** a profile with `enabled: false`, **WHEN** the user turns on "Hide disabled agent profiles from left panel navigation" on `/settings/agents`, **THEN** the profile's entry disappears from the Settings left panel's Agents tree immediately (no reload required), while enabled profiles and legacy profiles without the flag stay listed.
+- **AC-AGENTS-HIDE-DISABLED-PROFILES-NAV-001.8:** **GIVEN** a profile with `enabled: false`, **WHEN** the user turns on "Hide disabled profiles from navigation" in Agent options on `/settings/agents`, **THEN** the profile's entry disappears from the Settings left panel's Agents tree immediately (no reload required), while enabled profiles and legacy profiles without the flag stay listed.
 
 ## Migrated source detail
 
@@ -64,9 +64,11 @@ setting for agent profiles.
 
 ## What
 
-- The agents settings page (`/settings/agents`) SHALL gain one new setting,
-  **"Hide disabled agent profiles from left panel navigation"**, off by
-  default. It is a single, install-wide preference — not per profile.
+- The agents settings page (`/settings/agents`) SHALL provide an Options button
+  immediately before Terminal in the Installed Agents toolbar. It opens the
+  **"Hide disabled profiles from navigation"** preference, off by default.
+  This is one preference shared across agent profiles within the current
+  browser profile.
 - When that setting is **off** (default), a disabled profile MUST still
   appear in the Settings left panel's Agents tree exactly as it does today,
   with its "Disabled" badge — only the profile's own `enabled` state and
@@ -95,7 +97,7 @@ browser's `localStorage`, matching
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `kandev:agents:hideDisabledInNav:v1` | boolean | `false` | Not per-profile; one flag for the whole nav-filtering behavior. |
+| `kandev:agents:hideDisabledInNav:v1` | boolean | `false` | Shared across agent profiles within the current browser profile. |
 
 The per-profile `enabled` state is the existing
 `agent_profiles.enabled` column (SQLite), exposed on every profile in the
@@ -112,7 +114,7 @@ Frontend primitives (new):
 
 - `hooks/use-local-storage-boolean.ts` — the shared
   `useLocalStorageBoolean(storageKey, syncEvent, defaultValue = false)`
-  primitive: install-wide, `localStorage`-backed boolean with the
+  primitive: browser-profile-scoped, `localStorage`-backed boolean with the
   `useSyncExternalStore` + `storage`-event + custom-event-broadcast shape
   both nav-visibility toggles use. Absent keys (and read failures) resolve
   to `defaultValue` on both the client snapshot and the server snapshot, so
@@ -127,16 +129,17 @@ Frontend primitives (new):
   browser `storage` event. The integrations sibling
   (`useHideDisabledIntegrationsInNav`) delegates to the same primitive with
   its own key/event, so the two features cannot drift in mechanism.
+- `app/settings/agents/agent-options-dialog.tsx` — the route-local
+  `AgentOptionsDialog` owns the Options trigger and responsive presentation.
+  `InstalledAgentsHeader` renders it immediately before Terminal; it uses a
+  Dialog on desktop and a Drawer below 768px.
 - `app/settings/agents/hide-disabled-agent-profiles-setting.tsx` — the
-  settings-page row (label + description + `<Switch
-  id="hide-disabled-agent-profiles-in-nav">`), rendered on the agents
-  settings page directly below the header separator and above the
-  "Installed Agents" list (the restructured page's profile list lives inside
-  the installed-agent cards), so the setting appears before the first agent
-  profile on the page.
-  The switch saves immediately on toggle (the agents page has no
-  settings-floating-save bar; its profile enabled toggles are
-  immediate-save, and this setting follows that page convention).
+  labelled preference switch and helper text rendered inside Agent options.
+  The switch saves immediately on toggle, matching the agents page's
+  immediate-save profile controls.
+
+The paired [Agent page options system design](../system-design/agent-page-options.md)
+owns the overlay composition and component boundaries.
 
 Modified:
 
@@ -155,7 +158,7 @@ Modified:
 
 ## Permissions
 
-No change. The setting is a per-browser-profile, install-wide UI preference
+No change. The setting is a per-browser-profile UI preference
 with no authorization dimension (same as the integrations nav-hiding
 setting).
 
@@ -184,7 +187,7 @@ nav-setting convention. It survives a browser restart but not a
   off (default), **WHEN** the user opens the Settings left panel's Agents
   tree, **THEN** the profile is listed with its "Disabled" badge.
 - **GIVEN** a profile with `enabled: false`, **WHEN** the user turns on
-  "Hide disabled agent profiles from left panel navigation" on
+  "Hide disabled profiles from navigation" in Agent options on
   `/settings/agents`, **THEN** the profile's entry disappears from the
   Settings left panel's Agents tree immediately (no reload required), while
   enabled profiles and legacy profiles without the flag stay listed.

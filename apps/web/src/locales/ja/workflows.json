@@ -313,6 +313,7 @@
   "workflowName": "ワークフロー名",
   "workflowsReadOnlyImprove": "このワークスペースのワークフローは Improve Kandev によって管理されており、変更できません。",
   "workflowNameIsRequired": "ワークフロー名は必須です",
+  "workflowPreviewStatusAnnouncement": "{{workflowName}}：{{status}}",
   "workflowNamePlaceholder": "マイプロジェクトワークフロー",
   "workflowMutationInProgress": "現在のワークフロー変更が終わるまで待つ。",
   "workflows": "ワークフロー",

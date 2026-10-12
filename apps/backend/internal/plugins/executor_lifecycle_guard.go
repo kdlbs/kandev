@@ -33,8 +33,7 @@ type retainedExecutorProviderInventory struct {
 }
 
 // SetExecutorProviderInventoryReader wires the durable runtime inventory used
-// by administrative plugin lifecycle guards. It remains available when the
-// provider feature gate is off because these checks must protect retained
+// by administrative plugin lifecycle guards. These checks protect retained
 // resources without dispatching plugin RPCs.
 func (s *Service) SetExecutorProviderInventoryReader(reader ExecutorProviderInventoryReader) {
 	s.mu.Lock()

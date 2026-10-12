@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { setChatDraftContent } from "@/lib/local-storage";
 import { moveTask } from "@/lib/api/domains/kanban-api";
 import { getTaskMoveErrorDetail } from "@/components/task/task-move-error-message";
 import { resolveLatestTaskProjection } from "@/components/task/task-page-content-helpers";
@@ -169,6 +168,10 @@ export function collectImplementPlanInput(
   };
 }
 
+export function planAttachmentsAreReady(attachments: MessageAttachment[]): boolean {
+  return attachments.every((attachment) => Boolean(attachment.attachment_id));
+}
+
 export async function markPlanImplementationStartedBestEffort(
   taskId: string,
   sessionId: string,
@@ -201,10 +204,13 @@ function useImplementPlan(
     const client = getWebSocketClient();
     if (!client) return false;
 
+    const chatInput = chatInputRef?.current;
+    const clearAcceptedPayload = chatInput?.clearAcceptedPayload;
     const { userText, attachments, contextFilesMeta } = collectImplementPlanInput(
-      chatInputRef?.current,
+      chatInput,
       resolvedSessionId,
     );
+    if (!planAttachmentsAreReady(attachments)) return false;
 
     const content = buildImplementPlanContent(userText);
 
@@ -228,10 +234,7 @@ function useImplementPlan(
       if (clearPlanModeAfterSend) {
         handlePlanModeChange?.(false);
       }
-      if (chatInputRef) {
-        chatInputRef.current?.clear();
-        setChatDraftContent(resolvedSessionId, null);
-      }
+      clearAcceptedPayload?.({ message: userText, attachments });
       // Authoritatively clear plan_mode in session metadata so a refresh
       // mid-implementation cannot re-hydrate plan mode from the server.
       // Run as a separate request with its own catch so a set_plan_mode
@@ -324,7 +327,9 @@ export function usePlanActions(opts: {
 
   const showImplement = opts.planModeEnabled;
   const implementPlanHandler = showImplement
-    ? (fresh: boolean) => {
+    ? async (fresh: boolean) => {
+        const attachments = opts.chatInputRef.current?.getAttachments() ?? [];
+        if (!planAttachmentsAreReady(attachments)) return false;
         if (nextStepIsWorkStep) return proceed();
         return implementPlan(fresh);
       }

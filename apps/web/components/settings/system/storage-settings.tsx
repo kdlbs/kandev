@@ -43,7 +43,7 @@ export function StorageSettings() {
         tabs={<SettingsTabsList ariaLabel={t("system:storageTitle")} />}
       >
         <SettingsTabsPanel value="host" testId="settings-storage-host">
-          <StorageMaintenanceSettings />
+          <StorageMaintenanceSettings active={value === "host"} />
         </SettingsTabsPanel>
         <SettingsTabsPanel value="office-retention" testId="settings-storage-office-retention">
           <RetentionSettingsCard />

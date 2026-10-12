@@ -108,10 +108,18 @@ func (s *Service) BuildRunnerMutabilityViews(ctx context.Context, tasks []*model
 		s.executors == nil || s.workspaceFolders == nil {
 		return unavailable()
 	}
+	if ctx.Err() != nil {
+		return unavailable()
+	}
 
 	batch, err := s.loadRunnerMutabilitySignalBatch(ctx, ids)
 	if err != nil {
-		s.logger.Warn("failed to load signals for runner mutability", zap.Error(err))
+		if !isRequestCancellationError(ctx, err) {
+			s.logger.Warn("failed to load signals for runner mutability", zap.Error(err))
+		}
+		return unavailable()
+	}
+	if ctx.Err() != nil {
 		return unavailable()
 	}
 
@@ -144,30 +152,51 @@ func (s *Service) loadRunnerMutabilitySignalBatch(ctx context.Context, ids []str
 	var batch runnerMutabilitySignalBatch
 	var err error
 
+	if err := ctx.Err(); err != nil {
+		return runnerMutabilitySignalBatch{}, err
+	}
 	batch.repoLinks, err = s.taskRepos.ListTaskRepositoriesByTaskIDs(ctx, ids)
 	if err != nil {
+		return runnerMutabilitySignalBatch{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return runnerMutabilitySignalBatch{}, err
 	}
 	batch.sessionCounts, err = s.sessions.GetSessionCountsByTaskIDs(ctx, ids)
 	if err != nil {
 		return runnerMutabilitySignalBatch{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return runnerMutabilitySignalBatch{}, err
+	}
 	batch.envExists, err = s.taskEnvironments.GetTaskEnvironmentExistenceByTaskIDs(ctx, ids)
 	if err != nil {
+		return runnerMutabilitySignalBatch{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return runnerMutabilitySignalBatch{}, err
 	}
 	batch.execExists, err = s.executors.GetExecutorRunningExistenceByTaskIDs(ctx, ids)
 	if err != nil {
 		return runnerMutabilitySignalBatch{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return runnerMutabilitySignalBatch{}, err
+	}
 	batch.folders, err = s.workspaceFolders.ListTaskWorkspaceFoldersByTaskIDs(ctx, ids)
 	if err != nil {
+		return runnerMutabilitySignalBatch{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return runnerMutabilitySignalBatch{}, err
 	}
 	batch.groupMembers = map[string]bool{}
 	if s.wsGroupMembership != nil {
 		batch.groupMembers, err = s.wsGroupMembership.GetActiveWorkspaceGroupTaskIDs(ctx, ids)
 		if err != nil {
+			return runnerMutabilitySignalBatch{}, err
+		}
+		if err := ctx.Err(); err != nil {
 			return runnerMutabilitySignalBatch{}, err
 		}
 	}

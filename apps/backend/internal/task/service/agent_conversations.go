@@ -11,8 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"google.golang.org/grpc/codes"
@@ -22,13 +24,27 @@ import (
 // Managed conversation metadata keys, stamped server-side on the backing
 // task's Metadata map.
 const (
-	metaKeyPluginID        = "kandev.plugin_id"
-	metaKeyWorkspaceID     = "kandev.workspace_id"
-	metaKeyConversationKey = "kandev.conversation_key"
-	metaKeyEphemeral       = "kandev.ephemeral"
-	metaKeyManagedByPlugin = "kandev.managed_by_plugin"
-	metaKeyInstructionVer  = "kandev.instruction_version"
+	metaKeyPluginID                = "kandev.plugin_id"
+	metaKeyWorkspaceID             = "kandev.workspace_id"
+	metaKeyConversationKey         = "kandev.conversation_key"
+	metaKeyEphemeral               = "kandev.ephemeral"
+	metaKeyManagedByPlugin         = models.MetaKeyManagedByPlugin
+	metaKeyInstructionVer          = "kandev.instruction_version"
+	metaKeyManagedRetained         = models.MetaKeyManagedRetained
+	metaKeyManagedInstall          = models.MetaKeyManagedInstallationID
+	metaKeyManagedInstance         = models.MetaKeyManagedInstanceKey
+	metaKeyManagedRevision         = models.MetaKeyManagedConversationRevision
+	metaKeyManagedPaused           = models.MetaKeyManagedConversationPaused
+	metaKeyManagedDetached         = models.MetaKeyManagedConversationDetached
+	metaKeyManagedApprovalRevision = models.MetaKeyManagedApprovalRevision
+	metaKeyManagedManifestDigest   = models.MetaKeyManagedManifestDigest
+	metaKeyManagedToolNames        = models.MetaKeyManagedAgentToolNames
+	metaKeyManagedOperation        = "kandev.last_exact_operation"
+	metaKeyManagedPayload          = "kandev.last_exact_payload"
+	metaKeyRetentionMode           = models.MetaKeyManagedRetentionMode
 )
+
+const managedConversationRetentionMode = "retain_on_uninstall"
 
 // defaultAgentConversationTitle is the title for managed conversation
 // backing tasks. Visible only in diagnostic/admin views, never on the
@@ -58,11 +74,13 @@ const (
 	// otherwise cannot back a new conversation. No task or session row is
 	// created.
 	AgentConversationStatusConfigurationRequired = "configuration_required"
+	AgentConversationStatusAlreadyApplied        = "already_applied"
 )
 
 // agentConversationTaskRepo is the narrow task-repository interface for
 // managed conversation operations.
 type agentConversationTaskRepo interface {
+	managed.Repository
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
 	// ListEphemeralTasksAllWorkspaces returns every ephemeral task across
@@ -145,6 +163,17 @@ type agentConversationDispatcher interface {
 	Deliver(ctx context.Context, taskID string, session *models.TaskSession, text, source, idempotencyID string) (status string, err error)
 }
 
+// agentConversationImmediateDispatcher is the optional race-safe direct
+// prompt path used by exact managed dispatch. It must never add queue work.
+type agentConversationImmediateDispatcher interface {
+	DispatchImmediate(
+		ctx context.Context,
+		taskID string,
+		session *models.TaskSession,
+		text, source, idempotencyID string,
+	) (pluginsdk.ManagedAgentDispatchStatus, error)
+}
+
 // AgentConversationService implements the managed conversation lifecycle:
 // Ensure (create-or-repair), Dispatch, and Delete. It uses narrow
 // repository interfaces to avoid depending on the full task/Service.
@@ -168,8 +197,13 @@ type AgentConversationService struct {
 	// pattern (internal/plugins/host.go) for the same boot-ordering reason:
 	// the orchestrator is constructed after this service. Guarded by mu so
 	// concurrent Dispatch calls observe a consistent value.
-	mu         sync.RWMutex
-	dispatcher agentConversationDispatcher
+	mu                           sync.RWMutex
+	dispatcher                   agentConversationDispatcher
+	managedInputStorage          messagequeue.ManagedInputStorage
+	managedInputIdentityResolver func(context.Context, string, string) (messagequeue.QueueSessionIdentity, error)
+	managedInputMaxPerSession    func() int
+	managedInputQueueNotifier    func(context.Context, string, string)
+	managedInputExecutionStopper func(context.Context, string, string, string) (bool, error)
 
 	dispatchLocksMu sync.Mutex
 	dispatchLocks   map[string]*sync.Mutex
@@ -181,6 +215,8 @@ type AgentConversationService struct {
 	// lifetime of the process.
 	ensureLocksMu sync.Mutex
 	ensureLocks   map[string]*sync.Mutex
+
+	managedExecutionStopper func(context.Context, string) error
 }
 
 // NewAgentConversationService creates a new service with the given dependencies.
@@ -217,6 +253,46 @@ func (s *AgentConversationService) SetTaskDeleter(d agentConversationTaskDeleter
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deleter = d
+}
+
+// SetManagedExecutionStopper wires lifecycle cancellation after the shared
+// orchestrator exists. The callback receives only a host-owned task identity.
+func (s *AgentConversationService) SetManagedExecutionStopper(stop func(context.Context, string) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managedExecutionStopper = stop
+}
+
+// SetManagedInputStorage wires the durable input receipt store and the queue
+// repository's authoritative session-identity resolver. maxPerSession is read
+// at admission time so managed inputs use the same configured queue limit.
+func (s *AgentConversationService) SetManagedInputStorage(
+	storage messagequeue.ManagedInputStorage,
+	resolveIdentity func(context.Context, string, string) (messagequeue.QueueSessionIdentity, error),
+	maxPerSession func() int,
+) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managedInputStorage = storage
+	s.managedInputIdentityResolver = resolveIdentity
+	s.managedInputMaxPerSession = maxPerSession
+}
+
+// SetManagedInputNotifier wires the orchestrator wake used after durable
+// admission and when a paused conversation resumes.
+func (s *AgentConversationService) SetManagedInputNotifier(notify func(context.Context, string, string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managedInputQueueNotifier = notify
+}
+
+// SetManagedInputExecutionStopper wires exact-generation cancellation.
+func (s *AgentConversationService) SetManagedInputExecutionStopper(
+	stop func(context.Context, string, string, string) (bool, error),
+) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managedInputExecutionStopper = stop
 }
 
 func (s *AgentConversationService) getDispatcher() agentConversationDispatcher {
@@ -882,6 +958,9 @@ func isManagedConversation(task *models.Task, pluginID, workspaceID, conversatio
 	if task == nil || task.Metadata == nil {
 		return false
 	}
+	if retained, _ := task.Metadata[metaKeyManagedRetained].(bool); retained {
+		return false
+	}
 	pID, _ := task.Metadata[metaKeyPluginID].(string)
 	wID, _ := task.Metadata[metaKeyWorkspaceID].(string)
 	cKey, _ := task.Metadata[metaKeyConversationKey].(string)
@@ -895,6 +974,9 @@ func isManagedConversation(task *models.Task, pluginID, workspaceID, conversatio
 // workspace or conversation key it was created under.
 func isManagedConversationOwnedByPlugin(task *models.Task, pluginID string) bool {
 	if task == nil || task.Metadata == nil {
+		return false
+	}
+	if retained, _ := task.Metadata[metaKeyManagedRetained].(bool); retained {
 		return false
 	}
 	pID, _ := task.Metadata[metaKeyPluginID].(string)

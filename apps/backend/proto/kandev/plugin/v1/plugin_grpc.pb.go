@@ -761,48 +761,109 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Host_GetState_FullMethodName                      = "/kandev.plugin.v1.Host/GetState"
-	Host_SetState_FullMethodName                      = "/kandev.plugin.v1.Host/SetState"
-	Host_DeleteState_FullMethodName                   = "/kandev.plugin.v1.Host/DeleteState"
-	Host_ListState_FullMethodName                     = "/kandev.plugin.v1.Host/ListState"
-	Host_RevealSecret_FullMethodName                  = "/kandev.plugin.v1.Host/RevealSecret"
-	Host_EmitEvent_FullMethodName                     = "/kandev.plugin.v1.Host/EmitEvent"
-	Host_GetSecret_FullMethodName                     = "/kandev.plugin.v1.Host/GetSecret"
-	Host_SetSecret_FullMethodName                     = "/kandev.plugin.v1.Host/SetSecret"
-	Host_DeleteSecret_FullMethodName                  = "/kandev.plugin.v1.Host/DeleteSecret"
-	Host_GetConfig_FullMethodName                     = "/kandev.plugin.v1.Host/GetConfig"
-	Host_ListTasks_FullMethodName                     = "/kandev.plugin.v1.Host/ListTasks"
-	Host_GetTask_FullMethodName                       = "/kandev.plugin.v1.Host/GetTask"
-	Host_ListTaskStepTransitions_FullMethodName       = "/kandev.plugin.v1.Host/ListTaskStepTransitions"
-	Host_ListWorkspaces_FullMethodName                = "/kandev.plugin.v1.Host/ListWorkspaces"
-	Host_ListWorkflows_FullMethodName                 = "/kandev.plugin.v1.Host/ListWorkflows"
-	Host_ListWorkflowSteps_FullMethodName             = "/kandev.plugin.v1.Host/ListWorkflowSteps"
-	Host_ListWorkflowTransitionGroups_FullMethodName  = "/kandev.plugin.v1.Host/ListWorkflowTransitionGroups"
-	Host_ListAgentProfiles_FullMethodName             = "/kandev.plugin.v1.Host/ListAgentProfiles"
-	Host_ListExecutorProfiles_FullMethodName          = "/kandev.plugin.v1.Host/ListExecutorProfiles"
-	Host_CheckpointExecutorResource_FullMethodName    = "/kandev.plugin.v1.Host/CheckpointExecutorResource"
-	Host_ReportExecutorProgress_FullMethodName        = "/kandev.plugin.v1.Host/ReportExecutorProgress"
-	Host_ReadExecutorRuntimeArtifact_FullMethodName   = "/kandev.plugin.v1.Host/ReadExecutorRuntimeArtifact"
-	Host_ListRepositories_FullMethodName              = "/kandev.plugin.v1.Host/ListRepositories"
-	Host_ListSessions_FullMethodName                  = "/kandev.plugin.v1.Host/ListSessions"
-	Host_ListSessionCodeStats_FullMethodName          = "/kandev.plugin.v1.Host/ListSessionCodeStats"
-	Host_ListMessages_FullMethodName                  = "/kandev.plugin.v1.Host/ListMessages"
-	Host_ListPendingInteractions_FullMethodName       = "/kandev.plugin.v1.Host/ListPendingInteractions"
-	Host_GetInteraction_FullMethodName                = "/kandev.plugin.v1.Host/GetInteraction"
-	Host_InvokeUtilityAgent_FullMethodName            = "/kandev.plugin.v1.Host/InvokeUtilityAgent"
-	Host_InvokeUtilityAgentWithOptions_FullMethodName = "/kandev.plugin.v1.Host/InvokeUtilityAgentWithOptions"
-	Host_CreateTask_FullMethodName                    = "/kandev.plugin.v1.Host/CreateTask"
-	Host_UpdateTask_FullMethodName                    = "/kandev.plugin.v1.Host/UpdateTask"
-	Host_MoveTask_FullMethodName                      = "/kandev.plugin.v1.Host/MoveTask"
-	Host_SendMessage_FullMethodName                   = "/kandev.plugin.v1.Host/SendMessage"
-	Host_PreviewPluginOwnedTaskTree_FullMethodName    = "/kandev.plugin.v1.Host/PreviewPluginOwnedTaskTree"
-	Host_DeletePluginOwnedTaskTree_FullMethodName     = "/kandev.plugin.v1.Host/DeletePluginOwnedTaskTree"
-	Host_EnsureAgentConversation_FullMethodName       = "/kandev.plugin.v1.Host/EnsureAgentConversation"
-	Host_DispatchAgentConversation_FullMethodName     = "/kandev.plugin.v1.Host/DispatchAgentConversation"
-	Host_DeleteAgentConversation_FullMethodName       = "/kandev.plugin.v1.Host/DeleteAgentConversation"
-	Host_RespondToPermission_FullMethodName           = "/kandev.plugin.v1.Host/RespondToPermission"
-	Host_AnswerClarification_FullMethodName           = "/kandev.plugin.v1.Host/AnswerClarification"
-	Host_CancelClarification_FullMethodName           = "/kandev.plugin.v1.Host/CancelClarification"
+	Host_GetCapabilityContext_FullMethodName                       = "/kandev.plugin.v1.Host/GetCapabilityContext"
+	Host_UpdateTaskExact_FullMethodName                            = "/kandev.plugin.v1.Host/UpdateTaskExact"
+	Host_CreateTaskExact_FullMethodName                            = "/kandev.plugin.v1.Host/CreateTaskExact"
+	Host_SetTaskLabelsExact_FullMethodName                         = "/kandev.plugin.v1.Host/SetTaskLabelsExact"
+	Host_AssignTaskExact_FullMethodName                            = "/kandev.plugin.v1.Host/AssignTaskExact"
+	Host_MoveTaskExact_FullMethodName                              = "/kandev.plugin.v1.Host/MoveTaskExact"
+	Host_ArchiveTaskExact_FullMethodName                           = "/kandev.plugin.v1.Host/ArchiveTaskExact"
+	Host_AddTaskRelationExact_FullMethodName                       = "/kandev.plugin.v1.Host/AddTaskRelationExact"
+	Host_RemoveTaskRelationExact_FullMethodName                    = "/kandev.plugin.v1.Host/RemoveTaskRelationExact"
+	Host_SendTaskMessageExact_FullMethodName                       = "/kandev.plugin.v1.Host/SendTaskMessageExact"
+	Host_IssueTaskDirectiveExact_FullMethodName                    = "/kandev.plugin.v1.Host/IssueTaskDirectiveExact"
+	Host_ResolveTaskDirectiveExact_FullMethodName                  = "/kandev.plugin.v1.Host/ResolveTaskDirectiveExact"
+	Host_AcquireTaskManagementClaimExact_FullMethodName            = "/kandev.plugin.v1.Host/AcquireTaskManagementClaimExact"
+	Host_ReleaseTaskManagementClaimExact_FullMethodName            = "/kandev.plugin.v1.Host/ReleaseTaskManagementClaimExact"
+	Host_TransferTaskManagementClaimExact_FullMethodName           = "/kandev.plugin.v1.Host/TransferTaskManagementClaimExact"
+	Host_SetTaskCompletionCriteriaExact_FullMethodName             = "/kandev.plugin.v1.Host/SetTaskCompletionCriteriaExact"
+	Host_VerifyTaskCompletionCriterionExact_FullMethodName         = "/kandev.plugin.v1.Host/VerifyTaskCompletionCriterionExact"
+	Host_ApplyWorkspaceAdministrationExact_FullMethodName          = "/kandev.plugin.v1.Host/ApplyWorkspaceAdministrationExact"
+	Host_GetSourceIssueCapabilitiesExact_FullMethodName            = "/kandev.plugin.v1.Host/GetSourceIssueCapabilitiesExact"
+	Host_CommentSourceIssueExact_FullMethodName                    = "/kandev.plugin.v1.Host/CommentSourceIssueExact"
+	Host_TransitionSourceIssueExact_FullMethodName                 = "/kandev.plugin.v1.Host/TransitionSourceIssueExact"
+	Host_EnsureManagedAgentConversationExact_FullMethodName        = "/kandev.plugin.v1.Host/EnsureManagedAgentConversationExact"
+	Host_GetManagedAgentConversationStatusExact_FullMethodName     = "/kandev.plugin.v1.Host/GetManagedAgentConversationStatusExact"
+	Host_ListManagedAgentConversationsExact_FullMethodName         = "/kandev.plugin.v1.Host/ListManagedAgentConversationsExact"
+	Host_SetManagedAgentConversationPausedExact_FullMethodName     = "/kandev.plugin.v1.Host/SetManagedAgentConversationPausedExact"
+	Host_DeleteManagedAgentConversationExact_FullMethodName        = "/kandev.plugin.v1.Host/DeleteManagedAgentConversationExact"
+	Host_EnqueueManagedAgentInputExact_FullMethodName              = "/kandev.plugin.v1.Host/EnqueueManagedAgentInputExact"
+	Host_GetManagedAgentInputExact_FullMethodName                  = "/kandev.plugin.v1.Host/GetManagedAgentInputExact"
+	Host_ListManagedAgentInputsExact_FullMethodName                = "/kandev.plugin.v1.Host/ListManagedAgentInputsExact"
+	Host_CancelManagedAgentInputExact_FullMethodName               = "/kandev.plugin.v1.Host/CancelManagedAgentInputExact"
+	Host_DispatchManagedAgentConversationExact_FullMethodName      = "/kandev.plugin.v1.Host/DispatchManagedAgentConversationExact"
+	Host_ListManagedConversationSchedulesExact_FullMethodName      = "/kandev.plugin.v1.Host/ListManagedConversationSchedulesExact"
+	Host_CreateManagedConversationScheduleExact_FullMethodName     = "/kandev.plugin.v1.Host/CreateManagedConversationScheduleExact"
+	Host_UpdateManagedConversationScheduleExact_FullMethodName     = "/kandev.plugin.v1.Host/UpdateManagedConversationScheduleExact"
+	Host_SetManagedConversationScheduleEnabledExact_FullMethodName = "/kandev.plugin.v1.Host/SetManagedConversationScheduleEnabledExact"
+	Host_DeleteManagedConversationScheduleExact_FullMethodName     = "/kandev.plugin.v1.Host/DeleteManagedConversationScheduleExact"
+	Host_EnsureTaskRunExact_FullMethodName                         = "/kandev.plugin.v1.Host/EnsureTaskRunExact"
+	Host_StopTaskRunExact_FullMethodName                           = "/kandev.plugin.v1.Host/StopTaskRunExact"
+	Host_RecoverSessionExact_FullMethodName                        = "/kandev.plugin.v1.Host/RecoverSessionExact"
+	Host_CancelPendingTaskTransitionExact_FullMethodName           = "/kandev.plugin.v1.Host/CancelPendingTaskTransitionExact"
+	Host_GetSessionModeContextExact_FullMethodName                 = "/kandev.plugin.v1.Host/GetSessionModeContextExact"
+	Host_SetSessionModeExact_FullMethodName                        = "/kandev.plugin.v1.Host/SetSessionModeExact"
+	Host_RespondPermissionExact_FullMethodName                     = "/kandev.plugin.v1.Host/RespondPermissionExact"
+	Host_AnswerClarificationExact_FullMethodName                   = "/kandev.plugin.v1.Host/AnswerClarificationExact"
+	Host_ListWorkspacesExact_FullMethodName                        = "/kandev.plugin.v1.Host/ListWorkspacesExact"
+	Host_ListWorkflowsExact_FullMethodName                         = "/kandev.plugin.v1.Host/ListWorkflowsExact"
+	Host_ListWorkflowStepsExact_FullMethodName                     = "/kandev.plugin.v1.Host/ListWorkflowStepsExact"
+	Host_ListTasksExact_FullMethodName                             = "/kandev.plugin.v1.Host/ListTasksExact"
+	Host_GetTaskExact_FullMethodName                               = "/kandev.plugin.v1.Host/GetTaskExact"
+	Host_ListSessionsExact_FullMethodName                          = "/kandev.plugin.v1.Host/ListSessionsExact"
+	Host_ListPendingInteractionsExact_FullMethodName               = "/kandev.plugin.v1.Host/ListPendingInteractionsExact"
+	Host_GetInteractionExact_FullMethodName                        = "/kandev.plugin.v1.Host/GetInteractionExact"
+	Host_ListSanitizedMessagesExact_FullMethodName                 = "/kandev.plugin.v1.Host/ListSanitizedMessagesExact"
+	Host_ListTaskInboxExact_FullMethodName                         = "/kandev.plugin.v1.Host/ListTaskInboxExact"
+	Host_GetTaskDirectiveExact_FullMethodName                      = "/kandev.plugin.v1.Host/GetTaskDirectiveExact"
+	Host_ListTaskDirectivesExact_FullMethodName                    = "/kandev.plugin.v1.Host/ListTaskDirectivesExact"
+	Host_GetTaskRelationsExact_FullMethodName                      = "/kandev.plugin.v1.Host/GetTaskRelationsExact"
+	Host_ListTaskRelationsExact_FullMethodName                     = "/kandev.plugin.v1.Host/ListTaskRelationsExact"
+	Host_ListPendingTaskTransitionsExact_FullMethodName            = "/kandev.plugin.v1.Host/ListPendingTaskTransitionsExact"
+	Host_ListChangeRequestEvidenceExact_FullMethodName             = "/kandev.plugin.v1.Host/ListChangeRequestEvidenceExact"
+	Host_ListTaskUsageExact_FullMethodName                         = "/kandev.plugin.v1.Host/ListTaskUsageExact"
+	Host_GetState_FullMethodName                                   = "/kandev.plugin.v1.Host/GetState"
+	Host_SetState_FullMethodName                                   = "/kandev.plugin.v1.Host/SetState"
+	Host_DeleteState_FullMethodName                                = "/kandev.plugin.v1.Host/DeleteState"
+	Host_ListState_FullMethodName                                  = "/kandev.plugin.v1.Host/ListState"
+	Host_RevealSecret_FullMethodName                               = "/kandev.plugin.v1.Host/RevealSecret"
+	Host_EmitEvent_FullMethodName                                  = "/kandev.plugin.v1.Host/EmitEvent"
+	Host_GetSecret_FullMethodName                                  = "/kandev.plugin.v1.Host/GetSecret"
+	Host_SetSecret_FullMethodName                                  = "/kandev.plugin.v1.Host/SetSecret"
+	Host_DeleteSecret_FullMethodName                               = "/kandev.plugin.v1.Host/DeleteSecret"
+	Host_GetConfig_FullMethodName                                  = "/kandev.plugin.v1.Host/GetConfig"
+	Host_ListTasks_FullMethodName                                  = "/kandev.plugin.v1.Host/ListTasks"
+	Host_GetTask_FullMethodName                                    = "/kandev.plugin.v1.Host/GetTask"
+	Host_ListTaskStepTransitions_FullMethodName                    = "/kandev.plugin.v1.Host/ListTaskStepTransitions"
+	Host_ListWorkspaces_FullMethodName                             = "/kandev.plugin.v1.Host/ListWorkspaces"
+	Host_ListWorkflows_FullMethodName                              = "/kandev.plugin.v1.Host/ListWorkflows"
+	Host_ListWorkflowSteps_FullMethodName                          = "/kandev.plugin.v1.Host/ListWorkflowSteps"
+	Host_ListWorkflowTransitionGroups_FullMethodName               = "/kandev.plugin.v1.Host/ListWorkflowTransitionGroups"
+	Host_ListAgentProfiles_FullMethodName                          = "/kandev.plugin.v1.Host/ListAgentProfiles"
+	Host_ListExecutorProfiles_FullMethodName                       = "/kandev.plugin.v1.Host/ListExecutorProfiles"
+	Host_CheckpointExecutorResource_FullMethodName                 = "/kandev.plugin.v1.Host/CheckpointExecutorResource"
+	Host_ReportExecutorProgress_FullMethodName                     = "/kandev.plugin.v1.Host/ReportExecutorProgress"
+	Host_ReadExecutorRuntimeArtifact_FullMethodName                = "/kandev.plugin.v1.Host/ReadExecutorRuntimeArtifact"
+	Host_ListRepositories_FullMethodName                           = "/kandev.plugin.v1.Host/ListRepositories"
+	Host_ListSessions_FullMethodName                               = "/kandev.plugin.v1.Host/ListSessions"
+	Host_ListSessionCodeStats_FullMethodName                       = "/kandev.plugin.v1.Host/ListSessionCodeStats"
+	Host_ListMessages_FullMethodName                               = "/kandev.plugin.v1.Host/ListMessages"
+	Host_ListPendingInteractions_FullMethodName                    = "/kandev.plugin.v1.Host/ListPendingInteractions"
+	Host_GetInteraction_FullMethodName                             = "/kandev.plugin.v1.Host/GetInteraction"
+	Host_InvokeUtilityAgent_FullMethodName                         = "/kandev.plugin.v1.Host/InvokeUtilityAgent"
+	Host_InvokeUtilityAgentWithOptions_FullMethodName              = "/kandev.plugin.v1.Host/InvokeUtilityAgentWithOptions"
+	Host_CreateTask_FullMethodName                                 = "/kandev.plugin.v1.Host/CreateTask"
+	Host_UpdateTask_FullMethodName                                 = "/kandev.plugin.v1.Host/UpdateTask"
+	Host_MoveTask_FullMethodName                                   = "/kandev.plugin.v1.Host/MoveTask"
+	Host_SendMessage_FullMethodName                                = "/kandev.plugin.v1.Host/SendMessage"
+	Host_PreviewPluginOwnedTaskTree_FullMethodName                 = "/kandev.plugin.v1.Host/PreviewPluginOwnedTaskTree"
+	Host_DeletePluginOwnedTaskTree_FullMethodName                  = "/kandev.plugin.v1.Host/DeletePluginOwnedTaskTree"
+	Host_EnsureAgentConversation_FullMethodName                    = "/kandev.plugin.v1.Host/EnsureAgentConversation"
+	Host_DispatchAgentConversation_FullMethodName                  = "/kandev.plugin.v1.Host/DispatchAgentConversation"
+	Host_DeleteAgentConversation_FullMethodName                    = "/kandev.plugin.v1.Host/DeleteAgentConversation"
+	Host_RespondToPermission_FullMethodName                        = "/kandev.plugin.v1.Host/RespondToPermission"
+	Host_AnswerClarification_FullMethodName                        = "/kandev.plugin.v1.Host/AnswerClarification"
+	Host_CancelClarification_FullMethodName                        = "/kandev.plugin.v1.Host/CancelClarification"
 )
 
 // HostClient is the client API for Host service.
@@ -831,6 +892,76 @@ const (
 // the relevant service (never a repository directly); write handlers call
 // service methods that publish task.* events (never repository.TaskRepository).
 type HostClient interface {
+	GetCapabilityContext(ctx context.Context, in *GetCapabilityContextRequest, opts ...grpc.CallOption) (*GetCapabilityContextResponse, error)
+	UpdateTaskExact(ctx context.Context, in *UpdateTaskExactRequest, opts ...grpc.CallOption) (*UpdateTaskExactResponse, error)
+	CreateTaskExact(ctx context.Context, in *CreateTaskExactRequest, opts ...grpc.CallOption) (*CreateTaskExactResponse, error)
+	SetTaskLabelsExact(ctx context.Context, in *SetTaskLabelsExactRequest, opts ...grpc.CallOption) (*SetTaskLabelsExactResponse, error)
+	AssignTaskExact(ctx context.Context, in *AssignTaskExactRequest, opts ...grpc.CallOption) (*AssignTaskExactResponse, error)
+	MoveTaskExact(ctx context.Context, in *MoveTaskExactRequest, opts ...grpc.CallOption) (*MoveTaskExactResponse, error)
+	ArchiveTaskExact(ctx context.Context, in *ArchiveTaskExactRequest, opts ...grpc.CallOption) (*ArchiveTaskExactResponse, error)
+	AddTaskRelationExact(ctx context.Context, in *AddTaskRelationExactRequest, opts ...grpc.CallOption) (*AddTaskRelationExactResponse, error)
+	RemoveTaskRelationExact(ctx context.Context, in *RemoveTaskRelationExactRequest, opts ...grpc.CallOption) (*RemoveTaskRelationExactResponse, error)
+	SendTaskMessageExact(ctx context.Context, in *SendTaskMessageExactRequest, opts ...grpc.CallOption) (*SendTaskMessageExactResponse, error)
+	IssueTaskDirectiveExact(ctx context.Context, in *IssueTaskDirectiveExactRequest, opts ...grpc.CallOption) (*IssueTaskDirectiveExactResponse, error)
+	ResolveTaskDirectiveExact(ctx context.Context, in *ResolveTaskDirectiveExactRequest, opts ...grpc.CallOption) (*ResolveTaskDirectiveExactResponse, error)
+	AcquireTaskManagementClaimExact(ctx context.Context, in *AcquireTaskManagementClaimExactRequest, opts ...grpc.CallOption) (*TaskManagementClaimExactResponse, error)
+	ReleaseTaskManagementClaimExact(ctx context.Context, in *ReleaseTaskManagementClaimExactRequest, opts ...grpc.CallOption) (*TaskManagementClaimExactResponse, error)
+	TransferTaskManagementClaimExact(ctx context.Context, in *TransferTaskManagementClaimExactRequest, opts ...grpc.CallOption) (*TaskManagementClaimExactResponse, error)
+	SetTaskCompletionCriteriaExact(ctx context.Context, in *SetTaskCompletionCriteriaExactRequest, opts ...grpc.CallOption) (*TaskCompletionGateExactResponse, error)
+	VerifyTaskCompletionCriterionExact(ctx context.Context, in *VerifyTaskCompletionCriterionExactRequest, opts ...grpc.CallOption) (*TaskCompletionGateExactResponse, error)
+	ApplyWorkspaceAdministrationExact(ctx context.Context, in *ApplyWorkspaceAdministrationExactRequest, opts ...grpc.CallOption) (*WorkspaceAdministrationExactResponse, error)
+	GetSourceIssueCapabilitiesExact(ctx context.Context, in *GetSourceIssueCapabilitiesExactRequest, opts ...grpc.CallOption) (*GetSourceIssueCapabilitiesExactResponse, error)
+	CommentSourceIssueExact(ctx context.Context, in *CommentSourceIssueExactRequest, opts ...grpc.CallOption) (*SourceIssueWritebackExactResponse, error)
+	TransitionSourceIssueExact(ctx context.Context, in *TransitionSourceIssueExactRequest, opts ...grpc.CallOption) (*SourceIssueWritebackExactResponse, error)
+	EnsureManagedAgentConversationExact(ctx context.Context, in *EnsureManagedAgentConversationExactRequest, opts ...grpc.CallOption) (*EnsureManagedAgentConversationExactResponse, error)
+	GetManagedAgentConversationStatusExact(ctx context.Context, in *GetManagedAgentConversationStatusExactRequest, opts ...grpc.CallOption) (*GetManagedAgentConversationStatusExactResponse, error)
+	ListManagedAgentConversationsExact(ctx context.Context, in *ListManagedAgentConversationsExactRequest, opts ...grpc.CallOption) (*ListManagedAgentConversationsExactResponse, error)
+	SetManagedAgentConversationPausedExact(ctx context.Context, in *SetManagedAgentConversationPausedExactRequest, opts ...grpc.CallOption) (*SetManagedAgentConversationPausedExactResponse, error)
+	DeleteManagedAgentConversationExact(ctx context.Context, in *DeleteManagedAgentConversationExactRequest, opts ...grpc.CallOption) (*DeleteManagedAgentConversationExactResponse, error)
+	// Durable ordered input for retained conversations. Enqueue returns a
+	// receipt before delivery; retries with the same idempotency and occurrence
+	// identity resolve to the same receipt. Dispatch remains immediate and
+	// reports BUSY instead of silently adding work to the queue.
+	EnqueueManagedAgentInputExact(ctx context.Context, in *EnqueueManagedAgentInputExactRequest, opts ...grpc.CallOption) (*EnqueueManagedAgentInputExactResponse, error)
+	GetManagedAgentInputExact(ctx context.Context, in *GetManagedAgentInputExactRequest, opts ...grpc.CallOption) (*GetManagedAgentInputExactResponse, error)
+	ListManagedAgentInputsExact(ctx context.Context, in *ListManagedAgentInputsExactRequest, opts ...grpc.CallOption) (*ListManagedAgentInputsExactResponse, error)
+	CancelManagedAgentInputExact(ctx context.Context, in *CancelManagedAgentInputExactRequest, opts ...grpc.CallOption) (*CancelManagedAgentInputExactResponse, error)
+	DispatchManagedAgentConversationExact(ctx context.Context, in *DispatchManagedAgentConversationExactRequest, opts ...grpc.CallOption) (*DispatchManagedAgentConversationExactResponse, error)
+	ListManagedConversationSchedulesExact(ctx context.Context, in *ListManagedConversationSchedulesExactRequest, opts ...grpc.CallOption) (*ListManagedConversationSchedulesExactResponse, error)
+	CreateManagedConversationScheduleExact(ctx context.Context, in *CreateManagedConversationScheduleExactRequest, opts ...grpc.CallOption) (*ManagedConversationScheduleExactResponse, error)
+	UpdateManagedConversationScheduleExact(ctx context.Context, in *UpdateManagedConversationScheduleExactRequest, opts ...grpc.CallOption) (*ManagedConversationScheduleExactResponse, error)
+	SetManagedConversationScheduleEnabledExact(ctx context.Context, in *SetManagedConversationScheduleEnabledExactRequest, opts ...grpc.CallOption) (*ManagedConversationScheduleExactResponse, error)
+	DeleteManagedConversationScheduleExact(ctx context.Context, in *DeleteManagedConversationScheduleExactRequest, opts ...grpc.CallOption) (*HostCommandResult, error)
+	// Exact task/session execution controls require workspace capability
+	// approval and resource-version/execution-generation fences.
+	EnsureTaskRunExact(ctx context.Context, in *EnsureTaskRunExactRequest, opts ...grpc.CallOption) (*EnsureTaskRunExactResponse, error)
+	StopTaskRunExact(ctx context.Context, in *StopTaskRunExactRequest, opts ...grpc.CallOption) (*StopTaskRunExactResponse, error)
+	RecoverSessionExact(ctx context.Context, in *RecoverSessionExactRequest, opts ...grpc.CallOption) (*RecoverSessionExactResponse, error)
+	CancelPendingTaskTransitionExact(ctx context.Context, in *CancelPendingTaskTransitionExactRequest, opts ...grpc.CallOption) (*CancelPendingTaskTransitionExactResponse, error)
+	GetSessionModeContextExact(ctx context.Context, in *GetSessionModeContextExactRequest, opts ...grpc.CallOption) (*GetSessionModeContextExactResponse, error)
+	SetSessionModeExact(ctx context.Context, in *SetSessionModeExactRequest, opts ...grpc.CallOption) (*SetSessionModeExactResponse, error)
+	// Human interaction responses require a Host-issued single-use receipt from
+	// the authenticated native UI, bound to the exact interaction revision and
+	// response payload.
+	RespondPermissionExact(ctx context.Context, in *RespondPermissionExactRequest, opts ...grpc.CallOption) (*RespondPermissionExactResponse, error)
+	AnswerClarificationExact(ctx context.Context, in *AnswerClarificationExactRequest, opts ...grpc.CallOption) (*AnswerClarificationExactResponse, error)
+	ListWorkspacesExact(ctx context.Context, in *ListWorkspacesExactRequest, opts ...grpc.CallOption) (*ListWorkspacesExactResponse, error)
+	ListWorkflowsExact(ctx context.Context, in *ListWorkflowsExactRequest, opts ...grpc.CallOption) (*ListWorkflowsExactResponse, error)
+	ListWorkflowStepsExact(ctx context.Context, in *ListWorkflowStepsExactRequest, opts ...grpc.CallOption) (*ListWorkflowStepsExactResponse, error)
+	ListTasksExact(ctx context.Context, in *ListTasksExactRequest, opts ...grpc.CallOption) (*ListTasksExactResponse, error)
+	GetTaskExact(ctx context.Context, in *GetTaskExactRequest, opts ...grpc.CallOption) (*GetTaskExactResponse, error)
+	ListSessionsExact(ctx context.Context, in *ListSessionsExactRequest, opts ...grpc.CallOption) (*ListSessionsExactResponse, error)
+	ListPendingInteractionsExact(ctx context.Context, in *ListPendingInteractionsExactRequest, opts ...grpc.CallOption) (*ListPendingInteractionsExactResponse, error)
+	GetInteractionExact(ctx context.Context, in *GetInteractionExactRequest, opts ...grpc.CallOption) (*GetInteractionExactResponse, error)
+	ListSanitizedMessagesExact(ctx context.Context, in *ListSanitizedMessagesExactRequest, opts ...grpc.CallOption) (*ListSanitizedMessagesExactResponse, error)
+	ListTaskInboxExact(ctx context.Context, in *ListTaskInboxExactRequest, opts ...grpc.CallOption) (*ListTaskInboxExactResponse, error)
+	GetTaskDirectiveExact(ctx context.Context, in *GetTaskDirectiveExactRequest, opts ...grpc.CallOption) (*GetTaskDirectiveExactResponse, error)
+	ListTaskDirectivesExact(ctx context.Context, in *ListTaskDirectivesExactRequest, opts ...grpc.CallOption) (*ListTaskDirectivesExactResponse, error)
+	GetTaskRelationsExact(ctx context.Context, in *GetTaskRelationsExactRequest, opts ...grpc.CallOption) (*GetTaskRelationsExactResponse, error)
+	ListTaskRelationsExact(ctx context.Context, in *ListTaskRelationsExactRequest, opts ...grpc.CallOption) (*ListTaskRelationsExactResponse, error)
+	ListPendingTaskTransitionsExact(ctx context.Context, in *ListPendingTaskTransitionsExactRequest, opts ...grpc.CallOption) (*ListPendingTaskTransitionsExactResponse, error)
+	ListChangeRequestEvidenceExact(ctx context.Context, in *ListChangeRequestEvidenceExactRequest, opts ...grpc.CallOption) (*ListChangeRequestEvidenceExactResponse, error)
+	ListTaskUsageExact(ctx context.Context, in *ListTaskUsageExactRequest, opts ...grpc.CallOption) (*ListTaskUsageExactResponse, error)
 	GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error)
 	SetState(ctx context.Context, in *SetStateRequest, opts ...grpc.CallOption) (*SetStateResponse, error)
 	DeleteState(ctx context.Context, in *DeleteStateRequest, opts ...grpc.CallOption) (*DeleteStateResponse, error)
@@ -919,6 +1050,8 @@ type HostClient interface {
 	MoveTask(ctx context.Context, in *MoveTaskRequest, opts ...grpc.CallOption) (*MoveTaskResponse, error)
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
 	PreviewPluginOwnedTaskTree(ctx context.Context, in *PreviewPluginOwnedTaskTreeRequest, opts ...grpc.CallOption) (*PreviewPluginOwnedTaskTreeResponse, error)
+	// Legacy v1 compatibility RPC. The current Kandev Host denies deletion
+	// because this method cannot carry a native Human confirmation ticket.
 	DeletePluginOwnedTaskTree(ctx context.Context, in *DeletePluginOwnedTaskTreeRequest, opts ...grpc.CallOption) (*DeletePluginOwnedTaskTreeResponse, error)
 	// Agent conversations — capability agent_conversation. Ensure creates or
 	// repairs one hidden workflowless ephemeral task with a primary session per
@@ -928,14 +1061,10 @@ type HostClient interface {
 	EnsureAgentConversation(ctx context.Context, in *EnsureAgentConversationRequest, opts ...grpc.CallOption) (*EnsureAgentConversationResponse, error)
 	DispatchAgentConversation(ctx context.Context, in *DispatchAgentConversationRequest, opts ...grpc.CallOption) (*DispatchAgentConversationResponse, error)
 	DeleteAgentConversation(ctx context.Context, in *DeleteAgentConversationRequest, opts ...grpc.CallOption) (*DeleteAgentConversationResponse, error)
-	// Interaction responses — capability api_write:interactions. Each routes
-	// through the same first-party service the native UI uses, so the agent
-	// unblocks, the durable record turns terminal, and every surface converges
-	// through the normal events. Terminal-once: an interaction that already has
-	// a resolution answers FailedPrecondition rather than dispatching a second
-	// response, and an unknown id answers NotFound — the two outcomes a
-	// reconciling cache needs to distinguish "someone else got there first" from
-	// "I am holding a stale id".
+	// Legacy interaction response methods remain on the wire for source
+	// compatibility. The Host returns PermissionDenied because these requests
+	// cannot carry an observed revision or human response receipt. Use the exact
+	// v2 methods above.
 	RespondToPermission(ctx context.Context, in *RespondToPermissionRequest, opts ...grpc.CallOption) (*RespondToPermissionResponse, error)
 	AnswerClarification(ctx context.Context, in *AnswerClarificationRequest, opts ...grpc.CallOption) (*AnswerClarificationResponse, error)
 	CancelClarification(ctx context.Context, in *CancelClarificationRequest, opts ...grpc.CallOption) (*CancelClarificationResponse, error)
@@ -947,6 +1076,616 @@ type hostClient struct {
 
 func NewHostClient(cc grpc.ClientConnInterface) HostClient {
 	return &hostClient{cc}
+}
+
+func (c *hostClient) GetCapabilityContext(ctx context.Context, in *GetCapabilityContextRequest, opts ...grpc.CallOption) (*GetCapabilityContextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCapabilityContextResponse)
+	err := c.cc.Invoke(ctx, Host_GetCapabilityContext_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) UpdateTaskExact(ctx context.Context, in *UpdateTaskExactRequest, opts ...grpc.CallOption) (*UpdateTaskExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateTaskExactResponse)
+	err := c.cc.Invoke(ctx, Host_UpdateTaskExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) CreateTaskExact(ctx context.Context, in *CreateTaskExactRequest, opts ...grpc.CallOption) (*CreateTaskExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateTaskExactResponse)
+	err := c.cc.Invoke(ctx, Host_CreateTaskExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) SetTaskLabelsExact(ctx context.Context, in *SetTaskLabelsExactRequest, opts ...grpc.CallOption) (*SetTaskLabelsExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetTaskLabelsExactResponse)
+	err := c.cc.Invoke(ctx, Host_SetTaskLabelsExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) AssignTaskExact(ctx context.Context, in *AssignTaskExactRequest, opts ...grpc.CallOption) (*AssignTaskExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AssignTaskExactResponse)
+	err := c.cc.Invoke(ctx, Host_AssignTaskExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) MoveTaskExact(ctx context.Context, in *MoveTaskExactRequest, opts ...grpc.CallOption) (*MoveTaskExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MoveTaskExactResponse)
+	err := c.cc.Invoke(ctx, Host_MoveTaskExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ArchiveTaskExact(ctx context.Context, in *ArchiveTaskExactRequest, opts ...grpc.CallOption) (*ArchiveTaskExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ArchiveTaskExactResponse)
+	err := c.cc.Invoke(ctx, Host_ArchiveTaskExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) AddTaskRelationExact(ctx context.Context, in *AddTaskRelationExactRequest, opts ...grpc.CallOption) (*AddTaskRelationExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddTaskRelationExactResponse)
+	err := c.cc.Invoke(ctx, Host_AddTaskRelationExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) RemoveTaskRelationExact(ctx context.Context, in *RemoveTaskRelationExactRequest, opts ...grpc.CallOption) (*RemoveTaskRelationExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveTaskRelationExactResponse)
+	err := c.cc.Invoke(ctx, Host_RemoveTaskRelationExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) SendTaskMessageExact(ctx context.Context, in *SendTaskMessageExactRequest, opts ...grpc.CallOption) (*SendTaskMessageExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SendTaskMessageExactResponse)
+	err := c.cc.Invoke(ctx, Host_SendTaskMessageExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) IssueTaskDirectiveExact(ctx context.Context, in *IssueTaskDirectiveExactRequest, opts ...grpc.CallOption) (*IssueTaskDirectiveExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IssueTaskDirectiveExactResponse)
+	err := c.cc.Invoke(ctx, Host_IssueTaskDirectiveExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ResolveTaskDirectiveExact(ctx context.Context, in *ResolveTaskDirectiveExactRequest, opts ...grpc.CallOption) (*ResolveTaskDirectiveExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveTaskDirectiveExactResponse)
+	err := c.cc.Invoke(ctx, Host_ResolveTaskDirectiveExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) AcquireTaskManagementClaimExact(ctx context.Context, in *AcquireTaskManagementClaimExactRequest, opts ...grpc.CallOption) (*TaskManagementClaimExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskManagementClaimExactResponse)
+	err := c.cc.Invoke(ctx, Host_AcquireTaskManagementClaimExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ReleaseTaskManagementClaimExact(ctx context.Context, in *ReleaseTaskManagementClaimExactRequest, opts ...grpc.CallOption) (*TaskManagementClaimExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskManagementClaimExactResponse)
+	err := c.cc.Invoke(ctx, Host_ReleaseTaskManagementClaimExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) TransferTaskManagementClaimExact(ctx context.Context, in *TransferTaskManagementClaimExactRequest, opts ...grpc.CallOption) (*TaskManagementClaimExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskManagementClaimExactResponse)
+	err := c.cc.Invoke(ctx, Host_TransferTaskManagementClaimExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) SetTaskCompletionCriteriaExact(ctx context.Context, in *SetTaskCompletionCriteriaExactRequest, opts ...grpc.CallOption) (*TaskCompletionGateExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskCompletionGateExactResponse)
+	err := c.cc.Invoke(ctx, Host_SetTaskCompletionCriteriaExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) VerifyTaskCompletionCriterionExact(ctx context.Context, in *VerifyTaskCompletionCriterionExactRequest, opts ...grpc.CallOption) (*TaskCompletionGateExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskCompletionGateExactResponse)
+	err := c.cc.Invoke(ctx, Host_VerifyTaskCompletionCriterionExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ApplyWorkspaceAdministrationExact(ctx context.Context, in *ApplyWorkspaceAdministrationExactRequest, opts ...grpc.CallOption) (*WorkspaceAdministrationExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkspaceAdministrationExactResponse)
+	err := c.cc.Invoke(ctx, Host_ApplyWorkspaceAdministrationExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetSourceIssueCapabilitiesExact(ctx context.Context, in *GetSourceIssueCapabilitiesExactRequest, opts ...grpc.CallOption) (*GetSourceIssueCapabilitiesExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSourceIssueCapabilitiesExactResponse)
+	err := c.cc.Invoke(ctx, Host_GetSourceIssueCapabilitiesExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) CommentSourceIssueExact(ctx context.Context, in *CommentSourceIssueExactRequest, opts ...grpc.CallOption) (*SourceIssueWritebackExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SourceIssueWritebackExactResponse)
+	err := c.cc.Invoke(ctx, Host_CommentSourceIssueExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) TransitionSourceIssueExact(ctx context.Context, in *TransitionSourceIssueExactRequest, opts ...grpc.CallOption) (*SourceIssueWritebackExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SourceIssueWritebackExactResponse)
+	err := c.cc.Invoke(ctx, Host_TransitionSourceIssueExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) EnsureManagedAgentConversationExact(ctx context.Context, in *EnsureManagedAgentConversationExactRequest, opts ...grpc.CallOption) (*EnsureManagedAgentConversationExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnsureManagedAgentConversationExactResponse)
+	err := c.cc.Invoke(ctx, Host_EnsureManagedAgentConversationExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetManagedAgentConversationStatusExact(ctx context.Context, in *GetManagedAgentConversationStatusExactRequest, opts ...grpc.CallOption) (*GetManagedAgentConversationStatusExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetManagedAgentConversationStatusExactResponse)
+	err := c.cc.Invoke(ctx, Host_GetManagedAgentConversationStatusExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListManagedAgentConversationsExact(ctx context.Context, in *ListManagedAgentConversationsExactRequest, opts ...grpc.CallOption) (*ListManagedAgentConversationsExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListManagedAgentConversationsExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListManagedAgentConversationsExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) SetManagedAgentConversationPausedExact(ctx context.Context, in *SetManagedAgentConversationPausedExactRequest, opts ...grpc.CallOption) (*SetManagedAgentConversationPausedExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetManagedAgentConversationPausedExactResponse)
+	err := c.cc.Invoke(ctx, Host_SetManagedAgentConversationPausedExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) DeleteManagedAgentConversationExact(ctx context.Context, in *DeleteManagedAgentConversationExactRequest, opts ...grpc.CallOption) (*DeleteManagedAgentConversationExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteManagedAgentConversationExactResponse)
+	err := c.cc.Invoke(ctx, Host_DeleteManagedAgentConversationExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) EnqueueManagedAgentInputExact(ctx context.Context, in *EnqueueManagedAgentInputExactRequest, opts ...grpc.CallOption) (*EnqueueManagedAgentInputExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnqueueManagedAgentInputExactResponse)
+	err := c.cc.Invoke(ctx, Host_EnqueueManagedAgentInputExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetManagedAgentInputExact(ctx context.Context, in *GetManagedAgentInputExactRequest, opts ...grpc.CallOption) (*GetManagedAgentInputExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetManagedAgentInputExactResponse)
+	err := c.cc.Invoke(ctx, Host_GetManagedAgentInputExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListManagedAgentInputsExact(ctx context.Context, in *ListManagedAgentInputsExactRequest, opts ...grpc.CallOption) (*ListManagedAgentInputsExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListManagedAgentInputsExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListManagedAgentInputsExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) CancelManagedAgentInputExact(ctx context.Context, in *CancelManagedAgentInputExactRequest, opts ...grpc.CallOption) (*CancelManagedAgentInputExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelManagedAgentInputExactResponse)
+	err := c.cc.Invoke(ctx, Host_CancelManagedAgentInputExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) DispatchManagedAgentConversationExact(ctx context.Context, in *DispatchManagedAgentConversationExactRequest, opts ...grpc.CallOption) (*DispatchManagedAgentConversationExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DispatchManagedAgentConversationExactResponse)
+	err := c.cc.Invoke(ctx, Host_DispatchManagedAgentConversationExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListManagedConversationSchedulesExact(ctx context.Context, in *ListManagedConversationSchedulesExactRequest, opts ...grpc.CallOption) (*ListManagedConversationSchedulesExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListManagedConversationSchedulesExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListManagedConversationSchedulesExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) CreateManagedConversationScheduleExact(ctx context.Context, in *CreateManagedConversationScheduleExactRequest, opts ...grpc.CallOption) (*ManagedConversationScheduleExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ManagedConversationScheduleExactResponse)
+	err := c.cc.Invoke(ctx, Host_CreateManagedConversationScheduleExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) UpdateManagedConversationScheduleExact(ctx context.Context, in *UpdateManagedConversationScheduleExactRequest, opts ...grpc.CallOption) (*ManagedConversationScheduleExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ManagedConversationScheduleExactResponse)
+	err := c.cc.Invoke(ctx, Host_UpdateManagedConversationScheduleExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) SetManagedConversationScheduleEnabledExact(ctx context.Context, in *SetManagedConversationScheduleEnabledExactRequest, opts ...grpc.CallOption) (*ManagedConversationScheduleExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ManagedConversationScheduleExactResponse)
+	err := c.cc.Invoke(ctx, Host_SetManagedConversationScheduleEnabledExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) DeleteManagedConversationScheduleExact(ctx context.Context, in *DeleteManagedConversationScheduleExactRequest, opts ...grpc.CallOption) (*HostCommandResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HostCommandResult)
+	err := c.cc.Invoke(ctx, Host_DeleteManagedConversationScheduleExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) EnsureTaskRunExact(ctx context.Context, in *EnsureTaskRunExactRequest, opts ...grpc.CallOption) (*EnsureTaskRunExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnsureTaskRunExactResponse)
+	err := c.cc.Invoke(ctx, Host_EnsureTaskRunExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) StopTaskRunExact(ctx context.Context, in *StopTaskRunExactRequest, opts ...grpc.CallOption) (*StopTaskRunExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StopTaskRunExactResponse)
+	err := c.cc.Invoke(ctx, Host_StopTaskRunExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) RecoverSessionExact(ctx context.Context, in *RecoverSessionExactRequest, opts ...grpc.CallOption) (*RecoverSessionExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RecoverSessionExactResponse)
+	err := c.cc.Invoke(ctx, Host_RecoverSessionExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) CancelPendingTaskTransitionExact(ctx context.Context, in *CancelPendingTaskTransitionExactRequest, opts ...grpc.CallOption) (*CancelPendingTaskTransitionExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelPendingTaskTransitionExactResponse)
+	err := c.cc.Invoke(ctx, Host_CancelPendingTaskTransitionExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetSessionModeContextExact(ctx context.Context, in *GetSessionModeContextExactRequest, opts ...grpc.CallOption) (*GetSessionModeContextExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSessionModeContextExactResponse)
+	err := c.cc.Invoke(ctx, Host_GetSessionModeContextExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) SetSessionModeExact(ctx context.Context, in *SetSessionModeExactRequest, opts ...grpc.CallOption) (*SetSessionModeExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetSessionModeExactResponse)
+	err := c.cc.Invoke(ctx, Host_SetSessionModeExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) RespondPermissionExact(ctx context.Context, in *RespondPermissionExactRequest, opts ...grpc.CallOption) (*RespondPermissionExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RespondPermissionExactResponse)
+	err := c.cc.Invoke(ctx, Host_RespondPermissionExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) AnswerClarificationExact(ctx context.Context, in *AnswerClarificationExactRequest, opts ...grpc.CallOption) (*AnswerClarificationExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AnswerClarificationExactResponse)
+	err := c.cc.Invoke(ctx, Host_AnswerClarificationExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListWorkspacesExact(ctx context.Context, in *ListWorkspacesExactRequest, opts ...grpc.CallOption) (*ListWorkspacesExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListWorkspacesExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListWorkspacesExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListWorkflowsExact(ctx context.Context, in *ListWorkflowsExactRequest, opts ...grpc.CallOption) (*ListWorkflowsExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListWorkflowsExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListWorkflowsExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListWorkflowStepsExact(ctx context.Context, in *ListWorkflowStepsExactRequest, opts ...grpc.CallOption) (*ListWorkflowStepsExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListWorkflowStepsExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListWorkflowStepsExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListTasksExact(ctx context.Context, in *ListTasksExactRequest, opts ...grpc.CallOption) (*ListTasksExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTasksExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListTasksExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetTaskExact(ctx context.Context, in *GetTaskExactRequest, opts ...grpc.CallOption) (*GetTaskExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTaskExactResponse)
+	err := c.cc.Invoke(ctx, Host_GetTaskExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListSessionsExact(ctx context.Context, in *ListSessionsExactRequest, opts ...grpc.CallOption) (*ListSessionsExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSessionsExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListSessionsExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListPendingInteractionsExact(ctx context.Context, in *ListPendingInteractionsExactRequest, opts ...grpc.CallOption) (*ListPendingInteractionsExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPendingInteractionsExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListPendingInteractionsExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetInteractionExact(ctx context.Context, in *GetInteractionExactRequest, opts ...grpc.CallOption) (*GetInteractionExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetInteractionExactResponse)
+	err := c.cc.Invoke(ctx, Host_GetInteractionExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListSanitizedMessagesExact(ctx context.Context, in *ListSanitizedMessagesExactRequest, opts ...grpc.CallOption) (*ListSanitizedMessagesExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSanitizedMessagesExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListSanitizedMessagesExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListTaskInboxExact(ctx context.Context, in *ListTaskInboxExactRequest, opts ...grpc.CallOption) (*ListTaskInboxExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTaskInboxExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListTaskInboxExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetTaskDirectiveExact(ctx context.Context, in *GetTaskDirectiveExactRequest, opts ...grpc.CallOption) (*GetTaskDirectiveExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTaskDirectiveExactResponse)
+	err := c.cc.Invoke(ctx, Host_GetTaskDirectiveExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListTaskDirectivesExact(ctx context.Context, in *ListTaskDirectivesExactRequest, opts ...grpc.CallOption) (*ListTaskDirectivesExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTaskDirectivesExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListTaskDirectivesExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetTaskRelationsExact(ctx context.Context, in *GetTaskRelationsExactRequest, opts ...grpc.CallOption) (*GetTaskRelationsExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTaskRelationsExactResponse)
+	err := c.cc.Invoke(ctx, Host_GetTaskRelationsExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListTaskRelationsExact(ctx context.Context, in *ListTaskRelationsExactRequest, opts ...grpc.CallOption) (*ListTaskRelationsExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTaskRelationsExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListTaskRelationsExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListPendingTaskTransitionsExact(ctx context.Context, in *ListPendingTaskTransitionsExactRequest, opts ...grpc.CallOption) (*ListPendingTaskTransitionsExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPendingTaskTransitionsExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListPendingTaskTransitionsExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListChangeRequestEvidenceExact(ctx context.Context, in *ListChangeRequestEvidenceExactRequest, opts ...grpc.CallOption) (*ListChangeRequestEvidenceExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListChangeRequestEvidenceExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListChangeRequestEvidenceExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListTaskUsageExact(ctx context.Context, in *ListTaskUsageExactRequest, opts ...grpc.CallOption) (*ListTaskUsageExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTaskUsageExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListTaskUsageExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *hostClient) GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error) {
@@ -1404,6 +2143,76 @@ func (c *hostClient) CancelClarification(ctx context.Context, in *CancelClarific
 // the relevant service (never a repository directly); write handlers call
 // service methods that publish task.* events (never repository.TaskRepository).
 type HostServer interface {
+	GetCapabilityContext(context.Context, *GetCapabilityContextRequest) (*GetCapabilityContextResponse, error)
+	UpdateTaskExact(context.Context, *UpdateTaskExactRequest) (*UpdateTaskExactResponse, error)
+	CreateTaskExact(context.Context, *CreateTaskExactRequest) (*CreateTaskExactResponse, error)
+	SetTaskLabelsExact(context.Context, *SetTaskLabelsExactRequest) (*SetTaskLabelsExactResponse, error)
+	AssignTaskExact(context.Context, *AssignTaskExactRequest) (*AssignTaskExactResponse, error)
+	MoveTaskExact(context.Context, *MoveTaskExactRequest) (*MoveTaskExactResponse, error)
+	ArchiveTaskExact(context.Context, *ArchiveTaskExactRequest) (*ArchiveTaskExactResponse, error)
+	AddTaskRelationExact(context.Context, *AddTaskRelationExactRequest) (*AddTaskRelationExactResponse, error)
+	RemoveTaskRelationExact(context.Context, *RemoveTaskRelationExactRequest) (*RemoveTaskRelationExactResponse, error)
+	SendTaskMessageExact(context.Context, *SendTaskMessageExactRequest) (*SendTaskMessageExactResponse, error)
+	IssueTaskDirectiveExact(context.Context, *IssueTaskDirectiveExactRequest) (*IssueTaskDirectiveExactResponse, error)
+	ResolveTaskDirectiveExact(context.Context, *ResolveTaskDirectiveExactRequest) (*ResolveTaskDirectiveExactResponse, error)
+	AcquireTaskManagementClaimExact(context.Context, *AcquireTaskManagementClaimExactRequest) (*TaskManagementClaimExactResponse, error)
+	ReleaseTaskManagementClaimExact(context.Context, *ReleaseTaskManagementClaimExactRequest) (*TaskManagementClaimExactResponse, error)
+	TransferTaskManagementClaimExact(context.Context, *TransferTaskManagementClaimExactRequest) (*TaskManagementClaimExactResponse, error)
+	SetTaskCompletionCriteriaExact(context.Context, *SetTaskCompletionCriteriaExactRequest) (*TaskCompletionGateExactResponse, error)
+	VerifyTaskCompletionCriterionExact(context.Context, *VerifyTaskCompletionCriterionExactRequest) (*TaskCompletionGateExactResponse, error)
+	ApplyWorkspaceAdministrationExact(context.Context, *ApplyWorkspaceAdministrationExactRequest) (*WorkspaceAdministrationExactResponse, error)
+	GetSourceIssueCapabilitiesExact(context.Context, *GetSourceIssueCapabilitiesExactRequest) (*GetSourceIssueCapabilitiesExactResponse, error)
+	CommentSourceIssueExact(context.Context, *CommentSourceIssueExactRequest) (*SourceIssueWritebackExactResponse, error)
+	TransitionSourceIssueExact(context.Context, *TransitionSourceIssueExactRequest) (*SourceIssueWritebackExactResponse, error)
+	EnsureManagedAgentConversationExact(context.Context, *EnsureManagedAgentConversationExactRequest) (*EnsureManagedAgentConversationExactResponse, error)
+	GetManagedAgentConversationStatusExact(context.Context, *GetManagedAgentConversationStatusExactRequest) (*GetManagedAgentConversationStatusExactResponse, error)
+	ListManagedAgentConversationsExact(context.Context, *ListManagedAgentConversationsExactRequest) (*ListManagedAgentConversationsExactResponse, error)
+	SetManagedAgentConversationPausedExact(context.Context, *SetManagedAgentConversationPausedExactRequest) (*SetManagedAgentConversationPausedExactResponse, error)
+	DeleteManagedAgentConversationExact(context.Context, *DeleteManagedAgentConversationExactRequest) (*DeleteManagedAgentConversationExactResponse, error)
+	// Durable ordered input for retained conversations. Enqueue returns a
+	// receipt before delivery; retries with the same idempotency and occurrence
+	// identity resolve to the same receipt. Dispatch remains immediate and
+	// reports BUSY instead of silently adding work to the queue.
+	EnqueueManagedAgentInputExact(context.Context, *EnqueueManagedAgentInputExactRequest) (*EnqueueManagedAgentInputExactResponse, error)
+	GetManagedAgentInputExact(context.Context, *GetManagedAgentInputExactRequest) (*GetManagedAgentInputExactResponse, error)
+	ListManagedAgentInputsExact(context.Context, *ListManagedAgentInputsExactRequest) (*ListManagedAgentInputsExactResponse, error)
+	CancelManagedAgentInputExact(context.Context, *CancelManagedAgentInputExactRequest) (*CancelManagedAgentInputExactResponse, error)
+	DispatchManagedAgentConversationExact(context.Context, *DispatchManagedAgentConversationExactRequest) (*DispatchManagedAgentConversationExactResponse, error)
+	ListManagedConversationSchedulesExact(context.Context, *ListManagedConversationSchedulesExactRequest) (*ListManagedConversationSchedulesExactResponse, error)
+	CreateManagedConversationScheduleExact(context.Context, *CreateManagedConversationScheduleExactRequest) (*ManagedConversationScheduleExactResponse, error)
+	UpdateManagedConversationScheduleExact(context.Context, *UpdateManagedConversationScheduleExactRequest) (*ManagedConversationScheduleExactResponse, error)
+	SetManagedConversationScheduleEnabledExact(context.Context, *SetManagedConversationScheduleEnabledExactRequest) (*ManagedConversationScheduleExactResponse, error)
+	DeleteManagedConversationScheduleExact(context.Context, *DeleteManagedConversationScheduleExactRequest) (*HostCommandResult, error)
+	// Exact task/session execution controls require workspace capability
+	// approval and resource-version/execution-generation fences.
+	EnsureTaskRunExact(context.Context, *EnsureTaskRunExactRequest) (*EnsureTaskRunExactResponse, error)
+	StopTaskRunExact(context.Context, *StopTaskRunExactRequest) (*StopTaskRunExactResponse, error)
+	RecoverSessionExact(context.Context, *RecoverSessionExactRequest) (*RecoverSessionExactResponse, error)
+	CancelPendingTaskTransitionExact(context.Context, *CancelPendingTaskTransitionExactRequest) (*CancelPendingTaskTransitionExactResponse, error)
+	GetSessionModeContextExact(context.Context, *GetSessionModeContextExactRequest) (*GetSessionModeContextExactResponse, error)
+	SetSessionModeExact(context.Context, *SetSessionModeExactRequest) (*SetSessionModeExactResponse, error)
+	// Human interaction responses require a Host-issued single-use receipt from
+	// the authenticated native UI, bound to the exact interaction revision and
+	// response payload.
+	RespondPermissionExact(context.Context, *RespondPermissionExactRequest) (*RespondPermissionExactResponse, error)
+	AnswerClarificationExact(context.Context, *AnswerClarificationExactRequest) (*AnswerClarificationExactResponse, error)
+	ListWorkspacesExact(context.Context, *ListWorkspacesExactRequest) (*ListWorkspacesExactResponse, error)
+	ListWorkflowsExact(context.Context, *ListWorkflowsExactRequest) (*ListWorkflowsExactResponse, error)
+	ListWorkflowStepsExact(context.Context, *ListWorkflowStepsExactRequest) (*ListWorkflowStepsExactResponse, error)
+	ListTasksExact(context.Context, *ListTasksExactRequest) (*ListTasksExactResponse, error)
+	GetTaskExact(context.Context, *GetTaskExactRequest) (*GetTaskExactResponse, error)
+	ListSessionsExact(context.Context, *ListSessionsExactRequest) (*ListSessionsExactResponse, error)
+	ListPendingInteractionsExact(context.Context, *ListPendingInteractionsExactRequest) (*ListPendingInteractionsExactResponse, error)
+	GetInteractionExact(context.Context, *GetInteractionExactRequest) (*GetInteractionExactResponse, error)
+	ListSanitizedMessagesExact(context.Context, *ListSanitizedMessagesExactRequest) (*ListSanitizedMessagesExactResponse, error)
+	ListTaskInboxExact(context.Context, *ListTaskInboxExactRequest) (*ListTaskInboxExactResponse, error)
+	GetTaskDirectiveExact(context.Context, *GetTaskDirectiveExactRequest) (*GetTaskDirectiveExactResponse, error)
+	ListTaskDirectivesExact(context.Context, *ListTaskDirectivesExactRequest) (*ListTaskDirectivesExactResponse, error)
+	GetTaskRelationsExact(context.Context, *GetTaskRelationsExactRequest) (*GetTaskRelationsExactResponse, error)
+	ListTaskRelationsExact(context.Context, *ListTaskRelationsExactRequest) (*ListTaskRelationsExactResponse, error)
+	ListPendingTaskTransitionsExact(context.Context, *ListPendingTaskTransitionsExactRequest) (*ListPendingTaskTransitionsExactResponse, error)
+	ListChangeRequestEvidenceExact(context.Context, *ListChangeRequestEvidenceExactRequest) (*ListChangeRequestEvidenceExactResponse, error)
+	ListTaskUsageExact(context.Context, *ListTaskUsageExactRequest) (*ListTaskUsageExactResponse, error)
 	GetState(context.Context, *GetStateRequest) (*GetStateResponse, error)
 	SetState(context.Context, *SetStateRequest) (*SetStateResponse, error)
 	DeleteState(context.Context, *DeleteStateRequest) (*DeleteStateResponse, error)
@@ -1492,6 +2301,8 @@ type HostServer interface {
 	MoveTask(context.Context, *MoveTaskRequest) (*MoveTaskResponse, error)
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
 	PreviewPluginOwnedTaskTree(context.Context, *PreviewPluginOwnedTaskTreeRequest) (*PreviewPluginOwnedTaskTreeResponse, error)
+	// Legacy v1 compatibility RPC. The current Kandev Host denies deletion
+	// because this method cannot carry a native Human confirmation ticket.
 	DeletePluginOwnedTaskTree(context.Context, *DeletePluginOwnedTaskTreeRequest) (*DeletePluginOwnedTaskTreeResponse, error)
 	// Agent conversations — capability agent_conversation. Ensure creates or
 	// repairs one hidden workflowless ephemeral task with a primary session per
@@ -1501,14 +2312,10 @@ type HostServer interface {
 	EnsureAgentConversation(context.Context, *EnsureAgentConversationRequest) (*EnsureAgentConversationResponse, error)
 	DispatchAgentConversation(context.Context, *DispatchAgentConversationRequest) (*DispatchAgentConversationResponse, error)
 	DeleteAgentConversation(context.Context, *DeleteAgentConversationRequest) (*DeleteAgentConversationResponse, error)
-	// Interaction responses — capability api_write:interactions. Each routes
-	// through the same first-party service the native UI uses, so the agent
-	// unblocks, the durable record turns terminal, and every surface converges
-	// through the normal events. Terminal-once: an interaction that already has
-	// a resolution answers FailedPrecondition rather than dispatching a second
-	// response, and an unknown id answers NotFound — the two outcomes a
-	// reconciling cache needs to distinguish "someone else got there first" from
-	// "I am holding a stale id".
+	// Legacy interaction response methods remain on the wire for source
+	// compatibility. The Host returns PermissionDenied because these requests
+	// cannot carry an observed revision or human response receipt. Use the exact
+	// v2 methods above.
 	RespondToPermission(context.Context, *RespondToPermissionRequest) (*RespondToPermissionResponse, error)
 	AnswerClarification(context.Context, *AnswerClarificationRequest) (*AnswerClarificationResponse, error)
 	CancelClarification(context.Context, *CancelClarificationRequest) (*CancelClarificationResponse, error)
@@ -1522,6 +2329,189 @@ type HostServer interface {
 // pointer dereference when methods are called.
 type UnimplementedHostServer struct{}
 
+func (UnimplementedHostServer) GetCapabilityContext(context.Context, *GetCapabilityContextRequest) (*GetCapabilityContextResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetCapabilityContext not implemented")
+}
+func (UnimplementedHostServer) UpdateTaskExact(context.Context, *UpdateTaskExactRequest) (*UpdateTaskExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateTaskExact not implemented")
+}
+func (UnimplementedHostServer) CreateTaskExact(context.Context, *CreateTaskExactRequest) (*CreateTaskExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateTaskExact not implemented")
+}
+func (UnimplementedHostServer) SetTaskLabelsExact(context.Context, *SetTaskLabelsExactRequest) (*SetTaskLabelsExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetTaskLabelsExact not implemented")
+}
+func (UnimplementedHostServer) AssignTaskExact(context.Context, *AssignTaskExactRequest) (*AssignTaskExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AssignTaskExact not implemented")
+}
+func (UnimplementedHostServer) MoveTaskExact(context.Context, *MoveTaskExactRequest) (*MoveTaskExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MoveTaskExact not implemented")
+}
+func (UnimplementedHostServer) ArchiveTaskExact(context.Context, *ArchiveTaskExactRequest) (*ArchiveTaskExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ArchiveTaskExact not implemented")
+}
+func (UnimplementedHostServer) AddTaskRelationExact(context.Context, *AddTaskRelationExactRequest) (*AddTaskRelationExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddTaskRelationExact not implemented")
+}
+func (UnimplementedHostServer) RemoveTaskRelationExact(context.Context, *RemoveTaskRelationExactRequest) (*RemoveTaskRelationExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveTaskRelationExact not implemented")
+}
+func (UnimplementedHostServer) SendTaskMessageExact(context.Context, *SendTaskMessageExactRequest) (*SendTaskMessageExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SendTaskMessageExact not implemented")
+}
+func (UnimplementedHostServer) IssueTaskDirectiveExact(context.Context, *IssueTaskDirectiveExactRequest) (*IssueTaskDirectiveExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IssueTaskDirectiveExact not implemented")
+}
+func (UnimplementedHostServer) ResolveTaskDirectiveExact(context.Context, *ResolveTaskDirectiveExactRequest) (*ResolveTaskDirectiveExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResolveTaskDirectiveExact not implemented")
+}
+func (UnimplementedHostServer) AcquireTaskManagementClaimExact(context.Context, *AcquireTaskManagementClaimExactRequest) (*TaskManagementClaimExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AcquireTaskManagementClaimExact not implemented")
+}
+func (UnimplementedHostServer) ReleaseTaskManagementClaimExact(context.Context, *ReleaseTaskManagementClaimExactRequest) (*TaskManagementClaimExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReleaseTaskManagementClaimExact not implemented")
+}
+func (UnimplementedHostServer) TransferTaskManagementClaimExact(context.Context, *TransferTaskManagementClaimExactRequest) (*TaskManagementClaimExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TransferTaskManagementClaimExact not implemented")
+}
+func (UnimplementedHostServer) SetTaskCompletionCriteriaExact(context.Context, *SetTaskCompletionCriteriaExactRequest) (*TaskCompletionGateExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetTaskCompletionCriteriaExact not implemented")
+}
+func (UnimplementedHostServer) VerifyTaskCompletionCriterionExact(context.Context, *VerifyTaskCompletionCriterionExactRequest) (*TaskCompletionGateExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyTaskCompletionCriterionExact not implemented")
+}
+func (UnimplementedHostServer) ApplyWorkspaceAdministrationExact(context.Context, *ApplyWorkspaceAdministrationExactRequest) (*WorkspaceAdministrationExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ApplyWorkspaceAdministrationExact not implemented")
+}
+func (UnimplementedHostServer) GetSourceIssueCapabilitiesExact(context.Context, *GetSourceIssueCapabilitiesExactRequest) (*GetSourceIssueCapabilitiesExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSourceIssueCapabilitiesExact not implemented")
+}
+func (UnimplementedHostServer) CommentSourceIssueExact(context.Context, *CommentSourceIssueExactRequest) (*SourceIssueWritebackExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CommentSourceIssueExact not implemented")
+}
+func (UnimplementedHostServer) TransitionSourceIssueExact(context.Context, *TransitionSourceIssueExactRequest) (*SourceIssueWritebackExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TransitionSourceIssueExact not implemented")
+}
+func (UnimplementedHostServer) EnsureManagedAgentConversationExact(context.Context, *EnsureManagedAgentConversationExactRequest) (*EnsureManagedAgentConversationExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EnsureManagedAgentConversationExact not implemented")
+}
+func (UnimplementedHostServer) GetManagedAgentConversationStatusExact(context.Context, *GetManagedAgentConversationStatusExactRequest) (*GetManagedAgentConversationStatusExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetManagedAgentConversationStatusExact not implemented")
+}
+func (UnimplementedHostServer) ListManagedAgentConversationsExact(context.Context, *ListManagedAgentConversationsExactRequest) (*ListManagedAgentConversationsExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListManagedAgentConversationsExact not implemented")
+}
+func (UnimplementedHostServer) SetManagedAgentConversationPausedExact(context.Context, *SetManagedAgentConversationPausedExactRequest) (*SetManagedAgentConversationPausedExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetManagedAgentConversationPausedExact not implemented")
+}
+func (UnimplementedHostServer) DeleteManagedAgentConversationExact(context.Context, *DeleteManagedAgentConversationExactRequest) (*DeleteManagedAgentConversationExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteManagedAgentConversationExact not implemented")
+}
+func (UnimplementedHostServer) EnqueueManagedAgentInputExact(context.Context, *EnqueueManagedAgentInputExactRequest) (*EnqueueManagedAgentInputExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EnqueueManagedAgentInputExact not implemented")
+}
+func (UnimplementedHostServer) GetManagedAgentInputExact(context.Context, *GetManagedAgentInputExactRequest) (*GetManagedAgentInputExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetManagedAgentInputExact not implemented")
+}
+func (UnimplementedHostServer) ListManagedAgentInputsExact(context.Context, *ListManagedAgentInputsExactRequest) (*ListManagedAgentInputsExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListManagedAgentInputsExact not implemented")
+}
+func (UnimplementedHostServer) CancelManagedAgentInputExact(context.Context, *CancelManagedAgentInputExactRequest) (*CancelManagedAgentInputExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelManagedAgentInputExact not implemented")
+}
+func (UnimplementedHostServer) DispatchManagedAgentConversationExact(context.Context, *DispatchManagedAgentConversationExactRequest) (*DispatchManagedAgentConversationExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DispatchManagedAgentConversationExact not implemented")
+}
+func (UnimplementedHostServer) ListManagedConversationSchedulesExact(context.Context, *ListManagedConversationSchedulesExactRequest) (*ListManagedConversationSchedulesExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListManagedConversationSchedulesExact not implemented")
+}
+func (UnimplementedHostServer) CreateManagedConversationScheduleExact(context.Context, *CreateManagedConversationScheduleExactRequest) (*ManagedConversationScheduleExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateManagedConversationScheduleExact not implemented")
+}
+func (UnimplementedHostServer) UpdateManagedConversationScheduleExact(context.Context, *UpdateManagedConversationScheduleExactRequest) (*ManagedConversationScheduleExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateManagedConversationScheduleExact not implemented")
+}
+func (UnimplementedHostServer) SetManagedConversationScheduleEnabledExact(context.Context, *SetManagedConversationScheduleEnabledExactRequest) (*ManagedConversationScheduleExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetManagedConversationScheduleEnabledExact not implemented")
+}
+func (UnimplementedHostServer) DeleteManagedConversationScheduleExact(context.Context, *DeleteManagedConversationScheduleExactRequest) (*HostCommandResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteManagedConversationScheduleExact not implemented")
+}
+func (UnimplementedHostServer) EnsureTaskRunExact(context.Context, *EnsureTaskRunExactRequest) (*EnsureTaskRunExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EnsureTaskRunExact not implemented")
+}
+func (UnimplementedHostServer) StopTaskRunExact(context.Context, *StopTaskRunExactRequest) (*StopTaskRunExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StopTaskRunExact not implemented")
+}
+func (UnimplementedHostServer) RecoverSessionExact(context.Context, *RecoverSessionExactRequest) (*RecoverSessionExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RecoverSessionExact not implemented")
+}
+func (UnimplementedHostServer) CancelPendingTaskTransitionExact(context.Context, *CancelPendingTaskTransitionExactRequest) (*CancelPendingTaskTransitionExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelPendingTaskTransitionExact not implemented")
+}
+func (UnimplementedHostServer) GetSessionModeContextExact(context.Context, *GetSessionModeContextExactRequest) (*GetSessionModeContextExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSessionModeContextExact not implemented")
+}
+func (UnimplementedHostServer) SetSessionModeExact(context.Context, *SetSessionModeExactRequest) (*SetSessionModeExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetSessionModeExact not implemented")
+}
+func (UnimplementedHostServer) RespondPermissionExact(context.Context, *RespondPermissionExactRequest) (*RespondPermissionExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RespondPermissionExact not implemented")
+}
+func (UnimplementedHostServer) AnswerClarificationExact(context.Context, *AnswerClarificationExactRequest) (*AnswerClarificationExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AnswerClarificationExact not implemented")
+}
+func (UnimplementedHostServer) ListWorkspacesExact(context.Context, *ListWorkspacesExactRequest) (*ListWorkspacesExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWorkspacesExact not implemented")
+}
+func (UnimplementedHostServer) ListWorkflowsExact(context.Context, *ListWorkflowsExactRequest) (*ListWorkflowsExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWorkflowsExact not implemented")
+}
+func (UnimplementedHostServer) ListWorkflowStepsExact(context.Context, *ListWorkflowStepsExactRequest) (*ListWorkflowStepsExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWorkflowStepsExact not implemented")
+}
+func (UnimplementedHostServer) ListTasksExact(context.Context, *ListTasksExactRequest) (*ListTasksExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTasksExact not implemented")
+}
+func (UnimplementedHostServer) GetTaskExact(context.Context, *GetTaskExactRequest) (*GetTaskExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTaskExact not implemented")
+}
+func (UnimplementedHostServer) ListSessionsExact(context.Context, *ListSessionsExactRequest) (*ListSessionsExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListSessionsExact not implemented")
+}
+func (UnimplementedHostServer) ListPendingInteractionsExact(context.Context, *ListPendingInteractionsExactRequest) (*ListPendingInteractionsExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListPendingInteractionsExact not implemented")
+}
+func (UnimplementedHostServer) GetInteractionExact(context.Context, *GetInteractionExactRequest) (*GetInteractionExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetInteractionExact not implemented")
+}
+func (UnimplementedHostServer) ListSanitizedMessagesExact(context.Context, *ListSanitizedMessagesExactRequest) (*ListSanitizedMessagesExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListSanitizedMessagesExact not implemented")
+}
+func (UnimplementedHostServer) ListTaskInboxExact(context.Context, *ListTaskInboxExactRequest) (*ListTaskInboxExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTaskInboxExact not implemented")
+}
+func (UnimplementedHostServer) GetTaskDirectiveExact(context.Context, *GetTaskDirectiveExactRequest) (*GetTaskDirectiveExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTaskDirectiveExact not implemented")
+}
+func (UnimplementedHostServer) ListTaskDirectivesExact(context.Context, *ListTaskDirectivesExactRequest) (*ListTaskDirectivesExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTaskDirectivesExact not implemented")
+}
+func (UnimplementedHostServer) GetTaskRelationsExact(context.Context, *GetTaskRelationsExactRequest) (*GetTaskRelationsExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTaskRelationsExact not implemented")
+}
+func (UnimplementedHostServer) ListTaskRelationsExact(context.Context, *ListTaskRelationsExactRequest) (*ListTaskRelationsExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTaskRelationsExact not implemented")
+}
+func (UnimplementedHostServer) ListPendingTaskTransitionsExact(context.Context, *ListPendingTaskTransitionsExactRequest) (*ListPendingTaskTransitionsExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListPendingTaskTransitionsExact not implemented")
+}
+func (UnimplementedHostServer) ListChangeRequestEvidenceExact(context.Context, *ListChangeRequestEvidenceExactRequest) (*ListChangeRequestEvidenceExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListChangeRequestEvidenceExact not implemented")
+}
+func (UnimplementedHostServer) ListTaskUsageExact(context.Context, *ListTaskUsageExactRequest) (*ListTaskUsageExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTaskUsageExact not implemented")
+}
 func (UnimplementedHostServer) GetState(context.Context, *GetStateRequest) (*GetStateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetState not implemented")
 }
@@ -1667,6 +2657,1104 @@ func RegisterHostServer(s grpc.ServiceRegistrar, srv HostServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&Host_ServiceDesc, srv)
+}
+
+func _Host_GetCapabilityContext_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCapabilityContextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetCapabilityContext(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetCapabilityContext_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetCapabilityContext(ctx, req.(*GetCapabilityContextRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_UpdateTaskExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTaskExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).UpdateTaskExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_UpdateTaskExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).UpdateTaskExact(ctx, req.(*UpdateTaskExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_CreateTaskExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTaskExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).CreateTaskExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_CreateTaskExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).CreateTaskExact(ctx, req.(*CreateTaskExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_SetTaskLabelsExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetTaskLabelsExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).SetTaskLabelsExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_SetTaskLabelsExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).SetTaskLabelsExact(ctx, req.(*SetTaskLabelsExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_AssignTaskExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AssignTaskExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).AssignTaskExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_AssignTaskExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).AssignTaskExact(ctx, req.(*AssignTaskExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_MoveTaskExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MoveTaskExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).MoveTaskExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_MoveTaskExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).MoveTaskExact(ctx, req.(*MoveTaskExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ArchiveTaskExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ArchiveTaskExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ArchiveTaskExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ArchiveTaskExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ArchiveTaskExact(ctx, req.(*ArchiveTaskExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_AddTaskRelationExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddTaskRelationExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).AddTaskRelationExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_AddTaskRelationExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).AddTaskRelationExact(ctx, req.(*AddTaskRelationExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_RemoveTaskRelationExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveTaskRelationExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).RemoveTaskRelationExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_RemoveTaskRelationExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).RemoveTaskRelationExact(ctx, req.(*RemoveTaskRelationExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_SendTaskMessageExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SendTaskMessageExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).SendTaskMessageExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_SendTaskMessageExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).SendTaskMessageExact(ctx, req.(*SendTaskMessageExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_IssueTaskDirectiveExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IssueTaskDirectiveExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).IssueTaskDirectiveExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_IssueTaskDirectiveExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).IssueTaskDirectiveExact(ctx, req.(*IssueTaskDirectiveExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ResolveTaskDirectiveExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveTaskDirectiveExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ResolveTaskDirectiveExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ResolveTaskDirectiveExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ResolveTaskDirectiveExact(ctx, req.(*ResolveTaskDirectiveExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_AcquireTaskManagementClaimExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AcquireTaskManagementClaimExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).AcquireTaskManagementClaimExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_AcquireTaskManagementClaimExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).AcquireTaskManagementClaimExact(ctx, req.(*AcquireTaskManagementClaimExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ReleaseTaskManagementClaimExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleaseTaskManagementClaimExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ReleaseTaskManagementClaimExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ReleaseTaskManagementClaimExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ReleaseTaskManagementClaimExact(ctx, req.(*ReleaseTaskManagementClaimExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_TransferTaskManagementClaimExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransferTaskManagementClaimExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).TransferTaskManagementClaimExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_TransferTaskManagementClaimExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).TransferTaskManagementClaimExact(ctx, req.(*TransferTaskManagementClaimExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_SetTaskCompletionCriteriaExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetTaskCompletionCriteriaExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).SetTaskCompletionCriteriaExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_SetTaskCompletionCriteriaExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).SetTaskCompletionCriteriaExact(ctx, req.(*SetTaskCompletionCriteriaExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_VerifyTaskCompletionCriterionExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyTaskCompletionCriterionExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).VerifyTaskCompletionCriterionExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_VerifyTaskCompletionCriterionExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).VerifyTaskCompletionCriterionExact(ctx, req.(*VerifyTaskCompletionCriterionExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ApplyWorkspaceAdministrationExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ApplyWorkspaceAdministrationExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ApplyWorkspaceAdministrationExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ApplyWorkspaceAdministrationExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ApplyWorkspaceAdministrationExact(ctx, req.(*ApplyWorkspaceAdministrationExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetSourceIssueCapabilitiesExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSourceIssueCapabilitiesExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetSourceIssueCapabilitiesExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetSourceIssueCapabilitiesExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetSourceIssueCapabilitiesExact(ctx, req.(*GetSourceIssueCapabilitiesExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_CommentSourceIssueExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommentSourceIssueExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).CommentSourceIssueExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_CommentSourceIssueExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).CommentSourceIssueExact(ctx, req.(*CommentSourceIssueExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_TransitionSourceIssueExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransitionSourceIssueExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).TransitionSourceIssueExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_TransitionSourceIssueExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).TransitionSourceIssueExact(ctx, req.(*TransitionSourceIssueExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_EnsureManagedAgentConversationExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnsureManagedAgentConversationExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).EnsureManagedAgentConversationExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_EnsureManagedAgentConversationExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).EnsureManagedAgentConversationExact(ctx, req.(*EnsureManagedAgentConversationExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetManagedAgentConversationStatusExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetManagedAgentConversationStatusExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetManagedAgentConversationStatusExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetManagedAgentConversationStatusExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetManagedAgentConversationStatusExact(ctx, req.(*GetManagedAgentConversationStatusExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListManagedAgentConversationsExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListManagedAgentConversationsExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListManagedAgentConversationsExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListManagedAgentConversationsExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListManagedAgentConversationsExact(ctx, req.(*ListManagedAgentConversationsExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_SetManagedAgentConversationPausedExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetManagedAgentConversationPausedExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).SetManagedAgentConversationPausedExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_SetManagedAgentConversationPausedExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).SetManagedAgentConversationPausedExact(ctx, req.(*SetManagedAgentConversationPausedExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_DeleteManagedAgentConversationExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteManagedAgentConversationExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).DeleteManagedAgentConversationExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_DeleteManagedAgentConversationExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).DeleteManagedAgentConversationExact(ctx, req.(*DeleteManagedAgentConversationExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_EnqueueManagedAgentInputExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnqueueManagedAgentInputExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).EnqueueManagedAgentInputExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_EnqueueManagedAgentInputExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).EnqueueManagedAgentInputExact(ctx, req.(*EnqueueManagedAgentInputExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetManagedAgentInputExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetManagedAgentInputExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetManagedAgentInputExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetManagedAgentInputExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetManagedAgentInputExact(ctx, req.(*GetManagedAgentInputExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListManagedAgentInputsExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListManagedAgentInputsExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListManagedAgentInputsExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListManagedAgentInputsExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListManagedAgentInputsExact(ctx, req.(*ListManagedAgentInputsExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_CancelManagedAgentInputExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelManagedAgentInputExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).CancelManagedAgentInputExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_CancelManagedAgentInputExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).CancelManagedAgentInputExact(ctx, req.(*CancelManagedAgentInputExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_DispatchManagedAgentConversationExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DispatchManagedAgentConversationExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).DispatchManagedAgentConversationExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_DispatchManagedAgentConversationExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).DispatchManagedAgentConversationExact(ctx, req.(*DispatchManagedAgentConversationExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListManagedConversationSchedulesExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListManagedConversationSchedulesExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListManagedConversationSchedulesExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListManagedConversationSchedulesExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListManagedConversationSchedulesExact(ctx, req.(*ListManagedConversationSchedulesExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_CreateManagedConversationScheduleExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateManagedConversationScheduleExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).CreateManagedConversationScheduleExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_CreateManagedConversationScheduleExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).CreateManagedConversationScheduleExact(ctx, req.(*CreateManagedConversationScheduleExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_UpdateManagedConversationScheduleExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateManagedConversationScheduleExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).UpdateManagedConversationScheduleExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_UpdateManagedConversationScheduleExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).UpdateManagedConversationScheduleExact(ctx, req.(*UpdateManagedConversationScheduleExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_SetManagedConversationScheduleEnabledExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetManagedConversationScheduleEnabledExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).SetManagedConversationScheduleEnabledExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_SetManagedConversationScheduleEnabledExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).SetManagedConversationScheduleEnabledExact(ctx, req.(*SetManagedConversationScheduleEnabledExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_DeleteManagedConversationScheduleExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteManagedConversationScheduleExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).DeleteManagedConversationScheduleExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_DeleteManagedConversationScheduleExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).DeleteManagedConversationScheduleExact(ctx, req.(*DeleteManagedConversationScheduleExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_EnsureTaskRunExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnsureTaskRunExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).EnsureTaskRunExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_EnsureTaskRunExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).EnsureTaskRunExact(ctx, req.(*EnsureTaskRunExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_StopTaskRunExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StopTaskRunExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).StopTaskRunExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_StopTaskRunExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).StopTaskRunExact(ctx, req.(*StopTaskRunExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_RecoverSessionExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecoverSessionExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).RecoverSessionExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_RecoverSessionExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).RecoverSessionExact(ctx, req.(*RecoverSessionExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_CancelPendingTaskTransitionExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelPendingTaskTransitionExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).CancelPendingTaskTransitionExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_CancelPendingTaskTransitionExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).CancelPendingTaskTransitionExact(ctx, req.(*CancelPendingTaskTransitionExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetSessionModeContextExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSessionModeContextExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetSessionModeContextExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetSessionModeContextExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetSessionModeContextExact(ctx, req.(*GetSessionModeContextExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_SetSessionModeExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetSessionModeExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).SetSessionModeExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_SetSessionModeExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).SetSessionModeExact(ctx, req.(*SetSessionModeExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_RespondPermissionExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RespondPermissionExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).RespondPermissionExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_RespondPermissionExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).RespondPermissionExact(ctx, req.(*RespondPermissionExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_AnswerClarificationExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AnswerClarificationExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).AnswerClarificationExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_AnswerClarificationExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).AnswerClarificationExact(ctx, req.(*AnswerClarificationExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListWorkspacesExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWorkspacesExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListWorkspacesExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListWorkspacesExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListWorkspacesExact(ctx, req.(*ListWorkspacesExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListWorkflowsExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWorkflowsExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListWorkflowsExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListWorkflowsExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListWorkflowsExact(ctx, req.(*ListWorkflowsExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListWorkflowStepsExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWorkflowStepsExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListWorkflowStepsExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListWorkflowStepsExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListWorkflowStepsExact(ctx, req.(*ListWorkflowStepsExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListTasksExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTasksExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListTasksExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListTasksExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListTasksExact(ctx, req.(*ListTasksExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetTaskExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTaskExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetTaskExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetTaskExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetTaskExact(ctx, req.(*GetTaskExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListSessionsExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSessionsExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListSessionsExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListSessionsExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListSessionsExact(ctx, req.(*ListSessionsExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListPendingInteractionsExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPendingInteractionsExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListPendingInteractionsExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListPendingInteractionsExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListPendingInteractionsExact(ctx, req.(*ListPendingInteractionsExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetInteractionExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetInteractionExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetInteractionExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetInteractionExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetInteractionExact(ctx, req.(*GetInteractionExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListSanitizedMessagesExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSanitizedMessagesExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListSanitizedMessagesExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListSanitizedMessagesExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListSanitizedMessagesExact(ctx, req.(*ListSanitizedMessagesExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListTaskInboxExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTaskInboxExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListTaskInboxExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListTaskInboxExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListTaskInboxExact(ctx, req.(*ListTaskInboxExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetTaskDirectiveExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTaskDirectiveExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetTaskDirectiveExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetTaskDirectiveExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetTaskDirectiveExact(ctx, req.(*GetTaskDirectiveExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListTaskDirectivesExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTaskDirectivesExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListTaskDirectivesExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListTaskDirectivesExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListTaskDirectivesExact(ctx, req.(*ListTaskDirectivesExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetTaskRelationsExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTaskRelationsExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetTaskRelationsExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetTaskRelationsExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetTaskRelationsExact(ctx, req.(*GetTaskRelationsExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListTaskRelationsExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTaskRelationsExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListTaskRelationsExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListTaskRelationsExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListTaskRelationsExact(ctx, req.(*ListTaskRelationsExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListPendingTaskTransitionsExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPendingTaskTransitionsExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListPendingTaskTransitionsExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListPendingTaskTransitionsExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListPendingTaskTransitionsExact(ctx, req.(*ListPendingTaskTransitionsExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListChangeRequestEvidenceExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListChangeRequestEvidenceExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListChangeRequestEvidenceExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListChangeRequestEvidenceExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListChangeRequestEvidenceExact(ctx, req.(*ListChangeRequestEvidenceExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListTaskUsageExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTaskUsageExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListTaskUsageExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListTaskUsageExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListTaskUsageExact(ctx, req.(*ListTaskUsageExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _Host_GetState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -2425,6 +4513,250 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "kandev.plugin.v1.Host",
 	HandlerType: (*HostServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetCapabilityContext",
+			Handler:    _Host_GetCapabilityContext_Handler,
+		},
+		{
+			MethodName: "UpdateTaskExact",
+			Handler:    _Host_UpdateTaskExact_Handler,
+		},
+		{
+			MethodName: "CreateTaskExact",
+			Handler:    _Host_CreateTaskExact_Handler,
+		},
+		{
+			MethodName: "SetTaskLabelsExact",
+			Handler:    _Host_SetTaskLabelsExact_Handler,
+		},
+		{
+			MethodName: "AssignTaskExact",
+			Handler:    _Host_AssignTaskExact_Handler,
+		},
+		{
+			MethodName: "MoveTaskExact",
+			Handler:    _Host_MoveTaskExact_Handler,
+		},
+		{
+			MethodName: "ArchiveTaskExact",
+			Handler:    _Host_ArchiveTaskExact_Handler,
+		},
+		{
+			MethodName: "AddTaskRelationExact",
+			Handler:    _Host_AddTaskRelationExact_Handler,
+		},
+		{
+			MethodName: "RemoveTaskRelationExact",
+			Handler:    _Host_RemoveTaskRelationExact_Handler,
+		},
+		{
+			MethodName: "SendTaskMessageExact",
+			Handler:    _Host_SendTaskMessageExact_Handler,
+		},
+		{
+			MethodName: "IssueTaskDirectiveExact",
+			Handler:    _Host_IssueTaskDirectiveExact_Handler,
+		},
+		{
+			MethodName: "ResolveTaskDirectiveExact",
+			Handler:    _Host_ResolveTaskDirectiveExact_Handler,
+		},
+		{
+			MethodName: "AcquireTaskManagementClaimExact",
+			Handler:    _Host_AcquireTaskManagementClaimExact_Handler,
+		},
+		{
+			MethodName: "ReleaseTaskManagementClaimExact",
+			Handler:    _Host_ReleaseTaskManagementClaimExact_Handler,
+		},
+		{
+			MethodName: "TransferTaskManagementClaimExact",
+			Handler:    _Host_TransferTaskManagementClaimExact_Handler,
+		},
+		{
+			MethodName: "SetTaskCompletionCriteriaExact",
+			Handler:    _Host_SetTaskCompletionCriteriaExact_Handler,
+		},
+		{
+			MethodName: "VerifyTaskCompletionCriterionExact",
+			Handler:    _Host_VerifyTaskCompletionCriterionExact_Handler,
+		},
+		{
+			MethodName: "ApplyWorkspaceAdministrationExact",
+			Handler:    _Host_ApplyWorkspaceAdministrationExact_Handler,
+		},
+		{
+			MethodName: "GetSourceIssueCapabilitiesExact",
+			Handler:    _Host_GetSourceIssueCapabilitiesExact_Handler,
+		},
+		{
+			MethodName: "CommentSourceIssueExact",
+			Handler:    _Host_CommentSourceIssueExact_Handler,
+		},
+		{
+			MethodName: "TransitionSourceIssueExact",
+			Handler:    _Host_TransitionSourceIssueExact_Handler,
+		},
+		{
+			MethodName: "EnsureManagedAgentConversationExact",
+			Handler:    _Host_EnsureManagedAgentConversationExact_Handler,
+		},
+		{
+			MethodName: "GetManagedAgentConversationStatusExact",
+			Handler:    _Host_GetManagedAgentConversationStatusExact_Handler,
+		},
+		{
+			MethodName: "ListManagedAgentConversationsExact",
+			Handler:    _Host_ListManagedAgentConversationsExact_Handler,
+		},
+		{
+			MethodName: "SetManagedAgentConversationPausedExact",
+			Handler:    _Host_SetManagedAgentConversationPausedExact_Handler,
+		},
+		{
+			MethodName: "DeleteManagedAgentConversationExact",
+			Handler:    _Host_DeleteManagedAgentConversationExact_Handler,
+		},
+		{
+			MethodName: "EnqueueManagedAgentInputExact",
+			Handler:    _Host_EnqueueManagedAgentInputExact_Handler,
+		},
+		{
+			MethodName: "GetManagedAgentInputExact",
+			Handler:    _Host_GetManagedAgentInputExact_Handler,
+		},
+		{
+			MethodName: "ListManagedAgentInputsExact",
+			Handler:    _Host_ListManagedAgentInputsExact_Handler,
+		},
+		{
+			MethodName: "CancelManagedAgentInputExact",
+			Handler:    _Host_CancelManagedAgentInputExact_Handler,
+		},
+		{
+			MethodName: "DispatchManagedAgentConversationExact",
+			Handler:    _Host_DispatchManagedAgentConversationExact_Handler,
+		},
+		{
+			MethodName: "ListManagedConversationSchedulesExact",
+			Handler:    _Host_ListManagedConversationSchedulesExact_Handler,
+		},
+		{
+			MethodName: "CreateManagedConversationScheduleExact",
+			Handler:    _Host_CreateManagedConversationScheduleExact_Handler,
+		},
+		{
+			MethodName: "UpdateManagedConversationScheduleExact",
+			Handler:    _Host_UpdateManagedConversationScheduleExact_Handler,
+		},
+		{
+			MethodName: "SetManagedConversationScheduleEnabledExact",
+			Handler:    _Host_SetManagedConversationScheduleEnabledExact_Handler,
+		},
+		{
+			MethodName: "DeleteManagedConversationScheduleExact",
+			Handler:    _Host_DeleteManagedConversationScheduleExact_Handler,
+		},
+		{
+			MethodName: "EnsureTaskRunExact",
+			Handler:    _Host_EnsureTaskRunExact_Handler,
+		},
+		{
+			MethodName: "StopTaskRunExact",
+			Handler:    _Host_StopTaskRunExact_Handler,
+		},
+		{
+			MethodName: "RecoverSessionExact",
+			Handler:    _Host_RecoverSessionExact_Handler,
+		},
+		{
+			MethodName: "CancelPendingTaskTransitionExact",
+			Handler:    _Host_CancelPendingTaskTransitionExact_Handler,
+		},
+		{
+			MethodName: "GetSessionModeContextExact",
+			Handler:    _Host_GetSessionModeContextExact_Handler,
+		},
+		{
+			MethodName: "SetSessionModeExact",
+			Handler:    _Host_SetSessionModeExact_Handler,
+		},
+		{
+			MethodName: "RespondPermissionExact",
+			Handler:    _Host_RespondPermissionExact_Handler,
+		},
+		{
+			MethodName: "AnswerClarificationExact",
+			Handler:    _Host_AnswerClarificationExact_Handler,
+		},
+		{
+			MethodName: "ListWorkspacesExact",
+			Handler:    _Host_ListWorkspacesExact_Handler,
+		},
+		{
+			MethodName: "ListWorkflowsExact",
+			Handler:    _Host_ListWorkflowsExact_Handler,
+		},
+		{
+			MethodName: "ListWorkflowStepsExact",
+			Handler:    _Host_ListWorkflowStepsExact_Handler,
+		},
+		{
+			MethodName: "ListTasksExact",
+			Handler:    _Host_ListTasksExact_Handler,
+		},
+		{
+			MethodName: "GetTaskExact",
+			Handler:    _Host_GetTaskExact_Handler,
+		},
+		{
+			MethodName: "ListSessionsExact",
+			Handler:    _Host_ListSessionsExact_Handler,
+		},
+		{
+			MethodName: "ListPendingInteractionsExact",
+			Handler:    _Host_ListPendingInteractionsExact_Handler,
+		},
+		{
+			MethodName: "GetInteractionExact",
+			Handler:    _Host_GetInteractionExact_Handler,
+		},
+		{
+			MethodName: "ListSanitizedMessagesExact",
+			Handler:    _Host_ListSanitizedMessagesExact_Handler,
+		},
+		{
+			MethodName: "ListTaskInboxExact",
+			Handler:    _Host_ListTaskInboxExact_Handler,
+		},
+		{
+			MethodName: "GetTaskDirectiveExact",
+			Handler:    _Host_GetTaskDirectiveExact_Handler,
+		},
+		{
+			MethodName: "ListTaskDirectivesExact",
+			Handler:    _Host_ListTaskDirectivesExact_Handler,
+		},
+		{
+			MethodName: "GetTaskRelationsExact",
+			Handler:    _Host_GetTaskRelationsExact_Handler,
+		},
+		{
+			MethodName: "ListTaskRelationsExact",
+			Handler:    _Host_ListTaskRelationsExact_Handler,
+		},
+		{
+			MethodName: "ListPendingTaskTransitionsExact",
+			Handler:    _Host_ListPendingTaskTransitionsExact_Handler,
+		},
+		{
+			MethodName: "ListChangeRequestEvidenceExact",
+			Handler:    _Host_ListChangeRequestEvidenceExact_Handler,
+		},
+		{
+			MethodName: "ListTaskUsageExact",
+			Handler:    _Host_ListTaskUsageExact_Handler,
+		},
 		{
 			MethodName: "GetState",
 			Handler:    _Host_GetState_Handler,

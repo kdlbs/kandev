@@ -25,6 +25,8 @@ func (m *Manager) buildWorktreeRecord(worktreeID string, req CreateRequest, work
 		RepositoryID:      req.RepositoryID,
 		BranchSlug:        requestBranchIdentitySlug(req),
 		RepositoryPath:    req.RepositoryPath,
+		SourceClonePath:   req.RepositoryPath,
+		SourceCommonDir:   filepath.Join(req.RepositoryPath, ".git"),
 		Path:              worktreePath,
 		Branch:            branchName,
 		BaseBranch:        req.BaseBranch,

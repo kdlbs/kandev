@@ -92,6 +92,15 @@ describe("mixed layer review state", () => {
     expect(state.staleFiles).toEqual(new Set());
   });
 
+  it("does not persist review state or a hash while diff enrichment is pending", () => {
+    const pending = { ...mixedFile(), diff_state: "pending" as const };
+    const key = reviewFileKey(pending);
+    expect(
+      computeChangesReviewSets([pending], new Map([[key, { reviewed: true, diffHash: "" }]])),
+    ).toEqual({ reviewedFiles: new Set(), staleFiles: new Set() });
+    expect(reviewDiffHashForKey([pending], key)).toBeNull();
+  });
+
   it("persists the selected layer diff hash", () => {
     const mixed = mixedFile();
     const staged = projectLayer(mixed, "staged");

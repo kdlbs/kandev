@@ -1,7 +1,18 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -11,6 +22,16 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(__dirname, "..");
 const repoRoot = resolve(desktopRoot, "../..");
+const backendRoot = join(repoRoot, "apps/backend");
+const remoteHelperBuilder = join(repoRoot, "scripts/release/remote-helper-assets.mjs");
+const helperNames = [
+  "agentctl-linux-amd64",
+  "agentctl-linux-arm64",
+  "agentctl-darwin-amd64",
+  "agentctl-darwin-arm64",
+];
+export const RELEASE_DESKTOP_STARTUP_TIMEOUT_MS = 120_000;
+export const DESKTOP_SMOKE_VERSION = "0.0.0-e2e";
 
 let atomicWriteSequence = 0;
 
@@ -36,6 +57,20 @@ export async function writeJsonAtomically(path, contents) {
 export const HEALTH_REQUESTED_TIMEOUT_MS = 90_000;
 export const READY_REQUESTED_TIMEOUT_MS = 60_000;
 export const ROOT_REQUESTED_TIMEOUT_MS = 60_000;
+
+export function parseProcessStatuses(output) {
+  if (output instanceof Error) {
+    if (output.status === 1 && !String(output.stdout ?? "").trim()) return [];
+    throw output;
+  }
+
+  const rows = output.trim().split(/\r?\n/).filter(Boolean);
+  return rows.map((row) => {
+    const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(row);
+    if (!match) throw new Error("ps returned an invalid process status row");
+    return { pid: Number(match[1]), parentPid: Number(match[2]), state: match[3] };
+  });
+}
 
 // Only run the CLI behavior when this file is executed directly (`node desktop-launch-smoke.mjs`
 // or the fake-runtime re-exec below) — not when desktop-launch-smoke.test.mjs imports it.
@@ -141,6 +176,189 @@ async function runHappyPathSmoke() {
   console.log(
     "Desktop smoke passed: WebView requested / after backend health and readiness succeeded.",
   );
+
+  await runReleaseShapedSmoke(appBinary);
+}
+
+async function runReleaseShapedSmoke(appBinary) {
+  if (process.platform !== "linux") {
+    console.log("Release-shaped Desktop launcher smoke runs on Linux only; skipping.");
+    return;
+  }
+
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  }).trim();
+  execFileSync(
+    "make",
+    [
+      "build-kandev",
+      "build-agentctl",
+      "build-agentctl-remote",
+      `VERSION=${DESKTOP_SMOKE_VERSION}`,
+      `COMMIT=${commit}`,
+    ],
+    { cwd: backendRoot, stdio: "inherit" },
+  );
+
+  const tmp = await mkdtemp(join(tmpdir(), "kandev-desktop-release-e2e-"));
+  const runtimeDir = join(tmp, "runtime");
+  const homeDir = join(tmp, "home");
+  const port = await findAvailablePort();
+  const runtime = await writeReleaseShapedRuntime({
+    sourceBinDir: join(backendRoot, "bin"),
+    runtimeDir,
+    homeDir,
+    version: DESKTOP_SMOKE_VERSION,
+    commit,
+  });
+
+  await runPackagedLauncherSmoke(runtimeDir, homeDir);
+
+  const launchedViaXvfb = !process.env.DISPLAY && commandExists("xvfb-run");
+  const command = launchedViaXvfb ? "xvfb-run" : appBinary;
+  const args = launchedViaXvfb ? ["-a", appBinary] : [];
+  const child = spawn(command, args, {
+    cwd: repoRoot,
+    detached: true,
+    env: {
+      ...process.env,
+      HOME: join(tmp, "user-home"),
+      KANDEV_DESKTOP_RUNTIME_DIR: runtimeDir,
+      KANDEV_DESKTOP_PORT: String(port),
+      KANDEV_HOME_DIR: homeDir,
+      KANDEV_E2E_MOCK: "true",
+      KANDEV_INTERNAL_CONFIG_FILE: "",
+      KANDEV_AGENTCTL_LINUX_AMD64_BINARY: "",
+      KANDEV_AGENTCTL_LINUX_BINARY: "",
+      WEBKIT_DISABLE_COMPOSITING_MODE: "1",
+      NO_AT_BRIDGE: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stdout = "";
+  let stderr = "";
+  child.stdout?.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr?.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const failIfExited = () => {
+    if (child.exitCode !== null) {
+      throw new Error(
+        `release-shaped desktop app exited early with code ${child.exitCode}\n${stdout}\n${stderr}`,
+      );
+    }
+  };
+  const describeChild = () => `[stdout]\n${stdout}\n[stderr]\n${stderr}`;
+
+  try {
+    await waitForHttp(
+      `http://127.0.0.1:${port}/ready`,
+      RELEASE_DESKTOP_STARTUP_TIMEOUT_MS,
+      failIfExited,
+      undefined,
+      describeChild,
+    );
+    await waitForHttp(
+      `http://127.0.0.1:${port}/`,
+      RELEASE_DESKTOP_STARTUP_TIMEOUT_MS,
+      failIfExited,
+      undefined,
+      describeChild,
+    );
+    execFileSync(
+      "go",
+      [
+        "test",
+        "-count=1",
+        "-run",
+        "^TestAgentctlResolverPackagedDesktopBundleUsesPreseededCache$",
+        "./internal/agent/runtime/lifecycle",
+      ],
+      {
+        cwd: backendRoot,
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          KANDEV_BUNDLE_DIR: runtimeDir,
+          KANDEV_HOME_DIR: homeDir,
+          KANDEV_AGENTCTL_LINUX_AMD64_BINARY: "",
+          KANDEV_AGENTCTL_LINUX_BINARY: "",
+          KANDEV_DESKTOP_SMOKE: "1",
+          KANDEV_DESKTOP_SMOKE_BUNDLE_DIR: runtimeDir,
+          KANDEV_DESKTOP_SMOKE_HOME_DIR: homeDir,
+          KANDEV_DESKTOP_SMOKE_VERSION: DESKTOP_SMOKE_VERSION,
+          KANDEV_DESKTOP_SMOKE_COMMIT: commit,
+          KANDEV_INTERNAL_CONFIG_FILE: "",
+        },
+      },
+    );
+  } finally {
+    await stopProcess(child);
+    await rm(tmp, { recursive: true, force: true });
+  }
+
+  console.log(
+    `Release-shaped Desktop smoke passed: the actual launcher served / from a standard bundle and the resolver selected the verified cached helper at ${runtime.cachePath}.`,
+  );
+}
+
+async function runPackagedLauncherSmoke(runtimeDir, homeDir) {
+  const launcherBinary = join(runtimeDir, "bin", "kandev");
+  const launcherPort = await findAvailablePort();
+  const child = spawn(launcherBinary, ["--headless", "--port", String(launcherPort)], {
+    cwd: repoRoot,
+    detached: true,
+    env: {
+      ...process.env,
+      KANDEV_BUNDLE_DIR: runtimeDir,
+      KANDEV_HOME_DIR: homeDir,
+      KANDEV_E2E_MOCK: "true",
+      KANDEV_INTERNAL_CONFIG_FILE: "",
+      KANDEV_AGENTCTL_LINUX_AMD64_BINARY: "",
+      KANDEV_AGENTCTL_LINUX_BINARY: "",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout?.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr?.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const failIfExited = () => {
+    if (child.exitCode !== null) {
+      throw new Error(
+        `release bundle launcher exited early with code ${child.exitCode}\n${stdout}\n${stderr}`,
+      );
+    }
+  };
+  const describeChild = () => `[stdout]\n${stdout}\n[stderr]\n${stderr}`;
+
+  try {
+    await waitForHttp(
+      `http://127.0.0.1:${launcherPort}/ready`,
+      RELEASE_DESKTOP_STARTUP_TIMEOUT_MS,
+      failIfExited,
+      undefined,
+      describeChild,
+    );
+    await waitForHttp(
+      `http://127.0.0.1:${launcherPort}/`,
+      RELEASE_DESKTOP_STARTUP_TIMEOUT_MS,
+      failIfExited,
+      undefined,
+      describeChild,
+    );
+  } finally {
+    await stopProcess(child);
+  }
 }
 
 async function runConflictRecoverySmoke() {
@@ -210,10 +428,24 @@ async function runConflictRecoverySmoke() {
     }
     failIfLauncherExited();
 
+    const firstGuiPid = first.parentPid;
+    const secondGuiPid = second.parentPid;
+    assertLiveDesktopChild(launcher.pid, firstGuiPid, "first temporary window");
+    assertLiveDesktopChild(launcher.pid, secondGuiPid, "second temporary window");
+    process.stdout.write(
+      `Desktop child-reaping smoke: conflict launcher PID ${launcher.pid}; temporary GUI PIDs ${firstGuiPid} and ${secondGuiPid}.\n`,
+    );
+
     await sendX11(inputHelper, "quit", first.parentPid);
     await waitForX11WindowGone(inputHelper, first.parentPid, 15_000);
-    await waitForPathRemoval(first.home, 15_000);
+    await waitForCondition(
+      () => !readChildProcessStatuses(launcher.pid).some((process) => process.pid === firstGuiPid),
+      1_000,
+      `temporary GUI child ${firstGuiPid} to be reaped by conflict launcher ${launcher.pid}`,
+    );
     failIfLauncherExited();
+    assertLiveDesktopChild(launcher.pid, secondGuiPid, "remaining temporary window");
+    await waitForPathRemoval(first.home, 15_000);
     const healthyResponse = await fetch(`${second.origin}/health`);
     if (
       !healthyResponse.ok ||
@@ -345,7 +577,7 @@ async function waitForReadyInstances(instancesDir, count, tick) {
     .slice(0, count);
 }
 
-async function readInstances(instancesDir) {
+export async function readInstances(instancesDir) {
   const entries = await readdir(instancesDir, { withFileTypes: true });
   const instances = [];
   for (const entry of entries) {
@@ -355,10 +587,31 @@ async function readInstances(instancesDir) {
         JSON.parse(await readFile(join(instancesDir, entry.name, "instance.json"), "utf8")),
       );
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
     }
   }
   return instances;
+}
+
+export async function writeInstanceRecord(instanceDir, record) {
+  const target = join(instanceDir, "instance.json");
+  const temporary = join(instanceDir, `.instance-${randomUUID()}.json`);
+  try {
+    await writeFile(temporary, JSON.stringify(record, null, 2));
+    await rename(temporary, target);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+export function createAtomicRecordWriter(filePath) {
+  let writes = Promise.resolve();
+  return (record) => {
+    const contents = JSON.stringify(record, null, 2);
+    const write = writes.then(() => writeJsonAtomically(filePath, contents));
+    writes = write.catch(() => undefined);
+    return write;
+  };
 }
 
 function assertDistinctTemporaryInstances(first, second) {
@@ -391,6 +644,28 @@ async function waitForProcessExit(pid, timeoutMs) {
   await waitForCondition(() => !processIsRunning(pid), timeoutMs, `process ${pid} to exit`);
 }
 
+function readChildProcessStatuses(parentPid) {
+  let output;
+  try {
+    output = execFileSync("ps", ["-o", "pid=,ppid=,stat=", "--ppid", String(parentPid)], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch (error) {
+    return parseProcessStatuses(error);
+  }
+  return parseProcessStatuses(output);
+}
+
+function assertLiveDesktopChild(parentPid, childPid, label) {
+  const child = readChildProcessStatuses(parentPid).find((process) => process.pid === childPid);
+  if (!child || child.parentPid !== parentPid || child.state.startsWith("Z")) {
+    throw new Error(
+      `${label} PID ${childPid} is not a live child of conflict launcher ${parentPid}`,
+    );
+  }
+}
+
 async function waitForPathRemoval(path, timeoutMs) {
   await waitForCondition(() => !existsSync(path), timeoutMs, `${path} to be removed`);
 }
@@ -414,7 +689,74 @@ async function waitForCondition(predicate, timeoutMs, label) {
   throw new Error(`Timed out waiting for ${label}`);
 }
 
-async function writeFakeRuntime(runtimeDir, stateDir, scenario) {
+export async function writeReleaseShapedRuntime({
+  sourceBinDir,
+  runtimeDir,
+  homeDir,
+  version,
+  commit,
+}) {
+  const baseDir = dirname(runtimeDir);
+  const bundleBinDir = join(runtimeDir, "bin");
+  const helperInputDir = join(baseDir, "remote-helper-inputs");
+  const helperArtifactDir = join(baseDir, "remote-helper-artifact");
+  await mkdir(bundleBinDir, { recursive: true });
+  await mkdir(helperInputDir, { recursive: true });
+
+  for (const name of ["kandev", "agentctl"]) {
+    const target = join(bundleBinDir, name);
+    await copyFile(join(sourceBinDir, name), target);
+    await chmod(target, 0o755);
+  }
+  for (const name of helperNames) {
+    const target = join(helperInputDir, name);
+    await copyFile(join(sourceBinDir, name), target);
+    await chmod(target, 0o755);
+  }
+
+  execFileSync(
+    process.execPath,
+    [
+      remoteHelperBuilder,
+      "build",
+      "--bin-dir",
+      helperInputDir,
+      "--output-dir",
+      helperArtifactDir,
+      "--version",
+      version,
+      "--commit",
+      commit,
+      "--stable",
+      "true",
+    ],
+    { cwd: repoRoot, stdio: "inherit" },
+  );
+
+  const manifestPath = join(helperArtifactDir, "manifests", "standard", "remote-helpers.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  await copyFile(manifestPath, join(runtimeDir, "remote-helpers.json"));
+  const helper = manifest.helpers.find((record) => record.platform === "linux/amd64");
+  if (!helper) {
+    throw new Error("Generated Desktop manifest is missing the linux/amd64 helper");
+  }
+  const cachePath = join(
+    homeDir,
+    "cache",
+    "remote-helpers",
+    version,
+    "linux-amd64",
+    helper.sha256,
+    "agentctl",
+  );
+  await mkdir(dirname(cachePath), { recursive: true });
+  await copyFile(join(helperInputDir, "agentctl-linux-amd64"), cachePath);
+  await chmod(cachePath, 0o755);
+
+  return { manifest, cachePath, runtimeDir, homeDir };
+}
+
+export async function writeFakeRuntime(runtimeDir, stateDir, scenario) {
   const fakeRuntime = join(
     runtimeDir,
     "bin",
@@ -425,13 +767,6 @@ async function writeFakeRuntime(runtimeDir, stateDir, scenario) {
     "bin",
     process.platform === "win32" ? "agentctl.cmd" : "agentctl",
   );
-  const remoteHelpers = [
-    ["agentctl-linux-amd64", "linux/amd64"],
-    ["agentctl-linux-arm64", "linux/arm64"],
-    ["agentctl-darwin-arm64", "darwin/arm64"],
-    ["agentctl-darwin-amd64", "darwin/amd64"],
-  ];
-
   await writeFile(join(stateDir, "scenario"), scenario);
 
   if (process.platform === "win32") {
@@ -450,13 +785,26 @@ async function writeFakeRuntime(runtimeDir, stateDir, scenario) {
     await chmod(agentctl, 0o755);
   }
 
-  for (const [name, platform] of remoteHelpers) {
-    const helper = join(runtimeDir, "bin", name);
-    await writeFile(helper, `#!/usr/bin/env bash\necho fake agentctl ${platform} helper\n`);
-    if (process.platform !== "win32") {
-      await chmod(helper, 0o755);
-    }
-  }
+  const helpers = [
+    ["linux/amd64", "agentctl-linux-amd64.gz"],
+    ["linux/arm64", "agentctl-linux-arm64.gz"],
+    ["darwin/amd64", "agentctl-darwin-amd64.gz"],
+    ["darwin/arm64", "agentctl-darwin-arm64.gz"],
+  ].map(([platform, asset]) => ({ platform, asset, sha256: "0".repeat(64), size_bytes: 1 }));
+  await writeFile(
+    join(runtimeDir, "remote-helpers.json"),
+    `${JSON.stringify(
+      {
+        schema_version: 1,
+        version: "0.0.0",
+        commit: "0".repeat(40),
+        variant: "standard",
+        helpers,
+      },
+      null,
+      2,
+    )}\n`,
+  );
 }
 
 async function runFakeRuntime(stateDir, args) {
@@ -507,15 +855,14 @@ async function runFakeRuntime(stateDir, args) {
     readyRequested: false,
     rootRequested: false,
   };
-  const saveRecord = () =>
-    writeJsonAtomically(join(instanceDir, "instance.json"), JSON.stringify(record, null, 2));
-  await saveRecord();
+  const saveRecord = createAtomicRecordWriter(join(instanceDir, "instance.json"));
+  await saveRecord(record);
   await writeFile(join(instanceDir, "launched"), JSON.stringify({ args, port }));
 
   const server = createServer(async (req, res) => {
     if (req.url === "/health") {
       record.healthRequested = true;
-      await saveRecord();
+      await saveRecord(record);
       await writeFile(join(instanceDir, "health-requested"), "1");
       const headers = { "content-type": "application/json" };
       if (process.env.KANDEV_DESKTOP_HEALTH_TOKEN) {
@@ -528,7 +875,7 @@ async function runFakeRuntime(stateDir, args) {
 
     if (req.url === "/ready") {
       record.readyRequested = true;
-      await saveRecord();
+      await saveRecord(record);
       await writeFile(join(instanceDir, "ready-requested"), "1");
       res.writeHead(200, { "content-type": "application/json" });
       res.end('{"status":"ok"}');
@@ -537,7 +884,7 @@ async function runFakeRuntime(stateDir, args) {
 
     if (req.url === "/") {
       record.rootRequested = true;
-      await saveRecord();
+      await saveRecord(record);
       await writeFile(join(instanceDir, "root-requested"), "1");
       res.writeHead(200, { "content-type": "text/html" });
       res.end("<!doctype html><title>Kandev</title><main>Kandev desktop smoke</main>");
@@ -555,7 +902,7 @@ async function runFakeRuntime(stateDir, args) {
     if (stopping) return;
     stopping = true;
     record.terminated = true;
-    await saveRecord();
+    await saveRecord(record);
     await writeFile(join(instanceDir, "terminated"), "1");
     server.close(() => process.exit(0));
   };
@@ -576,26 +923,88 @@ export async function waitForFile(path, timeoutMs, tick, describeDetail) {
   throw new Error(`Timed out waiting for ${path}${detail ? `\n\n${detail}` : ""}`);
 }
 
-async function stopProcess(child) {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-  if (process.platform === "win32") {
-    child.kill();
-  } else {
-    process.kill(-child.pid, "SIGTERM");
-  }
-  await Promise.race([
-    new Promise((resolveExit) => child.once("exit", resolveExit)),
-    new Promise((resolveTimeout) => setTimeout(resolveTimeout, 5_000)),
-  ]);
-  if (child.exitCode === null && child.signalCode === null) {
-    if (process.platform === "win32") {
-      child.kill("SIGKILL");
-    } else {
-      process.kill(-child.pid, "SIGKILL");
+export async function waitForHttp(
+  url,
+  timeoutMs,
+  tick,
+  pause = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms)),
+  describeDetail,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "no response";
+  while (Date.now() < deadline) {
+    tick?.();
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
+      if (response.ok) return;
+      lastError = `HTTP ${response.status}`;
+    } catch (error) {
+      lastError = error.message;
     }
+    await pause(100);
   }
+  const detail = describeDetail?.();
+  throw new Error(
+    `Timed out waiting for ${url} to return success (last result: ${lastError})${detail ? `\n\n${detail}` : ""}`,
+  );
+}
+
+async function findAvailablePort() {
+  const server = createServer();
+  await new Promise((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolveListen);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Could not determine an available Desktop smoke port");
+  }
+  await new Promise((resolveClose, reject) => {
+    server.close((error) => (error ? reject(error) : resolveClose()));
+  });
+  return address.port;
+}
+
+export async function stopProcess(child) {
+  if (!child.pid) return;
+  const isRunning =
+    process.platform === "win32"
+      ? () => child.exitCode === null && child.signalCode === null
+      : () => processGroupIsRunning(child.pid);
+  const signal = (name) => {
+    try {
+      if (process.platform === "win32") child.kill(name);
+      else process.kill(-child.pid, name);
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+  };
+
+  signal("SIGTERM");
+  const deadline = Date.now() + 5_000;
+  while (isRunning() && Date.now() < deadline) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  if (isRunning()) {
+    signal("SIGKILL");
+    await waitForCondition(() => !isRunning(), 5_000, "owned desktop process group to stop");
+  }
+}
+
+function processGroupIsRunning(groupId) {
+  const output = execFileSync("ps", ["-axo", "pgid=,stat="], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  return output
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .some((row) => {
+      const match = /^\s*(\d+)\s+(\S+)\s*$/.exec(row);
+      if (!match) throw new Error("ps returned an invalid process group row");
+      return Number(match[1]) === groupId && !match[2].startsWith("Z");
+    });
 }
 
 function commandExists(command) {

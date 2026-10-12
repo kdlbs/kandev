@@ -142,4 +142,13 @@ describe("TaskEditDialogDependencies", () => {
     fireEvent.click(screen.getByTestId("task-edit-dependencies-candidates-retry"));
     expect(retryCandidates).toHaveBeenCalledOnce();
   });
+
+  it("retries loading dependencies after an initial load failure", () => {
+    const retry = vi.fn();
+    renderDependencies(state({ loadError: new Error("dependency load failed"), retry }));
+
+    fireEvent.click(screen.getByTestId("task-edit-dependencies-retry"));
+
+    expect(retry).toHaveBeenCalledOnce();
+  });
 });

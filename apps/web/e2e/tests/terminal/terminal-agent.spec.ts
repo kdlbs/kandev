@@ -3,7 +3,6 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
 import { waitForSessionAgentctlReady } from "../../helpers/session-store";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { errors, type Page } from "@playwright/test";
 
@@ -25,16 +24,10 @@ async function createTUIProfile(apiClient: ApiClient, name: string) {
   });
 }
 
-/** Navigate to a kanban card by title and open its session page. */
-async function openTaskSession(page: Page, title: string): Promise<SessionPage> {
-  const kanban = new KanbanPage(page);
-  await kanban.goto();
-
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 15_000 });
-  await card.click();
-  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+/** Navigate directly to an API-created task and open its session page. */
+async function openTaskSession(page: Page, taskId: string): Promise<SessionPage> {
+  await page.goto(`/t/${taskId}`);
+  await expect(page).toHaveURL(new RegExp(`/t/${taskId}`), { timeout: 15_000 });
   const session = new SessionPage(page);
   await session.waitForPassthroughLoad();
   return session;
@@ -119,14 +112,19 @@ test.describe("Terminal agent (TUI passthrough)", () => {
   }) => {
     const profile = await createTUIProfile(apiClient, "Mock TUI");
 
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "TUI Test Task", profile.id, {
-      description: "hello from e2e test",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "TUI Test Task",
+      profile.id,
+      {
+        description: "hello from e2e test",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
 
-    const session = await openTaskSession(testPage, "TUI Test Task");
+    const session = await openTaskSession(testPage, task.id);
 
     // The loading overlay is transient; on fast runs it may never be observable.
     try {
@@ -203,7 +201,7 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     );
     if (!task.session_id) throw new Error("task creation did not return the TUI session");
 
-    const session = await openTaskSession(testPage, "TUI Profile Routing Task");
+    const session = await openTaskSession(testPage, task.id);
     await session.expectPassthroughHasText("Mock Agent");
     await waitForSessionState(apiClient, {
       taskId: task.id,
@@ -212,8 +210,6 @@ test.describe("Terminal agent (TUI passthrough)", () => {
       message: "the TUI source session did not become ready before the profile switch",
       timeout: 60_000,
     });
-    await waitForSessionAgentctlReady(testPage, task.session_id);
-
     await apiClient.moveTask(task.id, workflow.id, targetStep.id);
 
     let destinationSessionId = "";
@@ -292,7 +288,7 @@ test.describe("Terminal agent (TUI passthrough)", () => {
       },
     );
 
-    const session = await openTaskSession(testPage, "TUI Cascade Task");
+    const session = await openTaskSession(testPage, task.id);
 
     // Confirm the mock TUI is running and processed the initial prompt
     await session.expectPassthroughHasText("Mock Agent");
@@ -371,7 +367,7 @@ test.describe("Terminal agent (TUI passthrough)", () => {
       },
     );
 
-    const session = await openTaskSession(testPage, "TUI Reset Task");
+    const session = await openTaskSession(testPage, task.id);
     await session.expectPassthroughHasText("Mock Agent");
 
     // The terminal header can render before the auto-started boot turn ends.
@@ -438,12 +434,17 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     const profile = await createTUIProfile(apiClient, "TUI Switch");
 
     // Create two tasks with distinct descriptions so their terminal output differs
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "TUI Alpha Task", profile.id, {
-      description: "alpha-unique-marker",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const taskA = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "TUI Alpha Task",
+      profile.id,
+      {
+        description: "alpha-unique-marker",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
     await apiClient.createTaskWithAgent(seedData.workspaceId, "TUI Beta Task", profile.id, {
       description: "beta-unique-marker",
       workflow_id: seedData.workflowId,
@@ -451,7 +452,7 @@ test.describe("Terminal agent (TUI passthrough)", () => {
       repository_ids: [seedData.repositoryId],
     });
 
-    const session = await openTaskSession(testPage, "TUI Alpha Task");
+    const session = await openTaskSession(testPage, taskA.id);
 
     // Task A's terminal shows its prompt output
     await session.expectPassthroughHasText("alpha-unique-marker", 15_000);

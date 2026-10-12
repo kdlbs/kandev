@@ -1,18 +1,33 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
+import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
 import { SessionBootstrapRecoveryCard } from "./session-bootstrap-recovery-card";
 
 const recoveryActionState = vi.hoisted(() => ({
   busyAction: null as string | null,
   recoveryError: null as Error | null,
-  manualRecoveryFailure: null as { operation: "resume" | "restore_workspace" } | null,
-  branchDetails: null,
+  manualRecoveryFailure: null as {
+    operation: "resume" | "restore_workspace";
+    sessionId: string;
+    errorStamp: string | null;
+    requestKey: string;
+    operationId: number;
+  } | null,
+  branchDetails: null as {
+    kind: "branch_unrecoverable";
+    recovery_action: "resume_new_branch";
+  } | null,
   guardDetails: null as { retryable: boolean } | null,
   recoveryNotice: null as string | null,
+  recoveryNoticeKind: null as string | null,
+  managedCloneRecoveryStamp: null as string | null,
+  workspaceRecovery: null as WorkspaceRecoveryProjection | null,
+  providerRestoredResumeEligible: false,
   handleRecover: vi.fn().mockResolvedValue(true),
   handleRestore: vi.fn().mockResolvedValue(undefined),
   handleNewBranch: vi.fn().mockResolvedValue(true),
+  handleManagedCloneRelocation: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -65,11 +80,27 @@ afterEach(() => {
   recoveryActionState.branchDetails = null;
   recoveryActionState.guardDetails = null;
   recoveryActionState.recoveryNotice = null;
+  recoveryActionState.recoveryNoticeKind = null;
+  recoveryActionState.managedCloneRecoveryStamp = null;
+  recoveryActionState.workspaceRecovery = null;
+  recoveryActionState.providerRestoredResumeEligible = false;
   vi.clearAllMocks();
 });
 
 // eslint-disable-next-line max-lines-per-function -- recovery outcomes share one focused card harness.
 describe("SessionBootstrapRecoveryCard", () => {
+  it("explains skipped overrides before an eligible explicit Resume", () => {
+    recoveryActionState.providerRestoredResumeEligible = true;
+    render(<SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />);
+
+    const disclosure = screen.getByTestId("provider-restored-resume-disclosure");
+    const resume = screen.getByTestId(RESUME_BUTTON_TEST_ID);
+    expect(disclosure.textContent).toBe("task:providerRestoredResumeDisclosure");
+    expect(
+      disclosure.compareDocumentPosition(resume) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("shows safe cause details and exposes mobile-sized recovery actions", () => {
     render(
       <SessionBootstrapRecoveryCard
@@ -102,6 +133,53 @@ describe("SessionBootstrapRecoveryCard", () => {
     expect(recoveryActionState.handleRecover).toHaveBeenNthCalledWith(2, "fresh_start");
   });
 
+  it("offers only same-session Resume while inspection contention is pending", () => {
+    recoveryActionState.recoveryNotice = "task:workspaceRecoveryInspectionBusy";
+    recoveryActionState.recoveryNoticeKind = "inspection_busy";
+    render(<SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />);
+
+    expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId("recovery-restore-workspace-button")).toBeNull();
+    expect(screen.queryByTestId("recovery-fresh-button")).toBeNull();
+    expect(screen.queryByTestId("recovery-new-branch-button")).toBeNull();
+
+    fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
+    expect(recoveryActionState.handleRecover).toHaveBeenCalledWith("resume");
+  });
+
+  it("prioritizes a manual inspection notice over a matching automatic owner", () => {
+    recoveryActionState.recoveryNotice = "task:workspaceRecoveryInspectionBusy";
+    recoveryActionState.recoveryNoticeKind = "inspection_busy";
+    recoveryActionState.providerRestoredResumeEligible = true;
+    const automaticResume = vi.fn().mockResolvedValue(true);
+    render(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={error}
+        automaticRecovery={{
+          requestIdentity: {
+            taskId: "task-1",
+            sessionId: "session-1",
+            generation: 1,
+            attemptId: 1,
+          },
+          resumptionState: "idle",
+          error: null,
+          notice: "task:workspaceRecoveryInspectionBusy",
+          noticeKind: "inspection_busy",
+          recoveryFailure: null,
+          resumeSession: automaticResume,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
+
+    expect(recoveryActionState.handleRecover).toHaveBeenCalledWith("resume");
+    expect(automaticResume).not.toHaveBeenCalled();
+  });
+
   it("keeps the automatic read-only result inside the shared informational card", () => {
     render(
       <SessionBootstrapRecoveryCard
@@ -124,7 +202,7 @@ describe("SessionBootstrapRecoveryCard", () => {
     expect(screen.getByTestId("session-bootstrap-recovery-card").getAttribute("role")).toBe(
       "status",
     );
-    expect(screen.getAllByText("task:resumeFailedWorkspaceReadOnly").length).toBe(2);
+    expect(screen.getAllByText("task:resumeFailedWorkspaceReadOnly").length).toBe(1);
     fireEvent.click(
       screen.getByTestId("session-bootstrap-recovery-details").querySelector("summary")!,
     );
@@ -135,6 +213,123 @@ describe("SessionBootstrapRecoveryCard", () => {
       "raw-resume-secret",
     );
     expect(screen.queryByTestId("session-bootstrap-recovery-error")).toBeNull();
+  });
+
+  it("keeps a typed selection cause primary after read-only workspace recovery", () => {
+    render(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={{
+          ...error,
+          details: "agent_bootstrap; cause=model_unavailable",
+          attempt_id: "550e8400-e29b-41d4-a716-446655440000",
+          execution_id: "650e8400-e29b-41d4-a716-446655440000",
+          causes: [
+            {
+              operation: "start",
+              code: "model_unavailable",
+              reason: "requested_not_advertised",
+              requested_model: "claude-opus-4-8",
+              prompt_not_sent: true,
+              detail: "The requested model was not advertised.",
+            },
+          ],
+        }}
+        automaticRecovery={{
+          resumptionState: "resumed",
+          error: null,
+          notice: "task:resumeFailedWorkspaceReadOnly",
+          recoveryFailure: {
+            outcome: "workspace_read_only",
+            resumeError: "request failed",
+          },
+          resumeSession: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getByText("task:sessionBootstrapModelUnavailableTitle")).toBeTruthy();
+    expect(screen.getByText("task:sessionBootstrapModelUnavailableBody")).toBeTruthy();
+    expect(screen.getByTestId("session-recovery-workspace-status").textContent).toBe(
+      "task:sessionRecoveryWorkspaceReadOnly",
+    );
+    expect(screen.getByTestId("session-bootstrap-no-prompt").textContent).toBe(
+      "task:sessionBootstrapNoPromptSent",
+    );
+    expect(screen.getByTestId("session-recovery-fresh-start-warning")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByTestId("session-bootstrap-recovery-details").querySelector("summary")!,
+    );
+    const details = screen.getByTestId("session-bootstrap-cause-details").textContent ?? "";
+    expect(details).toContain("claude-opus-4-8");
+    expect(details).toContain("The requested model was not advertised.");
+    expect(details).toContain("550e8400-e29b-41d4-a716-446655440000");
+    expect(details).toContain("650e8400-e29b-41d4-a716-446655440000");
+    expect(details).not.toContain("agent_bootstrap; cause=model_unavailable");
+  });
+
+  it("names the attempted fallback model when its application fails", () => {
+    render(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={{
+          ...error,
+          causes: [
+            {
+              operation: "start",
+              code: "model_selection_failed",
+              reason: "application_failed",
+              requested_model: "primary",
+              attempted_model: "alternate",
+              detail: "The model could not be applied.",
+            } as unknown as (typeof error.causes)[number],
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("session-bootstrap-recovery-card").textContent).toContain(
+      "task:sessionBootstrapModelSelectionFailedBody",
+    );
+    expect(screen.getByTestId("session-bootstrap-recovery-card").textContent).not.toContain(
+      'could not apply the selected model "primary"',
+    );
+    fireEvent.click(
+      screen.getByTestId("session-bootstrap-recovery-details").querySelector("summary")!,
+    );
+    const details = screen.getByTestId("session-bootstrap-cause-details").textContent ?? "";
+    expect(details).toContain("primary");
+    expect(details).toContain("alternate");
+  });
+
+  it("keeps distinct branch guidance visible in the read-only result", () => {
+    recoveryActionState.branchDetails = {
+      kind: "branch_unrecoverable",
+      recovery_action: "resume_new_branch",
+    };
+    render(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={error}
+        automaticRecovery={{
+          resumptionState: "resumed",
+          error: null,
+          notice: "task:resumeFailedWorkspaceReadOnly",
+          recoveryFailure: {
+            outcome: "workspace_read_only",
+            resumeError: "resume failed",
+          },
+          resumeSession: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getAllByText("task:resumeFailedWorkspaceReadOnly")).toHaveLength(1);
+    expect(screen.getByText("task:branchIsNoLongerAvailable")).toBeTruthy();
   });
 
   it("keeps automatic resume and restore failures as labeled sanitized causes", () => {
@@ -173,7 +368,13 @@ describe("SessionBootstrapRecoveryCard", () => {
 
   it("uses the shared action row for repeated manual retry without raw backend output", () => {
     recoveryActionState.recoveryError = new Error("raw-backend-error".repeat(20));
-    recoveryActionState.manualRecoveryFailure = { operation: "resume" };
+    recoveryActionState.manualRecoveryFailure = {
+      operation: "resume",
+      sessionId: "session-1",
+      errorStamp: "bootstrap-1",
+      requestKey: "task-1\u0000session-1\u0000bootstrap-1",
+      operationId: 1,
+    };
     render(<SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />);
 
     expect(screen.queryByText(/raw-backend-error/)).toBeNull();
@@ -192,6 +393,12 @@ describe("SessionBootstrapRecoveryCard", () => {
         sessionId="session-1"
         error={error}
         automaticRecovery={{
+          requestIdentity: {
+            taskId: "task-1",
+            sessionId: "session-1",
+            generation: 1,
+            attemptId: 1,
+          },
           resumptionState: "resuming",
           error: null,
           notice: null,
@@ -205,6 +412,90 @@ describe("SessionBootstrapRecoveryCard", () => {
     expect(screen.getByTestId("recovery-fresh-button").getAttribute("disabled")).not.toBeNull();
     expect(recoveryActionState.handleRecover).not.toHaveBeenCalled();
     expect(automaticResume).not.toHaveBeenCalled();
+  });
+
+  it("offers only a confirmed relocation for a managed clone mismatch", () => {
+    render(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={{ ...error, category: "managed_clone_relocation_required" }}
+      />,
+    );
+
+    expect(screen.getByText("task:managedCloneRelocationTitle")).toBeTruthy();
+    expect(screen.getByTestId("managed-clone-relocate-button")).toBeTruthy();
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("recovery-restore-workspace-button")).toBeNull();
+    expect(screen.queryByTestId("recovery-fresh-button")).toBeNull();
+    fireEvent.click(screen.getByTestId("managed-clone-relocate-button"));
+    fireEvent.click(screen.getByTestId("managed-clone-relocation-confirm"));
+    expect(recoveryActionState.handleManagedCloneRelocation).toHaveBeenCalledOnce();
+  });
+
+  it("restores relocation progress from the durable projection after reload", () => {
+    recoveryActionState.workspaceRecovery = {
+      task_id: "task-1",
+      environment_id: "environment-1",
+      session_id: "session-1",
+      operation_id: "operation-1",
+      attempt_id: "attempt-1",
+      ownership_generation: "generation-1",
+      revision: "2",
+      kind: "managed_clone_relocation",
+      state: "running",
+      phase: "publishing",
+      repository_position: 2,
+      repository_total: 2,
+      completed_slots: 1,
+      workspace_complete: false,
+      agent_ready: false,
+      runner_live: true,
+      started_at: "2026-10-05T12:00:00Z",
+      updated_at: "2026-10-05T12:01:00Z",
+    };
+
+    render(<SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />);
+
+    expect(
+      screen.getByTestId("workspace-recovery-progress").getAttribute("data-recovery-phase"),
+    ).toBe("publishing");
+    expect(screen.getByText("task:managedCloneRelocationTitle")).toBeTruthy();
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+  });
+
+  it("changes a cancelled legacy restore failure to one relocation action", () => {
+    recoveryActionState.manualRecoveryFailure = {
+      operation: "restore_workspace",
+      sessionId: "session-1",
+      errorStamp: "bootstrap-1",
+      requestKey: "task-1\u0000session-1\u0000bootstrap-1",
+      operationId: 1,
+    };
+    recoveryActionState.recoveryError = new Error("workspace needs relocation");
+    const { rerender } = render(
+      <SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />,
+    );
+    expect(screen.getByTestId("recovery-restore-workspace-button")).toBeTruthy();
+    expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toBeTruthy();
+
+    recoveryActionState.managedCloneRecoveryStamp = "managed-stamp-2";
+    rerender(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={{
+          ...error,
+          stamp: "managed-stamp-2",
+          category: "managed_clone_relocation_required",
+        }}
+      />,
+    );
+
+    expect(screen.getAllByTestId("managed-clone-relocate-button")).toHaveLength(1);
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("recovery-fresh-button")).toBeNull();
+    expect(screen.queryByTestId("recovery-restore-workspace-button")).toBeNull();
   });
 });
 

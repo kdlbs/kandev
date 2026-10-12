@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -115,6 +117,46 @@ func TestStopInstanceBoundsHTTPServerShutdown(t *testing.T) {
 	}
 }
 
+func TestInstanceListenerActivityTracksServeLifetime(t *testing.T) {
+	log := newTestLogger(t)
+	mgr := NewManager(&config.Config{
+		Ports:    config.PortConfig{Base: 0, Max: 0},
+		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
+	}, log)
+	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
+	mgr.SetServerFactory(func(*config.InstanceConfig, *process.Manager, *logger.Logger) http.Handler {
+		return http.NotFoundHandler()
+	})
+
+	created, err := mgr.CreateInstance(context.Background(), &CreateRequest{WorkspacePath: t.TempDir()})
+	require.NoError(t, err)
+	inst, ok := mgr.GetInstance(created.ID)
+	require.True(t, ok)
+	info := inst.Info()
+	require.NotZero(t, info.LeaseGeneration)
+	require.True(t, info.ListenerActive)
+
+	lease := inst.lease
+	require.NoError(t, inst.server.Close())
+	select {
+	case <-inst.listenerDone:
+	case <-time.After(time.Second):
+		t.Fatal("Serve did not exit after the server was closed")
+	}
+	if inst.Info().ListenerActive {
+		t.Fatal("listener remained active after Serve exited")
+	}
+	if _, err := mgr.portAlloc.Allocate("successor"); err == nil {
+		t.Fatal("unexpected Serve exit released the registered instance lease")
+	}
+
+	require.NoError(t, mgr.StopInstance(context.Background(), created.ID))
+	successor, err := mgr.portAlloc.Allocate("successor")
+	require.NoError(t, err)
+	require.Equal(t, lease.Port, successor.Port)
+	require.NotEqual(t, lease.Generation, successor.Generation)
+}
+
 func TestStopHTTPServerReturnsCloseError(t *testing.T) {
 	log := newTestLogger(t)
 	mgr := NewManager(&config.Config{
@@ -140,13 +182,14 @@ func TestStopInstanceRetainsPortWhenHTTPServerCloseFails(t *testing.T) {
 		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
 	}, log)
 
-	port, err := mgr.portAlloc.Allocate("close-failure")
+	lease, err := mgr.portAlloc.Allocate("close-failure")
 	require.NoError(t, err)
 
 	closeErr := errors.New("listener close failed")
 	inst := &Instance{
 		ID:        "close-failure",
-		Port:      port,
+		Port:      lease.Port,
+		lease:     lease,
 		Status:    "running",
 		CreatedAt: time.Now(),
 		server: &fakeHTTPServer{
@@ -174,14 +217,15 @@ func TestStopInstanceRetainsPortAfterProcessTeardownFailure(t *testing.T) {
 		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
 	}, log)
 
-	port, err := mgr.portAlloc.Allocate("process-cleanup-failure")
+	lease, err := mgr.portAlloc.Allocate("process-cleanup-failure")
 	require.NoError(t, err)
 	processErr := errors.New("process teardown failed")
 	procMgr := &fakeProcessManager{stopErr: legacyResourceReleaseError{err: processErr}}
 	server := &fakeHTTPServer{}
 	inst := &Instance{
 		ID:        "process-cleanup-failure",
-		Port:      port,
+		Port:      lease.Port,
+		lease:     lease,
 		Status:    "running",
 		CreatedAt: time.Now(),
 		manager:   procMgr,
@@ -206,7 +250,7 @@ func TestStopInstanceRetainsPortAfterProcessTeardownFailure(t *testing.T) {
 	require.False(t, ok)
 	reusedPort, err := mgr.portAlloc.Allocate("third-instance")
 	require.NoError(t, err)
-	require.Equal(t, port, reusedPort)
+	require.Equal(t, lease.Port, reusedPort.Port)
 }
 
 func TestStopInstanceReturnsSuccessForCompletedDuplicateStop(t *testing.T) {
@@ -217,7 +261,7 @@ func TestStopInstanceReturnsSuccessForCompletedDuplicateStop(t *testing.T) {
 	}, log)
 	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
 
-	port, err := mgr.portAlloc.Allocate("duplicate-stop")
+	lease, err := mgr.portAlloc.Allocate("duplicate-stop")
 	require.NoError(t, err)
 	stopStarted := make(chan struct{})
 	releaseStop := make(chan struct{})
@@ -232,7 +276,8 @@ func TestStopInstanceReturnsSuccessForCompletedDuplicateStop(t *testing.T) {
 	}
 	inst := &Instance{
 		ID:        "duplicate-stop",
-		Port:      port,
+		Port:      lease.Port,
+		lease:     lease,
 		Status:    "running",
 		CreatedAt: time.Now(),
 		manager:   procMgr,
@@ -259,7 +304,7 @@ func TestStopInstanceReturnsSuccessForCompletedDuplicateStop(t *testing.T) {
 	require.False(t, ok, "duplicate stop must leave the instance removed")
 	reusedPort, err := mgr.portAlloc.Allocate("replacement-instance")
 	require.NoError(t, err)
-	require.Equal(t, port, reusedPort, "duplicate stop must release the port once")
+	require.Equal(t, lease.Port, reusedPort.Port, "duplicate stop must release the port once")
 }
 
 func TestStopInstanceRejectsReplacementForCapturedInstance(t *testing.T) {
@@ -316,6 +361,7 @@ func (s *fakeHTTPServer) Close() error {
 type fakeProcessManager struct {
 	stopErr              error
 	stopped              bool
+	stopCalls            int
 	stopStarted          chan<- struct{}
 	stopRelease          <-chan struct{}
 	stopStartOnce        sync.Once
@@ -343,6 +389,7 @@ func (m *fakeProcessManager) GetSessionID() string { return m.sessionID }
 
 func (m *fakeProcessManager) StopForTeardown(context.Context) error {
 	m.stopped = true
+	m.stopCalls++
 	if m.stopStarted != nil {
 		m.stopStartOnce.Do(func() { close(m.stopStarted) })
 	}

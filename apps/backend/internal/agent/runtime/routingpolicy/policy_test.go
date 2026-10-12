@@ -1,6 +1,7 @@
 package routingpolicy
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -127,6 +128,36 @@ func TestEvaluateHonorsStopAfterExhaustion(t *testing.T) {
 	})
 	if got.Kind != DecisionStop || got.PendingOutcome != OutcomeStop {
 		t.Fatalf("evaluation = %#v, want stop", got)
+	}
+}
+
+func TestUnclassifiedPolicyValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		section string
+		wantErr bool
+	}{
+		{name: "absent remains disabled"},
+		{name: "null remains disabled", section: `,"unclassified":null`},
+		{name: "disabled canonical policy", section: `,"unclassified":{"enabled":false,"consecutive_failure_threshold":0}`},
+		{name: "minimum enabled threshold", section: `,"unclassified":{"enabled":true,"consecutive_failure_threshold":2}`},
+		{name: "maximum enabled threshold", section: `,"unclassified":{"enabled":true,"consecutive_failure_threshold":10}`},
+		{name: "threshold below minimum", section: `,"unclassified":{"enabled":true,"consecutive_failure_threshold":1}`, wantErr: true},
+		{name: "threshold above maximum", section: `,"unclassified":{"enabled":true,"consecutive_failure_threshold":11}`, wantErr: true},
+		{name: "disabled threshold must be zero", section: `,"unclassified":{"enabled":false,"consecutive_failure_threshold":3}`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := `{"version":1,"transient":{"on_exhausted":"skip"},"hard":{"on_exhausted":"skip"}` + tt.section + `}`
+			var document Document
+			if err := json.Unmarshal([]byte(raw), &document); err != nil {
+				t.Fatalf("unmarshal policy: %v", err)
+			}
+			err := ValidateDocument(document)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateDocument() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 

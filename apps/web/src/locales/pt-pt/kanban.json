@@ -36,7 +36,6 @@
   "gitlabMergeRequest": "Merge Request do GitLab",
   "goToTask": "Ir para a tarefa",
   "group": "Agrupar",
-  "groupTasksIntoSectionsByState": "Agrupar as tarefas em secções por estado, fluxo de trabalho, repositório ou não agrupar.",
   "healthIssues": "Problemas de saúde",
   "improveKandev": "Melhorar o Kandev",
   "jiraTicket": "Ticket do Jira",
@@ -133,5 +132,6 @@
   "bulkSelected_other": "{{count}} selecionadas",
   "bulkActions": "Ações",
   "selectTasks": "Selecionar tarefas",
-  "cancelTaskSelection": "Cancelar seleção"
+  "cancelTaskSelection": "Cancelar seleção",
+  "groupTasksIntoSectionsByWorkflowStep": "Agrupar as tarefas em secções por etapa do fluxo de trabalho, fluxo de trabalho, repositório ou não agrupar."
 }

@@ -29,7 +29,7 @@ It does not implement chat, terminal, files, Git, or another agent protocol.
 
 | Requirement | Design sections |
 | --- | --- |
-| REQ-EXECUTORS-PLUGIN-001 | Registration and profiles; rollout |
+| REQ-EXECUTORS-PLUGIN-001 | Registration and profiles; permanent availability |
 | REQ-EXECUTORS-PLUGIN-002 | Provider RPCs; bootstrap; launch flow |
 | REQ-EXECUTORS-PLUGIN-003 | Connection leases; security |
 | REQ-EXECUTORS-PLUGIN-004 | Inventory; recovery and cleanup |
@@ -64,6 +64,10 @@ Keep `ExecutorProfile.Config` as `map[string]string`. The initial schema accepts
 enums, and secret references. Boolean and number values have canonical string encodings.
 Nested provider objects and custom form JavaScript are excluded from this first contract.
 Use existing plugin secret storage for secret fields. Persist references, never secret values.
+A profile may also carry Kandev-owned keys shared with the other remote executors:
+`remote_credentials`, `remote_auth_secrets`, `agent_config_bundles`, `remote_auth_target_home`,
+`git_user_name`, and `git_user_email`. Kandev validates them, never sends them to the provider, and
+treats an empty value as removal. A provider schema that declares one of these names is invalid.
 Redacted reads return presence, not vault IDs or values; updates distinguish unchanged, replace, and clear.
 References are bound to the owning plugin and profile; arbitrary global secret lookup is not allowed.
 
@@ -89,7 +93,7 @@ They use typed envelopes, not generic browser actions.
 | `RecoverExecutorOperation` | Original operation identity and profile snapshot | `found`, `absent`, or `unknown`; resolves lost provision responses |
 | `AttachExecutorEnvironment` | Recorded handle/state, session identity, expected runtime identity | Same environment descriptor; never provisions a replacement |
 | `InspectExecutorEnvironment` | Recorded handle/state | `running`, `suspended`, `terminated`, `absent`, or `unknown`, reason and expiry |
-| `ResolveExecutorConnection` | Recorded handle, purpose `agentctl`, runtime port | Transient connection lease |
+| `ResolveExecutorConnection` | Recorded handle, purpose `agentctl`, runtime port (control or instance) | Transient connection lease |
 | `DestroyExecutorEnvironment` | Recorded handle or unresolved operation identity, cleanup reason and claim | Confirmed absent or retryable failure; idempotent |
 
 Every call carries host-derived plugin installation identity, workspace/task/session/environment IDs,
@@ -127,13 +131,21 @@ The plugin verifies the digest before execution. The fixture transfers it direct
 
 The bootstrap descriptor carries host-selected startup configuration, a one-time nonce, and runtime
 port allocation constraints. It is transient and never included in checkpoints or progress messages.
+The provider starts agentctl with its control server on `runtime_port` and the nonce as its bootstrap
+nonce. agentctl serves each session instance on a separate port that it assigns, so the provider must
+issue leases for the control port and for any instance port the host requests.
 Core owns the existing handshake and encrypted agentctl token persistence. Agent credentials and
-repository credentials follow existing host-to-agentctl setup after authenticated readiness.
+repository credentials follow existing host-to-agentctl setup after authenticated readiness: once
+the session instance is healthy, core writes the credential files and configuration bundles
+selected on the profile through agentctl processes, with contents in the process environment and
+never in the command line, and runs the setup scripts of selected environment-variable methods.
+Upload is best-effort and does not fail the launch, as for the other remote executors.
 Do not put session secrets into reusable image configuration.
 
 The first version requires a Kandev runtime API URL reachable from the remote network.
-Reuse the configured runtime API address and scoped task credentials; reject loopback-only or missing
-addresses before provisioning. Structural validation is not a reachability guarantee.
+It is `githubCredentialBroker.publicBaseUrl` followed by `/api/v1`, the externally reachable address
+already configured for remote executors, and replaces any launch-supplied value. Use scoped task
+credentials; reject loopback-only or missing addresses before provisioning. Structural validation is not a reachability guarantee.
 Bootstrap performs a bounded authenticated callback probe; failure rolls back provisioning.
 Use a fake non-loopback address and controlled transport in unit tests, not a production bypass.
 No new public relay or tunnel broker is introduced.
@@ -199,7 +211,9 @@ Provider lifecycle and task-session state remain separate concepts.
    session; never borrow another session's resource or overwrite a shared environment binding.
 3. Claim the session launch and persist `allocating` with operation identity before any provider call.
 4. Invoke provision. The provider checkpoints its handle immediately after allocation.
-5. Transfer/bootstrap agentctl. Resolve the connection lease and perform host authenticated readiness.
+5. Transfer/bootstrap agentctl. Lease the control port, perform the handshake, and create the session
+   instance. Record the instance port in inventory, lease it, and perform authenticated readiness.
+   Recovery and retained reattach lease the recorded instance port.
 6. Materialize credential-free repository locators through existing workspace APIs. Resolve credentials
    through existing secret/Git broker paths and preserve origin scrubbing.
 7. Configure and start the agent through core. Commit ready inventory before publishing success.
@@ -235,6 +249,11 @@ An unsupported state version requires a compatible plugin; the host does not rei
 
 Ordinary agent Stop uses core agentctl behavior and detaches transient transport as appropriate.
 Backend shutdown closes local connections and stops plugin processes without destroying remote compute.
+It must also preserve the remote agentctl and its active agent process. Stopping a local proxy or plugin host must not terminate its remote children.
+This remote lifetime rule is independent of `features.agentSurvival`, which remains an opt-in for local/worktree processes and defaults to off.
+Normal local/worktree shutdown therefore stops local agents by default; remote shutdown detaches transport and preserves ongoing work.
+Startup obtains fresh connection credentials, verifies recorded ownership, and reattaches to the same remote execution.
+The [durable delivery contract](../../platform/requirements/durable-agent-delivery.md) owns long-outage output retention and replay.
 Archive, delete, reset, and failed-launch rollback use host-authorized resource destruction.
 Acquire the existing cleanup claim for environment owner and generation before external teardown.
 Late callbacks and stale claims cannot mutate inventory or destroy a successor resource.
@@ -319,20 +338,25 @@ IDs may appear in logs; resource state, headers, signed URLs, tokens, and config
 Add closed-label counters for operations (`provision`, `recover`, `attach`, `inspect`, `destroy`, `connect`)
 and outcomes (`success`, `failed`, `unknown`, `fenced`). Plugin or task IDs are never metric labels.
 
-## Rollout
+## Permanent availability
 
-Add **new** restart-required release toggle `features.remoteExecutorPlugins`, environment variable
-`KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS`. Defaults are false in prod, dev, and e2e profiles.
-Use the typed runtime flag registry, config binding, frontend feature defaults, and existing admin controls.
-Tests enable the flag explicitly. Registration and every RPC, background recovery, and admission path
-check the backend gate. Flag-off code can read inventory but cannot dispatch provider operations.
-Operators must re-enable and restart before provider cleanup. Inventory and blocking uninstall checks
-remain active while the flag is off. This avoids erasing resources through the disabled path.
+The initial release used the restart-required `features.remoteExecutorPlugins` toggle. The host retired
+its profile default, typed config field, active registry registration, service state and setter, frontend
+default, and flag-only branches. Its key and environment variable are in the append-only retired runtime
+flag identities. Existing SQLite overrides remain inert and are not deleted.
+
+Provider discovery remains manifest-owned. With no installed plugin declaring `executor_providers`,
+the catalog has no plugin remote entries and built-in executor profiles continue normally. An installed
+but disabled, incompatible, or unavailable provider remains ineligible for new launches. Saved profiles
+and retained inventory remain visible, and uninstall and upgrade guards still protect unresolved remote
+resources. Dispatch requires an active installed plugin, a declared compatible provider, and a running
+plugin process; these admission checks do not depend on a release toggle. Background recovery and
+cleanup retain the same provider and resource identity checks.
 
 The host provider API, packaged fixture, desktop and phone profile flows, retention disclosure, and
-operator guidance are implemented behind the off-by-default restart-required flag. Public documentation
-describes the provider contract and fixture, not a production cloud provider. A production cloud plugin
-requires its own live validation.
+operator guidance remain available when an eligible plugin is installed. Public documentation describes
+the provider contract and fixture, not a production cloud provider. A production cloud plugin requires
+its own live validation.
 
 ## Implementation evidence
 
@@ -350,11 +374,12 @@ envelope. A barrier test covers inspection racing with cleanup. Legacy `local_pc
 to standalone while unknown executor values fail closed. The detailed regression results are in
 [Task 10](../../../plans/remote-executor-plugins/task-10-review-remediations.md).
 
-The managed Chromium E2E tests cover provider profile availability and retention disclosure, plus
-feature-off profile admission without provider allocation. Separate profile and status E2Es cover the
-desktop and phone flows. Agentctl, lifecycle, and gateway tests cover authenticated request and WebSocket
-transport, recovery, and cleanup. The packaged browser test does not start a full remote agent session or
-exercise every prompt, permission, terminal, file, Git, editor, and preview action through the fixture.
+The managed Chromium E2E tests cover provider profile availability and retention disclosure with shipped
+defaults. With no eligible provider installed, they verify that built-in profile selection remains
+available. Separate profile and status E2Es cover desktop and phone flows. Agentctl, lifecycle, and gateway
+tests cover authenticated request and WebSocket transport, recovery, and cleanup. The packaged browser
+test does not start a full remote agent session or exercise every prompt, permission, terminal, file, Git,
+editor, and preview action through the fixture.
 
 The fixture and focused transport checks passed:
 

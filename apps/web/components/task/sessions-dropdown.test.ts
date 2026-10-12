@@ -11,6 +11,7 @@ const lifecycleMocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({
   deleteTask: lifecycleMocks.deleteTask,
+  deleteTaskAfterUserAction: lifecycleMocks.deleteTask,
 }));
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: lifecycleMocks.getWebSocketClient,

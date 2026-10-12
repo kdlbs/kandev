@@ -109,6 +109,38 @@ func TestHealthRouteReturnsOK(t *testing.T) {
 	}
 }
 
+func TestSeedTaskManagementClaimUsesTaskVersionAndRecordsHistory(t *testing.T) {
+	repo, sqlxDB := newTestRepo(t)
+	seedTask(t, sqlxDB, "claim-seed-task")
+	router := newRouter(t, repo, nil)
+	requestBody := mustJSON(t, map[string]string{
+		"installation_id": "removed-manager",
+		"instance_key":    "manager-instance",
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/_test/tasks/claim-seed-task/management-claim", bytes.NewReader(requestBody))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("seed claim status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	claim, err := repo.GetTaskManagementClaim(context.Background(), "claim-seed-task")
+	if err != nil {
+		t.Fatalf("read claim: %v", err)
+	}
+	if claim == nil || claim.InstallationID != "removed-manager" || claim.Generation != 1 {
+		t.Fatalf("seed claim = %+v", claim)
+	}
+	history, err := repo.ListTaskManagementClaimHistory(context.Background(), "claim-seed-task")
+	if err != nil {
+		t.Fatalf("read claim history: %v", err)
+	}
+	if len(history) != 1 || history[0].Reason != "E2E unavailable manager" {
+		t.Fatalf("claim history = %+v", history)
+	}
+}
+
 func TestSeedCostEventPreservesOutputTokenPresence(t *testing.T) {
 	taskRepo, sqlxDB := newTestRepo(t)
 	omittedTaskID := uuid.New().String()

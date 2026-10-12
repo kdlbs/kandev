@@ -51,10 +51,16 @@ describe("mapWorkspaceItem", () => {
       name: "Workspace",
       description: null,
       owner_id: "owner-1",
+      unit_id: undefined,
+      viewer_role: undefined,
+      scopes: undefined,
+      member_count: undefined,
       default_executor_id: null,
       default_environment_id: null,
       default_agent_profile_id: null,
       default_config_agent_profile_id: null,
+      acp_idle_suspension_enabled: false,
+      acp_idle_timeout_minutes: 120,
       office_workflow_id: null,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-02T00:00:00Z",
@@ -112,6 +118,18 @@ describe("resolveSettingsActiveWorkspaceId", () => {
 
   it("returns null when no workspaces exist", () => {
     expect(resolveSettingsActiveWorkspaceId([], "k-1", "k-2")).toBeNull();
+  });
+
+  it("prefers the workspace already active in this tab over the shared cookie", () => {
+    expect(resolveSettingsActiveWorkspaceId([OFFICE, KANBAN], KANBAN.id, null, OFFICE.id)).toBe(
+      OFFICE.id,
+    );
+  });
+
+  it("ignores a current workspace that no longer exists", () => {
+    expect(resolveSettingsActiveWorkspaceId([OFFICE, KANBAN], KANBAN.id, null, "gone")).toBe(
+      KANBAN.id,
+    );
   });
 });
 
@@ -336,7 +354,7 @@ describe("structural guard: workspace-cookie lookups stay scoped", () => {
   const readers = [
     "src/office-routes.tsx", // office boot: general then office family
     "src/kanban-route.tsx", // kanban boot: general family
-    "src/settings-routes.tsx", // settings boot: general family
+    "src/settings-routes.initial-state.ts", // settings boot: general family
     "src/spa-routes.tsx", // generic boot re-hydration: general family
   ];
   const writer = "components/app-sidebar/app-sidebar-workspace-navigation.ts";
@@ -381,7 +399,11 @@ describe("structural guard: workspace-cookie lookups stay scoped", () => {
       "office-routes must read the general family before the office family",
     ).toBeLessThan(office);
     // Kanban and settings boot read only the general family.
-    for (const file of ["src/kanban-route.tsx", "src/settings-routes.tsx", "src/spa-routes.tsx"]) {
+    for (const file of [
+      "src/kanban-route.tsx",
+      "src/settings-routes.initial-state.ts",
+      "src/spa-routes.tsx",
+    ]) {
       const source = compact(file);
       expect(
         source.includes("readActiveWorkspaceCookie()"),

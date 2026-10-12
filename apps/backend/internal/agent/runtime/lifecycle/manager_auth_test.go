@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 	"github.com/stretchr/testify/require"
 )
 
@@ -842,6 +843,97 @@ func TestRegisteredKubernetesLaunchRollbackDeletesSecretsBeforeReleasingInventor
 	}
 	if releases != 1 {
 		t.Fatalf("runtime inventory releases = %d, want 1", releases)
+	}
+}
+
+func TestRegisteredPluginLaunchRollbackDestroysBeforeReleasingInventory(t *testing.T) {
+	for _, failDestroy := range []bool{false, true} {
+		name := "successful cleanup"
+		if failDestroy {
+			name = "failed cleanup retains inventory"
+		}
+		t.Run(name, func(t *testing.T) {
+			operations := &pluginExecutorOperationsFake{
+				destroyResponse: &pluginsdk.DestroyExecutorEnvironmentResponse{ConfirmedAbsent: true},
+			}
+			if failDestroy {
+				operations.destroyErr = errors.New("provider destroy failed")
+			}
+			loader := &pluginExecutorRecoveryProfileLoaderFake{profile: models.ExecutorProviderLaunchProfile{
+				Provider: testPluginExecutorLaunchProvider(), ProfileID: "profile-plugin-recovery",
+			}}
+			store := &pluginExecutorInventoryStoreFake{
+				record: pluginExecutorRecoveryRecord(t, "ready", &pluginsdk.ExecutorResourceDescriptor{
+					ResourceHandle: "resource-rollback", StateJson: `{"resource":"one"}`, Platform: "linux-amd64", StateVersion: 1,
+				}),
+				session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", State: models.TaskSessionStateStarting},
+			}
+			runtime := NewPluginRemoteExecutor(operations, newTestLogger())
+			runtime.SetRecoveryDependencies(loader, store)
+			manager := newTestManager(t)
+			released := false
+			instance := &ExecutorInstance{
+				InstanceID: "execution-plugin-recovery", TaskID: "task-plugin-recovery", SessionID: "session-plugin-recovery",
+				Metadata: store.record.Metadata,
+				ReleaseRuntimeInventory: func(context.Context) error {
+					if operations.destroyRequest == nil || operations.destroyRequest.GetCleanupReason() != pluginExecutorCleanupReasonLaunch {
+						return errors.New("plugin environment was not destroyed before inventory release")
+					}
+					released = true
+					return nil
+				},
+			}
+			execution := &AgentExecution{
+				ID: "execution-plugin-recovery", SessionID: "session-plugin-recovery", RuntimeName: agentruntime.RuntimePluginRemote,
+			}
+
+			err := manager.stopRegisteredLaunchRuntime(runtime, instance, execution)
+			if failDestroy {
+				if err == nil {
+					t.Fatal("stopRegisteredLaunchRuntime succeeded after provider destroy failed")
+				}
+				if released || store.record == nil {
+					t.Fatalf("failed cleanup released ownership: released=%v record=%#v", released, store.record)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("stopRegisteredLaunchRuntime: %v", err)
+			}
+			if !released || operations.destroyRequest.GetCleanupReason() != pluginExecutorCleanupReasonLaunch {
+				t.Fatalf("cleanup/release order is wrong: destroy=%#v released=%v", operations.destroyRequest, released)
+			}
+		})
+	}
+}
+
+func TestRegisteredPluginResumeRollbackPreservesRetainedEnvironment(t *testing.T) {
+	operations := &pluginExecutorOperationsFake{destroyResponse: &pluginsdk.DestroyExecutorEnvironmentResponse{ConfirmedAbsent: true}}
+	loader := &pluginExecutorRecoveryProfileLoaderFake{profile: models.ExecutorProviderLaunchProfile{
+		Provider: testPluginExecutorLaunchProvider(), ProfileID: "profile-plugin-recovery",
+	}}
+	store := &pluginExecutorInventoryStoreFake{
+		record: pluginExecutorRecoveryRecord(t, "ready", &pluginsdk.ExecutorResourceDescriptor{
+			ResourceHandle: "resource-retained", StateJson: `{"resource":"one"}`, Platform: "linux-amd64", StateVersion: 1,
+		}),
+		session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", State: models.TaskSessionStateStarting},
+	}
+	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
+	runtime.SetRecoveryDependencies(loader, store)
+	manager := newTestManager(t)
+	execution := &AgentExecution{
+		ID: "execution-plugin-recovery", SessionID: "session-plugin-recovery", RuntimeName: agentruntime.RuntimePluginRemote,
+		isResumedSession: true,
+	}
+
+	if err := manager.stopRegisteredLaunchRuntime(runtime, &ExecutorInstance{
+		InstanceID: "execution-plugin-recovery", TaskID: "task-plugin-recovery", SessionID: "session-plugin-recovery",
+		Metadata: store.record.Metadata,
+	}, execution); err != nil {
+		t.Fatalf("stopRegisteredLaunchRuntime: %v", err)
+	}
+	if operations.destroyRequest != nil || store.record == nil {
+		t.Fatalf("retained environment was destroyed or lost: destroy=%#v record=%#v", operations.destroyRequest, store.record)
 	}
 }
 

@@ -34,6 +34,7 @@ type AppSidebarNavItemProps = {
 };
 
 type TriggerProps = {
+  active: boolean;
   onClick?: () => void;
   disabled: boolean;
   baseClass: string;
@@ -43,7 +44,16 @@ type TriggerProps = {
   testId?: string;
 };
 
-function renderTrigger({ onClick, disabled, baseClass, label, href, inner, testId }: TriggerProps) {
+function renderTrigger({
+  onClick,
+  disabled,
+  baseClass,
+  label,
+  href,
+  inner,
+  testId,
+  active,
+}: TriggerProps) {
   if (onClick) {
     return (
       <button
@@ -67,7 +77,13 @@ function renderTrigger({ onClick, disabled, baseClass, label, href, inner, testI
     );
   }
   return (
-    <Link href={href ?? "#"} className={baseClass} aria-label={label} data-testid={testId}>
+    <Link
+      href={href ?? "#"}
+      className={baseClass}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      data-testid={testId}
+    >
       {inner}
     </Link>
   );
@@ -117,7 +133,7 @@ export function AppSidebarNavItem({
   const badgeLabel = badgeText(badge, badgeSuffix);
 
   const baseClass = cn(
-    "flex items-center rounded-md text-[13px] font-medium transition-colors",
+    "flex items-center rounded-md text-[13px] font-medium transition-colors [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11",
     collapsed ? "h-9 w-9 justify-center mx-auto" : "h-9 px-2.5 gap-2.5 w-full text-left",
     disabled
       ? "cursor-not-allowed text-foreground/40"
@@ -140,7 +156,16 @@ export function AppSidebarNavItem({
     </>
   );
 
-  const buttonOrLink = renderTrigger({ onClick, disabled, baseClass, label, href, inner, testId });
+  const buttonOrLink = renderTrigger({
+    onClick,
+    disabled,
+    baseClass,
+    label,
+    href,
+    inner,
+    testId,
+    active,
+  });
 
   if (!collapsed) return buttonOrLink;
   return (

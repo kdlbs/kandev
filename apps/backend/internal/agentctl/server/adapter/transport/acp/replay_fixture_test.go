@@ -21,8 +21,9 @@ import (
 // &acp.RequestError{Code, Message, Data} built from the prompt_error frame."
 type replayFakeAgent struct {
 	concurrencyFakeAgent
-	conn    *acp.AgentSideConnection
-	fixture replayfixtures.Fixture
+	conn         *acp.AgentSideConnection
+	fixture      replayfixtures.Fixture
+	requestError *acp.RequestError
 }
 
 func (f *replayFakeAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
@@ -44,11 +45,12 @@ func (f *replayFakeAgent) Prompt(ctx context.Context, req acp.PromptRequest) (ac
 			return acp.PromptResponse{}, err
 		}
 	}
-	return acp.PromptResponse{}, &acp.RequestError{
+	f.requestError = &acp.RequestError{
 		Code:    promptErrorFrame.Code,
 		Message: promptErrorFrame.Message,
 		Data:    promptErrorFrame.Data,
 	}
+	return acp.PromptResponse{}, f.requestError
 }
 
 // buildReplaySessionUpdate converts one non-prompt_error fixture frame into
@@ -110,10 +112,13 @@ func buildReplaySessionUpdate(frame replayfixtures.Frame) (acp.SessionUpdate, bo
 // real acp.AgentSideConnection wrapping the fixture-driven fake agent. It
 // returns the live Adapter (so callers can read state the replay actually
 // settled, such as ProviderErrorContext), the tokenized event sequence
-// observed on updatesCh (excluding the terminal error, which has no
-// AgentEvent counterpart on this path), and the error Adapter.Prompt
-// returned.
-func replayFixtureThroughAdapter(t *testing.T, fx replayfixtures.Fixture) (*Adapter, []string, error) {
+// observed on updatesCh, the raw RequestError returned by the fixture-driven
+// ACP agent, and the error Adapter.Prompt returned. Retainable provider errors
+// are represented by a terminal error event and a nil adapter return.
+func replayFixtureThroughAdapter(
+	t *testing.T,
+	fx replayfixtures.Fixture,
+) (*Adapter, []AgentEvent, *acp.RequestError, error) {
 	t.Helper()
 
 	clientToAgentR, clientToAgentW := io.Pipe()
@@ -153,7 +158,7 @@ func replayFixtureThroughAdapter(t *testing.T, fx replayfixtures.Fixture) (*Adap
 		t.Fatal("Adapter.Prompt did not return")
 	}
 
-	return a, tokenizeEvents(drainEvents(a)), promptErr
+	return a, drainEvents(a), fake.requestError, promptErr
 }
 
 // tokenizeEvents keeps only the events whose type is in the closed
@@ -177,6 +182,8 @@ func tokenizeEvents(events []AgentEvent) []string {
 			tokens = append(tokens, "tool_call")
 		case streams.EventTypeToolUpdate:
 			tokens = append(tokens, "tool_update")
+		case streams.EventTypeError:
+			tokens = append(tokens, "error")
 		}
 	}
 	return tokens
@@ -185,18 +192,35 @@ func tokenizeEvents(events []AgentEvent) []string {
 // TestReplayFixtureTransportLayer drives every fixture in the shared ACP
 // replay corpus through a live Adapter and asserts the two things
 // provider-error-recovery-02.md#replay-harness-semantics assigns to the ACP
-// transport layer: expect.events up to (but excluding) the trailing error
-// token, and the error token plus expect.providerError/expect.diagnosticCode
-// derived from ProviderErrorFromError applied to the error Adapter.Prompt
-// returned.
+// transport layer: expect.events, plus expect.providerError/expect.diagnosticCode
+// derived from either a retained terminal error event or the error Adapter.Prompt
+// returned for a terminal provider failure.
 func TestReplayFixtureTransportLayer(t *testing.T) {
 	fixtures := replayfixtures.MustLoad()
 
 	for _, fx := range fixtures {
 		t.Run(fx.FileName, func(t *testing.T) {
-			a, tokens, promptErr := replayFixtureThroughAdapter(t, fx)
+			a, observedEvents, requestErr, promptErr := replayFixtureThroughAdapter(t, fx)
+			if requestErr == nil {
+				t.Fatal("fixture ACP agent returned no RequestError")
+			}
+			promptErrorFrame := fx.Frames[len(fx.Frames)-1]
+			if requestErr.Code != promptErrorFrame.Code {
+				t.Fatalf("fixture RequestError code = %d, want %d", requestErr.Code, promptErrorFrame.Code)
+			}
+			wantRetainedFailure := fx.Expect.DiagnosticCode == string(routingerr.CodeProviderOverloaded) ||
+				fx.Expect.DiagnosticCode == string(routingerr.CodeModelCapacity) ||
+				fx.Expect.DiagnosticCode == string(routingerr.CodeRateLimited)
+			if (promptErr == nil) != wantRetainedFailure {
+				t.Fatalf("Adapter.Prompt retained failure = %v, want %v for diagnostic %q",
+					promptErr == nil, wantRetainedFailure, fx.Expect.DiagnosticCode)
+			}
+			tokens := tokenizeEvents(observedEvents)
 
-			wantTokens := fx.Expect.Events[:len(fx.Expect.Events)-1]
+			wantTokens := fx.Expect.Events
+			if promptErr != nil {
+				wantTokens = wantTokens[:len(wantTokens)-1]
+			}
 			if len(tokens) != len(wantTokens) {
 				t.Fatalf("tokenized events = %v, want %v", tokens, wantTokens)
 			}
@@ -209,17 +233,30 @@ func TestReplayFixtureTransportLayer(t *testing.T) {
 				t.Fatalf("fixture %s: expect.events must end with error", fx.FileName)
 			}
 
+			var got *streams.ProviderError
 			if promptErr == nil {
-				t.Fatal("Adapter.Prompt returned nil, want the fixture's prompt_error")
-			}
+				var terminal *AgentEvent
+				for i := range observedEvents {
+					if observedEvents[i].Type == streams.EventTypeError {
+						terminal = &observedEvents[i]
+					}
+				}
+				if terminal == nil {
+					t.Fatal("Adapter.Prompt returned nil without a terminal error event")
+				}
+				if terminal.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime {
+					t.Fatalf("terminal disposition = %q, want retain_runtime", terminal.PromptFailureDisposition)
+				}
+				got = terminal.ProviderError
+			} else {
+				var reqErr *acp.RequestError
+				if !errors.As(promptErr, &reqErr) {
+					t.Fatalf("Adapter.Prompt error = %v, want *acp.RequestError", promptErr)
+				}
 
-			var reqErr *acp.RequestError
-			if !errors.As(promptErr, &reqErr) {
-				t.Fatalf("Adapter.Prompt error = %v, want *acp.RequestError", promptErr)
+				providerID, modelID := a.ProviderErrorContext()
+				got = ProviderErrorFromError(promptErr, providerID, modelID)
 			}
-
-			providerID, modelID := a.ProviderErrorContext()
-			got := ProviderErrorFromError(promptErr, providerID, modelID)
 			if got == nil {
 				t.Fatal("ProviderErrorFromError() = nil, want a projection")
 			}
@@ -248,5 +285,59 @@ func TestReplayFixtureTransportLayer(t *testing.T) {
 				t.Fatalf("diagnosticCode = %q, want %q", diagnosticCode, fx.Expect.DiagnosticCode)
 			}
 		})
+	}
+}
+
+func TestReplayFixtureRetainedCapacityUsesMarkedRequestError(t *testing.T) {
+	fx := replayfixtures.Fixture{
+		AgentID: mockAgentID,
+		Identity: replayfixtures.Identity{
+			SessionID:        "mock-retained-capacity",
+			ExecutionID:      "mock-retained-capacity-execution",
+			PromptGeneration: 7,
+		},
+		Frames: []replayfixtures.Frame{
+			{Kind: replayfixtures.FrameToolCall, ToolCallID: "completed-read", Status: "completed"},
+			{
+				Kind:    replayfixtures.FramePromptError,
+				Code:    -32603,
+				Message: "Selected model is at capacity. Please try a different model.",
+				Data:    map[string]any{"kandevMock": map[string]any{"retainedProviderCapacity": true}},
+			},
+		},
+	}
+	_, observedEvents, requestErr, promptErr := replayFixtureThroughAdapter(t, fx)
+	if promptErr != nil {
+		t.Fatalf("Adapter.Prompt() error = %v, want retained turn event", promptErr)
+	}
+	if requestErr == nil || requestErr.Code != -32603 {
+		t.Fatalf("raw ACP RequestError = %#v, want code -32603", requestErr)
+	}
+	data, ok := requestErr.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("raw ACP RequestError data = %#v, want marker", requestErr.Data)
+	}
+	meta, ok := data["kandevMock"].(map[string]any)
+	if !ok || meta["retainedProviderCapacity"] != true {
+		t.Fatalf("raw ACP RequestError marker = %#v, want retainedProviderCapacity", requestErr.Data)
+	}
+	var terminal *AgentEvent
+	for i := range observedEvents {
+		if observedEvents[i].Type == streams.EventTypeError {
+			terminal = &observedEvents[i]
+		}
+	}
+	if terminal == nil {
+		t.Fatal("Adapter.Prompt returned nil without a terminal error event")
+	}
+	if terminal.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime {
+		t.Fatalf("prompt failure disposition = %q, want retain_runtime", terminal.PromptFailureDisposition)
+	}
+	if terminal.ProviderError == nil || terminal.ProviderError.Source != streams.ProviderErrorSourceACPPrompt ||
+		terminal.ProviderError.RPCCode != -32603 {
+		t.Fatalf("terminal provider error = %+v, want the marked ACP prompt error", terminal.ProviderError)
+	}
+	if terminal.CapacityContinuation == nil || !terminal.CapacityContinuation.SafeFor(fx.Identity.PromptGeneration) {
+		t.Fatalf("capacity continuation evidence = %+v, want safe generation %d", terminal.CapacityContinuation, fx.Identity.PromptGeneration)
 	}
 }

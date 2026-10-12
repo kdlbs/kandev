@@ -23,6 +23,29 @@ function session(overrides: Partial<TaskSession>): TaskSession {
   };
 }
 
+describe("managed runtime startup run errors", () => {
+  it("preserves typed reason and attempt count", () => {
+    const errors = buildRunErrorsFromSessions([
+      session({
+        metadata: {
+          last_agent_error: {
+            message: "managed runtime startup failed",
+            failure_code: "managed_runtime_startup",
+            startup_reason: "early_exit",
+            startup_attempts: 2,
+            startup_npm_code: "",
+          },
+        },
+      }),
+    ]);
+    expect(errors[0]).toMatchObject({
+      failureCode: "managed_runtime_startup",
+      startupReason: "early_exit",
+      startupAttempts: 2,
+    });
+  });
+});
+
 describe("buildRunErrorsFromSessions", () => {
   it("preserves structured managed runtime failure metadata", () => {
     const errors = buildRunErrorsFromSessions([

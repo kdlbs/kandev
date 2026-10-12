@@ -131,6 +131,10 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 		return exportAutomation{}, nil, err
 	}
 	warnings = append(warnings, triggerWarnings...)
+	policy, err := NormalizeRetryPolicy(a.RetryPolicy)
+	if err != nil {
+		return exportAutomation{}, nil, fmt.Errorf("normalize retry policy for automation %q: %w", a.ID, err)
+	}
 
 	return exportAutomation{
 		Name:              a.Name,
@@ -149,6 +153,14 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 			}
 			return a.TaskMode
 		}(),
+		ManagedDestination: func() *exportManagedConversationDestination {
+			if a.ManagedDestination == nil {
+				return nil
+			}
+			return &exportManagedConversationDestination{
+				PluginID: a.ManagedDestination.PluginID, InstanceKey: a.ManagedDestination.InstanceKey,
+			}
+		}(),
 		RepositoryMode: func() RepositoryMode {
 			if a.RepositoryMode == "" {
 				if len(a.RepositoryIDs) > 0 {
@@ -158,6 +170,7 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 			}
 			return a.RepositoryMode
 		}(),
+		RetryPolicy:       exportRetryPolicy(policy),
 		TaskTitleTemplate: a.TaskTitleTemplate,
 		Prompt:            promptNode,
 		AgentProfile:      resolved.AgentProfile,

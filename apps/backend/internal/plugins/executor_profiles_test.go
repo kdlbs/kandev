@@ -26,7 +26,6 @@ func TestPluginExecutorCatalog(t *testing.T) {
 		InstallationID: "installation-1", Status: StatusActive,
 	})
 	service.SetRuntime(&fakeRuntime{running: map[string]bool{"example-provider": true}})
-	service.SetRemoteExecutorPluginsEnabled(true)
 
 	providers, err := service.ListExecutorProviders(context.Background())
 	if err != nil {
@@ -46,11 +45,6 @@ func TestPluginExecutorCatalog(t *testing.T) {
 		t.Fatalf("localized message references = %#v", provider.LocalizedMessages)
 	}
 
-	service.SetRemoteExecutorPluginsEnabled(false)
-	providers, err = service.ListExecutorProviders(context.Background())
-	if err != nil || len(providers) != 1 || providers[0].Available || providers[0].AvailabilityCause != "feature_disabled" {
-		t.Fatalf("disabled catalog = %+v, %v; want saved declaration unavailable", providers, err)
-	}
 }
 
 func TestPluginExecutorProfileSecrets(t *testing.T) {

@@ -13,6 +13,7 @@ import {
 import { useProfileModelCapabilities } from "@/hooks/domains/settings/use-profile-model-capabilities";
 import { modelConfigOptions } from "@/components/settings/profile-model-config";
 import type { CommandEntry, ModeEntry, ModelConfig } from "@/lib/types/http";
+import type { ProfileLaunchSettingsRequest } from "@/lib/types/http";
 import type { ProfileFormData } from "./profile-model-fields";
 
 type ProfileFormCapabilitySelection = {
@@ -20,6 +21,18 @@ type ProfileFormCapabilitySelection = {
   mode: string;
   provider_kind?: string;
   config_options?: Record<string, string>;
+  env_vars?: ProfileLaunchSettingsRequest["env_vars"];
+  cli_flags?: ProfileLaunchSettingsRequest["cli_flags"];
+  command_prefix?: string;
+};
+
+type ProfileCapabilityContext = {
+  profileId?: string;
+  savedLaunchSettings?: ProfileLaunchSettingsRequest;
+};
+
+type ProfileFormCapabilityOptions = ProfileCapabilityContext & {
+  onPendingChange?: (pending: boolean) => void;
 };
 
 export function useProfileFormCapabilities(
@@ -27,9 +40,11 @@ export function useProfileFormCapabilities(
   profile: ProfileFormCapabilitySelection,
   modelConfig: ModelConfig,
   onChange: (patch: { config_options: Record<string, string> }) => void,
-  onPendingChange?: (pending: boolean) => void,
+  options: ProfileFormCapabilityOptions = {},
 ) {
+  const { onPendingChange, ...context } = options;
   const result = useProfileModelCapabilities(agentName, profile, modelConfig, onChange, {
+    ...context,
     skipCapabilityProbe: profile.provider_kind === "openai_compatible",
   });
 

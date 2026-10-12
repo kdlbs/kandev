@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -29,6 +29,16 @@ async function switchMobileTask(testPage: Page, title: string): Promise<void> {
   // while the mobile drawer is under CI load.
   await taskRow.click();
   await expect(sheet).not.toBeVisible({ timeout: 10_000 });
+}
+
+async function simulateReaderScrollToMiddle(list: Locator): Promise<number> {
+  return list.evaluate((element) => {
+    const target = Math.floor((element.scrollHeight - element.clientHeight) / 2);
+    element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
+    element.scrollTop = target;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    return element.scrollTop;
+  });
 }
 
 /**
@@ -186,11 +196,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     );
     expect(olderRequests).toHaveLength(0);
 
-    const targetScrollTop = await list.evaluate((element) => {
-      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) / 2);
-      element.dispatchEvent(new Event("scroll"));
-      return element.scrollTop;
-    });
+    const targetScrollTop = await simulateReaderScrollToMiddle(list);
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
@@ -277,10 +283,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
       })
       .toBeGreaterThan(200);
 
-    const targetScrollTop = await list.evaluate((el) => {
-      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-      return el.scrollTop;
-    });
+    const targetScrollTop = await simulateReaderScrollToMiddle(list);
     expect(targetScrollTop).toBeGreaterThan(100);
 
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
@@ -370,12 +373,31 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
     const marker = "New content while disabled at bottom on mobile";
-    await session.sendMessageViaButton(`e2e:delay(500)\ne2e:message("${marker}")`);
-    // Mobile submission clears the composer and appends the user's prompt,
-    // which can resize the transcript before the delayed agent reply. Capture
-    // the frozen position after that submit layout settles so this assertion
-    // isolates movement caused by the incoming content.
-    const frozenScrollTop = await list.evaluate((el) => el.scrollTop);
+    await session.sendMessageViaButton(`e2e:delay(1500)\ne2e:message("${marker}")`);
+    await expect(activeChat.getByText("e2e:delay(1500)", { exact: false })).toBeVisible();
+    // Capture only after the submitted prompt's scroll position is stable.
+    // The delayed response leaves time for the user's message row to settle.
+    const frozenScrollTop = await list.evaluate(async (el) => {
+      let previous = el.scrollTop;
+      let stableFrames = 0;
+      for (let frame = 0; frame < 30; frame++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const current = el.scrollTop;
+        stableFrames = Math.abs(current - previous) <= 0.5 ? stableFrames + 1 : 0;
+        previous = current;
+        if (stableFrames === 3) return current;
+      }
+      throw new Error("transcript scroll position did not settle after prompt submission");
+    });
+    const markerMessages = activeChat.getByText(marker, { exact: false });
+    const promptMarkerCount = await markerMessages.count();
+    expect(promptMarkerCount).toBeGreaterThan(0);
+    await expect
+      .poll(() => markerMessages.count(), {
+        timeout: 15_000,
+        message: "Waiting for the delayed assistant response after the submitted prompt",
+      })
+      .toBeGreaterThan(promptMarkerCount);
     await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
       timeout: 15_000,
     });

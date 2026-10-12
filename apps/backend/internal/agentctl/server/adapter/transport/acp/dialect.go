@@ -9,7 +9,11 @@ import (
 // ACP implementation. The Adapter remains responsible for RPC execution,
 // session state, serialization, and event delivery.
 type acpDialect struct {
-	normalizeSessionConfig func(
+	continuationSupport         streams.ContinuationSupport
+	capacityContinuationSupport streams.CapacityContinuationSupport
+	continuationError           func(error) bool
+	retainedApplicationErr      func(error) bool
+	normalizeSessionConfig      func(
 		[]streams.ConfigOption,
 		[]modelInfo,
 		string,

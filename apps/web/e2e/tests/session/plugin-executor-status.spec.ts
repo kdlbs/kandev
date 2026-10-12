@@ -11,7 +11,6 @@ test("remote executor disclosure explains expiry and keeps reset authorized", as
   testPage,
 }) => {
   test.setTimeout(120_000);
-  const releaseFeature = await backend.useEnv({ KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS: "true" });
   let taskId = "";
   try {
     const seeded = await seedPluginExecutorStatusTask(testPage, {
@@ -60,6 +59,5 @@ test("remote executor disclosure explains expiry and keeps reset authorized", as
   } finally {
     if (taskId) await apiClient.deleteTask(taskId).catch(() => undefined);
     await uninstallFixturePlugin(apiClient);
-    await releaseFeature();
   }
 });

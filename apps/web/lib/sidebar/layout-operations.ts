@@ -34,7 +34,7 @@ export class SidebarLayoutOperationError extends Error {
   }
 }
 
-const PROTECTED_NODE_IDS = new Set(["tasks", "inbox", "needs-you-inbox"]);
+const PROTECTED_NODE_IDS = new Set(["tasks"]);
 function copyLayout(layout: SidebarLayout): SidebarLayout {
   return {
     ...layout,

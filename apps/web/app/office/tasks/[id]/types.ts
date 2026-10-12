@@ -109,6 +109,9 @@ export type RunError = {
   remediationUrl?: string;
   failureCode?: string;
   failureDetails?: string;
+  startupReason?: string;
+  startupAttempts?: number;
+  startupNpmCode?: string;
   message?: string;
   recoveryActions?: TaskLaunchRecoveryAction[];
   taskRepositoryId?: string;

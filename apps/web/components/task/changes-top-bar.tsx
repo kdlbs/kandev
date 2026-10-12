@@ -61,7 +61,7 @@ function ChangesTopBarLeft({
           <Button
             size="sm"
             variant="ghost"
-            className="h-6 min-w-6 px-1.5 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-w-11"
+            className="h-6 min-w-6 px-1.5 cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-11"
           >
             <IconSettings className="h-3.5 w-3.5" />
           </Button>
@@ -116,7 +116,7 @@ function ReviewWalkthroughRequestButton({
           <Button
             size="sm"
             variant="ghost"
-            className="h-6 min-w-6 px-1.5 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-w-11"
+            className="h-6 min-w-6 px-1.5 cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-11"
             aria-label={t("task:walkMeThroughTheseReviewChanges")}
             data-testid="review-request-walkthrough"
             disabled={requestWalkthroughDisabled}
@@ -139,7 +139,7 @@ function ExpandReviewButton() {
         <Button
           size="sm"
           variant="ghost"
-          className="h-6 min-w-6 px-1.5 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-w-11"
+          className="h-6 min-w-6 px-1.5 cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-11"
           aria-label={t("task:expandReview")}
           onClick={() => window.dispatchEvent(new CustomEvent("open-review-dialog"))}
         >
@@ -184,7 +184,7 @@ function ChangesTopBarRight({
           <Button
             size="sm"
             variant="ghost"
-            className={`h-6 min-w-6 px-1.5 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-w-11 ${wordWrap ? "bg-muted" : ""}`}
+            className={`h-6 min-w-6 px-1.5 cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-11 ${wordWrap ? "bg-muted" : ""}`}
             onClick={() => setWordWrap(!wordWrap)}
           >
             <IconTextWrap className="h-3.5 w-3.5" />
@@ -197,7 +197,7 @@ function ChangesTopBarRight({
           <Button
             size="sm"
             variant="ghost"
-            className="h-6 min-w-6 px-1.5 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-w-11"
+            className="h-6 min-w-6 px-1.5 cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-11"
             onClick={() => handleToggleSplitView(!splitView)}
           >
             {splitView ? (
@@ -213,7 +213,7 @@ function ChangesTopBarRight({
         <Button
           size="sm"
           variant="outline"
-          className="min-h-6 text-xs cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          className="min-h-6 text-xs cursor-pointer [@media(pointer:coarse)]:min-h-11"
           onClick={handleFixComments}
         >
           <IconMessageForward className="h-3.5 w-3.5" />

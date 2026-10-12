@@ -14,6 +14,8 @@ import { Input } from "@kandev/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useAppStore } from "@/components/state-provider";
+import { ShowHiddenToggle } from "@/components/directory-browser/show-hidden-toggle";
 import { listDirectory, type DirectoryListing } from "@/lib/api/domains/fs-api";
 import {
   isTauriWebview,
@@ -213,15 +215,27 @@ export function useDirectoryListing(open: boolean, value: string) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestGeneration = useRef(0);
+  // One shared preference, so every directory browser in the application agrees
+  // on whether hidden directories are revealed.
+  const showHidden = useAppStore((state) => state.directoryBrowserShowHidden);
+  // Read through a ref so the reveal stays out of `load`'s identity: browsing
+  // does not commit a value, and a new `load` would reset the browser to `value`
+  // and throw away wherever the user had descended to.
+  const showHiddenRef = useRef(showHidden);
+  showHiddenRef.current = showHidden;
+  const browsedPath = useRef<string | null>(null);
+  const listedVisibility = useRef<boolean | null>(null);
 
   const load = useCallback(
-    async (path: string) => {
+    async (path: string, { preserveListing = false }: { preserveListing?: boolean } = {}) => {
       const generation = ++requestGeneration.current;
+      browsedPath.current = path;
+      listedVisibility.current = showHiddenRef.current;
       setLoading(true);
       setError(null);
-      setListing(null);
+      if (!preserveListing) setListing(null);
       try {
-        const nextListing = await listDirectory(path);
+        const nextListing = await listDirectory(path, { includeHidden: showHiddenRef.current });
         if (generation !== requestGeneration.current) return;
         setListing(nextListing);
       } catch (err) {
@@ -241,6 +255,7 @@ export function useDirectoryListing(open: boolean, value: string) {
     // last-browsed directory instead of their picked folder (or the root).
     if (!open) {
       requestGeneration.current++;
+      browsedPath.current = null;
       setListing(null);
       setLoading(false);
       setError(null);
@@ -251,6 +266,16 @@ export function useDirectoryListing(open: boolean, value: string) {
       requestGeneration.current++;
     };
   }, [open, load, value]);
+
+  useEffect(() => {
+    // A display-only preference change re-lists the directory already on screen
+    // instead of the chosen one. The visibility guard keeps the first load from
+    // firing a second identical request. Keep the current listing while it
+    // refreshes so the path remains selectable and keyed toolbar state survives.
+    if (!open || browsedPath.current === null) return;
+    if (listedVisibility.current === showHidden) return;
+    void load(browsedPath.current, { preserveListing: true });
+  }, [open, showHidden, load]);
 
   return { listing, loading, error, load };
 }
@@ -294,6 +319,9 @@ function appendPathSegments(
   }
 }
 
+/** The breadcrumb's scrolling region. The row that hosts it owns the
+ * overflow boundary, so a deep path scrolls without moving the reveal control
+ * out of reach. */
 function Breadcrumb({
   path,
   onNavigate,
@@ -306,7 +334,7 @@ function Breadcrumb({
   const { t } = useTranslation();
   const segs = pathSegments(path);
   return (
-    <div className="flex items-center gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border bg-muted/30 px-2 py-1.5">
+    <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden py-1.5 pl-2">
       {segs.length === 0 && (
         <span className="text-[11px] text-muted-foreground italic">{t("common:loading")}</span>
       )}
@@ -365,7 +393,10 @@ export function DirectoryBrowserBody({
           touchRows={touchRows}
         />
       ) : null}
-      <Breadcrumb path={listing?.path ?? ""} onNavigate={onNavigate} touchRows={touchRows} />
+      <div className="flex shrink-0 items-stretch border-b border-border bg-muted/30">
+        <Breadcrumb path={listing?.path ?? ""} onNavigate={onNavigate} touchRows={touchRows} />
+        <ShowHiddenToggle touchRows={touchRows} />
+      </div>{" "}
       <Entries
         listing={listing}
         loading={loading}

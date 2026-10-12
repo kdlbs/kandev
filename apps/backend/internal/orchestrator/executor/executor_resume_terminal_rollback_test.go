@@ -11,70 +11,45 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-type concurrentRunningAfterStartingReadRepo struct {
-	*mockRepository
-	changed bool
-}
-
-func (r *concurrentRunningAfterStartingReadRepo) GetTaskSession(
-	ctx context.Context,
-	id string,
-) (*models.TaskSession, error) {
-	current, err := r.mockRepository.GetTaskSession(ctx, id)
-	if err != nil || current == nil {
-		return current, err
-	}
-	snapshot := cloneMockTaskSession(current)
-	if !r.changed && snapshot.State == models.TaskSessionStateStarting {
-		r.changed = true
-		if err := r.UpdateTaskSessionState(
-			ctx, id, models.TaskSessionStateRunning, "",
-		); err != nil {
-			return nil, err
-		}
-	}
-	return snapshot, nil
-}
-
 func TestRollbackResumeStateAfterFailureDoesNotOverwriteConcurrentRunning(t *testing.T) {
-	baseRepo := newMockRepository()
-	setupLiveResumeTestFixture(baseRepo)
-	baseRepo.sessions["sess-1"].State = models.TaskSessionStateStarting
-	repo := &concurrentRunningAfterStartingReadRepo{mockRepository: baseRepo}
-	exec := newTestExecutor(t, &mockAgentManager{}, repo)
-	exec.SetOnSessionStateTransition(func(
-		ctx context.Context,
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateStarting
+	repo.sessions["sess-1"].Metadata = map[string]interface{}{
+		models.SessionMetaKeyAgentStartAttemptID: "attempt-old",
+	}
+	repo.updateTaskSessionResumeStateIfCurrentAttemptFunc = func(
+		_ context.Context,
+		_, sessionID, _ string,
+		_, _ models.TaskSessionState,
 		_ string,
-		sessionID string,
-		expectedState *models.TaskSessionState,
-		nextState models.TaskSessionState,
-		errorMessage string,
-		_ func(),
-	) (bool, models.TaskSessionState, error) {
-		current, err := repo.GetTaskSession(ctx, sessionID)
-		if err != nil {
-			return false, "", err
-		}
-		if expectedState == nil {
-			expectedState = &current.State
-		}
-		changed, _, err := repo.UpdateTaskSessionStateIfCurrent(
-			ctx, sessionID, *expectedState, nextState, errorMessage,
-		)
-		return changed, repo.sessions[sessionID].State, err
-	})
+		_, _, _ bool,
+		_ interface{},
+	) (bool, time.Time, error) {
+		current := repo.sessions[sessionID]
+		current.State = models.TaskSessionStateRunning
+		current.Metadata[models.SessionMetaKeyAgentStartAttemptID] = "successor-attempt"
+		return false, time.Time{}, nil
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	var releases int
+	exec.SetOnCeilingReservationRelease(func(string) { releases++ })
 
 	exec.rollbackResumeStateAfterFailure(
 		context.Background(),
 		"task-1",
 		"sess-1",
+		"attempt-old",
 		models.TaskSessionStateRunning,
 		errors.New("launch failed"),
 		nil,
 	)
 
-	if got := baseRepo.sessions["sess-1"].State; got != models.TaskSessionStateRunning {
+	if got := repo.sessions["sess-1"].State; got != models.TaskSessionStateRunning {
 		t.Fatalf("session state after concurrent transition = %s, want %s", got, models.TaskSessionStateRunning)
+	}
+	if releases != 0 {
+		t.Fatalf("reservation releases = %d, want 0 for superseded attempt", releases)
 	}
 }
 
@@ -123,23 +98,20 @@ func TestResumeSession_RedirectsRunningToFailedWhenRelaunchFails(t *testing.T) {
 	}
 	exec := newTestExecutor(t, agentMgr, repo)
 	var transitionCalls int
-	exec.SetOnSessionStateTransition(func(
-		ctx context.Context,
-		_ string,
-		sessionID string,
-		expectedState *models.TaskSessionState,
-		nextState models.TaskSessionState,
-		errorMessage string,
-		_ func(),
-	) (bool, models.TaskSessionState, error) {
+	exec.SetOnResumeFailureRollback(func(ctx context.Context, request ResumeFailureRollbackRequest) (bool, error) {
 		transitionCalls++
-		if expectedState == nil || *expectedState != models.TaskSessionStateStarting {
-			t.Fatalf("expected state = %v, want STARTING", expectedState)
+		if request.ExpectedState != models.TaskSessionStateStarting || request.NextState != models.TaskSessionStateFailed {
+			t.Fatalf("rollback transition = %s -> %s, want STARTING -> FAILED", request.ExpectedState, request.NextState)
 		}
-		changed, _, err := repo.UpdateTaskSessionStateIfCurrent(
-			ctx, sessionID, *expectedState, nextState, errorMessage,
+		updater := resumeStateAttemptUpdater(repo)
+		changed, _, err := updater.UpdateTaskSessionResumeStateIfCurrentAttempt(
+			ctx, request.TaskID, request.SessionID, request.AttemptID,
+			request.ExpectedState, request.NextState, request.ErrorMessage,
+			true, request.CredentialSnapshot != nil,
+			request.CredentialSnapshot != nil && request.CredentialSnapshot.Present,
+			credentialSnapshotValue(request.CredentialSnapshot),
 		)
-		return changed, repo.sessions[sessionID].State, err
+		return changed, err
 	})
 
 	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); !errors.Is(err, launchErr) {

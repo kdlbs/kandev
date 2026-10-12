@@ -22,6 +22,7 @@ export async function seedPluginExecutorStatusTask(
     };
     state: PluginExecutorStatusState;
     touch: boolean;
+    onEnvironmentLiveRequest?: () => Promise<void> | void;
   },
 ) {
   const { backend, apiClient, seedData, state, touch } = options;
@@ -64,6 +65,7 @@ export async function seedPluginExecutorStatusTask(
   }
 
   await page.route(`**/api/v1/tasks/${task.id}/environment/live`, async (route) => {
+    await options.onEnvironmentLiveRequest?.();
     await route.fulfill({
       status: 200,
       contentType: "application/json",

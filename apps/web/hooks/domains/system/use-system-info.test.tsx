@@ -500,6 +500,50 @@ async function protectsReturnedIdentityFromDelayedCleanup() {
   }
 }
 
+async function removesObsoleteDatabaseStatsQueriesOnly() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.resolve(makeResponse(INFO))),
+  );
+  let store: StoreApi<AppState> | undefined;
+  let queryClient: QueryClient | undefined;
+
+  render(
+    <TestHarness
+      onStore={(nextStore) => {
+        store = nextStore;
+      }}
+      onQueryClient={(nextClient) => {
+        queryClient = nextClient;
+      }}
+    >
+      <InfoProbe id="current" />
+    </TestHarness>,
+  );
+  await waitFor(() => expect(queryClient).toBeDefined());
+
+  const oldDatabaseKey = [
+    "system",
+    "database-stats",
+    BACKEND_ORIGIN,
+    PAGE_BOOT_ID,
+    AUTH.mode,
+    AUTH.authenticated,
+    AUTH.user.id,
+  ] as const;
+  const unrelatedKey = ["settings", "draft", "unsaved-form"] as const;
+  const oldDatabaseStats = { backup_directory: "/old/backups" };
+  const unrelatedDraft = { value: "keep me" };
+  queryClient?.setQueryData(oldDatabaseKey, oldDatabaseStats);
+  queryClient?.setQueryData(unrelatedKey, unrelatedDraft);
+
+  act(() => {
+    store?.getState().setAuthState({ ...AUTH, user: { ...AUTH.user, id: "user-2" } });
+  });
+  await waitFor(() => expect(queryClient?.getQueryData(oldDatabaseKey)).toBeUndefined());
+  expect(queryClient?.getQueryData(unrelatedKey)).toEqual(unrelatedDraft);
+}
+
 function scopesTheCacheKeyToTheFullIdentity() {
   const identity = {
     apiBaseUrl: `${BACKEND_ORIGIN}/system/`,
@@ -556,6 +600,10 @@ describe("useSystemInfo Query cache", () => {
   it(
     "does not let delayed identity cleanup remove a newly active query",
     protectsReturnedIdentityFromDelayedCleanup,
+  );
+  it(
+    "removes obsolete DatabaseStats queries without clearing unrelated cache data",
+    removesObsoleteDatabaseStatsQueriesOnly,
   );
   it(
     "includes full backend, boot, and auth identity in its cache key",

@@ -37,27 +37,30 @@ func TestDefinitionsIncludeOfficeExperimentalMetadata(t *testing.T) {
 	}
 }
 
-func TestDefinitionsIncludeRemoteExecutorPluginsMetadata(t *testing.T) {
-	def, ok := DefinitionByKey("features.remoteExecutorPlugins")
-	if !ok {
-		t.Fatal("features.remoteExecutorPlugins definition missing")
+func TestRemoteExecutorPluginsFlagIsRetired(t *testing.T) {
+	const key = "features.remoteExecutorPlugins"
+	const envVar = "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"
+	if _, ok := DefinitionByKey(key); ok {
+		t.Fatalf("%s remains active after remote executor plugins graduated", key)
 	}
-	if def.EnvVar != "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS" {
-		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS", def.EnvVar)
-	}
-	if def.Stability != StabilityExperimental || def.RiskLevel != RiskHigh {
-		t.Fatalf("stability/risk = %q/%q, want experimental/high", def.Stability, def.RiskLevel)
-	}
-	if !def.RestartRequired || !def.Mutable || def.RiskDescription == "" {
-		t.Fatalf("flag metadata = %+v, want restart-required mutable flag with risk description", def)
+	for _, def := range Definitions() {
+		if def.EnvVar == envVar {
+			t.Fatalf("definition %q still binds %s", def.Key, envVar)
+		}
 	}
 	defaults, err := profiles.FeatureFlagDefaults()
 	if err != nil {
 		t.Fatalf("profiles.FeatureFlagDefaults: %v", err)
 	}
-	if got := defaults["remote_executor_plugins"]; got != "false" {
-		t.Fatalf("profiles.yaml remote_executor_plugins default = %q, want false", got)
+	if _, ok := defaults["remote_executor_plugins"]; ok {
+		t.Fatal("remote_executor_plugins remains in shipped profile defaults")
 	}
+	for _, identity := range retiredRuntimeFlagIdentities {
+		if identity.key == key && identity.envVar == envVar {
+			return
+		}
+	}
+	t.Fatalf("retired runtime flag identity (%s, %s) is missing", key, envVar)
 }
 
 func TestDefinitionsIncludeDynamicAgentRoutingMetadata(t *testing.T) {

@@ -604,6 +604,21 @@ func TestValidate_AgentToolContract(t *testing.T) {
 	}
 }
 
+func TestValidate_ManagedAgentToolRequiresExplicitWorkspaceCapability(t *testing.T) {
+	m := managedManifest(t)
+	m.AgentTools = []AgentTool{{
+		Name: "read_task", Description: "Read one task.",
+		Surfaces: []string{AgentToolSurfaceManaged}, InputSchema: map[string]any{"type": "object"},
+	}}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "managed_agent_tools") {
+		t.Fatalf("Validate() error = %v, want managed_agent_tools capability requirement", err)
+	}
+	m.Capabilities.APIWrite = append(m.Capabilities.APIWrite, "managed_agent_tools")
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() with explicit capability: %v", err)
+	}
+}
+
 func TestValidate_RejectsAgentToolsOnLegacyRemotePlugin(t *testing.T) {
 	m := validManifest(t)
 	m.AgentTools = []AgentTool{{

@@ -88,8 +88,9 @@ type Manifest struct {
 }
 
 const (
-	AgentToolSurfaceKanban = "kanban-task"
-	AgentToolSurfaceOffice = "office-task"
+	AgentToolSurfaceKanban  = "kanban-task"
+	AgentToolSurfaceOffice  = "office-task"
+	AgentToolSurfaceManaged = "managed-conversation"
 )
 
 // AgentTool is an MCP tool a plugin contributes to matching task sessions.

@@ -47,12 +47,13 @@ test.describe("Agent profile recent use", () => {
         .getByRole("listbox")
         .getByRole("option", { name: profileA.name, exact: false })
         .click();
-      await cancelledSetup
-        .getByTestId("quick-chat-setup-footer")
-        .getByRole("button", { name: "Cancel", exact: true })
-        .click();
+      await cancelledSetup.getByRole("button", { name: "Close New Chat", exact: true }).click();
 
-      const reopenedSetup = await openQuickChatSetup(testPage, false);
+      await expect(cancelledSetup.getByTestId("quick-chat-setup")).toHaveCount(0);
+      await cancelledSetup.getByTestId("quick-chat-add-menu-trigger").click();
+      await testPage.getByTestId("quick-chat-new-agent").click();
+      const reopenedSetup = cancelledSetup.getByTestId("quick-chat-setup");
+      await expect(reopenedSetup).toBeVisible();
       const reopenedSelector = reopenedSetup.getByTestId("agent-profile-selector");
       await reopenedSelector.click();
       await expect(testPage.getByRole("listbox").getByRole("option").first()).toContainText(

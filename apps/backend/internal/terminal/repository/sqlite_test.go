@@ -58,6 +58,69 @@ func TestCreate_AssignsSequentialSeqs(t *testing.T) {
 	}
 }
 
+func TestOneShotInitialCommandCanBeConsumedOnlyOnce(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	term, err := repo.CreateWithInitialCommandOnce(ctx, "task-1", "env-1", "shell-auth", "exec cursor-agent mcp login server", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !term.InitialCommandOnce || term.InitialCommandConsumed {
+		t.Fatalf("new one-shot terminal = %+v", term)
+	}
+
+	claimed, err := repo.ConsumeInitialCommandOnce(ctx, "task-1", "env-1", term.ID)
+	if err != nil || !claimed {
+		t.Fatalf("first consume = (%v, %v), want true, nil", claimed, err)
+	}
+	claimed, err = repo.ConsumeInitialCommandOnce(ctx, "task-1", "env-1", term.ID)
+	if err != nil || claimed {
+		t.Fatalf("second consume = (%v, %v), want false, nil", claimed, err)
+	}
+	got, err := repo.Get(ctx, term.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.InitialCommandOnce || !got.InitialCommandConsumed || got.InitialCommand != term.InitialCommand {
+		t.Fatalf("consumed terminal = %+v", got)
+	}
+}
+
+func TestNewRepositoryMigratesLegacyTerminalTable(t *testing.T) {
+	rawDB, err := sql.Open("sqlite3", "file::memory:?cache=shared&_foreign_keys=on")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	rawDB.SetMaxOpenConns(1)
+	db := sqlx.NewDb(rawDB, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	_, err = db.Exec(`CREATE TABLE user_terminals (
+		id TEXT PRIMARY KEY, task_id TEXT NOT NULL, environment_id TEXT NOT NULL,
+		seq INTEGER NOT NULL, custom_name TEXT, state TEXT NOT NULL DEFAULT 'open',
+		initial_command TEXT NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(task_id, seq))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO user_terminals (id, task_id, environment_id, seq, initial_command)
+		VALUES ('legacy', 'task-1', 'env-1', 1, 'legacy command')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("upgrade legacy terminal table: %v", err)
+	}
+	legacy, err := repo.Get(context.Background(), "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.InitialCommand != "legacy command" || legacy.InitialCommandOnce || legacy.InitialCommandConsumed {
+		t.Fatalf("legacy terminal = %+v, want existing command with repeat-compatible defaults", legacy)
+	}
+}
+
 func TestCreate_SeqIsPerTask(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()

@@ -1,0 +1,979 @@
+// Package journal provides the bounded, owner-scoped delivery journal used by
+// agentctl. It stores normalized events and immutable submission outcomes, not
+// a second canonical task transcript.
+package journal
+
+import (
+	"context"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
+	bolt "go.etcd.io/bbolt"
+)
+
+const (
+	CurrentVersion                     uint32 = 1
+	DefaultMaxEventBytes                      = 1 << 20
+	DefaultReserveBytes                       = 1 << 20
+	DefaultDiskReserveBytes                   = 32 << 20
+	DefaultDiskAllocationHeadroomBytes        = 16 << 20
+	DefaultDiskWriteHeadroomBytes             = DefaultDiskAllocationHeadroomBytes + (4 << 20) + 2*DefaultMaxEventBytes
+	MaxStreamSubmissions                      = 10000
+	defaultDiskCapacityReadTimeout            = 2 * time.Second
+)
+
+var (
+	ErrJournalCorrupt       = errors.New("agent delivery journal is corrupt")
+	ErrJournalClosed        = bolt.ErrDatabaseNotOpen
+	ErrJournalNewerVersion  = errors.New("agent delivery journal uses a newer version")
+	ErrJournalFull          = errors.New("agent delivery journal is full")
+	ErrStreamFull           = errors.New("agent delivery stream is full")
+	ErrStreamNotFound       = errors.New("agent delivery stream not found")
+	ErrCursorExpired        = errors.New("agent delivery cursor expired")
+	ErrSequenceConflict     = errors.New("agent delivery sequence conflict")
+	ErrSubmissionConflict   = errors.New("agent delivery submission conflict")
+	ErrSubmissionNotFound   = errors.New("agent delivery submission not found")
+	ErrSubmissionState      = errors.New("invalid agent delivery submission transition")
+	ErrSubmissionGeneration = errors.New("agent delivery submission requires a newer harness generation")
+	ErrOwnerMismatch        = errors.New("agent delivery owner mismatch")
+)
+
+var (
+	bucketMeta        = []byte("meta")
+	bucketEvents      = []byte("events")
+	bucketStreamMeta  = []byte("stream_meta")
+	bucketSubmissions = []byte("submissions")
+	keyVersion        = []byte("version")
+	keyJournalBytes   = []byte("journal_bytes")
+)
+
+type Config struct {
+	ReadOnly               bool
+	ExistingOnly           bool
+	Path                   string
+	MaxEventBytes          int64
+	MaxStreamBytes         int64
+	MaxJournalBytes        int64
+	ReserveBytes           int64
+	DiskReserveBytes       int64
+	DiskWriteHeadroomBytes int64
+	DiskCapacityCacheTTL   time.Duration
+	DiskCapacityTimeout    time.Duration
+	DiskCapacityReader     func(context.Context, string) (systemmetrics.DiskCapacity, error)
+	OpenTimeout            time.Duration
+}
+
+func (c Config) withDefaults() Config {
+	if c.MaxEventBytes <= 0 {
+		c.MaxEventBytes = DefaultMaxEventBytes
+	}
+	if c.ReserveBytes <= 0 {
+		c.ReserveBytes = DefaultReserveBytes
+	}
+	if c.DiskReserveBytes <= 0 {
+		c.DiskReserveBytes = DefaultDiskReserveBytes
+	}
+	if c.DiskWriteHeadroomBytes <= 0 {
+		c.DiskWriteHeadroomBytes = DefaultDiskWriteHeadroomBytes
+	}
+	if c.DiskCapacityCacheTTL <= 0 {
+		c.DiskCapacityCacheTTL = time.Second
+	}
+	if c.DiskCapacityTimeout <= 0 {
+		c.DiskCapacityTimeout = defaultDiskCapacityReadTimeout
+	}
+	if c.DiskCapacityReader == nil {
+		c.DiskCapacityReader = systemmetrics.DiskUsage
+	}
+	if c.OpenTimeout <= 0 {
+		c.OpenTimeout = 2 * time.Second
+	}
+	return c
+}
+
+type Event struct {
+	SessionID         string    `json:"session_id"`
+	IncarnationID     string    `json:"incarnation_id"`
+	HarnessGeneration uint64    `json:"harness_generation"`
+	StreamID          string    `json:"stream_id"`
+	Sequence          uint64    `json:"sequence"`
+	SubmissionID      string    `json:"submission_id,omitempty"`
+	Type              string    `json:"type"`
+	Payload           []byte    `json:"payload"`
+	Terminal          bool      `json:"terminal,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+}
+
+type Stream struct {
+	SessionID         string `json:"session_id"`
+	IncarnationID     string `json:"incarnation_id"`
+	HarnessGeneration uint64 `json:"harness_generation"`
+	StreamID          string `json:"stream_id"`
+	HighWater         uint64 `json:"high_water"`
+	Acknowledged      uint64 `json:"acknowledged"`
+	FirstRetained     uint64 `json:"first_retained"`
+	Bytes             int64  `json:"bytes"`
+	Sealed            bool   `json:"sealed"`
+}
+
+type SubmissionState string
+
+const (
+	SubmissionPrepared           SubmissionState = "prepared"
+	SubmissionAccepted           SubmissionState = "accepted"
+	SubmissionDispatching        SubmissionState = "dispatching"
+	SubmissionCompleted          SubmissionState = "completed"
+	SubmissionFailed             SubmissionState = "failed"
+	SubmissionCancelled          SubmissionState = "cancelled"
+	SubmissionInterruptedUnknown SubmissionState = "interrupted_unknown"
+)
+
+type Submission struct {
+	ID                    string          `json:"id"`
+	StreamID              string          `json:"stream_id,omitempty"`
+	SessionID             string          `json:"session_id"`
+	IncarnationID         string          `json:"incarnation_id"`
+	HarnessGeneration     uint64          `json:"harness_generation"`
+	Hash                  string          `json:"hash"`
+	Payload               []byte          `json:"payload"`
+	State                 SubmissionState `json:"state"`
+	TerminalEventRetained bool            `json:"terminal_event_retained,omitempty"`
+	TerminalSequence      uint64          `json:"terminal_sequence,omitempty"`
+	Retired               bool            `json:"retired,omitempty"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
+}
+
+type Journal struct {
+	mu                       sync.RWMutex
+	db                       *bolt.DB
+	pageSize                 int64
+	config                   Config
+	diskCapacityMu           sync.Mutex
+	diskCapacityAt           time.Time
+	diskAvailable            int64
+	diskCapacityKnown        bool
+	diskPendingBytes         int64
+	diskReusablePendingBytes int64
+	diskWrittenBytes         int64
+}
+
+func Open(config Config) (journal *Journal, err error) {
+	defer func() {
+		if err != nil {
+			RecordJournalError(classifyJournalError(err))
+		}
+	}()
+	config = config.withDefaults()
+	if config.Path == "" {
+		return nil, fmt.Errorf("journal path is required")
+	}
+	if config.ReadOnly {
+		config.ExistingOnly = true
+	} else {
+		if err := os.MkdirAll(filepath.Dir(config.Path), 0o700); err != nil {
+			return nil, fmt.Errorf("create journal directory: %w", err)
+		}
+		if err := os.Chmod(filepath.Dir(config.Path), 0o700); err != nil {
+			return nil, fmt.Errorf("secure journal directory: %w", err)
+		}
+	}
+	options := &bolt.Options{Timeout: config.OpenTimeout, NoSync: false, ReadOnly: config.ReadOnly}
+	if config.ExistingOnly {
+		options.OpenFile = func(path string, flags int, mode os.FileMode) (*os.File, error) {
+			return os.OpenFile(path, flags&^os.O_CREATE, mode)
+		}
+	}
+	db, err := bolt.Open(config.Path, 0o600, options)
+	if err != nil {
+		return nil, fmt.Errorf("open delivery journal: %w", err)
+	}
+	// Page size is immutable; Info also reads the mapping, so capture it before concurrent writes.
+	journal = &Journal{db: db, pageSize: int64(db.Info().PageSize), config: config}
+	if config.ReadOnly {
+		err = journal.validateReadOnly()
+	} else {
+		err = journal.initialize()
+	}
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	journal.refreshMetrics()
+	return journal, nil
+}
+
+func (j *Journal) initialize() error {
+	err := j.db.Update(func(tx *bolt.Tx) error {
+		meta, err := tx.CreateBucketIfNotExists(bucketMeta)
+		if err != nil {
+			return err
+		}
+		version := meta.Get(keyVersion)
+		if version == nil {
+			if j.config.ExistingOnly {
+				return ErrJournalCorrupt
+			}
+			return initializeFreshJournal(tx, meta)
+		}
+		return validateExistingJournal(tx, meta, version)
+	})
+	if err != nil {
+		return fmt.Errorf("initialize delivery journal: %w", err)
+	}
+	return nil
+}
+
+func (j *Journal) validateReadOnly() error {
+	return j.db.View(func(tx *bolt.Tx) error {
+		meta := tx.Bucket(bucketMeta)
+		if meta == nil {
+			return ErrJournalCorrupt
+		}
+		if err := validateExistingJournalReadOnly(tx, meta, meta.Get(keyVersion)); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func initializeFreshJournal(tx *bolt.Tx, meta *bolt.Bucket) error {
+	if meta.Stats().KeyN != 0 || tx.Bucket(bucketEvents) != nil || tx.Bucket(bucketStreamMeta) != nil || tx.Bucket(bucketSubmissions) != nil {
+		return ErrJournalCorrupt
+	}
+	var encoded [4]byte
+	binary.BigEndian.PutUint32(encoded[:], CurrentVersion)
+	if err := meta.Put(keyVersion, encoded[:]); err != nil {
+		return err
+	}
+	if err := meta.Put(keyJournalBytes, encodeInt64(0)); err != nil {
+		return err
+	}
+	return createJournalBuckets(tx)
+}
+
+func validateExistingJournal(tx *bolt.Tx, meta *bolt.Bucket, version []byte) error {
+	if len(version) != 4 {
+		return ErrJournalCorrupt
+	}
+	switch got := binary.BigEndian.Uint32(version); {
+	case got > CurrentVersion:
+		return ErrJournalNewerVersion
+	case got != CurrentVersion:
+		return ErrJournalCorrupt
+	}
+	if err := validateJournalBuckets(tx); err != nil {
+		return err
+	}
+	if _, err := decodeInt64(meta.Get(keyJournalBytes)); err != nil {
+		return err
+	}
+	return reconcileJournalBytes(tx, meta)
+}
+
+// reconcileJournalBytes repairs the logical counter used by admission before
+// any new record is accepted. Older journals counted event payloads only, so
+// reopening them must include retained submission metadata and payloads.
+func reconcileJournalBytes(tx *bolt.Tx, meta *bolt.Bucket) error {
+	total, err := calculateJournalBytes(tx)
+	if err != nil {
+		return err
+	}
+	return meta.Put(keyJournalBytes, encodeInt64(total))
+}
+
+func validateExistingJournalReadOnly(tx *bolt.Tx, meta *bolt.Bucket, version []byte) error {
+	if len(version) != 4 {
+		return ErrJournalCorrupt
+	}
+	switch got := binary.BigEndian.Uint32(version); {
+	case got > CurrentVersion:
+		return ErrJournalNewerVersion
+	case got != CurrentVersion:
+		return ErrJournalCorrupt
+	}
+	if err := validateJournalBuckets(tx); err != nil {
+		return err
+	}
+	stored, err := decodeInt64(meta.Get(keyJournalBytes))
+	if err != nil {
+		return err
+	}
+	actual, legacyEventOnly, err := calculateJournalAccounting(tx)
+	if err != nil || (stored != actual && stored != legacyEventOnly) {
+		return ErrJournalCorrupt
+	}
+	return nil
+}
+
+func calculateJournalBytes(tx *bolt.Tx) (int64, error) {
+	total, _, err := calculateJournalAccounting(tx)
+	return total, err
+}
+
+func calculateJournalAccounting(tx *bolt.Tx) (total, legacyEventOnly int64, err error) {
+	if err := tx.Bucket(bucketEvents).ForEach(func(streamID, value []byte) error {
+		if value != nil {
+			return nil
+		}
+		return tx.Bucket(bucketEvents).Bucket(streamID).ForEach(func(_, eventValue []byte) error {
+			size := int64(len(eventValue))
+			total += size
+			legacyEventOnly += size
+			return nil
+		})
+	}); err != nil {
+		return 0, 0, ErrJournalCorrupt
+	}
+	if err := tx.Bucket(bucketSubmissions).ForEach(func(_, value []byte) error {
+		if value != nil {
+			total += int64(len(value))
+		}
+		return nil
+	}); err != nil {
+		return 0, 0, ErrJournalCorrupt
+	}
+	return total, legacyEventOnly, nil
+}
+
+func createJournalBuckets(tx *bolt.Tx) error {
+	for _, name := range [][]byte{bucketEvents, bucketStreamMeta, bucketSubmissions} {
+		if _, err := tx.CreateBucketIfNotExists(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateJournalBuckets(tx *bolt.Tx) error {
+	for _, name := range [][]byte{bucketEvents, bucketStreamMeta, bucketSubmissions} {
+		if tx.Bucket(name) == nil {
+			return ErrJournalCorrupt
+		}
+	}
+	return nil
+}
+
+func (j *Journal) Close() error {
+	if j == nil {
+		return nil
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.db == nil {
+		return nil
+	}
+	err := j.db.Close()
+	j.db = nil
+	return err
+}
+
+// dbLocked returns the current database while the caller holds j.mu. The
+// lifetime lock keeps Close from invalidating the handle until the operation
+// releases its read or write lock.
+func (j *Journal) dbLocked() (*bolt.DB, error) {
+	if j == nil || j.db == nil {
+		return nil, ErrJournalClosed
+	}
+	return j.db, nil
+}
+
+// Compact rewrites the journal into a sibling temporary database and swaps it
+// into place while all journal operations are excluded. A crash before the
+// atomic rename leaves the original database intact; a crash after it leaves
+// the fully closed compacted database at the canonical path.
+func (j *Journal) Compact(ctx context.Context) error {
+	if j == nil {
+		return errors.New("journal is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return err
+	}
+	temporaryPath := fmt.Sprintf("%s.compact-%d", j.config.Path, time.Now().UnixNano())
+	defer func() { _ = os.Remove(temporaryPath) }()
+	destination, err := bolt.Open(temporaryPath, 0o600, &bolt.Options{Timeout: j.config.OpenTimeout, NoSync: false})
+	if err != nil {
+		return fmt.Errorf("open compacted journal: %w", err)
+	}
+	compactErr := bolt.Compact(destination, db, 0)
+	closeErr := destination.Close()
+	if compactErr != nil || closeErr != nil {
+		return errors.Join(compactErr, closeErr)
+	}
+	if err := db.Close(); err != nil {
+		return fmt.Errorf("close journal before compaction swap: %w", err)
+	}
+	j.db = nil
+	if err := os.Rename(temporaryPath, j.config.Path); err != nil {
+		reopened, reopenErr := bolt.Open(j.config.Path, 0o600, &bolt.Options{Timeout: j.config.OpenTimeout, NoSync: false})
+		if reopenErr == nil {
+			j.db = reopened
+			j.pageSize = int64(reopened.Info().PageSize)
+		}
+		return errors.Join(fmt.Errorf("replace compacted journal: %w", err), reopenErr)
+	}
+	reopened, err := bolt.Open(j.config.Path, 0o600, &bolt.Options{Timeout: j.config.OpenTimeout, NoSync: false})
+	if err != nil {
+		j.db = nil
+		return fmt.Errorf("reopen compacted journal: %w", err)
+	}
+	j.db = reopened
+	j.pageSize = int64(reopened.Info().PageSize)
+	return nil
+}
+
+// CompactIfNeeded performs idle maintenance after acknowledged records have
+// created enough reclaimable bbolt pages to justify a rewrite. The logical
+// quota remains authoritative; this only limits physical file growth.
+func (j *Journal) CompactIfNeeded(ctx context.Context) error {
+	if j == nil {
+		return errors.New("journal is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	j.mu.RLock()
+	_, err := j.dbLocked()
+	j.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(j.config.Path)
+	if err != nil {
+		return err
+	}
+	const minimumCompactionFileBytes int64 = 4 << 20
+	if info.Size() < minimumCompactionFileBytes {
+		return nil
+	}
+	j.mu.RLock()
+	db, err := j.dbLocked()
+	if err != nil {
+		j.mu.RUnlock()
+		return err
+	}
+	var logicalBytes int64
+	err = db.View(func(tx *bolt.Tx) error {
+		var decodeErr error
+		logicalBytes, decodeErr = decodeInt64(tx.Bucket(bucketMeta).Get(keyJournalBytes))
+		return decodeErr
+	})
+	j.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	if info.Size() <= logicalBytes*2+minimumCompactionFileBytes {
+		return nil
+	}
+	available, known, err := j.effectiveDiskCapacity(ctx)
+	if err != nil {
+		return err
+	}
+	if !known || available < requiredDiskBytes(info.Size(), j.config.DiskReserveBytes, j.config.DiskWriteHeadroomBytes) {
+		return nil
+	}
+	return j.Compact(ctx)
+}
+
+// MaxEventBytes returns the configured logical payload limit shared by event
+// and submission admission.
+func (j *Journal) MaxEventBytes() int64 {
+	if j == nil {
+		return 0
+	}
+	return j.config.MaxEventBytes
+}
+
+func (j *Journal) Append(ctx context.Context, event Event) (Event, error) {
+	events, err := j.AppendBatch(ctx, []Event{event})
+	if err != nil {
+		return Event{}, err
+	}
+	return events[0], nil
+}
+
+// AppendBatch commits an ordered group of normalized events in one durable
+// bbolt transaction. Sequence allocation, capacity checks, and terminal
+// submission evidence all roll back together when any member fails.
+func (j *Journal) AppendBatch(ctx context.Context, events []Event) ([]Event, error) {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return nil, err
+	}
+	if len(events) == 0 {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := prepareAppendEvents(events, j.config.MaxEventBytes); err != nil {
+		return nil, err
+	}
+	writeBytes, err := estimateEncodedEventBytes(events)
+	if err != nil {
+		return nil, err
+	}
+	preserveReserve := false
+	for _, event := range events {
+		if !event.Terminal {
+			preserveReserve = true
+			break
+		}
+	}
+	diskReservation, err := j.checkDiskCapacity(ctx, db, writeBytes, preserveReserve)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			RecordJournalError(classifyJournalError(err))
+		}
+		return nil, err
+	}
+	err = j.updateLocked(func(tx *bolt.Tx) error {
+		for i := range events {
+			if err := j.appendEventTx(ctx, tx, &events[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	j.finishDiskCapacityReservation(diskReservation, err == nil)
+	if err != nil {
+		if errors.Is(err, ErrSequenceConflict) || errors.Is(err, ErrOwnerMismatch) {
+			RecordSequenceError(classifyJournalError(err))
+		}
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			RecordJournalError(classifyJournalError(err))
+		}
+		return nil, err
+	}
+	j.refreshMetricsLocked()
+	return events, nil
+}
+
+func prepareAppendEvents(events []Event, maxEventBytes int64) error {
+	for i := range events {
+		event := &events[i]
+		if event.StreamID == "" || event.SessionID == "" || event.Type == "" {
+			return fmt.Errorf("event stream, session, and type are required")
+		}
+		if len(event.Payload) > int(maxEventBytes) {
+			return fmt.Errorf("%w: %d bytes", ErrStreamFull, len(event.Payload))
+		}
+		if event.CreatedAt.IsZero() {
+			event.CreatedAt = time.Now().UTC()
+		}
+	}
+	return nil
+}
+
+func (j *Journal) appendEventTx(ctx context.Context, tx *bolt.Tx, event *Event) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	stream, err := appendStream(tx, *event)
+	if err != nil {
+		return err
+	}
+	if err := assignAppendSequence(&stream, event); err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	newBytes := int64(len(encoded))
+	journalBytes, err := decodeInt64(tx.Bucket(bucketMeta).Get(keyJournalBytes))
+	if err != nil {
+		return err
+	}
+	if err := validateAppendCapacity(j, stream, journalBytes, newBytes, event.Terminal); err != nil {
+		return err
+	}
+	stream.HighWater = event.Sequence
+	stream.Bytes += newBytes
+	if stream.FirstRetained == 0 {
+		stream.FirstRetained = event.Sequence
+	}
+	if err := writeAppendedEvent(tx, stream, *event, encoded, journalBytes+newBytes); err != nil {
+		return err
+	}
+	if event.Terminal && event.SubmissionID != "" {
+		return markSubmissionTerminalTx(ctx, tx, *event, j.config.MaxJournalBytes)
+	}
+	return nil
+}
+
+func appendStream(tx *bolt.Tx, event Event) (Stream, error) {
+	streams := tx.Bucket(bucketStreamMeta)
+	stream, err := decodeStream(streams.Get([]byte(event.StreamID)))
+	if err != nil {
+		return Stream{}, err
+	}
+	if stream.StreamID != "" && !sameStreamOwner(stream, event) {
+		return Stream{}, ErrOwnerMismatch
+	}
+	if stream.StreamID == "" {
+		return Stream{
+			SessionID:         event.SessionID,
+			IncarnationID:     event.IncarnationID,
+			HarnessGeneration: event.HarnessGeneration,
+			StreamID:          event.StreamID,
+		}, nil
+	}
+	if stream.Sealed {
+		return Stream{}, ErrOwnerMismatch
+	}
+	return stream, nil
+}
+
+func assignAppendSequence(stream *Stream, event *Event) error {
+	if event.Sequence == 0 {
+		if stream.HighWater == ^uint64(0) {
+			return ErrSequenceConflict
+		}
+		event.Sequence = stream.HighWater + 1
+	}
+	if event.Sequence != stream.HighWater+1 {
+		return ErrSequenceConflict
+	}
+	return nil
+}
+
+func sameStreamOwner(stream Stream, event Event) bool {
+	return stream.SessionID == event.SessionID &&
+		stream.IncarnationID == event.IncarnationID &&
+		stream.HarnessGeneration == event.HarnessGeneration
+}
+
+func validateAppendCapacity(j *Journal, stream Stream, journalBytes, eventBytes int64, terminal bool) error {
+	streamLimit := logicalLimit(j.config.MaxStreamBytes, j.config.ReserveBytes)
+	journalLimit := logicalLimit(j.config.MaxJournalBytes, j.config.ReserveBytes)
+	if !terminal {
+		if streamLimit > 0 && stream.Bytes+eventBytes > streamLimit {
+			return ErrStreamFull
+		}
+		if journalLimit > 0 && journalBytes+eventBytes > journalLimit {
+			return ErrJournalFull
+		}
+		return nil
+	}
+	if j.config.MaxStreamBytes > 0 && stream.Bytes+eventBytes > j.config.MaxStreamBytes {
+		return ErrStreamFull
+	}
+	if j.config.MaxJournalBytes > 0 && journalBytes+eventBytes > j.config.MaxJournalBytes {
+		return ErrJournalFull
+	}
+	return nil
+}
+
+func logicalLimit(maxBytes, reserveBytes int64) int64 {
+	if maxBytes <= 0 {
+		return 0
+	}
+	return maxBytes - min(reserveBytes, maxBytes/10)
+}
+
+func exceedsLimit(current, additional, limit int64) bool {
+	if limit <= 0 || additional <= 0 {
+		return false
+	}
+	return additional > limit || current > limit-additional
+}
+
+func estimateEncodedEventBytes(events []Event) (int64, error) {
+	maxInt64 := int64(^uint64(0) >> 1)
+	var total int64
+	for _, event := range events {
+		event.Sequence = ^uint64(0)
+		encoded, err := json.Marshal(event)
+		if err != nil {
+			return 0, err
+		}
+		if int64(len(encoded)) > maxInt64-total {
+			return maxInt64, nil
+		}
+		total += int64(len(encoded))
+	}
+	return total, nil
+}
+
+func writeAppendedEvent(tx *bolt.Tx, stream Stream, event Event, encoded []byte, journalBytes int64) error {
+	streamBytes, err := json.Marshal(stream)
+	if err != nil {
+		return err
+	}
+	if err := tx.Bucket(bucketStreamMeta).Put([]byte(event.StreamID), streamBytes); err != nil {
+		return err
+	}
+	streamBucket, err := tx.Bucket(bucketEvents).CreateBucketIfNotExists([]byte(event.StreamID))
+	if err != nil {
+		return err
+	}
+	if err := streamBucket.Put(sequenceKey(event.Sequence), encoded); err != nil {
+		return err
+	}
+	return tx.Bucket(bucketMeta).Put(keyJournalBytes, encodeInt64(journalBytes))
+}
+
+func (j *Journal) Replay(ctx context.Context, streamID string, after uint64, limit int) ([]Event, Stream, error) {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return nil, Stream{}, err
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	var out []Event
+	var stream Stream
+	err = db.View(func(tx *bolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var decodeErr error
+		stream, decodeErr = decodeStream(tx.Bucket(bucketStreamMeta).Get([]byte(streamID)))
+		if decodeErr != nil {
+			return decodeErr
+		}
+		if stream.StreamID == "" {
+			return ErrStreamNotFound
+		}
+		if stream.FirstRetained != 0 && after+1 < stream.FirstRetained {
+			return ErrCursorExpired
+		}
+		events, replayErr := replayEvents(tx, streamID, after, limit)
+		out = events
+		return replayErr
+	})
+	if err != nil {
+		if errors.Is(err, ErrCursorExpired) || errors.Is(err, ErrSequenceConflict) {
+			RecordSequenceError(classifyJournalError(err))
+		} else if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			RecordJournalError(classifyJournalError(err))
+		}
+	} else {
+		RecordReplayedEvents(len(out))
+	}
+	return out, stream, err
+}
+
+func replayEvents(tx *bolt.Tx, streamID string, after uint64, limit int) ([]Event, error) {
+	if after == ^uint64(0) {
+		return nil, nil
+	}
+	bucket := tx.Bucket(bucketEvents).Bucket([]byte(streamID))
+	if bucket == nil {
+		return nil, nil
+	}
+	var out []Event
+	cursor := bucket.Cursor()
+	for key, value := cursor.Seek(sequenceKey(after + 1)); key != nil && len(out) < limit; key, value = cursor.Next() {
+		var event Event
+		if err := json.Unmarshal(value, &event); err != nil {
+			return nil, ErrJournalCorrupt
+		}
+		out = append(out, event)
+	}
+	return out, nil
+}
+
+func (j *Journal) Acknowledge(ctx context.Context, streamID string, sequence uint64) error {
+	j.mu.RLock()
+	db, err := j.dbLocked()
+	if err != nil {
+		j.mu.RUnlock()
+		RecordJournalError(classifyJournalError(err))
+		return err
+	}
+	err = db.Update(func(tx *bolt.Tx) error {
+		return acknowledgeStreamTx(ctx, tx, streamID, sequence)
+	})
+	j.mu.RUnlock()
+	if err != nil {
+		if errors.Is(err, ErrSequenceConflict) {
+			RecordSequenceError(classifyJournalError(err))
+		} else if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			RecordJournalError(classifyJournalError(err))
+		}
+	} else {
+		j.refreshMetrics()
+		if compactErr := j.CompactIfNeeded(ctx); compactErr != nil {
+			RecordJournalError(classifyJournalError(compactErr))
+		}
+	}
+	return err
+}
+
+func acknowledgeStreamTx(ctx context.Context, tx *bolt.Tx, streamID string, sequence uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	meta := tx.Bucket(bucketMeta)
+	streams := tx.Bucket(bucketStreamMeta)
+	stream, err := decodeStream(streams.Get([]byte(streamID)))
+	if err != nil {
+		return err
+	}
+	if stream.StreamID == "" || sequence > stream.HighWater {
+		return ErrSequenceConflict
+	}
+	if sequence <= stream.Acknowledged {
+		return nil
+	}
+	bucket := tx.Bucket(bucketEvents).Bucket([]byte(streamID))
+	if bucket == nil {
+		return ErrJournalCorrupt
+	}
+	journalBytes, err := decodeInt64(meta.Get(keyJournalBytes))
+	if err != nil {
+		return err
+	}
+	journalBytes, err = deleteAcknowledgedEvents(bucket, sequence, journalBytes, &stream)
+	if err != nil {
+		return err
+	}
+	journalBytes, err = pruneAcknowledgedSubmissionsTx(ctx, tx, stream, sequence, journalBytes)
+	if err != nil {
+		return err
+	}
+	stream.Acknowledged = sequence
+	if sequence == ^uint64(0) {
+		stream.FirstRetained = 0
+	} else {
+		stream.FirstRetained = sequence + 1
+	}
+	encoded, err := json.Marshal(stream)
+	if err != nil {
+		return err
+	}
+	if err := meta.Put(keyJournalBytes, encodeInt64(journalBytes)); err != nil {
+		return err
+	}
+	return streams.Put([]byte(streamID), encoded)
+}
+
+func deleteAcknowledgedEvents(bucket *bolt.Bucket, sequence uint64, journalBytes int64, stream *Stream) (int64, error) {
+	cursor := bucket.Cursor()
+	for key, value := cursor.First(); key != nil; {
+		if binary.BigEndian.Uint64(key) > sequence {
+			break
+		}
+		keyCopy := append([]byte(nil), key...)
+		stream.Bytes -= int64(len(value))
+		journalBytes -= int64(len(value))
+		if journalBytes < 0 {
+			journalBytes = 0
+		}
+		nextKey, nextValue := cursor.Next()
+		if err := bucket.Delete(keyCopy); err != nil {
+			return 0, err
+		}
+		key, value = nextKey, nextValue
+	}
+	return journalBytes, nil
+}
+
+// pruneAcknowledgedSubmissionsTx releases prompt payload bytes while keeping
+// the immutable submission ID, hash, state, and terminal tombstone. Cursor
+// traversal copies the next key before deleting the current record so several
+// bbolt leaf pages and materialized nodes are handled without skipping data.
+func pruneAcknowledgedSubmissionsTx(ctx context.Context, tx *bolt.Tx, stream Stream, sequence uint64, journalBytes int64) (int64, error) {
+	bucket := tx.Bucket(bucketSubmissions)
+	var pruneKeys [][]byte
+	if err := bucket.ForEach(func(key, raw []byte) error {
+		if raw != nil {
+			var submission Submission
+			if err := json.Unmarshal(raw, &submission); err != nil {
+				return ErrJournalCorrupt
+			}
+			if prunableSubmission(submission, stream, sequence) {
+				pruneKeys = append(pruneKeys, append([]byte(nil), key...))
+			}
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	for _, key := range pruneKeys {
+		var err error
+		journalBytes, err = pruneSubmissionPayloadTx(ctx, bucket, key, journalBytes)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return journalBytes, nil
+}
+
+func prunableSubmission(submission Submission, stream Stream, sequence uint64) bool {
+	return submission.SessionID == stream.SessionID && submission.IncarnationID == stream.IncarnationID &&
+		submission.HarnessGeneration == stream.HarnessGeneration && submission.TerminalEventRetained &&
+		submission.TerminalSequence <= sequence && len(submission.Payload) > 0 &&
+		(submission.State == SubmissionCompleted || submission.State == SubmissionFailed || submission.State == SubmissionCancelled)
+}
+
+func pruneSubmissionPayloadTx(ctx context.Context, bucket *bolt.Bucket, key []byte, journalBytes int64) (int64, error) {
+	raw := bucket.Get(key)
+	if raw == nil {
+		return journalBytes, nil
+	}
+	var submission Submission
+	if err := json.Unmarshal(raw, &submission); err != nil {
+		return 0, ErrJournalCorrupt
+	}
+	submission.Payload = nil
+	encoded, err := json.Marshal(submission)
+	if err != nil {
+		return 0, err
+	}
+	journalBytes -= int64(len(raw)) - int64(len(encoded))
+	if journalBytes < 0 {
+		journalBytes = 0
+	}
+	if err := bucket.Put(key, encoded); err != nil {
+		return 0, err
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	return journalBytes, nil
+}
+
+func (j *Journal) GetStream(ctx context.Context, streamID string) (Stream, error) {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return Stream{}, err
+	}
+	var stream Stream
+	err = db.View(func(tx *bolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var decodeErr error
+		stream, decodeErr = decodeStream(tx.Bucket(bucketStreamMeta).Get([]byte(streamID)))
+		if decodeErr != nil {
+			return decodeErr
+		}
+		if stream.StreamID == "" {
+			return ErrStreamNotFound
+		}
+		return nil
+	})
+	return stream, err
+}

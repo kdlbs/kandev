@@ -20,9 +20,11 @@ for (const required of [
   'id: "kandev-plugin-e2e"',
   'version: "1.0.0"',
   'min_kandev_version: "0.91.1"',
-  'api_read: ["messages"]',
 ]) {
   if (!manifest.includes(required)) throw new Error(`fixture manifest missing ${required}`);
+}
+if (!/api_read:\s*\[[^\]]*"messages"/.test(manifest)) {
+  throw new Error('fixture manifest missing api_read resource "messages"');
 }
 const output = await readFile(generatedPath, "utf8");
 if (!output.includes('id: "prompt-history-plugin"')) {

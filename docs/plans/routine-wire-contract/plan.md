@@ -6,8 +6,10 @@ requirements:
   - REQ-OFFICE-ROUTINE-WIRE-002
   - REQ-OFFICE-ROUTINE-WIRE-003
   - REQ-OFFICE-ROUTINE-WIRE-004
+  - REQ-OFFICE-SCHEDULER-001
 system_design:
   - ../../specs/office/system-design/routine-wire-contract.md
+  - ../../specs/office/system-design/scheduler-01.md
 ---
 
 # Implementation plan: Office routine wire contract (camelCase/snake_case adapter)
@@ -21,14 +23,17 @@ not fold underscores, so every multi-word key was silently discarded on
 write, a cron trigger could not be armed at all, and reads rendered blanks,
 placeholders, or the characters of a JSON-encoded string one per line. This
 plan closes that gap with a single adapter at the client's API boundary that
-translates in both directions, so no HTTP contract, Go struct tag, database
-column, or scheduler behavior changes.
+translates in both directions. Routine creation also accepts an optional
+nested `trigger` so it can create the routine and cron trigger atomically.
+Existing update fields, response shapes, database columns and scheduler
+behavior stay unchanged.
 
 ## Scope
 
 In scope: a create/update/trigger request builder that emits the exact
-snake_case keys the backend binds, JSON-encoding `task_template` and
-`variables` as strings (REQ-001); a create-routine and detail-view control
+snake_case keys the backend binds, including an optional create-only nested
+`trigger`, and JSON-encoding `task_template` and `variables` as strings
+(REQ-001, REQ-002); a create-routine and detail-view control
 flow that arms, replaces, and reports on a cron trigger correctly (REQ-002);
 a response adapter that unwraps envelopes, decodes JSON-encoded string
 fields, and produces camelCase models with no snake_case fallback casts and
@@ -36,18 +41,20 @@ no `as unknown as` (REQ-003); and the same normalization applied to routine
 runs, including the previously-missing `dispatchFingerprint`, `linkedTaskId`
 and `createdAt` (REQ-004).
 
-Out of scope: any HTTP contract, Go struct tag, database column, or
-scheduler behavior change; clearing an armed cron schedule; enqueueing more
-than one run per resumed tick; and the pre-existing `AgentRunSummary` wire
-shape consumed by `app/office/agents/[id]/`, which this capability does not
-own (system design, [Out of scope](../../specs/office/system-design/routine-wire-contract.md#out-of-scope)).
+Out of scope: changing existing update fields or resource response shapes,
+database columns, or scheduler behavior; clearing an armed cron schedule;
+enqueueing more than one run per resumed tick; and the pre-existing
+`AgentRunSummary` wire shape consumed by `app/office/agents/[id]/`, which this
+capability does not own (system design,
+[Out of scope](../../specs/office/system-design/routine-wire-contract.md#out-of-scope)).
 
 ## Technical approach
 
 `apps/web/lib/api/domains/office-routine-api.ts` builds every create/update/
 trigger request body from typed inputs, emitting only the contract's
-snake_case keys and JSON-encoding `task_template`/`variables` before they
-leave the client. `apps/web/lib/api/domains/office-routine-normalize.ts` is
+snake_case keys. Routine creation may include a nested trigger; update bodies
+do not include it. The adapter JSON-encodes `task_template`/`variables` before
+they leave the client. `apps/web/lib/api/domains/office-routine-normalize.ts` is
 the single response-side adapter: it unwraps the envelope, decodes the two
 JSON-encoded string fields back into objects (falling back to `{}` for
 anything that isn't a JSON object per the requirement's definition), and
@@ -75,6 +82,7 @@ in the system design's Testing section.
 ## Implementation waves and parallel candidates
 
 - [x] [Task 01: camelCase/snake_case adapter and cron-reconcile control flow](task-01-wire-adapter.md) (`done`) — REQ-001, REQ-002, REQ-003, REQ-004
+- [x] [Task 02: embedded tzdata and atomic routine + trigger create](task-02-tzdata-atomic-create.md) (`done`) — REQ-001, REQ-002, REQ-OFFICE-SCHEDULER-001
 
 Single wave: the request builder, response adapter, and the UI components
 that consume them all change together behind one contract, so there is no
@@ -103,11 +111,19 @@ one pre-existing regression (the create dialog silently discarding form
 input on a rejected create) were both fixed and covered by regression tests
 in the same round.
 
+The maintainer follow-up adds focused coverage for the optional nested trigger.
+From `apps/`, `pnpm --filter @kandev/web test -- --run lib/api/domains/office-routine-normalize.test.ts`
+passed: 1 test file and 28 tests. The case verifies `cron_expression`,
+trimming, no camelCase key, and omission when no trigger is supplied.
+`python3 scripts/list-docs.py validate` validated 343 decisions and 1319
+specifications; `python3 scripts/lint-spec-files.py --all` passed.
+
 ## Risks and out of scope
 
 - The client cannot validate that the server actually stored what it sent;
-  it can only prove it sent the contract's exact keys and shapes. Any future
-  DTO change on the backend needs a matching adapter change, not the reverse.
+  it can only prove it sent the contract's exact keys and shapes. Future DTO
+  changes beyond the optional create-only trigger need a matching adapter
+  change, not the reverse.
 - `app/office/agents/[id]/` reads `s.office.routines` for `AgentRunSummary`
   data this capability does not own; those two files are deliberately
   excluded from the AC-003.10/AC-003.18 static scan rather than migrated.

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { AppState } from "@/lib/state/store";
-import { isOfficeWorkspace, selectActiveWorkspace, type WorkspaceItem } from "./selectors";
+import {
+  isOfficeWorkspace,
+  selectActiveWorkspace,
+  selectWorkspaceById,
+  type WorkspaceItem,
+} from "./selectors";
 
 function workspace(id: string, officeWorkflowId?: string | null): WorkspaceItem {
   return {
@@ -60,5 +65,22 @@ describe("selectActiveWorkspace", () => {
 
   it("returns undefined when no workspace is active", () => {
     expect(selectActiveWorkspace(stateWith([workspace("kanban-1")], null))).toBeUndefined();
+  });
+});
+
+describe("selectWorkspaceById", () => {
+  it("returns the record matching the given id, independent of the active id", () => {
+    const state = stateWith(
+      [workspace("kanban-1"), workspace("office-1", "wf-office")],
+      "kanban-1",
+    );
+
+    expect(selectWorkspaceById("office-1")(state)?.id).toBe("office-1");
+  });
+
+  it("returns undefined when no workspace matches the given id", () => {
+    expect(
+      selectWorkspaceById("missing")(stateWith([workspace("kanban-1")], "kanban-1")),
+    ).toBeUndefined();
   });
 });

@@ -12,10 +12,11 @@ func TestBuildWorkflowExportIncludesStepProfileSessionPolicies(t *testing.T) {
 		ID:   "workflow-1",
 		Name: "Workflow",
 	}}, map[string][]*WorkflowStep{"workflow-1": {{
-		ID:                        "step-1",
-		Name:                      "Step",
-		ProfileSessionStartPolicy: taskmodels.WorkflowProfileSessionStartPolicyNew,
-		ProfileSessionEndPolicy:   taskmodels.WorkflowProfileSessionEndPolicyPark,
+		ID:                          "step-1",
+		Name:                        "Step",
+		ProfileSessionStartPolicy:   taskmodels.WorkflowProfileSessionStartPolicyNew,
+		ProfileSessionEndPolicy:     taskmodels.WorkflowProfileSessionEndPolicyPark,
+		DisableUnclassifiedFallback: true,
 	}}}, nil)
 
 	payload, err := json.Marshal(export.Workflows[0])
@@ -32,5 +33,8 @@ func TestBuildWorkflowExportIncludesStepProfileSessionPolicies(t *testing.T) {
 	}
 	if got := stepFields["profile_session_end_policy"]; got != string(taskmodels.WorkflowProfileSessionEndPolicyPark) {
 		t.Fatalf("profile_session_end_policy = %v, want %q", got, taskmodels.WorkflowProfileSessionEndPolicyPark)
+	}
+	if got := stepFields["disable_unclassified_fallback"]; got != true {
+		t.Fatalf("disable_unclassified_fallback = %v, want true", got)
 	}
 }

@@ -2,12 +2,15 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -88,4 +91,90 @@ func TestConcurrentResumePendingClaimsExactlyOneGeneration(t *testing.T) {
 	if staleCount != callers-1 {
 		t.Fatalf("stale/rejected claims = %d, want %d", staleCount, callers-1)
 	}
+}
+
+func TestUnclassifiedFailureClaimOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-unclassified-race", Title: "Race"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-unclassified-race", TaskID: "task-unclassified-race", State: models.TaskSessionStateRunning,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	state := dynamicruntime.RouteState{
+		SessionID: "session-unclassified-race", LogicalProfileID: "dynamic",
+		ExecutionProfileID: "candidate-a", Generation: 1, ProfileVersion: 1,
+		Status: "active", UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.SaveRouteState(ctx, state); err != nil {
+		t.Fatalf("SaveRouteState: %v", err)
+	}
+	profile := dynamicruntime.Profile{ID: "dynamic", Version: 1, Candidates: []dynamicruntime.Candidate{
+		{ID: "candidate-a", Enabled: true, Policies: unclassifiedConcurrencyPolicy(3)},
+		{ID: "candidate-b", Enabled: true},
+	}}
+	failure := &routingerr.Error{Code: routingerr.CodeUnknownProvider, Class: routingerr.ClassUnclassified, Phase: routingerr.PhasePromptSend}
+	evidence := dynamicruntime.UnclassifiedFailureEvidence{
+		TaskScope: true, TaskID: "task-unclassified-race", SessionID: state.SessionID,
+		LogicalProfileID: profile.ID, ExecutionProfileID: "candidate-a", RouteGeneration: 1,
+		StepKnown: true, AttemptID: "same-terminal-event", Origin: dynamicruntime.UnclassifiedOriginTerminalProvider,
+		Phase: routingerr.PhasePromptSend, ProviderID: "provider-x", DiagnosticText: "unsupported response",
+		DiagnosticComplete: true, CurrentAttempt: true, EvidenceKnown: true,
+	}
+	engines := []*dynamicruntime.Engine{
+		dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo), dynamicruntime.WithStateLoader(repo)),
+		dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo), dynamicruntime.WithStateLoader(repo)),
+	}
+	for i, engine := range engines {
+		if _, _, err := engine.LoadState(ctx, state.SessionID); err != nil {
+			t.Fatalf("warm engine %d: %v", i, err)
+		}
+	}
+	var wg sync.WaitGroup
+	decisions := make([]dynamicruntime.RouteDecision, len(engines))
+	errs := make([]error, len(engines))
+	wg.Add(len(engines))
+	for i, engine := range engines {
+		go func(i int, engine *dynamicruntime.Engine) {
+			defer wg.Done()
+			decisions[i], errs[i] = engine.ApplyUnclassifiedFailureContext(
+				ctx, state.SessionID, profile, 1, "candidate-a", failure, evidence,
+			)
+		}(i, engine)
+	}
+	wg.Wait()
+	successes, stale := 0, 0
+	for _, err := range errs {
+		switch {
+		case errors.Is(err, dynamicruntime.ErrRecoveryPending):
+			successes++
+		case errors.Is(err, dynamicruntime.ErrStaleGeneration):
+			stale++
+		default:
+			t.Fatalf("unexpected unclassified failure claim error: %v", err)
+		}
+	}
+	if successes != 1 || stale != len(engines)-1 {
+		t.Fatalf("snapshot claims = success %d, stale %d, errors %v; want one winner", successes, stale, errs)
+	}
+	loaded, err := repo.LoadRouteState(ctx, state.SessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	var persisted dynamicruntime.PolicyState
+	if err := json.Unmarshal([]byte(loaded.PolicyStateJSON), &persisted); err != nil {
+		t.Fatalf("decode policy state: %v", err)
+	}
+	if persisted.Unclassified == nil || persisted.Unclassified.Count != 1 {
+		t.Fatalf("durable streak = %+v, want exactly one claimed failure", persisted.Unclassified)
+	}
+}
+
+func unclassifiedConcurrencyPolicy(threshold int64) routingpolicy.Document {
+	document := routingpolicy.DefaultDocument()
+	document.Unclassified = &routingpolicy.UnclassifiedPolicy{Enabled: true, ConsecutiveFailureThreshold: threshold}
+	return document
 }

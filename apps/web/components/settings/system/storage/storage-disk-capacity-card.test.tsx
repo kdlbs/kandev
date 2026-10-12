@@ -60,4 +60,103 @@ describe("StorageDiskCapacityCard", () => {
     expect(screen.getByTestId("storage-disk-unavailable")).toBeTruthy();
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
+
+  it("shows temporary filesystem pressure beside home capacity before analysis", () => {
+    render(
+      <StorageDiskCapacityCard
+        disk={{
+          ...disk,
+          temporary_roots: [
+            {
+              requested_path: "/var/tmp",
+              path: "/tmp",
+              aliases: ["/var/tmp"],
+              total_bytes: 100 * 1024 ** 3,
+              used_bytes: 95 * 1024 ** 3,
+              available_bytes: 5 * 1024 ** 3,
+              used_percent: 95,
+              available: true,
+              observed_at: "2026-09-28T10:00:00Z",
+              shared_with_home: false,
+            },
+          ],
+        }}
+      />,
+    );
+
+    const temporary = screen.getByTestId("storage-temporary-disk-capacity-0");
+    expect(temporary.textContent).toContain("95%");
+    expect(temporary.textContent).toContain("/tmp");
+    expect(screen.getByTestId("storage-disk-view-temporary")).toBeTruthy();
+  });
+});
+
+describe("temporary disk refresh state", () => {
+  it("shows a failed temporary refresh while retaining stale capacity", () => {
+    const props = {
+      disk: {
+        ...disk,
+        temporary_roots_warning: "temporary storage paths unavailable",
+        temporary_roots: [
+          {
+            requested_path: "/tmp",
+            path: "/tmp",
+            total_bytes: 100,
+            used_bytes: 40,
+            available_bytes: 60,
+            used_percent: 40,
+            available: true,
+            observed_at: "2026-09-28T10:00:00.000Z",
+            shared_with_home: false,
+            stale: true,
+          },
+        ],
+      },
+    };
+    const { rerender } = render(<StorageDiskCapacityCard {...props} />);
+
+    expect(screen.getByTestId("storage-temporary-disk-refresh-failed")).toBeTruthy();
+    expect(screen.getByTestId("storage-temporary-disk-stale").textContent).toContain(
+      "latest refresh failed",
+    );
+    expect(screen.getByTestId("storage-temporary-disk-used-percent").textContent).toContain("40%");
+
+    rerender(
+      <StorageDiskCapacityCard
+        {...props}
+        disk={{ ...props.disk, temporary_roots_warning: undefined }}
+        error="temporary capacity request failed"
+      />,
+    );
+    expect(screen.getByTestId("storage-temporary-disk-refresh-failed")).toBeTruthy();
+  });
+});
+
+describe("temporary disk unavailable state", () => {
+  it("does not describe a never-measured capacity as a stale success", () => {
+    render(
+      <StorageDiskCapacityCard
+        disk={{
+          ...disk,
+          temporary_roots: [
+            {
+              requested_path: "/tmp",
+              path: "/tmp",
+              total_bytes: 0,
+              used_bytes: 0,
+              available_bytes: 0,
+              used_percent: 0,
+              available: false,
+              warning: "disk usage unavailable",
+              observed_at: "2026-09-28T10:00:00.000Z",
+              shared_with_home: null,
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getAllByTestId("storage-temporary-disk-unavailable").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("storage-temporary-disk-stale")).toBeNull();
+  });
 });

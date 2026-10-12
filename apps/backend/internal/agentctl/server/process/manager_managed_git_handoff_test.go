@@ -35,9 +35,9 @@ func TestManagerManagedGitConfigurationReplacement(t *testing.T) {
 				"GIT_CONFIG_KEY_2": "credential.https://github.com.helper", "GIT_CONFIG_VALUE_2": githubauth.ManagedGitCredentialHelper,
 				"GIT_CONFIG_KEY_3": "credential.useHttpPath", "GIT_CONFIG_VALUE_3": "true",
 			}
-			require.NoError(t, configure("echo", nil, false, env, "", "", nil, false))
+			require.NoError(t, configure("echo", nil, false, env, "", nil, false))
 			require.Equal(t, "current", envValue(cfg.AgentEnv, githubauth.CredentialLeaseEnv))
-			require.NoError(t, configure("echo", nil, false, nil, "", "", nil, false))
+			require.NoError(t, configure("echo", nil, false, nil, "", nil, false))
 			require.Empty(t, envValue(cfg.AgentEnv, githubauth.CredentialLeaseEnv))
 			require.Empty(t, envValue(cfg.AgentEnv, githubauth.CredentialHelperPathEnv))
 			require.NotContains(t, strings.Join(cfg.AgentEnv, "\n"), githubauth.ManagedGitCredentialHelper)
@@ -71,7 +71,7 @@ printf 'username=synthetic\npassword=synthetic\n'
 	cfg := &config.InstanceConfig{WorkDir: dir}
 	mgr := NewManager(cfg, newTestLogger(t))
 	t.Cleanup(func() { require.NoError(t, mgr.StopForTeardown(context.Background())) })
-	for _, configure := range []func(string, []string, bool, map[string]string, string, string, []string, bool) error{mgr.Configure, mgr.ConfigureWithEnvironment} {
+	for _, configure := range []func(string, []string, bool, map[string]string, string, []string, bool) error{mgr.Configure, mgr.ConfigureWithEnvironment} {
 		env := map[string]string{
 			"PATH": os.Getenv("PATH"), "HOME": dir, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.DevNull,
 			"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "SSH_ASKPASS": "",
@@ -82,7 +82,7 @@ printf 'username=synthetic\npassword=synthetic\n'
 			"GIT_CONFIG_KEY_1": "credential.https://github.com.helper", "GIT_CONFIG_VALUE_1": githubauth.ManagedGitCredentialHelper,
 			"GIT_CONFIG_KEY_2": "credential.useHttpPath", "GIT_CONFIG_VALUE_2": "true",
 		}
-		require.NoError(t, configure("echo", nil, false, env, "", "", nil, false))
+		require.NoError(t, configure("echo", nil, false, env, "", nil, false))
 		for _, repo := range []string{"allowed", "foreign"} {
 			cmd := exec.Command(git, "credential", "fill")
 			cmd.Dir, cmd.Env = dir, append([]string(nil), cfg.AgentEnv...)
@@ -106,6 +106,6 @@ func TestManagerConfigurePreservesUnmanagedLegacyHelper(t *testing.T) {
 	}}
 	mgr := NewManager(cfg, newTestLogger(t))
 	t.Cleanup(func() { require.NoError(t, mgr.StopForTeardown(context.Background())) })
-	require.NoError(t, mgr.Configure("echo", nil, false, nil, "", "", nil, false))
+	require.NoError(t, mgr.Configure("echo", nil, false, nil, "", nil, false))
 	require.Equal(t, githubauth.LegacyGitCredentialHelper, envValue(cfg.AgentEnv, "GIT_CONFIG_VALUE_0"))
 }

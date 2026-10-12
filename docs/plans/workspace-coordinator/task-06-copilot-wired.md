@@ -1,0 +1,235 @@
+---
+id: "06-copilot-wired"
+title: "Coordinator copilot wired in"
+status: pending
+wave: 3
+depends_on:
+  - "03-session-tool-surface"
+  - "04-needs-you-queue-stalls"
+  - "05-popover-shell"
+plan: "plan.md"
+requirements:
+  - REQ-COORDINATOR-COPILOT-002
+  - REQ-COORDINATOR-COPILOT-004
+  - REQ-COORDINATOR-COPILOT-005
+acceptance_criteria:
+  - AC-COORDINATOR-COPILOT-004.3
+  - AC-COORDINATOR-COPILOT-004.4
+  - AC-COORDINATOR-COPILOT-004.5
+  - AC-COORDINATOR-COPILOT-004.10
+  - AC-COORDINATOR-COPILOT-005.1
+  - AC-COORDINATOR-COPILOT-005.2
+  - AC-COORDINATOR-COPILOT-005.4
+  - AC-COORDINATOR-COPILOT-005.5
+system_design:
+  - ../../specs/coordinator/system-design/copilot.md
+  - ../../specs/coordinator/system-design/copilot-popover.md
+  - ../../specs/coordinator/system-design/coordinators.md
+---
+
+# Task 06: Coordinator Copilot Wired In (WP-4b)
+
+> **Built as a popover.** This work order is built. The popover frame it
+> describes (420 by 550 pixels, the 1200px no-overlap check, Escape anywhere)
+> is the interim state. The requirement now specifies a right-side panel, and
+> [task 11](task-11-panel-swap.md) delivers it: it owns the panel criteria
+> `AC-COORDINATOR-COPILOT-004.1`, `004.2`, `004.7`, `004.8`, `004.11`,
+> `004.12`, `004.13` and `002.4`, which this work order no longer owns. The
+> content criteria listed below stay here, and task 11 keeps them passing.
+
+## Summary
+
+Put the copilot on the Coordinator screens: task 05's shell and
+`QuickChatSessionView` on the session from task 03's conversation route, with
+**Ask about this** and its context chip on task 04's item cards. On the
+critical path.
+
+## In scope
+
+- Coordinator controller: launcher for `workspace.manage` only, busy state
+  from the session store, 420 by 550 popover titled `Coordinator: <name>`, no
+  Expand, full width below 640px. With the flag off no launcher renders.
+- Launcher busy state as the
+  [copilot design](../../specs/coordinator/system-design/copilot-popover.md#launcher-busy-state)
+  says: the controller never calls the conversation route on mount; the
+  session id is the latest route response's in this page, else the primary
+  session of the GET's `conversation_task_id` through `useTaskSessions`, kept
+  subscribed with `useSession` while a Coordinator screen is mounted; busy is
+  `isSessionWorking`; a null `conversation_task_id` or a failed read is not
+  busy and fetches nothing.
+- The controller's own coordinator read
+  ([copilot design](../../specs/coordinator/system-design/copilot-popover.md#coordinator-read)):
+  `getCoordinator` when the viewed coordinator resolves and again on each
+  popover open, before the route; no polling.
+- The open sequence and its outcome table
+  ([copilot design](../../specs/coordinator/system-design/copilot-popover.md#opening-the-conversation)):
+  one sequence in flight per coordinator, stale responses discarded, no
+  automatic retry; GET and route 404 show the gone message, a GET failure and
+  a route 502, 500, other status or network error show their message with
+  **Try again**, `conversation_conflict` shows its message with **Try again**.
+  No error body renders a composer or `SessionRecoveryFeedback`.
+- The popover builds its `QuickChatSession` value from the conversation
+  route's response with `kind: "chat"`, passes `archive_state` as
+  `taskArchiveState`, `automaticRecovery={false}` and
+  `hideSessionSelectors`.
+- The copilot half of `AC-COORDINATOR-COORDINATORS-005.1` (owned
+  by task 03): the profile messages in place of the composer, mapped from
+  `agent_profile_status` and `executor_profile_status` as the
+  [coordinators design](../../specs/coordinator/system-design/coordinators.md#validation)
+  tables say: from the coordinator GET without calling the conversation
+  route, or from the route's `coordinator_profile_unavailable` 409 body;
+  both messages shown together when both are not `ok`. A
+  component test covers agent `missing`, agent `passthrough` (the passthrough
+  message, not the removed one), executor `missing`, both not `ok`, a 409 body
+  after an `ok` GET, and an unknown status value (shown as that field's
+  `missing` message).
+- Empty-conversation intro and one suggestion, the fixed translated "What
+  needs me first, and why?", shown only while the transcript is empty; it
+  replaces the composer text, sets no chip and sends nothing
+  ([copilot design](../../specs/coordinator/system-design/copilot-popover.md#empty-conversation)).
+- Copilot store `{open, chip, draft}` in client memory, one entry per
+  coordinator id, shared by Needs you and Queue, reset by a reload; a 404
+  clears `chip` and `draft` at once, keeps the popover open on the gone
+  message, and removes the entry when that popover closes; close keeps the chip, a send keeps the chip, `draft` is a one-shot
+  seed cleared once applied
+  ([copilot design](../../specs/coordinator/system-design/copilot-popover.md#ask-about-this)).
+- **Ask about this** wiring on task 04's item cards, the chip, and the
+  "About <id>: " prefix through task 05's `transformOutgoing`, with the hint
+  under the composer. `<id>` is the card's identifier, else task title, else
+  the proposal title for a proposal without a source task, normalised
+  (whitespace runs to one space, trimmed, each `: ` to ` - `); the question
+  "Why is {{id}} here?" is translated, the `About ` prefix is not.
+- Readers: **Ask about this** stays a disabled button with no handler and
+  the translated tooltip "Only workspace managers can ask the coordinator."
+- Screens leave room for the popover at 1200px.
+
+## Out of scope
+
+- The launcher on other pages, Expand, a Quick Chat tab (phase 2).
+- Proposal decisions on the chat card (task 08; the card renders read-only).
+
+## ASCII UI preview
+
+From [plan UI-02](plan.md#ui-02-the-copilot-coordinator-screens):
+
+```text
+                                     +---------------------------------+
+                                     | * Coordinator: Planner      [x] |
+                                     |---------------------------------|
+                                     | You: split KAN-418 into two     |
+                                     | ( ) list_tasks_kandev           |
+                                     | Planner: I proposed it.         |
+                                     | ! create_task  Pending Approval |
+                                     |---------------------------------|
+                                     | [about KAN-418 x]               |
+                                     | Ask the coordinator...     [>]  |
+                                     | sent as "About KAN-418: ..."    |
+                                     +---------------------------------+
+                                                                 ( * )
+```
+
+## Mockup screenshots and scenarios
+
+Screenshots (visual reference; the acceptance criteria govern):
+
+- [`docs/plans/workspace-coordinator/assets/p1-02-ask-about-this.png`](assets/p1-02-ask-about-this.png)
+- [`docs/plans/workspace-coordinator/assets/p1-05-chat-create-task-proposal.png`](assets/p1-05-chat-create-task-proposal.png)
+
+Mockup scenario specs to port (in the workspace-coordinator analysis
+mockup's `mockup/e2e/tests/`, outside this repository; see the plan's [Mockup scenario to repo test](plan.md#mockup-scenario-to-repo-test)):
+
+- `17-ask-the-copilot.spec.ts`: ask, answer, tool call shown.
+- `18-v21-copilot-anywhere.spec.ts`, Ask about this: chip, draft, stored prefix and tag.
+
+## Acceptance
+
+- A manager opens the copilot, asks about an item and gets the mock agent's
+  answer; the chip, draft, prefix and tag behave as specified.
+- Opening, closing and reloading send no prompt, resume or restore request
+  and start no turn; after a reload the transcript shows the session's state
+  as stored: an idle session shows idle until Send, and a turn that kept
+  running across the reload shows running with the launcher busy.
+- Readers see no launcher; Escape, Stop, no send while a turn runs, and the 1200px and
+  390px layouts pass; no Quick Chat tab appears.
+
+## Verification
+
+```bash
+cd apps/web && pnpm test -- hooks/domains/coordinator app/coordinator/copilot
+cd apps/web && pnpm run typecheck && pnpm run i18n:check
+cd apps/web && pnpm e2e:run tests/coordinator/copilot.spec.ts tests/settings/config-chat-popover.spec.ts
+cd apps/web && pnpm e2e:run --project=mobile-chrome tests/settings/mobile-config-chat-popover.spec.ts
+cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-copilot.spec.ts
+```
+
+The `mobile-chrome` project matches on the `mobile-*.spec.ts` filename prefix
+(`apps/web/e2e/playwright.config.ts`), not on project scope, so the 390px
+layout assertions live in their own `mobile-copilot.spec.ts` file rather than
+a rerun of `copilot.spec.ts` under a different project.
+
+`tests/coordinator/copilot.spec.ts` includes a permission-request case: the
+mock agent calls one of its own tools, the popover shows Approve and Deny
+through `QuickChatSessionView`'s existing permission UI (unchanged by this
+work order), and approving lets the tool call complete. This is the test that
+pins `AC-COORDINATOR-COPILOT-003.9` (task 03's, enforced by the guard and
+auto-approval policy) for a coordinator session.
+
+A component test on the coordinator controller asserts the flag-off case
+directly: with `features.coordinator` off, no launcher renders on the
+Coordinator screens, so the "In scope" summary's "no launcher renders" claim
+is a checked assertion. A second component test covers the reader-visibility
+case (`AC-COORDINATOR-COPILOT-004.1`) with the flag on: a `workspace.manage`
+viewer sees the launcher on both Coordinator screens, and a `workspace.read`
+viewer sees neither launcher, with no popover reachable by URL or keyboard.
+Task 02's `tests/auth/coordinator-settings-reader.spec.ts` is the coordinator
+suite's one `auth`-project Playwright spec; this reader-gating check does not
+need a second one.
+
+A component test on the open sequence covers each row of the design's
+outcome table: GET with a status not `ok` (route not called), GET 404 and
+route 404 (gone message, no **Try again**, popover still open with no chip until Close, then the entry is gone), GET 500 and network error, route
+409 `coordinator_profile_unavailable`, route 409 `conversation_conflict`,
+route 502 and 500. Each asserts no composer and no `SessionRecoveryFeedback`,
+Close and Escape still work, and **Try again** re-runs the GET and then the
+route exactly once. It also asserts that two opens in flight issue one GET
+and one route call, and that a response for a coordinator no longer viewed is
+discarded.
+
+A component test on the launcher asserts: mount issues the GET and never the
+conversation route; a null `conversation_task_id` shows not busy with no
+session read; a `RUNNING` session, and a `background` foreground activity,
+show busy with the popover closed; a session state change pushed while closed
+flips the launcher; when the viewed coordinator changes from A to B and A's
+GET resolves after B's, the launcher follows B's session and never subscribes
+to A's.
+
+A store and card test asserts: the `<id>` derivation for a task with and
+without `identifier`, a proposal with and without a source task, and titles
+containing a line break, repeated spaces and `: ` (the sent message parses
+back to the whole id); a same-item re-ask replaces typed text with the
+question; the chip survives close and reopen, a send, and Needs you to Queue
+navigation, and does not appear on another coordinator; a reload starts
+without a chip; the suggestion fills the composer without a chip or a send
+and hides once a message exists; a reader's **Ask about this** is disabled,
+shows its tooltip, and opens nothing.
+
+## Likely files
+
+- `apps/web/app/coordinator/copilot/`
+- `apps/web/hooks/domains/coordinator/use-copilot.ts` and test
+- `apps/web/src/locales/*/`
+- `apps/web/e2e/tests/coordinator/copilot.spec.ts`, `mobile-copilot.spec.ts`
+
+## Dependencies
+
+- Task 03 (conversation route, attended session, mock agent tools).
+- Task 04 (screens, item cards with **Ask about this**).
+- Task 05 (shell, props, transcript tag).
+- While G0 is open the branch starts from task 03's branch with the reviewed
+  branches of tasks 04 and 05 merged in, and rebases onto main after each
+  predecessor merges.
+
+## Risks
+
+- Tasks 03, 04 and 05 land in any order; start only when all three have
+  passed Review, so the controller is built on their final interfaces.

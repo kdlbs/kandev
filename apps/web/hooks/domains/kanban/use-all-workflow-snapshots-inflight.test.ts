@@ -409,7 +409,10 @@ describe("useAllWorkflowSnapshots failed refreshes", () => {
     act(() => window.dispatchEvent(new Event("focus")));
 
     await waitFor(() => expect(errorSpy).toHaveBeenCalled());
-    expect(mocks.setWorkflowSnapshot).not.toHaveBeenCalled();
+    expect(mocks.setWorkflowSnapshot).toHaveBeenCalledWith(
+      WORKFLOW_ID,
+      expect.objectContaining({ tasks: resolvedSnapshot.tasks, fetchFailed: true }),
+    );
     expect(mocks.state!.kanbanMulti.snapshots[WORKFLOW_ID]).toBe(resolvedSnapshot);
     errorSpy.mockRestore();
   });

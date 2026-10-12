@@ -35,9 +35,37 @@ turn's step through the existing `h.workflowCtrl.GetStep` call already used
 for the stale-turn diagnostic above, and additively sets two response fields
 before returning:
 
-- `advances` (bool) — the step's `AutoAdvanceRequiresSignal` value.
+- `advances` (bool) — `true` only when the step's `AutoAdvanceRequiresSignal`
+  is set and `WorkflowStep.AdvancesOnTurnComplete()` reports a move the
+  engine runs on turn completion.
 - `note` (string) — present only when `advances` is `false`, explaining that
-  the step does not advance on a completion signal.
+  the step does not advance on a completion signal, or, for a signal-gated
+  step, that it has no `on_turn_complete` move that runs automatically.
+
+`internal/workflow/models.WorkflowStep.AdvancesOnTurnComplete` mirrors
+`internal/workflow/engine.compileOnTurnComplete` and `evaluateActions`:
+`move_to_next` and `move_to_previous` count, `move_to_step` counts only with a
+non-empty `step_id` that differs from the current step, and a move marked
+`requires_approval` does not count because neither engine nor legacy turn
+completion runs it. An unguarded self-target is selected first and blocks later
+actions, but the engine does not transition to the current step. A guarded
+self-target can fall through to later actions when its guard is not satisfied.
+`disable_plan_mode` changes session settings and never moves the task. A move
+behind a `wait_for_quorum` guard counts, because quorum re-evaluation can still
+apply it. The field describes configuration, not a promise: a clarification
+barrier, an unsatisfied guard, or a last-step `move_to_next` can still leave the
+task in place.
+
+A signal-gated step without such a move still accepts and records the signal.
+The turn-end gate finds the signal, the engine selects no transition, and the
+session waits for input. The bag entry stays until a new user turn or a
+clarification pause clears it, or until the task leaves the step and the entry
+becomes stale. A signal on a non-gated step is handled the same way today: it
+is recorded and does not drive a transition. Rejecting the call instead was
+considered and not chosen. It would change the `accepted` contract that
+signal-gated prompts rely on, and it would answer the same "this signal will
+not move the task" situation with an error for gated steps and a success for
+non-gated steps.
 
 `accepted` is never changed by this — ADR 0015 semantics and existing agent
 prompts depend on it staying `true` once the signal is recorded. When the step
@@ -106,9 +134,12 @@ cover gated task and Office contexts, omission from ungated instructions, and
 existing size budgets. These are protocol tests, not browser layout changes.
 
 Handler tests also cover the `advances`/`note` response fields directly: a
-signal-gated step returns `advances:true` with no `note`; a non-signal-gated
-step returns `advances:false` with a `note`; a step that fails to resolve
-omits both fields.
+signal-gated step with a move action returns `advances:true` with no `note`; a
+non-signal-gated step returns `advances:false` with a `note`; a signal-gated
+step without a runnable move returns `advances:false` with a `note` while the
+signal is still recorded and published; a step that fails to resolve omits
+both fields. A model test pins `AdvancesOnTurnComplete`, and an engine test
+compares it with the compiled `on_turn_complete` actions.
 
 ## Related decisions and contracts
 
@@ -119,3 +150,4 @@ omits both fields.
 ## Implementation plans
 
 - [Issue 3772 recovery package](../../../plans/step-completion-stale-turn-recovery/plan.md)
+- [Applicability response package](../../../plans/office-assignment-step-eligibility/plan.md)

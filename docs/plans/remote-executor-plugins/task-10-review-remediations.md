@@ -227,6 +227,20 @@ the phone and desktop plugin-executor status specs (one test each, retries disab
 Kubernetes task-environment spec (one test, retries disabled). Targeted Prettier and ESLint checks
 passed. Fresh PR checks for this follow-up commit are tracked in the implementation task plan.
 
+## PR #4068 control-client follow-up
+
+The leased control client uses the provider connection-lease resolver for the control endpoint. Agent
+connections continue to use the recorded runtime instance port. Launch and recovery fail closed when an
+instance has no usable port; retained attachment also requires that recorded port. When a provider returns
+an error with no lease, the host preserves the stable provider error instead of replacing it with a generic
+missing-lease error. Launch cleanup logs the error type and does not log provider error text, which can
+contain credentials.
+
+Regression coverage includes the leased control-client transport, provider rejection with no lease,
+invalid ports during creation, recovery and retained attachment with a missing instance port, and a
+credential-bearing cleanup error that must not appear in logs. This follow-up covers connection leases,
+safe provider diagnostics, and recovery contracts in requirements 001, 003, and 004.
+
 ## Dependencies
 
 [Task 02](task-02-authenticated-transport.md), [Task 03](task-03-profile-admission.md),

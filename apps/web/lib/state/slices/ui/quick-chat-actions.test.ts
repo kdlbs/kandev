@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
+import {
+  getChatDraftAttachments,
+  getChatDraftText,
+  setChatDraftAttachments,
+  setChatDraftText,
+} from "@/lib/local-storage";
 import { createUISlice } from "./ui-slice";
 import { getQuickChatSetupSessionId } from "./quick-chat-session";
 import type { UISlice } from "./types";
@@ -9,6 +15,14 @@ const WORKSPACE_A = "workspace-a";
 const WORKSPACE_B = "workspace-b";
 const SESSION_A = "session-a";
 const SESSION_B = "session-b";
+const TEXT_MIME_TYPE = "text/plain";
+const OPENING_ATTACHMENT_ID = "attachment-1";
+const OPENING_ATTACHMENT_NAME = "trace.txt";
+
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+});
 
 type TerminalActions = {
   reuseOrCreateQuickTerminal: (workspaceId: string) => string;
@@ -76,6 +90,75 @@ describe("typed quick chat sessions", () => {
         },
       ],
     });
+  });
+
+  it("seeds the complete opening payload into the session draft before rendering", () => {
+    const store = makeStore();
+    const openingPayload = {
+      message: "Review this trace",
+      clientMessageId: "opening-message-1",
+      attachments: [
+        {
+          type: "resource" as const,
+          attachment_id: OPENING_ATTACHMENT_ID,
+          mime_type: TEXT_MIME_TYPE,
+          name: OPENING_ATTACHMENT_NAME,
+          size_bytes: 42,
+          delivery_mode: "path" as const,
+        },
+      ],
+    };
+    store.getState().addQuickChatSession(SESSION_A, WORKSPACE_A, "agent-a", "config");
+
+    store.getState().setQuickChatInitialPrompt(SESSION_A, openingPayload);
+
+    expect(store.getState().quickChat.sessions[0].initialPrompt).toEqual(openingPayload);
+    expect(getChatDraftText(SESSION_A)).toBe(openingPayload.message);
+    expect(getChatDraftAttachments(SESSION_A)).toEqual([
+      expect.objectContaining({
+        attachmentId: OPENING_ATTACHMENT_ID,
+        fileName: OPENING_ATTACHMENT_NAME,
+        mimeType: TEXT_MIME_TYPE,
+        size: 42,
+        deliveryMode: "path",
+      }),
+    ]);
+  });
+
+  it("does not replace a manual draft while registering an opening payload", () => {
+    const store = makeStore();
+    store.getState().addQuickChatSession(SESSION_A, WORKSPACE_A, "agent-a", "config");
+    setChatDraftText(SESSION_A, "manual follow-up");
+    setChatDraftAttachments(SESSION_A, [
+      {
+        id: "follow-up-id",
+        attachmentId: "follow-up-attachment",
+        mimeType: TEXT_MIME_TYPE,
+        fileName: "follow-up.txt",
+        size: 18,
+        isImage: false,
+        deliveryMode: "path",
+      },
+    ]);
+
+    store.getState().setQuickChatInitialPrompt(SESSION_A, {
+      message: "Review this trace",
+      attachments: [
+        {
+          type: "resource",
+          attachment_id: "opening-attachment",
+          mime_type: TEXT_MIME_TYPE,
+          name: OPENING_ATTACHMENT_NAME,
+          size_bytes: 42,
+          delivery_mode: "path",
+        },
+      ],
+    });
+
+    expect(getChatDraftText(SESSION_A)).toBe("manual follow-up");
+    expect(getChatDraftAttachments(SESSION_A)).toEqual([
+      expect.objectContaining({ attachmentId: "follow-up-attachment" }),
+    ]);
   });
 
   it("preserves task ownership when reopening or refreshing an existing session", () => {
@@ -265,6 +348,22 @@ describe("quick terminal tabs", () => {
     });
   });
 
+  it("invalidates older workspace snapshots when terminals start, bind, or close", () => {
+    const store = makeStore();
+    const actions = withTerminalActions(store);
+    const revision = () => store.getState().quickChat.syncRevisionByWorkspace[WORKSPACE_A] ?? 0;
+    let captured = revision();
+    const tabId = actions.createQuickTerminal(WORKSPACE_A);
+    expect(revision()).toBeGreaterThan(captured);
+    captured = revision();
+    actions.updateQuickTerminal(tabId, { sessionId: "pty-1", status: "running" });
+    expect(revision()).toBeGreaterThan(captured);
+    captured = revision();
+    actions.removeQuickTerminal(tabId);
+    expect(revision()).toBeGreaterThan(captured);
+    expect(store.getState().quickChat.syncRevisionByWorkspace[WORKSPACE_B] ?? 0).toBe(0);
+  });
+
   it("updates lifecycle state without changing terminal identity", () => {
     const store = makeStore();
     const actions = withTerminalActions(store);
@@ -332,4 +431,36 @@ describe("quick terminal tabs", () => {
     expect(store.getState().quickChat.activeSessionId).toBe(SESSION_B);
     expect(terminalState(store).activeKind).toBe("conversation");
   });
+});
+
+describe("late quick chat creation after deletion", () => {
+  it.each(["openQuickChat", "addQuickChatSession"] as const)(
+    "%s respects deletion tombstones",
+    (action) => {
+      const store = makeStore();
+      store.getState().openQuickChat(SESSION_A, WORKSPACE_A, "agent-a", "chat", "task-a");
+      store.getState().removeQuickChatSessionsForTask("task-a");
+      store.getState().openQuickChat(SESSION_B, WORKSPACE_A, "agent-b", "chat", "task-b");
+      store.getState()[action](SESSION_A, WORKSPACE_A, "agent-a", "chat", "task-a");
+      expect(store.getState().quickChat.sessions.map((session) => session.sessionId)).toEqual([
+        SESSION_B,
+      ]);
+      expect(store.getState().quickChat.activeSessionId).toBe(SESSION_B);
+    },
+  );
+});
+
+describe("rejected late responses preserve pending opens", () => {
+  it.each(["openQuickChat", "addQuickChatSession"] as const)(
+    "%s preserves the pending selection",
+    (action) => {
+      const store = makeStore();
+      store.getState().openQuickChat(SESSION_A, WORKSPACE_A, "agent-a", "chat", "task-a");
+      store.getState().removeQuickChatSessionsForTask("task-a");
+      const pendingOpen = { workspaceId: WORKSPACE_B, kind: "chat" as const, selectionRevision: 3 };
+      store.setState((state) => ({ quickChat: { ...state.quickChat, pendingOpen } }));
+      store.getState()[action](SESSION_A, WORKSPACE_A, "agent-a", "chat", "task-a");
+      expect(store.getState().quickChat.pendingOpen).toEqual(pendingOpen);
+    },
+  );
 });

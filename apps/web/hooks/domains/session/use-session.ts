@@ -11,7 +11,11 @@ type UseSessionResult = {
   errorMessage: string | undefined;
 };
 
-export function useSession(sessionId: string | null): UseSessionResult {
+export function useSession(
+  sessionId: string | null,
+  options: { detailActive?: boolean } = {},
+): UseSessionResult {
+  const detailActive = options.detailActive ?? true;
   const store = useAppStoreApi();
   const session = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
@@ -34,6 +38,7 @@ export function useSession(sessionId: string | null): UseSessionResult {
   }, [session?.state]);
 
   useEffect(() => {
+    if (!detailActive) return;
     if (connectionStatus !== "connected") return;
     if (!session?.id) return;
     const client = getWebSocketClient();
@@ -51,7 +56,7 @@ export function useSession(sessionId: string | null): UseSessionResult {
       releaseReconciliation();
       unsubscribe();
     };
-  }, [session?.id, connectionStatus, store]);
+  }, [detailActive, session?.id, connectionStatus, store]);
 
   return { session, isActive, isFailed, errorMessage: session?.error_message };
 }

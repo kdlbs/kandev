@@ -77,6 +77,27 @@ func TestSessionScopingGetTaskSession(t *testing.T) {
 	}
 }
 
+func TestSessionScopingHasUserPromptHistory(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedSessionScopeFixture(t, repo)
+	if _, err := svc.CreateMessage(context.Background(), &CreateMessageRequest{
+		TaskSessionID: "sess-b", TaskID: "task-b", AuthorType: "user", Content: "private prompt",
+	}); err != nil {
+		t.Fatalf("seed foreign prompt: %v", err)
+	}
+
+	if _, err := svc.HasUserPromptHistory(ctxAs("user-a"), "sess-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("read foreign prompt history = %v, want ErrTaskNotFound", err)
+	}
+	hasHistory, err := svc.HasUserPromptHistory(ctxAs("user-b"), "sess-b")
+	if err != nil {
+		t.Fatalf("owner prompt history: %v", err)
+	}
+	if !hasHistory {
+		t.Fatal("owner prompt history = false, want true")
+	}
+}
+
 func TestSessionScopingListTaskSessions(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedSessionScopeFixture(t, repo)

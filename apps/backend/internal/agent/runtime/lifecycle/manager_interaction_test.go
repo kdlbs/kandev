@@ -45,29 +45,41 @@ type restartMockAgentctlServer struct {
 	mu                 sync.Mutex
 	httpActions        []string
 	repairPackageSpecs []string
+	updateStreamCount  int
+	updateStreams      []*websocket.Conn
 	wsActions          []string
 	setModelIDs        []string
 	setModeIDs         []string
 	setOptions         []restartConfigOption
 
 	failStop                     bool
+	onStop                       func(context.Context)
 	failSessionNew               bool
+	initializeError              string
+	sessionNewError              string
+	configureError               string
+	startError                   string
 	failSessionReset             bool
 	failCacheRepair              bool
 	failMode                     bool
+	modeResult                   *agentctl.ModeResult
 	failModel                    bool
 	failConfigOptionID           string
 	stderrLines                  []string
+	stderrConfigured             bool
 	modelState                   *streams.SessionModelState
 	newModelState                *streams.SessionModelState
 	suppressSessionResetResponse bool
 	resetResponseDelay           time.Duration
+	updateStreamClosed           chan struct{}
 	resetLateEvent               *agentctl.AgentEvent
 	resetLateEventSent           chan struct{}
 	newLateEvent                 *agentctl.AgentEvent
 	newLateEventDelay            time.Duration
 	newLateEventSent             chan struct{}
 	newLateEventOnce             sync.Once
+	processGeneration            uint64
+	promptCalls                  int
 	onReset                      func()
 	onSessionNew                 func()
 	onCacheRepair                func()
@@ -175,8 +187,9 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 	t.Helper()
 
 	m := &restartMockAgentctlServer{
-		failStop:       failStop,
-		failSessionNew: failSessionNew,
+		failStop:           failStop,
+		failSessionNew:     failSessionNew,
+		updateStreamClosed: make(chan struct{}, 32),
 	}
 
 	upgrader := websocket.Upgrader{
@@ -188,8 +201,11 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
-	mux.HandleFunc("/api/v1/stop", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/v1/stop", func(w http.ResponseWriter, r *http.Request) {
 		m.recordHTTP("stop")
+		if m.onStop != nil {
+			m.onStop(r.Context())
+		}
 		if m.failStop {
 			_, _ = w.Write([]byte(`{"success":false,"error":"stop failed"}`))
 			return
@@ -216,18 +232,45 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 	})
 	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, _ *http.Request) {
 		m.recordHTTP("configure")
+		m.mu.Lock()
+		configureError := m.configureError
+		m.mu.Unlock()
+		if configureError != "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": configureError})
+			return
+		}
 		_, _ = w.Write([]byte(`{"success":true}`))
 	})
 	mux.HandleFunc("/api/v1/start", func(w http.ResponseWriter, _ *http.Request) {
-		m.recordHTTP("start")
-		_, _ = w.Write([]byte(`{"success":true,"command":"auggie --model test"}`))
+		m.mu.Lock()
+		m.httpActions = append(m.httpActions, "start")
+		m.processGeneration++
+		generation := m.processGeneration
+		startError := m.startError
+		m.mu.Unlock()
+		if startError != "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": startError})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success":            true,
+			"command":            "auggie --model test",
+			"process_generation": generation,
+		})
 	})
 	mux.HandleFunc("/api/v1/agent/stream", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
-		defer func() { _ = conn.Close() }()
+		m.mu.Lock()
+		m.updateStreamCount++
+		m.updateStreams = append(m.updateStreams, conn)
+		m.mu.Unlock()
+		defer func() {
+			_ = conn.Close()
+			m.updateStreamClosed <- struct{}{}
+		}()
 
 		for {
 			_, message, err := conn.ReadMessage()
@@ -248,6 +291,16 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 			var resp *ws.Message
 			switch msg.Action {
 			case "agent.initialize":
+				m.mu.Lock()
+				initializeError := m.initializeError
+				m.mu.Unlock()
+				if initializeError != "" {
+					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+						"success": false,
+						"error":   initializeError,
+					})
+					break
+				}
 				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 					"success": true,
 					"agent_info": map[string]string{
@@ -259,10 +312,18 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				if m.onSessionNew != nil {
 					m.onSessionNew()
 				}
-				if m.failSessionNew {
+				m.mu.Lock()
+				failSessionNew := m.failSessionNew
+				sessionNewError := m.sessionNewError
+				m.mu.Unlock()
+				if failSessionNew || sessionNewError != "" {
+					message := sessionNewError
+					if message == "" {
+						message = "session new failed"
+					}
 					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 						"success": false,
-						"error":   "session new failed",
+						"error":   message,
 					})
 				} else {
 					payload := map[string]interface{}{
@@ -312,9 +373,15 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				if m.failMode {
 					resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "mode rejected", nil)
 				} else {
-					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-						"success": true,
-					})
+					var request struct {
+						ModeID string `json:"mode_id"`
+					}
+					_ = json.Unmarshal(msg.Payload, &request)
+					result := agentctl.ModeResult{Requested: request.ModeID, Effective: request.ModeID, Confirmed: request.ModeID != ""}
+					if m.modeResult != nil {
+						result = *m.modeResult
+					}
+					resp, _ = ws.NewResponse(msg.ID, msg.Action, result)
 				}
 			case "agent.session.set_model":
 				if m.failModel {
@@ -338,12 +405,18 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					})
 				}
 			case "agent.prompt":
+				m.mu.Lock()
+				m.promptCalls++
+				m.mu.Unlock()
 				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 					"success": true,
 				})
 			case "agent.stderr":
-				stderrLines := m.stderrLines
-				if len(stderrLines) == 0 {
+				m.mu.Lock()
+				stderrLines := append([]string(nil), m.stderrLines...)
+				stderrConfigured := m.stderrConfigured
+				m.mu.Unlock()
+				if !stderrConfigured && len(stderrLines) == 0 {
 					stderrLines = []string{
 						"npm error code ETARGET",
 						"npm error notarget No matching version found for opencode-ai@1.2.3",
@@ -438,6 +511,21 @@ func (m *restartMockAgentctlServer) getHTTPActions() []string {
 	return out
 }
 
+func (m *restartMockAgentctlServer) getUpdateStreamCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.updateStreamCount
+}
+
+func (m *restartMockAgentctlServer) closeUpdateStreams() {
+	m.mu.Lock()
+	connections := append([]*websocket.Conn(nil), m.updateStreams...)
+	m.mu.Unlock()
+	for _, conn := range connections {
+		_ = conn.Close()
+	}
+}
+
 func (m *restartMockAgentctlServer) getManagedRuntimeRepairSpecs() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -452,6 +540,12 @@ func (m *restartMockAgentctlServer) getWSActions() []string {
 	out := make([]string, len(m.wsActions))
 	copy(out, m.wsActions)
 	return out
+}
+
+func (m *restartMockAgentctlServer) getPromptCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.promptCalls
 }
 
 func (m *restartMockAgentctlServer) getSetModelIDs() []string {
@@ -487,20 +581,22 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	t.Cleanup(client.Close)
 
 	exec := &AgentExecution{
-		ID:             "exec-1",
-		TaskID:         "task-1",
-		SessionID:      "session-1",
-		AgentProfileID: "profile-1",
-		ACPSessionID:   "old-session",
-		AgentCommand:   "auggie --model test",
-		Status:         v1.AgentStatusRunning,
-		WorkspacePath:  "/workspace",
+		ID:              "exec-1",
+		TaskID:          "task-1",
+		SessionID:       "session-1",
+		AgentProfileID:  "profile-1",
+		ResumeAttemptID: "resume-restart",
+		ACPSessionID:    "old-session",
+		AgentCommand:    "auggie --model test",
+		Status:          v1.AgentStatusRunning,
+		WorkspacePath:   "/workspace",
 		metadata: map[string]interface{}{
 			"task_description": "review the changes",
 		},
 		agentctl:     client,
 		promptDoneCh: make(chan PromptCompletionSignal, 1),
 	}
+	initialStartupGeneration := exec.beginStartupAttemptWithID("resume-restart")
 	exec.messageBuffer.WriteString("old-response")
 	exec.thinkingBuffer.WriteString("old-thinking")
 	exec.currentMessageID = "msg-1"
@@ -524,6 +620,12 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 
 	if exec.ACPSessionID != "new-session-123" {
 		t.Fatalf("expected new ACP session ID, got %q", exec.ACPSessionID)
+	}
+	if exec.currentStartupAttemptID() != "resume-restart" {
+		t.Fatalf("restart changed recovery attempt ID to %q", exec.currentStartupAttemptID())
+	}
+	if got := exec.startupAttemptSnapshot(); got <= initialStartupGeneration {
+		t.Fatalf("restart startup source generation = %d, want > %d", got, initialStartupGeneration)
 	}
 	if exec.Status != v1.AgentStatusReady {
 		t.Fatalf("expected status %q, got %q", v1.AgentStatusReady, exec.Status)

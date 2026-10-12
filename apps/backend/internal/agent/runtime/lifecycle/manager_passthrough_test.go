@@ -106,6 +106,7 @@ func newPassthroughMCPTestManager(t *testing.T, agentName string) (*Manager, *Ag
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
+		ExecutorType:   "local",
 		metadata: map[string]interface{}{
 			"standalone_port": 45678,
 		},
@@ -683,10 +684,10 @@ func TestWritePassthroughMCPFilesUnionTrackingOnRelaunch(t *testing.T) {
 	file := mcpconfig.PassthroughConfigFile{Path: path, Content: []byte("{}\n")}
 
 	// Two launches writing the same path must track it exactly once.
-	if err := mgr.writePassthroughMCPFiles(exec, []mcpconfig.PassthroughConfigFile{file}); err != nil {
+	if err := mgr.writePassthroughMCPFiles(context.Background(), exec, []mcpconfig.PassthroughConfigFile{file}); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
-	if err := mgr.writePassthroughMCPFiles(exec, []mcpconfig.PassthroughConfigFile{file}); err != nil {
+	if err := mgr.writePassthroughMCPFiles(context.Background(), exec, []mcpconfig.PassthroughConfigFile{file}); err != nil {
 		t.Fatalf("second write: %v", err)
 	}
 	if files := getPassthroughMCPFiles(exec); len(files) != 1 || files[0] != path {
@@ -818,7 +819,7 @@ func TestWritePassthroughMCPFilesSkipsDanglingLeafSymlink(t *testing.T) {
 	}
 
 	execution := &AgentExecution{WorkspacePath: ws, metadata: map[string]interface{}{}}
-	if err := mgr.writePassthroughMCPFiles(execution, []mcpconfig.PassthroughConfigFile{
+	if err := mgr.writePassthroughMCPFiles(context.Background(), execution, []mcpconfig.PassthroughConfigFile{
 		{Path: leaf, Content: []byte(`{"mcpServers":{}}`), MergeKey: "mcpServers"},
 	}); err != nil {
 		t.Fatalf("writePassthroughMCPFiles: %v", err)

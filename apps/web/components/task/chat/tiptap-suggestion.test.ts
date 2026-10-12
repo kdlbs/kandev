@@ -7,7 +7,12 @@ import {
   handleEntityReferenceMenuKeyDown,
   isEntityReferenceQueryAllowed,
 } from "./tiptap-entity-reference-suggestion";
-import { createMentionSuggestion, MentionSuggestionPluginKey } from "./tiptap-suggestion";
+import {
+  createMentionSuggestion,
+  createSlashSuggestion,
+  MentionSuggestionPluginKey,
+} from "./tiptap-suggestion";
+import type { SlashCommand } from "./slash-command-types";
 import * as entityReferenceSuggestions from "./tiptap-entity-reference-suggestion";
 
 function createSuggestionPositioningProps() {
@@ -24,6 +29,69 @@ function createSuggestionPositioningProps() {
     loading: false,
   };
 }
+
+describe("slash command suggestion", () => {
+  const rawRetroName = "$retro";
+  const skill = {
+    id: `agent-${rawRetroName}`,
+    label: "/retro",
+    description: "Run retro",
+    action: "agent" as const,
+    agentCommandName: rawRetroName,
+    kind: "skill",
+  } as unknown as SlashCommand;
+  const command = {
+    id: "agent-retro",
+    label: "/retro",
+    description: "Run retro command",
+    action: "agent" as const,
+    agentCommandName: "retro",
+  } as SlashCommand;
+
+  it("matches by clean and raw names while keeping equal display names separate", () => {
+    const config = createSlashSuggestion({ getCommands: () => [skill, command] }, vi.fn(), vi.fn());
+    const getItems = config.items as unknown as (args: { query: string }) => SlashCommand[];
+
+    expect(getItems({ query: "retro" }).map((item) => item.id)).toEqual([
+      `agent-${rawRetroName}`,
+      "agent-retro",
+    ]);
+    expect(getItems({ query: rawRetroName }).map((item) => item.id)).toEqual([
+      `agent-${rawRetroName}`,
+    ]);
+  });
+
+  it("selects a clean chip while retaining the raw provider command for serialization", () => {
+    const config = createSlashSuggestion({ getCommands: () => [skill] }, vi.fn(), vi.fn());
+    const chain = {
+      focus: vi.fn(),
+      insertContentAt: vi.fn(),
+      run: vi.fn(),
+    };
+    chain.focus.mockReturnValue(chain);
+    chain.insertContentAt.mockReturnValue(chain);
+    const select = config.command as unknown as (args: {
+      editor: { chain: () => typeof chain };
+      range: { from: number; to: number };
+      props: SlashCommand;
+    }) => void;
+
+    select({ editor: { chain: () => chain }, range: { from: 1, to: 2 }, props: skill });
+
+    expect(chain.insertContentAt).toHaveBeenCalledWith({ from: 1, to: 2 }, [
+      {
+        type: "slashCommand",
+        attrs: {
+          id: "agent-$retro",
+          label: "/retro",
+          commandName: "$retro",
+          description: "Run retro",
+        },
+      },
+      { type: "text", text: " " },
+    ]);
+  });
+});
 
 describe("entity reference suggestion", () => {
   it("provides an independent # suggestion config", () => {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockExecuteUtilityPrompt = vi.fn();
 const mockToast = vi.fn();
+const mockUseSessionGitStatus = vi.fn();
 
 vi.mock("@/lib/api/domains/utility-api", () => ({
   executeUtilityPrompt: (...args: unknown[]) => mockExecuteUtilityPrompt(...args),
@@ -11,7 +12,7 @@ vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 vi.mock("@/hooks/domains/session/use-session-git-status", () => ({
-  useSessionGitStatus: () => undefined,
+  useSessionGitStatus: (...args: unknown[]) => mockUseSessionGitStatus(...args),
 }));
 
 import { useUtilityAgentGenerator } from "./use-utility-agent-generator";
@@ -21,6 +22,12 @@ beforeEach(() => {
 });
 
 describe("useUtilityAgentGenerator enhancePrompt", () => {
+  it("keeps hidden session composers off rich git-status subscriptions", () => {
+    renderHook(() => useUtilityAgentGenerator({ sessionId: "session-1", detailActive: false }));
+
+    expect(mockUseSessionGitStatus).toHaveBeenCalledWith("session-1", { detailActive: false });
+  });
+
   it("keeps enhance loading until the successful result is delivered", async () => {
     mockExecuteUtilityPrompt.mockResolvedValue({
       success: true,

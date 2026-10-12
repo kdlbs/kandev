@@ -56,7 +56,12 @@ function ExportDownloadError({ errorKey, onRetry }: ExportErrorProps) {
     <div className="flex shrink-0 items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
       <span>{t(errorKey)}</span>
       {errorKey === "office:exportConfigurationChanged" && (
-        <Button size="sm" variant="ghost" onClick={onRetry} className="min-h-11 cursor-pointer">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onRetry}
+          className="max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 cursor-pointer"
+        >
           {t("office:retry")}
         </Button>
       )}

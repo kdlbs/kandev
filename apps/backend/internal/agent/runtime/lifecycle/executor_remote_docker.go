@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
@@ -27,7 +29,8 @@ import (
 // all resolve on the remote host, and nothing on the backend's filesystem is
 // mounted into the container.
 type RemoteDockerExecutor struct {
-	logger *logger.Logger
+	logger           *logger.Logger
+	agentctlResolver *AgentctlResolver
 
 	// connect resolves a request to a live remote session. These operations
 	// are fields so the lifecycle can be tested without a daemon or an SSH
@@ -64,10 +67,11 @@ var remoteDockerTargetKeys = []string{
 // remoteDockerSession is one executor profile's live connection to a remote
 // daemon, plus the per-session resources that ride it.
 type remoteDockerSession struct {
-	sshClient    *ssh.Client
-	dockerClient *docker.Client
-	containerMgr *ContainerManager
-	endpoints    containerEndpointResolver
+	sshClient      *ssh.Client
+	dockerClient   *docker.Client
+	containerMgr   *ContainerManager
+	endpoints      containerEndpointResolver
+	agentctlClient *agentctl.Client
 	// inputs delivers the container's agentctl helper, session directory, and
 	// seeded credentials through the Engine API. Nothing reaches the remote
 	// host's filesystem.
@@ -98,6 +102,9 @@ func (s *remoteDockerSession) closeWithWatchdogLoop(
 	watchdog := s.takeWatchdog(expectedWatchdog)
 	if watchdog != nil && awaitLoop {
 		watchdog.stopAndAwaitLoop()
+	}
+	if client := s.takeAgentctlClient(); client != nil {
+		client.Close()
 	}
 	if s.endpoints != nil {
 		if err := s.endpoints.Close(); err != nil {
@@ -145,19 +152,57 @@ func (s *remoteDockerSession) takeWatchdog(expected *sshKeepaliveWatchdog) *sshK
 	return watchdog
 }
 
+func (s *remoteDockerSession) setAgentctlClient(client *agentctl.Client) {
+	s.watchdogMu.Lock()
+	if s.closed {
+		s.watchdogMu.Unlock()
+		if client != nil {
+			client.Close()
+		}
+		return
+	}
+	previous := s.agentctlClient
+	s.agentctlClient = client
+	s.watchdogMu.Unlock()
+	if previous != nil && previous != client {
+		previous.Close()
+	}
+}
+
+func (s *remoteDockerSession) takeAgentctlClient() *agentctl.Client {
+	s.watchdogMu.Lock()
+	defer s.watchdogMu.Unlock()
+	client := s.agentctlClient
+	s.agentctlClient = nil
+	return client
+}
+
 // NewRemoteDockerExecutor creates the remote Docker runtime. Connections are
 // established per launch, against the target named by the executor profile.
-func NewRemoteDockerExecutor(log *logger.Logger) *RemoteDockerExecutor {
+func NewRemoteDockerExecutor(log *logger.Logger, resolvers ...*AgentctlResolver) *RemoteDockerExecutor {
+	resolver := NewAgentctlResolver(log)
+	if len(resolvers) > 0 && resolvers[0] != nil {
+		resolver = resolvers[0]
+	}
 	r := &RemoteDockerExecutor{
-		logger:   log.WithFields(zap.String("runtime", "remote_docker")),
-		sessions: map[string]*remoteDockerSession{},
-		targets:  map[string]map[string]interface{}{},
+		logger:           log.WithFields(zap.String("runtime", "remote_docker")),
+		agentctlResolver: resolver,
+		sessions:         map[string]*remoteDockerSession{},
+		targets:          map[string]map[string]interface{}{},
 	}
 	r.connect = r.dialRemote
 	r.reconnect = r.reconnectToContainer
 	r.launch = r.launchFresh
 	r.watchTransport = r.startTransportWatchdog
 	return r
+}
+
+func (r *RemoteDockerExecutor) newRemoteContainerInputs(
+	client containerArchiveWriter,
+	platform SSHRemotePlatform,
+	commandBuilder *CommandBuilder,
+) *remoteContainerInputs {
+	return newRemoteContainerInputs(client, platform, commandBuilder, r.logger, r.agentctlResolver)
 }
 
 func (r *RemoteDockerExecutor) Name() executor.Name {
@@ -268,7 +313,7 @@ func (r *RemoteDockerExecutor) dialRemote(ctx context.Context, req *ExecutorCrea
 	mgr.containerHostFiles = newRemoteContainerHostFiles(info.Platform)
 	mgr.endpointResolver = session.endpoints
 
-	session.inputs = newRemoteContainerInputs(dockerClient, info.Platform, mgr.commandBuilder, r.logger)
+	session.inputs = r.newRemoteContainerInputs(dockerClient, info.Platform, mgr.commandBuilder)
 	session.inputs.resolveMockAgentBinary = mgr.resolveMockAgentBinary
 	mgr.seedCreatedContainer = session.inputs.DeliverLaunchInputs
 	session.containerMgr = mgr
@@ -326,6 +371,7 @@ func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *Executor
 		return nil, reconnectErr
 	}
 	if instance != nil {
+		session.setAgentctlClient(instance.Client)
 		r.rememberTarget(req)
 		return instance, nil
 	}
@@ -340,6 +386,7 @@ func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *Executor
 		r.releaseSession(req.InstanceID)
 		return nil, err
 	}
+	session.setAgentctlClient(instance.Client)
 	r.rememberTarget(req)
 	return instance, nil
 }
@@ -598,11 +645,21 @@ func (r *RemoteDockerExecutor) StopInstance(ctx context.Context, instance *Execu
 func (r *RemoteDockerExecutor) stopOverNewConnection(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	target := r.target(instance.InstanceID)
 	if target == nil {
+		var err error
+		target, err = persistedRemoteDockerTarget(instance)
+		if err != nil {
+			return fmt.Errorf("remote docker: saved target for instance %s is invalid; container %s was left running: %w",
+				instance.InstanceID, instance.ContainerID, err)
+		}
+	}
+	if target == nil {
 		// Nothing says where the container is. It stays on the remote host;
 		// say so rather than reporting success.
 		return fmt.Errorf("remote docker: no live connection for instance %s; container %s was left running",
 			instance.InstanceID, instance.ContainerID)
 	}
+	target = cloneRemoteDockerTargetMetadata(target)
+	target[MetadataKeyContainerID] = instance.ContainerID
 	session, err := r.connect(ctx, &ExecutorCreateRequest{InstanceID: instance.InstanceID, Metadata: target})
 	if err != nil {
 		return fmt.Errorf("remote docker: reconnect to remove container %s: %w", instance.ContainerID, err)
@@ -616,11 +673,57 @@ func (r *RemoteDockerExecutor) stopOverNewConnection(ctx context.Context, instan
 	return stopDockerContainer(ctx, session.dockerClient, session.containerMgr, instance, force, r.logger)
 }
 
-// RecoverInstances does not adopt containers after a backend restart. The
-// remote container survives, but its SSH connection and port forwards do not,
-// and reconnecting is resume's job once a request names the target.
-func (r *RemoteDockerExecutor) RecoverInstances(_ context.Context, _ []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
-	return nil, nil
+func persistedRemoteDockerTarget(instance *ExecutorInstance) (map[string]interface{}, error) {
+	if instance == nil {
+		return nil, nil
+	}
+	target := cloneRemoteDockerTargetMetadata(instance.Metadata)
+	targetPresent := false
+	for _, key := range remoteDockerTargetKeys {
+		if strings.TrimSpace(getMetadataString(target, key)) != "" {
+			targetPresent = true
+			break
+		}
+	}
+	if !targetPresent {
+		return nil, nil
+	}
+	containerID := strings.TrimSpace(instance.ContainerID)
+	if containerID == "" {
+		return nil, errors.New("container ID is missing")
+	}
+	if savedID := strings.TrimSpace(getMetadataString(instance.Metadata, MetadataKeyContainerID)); savedID != "" && savedID != containerID {
+		return nil, fmt.Errorf("saved container ID %q does not match instance container %q", savedID, containerID)
+	}
+	if _, err := remoteDockerTarget(target); err != nil {
+		return nil, err
+	}
+	target[MetadataKeyContainerID] = containerID
+	return target, nil
+}
+
+func cloneRemoteDockerTargetMetadata(metadata map[string]interface{}) map[string]interface{} {
+	if metadata == nil {
+		return nil
+	}
+	target := make(map[string]interface{}, len(remoteDockerTargetKeys))
+	for _, key := range remoteDockerTargetKeys {
+		if value, ok := metadata[key]; ok {
+			target[key] = value
+		}
+	}
+	return target
+}
+
+// RecoverInstances attaches to the exact live container and agentctl instance
+// recorded before a backend restart. It does not use the resume path, which
+// may start a stopped container or recreate an agentctl instance.
+func (r *RemoteDockerExecutor) RecoverInstances(
+	ctx context.Context,
+	records []*models.ExecutorRunning,
+) ([]*ExecutorInstance, error) {
+	instances, _, err := r.RecoverInstancesDetailed(ctx, records)
+	return instances, err
 }
 
 // GetInteractiveRunner returns nil: passthrough mode runs a process on the

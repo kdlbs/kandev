@@ -299,6 +299,19 @@ test("launches from a real in-cluster service account", async ({ cluster }) => {
     expect(task.session_id).toBeTruthy();
     const pod = await waitForKubernetesPod(cluster, task.id, task.session_id!);
     expect(pod.metadata.labels?.["kandev.ai/executor-id"]).toBe(seed.executorId);
+    const backendLogs = cluster.kubectl([
+      "-n",
+      cluster.controlNamespace,
+      "exec",
+      "pod/kandev-in-cluster",
+      "-c",
+      "backend",
+      "--",
+      "cat",
+      "/data/home/logs/backend-logs.log",
+    ]);
+    expect(backendLogs).toContain("using verified remote helper cache");
+    expect(backendLogs).toContain(cluster.remoteHelperCachePath);
   } finally {
     await apiClient.e2eReset(seed.workspaceId, [seed.workflowId]).catch(() => undefined);
     await apiClient.deleteExecutorProfile(seed.executorProfileId).catch(() => undefined);

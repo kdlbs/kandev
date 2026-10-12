@@ -129,6 +129,32 @@ func (s *Service) ClaimMessageAttachments(ctx context.Context, taskID, sessionID
 	return s.attachmentSvc.Claim(ctx, identity.UserID, task.WorkspaceID, taskID, sessionID, ids)
 }
 
+// RestoreLaunchMessageAttachments keeps staged uploads reusable when a
+// synchronous launch fails before the caller receives a session identity.
+func (s *Service) RestoreLaunchMessageAttachments(
+	ctx context.Context,
+	taskID, sessionID string,
+	attachments []v1.MessageAttachment,
+) error {
+	ids := make([]string, 0, len(attachments))
+	for _, attachment := range attachments {
+		if attachment.AttachmentID != "" {
+			ids = append(ids, attachment.AttachmentID)
+		}
+	}
+	if len(ids) == 0 || s.attachmentSvc == nil {
+		return nil
+	}
+	if _, err := s.GetTask(ctx, taskID); err != nil {
+		return err
+	}
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.UserID == "" {
+		return models.ErrAttachmentForbidden
+	}
+	return s.attachmentSvc.RestoreLaunchClaim(ctx, identity.UserID, taskID, sessionID, ids)
+}
+
 func (s *Service) attachmentIDs(attachments []v1.MessageAttachment) ([]string, error) {
 	if len(attachments) == 0 {
 		return nil, nil

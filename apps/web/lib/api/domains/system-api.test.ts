@@ -10,6 +10,7 @@ import {
   fetchDiskUsage,
   refreshDiskUsage,
   fetchDatabaseStats,
+  retryDatabaseStats,
   vacuumDatabase,
   optimizeDatabase,
   resetDatabase,
@@ -130,6 +131,14 @@ describe("fetchDatabaseStats", () => {
         backup_directory: "/data/backups",
         size_bytes: 1,
         wal_size_bytes: 0,
+        message_content_bytes: null,
+        message_metadata_bytes: null,
+        message_payload_bytes: null,
+        git_snapshot_bytes: null,
+        logical_stats_state: "pending",
+        logical_stats_measured_at: null,
+        metadata_stale: false,
+        metadata_measured_at: "2026-05-17T00:00:00Z",
         schema_version: "1",
         last_backup_at: "",
       }),
@@ -140,6 +149,13 @@ describe("fetchDatabaseStats", () => {
     expect(stats.driver).toBe("sqlite");
     expect(stats.path).toBe("/data/kandev.db");
     expect(stats.backup_directory).toBe("/data/backups");
+  });
+
+  it("POSTs /database/refresh to request an immediate background retry", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await retryDatabaseStats();
+    expect(lastCall().url).toBe(`${BASE}/database/refresh`);
+    expect(method()).toBe("POST");
   });
 });
 
@@ -400,7 +416,12 @@ const storageSettings = {
   quarantine_retention_hours: 168,
   workspaces: { enabled: true, dependency_cleanup_enabled: false },
   kandev_containers: { enabled: true },
-  go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
+  go_cache: {
+    enabled: false,
+    max_bytes: 16106127360,
+    adopted_path: "",
+    allow_cleanup_while_busy: false,
+  },
   docker: {
     dedicated_daemon_acknowledged: false,
     build_cache_enabled: false,

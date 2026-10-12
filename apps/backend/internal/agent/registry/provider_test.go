@@ -32,6 +32,24 @@ type providerSelectionReader struct {
 	err       error
 }
 
+type providerOpenCodeSelectionStore struct {
+	selection managedruntime.OpenCodeSelection
+	err       error
+}
+
+func (s providerOpenCodeSelectionStore) Get(context.Context, string, string) (managedruntime.Selection, bool, error) {
+	return managedruntime.Selection{}, false, nil
+}
+
+func (s providerOpenCodeSelectionStore) Save(context.Context, string, string, string) error {
+	return nil
+}
+func (s providerOpenCodeSelectionStore) Delete(context.Context, string, string) error { return nil }
+
+func (s providerOpenCodeSelectionStore) GetOpenCodeSelection(context.Context) (managedruntime.OpenCodeSelection, bool, error) {
+	return s.selection, s.err == nil, s.err
+}
+
 func (s providerSelectionReader) Get(
 	context.Context,
 	string,
@@ -62,7 +80,7 @@ func TestProvide_MockAgentModes(t *testing.T) {
 			wantOnlyMock:    false,
 		},
 		{
-			name:            "only: only mock-agent registered and enabled",
+			name:            "only: mock-agent enabled, optional native descriptor disabled",
 			envValue:        "only",
 			wantMockEnabled: true,
 			wantOnlyMock:    true,
@@ -102,9 +120,12 @@ func TestProvide_MockAgentModes(t *testing.T) {
 			// Check agent count
 			all := reg.List()
 			if tt.wantOnlyMock {
-				if len(all) != 2 {
-					t.Errorf("only mode: expected mock agent plus virtual families, got %d", len(all))
+				if len(all) != 3 {
+					t.Errorf("only mode: expected mock agent, virtual family, and disabled native descriptor, got %d", len(all))
 				}
+			}
+			if native, exists := reg.Get("codex-app-server"); !exists || native.Enabled() {
+				t.Error("native Codex descriptor should remain registered but disabled by default")
 			}
 			if !reg.Exists(agents.DynamicAgentID) {
 				t.Error("dynamic virtual family should always be registered")
@@ -120,6 +141,24 @@ func TestProvide_MockAgentModes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestProvide_MockOnlyKeepsNativeCodexDisabled(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT", "only")
+
+	reg, cleanup, err := Provide(newTestLogger(), true)
+	if err != nil {
+		t.Fatalf("Provide() error: %v", err)
+	}
+	defer cleanup() //nolint:errcheck
+
+	native, exists := reg.Get("codex-app-server")
+	if !exists {
+		t.Fatal("native Codex descriptor should remain registered")
+	}
+	if native.Enabled() {
+		t.Fatal("native Codex must stay disabled while mock-only mode isolates inference")
 	}
 }
 
@@ -172,6 +211,33 @@ func TestResolveProviderCommandFailsClosedOnSelectionReadError(t *testing.T) {
 	}
 }
 
+func TestResolveProviderCommandUsesSelectedOpenCodeFamily(t *testing.T) {
+	reg := NewRegistry(newTestLogger())
+	openCode := agents.NewOpenCodeACP()
+	if err := reg.Register(openCode); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	reg.SetManagedRuntimeSelectionStore(providerOpenCodeSelectionStore{selection: managedruntime.OpenCodeSelection{
+		SchemaVersion: 1, Family: managedruntime.OpenCodeFamilyV2, Source: managedruntime.OpenCodeSourceManaged,
+		Package: "@opencode/cli", SelectedVersion: "2.0.18", AppliedDefaultVersion: "2.0.18", Revision: 1,
+	}})
+
+	args, _, ok := reg.resolveProviderCommand(context.Background(), openCode.ID())
+	if !ok {
+		t.Fatal("resolveProviderCommand returned !ok")
+	}
+	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", managedruntime.NPMProjectPrefix,
+		"@opencode/cli@2.0.18", "acp", "--print-logs"}
+	if len(args) != len(want) {
+		t.Fatalf("command args = %#v, want %#v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("command args = %#v, want %#v", args, want)
+		}
+	}
+}
+
 // TestProvide_MockProviders_RegistersExtraAliases ensures that when
 // KANDEV_MOCK_AGENT=only and KANDEV_MOCK_PROVIDERS lists canonical
 // routing provider IDs, each accepted ID is registered as an extra
@@ -203,6 +269,30 @@ func TestProvide_MockProviders_RegistersExtraAliases(t *testing.T) {
 	// opencode-acp not in the env var, must not be registered.
 	if reg.Exists("opencode-acp") {
 		t.Error("opencode-acp should NOT be registered when not in KANDEV_MOCK_PROVIDERS")
+	}
+}
+
+func TestProvide_E2EMockAuggieIsExplicitlyOptIn(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT", "only")
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	t.Setenv("KANDEV_E2E_MOCK_AUGGIE", "true")
+
+	log := newTestLogger()
+	reg, cleanup, err := Provide(log)
+	if err != nil {
+		t.Fatalf("Provide() error: %v", err)
+	}
+	defer cleanup() //nolint:errcheck
+
+	provider, ok := reg.Get("auggie")
+	if !ok {
+		t.Fatal("expected explicit E2E Auggie mock alias")
+	}
+	if _, isMock := provider.(*agents.MockAgent); !isMock {
+		t.Fatalf("auggie provider = %T, want *agents.MockAgent", provider)
+	}
+	if !provider.Enabled() {
+		t.Fatal("explicit E2E Auggie mock alias must be enabled")
 	}
 }
 

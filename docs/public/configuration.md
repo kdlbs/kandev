@@ -28,6 +28,8 @@ This page is the startup-configuration reference. Executor-specific fields are c
 
 Startup sources are read once and later sources override earlier ones. Web settings are stored separately and do not join the YAML and environment-variable precedence chain.
 
+Persistent web preferences are stored separately from startup configuration. **Settings > Preferences > Task behavior > Conversation > Message time** controls whether transcript timestamps use relative, absolute short, or absolute long labels. The other form remains available on hover or by tapping the timestamp. This is a per-user preference stored in the database, not a `config.yaml` key or environment variable.
+
 ## Load order and lifecycle
 
 At backend startup, later sources override earlier ones:
@@ -148,10 +150,10 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 ### Core agent service
 
-| YAML key               | Environment variable                              | Default     | Current behavior                                                                                  |
-| ---------------------- | ------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
-| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `127.0.0.1` | Host of the core `agentctl` control server. The literal avoids IPv6 loopback resolution variance. |
-| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback.                                  |
+| YAML key               | Environment variable                              | Default     | Current behavior                                                                                                                                                                                        |
+| ---------------------- | ------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `127.0.0.1` | Host of the core `agentctl` control server. `agentctl` and its per-session servers listen only on this host, so they stay on loopback by default. The literal avoids IPv6 loopback resolution variance. |
+| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback.                                                                                                                                        |
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
@@ -196,6 +198,31 @@ environment value falls back to `2h`, and non-positive values from a profile
 default are ignored, leaving the `2h` default in effect. The environment
 variable overrides YAML, and changes require a backend restart.
 
+
+### Backend delivery retention
+
+These startup values apply to SQLite and PostgreSQL. Restart the backend after a change.
+Invalid durations, zero values, and values outside the ranges stop startup.
+Environment values override YAML. These values do not configure the agentctl journal.
+
+| YAML key | Environment variable | Default | Range |
+| --- | --- | --- | --- |
+| `tasks.deliveryRetention.payloadGrace` | `KANDEV_TASK_DELIVERY_RETENTION_PAYLOAD_GRACE` | `1h` | `1m` to `720h` |
+| `tasks.deliveryRetention.replayAge` | `KANDEV_TASK_DELIVERY_RETENTION_REPLAY_AGE` | `24h` | `1h` to `720h` |
+| `tasks.deliveryRetention.replayEvents` | `KANDEV_TASK_DELIVERY_RETENTION_REPLAY_EVENTS` | `10000` | 100 to 100000 |
+| `tasks.deliveryRetention.interval` | `KANDEV_TASK_DELIVERY_RETENTION_INTERVAL` | `1m` | `10s` to `1h` |
+| `tasks.deliveryRetention.batchRows` | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_ROWS` | `200` | 1 to 200 |
+| `tasks.deliveryRetention.batchBytes` | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_BYTES` | `4194304` | 1048576 to 4194304 |
+
+`interval` controls idle rechecks after work is exhausted or maintenance is busy. Productive cleanup continues immediately without inter-batch or inter-pass sleeps.
+
+`batchRows` sets a candidate ceiling. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings. Other cleanup batches can use the configured ceiling.
+
+Automatic cleanup preserves canonical history and unresolved recovery evidence.
+Grace controls eligible raw payload removal. Replay age and event count bound recent duplicate receipts.
+Safety checks apply at every configured value. Protected data has no forced expiry.
+See [delivery retention operations](operations.md#backend-delivery-retention) for backups, rollback, logs, and physical reclamation.
+
 ### Capacity and managed-process startup settings
 
 | YAML key                                   | Environment variable                              | Type and default                  | Current behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -235,7 +262,7 @@ through a private process contract.
 | `auth.sessionTTLHours`                 | `KANDEV_AUTH_SESSIONTTLHOURS`                     | `720`            | Compatibility session lifetime setting.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `auth.cookieName`                      | `KANDEV_AUTH_COOKIE_NAME`                         | empty            | Session cookie base name. Empty (default) means the effective name is derived from the request host: `kandev_session` on a default-port host, `kandev_session_<port>` on a ported host. This isolates multiple instances on one host (see [authentication](authentication.md#multiple-instances-on-one-host)). A non-empty value is used verbatim (never port-suffixed) and disables automatic isolation, so it must be unique per cookie host. Precedence: environment over config file over default. |
 | `office.jwtSigningKey`                 | `KANDEV_OFFICE_JWTSIGNINGKEY`                     | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts.                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `githubCredentialBroker.publicBaseUrl` | `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL` | empty            | Public HTTPS base URL used by remote executors to resolve GitHub credentials. Loopback HTTP is allowed for development.                                                                                                                                                                                                                                                                                                                                                                                |
+| `githubCredentialBroker.publicBaseUrl` | `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL` | empty            | Public HTTPS base URL of Kandev, used by remote executors to resolve GitHub credentials and by plugin remote executors to call the Kandev API. Loopback HTTP is allowed for development; plugin remote executors require a non-local HTTPS URL.                                                                                                                                                                                                                                                                                                                                                                                |
 
 Runtime feature flags are documented in [Runtime feature toggles](#runtime-feature-toggles); they are profile, environment, and database-backed controls, not canonical YAML settings.
 

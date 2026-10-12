@@ -118,6 +118,49 @@ export interface PluginActionProps {
   onMouseLeave?: PluginActionEventHandler<PluginActionMouseEvent>;
 }
 
+/** Immutable task identity passed to a task-create completion handler. */
+export interface PluginTaskCreatedIdentity {
+  readonly id: string;
+  readonly workspace_id: string;
+}
+
+/** Handler invoked after its owning create dialog successfully creates a task. */
+export type PluginTaskCreatedHandler = (task: PluginTaskCreatedIdentity) => void | Promise<void>;
+
+/** Registers a task-created handler for the lifetime of its slot contribution. */
+export type RegisterPluginTaskCreatedHandler = (handler: PluginTaskCreatedHandler) => () => void;
+
+export type PluginComposerSurface = "task-chat" | "quick-chat" | "task-create" | "new-session";
+
+export type PluginComposerSubmitResult =
+  | { status: "submitted" }
+  | { status: "blocked"; reason?: string }
+  | { status: "unavailable" };
+
+export interface PluginComposerCapability {
+  insertText(text: string): { status: "inserted" | "ignored" | "unavailable" };
+  focus(): { status: "focused" | "unavailable" };
+  submit(): Promise<PluginComposerSubmitResult>;
+}
+
+/** Typed context passed to native composer action slots. */
+export interface PluginComposerSlotProps {
+  surface: PluginComposerSurface;
+  presentation: "desktop" | "mobile";
+  taskId: string | null;
+  taskTitle?: string;
+  activeSessionId: string | null;
+  sessionIds: string[];
+  disabled: boolean;
+  submittable: boolean;
+  disabledReason?: string;
+  composer: PluginComposerCapability;
+  /**
+   * Present only on create-mode `task-create-input-actions`. The returned
+   * cleanup unregisters the callback when the slot contribution unmounts.
+   */
+  registerTaskCreatedHandler?: RegisterPluginTaskCreatedHandler;
+}
 export interface PluginActionGroupProps {
   children?: HostNode;
   label?: string;
@@ -497,6 +540,217 @@ export interface PluginConversationApi {
   useMessageFavorite(sessionId: string | null, messageId: string): boolean;
 }
 
+export interface PluginTaskStatusSnapshot {
+  taskId: string;
+  title: string;
+  state: string;
+  workflowStepId?: string;
+  statusSummary?: {
+    revision: number;
+    foregroundActivity?: string;
+    activeSubagentCount?: number;
+    queuedPromptCount?: number;
+    completionGate?: { verifiedCount: number; criteriaCount: number; blocked: boolean };
+    activeError?: { preview: string; category?: string };
+  } | null;
+}
+
+export interface PluginTaskUsageSnapshot {
+  taskId: string;
+  sessionId?: string;
+  tokensIn: number;
+  tokensCachedRead: number;
+  tokensCachedWrite: number;
+  tokensOut: number;
+  tokensThought: number;
+  tokensTotal: number;
+  /** Hundredths of a cent, as returned by Kandev's task usage API. */
+  costSubcents: number;
+  eventCount: number;
+  estimatedEventCount: number;
+  unpricedEventCount: number;
+  outputTokensComplete: boolean;
+  firstEventAt?: string | null;
+  lastEventAt?: string | null;
+}
+
+export interface PluginQueryState<Value> {
+  data: Value | null;
+  loading: boolean;
+  error: string | null;
+  refetch(): Promise<void>;
+}
+
+export interface PluginHostQueriesApi {
+  useTaskStatus(taskId: string | null): PluginQueryState<PluginTaskStatusSnapshot>;
+  useTaskUsage(
+    taskId: string | null,
+    sessionId?: string | null,
+  ): PluginQueryState<PluginTaskUsageSnapshot>;
+}
+
+export type PluginManagedConversationState =
+  | "loading"
+  | "ready"
+  | "paused"
+  | "disconnected"
+  | "revoked"
+  | "unsupported"
+  | "unavailable"
+  | "detached";
+
+export interface PluginManagedConversationOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface PluginManagedConversationQuestion {
+  id: string;
+  title: string;
+  prompt?: string;
+  options?: readonly PluginManagedConversationOption[];
+}
+
+export interface PluginManagedConversationClarificationAnswer {
+  questionId: string;
+  selectedOptions?: readonly string[];
+  customText?: string;
+}
+
+export interface PluginManagedConversationInteraction {
+  id: string;
+  kind: "permission" | "clarification";
+  title: string;
+  context?: string;
+  expectedResourceVersion: string;
+  options?: readonly PluginManagedConversationOption[];
+  questions?: readonly PluginManagedConversationQuestion[];
+  agentDisconnected?: boolean;
+}
+
+export interface PluginManagedConversationSnapshot {
+  workspaceId: string;
+  instanceKey: string;
+  taskId: string;
+  sessionId: string | null;
+  /** Host conversation revision for managed input and lifecycle commands. */
+  revision: number;
+  /** Current session resource version used by safe execution recovery. */
+  sessionResourceVersion: string;
+  executionId?: string;
+  sessionState?: string;
+  state: PluginManagedConversationState;
+  readOnly?: boolean;
+  statusReason?: string;
+  recoverySupported?: boolean;
+  recoveryReason?: string;
+  pendingInteractions: readonly PluginManagedConversationInteraction[];
+}
+
+export interface PluginManagedConversationInputIntent {
+  requestId: string;
+  idempotencyKey: string;
+  occurrenceKey: string;
+  origin: "human";
+  payload: string;
+}
+
+export interface PluginManagedConversationController {
+  getStatus(): Promise<PluginManagedConversationSnapshot>;
+  listInputs(input: { sequenceCursor: number; limit: number }): Promise<{
+    inputs: readonly PluginHostV2ManagedAgentInputReceipt[];
+    nextSequenceCursor: number;
+    hasMore: boolean;
+  }>;
+  enqueue(
+    input: PluginManagedConversationInputIntent & { expectedConversationRevision: number },
+  ): Promise<{
+    receipt: PluginHostV2ManagedAgentInputReceipt;
+  }>;
+  cancelInput(input: {
+    requestId: string;
+    idempotencyKey: string;
+    expectedConversationRevision: number;
+    hostInputId: string;
+    expectedExecutionId?: string;
+  }): Promise<{ receipt: PluginHostV2ManagedAgentInputReceipt }>;
+  setPaused(input: {
+    requestId: string;
+    idempotencyKey: string;
+    expectedConversationRevision: number;
+    paused: boolean;
+  }): Promise<PluginManagedConversationSnapshot>;
+  recover(input: {
+    requestId: string;
+    idempotencyKey: string;
+    expectedConversationRevision: number;
+    expectedSessionResourceVersion: string;
+    expectedExecutionId: string;
+  }): Promise<PluginManagedConversationSnapshot>;
+  respondToPermission(input: {
+    requestId: string;
+    interactionId: string;
+    expectedResourceVersion: string;
+    optionId?: string;
+    cancelled?: boolean;
+    humanResponseReceiptId: string;
+  }): Promise<void>;
+  answerClarification(input: {
+    requestId: string;
+    interactionId: string;
+    expectedResourceVersion: string;
+    answers: readonly PluginManagedConversationClarificationAnswer[];
+    humanResponseReceiptId: string;
+  }): Promise<void>;
+}
+
+export interface PluginManagedConversationInstance {
+  key: string;
+  label: string;
+}
+
+export interface PluginWorkspaceAgentChatProps {
+  conversation: PluginManagedConversationSnapshot;
+  controller: PluginManagedConversationController;
+  instances?: readonly PluginManagedConversationInstance[];
+  onSelectInstance?(instanceKey: string): void;
+  tasksPanel?: HostNode;
+  outcomesPanel?: HostNode;
+  onStatus?(status: PluginManagedConversationSnapshot): void;
+}
+
+export interface PluginHumanInteractionResponseInput {
+  workspaceId: string;
+  interactionId: string;
+  expectedResourceVersion: string;
+  response:
+    | { kind: "permission"; optionId: string; cancelled?: false }
+    | { kind: "permission"; optionId?: never; cancelled: true }
+    | {
+        kind: "clarification";
+        answers: readonly PluginManagedConversationClarificationAnswer[];
+      };
+}
+
+export interface PluginHostInteractionsApi {
+  /** Issues a short-lived receipt for an authenticated human response. */
+  issueResponseReceipt(input: PluginHumanInteractionResponseInput): Promise<{
+    id: string;
+    interactionId: string;
+    resourceVersion: string;
+    expiresAt: string;
+  }>;
+}
+
+export interface PluginWorkspaceTaskSurfaceProps {
+  taskId: string;
+}
+
+export interface PluginWorkspaceTaskUsageProps extends PluginWorkspaceTaskSurfaceProps {
+  sessionId?: string | null;
+}
+
 export type PluginOpenMessageResult = { status: "accepted" | "unavailable" };
 
 export interface PluginTaskPanelConversationCapability {
@@ -783,6 +1037,9 @@ interface PluginUIShape {
   SettingsSection: unknown;
   SettingsCard: unknown;
   WorkspaceScopedSection: unknown;
+  WorkspaceAgentChat: Component<PluginWorkspaceAgentChatProps>;
+  WorkspaceTaskStatus: Component<PluginWorkspaceTaskSurfaceProps>;
+  WorkspaceTaskUsage: Component<PluginWorkspaceTaskUsageProps>;
 }
 
 export type SettingsSaveRevision = string | number;
@@ -832,12 +1089,262 @@ export interface PluginI18nApi {
   };
 }
 
+/** Exact backend Host operations advertised for one approved installation. */
+export interface PluginHostV2OperationSupport {
+  method: string;
+  capabilityId: string;
+  description: string;
+  supported: boolean;
+  authorized: boolean;
+  unavailableReason: string;
+}
+
+/** Workspace-scoped v2 feature discovery returned by the Go pluginsdk. */
+export interface PluginHostV2CapabilityContext {
+  installationId: string;
+  workspaceId: string;
+  manifestDigest: string;
+  approvalRevision: number;
+  approvalState: string;
+  operations: readonly PluginHostV2OperationSupport[];
+  limits: Readonly<Record<string, number>>;
+  supportedProviders: readonly string[];
+}
+
+export type PluginHostV2CommandStatus =
+  | "APPLIED"
+  | "ALREADY_APPLIED"
+  | "NO_CHANGE"
+  | "CONFLICT"
+  | "DENIED"
+  | "NOT_FOUND"
+  | "INVALID"
+  | "UNSUPPORTED"
+  | "RATE_LIMITED"
+  | "UNAVAILABLE"
+  | "PARTIAL"
+  | "UNCERTAIN";
+
+/** Durable result metadata returned by an exact backend Host command. */
+export interface PluginHostV2CommandReceipt {
+  id: string;
+  operationId: string;
+  status: PluginHostV2CommandStatus;
+  targetId: string;
+  resourceVersion: string;
+  approvalRevision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PluginHostV2CommandResult {
+  status: PluginHostV2CommandStatus;
+  reason?: string;
+  receipt?: PluginHostV2CommandReceipt;
+}
+
+/** The exact task patch supported by the first Host v2 command. */
+export interface PluginHostV2TaskUpdate {
+  requestId: string;
+  workspaceId: string;
+  taskId: string;
+  idempotencyKey: string;
+  expectedResourceVersion: string;
+  approvalRevision: number;
+  manifestDigest: string;
+  title?: string;
+  description?: string;
+  state?: string;
+  priority?: string;
+}
+
+export interface PluginHostV2TaskCommandContext {
+  requestId: string;
+  workspaceId: string;
+  taskId: string;
+  idempotencyKey: string;
+  expectedResourceVersion: string;
+  approvalRevision: number;
+  manifestDigest: string;
+}
+
+/** Exact task label replacement projected by a plugin backend to its UI. */
+export interface PluginHostV2TaskLabels extends PluginHostV2TaskCommandContext {
+  labels: readonly string[];
+}
+
+/** Human assignee update. Agent assignment uses a separate native command. */
+export interface PluginHostV2TaskAssignment extends PluginHostV2TaskCommandContext {
+  assigneeUserId: string;
+}
+
+/** Workflow move projected by a plugin backend to its UI. */
+export interface PluginHostV2TaskMove extends PluginHostV2TaskCommandContext {
+  workflowId?: string;
+  workflowStepId: string;
+  position: number;
+}
+
+/** Native task archive request projected by a plugin backend to its UI. */
+export interface PluginHostV2TaskArchive extends PluginHostV2TaskCommandContext {}
+
+export type PluginHostV2TaskCompletionEvidenceKind =
+  | "task_revision"
+  | "execution"
+  | "artifact_revision"
+  | "github_pr_head";
+
+export interface PluginHostV2TaskCompletionEvidenceSubject {
+  kind: PluginHostV2TaskCompletionEvidenceKind;
+  id: string;
+  revision?: string;
+}
+
+export interface PluginHostV2TaskCompletionEvidence {
+  subject: PluginHostV2TaskCompletionEvidenceSubject;
+  summary?: string;
+  reference?: string;
+}
+
+export interface PluginHostV2TaskCompletionCriterion {
+  id: string;
+  description: string;
+  evidenceSubject: PluginHostV2TaskCompletionEvidenceSubject;
+  criterionRevision: number;
+  verifiedRevision: number;
+  evidence?: PluginHostV2TaskCompletionEvidence;
+  verifierKind?: string;
+  verifierId?: string;
+  verifiedAt?: string;
+}
+
+export interface PluginHostV2TaskCompletionBlocker {
+  criterionId: string;
+  reason: string;
+}
+
+/** Bounded task-owned completion snapshot projected by a plugin backend. */
+export interface PluginHostV2TaskCompletionGateSnapshot {
+  taskId: string;
+  workspaceId: string;
+  revision: number;
+  criteria: readonly PluginHostV2TaskCompletionCriterion[];
+  blockers: readonly PluginHostV2TaskCompletionBlocker[];
+  blocked: boolean;
+}
+
+export type PluginHostV2ManagedAgentInputOrigin =
+  | "human"
+  | "automation"
+  | "periodic"
+  | "interaction";
+
+export type PluginHostV2ManagedAgentInputState =
+  | "accepted"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "uncertain";
+
+export type PluginHostV2ManagedDispatchStatus = "busy" | "started" | "sent";
+
+/** Host-owned receipt for one durably admitted managed conversation input. */
+export interface PluginHostV2ManagedAgentInputReceipt {
+  hostInputId: string;
+  occurrenceKey: string;
+  sequence: number;
+  origin: PluginHostV2ManagedAgentInputOrigin;
+  payload: string;
+  coalesceKey: string;
+  conversationRevision: number;
+  state: PluginHostV2ManagedAgentInputState;
+  createdAt: string;
+  updatedAt: string;
+  queueEntryId: string;
+  executionId: string;
+  turnId: string;
+  supersededBy: string;
+}
+
+/** Exact authorization and idempotency metadata for durable input admission. */
+export interface PluginHostV2ManagedAgentInputEnqueue {
+  requestId: string;
+  idempotencyKey: string;
+  workspaceId: string;
+  instanceKey: string;
+  expectedConversationRevision: number;
+  approvalRevision: number;
+  manifestDigest: string;
+  occurrenceKey: string;
+  origin: PluginHostV2ManagedAgentInputOrigin;
+  payload: string;
+  /** Only periodic input may use a non-empty coalescing key. */
+  coalesceKey?: string;
+}
+
+export interface PluginHostV2ManagedAgentInputQuery {
+  workspaceId: string;
+  instanceKey: string;
+  hostInputId: string;
+  approvalRevision: number;
+  manifestDigest: string;
+}
+
+export interface PluginHostV2ManagedAgentInputListQuery {
+  workspaceId: string;
+  instanceKey: string;
+  sequenceCursor: number;
+  /** The Host enforces the maximum page size. */
+  limit: number;
+  approvalRevision: number;
+  manifestDigest: string;
+}
+
+export interface PluginHostV2ManagedAgentInputPage {
+  inputs: readonly PluginHostV2ManagedAgentInputReceipt[];
+  nextSequenceCursor: number;
+  hasMore: boolean;
+}
+
+export interface PluginHostV2ManagedAgentInputCancel {
+  requestId: string;
+  idempotencyKey: string;
+  workspaceId: string;
+  instanceKey: string;
+  hostInputId: string;
+  expectedConversationRevision: number;
+  /** Required after start; empty only when the input is still accepted. */
+  expectedExecutionId: string;
+  approvalRevision: number;
+  manifestDigest: string;
+}
+
+/** Immediate dispatch never queues; a busy session is reported as "busy". */
+export interface PluginHostV2ManagedConversationDispatch {
+  requestId: string;
+  idempotencyKey: string;
+  workspaceId: string;
+  instanceKey: string;
+  expectedConversationRevision: number;
+  approvalRevision: number;
+  manifestDigest: string;
+  occurrenceKey: string;
+  origin: PluginHostV2ManagedAgentInputOrigin;
+  payload: string;
+  coalesceKey?: string;
+}
+
 export interface PluginHostApi {
   pluginId: string;
   React: HostReact;
   jsx: ElementFactory;
   ui: PluginUIApi;
   conversation: PluginConversationApi;
+  /** Optional on older runtimes; check before using this host read facade. */
+  queries?: PluginHostQueriesApi;
+  /** Optional on older runtimes; check before requesting human response receipts. */
+  interactions?: PluginHostInteractionsApi;
   i18n: PluginI18nApi;
   context: PluginContextApi;
   api: {
@@ -934,7 +1441,10 @@ export interface PluginRegistry {
     section?: PluginNavSection;
   }): void;
   registerSettingsRoute(path: string, component: Component): void;
-  registerComponent(slot: string, component: Component<{ slotProps?: unknown }>): void;
+  registerComponent<Props = { slotProps?: unknown }>(
+    slot: string,
+    component: Component<Props>,
+  ): void;
   registerWsHandler(action: string, handler: (payload: unknown) => void): void;
   registerKeybinding(id: string, handler: (event: KeyboardEvent) => void): void;
   registerIntegrationSettings(settings: {

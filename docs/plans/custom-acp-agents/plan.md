@@ -3,6 +3,7 @@ created: 2026-09-22
 status: in_progress
 requirements:
   - REQ-AGENTS-CUSTOM-ACP-001
+  - REQ-AGENTS-CUSTOM-ACP-002
 system_design:
   - ../../specs/agents/system-design/custom-acp-agents.md
 legacy_specs: []
@@ -22,10 +23,12 @@ stay absent from Installed Agents until the backend restarted.
 | Wave | Work order | Owns |
 | --- | --- | --- |
 | 1 | [Task 01: Operator-registered ACP agents](task-01-operator-registered-acp-agents.md) | Live discovery, the protocol field, `CustomACPAgent`, the probe exception, and the dialog |
+| 2 | [Task 02: Restore the provider session on reconnect](task-02-custom-acp-session-restore.md) | `CustomACPAgent` declares native session restore; the ACP adapter keeps negotiating it per connection |
 
 ## Sequencing
 
-A single sequential work order. Splitting the discovery fix into its own wave was considered and
+Task 02 builds on the `CustomACPAgent` type that Task 01 introduced and does not depend on Task 01's
+remaining verification. Task 01 is otherwise a single sequential work order. Splitting the discovery fix into its own wave was considered and
 rejected: it would leave the ACP wave unable to verify its own acceptance criteria, since every
 create/delete assertion depends on the live sweep.
 

@@ -584,7 +584,7 @@ function PassthroughStatusRow({
         isTouch={isTouch}
       />
 
-      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5">
+      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-md:contents">
         <TaskDependencyChip taskId={taskId} />
         <PRStatusChip taskId={taskId} />
         <MRStatusChip taskId={taskId} />
@@ -597,7 +597,7 @@ function PassthroughStatusRow({
             nextStepName={nextStepName}
             onProceed={onProceed}
             isMoving={isMoving}
-            className={`${isTouch ? "min-h-11 min-w-11" : "h-6"} shrink-0`}
+            className={`${isTouch ? "h-auto min-h-11 min-w-11 whitespace-normal break-words" : "h-6"} ml-auto max-w-full shrink-0`}
             testId="passthrough-proceed-next-step"
           />
         )}

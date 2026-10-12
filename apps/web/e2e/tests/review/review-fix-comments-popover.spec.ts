@@ -15,8 +15,9 @@ test.describe("Review dialog Fix Comments popover", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
-    const task = await seedReviewTask(testPage, apiClient, seedData);
+    const task = await seedReviewTask(backend, apiClient, seedData);
     const sessionId = task.session_id!;
     expect(sessionId).toBeTruthy();
     const comments = await seedComments(testPage, sessionId);
@@ -66,8 +67,9 @@ test.describe("Review dialog Fix Comments popover", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
-    const task = await seedReviewTask(testPage, apiClient, seedData);
+    const task = await seedReviewTask(backend, apiClient, seedData);
     const sessionId = task.session_id!;
     expect(sessionId).toBeTruthy();
     await seedComments(testPage, sessionId);
@@ -85,8 +87,9 @@ test.describe("Review dialog Fix Comments popover", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
-    const task = await seedReviewTask(testPage, apiClient, seedData);
+    const task = await seedReviewTask(backend, apiClient, seedData);
     await loadSession(testPage, task.id);
     const dialog = await openDialogWithChanges(testPage);
 

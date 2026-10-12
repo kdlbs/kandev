@@ -42,6 +42,7 @@ import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { clarificationTurnIdForSession } from "@/lib/utils/pending-clarification";
 import { usePlanCommentMigration } from "@/hooks/domains/comments/use-plan-comment-migration";
 import { usePreviewFeedback } from "@/hooks/domains/comments/use-preview-feedback";
+import { hasPendingClarification } from "./types";
 
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -249,6 +250,7 @@ export function useContextFiles(resolvedSessionId: string | null) {
   const removeContextFile = useContextFilesStore((s) => s.removeFile);
   const unpinFile = useContextFilesStore((s) => s.unpinFile);
   const clearEphemeral = useContextFilesStore((s) => s.clearEphemeral);
+  const consumeSubmittedEphemeral = useContextFilesStore((s) => s.consumeSubmittedEphemeral);
 
   useEffect(() => {
     if (resolvedSessionId) hydrateContextFiles(resolvedSessionId);
@@ -274,6 +276,7 @@ export function useContextFiles(resolvedSessionId: string | null) {
     removeContextFile,
     unpinFile,
     clearEphemeral,
+    consumeSubmittedEphemeral,
     handleToggleContextFile,
     handleAddContextFile,
   };
@@ -354,6 +357,7 @@ function useSessionData(
   session: ReturnType<typeof useSessionState>["session"],
   taskId: string | null,
   taskDescription: string | null,
+  detailActive: boolean,
 ) {
   const {
     messages,
@@ -365,9 +369,12 @@ function useSessionData(
     historyStatus,
     historyError,
     retryHistory,
-  } = useSessionMessages(resolvedSessionId);
+  } = useSessionMessages(resolvedSessionId, { detailActive });
   const turns = useAppStore((state) =>
     resolvedSessionId ? state.turns.bySession[resolvedSessionId] : undefined,
+  );
+  const activeTurnId = useAppStore((state) =>
+    resolvedSessionId ? (state.turns.activeBySession[resolvedSessionId] ?? null) : null,
   );
   const currentTurnId = useMemo(
     () => clarificationTurnIdForSession(session?.state, turns),
@@ -401,9 +408,11 @@ function useSessionData(
     editEntry: editQueueEntry,
     removeEntry: removeQueueEntry,
     ...queueRest
-  } = useQueue(resolvedSessionId);
+  } = useQueue(resolvedSessionId, { detailActive });
   return {
     messages,
+    lastAgentError,
+    activeTurnId,
     messagesLoading,
     isInitialMessagesLoading,
     historyRefreshPending,
@@ -454,6 +463,7 @@ function deriveQueueAwareSessionInput(
 export type UseChatPanelStateOptions = {
   sessionId: string | null;
   taskId?: string | null;
+  detailActive?: boolean;
   /** Disable Dockview and plan-layout mutations for embedded multi-panel hosts. */
   disableWorkbenchEffects?: boolean;
   onOpenFile?: (path: string, repo?: string) => void;
@@ -463,11 +473,12 @@ export type UseChatPanelStateOptions = {
 export function useChatPanelState({
   sessionId,
   taskId: taskIdHint = null,
+  detailActive = true,
   disableWorkbenchEffects = false,
   onOpenFile,
   onOpenFileAtLine,
 }: UseChatPanelStateOptions) {
-  const sessionState = useSessionState(sessionId, { taskIdHint });
+  const sessionState = useSessionState(sessionId, { taskIdHint, detailActive });
   const { resolvedSessionId, taskId } = sessionState;
   const planMode = usePlanMode(resolvedSessionId, taskId, {
     enableLayoutEffects: !disableWorkbenchEffects,
@@ -476,8 +487,7 @@ export function useChatPanelState({
     supportsMcp,
     mcpServers,
     attachmentHistory: mcpAttachmentHistory,
-  } = useSessionMcp(sessionState.session?.agent_profile_id, sessionState.session?.id);
-  const planModeAvailable = supportsMcp;
+  } = useSessionMcp(sessionState.session?.agent_profile_id, sessionState.session?.id, detailActive);
 
   // When MCP is available: full plan mode toggle (layout + chat input state)
   // When MCP is unavailable: layout-only toggle (plan panel visible, but no plan context/border)
@@ -489,18 +499,18 @@ export function useChatPanelState({
   } = planMode;
   const guardedHandlePlanModeChange = useCallback(
     (enabled: boolean) => {
-      if (planModeAvailable) return rawHandlePlanModeChange(enabled);
+      if (supportsMcp) return rawHandlePlanModeChange(enabled);
       // Toggle based on current layout state, ignoring the passed value
       togglePlanLayout(!planLayoutVisible);
     },
-    [planModeAvailable, rawHandlePlanModeChange, togglePlanLayout, planLayoutVisible],
+    [supportsMcp, rawHandlePlanModeChange, togglePlanLayout, planLayoutVisible],
   );
 
   const hasAgentProfile = Boolean(sessionState.session?.agent_profile_id);
   useAutoDisableUnsupportedPlanMode({
     planModeEnabled,
     hasAgentProfile,
-    planModeAvailable,
+    planModeAvailable: supportsMcp,
     resolvedSessionId,
   });
 
@@ -511,6 +521,7 @@ export function useChatPanelState({
     sessionState.session,
     taskId,
     sessionState.taskDescription,
+    detailActive,
   );
   const comments = useCommentsState(resolvedSessionId, taskId);
   const previewFeedbackState = usePreviewFeedback(taskId);
@@ -522,8 +533,8 @@ export function useChatPanelState({
     () => contextFiles.some((f) => f.path === PLAN_CONTEXT_PATH),
     [contextFiles],
   );
-
   const { contextItems, prompts } = useChatContextItems({
+    detailActive,
     planContextEnabled,
     contextFiles,
     resolvedSessionId,
@@ -538,9 +549,15 @@ export function useChatPanelState({
   });
 
   const todoItems = useSessionTodoItems(resolvedSessionId, sessionData.todoItems);
+  const hasPanelPendingClarification = hasPendingClarification(
+    Boolean(sessionData.pendingClarification),
+    sessionState.session?.pending_action,
+  );
 
   return {
     ...sessionState,
+    detailActive,
+    hasPendingClarification: hasPanelPendingClarification,
     ...planMode,
     handlePlanModeChange: guardedHandlePlanModeChange,
     ...contextFilesState,
@@ -553,7 +570,7 @@ export function useChatPanelState({
     planCommentMigration,
     contextItems,
     planContextEnabled,
-    planModeAvailable,
+    planModeAvailable: supportsMcp,
     mcpServers,
     mcpAttachmentHistory,
     prompts,

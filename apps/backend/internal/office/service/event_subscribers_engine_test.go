@@ -153,6 +153,76 @@ func TestEngineDispatcher_SkipsAlreadyDispatchedCommentEvent(t *testing.T) {
 	}
 }
 
+func TestCommentRetryDispatchPreservesCapturedWorkflowEntry(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	svc.SetWorkflowEngineDispatcher(nil)
+	insertTestTask(t, svc, "task-comment-retry-entry", "ws-1")
+	comment := &models.TaskComment{
+		ID:         "comment-retry-entry",
+		TaskID:     "task-comment-retry-entry",
+		AuthorType: "user",
+		AuthorID:   "user-1",
+		Body:       "please decide",
+	}
+	if err := svc.CreateComment(context.Background(), comment); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+
+	disp := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(disp)
+	ctx := context.Background()
+	event := bus.NewEvent(events.OfficeCommentCreated, "dashboard", map[string]string{
+		"task_id":                     comment.TaskID,
+		"comment_id":                  comment.ID,
+		"author_type":                 "user",
+		"author_id":                   "user-1",
+		"workflow_step_id":            "step-review",
+		"workflow_step_transition_id": "42",
+	})
+	if err := eb.Publish(ctx, events.OfficeCommentCreated, event); err != nil {
+		t.Fatalf("publish comment retry: %v", err)
+	}
+	calls := disp.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("dispatcher calls = %d, want 1", len(calls))
+	}
+	payload, ok := calls[0].payload.(engine.OnCommentPayload)
+	if !ok {
+		t.Fatalf("payload type = %T, want engine.OnCommentPayload", calls[0].payload)
+	}
+	if payload.RetryWorkflowStepID != "step-review" || payload.RetryWorkflowStepTransitionID != 42 {
+		t.Fatalf("retry entry = (%q, %d), want (step-review, 42)", payload.RetryWorkflowStepID, payload.RetryWorkflowStepTransitionID)
+	}
+
+	partial := bus.NewEvent(events.OfficeCommentCreated, "dashboard", map[string]string{
+		"task_id":                     comment.TaskID,
+		"comment_id":                  comment.ID,
+		"author_type":                 "user",
+		"author_id":                   "user-1",
+		"workflow_step_id":            "step-review",
+		"workflow_step_transition_id": "",
+	})
+	if err := eb.Publish(ctx, events.OfficeCommentCreated, partial); err != nil {
+		t.Fatalf("publish partial comment retry: %v", err)
+	}
+	if calls := disp.Calls(); len(calls) != 1 {
+		t.Fatalf("dispatcher calls after partial retry identity = %d, want 1", len(calls))
+	}
+	suppressed := bus.NewEvent(events.OfficeCommentCreated, "dashboard", map[string]string{
+		"task_id":                 comment.TaskID,
+		"comment_id":              comment.ID,
+		"author_type":             "user",
+		"author_id":               "user-1",
+		"engine_retry_suppressed": "true",
+	})
+	if err := eb.Publish(ctx, events.OfficeCommentCreated, suppressed); err != nil {
+		t.Fatalf("publish retry-suppressed comment: %v", err)
+	}
+	if calls := disp.Calls(); len(calls) != 1 {
+		t.Fatalf("dispatcher calls after retry suppression = %d, want 1", len(calls))
+	}
+}
+
 func TestEngineDispatcher_SkipsDoneStepSelfComment(t *testing.T) {
 	svc, _ := newTestServiceWithBus(t)
 

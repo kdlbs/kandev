@@ -1,20 +1,24 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   refetch: vi.fn(),
+  mounts: vi.fn(),
+  unmounts: vi.fn(),
+  activeSessionId: null as string | null,
   useCommitDetail: vi.fn(() => ({
-    files: null,
+    files: null as Record<string, never> | null,
     commit: null,
     loading: false,
-    error: "Commit detail unavailable",
+    error: "Commit detail unavailable" as string | null,
     refetch: mocks.refetch,
   })),
 }));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({ tasks: { activeSessionId: null } }),
+    selector({ tasks: { activeSessionId: mocks.activeSessionId } }),
 }));
 
 vi.mock("@/hooks/domains/session/use-session-commits", () => ({
@@ -38,10 +42,23 @@ vi.mock("./panel-primitives", () => ({
   PanelBody: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock("./commit-detail-content", () => ({
+  CommitDetailContent: ({ target }: { target: { sha: string } }) => {
+    useEffect(() => {
+      mocks.mounts();
+      return mocks.unmounts;
+    }, []);
+    return <div data-testid="commit-detail-content" data-commit-sha={target.sha} />;
+  },
+}));
+
 import { CommitDetailPanel, CommitDiffView } from "./commit-detail-panel";
 
 afterEach(() => {
   mocks.refetch.mockReset();
+  mocks.mounts.mockReset();
+  mocks.unmounts.mockReset();
+  mocks.activeSessionId = null;
   mocks.useCommitDetail.mockClear();
 });
 
@@ -81,5 +98,31 @@ describe("CommitDetailPanel target validation", () => {
     );
 
     expect(mocks.useCommitDetail).toHaveBeenCalledWith({ source: "local", sha: "" });
+  });
+
+  it("remounts commit content when the active session changes", () => {
+    mocks.activeSessionId = "session-a";
+    mocks.useCommitDetail.mockReturnValue({
+      files: {},
+      commit: null,
+      loading: false,
+      error: null,
+      refetch: mocks.refetch,
+    });
+    const target = {
+      source: "github" as const,
+      sha: "remote123",
+      workspaceId: "workspace-1",
+      owner: "acme",
+      repo: "widget",
+    };
+    const { rerender } = render(<CommitDetailPanel panelId="commit-detail" params={{ target }} />);
+    expect(mocks.mounts).toHaveBeenCalledOnce();
+
+    mocks.activeSessionId = "session-b";
+    rerender(<CommitDetailPanel panelId="commit-detail" params={{ target }} />);
+
+    expect(mocks.mounts).toHaveBeenCalledTimes(2);
+    expect(mocks.unmounts).toHaveBeenCalledOnce();
   });
 });

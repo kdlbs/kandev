@@ -134,15 +134,37 @@ test.describe("mobile CLI mode: passthrough composer", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    const { session } = await openMobilePassthroughTask(
+    const { task, session } = await openMobilePassthroughTask(
       testPage,
       apiClient,
       seedData,
       "Mobile CLI Geometry",
       "Mobile CLI Geometry Task",
     );
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "test-org",
+      repo: "test-repo",
+      pr_number: 3948,
+      pr_url: "https://github.com/test-org/test-repo/pull/3948",
+      pr_title: "Mobile terminal controls",
+      head_branch: "feature/mobile-toolbar",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "merged",
+    });
     const toolbar = testPage.getByTestId("passthrough-toolbar");
     const statusRow = toolbar.getByTestId("passthrough-status-row");
+    const banner = statusRow.getByTestId("pr-merged-banner");
+    await expect(banner).toContainText("PR #3948 merged");
+    const rowBox = (await statusRow.boundingBox())!;
+    const bannerBox = (await banner.boundingBox())!;
+    expect(bannerBox.width).toBeGreaterThanOrEqual(rowBox.width - 18);
+    expect(
+      (await statusRow.getByTestId("passthrough-toggle-composer").boundingBox())!.y,
+    ).toBeGreaterThanOrEqual(bannerBox.y + bannerBox.height);
+    await expectTouchTarget(banner.getByTestId("pr-merged-archive-button"));
+    await expectTouchTarget(banner.getByTestId("pr-merged-dismiss-button"));
 
     for (const testId of ["passthrough-toggle-composer", "passthrough-toggle-comments"]) {
       await expectTouchTarget(statusRow.getByTestId(testId));
@@ -347,10 +369,12 @@ test.describe("mobile CLI mode: passthrough composer", () => {
     const searchInput = testPage.getByPlaceholder("Search files and prompts...");
     await expect(searchInput).toBeVisible({ timeout: 5_000 });
     await searchInput.fill(promptName);
-    const promptOption = testPage.getByRole("checkbox", { name: promptName });
-    await expect(promptOption).toBeVisible();
-    await testPage.getByText(promptName, { exact: true }).tap();
-    await expect(promptOption).toBeChecked();
+    const promptCheckbox = testPage.getByRole("checkbox", { name: promptName, exact: true });
+    await expect(promptCheckbox).toBeVisible({ timeout: 5_000 });
+    const promptRow = testPage.getByTestId("context-prompt-item").filter({ hasText: promptName });
+    await expectTouchTarget(promptRow);
+    await promptRow.getByText(promptName, { exact: true }).tap();
+    await expect(promptCheckbox).toBeChecked();
     await expect(async () => {
       await expect(firstComposer.getByTestId("chat-context-button")).toContainText("1", {
         timeout: 1_000,

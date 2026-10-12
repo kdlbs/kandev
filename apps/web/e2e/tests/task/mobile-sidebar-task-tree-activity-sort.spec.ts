@@ -1,6 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { seedTaskTreeActivityScenario } from "./sidebar-task-tree-activity-sort-helpers";
+import {
+  seedTaskTreeActivityScenario,
+  exerciseRepeatedTreeActivity,
+} from "./sidebar-task-tree-activity-sort-helpers";
 
 // @covers AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-002.1, .2, .5, .6
 test("phone task drawer ranks a parent by its active child and navigates to that child", async ({
@@ -44,6 +47,7 @@ test("phone task drawer ranks a parent by its active child and navigates to that
   expect(parentTime).toBeTruthy();
   expect(childTime).toBeTruthy();
   expect(Date.parse(childTime!)).toBeGreaterThan(Date.parse(parentTime!));
+  await exerciseRepeatedTreeActivity(sheet, apiClient, { parent, child, peer });
 
   await sheet.locator(`[data-task-row-id="${child.id}"]`).tap();
   await expect(testPage).toHaveURL((url) => url.pathname === `/t/${child.id}`);

@@ -235,18 +235,19 @@ type MessageReader interface {
 	Send(ctx context.Context, taskID, sessionID, text string) (*MessageDispatch, error)
 }
 
-// PluginOwnedTaskTreeHost is an optional host extension for previewing and
-// deleting only task trees whose source provenance matches the caller.
+// PluginOwnedTaskTreeHost is an optional Host extension for previewing task
+// trees whose source provenance matches the caller. Delete remains in the
+// compatibility interface, but the current Kandev Host denies it because the
+// RPC cannot carry a native Human's one-use task-deletion confirmation.
 type PluginOwnedTaskTreeHost interface {
 	PluginOwnedTaskTrees() PluginOwnedTaskTreeManager
 }
 
 type PluginOwnedTaskTreeManager interface {
 	Preview(ctx context.Context, rootTaskID string) ([]Task, error)
-	// Delete removes descendants before their parent and treats an absent root
-	// as an idempotent success. A non-nil error may be
-	// accompanied by deleted task ids when the backing store failed part-way;
-	// callers must reconcile those ids before retrying the remaining cleanup.
+	// Delete is retained for wire compatibility. The current Kandev Host returns
+	// PermissionDenied with native_human_confirmation_required; direct plugins
+	// to the native task UI when a person requests deletion.
 	Delete(ctx context.Context, rootTaskID string) ([]string, error)
 }
 
@@ -327,6 +328,10 @@ func (h *grpcHostClient) PluginOwnedTaskTrees() PluginOwnedTaskTreeManager {
 
 func (h *grpcHostClient) AgentConversations() AgentConversationManager {
 	return grpcAgentConversationManager{client: h.client}
+}
+
+func (h *grpcHostClient) ManagedAgentConversations() ManagedAgentConversationManager {
+	return grpcManagedAgentConversationManager{client: h.client}
 }
 
 func (h *grpcHostClient) GetState(ctx context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
@@ -417,6 +422,50 @@ func (h *grpcHostClient) EmitEvent(ctx context.Context, name string, payload map
 	}
 	_, err = h.client.EmitEvent(ctx, &pluginv1.EmitEventRequest{EventName: name, Payload: protoPayload})
 	return err
+}
+
+func (h *grpcHostClient) GetCapabilityContext(ctx context.Context, workspaceID string) (*CapabilityContext, error) {
+	response, err := h.client.GetCapabilityContext(ctx, &pluginv1.GetCapabilityContextRequest{WorkspaceId: workspaceID})
+	if err != nil {
+		return nil, err
+	}
+	return capabilityContextFromProto(response.GetContext()), nil
+}
+
+func (h *grpcHostClient) UpdateTaskExact(ctx context.Context, input ExactTaskUpdate) (*CommandResult, *Task, error) {
+	response, err := h.client.UpdateTaskExact(ctx, exactTaskUpdateToProto(input))
+	if err != nil {
+		return nil, nil, err
+	}
+	result := commandResultFromProto(response.GetResult())
+	if response.GetTask() == nil {
+		return result, nil, nil
+	}
+	task, err := taskFromProto(response.GetTask())
+	if err != nil {
+		return nil, nil, err
+	}
+	return result, &task, nil
+}
+
+func (h *grpcHostClient) TaskCommands() ExactTaskCommandManager {
+	return grpcExactTaskCommandManager{client: h.client}
+}
+
+func (h *grpcHostClient) TaskManagementClaims() ExactTaskManagementClaimCommandManager {
+	return grpcExactTaskManagementClaimCommandManager{client: h.client}
+}
+
+func (h *grpcHostClient) TaskCompletionGates() ExactTaskCompletionGateCommandManager {
+	return grpcExactTaskCompletionGateCommandManager{client: h.client}
+}
+
+func (h *grpcHostClient) WorkspaceAdministration() ExactWorkspaceAdministrationManager {
+	return grpcExactWorkspaceAdministrationManager{client: h.client}
+}
+
+func (h *grpcHostClient) SourceIssueWriteback() ExactSourceIssueWritebackManager {
+	return grpcExactSourceIssueWritebackManager{client: h.client}
 }
 
 func (h *grpcHostClient) Tasks() TaskReader { return grpcTaskReader{client: h.client} }
@@ -651,6 +700,116 @@ type grpcAgentConversationManager struct {
 	client pluginv1.HostClient
 }
 
+type grpcManagedAgentConversationManager struct {
+	client pluginv1.HostClient
+}
+
+func (m grpcManagedAgentConversationManager) Ensure(ctx context.Context, spec ManagedAgentConversationSpec) (*CommandResult, ManagedAgentConversationDescriptor, error) {
+	resp, err := m.client.EnsureManagedAgentConversationExact(ctx, &pluginv1.EnsureManagedAgentConversationExactRequest{
+		Spec: managedConversationSpecToProto(spec),
+	})
+	if err != nil {
+		return nil, ManagedAgentConversationDescriptor{}, err
+	}
+	return commandResultFromProto(resp.GetResult()), managedConversationFromProto(resp.GetConversation()), nil
+}
+
+func (m grpcManagedAgentConversationManager) Get(ctx context.Context, query ManagedAgentConversationQuery) (ManagedAgentConversationDescriptor, error) {
+	resp, err := m.client.GetManagedAgentConversationStatusExact(ctx, &pluginv1.GetManagedAgentConversationStatusExactRequest{
+		WorkspaceId: query.WorkspaceID, InstanceKey: query.InstanceKey,
+		ApprovalRevision: query.ApprovalRevision, ManifestDigest: query.ManifestDigest,
+	})
+	if err != nil {
+		return ManagedAgentConversationDescriptor{}, err
+	}
+	return managedConversationFromProto(resp.GetConversation()), nil
+}
+
+func (m grpcManagedAgentConversationManager) List(ctx context.Context, query ManagedAgentConversationListQuery) ([]ManagedAgentConversationDescriptor, error) {
+	resp, err := m.client.ListManagedAgentConversationsExact(ctx, &pluginv1.ListManagedAgentConversationsExactRequest{
+		WorkspaceId: query.WorkspaceID, ApprovalRevision: query.ApprovalRevision, ManifestDigest: query.ManifestDigest,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ManagedAgentConversationDescriptor, len(resp.GetConversations()))
+	for i, conversation := range resp.GetConversations() {
+		out[i] = managedConversationFromProto(conversation)
+	}
+	return out, nil
+}
+
+func (m grpcManagedAgentConversationManager) SetPaused(ctx context.Context, input ManagedAgentConversationPause) (*CommandResult, ManagedAgentConversationDescriptor, error) {
+	resp, err := m.client.SetManagedAgentConversationPausedExact(ctx, &pluginv1.SetManagedAgentConversationPausedExactRequest{
+		RequestId: input.RequestID, IdempotencyKey: input.IdempotencyKey, WorkspaceId: input.WorkspaceID,
+		InstanceKey: input.InstanceKey, ExpectedRevision: input.ExpectedRevision,
+		ApprovalRevision: input.ApprovalRevision, ManifestDigest: input.ManifestDigest, Paused: input.Paused,
+	})
+	if err != nil {
+		return nil, ManagedAgentConversationDescriptor{}, err
+	}
+	return commandResultFromProto(resp.GetResult()), managedConversationFromProto(resp.GetConversation()), nil
+}
+
+func (m grpcManagedAgentConversationManager) Delete(ctx context.Context, input ManagedAgentConversationDelete) (*CommandResult, error) {
+	resp, err := m.client.DeleteManagedAgentConversationExact(ctx, &pluginv1.DeleteManagedAgentConversationExactRequest{
+		RequestId: input.RequestID, IdempotencyKey: input.IdempotencyKey, WorkspaceId: input.WorkspaceID,
+		InstanceKey: input.InstanceKey, ExpectedRevision: input.ExpectedRevision,
+		ApprovalRevision: input.ApprovalRevision, ManifestDigest: input.ManifestDigest,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return commandResultFromProto(resp.GetResult()), nil
+}
+
+func (m grpcManagedAgentConversationManager) EnqueueInput(ctx context.Context, input ManagedAgentInputEnqueue) (*CommandResult, ManagedAgentInputReceipt, error) {
+	resp, err := m.client.EnqueueManagedAgentInputExact(ctx, managedAgentInputEnqueueToProto(input))
+	if err != nil {
+		return nil, ManagedAgentInputReceipt{}, err
+	}
+	return commandResultFromProto(resp.GetResult()), managedAgentInputFromProto(resp.GetInput()), nil
+}
+
+func (m grpcManagedAgentConversationManager) GetInput(ctx context.Context, query ManagedAgentInputQuery) (ManagedAgentInputReceipt, error) {
+	resp, err := m.client.GetManagedAgentInputExact(ctx, managedAgentInputQueryToProto(query))
+	if err != nil {
+		return ManagedAgentInputReceipt{}, err
+	}
+	return managedAgentInputFromProto(resp.GetInput()), nil
+}
+
+func (m grpcManagedAgentConversationManager) ListInputs(ctx context.Context, query ManagedAgentInputListQuery) (ManagedAgentInputPage, error) {
+	resp, err := m.client.ListManagedAgentInputsExact(ctx, managedAgentInputListQueryToProto(query))
+	if err != nil {
+		return ManagedAgentInputPage{}, err
+	}
+	page := ManagedAgentInputPage{
+		Inputs:             make([]ManagedAgentInputReceipt, len(resp.GetInputs())),
+		NextSequenceCursor: resp.GetNextSequenceCursor(), HasMore: resp.GetHasMore(),
+	}
+	for i, input := range resp.GetInputs() {
+		page.Inputs[i] = managedAgentInputFromProto(input)
+	}
+	return page, nil
+}
+
+func (m grpcManagedAgentConversationManager) CancelInput(ctx context.Context, input ManagedAgentInputCancel) (*CommandResult, ManagedAgentInputReceipt, error) {
+	resp, err := m.client.CancelManagedAgentInputExact(ctx, managedAgentInputCancelToProto(input))
+	if err != nil {
+		return nil, ManagedAgentInputReceipt{}, err
+	}
+	return commandResultFromProto(resp.GetResult()), managedAgentInputFromProto(resp.GetInput()), nil
+}
+
+func (m grpcManagedAgentConversationManager) Dispatch(ctx context.Context, input ManagedAgentConversationDispatch) (*CommandResult, ManagedAgentDispatchStatus, ManagedAgentConversationDescriptor, error) {
+	resp, err := m.client.DispatchManagedAgentConversationExact(ctx, managedAgentConversationDispatchToProto(input))
+	if err != nil {
+		return nil, "", ManagedAgentConversationDescriptor{}, err
+	}
+	return commandResultFromProto(resp.GetResult()), managedAgentDispatchStatusFromProto(resp.GetDispatchStatus()), managedConversationFromProto(resp.GetConversation()), nil
+}
+
 func (m grpcAgentConversationManager) Ensure(ctx context.Context, spec AgentConversationSpec) (AgentConversationDescriptor, string, error) {
 	resp, err := m.client.EnsureAgentConversation(ctx, &pluginv1.EnsureAgentConversationRequest{Spec: spec.toProto()})
 	if err != nil {
@@ -703,12 +862,615 @@ func (r grpcMessageReader) Send(ctx context.Context, taskID, sessionID, text str
 // kandev.plugin.v1.Host RPCs to impl (kandev's Go-native Host
 // implementation), converting proto<->Go-native types at the boundary.
 func registerHostServer(s grpc.ServiceRegistrar, impl Host) {
-	pluginv1.RegisterHostServer(s, &grpcHostServer{impl: impl})
+	exact, _ := impl.(ExactHost)
+	exactQueries, _ := impl.(ExactQueryHost)
+	taskCommands, _ := impl.(ExactTaskCommandHost)
+	claimCommands, _ := impl.(ExactTaskManagementClaimCommandHost)
+	completionGateCommands, _ := impl.(ExactTaskCompletionGateCommandHost)
+	workspaceAdminCommands, _ := impl.(ExactWorkspaceAdministrationHost)
+	sourceIssueWritebackCommands, _ := impl.(ExactSourceIssueWritebackHost)
+	executionCommands, _ := impl.(ExactExecutionCommandHost)
+	interactionCommands, _ := impl.(ExactInteractionCommandHost)
+	pluginv1.RegisterHostServer(s, &grpcHostServer{
+		impl: impl, exact: exact, exactQueries: exactQueries, taskCommands: taskCommands,
+		claimCommands: claimCommands, completionGateCommands: completionGateCommands,
+		workspaceAdminCommands:       workspaceAdminCommands,
+		sourceIssueWritebackCommands: sourceIssueWritebackCommands,
+		executionCommands:            executionCommands, interactionCommands: interactionCommands,
+	})
 }
 
 type grpcHostServer struct {
 	pluginv1.UnimplementedHostServer
-	impl Host
+	impl                         Host
+	exact                        ExactHost
+	exactQueries                 ExactQueryHost
+	taskCommands                 ExactTaskCommandHost
+	claimCommands                ExactTaskManagementClaimCommandHost
+	completionGateCommands       ExactTaskCompletionGateCommandHost
+	workspaceAdminCommands       ExactWorkspaceAdministrationHost
+	sourceIssueWritebackCommands ExactSourceIssueWritebackHost
+	executionCommands            ExactExecutionCommandHost
+	interactionCommands          ExactInteractionCommandHost
+}
+
+//nolint:dupl // Keep each generated request and response mapping explicit at the gRPC boundary.
+func (s *grpcHostServer) AcquireTaskManagementClaimExact(ctx context.Context, req *pluginv1.AcquireTaskManagementClaimExactRequest) (*pluginv1.TaskManagementClaimExactResponse, error) {
+	if s.claimCommands == nil || s.claimCommands.TaskManagementClaims() == nil {
+		return nil, status.Error(codes.Unimplemented, "task management claims are unavailable")
+	}
+	input := ExactTaskManagementClaimAcquire{
+		ExactTaskManagementClaimCommand: ExactTaskManagementClaimCommand{
+			RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+			ExpectedTaskResourceVersion:  req.GetExpectedTaskResourceVersion(),
+			ExpectedClaimResourceVersion: req.GetExpectedClaimResourceVersion(), IdempotencyKey: req.GetIdempotencyKey(),
+			Reason: req.GetReason(), ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+		},
+		InstanceKey: req.GetInstanceKey(),
+	}
+	result, claim, err := s.claimCommands.TaskManagementClaims().Acquire(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.TaskManagementClaimExactResponse{Result: commandResultToProto(result), Claim: taskManagementClaimToProto(claim)}, nil
+}
+
+//nolint:dupl // Keep each generated request and response mapping explicit at the gRPC boundary.
+func (s *grpcHostServer) ReleaseTaskManagementClaimExact(ctx context.Context, req *pluginv1.ReleaseTaskManagementClaimExactRequest) (*pluginv1.TaskManagementClaimExactResponse, error) {
+	if s.claimCommands == nil || s.claimCommands.TaskManagementClaims() == nil {
+		return nil, status.Error(codes.Unimplemented, "task management claims are unavailable")
+	}
+	input := ExactTaskManagementClaimRelease{
+		ExactTaskManagementClaimCommand: ExactTaskManagementClaimCommand{
+			RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+			ExpectedTaskResourceVersion:  req.GetExpectedTaskResourceVersion(),
+			ExpectedClaimResourceVersion: req.GetExpectedClaimResourceVersion(), IdempotencyKey: req.GetIdempotencyKey(),
+			Reason: req.GetReason(), ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+		},
+		InstanceKey: req.GetInstanceKey(),
+	}
+	result, claim, err := s.claimCommands.TaskManagementClaims().Release(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.TaskManagementClaimExactResponse{Result: commandResultToProto(result), Claim: taskManagementClaimToProto(claim)}, nil
+}
+
+func (s *grpcHostServer) TransferTaskManagementClaimExact(ctx context.Context, req *pluginv1.TransferTaskManagementClaimExactRequest) (*pluginv1.TaskManagementClaimExactResponse, error) {
+	if s.claimCommands == nil || s.claimCommands.TaskManagementClaims() == nil {
+		return nil, status.Error(codes.Unimplemented, "task management claims are unavailable")
+	}
+	input := ExactTaskManagementClaimTransfer{
+		ExactTaskManagementClaimCommand: ExactTaskManagementClaimCommand{
+			RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+			ExpectedTaskResourceVersion:  req.GetExpectedTaskResourceVersion(),
+			ExpectedClaimResourceVersion: req.GetExpectedClaimResourceVersion(), IdempotencyKey: req.GetIdempotencyKey(),
+			Reason: req.GetReason(), ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+		},
+		InstanceKey: req.GetInstanceKey(), TargetInstallationID: req.GetTargetInstallationId(), TargetInstanceKey: req.GetTargetInstanceKey(),
+	}
+	result, claim, err := s.claimCommands.TaskManagementClaims().Transfer(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.TaskManagementClaimExactResponse{Result: commandResultToProto(result), Claim: taskManagementClaimToProto(claim)}, nil
+}
+
+func (s *grpcHostServer) SetTaskCompletionCriteriaExact(ctx context.Context, req *pluginv1.SetTaskCompletionCriteriaExactRequest) (*pluginv1.TaskCompletionGateExactResponse, error) {
+	if s.completionGateCommands == nil || s.completionGateCommands.TaskCompletionGates() == nil {
+		return nil, status.Error(codes.Unimplemented, "task completion gates are unavailable")
+	}
+	criteria := make([]TaskCompletionCriterionInput, 0, len(req.GetCriteria()))
+	for _, item := range req.GetCriteria() {
+		criteria = append(criteria, TaskCompletionCriterionInput{
+			ID: item.GetId(), Description: item.GetDescription(),
+			EvidenceSubject: completionEvidenceSubjectFromProto(item.GetEvidenceSubject()),
+		})
+	}
+	result, gate, err := s.completionGateCommands.TaskCompletionGates().SetCriteria(ctx, ExactTaskCompletionCriteria{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		IdempotencyKey: req.GetIdempotencyKey(), ExpectedTaskResourceVersion: req.GetExpectedTaskResourceVersion(),
+		ExpectedRevision: req.GetExpectedRevision(), Criteria: criteria,
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+		ManagementInstanceKey: req.GetManagementInstanceKey(), ExpectedClaimGeneration: req.GetExpectedClaimGeneration(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.TaskCompletionGateExactResponse{Result: commandResultToProto(result), Snapshot: completionGateToProto(gate)}, nil
+}
+
+func (s *grpcHostServer) VerifyTaskCompletionCriterionExact(ctx context.Context, req *pluginv1.VerifyTaskCompletionCriterionExactRequest) (*pluginv1.TaskCompletionGateExactResponse, error) {
+	if s.completionGateCommands == nil || s.completionGateCommands.TaskCompletionGates() == nil {
+		return nil, status.Error(codes.Unimplemented, "task completion gates are unavailable")
+	}
+	evidence := TaskCompletionEvidence{}
+	if req.GetEvidence() != nil {
+		evidence.Subject = completionEvidenceSubjectFromProto(req.GetEvidence().GetSubject())
+		evidence.Summary = req.GetEvidence().GetSummary()
+		evidence.Reference = req.GetEvidence().GetReference()
+	}
+	result, gate, err := s.completionGateCommands.TaskCompletionGates().Verify(ctx, ExactTaskCompletionEvidence{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		CriterionID: req.GetCriterionId(), IdempotencyKey: req.GetIdempotencyKey(),
+		ExpectedTaskResourceVersion: req.GetExpectedTaskResourceVersion(), ExpectedRevision: req.GetExpectedRevision(),
+		Evidence: evidence, ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+		ManagementInstanceKey: req.GetManagementInstanceKey(), ExpectedClaimGeneration: req.GetExpectedClaimGeneration(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.TaskCompletionGateExactResponse{Result: commandResultToProto(result), Snapshot: completionGateToProto(gate)}, nil
+}
+
+func (s *grpcHostServer) ApplyWorkspaceAdministrationExact(ctx context.Context, req *pluginv1.ApplyWorkspaceAdministrationExactRequest) (*pluginv1.WorkspaceAdministrationExactResponse, error) {
+	if s.workspaceAdminCommands == nil || s.workspaceAdminCommands.WorkspaceAdministration() == nil {
+		return nil, status.Error(codes.Unimplemented, "workspace administration is unavailable")
+	}
+	command, err := workspaceAdminCommandFromProto(req)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid workspace administration operation")
+	}
+	result, err := s.workspaceAdminCommands.WorkspaceAdministration().Apply(ctx, command)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.WorkspaceAdministrationExactResponse{Result: commandResultToProto(result)}, nil
+}
+
+func (s *grpcHostServer) GetSourceIssueCapabilitiesExact(ctx context.Context, req *pluginv1.GetSourceIssueCapabilitiesExactRequest) (*pluginv1.GetSourceIssueCapabilitiesExactResponse, error) {
+	if s.sourceIssueWritebackCommands == nil || s.sourceIssueWritebackCommands.SourceIssueWriteback() == nil {
+		return nil, status.Error(codes.Unimplemented, "source issue operations are unavailable")
+	}
+	result, item, receipt, err := s.sourceIssueWritebackCommands.SourceIssueWriteback().GetCapabilities(ctx, SourceIssueCapabilitiesQuery{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	response := &pluginv1.GetSourceIssueCapabilitiesExactResponse{
+		Result: commandResultToProto(result), Item: sourceIssueCapabilitiesToProto(item),
+	}
+	if receipt != nil {
+		response.Receipt = hostReadReceiptToProto(*receipt)
+	}
+	return response, nil
+}
+
+//nolint:dupl // Keep each generated request and response mapping explicit at the gRPC boundary.
+func (s *grpcHostServer) CommentSourceIssueExact(ctx context.Context, req *pluginv1.CommentSourceIssueExactRequest) (*pluginv1.SourceIssueWritebackExactResponse, error) {
+	if s.sourceIssueWritebackCommands == nil || s.sourceIssueWritebackCommands.SourceIssueWriteback() == nil {
+		return nil, status.Error(codes.Unimplemented, "source issue operations are unavailable")
+	}
+	result, receipt, err := s.sourceIssueWritebackCommands.SourceIssueWriteback().Comment(ctx, SourceIssueWritebackCommand{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		IdempotencyKey: req.GetIdempotencyKey(), ExpectedTaskResourceVersion: req.GetExpectedTaskResourceVersion(),
+		ExpectedSourceResourceVersion: req.GetExpectedSourceResourceVersion(), Body: req.GetBody(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.SourceIssueWritebackExactResponse{Result: commandResultToProto(result), Receipt: sourceIssueWritebackReceiptToProto(receipt)}, nil
+}
+
+//nolint:dupl // Keep each generated request and response mapping explicit at the gRPC boundary.
+func (s *grpcHostServer) TransitionSourceIssueExact(ctx context.Context, req *pluginv1.TransitionSourceIssueExactRequest) (*pluginv1.SourceIssueWritebackExactResponse, error) {
+	if s.sourceIssueWritebackCommands == nil || s.sourceIssueWritebackCommands.SourceIssueWriteback() == nil {
+		return nil, status.Error(codes.Unimplemented, "source issue operations are unavailable")
+	}
+	result, receipt, err := s.sourceIssueWritebackCommands.SourceIssueWriteback().Transition(ctx, SourceIssueWritebackCommand{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		IdempotencyKey: req.GetIdempotencyKey(), ExpectedTaskResourceVersion: req.GetExpectedTaskResourceVersion(),
+		ExpectedSourceResourceVersion: req.GetExpectedSourceResourceVersion(), TargetID: req.GetTargetId(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.SourceIssueWritebackExactResponse{Result: commandResultToProto(result), Receipt: sourceIssueWritebackReceiptToProto(receipt)}, nil
+}
+
+func (s *grpcHostServer) GetCapabilityContext(ctx context.Context, req *pluginv1.GetCapabilityContextRequest) (*pluginv1.GetCapabilityContextResponse, error) {
+	if s.exact == nil {
+		return nil, status.Error(codes.Unimplemented, "exact Host operations are unavailable")
+	}
+	result, err := s.exact.GetCapabilityContext(ctx, req.GetWorkspaceId())
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.GetCapabilityContextResponse{Context: capabilityContextToProto(result)}, nil
+}
+
+func (s *grpcHostServer) UpdateTaskExact(ctx context.Context, req *pluginv1.UpdateTaskExactRequest) (*pluginv1.UpdateTaskExactResponse, error) {
+	if s.exact == nil {
+		return nil, status.Error(codes.Unimplemented, "exact Host operations are unavailable")
+	}
+	result, task, err := s.exact.UpdateTaskExact(ctx, exactTaskUpdateFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	response := &pluginv1.UpdateTaskExactResponse{Result: commandResultToProto(result)}
+	if task != nil {
+		response.Task, err = task.toProto()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return response, nil
+}
+
+func (s *grpcHostServer) CreateTaskExact(ctx context.Context, req *pluginv1.CreateTaskExactRequest) (*pluginv1.CreateTaskExactResponse, error) {
+	if s.taskCommands == nil || s.taskCommands.TaskCommands() == nil {
+		return nil, status.Error(codes.Unimplemented, "exact task commands are unavailable")
+	}
+	input, err := createTaskInputFromProto(req.GetTask())
+	if err != nil {
+		return nil, err
+	}
+	result, task, err := s.taskCommands.TaskCommands().CreateTask(ctx, ExactTaskCreate{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(),
+		IdempotencyKey: req.GetIdempotencyKey(), ExternalID: req.GetExternalId(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+		Task: input,
+	})
+	if err != nil {
+		return nil, err
+	}
+	response := &pluginv1.CreateTaskExactResponse{Result: commandResultToProto(result)}
+	if task != nil {
+		response.Task, err = task.toProto()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return response, nil
+}
+
+func (s *grpcHostServer) SetTaskLabelsExact(ctx context.Context, req *pluginv1.SetTaskLabelsExactRequest) (*pluginv1.SetTaskLabelsExactResponse, error) {
+	if s.taskCommands == nil || s.taskCommands.TaskCommands() == nil {
+		return nil, status.Error(codes.Unimplemented, "exact task commands are unavailable")
+	}
+	result, task, err := s.taskCommands.TaskCommands().SetLabels(ctx, ExactTaskLabels{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		IdempotencyKey: req.GetIdempotencyKey(), ExpectedResourceVersion: req.GetExpectedResourceVersion(),
+		ManagementInstanceKey: req.GetManagementInstanceKey(), ExpectedClaimGeneration: req.GetExpectedClaimGeneration(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+		Labels: append([]string(nil), req.GetLabels()...),
+	})
+	if err != nil {
+		return nil, err
+	}
+	response := &pluginv1.SetTaskLabelsExactResponse{Result: commandResultToProto(result)}
+	if task != nil {
+		response.Task, err = task.toProto()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return response, nil
+}
+
+func (s *grpcHostServer) AssignTaskExact(ctx context.Context, req *pluginv1.AssignTaskExactRequest) (*pluginv1.AssignTaskExactResponse, error) {
+	if s.taskCommands == nil || s.taskCommands.TaskCommands() == nil {
+		return nil, status.Error(codes.Unimplemented, "exact task commands are unavailable")
+	}
+	result, task, err := s.taskCommands.TaskCommands().Assign(ctx, ExactTaskAssignment{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		IdempotencyKey: req.GetIdempotencyKey(), ExpectedResourceVersion: req.GetExpectedResourceVersion(),
+		ManagementInstanceKey: req.GetManagementInstanceKey(), ExpectedClaimGeneration: req.GetExpectedClaimGeneration(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+		AssigneeUserID: req.GetAssigneeUserId(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	response := &pluginv1.AssignTaskExactResponse{Result: commandResultToProto(result)}
+	if task != nil {
+		response.Task, err = task.toProto()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return response, nil
+}
+
+func (s *grpcHostServer) MoveTaskExact(ctx context.Context, req *pluginv1.MoveTaskExactRequest) (*pluginv1.MoveTaskExactResponse, error) {
+	if s.taskCommands == nil || s.taskCommands.TaskCommands() == nil {
+		return nil, status.Error(codes.Unimplemented, "exact task commands are unavailable")
+	}
+	result, task, err := s.taskCommands.TaskCommands().Move(ctx, ExactTaskMove{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		IdempotencyKey: req.GetIdempotencyKey(), ExpectedResourceVersion: req.GetExpectedResourceVersion(),
+		ManagementInstanceKey: req.GetManagementInstanceKey(), ExpectedClaimGeneration: req.GetExpectedClaimGeneration(),
+		WorkflowID: req.GetWorkflowId(), WorkflowStepID: req.GetWorkflowStepId(), Position: req.GetPosition(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	response := &pluginv1.MoveTaskExactResponse{Result: commandResultToProto(result)}
+	if task != nil {
+		response.Task, err = task.toProto()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return response, nil
+}
+
+func (s *grpcHostServer) ArchiveTaskExact(ctx context.Context, req *pluginv1.ArchiveTaskExactRequest) (*pluginv1.ArchiveTaskExactResponse, error) {
+	if s.taskCommands == nil || s.taskCommands.TaskCommands() == nil {
+		return nil, status.Error(codes.Unimplemented, "exact task commands are unavailable")
+	}
+	result, task, err := s.taskCommands.TaskCommands().Archive(ctx, ExactTaskArchive{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		IdempotencyKey: req.GetIdempotencyKey(), ExpectedResourceVersion: req.GetExpectedResourceVersion(),
+		ManagementInstanceKey: req.GetManagementInstanceKey(), ExpectedClaimGeneration: req.GetExpectedClaimGeneration(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	response := &pluginv1.ArchiveTaskExactResponse{Result: commandResultToProto(result)}
+	if task != nil {
+		response.Task, err = task.toProto()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return response, nil
+}
+
+//nolint:dupl // Keep each generated request and response mapping explicit at the gRPC boundary.
+func (s *grpcHostServer) AddTaskRelationExact(ctx context.Context, req *pluginv1.AddTaskRelationExactRequest) (*pluginv1.AddTaskRelationExactResponse, error) {
+	if s.taskCommands == nil || s.taskCommands.TaskCommands() == nil {
+		return nil, status.Error(codes.Unimplemented, "exact task commands are unavailable")
+	}
+	result, err := s.taskCommands.TaskCommands().AddRelation(ctx, ExactTaskRelation{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		RelatedTaskID: req.GetRelatedTaskId(), ExpectedTaskResourceVersion: req.GetExpectedTaskResourceVersion(),
+		ExpectedRelatedResourceVersion: req.GetExpectedRelatedResourceVersion(), IdempotencyKey: req.GetIdempotencyKey(),
+		ManagementInstanceKey: req.GetManagementInstanceKey(), ExpectedClaimGeneration: req.GetExpectedClaimGeneration(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.AddTaskRelationExactResponse{Result: commandResultToProto(result)}, nil
+}
+
+//nolint:dupl // Keep each generated request and response mapping explicit at the gRPC boundary.
+func (s *grpcHostServer) RemoveTaskRelationExact(ctx context.Context, req *pluginv1.RemoveTaskRelationExactRequest) (*pluginv1.RemoveTaskRelationExactResponse, error) {
+	if s.taskCommands == nil || s.taskCommands.TaskCommands() == nil {
+		return nil, status.Error(codes.Unimplemented, "exact task commands are unavailable")
+	}
+	result, err := s.taskCommands.TaskCommands().RemoveRelation(ctx, ExactTaskRelation{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		RelatedTaskID: req.GetRelatedTaskId(), ExpectedTaskResourceVersion: req.GetExpectedTaskResourceVersion(),
+		ExpectedRelatedResourceVersion: req.GetExpectedRelatedResourceVersion(), IdempotencyKey: req.GetIdempotencyKey(),
+		ManagementInstanceKey: req.GetManagementInstanceKey(), ExpectedClaimGeneration: req.GetExpectedClaimGeneration(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.RemoveTaskRelationExactResponse{Result: commandResultToProto(result)}, nil
+}
+
+func (s *grpcHostServer) SendTaskMessageExact(ctx context.Context, req *pluginv1.SendTaskMessageExactRequest) (*pluginv1.SendTaskMessageExactResponse, error) {
+	if s.taskCommands == nil || s.taskCommands.TaskCommands() == nil {
+		return nil, status.Error(codes.Unimplemented, "exact task commands are unavailable")
+	}
+	result, err := s.taskCommands.TaskCommands().SendMessage(ctx, ExactTaskMessage{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		SessionID: req.GetSessionId(), IdempotencyKey: req.GetIdempotencyKey(),
+		ExpectedTaskResourceVersion:    req.GetExpectedTaskResourceVersion(),
+		ExpectedSessionResourceVersion: req.GetExpectedSessionResourceVersion(), Content: req.GetContent(),
+		ManagementInstanceKey: req.GetManagementInstanceKey(), ExpectedClaimGeneration: req.GetExpectedClaimGeneration(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.SendTaskMessageExactResponse{Result: commandResultToProto(result)}, nil
+}
+
+func (s *grpcHostServer) IssueTaskDirectiveExact(ctx context.Context, req *pluginv1.IssueTaskDirectiveExactRequest) (*pluginv1.IssueTaskDirectiveExactResponse, error) {
+	if s.taskCommands == nil || s.taskCommands.TaskCommands() == nil {
+		return nil, status.Error(codes.Unimplemented, "exact task commands are unavailable")
+	}
+	result, directive, err := s.taskCommands.TaskCommands().IssueDirective(ctx, ExactTaskDirectiveIssue{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		SessionID: req.GetSessionId(), CapabilityClass: req.GetCapabilityClass(),
+		InstructionDigest:              req.GetInstructionDigest(),
+		ExpectedTaskResourceVersion:    req.GetExpectedTaskResourceVersion(),
+		ExpectedSessionResourceVersion: req.GetExpectedSessionResourceVersion(),
+		ExpiresAt:                      req.GetExpiresAt(), IdempotencyKey: req.GetIdempotencyKey(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.IssueTaskDirectiveExactResponse{Result: commandResultToProto(result), Directive: taskDirectiveToProto(directive)}, nil
+}
+
+//nolint:dupl // Keep each generated request and response mapping explicit at the gRPC boundary.
+func (s *grpcHostServer) ResolveTaskDirectiveExact(ctx context.Context, req *pluginv1.ResolveTaskDirectiveExactRequest) (*pluginv1.ResolveTaskDirectiveExactResponse, error) {
+	if s.taskCommands == nil || s.taskCommands.TaskCommands() == nil {
+		return nil, status.Error(codes.Unimplemented, "exact task commands are unavailable")
+	}
+	result, directive, err := s.taskCommands.TaskCommands().ResolveDirective(ctx, ExactTaskDirectiveResolve{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), DirectiveID: req.GetDirectiveId(),
+		ExpectedResourceVersion: req.GetExpectedResourceVersion(), IdempotencyKey: req.GetIdempotencyKey(),
+		Resolution: req.GetResolution(), ResolutionDigest: req.GetResolutionDigest(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.ResolveTaskDirectiveExactResponse{Result: commandResultToProto(result), Directive: taskDirectiveToProto(directive)}, nil
+}
+
+func (s *grpcHostServer) managedAgentConversations() (ManagedAgentConversationManager, error) {
+	if s.exact == nil || s.exact.ManagedAgentConversations() == nil {
+		return nil, status.Error(codes.Unimplemented, "managed conversations are unavailable")
+	}
+	return s.exact.ManagedAgentConversations(), nil
+}
+
+func (s *grpcHostServer) EnsureManagedAgentConversationExact(ctx context.Context, req *pluginv1.EnsureManagedAgentConversationExactRequest) (*pluginv1.EnsureManagedAgentConversationExactResponse, error) {
+	manager, err := s.managedAgentConversations()
+	if err != nil {
+		return nil, err
+	}
+	result, conversation, err := manager.Ensure(ctx, managedConversationSpecFromProto(req.GetSpec()))
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.EnsureManagedAgentConversationExactResponse{
+		Result: commandResultToProto(result), Conversation: managedConversationToProto(conversation),
+	}, nil
+}
+
+func (s *grpcHostServer) GetManagedAgentConversationStatusExact(ctx context.Context, req *pluginv1.GetManagedAgentConversationStatusExactRequest) (*pluginv1.GetManagedAgentConversationStatusExactResponse, error) {
+	manager, err := s.managedAgentConversations()
+	if err != nil {
+		return nil, err
+	}
+	conversation, err := manager.Get(ctx, ManagedAgentConversationQuery{
+		WorkspaceID: req.GetWorkspaceId(), InstanceKey: req.GetInstanceKey(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.GetManagedAgentConversationStatusExactResponse{Conversation: managedConversationToProto(conversation)}, nil
+}
+
+func (s *grpcHostServer) ListManagedAgentConversationsExact(ctx context.Context, req *pluginv1.ListManagedAgentConversationsExactRequest) (*pluginv1.ListManagedAgentConversationsExactResponse, error) {
+	manager, err := s.managedAgentConversations()
+	if err != nil {
+		return nil, err
+	}
+	conversations, err := manager.List(ctx, ManagedAgentConversationListQuery{
+		WorkspaceID: req.GetWorkspaceId(), ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*pluginv1.ManagedAgentConversationDescriptor, len(conversations))
+	for i, conversation := range conversations {
+		out[i] = managedConversationToProto(conversation)
+	}
+	return &pluginv1.ListManagedAgentConversationsExactResponse{Conversations: out}, nil
+}
+
+func (s *grpcHostServer) SetManagedAgentConversationPausedExact(ctx context.Context, req *pluginv1.SetManagedAgentConversationPausedExactRequest) (*pluginv1.SetManagedAgentConversationPausedExactResponse, error) {
+	manager, err := s.managedAgentConversations()
+	if err != nil {
+		return nil, err
+	}
+	result, conversation, err := manager.SetPaused(ctx, ManagedAgentConversationPause{
+		RequestID: req.GetRequestId(), IdempotencyKey: req.GetIdempotencyKey(), WorkspaceID: req.GetWorkspaceId(),
+		InstanceKey: req.GetInstanceKey(), ExpectedRevision: req.GetExpectedRevision(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(), Paused: req.GetPaused(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.SetManagedAgentConversationPausedExactResponse{
+		Result: commandResultToProto(result), Conversation: managedConversationToProto(conversation),
+	}, nil
+}
+
+func (s *grpcHostServer) DeleteManagedAgentConversationExact(ctx context.Context, req *pluginv1.DeleteManagedAgentConversationExactRequest) (*pluginv1.DeleteManagedAgentConversationExactResponse, error) {
+	manager, err := s.managedAgentConversations()
+	if err != nil {
+		return nil, err
+	}
+	result, err := manager.Delete(ctx, ManagedAgentConversationDelete{
+		RequestID: req.GetRequestId(), IdempotencyKey: req.GetIdempotencyKey(), WorkspaceID: req.GetWorkspaceId(),
+		InstanceKey: req.GetInstanceKey(), ExpectedRevision: req.GetExpectedRevision(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.DeleteManagedAgentConversationExactResponse{Result: commandResultToProto(result)}, nil
+}
+
+func (s *grpcHostServer) EnqueueManagedAgentInputExact(ctx context.Context, req *pluginv1.EnqueueManagedAgentInputExactRequest) (*pluginv1.EnqueueManagedAgentInputExactResponse, error) {
+	manager, err := s.managedAgentConversations()
+	if err != nil {
+		return nil, err
+	}
+	result, input, err := manager.EnqueueInput(ctx, managedAgentInputEnqueueFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.EnqueueManagedAgentInputExactResponse{
+		Result: commandResultToProto(result), Input: managedAgentInputToProto(input),
+	}, nil
+}
+
+func (s *grpcHostServer) GetManagedAgentInputExact(ctx context.Context, req *pluginv1.GetManagedAgentInputExactRequest) (*pluginv1.GetManagedAgentInputExactResponse, error) {
+	manager, err := s.managedAgentConversations()
+	if err != nil {
+		return nil, err
+	}
+	input, err := manager.GetInput(ctx, managedAgentInputQueryFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.GetManagedAgentInputExactResponse{Input: managedAgentInputToProto(input)}, nil
+}
+
+func (s *grpcHostServer) ListManagedAgentInputsExact(ctx context.Context, req *pluginv1.ListManagedAgentInputsExactRequest) (*pluginv1.ListManagedAgentInputsExactResponse, error) {
+	manager, err := s.managedAgentConversations()
+	if err != nil {
+		return nil, err
+	}
+	page, err := manager.ListInputs(ctx, managedAgentInputListQueryFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	inputs := make([]*pluginv1.ManagedAgentInputReceipt, len(page.Inputs))
+	for i, input := range page.Inputs {
+		inputs[i] = managedAgentInputToProto(input)
+	}
+	return &pluginv1.ListManagedAgentInputsExactResponse{
+		Inputs: inputs, NextSequenceCursor: page.NextSequenceCursor, HasMore: page.HasMore,
+	}, nil
+}
+
+func (s *grpcHostServer) CancelManagedAgentInputExact(ctx context.Context, req *pluginv1.CancelManagedAgentInputExactRequest) (*pluginv1.CancelManagedAgentInputExactResponse, error) {
+	manager, err := s.managedAgentConversations()
+	if err != nil {
+		return nil, err
+	}
+	result, input, err := manager.CancelInput(ctx, managedAgentInputCancelFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.CancelManagedAgentInputExactResponse{
+		Result: commandResultToProto(result), Input: managedAgentInputToProto(input),
+	}, nil
+}
+
+func (s *grpcHostServer) DispatchManagedAgentConversationExact(ctx context.Context, req *pluginv1.DispatchManagedAgentConversationExactRequest) (*pluginv1.DispatchManagedAgentConversationExactResponse, error) {
+	manager, err := s.managedAgentConversations()
+	if err != nil {
+		return nil, err
+	}
+	result, dispatchStatus, conversation, err := manager.Dispatch(ctx, managedAgentConversationDispatchFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.DispatchManagedAgentConversationExactResponse{
+		Result: commandResultToProto(result), DispatchStatus: managedAgentDispatchStatusToProto(dispatchStatus),
+		Conversation: managedConversationToProto(conversation),
+	}, nil
 }
 
 func (s *grpcHostServer) GetState(ctx context.Context, req *pluginv1.GetStateRequest) (*pluginv1.GetStateResponse, error) {

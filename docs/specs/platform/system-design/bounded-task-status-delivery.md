@@ -429,3 +429,7 @@ intermediate replacement.
   [Task-summary semantic equality](../../../plans/task-summary-semantic-equality/plan.md)
 - Late deleted-task queue event repair:
   [Recent runtime log remediation](../../../plans/recent-runtime-log-remediation/plan.md)
+
+## Journey loading extension
+
+[Journey data loading](journey-data-loading.md) owns the new reader-isolation, visible-detail, boot, and shared-loading work. The [delivery package](../../../plans/journey-data-efficiency/plan.md) preserves the existing completed plans and their verification history.

@@ -21,18 +21,18 @@ function status(overrides: Partial<GitStatusEntry> = {}): GitStatusEntry {
 
 describe("deriveSessionGitValues", () => {
   it("uses upstream-relative counts for remote actions", () => {
-    const result = deriveSessionGitValues(
-      status({
+    const result = deriveSessionGitValues({
+      gitStatus: status({
         ahead: 7,
         behind: 2,
         remote_ahead: 1,
         remote_behind: 3,
       }),
-      false,
-      [],
-      [],
-      [],
-    );
+      hasRepositoryStatuses: false,
+      unstagedFiles: [],
+      stagedFiles: [],
+      commits: [],
+    });
 
     expect(result).toMatchObject({
       ahead: 7,
@@ -47,18 +47,18 @@ describe("deriveSessionGitValues", () => {
   });
 
   it("falls back to base-ahead for a branch without an upstream", () => {
-    const result = deriveSessionGitValues(
-      status({
+    const result = deriveSessionGitValues({
+      gitStatus: status({
         remote_branch: null,
         ahead: 4,
         remote_ahead: 8,
         remote_behind: 2,
       }),
-      false,
-      [],
-      [],
-      [],
-    );
+      hasRepositoryStatuses: false,
+      unstagedFiles: [],
+      stagedFiles: [],
+      commits: [],
+    });
 
     expect(result).toMatchObject({
       remoteAhead: 8,
@@ -66,6 +66,32 @@ describe("deriveSessionGitValues", () => {
       pushAhead: 4,
       pullBehind: 0,
       canPush: true,
+      canPull: false,
+    });
+  });
+
+  it("hides ahead and behind counts until enrichment is ready", () => {
+    const result = deriveSessionGitValues({
+      gitStatus: status({
+        detail_state: "pending",
+        ahead: 4,
+        behind: 2,
+        remote_ahead: 3,
+        remote_behind: 1,
+      }),
+      hasRepositoryStatuses: false,
+      unstagedFiles: [],
+      stagedFiles: [],
+      commits: [],
+    });
+
+    expect(result).toMatchObject({
+      statusDetailsReady: false,
+      ahead: 0,
+      behind: 0,
+      pushAhead: 0,
+      pullBehind: 0,
+      canPush: false,
       canPull: false,
     });
   });

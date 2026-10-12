@@ -22,7 +22,6 @@
   "group": "分組",
   "groupByNone": "無",
   "groupByRepository": "儲存庫",
-  "groupByState": "狀態",
   "groupByWorkflow": "工作流程",
   "ungrouped": "未分組",
   "loading": "載入中…",
@@ -56,5 +55,10 @@
   "unarchivedBranchesMissing_one": "分支 {{branches}} 在本地和遠端都已不存在。下一個工作階段將從基礎分支重新開始。",
   "unarchivedBranchesMissing_other": "分支 {{branches}} 在本地和遠端都已不存在。下一個工作階段將從基礎分支重新開始。",
   "unarchivedTaskRestored": "任務已恢復。",
-  "unarchiveTask": "取消歸檔任務"
+  "unarchiveTask": "取消歸檔任務",
+  "groupByWorkflowStep": "工作流程步驟",
+  "noWorkflowStep": "無工作流程步驟",
+  "loadingWorkflowStep": "正在載入工作流程步驟...",
+  "unknownWorkflowStep": "未知工作流程步驟",
+  "workflowStepSection": "{{workflow}} / {{step}}"
 }

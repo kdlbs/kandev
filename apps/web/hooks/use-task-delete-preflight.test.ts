@@ -20,7 +20,7 @@ describe("useTaskDeletePreflight", () => {
 
     await waitFor(() => expect(result.current.status).toBe("resolved"));
     expect(result.current.requiresDiscardConsent).toBe(false);
-    expect(mockGetTaskDeletePreflight).toHaveBeenCalledWith(["task-1"], false);
+    expect(mockGetTaskDeletePreflight).toHaveBeenCalledWith(["task-1"], false, false);
   });
 
   it("fails closed and retries an unavailable inspection", async () => {

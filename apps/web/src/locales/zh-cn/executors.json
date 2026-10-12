@@ -13,7 +13,6 @@
   "allowUserNamespacesNote": "此设置仅影响新创建的容器。现有任务环境必须重置才能使更改生效。",
   "allowUserNamespacesTitle": "用户命名空间支持",
   "allowUserNamespacesWarning": "这会为选择启用的容器停用 Docker 默认的 AppArmor 限制。仅为需要用户命名空间沙箱的可信代理运行环境启用。",
-  "providerFeatureDisabled": "远程执行器插件当前已停用。",
   "providerFieldClear": "清除",
   "providerFieldClearPending": "保存时将清除 {{field}}。",
   "providerFieldConfigured": "{{field}} 已配置。",

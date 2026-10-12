@@ -61,6 +61,18 @@ export interface SessionSubscriptionHandle {
 
 export type CoreSessionRecoveryHandler = () => Promise<boolean>;
 
+export type SessionGitRefreshMode = "fresh" | "recover" | "replay";
+
+export type SessionGitRefreshResponse = {
+  success: boolean;
+  session_id: string;
+  task_environment_id?: string;
+  mode: SessionGitRefreshMode;
+  status_state: "ready" | "unavailable";
+  error_code?: string;
+  snapshots: Array<BackendMessageMap["session.git.event"]>;
+};
+
 const CORE_CONVERSATION_ACTIONS = new Set<BackendMessageType>([
   "session.message.added",
   "session.message.updated",
@@ -347,6 +359,10 @@ const DEFAULT_RECONNECT_OPTIONS: Required<ReconnectOptions> = {
 // interpolated English diagnostic (see docs/i18n.md on interpolated values).
 const WEBSOCKET_CONNECTION_CLOSED_ERROR = "WebSocket connection closed";
 
+function requestAbortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error("");
+}
+
 export class WebSocketClient {
   private socket: WebSocket | null = null;
   private status: WebSocketStatus = "disconnected";
@@ -356,7 +372,11 @@ export class WebSocketClient {
     {
       resolve: (payload: unknown) => void;
       reject: (error: Error) => void;
-      timeout: ReturnType<typeof setTimeout>;
+      timeout: ReturnType<typeof setTimeout> | null;
+      timeoutMs: number;
+      action: string;
+      signal?: AbortSignal;
+      abortHandler?: () => void;
     }
   >();
   private rawSessionEventHandlers = new Set<(event: RawSessionEvent) => void>();
@@ -466,20 +486,33 @@ export class WebSocketClient {
       return;
     }
     this.socket.send(data);
+    this.startRequestTimeoutFromPayload(payload);
   }
 
-  request<T>(action: string, payload: unknown, timeoutMs = 5000): Promise<T> {
+  request<T>(action: string, payload: unknown, timeoutMs = 5000, signal?: AbortSignal): Promise<T> {
     const id = generateUUID();
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new WebSocketRequestTimeoutError(action));
-      }, timeoutMs);
-      this.pendingRequests.set(id, {
+      if (signal?.aborted) {
+        reject(requestAbortError(signal));
+        return;
+      }
+      const pending = {
         resolve: resolve as (payload: unknown) => void,
         reject,
-        timeout,
-      });
+        timeout: null,
+        timeoutMs,
+        action,
+        signal,
+        abortHandler: undefined as (() => void) | undefined,
+      };
+      if (signal) {
+        pending.abortHandler = () => {
+          this.removePendingRequest(id);
+          reject(requestAbortError(signal));
+        };
+        signal.addEventListener("abort", pending.abortHandler, { once: true });
+      }
+      this.pendingRequests.set(id, pending);
       this.send({ id, type: "request", action, payload });
     });
   }
@@ -564,15 +597,19 @@ export class WebSocketClient {
    * explicit git refresh keeps tab activation from replaying session data during
    * ordinary task switching.
    */
-  refreshSessionData(sessionId: string) {
-    if (this.status !== "connected") return;
-    if (!this.sessionFocusCounts.get(sessionId)) return;
-    this.send({
-      id: generateUUID(),
-      type: "request",
-      action: "session.git.refresh",
-      payload: { session_id: sessionId },
-    });
+  refreshSessionData(
+    sessionId: string,
+    mode: SessionGitRefreshMode = "fresh",
+    signal?: AbortSignal,
+  ) {
+    if (this.status !== "connected" || !this.sessionFocusCounts.get(sessionId)) return undefined;
+    const timeoutMs = mode === "recover" ? 65_000 : 5_000;
+    return this.request<SessionGitRefreshResponse>(
+      "session.git.refresh",
+      { session_id: sessionId, mode },
+      timeoutMs,
+      signal,
+    );
   }
 
   unfocusSession(sessionId: string) {
@@ -1107,8 +1144,7 @@ export class WebSocketClient {
   private resolvePendingRequest(msgId: string, payload: unknown) {
     const pending = this.pendingRequests.get(msgId);
     if (!pending) return;
-    clearTimeout(pending.timeout);
-    this.pendingRequests.delete(msgId);
+    this.removePendingRequest(msgId);
     pending.resolve(payload);
   }
 
@@ -1118,9 +1154,18 @@ export class WebSocketClient {
   private rejectPendingRequest(msgId: string, payload: unknown) {
     const pending = this.pendingRequests.get(msgId);
     if (!pending) return;
-    clearTimeout(pending.timeout);
-    this.pendingRequests.delete(msgId);
+    this.removePendingRequest(msgId);
     pending.reject(toWebSocketRequestError(payload));
+  }
+
+  private removePendingRequest(msgId: string) {
+    const pending = this.pendingRequests.get(msgId);
+    if (!pending) return;
+    if (pending.timeout !== null) clearTimeout(pending.timeout);
+    if (pending.signal && pending.abortHandler) {
+      pending.signal.removeEventListener("abort", pending.abortHandler);
+    }
+    this.pendingRequests.delete(msgId);
   }
 
   private handleDisconnect(event: CloseEvent) {
@@ -1183,10 +1228,10 @@ export class WebSocketClient {
 
   private cleanupPendingRequests() {
     // Reject all pending requests
-    this.pendingRequests.forEach(({ reject, timeout }) => {
-      clearTimeout(timeout);
+    this.pendingRequests.forEach(({ reject }) => {
       reject(new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR));
     });
+    for (const id of this.pendingRequests.keys()) this.removePendingRequest(id);
     this.pendingRequests.clear();
   }
 
@@ -1678,8 +1723,26 @@ export class WebSocketClient {
 
   private flushQueue() {
     if (!this.socket || this.status !== "connected") return;
-    this.pendingQueue.forEach((data) => this.socket?.send(data));
+    this.pendingQueue.forEach((data) => {
+      this.socket?.send(data);
+      this.startRequestTimeoutFromPayload(JSON.parse(data));
+    });
     this.pendingQueue = [];
+  }
+
+  private startRequestTimeout(id: string) {
+    const pending = this.pendingRequests.get(id);
+    if (!pending || pending.timeout !== null) return;
+    pending.timeout = setTimeout(() => {
+      this.removePendingRequest(id);
+      pending.reject(new WebSocketRequestTimeoutError(pending.action));
+    }, pending.timeoutMs);
+  }
+
+  private startRequestTimeoutFromPayload(payload: unknown) {
+    const request = payload as { id?: unknown; type?: unknown } | null;
+    if (request?.type !== "request" || typeof request.id !== "string") return;
+    this.startRequestTimeout(request.id);
   }
 
   private setStatus(status: WebSocketStatus) {

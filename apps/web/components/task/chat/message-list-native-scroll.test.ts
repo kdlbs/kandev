@@ -10,6 +10,7 @@ describe("resolveCompetingInitialScrollOwner", () => {
         hasPendingLayoutRestore: true,
         hasExplicitScrollTarget: true,
         hasUnreadDivider: true,
+        enabled: true,
         isProgrammaticScrollLocked: noProgrammaticLock,
       }),
     ).toBe("layout-restore");
@@ -18,6 +19,7 @@ describe("resolveCompetingInitialScrollOwner", () => {
         hasPendingLayoutRestore: false,
         hasExplicitScrollTarget: true,
         hasUnreadDivider: true,
+        enabled: true,
         isProgrammaticScrollLocked: noProgrammaticLock,
       }),
     ).toBe("explicit-target");
@@ -29,6 +31,7 @@ describe("resolveCompetingInitialScrollOwner", () => {
         hasPendingLayoutRestore: false,
         hasExplicitScrollTarget: false,
         hasUnreadDivider: true,
+        enabled: true,
         isProgrammaticScrollLocked: noProgrammaticLock,
       }),
     ).toBe("unread-divider");
@@ -37,8 +40,21 @@ describe("resolveCompetingInitialScrollOwner", () => {
         hasPendingLayoutRestore: false,
         hasExplicitScrollTarget: false,
         hasUnreadDivider: false,
+        enabled: true,
         isProgrammaticScrollLocked: () => true,
       }),
     ).toBe("programmatic-scroll");
+  });
+
+  it("keeps saved-position placement ahead of the unread divider when auto-scroll is disabled", () => {
+    expect(
+      resolveCompetingInitialScrollOwner({
+        hasPendingLayoutRestore: false,
+        hasExplicitScrollTarget: false,
+        hasUnreadDivider: true,
+        enabled: false,
+        isProgrammaticScrollLocked: noProgrammaticLock,
+      }),
+    ).toBeNull();
   });
 });

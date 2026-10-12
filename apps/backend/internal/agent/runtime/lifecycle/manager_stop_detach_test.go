@@ -8,8 +8,11 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // newDetachTestManager builds a Manager wired with a MockExecutor registered
@@ -103,6 +106,30 @@ func TestStopAgentWithReasonTerminatesOnBackendShutdownWhenSurvivalDisabled(t *t
 
 	eventBus := mgr.eventBus.(*MockEventBus)
 	require.True(t, hasAgentStoppedEvent(eventBus.PublishedEvents), "a terminating stop must still publish agent.stopped")
+}
+
+func TestStopAgentWithReasonPreservesPassthroughConversationOnBackendShutdown(t *testing.T) {
+	mgr, mockExecutor := newDetachTestManager(t, false)
+	writer := &invariantWriter{prior: &models.ExecutorRunning{
+		SessionID:        "session-passthrough",
+		TaskID:           "task-passthrough",
+		Runtime:          agentruntime.RuntimeStandalone,
+		Status:           models.ExecutorRunningStatusReady,
+		AgentExecutionID: "exec-passthrough",
+	}}
+	mgr.SetExecutorRunningWriter(writer)
+	execution := newDetachTestExecution("exec-passthrough", "session-passthrough")
+	execution.IsPassthrough = true
+	execution.Status = v1.AgentStatusReady
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	require.NoError(t, mgr.StopAgentWithReason(context.Background(), execution.ID, StopReasonBackendShutdown, false))
+
+	require.Len(t, mockExecutor.stopInstanceCalls, 1, "passthrough process must stop with its backend")
+	require.False(t, writer.deleted, "backend shutdown must retain the TUI conversation identity")
+	require.NotNil(t, writer.prior)
+	require.Equal(t, "exec-passthrough", writer.prior.AgentExecutionID)
+	require.Equal(t, models.ExecutorRunningStatusStopped, writer.prior.Status)
 }
 
 func hasAgentStoppedEvent(published []*bus.Event) bool {

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  formatCompactDuration,
   formatDate,
   formatNumber,
   formatRelative,
@@ -38,7 +39,7 @@ describe("formatRelative (en, timeAgo-compatible)", () => {
   });
 });
 
-describe("formatRelative (ja)", () => {
+describe("formatRelative (catalog buckets)", () => {
   const now = new Date(FORMAT_NOW).getTime();
   const ago = (ms: number) => new Date(now - ms).toISOString();
 
@@ -46,12 +47,15 @@ describe("formatRelative (ja)", () => {
     await activateLocale("en");
   });
 
-  it("uses Japanese catalog buckets", async () => {
-    await activateLocale("ja");
-    expect(formatRelative(ago(30_000), now)).toBe("たった今");
-    expect(formatRelative(ago(5 * 60_000), now)).toBe("5分前");
-    expect(formatRelative(ago(3 * 3_600_000), now)).toBe("3時間前");
-    expect(formatRelative(ago(2 * 86_400_000), now)).toBe("2日前");
+  it.each([
+    ["ja", "たった今", "5分前", "3時間前", "2日前"],
+    ["ko", "방금", "5분 전", "3시간 전", "2일 전"],
+  ] as const)("uses the %s catalog buckets", async (locale, justNow, minutes, hours, days) => {
+    await activateLocale(locale);
+    expect(formatRelative(ago(30_000), now)).toBe(justNow);
+    expect(formatRelative(ago(5 * 60_000), now)).toBe(minutes);
+    expect(formatRelative(ago(3 * 3_600_000), now)).toBe(hours);
+    expect(formatRelative(ago(2 * 86_400_000), now)).toBe(days);
   });
 });
 
@@ -93,6 +97,7 @@ describe("formatSidebarElapsedTime", () => {
     ["zh-hk", "3週"],
     ["zh-tw", "3週"],
     ["ja", "3週間"],
+    ["ko", "3주"],
     ["pseudo", "3ŵ"],
   ] as const)("uses the %s compact unit catalog", async (locale, expected) => {
     await activateLocale(locale);
@@ -104,7 +109,54 @@ describe("formatSidebarElapsedTime", () => {
   });
 });
 
+describe("formatCompactDuration", () => {
+  afterAll(async () => {
+    await activateLocale("en");
+  });
+
+  it.each([
+    ["en", "42s", "5m", "3h", "2d"],
+    ["ko", "42초", "5분", "3시간", "2일"],
+  ] as const)("formats compact units in %s", async (locale, seconds, minutes, hours, days) => {
+    await activateLocale(locale);
+    expect(formatCompactDuration(42, "second")).toBe(seconds);
+    expect(formatCompactDuration(5, "minute")).toBe(minutes);
+    expect(formatCompactDuration(3, "hour")).toBe(hours);
+    expect(formatCompactDuration(2, "day")).toBe(days);
+  });
+});
+
+const LONG_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  timeZone: "UTC",
+};
+
+const currencyOptions = (
+  currency: string,
+  currencyDisplay: Intl.NumberFormatOptions["currencyDisplay"] = "code",
+): Intl.NumberFormatOptions => ({
+  style: "currency",
+  currency,
+  currencyDisplay,
+});
+
+/** Asserts the wrappers format exactly as the raw Intl formatters do for the active locale. */
+const expectLocaleFormatters = (locale: string, numberOptions?: Intl.NumberFormatOptions) => {
+  expect(formatNumber(1234.5, numberOptions)).toBe(
+    new Intl.NumberFormat(locale, numberOptions).format(1234.5),
+  );
+  expect(formatDate(FORMAT_DATE, LONG_DATE_OPTIONS)).toBe(
+    new Intl.DateTimeFormat(locale, LONG_DATE_OPTIONS).format(new Date(FORMAT_DATE)),
+  );
+};
+
 describe("locale-aware Intl wrappers", () => {
+  afterAll(async () => {
+    await activateLocale("en");
+  });
+
   it("formats numbers using the active locale", async () => {
     await activateLocale("en");
     expect(formatNumber(1234567.89)).toBe("1,234,567.89");
@@ -115,99 +167,22 @@ describe("locale-aware Intl wrappers", () => {
     // pseudo has no CLDR data; wrappers fall back to en formatting.
     expect(formatNumber(1000)).toBe("1,000");
     expect(formatDate(FORMAT_DATE, { year: "numeric" })).toBe("2026");
-    await activateLocale("en");
-  });
-
-  it("passes zh-cn to number and date formatters", async () => {
-    await activateLocale("zh-cn");
-    const numberOptions: Intl.NumberFormatOptions = {
-      style: "currency",
-      currency: "CNY",
-      currencyDisplay: "name",
-    };
-    const dateOptions: Intl.DateTimeFormatOptions = {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      timeZone: "UTC",
-    };
-    const date = FORMAT_DATE;
-
-    expect(formatNumber(1234.5, numberOptions)).toBe(
-      new Intl.NumberFormat("zh-cn", numberOptions).format(1234.5),
-    );
-    expect(formatDate(date, dateOptions)).toBe(
-      new Intl.DateTimeFormat("zh-cn", dateOptions).format(new Date(date)),
-    );
-    await activateLocale("en");
-  });
-
-  it.each([
-    ["zh-tw", "TWD"],
-    ["zh-hk", "HKD"],
-  ] as const)("passes %s to number and date formatters", async (locale, currency) => {
-    await activateLocale(locale);
-    const numberOptions: Intl.NumberFormatOptions = {
-      style: "currency",
-      currency,
-      currencyDisplay: "code",
-    };
-    const dateOptions: Intl.DateTimeFormatOptions = {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      timeZone: "UTC",
-    };
-    const date = FORMAT_DATE;
-
-    expect(formatNumber(1234.5, numberOptions)).toBe(
-      new Intl.NumberFormat(locale, numberOptions).format(1234.5),
-    );
-    expect(formatDate(date, dateOptions)).toBe(
-      new Intl.DateTimeFormat(locale, dateOptions).format(new Date(date)),
-    );
-    await activateLocale("en");
-  });
-
-  it("passes ja to number and date formatters", async () => {
-    await activateLocale("ja");
-    const numberOptions: Intl.NumberFormatOptions = {
-      style: "currency",
-      currency: "JPY",
-      currencyDisplay: "code",
-    };
-    const dateOptions: Intl.DateTimeFormatOptions = {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      timeZone: "UTC",
-    };
-    const date = FORMAT_DATE;
-
-    expect(formatNumber(1234.5, numberOptions)).toBe(
-      new Intl.NumberFormat("ja", numberOptions).format(1234.5),
-    );
-    expect(formatDate(date, dateOptions)).toBe(
-      new Intl.DateTimeFormat("ja", dateOptions).format(new Date(date)),
-    );
-    await activateLocale("en");
   });
 
   it("passes pt-pt to number and date formatters", async () => {
     await activateLocale("pt-pt");
-    const dateOptions: Intl.DateTimeFormatOptions = {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      timeZone: "UTC",
-    };
-    const date = FORMAT_DATE;
+    expectLocaleFormatters("pt-pt");
+  });
 
-    expect(formatNumber(1234.5)).toBe(new Intl.NumberFormat("pt-pt").format(1234.5));
-    expect(formatDate(date, dateOptions)).toBe(
-      new Intl.DateTimeFormat("pt-pt", dateOptions).format(new Date(date)),
-    );
-    await activateLocale("en");
+  it.each([
+    ["zh-cn", "CNY", "name"],
+    ["zh-tw", "TWD", "code"],
+    ["zh-hk", "HKD", "code"],
+    ["ja", "JPY", "code"],
+    ["ko", "KRW", "code"],
+  ] as const)("passes %s to number and date formatters", async (locale, currency, display) => {
+    await activateLocale(locale);
+    expectLocaleFormatters(locale, currencyOptions(currency, display));
   });
 });
 
@@ -334,5 +309,12 @@ describe("formatRelativeTime (locale awareness)", () => {
     const japanese = formatRelativeTime(threeHoursAgo, now);
     expect(japanese).toContain("3");
     expect(japanese).toMatch(/時間/);
+  });
+
+  it("renders Korean relative time once ko is active", async () => {
+    await activateLocale("ko");
+    const korean = formatRelativeTime(threeHoursAgo, now);
+    expect(korean).toContain("3");
+    expect(korean).toMatch(/시간/);
   });
 });

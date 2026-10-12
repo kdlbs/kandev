@@ -1057,7 +1057,7 @@ func TestApplyFileDiff_RegularFile(t *testing.T) {
 	// Build a unified diff that changes line2 -> modified
 	diff := "--- test.txt\n+++ test.txt\n@@ -1,3 +1,3 @@\n line1\n-line2\n+modified\n line3\n"
 
-	hash, resolution, err := wt.ApplyFileDiff(context.Background(), "test.txt", diff, "", nil)
+	hash, resolution, err := wt.ApplyFileDiff(context.Background(), "test.txt", "test.txt", diff, "", nil)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff failed: %v", err)
 	}
@@ -1112,7 +1112,7 @@ func TestApplyFileDiff_Symlink(t *testing.T) {
 	// Build a diff targeting the symlink path
 	diff := "--- LINK.md\n+++ LINK.md\n@@ -1,3 +1,3 @@\n line1\n-line2\n+patched\n line3\n"
 
-	hash, resolution, err := wt.ApplyFileDiff(context.Background(), "LINK.md", diff, "", nil)
+	hash, resolution, err := wt.ApplyFileDiff(context.Background(), "LINK.md", "LINK.md", diff, "", nil)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff through symlink failed: %v", err)
 	}
@@ -1173,7 +1173,7 @@ func TestApplyFileDiff_ConflictDetection(t *testing.T) {
 
 	diff := "--- conflict.txt\n+++ conflict.txt\n@@ -1 +1 @@\n-original\n+patched\n"
 
-	_, _, err := wt.ApplyFileDiff(context.Background(), "conflict.txt", diff, origHash, nil)
+	_, _, err := wt.ApplyFileDiff(context.Background(), "conflict.txt", "conflict.txt", diff, origHash, nil)
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
@@ -1243,7 +1243,7 @@ func TestApplyFileDiff_ConflictWithDesiredContent(t *testing.T) {
 	diff := "--- file.txt\n+++ file.txt\n@@ -1 +1 @@\n-original\n+user-version\n"
 	desiredContent := "user-desired-content\n"
 
-	newHash, resolution, err := wt.ApplyFileDiff(context.Background(), "file.txt", diff, origHash, &desiredContent)
+	newHash, resolution, err := wt.ApplyFileDiff(context.Background(), "file.txt", "file.txt", diff, origHash, &desiredContent)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff with desiredContent should not fail: %v", err)
 	}
@@ -1282,7 +1282,7 @@ func TestApplyFileDiff_ConflictWithoutDesiredContent(t *testing.T) {
 	diff := "--- file.txt\n+++ file.txt\n@@ -1 +1 @@\n-original\n+user-version\n"
 
 	// Without desiredContent, conflict should still fail
-	_, _, err := wt.ApplyFileDiff(context.Background(), "file.txt", diff, origHash, nil)
+	_, _, err := wt.ApplyFileDiff(context.Background(), "file.txt", "file.txt", diff, origHash, nil)
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
@@ -1322,7 +1322,7 @@ func TestApplyFileDiff_SymlinkConflictWithDesiredContent(t *testing.T) {
 	diff := "--- LINK.md\n+++ LINK.md\n@@ -1 +1 @@\n-original\n+user-version\n"
 	desiredContent := "user-content\n"
 
-	newHash, resolution, err := wt.ApplyFileDiff(context.Background(), "LINK.md", diff, origHash, &desiredContent)
+	newHash, resolution, err := wt.ApplyFileDiff(context.Background(), "LINK.md", "LINK.md", diff, origHash, &desiredContent)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff with desiredContent through symlink should not fail: %v", err)
 	}

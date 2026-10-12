@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
@@ -16,6 +17,7 @@ import (
 // sent to a different candidate.
 type DownstreamLaunch struct {
 	ExecutionProfileID string
+	AttemptID          string
 	Decision           RouteDecision
 	Prompt             string
 	PriorACPSession    string
@@ -208,6 +210,34 @@ func (c *Conductor) RouteAfterFailure(
 	)
 }
 
+// RouteAfterUnclassifiedFailure applies the narrow opt-in policy using
+// caller-supplied evidence from a trusted task/runtime boundary.
+func (c *Conductor) RouteAfterUnclassifiedFailure(
+	ctx context.Context,
+	sessionID, logicalProfileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+	failure *routingerr.Error,
+	evidence UnclassifiedFailureEvidence,
+) (RouteDecision, error) {
+	if c.engine == nil || c.profiles == nil {
+		return RouteDecision{}, errors.New("dynamic conductor is not configured")
+	}
+	if resolver, ok := c.profiles.(interface {
+		RouteAfterUnclassifiedFailure(context.Context, string, string, string, int64, *routingerr.Error, UnclassifiedFailureEvidence) (RouteDecision, error)
+	}); ok {
+		return resolver.RouteAfterUnclassifiedFailure(
+			ctx, sessionID, logicalProfileID, currentExecutionProfileID, expectedGeneration, failure, evidence,
+		)
+	}
+	profile, err := c.profiles.LoadDynamicProfile(ctx, logicalProfileID)
+	if err != nil {
+		return RouteDecision{}, err
+	}
+	return c.engine.ApplyUnclassifiedFailureContext(
+		ctx, sessionID, profile, expectedGeneration, currentExecutionProfileID, failure, evidence,
+	)
+}
+
 // BuildContinuation creates the bounded provider-neutral handoff package used
 // by a successor launch. Callers that already classified a failed turn build
 // it before advancing the route, then persist it against the successor
@@ -239,6 +269,7 @@ func (c *Conductor) launchWithFallback(
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		execution, err := c.downstream.Launch(ctx, DownstreamLaunch{
 			ExecutionProfileID: current.ExecutionProfileID,
+			AttemptID:          uuid.NewString(),
 			Decision:           current,
 			Prompt:             ContinuationPrompt(request.Prompt, currentContinuation),
 			PriorACPSession:    priorACPSession(request.PriorACPSession, decision, current),

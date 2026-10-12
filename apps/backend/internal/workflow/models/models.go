@@ -186,22 +186,23 @@ type WorkflowTemplate struct {
 
 // StepDefinition represents a step in a workflow template (stored as JSON in WorkflowTemplate)
 type StepDefinition struct {
-	ID                        string                                       `json:"id"`
-	Name                      string                                       `json:"name"`
-	Position                  int                                          `json:"position"`
-	Color                     string                                       `json:"color"`
-	Prompt                    string                                       `json:"prompt,omitempty"`
-	Events                    StepEvents                                   `json:"events"`
-	AllowManualMove           bool                                         `json:"allow_manual_move"`
-	IsStartStep               bool                                         `json:"is_start_step"`
-	ShowInCommandPanel        bool                                         `json:"show_in_command_panel"`
-	AutoArchiveAfterHours     int                                          `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID            string                                       `json:"agent_profile_id,omitempty" yaml:"agent_profile_id,omitempty"`
-	ProfileSessionStartPolicy taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty" yaml:"profile_session_start_policy,omitempty"`
-	ProfileSessionEndPolicy   taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty" yaml:"profile_session_end_policy,omitempty"`
-	SessionTarget             *WorkflowSessionTarget                       `json:"session_target,omitempty" yaml:"session_target,omitempty"`
-	WIPLimit                  int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
-	PullFromStepID            string                                       `json:"pull_from_step_id,omitempty" yaml:"pull_from_step_id,omitempty"`
+	ID                          string                                       `json:"id"`
+	Name                        string                                       `json:"name"`
+	Position                    int                                          `json:"position"`
+	Color                       string                                       `json:"color"`
+	Prompt                      string                                       `json:"prompt,omitempty"`
+	Events                      StepEvents                                   `json:"events"`
+	AllowManualMove             bool                                         `json:"allow_manual_move"`
+	IsStartStep                 bool                                         `json:"is_start_step"`
+	ShowInCommandPanel          bool                                         `json:"show_in_command_panel"`
+	AutoArchiveAfterHours       int                                          `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID              string                                       `json:"agent_profile_id,omitempty" yaml:"agent_profile_id,omitempty"`
+	ProfileSessionStartPolicy   taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty" yaml:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy     taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty" yaml:"profile_session_end_policy,omitempty"`
+	DisableUnclassifiedFallback bool                                         `json:"disable_unclassified_fallback,omitempty" yaml:"disable_unclassified_fallback,omitempty"`
+	SessionTarget               *WorkflowSessionTarget                       `json:"session_target,omitempty" yaml:"session_target,omitempty"`
+	WIPLimit                    int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
+	PullFromStepID              string                                       `json:"pull_from_step_id,omitempty" yaml:"pull_from_step_id,omitempty"`
 	// StageType mirrors WorkflowStep.StageType for templates so the office
 	// default + coordination workflows can declare their UX role
 	// ("work", "review", "approval", "custom") in YAML.
@@ -218,23 +219,24 @@ type StepDefinition struct {
 
 // WorkflowStep represents a step in a workflow
 type WorkflowStep struct {
-	ID                        string                                       `json:"id"`
-	WorkflowID                string                                       `json:"workflow_id"`
-	Name                      string                                       `json:"name"`
-	Position                  int                                          `json:"position"`
-	Color                     string                                       `json:"color"`
-	Prompt                    string                                       `json:"prompt,omitempty"`
-	Events                    StepEvents                                   `json:"events"`
-	AllowManualMove           bool                                         `json:"allow_manual_move"`
-	IsStartStep               bool                                         `json:"is_start_step"`
-	ShowInCommandPanel        bool                                         `json:"show_in_command_panel"`
-	AutoArchiveAfterHours     int                                          `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID            string                                       `json:"agent_profile_id,omitempty"`
-	ProfileSessionStartPolicy taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty"`
-	ProfileSessionEndPolicy   taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty"`
-	SessionTarget             *WorkflowSessionTarget                       `json:"session_target,omitempty"`
-	WIPLimit                  int                                          `json:"wip_limit,omitempty"`
-	PullFromStepID            string                                       `json:"pull_from_step_id,omitempty"`
+	ID                          string                                       `json:"id"`
+	WorkflowID                  string                                       `json:"workflow_id"`
+	Name                        string                                       `json:"name"`
+	Position                    int                                          `json:"position"`
+	Color                       string                                       `json:"color"`
+	Prompt                      string                                       `json:"prompt,omitempty"`
+	Events                      StepEvents                                   `json:"events"`
+	AllowManualMove             bool                                         `json:"allow_manual_move"`
+	IsStartStep                 bool                                         `json:"is_start_step"`
+	ShowInCommandPanel          bool                                         `json:"show_in_command_panel"`
+	AutoArchiveAfterHours       int                                          `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID              string                                       `json:"agent_profile_id,omitempty"`
+	ProfileSessionStartPolicy   taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy     taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty"`
+	DisableUnclassifiedFallback bool                                         `json:"disable_unclassified_fallback"`
+	SessionTarget               *WorkflowSessionTarget                       `json:"session_target,omitempty"`
+	WIPLimit                    int                                          `json:"wip_limit,omitempty"`
+	PullFromStepID              string                                       `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend
 	// ("work", "review", "approval", "custom"). The engine does not branch
 	// on it. Stored as TEXT in workflow_steps.stage_type, defaulting to
@@ -318,6 +320,57 @@ func (s *WorkflowStep) HasOnTurnCompleteAction(actionType OnTurnCompleteActionTy
 		}
 	}
 	return false
+}
+
+// AdvancesOnTurnComplete reports whether the step's on_turn_complete actions
+// include a move the workflow engine runs: move_to_next, move_to_previous, or
+// move_to_step with a non-empty step_id that differs from this step, not
+// marked requires_approval. An unconditional self-target is selected by the
+// engine and blocks later actions, but does not transition. A guarded
+// self-target can fall through when its guard is not satisfied. The engine
+// skips a move_to_step without a step_id and does not run a requires_approval
+// move on turn completion; disable_plan_mode never moves the task. A move
+// behind a wait_for_quorum guard counts, because the guard can be satisfied
+// later.
+func (s *WorkflowStep) AdvancesOnTurnComplete() bool {
+	for _, action := range s.Events.OnTurnComplete {
+		if requiresApproval, _ := action.Config["requires_approval"].(bool); requiresApproval {
+			continue
+		}
+		switch action.Type {
+		case OnTurnCompleteMoveToNext, OnTurnCompleteMoveToPrevious:
+			return true
+		case OnTurnCompleteMoveToStep:
+			stepID, _ := action.Config["step_id"].(string)
+			if stepID == "" {
+				continue
+			}
+			if stepID != s.ID {
+				return true
+			}
+			if !hasOnTurnCompleteQuorumGuard(action.Config) {
+				return false
+			}
+		}
+	}
+	return false
+}
+
+func hasOnTurnCompleteQuorumGuard(config map[string]any) bool {
+	guard, ok := config["wait_for_quorum"].(map[string]any)
+	if !ok {
+		condition, ok := config["if"].(map[string]any)
+		if !ok {
+			return false
+		}
+		guard, ok = condition["wait_for_quorum"].(map[string]any)
+		if !ok {
+			return false
+		}
+	}
+	role, _ := guard["role"].(string)
+	threshold, _ := guard["threshold"].(string)
+	return role != "" && threshold != ""
 }
 
 // RemapStepID returns the mapped workflow-step ID when id references a template

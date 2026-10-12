@@ -178,3 +178,4 @@ Task 06 verification completed on 2026-09-26:
 - [Requirements](../../specs/ci/requirements/pull-request-documentation-coverage.md)
 - [System design](../../specs/ci/system-design/pull-request-documentation-coverage.md)
 - [Decision](../../decisions/2026-09-10-pr-documentation-coverage.md)
+- [Absent merge queue label reevaluation follow-up](../pr-docs-absent-queue/plan.md)

@@ -14,6 +14,17 @@ An executor determines where Kandev creates a task environment and runs `agentct
 3. Choose Docker, Kubernetes, SSH, or Sprites when the host boundary or remote location is part of the requirement.
 4. Review credentials, scripts, mounts, and network policy as part of the executor trust boundary.
 
+## Stable remote helpers
+
+Stable standard installs include a manifest for remote helpers. They do not include the helper
+executables. On the first remote task for a platform, Kandev downloads that Stable release's helper
+when no verified copy is cached. It checks the helper digest from the installed manifest before use.
+
+The Kandev host needs outbound HTTPS to `github.com` and `release-assets.githubusercontent.com`.
+GitHub redirects release-asset downloads to the second host. If network access is not available,
+install a full CLI archive or set an existing helper-path override. A full Stable Desktop installer
+or updater is not available. Containers and npm Nightlies include all remote helpers.
+
 ## Current support
 
 | Executor      | Current status                                                                  | Workspace                                                               | Use it when                                                              |
@@ -23,7 +34,7 @@ An executor determines where Kandev creates a task environment and runs `agentct
 | Local Docker  | Supported when the global Docker runtime is enabled and its daemon is reachable | `/workspace` in a new Docker container                                  | You need a repeatable container boundary                                 |
 | Kubernetes    | Dependency-bound on cluster access, namespaced RBAC, admission, storage, and streaming support | `/workspace` in one Pod per task | You need sessions scheduled inside an administrator-managed cluster boundary |
 | Sprites.dev   | Supported, provider-dependent                                                   | `/workspace` in a provider sandbox                                      | You need remote compute and accept provider lifecycle/billing            |
-| Plugin remote | Administrator-enabled provider plugins; disabled by default                   | Provider-owned environment with reported retention and expiry           | You need a remote provider that implements the Kandev executor contract  |
+| Plugin remote | Available through an installed, active, compatible provider                       | Provider-owned environment with reported retention and expiry           | You need a remote provider that implements the Kandev executor contract  |
 | SSH           | Supported for repository sources on a trusted host                              | A task folder on a trusted SSH host                                     | You need a remote host with SSH, SFTP, forwarding, and clone credentials |
 | Remote Docker | Supported over SSH; local Git sources are not yet rejected (see below) | `/workspace` in a container on a remote Docker daemon | You want a container boundary on one remote machine, including a host that accepts no filesystem writes, and do not run Kubernetes |
 
@@ -45,13 +56,13 @@ Choose Remote Docker over a single-node Kubernetes cluster when you want a conta
 
 ## Plugin-managed remote executors
 
-Plugin remote providers appear in **Settings > Executors** when an installed plugin declares `executor_providers`. The administrator must enable `features.remoteExecutorPlugins` and restart Kandev. This feature is disabled in shipped profiles.
+Plugin remote providers appear in **Settings > Executors** when an installed, active plugin declares a compatible `executor_providers` contract. No separate feature flag or restart is required. Disabled, incompatible, or unavailable providers remain ineligible for new launches, and built-in executors continue to work when no provider plugin is installed.
 
 The plugin provisions and removes provider compute. Kandev owns agentctl, agent lifecycle, workspace materialization, task authorization, and durable resource inventory. A provider must support recovery with the original operation identity. Kandev keeps unresolved cleanup inventory when a provider is unavailable or removal is not confirmed.
 
 Review each provider's retention and expiry before launch. `persistent` means the provider reports no fixed expiry. `bounded` includes a maximum lifetime. `ephemeral` means workspace data ends with the compute environment. `unknown` makes no retention promise. The task environment disclosure reports effective retention, known expiry, current status, and available cleanup actions.
 
-Remote environments need outbound access to the configured Kandev API URL. Providers return short-lived HTTPS connection leases for agentctl. Do not place provider credentials in endpoint URLs, task metadata, or resource state. See [Authoring plugins](plugins-authoring.md#remote-executor-providers) and the [plugin manifest reference](plugins-manifest.md#remote-executor-providers).
+Remote environments need outbound access to the Kandev API. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to a non-local HTTPS URL of this Kandev; plugin launches fail without it. Select agent credentials on the profile page as for other remote executors: Kandev copies the selected credential files into the environment and passes selected secrets as agent environment variables. Providers return short-lived HTTPS connection leases for agentctl. Do not place provider credentials in endpoint URLs, task metadata, or resource state. See [Authoring plugins](plugins-authoring.md#remote-executor-providers) and the [plugin manifest reference](plugins-manifest.md#remote-executor-providers).
 
 ## Embedded VS Code availability
 
@@ -92,6 +103,11 @@ The MCP editor checks only that the value is a JSON object. Its presets cover st
 
 Profile edits apply when Kandev provisions a launch, but a Docker container or Sprite resume can reconnect to the already provisioned process, image, environment, credentials, and files. Kubernetes records a separate workload snapshot for each session; changing its profile affects new sessions, while an existing session and any replacement Pod keep that snapshot. Use **Reset Environment** or explicitly destroy the resource when a change must take effect on a fresh environment. Deleting or editing a profile does not tear down an already-running resource.
 
+An ordinary partial API save keeps each omitted prepare or cleanup script,
+including a newer value saved concurrently. Supplying a script replaces it;
+supplying an empty string clears it. The profile editor submits both scripts,
+so a stale full editor draft can still replace newer script values.
+
 ### Repository environment secrets
 
 Open a workspace repository's editor to add **Environment secrets** bindings. Each binding maps a POSIX environment key to a Global secret or a Workspace secret from that same workspace. A task receives the bindings from every repository attached to it, along with its selected executor profile environment. The resolved snapshot is available to repository setup scripts, the agent, child shells, and new terminal-panel terminals on supported executors.
@@ -114,14 +130,41 @@ endpoints, or host paths that do not work in the executor. A fresh provision or
 **Reset Environment** can replace the target file. A warm resume keeps the
 existing executor file and does not read the host again.
 
-Each file is limited to 1 MiB and each launch is limited to 4 MiB. Kandev
-writes copied files with owner-only mode `0600`. Missing, unreadable, invalid,
-or oversized optional files produce a preparation warning and do not stop the
-launch. File contents are not returned by the API or stored in the profile.
+Each configuration file is limited to 1 MiB and each launch is limited to
+4 MiB of copied configuration. Kandev writes copied files with owner-only
+mode `0600`. Missing, unreadable, invalid, or oversized optional files produce
+a preparation warning and do not stop the launch. File contents are not
+returned by the API or stored in the profile.
 
 SSH writes below the configured remote user's home. If that account is shared,
 the copied configuration can affect other processes that use the same account.
 Review the selected bundles before saving the profile.
+
+### Agent lifetime and reconnect
+
+Kandev also keeps durable delivery records in retained executor storage when
+the executor supports them. The records help Kandev replay accepted output
+after an agentctl replacement or backend restart. A compatible surviving
+agentctl keeps its delivery identity, and Kandev replays committed records
+before it accepts new work. These records do not replace native harness state.
+
+Local and worktree agents stop with Kandev by default. To keep supported local
+agents alive across a backend restart, enable **Agent survival across backend
+restart** under **Settings > System > Feature Toggles**, then restart Kandev.
+The equivalent environment variable is `KANDEV_FEATURES_AGENT_SURVIVAL=true`.
+This installation setting is not an agent-profile setting.
+
+Remote agents continue when the local Kandev backend stops or disconnects.
+Remote survival does not depend on the local survival setting. When Kandev
+returns, it verifies the recorded execution and reconnects to the same agent.
+It replays saved output without sending another prompt. **Stop** still stops
+the selected remote agent.
+
+The executor needs usable disk space to retain output during a long outage.
+Provider expiration and external process termination can still stop a remote
+agent. Backend tools and credential services require connectivity to Kandev.
+If the retained journal is unavailable, Kandev blocks unsafe prompt admission.
+It does not silently use a less durable path.
 
 ### Model selection in remote executors
 
@@ -149,13 +192,13 @@ guarantee equal host and executor model catalogs.
 
 Do not treat the two script fields as universal hooks:
 
-| Runtime          | Prepare script                                                                                                        | Profile cleanup script                                                                                                                                                                                                                                                  |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local / Worktree | Runs on the host during preparation, with the common `KANDEV_TASK_PREPARATION_TIMEOUT` limit (`10m` by default). A failure is shown but is non-fatal, so the agent can still start for diagnosis. | Not executed by the executor runtime. Repository-level worktree cleanup is a separate repository setting.                                                                                                                                                               |
-| Local Docker     | Runs inside the container before `agentctl`, with the common preparation limit. Failure is logged but `agentctl` still starts.                           | Not executed.                                                                                                                                                                                                                                                           |
-| Kubernetes       | Runs in the main container before `agentctl`. The default is idempotent for a retained PVC; a failure aborts launch. Kandev injects the script and helper through Pod exec rather than requiring them in the image. | Runs in the verified main container only for terminal task/session archive or delete cleanup. Failure is logged but does not prevent exact Pod/PVC deletion. Plain Stop and backend restart preserve the Pod and workspace and skip cleanup. |
-| Sprites          | Runs inside a newly created sandbox, with the common preparation limit. Failure aborts the launch and destroys that new sandbox.                         | Runs, with a 60-second limit, only when a live execution is stopped with a task/session archived or deleted reason; failure does not prevent the subsequent destroy attempt. Plain Stop, **Reset Environment**, and profile-page direct destroy do not run this script. |
-| SSH              | Runs on the target before `agentctl`, with the common preparation limit. An empty profile script uses the SSH default, which materializes the primary repository at the task-workspace root, reuses a matching checkout, runs repository setup, and selects the Kandev branch. A non-zero exit, timeout, missing checkout, or conflicting origin aborts the launch. | Runs on the target, with a 60-second limit, only for task/session archive or delete stops. Failure is logged but does not prevent controller teardown. Plain Stop and backend restart preserve the task workspace and skip cleanup. |
+| Runtime          | Prepare script                                                                                                                                                                                                                                                                                                                                                      | Profile cleanup script                                                                                                                                                                                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local / Worktree | Runs on the host during preparation, with the common `KANDEV_TASK_PREPARATION_TIMEOUT` limit (`10m` by default). A failure is shown but is non-fatal, so the agent can still start for diagnosis.                                                                                                                                                                   | Not executed by the executor runtime. Repository-level worktree cleanup is a separate repository setting.                                                                                                                                                               |
+| Local Docker     | Runs inside the container before `agentctl`, with the common preparation limit. Failure is logged but `agentctl` still starts.                                                                                                                                                                                                                                      | Not executed.                                                                                                                                                                                                                                                           |
+| Kubernetes       | Runs in the main container before `agentctl`. The default is idempotent for a retained PVC; a failure aborts launch. Kandev injects the script and helper through Pod exec rather than requiring them in the image.                                                                                                                                                 | Runs in the verified main container only for terminal task/session archive or delete cleanup. Failure is logged but does not prevent exact Pod/PVC deletion. Plain Stop and backend restart preserve the Pod and workspace and skip cleanup.                            |
+| Sprites          | Runs inside a newly created sandbox, with the common preparation limit. Failure aborts the launch and destroys that new sandbox.                                                                                                                                                                                                                                    | Runs, with a 60-second limit, only when a live execution is stopped with a task/session archived or deleted reason; failure does not prevent the subsequent destroy attempt. Plain Stop, **Reset Environment**, and profile-page direct destroy do not run this script. |
+| SSH              | Runs on the target before `agentctl`, with the common preparation limit. An empty profile script uses the SSH default, which materializes the primary repository at the task-workspace root, reuses a matching checkout, runs repository setup, and selects the Kandev branch. A non-zero exit, timeout, missing checkout, or conflicting origin aborts the launch. | Runs on the target, with a 60-second limit, only for task/session archive or delete stops. Failure is logged but does not prevent controller teardown. Plain Stop and backend restart preserve the task workspace and skip cleanup.                                     |
 
 Keep working prepare scripts noninteractive and idempotent. Kandev resolves supported placeholders and appends its managed branch checkout for Docker, Kubernetes, Sprites, and SSH after the user script. A profile cleanup script must never remove paths outside the environment it owns.
 
@@ -252,6 +295,10 @@ Repository settings control base branch, branch naming, pull-before-create, repo
 
 Normal stop keeps the task environment available. Task deletion or **Reset Environment** removes the tracked worktree when configured to clean worktrees. Preserve or push valuable changes first; see [Git Operations](git-operations.md).
 
+If a managed repository clone changes while a task worktree has local changes, Kandev offers a confirmed recovery action to move those files into worktrees from the current clone and resume the same session. The recovery card reports the current repository, phase, and last update. That progress survives page reloads and reconnects, and it blocks another transfer while the recovery runner is live. If Kandev cannot confirm the recovery status, use **Check status** before choosing another recovery action.
+
+The original repository clone and a recovery snapshot remain on disk. Git staging choices do not transfer. After every selected repository's files have moved, Kandev reports session startup separately; moved files do not mean the agent is ready. Review the changes before committing. Recovery preserves ignored files as part of the worktree contents and does not promise a faster copy or show a time estimate.
+
 Typical failures:
 
 - dirty or conflicting source repository state;
@@ -347,7 +394,7 @@ Docker profiles can inject resolved environment secrets. For agent file-based au
 
 A container is a useful boundary, not a hostile-code security sandbox. The Docker daemon has host-level power, bind mounts expose their sources, the agent can use every injected secret, and the default image has outbound network access. Kandev does **not** mount the Docker socket into agent containers automatically.
 
-Plain Stop preserves a healthy container for resume. A later launch reconnects to an existing running container, or starts one in a stopped/exited state; if reconnect fails, it creates a fresh container. Archive, delete, stale cleanup, explicit removal in the profile page, and **Reset Environment** can stop or force-remove it. Inspect matching containers before manual cleanup:
+Plain Stop preserves a healthy container for resume. Recoverable agent failure also retains the established container and workspace, including when the container was stopped externally. This does not resend an interrupted prompt. A later launch reconnects to an existing running container, or starts one in a stopped/exited state; if reconnect fails, it creates a fresh container. Stale execution cleanup stops the container and preserves it for resume. Archive, delete, explicit force-stop, removal in the profile page, and **Reset Environment** can remove it. Inspect matching containers before manual cleanup:
 
 ```bash
 docker ps -a --filter label=kandev.managed=true
@@ -420,7 +467,11 @@ Sprites profiles do not copy the host-active `gh` CLI token. Kandev may copy exp
 
 Network rules are stored in `sprites_network_policy_rules` as JSON entries with `domain`, `action` (`allow` or `deny`), and optional `include`. Kandev applies them only on fresh sandbox creation, and currently does so after credential upload, prepare, controller startup, and agent-instance creation. Bootstrap traffic can therefore occur before the profile policy is installed. A parse/provider failure is reported as skipped and does not abort launch. Provider semantics remain authoritative; do not treat this late, best-effort step as a security boundary, and test the resulting policy.
 
-Fresh launch creates a sandbox named `kandev-<execution-prefix>`, uploads the Linux/amd64 `agentctl`, uploads credentials, runs prepare, starts the controller, and opens a local proxy to its control port. The current Sprites path does not probe sandbox architecture; it assumes x86-64. A failed fresh launch destroys the new sandbox. Resume reconnects to the recorded sandbox; if it no longer exists or has expired, Kandev warns and provisions a fresh one on the recorded branch.
+Fresh launch creates a sandbox named `kandev-<execution-prefix>`, uploads the Linux/amd64 `agentctl`, uploads credentials, runs prepare, starts the controller, and opens a local proxy to its control port. The current Sprites path does not probe sandbox architecture; it assumes x86-64. A failed fresh launch destroys the new sandbox. An explicit resume reconnects to the recorded sandbox; if it no longer exists or has expired, Kandev warns and provisions a fresh one on the recorded branch.
+
+Backend shutdown closes the local proxy and leaves the remote agent working.
+Automatic startup recovery reconnects only to the recorded sandbox and agent.
+It preserves unavailable resources for a later retry and does not provision a replacement or send a prompt.
 
 Plain Stop preserves the sandbox and workspace for resume. Archive/delete terminal stops attempt to destroy it, and the profile page can list and explicitly destroy Kandev-named sandboxes with the selected provider token. **Reset Environment** also requests sandbox destruction, but the current direct-reset path does not carry the profile's Sprites secret into that destroy request; after a reset or backend restart, verify the old sandbox in the profile page and destroy it there if it remains. Provider retention, quotas, network behavior, and billing remain provider-dependent. Destroying a sandbox out of band breaks any session that still references it.
 
@@ -480,7 +531,11 @@ SSH materializes the primary attached repository at the remote task-workspace ro
 
 The runtime preflights the selected agent command and reports an installation hint when missing; it does not install the agent or its toolchain. Only these resolved credential environment names are forwarded to the remote agent: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GITHUB_TOKEN`, and `GH_TOKEN`. Arbitrary profile variables and control-plane process variables are not forwarded to that agent process. Agent-specific auth setup scripts can still consume a selected stored secret and materialize their own remote login state.
 
-Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop and backend restart skip cleanup and preserve the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. Resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
+Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop skips cleanup and preserves the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. An explicit resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
+
+Backend shutdown closes forwarding and SSH without killing remote processes or running cleanup.
+Startup recovery reconnects to the recorded controller and verifies its authenticated session identity before replay.
+An unavailable connection stays pending for retry; recovery does not start a replacement controller.
 
 </details>
 

@@ -4,7 +4,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kand
 import { Spinner } from "@kandev/ui/spinner";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { IconChartPie, IconTrash } from "@tabler/icons-react";
-import { useLayoutEffect, useRef, type FocusEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   formatDateTime,
@@ -14,18 +13,23 @@ import {
 } from "@/lib/i18n/formats";
 import type {
   StorageMaintenanceSettings,
+  StorageMaintenanceRun,
   StorageOverviewResponse,
   StorageSummaryPartial,
 } from "@/lib/types/system";
+import { StorageGoCacheResult } from "./storage-go-cache-result";
 import { StorageActionButton } from "./storage-action-button";
 import { StorageSettingHelp } from "./storage-setting-help";
 import {
   storageResources,
+  SYSTEM_TEMPORARY_RESOURCE_ID,
   TEMPORARY_ARTIFACTS_RESOURCE_ID,
   type StorageResource,
   type Translate,
 } from "./storage-overview-resources";
 import { formatGigabytes } from "./storage-units";
+import { StorageTemporaryEntries } from "./storage-temporary-entries";
+import { useStorageOverviewFocus } from "./use-storage-overview-focus";
 import { storageAnalysisTotal } from "./storage-totals";
 
 interface Props {
@@ -34,8 +38,12 @@ interface Props {
   loading?: boolean;
   error?: string | null;
   disabledReason?: string;
+  latestGoCacheRun?: StorageMaintenanceRun;
   onRunGoCache: () => void;
   onRunTemporaryArtifacts?: () => void;
+  onReviewTemporaryArtifacts?: () => void;
+  focusTemporaryEntries?: number;
+  focusTemporaryCleanup?: number;
 }
 
 function goCacheDisabledReason(
@@ -51,7 +59,15 @@ function goCacheDisabledReason(
   if (goCache.owned !== true) {
     return t("system:storageGoCacheNotOwned");
   }
-  if ((goCache.size_bytes ?? 0) <= (settings ?? overview.settings).go_cache.max_bytes) {
+  const cleanupEligibleBytes = goCache.cleanup_eligible_size_bytes;
+  if (
+    typeof cleanupEligibleBytes !== "number" ||
+    !Number.isFinite(cleanupEligibleBytes) ||
+    cleanupEligibleBytes < 0
+  ) {
+    return t("system:storageAnalysisSourcePending");
+  }
+  if (cleanupEligibleBytes <= (settings ?? overview.settings).go_cache.max_bytes) {
     return t("system:storageGoCacheBelowLimit");
   }
   return undefined;
@@ -78,9 +94,11 @@ function temporaryArtifactsDisabledReason(
 interface ResourceRowProps {
   resource: StorageResource;
   goCacheCleanupDisabledReason?: string;
+  latestGoCacheRun?: StorageMaintenanceRun;
   onRunGoCache: () => void;
   temporaryArtifactsCleanupDisabledReason?: string;
   onRunTemporaryArtifacts: () => void;
+  onReviewTemporaryArtifacts: () => void;
 }
 
 function ResourceBar({ resource }: { resource: StorageResource }) {
@@ -100,33 +118,51 @@ function ResourceBar({ resource }: { resource: StorageResource }) {
   );
 }
 
-interface FocusedStorageTarget {
-  resourceId: string;
-  element: HTMLElement;
-  focusId: string;
-}
-
-function focusedElementAfterReorder(
-  container: HTMLElement,
-  target: FocusedStorageTarget,
-): HTMLElement | null {
-  const resource = Array.from(
-    container.querySelectorAll<HTMLElement>("[data-storage-resource-id]"),
-  ).find((element) => element.dataset.storageResourceId === target.resourceId);
-  if (!resource) return null;
+function GoCacheResourceActions({
+  latestRun,
+  disabledReason,
+  onRun,
+}: {
+  latestRun?: StorageMaintenanceRun;
+  disabledReason?: string;
+  onRun: () => void;
+}) {
+  const { t } = useTranslation();
   return (
-    Array.from(resource.querySelectorAll<HTMLElement>("[data-storage-focus-id]")).find(
-      (element) => element.dataset.storageFocusId === target.focusId,
-    ) ?? null
+    <>
+      {latestRun && (
+        <div className="mt-3 border-t pt-3">
+          <StorageGoCacheResult
+            result={latestRun.result}
+            busyPolicyEnabled={
+              latestRun.settings_snapshot.go_cache?.allow_cleanup_while_busy === true
+            }
+            testId="storage-go-cache-inline-result"
+          />
+        </div>
+      )}
+      <StorageActionButton
+        variant="outline"
+        className="mt-3 w-full sm:w-auto"
+        disabledReason={disabledReason}
+        onClick={onRun}
+        data-testid="storage-go-cache-clean"
+        focusId="go-cache-clean"
+      >
+        <IconTrash className="size-4" /> {t("system:storageCleanGoCache")}
+      </StorageActionButton>
+    </>
   );
 }
 
 function ResourceRow({
   resource,
   goCacheCleanupDisabledReason,
+  latestGoCacheRun,
   onRunGoCache,
   temporaryArtifactsCleanupDisabledReason,
   onRunTemporaryArtifacts,
+  onReviewTemporaryArtifacts,
 }: ResourceRowProps) {
   const { t } = useTranslation();
   return (
@@ -177,17 +213,19 @@ function ResourceRow({
           </div>
         )}
         {resource.warning && <p className="mt-2 break-words text-amber-600">{resource.warning}</p>}
+        {resource.id === SYSTEM_TEMPORARY_RESOURCE_ID && resource.systemTemporary && (
+          <StorageTemporaryEntries
+            roots={resource.systemTemporary.roots}
+            temporaryArtifacts={resource.temporaryArtifacts}
+            onReviewCleanup={onReviewTemporaryArtifacts}
+          />
+        )}
         {resource.id === "go-cache" && (
-          <StorageActionButton
-            variant="outline"
-            className="mt-3 w-full sm:w-auto"
+          <GoCacheResourceActions
+            latestRun={latestGoCacheRun}
             disabledReason={goCacheCleanupDisabledReason}
-            onClick={onRunGoCache}
-            data-testid="storage-go-cache-clean"
-            focusId="go-cache-clean"
-          >
-            <IconTrash className="size-4" /> {t("system:storageCleanGoCache")}
-          </StorageActionButton>
+            onRun={onRunGoCache}
+          />
         )}
         {resource.id === TEMPORARY_ARTIFACTS_RESOURCE_ID && (
           <StorageActionButton
@@ -384,66 +422,32 @@ function StorageOverviewHeader({
 
 function StorageOverviewResources({
   resources,
+  focusTemporaryEntries,
+  focusTemporaryCleanup,
   cleanupDisabledReason,
   temporaryArtifactsCleanupDisabledReason,
+  latestGoCacheRun,
   onRunGoCache,
   onRunTemporaryArtifacts,
+  onReviewTemporaryArtifacts,
 }: {
   resources: StorageResource[];
+  focusTemporaryEntries?: number;
+  focusTemporaryCleanup?: number;
   cleanupDisabledReason?: string;
   temporaryArtifactsCleanupDisabledReason?: string;
+  latestGoCacheRun?: StorageMaintenanceRun;
   onRunGoCache: () => void;
   onRunTemporaryArtifacts: () => void;
+  onReviewTemporaryArtifacts: () => void;
 }) {
-  const resourcesRef = useRef<HTMLDivElement | null>(null);
-  const focusedTargetRef = useRef<FocusedStorageTarget | null>(null);
-  const resourceOrderKey = resources.map((resource) => resource.id).join("\u0000");
-
-  const rememberFocusedTarget = (event: FocusEvent<HTMLDivElement>) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    const container = resourcesRef.current;
-    const resource = target.closest<HTMLElement>("[data-storage-resource-id]");
-    if (!container || !resource || !container.contains(resource)) {
-      focusedTargetRef.current = null;
-      return;
-    }
-    const focusId = target.dataset.storageFocusId;
-    if (!focusId) {
-      focusedTargetRef.current = null;
-      return;
-    }
-    focusedTargetRef.current = {
-      resourceId: resource.dataset.storageResourceId ?? "",
-      element: target,
-      focusId,
-    };
-  };
-
-  const forgetFocusedTargetOutsideResources = (event: FocusEvent<HTMLDivElement>) => {
-    const relatedTarget = event.relatedTarget;
-    if (!(relatedTarget instanceof Node) || !resourcesRef.current?.contains(relatedTarget)) {
-      focusedTargetRef.current = null;
-    }
-  };
-
-  useLayoutEffect(() => {
-    const container = resourcesRef.current;
-    const target = focusedTargetRef.current;
-    if (!container || !target) return;
-    const activeElement = document.activeElement;
-    if (
-      activeElement &&
-      activeElement !== document.body &&
-      (!container.contains(activeElement) || activeElement !== target.element)
-    ) {
-      focusedTargetRef.current = null;
-      return;
-    }
-    const element = focusedElementAfterReorder(container, target);
-    if (element && document.activeElement !== element) element.focus();
-    focusedTargetRef.current = null;
-  }, [resourceOrderKey]);
+  const {
+    resourcesRef,
+    expandedResources,
+    setExpandedResources,
+    rememberFocusedTarget,
+    forgetFocusedTargetOutsideResources,
+  } = useStorageOverviewFocus({ resources, focusTemporaryEntries, focusTemporaryCleanup });
 
   return (
     <CardContent
@@ -452,15 +456,22 @@ function StorageOverviewResources({
       onFocusCapture={rememberFocusedTarget}
       onBlurCapture={forgetFocusedTargetOutsideResources}
     >
-      <Accordion type="multiple" className="min-w-0">
+      <Accordion
+        type="multiple"
+        className="min-w-0"
+        value={expandedResources}
+        onValueChange={setExpandedResources}
+      >
         {resources.map((resource) => (
           <ResourceRow
             key={resource.id}
             resource={resource}
             goCacheCleanupDisabledReason={cleanupDisabledReason}
+            latestGoCacheRun={latestGoCacheRun}
             onRunGoCache={onRunGoCache}
             temporaryArtifactsCleanupDisabledReason={temporaryArtifactsCleanupDisabledReason}
             onRunTemporaryArtifacts={onRunTemporaryArtifacts}
+            onReviewTemporaryArtifacts={onReviewTemporaryArtifacts}
           />
         ))}
       </Accordion>
@@ -474,8 +485,12 @@ export function StorageOverviewCard({
   loading,
   error,
   disabledReason,
+  latestGoCacheRun,
   onRunGoCache,
   onRunTemporaryArtifacts = () => {},
+  focusTemporaryEntries,
+  focusTemporaryCleanup,
+  onReviewTemporaryArtifacts = () => {},
 }: Props) {
   const { t } = useTranslation();
   if (!overview) {
@@ -501,10 +516,14 @@ export function StorageOverviewCard({
       />
       <StorageOverviewResources
         resources={storageResources(t, overview)}
+        focusTemporaryEntries={focusTemporaryEntries}
+        focusTemporaryCleanup={focusTemporaryCleanup}
         cleanupDisabledReason={cleanupDisabledReason}
         temporaryArtifactsCleanupDisabledReason={temporaryArtifactsCleanupDisabledReason}
+        latestGoCacheRun={latestGoCacheRun}
         onRunGoCache={onRunGoCache}
         onRunTemporaryArtifacts={onRunTemporaryArtifacts}
+        onReviewTemporaryArtifacts={onReviewTemporaryArtifacts}
       />
     </Card>
   );

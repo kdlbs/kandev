@@ -20,6 +20,15 @@ remain protected with either preference value. The default-off behavior below
 continues for otherwise eligible sessions. Explicit user execution and legitimate
 workflow re-entry retain their own activation paths.
 
+### Idle-suspension recovery exception
+
+The workspace [ACP idle-suspension policy](../../executors/requirements/idle-runtime-parking.md)
+defines a narrow exception to the open-time preference below. Explicit focus
+resumes a session that this policy suspended, even when prevent-auto-start is on.
+The exception requires durable idle-suspension provenance. It does not apply to
+manual stops, cancellations, archived tasks, never-started sessions, or workflow
+parking. Queued destination ownership remains protected.
+
 ## Requirements
 
 ### REQ-TASKS-PREVENT-AGENT-AUTOSTART-ON-OPEN-001: Prevent Agent Auto-Start On Open

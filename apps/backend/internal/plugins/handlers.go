@@ -110,11 +110,16 @@ func RegisterRoutes(
 	// tree versions reject a static sibling added after an existing wildcard for
 	// the same method.
 	ctrl.registerMarketplaceRoutes(api)
+	api.GET("/workspaces/:workspace_id/managed-conversation-destinations", ctrl.managedConversationDestinations)
 	api.GET("/settings", ctrl.getSettings)
 	api.PUT("/settings", authn.RequireAdmin(), ctrl.updateSettings)
+	api.POST("/host/interactions/response-receipts", ctrl.issueHumanInteractionResponseReceipt)
 	api.GET("", ctrl.list)
 	api.GET("/:id", ctrl.get)
 	api.GET("/:id/config", ctrl.getConfig)
+	api.GET("/:id/capability-approvals", ctrl.getCapabilityApprovals)
+	api.PUT("/:id/capability-approvals", ctrl.updateCapabilityApprovals)
+	api.DELETE("/:id/capability-approvals", ctrl.revokeCapabilityApprovals)
 	api.PATCH("/:id", authn.RequireAdmin(), ctrl.updateConfig)
 	api.PUT("/:id/auto-update", authn.RequireAdmin(), ctrl.setAutoUpdate)
 	api.DELETE("/:id", authn.RequireAdmin(), ctrl.uninstall)
@@ -131,6 +136,25 @@ func RegisterRoutes(
 	registerConversationRoutes(api, ctrl)
 	api.POST("/:id/webhooks/:key", ctrl.webhook)
 	api.GET("/:id/webhooks/:key", ctrl.webhook)
+}
+
+func (c *Controller) managedConversationDestinations(ctx *gin.Context) {
+	workspaceID := ctx.Param("workspace_id")
+	authorize := c.svc.capabilityApprovalWorkspaceAuthorizer
+	if authorize == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "workspace authorization unavailable"})
+		return
+	}
+	if err := authorize(ctx.Request.Context(), workspaceID); err != nil {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "workspace access denied"})
+		return
+	}
+	destinations, err := c.svc.ListManagedConversationDestinations(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "managed conversation targets unavailable"})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"destinations": destinations})
 }
 
 // --- Management ---

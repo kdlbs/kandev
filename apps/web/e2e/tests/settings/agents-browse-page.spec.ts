@@ -1,12 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ListAvailableAgentsResponse } from "../../../lib/types/http";
+import { serializeInlineScriptJSON } from "../../helpers/inline-script-json";
 
 // The default mock-agent is discovered as already available (it has an
 // InstallScript, but the catalog filters on !available && install_script), so
 // the catalog would show its "everything installed" state with no install
-// cards. Seed one unavailable agent with an install script after navigation.
-// Settings pages hydrate available agents in the server-rendered boot payload,
-// so a route-only mock can be skipped by the loaded-state guard.
+// cards. Seed one unavailable agent in the Go-injected boot payload before the
+// SPA mounts, and keep any later catalog refresh on that same fixture.
 const AVAILABLE_AGENTS = {
   agents: [
     {
@@ -40,56 +40,52 @@ const AVAILABLE_AGENTS = {
   total: 1,
 } satisfies ListAvailableAgentsResponse;
 
-type E2EStoreWindow = Window & {
-  __KANDEV_E2E_STORE__?: {
-    getState: () => {
-      availableAgents: {
-        items: ListAvailableAgentsResponse["agents"];
-        tools: ListAvailableAgentsResponse["tools"];
-        loading: boolean;
-        loaded: boolean;
-      };
-    };
-    setState: (state: {
-      availableAgents: {
-        items: ListAvailableAgentsResponse["agents"];
-        tools: ListAvailableAgentsResponse["tools"];
-        loading: boolean;
-        loaded: boolean;
-      };
-    }) => void;
-  };
-};
-
 test.describe("Agents browse page", () => {
   test("renders the heading and install cards statically, without a collapsible toggle", async ({
     testPage,
   }) => {
+    const bootPayloadAssignment = "window.__KANDEV_BOOT_PAYLOAD__=";
+    let bootStateSeeded = false;
+    await testPage.route("**/settings/agents/browse**", async (route) => {
+      const response = await route.fetch();
+      const html = await response.text();
+      const payloadStart = html.indexOf(bootPayloadAssignment);
+      if (payloadStart < 0) throw new Error("Settings shell has no boot payload");
+      const jsonStart = payloadStart + bootPayloadAssignment.length;
+      const scriptEnd = html.indexOf(";</script>", jsonStart);
+      if (scriptEnd < 0) throw new Error("Settings shell boot payload is incomplete");
+      const payload = JSON.parse(html.slice(jsonStart, scriptEnd)) as {
+        initialState?: Record<string, unknown>;
+      };
+      const seededPayload = {
+        ...payload,
+        initialState: {
+          ...payload.initialState,
+          availableAgents: {
+            items: AVAILABLE_AGENTS.agents,
+            tools: [],
+            loading: false,
+            loaded: true,
+          },
+        },
+      };
+      await route.fulfill({
+        response,
+        body: `${html.slice(0, jsonStart)}${serializeInlineScriptJSON(seededPayload)}${html.slice(scriptEnd)}`,
+      });
+      bootStateSeeded = true;
+    });
+    await testPage.route("**/api/v1/agents/available", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(AVAILABLE_AGENTS),
+      });
+    });
     await testPage.goto("/settings/agents/browse");
+    expect(bootStateSeeded).toBe(true);
 
     const heading = testPage.getByRole("heading", { name: "Browse available agents" });
     await expect(heading).toBeVisible({ timeout: 15_000 });
-
-    // The SSR payload marks this resource as loaded before the client hook
-    // runs. Replace that hydrated snapshot directly so the assertion does not
-    // depend on whether a second fetch happens after the page mounts.
-    await testPage.evaluate((agents) => {
-      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-      if (!store) throw new Error("E2E store bridge is unavailable");
-      // Use the test store's partial-state bridge instead of the production
-      // action. The action rejects snapshots older than the SSR timestamp,
-      // while this fixture intentionally owns the catalog contents.
-      const current = store.getState().availableAgents;
-      store.setState({
-        availableAgents: {
-          ...current,
-          items: agents,
-          tools: [],
-          loading: false,
-          loaded: true,
-        },
-      });
-    }, AVAILABLE_AGENTS.agents);
 
     await expect(testPage.getByTestId("install-card-codex")).toBeVisible({ timeout: 15_000 });
 

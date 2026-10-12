@@ -43,7 +43,9 @@ func TestTransientRetryNoticeState_ReclaimsDeletedSessionAfterFence(t *testing.T
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-delete", "deleted", models.TaskSessionStateCompleted)
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
-	svc.transientRetryNoticeFenceTTL = 10 * time.Millisecond
+	// Keep the fence open across the repository-backed delete operation; the
+	// timer must not expire before the assertion observes the retired entry.
+	svc.transientRetryNoticeFenceTTL = time.Second
 	svc.rememberTurnPrompt("deleted", "prompt", "", false, nil)
 	svc.scheduleTransientRetry("task-delete", "deleted", "execution-1", 1, time.Hour)
 	t.Cleanup(svc.cancelAllTransientRetries)
@@ -58,7 +60,7 @@ func TestTransientRetryNoticeState_ReclaimsDeletedSessionAfterFence(t *testing.T
 		t.Fatalf("notice state entries immediately after deletion = %d, want 1 fenced entry", got)
 	}
 
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(svc.transientRetryNoticeFenceTTL + time.Second)
 	for time.Now().Before(deadline) {
 		if transientRetryNoticeStateCount(svc) == 0 {
 			return

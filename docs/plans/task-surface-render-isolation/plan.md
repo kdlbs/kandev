@@ -172,3 +172,22 @@ The trace comparison is diagnostic evidence. It is not a CI timing threshold.
 - This plan does not change WebSocket update frequency or backend state shapes.
 
 No ADR is required. The design uses the existing virtual-list dependency and UI ownership rules.
+
+## September 29 task-switch follow-up
+
+The [session refresh efficiency extension](../session-refresh-efficiency/plan.md#second-trace-task-switch-extension)
+adds progressive route hydration, editor lifecycle attribution, shared PR
+feedback, agent initialization, and integration health reads. Its
+[trace report](../session-refresh-efficiency/trace-2026-09-29-task-switch.md)
+is new evidence, not a replacement for this package's recorded results.
+Preserve this package's row, file-tree, and scoped-read regression guarantees.
+Task 04 and Tasks 06–08 now have implementation and desktop/phone regression
+coverage. Task 05 remains open pending editor-owner attribution. These tasks do
+not reopen completed work here.
+
+## September 30 Changes rendering follow-up
+
+The [bounded Changes package](../bounded-changes-rendering/plan.md) owns
+virtualization of the Changes timeline, including inline historical files.
+This follow-up preserves the results and completed work orders recorded here.
+Its new regressions supplement the existing interaction and source-routing checks.

@@ -13,6 +13,9 @@ import {
 import type { AppState } from "@/lib/state/store";
 import { WebSocketRequestError } from "@/lib/ws/client";
 
+import { i18n } from "@/lib/i18n";
+import ptTask from "@/src/locales/pt-pt/task.json";
+
 const requestMock = vi.fn().mockResolvedValue({});
 
 vi.mock("@/lib/ws/connection", () => ({
@@ -28,6 +31,8 @@ afterEach(() => {
 const RECOVERY_MESSAGE = "Agent encountered an error";
 const RESUME_TEST_ID = "recovery-resume-button";
 const FRESH_TEST_ID = "recovery-fresh-button";
+const RESTORE_BUTTON_TEST_ID = "recovery-restore-workspace-button";
+const SESSION_RECOVERY_METHOD = "session.recover";
 const BRANCH_FAILURE_MESSAGE = "The saved branch is no longer available.";
 const RECOVERY_ERROR_TEST_ID = "session-recovery-error";
 const TEST_SESSION_ID = "sess-1";
@@ -54,7 +59,7 @@ function recoveryMessage(): Message {
           label: "Resume session",
           test_id: RESUME_TEST_ID,
           params: {
-            method: "session.recover",
+            method: SESSION_RECOVERY_METHOD,
             payload: { task_id: TEST_TASK_ID, session_id: TEST_SESSION_ID, action: "resume" },
           },
         },
@@ -63,7 +68,7 @@ function recoveryMessage(): Message {
           label: "Start fresh session",
           test_id: FRESH_TEST_ID,
           params: {
-            method: "session.recover",
+            method: SESSION_RECOVERY_METHOD,
             payload: { task_id: TEST_TASK_ID, session_id: TEST_SESSION_ID, action: "fresh_start" },
           },
         },
@@ -241,6 +246,34 @@ describe("ActionMessage — recovery history remains after the agent is back", (
   });
 });
 
+describe("ActionMessage history continuation", () => {
+  it("offers history continuation when native session restore is unavailable", async () => {
+    requestMock.mockRejectedValueOnce(
+      new WebSocketRequestError("Native session state is unavailable.", "CONFLICT", {
+        kind: "session_restore_required",
+        recovery_action: "continue_from_history",
+        reason: "native_state_missing",
+      }),
+    );
+
+    renderWithTranscript("WAITING_FOR_INPUT", []);
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+
+    expect(await screen.findByTestId(RECOVERY_ERROR_TEST_ID)).toBeTruthy();
+    fireEvent.click(await screen.findByTestId("recovery-continue-from-history-button"));
+
+    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
+    expect(requestMock.mock.calls[1].slice(0, 2)).toEqual([
+      SESSION_RECOVERY_METHOD,
+      {
+        task_id: TEST_TASK_ID,
+        session_id: TEST_SESSION_ID,
+        action: "continue_from_history",
+      },
+    ]);
+  });
+});
+
 describe("ActionMessage recovery retry", () => {
   it("disables Retry while a repeated recovery request is pending", async () => {
     let resolveRetry: (() => void) | undefined;
@@ -358,6 +391,41 @@ describe("ActionMessage — a recovery that failed keeps its controls", () => {
   });
 });
 
+it("offers confirmed relocation after restore reports a managed-clone refusal", async () => {
+  requestMock.mockRejectedValueOnce(new Error("The first resume failed.")).mockRejectedValueOnce(
+    new WebSocketRequestError("Workspace relocation is required.", "CONFLICT", {
+      kind: "managed_clone_relocation_required",
+      error_stamp: "durable-relocation-stamp",
+      recovery_action: "relocate_and_resume",
+    }),
+  );
+  renderWithTranscript("FAILED", []);
+
+  fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+  fireEvent.click(await screen.findByTestId(RESTORE_BUTTON_TEST_ID));
+  await screen.findByTestId("session-recovery-error");
+  const relocate = await screen.findByTestId("managed-clone-relocate-button");
+  expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
+  expect(screen.queryByTestId(FRESH_TEST_ID)).toBeNull();
+  expect(screen.queryByTestId(RESTORE_BUTTON_TEST_ID)).toBeNull();
+
+  fireEvent.click(relocate);
+  expect(await screen.findByTestId("managed-clone-relocation-confirmation")).toBeTruthy();
+  expect(requestMock).toHaveBeenCalledTimes(2);
+
+  fireEvent.click(screen.getByTestId("managed-clone-relocation-confirm"));
+  await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(3));
+  expect(requestMock.mock.calls[2].slice(0, 2)).toEqual([
+    "session.recover",
+    {
+      task_id: TEST_TASK_ID,
+      session_id: TEST_SESSION_ID,
+      action: "relocate_and_resume",
+      error_stamp: "durable-relocation-stamp",
+    },
+  ]);
+});
+
 it("shows fresh start directly beside resume", () => {
   renderWithTranscript("FAILED", []);
   expect(screen.getByTestId(FRESH_TEST_ID)).toBeTruthy();
@@ -405,4 +473,45 @@ it("redacts a workspace failure after a transcript recovery guard", async () => 
   expect(document.body.textContent).not.toContain("transcript-secret-fixture");
 });
 
-const RESTORE_BUTTON_TEST_ID = "recovery-restore-workspace-button";
+describe("recovery description localization", () => {
+  it.each([
+    ["sessionRecoveryResumeDescription", "Retomar mantém as mensagens e o contexto anteriores."],
+    [
+      "sessionRecoveryFreshDescription",
+      "Começar de novo utiliza o mesmo espaço de trabalho sem o contexto da conversa anterior.",
+    ],
+    [
+      "sessionRecoveryCorruptedDescription",
+      "É provável que retomar volte a falhar porque o estado guardado desta sessão está corrompido. Inicie uma nova sessão.",
+    ],
+  ])("localizes %s instead of displaying the backend fallback", async (key, expected) => {
+    i18n.addResourceBundle("pt-pt", "task", ptTask, true, true);
+    await i18n.changeLanguage("pt-pt");
+    try {
+      const message = recoveryMessage();
+      const actions = message.metadata!.actions as Record<string, unknown>[];
+      actions[0].tooltip_key = key;
+      actions[0].tooltip = "English fallback";
+      renderWithTranscript("WAITING_FOR_INPUT", [], undefined, message);
+      expect(screen.getByTestId(RESUME_TEST_ID).getAttribute("title")).toBe(expected);
+      expect(screen.getByText(expected)).toBeTruthy();
+      await act(() => i18n.changeLanguage("en"));
+      expect(screen.getByTestId(RESUME_TEST_ID).getAttribute("title")).toBe(i18n.t(`task:${key}`));
+    } finally {
+      cleanup();
+      await i18n.changeLanguage("en");
+    }
+  });
+});
+
+it.each([undefined, "futureDescription"])(
+  "keeps fallback copy for a missing or unknown key: %s",
+  (key) => {
+    const message = recoveryMessage();
+    const actions = message.metadata!.actions as Record<string, unknown>[];
+    actions[0].tooltip_key = key;
+    actions[0].tooltip = "Recovery fallback";
+    renderWithTranscript("WAITING_FOR_INPUT", [], undefined, message);
+    expect(screen.getByTestId(RESUME_TEST_ID).getAttribute("title")).toBe("Recovery fallback");
+  },
+);

@@ -21,8 +21,9 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
           : "[@media(hover:hover)]:group-hover:opacity-0 group-focus-within/actions:opacity-0",
       )}
     >
-      <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
-      <span className="text-rose-500">-{diffStats.deletions}</span>
+      {diffStats.additions > 0 && <span className="text-emerald-500">+{diffStats.additions}</span>}
+      {diffStats.additions > 0 && diffStats.deletions > 0 && " "}
+      {diffStats.deletions > 0 && <span className="text-rose-500">-{diffStats.deletions}</span>}
     </div>
   );
 }

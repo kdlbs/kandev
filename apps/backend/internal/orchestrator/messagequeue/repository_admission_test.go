@@ -47,6 +47,191 @@ func TestSQLiteQueueAdmissionReplaysAfterQueueRowRemoval(t *testing.T) {
 	require.False(t, replay)
 }
 
+func TestQueueWorkflowAdmissionRejectsStaleExactTaskVersion(t *testing.T) {
+	repo := newTestSQLiteRepo(t).(*sqliteRepository)
+	identity := QueueSessionIdentity{TaskID: "exact-task", SessionID: "exact-session", SessionIncarnationID: "exact-incarnation"}
+	seedQueueSessionIdentity(t, repo, identity)
+	prepareWorkflowEntryAuthority(t, repo, identity)
+	service := NewService(repo, 10, logger.Default())
+	entry := currentWorkflowEntry(t, repo, identity)
+	entry.ExpectedTaskResourceVersion = "2000-01-01T00:00:00Z"
+
+	_, err := service.QueueMessageWithMetadataForSessionAtWorkflowEntry(
+		context.Background(), identity, entry, "exact body", "", QueuedByUser, false, nil, nil,
+	)
+	require.ErrorIs(t, err, ErrWorkflowEntryMismatch)
+}
+
+func TestExactQueueAdmissionRecoversAndFencesWorkflowEntry(t *testing.T) {
+	repo := newTestSQLiteRepo(t).(*sqliteRepository)
+	identity := QueueSessionIdentity{TaskID: "exact-task", SessionID: "exact-session", SessionIncarnationID: "exact-incarnation"}
+	seedQueueSessionIdentity(t, repo, identity)
+	prepareWorkflowEntryAuthority(t, repo, identity)
+	service := NewService(repo, 10, logger.Default())
+	entry := currentWorkflowEntry(t, repo, identity)
+	entry.RejectPendingMove = true
+	ctx := context.Background()
+
+	first, replay, err := service.QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry(
+		ctx, identity, entry, "queue-exact-1", "accepted prompt", "", QueuedByUser, false, nil, nil,
+	)
+	require.NoError(t, err)
+	require.False(t, replay)
+	require.Equal(t, "queue-exact-1", first.ID)
+
+	if _, err := repo.db.Exec(`UPDATE tasks SET updated_at = '2026-09-26 10:30:00' WHERE id = ?`, identity.TaskID); err != nil {
+		t.Fatalf("advance task version: %v", err)
+	}
+	replayed, replay, err := service.QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry(
+		ctx, identity, entry, "queue-exact-1", "accepted prompt", "", QueuedByUser, false, nil, nil,
+	)
+	require.NoError(t, err)
+	require.True(t, replay)
+	require.Equal(t, first.ID, replayed.ID)
+
+	_, _, err = service.QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry(
+		ctx, identity, entry, "queue-exact-stale", "different prompt", "", QueuedByUser, false, nil, nil,
+	)
+	require.ErrorIs(t, err, ErrWorkflowEntryMismatch)
+
+	current := currentWorkflowEntry(t, repo, identity)
+	current.RejectPendingMove = true
+	current.ExpectedSessionResourceVersion = "2000-01-01T00:00:00Z"
+	_, _, err = service.QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry(
+		ctx, identity, current, "queue-exact-stale-session", "different prompt", "", QueuedByUser, false, nil, nil,
+	)
+	require.ErrorIs(t, err, ErrWorkflowEntryMismatch)
+
+	current = currentWorkflowEntry(t, repo, identity)
+	current.RejectPendingMove = true
+	require.NoError(t, repo.SetPendingMove(ctx, identity.SessionID, &PendingMove{
+		MoveID: "move-pending", TaskID: identity.TaskID, WorkflowID: current.WorkflowID,
+		WorkflowStepID: "destination-step",
+	}))
+	_, _, err = service.QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry(
+		ctx, identity, current, "queue-exact-pending-move", "different prompt", "", QueuedByUser, false, nil, nil,
+	)
+	require.ErrorIs(t, err, ErrWorkflowEntryMismatch)
+}
+
+func TestExactQueueMessageCannotDispatchAfterManagerChange(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		update string
+		args   []any
+		stale  bool
+	}{
+		{name: "same manager generation", stale: false},
+		{name: "transferred to another plugin", update: `UPDATE task_management_claims SET installation_id = ?, instance_key = ?, generation = ? WHERE task_id = ?`, args: []any{"new-manager", "instance-2", 5, "exact-task"}, stale: true},
+		{name: "transferred to a human", update: `UPDATE task_management_claims SET owner_kind = 'human', installation_id = '', instance_key = '', generation = ? WHERE task_id = ?`, args: []any{5, "exact-task"}, stale: true},
+		{name: "released after admission", update: `UPDATE task_management_claims SET owner_kind = '', installation_id = '', instance_key = '', generation = ? WHERE task_id = ?`, args: []any{5, "exact-task"}, stale: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newTestSQLiteRepo(t).(*sqliteRepository)
+			identity := QueueSessionIdentity{TaskID: "exact-task", SessionID: "exact-session", SessionIncarnationID: "exact-incarnation"}
+			seedQueueSessionIdentity(t, repo, identity)
+			prepareWorkflowEntryAuthority(t, repo, identity)
+			_, err := repo.db.Exec(`CREATE TABLE task_management_claims (
+				task_id TEXT PRIMARY KEY, owner_kind TEXT NOT NULL, installation_id TEXT NOT NULL,
+				instance_key TEXT NOT NULL, generation INTEGER NOT NULL
+			)`)
+			require.NoError(t, err)
+			_, err = repo.db.Exec(`INSERT INTO task_management_claims (task_id, owner_kind, installation_id, instance_key, generation)
+				VALUES (?, 'plugin', 'old-manager', 'instance-1', 4)`, identity.TaskID)
+			require.NoError(t, err)
+
+			entry := currentWorkflowEntry(t, repo, identity)
+			entry.EnforceTaskManagementClaim = true
+			entry.ManagementInstallationID = "old-manager"
+			entry.ManagementInstanceKey = "instance-1"
+			entry.ExpectedClaimGeneration = 4
+			queue := NewService(repo, 10, logger.Default())
+			queued, replayed, err := queue.QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry(
+				context.Background(), identity, entry, "managed-message", "old instruction", "", QueuedByUser, false, nil, nil,
+			)
+			require.NoError(t, err)
+			require.False(t, replayed)
+			require.NotNil(t, queued)
+
+			if tc.update != "" {
+				_, err := repo.db.Exec(tc.update, tc.args...)
+				require.NoError(t, err)
+			}
+			taken, found, err := queue.TakeQueuedEntryForSession(context.Background(), identity, queued.ID)
+			require.NoError(t, err)
+			if tc.stale {
+				require.False(t, found)
+				require.Nil(t, taken)
+				entries, err := repo.ListBySession(context.Background(), identity.SessionID)
+				require.NoError(t, err)
+				require.Empty(t, entries, "stale managed input is removed rather than left at the FIFO head")
+				return
+			}
+			require.True(t, found)
+			require.Equal(t, queued.ID, taken.ID)
+		})
+	}
+}
+
+func TestExactQueueAdmissionSupportsVersionFencedWorkflowlessTask(t *testing.T) {
+	repo := newTestSQLiteRepo(t).(*sqliteRepository)
+	identity := QueueSessionIdentity{TaskID: "workflowless-task", SessionID: "workflowless-session", SessionIncarnationID: "workflowless-incarnation"}
+	seedQueueSessionIdentity(t, repo, identity)
+	prepareWorkflowEntryAuthority(t, repo, identity)
+	_, err := repo.db.Exec(`UPDATE tasks SET workflow_id = '', workflow_step_id = '' WHERE id = ?`, identity.TaskID)
+	require.NoError(t, err)
+	entry := currentWorkflowEntry(t, repo, identity)
+	entry.WorkflowID = ""
+	entry.WorkflowStepID = ""
+	entry.TransitionID = 0
+	entry.RejectPendingMove = true
+
+	queued, replayed, err := NewService(repo, 10, logger.Default()).QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry(
+		context.Background(), identity, entry, "workflowless-message", "accepted", "", QueuedByUser, false, nil, nil,
+	)
+	require.NoError(t, err)
+	require.False(t, replayed)
+	require.Equal(t, "workflowless-message", queued.ID)
+}
+
+func prepareWorkflowEntryAuthority(t *testing.T, repo *sqliteRepository, identity QueueSessionIdentity) {
+	t.Helper()
+	statements := []string{
+		`ALTER TABLE tasks ADD COLUMN workflow_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN workflow_step_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE task_sessions ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT '2026-09-26 10:00:00'`,
+		`CREATE TABLE task_step_transitions (id INTEGER PRIMARY KEY, task_id TEXT NOT NULL)`,
+	}
+	for _, statement := range statements {
+		if _, err := repo.db.Exec(statement); err != nil {
+			t.Fatalf("prepare workflow admission authority: %v", err)
+		}
+	}
+	if _, err := repo.db.Exec(`UPDATE tasks SET workflow_id = 'workflow', workflow_step_id = 'step' WHERE id = ?`, identity.TaskID); err != nil {
+		t.Fatalf("set task workflow entry: %v", err)
+	}
+	if _, err := repo.db.Exec(`INSERT INTO task_step_transitions(id, task_id) VALUES(1, ?)`, identity.TaskID); err != nil {
+		t.Fatalf("seed task workflow transition: %v", err)
+	}
+	repo.taskStepTransitionsPresent = true
+}
+
+func currentWorkflowEntry(t *testing.T, repo *sqliteRepository, identity QueueSessionIdentity) WorkflowEntryIdentity {
+	t.Helper()
+	var taskVersion, sessionVersion time.Time
+	if err := repo.db.Get(&taskVersion, `SELECT updated_at FROM tasks WHERE id = ?`, identity.TaskID); err != nil {
+		t.Fatalf("read task resource version: %v", err)
+	}
+	if err := repo.db.Get(&sessionVersion, `SELECT updated_at FROM task_sessions WHERE id = ?`, identity.SessionID); err != nil {
+		t.Fatalf("read session resource version: %v", err)
+	}
+	return WorkflowEntryIdentity{
+		WorkflowID: "workflow", WorkflowStepID: "step", TransitionID: 1,
+		ExpectedTaskResourceVersion:    taskVersion.UTC().Format(time.RFC3339Nano),
+		ExpectedSessionResourceVersion: sessionVersion.UTC().Format(time.RFC3339Nano),
+	}
+}
+
 // @covers AC-TASKS-QUEUE-ADMISSION-001.2
 func TestSQLiteQueueAdmissionReceiptSurvivesRepositoryRestart(t *testing.T) {
 	repo := newTestSQLiteRepo(t)

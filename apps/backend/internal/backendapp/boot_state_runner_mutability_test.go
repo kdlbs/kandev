@@ -92,6 +92,11 @@ func TestBootTaskDTOsWithSessionInfoEvaluatesRunnerMutability(t *testing.T) {
 		t.Fatalf("ineligible task runner projection = editable=%v reason=%q, want editable=false reason=session_exists",
 			ineligible.RunnerEditable, ineligible.RunnerIneligibleReason)
 	}
+	if ineligible.PrimarySessionID != nil || ineligible.PrimarySessionState != nil ||
+		ineligible.SessionCount == nil || *ineligible.SessionCount != 1 {
+		t.Fatalf("session summary with no primary = primary=%v state=%v count=%v, want nil/nil/1",
+			ineligible.PrimarySessionID, ineligible.PrimarySessionState, ineligible.SessionCount)
+	}
 
 	// Confirms the whole boot-map pipeline, not just the DTO field, so a
 	// future regression in mapKanbanTaskState's whitelist would fail here too.

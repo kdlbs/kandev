@@ -26,6 +26,7 @@ import (
 
 func provideLifecycleManager(
 	cfg *config.Config,
+	runtimeOwner *agentctl.RuntimeOwner,
 	log *logger.Logger,
 	eventBus bus.EventBus,
 	agentSettingsRepo settingsstore.Repository,
@@ -38,57 +39,57 @@ func provideLifecycleManager(
 	mcpPrincipalScoper lifecycle.MCPPrincipalScoper,
 	recoveryDeadlineStart time.Time,
 	inheritedRecordScope lifecycle.InheritedRecordScope,
+	peerCapabilities []string,
 	workspaceInfoProvider lifecycle.WorkspaceInfoProvider,
+	workspaceRecoveryErrorReporter lifecycle.WorkspaceRecoveryErrorReporter,
 	passthroughSessionProvider lifecycle.PassthroughSessionProvider,
 	runningWriter lifecycle.ExecutorRunningWriter,
 	startupRecoveryGuard *lifecycle.RecoveryGuard,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 	secretStores := newLifecycleSecretStores(rawSecretStore)
+	agentctlResolver := lifecycle.NewAgentctlResolverWithOptions(log, lifecycle.AgentctlResolverOptions{
+		Version:   Version,
+		Commit:    Commit,
+		BundleDir: os.Getenv("KANDEV_BUNDLE_DIR"),
+		HomeDir:   cfg.ResolvedHomeDir(),
+	})
 
 	// Create runtime registry to manage multiple runtimes
 	executorRegistry := lifecycle.NewExecutorRegistry(log)
 
 	// Standalone runtime is always available (agentctl is a core service)
-	controlClient := agentctl.NewControlClient(
-		cfg.Agent.StandaloneHost,
-		cfg.Agent.StandalonePort,
-		log,
-		agentctl.WithControlAuthToken(cfg.Agent.StandaloneAuthToken),
-	)
-	standaloneExec := lifecycle.NewStandaloneExecutor(
-		controlClient,
-		cfg.Agent.StandaloneHost,
-		cfg.Agent.StandalonePort,
-		log,
-	)
-	// Per-instance servers enforce the same single rotating credential as
-	// the control server -- see the field doc on config.AgentConfig.
-	standaloneExec.SetAuthToken(cfg.Agent.StandaloneAuthToken)
+	standaloneExec := lifecycle.NewStandaloneExecutor(nil, "", 0, log)
+	standaloneExec.SetRuntimeOwner(runtimeOwner)
+	if len(peerCapabilities) > 0 {
+		standaloneExec.SetPeerCapabilities(peerCapabilities)
+	}
 
 	// Create InteractiveRunner for passthrough mode (no WorkspaceTracker, uses callbacks)
 	interactiveRunner := process.NewInteractiveRunner(nil, log, 2*1024*1024) // 2MB buffer
 	standaloneExec.SetInteractiveRunner(interactiveRunner)
 
 	executorRegistry.Register(standaloneExec)
-	log.Info("Standalone runtime registered with passthrough support",
-		zap.String("host", cfg.Agent.StandaloneHost),
-		zap.Int("port", cfg.Agent.StandalonePort))
+	log.Info("Standalone runtime registered with passthrough support")
 
-	// Register Docker runtime if enabled (client is created lazily on first use)
+	// Keep cache cleanup on the shared resolver so SSH, Sprites, Kubernetes, and
+	// Desktop helper use can trigger it after a complete Docker mount inventory.
+	dockerExec := lifecycle.NewDockerExecutor(cfg.Docker, cfg.ResolvedHomeDir(), log, agentctlResolver)
+	agentctlResolver.SetCacheMountInventory(dockerExec.RemoteHelperCacheMounts)
+
+	// Register Docker runtime if enabled (client is created lazily on first use).
+	// The inventory callback remains available to non-Docker helper resolutions.
 	if cfg.Docker.Enabled {
-		dockerExec := lifecycle.NewDockerExecutor(cfg.Docker, cfg.ResolvedHomeDir(), log)
 		executorRegistry.Register(dockerExec)
 		log.Info("Docker runtime registered (lazy initialization)")
 	}
 
 	// Register Remote Docker runtime (always available, instances are created lazily per host)
-	remoteDockerExec := lifecycle.NewRemoteDockerExecutor(log)
+	remoteDockerExec := lifecycle.NewRemoteDockerExecutor(log, agentctlResolver)
 	executorRegistry.Register(remoteDockerExec)
 	log.Info("Remote Docker runtime registered")
 
 	// Register Sprites runtime (remote sandboxes via Sprites.dev)
-	agentctlResolver := lifecycle.NewAgentctlResolver(log)
 	spritesExec := lifecycle.NewSpritesExecutor(secretStores.credentials, agentRegistry, agentctlResolver, 8765, log)
 	executorRegistry.Register(spritesExec)
 	log.Info("Sprites runtime registered")
@@ -123,6 +124,7 @@ func provideLifecycleManager(
 		cfg.ResolvedHomeDir(),
 		log,
 	)
+	lifecycleMgr.SetRuntimeOwner(runtimeOwner)
 
 	// Persistence writer for executors_running, wired before Start runs its
 	// recovery pass: Start reads ListLiveStandaloneExecutorsRunning to build
@@ -206,6 +208,9 @@ func provideLifecycleManager(
 	// instead of staying empty until something else happens to resolve it.
 	if workspaceInfoProvider != nil {
 		lifecycleMgr.SetWorkspaceInfoProvider(workspaceInfoProvider)
+	}
+	if workspaceRecoveryErrorReporter != nil {
+		lifecycleMgr.SetWorkspaceRecoveryErrorReporter(workspaceRecoveryErrorReporter)
 	}
 	// AC-EXECUTORS-SURVIVAL-005.3: wire the durable passthrough-mode lookup
 	// before Start so the startup recovery guard can exclude a confirmed

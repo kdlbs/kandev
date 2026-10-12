@@ -73,21 +73,32 @@ type TaskRepositoryInput struct {
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
-	WorkspaceID    string                 `json:"workspace_id"`
-	WorkflowID     string                 `json:"workflow_id"`
-	WorkflowStepID string                 `json:"workflow_step_id"`
-	Title          string                 `json:"title"`
-	Description    string                 `json:"description"`
-	AutoTitle      bool                   `json:"auto_title,omitempty"`
-	Priority       string                 `json:"priority"`
-	State          *v1.TaskState          `json:"state,omitempty"`
-	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
-	Position       int                    `json:"position"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	WorkspaceID    string                `json:"workspace_id"`
+	WorkflowID     string                `json:"workflow_id"`
+	WorkflowStepID string                `json:"workflow_step_id"`
+	Title          string                `json:"title"`
+	Description    string                `json:"description"`
+	AutoTitle      bool                  `json:"auto_title,omitempty"`
+	Priority       string                `json:"priority"`
+	State          *v1.TaskState         `json:"state,omitempty"`
+	Repositories   []TaskRepositoryInput `json:"repositories,omitempty"`
+	// projectRepositoryDefaults marks the source list read from a root task's
+	// Office project. Only these automatic selections deduplicate aliases after
+	// each source has passed normal repository resolution.
+	projectRepositoryDefaults bool
+	Position                  int                    `json:"position"`
+	Metadata                  map[string]interface{} `json:"metadata,omitempty"`
 	// TrustedHandoffMetadata allows the handoff application path to persist its
 	// server-authored provenance fields. It is internal-only and never decoded
 	// from a request body; ordinary task creation cannot forge those fields.
 	TrustedHandoffMetadata bool `json:"-"`
+	// AutomationStartOwned reserves the new task's initial start for the
+	// automation run that creates it (models.MetaKeyAutomationStartOwned). It is
+	// internal-only: the marker suppresses workflow auto-start, so it is never
+	// accepted from Metadata or decoded from a request body.
+	AutomationStartOwned bool `json:"-"`
+	// AutomationStartOwner identifies the admitted run; unbound internal starts receive a fresh token.
+	AutomationStartOwner string `json:"-"`
 	// WorkflowAgentOverrides groups one replacement by source profile. The
 	// service expands it to fixed workflow-step bindings before insertion.
 	WorkflowAgentOverrides           map[string]string              `json:"workflow_agent_overrides,omitempty"`
@@ -120,6 +131,17 @@ type CreateTaskRequest struct {
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Accepted on REST
 	// and MCP; empty means no idempotency key.
 	ExternalID string `json:"external_id,omitempty"`
+	// AllowReservedExternalID permits ExternalID to carry the
+	// ReservedExternalIDPrefixCoordinatorProposal prefix, which every other
+	// caller is refused (docs/specs/coordinator/system-design/proposals.md#reserved-prefix).
+	// Tagged json:"-" so no HTTP or MCP request body can set it; only the
+	// coordinator service sets it, when creating the task behind an approved
+	// proposal.
+	AllowReservedExternalID bool `json:"-"`
+	// AllowReservedMetadata permits Metadata keys with the
+	// ReservedMetadataKeyPrefixCoordinator prefix. Tagged json:"-" so no
+	// request body can set it; only the coordinator service does.
+	AllowReservedMetadata bool `json:"-"`
 
 	// Office extensions
 	AssigneeAgentProfileID string   `json:"assignee_agent_profile_id,omitempty"`
@@ -175,25 +197,32 @@ type UpdateTaskRequest struct {
 	// pointer to "" unassigns. It is independent of the agent assignee and
 	// never clears it.
 	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
+	// AllowReservedMetadata permits Metadata keys with the
+	// ReservedMetadataKeyPrefixCoordinator prefix; json:"-" as on
+	// CreateTaskRequest.
+	AllowReservedMetadata bool `json:"-"`
 }
 
 // CreateWorkflowRequest contains the data for creating a new workflow
 type CreateWorkflowRequest struct {
-	WorkspaceID        string  `json:"workspace_id"`
-	Name               string  `json:"name"`
-	Description        string  `json:"description"`
-	Prompt             string  `json:"prompt,omitempty"`
-	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
+	ID                         string     `json:"-"`
+	ExpectedWorkspaceUpdatedAt *time.Time `json:"-"`
+	WorkspaceID                string     `json:"workspace_id"`
+	Name                       string     `json:"name"`
+	Description                string     `json:"description"`
+	Prompt                     string     `json:"prompt,omitempty"`
+	WorkflowTemplateID         *string    `json:"workflow_template_id,omitempty"`
 	// Hidden marks the workflow as system-only; excluded from management UI and pickers.
 	Hidden bool `json:"hidden,omitempty"`
 }
 
 // UpdateWorkflowRequest contains the data for updating a workflow
 type UpdateWorkflowRequest struct {
-	Name           *string `json:"name,omitempty"`
-	Description    *string `json:"description,omitempty"`
-	Prompt         *string `json:"prompt,omitempty"`
-	AgentProfileID *string `json:"agent_profile_id,omitempty"`
+	ExpectedUpdatedAt *time.Time `json:"-"`
+	Name              *string    `json:"name,omitempty"`
+	Description       *string    `json:"description,omitempty"`
+	Prompt            *string    `json:"prompt,omitempty"`
+	AgentProfileID    *string    `json:"agent_profile_id,omitempty"`
 }
 
 // CreateWorkspaceRequest contains the data for creating a new workspace
@@ -210,12 +239,15 @@ type CreateWorkspaceRequest struct {
 
 // UpdateWorkspaceRequest contains the data for updating a workspace
 type UpdateWorkspaceRequest struct {
-	Name                        *string `json:"name,omitempty"`
-	Description                 *string `json:"description,omitempty"`
-	DefaultExecutorID           *string `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
-	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
+	ExpectedUpdatedAt           *time.Time `json:"-"`
+	Name                        *string    `json:"name,omitempty"`
+	Description                 *string    `json:"description,omitempty"`
+	DefaultExecutorID           *string    `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID        *string    `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID       *string    `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID *string    `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled    *bool      `json:"acp_idle_suspension_enabled,omitempty"`
+	ACPIdleTimeoutMinutes       *int       `json:"acp_idle_timeout_minutes,omitempty"`
 	// Visibility is "private" or "org". Unknown values normalize to private:
 	// unrecognized input must never widen access.
 	Visibility *string `json:"visibility,omitempty"`
@@ -240,26 +272,28 @@ type FindOrCreateRepositoryRequest struct {
 
 // CreateRepositoryRequest contains the data for creating a new repository
 type CreateRepositoryRequest struct {
-	WorkspaceID            string                         `json:"workspace_id"`
-	Name                   string                         `json:"name"`
-	SourceType             string                         `json:"source_type"`
-	LocalPath              string                         `json:"local_path"`
-	Provider               string                         `json:"provider"`
-	ProviderRepoID         string                         `json:"provider_repo_id"`
-	ProviderHost           string                         `json:"provider_host"`
-	ProviderScope          string                         `json:"provider_scope"`
-	ProviderOwner          string                         `json:"provider_owner"`
-	ProviderName           string                         `json:"provider_name"`
-	RemoteURL              string                         `json:"remote_url"`
-	DefaultBranch          string                         `json:"default_branch"`
-	WorktreeBranchPrefix   string                         `json:"worktree_branch_prefix"`
-	WorktreeBranchTemplate string                         `json:"worktree_branch_template"`
-	PullBeforeWorktree     *bool                          `json:"pull_before_worktree"`
-	SetupScript            string                         `json:"setup_script"`
-	CleanupScript          string                         `json:"cleanup_script"`
-	DevScript              string                         `json:"dev_script"`
-	CopyFiles              string                         `json:"copy_files"`
-	SecretBindings         []RepositorySecretBindingInput `json:"secret_bindings,omitempty"`
+	ID                         string                         `json:"-"`
+	ExpectedWorkspaceUpdatedAt *time.Time                     `json:"-"`
+	WorkspaceID                string                         `json:"workspace_id"`
+	Name                       string                         `json:"name"`
+	SourceType                 string                         `json:"source_type"`
+	LocalPath                  string                         `json:"local_path"`
+	Provider                   string                         `json:"provider"`
+	ProviderRepoID             string                         `json:"provider_repo_id"`
+	ProviderHost               string                         `json:"provider_host"`
+	ProviderScope              string                         `json:"provider_scope"`
+	ProviderOwner              string                         `json:"provider_owner"`
+	ProviderName               string                         `json:"provider_name"`
+	RemoteURL                  string                         `json:"remote_url"`
+	DefaultBranch              string                         `json:"default_branch"`
+	WorktreeBranchPrefix       string                         `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate     string                         `json:"worktree_branch_template"`
+	PullBeforeWorktree         *bool                          `json:"pull_before_worktree"`
+	SetupScript                string                         `json:"setup_script"`
+	CleanupScript              string                         `json:"cleanup_script"`
+	DevScript                  string                         `json:"dev_script"`
+	CopyFiles                  string                         `json:"copy_files"`
+	SecretBindings             []RepositorySecretBindingInput `json:"secret_bindings,omitempty"`
 }
 
 // RepositorySecretBindingInput is the write-only reference shape accepted by
@@ -278,24 +312,25 @@ type InitializeLocalRepositoryRequest struct {
 
 // UpdateRepositoryRequest contains the data for updating a repository
 type UpdateRepositoryRequest struct {
-	Name                   *string `json:"name,omitempty"`
-	SourceType             *string `json:"source_type,omitempty"`
-	LocalPath              *string `json:"local_path,omitempty"`
-	Provider               *string `json:"provider,omitempty"`
-	ProviderRepoID         *string `json:"provider_repo_id,omitempty"`
-	ProviderHost           *string `json:"provider_host,omitempty"`
-	ProviderScope          *string `json:"provider_scope,omitempty"`
-	ProviderOwner          *string `json:"provider_owner,omitempty"`
-	ProviderName           *string `json:"provider_name,omitempty"`
-	RemoteURL              *string `json:"remote_url,omitempty"`
-	DefaultBranch          *string `json:"default_branch,omitempty"`
-	WorktreeBranchPrefix   *string `json:"worktree_branch_prefix,omitempty"`
-	WorktreeBranchTemplate *string `json:"worktree_branch_template,omitempty"`
-	PullBeforeWorktree     *bool   `json:"pull_before_worktree,omitempty"`
-	SetupScript            *string `json:"setup_script,omitempty"`
-	CleanupScript          *string `json:"cleanup_script,omitempty"`
-	DevScript              *string `json:"dev_script,omitempty"`
-	CopyFiles              *string `json:"copy_files,omitempty"`
+	ExpectedUpdatedAt      *time.Time `json:"-"`
+	Name                   *string    `json:"name,omitempty"`
+	SourceType             *string    `json:"source_type,omitempty"`
+	LocalPath              *string    `json:"local_path,omitempty"`
+	Provider               *string    `json:"provider,omitempty"`
+	ProviderRepoID         *string    `json:"provider_repo_id,omitempty"`
+	ProviderHost           *string    `json:"provider_host,omitempty"`
+	ProviderScope          *string    `json:"provider_scope,omitempty"`
+	ProviderOwner          *string    `json:"provider_owner,omitempty"`
+	ProviderName           *string    `json:"provider_name,omitempty"`
+	RemoteURL              *string    `json:"remote_url,omitempty"`
+	DefaultBranch          *string    `json:"default_branch,omitempty"`
+	WorktreeBranchPrefix   *string    `json:"worktree_branch_prefix,omitempty"`
+	WorktreeBranchTemplate *string    `json:"worktree_branch_template,omitempty"`
+	PullBeforeWorktree     *bool      `json:"pull_before_worktree,omitempty"`
+	SetupScript            *string    `json:"setup_script,omitempty"`
+	CleanupScript          *string    `json:"cleanup_script,omitempty"`
+	DevScript              *string    `json:"dev_script,omitempty"`
+	CopyFiles              *string    `json:"copy_files,omitempty"`
 	// SecretBindings uses nil to preserve the current set and a non-nil empty
 	// slice to clear it.
 	SecretBindings *[]RepositorySecretBindingInput `json:"secret_bindings,omitempty"`
@@ -372,9 +407,10 @@ type ListMessagesRequest struct {
 	AuthorType    string
 	// AuthorTypes narrows by any listed author; when non-empty it takes
 	// precedence over AuthorType. TaskID narrows the page to one task.
-	AuthorTypes []string
-	TaskID      string
-	Around      string
+	AuthorTypes  []string
+	TaskID       string
+	Around       string
+	IncludeTurns bool
 }
 
 // CreateRepositoryScriptRequest contains the data for creating a repository script

@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -21,18 +20,21 @@ import (
 )
 
 func TestPluginExecutorPackagedRecovery(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	buildCtx, cancelBuild := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelBuild()
 	dataDir := t.TempDir()
 	binary := filepath.Join(t.TempDir(), "plugin-fixture")
-	_, sourceFile, _, ok := runtime.Caller(0)
-	require.True(t, ok)
-	fixturePackage := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "../../cmd/plugin-fixture"))
-	build := exec.CommandContext(ctx, "go", "build", "-o", binary, ".")
+	packageDir, err := os.Getwd()
+	require.NoError(t, err)
+	fixturePackage := filepath.Clean(filepath.Join(packageDir, "../../cmd/plugin-fixture"))
+	build := exec.CommandContext(buildCtx, "go", "build", "-trimpath", "-o", binary, ".")
 	build.Dir = fixturePackage
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
 	output, err := build.CombinedOutput()
+	cancelBuild()
 	require.NoError(t, err, string(output))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	profile := &pluginsdk.ExecutorProfileSnapshot{ProfileId: "profile-1", Config: map[string]string{"region": "eu-west-1"}}
 	requestContext := &pluginsdk.ExecutorProviderRequestContext{

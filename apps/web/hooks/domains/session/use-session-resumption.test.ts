@@ -1,10 +1,11 @@
 /* eslint-disable max-lines -- session resumption cases share one lifecycle harness. */
 
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildRestoreWorkspaceRequest } from "@/lib/services/session-launch-helpers";
 import { sanitizeWorkspaceRestorationDetails } from "@/lib/state/slices/session-runtime/workspace-restoration";
 import { createAppStore } from "@/lib/state/store";
+import { WebSocketRequestError } from "@/lib/ws/client";
 
 const mockRequest = vi.fn();
 const mockSetTaskSession = vi.fn();
@@ -64,6 +65,7 @@ const RESUME_TRANSPORT_ERROR = "Resume transport failed";
 const WORKSPACE_RESTORE_ERROR = "Workspace restore failed";
 
 afterEach(() => {
+  cleanup();
   vi.useRealTimers();
   mockRequest.mockReset();
   mockWorkspaceRestorationEnabled = false;
@@ -140,6 +142,23 @@ describe("resumeWithSilentFallback", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
+  it("publishes committed request identity when idle inputs change without a status request", () => {
+    mockConnectionStatus = "disconnected";
+    const { result, rerender } = renderHook(
+      ({ taskId, sessionId, archived }) => useSessionResumption(taskId, sessionId, archived),
+      { initialProps: { taskId: TASK_ID, sessionId: SESSION_ID, archived: false } },
+    );
+    const initialGeneration = result.current.requestIdentity!.generation;
+    rerender({ taskId: "t2", sessionId: "s2", archived: false });
+    expect(result.current.requestIdentity).toMatchObject({ taskId: "t2", sessionId: "s2" });
+    expect(result.current.requestIdentity!.generation).toBeGreaterThan(initialGeneration);
+    const switchedGeneration = result.current.requestIdentity!.generation;
+    rerender({ taskId: "t2", sessionId: "s2", archived: true });
+    expect(result.current.requestIdentity!.generation).toBeGreaterThan(switchedGeneration);
+    expect(result.current.resumptionState).toBe("idle");
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
   it("uses resume on first try when it succeeds, never calling restore_workspace", async () => {
     mockRequest.mockResolvedValueOnce({
       success: true,
@@ -162,6 +181,27 @@ describe("resumeWithSilentFallback", () => {
     expect(calls.resumptionStates).toContain("resumed");
     expect(calls.errors).not.toContain(expect.any(String));
     expect(calls.worktreePaths).toContain("/wt/foo");
+  });
+
+  it("uses explicit focus recovery intent for an idle-suspended session", async () => {
+    mockRequest.mockResolvedValueOnce({
+      success: true,
+      task_id: TASK_ID,
+      session_id: SESSION_ID,
+      state: "STARTING",
+    });
+    const { setters } = createSetters();
+
+    await resumeWithSilentFallback(TASK_ID, SESSION_ID, null, setters, {
+      canContinue: () => true,
+      activationSource: "session_focus",
+    });
+
+    expect(mockRequest).toHaveBeenCalledWith(
+      LAUNCH_ACTION,
+      expect.objectContaining({ intent: "resume", activation_source: "session_focus" }),
+      expect.any(Number),
+    );
   });
 
   it("publishes STARTING before a delayed resume request resolves", async () => {
@@ -317,6 +357,41 @@ describe("resumeWithSilentFallback", () => {
     expect(calls.resumptionStates.at(-1)).toBe("resumed");
     expect(calls.errors.filter((e) => typeof e === "string")).toHaveLength(0);
   });
+
+  // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.12
+  it.each([true, false])(
+    "preserves typed cleanup cause when workspace restore succeeds=%s",
+    async (restored) => {
+      const causes = [
+        { operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true },
+      ];
+      mockRequest
+        .mockRejectedValueOnce(
+          new WebSocketRequestError("private transport failure", "INTERNAL_ERROR", {
+            kind: "runtime_cleanup_failed",
+            session_id: SESSION_ID,
+            causes,
+          }),
+        )
+        .mockResolvedValueOnce({
+          success: restored,
+          task_id: TASK_ID,
+          session_id: SESSION_ID,
+          state: FAILED_STATE,
+          ...(restored ? {} : { error: WORKSPACE_RESTORE_ERROR }),
+        });
+      const { setters, calls } = createSetters();
+      await resumeWithSilentFallback(TASK_ID, SESSION_ID, null, setters);
+      expect(calls.recoveryFailures.at(-1)).toMatchObject({
+        outcome: restored ? "workspace_read_only" : "recovery_failed",
+        resumeError:
+          "The previous runtime could not be stopped. Check executor connectivity, then retry Resume.",
+        resumeCauses: causes,
+        ...(restored ? {} : { restoreError: WORKSPACE_RESTORE_ERROR }),
+      });
+      expect(JSON.stringify(calls)).not.toContain("private transport failure");
+    },
+  );
 
   it("surfaces an error only when BOTH resume and restore_workspace fail", async () => {
     mockRequest
@@ -580,6 +655,11 @@ describe("useSessionResumption", () => {
       statusError: "WebSocket request timed out: task.session.status",
     });
     expect(result.current.recoveryAttemptId).toBe(1);
+    expect(result.current.requestIdentity).toMatchObject({
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      attemptId: 1,
+    });
     expect(mockRequest).toHaveBeenCalledTimes(2);
 
     mockRequest.mockResolvedValueOnce({
@@ -603,9 +683,14 @@ describe("useSessionResumption", () => {
     expect(result.current.recoveryFailure).toBeNull();
     expect(result.current.resumptionState).toBe("running");
     expect(result.current.recoveryAttemptId).toBe(2);
+    expect(result.current.requestIdentity).toMatchObject({
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      attemptId: 2,
+    });
   });
 
-  it("keeps a workspace restore failure as launch feedback with a launch retry", async () => {
+  it("keeps a workspace restore failure as launch feedback with a recovery retry", async () => {
     mockWorkspaceRestorationEnabled = true;
     mockRequest
       .mockResolvedValueOnce({
@@ -645,8 +730,8 @@ describe("useSessionResumption", () => {
 
     expect(mockRequest).toHaveBeenNthCalledWith(
       3,
-      LAUNCH_ACTION,
-      expect.objectContaining({ intent: "resume" }),
+      "session.recover",
+      expect.objectContaining({ action: "resume" }),
       expect.any(Number),
     );
   });
@@ -875,6 +960,78 @@ describe("useSessionResumption prevent-auto-start gate", () => {
   });
 });
 
+describe("useSessionResumption skipAutomaticRecovery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConnectionStatus = "connected";
+    mockPreventAutoStart = false;
+    mockSessionItems = {
+      s1: {
+        started_at: STARTED_AT,
+      },
+    };
+  });
+
+  // @covers task-05-popover-shell.md#build-decisions "automaticRecovery"
+  it("skips the automatic check-and-resume request when skipAutomaticRecovery is set", async () => {
+    renderHook(() =>
+      useSessionResumption(TASK_ID, SESSION_ID, false, { skipAutomaticRecovery: true }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it("skips the remote-status retry effect when skipAutomaticRecovery is set", async () => {
+    vi.useFakeTimers();
+    mockSessionItems = {
+      s1: {
+        started_at: STARTED_AT,
+        state: "RUNNING",
+      },
+    };
+
+    renderHook(() =>
+      useSessionResumption(TASK_ID, SESSION_ID, false, { skipAutomaticRecovery: true }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it("still allows a manual status retry while automatic recovery is skipped", async () => {
+    mockRequest.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: false,
+      needs_resume: false,
+    });
+
+    const { result } = renderHook(() =>
+      useSessionResumption(TASK_ID, SESSION_ID, false, { skipAutomaticRecovery: true }),
+    );
+    expect(mockRequest).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.retrySessionStatus();
+    });
+
+    expect(mockRequest).toHaveBeenCalledWith(
+      STATUS_ACTION,
+      { task_id: TASK_ID, session_id: SESSION_ID },
+      10000,
+    );
+  });
+});
+
 // eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("useSessionResumption monotonic terminal hydration", () => {
   beforeEach(() => {
@@ -1078,6 +1235,217 @@ describe("useSessionResumption completed-session admission", () => {
       );
     },
   );
+});
+
+// eslint-disable-next-line max-lines-per-function -- startup and focus share deferred recovery barriers.
+describe("idle-suspended session focus recovery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConnectionStatus = "connected";
+    mockPreventAutoStart = true;
+    mockSessionItems = {
+      s1: {
+        started_at: STARTED_AT,
+        updated_at: STARTED_AT,
+        state: "WAITING_FOR_INPUT",
+      },
+    };
+  });
+
+  it("does not recover on focus while automatic recovery is blocked", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    mockRequest.mockResolvedValue({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: true,
+      needs_resume: true,
+      is_idle_suspended: true,
+      auto_resume_allowed: true,
+      resume_reason: "idle_suspension",
+    });
+    try {
+      renderHook(() =>
+        useSessionResumption(TASK_ID, SESSION_ID, false, { preventAutoResume: true }),
+      );
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(mockRequest).not.toHaveBeenCalled();
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it("invalidates pending startup recovery when an error arrives", async () => {
+    const status = Promise.withResolvers<unknown>();
+    mockRequest.mockReturnValueOnce(status.promise);
+    const { rerender } = renderHook(
+      ({ blocked }) =>
+        useSessionResumption(TASK_ID, SESSION_ID, false, { preventAutoResume: blocked }),
+      { initialProps: { blocked: false } },
+    );
+    await waitFor(() =>
+      expect(mockRequest).toHaveBeenCalledWith(
+        STATUS_ACTION,
+        expect.anything(),
+        expect.any(Number),
+      ),
+    );
+    rerender({ blocked: true });
+    await act(async () => {
+      status.resolve({
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        is_agent_running: false,
+        is_resumable: true,
+        needs_resume: true,
+        is_idle_suspended: true,
+        auto_resume_allowed: true,
+        resume_reason: "idle_suspension",
+      });
+    });
+    expect(mockRequest.mock.calls.some(([action]) => action === LAUNCH_ACTION)).toBe(false);
+  });
+
+  it("resumes the selected session without a prompt despite the preference", async () => {
+    mockRequest
+      .mockResolvedValueOnce({
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        is_agent_running: false,
+        is_resumable: true,
+        needs_resume: true,
+        is_idle_suspended: true,
+        auto_resume_allowed: true,
+        resume_reason: "idle_suspension",
+        updated_at: STARTED_AT,
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        task_id: TASK_ID,
+        session_id: SESSION_ID,
+        state: "STARTING",
+      })
+      .mockResolvedValueOnce({
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        state: "RUNNING",
+        is_agent_running: true,
+        is_resumable: false,
+        needs_resume: false,
+      });
+
+    renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+
+    await waitFor(() => {
+      expect(mockRequest).toHaveBeenCalledWith(
+        LAUNCH_ACTION,
+        expect.objectContaining({ intent: "resume", activation_source: "session_focus" }),
+        expect.any(Number),
+      );
+    });
+    expect(mockSetResumeSkipped).not.toHaveBeenCalledWith(SESSION_ID, true);
+  });
+
+  it("joins an in-flight startup recovery when the selected session receives focus", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const startupStatus = Promise.withResolvers<unknown>();
+    const launchResponse = Promise.withResolvers<unknown>();
+    let statusRequestCount = 0;
+    const suspendedStatus = {
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: true,
+      needs_resume: true,
+      is_idle_suspended: true,
+      auto_resume_allowed: true,
+      resume_reason: "idle_suspension",
+      updated_at: STARTED_AT,
+    };
+    mockRequest.mockImplementation((action: string) => {
+      if (action === STATUS_ACTION) {
+        statusRequestCount += 1;
+        if (statusRequestCount === 1) return startupStatus.promise;
+        return Promise.resolve({
+          session_id: SESSION_ID,
+          task_id: TASK_ID,
+          state: "RUNNING",
+          is_agent_running: true,
+          is_resumable: false,
+          needs_resume: false,
+        });
+      }
+      if (action === LAUNCH_ACTION) return launchResponse.promise;
+      return Promise.resolve(undefined);
+    });
+
+    try {
+      const { unmount } = renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+
+      await waitFor(() => expect(statusRequestCount).toBe(1));
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(statusRequestCount).toBe(1);
+
+      await act(async () => startupStatus.resolve(suspendedStatus));
+      await waitFor(() =>
+        expect(mockRequest).toHaveBeenCalledWith(
+          LAUNCH_ACTION,
+          expect.objectContaining({ intent: "resume" }),
+          expect.any(Number),
+        ),
+      );
+      expect(mockRequest.mock.calls.filter(([action]) => action === LAUNCH_ACTION)).toHaveLength(1);
+
+      await act(async () => launchResponse.resolve({ success: true, state: "STARTING" }));
+      await waitFor(() => expect(statusRequestCount).toBe(2));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(mockRequest.mock.calls.filter(([action]) => action === LAUNCH_ACTION)).toHaveLength(1);
+      unmount();
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it("does not resume an idle-suspended session from a hidden task view", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    mockRequest.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: true,
+      needs_resume: true,
+      is_idle_suspended: true,
+      auto_resume_allowed: true,
+      resume_reason: "idle_suspension",
+      updated_at: LATER_AT,
+    });
+
+    try {
+      renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+      await waitFor(() =>
+        expect(mockRequest).toHaveBeenCalledWith(
+          STATUS_ACTION,
+          expect.anything(),
+          expect.anything(),
+        ),
+      );
+      expect(mockRequest.mock.calls.filter(([action]) => action === LAUNCH_ACTION)).toHaveLength(0);
+    } finally {
+      visibility.mockRestore();
+    }
+  });
 });
 
 describe("useSessionResumption resume-skipped clearing on running status", () => {
