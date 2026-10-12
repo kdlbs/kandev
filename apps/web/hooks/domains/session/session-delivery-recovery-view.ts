@@ -30,6 +30,7 @@ export function persistedDeliveryRecoveryNotice(
   block: SessionRecoveryBlockProjection | undefined,
   t: TFunction,
 ): string | null {
+  if (canResumeLegacyDeliveryBlock(recovery, block)) return t("task:deliveryRecoveryLegacyResume");
   if (
     recovery?.historyGap &&
     (recovery.phase === "uncertain" || recovery.phase === "reconnecting")

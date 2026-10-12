@@ -201,7 +201,10 @@ export async function exerciseDeliveryRecordRecovery({
     "Delivery is blocked while session recovery is pending.",
   );
   await expect(page.getByText(broken.promptMessage, { exact: true })).toBeVisible();
-  await expect(banner).toContainText("The saved prompt record is missing. Recovery is blocked.");
+  await expect(banner).toContainText(
+    "Resume checks the saved conversation without sending the previous prompt again.",
+  );
+  await expect(banner.getByTestId("recovery-resume-button")).toBeVisible();
   await expect(banner.getByTestId("recovery-stop-button")).toBeVisible();
   await expect(page.getByTestId("interrupted-session-continuation")).toHaveCount(0);
   if (mobile) {
@@ -265,6 +268,7 @@ export async function exerciseDeliveryRecordRecovery({
       "Retry restored the saved record. Missing original process proof keeps continuation blocked.",
   });
 
+  await expect(banner.getByTestId("recovery-resume-button")).toHaveCount(0);
   const firstRecovery = await recoverySnapshot(apiClient, broken.task.id, broken.sessionId);
   expect(firstRecovery.revision).toBe(1);
   expect(firstRecovery.messageCount).toBe(1);

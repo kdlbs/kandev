@@ -53,8 +53,15 @@ PR, address CI/reviews and merge the passing head in this session.
 
 ## Local results
 
-The two behavioral regressions failed before implementation. All 43 focused
+The two behavioral regressions failed before implementation. All 44 focused
 frontend tests now pass; changed-file ESLint passes with zero warnings. Catalog
 and specification validation pass. Full frontend typecheck exceeded the imposed
 2 GB heap cap (exit 134); CI must complete typecheck and the authored desktop/
 phone E2E scenarios. No local E2E ran.
+
+Review remediation adds a distinct localized legacy Resume notice without
+claiming that an existing record is missing. It retains the no-Resume assertion
+after canonical record reconstruction and checks Retry visibility alongside
+Resume and Stop in the legacy browser scenario. All seven translated catalogs
+and pseudo pass i18n checks. The exact PR documentation evaluator now passes
+after linking requirements 006 and 008 in the parent plan and design metadata.

@@ -65,6 +65,8 @@ it("offers explicit Resume for an empty legacy delivery fence without replaying 
     </TooltipProvider>,
   );
   expect(mocks.request).not.toHaveBeenCalled();
+  expect(screen.getByText("task:deliveryRecoveryLegacyResume")).toBeTruthy();
+  expect(screen.queryByText("task:deliveryRecoveryMissingSubmission")).toBeNull();
   expect(screen.getByTestId(RETRY_CONNECTION_BUTTON)).toBeTruthy();
   expect(screen.getByTestId(STOP_BUTTON)).toBeTruthy();
   fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));

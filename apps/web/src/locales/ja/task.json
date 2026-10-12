@@ -2721,6 +2721,7 @@
   "deliveryRecoverySettled": "保存された出力を同期し、プロンプトの結果を復元しました。",
   "deliveryRecoveryUncertain": "前のプロンプトの結果はまだ不明です。続行する前に保持された変更を確認してください。",
   "deliveryRecoveryUnavailable": "保存された証拠を利用できません。接続の再試行では作業は再開されませんでした。",
+  "deliveryRecoveryLegacyResume": "再開すると、前のプロンプトを再送信せずに保存済みの会話を確認します。",
   "deliveryRecoveryMissingSubmission": "保存されたプロンプトの記録がありません。復旧がブロックされています。",
   "deliveryRecoveryOwnershipBlocked": "保存されたセッションの所有者が変更されました。復旧がブロックされています。",
   "deliveryRecoveryBlocked": "復旧がブロックされています。復旧の問題を解決してから再試行してください。",

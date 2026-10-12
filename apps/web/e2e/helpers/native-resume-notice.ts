@@ -86,6 +86,10 @@ export async function verifyNativeResumeClearsRecoveryNotice(
   );
   try {
     if (legacy) {
+      await expect(page.getByTestId("recovery-retry-connection-button")).toBeVisible();
+      await expect(page.getByTestId("failed-session-banner")).toContainText(
+        "Resume checks the saved conversation without sending the previous prompt again.",
+      );
       await assertDeliveryRecoveryGeometry(page, "recovery-resume-button");
       const resume = page.getByTestId("recovery-resume-button");
       if (test.info().project.name === "mobile-chrome") await resume.tap();

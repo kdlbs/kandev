@@ -60,7 +60,16 @@ describe("legacy delivery Resume availability", () => {
       block,
       ((key: string) => key) as TFunction,
     );
-    expect(notice).toBe("task:deliveryRecoveryMissingSubmission");
+    expect(notice).toBe("task:deliveryRecoveryLegacyResume");
+  });
+  it("preserves the missing-record notice for an identified missing submission", () => {
+    expect(
+      persistedDeliveryRecoveryNotice(
+        null,
+        { ...block, reason: "missing_canonical_submission", delivery_submission_id: "missing" },
+        ((key: string) => key) as TFunction,
+      ),
+    ).toBe("task:deliveryRecoveryMissingSubmission");
   });
   it("invalidates pending results when a newer block supersedes restored metadata", () => {
     const before = deliveryRecoveryRequestIdentity(restored, block);

@@ -2721,6 +2721,7 @@
   "deliveryRecoverySettled": "已同步儲存的輸出並恢復提示結果。",
   "deliveryRecoveryUncertain": "先前提示的結果仍然未知。繼續前請檢查保留的更改。",
   "deliveryRecoveryUnavailable": "儲存的證據不可用。重試連接並未恢復工作。",
+  "deliveryRecoveryLegacyResume": "恢復會檢查已儲存的對話，不會重新傳送上一條提示。",
   "deliveryRecoveryMissingSubmission": "缺少儲存的提示記錄。恢復已被阻止。",
   "deliveryRecoveryOwnershipBlocked": "儲存的工作階段所有者已更改。恢復已被阻止。",
   "deliveryRecoveryBlocked": "恢復已被阻止。請先解決恢復問題再重試。",
