@@ -7102,7 +7102,7 @@ func (s *Service) runPromptTurn(
 		}
 		submissionID = normalizeDeliverySubmissionID(options.deliverySubmissionID)
 	}
-	result, execErr, delivery := s.dispatchPreparedPrompt(
+	result, delivery, execErr := s.dispatchPreparedPrompt(
 		promptCtx, taskID, session, activityExecutionID, effectivePrompt, attachments,
 		dispatchOnly, options, submissionID, validateAdmission, onDispatched,
 	)

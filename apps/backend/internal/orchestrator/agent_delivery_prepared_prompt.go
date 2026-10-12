@@ -47,7 +47,7 @@ func (s *Service) dispatchPreparedPrompt(
 	ctx context.Context, taskID string, session *models.TaskSession, executionID, prompt string,
 	attachments []v1.MessageAttachment, dispatchOnly bool, options promptTaskOptions, submissionID string,
 	validateAdmission func() error, onDispatched func(),
-) (*executor.PromptResult, error, *agentDeliverySubmissionRuntime) {
+) (*executor.PromptResult, *agentDeliverySubmissionRuntime, error) {
 	var delivery *agentDeliverySubmissionRuntime
 	beforeAdmission := func(admissionCtx context.Context, finalPrompt string, finalAttachments []v1.MessageAttachment) error {
 		if validateAdmission != nil {
@@ -74,5 +74,5 @@ func (s *Service) dispatchPreparedPrompt(
 		ctx, taskID, session.ID, prompt, attachments, dispatchOnly,
 		beforeAdmission, onDispatched, submissionID, session,
 	)
-	return result, execErr, delivery
+	return result, delivery, execErr
 }

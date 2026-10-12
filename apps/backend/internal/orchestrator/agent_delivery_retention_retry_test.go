@@ -67,7 +67,13 @@ func (m *retentionRetryManager) acceptRetry(
 ) (*executor.PromptResult, error) {
 	// Runtime preparation changes both text and attachment descriptors before admission.
 	prompt += "\nprepared runtime context"
-	attachments = []v1.MessageAttachment{{AttachmentID: "retry-attachment", Type: "resource", Name: "bundle-2.zip", MimeType: "application/zip", SizeBytes: 16, DeliveryMode: "prompt"}}
+	attachments = append([]v1.MessageAttachment(nil), attachments...)
+	for i := range attachments {
+		attachments[i].Name = "bundle-2.zip"
+		attachments[i].MimeType = "application/zip"
+		attachments[i].SizeBytes = 16
+		attachments[i].DeliveryMode = "prompt"
+	}
 	if beforeAdmission != nil {
 		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
 			return nil, err
@@ -139,7 +145,7 @@ func assertRetentionRetryPromptAdmission(t *testing.T, engine, scenario string) 
 	if scenario == "storage_failure" {
 		installRetentionRetryStorageFailure(t, repo, engine, originalID)
 	}
-	service.lastTurnPrompt.Store(sessionID, capturedPrompt{text: "/transient retry original"})
+	service.lastTurnPrompt.Store(sessionID, capturedPrompt{text: "/transient retry original", attachments: []v1.MessageAttachment{{AttachmentID: "retry-attachment", Type: "resource", Name: "bundle.zip"}}})
 	var ids []string
 	for attempt := 1; attempt <= 2; attempt++ {
 		require.NoError(t, repo.UpdateTaskSessionState(t.Context(), sessionID, models.TaskSessionStateWaitingForInput, ""))

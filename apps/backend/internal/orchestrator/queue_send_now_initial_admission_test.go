@@ -78,16 +78,16 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 				manager.mu.Unlock()
 				require.NotNil(t, admit)
 				err = admit(ctx, "prepared queued instruction", []v1.MessageAttachment{{Type: "resource", AttachmentID: "file", Name: "bundle-2.zip", MimeType: "application/zip", SizeBytes: 16, DeliveryMode: "prompt"}})
-				if outcome == "sql_failure" {
+				switch outcome {
+				case "sql_failure":
 					require.Error(t, err)
 					failed()
-				} else {
+				case "shutdown_after_admission":
 					require.NoError(t, err)
-					if outcome == "shutdown_after_admission" {
-						cancel()
-					} else {
-						accepted()
-					}
+					cancel()
+				default:
+					require.NoError(t, err)
+					accepted()
 				}
 			}
 			select {
