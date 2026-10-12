@@ -110,7 +110,7 @@ type admissionSubmissionAwarePromptProvider interface {
 		string,
 		[]v1.MessageAttachment,
 		bool,
-		func() error,
+		func(context.Context, string, []v1.MessageAttachment) error,
 		func(),
 		string,
 	) (*orchestratorexecutor.PromptResult, error)
