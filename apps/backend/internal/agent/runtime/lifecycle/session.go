@@ -1943,12 +1943,17 @@ func (sm *SessionManager) sendPrompt(
 	flushStreamingStateWithHistory(execution, sm.historyManager, sm.logger)
 	if callbacks.beforeAdmission != nil {
 		if err := callbacks.beforeAdmission(preparedCtx, effectivePrompt, materializedAttachments); err != nil {
-			sm.reportPromptFailure(execution, 0, err, callbacks.onAdmissionRejected)
+			handler := callbacks.onAdmissionRejected
+			var persistenceFailure *PromptAdmissionPersistenceError
+			if errors.As(err, &persistenceFailure) {
+				handler = callbacks.onFailure
+			}
+			sm.reportPromptFailure(execution, 0, err, handler)
 			return nil, err
 		}
 	}
 	if err := sm.persistInitialDeliveryBeforeDispatch(preparedCtx, execution, effectivePrompt, materializedAttachments, callbacks.deliverySubmissionID); err != nil {
-		sm.reportPromptFailure(execution, 0, err, callbacks.onAdmissionRejected)
+		sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
 		return nil, err
 	}
 	promptGeneration, err := sm.admitPrompt(execution, validateStatus)

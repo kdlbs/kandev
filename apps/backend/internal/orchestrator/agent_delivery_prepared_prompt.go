@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -15,6 +16,7 @@ func (s *Service) configureInitialDeliveryAdmission(session *models.TaskSession,
 		deliveryProtocol: options.deliveryProtocol, deliverySubmissionID: options.deliverySubmissionID,
 		deliveryPayloadHash: options.deliveryPayloadHash, deliveryClaimUpdater: options.deliveryClaimUpdater,
 	}
+	// Executor binds these options before starting the goroutine that admits the prompt.
 	launchOptions.BeforeAgentStart = func(admissionCtx context.Context, executionID, _ string) error {
 		var bindErr error
 		deliveryOptions, bindErr = s.bindInitialAgentDeliverySubmission(admissionCtx, session, executionID, deliveryOptions)
@@ -24,11 +26,20 @@ func (s *Service) configureInitialDeliveryAdmission(session *models.TaskSession,
 	launchOptions.BeforeInitialPromptDispatch = func(admissionCtx context.Context, executionID, finalPrompt string, finalAttachments []v1.MessageAttachment) error {
 		if validateAdmission != nil {
 			if err := validateAdmission(admissionCtx, executionID, finalPrompt, finalAttachments); err != nil {
+				if options.onInitialPromptAdmissionFailed != nil {
+					options.onInitialPromptAdmissionFailed(err)
+				}
 				return err
 			}
 		}
 		_, admissionErr := s.prepareAgentDeliverySubmission(admissionCtx, session, executionID, finalPrompt, finalAttachments, deliveryOptions)
-		return admissionErr
+		if admissionErr != nil {
+			if options.onInitialPromptAdmissionFailed != nil {
+				options.onInitialPromptAdmissionFailed(admissionErr)
+			}
+			return &lifecycle.PromptAdmissionPersistenceError{Err: admissionErr}
+		}
+		return nil
 	}
 }
 

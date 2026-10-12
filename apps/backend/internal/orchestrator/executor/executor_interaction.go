@@ -843,6 +843,7 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session
 	if strings.TrimSpace(promptWithAttachments) == "" {
 		return nil, fmt.Errorf("passthrough prompt cannot be empty")
 	}
+	// Passthrough admission fences source intent; PTY text is not an agentctl journal payload.
 	if beforeAdmission != nil {
 		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
 			return nil, err
@@ -1461,6 +1462,7 @@ func (e *Executor) registerInitialPromptDispatchCallbacks(
 	return nil
 }
 
+// Launch admission carries the prepared payload; model-switch admission only fences ownership.
 func (e *Executor) registerInitialPromptCallbacks(
 	executionID string,
 	beforeAdmission func(context.Context, string, string, []v1.MessageAttachment) error,

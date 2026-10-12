@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
@@ -108,4 +109,38 @@ func TestPreparedDeliveryAdmissionFailureNeverDispatches(t *testing.T) {
 	submissions, err := repo.ListAgentDeliverySubmissions(t.Context(), execution.SessionID)
 	require.NoError(t, err)
 	require.Empty(t, submissions)
+}
+
+func TestInitialAdmissionPersistenceFailureUsesFailureHandler(t *testing.T) {
+	for _, owned := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary launch", true: "owned launch"}[owned], func(t *testing.T) {
+			sm, execution, _, _ := initialDeliveryPersistenceFixture(t)
+			failures := make(chan InitialPromptFailure, 1)
+			sm.SetInitialPromptFailureHandler(func(failure InitialPromptFailure) { failures <- failure })
+			want := errors.New("SQL admission unavailable")
+			var cleanup func()
+			cleaned := make(chan struct{}, 1)
+			if owned {
+				cleanup = func() { cleaned <- struct{}{} }
+			}
+			execution.setInitialPromptDispatchCallbacks(func(context.Context, string, []v1.MessageAttachment) error {
+				return &PromptAdmissionPersistenceError{Err: want}
+			}, nil, cleanup)
+			agentConfig, ok := newTestRegistry().Get("claude-acp")
+			require.True(t, ok)
+			sm.dispatchInitialPrompt(t.Context(), execution, agentConfig, "initial instruction", nil, func(string) error { return nil })
+			select {
+			case failure := <-failures:
+				require.ErrorIs(t, failure.Err, want)
+				require.Equal(t, execution.ID, failure.ExecutionID)
+				require.Zero(t, failure.PromptGeneration)
+			case <-time.After(5 * time.Second):
+				t.Fatal("durable admission failure was not reported")
+			}
+			if owned {
+				require.Len(t, cleaned, 1)
+			}
+			require.Zero(t, execution.promptGenerationSnapshot())
+		})
+	}
 }

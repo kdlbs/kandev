@@ -722,18 +722,19 @@ func (s *Service) startCreatedSessionWithComposedPromptAndLifecycleOwnership(
 }
 
 type startCreatedSessionOptions struct {
-	lifecycleLockHeld           bool
-	refuseIfAgentRunning        bool
-	initialCreatePrompt         bool
-	beforeInitialPromptDispatch func() error
-	beforeProviderAdmission     func(executionID string) error
-	onExecutionAdmitted         func(executionID string)
-	onInitialPromptAccepted     func(executionID string)
-	onInitialPromptFailed       func()
-	skipTaskDescriptionFallback bool
-	promptAlreadyComposed       bool
-	noInitialTurn               bool
-	retryPrompt                 string
+	lifecycleLockHeld              bool
+	refuseIfAgentRunning           bool
+	initialCreatePrompt            bool
+	beforeInitialPromptDispatch    func() error
+	beforeProviderAdmission        func(executionID string) error
+	onExecutionAdmitted            func(executionID string)
+	onInitialPromptAccepted        func(executionID string)
+	onInitialPromptFailed          func()
+	onInitialPromptAdmissionFailed func(error)
+	skipTaskDescriptionFallback    bool
+	promptAlreadyComposed          bool
+	noInitialTurn                  bool
+	retryPrompt                    string
 	// canvasGuidanceResolved carries the server-side capability projection
 	// from message admission. When false, this launch resolves the capability
 	// locally because no earlier producer has made a trusted decision.
