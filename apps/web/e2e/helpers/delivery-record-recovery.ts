@@ -203,7 +203,6 @@ export async function exerciseDeliveryRecordRecovery({
   await expect(page.getByText(broken.promptMessage, { exact: true })).toBeVisible();
   await expect(banner).toContainText("The saved prompt record is missing. Recovery is blocked.");
   await expect(banner.getByTestId("recovery-stop-button")).toBeVisible();
-  await expect(banner.getByTestId("recovery-resume-button")).toHaveCount(0);
   await expect(page.getByTestId("interrupted-session-continuation")).toHaveCount(0);
   if (mobile) {
     await expect(page.locator("[data-testid='mobile-task-layout']:visible")).toBeVisible();

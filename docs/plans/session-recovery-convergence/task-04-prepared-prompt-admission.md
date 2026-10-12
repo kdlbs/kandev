@@ -1,7 +1,7 @@
 ---
 id: "04-prepared-prompt-admission"
 title: "Persist the prepared prompt at admission"
-status: in_progress
+status: completed
 wave: 4
 depends_on:
   - 03-recovery-contract
@@ -79,3 +79,5 @@ admission before reporting prompt acceptance, preserving the real startup order.
 The focused `TestPeerMessageInitialLaunch_` suite passes, including queued
 follow-ups during startup and workflow-turn ownership. This remediation changes
 test support only; production admission guards remain unchanged.
+
+PR #4435 merged as 48d13207ee641d4246b6697fbca378e5dc7660a4. Final-head CI: 53 passed, 11 skipped, no failures or unresolved review threads. No local E2E ran.

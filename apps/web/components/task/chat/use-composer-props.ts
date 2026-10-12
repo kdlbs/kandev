@@ -40,10 +40,13 @@ type DeliveryRecoveryPresentation = {
 function deliveryRecoveryPresentation(
   phase: NonNullable<ReturnType<typeof readAgentDeliveryRecovery>>["phase"] | undefined,
   legacyUncertainDelivery: boolean,
+  hasDeliveryRecoveryBlock: boolean,
 ): DeliveryRecoveryPresentation {
   if (phase === "reconnecting" || phase === "uncertain") {
     return { uncertainDelivery: true, deliveryRecoveryPhase: phase };
   }
+  if (hasDeliveryRecoveryBlock)
+    return { uncertainDelivery: true, deliveryRecoveryPhase: "uncertain" };
   if (phase) return { uncertainDelivery: false, deliveryRecoveryPhase: undefined };
   return {
     uncertainDelivery: legacyUncertainDelivery,
@@ -110,7 +113,8 @@ export function useComposerProps(args: ComposerPropsArgs) {
   const legacyUncertainDelivery = panelState.lastAgentError?.code === DURABLE_DELIVERY_UNCERTAIN;
   const recoveryPresentation = deliveryRecoveryPresentation(
     deliveryRecovery?.phase,
-    legacyUncertainDelivery || hasDeliveryRecoveryBlock,
+    legacyUncertainDelivery,
+    hasDeliveryRecoveryBlock,
   );
   const canQueueWhileStarting = panelState.inputMode === "queue" && panelState.isQueueReady;
   const supportsSteering = panelState.supportsSteering;

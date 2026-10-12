@@ -37,6 +37,7 @@ No private payloads or live native conversations belong in fixtures.
 2. [Retirement and fence convergence](task-02-native-convergence.md).
 3. [State/boundary contract and delivery](task-03-recovery-contract.md).
 4. [Prepared prompt admission](task-04-prepared-prompt-admission.md).
+5. [Legacy delivery Resume controls](task-05-legacy-resume-controls.md).
 
 Each work order is executed here sequentially. Native restoration and retirement
 are never prompt authority. Historical labels, hashes, cursors and independent
@@ -59,9 +60,11 @@ legacy shutdown history, prepared checkpoints, missing/stale fences and repeated
 recovery. The four established recovery regressions reported by CI now pass
 after separating stored-record inspection from retired-record proof.
 All eight review threads were addressed and resolved. All 55 final-head CI
-checks passed, and the PR merged. No local E2E ran. Task 04 below remains open.
+checks passed, and the PR merged. No local E2E ran. Task 04 subsequently merged in PR #4435.
 
 PR #4432 merged as bc0d3b9047 after all 55 CI checks passed and all review
 threads were resolved. A subsequent other-machine fresh-task report confirmed
 attachments were present. Task 04 repairs a separately reproduced pre-dispatch
 payload divergence: SQL admission occurred before attachment materialization.
+
+Task 05 addresses a legacy session with a loaded native conversation and an empty delivery fence. Explicit authenticated Resume succeeded operationally, but the UI exposed only Retry connection and Stop. Automatic reconciliation correctly refused absent original-process proof.

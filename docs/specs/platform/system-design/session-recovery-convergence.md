@@ -92,6 +92,14 @@ source evidence, exact SQL history and complete stream projection are rechecked.
 no prompt and does not revive a dispatched queue entry. A distinct new prompt
 requires a new immutable submission and normal workflow/queue authority.
 
+Legacy prompt bindings may lack original-process identity and prompt generation.
+A successful native load does not supply that missing automatic-retirement proof.
+For an empty generic agent-delivery block without active recovery metadata, the
+composer offers explicit Resume through the existing authenticated retirement
+transaction. Retry remains available for missing-record reconstruction, alongside
+Stop. An open block outranks a historical restored snapshot; changing that block
+invalidates pending UI results. Desktop and phone expose the same guarded actions.
+
 ## Verification
 
 Generate reachable states using admission, dispatch, terminal, shutdown,

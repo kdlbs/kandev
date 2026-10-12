@@ -58,23 +58,24 @@ function uncertainDeliveryRecoveryChoices(
   t: RecoveryTranslator,
 ): RecoveryChoice[] {
   if (!props.taskId || !props.sessionId) return [];
-  if (props.actions.deliveryHistoryGap)
-    return [
-      {
-        kind: "resume",
-        label: t("task:resume"),
-        testId: "recovery-resume-button",
-        onClick: () => void props.actions.handleRecover("resume"),
-      },
-    ];
-  return [
-    {
+  const choices: RecoveryChoice[] = [];
+  if (props.actions.deliveryHistoryGap || props.actions.deliveryResumeAvailable) {
+    choices.push({
+      kind: "resume",
+      label: t("task:resume"),
+      testId: "recovery-resume-button",
+      onClick: () => void props.actions.handleRecover("resume"),
+    });
+  }
+  if (!props.actions.deliveryHistoryGap) {
+    choices.push({
       kind: "retry_connection",
       label: t("task:retryConnection"),
       testId: "recovery-retry-connection-button",
       onClick: () => void props.actions.handleRecover("retry_connection"),
-    },
-  ];
+    });
+  }
+  return choices;
 }
 
 function sessionRecoveryChoices(

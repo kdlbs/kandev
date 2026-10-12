@@ -2,11 +2,13 @@ import { test, expect, type Page } from "@playwright/test";
 import path from "node:path";
 import type { ApiClient } from "./api-client";
 import type { SeedData } from "../fixtures/test-base";
+import { assertDeliveryRecoveryGeometry } from "./delivery-recovery-controls";
 import { SessionPage } from "../pages/session-page";
 import {
   seedInterruptedPrompt,
   readRecovery,
   expectJournalRetirement,
+  withDatabase,
 } from "./interrupted-prompt-recovery";
 
 // @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.4
@@ -15,6 +17,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
   api: ApiClient,
   seed: SeedData,
   tmpDir: string,
+  legacy = false,
 ) {
   const task = await api.createTaskWithAgent(
     seed.workspaceId,
@@ -55,18 +58,50 @@ export async function verifyNativeResumeClearsRecoveryNotice(
     )
     .toBe(false);
   expect(active.agent_execution_id).toBeTruthy();
+  const originalMessages = (await api.listSessionMessages(active.id)).messages;
   const seeded = seedInterruptedPrompt(tmpDir, active.id, active.agent_execution_id);
+  if (legacy) {
+    withDatabase(tmpDir, (db) => {
+      db.prepare(
+        "UPDATE agent_delivery_submissions SET state = 'dispatching', outcome = 'dispatching' WHERE id = ?",
+      ).run(seeded.submissionId);
+      db.prepare(
+        "UPDATE session_recovery_blocks SET reason = 'unresolved_durable_work', delivery_submission_id = '', delivery_stream_id = '' WHERE id = ?",
+      ).run(seeded.blockId);
+      const row = db.prepare("SELECT metadata FROM task_sessions WHERE id = ?").get(active.id) as {
+        metadata: string;
+      };
+      const metadata = JSON.parse(row.metadata);
+      delete metadata.agent_delivery_recovery;
+      delete metadata.last_agent_error;
+      db.prepare(
+        "UPDATE task_sessions SET metadata = ?, state = 'WAITING_FOR_INPUT', error_message = '' WHERE id = ?",
+      ).run(JSON.stringify(metadata), active.id);
+    });
+  }
   await page.reload();
   await session.waitForLoad();
   await expect(page.getByTestId("failed-session-banner")).toContainText(
     "The prompt outcome is uncertain.",
   );
   try {
-    await api.wsRequest("session.recover", {
-      task_id: task.id,
-      session_id: active.id,
-      action: "resume",
-    });
+    if (legacy) {
+      await assertDeliveryRecoveryGeometry(page, "recovery-resume-button");
+      const resume = page.getByTestId("recovery-resume-button");
+      if (test.info().project.name === "mobile-chrome") await resume.tap();
+      else await resume.click();
+      await expect
+        .poll(() => readRecovery(tmpDir, seeded.blockId, seeded.submissionId).block, {
+          timeout: 60_000,
+        })
+        .toMatchObject({ state: "resolved", authorized_action: "resume" });
+    } else {
+      await api.wsRequest("session.recover", {
+        task_id: task.id,
+        session_id: active.id,
+        action: "resume",
+      });
+    }
   } catch (error) {
     await test.info().attach("native-resume-backend-log", {
       path: path.join(tmpDir, ".kandev/logs/backend-logs.log"),
@@ -78,12 +113,13 @@ export async function verifyNativeResumeClearsRecoveryNotice(
     });
     throw error;
   }
-  await expect
-    .poll(async () => {
-      const { session: current } = await api.getTaskSession(active.id);
-      return (current.metadata?.agent_delivery_recovery as { phase?: string } | undefined)?.phase;
-    })
-    .toBe("restored");
+  if (!legacy)
+    await expect
+      .poll(async () => {
+        const { session: current } = await api.getTaskSession(active.id);
+        return (current.metadata?.agent_delivery_recovery as { phase?: string } | undefined)?.phase;
+      })
+      .toBe("restored");
   await page.reload();
   await session.waitForLoad();
   await expect(page.getByTestId("failed-session-banner")).toHaveCount(0);
@@ -94,6 +130,12 @@ export async function verifyNativeResumeClearsRecoveryNotice(
     submission: { state: "interrupted_unknown" },
   });
   await expectJournalRetirement(seeded.journalPath, seeded.submission);
+  expect(
+    (await api.listSessionMessages(active.id)).messages
+      .filter((item) => item.author_type === "user")
+      .map((item) => item.id),
+  ).toEqual(originalMessages.filter((item) => item.author_type === "user").map((item) => item.id));
+  await expect(session.chat.getByText("simple mock response", { exact: false })).toHaveCount(1);
   await session.sendMessageViaButton("/slow 1s");
   await expect(
     session.chat.getByText("Slow response complete after 1s.", { exact: false }),

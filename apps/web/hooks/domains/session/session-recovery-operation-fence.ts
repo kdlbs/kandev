@@ -171,11 +171,13 @@ export type SessionRecoveryActions = Omit<
   | "recoveryNoticeKind"
   | "deliveryRecoveryNotice"
   | "deliveryHistoryGap"
+  | "deliveryResumeAvailable"
   | "clearInspectionContentionNotice"
 > & {
   workspaceRecoveryMatchesCurrentFailure?: boolean;
   recoveryNoticeKind?: SessionRecoveryNoticeKind | null;
   deliveryRecoveryNotice?: string | null;
+  deliveryResumeAvailable?: boolean;
   deliveryHistoryGap?: import("@/lib/session-agent-delivery-recovery").AgentDeliveryHistoryGap;
   clearInspectionContentionNotice?: () => void;
 };
