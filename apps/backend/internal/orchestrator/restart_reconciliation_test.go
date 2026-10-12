@@ -132,22 +132,26 @@ func (m *alreadyResumedRestartManager) ReconcileAlreadyResumedDelivery(ctx conte
 
 // @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.2
 func TestRestartRecoveryUsesAlreadyLoadedNativeConversation(t *testing.T) {
-	testAlreadyLoadedRestartRecovery(t, false, false, false)
+	testAlreadyLoadedRestartRecovery(t, false, false, false, false)
 }
 
 func TestRestartRecoveryRepairsBothDispatchingWithoutMetadata(t *testing.T) {
-	testAlreadyLoadedRestartRecovery(t, true, false, false)
+	testAlreadyLoadedRestartRecovery(t, true, false, false, false)
 }
 
 func TestAlreadyLoadedRestartRecoveryPreservesIndependentBlock(t *testing.T) {
-	testAlreadyLoadedRestartRecovery(t, false, true, false)
+	testAlreadyLoadedRestartRecovery(t, false, true, false, false)
 }
 
 func TestRestartRecoveryRepairsIncompleteBlockWithKnownOwner(t *testing.T) {
-	testAlreadyLoadedRestartRecovery(t, false, false, true)
+	testAlreadyLoadedRestartRecovery(t, false, false, true, false)
 }
 
-func testAlreadyLoadedRestartRecovery(t *testing.T, missingMetadata, independentBlock, partialBlock bool) {
+func TestRestartRecoveryRepairsCanonicalContinuationWithoutUserMessage(t *testing.T) {
+	testAlreadyLoadedRestartRecovery(t, true, false, false, true)
+}
+
+func testAlreadyLoadedRestartRecovery(t *testing.T, missingMetadata, independentBlock, partialBlock, continuation bool) {
 	service, repo, base, session, store := newSilentRestoreEligibilityFixture(t, "native", "loaded")
 	ctx := context.Background()
 	root := t.TempDir()
@@ -157,11 +161,17 @@ func testAlreadyLoadedRestartRecovery(t *testing.T, missingMetadata, independent
 	submissionID := "loaded-submission"
 	state := journal.SubmissionInterruptedUnknown
 	if missingMetadata {
-		submissionID, state = "prompt:crash-message", journal.SubmissionDispatching
+		messageID := "crash-message"
+		if continuation {
+			messageID = "continuation:crash"
+		}
+		submissionID, state = "prompt:"+messageID, journal.SubmissionDispatching
 		require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "crash-turn", TaskID: session.TaskID, TaskSessionID: session.ID, StartedAt: time.Now().UTC()}))
-		require.NoError(t, repo.CreateMessage(ctx, &models.Message{ID: "crash-message", TaskID: session.TaskID, TaskSessionID: session.ID,
-			TurnID: "crash-turn", AuthorType: models.MessageAuthorUser, Content: "original prompt"}))
-		_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET id = ?, dispatch_attempt_id = 'crash-message', state = 'dispatching' WHERE id = ?`, submissionID, "loaded-submission")
+		if !continuation {
+			require.NoError(t, repo.CreateMessage(ctx, &models.Message{ID: messageID, TaskID: session.TaskID, TaskSessionID: session.ID,
+				TurnID: "crash-turn", AuthorType: models.MessageAuthorUser, Content: "original prompt"}))
+		}
+		_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET id = ?, dispatch_attempt_id = ?, state = 'dispatching' WHERE id = ?`, submissionID, messageID, "loaded-submission")
 		require.NoError(t, err)
 		_, err = repo.DB().ExecContext(ctx, `UPDATE task_sessions SET metadata = '{}' WHERE id = ?`, session.ID)
 		require.NoError(t, err)
@@ -217,7 +227,11 @@ func testAlreadyLoadedRestartRecovery(t *testing.T, missingMetadata, independent
 	require.NoError(t, err)
 	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, canonical.State)
 	require.Equal(t, payload, canonical.Payload)
-	require.Empty(t, canonical.Outcome)
+	if missingMetadata {
+		require.Equal(t, "unknown", canonical.Outcome)
+	} else {
+		require.Empty(t, canonical.Outcome)
+	}
 	retiredStore, err := journal.Open(journal.Config{Path: journal.CheckStorage(root, session.ID).Path})
 	require.NoError(t, err)
 	retired, err := retiredStore.GetSubmission(ctx, submissionID)

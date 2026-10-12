@@ -67,6 +67,12 @@ or unprojected receipt refuses resolution. A transaction rollback changes none
 of the binding, notice or fence. A retry reuses retired journal proof. Retained inspection has a separate
 metadata-only stored-submission request for unretired legacy history; retirement
 proof still requires the actual retired marker and preserves the original label.
+A retained submission with an existing canonical SQL row can repair its recovery
+presentation without a user-message row, including internal continuations. The
+request marks this as existing-record-only, and the SQL transaction refuses a
+missing or changed canonical row instead of inserting one. Reconstruction from
+journal-only evidence still requires the exact user-message association. A
+proven-dead dispatch records an unknown outcome when its prior outcome is empty.
 A matching prepared checkpoint with no candidate is completed in that transaction;
 an allocated/launching or unrelated attempt still blocks it. Legacy composer
 uncertainty is cleared only for an exactly retired submission. An explicit null

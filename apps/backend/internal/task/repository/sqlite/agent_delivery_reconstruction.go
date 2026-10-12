@@ -52,6 +52,9 @@ func (r *Repository) ReconstructAgentDeliverySubmission(
 	if existing, exists := rows[request.Submission.ID]; exists {
 		return r.reconcileExistingReconstructionTx(ctx, tx, owner, existing, block, request)
 	}
+	if request.ExistingSubmissionOnly {
+		return nil, repoerrors.ErrAgentDeliveryReconstructionStale
+	}
 	if owner.exists && !owner.historical {
 		return nil, repoerrors.ErrAgentDeliveryReconstructionConflict
 	}
@@ -272,6 +275,9 @@ func (r *Repository) validateReconstructionMessageTx(
 	tx *sqlx.Tx,
 	request *models.AgentDeliveryReconstructionRequest,
 ) error {
+	if request.ExistingSubmissionOnly {
+		return nil
+	}
 	query := `SELECT task_id, task_session_id, author_type FROM task_session_messages WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR KEY SHARE`
@@ -584,8 +590,8 @@ func (r *Repository) reconstructExistingDispatchTx(ctx context.Context, tx *sqlx
 		if proof == nil || !*proof {
 			return nil, repoerrors.ErrAgentDeliveryReconstructionConflict
 		}
-		result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE agent_delivery_submissions SET state = ? WHERE id = ? AND state = ?`),
-			models.DeliverySubmissionInterruptedUnknown, existing.ID, existing.State)
+		result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE agent_delivery_submissions SET state = ?, outcome = CASE WHEN outcome = '' THEN ? ELSE outcome END, updated_at = ? WHERE id = ? AND state = ?`),
+			models.DeliverySubmissionInterruptedUnknown, reconstructionUnknownOutcome, r.nowUTC(), existing.ID, existing.State)
 		if err != nil {
 			return nil, err
 		}

@@ -17,7 +17,7 @@ func TestRestartRecoveryRepairsMissingCanonicalProjection(t *testing.T) {
 }
 
 func TestRestartRecoveryPreservesCanonicalLiveDispatch(t *testing.T) {
-	for _, condition := range []string{"live", "no death proof", "dead", "lost CAS", "retired verified", "retired changed", "retired live"} {
+	for _, condition := range []string{"live", "no death proof", "dead", "lost CAS", "retired verified", "retired changed", "retired live", "continuation", "continuation missing", "continuation changed"} {
 		t.Run(condition, func(t *testing.T) { testMissingProjectionReconstruction(t, condition) })
 	}
 }
@@ -48,12 +48,17 @@ func testMissingProjectionReconstruction(t *testing.T, condition string) {
 		PayloadHash: journal.SubmissionHash(payload), State: models.DeliverySubmissionInterruptedUnknown, Outcome: "unknown"}
 	if condition != "unknown" {
 		submission.State = models.DeliverySubmissionDispatching
+		submission.Outcome = ""
+	}
+	continuation := condition == "continuation" || condition == "continuation missing" || condition == "continuation changed"
+	if continuation {
+		submission.ID, submission.DispatchAttemptID = "prompt:continuation:attempt", "continuation:attempt"
 	}
 	_, err := repo.PrepareAgentDeliverySubmission(ctx, &submission)
 	require.NoError(t, err)
 	request := &models.AgentDeliveryReconstructionRequest{TaskID: "task", SessionID: "session", IncarnationID: "incarnation",
 		HarnessGeneration: 1, ExpectedSessionState: models.TaskSessionStateWaitingForInput, NativeSessionID: "native",
-		MessageID: "message", ExpectedBlock: *block, Submission: submission, SourceStreamFirstRetained: 1,
+		ExistingSubmissionOnly: continuation, MessageID: submission.DispatchAttemptID, ExpectedBlock: *block, Submission: submission, SourceStreamFirstRetained: 1,
 		Recovery: models.AgentDeliveryRecovery{Phase: models.AgentDeliveryRecoveryUncertain, SessionID: "session",
 			SubmissionID: submission.ID, StreamID: "stream", IncarnationID: "incarnation", HarnessGeneration: 1,
 			Reconstruction: &models.AgentDeliveryReconstructionProvenance{SourceSessionID: "session", SourceIncarnationID: "incarnation",
@@ -104,7 +109,23 @@ func testMissingProjectionReconstruction(t *testing.T, condition string) {
 		request.Recovery.Revision = prior.Revision
 	}
 
+	if condition == "continuation missing" {
+		_, err = repo.DB().ExecContext(ctx, `DELETE FROM agent_delivery_submissions WHERE id = ?`, submission.ID)
+		require.NoError(t, err)
+	}
+	if condition == "continuation changed" {
+		_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET payload_hash = 'changed' WHERE id = ?`, submission.ID)
+		require.NoError(t, err)
+	}
 	result, err := repo.ReconstructAgentDeliverySubmission(ctx, request)
+	if condition == "continuation missing" || condition == "continuation changed" {
+		require.Error(t, err, "canonical-only repair must not insert missing or overwrite changed evidence")
+		current, readErr := repo.GetTaskSession(ctx, "session")
+		require.NoError(t, readErr)
+		_, exists := models.LoadAgentDeliveryRecovery(current.Metadata)
+		require.False(t, exists)
+		return
+	}
 	if condition == "history unresolved" {
 		require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryReconstructionConflict)
 		return

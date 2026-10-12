@@ -51,7 +51,11 @@ correcting work-order metadata. Review remediation covers terminal drain orderin
 complete stream snapshot validation, exact submission stream binding and unknown
 reconstruction outcomes. Focused automatic restart and repeated recovery checks pass. CI-reported
 recovery fixtures pass after correcting metadata-only retained inspection.
-All eight initial review findings are resolved; final-head CI and any new
-review findings remain the delivery gate. No local E2E has run.
+All eight initial review findings are resolved. CI then exposed an empty outcome
+on reconstructed dispatch and a canonical internal continuation incorrectly
+requiring a user-message row. Both desktop and phone pruned-history failures
+share the former cause. Focused regressions cover empty-outcome settlement and
+existing-only continuation repair, including deleted/changed canonical controls.
+Final-head CI and any new review findings remain the delivery gate. No local E2E has run.
 
 [Parent plan](plan.md). [Requirements](../../specs/platform/requirements/durable-restart-reconciliation.md).
