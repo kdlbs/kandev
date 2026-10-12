@@ -102,6 +102,14 @@ export class ChangesInlineCommitState {
     return this.snapshots.get(commitDetailTargetKey(target)) ?? EMPTY_SNAPSHOT;
   }
 
+  getPendingRequestCount(): number {
+    let pending = 0;
+    for (const snapshot of this.snapshots.values()) {
+      if (snapshot.status === "loading") pending += 1;
+    }
+    return pending;
+  }
+
   registerMountedTargetKey(key: string): () => void {
     if (this.retired) return () => {};
     this.mountedTargets.set(key, (this.mountedTargets.get(key) ?? 0) + 1);

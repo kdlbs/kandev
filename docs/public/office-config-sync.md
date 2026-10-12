@@ -7,6 +7,10 @@ description: "Keep an Office workspace's agents, skills, projects, and routines 
 
 Office Config Sync makes a GitHub or GitLab repository the source of truth for an Office workspace's agents, skills, projects, and routines. Each run reads the repository's Office config layout, creates or reconciles the entities sync owns, and safely removes entities that no longer exist. Entities created by hand in the Kandev UI are left alone.
 
+Projects can list local paths and supported Git URLs as repository sources, including host/path forms such as `github.com/org/repo`. When the Office task form creates a root task with a project and no explicit repository selection, Kandev attaches these sources before the first launch. Task creation fails if Kandev cannot read the project or a source is invalid or unsupported.
+
+An explicit repository selection remains in effect, and child tasks inherit their parent's repository context. Later project or source edits do not change existing task attachments.
+
 Office mode is currently feature-flagged. Config sync settings appear under **Office workspace Settings > Config Sync** when Office is enabled.
 
 This is a separate capability from [Workflow Sync](workflow-sync.md): Workflow Sync reconciles regular Kanban workflows from a flat directory of portable workflow files; Office Config Sync reconciles an Office workspace's agents, skills, projects, and routines from the Office config directory tree described below. The two do not interact and share no configuration.

@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-30
-last_updated: 2026-09-30
+last_updated: 2026-10-12
 requirements:
   - REQ-COORDINATOR-OUTCOMES-001
   - REQ-COORDINATOR-OUTCOMES-002
@@ -130,6 +130,16 @@ differ between `spec_json` and `final_spec_json`; `reason_code` is
 `reasons.Code` of `reject_reason` (the text is read and dropped, never copied).
 A call the observer makes never fails the decision, and a panic in it is
 recovered and counted in `coordinator_outcomes_observer_panic_total{observer}` (`observer` is `grader` or `override`).
+
+The hook enqueues grading immediately and hands an immutable copy of the
+decision, including its edited-field names, to a separate bounded override
+queue of 1,000 entries. A single worker performs override authorization and
+SQL capture; that I/O never holds the committed decision response. A full queue
+drops the observation and increments
+`coordinator_override_capture_dropped_total{reason="queue_full"}`. Shutdown
+closes admission, cancels capture I/O and joins the worker before repository
+teardown; observations refused or discarded during shutdown use the bounded
+`stopped` reason. Capture remains best effort and never reverts a decision.
 
 Three paths call `Grade` through one in-process queue (`grader.Enqueue(id)`,
 keyed set so a proposal is queued once at a time, a worker pool of 1):
@@ -306,3 +316,14 @@ Grade idempotence under two goroutines; final rows never change; reopen once
 under concurrent graders; cost NULL vs zero; override uniqueness and
 redelivery; moved-back ordering matrix; the reason-code table; the measures
 ordering and null reasons; the median parity case; window validation matrix.
+
+
+### Worker ownership
+
+The grading queue, daily sweeps and override scanner each admit one worker
+under the same mutex that closes shutdown admission. Worker registration occurs
+before releasing that mutex. Stop cancels owned I/O contexts, closes admission
+and joins already-registered workers; repeated stops also wait for that join.
+Decision capture remains an immutable bounded queue and does not hold committed
+approval, rejection or undo responses. A committed rejection notifies recording
+before its response reread, using the timestamp written by the decision CAS.

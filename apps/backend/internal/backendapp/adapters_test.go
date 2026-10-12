@@ -284,6 +284,15 @@ func TestBuildLifecycleLaunchRequestCarriesSessionSettingsPolicy(t *testing.T) {
 	}
 }
 
+func TestBuildLifecycleLaunchRequestCarriesContextContinuation(t *testing.T) {
+	got := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		ForceContextContinuation: true,
+	}, "", "")
+	if !got.ForceContextContinuation {
+		t.Fatal("ForceContextContinuation was dropped from lifecycle launch request")
+	}
+}
+
 func TestDetectGitDefaultBranchDetachedHEADReturnsEmpty(t *testing.T) {
 	repoPath := t.TempDir()
 	gitDir := filepath.Join(repoPath, ".git")
@@ -822,3 +831,14 @@ func TestNormalizeRuntimeStopError(t *testing.T) {
 // jiraSecretAdapter Set/Exists branching is tested in
 // internal/integrations/secretadapter/secretadapter_test.go now that the
 // upsert helper lives there.
+
+func TestContinuationNativeOnlyRestoreLaunchContract(t *testing.T) {
+	req := &orchestratorexecutor.LaunchAgentRequest{RequiredNativeConversationID: "provider-session"}
+	got := reflect.ValueOf(buildLifecycleLaunchRequest(req, "/workspace", "profile-1")).Elem().FieldByName("RequiredNativeConversationID")
+	if !got.IsValid() {
+		t.Fatal("missing native identity field")
+	}
+	if got.String() != "provider-session" {
+		t.Fatal("native identity was not forwarded")
+	}
+}

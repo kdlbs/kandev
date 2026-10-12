@@ -2,6 +2,7 @@ package replay
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,11 +16,12 @@ import (
 type world struct {
 	mu sync.Mutex
 
-	turns     []Turn
-	proposals map[string]Proposal
-	snapshots map[string]string
-	triggers  map[string]string
-	titles    map[string]string
+	turns      []Turn
+	proposals  map[string]Proposal
+	snapshots  map[string]string
+	triggers   map[string]string
+	titles     map[string]string
+	caseScopes []string
 
 	selectErr, profileErr, priceErr, renderErr, baselineErr error
 	proposalErr                                             error
@@ -71,7 +73,10 @@ func (w *world) SelectTurns(context.Context, string, time.Time) ([]Turn, error) 
 	return w.turns, w.selectErr
 }
 
-func (w *world) Proposal(_ context.Context, id string) (Proposal, error) {
+func (w *world) Proposal(_ context.Context, coordinatorID, id string) (Proposal, error) {
+	w.mu.Lock()
+	w.caseScopes = append(w.caseScopes, coordinatorID)
+	w.mu.Unlock()
 	if w.proposalErr != nil {
 		return Proposal{}, w.proposalErr
 	}
@@ -98,7 +103,10 @@ func (w *world) TriggerText(_ context.Context, t Turn) (string, error) {
 	return s, nil
 }
 
-func (w *world) TaskTitle(_ context.Context, id string) (string, error) {
+func (w *world) TaskTitle(_ context.Context, coordinatorID, id string) (string, error) {
+	w.mu.Lock()
+	w.caseScopes = append(w.caseScopes, coordinatorID)
+	w.mu.Unlock()
 	s, ok := w.titles[id]
 	if !ok {
 		return "", ErrNotFound
@@ -228,10 +236,9 @@ func scripted(f func(side, caseID string) []string) func(string) (Reply, error) 
 		if strings.Contains(prompt, "CAND") {
 			side = "cand"
 		}
-		caseID := ""
-		if i := strings.Index(prompt, "CASE:"); i >= 0 {
-			rest := prompt[i+5:]
-			caseID = strings.Fields(rest)[0]
+		caseID, err := promptCaseID(prompt)
+		if err != nil {
+			return Reply{}, err
 		}
 		var parts []string
 		for _, k := range f(side, caseID) {
@@ -239,6 +246,25 @@ func scripted(f func(side, caseID string) []string) func(string) (Reply, error) 
 		}
 		return Reply{Text: "[" + strings.Join(parts, ",") + "]", PromptTokens: 100, ResponseTokens: 10}, nil
 	}
+}
+
+func promptCaseID(prompt string) (string, error) {
+	_, data, found := strings.Cut(prompt, "<data kind=\"replay-input\">\n")
+	if !found {
+		return "", errors.New("replay input envelope missing")
+	}
+	body, _, found := strings.Cut(data, "\n</data>")
+	if !found {
+		return "", errors.New("replay input envelope unfinished")
+	}
+	var input promptData
+	if err := json.Unmarshal([]byte(body), &input); err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(input.Snapshot, "CASE:") {
+		return "", errors.New("replay fixture snapshot missing case marker")
+	}
+	return strings.TrimPrefix(input.Snapshot, "CASE:"), nil
 }
 
 var errBoom = errors.New("boom")

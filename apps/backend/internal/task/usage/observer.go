@@ -17,6 +17,8 @@ const observerCallTimeout = 45 * time.Second
 // observerDroppedTotal counts notices abandoned because the queue was full.
 var observerDroppedTotal = expvar.NewInt("coordinator_usage_observer_dropped_total")
 
+var observerAbandonedTotal = expvar.NewInt("coordinator_usage_observer_abandoned_total")
+
 // RecordedObserver is told, after a usage row commits, which task and session
 // it belongs to. The context is cancelled when the writer stops.
 type RecordedObserver func(ctx context.Context, taskID, sessionID string)
@@ -38,6 +40,9 @@ func (w *Writer) SetRecordedObserver(fn RecordedObserver) {
 func (w *Writer) currentObserver() RecordedObserver {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.observerFailed {
+		return nil
+	}
 	return w.observer
 }
 
@@ -73,10 +78,38 @@ func (w *Writer) runObserver() {
 func (w *Writer) callObserver(fn RecordedObserver, n usageNotice) {
 	ctx, cancel := context.WithTimeout(w.obsCtx, observerCallTimeout)
 	defer cancel()
-	defer func() {
-		if r := recover(); r != nil && w.log != nil {
-			w.log.Warn("usage observer panicked", zap.Any("panic", r), zap.String("task_id", n.taskID))
-		}
+	done := make(chan struct{})
+	w.mu.Lock()
+	w.obsActiveDone = done
+	w.mu.Unlock()
+	go func() {
+		defer close(done)
+		defer func() {
+			if r := recover(); r != nil && w.log != nil {
+				w.log.Warn("usage observer panicked", zap.Any("panic", r), zap.String("task_id", n.taskID))
+			}
+		}()
+		fn(ctx, n.taskID, n.sessionID)
 	}()
-	fn(ctx, n.taskID, n.sessionID)
+	select {
+	case <-done:
+		return
+	case <-ctx.Done():
+	}
+	if ctx.Err() != context.DeadlineExceeded {
+		grace := time.NewTimer(drainDeadline)
+		defer grace.Stop()
+		select {
+		case <-done:
+			return
+		case <-grace.C:
+		}
+	}
+	w.mu.Lock()
+	w.observerFailed = true
+	w.mu.Unlock()
+	observerAbandonedTotal.Add(1)
+	if w.log != nil {
+		w.log.Warn("usage observer did not return; further callbacks disabled", zap.String("task_id", n.taskID))
+	}
 }

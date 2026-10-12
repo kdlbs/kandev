@@ -39,7 +39,9 @@ func (s *Service) bindConversationTask(ctx context.Context, task *taskmodels.Tas
 	if err := s.stampToolPolicy(metadata, c, task.ID); err != nil {
 		return err
 	}
-	_, err := s.conversationTasks.UpdateTask(ctx, task.ID, &taskservice.UpdateTaskRequest{
+	bindCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bindTimeout)
+	defer cancel()
+	_, err := s.conversationTasks.UpdateTask(bindCtx, task.ID, &taskservice.UpdateTaskRequest{
 		Metadata:              metadata,
 		AllowReservedMetadata: true,
 	})

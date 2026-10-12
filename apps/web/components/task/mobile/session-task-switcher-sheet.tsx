@@ -9,7 +9,7 @@ import { useTaskSheetSelectionController } from "./task-sheet-selection-context"
 export { useTaskSheetSelectionController } from "./task-sheet-selection-context";
 import type { TaskSheetSelectionController } from "./session-task-switcher-sheet-selection";
 import { useTaskReadStatus } from "./session-task-switcher-sheet-read-status";
-import { TaskPickerSurface, InlineTaskHeader } from "./task-picker-surface";
+import { TaskPickerSurface, InlineTaskHeader, useTaskSheetOpener } from "./task-picker-surface";
 import { Button } from "@kandev/ui/button";
 import { QuickChatSheetButton } from "./quick-chat-sheet-button";
 import { MobileTaskMoveOptionsSurface, useMobileTaskMoveOptions } from "./mobile-task-move-options";
@@ -40,25 +40,16 @@ type SessionTaskSwitcherSheetProps = {
   navigate?: (taskId: string, sessionId?: string) => void;
   onCloseAutoFocus?: (event: Event) => void;
   renderInline?: (body: ReactNode) => ReactNode;
+  showInlineNewTask?: boolean;
   selection?: TaskSheetSelectionController;
 };
-function useTaskSheetOpener(open: boolean) {
-  const [opener, setOpener] = useState({ open: false, current: null as HTMLElement | null });
-  if (opener.open !== open) {
-    setOpener({
-      open,
-      current:
-        open && document.activeElement instanceof HTMLElement
-          ? document.activeElement
-          : opener.current,
-    });
-  }
-  return opener;
-}
 
-export function useMobileTaskLinking(workspaceId: string | null) {
+export function useMobileTaskLinking(
+  workspaceId: string | null,
+  pageTasks: Parameters<typeof useSidebarLinkActions>[1] = [],
+) {
   const store = useAppStoreApi();
-  const actions = useSidebarLinkActions(store);
+  const actions = useSidebarLinkActions(store, pageTasks);
   const taskListHandlers = useSidebarTaskLinking(workspaceId, actions);
   const { repositories } = useRepositories(workspaceId);
 
@@ -209,6 +200,7 @@ type TaskSwitcherSurfaceContentProps = {
   onQuickChat: () => void;
   onNewTask: () => void;
   inline?: boolean;
+  showInlineNewTask?: boolean;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
   onCreateSubtask: (taskId: string, taskTitle: string) => void;
@@ -247,6 +239,7 @@ function TaskSwitcherSurfaceContent({
   edit,
   linking,
   inline = false,
+  showInlineNewTask = true,
   expanded,
   onExpandedChange,
 }: TaskSwitcherSurfaceContentProps) {
@@ -281,6 +274,7 @@ function TaskSwitcherSurfaceContent({
     <>
       {inline ? (
         <InlineTaskHeader
+          showNewTask={showInlineNewTask}
           expanded={expanded}
           onExpandedChange={onExpandedChange}
           onNewTask={onNewTask}
@@ -341,6 +335,7 @@ function TaskSwitcherSurfaceContent({
               pageEntries={data.pageEntries}
               page={data.page.response}
               pagePending={data.page.requestedPage !== null}
+              pageTransitioning={data.page.isDisclosureTransition}
               pageError={data.page.error}
               pageCanRetry={data.page.canRetry}
               onPageChange={data.page.goToPage}
@@ -387,6 +382,17 @@ function PortForwardingTaskAction({
   );
 }
 
+function useMobileTaskQuickChat(
+  workspaceId: string | null | undefined,
+  onOpenChange: (open: boolean) => void,
+) {
+  const openQuickChat = useQuickChatLauncher(workspaceId);
+  return useCallback(() => {
+    onOpenChange(false);
+    openQuickChat();
+  }, [onOpenChange, openQuickChat]);
+}
+
 export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   open,
   onOpenChange,
@@ -396,6 +402,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   navigate,
   onCloseAutoFocus,
   renderInline,
+  showInlineNewTask,
   selection,
 }: SessionTaskSwitcherSheetProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -410,15 +417,17 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     (nextOpen: boolean) => handleTaskSheetOpenChange(selectionController, nextOpen, onOpenChange),
     [onOpenChange, selectionController],
   );
-  const actions = useSheetActions(workspaceId, handleOpenChange, selectionController, navigate);
+  const actions = useSheetActions(
+    workspaceId,
+    handleOpenChange,
+    selectionController,
+    navigate,
+    data.tasksWithRepositories,
+  );
   const rename = useMobileTaskRename();
-  const edit = useSidebarTaskEdit();
-  const linking = useMobileTaskLinking(workspaceId);
-  const openQuickChat = useQuickChatLauncher(workspaceId);
-  const handleQuickChat = useCallback(() => {
-    handleOpenChange(false);
-    openQuickChat();
-  }, [handleOpenChange, openQuickChat]);
+  const edit = useSidebarTaskEdit(data.allTasks);
+  const linking = useMobileTaskLinking(workspaceId, data.allTasks);
+  const handleQuickChat = useMobileTaskQuickChat(workspaceId, handleOpenChange);
   const handleCreateSubtask = useCallback(
     (taskId: string, taskTitle: string) => {
       handleOpenChange(false);
@@ -431,6 +440,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     <TaskSwitcherSurfaceContent
       open={open}
       inline={!!renderInline}
+      showInlineNewTask={showInlineNewTask}
       expanded={expanded}
       onExpandedChange={setExpanded}
       presentation={presentation}

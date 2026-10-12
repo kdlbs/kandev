@@ -179,7 +179,7 @@ func (r *run) replay(ctx, runCtx context.Context, renders Renders) {
 	}
 	var prepared []preparedCase
 	for _, t := range turns {
-		pc, err := prepareCase(runCtx, d.Cases, t)
+		pc, err := prepareCase(runCtx, d.Cases, r.req.CoordinatorID, t)
 		if err != nil {
 			r.stopRead(ctx)
 			return

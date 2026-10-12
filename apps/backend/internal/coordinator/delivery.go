@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -41,6 +42,10 @@ func (s *Service) Deliver(ctx context.Context, coordinatorID string) error {
 	if err != nil {
 		return err
 	}
+	watchSet, err := s.store.LoadWatchSet(ctx, s.store.ro, coordinatorID)
+	if err != nil {
+		return err
+	}
 	wakes, err := s.holdingWakes(ctx, coord)
 	if err != nil || len(wakes) == 0 {
 		return err
@@ -50,12 +55,11 @@ func (s *Service) Deliver(ctx context.Context, coordinatorID string) error {
 		ids[i] = w.ID
 	}
 	started, err := s.store.startUnattendedTurn(ctx, turnStart{
-		CoordinatorID: coordinatorID, ConvTaskID: adm.TaskID, SessionID: adm.SessionID, WakeIDs: ids,
+		CoordinatorID: coordinatorID, ConvTaskID: adm.TaskID, SessionID: adm.SessionID, WakeIDs: ids, WatchSet: &watchSet,
 	})
 	if err != nil || started == nil {
 		return err
 	}
-	wakeDeliveredTotal.Add(int64(len(started.Wakes)))
 	s.publishCoordinatorUpdatedWith(ctx, started.WorkspaceID, coordinatorID, true)
 	return s.sendTurn(ctx, coord, adm, started)
 }
@@ -65,6 +69,7 @@ func (s *Service) sendTurn(ctx context.Context, coord *Coordinator, adm Admissio
 		return errors.New("coordinator delivery: wake sender is not wired")
 	}
 	turnID := started.ID
+	var accepted sync.Once
 	messageID, err := s.wakeSender.PromptUnattendedWake(ctx, orchestrator.UnattendedWakePrompt{
 		TaskID:     adm.TaskID,
 		SessionID:  adm.SessionID,
@@ -74,7 +79,10 @@ func (s *Service) sendTurn(ctx context.Context, coord *Coordinator, adm Admissio
 			s.writeBinding(ctx, turnID, "reserved", s.store.bindReservedTurn, reservedTurnID)
 		},
 		OnAccepted: func(sessionTurnID string) {
-			s.onAccepted(ctx, coord.ID, adm.SessionID, turnID, sessionTurnID)
+			accepted.Do(func() {
+				s.onAccepted(ctx, coord.ID, adm.SessionID, turnID, sessionTurnID)
+				wakeDeliveredTotal.Add(int64(len(started.Wakes)))
+			})
 		},
 	})
 	if errors.Is(err, orchestrator.ErrWakePromptNotDispatched) {

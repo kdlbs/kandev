@@ -3,11 +3,13 @@
 For cleanup priorities, proposed rules, and review cadence, see the
 [architecture maintenance roadmap](architecture-maintenance/README.md).
 
-Kandev turns a small set of accepted architecture boundaries into fast repository checks. The
-pre-commit hook runs them automatically; use `make lint-architecture` to run them directly. CI runs
-the same dependency-free Python linter against tracked files and reports `path:line` diagnostics.
-Executable tooling lives under `scripts/`, durable rule configuration lives under `config/`, and
-the GitHub Actions workflow only invokes those repository-owned entry points.
+Kandev enforces architecture boundaries through the Python architecture linter and a bounded
+frontend ESLint guard. The pre-commit architecture-lint hook and `make lint-architecture` run the
+Python engine, which CI also runs against tracked files and reports as `path:line` diagnostics.
+The migrated System Query owner guard runs through the web ESLint configuration and the
+`Frontend Tests Passed` CI gate; `make lint-architecture` does not run it. The Python engine's
+executable tooling lives under `scripts/`, and its durable rule configuration lives under
+`config/`.
 
 The linter's system boundary is documented in the
 [architecture-lint specification](specs/architecture-lint/README.md).
@@ -24,14 +26,17 @@ The linter's system boundary is documented in the
 | `ARCH-FRONTEND-STATE-UI-IMPORT` | Production files under `apps/web/lib/state/` must not import `apps/web/components/` or `apps/web/app/`. | Components and routes consume state; state remains below UI/app layers and shared values belong in dependency-neutral modules. |
 | `ARCH-INBOX-HISTORY-ISOLATION` | A closed set of backend pending-action sinks must not reference the Inbox History read's exported entry points, and the Inbox History read/render modules must not reference the Needs-you sidebar-badge state or subscribe to an event stream. | Keep the additive History read (AC-UI-INBOX-HISTORY-001.5/.17/.22) out of the operational pending-action path in both directions. |
 | `ARCH-DEPRECATION-LEDGER` | Handwritten production Go `Deprecated:` comments and TypeScript JSDoc `@deprecated` annotations must be registered or present in the exact legacy baseline. | Give every newly deprecated declaration an owner, reason, introduction record, removal condition, and target in the compatibility ledger. |
+| `system-query-owner/no-migrated-system-zustand-owner` | Four guarded System Zustand owner files must not reintroduce direct mirrors of the migrated SystemInfo, database-statistics, backup-list, or disk-usage Query snapshots. | Read each snapshot through its supported System Query hook; preserve other System owners including jobs and storage.disk. |
 
-Each rule owns its exact grandfathered finding set under `config/architecture-lint/`. A current
+Each Python architecture rule owns its exact grandfathered finding set under
+`config/architecture-lint/`. A current
 finding absent from that rule's baseline fails. When cleanup removes a finding, the now-stale entry
 also fails, so the same change must delete the exemption. CI compares each file with the pull
 request base and rejects additions; a rule's baseline can only shrink after its initial rollout.
 For `ARCH-DEPRECATION-LEDGER`, a valid declaration-level ledger registration satisfies the finding;
 the baseline contains only current unregistered declarations.
-Normal lint never rewrites baselines.
+Normal Python architecture lint never rewrites baselines. The frontend ESLint guard has no
+grandfathered baseline or ownership exemptions.
 
 To reduce the baseline:
 
@@ -56,6 +61,13 @@ not only report that a violation exists. Shared code owns git discovery, compari
 and ledger validation; it must not accumulate rule-specific conditions. A baseline absent from the
 target branch is treated as a new rule's reviewed bootstrap. After that first merge, CI permits only
 removals from that rule's baseline.
+
+The migrated System Query owner rule is a bounded frontend exception to this Python contribution
+path, not a second Python scanner or registry entry. Its AST scope, ESLint rule ID, fixtures,
+configuration tests, and frontend CI path are specified in the
+[migrated System Query owner design](specs/architecture-lint/system-design/migrated-system-query-owner.md)
+and the accepted
+[frontend ESLint architecture guard decision](decisions/2026-10-08-bounded-frontend-eslint-architecture-guard.md).
 
 ## Compatibility ledger
 

@@ -51,11 +51,14 @@ type Writer struct {
 	// notices carries one (task, session) pair per committed row to the
 	// observer consumer. Only the worker sends and only Stop closes it, after
 	// the worker has been joined.
-	notices   chan usageNotice
-	observer  RecordedObserver
-	obsCtx    context.Context
-	obsCancel context.CancelFunc
-	obsWG     sync.WaitGroup
+	notices        chan usageNotice
+	observer       RecordedObserver
+	obsCtx         context.Context
+	obsCancel      context.CancelFunc
+	obsWG          sync.WaitGroup
+	observerFailed bool
+	obsActiveDone  <-chan struct{}
+	stopDone       chan struct{}
 
 	mu       sync.Mutex
 	started  bool
@@ -73,6 +76,7 @@ func NewWriter(repo Repository, pricing PricingLookup, log *logger.Logger) *Writ
 	workCtx, cancel := context.WithCancel(context.Background())
 	obsCtx, obsCancel := context.WithCancel(context.Background())
 	return &Writer{
+		stopDone:   make(chan struct{}),
 		notices:    make(chan usageNotice, observerQueueCapacity),
 		obsCtx:     obsCtx,
 		obsCancel:  obsCancel,
@@ -89,7 +93,7 @@ func NewWriter(repo Repository, pricing PricingLookup, log *logger.Logger) *Writ
 func (w *Writer) Start() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.started {
+	if w.started || w.draining {
 		return
 	}
 	w.started = true
@@ -106,13 +110,24 @@ func (w *Writer) Start() {
 // counted dropped:drain_timeout and never written. Idempotent.
 func (w *Writer) Stop() {
 	w.mu.Lock()
-	if !w.started || w.draining {
+	if w.draining {
+		done := w.stopDone
+		w.mu.Unlock()
+		<-done
+		return
+	}
+	if !w.started {
+		w.draining = true
+		w.cancelWork()
+		w.obsCancel()
+		close(w.stopDone)
 		w.mu.Unlock()
 		return
 	}
 	w.draining = true
 	close(w.events)
 	w.mu.Unlock()
+	defer close(w.stopDone)
 
 	timer := time.AfterFunc(drainDeadline, w.cancelWork)
 	defer timer.Stop()

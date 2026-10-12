@@ -258,7 +258,8 @@ func TestStartCoordinatorBackgroundPass_RunsHooksWithProvidedT0(t *testing.T) {
 		func(_ context.Context, t0 time.Time) { received <- t0 },
 	}
 
-	startCoordinatorBackgroundPass(context.Background(), fixedT0, hooks)
+	stop := startCoordinatorBackgroundPass(context.Background(), fixedT0, hooks)
+	defer stop()
 
 	select {
 	case got := <-received:
@@ -317,11 +318,12 @@ func TestRegisterCoordinatorRoutes_CapturesT0BeforeRoutesRegister(t *testing.T) 
 	// synchronous or not.
 	t.Cleanup(func() { runCoordinatorBackgroundPass = startCoordinatorBackgroundPass })
 	var gotT0 time.Time
-	runCoordinatorBackgroundPass = func(ctx context.Context, t0 time.Time, hooks []func(context.Context, time.Time)) {
+	runCoordinatorBackgroundPass = func(ctx context.Context, t0 time.Time, hooks []func(context.Context, time.Time)) func() {
 		gotT0 = t0
 		for _, hook := range hooks {
 			hook(ctx, t0)
 		}
+		return func() {}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

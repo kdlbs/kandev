@@ -74,6 +74,10 @@ test.describe("Coordinator copilot activity display on a phone viewport", () => 
     await expect(panel.getByTestId("activity-chip")).toHaveCount(1);
     await expect(chip).toHaveText(/Checked 2 sources/);
     await expect(chip).toHaveAttribute("aria-expanded", "false");
+    const chipBox = await chip.boundingBox();
+    expect(chipBox).not.toBeNull();
+    expect(chipBox!.height).toBeGreaterThanOrEqual(44);
+    expect(chipBox!.width).toBeGreaterThanOrEqual(44);
     await expect(panel.getByText("Kandev: List Workflows")).toHaveCount(0);
 
     await chip.click();

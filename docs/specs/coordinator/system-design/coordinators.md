@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-10-01
+last_updated: 2026-10-06
 requirements:
   - REQ-COORDINATOR-COORDINATORS-001
   - REQ-COORDINATOR-COORDINATORS-002

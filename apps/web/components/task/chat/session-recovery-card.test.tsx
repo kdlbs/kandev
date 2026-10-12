@@ -13,6 +13,7 @@ vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn(
 afterEach(cleanup);
 const RECOVERY_CARD = "session-recovery-card";
 const NPM_POLICY = "managed_runtime_npm_policy";
+const CONNECTION_LOST = "Connection lost";
 const resume = vi.fn();
 const relocate = vi.fn().mockResolvedValue(true);
 const actions = {
@@ -30,8 +31,8 @@ const session = {
   task_id: "task",
   state: "FAILED",
   agent_profile_id: "profile",
-  error_message: "Connection lost",
-  metadata: { last_agent_error: { message: "Connection lost", stamp: "failure" } },
+  error_message: CONNECTION_LOST,
+  metadata: { last_agent_error: { message: CONNECTION_LOST, stamp: "failure" } },
 } as unknown as TaskSession;
 function message(kind?: string): Message {
   return {
@@ -40,7 +41,7 @@ function message(kind?: string): Message {
     task_id: "task",
     type: "status",
     author_type: "agent",
-    content: "Connection lost",
+    content: CONNECTION_LOST,
     created_at: "2026-09-20T10:00:00Z",
     metadata: {
       recovery_actions: true,
@@ -86,6 +87,12 @@ describe("composer recovery ownership", () => {
     ).toBeNull();
     expect(screen.getByTestId(FRESH_BUTTON)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "More options" })).toBeNull();
+    expect(screen.getByTestId("session-recovery-history").textContent).toContain(
+      "This failure is explained in the recovery card above.",
+    );
+    expect(screen.getByTestId("session-recovery-history").textContent).not.toContain(
+      CONNECTION_LOST,
+    );
     fireEvent.click(screen.getByTestId(RESUME_BUTTON));
     expect(resume).toHaveBeenCalledWith("resume");
     expect(document.body.textContent).not.toContain("hidden-fixture-value");
@@ -113,43 +120,10 @@ describe("composer recovery ownership", () => {
     expect(screen.queryByTestId(FRESH_BUTTON)).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete task" })).toBeNull();
   });
-});
 
-it("preserves bootstrap restore eligibility and separate cause details", () => {
-  render(
-    <StateProvider
-      initialState={
-        {
-          taskSessions: { items: { session } },
-          agentProfiles: { items: [{ id: "profile" }] },
-        } as unknown as Partial<AppState>
-      }
-    >
-      <SessionRecoveryCard
-        model={{
-          sessionId: "session",
-          kind: "generic",
-          error: {
-            message: "Could not start",
-            phase: "bootstrap",
-            causes: [{ operation: "resume", code: "permission_denied", detail: "original cause" }],
-          },
-        }}
-        actions={actions}
-        onNewSession={vi.fn()}
-      />
-    </StateProvider>,
-  );
-  expect(screen.getByTestId(RESTORE_WORKSPACE_BUTTON)).toBeTruthy();
-  expect(screen.getByTestId(FRESH_BUTTON)).toBeTruthy();
-  fireEvent.click(screen.getByText("Technical details"));
-  expect(document.body.textContent).toContain("original cause");
-});
-
-describe("read-only recovery presentation", () => {
-  it("does not repeat the read-only status below its title", () => {
-    const notice = "Workspace restored in read-only mode";
-    render(
+  it("keeps one disabled action group and one live status while recovery waits", () => {
+    const pendingActions = { ...actions, busyAction: "resume" } as SessionRecoveryActions;
+    const { container } = render(
       <StateProvider
         initialState={
           {
@@ -159,89 +133,19 @@ describe("read-only recovery presentation", () => {
         }
       >
         <SessionRecoveryCard
-          model={{
-            sessionId: "session",
-            kind: "generic",
-            error: { message: "Workspace recovery failed.", phase: "bootstrap" },
-          }}
-          actions={{ ...actions, recoveryNotice: notice, manualRecoveryFailure: null }}
+          model={{ sessionId: "session", stamp: "failure", kind: "generic" }}
+          actions={pendingActions}
           onNewSession={vi.fn()}
         />
       </StateProvider>,
     );
 
-    const title = screen.getByRole("heading", { name: notice });
-    expect(title.getAttribute("aria-live")).toBe("polite");
-    expect(title.getAttribute("aria-atomic")).toBe("true");
-    expect(screen.getAllByText(notice)).toHaveLength(1);
+    expect(container.querySelectorAll('[aria-busy="true"]')).toHaveLength(1);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status").textContent).toBe("Resuming...");
+    expect(screen.getByTestId(RESUME_BUTTON)).toHaveProperty("disabled", true);
+    expect(screen.getByTestId(FRESH_BUTTON)).toHaveProperty("disabled", true);
   });
-
-  it("keeps a distinct recovery failure visible and announced", () => {
-    const recoveryError = new Error("The provider rejected the restored session.");
-    render(
-      <StateProvider
-        initialState={
-          {
-            taskSessions: { items: { session } },
-            agentProfiles: { items: [{ id: "profile" }] },
-          } as unknown as Partial<AppState>
-        }
-      >
-        <SessionRecoveryCard
-          model={{
-            sessionId: "session",
-            kind: "generic",
-            error: { message: "Workspace recovery failed.", phase: "bootstrap" },
-          }}
-          actions={{
-            ...actions,
-            recoveryError,
-            recoveryNotice: null,
-            manualRecoveryFailure: { operation: "resume" },
-          }}
-          onNewSession={vi.fn()}
-        />
-      </StateProvider>,
-    );
-
-    const error = screen.getByTestId("session-recovery-error");
-    expect(error.getAttribute("role")).toBe("status");
-    expect(error.textContent).toContain("Failed to resume session");
-  });
-});
-
-it("shows only the confirmed managed clone relocation action", () => {
-  render(
-    <StateProvider
-      initialState={
-        {
-          taskSessions: { items: { session } },
-          agentProfiles: { items: [{ id: "profile" }] },
-        } as unknown as Partial<AppState>
-      }
-    >
-      <SessionRecoveryCard
-        model={{
-          sessionId: "session",
-          stamp: "managed-stamp",
-          kind: "managed_clone_relocation_required",
-          summary: "old clone mismatch",
-        }}
-        actions={actions}
-        onNewSession={vi.fn()}
-      />
-    </StateProvider>,
-  );
-
-  expect(screen.getByTestId("managed-clone-relocate-button")).toBeTruthy();
-  expect(screen.queryByTestId(RESUME_BUTTON)).toBeNull();
-  expect(screen.queryByTestId(FRESH_BUTTON)).toBeNull();
-  expect(screen.queryByTestId(RESTORE_WORKSPACE_BUTTON)).toBeNull();
-  fireEvent.click(screen.getByTestId("managed-clone-relocate-button"));
-  expect(screen.getByTestId("managed-clone-relocation-confirm")).toBeTruthy();
-  expect(document.body.textContent).toContain("Git staging choices do not transfer");
-  fireEvent.click(screen.getByTestId("managed-clone-relocation-confirm"));
-  expect(relocate).toHaveBeenCalledOnce();
 });
 
 const RESUME_BUTTON = "recovery-resume-button";

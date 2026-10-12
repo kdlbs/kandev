@@ -29,6 +29,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./use-session-git-status", () => ({
   useSessionGitStatus: () => undefined,
   useSessionGitStatusByRepo: () => mocks.statuses,
+  useSessionGitStatusSnapshots: () => ({
+    gitStatus: undefined,
+    statusByRepo: mocks.statuses,
+    displayGitStatus: undefined,
+    displayStatusByRepo: mocks.statuses,
+    displayScopeByRepo: {},
+  }),
   useSessionGitPendingCheckoutGenerations: () => mocks.checkoutGenerations,
   useSessionGitPendingScope: (sessionId: string | null) =>
     sessionId ? `${sessionId}:environment` : "",

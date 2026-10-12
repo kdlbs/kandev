@@ -34,10 +34,13 @@ type admissionKey struct {
 	firstUnmet string
 }
 
+const admissionHistoryLimit = 1000
+
 // admissionState remembers the last admission key per coordinator id.
 type admissionState struct {
-	mu   sync.Mutex
-	last map[string]admissionKey
+	mu    sync.Mutex
+	last  map[string]admissionKey
+	order []string
 }
 
 func newAdmissionState() admissionState {
@@ -50,6 +53,13 @@ func (s *admissionState) changed(coordinatorID string, key admissionKey) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	prev, seen := s.last[coordinatorID]
+	if !seen {
+		if len(s.order) >= admissionHistoryLimit {
+			delete(s.last, s.order[0])
+			s.order = s.order[1:]
+		}
+		s.order = append(s.order, coordinatorID)
+	}
 	s.last[coordinatorID] = key
 	return seen && prev != key
 }

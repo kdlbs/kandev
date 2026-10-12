@@ -17,6 +17,7 @@ func pendingPromptExecution() *AgentExecution {
 	return execution
 }
 
+// @covers AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.10
 func TestWaitForPendingDispatchedPrompt_TimesOutWithoutClearingGate(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		execution := pendingPromptExecution()

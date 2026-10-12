@@ -78,9 +78,9 @@ type WakeKey struct {
 
 // ownTaskPredicates selects the tasks a coordinator owns. p is the approved
 // create_task proposal, t its task and c the coordinator. The kind predicate
-// matters because message, move and resume proposals also record task_id.
+// ensures only create_task proposals establish ownership.
 const ownTaskPredicates = `p.kind = 'create_task' AND p.status = 'approved' AND p.task_id IS NOT NULL
-	AND t.archived_at IS NULL AND t.is_ephemeral = 0
+	AND t.workspace_id = c.workspace_id AND t.archived_at IS NULL AND t.is_ephemeral = 0
 	AND (c.conversation_task_id IS NULL OR t.id <> c.conversation_task_id)`
 
 const ownTaskJoins = `FROM coordinator_proposals p

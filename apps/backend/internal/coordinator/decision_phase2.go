@@ -137,9 +137,9 @@ func (s *Service) failProposalStore(ctx context.Context, workspaceID, coordinato
 	})
 }
 
-func (s *Service) rejectProposalStore(ctx context.Context, p *Proposal, reason, decidedBy string) (bool, error) {
+func (s *Service) rejectProposalStore(ctx context.Context, p *Proposal, reason, decidedBy string, decidedAt time.Time) (bool, error) {
 	if !s.phase2 {
-		return s.store.RejectProposal(ctx, p.ID, reason, decidedBy, time.Now())
+		return s.store.RejectProposal(ctx, p.ID, reason, decidedBy, decidedAt)
 	}
 	class := ActionUnknown
 	if a := Action(p.Kind); isPolicyAction(a) || a == ActionImprovement {
@@ -151,7 +151,7 @@ func (s *Service) rejectProposalStore(ctx context.Context, p *Proposal, reason, 
 		TargetTaskID: p.TargetTaskID, ProposalID: &p.ID, ActorUserID: optString(decidedBy), Detail: reason,
 	}
 	return s.settleDecision(ctx, p.CoordinatorID, row, func(tx coordinatorExec) (bool, error) {
-		return s.store.RejectProposalTx(ctx, tx, p.ID, reason, decidedBy, time.Now())
+		return s.store.RejectProposalTx(ctx, tx, p.ID, reason, decidedBy, decidedAt)
 	})
 }
 

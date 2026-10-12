@@ -95,7 +95,7 @@ steps:
 
       Build incrementally — one behavior at a time, tests passing at every step.
       Follow existing codebase conventions (naming, patterns, file organization).
-      You can update the plan during implementation using update_task_plan_kandev if needed.
+      For focused plan changes, use bounded get_task_plan_kandev reads (offset/limit) and edit_task_plan_kandev with the current expected_version. Use update_task_plan_kandev(mode="append") for additions. Never submit a fragment as a whole-document replacement.
 
       STEP 3: STOP CONDITIONS
       - If you hit a blocker (missing dependency, unclear requirement, test fails repeatedly): stop and ask the user.

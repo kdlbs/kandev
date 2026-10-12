@@ -288,7 +288,7 @@ func TestWorkspaceTrackerExpiredCallerStillPublishes(t *testing.T) {
 			close(release)
 		}
 	}()
-	tracker.gitStatusBetweenQueries = func() {
+	tracker.gitStatusBetweenQueries = func(context.Context) {
 		close(started)
 		<-release
 	}

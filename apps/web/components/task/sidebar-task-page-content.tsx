@@ -31,7 +31,7 @@ export function SidebarTaskPageContent({
       )}
       <SidebarTaskPagination
         page={page.response}
-        pending={page.requestedPage !== null}
+        pending={page.requestedPage !== null || page.isDisclosureTransition}
         onPageChange={(nextPage) =>
           page.goToPage(nextPage, () => scrollRef.current?.scrollTo({ top: 0 }))
         }

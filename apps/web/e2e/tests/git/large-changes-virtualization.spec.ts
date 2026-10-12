@@ -67,10 +67,13 @@ test.describe("Large Changes virtualization", () => {
     await prCapture.screenshot("changelist-spacing-desktop", {
       caption: "Commit history retains compact, contiguous rows after measurement refresh",
     });
-    await testPage.getByTestId("changes-panel-scroll-owner").evaluate((element) => {
-      element.scrollTop = 360;
-    });
-    await refreshSpacingAndExpectAnchor(testPage);
+    for (const top of [360, 0, 360]) {
+      await testPage.getByTestId("changes-panel-scroll-owner").evaluate((element, offset) => {
+        element.scrollTop = offset;
+        element.dispatchEvent(new Event("scroll"));
+      }, top);
+      await refreshSpacingAndExpectAnchor(testPage);
+    }
     for (const width of [1040, 768, 1280]) {
       await testPage.setViewportSize({ width, height: 900 });
       await refreshSpacingAndExpectAnchor(testPage);

@@ -45,28 +45,48 @@ func (s *Service) StartActivityRetention(ctx context.Context) {
 }
 
 func (s *Service) startActivityRetention(ctx context.Context, tick <-chan time.Time, stopTicker func()) {
+	s.retentionMu.Lock()
+	if s.retentionStarted || s.retentionClosed || ctx.Err() != nil {
+		s.retentionMu.Unlock()
+		stopTicker()
+		return
+	}
+	loopCtx, cancel := context.WithCancel(ctx)
+	s.retentionStarted = true
+	s.retentionCancel = cancel
 	s.retentionWG.Add(2)
+	s.retentionMu.Unlock()
 	go func() {
 		defer s.retentionWG.Done()
-		s.runActivityRetention(ctx)
+		s.runActivityRetention(loopCtx)
 	}()
 	go func() {
 		defer s.retentionWG.Done()
 		defer stopTicker()
+		defer cancel()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-loopCtx.Done():
 				return
 			case <-tick:
-				s.runActivityRetention(ctx)
+				s.runActivityRetention(loopCtx)
 			}
 		}
 	}()
 }
 
-// WaitActivityRetentionStopped blocks until the retention goroutines have
-// exited after their context was cancelled.
-func (s *Service) WaitActivityRetentionStopped() { s.retentionWG.Wait() }
+// WaitActivityRetentionStopped closes admission and joins the cancelled
+// retention workers before their repository may close.
+func (s *Service) WaitActivityRetentionStopped() {
+	s.retentionMu.Lock()
+	s.retentionClosed = true
+	cancel := s.retentionCancel
+	s.retentionMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	s.retentionWG.Wait()
+}
 
 // outcomesRetentionBatch is the number of rows of each outcomes table one
 // prune transaction removes.

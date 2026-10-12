@@ -1593,10 +1593,38 @@ test.describe("LSP file intelligence", () => {
 
       await backend.restart();
       await expect.poll(() => isProcessAlive(firstProcess.pid)).toBe(false);
+      const recoveryFile = "zz-RecoveryAfterRestart.kt";
       const nextTask = await createKotlinTask(testPage, apiClient, seedData, backend, {
         title: "Kotlin LSP After Backend Restart",
+        filePaths: [
+          ...Array.from({ length: 48 }, (_, index) => `a-recovery-padding-${index}.kt`),
+          recoveryFile,
+        ],
       });
-      await openDesktopFile(testPage, nextTask.session, nextTask.filePaths[0]);
+      await nextTask.session.clickTab("Files");
+      await expect(nextTask.session.fileTree.fileTreeScrollViewport()).toBeVisible();
+      await expect(nextTask.session.fileTreeNode(recoveryFile)).toHaveCount(0);
+      // A late panel activation must not lose the search used for a virtualized row.
+      await testPage.evaluate(() => {
+        const switchPanel = (event: MouseEvent) => {
+          if (!(event.target instanceof Element)) return;
+          if (!event.target.closest('button[aria-label="Search files"]')) return;
+          document.removeEventListener("click", switchPanel);
+          queueMicrotask(() => {
+            const changes = [...document.querySelectorAll<HTMLElement>(".dv-default-tab")].find(
+              (tab) => /^Changes(?: \(\d+\))?$/.test(tab.textContent?.trim() ?? ""),
+            );
+            if (!changes) throw new Error("Changes tab missing from restart fixture");
+            changes.dispatchEvent(
+              new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }),
+            );
+            document.documentElement.dataset.lspLatePanelSwitch = "done";
+          });
+        };
+        document.addEventListener("click", switchPanel);
+      });
+      await openDesktopFile(testPage, nextTask.session, recoveryFile);
+      await expect(testPage.locator("html")).toHaveAttribute("data-lsp-late-panel-switch", "done");
       await expect(status).toHaveAttribute("data-lsp-state", "ready", { timeout: 20_000 });
       const secondProcess = await expectFakeLspEvent(
         backend,

@@ -3,8 +3,11 @@
 // designed for quick tasks like generating commit messages or PR descriptions.
 package utility
 
-import "github.com/kandev/kandev/internal/common/acpprovider"
-import "github.com/kandev/kandev/pkg/agent"
+import (
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/common/acpprovider"
+	"github.com/kandev/kandev/pkg/agent"
+)
 
 // PromptRequest is the request for executing an inference prompt.
 type PromptRequest struct {
@@ -86,6 +89,9 @@ type ProbeRequest struct {
 	// request. It prevents launch settings and provider diagnostics from entering
 	// command logs or client-visible errors.
 	ProfileContext bool `json:"profile_context,omitempty"`
+	// RuntimeObservation contains trusted descriptors supplied by backend
+	// registration. It never comes from a browser request.
+	RuntimeObservation *agents.RuntimeObservationDescriptor `json:"runtime_observation,omitempty"`
 
 	// InferenceConfig is the agent's inference configuration.
 	// Command and WorkDir are required; Model is intentionally omitted for probes.
@@ -110,7 +116,8 @@ type ProbeResponse struct {
 	// AgentName is the agent name reported in initialize response (if any).
 	AgentName string `json:"agent_name,omitempty"`
 	// AgentVersion is the agent version reported in initialize response (if any).
-	AgentVersion string `json:"agent_version,omitempty"`
+	AgentVersion string              `json:"agent_version,omitempty"`
+	RuntimeInfo  *agents.RuntimeInfo `json:"runtime_info,omitempty"`
 
 	// ProtocolVersion is the negotiated ACP protocol version.
 	ProtocolVersion int `json:"protocol_version,omitempty"`

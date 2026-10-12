@@ -97,7 +97,7 @@ func TestSettleDecision_RowContentMatchesSpec(t *testing.T) {
 
 	store2, c2, svc2 := phase2Fixture(t, true)
 	p2 := insertKind(t, store2, c2, ProposalKindCreateTask)
-	if m, err := svc2.rejectProposalStore(ctx, p2, "no", "u1"); err != nil || !m {
+	if m, err := svc2.rejectProposalStore(ctx, p2, "no", "u1", store2.now().UTC()); err != nil || !m {
 		t.Fatalf("matched=%v err=%v", m, err)
 	}
 	if rows := listActivity(t, store2, c2.ID); len(rows) != 1 || rows[0].ActorUserID == nil || *rows[0].ActorUserID != "u1" {

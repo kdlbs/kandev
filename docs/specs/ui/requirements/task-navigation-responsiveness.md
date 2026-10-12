@@ -63,12 +63,71 @@ without redundant reads or data from another navigation context.
   task/session ownership SHALL resolve before displaying a conversation;
   stale responses SHALL NOT replace the selected task or newer session state.
 
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.8:** When a mounted task-session
+  resolver switches from a task with a settled fallback to a different uncached
+  task, including closing and reopening on that different task, it SHALL expose
+  no fallback session from the previous task while the current read is pending.
+  Obsolete successes and failures SHALL NOT change the current result or its
+  loading state.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.9:** The current task's available
+  session collection SHALL take precedence over a fetched fallback: its marked
+  primary session, or its first session if no primary is marked, SHALL remain
+  selected. An uncached task's successful fallback SHALL retain the first
+  returned session behavior.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.10:** With no selected task, the
+  resolver SHALL expose no session and no active loading indication. A current
+  pending fallback read SHALL indicate loading; successful empty reads, failed
+  reads, and unavailable transport SHALL settle without a fallback session or
+  loading indication. These cases SHALL retain the existing result interface.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.11:** Independently mounted
+  task-session resolvers SHALL retain independent fallback and request state.
+  Switching or settling one SHALL NOT alter another's result.
+
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.12:** When a mounted file-review
+  reader changes session, its returned review map SHALL belong only to the
+  selected session, including before deferred initialization settles. A late
+  response for the previous session SHALL NOT change the current session's
+  reviewed or stale classification, even for identical file identities and
+  diff hashes. Returning to a session SHALL permit reuse of its own shared
+  cache without reviving retired local publishers.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.13:** A file-review reader with no
+  session SHALL return an empty map and no loading indication. Retirement on
+  session change or unmount SHALL prevent obsolete deferred loading, cache-hit
+  work, notifications, responses, and finalization from changing that reader.
+  A current reader's newly initiated read SHALL retain loading until its own
+  settlement; unavailable transport and settled cache reuse SHALL be idle.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.14:** Same-session file-review
+  readers SHALL retain shared cache notifications, fetched-session reuse and
+  request coalescing. Current-session success, empty and failed reads, and
+  optimistic mark, unmark and reset behavior SHALL retain their existing
+  semantics. Desktop and phone SHALL receive the same session-owned review
+  state through their existing surfaces and result interface.
+
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.15:** When a multiple-selection
+  file move settles with some accepted renames and some failed outcomes, the
+  Files tree SHALL reconcile each file independently, retaining accepted files
+  at their confirmed destinations unless newer authoritative workspace data
+  supersedes those locations. Without a newer workspace change,
+  failed files SHALL remain at their original paths. The same outcomes SHALL
+  hold without a workspace notification, for either completion order, and when
+  every rename succeeds or every rename fails. Failure feedback SHALL remain
+  visible without presenting the selection as an atomic filesystem operation.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.16:** Settling a file move SHALL
+  preserve intervening authoritative tree changes, including an accepted move
+  already displayed by a workspace refresh and unrelated additions, removals,
+  or changed metadata. A failure response or transport rejection SHALL NOT
+  restore the selection's earlier whole-tree state or imply remote rollback.
+  A retained tree for the same valid context SHALL show the reconciled outcome
+  before a later refresh completes. Desktop and phone SHALL retain their
+  existing composition and interaction paths.
+
 ## Compatibility
 
 These criteria supplement existing [column visibility](board-step-visibility-filter.md),
 [file-tree interaction](file-tree-chat-context.md), and mobile navigation
 contracts. They do not change filtering, session selection eligibility, message
-pagination, file operations, or backend API semantics.
+pagination, filesystem mutation authority, or backend API semantics. File-move
+settlement changes only the current and retained Files-tree projection.
 
 No universal millisecond target is introduced. Causal browser tests prove that
 available content renders before deliberately held, unrelated responses.
@@ -77,7 +136,11 @@ Comparable isolated measurements assess actual navigation improvement.
 ## System design
 
 - [Task navigation responsiveness](../system-design/task-navigation-responsiveness.md)
+- [Files reply and move settlement](../system-design/file-browser-reply-freshness.md)
 
 ## Implementation plans
 
 - [Task navigation responsiveness](../../../plans/task-navigation-responsiveness/plan.md)
+- [Task session fallback ownership](../../../plans/task-session-fallback-ownership/plan.md)
+- [Session file-review reader ownership](../../../plans/session-file-review-reader-ownership/plan.md)
+- [Preserve successful file moves](../../../plans/preserve-successful-file-moves/plan.md)

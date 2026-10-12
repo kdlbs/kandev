@@ -1,7 +1,7 @@
 ---
 id: "03-replay-harness"
 title: "Replay harness, regression guard and planted suite"
-status: draft
+status: in_progress
 wave: 2
 depends_on:
   - "01-turn-ledger"
@@ -42,6 +42,13 @@ system_design:
 # Task 03: Replay harness, regression guard and planted suite (WP 3.1-3)
 
 ## Summary
+
+Integration verification for PR #4044 is pending. Focused parser and render
+regressions reproduced malformed trailing JSON, a rewritten existing order,
+and historical input escaping the replay data boundary. The same assertions
+pass after remediation in the inspected offline container. These proofs cover
+pure functions only; full hosted backend, frontend and E2E results for the
+integrated candidate remain required before this work order is verified.
 
 Builds the replay library: case selection, the one-prompt sandbox through
 `hostutility` with a structured answer, cost pricing and the spend reader's
@@ -102,3 +109,18 @@ in CI.
 
 - `make -C apps/backend test` for the touched packages, with `synctest` for any timer and no `time.Sleep`; store conformance on SQLite and PostgreSQL for each new table or column.
 - `python3 scripts/list-docs.py validate` if a specification changes.
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.
+
+The integration audit also found current task titles read without coordinator
+workspace or project scope. The current adapter now carries the request owner
+through proposal/title reads and fences outcome selection. Actual SQLite and
+PostgreSQL ownership regressions and a harness identity-forwarding test are
+prepared; full latest-head verification remains pending.

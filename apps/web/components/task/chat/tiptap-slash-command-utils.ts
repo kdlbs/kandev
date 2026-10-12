@@ -15,11 +15,11 @@ function withLeadingSlash(value: string): string {
 }
 
 export function formatSlashCommandLabel(attrs: SlashCommandAttrs | null | undefined): string {
-  if (typeof attrs?.label === "string" && attrs.label.trim()) {
-    return withLeadingSlash(attrs.label);
-  }
   if (typeof attrs?.commandName === "string" && attrs.commandName.trim()) {
     return withLeadingSlash(attrs.commandName);
+  }
+  if (typeof attrs?.label === "string" && attrs.label.trim()) {
+    return withLeadingSlash(attrs.label);
   }
   return "";
 }

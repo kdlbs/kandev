@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 )
@@ -43,10 +44,8 @@ func Parse(text string) ([]string, error) {
 	if err := dec.Decode(&elems); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreadable, err)
 	}
-	if dec.More() {
-		return nil, fmt.Errorf("%w: trailing data", ErrUnreadable)
-	}
-	if _, err := dec.Token(); err == nil {
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err != io.EOF {
 		return nil, fmt.Errorf("%w: trailing data", ErrUnreadable)
 	}
 	seen := map[string]bool{}

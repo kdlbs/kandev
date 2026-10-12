@@ -121,17 +121,20 @@ const (
 	ActionTaskLaunchRecover = "task.launch.recover"
 
 	// Unified session launch
-	ActionSessionLaunch       = "session.launch"
-	ActionSessionFork         = "session.fork"
-	ActionSessionEnsure       = "session.ensure"
-	ActionSessionRecover      = "session.recover"
-	ActionSessionResetContext = "session.reset_context"
-	ActionSessionStop         = "session.stop"
-	ActionSessionDelete       = "session.delete"
-	ActionSessionSetPrimary   = "session.set_primary"
-	ActionSessionSetPlanMode  = "session.set_plan_mode"
-	ActionSessionRename       = "session.rename"
-	ActionSessionRouteAction  = "session.route_action"
+	ActionSessionLaunch                   = "session.launch"
+	ActionSessionFork                     = "session.fork"
+	ActionSessionEnsure                   = "session.ensure"
+	ActionSessionRecoverBatch             = "session.recover_batch"
+	ActionSessionRecover                  = "session.recover"
+	ActionSessionWorkspaceRecoveryGet     = "session.workspace_recovery.get"
+	ActionSessionWorkspaceRecoveryChanged = "session.workspace_recovery.changed"
+	ActionSessionResetContext             = "session.reset_context"
+	ActionSessionStop                     = "session.stop"
+	ActionSessionDelete                   = "session.delete"
+	ActionSessionSetPrimary               = "session.set_primary"
+	ActionSessionSetPlanMode              = "session.set_plan_mode"
+	ActionSessionRename                   = "session.rename"
+	ActionSessionRouteAction              = "session.route_action"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"
@@ -203,10 +206,11 @@ const (
 	ActionSystemMetricsUnsubscribe = "system.metrics.unsubscribe"
 
 	// Message actions
-	ActionMessageAdd    = "message.add"
-	ActionMessageGet    = "message.get"
-	ActionMessageList   = "message.list"
-	ActionMessageSearch = "message.search"
+	ActionMessageAdd                 = "message.add"
+	ActionMessageDismissGitPushError = "message.dismiss_git_push_error"
+	ActionMessageGet                 = "message.get"
+	ActionMessageList                = "message.list"
+	ActionMessageSearch              = "message.search"
 
 	// Notification actions (server -> client)
 	ActionACPProgress                    = "acp.progress"
@@ -325,9 +329,10 @@ const (
 	ActionSystemMetricsUpdated          = "system.metrics.updated"
 	ActionUpdateAvailable               = "system.update_available"
 
-	ActionAgentProfileDeleted = "agent.profile.deleted"
-	ActionAgentProfileCreated = "agent.profile.created"
-	ActionAgentProfileUpdated = "agent.profile.updated"
+	ActionAgentProfileDeleted    = "agent.profile.deleted"
+	ActionAgentProfileCreated    = "agent.profile.created"
+	ActionAgentProfileUpdated    = "agent.profile.updated"
+	ActionAgentProfilesReordered = "agent.profiles.reordered"
 
 	// ActionAgentSettingsUpdated carries a full agent settings record
 	// (dto.AgentDTO) after a settings-side change such as a custom TUI agent's
@@ -565,6 +570,8 @@ const (
 	ActionMCPDeleteExecutorProfile = "mcp.delete_executor_profile"
 
 	ActionMCPMoveTask                    = "mcp.move_task"
+	ActionMCPTransferTask                = "mcp.transfer_task"
+	ActionMCPAuditTaskTransferAttempt    = "mcp.audit_task_transfer_attempt"
 	ActionMCPDeleteTask                  = "mcp.delete_task"
 	ActionMCPArchiveTask                 = "mcp.archive_task"
 	ActionMCPUpdateTaskState             = "mcp.update_task_state"

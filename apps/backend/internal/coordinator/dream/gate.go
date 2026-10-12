@@ -52,7 +52,7 @@ var protectedTargets = map[string]bool{
 	"ceiling": true, "cost_ceiling": true, "tool_profile": true, "context_human": true,
 }
 
-var forbiddenPhrase = regexp.MustCompile(`(?i)\b(raise|lower|change|set|disable|enable|turn|grant|revoke|widen|narrow|edit|remove)\s+(the\s+|its\s+|your\s+)?(cost\s+)?(ceiling|autonomy|permissions?|watch(es| scope)?|tool profile)\b`)
+var forbiddenPhrase = regexp.MustCompile(`(?i)\b(raise|lower|change|set|disable|enable|turn(\s+(on|off))?|grant|revoke|widen|narrow|edit|remove)\s+(the\s+|its\s+|your\s+)?(cost\s+)?(ceiling|autonomy|permissions?|watch(es| scope)?|tool profile)\b`)
 
 // Check returns GatePass or the first failing reason. It is pure: the same
 // item and evidence give the same result.

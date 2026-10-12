@@ -53,6 +53,7 @@ type storageDependencies struct {
 	tempArtifacts    *tempartifacts.Registry
 	coordinator      *activity.Coordinator
 	goCache          *gocache.Provider
+	goCacheMutations *storagepkg.MutationGate
 	workspaceFactory workspaceFactory
 	cachedOverview   *storagepkg.OverviewCache
 	quarantine       *workspaceQuarantineController
@@ -120,7 +121,8 @@ func provideStorageCompositionWithDependencies(
 		Settings: dependencies.settings, Store: dependencies.store, Jobs: tracker,
 		Activity: dependencies.coordinator, Providers: dependencies.providers,
 		Overview: dependencies.cachedOverview, GoCache: dependencies.goCache,
-		Quarantine: dependencies.quarantine,
+		GoCacheMutations: dependencies.goCacheMutations,
+		Quarantine:       dependencies.quarantine,
 	})
 	handler := storagepkg.NewHandler(storagepkg.HandlerConfig{
 		Settings: dependencies.settings, Runs: dependencies.store,
@@ -197,9 +199,10 @@ func prepareStorageDependencies(
 	}
 	coordinator := activity.NewCoordinator(activity.Options{})
 	taskSvc.SetTaskResourceCleanupActivityGate(&taskCleanupActivityGate{coordinator: coordinator})
+	goCacheMutations := storagepkg.NewMutationGate()
 	goCache := gocache.New(gocache.Config{
 		HomeDir: cfg.ResolvedHomeDir(), TrashDir: filepath.Join(cfg.ResolvedHomeDir(), "trash"),
-		Settings: settings, Store: store, Scanner: scanner,
+		Settings: settings, Mutations: goCacheMutations, Scanner: scanner,
 	})
 	database := databasestore.New(databasestore.Config{
 		Driver:        cfg.Database.Driver,
@@ -225,15 +228,16 @@ func prepareStorageDependencies(
 	cachedOverview := newStorageOverviewCache(overview, eventBus, log, logError)
 	quarantine := &workspaceQuarantineController{
 		settings: settings, store: store, factory: workspaceFactory, homeDir: cfg.ResolvedHomeDir(),
-		activity: coordinator, temporary: tempProvider,
+		activity: coordinator, temporary: tempProvider, goCacheMutations: goCacheMutations,
 	}
 	return &storageDependencies{
 		settings: settings, store: store, tempArtifacts: tempArtifacts,
-		coordinator: coordinator, goCache: goCache, workspaceFactory: workspaceFactory,
-		cachedOverview:  cachedOverview,
-		quarantine:      quarantine,
-		systemTemporary: systemTemporary,
-		providers:       storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, worktreeMgr, tempProvider),
+		coordinator: coordinator, goCache: goCache, goCacheMutations: goCacheMutations,
+		workspaceFactory: workspaceFactory,
+		cachedOverview:   cachedOverview,
+		quarantine:       quarantine,
+		systemTemporary:  systemTemporary,
+		providers:        storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, worktreeMgr, tempProvider),
 	}, nil
 }
 
@@ -954,6 +958,22 @@ func (p goCacheCleanupProvider) Cleanup(ctx context.Context) (map[string]any, er
 }
 func (p goCacheCleanupProvider) CleanupExplicit(ctx context.Context) (map[string]any, error) {
 	result, err := p.provider.CleanupExplicit(ctx)
+	return toMap(result), err
+}
+
+func (p goCacheCleanupProvider) CleanupWithSettings(
+	ctx context.Context,
+	settings storagepkg.StorageMaintenanceSettings,
+) (map[string]any, error) {
+	result, err := p.provider.CleanupWithSettings(ctx, settings)
+	return toMap(result), err
+}
+
+func (p goCacheCleanupProvider) CleanupExplicitWithSettings(
+	ctx context.Context,
+	settings storagepkg.StorageMaintenanceSettings,
+) (map[string]any, error) {
+	result, err := p.provider.CleanupExplicitWithSettings(ctx, settings)
 	return toMap(result), err
 }
 

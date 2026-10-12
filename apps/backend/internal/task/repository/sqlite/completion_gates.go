@@ -271,7 +271,7 @@ func (r *Repository) verifyTaskCompletionCriterion(ctx context.Context, change m
 }
 
 func (r *Repository) GetTaskCompletionGate(ctx context.Context, taskID string) (*models.TaskCompletionGateSnapshot, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.beginTaskCompletionGateRead(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -284,6 +284,14 @@ func (r *Repository) GetTaskCompletionGate(ctx context.Context, taskID string) (
 		return nil, err
 	}
 	return snapshot, nil
+}
+
+func (r *Repository) beginTaskCompletionGateRead(ctx context.Context) (*sql.Tx, error) {
+	var options *sql.TxOptions
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		options = &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}
+	}
+	return r.ro.BeginTx(ctx, options)
 }
 
 func (r *Repository) ListTaskCompletionGateHistory(ctx context.Context, taskID string) ([]*models.TaskCompletionGateHistory, error) {
@@ -410,12 +418,43 @@ func (r *Repository) readTaskCompletionGateTx(ctx context.Context, tx *sql.Tx, t
 }
 
 func (r *Repository) completionCriterionBlockedTx(ctx context.Context, tx *sql.Tx, taskID string, criterion models.TaskCompletionCriterion, lockEvidence ...bool) (bool, error) {
-	if criterion.VerifiedRevision != criterion.CriterionRevision || criterion.Evidence == nil {
+	if completionCriterionBlocked(criterion, true) {
 		return true, nil
 	}
 	lock := len(lockEvidence) > 0 && lockEvidence[0]
 	current, err := r.evidenceSubjectCurrentTx(ctx, tx, taskID, criterion.Evidence.Subject, lock)
-	return !current, err
+	return completionCriterionBlocked(criterion, current), err
+}
+
+func completionCriterionBlocked(criterion models.TaskCompletionCriterion, evidenceCurrent bool) bool {
+	return criterion.VerifiedRevision != criterion.CriterionRevision || criterion.Evidence == nil || !evidenceCurrent
+}
+
+func completionEvidenceSubjectCurrent(
+	subject models.TaskCompletionEvidenceSubject,
+	taskUpdatedAt *time.Time,
+	liveRevision string,
+	rowExists bool,
+) bool {
+	if !validEvidenceSubject(subject) {
+		return false
+	}
+	switch subject.Kind {
+	case models.TaskCompletionEvidenceTaskRevision:
+		if taskUpdatedAt == nil {
+			return false
+		}
+		observed, err := time.Parse(time.RFC3339Nano, subject.Revision)
+		return err == nil && observed.Equal(*taskUpdatedAt)
+	case models.TaskCompletionEvidenceGitHubPRHead:
+		return rowExists && liveRevision == subject.Revision
+	case models.TaskCompletionEvidenceExecution:
+		return rowExists && subject.Revision == subject.ID
+	case models.TaskCompletionEvidenceArtifact:
+		return subject.Revision != ""
+	default:
+		return false
+	}
 }
 
 func (r *Repository) evidenceSubjectCurrentTx(ctx context.Context, tx *sql.Tx, taskID string, subject models.TaskCompletionEvidenceSubject, lock bool) (bool, error) {
@@ -428,8 +467,7 @@ func (r *Repository) evidenceSubjectCurrentTx(ctx context.Context, tx *sql.Tx, t
 		if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT updated_at FROM tasks WHERE id = ?`), taskID).Scan(&updatedAt); err != nil {
 			return false, err
 		}
-		observed, err := time.Parse(time.RFC3339Nano, subject.Revision)
-		return err == nil && observed.Equal(updatedAt), nil
+		return completionEvidenceSubjectCurrent(subject, &updatedAt, "", true), nil
 	case models.TaskCompletionEvidenceGitHubPRHead:
 		query := `SELECT head_sha FROM github_task_prs WHERE id = ? AND task_id = ?`
 		if lock && dialect.IsPostgres(r.db.DriverName()) {
@@ -438,25 +476,25 @@ func (r *Repository) evidenceSubjectCurrentTx(ctx context.Context, tx *sql.Tx, t
 		var head string
 		if err := tx.QueryRowContext(ctx, r.db.Rebind(query), subject.ID, taskID).Scan(&head); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return false, nil
+				return completionEvidenceSubjectCurrent(subject, nil, "", false), nil
 			}
 			return false, err
 		}
-		return head == subject.Revision, nil
+		return completionEvidenceSubjectCurrent(subject, nil, head, true), nil
 	case models.TaskCompletionEvidenceExecution:
 		var exists int
 		err := tx.QueryRowContext(ctx, r.db.Rebind(`
 			SELECT 1 FROM task_session_turns WHERE id = ? AND task_id = ? AND completed_at IS NOT NULL
 		`), subject.ID, taskID).Scan(&exists)
 		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
+			return completionEvidenceSubjectCurrent(subject, nil, "", false), nil
 		}
-		return err == nil && subject.Revision == subject.ID, err
+		return completionEvidenceSubjectCurrent(subject, nil, "", err == nil), err
 	case models.TaskCompletionEvidenceArtifact:
 		// Artifact revisions are immutable host-issued identifiers. The exact
 		// artifact query that issued one owns its lifetime; evidence stores that
 		// revision rather than dereferencing a plugin during completion.
-		return subject.Revision != "", nil
+		return completionEvidenceSubjectCurrent(subject, nil, "", true), nil
 	default:
 		return false, nil
 	}

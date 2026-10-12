@@ -137,5 +137,6 @@
   "filterListLimit": "Filter {{filter}} has too many selections. Select up to {{limit}}.",
   "filterValueLimit": "A value in filter {{filter}} is too long. Use at most {{limit}} bytes.",
   "filterInvalid": "Filter {{filter}} is invalid. Check its value and operator.",
-  "filterCountLimit": "This view has too many filters. Use at most {{limit}}."
+  "filterCountLimit": "This view has too many filters. Use at most {{limit}}.",
+  "filtersActive": "Filters active"
 }

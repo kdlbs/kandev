@@ -308,7 +308,9 @@ func (s *Service) confirmConversationTask(ctx context.Context, coordinatorID, ta
 // taskrepo.ErrTaskNotFound as done. Any other failure is logged at warn and
 // swallowed: the startup cleanup pass will retry it.
 func (s *Service) deleteConversationTaskBestEffort(ctx context.Context, taskID string) {
-	if err := s.conversationTasks.DeleteTask(ctx, taskID); err != nil && !errors.Is(err, taskrepo.ErrTaskNotFound) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bindTimeout)
+	defer cancel()
+	if err := s.conversationTasks.DeleteTask(cleanupCtx, taskID); err != nil && !errors.Is(err, taskrepo.ErrTaskNotFound) {
 		s.logger.Warn("failed to delete conversation task", zap.String("task_id", taskID), zap.Error(err))
 	}
 }

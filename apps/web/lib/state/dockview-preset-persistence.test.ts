@@ -666,15 +666,110 @@ describe("applyCustomLayout — persistence at call site", () => {
     // Force the old-format path by passing a layout without `columns`, and
     // make fromJSON throw so the API may be in a partial state. Persisting
     // that partial snapshot would propagate corruption to the next load.
+    // The payload is shape-healthy so the throw, not the sanitizer, is what
+    // rejects it.
     (api.fromJSON as ReturnType<typeof vi.fn>).mockImplementation(() => {
       throw new Error("dockview fromJSON failed");
     });
     useDockviewStore.setState({ api, currentLayoutEnvId: "env-legacy" });
 
-    const legacyLayout = { id: "legacy", name: "legacy", layout: { grid: {} } };
+    const legacyLayout = {
+      id: "legacy",
+      name: "legacy",
+      layout: {
+        grid: {
+          root: {
+            type: "leaf",
+            size: 800,
+            data: { id: "g-center", views: ["chat"], activeView: "chat" },
+          },
+          width: 1600,
+          height: 800,
+        },
+        panels: { chat: { id: "chat", contentComponent: "chat" } },
+      },
+    };
     useDockviewStore.getState().applyCustomLayout(legacyLayout as unknown as ApplyCustomLayoutArg);
     await flushRaf();
 
+    expect(api.fromJSON).toHaveBeenCalled();
     expect(setEnvLayout).not.toHaveBeenCalled();
+  });
+});
+
+describe("applyCustomLayout — retired panel compatibility", () => {
+  // A literal, not a registry lookup: the retired panel has no registry entry.
+  const RETIRED_PANEL = {
+    id: "prompt-history",
+    component: "prompt-history",
+    title: "Prompt History",
+  };
+
+  beforeEach(resetStoreForIntegration);
+
+  it("drops the retired panel from a columns-format profile and applies the rest", () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
+    const layout = {
+      id: "custom-retired",
+      name: "custom",
+      layout: {
+        columns: [
+          {
+            id: "center",
+            groups: [
+              {
+                id: "group-center",
+                activePanel: "chat",
+                panels: [
+                  { id: "chat", component: "chat", title: "Agent" },
+                  { id: "todos", component: "todos", title: "Todos" },
+                  RETIRED_PANEL,
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    useDockviewStore.getState().applyCustomLayout(layout as unknown as ApplyCustomLayoutArg);
+
+    const applied = vi.mocked(applyLayout).mock.calls[0][1];
+    expect(
+      applied.columns.flatMap((column) =>
+        column.groups.flatMap((group) => group.panels.map((item) => item.id)),
+      ),
+    ).toEqual(["chat", "todos"]);
+  });
+
+  it("drops the retired panel from a legacy serialized profile before fromJSON", () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
+    const layout = {
+      id: "legacy-retired",
+      name: "legacy",
+      layout: {
+        grid: {
+          root: {
+            type: "leaf",
+            size: 800,
+            data: { id: "g-center", views: ["chat", RETIRED_PANEL.id], activeView: "chat" },
+          },
+          width: 1600,
+          height: 800,
+        },
+        panels: {
+          chat: { id: "chat", contentComponent: "chat" },
+          [RETIRED_PANEL.id]: { id: RETIRED_PANEL.id, contentComponent: RETIRED_PANEL.component },
+        },
+      },
+    };
+
+    useDockviewStore.getState().applyCustomLayout(layout as unknown as ApplyCustomLayoutArg);
+
+    const applied = (api.fromJSON as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(Object.keys(applied.panels)).toEqual(["chat"]);
+    expect(applied.grid.root.data.views).toEqual(["chat"]);
   });
 });

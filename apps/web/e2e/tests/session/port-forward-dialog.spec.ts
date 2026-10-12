@@ -2,8 +2,10 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
+import { routePortForwarding } from "./port-forwarding-helpers";
 
 /**
  * Seed a task + session with a mock_remote executor and navigate to the session page.
@@ -21,35 +23,37 @@ async function seedRemoteSession(
     default_executor_id: executor.id,
   });
 
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
+  const task = await (async () => {
+    try {
+      return await apiClient.createTask(seedData.workspaceId, title, {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        agent_profile_id: seedData.agentProfileId,
+        repository_ids: [seedData.repositoryId],
+        prepare_session: true,
+      });
+    } finally {
+      await apiClient.updateWorkspace(seedData.workspaceId, {
+        default_executor_id: "",
+      });
+    }
+  })();
 
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  if (!task.session_id) throw new Error("prepared remote task did not return a session_id");
 
+  const gateway = watchWs(testPage);
+  const subscribed = gateway.waitForResponse("session.subscribe");
   await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  // waitForChatIdle (not a raw idleInput wait) rides out the WS-subscribe race:
-  // the auto-started mock agent can complete before the client's WS subscription
-  // registers, leaving isAgentBusy=true and the idle input never rendering. The
-  // helper reloads once to re-derive state from SSR. The plain wait flaked here.
-  await session.waitForChatIdle({ timeout: 30_000 });
+  await subscribed;
+  const startAgentButton = testPage.getByTestId("task-description-start-button");
+  await expect(startAgentButton).toBeEnabled({ timeout: 15_000 });
+  await startAgentButton.click();
   await waitForSessionAgentctlReady(testPage, task.session_id);
-
-  // Reset workspace default executor so other tests aren't affected
-  await apiClient.updateWorkspace(seedData.workspaceId, {
-    default_executor_id: "",
-  });
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return { session, sessionId: task.session_id };
 }
@@ -63,33 +67,179 @@ async function seedLocalSession(
   seedData: SeedData,
   title: string,
 ): Promise<{ session: SessionPage; sessionId: string }> {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
+  const task = await apiClient.createTask(seedData.workspaceId, title, {
+    description: "/e2e:simple-message",
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    agent_profile_id: seedData.agentProfileId,
+    executor_profile_id: seedData.worktreeExecutorProfileId,
+    repository_ids: [seedData.repositoryId],
+    prepare_session: true,
+  });
 
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  if (!task.session_id) throw new Error("prepared local task did not return a session_id");
 
+  const gateway = watchWs(testPage);
+  const subscribed = gateway.waitForResponse("session.subscribe");
   await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  // See seedRemoteSession: waitForChatIdle handles the WS-subscribe race that
-  // makes a raw idleInput wait flake when the auto-started agent finishes early.
-  await session.waitForChatIdle({ timeout: 30_000 });
+  await subscribed;
+  const startAgentButton = testPage.getByTestId("task-description-start-button");
+  await expect(startAgentButton).toBeEnabled({ timeout: 15_000 });
+  await startAgentButton.click();
   await waitForSessionAgentctlReady(testPage, task.session_id);
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return { session, sessionId: task.session_id };
 }
 
 test.describe("Port Forward Dialog", () => {
+  test("empty discovery shows no orphaned port group headings", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const ports = await routePortForwarding(testPage, { empty: true });
+    const { session, sessionId } = await seedLocalSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Empty ports",
+    );
+    ports.setSession(sessionId);
+    await session.enablePortForwarding();
+    await session.portForwardButton.click();
+    await expect(
+      session.portForwardDialog.getByText("No listening ports detected.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      session.portForwardDialog.getByRole("heading", { name: "Other ports", exact: true }),
+    ).toHaveCount(0);
+    await expect(session.portForwardDialog.getByTestId("port-forward-active-heading")).toHaveCount(
+      0,
+    );
+    await session.portForwardInput.fill("9500");
+    await session.portForwardAddButton.click();
+    await expect(
+      session.portForwardDialog.getByRole("heading", { name: "Other ports", exact: true }),
+    ).toHaveCount(1);
+  });
+
+  // @covers AC-UI-PORT-FORWARDING-ACTIVE-FIRST-001.2, .4
+  test("merges late tunnel hydration with a newly started forward", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const ports = await routePortForwarding(testPage);
+    const { session, sessionId } = await seedLocalSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Late tunnel snapshot",
+    );
+    ports.setSession(sessionId);
+    // Hydration belongs to the session control and survives closing its dialog.
+    ports.holdNext("port.tunnel.list");
+    await session.enablePortForwarding();
+    await expect.poll(ports.held).toBe(true);
+    await session.portForwardButton.click();
+    await session.portForwardInput.fill("9500");
+    await session.portForwardAddButton.click();
+    await session.portForwardTunnelToggle(9500).click();
+    await session.portForwardTunnelStart(9500).click();
+    await expect(session.portForwardRow(9500)).toHaveAttribute("data-forwarded", "true");
+    await expect(session.portForwardDialog.getByTestId("port-forward-active-heading")).toHaveText(
+      "Forwarded ports1",
+    );
+    expect(ports.held()).toBe(true);
+    ports.release();
+    await expect(session.portForwardDialog.getByTestId("port-forward-active-heading")).toHaveText(
+      "Forwarded ports2",
+    );
+    await expect(session.portForwardRow(9000).getByRole("link").first()).toHaveAttribute(
+      "href",
+      /:49152\/$/,
+    );
+    await expect(session.portForwardRow(9500).getByRole("link").first()).toHaveAttribute(
+      "href",
+      /:49153\/$/,
+    );
+    await session.portForwardDialog.press("Escape");
+  });
+
+  // @covers AC-UI-PORT-FORWARDING-ACTIVE-FIRST-001.1-.5, .7
+  test("prioritizes forwarded ports and preserves focus through start and stop", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const ports = await routePortForwarding(testPage);
+    const { session, sessionId } = await seedLocalSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Active-first ports",
+    );
+    ports.setSession(sessionId);
+    await session.enablePortForwarding();
+    await session.portForwardButton.press("Enter");
+    await expect(session.portForwardRefresh).toBeFocused();
+    await testPage.keyboard.press("Tab");
+    await expect(session.portForwardTunnelToggle(9000)).toBeFocused();
+    const rows = session.portForwardDialog.locator('[data-testid^="port-forward-row-"]');
+    const ids = () =>
+      rows.evaluateAll((elements) =>
+        elements.map((element) => element.getAttribute("data-testid")),
+      );
+    await expect.poll(ids).toEqual(["port-forward-row-9000", "port-forward-row-3000"]);
+    await expect(session.portForwardDialog.getByTestId("port-forward-active-heading")).toHaveText(
+      "Forwarded ports1",
+    );
+    await expect(
+      session.portForwardRow(9000).getByText("Forwarding", { exact: true }),
+    ).toBeVisible();
+    await expect(session.portForwardRow(9000).getByRole("link").first()).toHaveAttribute(
+      "href",
+      /:49152\/$/,
+    );
+    await session.portForwardInput.fill("9500");
+    await session.portForwardAddButton.click();
+    await session.portForwardTunnelToggle(9500).click();
+    await session.portForwardTunnelStart(9500).click();
+    await expect
+      .poll(ids)
+      .toEqual(["port-forward-row-9000", "port-forward-row-9500", "port-forward-row-3000"]);
+    await expect(session.portForwardTunnelToggle(9500)).toBeFocused();
+    ports.failNext("port.tunnel.stop");
+    await session.portForwardTunnelToggle(9500).press("Enter");
+    await expect(
+      testPage.getByText("Failed to stop tunnel: Port operation failed", { exact: true }),
+    ).toBeVisible();
+    await expect(session.portForwardRow(9500)).toHaveAttribute("data-forwarded", "true");
+    await expect(session.portForwardTunnelToggle(9500)).toHaveAttribute("aria-disabled", "false");
+    await session.portForwardTunnelToggle(9500).press("Enter");
+    await expect
+      .poll(ids)
+      .toEqual(["port-forward-row-9000", "port-forward-row-3000", "port-forward-row-9500"]);
+    await expect(session.portForwardTunnelToggle(9500)).toBeFocused();
+    await testPage.screenshot({ path: test.info().outputPath("active-first-desktop.png") });
+    await testPage.keyboard.press("Escape");
+    // Wait for the tooltip layer to unmount before dismissing its parent dialog.
+    await expect(testPage.locator('[data-slot="tooltip-content"]')).toHaveCount(0);
+    if (
+      await session.portForwardDialog.evaluateAll((elements) =>
+        elements.some((element) => element.getAttribute("data-state") === "open"),
+      )
+    ) {
+      await testPage.keyboard.press("Escape");
+    }
+    await expect(session.portForwardDialog).toBeHidden();
+    await expect(session.portForwardButton).toBeFocused();
+  });
+
   test("local executor can enable the port forwarding control", async ({
     testPage,
     apiClient,
@@ -117,6 +267,7 @@ test.describe("Port Forward Dialog", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(120_000);
     const { session } = await seedRemoteSession(
       testPage,
       apiClient,

@@ -23,6 +23,12 @@ var (
 	errGitStatusDetailsUnavailable = errors.New("git status details unavailable")
 )
 
+// IsGitStatusEvidenceChanged reports whether repository evidence changed
+// during the status capture attempt.
+func IsGitStatusEvidenceChanged(err error) bool {
+	return errors.Is(err, errGitStatusEvidenceChanged)
+}
+
 type gitStatusBasicCapture struct {
 	status      types.GitStatusUpdate
 	fingerprint string
@@ -183,6 +189,7 @@ func (wt *WorkspaceTracker) publishGitStatus(status types.GitStatusUpdate, ordin
 	}
 
 	wt.gitStatusRevision++
+	wt.gitStatusDetailSourceRevision = 0
 	status.SnapshotRevision = wt.gitStatusRevision
 	wt.currentStatus = cloneGitStatusUpdate(status)
 	wt.gitStatusFingerprint = fingerprint

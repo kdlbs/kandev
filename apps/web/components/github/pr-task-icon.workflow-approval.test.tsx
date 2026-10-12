@@ -13,6 +13,7 @@ const TASK_ID = "task-1";
 const WORKSPACE_ID = "workspace-1";
 const ARIA_LABEL_ATTRIBUTE = "aria-label";
 const APPROVAL_WARNING_TEST_ID = "pr-workflow-approval-warning";
+const STATUS_ENTRY_TEST_ID = "pr-task-status-entry";
 const APPROVAL_LABEL = "Awaiting maintainer approval";
 const STALE_STATUS_COPY = "Last known status. GitHub could not provide a fresh workflow result.";
 
@@ -134,7 +135,7 @@ describe("PRTaskIcon stale workflow approval disclosure", () => {
     fireEvent.focus(icon);
     matches.mockRestore();
 
-    const entries = await screen.findAllByTestId("pr-task-status-entry");
+    const entries = await screen.findAllByTestId(STATUS_ENTRY_TEST_ID);
     expect(entries.length).toBeGreaterThan(0);
     expect(
       entries.every(
@@ -262,7 +263,7 @@ describe("PRTaskIcon newer compact workflow projection", () => {
     fireEvent.focus(icon);
     matches.mockRestore();
 
-    const entries = await screen.findAllByTestId("pr-task-status-entry");
+    const entries = await screen.findAllByTestId(STATUS_ENTRY_TEST_ID);
     expect(entries.length).toBeGreaterThan(0);
     expect(
       entries.every(
@@ -294,8 +295,11 @@ describe("PRTaskIcon newer compact workflow projection", () => {
             [TASK_ID]: [
               makePR({
                 pr_number: 42,
+                repository_id: "repository-1",
                 last_synced_at: "2026-09-30T11:00:00Z",
                 head_sha: "head-a",
+                review_state: "approved",
+                checks_state: "success",
                 workflow_attention: {
                   ...approvalAttention,
                   observed_at: "2026-09-30T10:30:00Z",
@@ -316,6 +320,13 @@ describe("PRTaskIcon newer compact workflow projection", () => {
     matches.mockRestore();
     await waitFor(() => expect(screen.queryByText(APPROVAL_LABEL)).toBeNull());
     expect(screen.queryByTestId("pr-task-stale-workflow-evidence")).toBeNull();
+
+    const entry = await screen.findByTestId(STATUS_ENTRY_TEST_ID);
+    expect(entry.textContent).toContain("PR #42");
+    expect(entry.textContent).toContain("Test PR");
+    expect(entry.textContent).toContain("alice");
+    expect(entry.textContent).toContain("Approved");
+    expect(entry.textContent).toContain("Passed");
   });
 });
 
@@ -375,7 +386,7 @@ describe("PRTaskIcon current-head workflow approval evidence", () => {
     fireEvent.focus(icon);
     matches.mockRestore();
 
-    const entries = await screen.findAllByTestId("pr-task-status-entry");
+    const entries = await screen.findAllByTestId(STATUS_ENTRY_TEST_ID);
     expect(
       entries.some(
         (entry) =>

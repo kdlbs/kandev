@@ -591,6 +591,17 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		}
 		resp.Models = refreshedOpenCodeModels
 	}
+	resp.RuntimeInfo = e.collectRuntimeObservation(
+		ctx,
+		req.RuntimeObservation,
+		cfg.Command,
+		cfg.CommandPrefix,
+		args,
+		cmd.Env,
+		cmd.Path,
+		cmd.Dir,
+		resp.AgentVersion,
+	)
 
 	resp.Success = true
 	resp.DurationMs = int(time.Since(startTime).Milliseconds())
@@ -1328,7 +1339,7 @@ func resolveProbeCommand(name string) string {
 	if resolved, ok := allowedProbeCommands[base]; ok {
 		return resolved
 	}
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsGOOS {
 		if ext := filepath.Ext(base); strings.EqualFold(ext, ".exe") {
 			return allowedProbeCommands[strings.TrimSuffix(base, ext)]
 		}

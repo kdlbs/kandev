@@ -73,17 +73,21 @@ type TaskRepositoryInput struct {
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
-	WorkspaceID    string                 `json:"workspace_id"`
-	WorkflowID     string                 `json:"workflow_id"`
-	WorkflowStepID string                 `json:"workflow_step_id"`
-	Title          string                 `json:"title"`
-	Description    string                 `json:"description"`
-	AutoTitle      bool                   `json:"auto_title,omitempty"`
-	Priority       string                 `json:"priority"`
-	State          *v1.TaskState          `json:"state,omitempty"`
-	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
-	Position       int                    `json:"position"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	WorkspaceID    string                `json:"workspace_id"`
+	WorkflowID     string                `json:"workflow_id"`
+	WorkflowStepID string                `json:"workflow_step_id"`
+	Title          string                `json:"title"`
+	Description    string                `json:"description"`
+	AutoTitle      bool                  `json:"auto_title,omitempty"`
+	Priority       string                `json:"priority"`
+	State          *v1.TaskState         `json:"state,omitempty"`
+	Repositories   []TaskRepositoryInput `json:"repositories,omitempty"`
+	// projectRepositoryDefaults marks the source list read from a root task's
+	// Office project. Only these automatic selections deduplicate aliases after
+	// each source has passed normal repository resolution.
+	projectRepositoryDefaults bool
+	Position                  int                    `json:"position"`
+	Metadata                  map[string]interface{} `json:"metadata,omitempty"`
 	// TrustedHandoffMetadata allows the handoff application path to persist its
 	// server-authored provenance fields. It is internal-only and never decoded
 	// from a request body; ordinary task creation cannot forge those fields.
@@ -396,9 +400,10 @@ type ListMessagesRequest struct {
 	AuthorType    string
 	// AuthorTypes narrows by any listed author; when non-empty it takes
 	// precedence over AuthorType. TaskID narrows the page to one task.
-	AuthorTypes []string
-	TaskID      string
-	Around      string
+	AuthorTypes  []string
+	TaskID       string
+	Around       string
+	IncludeTurns bool
 }
 
 // CreateRepositoryScriptRequest contains the data for creating a repository script

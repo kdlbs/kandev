@@ -54,20 +54,23 @@ export function RefreshCapabilitiesButton({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="w-full sm:w-auto">
+    <div className="flex items-center gap-1.5 shrink-0">
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onRefresh}
-            disabled={isLoading}
-            className="min-h-11 w-full cursor-pointer px-3 sm:min-h-9 sm:w-auto"
-            data-testid="profile-refresh-capabilities"
-          >
-            <IconRefresh className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-            <span>{t("agents:refreshCapabilities")}</span>
-          </Button>
+          <span tabIndex={isLoading ? 0 : -1} className="inline-flex">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={onRefresh}
+              disabled={isLoading}
+              aria-label={t("agents:refreshCapabilities")}
+              data-testid="profile-refresh-capabilities"
+              className="cursor-pointer shrink-0"
+            >
+              <IconRefresh className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+            </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent>
           <p>{t("agents:refreshCapabilitiesTooltip")}</p>

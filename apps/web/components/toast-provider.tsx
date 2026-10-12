@@ -2,11 +2,15 @@
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { IconCheck, IconX, IconInfoCircle, IconLoader2 } from "@tabler/icons-react";
+import Link from "@/components/routing/app-link";
+import { Button } from "@kandev/ui/button";
 import { cn, generateUUID } from "@/lib/utils";
 import { scheduleFrontendErrorReport } from "@/lib/api/domains/frontend-error-log-api";
 
 type ToastVariant = "default" | "success" | "error" | "loading";
 type ToastPlacement = "top";
+
+type ToastAction = { label: string } & ({ href: string } | { onClick: () => void });
 
 type Toast = {
   id: string;
@@ -14,8 +18,8 @@ type Toast = {
   description?: string;
   variant?: ToastVariant;
   placement?: ToastPlacement;
-  /** A button under the copy; pressing it runs `onClick` and dismisses the toast. */
-  action?: { label: string; onClick: () => void };
+  /** A link (`href`) or a button (`onClick`, which also dismisses the toast). */
+  action?: ToastAction;
 };
 
 type ToastInput = Omit<Toast, "id"> & { duration?: number };
@@ -115,6 +119,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           ...(input.description !== undefined && { description: input.description }),
           ...(input.variant !== undefined && { variant: input.variant }),
           ...(input.placement !== undefined && { placement: input.placement }),
+          ...(input.action !== undefined && { action: input.action }),
         };
         toastsRef.current.set(id, next);
         setToasts((current) => current.map((item) => (item.id === id ? next : item)));
@@ -158,7 +163,7 @@ function ToastActionButton({
   action,
   onDone,
 }: {
-  action: NonNullable<Toast["action"]>;
+  action: { label: string; onClick: () => void };
   onDone: () => void;
 }) {
   return (
@@ -234,12 +239,22 @@ function ToastStack({
             <div className={cn("mt-0.5 flex-shrink-0", styles.icon)}>
               <Icon className={cn("h-5 w-5", styles.spin && "animate-spin")} />
             </div>
-            <div className="flex-1 space-y-1">
+            <div className="min-w-0 flex-1 space-y-1">
               {t.title && <div className="text-sm font-semibold leading-tight">{t.title}</div>}
+              {t.action && "href" in t.action && (
+                <Button
+                  asChild
+                  size="sm"
+                  variant="outline"
+                  className="pointer-events-auto h-7 min-h-7 max-md:h-11 max-md:min-h-11 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-h-11"
+                >
+                  <Link href={t.action.href}>{t.action.label}</Link>
+                </Button>
+              )}
               {t.description && (
                 <div className="text-xs leading-relaxed text-muted-foreground">{t.description}</div>
               )}
-              {t.action && (
+              {t.action && "onClick" in t.action && (
                 <ToastActionButton action={t.action} onDone={() => dismissToast(t.id)} />
               )}
             </div>

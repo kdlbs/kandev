@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { StoreApi } from "zustand";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { defaultState } from "@/lib/state/default-state";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -9,6 +10,7 @@ import {
   type Turn,
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
+import { resolveMessageTimeLocale } from "@/lib/i18n/message-time";
 import { MessageActions } from "./message-actions";
 
 const TOUCH_DRAWER = vi.hoisted(() => ({ enabled: false }));
@@ -120,7 +122,7 @@ describe("MessageActions copy", () => {
 });
 
 describe("MessageActions timestamp tooltip", () => {
-  it("renders the relative timestamp as a <time> element with the full absolute time as its title", () => {
+  it("renders the relative timestamp as a <time> element with the absolute short form as its title", () => {
     const { container } = render(
       <StateProvider>
         <MessageActions message={assistantMessage()} />
@@ -130,7 +132,50 @@ describe("MessageActions timestamp tooltip", () => {
     const timeEl = container.querySelector("time");
     expect(timeEl).not.toBeNull();
     expect(timeEl?.getAttribute("dateTime")).toBe(MESSAGE_TIMESTAMP);
-    expect(timeEl?.getAttribute("title")).toBe(new Date(MESSAGE_TIMESTAMP).toLocaleString());
+    expect(timeEl?.getAttribute("title")).toBe(
+      new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(
+        new Date(MESSAGE_TIMESTAMP),
+      ),
+    );
+  });
+
+  it.each([
+    ["absolute_short", { dateStyle: "short", timeStyle: "short" }],
+    ["absolute_long", { dateStyle: "long", timeStyle: "medium" }],
+  ] as const)("renders the %s label and relative counterpart", (display, options) => {
+    const { container } = render(
+      <StateProvider
+        initialState={{
+          userSettings: { ...defaultState.userSettings, messageTimeDisplay: display },
+        }}
+      >
+        <MessageActions message={assistantMessage()} />
+      </StateProvider>,
+    );
+
+    const timeEl = container.querySelector("time");
+    const label = new Intl.DateTimeFormat(resolveMessageTimeLocale(), options).format(
+      new Date(MESSAGE_TIMESTAMP),
+    );
+    expect(timeEl?.textContent).toBe(label);
+    expect(timeEl?.getAttribute("title")).toMatch(/ago$/);
+    expect(timeEl?.getAttribute("aria-label")).toContain(label);
+    expect(timeEl?.getAttribute("aria-label")).toContain(timeEl?.getAttribute("title") ?? "");
+  });
+
+  it("exposes both the visible timestamp and counterpart in its accessible name", () => {
+    const { container } = render(
+      <StateProvider>
+        <MessageActions message={assistantMessage()} />
+      </StateProvider>,
+    );
+
+    const timeEl = container.querySelector("time");
+    const label = timeEl?.textContent ?? "";
+    const counterpart = timeEl?.getAttribute("title") ?? "";
+    const accessibleName = timeEl?.getAttribute("aria-label") ?? "";
+    expect(accessibleName).toContain(label);
+    expect(accessibleName).toContain(counterpart);
   });
 
   it.each(["", "not-a-date", "0", "2026-02-30T10:00:00Z"])(
@@ -162,7 +207,10 @@ describe("MessageActions timestamp tooltip", () => {
 describe("MessageActions timestamp tooltip on touch devices", () => {
   it("exposes the full absolute time via a tap-to-open drawer instead of relying on hover-only title", () => {
     TOUCH_DRAWER.enabled = true;
-    const expectedAbsoluteTime = new Date(MESSAGE_TIMESTAMP).toLocaleString();
+    const expectedAbsoluteTime = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(new Date(MESSAGE_TIMESTAMP));
 
     render(
       <StateProvider>

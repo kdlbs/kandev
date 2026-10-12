@@ -93,7 +93,7 @@ func Health(in HealthInput) HealthState {
 	}
 	if in.DebtSince != nil {
 		if in.NextAfter != nil && in.Now.Before(*in.NextAfter) {
-			return HealthState{State: HealthWaiting, Condition: WaitSpacing, NextAfter: in.NextAfter}
+			return HealthState{State: HealthWaiting, Condition: WaitSpacing, Detail: in.NextAfter.UTC().Format(time.RFC3339), NextAfter: in.NextAfter}
 		}
 		return HealthState{State: HealthFresh}
 	}

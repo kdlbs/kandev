@@ -219,10 +219,15 @@ export function EnsureSessionErrorBanner({
 export function SessionRecoveryNotice({
   message,
   recoveryFailure,
+  onResume,
+  resumeDisabled,
 }: {
   message: string;
   recoveryFailure?: Extract<SessionRecoveryFailure, { outcome: "workspace_read_only" }> | null;
+  onResume?: () => void;
+  resumeDisabled?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="px-3 pt-2" data-testid="session-recovery-notice">
       <Alert>
@@ -230,6 +235,19 @@ export function SessionRecoveryNotice({
         <AlertDescription className="col-start-2 w-full min-w-0">
           <span>{message}</span>
           {recoveryFailure ? <RecoveryFailureDetails failure={recoveryFailure} /> : null}
+          {onResume ? (
+            <RecoveryActions
+              actions={[
+                {
+                  kind: "resume",
+                  label: t("task:resumeSession"),
+                  onClick: onResume,
+                  testId: "session-recovery-notice-resume",
+                },
+              ]}
+              busy={resumeDisabled}
+            />
+          ) : null}
         </AlertDescription>
       </Alert>
     </div>
@@ -284,7 +302,12 @@ export function SessionRecoveryFeedback({
         testId={testId}
       />
       {notice ? (
-        <SessionRecoveryNotice message={notice} recoveryFailure={readOnlyRecovery} />
+        <SessionRecoveryNotice
+          message={notice}
+          recoveryFailure={readOnlyRecovery}
+          onResume={readOnlyRecovery ? onRetry : undefined}
+          resumeDisabled={retryDisabled}
+        />
       ) : null}
     </div>
   );

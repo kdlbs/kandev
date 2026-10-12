@@ -15,7 +15,8 @@ var ErrOrphanTurnSessionBusy = errors.New("session is running; orphan turn left 
 // CompleteUnattendedOrphanTurn completes turnID, the turn a rolled-back
 // unattended wake send left active, and drops its in-memory active-turn entry.
 // It changes nothing while the session is RUNNING or STARTING. A missing
-// session counts as not busy. Every non-nil error leaves the turn as it was.
+// session counts as not busy. A verification error after a committed completion
+// does not restore the completed turn or its cache entry.
 func (s *Service) CompleteUnattendedOrphanTurn(ctx context.Context, sessionID, turnID string) error {
 	if sessionID == "" || turnID == "" {
 		return errors.New("complete orphan turn: session id and turn id are required")

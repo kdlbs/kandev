@@ -1,7 +1,7 @@
 ---
 id: "01-flag-schema-settings"
 title: "Phase 3 flag, schema and autonomy settings"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -198,3 +198,12 @@ Receipts:
 - `go run ./cmd/sqlguard ./internal` and `golangci-lint` on the touched packages: clean.
 - `internal/common/config` `TestConfigSourceLoadsStableYAMLFields` (`launcher.healthTimeoutMs = 600000`) fails identically on the merge-base; pre-existing, not touched here.
 - `pnpm run typecheck`, Vitest for components/coordinators and the new hook, `pnpm run i18n:check` and `i18n:ratchet`: pass.
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.

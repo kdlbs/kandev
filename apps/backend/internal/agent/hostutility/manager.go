@@ -48,6 +48,7 @@ type Manager struct {
 	controlHost     string
 	controlPort     int
 	controlClient   *agentctlclient.ControlClient
+	runtimeOwner    *agentctlclient.RuntimeOwner
 	authToken       string // per-launch auth token for instance clients
 	log             *logger.Logger
 	profileResolver interface {
@@ -77,7 +78,12 @@ type Manager struct {
 	profileGroup                  singleflight.Group
 	managedRuntimeSelections      managedruntime.SelectionReader
 	startCancel                   context.CancelFunc
+	runtimeCtx                    context.Context
+	runtimeCancel                 context.CancelFunc
+	runtimeRebindWG               sync.WaitGroup
+	runtimeRebindEpoch            uint64
 	stopped                       bool
+	runtimeEpoch                  uint64
 }
 
 // ProviderGatewayAuthResolver resolves provider authentication for a saved
@@ -105,6 +111,7 @@ func (m *Manager) SetProviderGatewayAuthResolver(resolver ProviderGatewayAuthRes
 type instance struct {
 	agentType         string
 	instanceID        string
+	runtimeEpoch      uint64
 	workDir           string
 	client            *agentctlclient.Client
 	operationGateOnce sync.Once
@@ -165,6 +172,18 @@ func (m *Manager) SetAuthToken(token string) {
 	m.authToken = token
 }
 
+// SetRuntimeOwner makes local utility instances follow the shared standalone
+// agentctl binding instead of retaining startup endpoint and credential data.
+func (m *Manager) SetRuntimeOwner(owner *agentctlclient.RuntimeOwner) {
+	m.runtimeOwner = owner
+	if owner != nil {
+		m.controlHost = ""
+		m.controlPort = 0
+		m.controlClient = nil
+		m.authToken = ""
+	}
+}
+
 // SetManagedRuntimeSelectionStore wires the install-wide exact-version
 // resolver used by every host-local managed-runtime command path.
 func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
@@ -188,6 +207,9 @@ func (m *Manager) Start(ctx context.Context) error {
 		cancel()
 		return nil
 	}
+	runtimeCtx, runtimeCancel := context.WithCancel(ctx)
+	m.runtimeCtx = runtimeCtx
+	m.runtimeCancel = runtimeCancel
 	m.startCancel = cancel
 	m.mu.Unlock()
 	defer func() {
@@ -196,6 +218,9 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.mu.Unlock()
 		cancel()
 	}()
+	if err := m.reconcileRuntimeEpoch(ctx); err != nil {
+		return fmt.Errorf("acquire local agent runtime for host utilities: %w", err)
+	}
 
 	// Create a process-scoped parent dir so concurrent kandev processes do not
 	// share state, and so Stop only removes dirs owned by this process.
@@ -263,8 +288,11 @@ func (m *Manager) Stop(ctx context.Context) {
 	}
 	m.mu.Lock()
 	m.stopped = true
-	cancel := m.startCancel
+	startCancel := m.startCancel
 	m.startCancel = nil
+	runtimeCancel := m.runtimeCancel
+	m.runtimeCancel = nil
+	m.runtimeCtx = nil
 	instances := make([]*instance, 0, len(m.instances))
 	for _, inst := range m.instances {
 		instances = append(instances, inst)
@@ -276,9 +304,13 @@ func (m *Manager) Stop(ctx context.Context) {
 	m.tempLease = nil
 	m.mu.Unlock()
 
-	if cancel != nil {
-		cancel()
+	if startCancel != nil {
+		startCancel()
 	}
+	if runtimeCancel != nil {
+		runtimeCancel()
+	}
+	m.runtimeRebindWG.Wait()
 
 	for _, inst := range instances {
 		deleteCtx, cancel := hostUtilityDeleteContext(ctx)
@@ -308,13 +340,18 @@ func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
 	if inst == nil {
 		return
 	}
-	if m.controlClient != nil {
+	if m.runtimeOwner != nil {
+		m.deleteRuntimeInstance(ctx, inst)
+	} else if m.controlClient != nil {
 		if err := m.controlClient.DeleteInstance(ctx, inst.instanceID); err != nil {
 			m.log.Warn("failed to delete host utility instance",
 				zap.String("agent_type", inst.agentType),
 				zap.String("instance_id", inst.instanceID),
 				zap.Error(err))
 		}
+	}
+	if inst.client != nil {
+		inst.client.Close()
 	}
 	if inst.workDir == "" {
 		return
@@ -325,6 +362,142 @@ func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
 			zap.String("path", inst.workDir),
 			zap.Error(err))
 	}
+}
+
+func (m *Manager) deleteRuntimeInstance(ctx context.Context, inst *instance) {
+	lease, err := m.runtimeOwner.Acquire(ctx)
+	if err != nil {
+		return
+	}
+	defer lease.Close()
+	if lease.Epoch() != inst.runtimeEpoch {
+		return
+	}
+	control := lease.NewControlClient(m.log)
+	if control == nil {
+		return
+	}
+	if err := control.DeleteInstance(lease.Context(), inst.instanceID); err != nil {
+		m.log.Warn("failed to delete host utility instance",
+			zap.String("agent_type", inst.agentType),
+			zap.String("instance_id", inst.instanceID),
+			zap.Error(err))
+	}
+}
+
+func (m *Manager) reconcileRuntimeEpoch(ctx context.Context) error {
+	if m.runtimeOwner == nil {
+		return nil
+	}
+	lease, err := m.runtimeOwner.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	epoch := lease.Epoch()
+	lease.Close()
+
+	m.mu.Lock()
+	if m.runtimeEpoch == epoch {
+		m.mu.Unlock()
+		return nil
+	}
+	shouldRebootstrap := m.runtimeEpoch != 0
+	oldInstances := make([]*instance, 0, len(m.instances))
+	for _, inst := range m.instances {
+		oldInstances = append(oldInstances, inst)
+	}
+	m.instances = make(map[string]*instance)
+	m.runtimeEpoch = epoch
+	m.mu.Unlock()
+
+	m.cache.clear()
+	m.modelCache.clear()
+	for _, inst := range oldInstances {
+		m.deleteInstance(ctx, inst)
+	}
+	if shouldRebootstrap {
+		m.scheduleRuntimeEpochRebootstrap(epoch)
+	}
+	return nil
+}
+
+func (m *Manager) scheduleRuntimeEpochRebootstrap(epoch uint64) {
+	targets := m.eligibleAgents()
+	if len(targets) == 0 {
+		return
+	}
+
+	m.mu.Lock()
+	if m.stopped || m.runtimeCtx == nil || m.runtimeEpoch != epoch || m.runtimeRebindEpoch == epoch {
+		m.mu.Unlock()
+		return
+	}
+	ctx := m.runtimeCtx
+	m.runtimeRebindEpoch = epoch
+	m.runtimeRebindWG.Add(1)
+	for _, ia := range targets {
+		m.cache.set(AgentCapabilities{
+			AgentType:     ia.(agents.Agent).ID(),
+			Status:        StatusProbing,
+			LastCheckedAt: time.Now(),
+		})
+	}
+	m.mu.Unlock()
+
+	go func() {
+		defer m.runtimeRebindWG.Done()
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(maxConcurrentBootstraps)
+		for _, ia := range targets {
+			ia := ia
+			g.Go(func() error {
+				m.rebootstrapAgent(gctx, ia, epoch)
+				return nil
+			})
+		}
+		_ = g.Wait()
+	}()
+}
+
+func (m *Manager) rebootstrapAgent(ctx context.Context, ia agents.InferenceAgent, epoch uint64) {
+	ag, ok := ia.(agents.Agent)
+	if !ok {
+		return
+	}
+	inst, resolvedAgent, err := m.getInstance(ctx, ag.ID())
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		status := StatusFailed
+		if errors.Is(err, errAgentNotInstalled) {
+			status = StatusNotInstalled
+		}
+		m.publishCapabilitiesForEpoch(epoch, nil, probeFailureCapabilities(
+			ag.ID(), status, err.Error(), 0, time.Now(),
+		))
+		return
+	}
+	caps := m.probe(ctx, inst, resolvedAgent, false)
+	m.publishCapabilitiesForEpoch(epoch, inst, caps)
+}
+
+func (m *Manager) publishCapabilitiesForEpoch(epoch uint64, inst *instance, caps AgentCapabilities) {
+	m.mu.RLock()
+	current := !m.stopped && m.runtimeEpoch == epoch
+	if inst != nil {
+		current = current && m.instances[inst.agentType] == inst && inst.runtimeEpoch == epoch
+	}
+	m.mu.RUnlock()
+	if current {
+		m.cache.set(caps)
+	}
+}
+
+func (m *Manager) currentRuntimeEpoch() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.runtimeEpoch
 }
 
 // eligibleAgents returns enabled agents that implement supported inference
@@ -353,10 +526,14 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	ag := ia.(agents.Agent)
 	agentType := ag.ID()
 	log := m.log.WithFields(zap.String("agent_type", agentType))
+	epoch := m.currentRuntimeEpoch()
+	publish := func(inst *instance, caps AgentCapabilities) {
+		m.publishCapabilitiesForEpoch(epoch, inst, caps)
+	}
 
 	// Publish "probing" synchronously so the UI can distinguish "not started"
 	// (cache miss) from "in flight".
-	m.cache.set(AgentCapabilities{
+	publish(nil, AgentCapabilities{
 		AgentType:     agentType,
 		Status:        StatusProbing,
 		LastCheckedAt: time.Now(),
@@ -364,7 +541,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 
 	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {
-		m.cache.set(AgentCapabilities{
+		publish(nil, AgentCapabilities{
 			AgentType:     agentType,
 			Status:        StatusNotConfigured,
 			Error:         "inference config not available",
@@ -380,7 +557,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 			msg = err.Error()
 		}
 		log.Info("skipping host utility bootstrap: agent not installed")
-		m.cache.set(AgentCapabilities{
+		publish(nil, AgentCapabilities{
 			AgentType:     agentType,
 			Status:        StatusNotInstalled,
 			Error:         msg,
@@ -392,7 +569,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	inst, err := m.createInstance(ctx, agentType)
 	if err != nil {
 		log.Warn("failed to create host utility instance", zap.Error(err))
-		m.cache.set(AgentCapabilities{
+		publish(nil, AgentCapabilities{
 			AgentType:     agentType,
 			Status:        StatusFailed,
 			Error:         err.Error(),
@@ -420,7 +597,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	m.mu.Unlock()
 
 	caps := m.probe(ctx, inst, ia, false)
-	m.cache.set(caps)
+	publish(inst, caps)
 	log.Info("host utility bootstrap completed",
 		zap.String("status", string(caps.Status)),
 		zap.Int("models", len(caps.Models)),
@@ -462,14 +639,42 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 		// and never runs a persistent agent subprocess. Probe/Prompt calls
 		// spawn their own ephemeral ACP subprocesses via InferencePrompt/Probe.
 	}
-	resp, err := m.controlClient.CreateInstance(ctx, req)
+	var control *agentctlclient.ControlClient
+	controlCtx := ctx
+	var lease *agentctlclient.RuntimeLease
+	var err error
+	if m.runtimeOwner != nil {
+		lease, err = m.runtimeOwner.Acquire(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer lease.Close()
+		control = lease.NewControlClient(m.log)
+		controlCtx = lease.Context()
+	} else {
+		control = m.controlClient
+	}
+	if control == nil {
+		return nil, errors.New("host utility control client unavailable")
+	}
+	resp, err := control.CreateInstance(controlCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("create instance: %w", err)
 	}
+	if lease != nil {
+		if err := lease.CheckCurrent(); err != nil {
+			return nil, fmt.Errorf("host utility instance creation outcome is uncertain after runtime retirement: %w", err)
+		}
+	}
 
-	client := agentctlclient.NewClient(m.controlHost, resp.Port, m.log,
-		agentctlclient.WithExecutionID(resp.ID),
-		agentctlclient.WithAuthToken(m.authToken))
+	var client *agentctlclient.Client
+	if lease != nil {
+		client = lease.NewBoundInstanceClient(resp.Port, m.log, agentctlclient.WithExecutionID(resp.ID))
+	} else {
+		client = agentctlclient.NewClient(m.controlHost, resp.Port, m.log,
+			agentctlclient.WithExecutionID(resp.ID),
+			agentctlclient.WithAuthToken(m.authToken))
+	}
 
 	// Wait a moment for the instance HTTP server to come up.
 	healthCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -485,12 +690,22 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 		deleteCancel()
 		return nil, fmt.Errorf("instance %s not healthy: %w", resp.ID, err)
 	}
+	if lease != nil && lease.CheckCurrent() != nil {
+		client.Close()
+		return nil, agentctlclient.ErrRuntimeLeaseRetired
+	}
 
 	return &instance{
 		agentType:  agentType,
 		instanceID: resp.ID,
-		workDir:    workDir,
-		client:     client,
+		runtimeEpoch: func() uint64 {
+			if lease == nil {
+				return 0
+			}
+			return lease.Epoch()
+		}(),
+		workDir: workDir,
+		client:  client,
 	}, nil
 }
 
@@ -524,6 +739,9 @@ var errManagerStopped = errors.New("host utility manager stopped")
 // getInstance returns the warm instance for the agent type, lazily recreating
 // it if missing (e.g. after a previous failure or crash).
 func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance, agents.InferenceAgent, error) {
+	if err := m.reconcileRuntimeEpoch(ctx); err != nil {
+		return nil, nil, err
+	}
 	ia, ok := m.registry.GetInferenceAgent(agentType)
 	if !ok {
 		return nil, nil, fmt.Errorf("agent %q not found or not inference-capable", agentType)
@@ -667,44 +885,75 @@ func (m *Manager) probeWithCommand(
 	refresh bool,
 	command agents.Command,
 ) AgentCapabilities {
+	return m.probeWithOverrides(ctx, inst, ia, refresh, command, "", nil, nil)
+}
+
+func (m *Manager) probeWithOverrides(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	refresh bool,
+	command agents.Command,
+	workDir string,
+	env map[string]string,
+	stripEnv []string,
+) AgentCapabilities {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	resolvedCommand, err := m.resolveInferenceCommand(probeCtx, inst.agentType, ia, command)
+	req := buildProbeRequest(inst, ia, refresh, command)
+	if workDir != "" {
+		req.InferenceConfig.WorkDir = workDir
+	}
+	if len(env) > 0 {
+		if req.InferenceConfig.Env == nil {
+			req.InferenceConfig.Env = make(map[string]string)
+		}
+		for key, value := range env {
+			req.InferenceConfig.Env[key] = value
+		}
+	}
+	if len(stripEnv) > 0 {
+		req.InferenceConfig.StripEnv = append(req.InferenceConfig.StripEnv, stripEnv...)
+	}
+	resp, resolvedCommand, err := m.probeManagedRuntime(probeCtx, inst, ia, command, req)
 	if err != nil {
 		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
 	}
-
-	req := buildProbeRequest(inst, ia, refresh, resolvedCommand)
-	resp, err := m.probeManagedRuntime(probeCtx, inst, ia, resolvedCommand, req)
-	if err != nil {
-		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
-	}
-	return capabilitiesFromProbe(inst.agentType, resp, time.Now())
+	caps := capabilitiesFromProbe(inst.agentType, resp, time.Now())
+	stampConfiguredRuntimeVersion(&caps, ia, resolvedCommand)
+	return caps
 }
 
 func (m *Manager) probeManagedRuntime(
 	ctx context.Context,
 	inst *instance,
 	ia agents.InferenceAgent,
-	command agents.Command,
+	override agents.Command,
 	req *agentctlutil.ProbeRequest,
-) (*agentctlutil.ProbeResponse, error) {
-	release, err := inst.acquireOperation(ctx, false)
+) (*agentctlutil.ProbeResponse, agents.Command, error) {
+	command, release, err := m.acquireInferenceCommand(ctx, inst, ia, override)
 	if err != nil {
-		return nil, err
+		return nil, command, err
 	}
+	req = cloneProbeRequestWithCommand(req, command)
 	resp, err := inst.client.Probe(ctx, req)
 	release()
 	if err != nil || resp.Success || resp.FailureCode != agentctlutil.ProbeFailureManagedRuntimeNPMResolution {
-		return resp, err
+		return resp, command, err
 	}
 
 	release, err = inst.acquireOperation(ctx, true)
 	if err != nil {
-		return resp, nil
+		return resp, command, nil
 	}
 	defer release()
-	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, req, resp), nil
+	command, err = m.resolveInferenceCommand(ctx, inst.agentType, ia, override)
+	if err != nil {
+		m.log.Warn("could not resolve selected runtime for probe recovery", zap.Error(err))
+		return resp, command, nil
+	}
+	req = cloneProbeRequestWithCommand(req, command)
+	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, req, resp), command, nil
 }
 
 func (m *Manager) recoverManagedRuntimeProbe(
@@ -715,12 +964,25 @@ func (m *Manager) recoverManagedRuntimeProbe(
 	failedRequest *agentctlutil.ProbeRequest,
 	initial *agentctlutil.ProbeResponse,
 ) *agentctlutil.ProbeResponse {
+	if ctx.Err() != nil {
+		return initial
+	}
 	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
 		return initial
 	}
 	spec := managed.ManagedNPMRuntime()
-	retryCommand, packageSpec, ok := managedRuntimeProbeRetry(failedCommand, spec)
+	if openCode, ok := ia.(*agents.OpenCodeACP); ok {
+		if reader, hasSelection := m.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader); hasSelection {
+			selected, err := openCode.ResolveSelectedRuntimeWithReader(ctx, reader)
+			if err != nil {
+				m.log.Warn("could not resolve selected OpenCode runtime for probe recovery", zap.Error(err))
+				return initial
+			}
+			spec = selected.Spec
+		}
+	}
+	retryCommand, _, ok := managedRuntimeProbeRetry(failedCommand, spec)
 	if !ok {
 		return initial
 	}
@@ -728,16 +990,6 @@ func (m *Manager) recoverManagedRuntimeProbe(
 		zap.String("agent_type", inst.agentType),
 		zap.String("recovery_scope", "host_capability_probe"),
 		zap.Int("attempt", 1))
-	failedConfig := failedRequest.InferenceConfig
-	if err := inst.client.RepairManagedRuntimeCacheWithEnvironment(
-		ctx, packageSpec, failedConfig.Env, failedConfig.StripEnv,
-	); err != nil {
-		m.log.Warn("managed runtime host capability probe cache repair failed",
-			zap.String("agent_type", inst.agentType),
-			zap.String("recovery_scope", "host_capability_probe"),
-			zap.Error(err))
-		return initial
-	}
 	response, err := inst.client.Probe(ctx, cloneProbeRequestWithCommand(failedRequest, retryCommand))
 	if err != nil {
 		m.log.Warn("managed runtime host capability probe retry failed",
@@ -814,6 +1066,7 @@ func capabilitiesFromProbe(agentType string, resp *agentctlutil.ProbeResponse, n
 		AgentType:       agentType,
 		AgentName:       resp.AgentName,
 		AgentVersion:    resp.AgentVersion,
+		RuntimeInfo:     resp.RuntimeInfo,
 		Status:          StatusOK,
 		ProtocolVersion: resp.ProtocolVersion,
 		LoadSession:     resp.LoadSession,
@@ -849,6 +1102,41 @@ func capabilitiesFromProbe(agentType string, resp *agentctlutil.ProbeResponse, n
 	return caps
 }
 
+func stampConfiguredRuntimeVersion(caps *AgentCapabilities, ia agents.InferenceAgent, command agents.Command) {
+	if caps == nil || caps.RuntimeInfo == nil {
+		return
+	}
+	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return
+	}
+	packageName := managed.ManagedNPMRuntime().Package
+	if packageName == "" {
+		return
+	}
+	version := ""
+	for _, arg := range command.Args() {
+		prefix := packageName + "@"
+		if !strings.HasPrefix(arg, prefix) || managedruntime.ValidateExactPackageSpec(arg) != nil {
+			continue
+		}
+		candidate := strings.TrimPrefix(arg, prefix)
+		if _, err := managedruntime.ParseStableVersion(candidate); err == nil {
+			version = candidate
+		}
+	}
+	if version == "" {
+		return
+	}
+	for index := range caps.RuntimeInfo.Components {
+		component := &caps.RuntimeInfo.Components[index]
+		if component.Role == agents.RuntimeComponentBridge && component.Package == packageName {
+			component.EffectiveVersion = version
+			return
+		}
+	}
+}
+
 // resolveInferenceCommand selects the trusted exact host version for ordinary
 // probes and prompts. A non-empty override is reserved for candidate probes.
 func (m *Manager) resolveInferenceCommand(
@@ -868,6 +1156,11 @@ func (m *Manager) resolveInferenceCommand(
 	ag, ok := ia.(agents.Agent)
 	if !ok || m.managedRuntimeSelections == nil {
 		return command, nil
+	}
+	openCode, isOpenCode := ag.(*agents.OpenCodeACP)
+	reader, hasSelectionReader := m.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader)
+	if isOpenCode && hasSelectionReader {
+		return m.resolveOpenCodeInferenceCommand(ctx, openCode, reader)
 	}
 	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
@@ -891,6 +1184,54 @@ func (m *Manager) resolveInferenceCommand(
 	return spec.ACPCommand(version), nil
 }
 
+func (m *Manager) resolveOpenCodeInferenceCommand(
+	ctx context.Context,
+	openCode *agents.OpenCodeACP,
+	reader managedruntime.OpenCodeSelectionReader,
+) (agents.Command, error) {
+	selection, err := openCode.ResolveSelectedRuntimeWithReader(ctx, reader)
+	if err != nil {
+		return agents.Command{}, fmt.Errorf("resolve OpenCode runtime selection: %w", err)
+	}
+	if selection.Source != managedruntime.OpenCodeSourceNative || !selection.Spec.NativeBinaryOnPath() {
+		return selection.Spec.ACPCommand(selection.Version), nil
+	}
+	return nativeOpenCodeInferenceCommand(ctx, selection.Spec.NativeBinary)
+}
+
+func nativeOpenCodeInferenceCommand(ctx context.Context, binary string) (agents.Command, error) {
+	native, found, err := agents.DetectOpenCodeNativeRuntime(ctx)
+	if err != nil {
+		return agents.Command{}, err
+	}
+	if !found {
+		return agents.Command{}, errors.New("selected native OpenCode runtime is unavailable")
+	}
+	args, err := agents.OpenCodeACPArgsForVersion(native.Version)
+	if err != nil {
+		return agents.Command{}, err
+	}
+	return agents.NewCommand(append([]string{binary}, args...)...), nil
+}
+
+func (m *Manager) acquireInferenceCommand(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	override agents.Command,
+) (agents.Command, func(), error) {
+	release, err := inst.acquireOperation(ctx, false)
+	if err != nil {
+		return agents.Command{}, nil, err
+	}
+	command, err := m.resolveInferenceCommand(ctx, inst.agentType, ia, override)
+	if err != nil {
+		release()
+		return agents.Command{}, nil, err
+	}
+	return command, release, nil
+}
+
 const modelConfigResolveTimeout = 60 * time.Second
 
 func buildProbeRequest(
@@ -905,8 +1246,9 @@ func buildProbeRequest(
 		probeCommand = command
 	}
 	return &agentctlutil.ProbeRequest{
-		AgentID: inst.agentType,
-		Refresh: refresh,
+		AgentID:            inst.agentType,
+		Refresh:            refresh,
+		RuntimeObservation: runtimeObservationDescriptor(ia, cfg, probeCommand),
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
 			Protocol:        cfg.Protocol,
 			Command:         probeCommand.Args(),
@@ -917,6 +1259,111 @@ func buildProbeRequest(
 			OperatorDefined: cfg.OperatorDefined,
 		},
 	}
+}
+
+func runtimeObservationDescriptor(
+	ia agents.InferenceAgent,
+	cfg *agents.InferenceConfig,
+	command agents.Command,
+) *agents.RuntimeObservationDescriptor {
+	if cfg == nil || (cfg.Protocol != "" && cfg.Protocol != agent.ProtocolACP) {
+		return nil
+	}
+	registered, ok := ia.(agents.Agent)
+	if !ok {
+		return nil
+	}
+	bridge := runtimeObservationBridgeDescriptor(ia, registered, cfg, command)
+	descriptor := &agents.RuntimeObservationDescriptor{Bridge: bridge}
+	if provider, ok := ia.(agents.RuntimeObservationAgent); ok {
+		component := provider.RuntimeProviderObservation()
+		descriptor.Provider = &component
+	}
+	return descriptor
+}
+
+func runtimeObservationBridgeDescriptor(
+	ia agents.InferenceAgent,
+	registered agents.Agent,
+	cfg *agents.InferenceConfig,
+	command agents.Command,
+) agents.RuntimeComponentDescriptor {
+	bridge := agents.RuntimeComponentDescriptor{
+		Name:   registered.DisplayName(),
+		Source: agents.RuntimeComponentUnknown,
+		Owner:  agents.RuntimeComponentOwnerUnknown,
+	}
+	if managed, ok := ia.(agents.ManagedNPMRuntimeAgent); ok {
+		return managedRuntimeObservationBridge(bridge, managed, registered, command)
+	}
+	if cfg.OperatorDefined || !slices.Equal(command.Args(), cfg.Command.Args()) {
+		return bridge
+	}
+	if _, ok := registered.(agents.RuntimeReleaseAgent); !ok {
+		return bridge
+	}
+	capability := agents.RuntimeUpdateCapabilities(registered)
+	if capability.Management != "manual" || capability.Owner != "external" {
+		return bridge
+	}
+	bridge.Source = agents.RuntimeComponentExternal
+	bridge.Owner = agents.RuntimeComponentOwnerExternal
+	bridge.GuidanceURL = capability.Source.GuidanceURL
+	return bridge
+}
+
+func managedRuntimeObservationBridge(
+	bridge agents.RuntimeComponentDescriptor,
+	managed agents.ManagedNPMRuntimeAgent,
+	registered agents.Agent,
+	command agents.Command,
+) agents.RuntimeComponentDescriptor {
+	spec := managed.ManagedNPMRuntime()
+	if spec.NativeBinary != "" && slices.Equal(command.Args(), spec.NativeCommand().Args()) {
+		bridge.Source = agents.RuntimeComponentExternal
+		bridge.Owner = agents.RuntimeComponentOwnerExternal
+		bridge.GuidanceURL = runtimeManualGuidanceURL(registered)
+		return bridge
+	}
+	if managedRuntimeCommandVersion(command, spec) == "" {
+		return bridge
+	}
+	bridge.Package = spec.Package
+	bridge.Source = agents.RuntimeComponentManaged
+	bridge.Owner = agents.RuntimeComponentOwnerKandev
+	return bridge
+}
+
+func runtimeManualGuidanceURL(registered agents.Agent) string {
+	if releaseAgent, ok := registered.(agents.RuntimeReleaseAgent); ok {
+		return releaseAgent.RuntimeReleaseSource().GuidanceURL
+	}
+	capability := agents.RuntimeUpdateCapabilities(registered)
+	if capability.Management == "manual" {
+		return capability.Source.GuidanceURL
+	}
+	return ""
+}
+
+func managedRuntimeCommandVersion(command agents.Command, spec agents.ManagedNPMRuntimeSpec) string {
+	if spec.Package == "" {
+		return ""
+	}
+	args := command.Args()
+	prefix := spec.Package + "@"
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, prefix) || managedruntime.ValidateExactPackageSpec(arg) != nil {
+			continue
+		}
+		version := strings.TrimPrefix(arg, prefix)
+		if _, err := managedruntime.ParseStableVersion(version); err != nil {
+			continue
+		}
+		if slices.Equal(args, spec.ACPCommand(version).Args()) {
+			return version
+		}
+	}
+	return ""
 }
 
 func inferenceConfigForHostUtility(ia agents.InferenceAgent) *agents.InferenceConfig {

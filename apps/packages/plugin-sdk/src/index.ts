@@ -118,6 +118,49 @@ export interface PluginActionProps {
   onMouseLeave?: PluginActionEventHandler<PluginActionMouseEvent>;
 }
 
+/** Immutable task identity passed to a task-create completion handler. */
+export interface PluginTaskCreatedIdentity {
+  readonly id: string;
+  readonly workspace_id: string;
+}
+
+/** Handler invoked after its owning create dialog successfully creates a task. */
+export type PluginTaskCreatedHandler = (task: PluginTaskCreatedIdentity) => void | Promise<void>;
+
+/** Registers a task-created handler for the lifetime of its slot contribution. */
+export type RegisterPluginTaskCreatedHandler = (handler: PluginTaskCreatedHandler) => () => void;
+
+export type PluginComposerSurface = "task-chat" | "quick-chat" | "task-create" | "new-session";
+
+export type PluginComposerSubmitResult =
+  | { status: "submitted" }
+  | { status: "blocked"; reason?: string }
+  | { status: "unavailable" };
+
+export interface PluginComposerCapability {
+  insertText(text: string): { status: "inserted" | "ignored" | "unavailable" };
+  focus(): { status: "focused" | "unavailable" };
+  submit(): Promise<PluginComposerSubmitResult>;
+}
+
+/** Typed context passed to native composer action slots. */
+export interface PluginComposerSlotProps {
+  surface: PluginComposerSurface;
+  presentation: "desktop" | "mobile";
+  taskId: string | null;
+  taskTitle?: string;
+  activeSessionId: string | null;
+  sessionIds: string[];
+  disabled: boolean;
+  submittable: boolean;
+  disabledReason?: string;
+  composer: PluginComposerCapability;
+  /**
+   * Present only on create-mode `task-create-input-actions`. The returned
+   * cleanup unregisters the callback when the slot contribution unmounts.
+   */
+  registerTaskCreatedHandler?: RegisterPluginTaskCreatedHandler;
+}
 export interface PluginActionGroupProps {
   children?: HostNode;
   label?: string;
@@ -1398,7 +1441,10 @@ export interface PluginRegistry {
     section?: PluginNavSection;
   }): void;
   registerSettingsRoute(path: string, component: Component): void;
-  registerComponent(slot: string, component: Component<{ slotProps?: unknown }>): void;
+  registerComponent<Props = { slotProps?: unknown }>(
+    slot: string,
+    component: Component<Props>,
+  ): void;
   registerWsHandler(action: string, handler: (payload: unknown) => void): void;
   registerKeybinding(id: string, handler: (event: KeyboardEvent) => void): void;
   registerIntegrationSettings(settings: {

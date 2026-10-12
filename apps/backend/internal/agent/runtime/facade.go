@@ -107,6 +107,32 @@ func (f *facade) Resume(ctx context.Context, executionID string, prompt string) 
 	return err
 }
 
+func (f *facade) InspectDeliveryRecordEvidence(
+	ctx context.Context,
+	request DeliveryRecordEvidenceRequest,
+) (*DeliveryRecordEvidence, error) {
+	backend, ok := f.backend.(interface {
+		InspectDeliveryRecordEvidence(context.Context, lifecycle.DeliveryRecordEvidenceRequest) (*lifecycle.DeliveryRecordEvidence, error)
+	})
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend.InspectDeliveryRecordEvidence(ctx, request)
+}
+
+func (f *facade) ReadDeliveryRecordSubmission(
+	ctx context.Context,
+	request DeliveryRecordSubmissionRequest,
+) (*DeliveryRecordSubmission, error) {
+	backend, ok := f.backend.(interface {
+		ReadDeliveryRecordSubmission(context.Context, lifecycle.DeliveryRecordSubmissionRequest) (*lifecycle.DeliveryRecordSubmission, error)
+	})
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend.ReadDeliveryRecordSubmission(ctx, request)
+}
+
 // Stop terminates an execution.
 func (f *facade) Stop(ctx context.Context, executionID string, reason string) error {
 	if executionID == "" {

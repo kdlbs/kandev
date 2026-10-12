@@ -1,5 +1,6 @@
 import type { SidebarViewApi, SidebarViewDraftApi } from "@/lib/types/http";
 import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
+import { sidebarSortFromWireRaw, sidebarSortToWire } from "@/lib/sidebar/sidebar-sort-chain";
 import {
   cloneSidebarTaskRowPresentation,
   normalizeSidebarTaskRowPresentation,
@@ -44,13 +45,22 @@ function fromApiClause(c: SidebarViewApi["filters"][number]): SidebarView["filte
   };
 }
 
+function toApiSort(sort: SidebarView["sort"]) {
+  return sidebarSortToWire(sort);
+}
+
+function fromApiSort(sort: SidebarViewApi["sort"]): SidebarView["sort"] {
+  return sidebarSortFromWireRaw(sort);
+}
+
 export function toApiSidebarView(view: SidebarView): SidebarViewApi {
   return {
     id: view.id,
     name: view.name,
     filters: view.filters.map(toApiClause),
-    sort: { key: view.sort.key, direction: view.sort.direction },
+    sort: toApiSort(view.sort),
     group: view.group,
+    group_indent: view.groupIndent,
     collapsed_groups: view.collapsedGroups,
     task_row: toApiTaskRow(view.taskRow),
   };
@@ -61,11 +71,9 @@ export function fromApiSidebarView(api: SidebarViewApi): SidebarView {
     id: api.id,
     name: api.name,
     filters: api.filters.map(fromApiClause),
-    sort: {
-      key: api.sort.key as SidebarView["sort"]["key"],
-      direction: api.sort.direction as SidebarView["sort"]["direction"],
-    },
+    sort: fromApiSort(api.sort),
     group: api.group as SidebarView["group"],
+    groupIndent: typeof api.group_indent === "boolean" ? api.group_indent : true,
     collapsedGroups: api.collapsed_groups ?? [],
     taskRow: fromApiTaskRow(api.task_row),
   };
@@ -75,8 +83,9 @@ export function toApiSidebarDraft(draft: SidebarViewDraft): SidebarViewDraftApi 
   return {
     base_view_id: draft.baseViewId,
     filters: draft.filters.map(toApiClause),
-    sort: { key: draft.sort.key, direction: draft.sort.direction },
+    sort: toApiSort(draft.sort),
     group: draft.group,
+    group_indent: draft.groupIndent,
     task_row: toApiTaskRow(draft.taskRow),
   };
 }
@@ -85,11 +94,9 @@ export function fromApiSidebarDraft(api: SidebarViewDraftApi): SidebarViewDraft 
   return {
     baseViewId: api.base_view_id,
     filters: api.filters.map(fromApiClause),
-    sort: {
-      key: api.sort.key as SidebarView["sort"]["key"],
-      direction: api.sort.direction as SidebarView["sort"]["direction"],
-    },
+    sort: fromApiSort(api.sort),
     group: api.group as SidebarView["group"],
+    groupIndent: typeof api.group_indent === "boolean" ? api.group_indent : true,
     taskRow: fromApiTaskRow(api.task_row),
   };
 }

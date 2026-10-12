@@ -119,6 +119,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f := &fixture{t: t, db: w, store: store, coord: c, now: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC),
 		ep: &fakeEpisode{}, rp: &fakeReplay{}, cond: &fakeConditions{containment: true, measurable: true}}
+	f.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, workflow_id TEXT)`)
 	f.exec(`UPDATE coordinators SET autonomy_enabled = 1 WHERE id = ?`, c.ID)
 	if err := store.SetShadowDreamEnabled(context.Background(), c.WorkspaceID, c.ID, true); err != nil {
 		t.Fatal(err)

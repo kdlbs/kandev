@@ -41,7 +41,11 @@ func (h *Handlers) httpPutSettings(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	dto := NewCoordinatorDTO(found)
+	dto, err := h.coordinatorDTO(ctx, found)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
 	dto.CoordinatorPhase2 = saved
 	c.JSON(http.StatusOK, dto)
 }

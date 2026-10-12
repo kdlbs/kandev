@@ -1,7 +1,6 @@
 package ledger
 
 import (
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -34,14 +33,8 @@ func newPostgresFixture(t *testing.T) *fixture {
 		t.Fatalf("create schema: %v", err)
 	}
 	t.Cleanup(func() { _, _ = boot.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE") })
-	u, err := url.Parse(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
-	raw, err := internaldb.OpenPostgres(u.String(), 8, 2)
+	scopedDSN := testutil.PostgresDSNWithSearchPath(t, dsn, schema)
+	raw, err := internaldb.OpenPostgres(scopedDSN, 8, 2)
 	if err != nil {
 		t.Fatalf("open pool: %v", err)
 	}

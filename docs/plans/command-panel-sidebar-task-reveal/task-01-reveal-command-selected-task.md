@@ -5,7 +5,21 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/requirements/command-panel-sidebar-task-reveal.md"
+requirements:
+  - REQ-UI-COMMAND-PANEL-SIDEBAR-TASK-REVEAL-001
+acceptance_criteria:
+  - AC-UI-COMMAND-PANEL-SIDEBAR-TASK-REVEAL-001.1
+  - AC-UI-COMMAND-PANEL-SIDEBAR-TASK-REVEAL-001.2
+  - AC-UI-COMMAND-PANEL-SIDEBAR-TASK-REVEAL-001.3
+  - AC-UI-COMMAND-PANEL-SIDEBAR-TASK-REVEAL-001.4
+  - AC-UI-COMMAND-PANEL-SIDEBAR-TASK-REVEAL-001.5
+  - AC-UI-COMMAND-PANEL-SIDEBAR-TASK-REVEAL-001.6
+  - AC-UI-COMMAND-PANEL-SIDEBAR-TASK-REVEAL-001.7
+  - AC-UI-COMMAND-PANEL-SIDEBAR-TASK-REVEAL-001.8
+  - AC-UI-COMMAND-PANEL-SIDEBAR-TASK-REVEAL-001.9
+  - AC-UI-COMMAND-PANEL-SIDEBAR-TASK-REVEAL-001.10
+system_design:
+  - ../../specs/ui/system-design/command-panel-sidebar-task-reveal.md
 ---
 
 # Task 01: Reveal command-selected sidebar task
@@ -81,3 +95,41 @@ and delayed-blocker desktop regression failed before their respective fixes and 
 - `git diff --check`: passed.
 - Generated E2E output is disposable and excluded from the change; no security or trust-boundary
   changes were introduced.
+
+
+PR #3598 CI follow-up, 2026-10-06: run `37450559149`, shard 11 job
+`112233810114`, exposed an assertion that sampled the 1,400 ms reveal cue
+after waiting for route hydration and active-row settlement. Both reveal
+scenarios now observe the cue concurrently with command selection, before
+checking the destination URL, active identity, viewport containment, and
+unchanged document scroll. The existing one-second cue assertion deadline
+and production cue duration are unchanged.
+
+`cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium tests/task/sidebar-scroll-preservation.spec.ts tests/lsp/lsp-file-intelligence.spec.ts -- --retries 0 --trace=retain-on-failure`: all 27 cases passed in 9.8 minutes, including all eight sidebar-scroll cases, delayed guarded navigation, and above-viewport selection. `cd apps/web && pnpm exec vitest run lib/sidebar/task-navigation.test.ts`: 19 tests passed. Full web lint and typecheck, focused Prettier/ESLint, and whitespace checks passed. No production navigation change or deadline increase; exact pushed-head CI remains pending.
+
+
+The same follow-up updates this legacy work order's `spec` frontmatter to the
+current requirement/acceptance/design contract. Hosted documentation coverage
+rejected the obsolete field on `73a04b32bb4`; the exact local coverage
+preflight failed with that field and passed after migration across all 50
+changed work orders. This metadata correction changes no implementation scope
+or product behavior.
+
+### CI follow-up: observe the complete reveal transition
+
+The browser shard failed because its one-second class assertion began before
+command selection completed. The fixture now installs a narrowly scoped DOM
+observer before selection and records the target row's actual reveal class.
+Route, active identity, viewport containment, and document-scroll assertions
+remain unchanged. Observation disconnects and its handle is disposed on exit.
+
+Validation used the managed runner from the repository root:
+`TMPDIR=/root/.cache/kandev-pr3598-e2e-tmp GOMAXPROCS=4 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/task/sidebar-scroll-preservation.spec.ts -- --repeat-each=3 --retries=0 --trace=retain-on-failure`.
+All 24 cases passed. The phone command-navigation case passed three independent
+runs with retries disabled. Focused ESLint and web typecheck passed.
+
+A temporary 1.5-second option animation reproduced the original failure; the
+observer passed under the same delay. A temporary negative probe suppressed
+only the reveal class and failed after route, identity, and viewport assertions
+passed. Both probes were removed. Production timing and navigation are unchanged.
+Fresh pushed-head CI remains required.

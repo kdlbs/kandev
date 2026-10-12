@@ -65,7 +65,8 @@ func wireCoordinatorOutcomes(p routeParams, svc *coordinator.Service) {
 	queue.Start(p.ctx)
 	queue.RunSweeps(p.ctx, recorder.SQLProposals{DB: reader})
 	scanner.Start(p.ctx)
-	svc.SetDecisionObserver(recorder.NewObservers(log, queue, capture))
+	observers := recorder.NewObservers(log, queue, capture)
+	svc.SetDecisionObserver(observers)
 	if svc.Phase31Enabled() {
 		svc.SetOutcomeMeasures(recorder.NewMeasures(reader, dreamAgreement{store: svc.Store()}))
 	}
@@ -74,6 +75,7 @@ func wireCoordinatorOutcomes(p routeParams, svc *coordinator.Service) {
 			unsubGrade()
 			unsubScan()
 			svc.SetDecisionObserver(nil)
+			observers.Stop()
 			scanner.Stop()
 			queue.Stop()
 			return nil

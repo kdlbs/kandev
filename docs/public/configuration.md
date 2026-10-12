@@ -28,6 +28,8 @@ This page is the startup-configuration reference. Executor-specific fields are c
 
 Startup sources are read once and later sources override earlier ones. Web settings are stored separately and do not join the YAML and environment-variable precedence chain.
 
+Persistent web preferences are stored separately from startup configuration. **Settings > Preferences > Task behavior > Conversation > Message time** controls whether transcript timestamps use relative, absolute short, or absolute long labels. The other form remains available on hover or by tapping the timestamp. This is a per-user preference stored in the database, not a `config.yaml` key or environment variable.
+
 ## Load order and lifecycle
 
 At backend startup, later sources override earlier ones:
@@ -148,10 +150,10 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 ### Core agent service
 
-| YAML key               | Environment variable                              | Default     | Current behavior                                                                                  |
-| ---------------------- | ------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
-| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `127.0.0.1` | Host of the core `agentctl` control server. The literal avoids IPv6 loopback resolution variance. |
-| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback.                                  |
+| YAML key               | Environment variable                              | Default     | Current behavior                                                                                                                                                                                        |
+| ---------------------- | ------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `127.0.0.1` | Host of the core `agentctl` control server. `agentctl` and its per-session servers listen only on this host, so they stay on loopback by default. The literal avoids IPv6 loopback resolution variance. |
+| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback.                                                                                                                                        |
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
@@ -195,6 +197,31 @@ parsing, while a zero or negative YAML duration is rejected at startup with
 environment value falls back to `2h`, and non-positive values from a profile
 default are ignored, leaving the `2h` default in effect. The environment
 variable overrides YAML, and changes require a backend restart.
+
+
+### Backend delivery retention
+
+These startup values apply to SQLite and PostgreSQL. Restart the backend after a change.
+Invalid durations, zero values, and values outside the ranges stop startup.
+Environment values override YAML. These values do not configure the agentctl journal.
+
+| YAML key | Environment variable | Default | Range |
+| --- | --- | --- | --- |
+| `tasks.deliveryRetention.payloadGrace` | `KANDEV_TASK_DELIVERY_RETENTION_PAYLOAD_GRACE` | `1h` | `1m` to `720h` |
+| `tasks.deliveryRetention.replayAge` | `KANDEV_TASK_DELIVERY_RETENTION_REPLAY_AGE` | `24h` | `1h` to `720h` |
+| `tasks.deliveryRetention.replayEvents` | `KANDEV_TASK_DELIVERY_RETENTION_REPLAY_EVENTS` | `10000` | 100 to 100000 |
+| `tasks.deliveryRetention.interval` | `KANDEV_TASK_DELIVERY_RETENTION_INTERVAL` | `1m` | `10s` to `1h` |
+| `tasks.deliveryRetention.batchRows` | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_ROWS` | `200` | 1 to 200 |
+| `tasks.deliveryRetention.batchBytes` | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_BYTES` | `4194304` | 1048576 to 4194304 |
+
+`interval` controls idle rechecks after work is exhausted or maintenance is busy. Productive cleanup continues immediately without inter-batch or inter-pass sleeps.
+
+`batchRows` sets a candidate ceiling. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings. Other cleanup batches can use the configured ceiling.
+
+Automatic cleanup preserves canonical history and unresolved recovery evidence.
+Grace controls eligible raw payload removal. Replay age and event count bound recent duplicate receipts.
+Safety checks apply at every configured value. Protected data has no forced expiry.
+See [delivery retention operations](operations.md#backend-delivery-retention) for backups, rollback, logs, and physical reclamation.
 
 ### Capacity and managed-process startup settings
 

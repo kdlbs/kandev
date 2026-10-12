@@ -85,6 +85,7 @@ type Ledger struct {
 	events  chan turnJob
 
 	lifeMu  sync.Mutex
+	started bool
 	stopped bool
 	stopCh  chan struct{}
 	wg      sync.WaitGroup
@@ -121,8 +122,17 @@ func New(deps Deps) *Ledger {
 // rows. It returns nothing the caller must act on: a failed rebuild is counted
 // and logged.
 func (l *Ledger) Start(ctx context.Context) {
+	l.lifeMu.Lock()
+	if l.started || l.stopped {
+		l.lifeMu.Unlock()
+		return
+	}
+	l.started = true
+	// Shutdown joins the rebuild as well as its three registered workers.
+	l.wg.Add(4)
+	l.lifeMu.Unlock()
+	defer l.wg.Done()
 	l.safe(StageStart, func() error { return l.rebuildActive(ctx) })
-	l.wg.Add(3)
 	go l.runCallWriter()
 	go l.runJobs()
 	go l.runTurnEvents()
@@ -131,12 +141,10 @@ func (l *Ledger) Start(ctx context.Context) {
 // Stop ends the writer and waits for in-flight retries; it is idempotent.
 func (l *Ledger) Stop() {
 	l.lifeMu.Lock()
-	if l.stopped {
-		l.lifeMu.Unlock()
-		return
+	if !l.stopped {
+		l.stopped = true
+		close(l.stopCh)
 	}
-	l.stopped = true
-	close(l.stopCh)
 	l.lifeMu.Unlock()
 	l.wg.Wait()
 }

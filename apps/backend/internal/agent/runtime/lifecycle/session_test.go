@@ -55,12 +55,17 @@ type mockAgentServer struct {
 	httpActionLog        []string
 	rejectStreamAttempts int
 	agentStatus          string
+	instanceID           string
+	taskSessionID        string
+	nativeSessionID      string
+	deliveryStatus       *agentctl.DeliveryStatus
 	upgrader             websocket.Upgrader
 	handler              func(msg ws.Message) *ws.Message
 	afterResponse        func(msg ws.Message)
 	wsConnected          chan struct{} // closed when WS stream connects
 	materialized         []materializedUpload
 	failMaterialize      bool
+	materializedName     string
 }
 
 // materializedUpload records one /api/v1/attachments/materialize request so a
@@ -115,6 +120,39 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"agent_status":%q}`, status)
+	})
+	mux.HandleFunc("/api/v1/agent/session", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		status := m.agentStatus
+		if status == "" {
+			status = "running"
+		}
+		identity := map[string]any{
+			"instance_id":        m.instanceID,
+			"session_id":         m.taskSessionID,
+			"native_session_id":  m.nativeSessionID,
+			"agent_status":       status,
+			"incarnation_id":     "",
+			"harness_generation": uint64(0),
+		}
+		if m.deliveryStatus != nil {
+			identity["incarnation_id"] = m.deliveryStatus.IncarnationID
+			identity["harness_generation"] = m.deliveryStatus.HarnessGeneration
+		}
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(identity)
+	})
+	mux.HandleFunc("/api/v1/agent/delivery", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		status := m.deliveryStatus
+		m.mu.Unlock()
+		if status == nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(status)
 	})
 
 	// Agent stream WebSocket endpoint
@@ -223,6 +261,9 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 		}
 		name := r.FormValue("name")
 		m.mu.Lock()
+		if m.materializedName != "" {
+			name = m.materializedName
+		}
 		m.materialized = append(m.materialized, materializedUpload{
 			sessionID:    r.FormValue("session_id"),
 			attachmentID: r.FormValue("attachment_id"),
@@ -437,16 +478,20 @@ func TestInitializeAndPromptWithLayers_UnadvertisedModelFailsBeforeInference(t *
 
 func TestInitializeAndPromptWithLayers_AuggieTaskRejectsUnappliedMode(t *testing.T) {
 	tests := []struct {
-		name      string
-		agentID   string
-		result    agentctl.ModeResult
-		refused   bool
-		wantError string
+		name          string
+		agentID       string
+		result        agentctl.ModeResult
+		refused       bool
+		wantError     string
+		wantCode      string
+		wantReason    string
+		wantEffective string
 	}{
-		{name: "unconfirmed", result: agentctl.ModeResult{Requested: "plan"}, wantError: "confirmed"},
-		{name: "clamped", result: agentctl.ModeResult{Requested: "plan", Effective: "default", Confirmed: true}, wantError: "not applied"},
-		{name: "refused", refused: true, wantError: "apply requested permission mode"},
-		{name: "other provider still requires confirmation", agentID: "codex", result: agentctl.ModeResult{Requested: "plan"}, wantError: "confirmed"},
+		{name: "unconfirmed", result: agentctl.ModeResult{Requested: "plan"}, wantError: "confirmed", wantCode: "permission_mode_unconfirmed", wantReason: "confirmation_missing"},
+		{name: "confirmed without effective mode", result: agentctl.ModeResult{Requested: "plan", Confirmed: true}, wantError: "confirmed", wantCode: "permission_mode_unconfirmed", wantReason: "confirmation_missing"},
+		{name: "clamped", result: agentctl.ModeResult{Requested: "plan", Effective: "default", Confirmed: true}, wantError: "not applied", wantCode: "permission_mode_mismatch", wantReason: "effective_mismatch", wantEffective: "default"},
+		{name: "refused", refused: true, wantError: "apply requested permission mode", wantCode: "permission_mode_failed", wantReason: "application_failed"},
+		{name: "other provider still requires confirmation", agentID: "codex", result: agentctl.ModeResult{Requested: "plan"}, wantError: "confirmed", wantCode: "permission_mode_unconfirmed", wantReason: "confirmation_missing"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -499,6 +544,20 @@ func TestInitializeAndPromptWithLayers_AuggieTaskRejectsUnappliedMode(t *testing
 			)
 			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
 				t.Fatalf("mode error = %v, want %q", err, tc.wantError)
+			}
+			var failure *BootstrapFailure
+			if !errors.As(err, &failure) {
+				t.Fatalf("mode error %T does not preserve typed bootstrap evidence: %v", err, err)
+			}
+			if failure.Code != tc.wantCode {
+				t.Errorf("cause code = %q, want %q", failure.Code, tc.wantCode)
+			}
+			if failure.Reason != tc.wantReason || failure.RequestedMode != "plan" || failure.EffectiveMode != tc.wantEffective {
+				t.Errorf("mode evidence = (%q, %q, %q), want (%q, plan, %q)",
+					failure.Reason, failure.RequestedMode, failure.EffectiveMode, tc.wantReason, tc.wantEffective)
+			}
+			if failure.PromptNotSent == nil || !*failure.PromptNotSent {
+				t.Error("prompt_not_sent evidence = false or unknown, want true")
 			}
 			for _, action := range mock.getActionLog() {
 				if action == "agent.prompt" {
@@ -951,6 +1010,7 @@ func TestAuggieTaskStartRequiresSelectedModel(t *testing.T) {
 		wantError     string
 	}{
 		{name: "task Auggie rejects profile fallback", agentID: "auggie", taskScope: TaskLaunchScopeTask, profileModel: "missing-model", wantStartFail: true, wantError: "requested_not_advertised"},
+		{name: "automation Auggie rejects profile fallback", agentID: "auggie", taskScope: TaskLaunchScopeAutomation, profileModel: "missing-model", wantStartFail: true, wantError: "requested_not_advertised"},
 		{name: "task Auggie rejects missing runtime override", agentID: "auggie", taskScope: TaskLaunchScopeTask, profileModel: "gpt-5", runtimeModel: "missing-model", wantStartFail: true, wantError: "requested_not_advertised"},
 		{name: "task Auggie rejects selected model refusal", agentID: "auggie", taskScope: TaskLaunchScopeTask, profileModel: "gpt-5", rejectModel: true, wantStartFail: true, wantError: "failed to set start model"},
 		{name: "native resumed task Auggie preserves stored conversation when runtime model is missing", agentID: "auggie", taskScope: TaskLaunchScopeTask, profileModel: "gpt-5", runtimeModel: "missing-model", nativeResume: true, wantStartFail: true, wantError: "requested_not_advertised"},
@@ -1846,7 +1906,7 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 	}
 	callbacks := make(chan string, 2)
 	execution.setInitialPromptDispatchCallbacks(
-		func() error { callbacks <- "admission"; return nil },
+		func(context.Context, string, []v1.MessageAttachment) error { callbacks <- "admission"; return nil },
 		func() { callbacks <- "dispatched" },
 		nil,
 	)
@@ -1985,9 +2045,13 @@ func TestInitializeSession_CreatesNewSession(t *testing.T) {
 		},
 	}
 
-	result, err := sm.InitializeSession(ctx, client, agentConfig, "", "/workspace", nil)
+	execution := &AgentExecution{DeliveryStreamID: "legacy-stream"}
+	result, err := sm.InitializeSession(ctx, execution, client, agentConfig, "", "/workspace", nil)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
+	}
+	if execution.DeliveryMode != DurableDeliveryLegacy {
+		t.Errorf("delivery mode = %q, want %q", execution.DeliveryMode, DurableDeliveryLegacy)
 	}
 
 	if result.AgentName != "test-agent" {
@@ -2139,7 +2203,7 @@ func TestInitializeSession_LoadsExistingSession(t *testing.T) {
 		},
 	}
 
-	result, err := sm.InitializeSession(ctx, client, agentConfig, "existing-session", "/workspace", nil)
+	result, err := sm.InitializeSession(ctx, nil, client, agentConfig, "existing-session", "/workspace", nil)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}

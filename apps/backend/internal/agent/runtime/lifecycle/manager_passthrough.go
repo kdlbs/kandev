@@ -15,12 +15,14 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -42,7 +44,7 @@ func (m *Manager) PreparePassthroughRunning(sessionID string) (func(), error) {
 	var updated *AgentExecution
 	var alreadyRunning bool
 	var validationErr error
-	if err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+	if err := m.executionStore.WithPromptLifecycleLock(execution.ID, func(current *AgentExecution) {
 		// Revalidate the session mapping and passthrough mode while claiming the
 		// transition. The initial lookup only supplies the execution ID to lock.
 		if current.SessionID != sessionID {
@@ -61,9 +63,14 @@ func (m *Manager) PreparePassthroughRunning(sessionID string) (func(), error) {
 		}
 		current.Status = v1.AgentStatusRunning
 		updated = current
+		// Passthrough turns are not bound to the ACP prompt turn captured by a
+		// previous native dispatch. Clear that identity before publishing the
+		// running snapshot so a delayed ready event cannot settle an unrelated
+		// Kandev turn after a PTY prompt starts.
+		current.promptTurnID = ""
 		// Capture the payload under the same lock as the status claim so a
 		// competing stop/failure cannot relabel the deferred event.
-		payload = newAgentEventPayload(current)
+		payload = newAgentEventPayloadPromptLocked(current)
 	}); err != nil {
 		if errors.Is(err, ErrExecutionNotFound) {
 			return nil, fmt.Errorf("no agent execution found for session: %s", sessionID)
@@ -432,7 +439,7 @@ func (m *Manager) applyPassthroughMCPWithPreparation(
 	if err != nil {
 		return nil, fmt.Errorf("build passthrough MCP config: %w", err)
 	}
-	if err := m.writePassthroughMCPFiles(execution, artifacts.Files); err != nil {
+	if err := m.writePassthroughMCPFiles(ctx, execution, artifacts.Files); err != nil {
 		return nil, err
 	}
 	setPassthroughMCPEnv(execution, artifacts.Env)
@@ -456,7 +463,7 @@ func (m *Manager) passthroughMCPServers(
 	servers := []agentctltypes.McpServer{{
 		Name: kandevMCPServerName,
 		Type: string(mcpconfig.ServerTypeHTTP),
-		URL:  fmt.Sprintf("http://localhost:%d/mcp", port),
+		URL:  m.agentMCPURL(execution, port, "/mcp"),
 	}}
 	profileServers, err := m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig)
 	if err != nil {
@@ -490,40 +497,67 @@ func (m *Manager) passthroughMCPPaths(execution *AgentExecution) mcpconfig.Passt
 }
 
 // writePassthroughMCPFiles materializes the strategy's config files and records
-// every file kandev OWNS (created or overwrote) for cleanup. Files merged into a
-// pre-existing user file (Cursor) are not tracked — kandev must not delete the
-// user's file on teardown.
-func (m *Manager) writePassthroughMCPFiles(execution *AgentExecution, files []mcpconfig.PassthroughConfigFile) error {
+// a fingerprint claim for every file kandev owns. An existing MergeKey file is
+// owned only when its bytes match a known Kandev generation; otherwise it is a
+// user/unknown file and teardown leaves it alone.
+func (m *Manager) writePassthroughMCPFiles(ctx context.Context, execution *AgentExecution, files []mcpconfig.PassthroughConfigFile) error {
 	written := getPassthroughMCPFiles(execution)
 	for _, f := range files {
 		if f.Path == "" {
 			continue
 		}
-		ok, err := m.materializePassthroughFile(execution, f)
+		ok, err := m.materializePassthroughFile(ctx, execution, f)
 		if err != nil {
 			return err
 		}
 		if ok {
 			written = appendUnique(written, f.Path)
+		} else {
+			written = removePassthroughMCPFile(written, f.Path)
 		}
 	}
 	setPassthroughMCPFiles(execution, written)
+	if m.executionStore != nil {
+		if _, tracked := m.executionStore.Get(execution.ID); tracked {
+			// Workspace-only executions are already registered when promotion
+			// materializes their project file. Persist the claim immediately so
+			// backend recovery can distinguish it from a user file.
+			m.persistExecutorRunning(context.WithoutCancel(context.Background()), execution)
+		}
+	}
 	return nil
 }
 
 // materializePassthroughFile writes one config file and reports whether kandev
-// OWNS the result (true = track for cleanup). It refuses to write through an
+// owns the result (true = track for cleanup). It refuses to write through an
 // existing symlink (a malicious repo could point it outside the worktree),
 // guards against a symlinked parent escaping the worktree, and creates new files
-// with O_EXCL. For MergeKey files (Cursor) that already exist, kandev's servers
-// are merged into the user's file (preserving their entries) and the file is NOT
-// tracked for cleanup since it is the user's.
-func (m *Manager) materializePassthroughFile(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+// with O_EXCL. For an existing MergeKey file, Kandev preserves the user's
+// entries and records ownership only when the existing bytes match a known
+// Kandev generation.
+func (m *Manager) materializePassthroughFile(ctx context.Context, execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+	lockFile, err := acquirePassthroughMCPFileLock(ctx, f.Path)
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		if releaseErr := releasePassthroughMCPFileLock(lockFile); releaseErr != nil {
+			m.logger.Warn("failed to release passthrough MCP file lock",
+				zap.String("path", f.Path), zap.Error(releaseErr))
+		}
+	}()
+	m.passthroughMCPMu.Lock()
+	defer m.passthroughMCPMu.Unlock()
+	return m.materializePassthroughFileLocked(execution, f)
+}
+
+func (m *Manager) materializePassthroughFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
 	if escapes, err := workspacePathEscapes(execution.WorkspacePath, f.Path); err != nil {
 		return false, fmt.Errorf("validate passthrough MCP config path: %w", err)
 	} else if escapes {
 		m.logger.Warn("passthrough MCP config path escapes workspace via symlink; skipping",
 			zap.String("path", f.Path))
+		m.forgetPassthroughMCPClaimLocked(execution, f.Path)
 		return false, nil
 	}
 
@@ -534,25 +568,70 @@ func (m *Manager) materializePassthroughFile(execution *AgentExecution, f mcpcon
 		// outside the worktree. Applies to both merge and create.
 		m.logger.Warn("passthrough MCP config is a symlink; leaving it untouched",
 			zap.String("path", f.Path))
+		m.forgetPassthroughMCPClaimLocked(execution, f.Path)
 		return false, nil
 	case statErr == nil && f.MergeKey != "":
-		// Merge kandev's servers into the user's existing regular file. Not
-		// tracked — it's the user's file; we only appended our entries.
-		return false, m.mergePassthroughConfig(f)
+		return m.materializeExistingMergeFileLocked(execution, f)
 	case statErr == nil:
-		// Existing kandev-owned temp file (Claude/OpenCode) — overwrite it.
-		if err := os.WriteFile(f.Path, f.Content, 0o600); err != nil {
-			return false, fmt.Errorf("write passthrough MCP config: %w", err)
-		}
-		return true, nil
+		return m.overwritePassthroughFileLocked(execution, f)
 	case !os.IsNotExist(statErr):
 		return false, fmt.Errorf("lstat passthrough MCP config: %w", statErr)
 	default:
-		if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
-			return false, fmt.Errorf("create passthrough MCP config dir: %w", err)
-		}
-		return m.writeFileNoFollow(f.Path, f.Content)
+		return m.createPassthroughFileLocked(execution, f)
 	}
+}
+
+func (m *Manager) materializeExistingMergeFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+	content, readErr := os.ReadFile(f.Path)
+	knownOwned := readErr == nil && m.knownPassthroughMCPGenerationLocked(f.Path, passthroughMCPFingerprint(content))
+	if err := m.mergePassthroughConfig(f); err != nil {
+		return false, err
+	}
+	if !knownOwned {
+		// An existing MergeKey file with no matching Kandev generation is
+		// user/unknown owned. It may contain a stale Kandev entry, but its
+		// teardown ownership remains with the user.
+		m.forgetPassthroughMCPClaimLocked(execution, f.Path)
+		return false, nil
+	}
+	merged, err := os.ReadFile(f.Path)
+	if err != nil {
+		return false, fmt.Errorf("read merged passthrough MCP config: %w", err)
+	}
+	fingerprint := passthroughMCPFingerprint(merged)
+	m.adoptPassthroughMCPGenerationLocked(f.Path, fingerprint)
+	m.recordPassthroughMCPClaimLocked(execution, passthroughMCPFileClaim{
+		Path: f.Path, Fingerprint: fingerprint, Owned: true,
+	})
+	return true, nil
+}
+
+func (m *Manager) overwritePassthroughFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+	if err := os.WriteFile(f.Path, f.Content, 0o600); err != nil {
+		return false, fmt.Errorf("write passthrough MCP config: %w", err)
+	}
+	m.recordPassthroughMCPClaimLocked(execution, passthroughMCPFileClaim{
+		Path: f.Path, Fingerprint: passthroughMCPFingerprint(f.Content), Owned: true,
+	})
+	return true, nil
+}
+
+func (m *Manager) createPassthroughFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
+		return false, fmt.Errorf("create passthrough MCP config dir: %w", err)
+	}
+	owned, err := m.writeFileNoFollow(f.Path, f.Content)
+	if err != nil {
+		return false, err
+	}
+	if owned {
+		m.recordPassthroughMCPClaimLocked(execution, passthroughMCPFileClaim{
+			Path: f.Path, Fingerprint: passthroughMCPFingerprint(f.Content), Owned: true,
+		})
+	} else {
+		m.forgetPassthroughMCPClaimLocked(execution, f.Path)
+	}
+	return owned, nil
 }
 
 // mergePassthroughConfig merges kandev's servers (f.Content's f.MergeKey object)
@@ -646,14 +725,44 @@ func workspacePathEscapes(workspaceDir, path string) (bool, error) {
 }
 
 func (m *Manager) cleanupPassthroughMCPConfig(execution *AgentExecution) {
-	for _, path := range getPassthroughMCPFiles(execution) {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			m.logger.Warn("failed to remove passthrough MCP config",
-				zap.String("path", path),
-				zap.Error(err))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	m.cleanupPassthroughMCPConfigWithContext(ctx, execution)
+}
+
+func (m *Manager) cleanupPassthroughMCPConfigWithContext(ctx context.Context, execution *AgentExecution) {
+	for _, claim := range getPassthroughMCPClaims(execution) {
+		lockFile, err := acquirePassthroughMCPFileLock(ctx, claim.Path)
+		if err != nil {
+			m.logger.Warn("failed to acquire passthrough MCP file lock for cleanup",
+				zap.String("path", claim.Path), zap.Error(err))
+			m.passthroughMCPMu.Lock()
+			m.forgetPassthroughMCPClaimLocked(execution, claim.Path)
+			m.passthroughMCPMu.Unlock()
+			continue
+		}
+		m.passthroughMCPMu.Lock()
+		m.cleanupPassthroughMCPClaimLocked(execution, claim)
+		if err := releasePassthroughMCPFileLock(lockFile); err != nil {
+			m.logger.Warn("failed to release passthrough MCP file lock after cleanup",
+				zap.String("path", claim.Path), zap.Error(err))
+		}
+		m.forgetPassthroughMCPClaimLocked(execution, claim.Path)
+		m.passthroughMCPMu.Unlock()
+	}
+	if execution != nil {
+		execution.deleteMetadataValues(metadataKeyPassthroughMCPFiles, metadataKeyPassthroughMCPEnv)
+	}
+}
+
+func removePassthroughMCPFile(files []string, path string) []string {
+	filtered := files[:0]
+	for _, file := range files {
+		if filepath.Clean(file) != filepath.Clean(path) {
+			filtered = append(filtered, file)
 		}
 	}
-	execution.deleteMetadataValues(metadataKeyPassthroughMCPFiles, metadataKeyPassthroughMCPEnv)
+	return filtered
 }
 
 func appendUnique(list []string, value string) []string {
@@ -751,6 +860,10 @@ func (m *Manager) passthroughAgentCommandWithPreparation(ctx context.Context, ex
 	if err != nil {
 		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, err
 	}
+	baseCommand, err := m.openCodePassthroughCommand(ctx, agentConfig, execution.RuntimeName)
+	if err != nil {
+		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, err
+	}
 
 	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            effectivePassthroughModel(execution, profileInfo),
@@ -759,6 +872,7 @@ func (m *Manager) passthroughAgentCommandWithPreparation(ctx context.Context, ex
 		PermissionValues: profilePermissionValues(profileInfo),
 		MCPArgs:          mcpArgs,
 		CLIFlagTokens:    m.profileCLIFlagTokens(profileInfo),
+		BaseCommand:      baseCommand,
 	})
 	if cmd.IsEmpty() {
 		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("passthrough command is empty for agent %s", agentConfig.ID())
@@ -961,12 +1075,17 @@ func (m *Manager) freshPassthroughCommandForResolved(ctx context.Context, execut
 	if err != nil {
 		return agents.PassthroughConfig{}, nil, agents.Command{}, err
 	}
+	baseCommand, err := m.openCodePassthroughCommand(ctx, resolved.agentConfig, execution.RuntimeName)
+	if err != nil {
+		return agents.PassthroughConfig{}, nil, agents.Command{}, err
+	}
 
 	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            effectivePassthroughModel(execution, resolved.profile),
 		PermissionValues: profilePermissionValues(resolved.profile),
 		MCPArgs:          mcpArgs,
 		CLIFlagTokens:    m.profileCLIFlagTokens(resolved.profile),
+		BaseCommand:      baseCommand,
 	})
 	if cmd.IsEmpty() {
 		return agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("passthrough command is empty for agent %s", resolved.agentID)
@@ -984,17 +1103,50 @@ func (m *Manager) resumePassthroughCommandWithPreparation(ctx context.Context, e
 	if err != nil {
 		return agents.Command{}, err
 	}
+	baseCommand, err := m.openCodePassthroughCommand(ctx, resolved.agentConfig, execution.RuntimeName)
+	if err != nil {
+		return agents.Command{}, err
+	}
 	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            effectivePassthroughModel(execution, resolved.profile),
 		Resume:           useResume,
 		PermissionValues: profilePermissionValues(resolved.profile),
 		MCPArgs:          mcpArgs,
 		CLIFlagTokens:    m.profileCLIFlagTokens(resolved.profile),
+		BaseCommand:      baseCommand,
 	})
 	if cmd.IsEmpty() {
 		return agents.Command{}, fmt.Errorf("passthrough resume command is empty for agent %s", resolved.agentID)
 	}
 	return cmd, nil
+}
+
+func (m *Manager) openCodePassthroughCommand(
+	ctx context.Context,
+	agentConfig agents.Agent,
+	runtime agentruntime.Runtime,
+) (agents.Command, error) {
+	openCode, ok := agentConfig.(*agents.OpenCodeACP)
+	if !ok || m.managedRuntimeSelections == nil {
+		return agents.Command{}, nil
+	}
+	reader, ok := m.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader)
+	if !ok {
+		return agents.Command{}, nil
+	}
+	selected, err := openCode.ResolveSelectedRuntimeWithReader(ctx, reader)
+	if err != nil {
+		return agents.Command{}, fmt.Errorf("resolve OpenCode interactive runtime: %w", err)
+	}
+	if selected.Source == managedruntime.OpenCodeSourceNative && runtime == agentruntime.RuntimeStandalone && selected.Spec.NativeBinaryOnPath() {
+		if _, found, err := agents.DetectOpenCodeNativeRuntime(ctx); err != nil {
+			return agents.Command{}, err
+		} else if !found {
+			return agents.Command{}, errors.New("selected native OpenCode runtime is unavailable")
+		}
+		return agents.NewCommand(selected.Spec.NativeBinary), nil
+	}
+	return selected.Spec.InteractiveCommand(selected.Version), nil
 }
 
 func (m *Manager) newCursorPassthroughPreparationRecorder(execution *AgentExecution, resolved *resolvedPassthrough) *prepareProgressRecorder {

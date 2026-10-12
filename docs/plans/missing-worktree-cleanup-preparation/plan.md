@@ -167,6 +167,7 @@ missing-worktree state. No new layout or touch behavior requires a mobile design
 ## Work orders
 
 - [done] [Task 01: Recover cleanup preparation for absent worktrees](task-01-recover-preparation.md)
+- [done] [Task 02: Treat a checkout without Git metadata as absent](task-02-checkout-without-git-metadata.md)
 
 ## Verification results
 

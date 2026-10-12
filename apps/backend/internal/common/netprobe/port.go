@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-// ConnectProbeTimeout bounds each loopback connect probe so a silently
+// ConnectProbeTimeout bounds each TCP connect probe so a silently
 // dropped SYN (for example under WSL2 mirrored networking to an unbound
 // loopback port) cannot hang port selection. A timed-out connect counts as
 // "nothing listening".

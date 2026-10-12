@@ -2,14 +2,17 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { isDynamicErrorPolicyValid } from "@/components/settings/dynamic-agent-policy-editor";
 import { updateAgentProfileAction } from "@/app/actions/agents";
 import { isHandledApiError } from "@/lib/api/client";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { orderProfilesForSelection } from "@/lib/settings/agent-profile-selector-order";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { useSyncAgentsToStore } from "@/components/settings/agent-profile-page-state";
+import { isProfileRevisionNewer } from "@/components/settings/agent-profile-reconciliation";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 import type {
   DynamicAgentCandidate,
@@ -114,8 +117,8 @@ export function useDynamicAgentProfileEditorState({
   const { toast } = useToast();
   const routingEnabled = useFeature("dynamicAgentRouting");
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
-  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const storeApi = useAppStoreApi();
+  const syncAgentsToStore = useSyncAgentsToStore();
   const draft = useDynamicAgentProfileEditorDraft({ profile, onDraftChange });
   const [saving, setSaving] = useState(false);
   const standalone = onDraftChange === undefined;
@@ -136,7 +139,7 @@ export function useDynamicAgentProfileEditorState({
       settingsAgents.flatMap((item) =>
         item.name === "dynamic"
           ? []
-          : item.profiles
+          : orderProfilesForSelection(item.profiles)
               .filter(
                 (candidate) =>
                   candidate.kind !== "dynamic" &&
@@ -182,22 +185,21 @@ export function useDynamicAgentProfileEditorState({
         return;
       }
       const updated = await updateAgentProfileAction(profile.id, payload);
-      const nextAgents = settingsAgents.map((item) =>
+      const nextAgents = storeApi.getState().settingsAgents.items.map((item) =>
         item.id !== agent.id
           ? item
           : {
               ...item,
               profiles: item.profiles.map((itemProfile) =>
-                itemProfile.id === updated.id ? updated : itemProfile,
+                itemProfile.id === profile.id &&
+                updated.id === profile.id &&
+                isProfileRevisionNewer(updated, itemProfile)
+                  ? updated
+                  : itemProfile,
               ),
             },
       );
-      setSettingsAgents(nextAgents);
-      setAgentProfiles(
-        nextAgents.flatMap((item) =>
-          item.profiles.map((itemProfile) => toAgentProfileOption(item, itemProfile)),
-        ),
-      );
+      syncAgentsToStore(nextAgents);
       draft.acceptProfileSaveResponse(updated, submitted);
       toast({ title: t("agents:dynamicProfileSaved") });
     } catch (error) {

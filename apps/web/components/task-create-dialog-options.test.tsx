@@ -5,6 +5,9 @@ import type { AvailableAgent } from "@/lib/types/http-agents";
 import type { Executor } from "@/lib/types/http";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { computeExecutorHint, useAgentProfileOptions } from "./task-create-dialog-options";
+import { createAppStore } from "@/lib/state/store";
+import type { Agent } from "@/lib/types/http";
+import { AGENT_PROFILE_RECENT_USE_CONTEXTS } from "@/lib/types/http-agent-profile-recent-use";
 
 // Minimal store shape consumed by useAvailableAgents.
 type MockStore = {
@@ -197,6 +200,42 @@ describe("useAgentProfileOptions enabled filter", () => {
 });
 
 describe("useAgentProfileOptions recent-use ordering", () => {
+  // @covers AC-AGENTS-PROFILE-LIST-ORDERING-003.14
+  it.each(AGENT_PROFILE_RECENT_USE_CONTEXTS)(
+    "preserves %s recency ranking and unseen baseline after a Settings reorder",
+    (context) => {
+      const store = createAppStore();
+      store.getState().applyAgentListSnapshot(
+        [
+          {
+            id: "agent-1",
+            name: "omp-acp",
+            profile_order_revision: 2,
+            profiles: [
+              { id: "old", name: "Old", createdAt: "2026-01-01T00:00:00Z" },
+              { id: "middle", name: "Middle", createdAt: "2026-02-01T00:00:00Z" },
+              { id: "new", name: "New", createdAt: "2026-03-01T00:00:00Z" },
+            ],
+          } as Agent,
+        ],
+        0,
+      );
+      mockStore.agentProfileRecentUse = {
+        loaded: true,
+        records: {
+          [context]: { profileIds: ["old"], revision: 1, updatedAt: "2026-04-01T00:00:00Z" },
+        },
+      };
+      const { result, rerender } = renderHook(() =>
+        useAgentProfileOptions(store.getState().agentProfiles.items, context),
+      );
+      expect(result.current.map((option) => option.value)).toEqual(["old", "new", "middle"]);
+      store.getState().acceptAgentProfileOrder("agent-1", ["middle", "old", "new"], 3);
+      rerender();
+      expect(result.current.map((option) => option.value)).toEqual(["old", "new", "middle"]);
+    },
+  );
+
   it("ranks remembered eligible profiles and keeps unseen source order", () => {
     mockStore.agentProfileRecentUse = {
       loaded: true,

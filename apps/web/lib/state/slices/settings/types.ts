@@ -14,6 +14,7 @@ import type {
   ToolStatus,
   LspStatusLocation,
   LastSeenDisplay,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
@@ -35,6 +36,7 @@ import type {
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { TaskColor } from "@/lib/task-colors";
 import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
+import type { AgentUpdateJob } from "@/lib/api";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -92,6 +94,8 @@ export type AgentProfileOption = {
   /** Persisted profile revision (RFC3339 updated_at), used to prefer newer
    * WS-delivered options over a stale in-flight response. */
   updatedAt?: string;
+  /** Creation instant for the selector baseline, independent of Settings order. */
+  createdAt?: string;
   /**
    * False hides the profile from task/session creation pickers. Existing
    * sessions keep their labels and the profile stays editable in settings.
@@ -292,6 +296,7 @@ export function toAgentProfileOption(
   >,
   profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name" | "workspaceId"> & {
     updatedAt?: string;
+    createdAt?: string;
     kind?: AgentProfileKind;
     cliPassthrough?: boolean;
     model?: string;
@@ -315,15 +320,24 @@ export function toAgentProfileOption(
     require_exact_model: profile.requireExactModel ?? undefined,
     workspace_id: profile.workspaceId,
     updatedAt: profile.updatedAt,
+    createdAt: profile.createdAt,
     enabled: profile.enabled ?? true,
     capability_status: agent.capability_status,
     capability_error: agent.capability_error,
   };
 }
 
+export type ProfileOrderSync = {
+  revision: number;
+  order: string[] | null;
+  inFlight: string[] | null;
+  queued: string[] | null;
+};
+
 export type AgentProfilesState = {
   items: AgentProfileOption[];
   version: number;
+  orderByAgent: Record<string, ProfileOrderSync>;
 };
 
 export type InstallJobStatus = "queued" | "running" | "succeeded" | "failed";
@@ -346,27 +360,6 @@ export type InstallJob = {
  */
 export type InstallJobsState = {
   byAgent: Record<string, InstallJob>;
-};
-
-export type AgentUpdateJobStatus =
-  | "queued"
-  | "resolving"
-  | "updating"
-  | "refreshing"
-  | "succeeded"
-  | "failed";
-
-export type AgentUpdateJob = {
-  job_id: string;
-  agent_name: string;
-  status: AgentUpdateJobStatus;
-  current_version?: string;
-  target_version?: string;
-  output?: string;
-  error?: string;
-  refresh_error?: string;
-  started_at: string;
-  finished_at?: string;
 };
 
 export type AgentUpdateJobsState = {
@@ -486,8 +479,11 @@ export type UserSettingsState = {
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
   lastSeenDisplay: LastSeenDisplay;
+  messageTimeDisplay: MessageTimeDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
+  sidebarFastActionsEnabled: boolean;
+  sidebarNewTaskStyle: "simple" | "compact";
   sidebarHoverEnabled: boolean;
   sidebarHoverDelayMs: number;
   resolveSessionHostnames: boolean;
@@ -515,6 +511,11 @@ export type TaskCreateLastUsedState = {
 };
 
 export type SettingsSliceState = {
+  agentRuntimeUpdates: {
+    byAgent: Record<string, import("@/lib/api/domains/agent-update-api").AgentUpdateStatus>;
+    checkedAt: number;
+    loading: boolean;
+  };
   executors: ExecutorsState;
   settingsAgents: SettingsAgentsState;
   agentDiscovery: AgentDiscoveryState;
@@ -535,6 +536,11 @@ export type SettingsSliceState = {
 };
 
 export type SettingsSliceActions = {
+  setAgentRuntimeUpdateStatuses: (
+    statuses: import("@/lib/api/domains/agent-update-api").AgentUpdateStatus[],
+    checkedAt: number,
+  ) => void;
+  setAgentRuntimeUpdateLoading: (loading: boolean) => void;
   setExecutors: (executors: ExecutorsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
@@ -544,6 +550,17 @@ export type SettingsSliceActions = {
     tools?: AvailableAgentsState["tools"],
   ) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
+  applyAgentListSnapshot: (
+    agents: SettingsAgentsState["items"],
+    expectedProfileVersion: number,
+  ) => boolean;
+  acceptAgentProfileOrder: (agentId: string, profileIds: string[], revision: number) => boolean;
+  setAgentProfileOrder: (agentId: string, profileIds: string[]) => void;
+  setAgentProfileOrderIntent: (
+    agentId: string,
+    inFlight: string[] | null,
+    queued: string[] | null,
+  ) => void;
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
   setInstallJobs: (jobs: InstallJob[]) => void;
   upsertInstallJob: (job: InstallJob) => void;

@@ -196,6 +196,37 @@ describe("useRemoteContributionRelation repository selection", () => {
 describe("useRemoteContributionRelation status quality", () => {
   beforeEach(resetRelationMocks);
 
+  // @covers AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.4
+  it("waits for current upstream evidence without borrowing a sibling repository's counts", () => {
+    mocks.statuses = [
+      status("frontend", "local-head", "stale-upstream", {
+        remote_ahead: 2,
+        remote_behind: 0,
+      }),
+      status("backend", "backend-local", mocks.providerHead, {
+        remote_ahead: 2,
+        remote_behind: 2,
+      }),
+    ];
+    const { result, rerender } = renderHook(() => useRemoteContributionRelation("session-1"));
+
+    expect(result.current.relation).toMatchObject({ kind: "unknown", presentation: "unified" });
+    expect(remoteContributionActionPolicy(result.current.relation)).toMatchObject({
+      replaceDisabled: true,
+      useDisabled: true,
+    });
+
+    mocks.statuses = [
+      status("frontend", "local-head", mocks.providerHead, {
+        remote_ahead: 1,
+        remote_behind: 0,
+      }),
+      ...mocks.statuses.slice(1),
+    ];
+    rerender();
+    expect(result.current.relation.kind).toBe("local_ahead");
+  });
+
   // @covers AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.7
   it("keeps retained commits visible without authorizing actions during refresh", () => {
     mocks.authoritativeCommits = [];

@@ -41,6 +41,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	"github.com/kandev/kandev/internal/task/deliveryretention"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
@@ -82,6 +83,7 @@ type Repositories struct {
 }
 
 type Services struct {
+	DeliveryRetention        *deliveryretention.Worker
 	ManagedRuntimeSelections managedruntime.SelectionStore
 	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver
 	DynamicBindingResolver   *dynamicruntime.CredentialBindingResolver

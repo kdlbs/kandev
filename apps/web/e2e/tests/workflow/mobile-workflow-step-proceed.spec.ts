@@ -1,5 +1,4 @@
 import { expect, test } from "../../fixtures/test-base";
-import { waitForHttp } from "../../helpers/causal-waits";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import {
@@ -14,14 +13,9 @@ test("uses the task workflow when another board is selected on a phone", async (
   seedData,
 }) => {
   const scenario = await seedCrossWorkflowProceedScenario(apiClient, seedData);
-  const featureSnapshot = waitForHttp(
-    testPage,
-    "GET",
-    new RegExp(`/api/v1/workflows/${scenario.featureWorkflow.id}/snapshot$`),
-  );
+
   const kanban = new KanbanPage(testPage);
   await kanban.goto();
-  await featureSnapshot;
 
   const boardTaskCard = kanban.taskCardByTitle(BOARD_CONTEXT_TASK_TITLE);
   await expect(boardTaskCard).toBeVisible();

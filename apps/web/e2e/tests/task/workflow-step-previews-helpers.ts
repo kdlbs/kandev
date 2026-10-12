@@ -18,7 +18,10 @@ export async function expectWorkflowStepPreviewsLoaded(
 ) {
   const receivedResponses = await Promise.all(responses);
   for (const response of receivedResponses) expect(response.ok()).toBe(true);
-  await Promise.all(workflows.map(({ id, stepNames }) => expectStepsInOrder(page, id, stepNames)));
+  await Promise.all(receivedResponses.map((response) => response.finished()));
+  for (const { id, stepNames } of workflows) {
+    await expectStepsInOrder(page, id, stepNames);
+  }
 }
 
 export async function expectStepsInOrder(page: Page, workflowId: string, stepNames: string[]) {
@@ -26,12 +29,14 @@ export async function expectStepsInOrder(page: Page, workflowId: string, stepNam
   await expect(group).toBeVisible();
   await expect
     .poll(async () => {
-      const text = (await group.textContent()) ?? "";
-      let previousPosition = -1;
+      const renderedStepNames = await group
+        .getByTestId("workflow-option-step-name")
+        .allTextContents();
+      let nextPosition = 0;
       for (const name of stepNames) {
-        const position = text.indexOf(name);
-        if (position <= previousPosition) return false;
-        previousPosition = position;
+        const position = renderedStepNames.indexOf(name, nextPosition);
+        if (position < 0) return false;
+        nextPosition = position + 1;
       }
       return true;
     })
@@ -463,7 +468,7 @@ export async function touchWorkflowOptionListToBoundary(
   ).toBeGreaterThan(1);
 
   let gestureCount = 0;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
     const state = await optionList.evaluate((element) => ({
       top: element.scrollTop,
       bottom: element.scrollHeight - element.clientHeight,

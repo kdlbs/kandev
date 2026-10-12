@@ -7,6 +7,10 @@ import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import type { ChangesPanelBodyProps } from "./changes-panel-data";
 import type { ChangesHistoryTimelineRow } from "./changes-timeline-model";
+import {
+  useChangesInlineCommitDetails,
+  useChangesPanelContextIdentity,
+} from "./use-changes-inline-commit-details";
 
 const mocks = vi.hoisted(() => ({
   requestCommitDetail: vi.fn(),
@@ -63,6 +67,7 @@ const FRONTEND_REPOSITORY = "frontend";
 const BACKEND_REPOSITORY = "backend";
 const FRONTEND_COMMIT = "frontend-commit";
 const TASK_A_CONTEXT = ["task-a", "session-a", "environment-a"] as const;
+const TASK_A_SIBLING_CONTEXT = ["task-a", "session-a-sibling", "environment-a"] as const;
 const TASK_B_CONTEXT = ["task-b", "session-b", "environment-b"] as const;
 const TASK_B_NEW_ENVIRONMENT_CONTEXT = ["task-b", "session-b", "environment-c"] as const;
 const ARIA_EXPANDED = "aria-expanded";
@@ -99,7 +104,12 @@ function setContext(taskId: string, sessionId: string, environmentId: string) {
   });
 }
 
-function panelProps(): ChangesPanelBodyProps {
+type BodyTestProps = Omit<
+  ChangesPanelBodyProps,
+  "inlineCommitDetails" | "inlineCommitDetailVersion" | "contextKey"
+>;
+
+function panelProps(): BodyTestProps {
   const noop = () => {};
   const commit = (sha: string, repository_name: string) => ({
     commit_sha: sha,
@@ -142,6 +152,7 @@ function panelProps(): ChangesPanelBodyProps {
     gitStatus: {
       hasPriorData: false,
       membershipReady: false,
+      refreshPending: false,
       loading: false,
       unavailable: false,
       detailsPending: false,
@@ -169,6 +180,19 @@ function panelProps(): ChangesPanelBodyProps {
     stagedDeletions: 0,
     repoDisplayName: (repositoryName) => repositoryName,
   };
+}
+
+function OwnedChangesPanelBody(props: BodyTestProps) {
+  const context = useChangesPanelContextIdentity();
+  const details = useChangesInlineCommitDetails(context);
+  return (
+    <ChangesPanelBody
+      {...props}
+      inlineCommitDetails={details.state}
+      inlineCommitDetailVersion={details.version}
+      contextKey={context.contextKey}
+    />
+  );
 }
 
 function expandedRepository(name: string): HTMLElement {
@@ -205,6 +229,34 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+describe("ChangesPanelBody environment session ownership", () => {
+  it("keeps inline commit details on the environment session across tab switches", async () => {
+    render(
+      <TooltipProvider>
+        <StateProvider>
+          <OwnedChangesPanelBody {...panelProps()} />
+          <StoreCapture />
+        </StateProvider>
+      </TooltipProvider>,
+    );
+    setContext(...TASK_A_CONTEXT);
+
+    fireEvent.click(expandedCommit(FRONTEND_COMMIT));
+    expect(await screen.findByTestId(INLINE_FILE)).toBeTruthy();
+    expect(mocks.requestCommitDetail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        local: expect.objectContaining({ sessionId: "session-a" }),
+      }),
+    );
+
+    setContext(...TASK_A_SIBLING_CONTEXT);
+
+    expect(expandedCommit(FRONTEND_COMMIT).getAttribute(ARIA_EXPANDED)).toBe(EXPANDED);
+    expect(screen.getByTestId(INLINE_FILE)).toBeTruthy();
+    expect(mocks.requestCommitDetail).toHaveBeenCalledOnce();
+  });
+});
+
 describe("ChangesPanelBody history context ownership", () => {
   it("keeps a failed local commit detail request retryable", async () => {
     mocks.requestCommitDetail
@@ -226,7 +278,7 @@ describe("ChangesPanelBody history context ownership", () => {
     render(
       <TooltipProvider>
         <StateProvider>
-          <ChangesPanelBody {...panelProps()} />
+          <OwnedChangesPanelBody {...panelProps()} />
           <StoreCapture />
         </StateProvider>
       </TooltipProvider>,
@@ -253,7 +305,7 @@ describe("ChangesPanelBody history context ownership", () => {
     render(
       <TooltipProvider>
         <StateProvider>
-          <ChangesPanelBody {...panelProps()} />
+          <OwnedChangesPanelBody {...panelProps()} />
           <StoreCapture />
         </StateProvider>
       </TooltipProvider>,
@@ -302,24 +354,21 @@ describe("ChangesPanelBody history context ownership", () => {
 });
 
 describe("ChangesPanelBody Git status presentation", () => {
-  it("shows a retryable unavailable state without claiming the workspace is clean", () => {
-    const retry = vi.fn();
+  it("keeps refresh failure feedback out of the Changes body", () => {
     render(
       <TooltipProvider>
         <StateProvider>
-          <ChangesPanelBody
+          <OwnedChangesPanelBody
             {...panelProps()}
             gitStatus={{ ...panelProps().gitStatus, unavailable: true }}
-            onRetryGitStatus={retry}
           />
           <StoreCapture />
         </StateProvider>
       </TooltipProvider>,
     );
 
-    expect(screen.getByRole("alert").textContent).toContain("Git status unavailable");
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(retry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("git-status-notice")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     expect(screen.queryByText("Your changed files will appear here")).toBeNull();
   });
 
@@ -328,7 +377,7 @@ describe("ChangesPanelBody Git status presentation", () => {
       render(
         <TooltipProvider>
           <StateProvider>
-            <ChangesPanelBody
+            <OwnedChangesPanelBody
               {...panelProps()}
               hasAnything={false}
               hasCommits={false}
@@ -377,7 +426,7 @@ describe("ChangesPanelBody inline request retirement", () => {
     render(
       <TooltipProvider>
         <StateProvider>
-          <ChangesPanelBody {...panelProps()} />
+          <OwnedChangesPanelBody {...panelProps()} />
           <StoreCapture />
         </StateProvider>
       </TooltipProvider>,
@@ -403,7 +452,7 @@ describe("ChangesPanelBody inline request retirement", () => {
     const view = render(
       <TooltipProvider>
         <StateProvider>
-          <ChangesPanelBody {...panelProps()} />
+          <OwnedChangesPanelBody {...panelProps()} />
           <StoreCapture />
         </StateProvider>
       </TooltipProvider>,

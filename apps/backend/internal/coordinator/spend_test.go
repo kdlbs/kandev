@@ -63,6 +63,7 @@ func spendCoordinator() *Coordinator {
 func spendConvTask(id, coordinatorID string, archived bool) *taskmodels.Task {
 	task := &taskmodels.Task{ID: id, WorkspaceID: testWorkspaceID, CreatedAt: spendNow}
 	if coordinatorID != "" {
+		task.Origin = taskmodels.TaskOriginCoordinator
 		task.Metadata = map[string]interface{}{taskmodels.MetaKeyCoordinatorID: coordinatorID}
 	}
 	if archived {

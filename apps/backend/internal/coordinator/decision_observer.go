@@ -134,13 +134,15 @@ func (s *Service) notifyUndone(ctx context.Context, row *ActivityRow) {
 	if row.ProposalID == nil {
 		return
 	}
-	p, err := s.store.GetProposalAnyKind(ctx, row.WorkspaceID, row.CoordinatorID, *row.ProposalID)
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bindTimeout)
+	defer cancel()
+	p, err := s.store.GetProposalAnyKind(readCtx, row.WorkspaceID, row.CoordinatorID, *row.ProposalID)
 	if err != nil {
 		s.logger.Warn("undo decision not observed: proposal read failed", zap.String("proposal_id", *row.ProposalID), zap.Error(err))
 		return
 	}
 	var at time.Time
-	if fresh, err := s.store.GetActivityRow(ctx, s.store.db, row.CoordinatorID, row.ID); err == nil && fresh.UndoneAt != nil {
+	if fresh, err := s.store.GetActivityRow(readCtx, s.store.db, row.CoordinatorID, row.ID); err == nil && fresh.UndoneAt != nil {
 		at = fresh.UndoneAt.UTC()
 	}
 	s.notifyDecided(ctx, p, outcomes.DecisionUndone, outcomes.ReasonNone, at)

@@ -74,7 +74,7 @@ func TestRegisterCoordinatorRoutes_Phase3RegistrationsOnlyWhenEffective(t *testi
 				registerCoordinatorContainment, registerCoordinatorSpend, registerCoordinatorWake, registerCoordinatorDelivery = saved[0], saved[1], saved[2], saved[3]
 				registerCoordinatorRelay, registerCoordinatorReply, registerCoordinatorAutomatic, registerCoordinatorImprovements = saved[4], saved[5], saved[6], saved[7]
 			})
-			runCoordinatorBackgroundPass = func(context.Context, time.Time, []func(context.Context, time.Time)) {}
+			runCoordinatorBackgroundPass = func(context.Context, time.Time, []func(context.Context, time.Time)) func() { return func() {} }
 
 			registerCoordinatorRoutes(routeParams{ctx: context.Background(), router: gin.New(), services: &Services{Coordinator: svc}, log: newTestLogger()})
 

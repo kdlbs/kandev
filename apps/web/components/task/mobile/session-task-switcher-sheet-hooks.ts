@@ -67,7 +67,8 @@ function buildSheetItems(params: {
   acknowledgedAgentErrors: Record<string, string>;
   dismissedAgentErrors: Record<string, string>;
   automaticColorSettings: SheetItemCtx["automaticColorSettings"];
-  pendingArchiveTaskIds: ReadonlySet<string>;
+  manualColors: SheetItemCtx["manualColors"];
+  pendingRemovalTaskIds: ReadonlySet<string>;
   workspaceContextAccessDenied: boolean;
 }): TaskSwitcherItem[] {
   const {
@@ -81,7 +82,8 @@ function buildSheetItems(params: {
     acknowledgedAgentErrors,
     dismissedAgentErrors,
     automaticColorSettings,
-    pendingArchiveTaskIds,
+    manualColors,
+    pendingRemovalTaskIds,
     workspaceContextAccessDenied,
   } = params;
   if (workspaceContextAccessDenied) return [];
@@ -112,7 +114,8 @@ function buildSheetItems(params: {
     repositoriesById,
     stepColorById,
     automaticColorSettings,
-    pendingArchiveTaskIds,
+    manualColors,
+    pendingRemovalTaskIds,
   };
   return allTasks.map((task) => toSheetItem(task, context));
 }
@@ -122,7 +125,7 @@ export function useSheetData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const {
     allTasks,
-    pendingArchiveTaskIds,
+    pendingRemovalTaskIds,
     allSteps,
     stepsByWorkflowId,
     page,
@@ -143,6 +146,7 @@ export function useSheetData(workspaceId: string | null) {
   const automaticColorSettings = useAppStore(
     (state) => state.userSettings.sidebarTaskColorAutomation,
   );
+  const manualColors = useAppStore((state) => state.userSettings.sidebarTaskColors);
   const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
   const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
 
@@ -161,7 +165,8 @@ export function useSheetData(workspaceId: string | null) {
         acknowledgedAgentErrors,
         dismissedAgentErrors,
         automaticColorSettings,
-        pendingArchiveTaskIds,
+        manualColors,
+        pendingRemovalTaskIds,
         workspaceContextAccessDenied,
       }),
     [
@@ -175,7 +180,8 @@ export function useSheetData(workspaceId: string | null) {
       dismissedAgentErrors,
       wipQueueByTaskId,
       automaticColorSettings,
-      pendingArchiveTaskIds,
+      manualColors,
+      pendingRemovalTaskIds,
       workspaceContextAccessDenied,
     ],
   );
@@ -192,6 +198,7 @@ export function useSheetData(workspaceId: string | null) {
   );
 
   return {
+    allTasks,
     activeTaskId,
     selectedTaskId,
     workspaces,
@@ -623,8 +630,8 @@ function useSheetDeleteActions(
  * Re-parent via drag: runs the same composite nest operation the context menu
  * uses, resolving the workflow from the snapshot keys.
  */
-function useSheetNestTask() {
-  return useNestTaskByDrag();
+function useSheetNestTask(pageTasks: readonly TaskSwitcherItem[]) {
+  return useNestTaskByDrag(pageTasks);
 }
 
 export function useSheetArchiveActions(
@@ -696,6 +703,7 @@ export function useSheetActions(
   onOpenChange: (open: boolean) => void,
   selection: TaskSheetSelectionController,
   navigate?: (taskId: string, sessionId?: string) => void,
+  pageTasks: readonly TaskSwitcherItem[] = [],
 ) {
   const router = useRouter();
   const navigateTask = useCallback(
@@ -719,8 +727,8 @@ export function useSheetActions(
     notifySuccess,
   });
   const deleteActions = useSheetDeleteActions(store, runTaskRemoval);
-  const detachActions = useTaskDetachDialog(store);
-  const handleNestTask = useSheetNestTask();
+  const detachActions = useTaskDetachDialog(store, pageTasks);
+  const handleNestTask = useSheetNestTask(pageTasks);
   const handleSelectTask = useCallback(
     (taskId: string) => {
       const state = store.getState();

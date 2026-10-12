@@ -1,7 +1,7 @@
 ---
 id: "02-containment"
 title: "Containment check and unattended permissions"
-status: pending
+status: in_progress
 wave: 2
 depends_on:
   - "01-flag-schema-settings"
@@ -73,7 +73,7 @@ during an unattended turn and counts them on the turn row.
   `ResolveAgentPermission` path (or, with no reject option,
   `cancelAgentPermission` plus `markSessionRunningAfterPermission`) with a
   `PermissionResolutionAudit` of actor kind
-  `coordinator_unattended`, source `coordinator_wake` and the turn id; 
+  `coordinator_unattended`, source `coordinator_wake` and the turn id;
   resolution goes through the exported
   `Service.ResolveUnattendedPermission(ctx, taskID, sessionID, pendingID,
   unattendedTurnID)`, which reads the live snapshot for the `request_id` and
@@ -133,3 +133,12 @@ make -C apps/backend lint
   credentials manager are the two such sources; the first fails closed as
   `unverified_source` and the second is read through the same registry and
   `RequiredEnv` path launch uses. A new launch source needs a matching reader.
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.

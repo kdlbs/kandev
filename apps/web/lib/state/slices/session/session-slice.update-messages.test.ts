@@ -155,24 +155,34 @@ describe("updateMessages", () => {
       }),
     ]);
   });
+});
 
-  it("fans batched updates into the prompt cache", () => {
-    const store = makeStore();
-    store.getState().addMessage(
-      makeMessage("prompt", "before", SESSION, {
-        author_type: "user",
-        updated_at: "2026-08-27T00:00:00Z",
-      }),
-    );
+it("keeps an acknowledged Git push dismissal when a delayed update replays its original timestamp", () => {
+  const store = makeStore();
+  const dismissedAt = "2026-09-25T10:00:00Z";
+  const dismissed = makeMessage("push-error", "Git push failed", SESSION, {
+    type: "error",
+    updated_at: dismissedAt,
+    metadata: {
+      git_operation_error: true,
+      operation: "push",
+      git_operation_error_dismissed_at: dismissedAt,
+    },
+  });
+  store.getState().setMessages(SESSION, [dismissed]);
 
-    store.getState().updateMessages([
-      makeMessage("prompt", "after", SESSION, {
-        author_type: "user",
-        updated_at: "2026-08-27T00:00:01Z",
-      }),
-    ]);
+  store.getState().updateMessages([
+    makeMessage("push-error", "Git push failed", SESSION, {
+      type: "error",
+      updated_at: dismissed.updated_at,
+      metadata: { git_operation_error: true, operation: "push" },
+    }),
+  ]);
 
-    expect(store.getState().messagePrompts.bySession[SESSION][0].content).toBe("after");
+  expect(store.getState().messages.bySession[SESSION][0].metadata).toEqual({
+    git_operation_error: true,
+    operation: "push",
+    git_operation_error_dismissed_at: dismissedAt,
   });
 });
 

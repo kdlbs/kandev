@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import type { AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
+import { mergeHeldNeedsYouItems, type HeldItem } from "@/lib/coordinator/held-items";
 import { useNeedsYouFocusAfterDecision } from "../use-needs-you-focus";
 import { useNeedsYouFormNavigation } from "../use-needs-you-navigation";
 import { EmptyNeedsYouState } from "./empty-needs-you-state";
@@ -22,8 +23,6 @@ export type NeedsYouItemsPanelProps = {
   };
   computeNeedsYouCount: () => number;
 };
-
-type HeldItem = { item: NeedsYouItem; index: number };
 
 /**
  * Items the manager has expanded stay in the list, at their position, after
@@ -49,15 +48,7 @@ function useHeldItems(items: NeedsYouItem[]) {
     },
     [items],
   );
-  const displayItems = useMemo(() => {
-    const live = new Set(items.map((item) => item.id));
-    const merged = [...items];
-    Object.values(held)
-      .filter((entry) => !live.has(entry.item.id))
-      .sort((a, b) => a.index - b.index)
-      .forEach((entry) => merged.splice(Math.min(entry.index, merged.length), 0, entry.item));
-    return merged;
-  }, [items, held]);
+  const displayItems = useMemo(() => mergeHeldNeedsYouItems(items, held), [items, held]);
   return { displayItems, onExpandedChange };
 }
 
@@ -83,8 +74,8 @@ export function NeedsYouItemsPanel({
     items,
     inputsLoaded,
   );
-  useNeedsYouFocusAfterDecision(items);
   const { displayItems, onExpandedChange } = useHeldItems(items);
+  useNeedsYouFocusAfterDecision(displayItems);
 
   if (displayItems.length === 0) {
     return (

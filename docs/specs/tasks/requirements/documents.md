@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-04-29
-updated: 2026-08-28
+updated: 2026-10-08
 owners:
   - cfl
 ---
@@ -22,6 +22,48 @@ This document is the migrated task-system source for the capability. The source 
 
 - **AC-TASKS-DOCUMENTS-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
 - **AC-TASKS-DOCUMENTS-001.2:** When a plan write targets a missing task, the system shall return `not_found`, create no plan data, and expose no storage constraint details. This expected rejection shall create a debug entry and no error-level entry.
+
+### REQ-TASKS-DOCUMENTS-002: Attachment replacement failure preservation
+
+**Intent:** A rejected attachment upload shall leave the previously published
+attachment usable. Publication means that the task document's current metadata
+selects the bytes returned by its download endpoint.
+
+#### Acceptance criteria
+
+- **AC-TASKS-DOCUMENTS-002.1:** When an upload's lookup, file preparation, or uncommitted metadata write fails, that operation shall return an error without altering the previously published document metadata or download bytes. This applies to replacements with the same or a different filename extension.
+- **AC-TASKS-DOCUMENTS-002.2:** When a first upload fails before publication, it shall expose no new attachment document or downloadable candidate. A successful first upload shall expose the complete submitted bytes and their filename, MIME type, and byte count.
+- **AC-TASKS-DOCUMENTS-002.3:** When a replacement succeeds, it shall retain the document ID and creation time, expose the complete new bytes and matching attachment metadata, and keep a single current document without creating attachment revisions. Existing attachments shall remain downloadable and deletable without re-upload.
+- **AC-TASKS-DOCUMENTS-002.4:** When an upload fails before attempting metadata publication, cleanup shall affect only its own definitely unpublished candidate. Once metadata publication has been attempted, any returned error shall retain the candidate bytes, including bytes a download already resolved before a later replacement or deletion. A later current attachment or missing document shall not authorize candidate removal. An independent successful operation remains authoritative; failure preservation shall not roll it back or remove its bytes.
+- **AC-TASKS-DOCUMENTS-002.5:** When the registered document HTTP upload route rejects a replacement, it shall return its existing error response and subsequent downloads shall still serve the published bytes and metadata. A successful replacement shall return the existing success payload shape and subsequent downloads shall serve the new bytes.
+
+The internal filename is not a public attachment identity. Binary attachments
+remain replace-only. Crash recovery, immediate reclamation of superseded files,
+cross-resource transactional rollback, arbitrary overlapping upload/delete
+serialization, and filesystem ACL preservation are outside this amendment.
+
+### REQ-TASKS-DOCUMENTS-003: Plan draft continuity during successful saves
+
+**Intent:** Acknowledging a submitted plan shall preserve newer typing in the
+same task's editor. The persisted plan and the live unsaved draft represent
+different points in the user's editing history.
+
+#### Acceptance criteria
+
+- **AC-TASKS-DOCUMENTS-003.1:** When the user submits plan content A, types newer content B in the same task before that save succeeds, and receives their own save acknowledgement for A, the persisted plan shall contain A while the editor retains B and reports unsaved changes. The acknowledgement shall not remount the editor or reset its selection or focus.
+- **AC-TASKS-DOCUMENTS-003.2:** After that successful save settles, the retained B shall remain eligible for the next existing debounced autosave, which shall submit B for the same task without requiring more typing or an explicit save.
+- **AC-TASKS-DOCUMENTS-003.3:** When a successful save acknowledges the live submitted content and no newer typing exists, the editor shall remain unchanged, report no unsaved changes, and issue no redundant autosave. A subsequent edit shall autosave normally.
+- **AC-TASKS-DOCUMENTS-003.4:** A genuine external plan-content update shall continue to replace the local editor content through the existing external-update behavior, including when a different local draft exists. A plan deletion shall retain the existing empty-content behavior. An earlier completed, failed, or superseded own attempt shall not permanently exempt matching content from external synchronization.
+- **AC-TASKS-DOCUMENTS-003.5:** Autosave and explicit save shall provide the same acknowledgement protection. Overlapping own saves for one task shall preserve the existing latest-started save outcome; an older callback shall not replace newer typing, report an unpublished result as saved, or clear suppression belonging to a later rejected attempt, including repeated submissions of identical content.
+- **AC-TASKS-DOCUMENTS-003.6:** A task change, including a change to no task or a return to an earlier task, shall reset the local draft to the currently selected task's persisted content. A callback from the outgoing task view shall not alter the new view's draft, editor identity, or retry suppression. Existing legitimate background publication for the outgoing task shall remain supported.
+- **AC-TASKS-DOCUMENTS-003.7:** A failed save shall retain the live draft and the persisted baseline. Size rejection shall suppress only an unchanged automatic retry; changing the draft or explicitly saving shall remain available, and generic failures shall retain automatic retry eligibility, as defined by [plan-content-size-limit](plan-content-size-limit.md#req-tasks-plan-content-size-limit-003-a-user-sees-the-rejection-and-keeps-their-draft).
+
+This contract applies to the existing task Plan editor on desktop and phone.
+It changes no editing affordances or navigation. It does not define arbitrary
+concurrent-writer reconciliation, conflict merging, transport ordering, or a
+new version policy. Its technical owner is the [task document persistence
+lifecycle](../system-design/plan-write-lifecycle.md#plan-draft-acknowledgement).
+Delivery is recorded in the [draft-continuity plan](../../../plans/preserve-plan-typing/plan.md).
 
 ## Migrated source detail
 
@@ -74,11 +116,11 @@ POST   /tasks/:id/documents/:key/revisions/:revId/restore → restore from prior
 ### Attachments
 
 - Documents with `type=attachment` store binary files (images, PDFs, etc.) rather than markdown text.
-- Attachment content is stored on disk (not in SQLite) under the runtime data directory: `<home>/data/attachments/<task-id>/<key>.<ext>`. This is separate from the workspace config directory (`<home>/workspaces/`) which is reserved for declarative config files that can be git-synced.
+- Attachment content is stored on disk (not in SQLite) under the attachment root, in a task-scoped directory. The internal filename is opaque; legacy `<key>.<ext>` paths remain readable. The persisted metadata selects the current file. This is separate from the workspace config directory (`<home>/workspaces/`) which is reserved for declarative config files that can be git-synced.
 - The DB row stores metadata only: key, filename, mime type, size bytes, disk path.
 - Upload via `POST /tasks/:id/documents/:key/upload` (multipart form). Max file size: 10MB.
 - Download via `GET /tasks/:id/documents/:key/download` (streams the file).
-- Attachments have no revision history — upload replaces the previous file.
+- Attachments have no revision history; a successful upload replaces the current attachment. A rejected upload preserves the published attachment as defined by `REQ-TASKS-DOCUMENTS-002`.
 - Agents upload via `kandev doc upload <task-id> <key> <filepath>`.
 
 ### Backward compatibility

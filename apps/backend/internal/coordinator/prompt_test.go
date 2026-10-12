@@ -17,8 +17,9 @@ func TestStandingInstructions(t *testing.T) {
 		for _, want := range []string{
 			"Acme Workspace", "ws-1", "Ops",
 			"proposal tools available in this conversation",
-			"A human must decide each proposal",
-			"never applied automatically",
+			"A human must decide each proposal that requires approval",
+			"manager-configured permissions",
+			"Only the tool guard",
 			"get_coordinator_item_kandev",
 			"[workflow:<id>]",
 			"list_workflow_steps_kandev",

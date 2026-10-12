@@ -72,6 +72,19 @@ jobs:
       - name: Test frontend tests workflow contract
         run: python3 .github/scripts/frontend-tests-workflow-contract_test.py
 
+      - name: Test CI efficiency and required gates
+        run: |
+          python3 .github/scripts/ci-efficiency_test.py
+          python3 .github/scripts/ci-gates_test.py
+          python3 .github/scripts/ci-test-only-changes_test.py
+          python3 docs/plans/ci-performance/experiments/measurement-scripts_test.py
+
+      - name: Test release contributor notification helper
+        run: python3 .github/scripts/notify-release-contributors_test.py
+
+      - name: Test contributor notification workflow contract
+        run: python3 .github/scripts/notify-release-contributors-workflow-contract_test.py
+
       - name: Test release workflow contract
         run: python3 .github/scripts/release-workflow-contract_test.py
 
@@ -118,6 +131,9 @@ jobs:
 
       - name: Test GHCR retry helper
         run: bash scripts/release/retry-ghcr-command.test.sh
+
+      - name: Test SignPath signing readiness guard
+        run: bash scripts/release/signpath-signing-ready.test.sh
 
       - name: Test npm release helpers
         run: node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs

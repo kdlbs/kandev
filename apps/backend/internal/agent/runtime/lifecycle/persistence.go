@@ -86,6 +86,12 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		}
 		metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
 	}
+	if execution.OriginalWorkspacePath != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[MetadataKeyOriginalWorkspacePath] = execution.OriginalWorkspacePath
+	}
 	running := &models.ExecutorRunning{
 		ID:                 executionInventorySessionID(execution),
 		SessionID:          executionInventorySessionID(execution),
@@ -137,6 +143,11 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 			running.Metadata = make(map[string]interface{})
 		}
 		for k, v := range prior.Metadata {
+			if k == metadataKeyPassthroughMCPClaims {
+				// Current execution metadata owns claim state. Copying an absent
+				// claim from a prior row would restore ownership after revocation.
+				continue
+			}
 			if _, ok := running.Metadata[k]; !ok {
 				running.Metadata[k] = v
 			}
@@ -184,6 +195,9 @@ func (m *Manager) resolveLocalPID(execution *AgentExecution) int {
 		return 0
 	}
 	if execution.RuntimeName == agentruntime.RuntimeStandalone {
+		if execution.standaloneHostPID > 0 {
+			return execution.standaloneHostPID
+		}
 		return int(m.standaloneHostPID.Load())
 	}
 	return 0
@@ -512,6 +526,10 @@ type pluginExecutorRunningLister interface {
 	ListExecutorsRunningPluginRemote(ctx context.Context) ([]*models.ExecutorRunning, error)
 }
 
+type executorRunningInventoryLister interface {
+	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
+}
+
 // ListLiveStandaloneExecutorsRunning returns the startup recovery inventory:
 // every live standalone executors_running row, read at startup step 3 before
 // any control-server contact, so the recovery guard can be taken against it
@@ -534,6 +552,29 @@ func (m *Manager) ListLivePluginExecutorsRunning(ctx context.Context) ([]*models
 		return nil, nil
 	}
 	return lister.ListExecutorsRunningPluginRemote(ctx)
+}
+
+// ListLiveRemoteExecutorsRunning returns supported remote runtime rows from a
+// single persisted inventory snapshot. Plugin rows keep their separate
+// lister because it intentionally includes terminal rows for plugin cleanup.
+func (m *Manager) ListLiveRemoteExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	lister, ok := m.runningWriter.(executorRunningInventoryLister)
+	if !ok {
+		return nil, nil
+	}
+	rows, err := lister.ListExecutorsRunning(ctx)
+	if err != nil {
+		return nil, err
+	}
+	remote := make([]*models.ExecutorRunning, 0, len(rows))
+	for _, row := range rows {
+		if row == nil || remoteRecoveryOwnerUnsupported(row) || !isRemoteRecoveryRuntime(row.Runtime) || row.Runtime == agentruntime.RuntimePluginRemote ||
+			row.SessionID == "" || row.AgentExecutionID == "" || isTerminalExecutorRunningStatus(row.Status) {
+			continue
+		}
+		remote = append(remote, cloneRemoteRecoveryRecord(row))
+	}
+	return remote, nil
 }
 
 type executorRunningCASWriter interface {

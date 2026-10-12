@@ -5,6 +5,7 @@ import {
   removeTestRepository,
 } from "../../helpers/empty-remote-repository";
 import { GitHelper } from "../../helpers/git-helper";
+import { configureGitHubOrigin } from "../../helpers/github-origin";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SessionPage } from "../../pages/session-page";
 
@@ -132,6 +133,12 @@ export async function createPRLinkForkLaunchFixture(
     const headOID = forkGit.commit("fork pull request head");
     forkGit.exec(`git push origin ${HEAD_BRANCH}`);
     forkGit.exec(`git push "${upstream.remoteURL}" HEAD:refs/pull/${PR_NUMBER}/head`);
+
+    configureGitHubOrigin(
+      upstream.localPath,
+      `https://github.com/${upstreamOwner}/${upstreamRepository}.git`,
+      upstream.gitEnv,
+    );
 
     repositoryId = (
       await apiClient.createRepository(workspaceId, upstream.localPath, "main", {

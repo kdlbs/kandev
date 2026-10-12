@@ -3400,7 +3400,7 @@ func TestHandleTaskCIOptionsUpdatedRecordsPartialSyncFailureOnlyForUnsyncedPRs(t
 	}
 }
 
-func TestStartTaskPRCIAutomationSkipsDuplicateInFlightPR(t *testing.T) {
+func TestStartTaskPRCIAutomationCoalescesDuplicateInFlightPR(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
@@ -3422,8 +3422,9 @@ func TestStartTaskPRCIAutomationSkipsDuplicateInFlightPR(t *testing.T) {
 
 	close(block)
 	waitForCIAutomationIdle(t, svc, "task-1|repo-1|42", 200*time.Millisecond)
-	svc.startTaskPRCIAutomation(ctx, pr)
 	waitForCIOptionsCalls(t, ghSvc, 2, 200*time.Millisecond)
+	svc.startTaskPRCIAutomation(ctx, pr)
+	waitForCIOptionsCalls(t, ghSvc, 3, 200*time.Millisecond)
 }
 
 func waitForCIOptionsCalls(t *testing.T, ghSvc *mockGitHubService, want int, timeout time.Duration) {

@@ -77,3 +77,60 @@ describe("prepareResultToSessionState", () => {
     });
   });
 });
+
+describe("prepareResultToSessionState MCP diagnostics", () => {
+  it("hydrates bounded MCP diagnostics and continues to suppress legacy raw MCP fields", () => {
+    const diagnostic = {
+      operation: "enable",
+      stage: "wait",
+      kind: "output_wait_timeout",
+      message: "exec: WaitDelay expired before I/O complete",
+      exit_code: 0,
+    };
+    const result = prepareResultToSessionState("s1", {
+      prepare_result: {
+        steps: [
+          {
+            name: "raw name",
+            kind: "agent_mcp_approval",
+            mcp_server_id: "server-a",
+            status: "failed",
+            command: "raw command",
+            output: "raw stdout",
+            error: "raw stderr",
+            mcp_diagnostic: diagnostic,
+          },
+          {
+            name: "raw name",
+            kind: "agent_mcp_verification",
+            mcp_server_id: "server-b",
+            status: "failed",
+            mcp_diagnostic: { ...diagnostic, stage: "unknown" },
+          },
+        ],
+      },
+    });
+
+    expect(result?.steps).toMatchObject([
+      {
+        name: "",
+        kind: "agent_mcp_approval",
+        mcpServerId: "server-a",
+        status: "failed",
+        mcpDiagnostic: {
+          operation: "enable",
+          stage: "wait",
+          kind: "output_wait_timeout",
+          message: "exec: WaitDelay expired before I/O complete",
+          exitCode: 0,
+        },
+      },
+      {
+        name: "",
+        kind: "agent_mcp_verification",
+        mcpServerId: "server-b",
+        status: "failed",
+      },
+    ]);
+  });
+});

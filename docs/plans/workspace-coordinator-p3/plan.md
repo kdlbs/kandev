@@ -1,6 +1,6 @@
 ---
 created: 2026-09-29
-status: draft
+status: in_progress
 requirements:
   - REQ-COORDINATOR-WAKE-001
   - REQ-COORDINATOR-WAKE-002
@@ -439,3 +439,12 @@ coordinator, no conversation created or repointed by any wake path,
 containment and spend failing closed, attended turns unaffected by either,
 and every phase 3 write refused to a coordinator principal; public docs are
 updated.
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.

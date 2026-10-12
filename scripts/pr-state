@@ -2,7 +2,7 @@
 # pr-state — emit a raw JSON snapshot of PR CI and review state.
 #
 # Usage:
-#   scripts/pr-state [--summary] [--all] [--trusted-reviewer <login>] <PR>
+#   scripts/pr-state [--summary | --compact] [--all] [--trusted-reviewer <login>] <PR>
 #   scripts/pr-state --comment <comment_id>  # review or top-level issue comment
 #   scripts/pr-state --job-log <job_id>
 #
@@ -12,6 +12,7 @@
 #       base_target_oid, merge_base_oid, base_advanced_since_head, head_repository_owner,
 #       head_repository_name, head_ref_name, head_ref_oid, maintainer_can_modify }
 #   - since: { head_oid, committed_at } or null
+#   - merge_state: { state, mergeable, mergeStateStatus, reviewDecision, headRefOid } or null
 #   - checks: [{ type, name, workflow, status, conclusion, details_url, target_url, run_id, job_id }]
 #   - checks_head_sha: <SHA or null>
 #   - checks_snapshot_complete: <boolean>
@@ -32,6 +33,7 @@
 #   - errors: [{ source, message }]
 #
 # Summary output (--summary):
+#   Includes closing-head merge_state, plus:
 #   JSON object with:
 #   - pr: { number, branch, is_cross_repository, base_ref_name, base_head_oid,
 #       base_target_oid, merge_base_oid, base_advanced_since_head, head_repository_owner,
@@ -60,6 +62,12 @@
 #   - summary_notes: [<short human-readable notes>]
 #   - errors: [{ source, message }]
 #
+# Compact output (--compact):
+#   Summary output without successful_checks or terminal_checks rows.
+#   Adds skipped_check_count and neutral_check_count. Keeps review bodies,
+#   failed/pending checks, policy, errors, and evidence-completeness fields.
+#   Use --summary for pr-await's terminal confirmation fingerprint.
+#
 # Comment output (--comment):
 #   JSON object for one PR review or top-level issue comment:
 #   - comment_id, comment_type, author, body, path, line, original_line,
@@ -84,6 +92,7 @@ usage() {
 
 INCLUDE_ALL=0
 SUMMARY=0
+COMPACT=0
 TRUSTED_REVIEWER=''
 COMMENT_ID=''
 JOB_LOG_ID=''
@@ -96,6 +105,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --summary)
       SUMMARY=1
+      shift
+      ;;
+    --compact)
+      SUMMARY=1
+      COMPACT=1
       shift
       ;;
     --trusted-reviewer)
@@ -162,6 +176,7 @@ pr_view_succeeded=false
 checks_json='[]'
 checks_head_sha=''
 checks_snapshot_complete=false
+merge_state_json='null'
 required_status_checks_json='[]'
 required_status_checks_known=false
 base_ref_name=''
@@ -622,6 +637,7 @@ summarize_state_json() {
     | {
       pr,
       since,
+      merge_state,
       checks_head_sha,
       checks_snapshot_complete,
       required_status_checks: (.required_status_checks // []),
@@ -729,6 +745,10 @@ fetch_head_commit_json() {
         repository(owner: $owner, name: $repo) {
           pullRequest(number: $pr) {
             headRefOid
+            state
+            mergeable
+            mergeStateStatus
+            reviewDecision
             commits(last: 1) {
               nodes {
                 commit {
@@ -743,7 +763,8 @@ fetch_head_commit_json() {
     -f owner="$owner" -f repo="$repo" -F pr="$pr_number" |
     jq -c '{
       head_oid: (.data.repository.pullRequest.headRefOid // .data.repository.pullRequest.commits.nodes[0].commit.oid // null),
-      committed_at: (.data.repository.pullRequest.commits.nodes[0].commit.committedDate // null)
+      committed_at: (.data.repository.pullRequest.commits.nodes[0].commit.committedDate // null),
+      merge_state: (.data.repository.pullRequest | {state, mergeable, mergeStateStatus, reviewDecision, headRefOid})
     }'
 }
 
@@ -1118,6 +1139,7 @@ closing_head_oid=''
 if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
   if closing_since_json="$(fetch_head_commit_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
     closing_head_oid="$(jq -r '.head_oid // ""' <<<"$closing_since_json")"
+    merge_state_json="$(jq -c '.merge_state // null' <<<"$closing_since_json")"
     if [[ -z "$closing_head_oid" ]]; then
       add_error "closing_head" "head commit SHA unavailable after evidence collection"
     fi
@@ -1213,6 +1235,7 @@ state_json="$(jq -cn \
   --slurpfile review_evidence "$state_tmp_dir/review_evidence.json" \
   --slurpfile issue_comments "$state_tmp_dir/issue_comments.json" \
   --arg checks_head_sha "$checks_head_sha" \
+  --argjson merge_state "$merge_state_json" \
   --argjson checks_snapshot_complete "$checks_snapshot_complete" \
   --argjson required_status_checks_known "$required_status_checks_known" \
   --argjson unresolved_review_thread_count "$unresolved_review_thread_count" \
@@ -1221,6 +1244,7 @@ state_json="$(jq -cn \
   '{
     pr: $pr[0],
     since: $since[0],
+    merge_state: $merge_state,
     checks: $checks[0],
     checks_head_sha: (if $checks_head_sha == "" then null else $checks_head_sha end),
     checks_snapshot_complete: $checks_snapshot_complete,
@@ -1238,7 +1262,14 @@ state_json="$(jq -cn \
     errors: $errors[0]
   }')"
 
-if [[ "$SUMMARY" == "1" ]]; then
+if [[ "$COMPACT" == "1" ]]; then
+  summarize_state_json <<<"$state_json" | jq -c '
+    . + {
+      skipped_check_count: ([.terminal_checks[] | select(.conclusion == "skipped")] | length),
+      neutral_check_count: ([.terminal_checks[] | select(.conclusion == "neutral")] | length)
+    } | del(.successful_checks, .terminal_checks)
+  '
+elif [[ "$SUMMARY" == "1" ]]; then
   summarize_state_json <<<"$state_json"
 else
   printf '%s\n' "$state_json"

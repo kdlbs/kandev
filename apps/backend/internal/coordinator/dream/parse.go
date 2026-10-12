@@ -59,8 +59,8 @@ func ParseAnswer(raw string) (Answer, error) {
 	body := stripFence(strings.TrimSpace(raw))
 	dec := json.NewDecoder(bytes.NewReader([]byte(body)))
 	dec.DisallowUnknownFields()
-	var a Answer
-	if err := dec.Decode(&a); err != nil {
+	var a *Answer
+	if err := dec.Decode(&a); err != nil || a == nil {
 		return Answer{}, ErrBadOutput
 	}
 	if dec.More() || dec.InputOffset() != int64(len(body)) {
@@ -81,7 +81,7 @@ func ParseAnswer(raw string) (Answer, error) {
 	if a.Considered == nil {
 		a.Considered = []string{}
 	}
-	return a, nil
+	return *a, nil
 }
 
 func stripFence(s string) string {

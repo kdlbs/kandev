@@ -68,3 +68,5 @@ The shared [task summary](../../ui/requirements/pr-task-status-summary.md) owns 
 
 - [Polling efficiency](../../../plans/watch-task-cleanup/plan.md)
 - [Task approval badge](../../../plans/github-workflow-approval-badge/plan.md)
+
+- [Preserve PR details after approval clears](../../../plans/pr-task-disclosure-negative-projection/plan.md).

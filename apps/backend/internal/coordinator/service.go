@@ -109,16 +109,26 @@ type Service struct {
 
 	retentionWG      sync.WaitGroup
 	retentionRunning atomic.Bool
+	retentionMu      sync.Mutex
+	retentionStarted bool
+	retentionClosed  bool
+	retentionCancel  context.CancelFunc
 
 	// sweepMu guards sweepStarted against concurrent StartApprovalSweep
 	// calls; sweepWG lets Stop (and tests) wait for the loop to drain. See
 	// docs/specs/coordinator/system-design/proposal-recovery.md#recovery.
 	sweepMu      sync.Mutex
 	sweepStarted bool
+	sweepClosed  bool
+	sweepCancel  context.CancelFunc
 	sweepWG      sync.WaitGroup
 
 	// launchWG tracks resume launches that may outlive their Execute deadline.
-	launchWG sync.WaitGroup
+	launchWG      sync.WaitGroup
+	launchMu      sync.Mutex
+	launchClosed  bool
+	launchNext    uint64
+	launchCancels map[uint64]context.CancelFunc
 
 	// afterSweepPass is a test-only hook invoked once at the end of every
 	// approval-sweep pass (including a pass with nothing to recover). nil in

@@ -1,7 +1,7 @@
 ---
 id: "05-delivery-unattended-turn"
 title: "Admission, delivery and the unattended turn"
-status: built
+status: in_progress
 wave: 3
 depends_on:
   - "02-containment"
@@ -326,3 +326,12 @@ Receipts (after the rebase unless noted):
 - `make -C apps/backend test` (before the rebase): failures only in packages this work order does not touch or in environment-dependent tests. `internal/orchestrator` passes. `backendapp` (3 tests) and `task/service` (16 tests) fail identically at merge-base c4752a0dd1 in a scratch worktree, so they are pre-existing. The other failing packages (agent/*, agentctl/server/*, common/config, launcher, system/storage/*, worktree) are untouched by this change.
 - Postgres tests skip locally (no `KANDEV_TEST_POSTGRES_DSN`); their bodies were run against SQLite and pass.
 - `make fmt` reformats `internal/plugins/service.go` on the base; that file was restored and is not part of this work.
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.

@@ -368,7 +368,7 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	if err := c.ValidateStepReferences(ctx, step); err != nil {
 		return nil, err
 	}
-	demotedStartSteps, err := c.svc.UpdateStepWithStartStepUpdates(ctx, step)
+	demotedStartSteps, err := c.svc.UpdateStepWithStartStepIntent(ctx, step, req.IsStartStep)
 	if err != nil {
 		return nil, err
 	}

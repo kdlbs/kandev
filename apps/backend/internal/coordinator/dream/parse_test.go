@@ -44,6 +44,9 @@ func TestParseAnswerRefuses(t *testing.T) {
 		"11-items":      items(11),
 		"21-considered": cons(21),
 		"not-json":      `nope`,
+		"null":          `null`,
+		"fenced-null":   "```json\nnull\n```",
+		"array":         `[]`,
 		"empty":         ``,
 	} {
 		t.Run(name, func(t *testing.T) {

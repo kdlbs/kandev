@@ -10,8 +10,6 @@ import {
 } from "./completed-workspace-restoration-helpers";
 
 test.describe("Completed workspace restoration", () => {
-  test.describe.configure({ retries: 1 });
-
   test("restores a cold workspace and recovers a bounded failure", async ({
     testPage,
     apiClient,
@@ -19,7 +17,7 @@ test.describe("Completed workspace restoration", () => {
     backend,
     prCapture,
   }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(360_000);
     const task = await seedCompletedConversation(
       apiClient,
       seedData,

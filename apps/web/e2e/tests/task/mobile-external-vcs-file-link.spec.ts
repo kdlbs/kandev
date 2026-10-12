@@ -14,6 +14,10 @@ function initializeMobileRepository(backend: BackendContext): string {
   fs.mkdirSync(repositoryPath, { recursive: true });
   const gitEnvironment = makeGitEnv(backend.tmpDir);
   execFileSync("git", ["init", "-b", "main"], { cwd: repositoryPath, env: gitEnvironment });
+  execFileSync("git", ["remote", "add", "origin", MOBILE_REMOTE], {
+    cwd: repositoryPath,
+    env: gitEnvironment,
+  });
   fs.writeFileSync(path.join(repositoryPath, MOBILE_FILE), "export const mobile = true;\n");
   execFileSync("git", ["add", "-A"], { cwd: repositoryPath, env: gitEnvironment });
   execFileSync("git", ["commit", "-m", "seed mobile provider repository"], {

@@ -103,7 +103,7 @@ You can lower the permission back to **Requires approval** at any time. Undoing 
 
 Each coordinator has an **Agent for created tasks**: an agent profile and an executor profile. Both are required, on the add form, in guided setup, and on the coordinator's settings page.
 
-When you approve a card, the task it creates starts with this agent unless the card's board step, the board, or the workspace already names one. Automatic approvals work the same way. The card shows **Runs with** and the agent's name while it is pending or failed. If no agent is available, the card says so and points back to this setting.
+When you approve a card, the created task uses this agent profile unless the card's board step, the board, or the workspace already names one. Approval starts an agent only when your start-agent policy permits it. Automatic approval assigns the profile but never starts an agent. The card shows **Runs with** and the agent's name while it is pending or failed. If no agent is available, the card says so and points back to this setting.
 
 An agent profile that uses CLI passthrough cannot be chosen here. If the profile or executor is later removed, the settings page warns you, and approving a card that needs it fails with an explanation and creates nothing. Pick another agent to fix it.
 

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Agent, ListAgentsResponse, ListWorkspacesResponse } from "@/lib/types/http";
-import { loadSettingsInitialState } from "./settings-routes.bootstrap";
+import { loadSettingsInitialState } from "./settings-routes.initial-state";
 
 const mocks = vi.hoisted(() => ({
   fetchUserSettings: vi.fn(),

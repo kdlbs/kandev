@@ -104,21 +104,31 @@ function renderForm(
   cursorMcpAuthSupported = false,
 ) {
   return render(
-    <TooltipProvider>
-      <ProfileFormFields
-        profile={profile}
-        baselineProfile={profile}
-        onChange={onChange}
-        modelConfig={config}
-        permissionSettings={{}}
-        passthroughConfig={null}
-        agentName={mockAgentName}
-        capabilityProfileId="test-profile"
-        cursorMcpAuthSupported={cursorMcpAuthSupported}
-      />
-    </TooltipProvider>,
+    <StateProvider>
+      <TooltipProvider>
+        <ProfileFormFields
+          profile={profile}
+          baselineProfile={profile}
+          onChange={onChange}
+          modelConfig={config}
+          permissionSettings={{}}
+          passthroughConfig={null}
+          agentName={mockAgentName}
+          capabilityProfileId="test-profile"
+          cursorMcpAuthSupported={cursorMcpAuthSupported}
+        />
+      </TooltipProvider>
+    </StateProvider>,
   );
 }
+
+it("keeps a single refresh action when the profile advertises modes", () => {
+  renderForm(formData(), {
+    ...modelConfig,
+    available_modes: [{ id: "default", name: "Default" }],
+  });
+  expect(screen.getAllByTestId("profile-refresh-capabilities")).toHaveLength(1);
+});
 
 function renderStatefulForm(
   profile: ProfileFormData,
@@ -147,9 +157,11 @@ function renderStatefulForm(
   }
 
   return render(
-    <TooltipProvider>
-      <StatefulForm />
-    </TooltipProvider>,
+    <StateProvider>
+      <TooltipProvider>
+        <StatefulForm />
+      </TooltipProvider>
+    </StateProvider>,
   );
 }
 
@@ -354,22 +366,13 @@ describe("ProfileFormFields model options", () => {
     });
   });
 
-  it("constrains a single start model field on desktop", () => {
-    renderForm(formData());
-
-    const row = screen.getByTestId("profile-capabilities-model-row");
-    expect(row.firstElementChild?.className).toContain("md:max-w-xl");
-  });
-
-  it("keeps the model and mode fields balanced when modes are available", () => {
+  it("retains the mode selector when modes are available", () => {
     renderForm(formData({ mode: "default" }), {
       ...modelConfig,
       available_modes: [{ id: "default", name: "Default" }],
       current_mode_id: "default",
     });
 
-    const row = screen.getByTestId("profile-capabilities-model-row");
-    expect(row.firstElementChild?.className).toContain("flex-1");
     expect(screen.getByTestId("profile-mode-field")).not.toBeNull();
   });
 

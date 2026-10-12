@@ -198,7 +198,7 @@ func provideGateway(
 		agentHandlers := agenthandlers.NewHandlers(agentCtrl, log)
 		agentHandlers.RegisterHandlers(gateway.Dispatcher)
 
-		workspaceFileHandlers := agenthandlers.NewWorkspaceFileHandlers(lifecycleMgr, log)
+		workspaceFileHandlers := agenthandlers.NewWorkspaceFileHandlers(lifecycleMgr, log, taskRepo)
 		workspaceFileHandlers.RegisterHandlers(gateway.Dispatcher)
 
 		shellHandlers := agenthandlers.NewShellHandlers(lifecycleMgr, scriptSvc, log)

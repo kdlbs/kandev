@@ -3,7 +3,6 @@ package coordinator
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -119,14 +118,8 @@ func newPooledPostgresStore(t *testing.T) *Store {
 		_, _ = admin.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
 		_ = admin.Close()
 	})
-	u, err := url.Parse(dsn)
-	if err != nil {
-		t.Fatalf("parse dsn: %v", err)
-	}
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
-	raw, err := internaldb.OpenPostgres(u.String(), 8, 2)
+	scopedDSN := testutil.PostgresDSNWithSearchPath(t, dsn, schema)
+	raw, err := internaldb.OpenPostgres(scopedDSN, 8, 2)
 	if err != nil {
 		t.Fatalf("open pooled postgres: %v", err)
 	}

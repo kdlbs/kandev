@@ -64,15 +64,7 @@ func wireCoordinatorDream(p routeParams, svc *coordinator.Service) {
 		return
 	}
 	store := svc.Store()
-	harness := replay.New(replay.Deps{
-		Cases:        coordinator.NewReplayCases(store),
-		Profiles:     replaywire.Profiles{Store: store, Profiles: p.agentSettingsRepo},
-		Prompts:      replaywire.Prompts{Runner: p.hostUtilityMgr},
-		Prices:       replaywire.Prices{Source: p.services.Pricing},
-		Spend:        replaywire.Spend{Store: store, Source: svc},
-		Instructions: replaywire.Instructions{Store: store, Source: svc, WorkspaceName: dreamWorkspaceName(p)},
-		Results:      coordinator.NewReplayResults(store),
-	})
+	harness := newCoordinatorReplay(p, svc)
 	sch := dream.New(dream.Deps{
 		Store: store,
 		Episode: coordinator.DreamEpisode{
@@ -99,6 +91,24 @@ func wireCoordinatorDream(p routeParams, svc *coordinator.Service) {
 	}
 	p.log.Debug("coordinator shadow dream wired", zap.Bool("replay", true))
 }
+
+func newCoordinatorReplay(p routeParams, svc *coordinator.Service) *replay.Harness {
+	store := svc.Store()
+	return replay.New(replay.Deps{
+		Cases:        coordinator.NewReplayCases(store),
+		Profiles:     replaywire.Profiles{Store: store, Profiles: p.agentSettingsRepo},
+		Prompts:      replaywire.Prompts{Runner: p.hostUtilityMgr},
+		Prices:       replaywire.Prices{Source: p.services.Pricing},
+		Spend:        replaywire.Spend{Store: store, Source: svc},
+		Instructions: replaywire.Instructions{Store: store, Source: svc, WorkspaceName: dreamWorkspaceName(p)},
+		Results:      coordinator.NewReplayResults(store),
+		Clock:        coordinatorReplayClock{},
+	})
+}
+
+type coordinatorReplayClock struct{}
+
+func (coordinatorReplayClock) Now() time.Time { return time.Now().UTC() }
 
 func dreamWorkspaceName(p routeParams) func(context.Context, string) string {
 	return func(ctx context.Context, workspaceID string) string {

@@ -1,7 +1,7 @@
 ---
 id: "09-automatic"
 title: "The first automatic class: create_task"
-status: built
+status: in_progress
 wave: 3
 depends_on:
   - "01-flag-schema-settings"
@@ -186,3 +186,12 @@ cd apps/web && pnpm e2e:run tests/coordinator/automatic.spec.ts
 
 - The e2e test needs 30 days of log rows: seed them through phase 2's test
   fixture, never by weakening the history condition.
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.

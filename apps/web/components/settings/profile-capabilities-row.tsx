@@ -13,8 +13,15 @@ import {
   profileModelIsDirty,
 } from "@/components/settings/profile-capability-helpers";
 import { ModelPicker, ModePicker } from "@/components/settings/profile-model-fields";
+import { ModelDiscoveryNote } from "@/components/settings/model-discovery-note";
 import type { ProfileDiscoveryStatus } from "@/hooks/domains/settings/use-profile-model-capabilities";
-import type { CommandEntry, ModelConfig, ModeEntry, ModelEntry } from "@/lib/types/http";
+import type {
+  CommandEntry,
+  ModelConfig,
+  ModeEntry,
+  ModelEntry,
+  ModelDiscovery,
+} from "@/lib/types/http";
 import {
   SettingsFieldDescription,
   SettingsFieldLabel,
@@ -23,6 +30,7 @@ import type { ProfileFormData } from "./profile-form-fields";
 import type { useProfileFormCapabilities } from "./profile-capability-helpers";
 
 type CapabilitiesRowProps = {
+  discovery?: ModelDiscovery;
   profile: ProfileFormData;
   models: ModelEntry[];
   modes: ModeEntry[];
@@ -54,7 +62,139 @@ function CapabilitiesRow(props: CapabilitiesRowProps) {
   return <CapabilitiesRowContent {...props} />;
 }
 
+function StatusOrAuthMessage({
+  agentName,
+  status,
+  isLoading,
+  onRefresh,
+  error,
+  discoveryState,
+}: {
+  agentName: string;
+  status: ModelConfig["status"];
+  isLoading: boolean;
+  onRefresh: () => Promise<void>;
+  error: string | null;
+  discoveryState: ProfileDiscoveryStatus;
+}) {
+  if (status === "auth_required" || status === "not_installed") {
+    return (
+      <NoAuthPanel
+        agentName={agentName}
+        status={status}
+        isLoading={isLoading}
+        onRefresh={onRefresh}
+        error={error}
+        rawError={null}
+      />
+    );
+  }
+  return <CapabilityStatusMessage status={discoveryState} />;
+}
+
+type ModelAndModePickersProps = {
+  discovery?: ModelDiscovery;
+  profile: ProfileFormData;
+  baselineProfile?: ProfileFormData;
+  models: ModelEntry[];
+  modes: ModeEntry[];
+  currentModelId: string | undefined;
+  currentModeId: string | undefined;
+  configOptions: SelectConfigOption[];
+  onChange: (patch: Partial<ProfileFormData>) => void;
+  disableUnverifiedModels: boolean;
+  configIsLoading: boolean;
+  supportsDynamicModels?: boolean;
+  isLoading: boolean;
+  onRefresh: () => Promise<void>;
+  error: string | null;
+  showRefresh: boolean;
+  labelCls?: string;
+  gapCls: string;
+};
+
+function ModelAndModePickers({
+  discovery,
+  profile,
+  baselineProfile,
+  models,
+  modes,
+  currentModelId,
+  currentModeId,
+  configOptions,
+  onChange,
+  disableUnverifiedModels,
+  configIsLoading,
+  supportsDynamicModels,
+  isLoading,
+  onRefresh,
+  error,
+  showRefresh,
+  labelCls,
+  gapCls,
+}: ModelAndModePickersProps) {
+  const { t } = useTranslation();
+  const hasModes = modes.length > 0;
+
+  return (
+    <div
+      className={
+        hasModes
+          ? "grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+          : "grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 md:max-w-xl"
+      }
+      data-testid="profile-capabilities-model-row"
+    >
+      <div className="min-w-0">
+        <div
+          className="flex-1 min-w-0 space-y-1.5 sm:space-y-2"
+          data-settings-dirty={profileModelIsDirty(profile, baselineProfile)}
+          data-settings-dirty-level="container"
+        >
+          <SettingsFieldLabel className={labelCls}>{t("agents:startModel")}</SettingsFieldLabel>
+          <ModelPicker
+            discovery={discovery}
+            profile={profile}
+            models={models}
+            currentModelId={currentModelId}
+            configOptions={configOptions}
+            onChange={onChange}
+            ariaLabel={t("settings:startModelAria")}
+            goneModelLabel={t("settings:startModelUnavailable")}
+            disabled={disableUnverifiedModels}
+            configOptionsLoading={configIsLoading}
+            keepOpenOnModelChange={supportsDynamicModels}
+          />
+        </div>
+      </div>
+      {hasModes && (
+        <div
+          data-testid="profile-mode-field"
+          className={`col-span-2 row-start-2 min-w-0 md:col-span-1 md:col-start-2 md:row-start-1 ${gapCls}`}
+          data-settings-dirty={profileModeIsDirty(profile, baselineProfile)}
+          data-settings-dirty-level="container"
+        >
+          <SettingsFieldLabel className={labelCls}>{t("agents:startMode")}</SettingsFieldLabel>
+          <ModePicker
+            profile={profile}
+            modes={modes}
+            currentModeId={currentModeId}
+            onChange={onChange}
+            disabled={disableUnverifiedModels}
+          />
+        </div>
+      )}
+      {showRefresh && (
+        <div className={`col-start-2 row-start-1 shrink-0 ${hasModes ? "md:col-start-3" : ""}`}>
+          <RefreshCapabilitiesButton onRefresh={onRefresh} isLoading={isLoading} error={error} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CapabilitiesRowContent({
+  discovery,
   profile,
   models,
   modes,
@@ -78,58 +218,34 @@ function CapabilitiesRowContent({
   baselineProfile,
   disableUnverifiedModels,
 }: CapabilitiesRowProps) {
-  const { t } = useTranslation();
-  const hasModes = modes.length > 0;
   const activeMode = findActiveMode(modes, profile.mode, currentModeId);
   const labelCls = isCompact ? "text-xs" : undefined;
   const gapCls = isCompact ? "space-y-1.5" : "space-y-2";
+  const showRefresh = status !== "auth_required" && status !== "not_installed";
 
   return (
     <div className={gapCls}>
-      <div
-        className="flex flex-col gap-2 sm:flex-row sm:items-end"
-        data-testid="profile-capabilities-model-row"
-      >
-        <div
-          className={`${hasModes ? "flex-1" : "w-full md:max-w-xl"} min-w-0 ${gapCls}`}
-          data-settings-dirty={profileModelIsDirty(profile, baselineProfile)}
-          data-settings-dirty-level="container"
-        >
-          <SettingsFieldLabel className={labelCls}>{t("agents:startModel")}</SettingsFieldLabel>
-          <ModelPicker
-            profile={profile}
-            models={models}
-            currentModelId={currentModelId}
-            configOptions={configOptions}
-            onChange={onChange}
-            ariaLabel={t("settings:startModelAria")}
-            goneModelLabel={t("settings:startModelUnavailable")}
-            disabled={disableUnverifiedModels}
-            configOptionsLoading={configIsLoading}
-            keepOpenOnModelChange={modelConfig.supports_dynamic_models}
-          />
-        </div>
-        {hasModes && (
-          <div
-            data-testid="profile-mode-field"
-            className={`flex-1 min-w-0 ${gapCls}`}
-            data-settings-dirty={profileModeIsDirty(profile, baselineProfile)}
-            data-settings-dirty-level="container"
-          >
-            <SettingsFieldLabel className={labelCls}>{t("agents:startMode")}</SettingsFieldLabel>
-            <ModePicker
-              profile={profile}
-              modes={modes}
-              currentModeId={currentModeId}
-              onChange={onChange}
-              disabled={disableUnverifiedModels}
-            />
-          </div>
-        )}
-        {status !== "auth_required" && status !== "not_installed" && (
-          <RefreshCapabilitiesButton onRefresh={onRefresh} isLoading={isLoading} error={error} />
-        )}
-      </div>
+      <ModelAndModePickers
+        discovery={discovery}
+        profile={profile}
+        baselineProfile={baselineProfile}
+        models={models}
+        modes={modes}
+        currentModelId={currentModelId}
+        currentModeId={currentModeId}
+        configOptions={configOptions}
+        onChange={onChange}
+        disableUnverifiedModels={disableUnverifiedModels}
+        configIsLoading={configIsLoading}
+        supportsDynamicModels={modelConfig.supports_dynamic_models}
+        isLoading={isLoading}
+        onRefresh={onRefresh}
+        error={error}
+        showRefresh={showRefresh}
+        labelCls={labelCls}
+        gapCls={gapCls}
+      />
+      <ModelDiscoveryNote discovery={discovery} />
       <ModelConfigResolutionStatus
         status={configStatus}
         error={configError}
@@ -140,18 +256,14 @@ function CapabilitiesRowContent({
         <SettingsFieldDescription>{activeMode.description}</SettingsFieldDescription>
       )}
       {commands.length > 0 && <CommandsButton commands={commands} />}
-      {status === "auth_required" || status === "not_installed" ? (
-        <NoAuthPanel
-          agentName={agentName}
-          status={status}
-          isLoading={isLoading}
-          onRefresh={onRefresh}
-          error={error}
-          rawError={null}
-        />
-      ) : (
-        <CapabilityStatusMessage status={discoveryState} />
-      )}
+      <StatusOrAuthMessage
+        agentName={agentName}
+        status={status}
+        isLoading={isLoading}
+        onRefresh={onRefresh}
+        error={error}
+        discoveryState={discoveryState}
+      />
     </div>
   );
 }
@@ -189,6 +301,7 @@ export function ProfileCapabilitiesSection({
     <CapabilitiesRow
       profile={profile}
       models={capabilities.models}
+      discovery={capabilities.discovery}
       modes={capabilities.modes}
       commands={capabilities.commands}
       currentModelId={capabilities.currentModelId}

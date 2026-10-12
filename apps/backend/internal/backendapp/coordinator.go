@@ -147,7 +147,16 @@ func registerCoordinatorRoutes(p routeParams) {
 	if svc.Phase3Enabled() {
 		hooks = append(hooks, wireCoordinatorPhase3(p, svc)...)
 	}
-	runCoordinatorBackgroundPass(p.ctx, t0, hooks)
+	stop := runCoordinatorBackgroundPass(p.ctx, t0, hooks)
+	if p.addCleanup != nil {
+		p.addCleanup(func() error {
+			stop()
+			svc.WaitApprovalSweepStopped()
+			svc.WaitActivityRetentionStopped()
+			svc.WaitResumeLaunchesStopped()
+			return nil
+		})
+	}
 }
 
 // wireCoordinatorPhase3 wires the phase 3 dependencies and returns their
@@ -196,12 +205,19 @@ var runCoordinatorBackgroundPass = startCoordinatorBackgroundPass
 // describes (Build decision 14): conversation (task 03), subscribers (task
 // 04), decisions (task 07). Conversation and subscribers remain no-ops until
 // their work packages land; decisions runs StartupRecoveryPass.
-func startCoordinatorBackgroundPass(ctx context.Context, t0 time.Time, hooks []func(context.Context, time.Time)) {
+func startCoordinatorBackgroundPass(ctx context.Context, t0 time.Time, hooks []func(context.Context, time.Time)) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		for _, hook := range hooks {
+			if ctx.Err() != nil {
+				return
+			}
 			hook(ctx, t0)
 		}
 	}()
+	return func() { cancel(); <-done }
 }
 
 // registerCoordinatorConversation is task 03's named registration function

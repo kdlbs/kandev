@@ -249,6 +249,11 @@ An unsupported state version requires a compatible plugin; the host does not rei
 
 Ordinary agent Stop uses core agentctl behavior and detaches transient transport as appropriate.
 Backend shutdown closes local connections and stops plugin processes without destroying remote compute.
+It must also preserve the remote agentctl and its active agent process. Stopping a local proxy or plugin host must not terminate its remote children.
+This remote lifetime rule is independent of `features.agentSurvival`, which remains an opt-in for local/worktree processes and defaults to off.
+Normal local/worktree shutdown therefore stops local agents by default; remote shutdown detaches transport and preserves ongoing work.
+Startup obtains fresh connection credentials, verifies recorded ownership, and reattaches to the same remote execution.
+The [durable delivery contract](../../platform/requirements/durable-agent-delivery.md) owns long-outage output retention and replay.
 Archive, delete, reset, and failed-launch rollback use host-authorized resource destruction.
 Acquire the existing cleanup claim for environment owner and generation before external teardown.
 Late callbacks and stale claims cannot mutate inventory or destroy a successor resource.

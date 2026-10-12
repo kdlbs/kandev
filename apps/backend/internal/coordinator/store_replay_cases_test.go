@@ -97,9 +97,12 @@ func TestReplayCases_ReadsAndNotFound(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	c := NewReplayCases(s)
-	execAll(t, s, `CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL)`)
+	if err := s.CreateCoordinator(ctx, &Coordinator{ID: "c1", WorkspaceID: "w", Name: "Replay", AgentProfileID: "agent", ExecutorProfileID: "executor"}); err != nil {
+		t.Fatal(err)
+	}
+	execAll(t, s, `CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_id TEXT, workflow_id TEXT)`)
 	execAll(t, s, `CREATE TABLE task_session_messages (id TEXT PRIMARY KEY, task_session_id TEXT, turn_id TEXT, author_type TEXT, content TEXT, created_at TIMESTAMP)`)
-	execAll(t, s, `INSERT INTO tasks VALUES ('t1', '')`)
+	execAll(t, s, `INSERT INTO tasks VALUES ('t1', '', 'w', 'wf')`)
 	now := time.Now().UTC()
 	seedReplayTurn(t, s, "turn1", now, replay.DecisionApproved, false)
 	execAll(t, s, `INSERT INTO task_session_messages VALUES ('m2','sess','st-turn1','user','second',?)`, now.Add(time.Second))
@@ -112,30 +115,30 @@ func TestReplayCases_ReadsAndNotFound(t *testing.T) {
 	if got, err := c.TriggerText(ctx, replay.Turn{ID: "turn1"}); err != nil || got != "first" {
 		t.Fatalf("trigger = %q %v", got, err)
 	}
-	if got, err := c.TaskTitle(ctx, "t1"); err != nil || got != "" {
+	if got, err := c.TaskTitle(ctx, "c1", "t1"); err != nil || got != "" {
 		t.Fatalf("present empty title = %q %v", got, err)
 	}
 	if got, err := c.Snapshot(ctx, "h-turn1"); err != nil || got != "body" {
 		t.Fatalf("snapshot = %q %v", got, err)
 	}
-	p, err := c.Proposal(ctx, "p-turn1")
+	p, err := c.Proposal(ctx, "c1", "p-turn1")
 	if err != nil || p != (replay.Proposal{Kind: "create_task", WorkflowID: "wf", Title: "Do it"}) {
 		t.Fatalf("proposal = %+v %v", p, err)
 	}
 	if _, err := c.TriggerText(ctx, replay.Turn{ID: "nope"}); !errors.Is(err, replay.ErrNotFound) {
 		t.Fatalf("missing trigger = %v", err)
 	}
-	if _, err := c.TaskTitle(ctx, "gone"); !errors.Is(err, replay.ErrNotFound) {
+	if _, err := c.TaskTitle(ctx, "c1", "gone"); !errors.Is(err, replay.ErrNotFound) {
 		t.Fatalf("missing title = %v", err)
 	}
 	if _, err := c.Snapshot(ctx, "x"); !errors.Is(err, replay.ErrNotFound) {
 		t.Fatalf("missing snapshot = %v", err)
 	}
-	if _, err := c.Proposal(ctx, "x"); !errors.Is(err, replay.ErrNotFound) {
+	if _, err := c.Proposal(ctx, "c1", "x"); !errors.Is(err, replay.ErrNotFound) {
 		t.Fatalf("missing proposal = %v", err)
 	}
 	execAll(t, s, `DROP TABLE tasks`)
-	if _, err := c.TaskTitle(ctx, "t1"); err == nil || errors.Is(err, replay.ErrNotFound) {
+	if _, err := c.TaskTitle(ctx, "c1", "t1"); err == nil || errors.Is(err, replay.ErrNotFound) {
 		t.Fatalf("unreadable table must be a failed read, got %v", err)
 	}
 }

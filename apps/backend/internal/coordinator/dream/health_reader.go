@@ -75,5 +75,16 @@ func (s *Scheduler) debtSince(ctx context.Context, coordinatorID string, accepte
 	if err != nil || decisions < MinDecisions {
 		return nil, err
 	}
-	return s.d.Store.NthCompletedTurnFinish(ctx, coordinatorID, start, MinTurns)
+	completedAt, err := s.d.Store.NthCompletedTurnFinish(ctx, coordinatorID, start, MinTurns)
+	if err != nil || completedAt == nil {
+		return nil, err
+	}
+	decidedAt, err := s.d.Store.FirstDreamDecisionAt(ctx, coordinatorID, start, now)
+	if err != nil || decidedAt == nil {
+		return nil, err
+	}
+	if decidedAt.After(*completedAt) {
+		return decidedAt, nil
+	}
+	return completedAt, nil
 }

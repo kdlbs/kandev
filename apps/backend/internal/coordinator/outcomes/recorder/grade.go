@@ -74,42 +74,47 @@ type outcomeValues struct {
 // proposal without a decision gets no row. A read error keeps the earlier row,
 // is counted and returned.
 func (g *Grader) Grade(ctx context.Context, proposalID string, decidedAt time.Time) error {
+	_, err := g.grade(ctx, proposalID, decidedAt)
+	return err
+}
+
+func (g *Grader) grade(ctx context.Context, proposalID string, decidedAt time.Time) (bool, error) {
 	tx, err := g.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin grade: %w", err)
+		return false, fmt.Errorf("begin grade: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := lockOutcome(ctx, tx, g.db.DriverName(), proposalID); err != nil {
-		return err
+		return false, err
 	}
 	p, err := readProposal(ctx, tx, proposalID)
 	if err != nil {
-		return failRead(GradeProposalRead, err)
+		return false, failRead(GradeProposalRead, err)
 	}
 	if p == nil || !decided(p.Status) {
-		return nil
+		return false, nil
 	}
 	stored, err := readStored(ctx, tx, proposalID)
 	if err != nil {
-		return failRead(GradeProposalRead, err)
+		return false, failRead(GradeProposalRead, err)
 	}
 	v, err := g.derive(ctx, tx, p, stored, decidedAt)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if stored != nil && !stored.Final && !v.final && outcomes.Reopened(stored.TaskResult.String, v.taskResult.String) {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE coordinator_outcomes SET reopen_count = reopen_count + 1
 			WHERE proposal_id = ? AND task_result = ? AND final = ?`), proposalID, outcomes.ResultDone, false); err != nil {
-			return fmt.Errorf("count reopening: %w", err)
+			return false, fmt.Errorf("count reopening: %w", err)
 		}
 	}
 	if err := upsertOutcome(ctx, tx, v); err != nil {
-		return err
+		return false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit grade: %w", err)
+		return false, fmt.Errorf("commit grade: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func failRead(reason string, err error) error {

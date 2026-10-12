@@ -391,6 +391,8 @@ describe("PreviewSessionBody delivery", () => {
       sessionId: "session-1",
       taskId: TASK_ID,
       hideSessionsDropdown: true,
+      isVisible: false,
+      detailActive: true,
     });
     expect(mocks.taskChatPanelProps).not.toHaveProperty("onSend");
   });

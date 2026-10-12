@@ -187,3 +187,50 @@ Completed on 2026-09-18.
 - Review remediation: desktop and touch negative assertions use the shared
   `dwell(..., "negative-assertion", ...)` observer window instead of treating a
   request timeout as proof that no late refresh occurred.
+
+### PR #3598 move sequencing remediation (2026-10-07)
+
+Hosted shard 10 observed Fresh C remain STARTING after returning to retained A.
+The unmodified scenario passed five local repetitions, so that hosted startup
+stall was not reproduced locally. Source inspection identified incomplete test
+barriers: it waited for outgoing HTTP requests and primary-session selection,
+then began another move before observing the retained session become answerable.
+
+The scenario now waits for successful move responses, lifecycle completion,
+and the retained profile's WAITING_FOR_INPUT state before the fresh move. Preview
+outcomes and retained/fresh identity assertions remain. No production code,
+timeouts, retries, or workflow policy changed.
+
+From `apps/web`, the repaired focused command passed five repetitions:
+
+```sh
+E2E_PORT_OFFSET=0 pnpm e2e:run --no-build --project chromium tests/workflow/workflow-move-preview.spec.ts -- --grep 'matches other-session reuse' --retries=0 --repeat-each=5
+```
+
+Focused ESLint and `pnpm run typecheck` passed. This establishes the explicit
+scenario preconditions locally; hosted validation on the replacement head is
+still required to determine whether the reported stall recurs.
+
+The complete desktop spec also passed (3 tests), followed sequentially by the
+matching mobile spec (1 test), both with retries disabled. Commands from
+`apps/web`: `E2E_PORT_OFFSET=0 pnpm e2e:run --no-build --project chromium
+tests/workflow/workflow-move-preview.spec.ts -- --retries=0` and
+`E2E_PORT_OFFSET=0 pnpm e2e:run --no-build --project mobile-chrome
+tests/workflow/mobile-workflow-move-preview.spec.ts -- --retries=0`.
+
+After merging main's profile-enabled omission fix, the rebuilt combined desktop
+command passed all 17 cases on their first attempts:
+`E2E_PORT_OFFSET=0 pnpm e2e:run tests/task/create-task-remote-repo.spec.ts
+ tests/workflow/workflow-move-preview.spec.ts
+ tests/chat/queue-admission-reliability.spec.ts --project=chromium --retries=0`
+from `apps/web`. Profile-enabled race checks passed through backendapp,
+settings controller/store/handlers, MCP, and lifecycle. Focused ESLint, web
+typecheck, catalog/spec lint, and 74-work-order coverage passed.
+
+The matching mobile command then passed all 10 cases on their first attempts:
+`E2E_PORT_OFFSET=0 pnpm e2e:run --no-build
+ tests/task/mobile-create-task-remote-repo.spec.ts
+ tests/workflow/mobile-workflow-move-preview.spec.ts
+ tests/chat/mobile-queue-admission-reliability.spec.ts
+ --project=mobile-chrome --retries=0` from `apps/web`.
+Fresh hosted CI remains pending; these local passes do not establish its result.

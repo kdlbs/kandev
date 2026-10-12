@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/coordinator"
+	"github.com/kandev/kandev/internal/coordinator/watch"
 )
 
 // ErrUnavailable is returned when the ledger or the watch set cannot be read;
@@ -207,6 +208,7 @@ func (l *Ledger) List(ctx context.Context, coordinatorID string, args ListArgs) 
 type taskScope struct {
 	watch       coordinator.WatchSet
 	workspaceID string
+	projects    watch.Resolved
 }
 
 func (t taskScope) allows(workspaceID, workflowID string) bool {
@@ -219,7 +221,11 @@ func (l *Ledger) taskScopeFor(ctx context.Context, coordinatorID string, ws coor
 	if err != nil {
 		return taskScope{}, fmt.Errorf("read coordinator workspace: %w", err)
 	}
-	return taskScope{watch: ws, workspaceID: workspaceID}, nil
+	projects, err := coordinator.ResolveWatchProjectsSQL(ctx, l.deps.RO, workspaceID, ws.Projects)
+	if err != nil {
+		return taskScope{}, err
+	}
+	return taskScope{watch: ws, workspaceID: workspaceID, projects: projects}, nil
 }
 
 func (l *Ledger) taskVisible(ctx context.Context, scope taskScope, taskID string) (bool, error) {
@@ -227,7 +233,9 @@ func (l *Ledger) taskVisible(ctx context.Context, scope taskScope, taskID string
 		WorkspaceID string `db:"workspace_id"`
 		WorkflowID  string `db:"workflow_id"`
 	}
-	err := l.deps.RO.GetContext(ctx, &row, l.deps.RO.Rebind(`SELECT COALESCE(workspace_id, '') AS workspace_id, COALESCE(workflow_id, '') AS workflow_id FROM tasks WHERE id = ?`), taskID)
+	projectWhere, projectArgs := watch.TaskSQL(scope.projects)
+	query := `SELECT COALESCE(t.workspace_id, '') AS workspace_id, COALESCE(t.workflow_id, '') AS workflow_id FROM tasks t WHERE t.id = ? AND ` + projectWhere
+	err := l.deps.RO.GetContext(ctx, &row, l.deps.RO.Rebind(query), append([]any{taskID}, projectArgs...)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -410,7 +418,8 @@ func visibleTasks(ctx context.Context, db *sqlx.DB, taskIDs []string, scope task
 	if len(taskIDs) == 0 {
 		return visible, nil
 	}
-	query, args, err := sqlx.In(`SELECT id, COALESCE(workspace_id, '') AS workspace_id, COALESCE(workflow_id, '') AS workflow_id FROM tasks WHERE id IN (?)`, taskIDs)
+	projectWhere, projectArgs := watch.TaskSQL(scope.projects)
+	query, args, err := sqlx.In(`SELECT t.id, COALESCE(t.workspace_id, '') AS workspace_id, COALESCE(t.workflow_id, '') AS workflow_id FROM tasks t WHERE t.id IN (?) AND `+projectWhere, append([]any{taskIDs}, projectArgs...)...)
 	if err != nil {
 		return nil, fmt.Errorf("digest targets: %w", err)
 	}

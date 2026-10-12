@@ -12,6 +12,7 @@ import { buildMobileTaskSwitcherProps } from "./session-task-switcher-sheet-prop
 import { SidebarTaskQueryStatus } from "../sidebar-task-query-status";
 import { SidebarTaskPagination } from "../sidebar-task-pagination";
 import { groupSidebarTaskPage } from "../task-session-sidebar-grouped-view";
+import { sidebarSortHasKey } from "@/lib/sidebar/sidebar-sort-chain";
 import type { SidebarTaskPageEntry, SidebarTaskPageResponse } from "@/lib/types/http";
 function useSidebarGroupToggle(viewId: string) {
   const toggleSidebarGroupCollapsed = useAppStore((s) => s.toggleSidebarGroupCollapsed);
@@ -54,6 +55,7 @@ export type MobileTaskListProps = {
   pageEntries?: SidebarTaskPageEntry[];
   page?: SidebarTaskPageResponse | null;
   pagePending?: boolean;
+  pageTransitioning?: boolean;
   pageError?: string | null;
   pageCanRetry?: boolean;
   onPageChange?: (page: number, afterSuccess: () => void) => void;
@@ -113,7 +115,8 @@ export function MobileTaskList(props: MobileTaskListProps) {
     onReorderGroup: handleReorderGroup,
     onReorderSubtasks: handleReorderSubtasks,
     pinnedTaskIds,
-    showActivityTime: view.sort.key === "lastActivityAt",
+    showActivityTime: sidebarSortHasKey(view.sort, "lastActivityAt"),
+    groupIndent: view.groupIndent,
     taskRowPresentation: view.taskRow,
   });
   return (
@@ -131,7 +134,7 @@ export function MobileTaskList(props: MobileTaskListProps) {
       {!(props.pageError && !props.page && !props.loadError) && <TaskSwitcher {...switcherProps} />}
       <SidebarTaskPagination
         page={props.page ?? null}
-        pending={props.pagePending ?? false}
+        pending={props.pagePending === true || props.pageTransitioning === true}
         onPageChange={(nextPage) =>
           props.onPageChange?.(nextPage, () =>
             props.scrollContainerRef?.current?.scrollTo({ top: 0 }),

@@ -14,6 +14,7 @@ type ActiveTaskRowCue = {
   cueId: number;
   row: HTMLElement;
   timeoutId: number;
+  resizeObserver?: ResizeObserver;
 };
 
 let activeTaskRowCue: ActiveTaskRowCue | null = null;
@@ -24,6 +25,7 @@ export function cancelSidebarTaskReveal(): void {
   if (!activeTaskRowCue) return;
 
   window.clearTimeout(activeTaskRowCue.timeoutId);
+  activeTaskRowCue.resizeObserver?.disconnect();
   activeTaskRowCue.row.classList.remove(TASK_ROW_REVEAL_CLASS);
   activeTaskRowCue = null;
 }
@@ -90,10 +92,47 @@ function prefersReducedMotion(): boolean {
   );
 }
 
+function scrollTaskRow(row: HTMLElement): void {
+  row.scrollIntoView({
+    behavior: prefersReducedMotion() ? "auto" : "smooth",
+    block: "center",
+    inline: "nearest",
+  });
+}
+
+function observeCueViewport(row: HTMLElement, viewport: HTMLElement, cueId: number) {
+  if (typeof ResizeObserver === "undefined") return undefined;
+  let previous = viewport.getBoundingClientRect();
+  let previousContentHeight = viewport.scrollHeight;
+  const observer = new ResizeObserver(() => {
+    if (
+      activeTaskRowCue?.cueId !== cueId ||
+      !row.isConnected ||
+      row.getAttribute("aria-current") === "false"
+    )
+      return;
+    const current = viewport.getBoundingClientRect();
+    const contentHeight = viewport.scrollHeight;
+    if (
+      current.width === previous.width &&
+      current.height === previous.height &&
+      contentHeight === previousContentHeight
+    )
+      return;
+    previous = current;
+    previousContentHeight = contentHeight;
+    if (!isInsideViewport(row, viewport)) scrollTaskRow(row);
+  });
+  observer.observe(viewport);
+  if (viewport.firstElementChild) observer.observe(viewport.firstElementChild);
+  return observer;
+}
+
 /** Restarts the short-lived cue on the latest command-selected row. */
-function cueTaskRow(row: HTMLElement): void {
+function cueTaskRow(row: HTMLElement, viewport: HTMLElement): void {
   if (activeTaskRowCue) {
     window.clearTimeout(activeTaskRowCue.timeoutId);
+    activeTaskRowCue.resizeObserver?.disconnect();
     activeTaskRowCue.row.classList.remove(TASK_ROW_REVEAL_CLASS);
   }
 
@@ -105,10 +144,16 @@ function cueTaskRow(row: HTMLElement): void {
 
   const timeoutId = window.setTimeout(() => {
     if (activeTaskRowCue?.cueId !== cueId) return;
+    activeTaskRowCue.resizeObserver?.disconnect();
     row.classList.remove(TASK_ROW_REVEAL_CLASS);
     activeTaskRowCue = null;
   }, TASK_ROW_REVEAL_DURATION_MS);
-  activeTaskRowCue = { cueId, row, timeoutId };
+  activeTaskRowCue = {
+    cueId,
+    row,
+    timeoutId,
+    resizeObserver: observeCueViewport(row, viewport, cueId),
+  };
 }
 
 type TaskRowVisibilityState = {
@@ -116,6 +161,7 @@ type TaskRowVisibilityState = {
   scrollRequested: boolean;
   visibleFrames: number;
   previousGeometry: [number, number, number, number, number] | null;
+  scrollGeometry: [number, number, number] | null;
 };
 
 function updateTaskRowVisibility(
@@ -127,8 +173,17 @@ function updateTaskRowVisibility(
     state.portalScrollRestoreReleased = true;
   }
   if (!isInsideViewport(match.row, match.viewport)) {
-    // A row displaced after entering view starts a new scroll; pending motion does not.
-    if (state.previousGeometry !== null) state.scrollRequested = false;
+    const viewportRect = match.viewport.getBoundingClientRect();
+    const scrollGeometry: [number, number, number] = [
+      viewportRect.width,
+      viewportRect.height,
+      match.viewport.scrollHeight,
+    ];
+    const sameScrollTarget = state.scrollGeometry?.every(
+      (value, index) => value === scrollGeometry[index],
+    );
+    // Growth changes the scroll target even before pending motion brings the row into view.
+    if (state.previousGeometry !== null || !sameScrollTarget) state.scrollRequested = false;
     state.visibleFrames = 0;
     state.previousGeometry = null;
     if (!state.scrollRequested) {
@@ -138,6 +193,7 @@ function updateTaskRowVisibility(
         inline: "nearest",
       });
       state.scrollRequested = true;
+      state.scrollGeometry = scrollGeometry;
     }
     return false;
   }
@@ -159,7 +215,7 @@ function updateTaskRowVisibility(
   if (state.visibleFrames < STABLE_VISIBLE_FRAME_COUNT) return false;
 
   releasePortalScrollRestoration(match.viewport);
-  cueTaskRow(match.row);
+  cueTaskRow(match.row, match.viewport);
   return true;
 }
 
@@ -184,6 +240,7 @@ export function revealSidebarTask(
       scrollRequested: false,
       visibleFrames: 0,
       previousGeometry: null,
+      scrollGeometry: null,
     };
     const tick = () => {
       if (requestId !== latestNavigationRequestId) {

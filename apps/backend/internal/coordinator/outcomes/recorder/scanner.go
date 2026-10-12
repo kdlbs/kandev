@@ -49,6 +49,8 @@ type Scanner struct {
 	active  int
 	stopCh  chan struct{}
 	stopped bool
+	started bool
+	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 }
 
@@ -70,7 +72,15 @@ func NewScanner(capture *Capture, db dbReader, log *zap.Logger) *Scanner {
 
 // Start runs the scan worker and the daily scan of recently acted-on tasks.
 func (s *Scanner) Start(ctx context.Context) {
+	s.mu.Lock()
+	if s.stopped || s.started || ctx.Err() != nil {
+		s.mu.Unlock()
+		return
+	}
+	s.started = true
+	ctx, s.cancel = context.WithCancel(ctx)
 	s.wg.Add(2)
+	s.mu.Unlock()
 	go s.run(ctx)
 	go s.runDaily(ctx)
 }
@@ -80,10 +90,14 @@ func (s *Scanner) Stop() {
 	s.mu.Lock()
 	if s.stopped {
 		s.mu.Unlock()
+		s.wg.Wait()
 		return
 	}
 	s.stopped = true
 	close(s.stopCh)
+	if s.cancel != nil {
+		s.cancel()
+	}
 	for _, chains := range s.chains {
 		for _, c := range chains {
 			if c.timer != nil {

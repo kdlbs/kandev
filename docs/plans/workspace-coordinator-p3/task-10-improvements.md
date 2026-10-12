@@ -1,7 +1,7 @@
 ---
 id: "10-improvements"
 title: "Improvement proposals and pending changes"
-status: pending
+status: in_progress
 wave: 5
 depends_on:
   - "06-autonomy-ui"
@@ -147,3 +147,12 @@ cd apps/web && pnpm test -- app/coordinator app/settings/workspace
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/improvements.spec.ts
 ```
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.

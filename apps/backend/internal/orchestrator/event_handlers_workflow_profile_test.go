@@ -83,6 +83,9 @@ func TestCreateNewSessionForStepKeepsCurrentSessionWhenWorkspaceAttachFails(t *t
 		t.Fatal(err)
 	}
 	current.State = models.TaskSessionStateRunning
+	if err := repo.SetSessionPrimary(ctx, current.ID); err != nil {
+		t.Fatal(err)
+	}
 	current.IsPrimary = true
 	current.AgentProfileID = "profile-old"
 	current.ExecutorID = models.ExecutorIDWorktree

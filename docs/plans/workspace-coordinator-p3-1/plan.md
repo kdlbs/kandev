@@ -1,6 +1,6 @@
 ---
 created: 2026-09-30
-status: draft
+status: in_progress
 requirements:
   - REQ-COORDINATOR-TURN-LEDGER-001
   - REQ-COORDINATOR-TURN-LEDGER-002
@@ -201,3 +201,12 @@ The flag is off in every shipped profile including `e2e` and on only through the
 ## E2E decision input
 
 User-visible surfaces touched: the Learning section and report detail, the Pause control on the autonomy strip and in settings, the Projects part of Watches, the guided-setup step and the copilot scope hint. Each has an e2e spec listed above.
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.

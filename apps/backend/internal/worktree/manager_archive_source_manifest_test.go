@@ -2,12 +2,19 @@ package worktree
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
 func TestArchiveManifestRejectsForeignRepositoryPath(t *testing.T) {
@@ -99,7 +106,7 @@ func TestArchiveManifestRejectsSiblingWorktreeGitdir(t *testing.T) {
 }
 
 func TestArchiveManifestRejectsDisappearedUntrackedPath(t *testing.T) {
-	entries, err := archiveSourceManifestEntries(t.TempDir(), "?? disappeared.txt\x00")
+	entries, err := archiveSourceManifestEntries(context.Background(), t.TempDir(), "?? disappeared.txt\x00")
 	if err == nil {
 		t.Fatalf("accepted disappeared untracked path without content identity: %+v", entries)
 	}
@@ -141,24 +148,41 @@ func TestArchiveManifestCapturesIgnoredUntrackedFile(t *testing.T) {
 }
 
 // @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.3
-func TestArchiveManifestCapturesIgnoredDirectoryContents(t *testing.T) {
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.7
+func TestArchiveManifestOmitsIgnoredDirectoryContents(t *testing.T) {
 	repo := initGitRepoForWorktreeTest(t)
-	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("cache/\n"), 0o600); err != nil {
+	ignoreRules := "node_modules/\n**/node_modules/\ndist/\ngenerated-cache/\nignored.env\nignored-link\n"
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(ignoreRules), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, repo, "add", ".gitignore")
-	runGit(t, repo, "commit", "-m", "ignore generated directory")
+	runGit(t, repo, "commit", "-m", "ignore generated content")
 	worktreePath := filepath.Join(t.TempDir(), "task-worktree")
 	runGit(t, repo, "worktree", "add", "-b", "feature/task", worktreePath)
-	cachePath := filepath.Join(worktreePath, "cache")
-	if err := os.Mkdir(cachePath, 0o700); err != nil {
+	directoryFiles := map[string]string{
+		"node_modules/root-package/index.js":                "root package",
+		"packages/app/node_modules/nested-package/index.js": "nested package",
+		"dist/bundle.js":           "bundle",
+		"generated-cache/data.bin": "arbitrary ignored directory",
+	}
+	for path, contents := range directoryFiles {
+		fullPath := filepath.Join(worktreePath, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "ignored.env"), []byte("local value"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cachePath, "data.txt"), []byte("local value"), 0o600); err != nil {
+	outsideLinkTarget := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outsideLinkTarget, []byte("outside"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if status := runGit(t, worktreePath, "status", "--porcelain"); status != "" {
-		t.Fatalf("fixture must be Git-clean, status = %q", status)
+	if err := os.Symlink(outsideLinkTarget, filepath.Join(worktreePath, "ignored-link")); err != nil {
+		t.Skipf("symlink creation is unavailable: %v", err)
 	}
 	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
 	if err != nil {
@@ -170,16 +194,359 @@ func TestArchiveManifestCapturesIgnoredDirectoryContents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("capture ignored directory source: %v", err)
 	}
-	runGit(t, repo, "worktree", "remove", "--force", worktreePath)
-	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
-		t.Fatalf("worktree after cleanup: %v, want removed", err)
+	manifest := manifests["wt"]
+	manifestJSON, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, entry := range manifests["wt"].Entries {
-		if (entry.Path == "cache/" || entry.Path == "cache/data.txt") && entry.ContentSHA256 != "" {
-			return
+	var roundTripped ArchiveSourceManifest
+	if err := json.Unmarshal(manifestJSON, &roundTripped); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(manifest, roundTripped) {
+		t.Fatalf("manifest snapshot round trip changed omission evidence:\nbefore=%+v\nafter=%+v", manifest, roundTripped)
+	}
+	wantDirectories := []string{"dist", "generated-cache", "node_modules", "packages/app/node_modules"}
+	for _, wantPath := range wantDirectories {
+		found := false
+		for _, entry := range manifest.Entries {
+			entryPath := strings.TrimSuffix(filepath.ToSlash(entry.Path), "/")
+			if entryPath != wantPath {
+				continue
+			}
+			found = true
+			encoded, marshalErr := json.Marshal(entry)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			var persisted map[string]any
+			if unmarshalErr := json.Unmarshal(encoded, &persisted); unmarshalErr != nil {
+				t.Fatal(unmarshalErr)
+			}
+			if persisted["content_omission"] != "ignored_directory" || entry.ContentSHA256 != "" {
+				t.Fatalf("ignored directory evidence for %q = %s", wantPath, encoded)
+			}
+		}
+		if !found {
+			t.Fatalf("ignored directory %q was not recorded in manifest: %+v", wantPath, manifest.Entries)
 		}
 	}
-	t.Fatalf("ignored directory has no path and content identity in manifest: %+v", manifests["wt"].Entries)
+	for _, entry := range manifest.Entries {
+		path := strings.TrimSuffix(filepath.ToSlash(entry.Path), "/")
+		for _, directory := range wantDirectories {
+			if path != directory && strings.HasPrefix(path, directory+"/") {
+				t.Fatalf("manifest opened a descendant of omitted directory %q: %+v", directory, entry)
+			}
+		}
+	}
+	var ignoredFile, ignoredLink *ArchiveSourceManifestEntry
+	for index := range manifest.Entries {
+		entry := &manifest.Entries[index]
+		switch entry.Path {
+		case "ignored.env":
+			ignoredFile = entry
+		case "ignored-link":
+			ignoredLink = entry
+		}
+	}
+	if ignoredFile == nil || ignoredFile.ContentSHA256 == "" {
+		t.Fatalf("ignored regular file lost its digest: %+v", manifest.Entries)
+	}
+	if ignoredLink == nil || ignoredLink.ContentSHA256 == "" {
+		t.Fatalf("ignored symlink lost its link identity: %+v", manifest.Entries)
+	}
+	oldSnapshot, err := json.Marshal(ArchiveSourceManifestEntry{Path: "cache/", Status: "!!"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oldEntry ArchiveSourceManifestEntry
+	if err := json.Unmarshal(oldSnapshot, &oldEntry); err != nil || oldEntry.Path != "cache/" || oldEntry.ContentSHA256 != "" {
+		t.Fatalf("old manifest entry no longer decodes: entry=%+v err=%v", oldEntry, err)
+	}
+	var oldManifest ArchiveSourceManifest
+	if err := json.Unmarshal([]byte(`{"task_id":"task","worktree_id":"wt","entries":[{"path":"cache/","status":"!!"}]}`), &oldManifest); err != nil {
+		t.Fatalf("old source manifest snapshot no longer decodes: %v", err)
+	}
+	if len(oldManifest.Entries) != 1 || oldManifest.Entries[0].ContentOmission != "" {
+		t.Fatalf("old source manifest entry gained an omission value: %+v", oldManifest.Entries)
+	}
+
+	for path := range directoryFiles {
+		if err := os.WriteFile(filepath.Join(worktreePath, filepath.FromSlash(path)), []byte("mutated local content"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mutated, err := mgr.CaptureArchiveSourceManifests(context.Background(), []*Worktree{{
+		ID: "wt", TaskID: "task", RepositoryID: "repo", Path: worktreePath, RepositoryPath: repo,
+	}})
+	if err != nil {
+		t.Fatalf("recapture mutated ignored directories: %v", err)
+	}
+	if !reflect.DeepEqual(manifest.Entries, mutated["wt"].Entries) {
+		t.Fatalf("ignored directory contents changed manifest evidence:\nbefore=%+v\nafter=%+v", manifest.Entries, mutated["wt"].Entries)
+	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.7
+func TestArchiveManifestHashesTrackedDependencyPath(t *testing.T) {
+	root := t.TempDir()
+	trackedPath := filepath.Join(root, "node_modules", "tracked.txt")
+	if err := os.MkdirAll(filepath.Dir(trackedPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(trackedPath, []byte("tracked source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := archiveSourceManifestEntries(context.Background(), root, " M node_modules/tracked.txt\x00")
+	if err != nil {
+		t.Fatalf("capture tracked path under dependency directory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].ContentSHA256 == "" {
+		t.Fatalf("tracked dependency path has no digest: %+v", entries)
+	}
+	encoded, err := json.Marshal(entries[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted map[string]any
+	if err := json.Unmarshal(encoded, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := persisted["content_omission"]; exists {
+		t.Fatalf("tracked dependency path was marked as omitted: %s", encoded)
+	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.7
+func TestArchiveManifestIgnoredDirectoryDoesNotOpenDescendants(t *testing.T) {
+	handle := &rejectingArchiveSourceDirectoryHandle{}
+	digest, omitted, err := archiveSourceManifestDigestEntryAt(context.Background(), handle, "node_modules", "!!")
+	if err != nil {
+		t.Fatalf("classify ignored directory: %v", err)
+	}
+	if !omitted || digest != "" {
+		t.Fatalf("ignored directory evidence = digest %q, omitted %t", digest, omitted)
+	}
+	if handle.openedFiles != 0 || handle.openedSubdirectories != 0 {
+		t.Fatalf("ignored directory opened descendant handles: files=%d directories=%d", handle.openedFiles, handle.openedSubdirectories)
+	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.8
+func TestArchiveManifestDigestStopsOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	closeErr := errors.New("reader close failed")
+	reader := &cancelingArchiveManifestReader{cancel: cancel, chunks: [][]byte{
+		[]byte("first chunk"), []byte("must not be read"),
+	}, closeErr: closeErr}
+	_, err := archiveSourceManifestReadDigest(ctx, reader)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("digest error = %v, want context cancellation", err)
+	}
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("digest error = %v, want reader close failure preserved", err)
+	}
+	if reader.reads != 1 {
+		t.Fatalf("digest performed %d reads after cancellation; want one initial read", reader.reads)
+	}
+	if reader.closed != 1 {
+		t.Fatalf("reader closed %d times, want once", reader.closed)
+	}
+	if ctx.Err() != context.Canceled {
+		t.Fatalf("reader context error = %v, want canceled", ctx.Err())
+	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.8
+func TestArchiveManifestDigestStopsBeforeTraversal(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	handle := openTrackingArchiveManifestDirectory(t, root, &archiveManifestDirectoryReadState{})
+	var records []archiveSourceManifestDirectoryRecord
+	err := archiveSourceManifestCollectDirectory(ctx, handle, "", &records)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("directory capture error = %v, want cancellation", err)
+	}
+	if handle.state.readDirCalls != 0 {
+		t.Fatalf("directory traversal read %d directory listings after cancellation", handle.state.readDirCalls)
+	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.8
+func TestArchiveManifestDigestStopsBetweenDirectoryEntries(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	state := &archiveManifestDirectoryReadState{cancel: cancel, cancelOnOpen: "a.txt"}
+	handle := openTrackingArchiveManifestDirectory(t, root, state)
+	var records []archiveSourceManifestDirectoryRecord
+	err := archiveSourceManifestCollectDirectory(ctx, handle, "", &records)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("directory capture error = %v, want cancellation", err)
+	}
+	if !reflect.DeepEqual(state.openedFiles, []string{"a.txt"}) {
+		t.Fatalf("file opens = %v, want only the first entry before cancellation", state.openedFiles)
+	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.8
+func TestArchiveManifestDigestStopsDuringDirtySubmoduleCapture(t *testing.T) {
+	root := t.TempDir()
+	module := filepath.Join(root, "module")
+	if err := os.Mkdir(module, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(module, "tracked.txt"), []byte("dirty module source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	state := &archiveManifestDirectoryReadState{cancel: cancel, cancelOnOpen: "tracked.txt"}
+	handle := openTrackingArchiveManifestDirectory(t, root, state)
+	digest, omitted, err := archiveSourceManifestDigestEntryAt(ctx, handle, "module", " M")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("dirty submodule capture error = %v, want cancellation", err)
+	}
+	if digest != "" || omitted {
+		t.Fatalf("partial dirty submodule evidence = digest %q, omitted %t", digest, omitted)
+	}
+	if !reflect.DeepEqual(state.openedFiles, []string{"tracked.txt"}) {
+		t.Fatalf("dirty submodule file opens = %v", state.openedFiles)
+	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.8
+func TestArchiveManifestDigestStopsOnDeadline(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	reader := &cancelingArchiveManifestReader{chunks: [][]byte{[]byte("unread")}}
+	_, err := archiveSourceManifestReadDigest(ctx, reader)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("digest error = %v, want deadline expiration", err)
+	}
+	if reader.reads != 0 || reader.closed != 1 {
+		t.Fatalf("deadline capture reads=%d closes=%d, want no read and one close", reader.reads, reader.closed)
+	}
+}
+
+func TestArchiveManifestDigestReturnsCloseFailure(t *testing.T) {
+	closeErr := errors.New("reader close failed")
+	reader := &cancelingArchiveManifestReader{
+		chunks:   [][]byte{[]byte("complete content")},
+		closeErr: closeErr,
+	}
+	_, err := archiveSourceManifestReadDigest(context.Background(), reader)
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("digest error = %v, want reader close failure", err)
+	}
+	if reader.closed != 1 {
+		t.Fatalf("reader closed %d times, want once", reader.closed)
+	}
+}
+
+type cancelingArchiveManifestReader struct {
+	cancel   context.CancelFunc
+	chunks   [][]byte
+	reads    int
+	closed   int
+	closeErr error
+}
+
+func (r *cancelingArchiveManifestReader) Read(buffer []byte) (int, error) {
+	r.reads++
+	if r.reads > len(r.chunks) {
+		return 0, io.EOF
+	}
+	chunk := r.chunks[r.reads-1]
+	n := copy(buffer, chunk)
+	if r.reads == 1 && r.cancel != nil {
+		r.cancel()
+	}
+	return n, nil
+}
+
+func (r *cancelingArchiveManifestReader) Close() error {
+	r.closed++
+	return r.closeErr
+}
+
+type archiveManifestDirectoryReadState struct {
+	cancel       context.CancelFunc
+	cancelOnOpen string
+	openedFiles  []string
+	readDirCalls int
+}
+
+type trackingArchiveManifestDirectory struct {
+	storageworkspaces.DirectoryHandle
+	state *archiveManifestDirectoryReadState
+}
+
+func openTrackingArchiveManifestDirectory(
+	t *testing.T,
+	path string,
+	state *archiveManifestDirectoryReadState,
+) *trackingArchiveManifestDirectory {
+	t.Helper()
+	handle, err := storageworkspaces.OpenDirectoryNoFollow(filepath.Dir(path), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handle.Close() })
+	return &trackingArchiveManifestDirectory{DirectoryHandle: handle, state: state}
+}
+
+func (h *trackingArchiveManifestDirectory) ReadDir() ([]os.DirEntry, error) {
+	h.state.readDirCalls++
+	return h.DirectoryHandle.ReadDir()
+}
+
+func (h *trackingArchiveManifestDirectory) OpenSubdirectory(name string) (storageworkspaces.DirectoryHandle, error) {
+	child, err := h.DirectoryHandle.OpenSubdirectory(name)
+	if err != nil {
+		return nil, err
+	}
+	return &trackingArchiveManifestDirectory{DirectoryHandle: child, state: h.state}, nil
+}
+
+func (h *trackingArchiveManifestDirectory) OpenFile(name string) (io.ReadCloser, error) {
+	h.state.openedFiles = append(h.state.openedFiles, name)
+	if h.state.cancelOnOpen == name {
+		return &cancelingArchiveManifestReader{
+			cancel: h.state.cancel,
+			chunks: [][]byte{[]byte("first chunk"), []byte("must not be read")},
+		}, nil
+	}
+	return h.DirectoryHandle.OpenFile(name)
+}
+
+type rejectingArchiveSourceDirectoryHandle struct {
+	storageworkspaces.DirectoryHandle
+	openedFiles          int
+	openedSubdirectories int
+}
+
+func (h *rejectingArchiveSourceDirectoryHandle) LstatEntry(name string) (os.FileMode, error) {
+	if name != "node_modules" {
+		return 0, os.ErrNotExist
+	}
+	return os.ModeDir | 0o700, nil
+}
+
+func (h *rejectingArchiveSourceDirectoryHandle) OpenFile(string) (io.ReadCloser, error) {
+	h.openedFiles++
+	return nil, os.ErrPermission
+}
+
+func (h *rejectingArchiveSourceDirectoryHandle) OpenSubdirectory(string) (storageworkspaces.DirectoryHandle, error) {
+	h.openedSubdirectories++
+	return nil, os.ErrPermission
 }
 
 func TestArchiveManifestFileDigestRejectsSymlink(t *testing.T) {
@@ -192,7 +559,7 @@ func TestArchiveManifestFileDigestRejectsSymlink(t *testing.T) {
 	if err := os.Symlink(outside, path); err != nil {
 		t.Skipf("symlink creation is unavailable: %v", err)
 	}
-	if _, err := archiveSourceManifestFileDigest(root, path); err == nil {
+	if _, err := archiveSourceManifestFileDigest(context.Background(), root, path); err == nil {
 		t.Fatal("archive source digest followed a symlink")
 	}
 }
@@ -208,7 +575,7 @@ func TestArchiveManifestRejectsSymlinkedPathAncestor(t *testing.T) {
 		t.Skipf("symlink creation is unavailable: %v", err)
 	}
 	// The status was captured before cache was replaced by a symlink.
-	_, err := archiveSourceManifestEntries(root, "?? cache/secret-link\x00")
+	_, err := archiveSourceManifestEntries(context.Background(), root, "?? cache/secret-link\x00")
 	if err == nil {
 		t.Fatal("archive source manifest captured a path through a symlinked ancestor")
 	}
@@ -220,12 +587,30 @@ func TestArchiveManifestHandlesDeletedRenameDestination(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "next.txt"), []byte("next"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := archiveSourceManifestEntries(root, "RD renamed.txt\x00original.txt\x00?? next.txt\x00")
+	entries, err := archiveSourceManifestEntries(context.Background(), root, "RD renamed.txt\x00original.txt\x00?? next.txt\x00")
 	if err != nil {
 		t.Fatalf("parse staged rename with deleted destination: %v", err)
 	}
 	if len(entries) != 2 || entries[0].Path != "renamed.txt" || entries[0].Status != "RD" || entries[1].Path != "next.txt" {
 		t.Fatalf("rename evidence = %+v, want one deleted destination", entries)
+	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.4
+func TestArchiveManifestDeletedPathDoesNotIgnoreCloseFailure(t *testing.T) {
+	closeErr := errors.New("parent directory close failed")
+	err := errors.Join(os.ErrNotExist, archiveSourceManifestCloseError(closeErr))
+	if !errors.Is(err, os.ErrNotExist) || !errors.Is(err, closeErr) {
+		t.Fatalf("combined capture error %v does not preserve both causes", err)
+	}
+	if archiveSourceManifestIsDeletedPath("D ", err) {
+		t.Fatal("deleted path classification suppressed a directory close failure")
+	}
+	if !archiveSourceManifestIsDeletedPath("D ", os.ErrNotExist) {
+		t.Fatal("missing deleted path was not accepted")
+	}
+	if archiveSourceManifestIsDeletedPath(" M", os.ErrNotExist) {
+		t.Fatal("missing modified path was treated as a deletion")
 	}
 }
 
@@ -348,7 +733,7 @@ func TestArchiveManifestHashesDirtySubmoduleDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(submodule, "tracked.txt"), []byte("changed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := archiveSourceManifestEntries(root, " M module\x00")
+	entries, err := archiveSourceManifestEntries(context.Background(), root, " M module\x00")
 	if err != nil {
 		t.Fatalf("hash dirty submodule: %v", err)
 	}

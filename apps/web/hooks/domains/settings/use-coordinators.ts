@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useCallback, useMemo, useRef, useState } from "react";
 import {
   listCoordinators,
   createCoordinator,
@@ -14,11 +14,84 @@ import type {
   PatchCoordinatorRequest,
 } from "@/lib/api/domains/coordinator-api";
 
-/**
- * The workspace's coordinators, cached in the store and refetched on
- * workspace switch. Mirrors `useAutomations`: a workspace switch drops the
- * previous workspace's rows rather than serving them under the new id.
- */
+type ListIdentity = {
+  workspaceId: string;
+  setCoordinators: (items: Coordinator[]) => void;
+  setLoading: (loading: boolean) => void;
+};
+
+const EMPTY_COORDINATORS: Coordinator[] = [];
+
+function useCoordinatorList(
+  workspaceId: string | null,
+  setCoordinators: ListIdentity["setCoordinators"],
+  setLoading: ListIdentity["setLoading"],
+) {
+  const accepted = useRef<ListIdentity | null>(null);
+  const [loadedIdentity, setLoadedIdentity] = useState<ListIdentity | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const lifetime = useMemo(
+    () => ({ active: false, request: null as symbol | null }),
+    [workspaceId, setCoordinators, setLoading],
+  );
+
+  // Retire callbacks at commit, before another layout effect can invoke them.
+  useLayoutEffect(() => {
+    lifetime.active = true;
+    setLoadError(false);
+    return () => {
+      lifetime.active = false;
+      if (lifetime.request !== null) {
+        lifetime.request = null;
+        setLoading(false);
+      }
+    };
+  }, [lifetime, setLoading]);
+
+  const refresh = useCallback(() => {
+    if (!lifetime.active || !workspaceId) return;
+    const token = Symbol();
+    lifetime.request = token;
+    const current = () => lifetime.active && lifetime.request === token;
+    setLoading(true);
+    listCoordinators(workspaceId)
+      .then((result) => {
+        if (!current()) return;
+        setCoordinators(result.coordinators ?? []);
+        setLoadError(false);
+        const identity = { workspaceId, setCoordinators, setLoading };
+        accepted.current = identity;
+        setLoadedIdentity(identity);
+      })
+      .catch(() => {
+        if (current()) setLoadError(true);
+      })
+      .finally(() => {
+        if (!current()) return;
+        lifetime.request = null;
+        setLoading(false);
+      });
+  }, [lifetime, workspaceId, setCoordinators, setLoading]);
+
+  useEffect(() => {
+    const cached = accepted.current;
+    if (
+      cached?.workspaceId === workspaceId &&
+      cached?.setCoordinators === setCoordinators &&
+      cached?.setLoading === setLoading
+    )
+      return;
+    refresh();
+  }, [workspaceId, setCoordinators, setLoading, refresh]);
+
+  const loaded =
+    loadedIdentity?.workspaceId === workspaceId &&
+    loadedIdentity?.setCoordinators === setCoordinators &&
+    loadedIdentity?.setLoading === setLoading;
+  return { loaded, loadError, refresh };
+}
+
+/** The workspace's coordinator rows, with list reads owned by this hook lifetime. */
 export function useCoordinators(workspaceId: string | null) {
   const items = useAppStore((state) => state.coordinators.items);
   const loading = useAppStore((state) => state.coordinators.loading);
@@ -28,37 +101,11 @@ export function useCoordinators(workspaceId: string | null) {
   const updateInStore = useAppStore((state) => state.updateCoordinator);
   const removeFromStore = useAppStore((state) => state.removeCoordinator);
 
-  const loadedWorkspaceRef = useRef<string | null>(null);
-  const inFlightWorkspaceRef = useRef<string | null>(null);
-  const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState(false);
-
-  useEffect(() => {
-    if (!workspaceId) return;
-    if (loadedWorkspaceRef.current === workspaceId) return;
-    inFlightWorkspaceRef.current = workspaceId;
-    setLoading(true);
-    listCoordinators(workspaceId)
-      .then((result) => {
-        if (inFlightWorkspaceRef.current !== workspaceId) return; // stale
-        setCoordinators(result.coordinators ?? []);
-        setLoadError(false);
-        loadedWorkspaceRef.current = workspaceId;
-        setLoadedWorkspaceId(workspaceId);
-      })
-      .catch(() => {
-        if (inFlightWorkspaceRef.current !== workspaceId) return;
-        // Leave loadedWorkspaceRef unset (build decision B3): a failed load
-        // is not "loaded with nothing", so a later Retry runs, not a silent
-        // empty list.
-        setLoadError(true);
-      })
-      .finally(() => {
-        if (inFlightWorkspaceRef.current === workspaceId) {
-          setLoading(false);
-        }
-      });
-  }, [workspaceId, setCoordinators, setLoading]);
+  const { loaded, loadError, refresh } = useCoordinatorList(
+    workspaceId,
+    setCoordinators,
+    setLoading,
+  );
 
   const create = useCallback(
     async (req: CreateCoordinatorRequest): Promise<Coordinator> => {
@@ -89,27 +136,14 @@ export function useCoordinators(workspaceId: string | null) {
     [workspaceId, removeFromStore],
   );
 
-  const refresh = useCallback(() => {
-    if (!workspaceId) return;
-    inFlightWorkspaceRef.current = workspaceId;
-    setLoading(true);
-    listCoordinators(workspaceId)
-      .then((result) => {
-        if (inFlightWorkspaceRef.current !== workspaceId) return;
-        setCoordinators(result.coordinators ?? []);
-        setLoadError(false);
-        loadedWorkspaceRef.current = workspaceId;
-        setLoadedWorkspaceId(workspaceId);
-      })
-      .catch(() => {
-        if (inFlightWorkspaceRef.current !== workspaceId) return;
-        setLoadError(true);
-      })
-      .finally(() => {
-        if (inFlightWorkspaceRef.current === workspaceId) setLoading(false);
-      });
-  }, [workspaceId, setCoordinators, setLoading]);
-
-  const loaded = loadedWorkspaceId === workspaceId;
-  return { items, loaded, loading, loadError, create, patch, remove, refresh };
+  return {
+    items: loaded ? items : EMPTY_COORDINATORS,
+    loaded,
+    loading,
+    loadError,
+    create,
+    patch,
+    remove,
+    refresh,
+  };
 }

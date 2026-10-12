@@ -43,8 +43,11 @@ func (h *Handlers) recordCoordinatorCall(ctx context.Context, msg *ws.Message, a
 	target := ""
 	if fields, err := automationPayloadFields(msg.Payload); err == nil {
 		target = jsonStringField(fields, "task_id")
+		if msg.Action == coordinator.ActionGetItem && jsonStringField(fields, "kind") == "stall" {
+			target = jsonStringField(fields, "id")
+		}
 	}
-	if len(target) > maxRecordedTargetLen {
+	if len(target) > maxRecordedTargetLen || coordinator.ContainsCredential(target) {
 		target = ""
 	}
 	h.coordinatorSvc.RecordCall(principal.CallerSessionID, action, target, allowed)

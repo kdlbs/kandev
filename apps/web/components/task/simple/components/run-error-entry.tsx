@@ -51,6 +51,14 @@ function composerOwnsRunError(error: RunError, stamp: string | undefined) {
   return error.isActive !== false && Boolean(error.errorStamp) && error.errorStamp === stamp;
 }
 
+function isManagedRuntimeFailure(code: string | undefined) {
+  return (
+    code === "managed_runtime_npm_resolution" ||
+    code === "managed_runtime_npm_policy" ||
+    code === "managed_runtime_startup"
+  );
+}
+
 export function RunErrorEntry({
   taskId,
   workspaceId = "",
@@ -71,6 +79,10 @@ export function RunErrorEntry({
     guardDetails,
     recoveryNotice,
     manualRecoveryFailure,
+    workspaceRecovery,
+    workspaceRecoveryRepositoryName,
+    workspaceRecoveryStatusCheck,
+    checkWorkspaceRecoveryStatus,
     providerRestoredResumeEligible,
     handleRecover,
     handleRestore,
@@ -101,10 +113,7 @@ export function RunErrorEntry({
     );
   }
 
-  if (
-    error.failureCode === "managed_runtime_npm_resolution" ||
-    error.failureCode === "managed_runtime_npm_policy"
-  ) {
+  if (isManagedRuntimeFailure(error.failureCode)) {
     return (
       <ManagedRuntimeNpmRunError
         error={error}
@@ -134,6 +143,10 @@ export function RunErrorEntry({
           ? t("task:failedToRestoreWorkspace")
           : t("task:failedToResumeSession")
       }
+      workspaceRecovery={workspaceRecovery}
+      workspaceRecoveryRepositoryName={workspaceRecoveryRepositoryName}
+      workspaceRecoveryStatusCheck={workspaceRecoveryStatusCheck}
+      onCheckWorkspaceRecoveryStatus={() => void checkWorkspaceRecoveryStatus()}
     />
   );
 }

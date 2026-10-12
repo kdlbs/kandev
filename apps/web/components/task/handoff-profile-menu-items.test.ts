@@ -2,6 +2,8 @@ import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { ExecutorProfile } from "@/lib/types/http";
+import { createAppStore } from "@/lib/state/store";
+import type { Agent } from "@/lib/types/http";
 
 const PROFILE_A: AgentProfileOption = {
   id: "profile-a",
@@ -67,6 +69,31 @@ vi.mock("@/lib/agent-executor-compat", () => ({
 import { useHandoffProfiles, useHasSelectableAgentProfiles } from "./handoff-profile-menu-items";
 
 describe("useHandoffProfiles", () => {
+  it("keeps handoff choices in baseline order after a saved Settings reorder", () => {
+    const store = createAppStore();
+    store.getState().applyAgentListSnapshot(
+      [
+        {
+          id: "agent-1",
+          name: "mock",
+          profile_order_revision: 2,
+          profiles: [
+            { id: PROFILE_A.id, name: "Fast", createdAt: "2026-01-01T00:00:00Z" },
+            { id: PROFILE_B.id, name: "Slow", createdAt: "2026-02-01T00:00:00Z" },
+          ],
+        } as Agent,
+      ],
+      0,
+    );
+    mockProfiles = store.getState().agentProfiles.items;
+    const { result, rerender } = renderHook(() => useHandoffProfiles("task-1"));
+    expect(result.current.map((profile) => profile.id)).toEqual([PROFILE_B.id, PROFILE_A.id]);
+    store.getState().acceptAgentProfileOrder("agent-1", [PROFILE_A.id, PROFILE_B.id], 3);
+    mockProfiles = store.getState().agentProfiles.items;
+    rerender();
+    expect(result.current.map((profile) => profile.id)).toEqual([PROFILE_B.id, PROFILE_A.id]);
+  });
+
   afterEach(() => {
     mockProfiles = [PROFILE_A, PROFILE_B];
     mockExecutorProfile = LOCAL_EXECUTOR_PROFILE;

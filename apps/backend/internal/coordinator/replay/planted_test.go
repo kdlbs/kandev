@@ -76,7 +76,10 @@ func plantedWorld(t *testing.T, candidate string) *world {
 		if !ok {
 			t.Errorf("no model row for marker %q", marker)
 		}
-		id := strings.Fields(prompt[strings.Index(prompt, "CASE:")+5:])[0]
+		id, err := promptCaseID(prompt)
+		if err != nil {
+			return Reply{}, err
+		}
 		c := byID[id]
 		var parts []string
 		if !in(rule.DropApprovedIn, id) {

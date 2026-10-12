@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -97,7 +96,7 @@ func (s *Service) findStoredMessage(ctx context.Context, id string) (*models.Mes
 	if err != nil {
 		return nil, false, fmt.Errorf("check existing message: %w", err)
 	}
-	if err := s.AuthorizeSessionScope(ctx, existing.TaskSessionID, authz.ScopeSessionPrompt); err != nil {
+	if err := s.AuthorizeSessionPromptAccess(ctx, existing.TaskSessionID); err != nil {
 		return nil, false, err
 	}
 	return existing, true, nil

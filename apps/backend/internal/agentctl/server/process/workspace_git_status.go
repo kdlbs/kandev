@@ -209,16 +209,9 @@ func (wt *WorkspaceTracker) GetGitStatusWithDetails(ctx context.Context, fresh b
 		return status, errGitStatusDetailsUnavailable
 	}
 
-	wt.mu.RLock()
-	current := cloneGitStatusUpdate(wt.currentStatus)
-	fingerprint := wt.gitStatusFingerprint
-	wt.mu.RUnlock()
-	if current.TrackerEpoch != status.TrackerEpoch || current.SnapshotRevision != status.SnapshotRevision {
-		return current, errGitStatusEvidenceChanged
-	}
-	job := wt.gitStatusEnrichmentForFingerprint(fingerprint)
-	if job == nil {
-		return current, errGitStatusDetailsUnavailable
+	current, fingerprint, job, err := wt.gitStatusDetailsWaitTarget(status)
+	if err != nil || current.DetailState == gitStatusDetailReady {
+		return current, err
 	}
 	if wt.gitStatusDetailsWaitJoined != nil {
 		wt.gitStatusDetailsWaitJoined()
@@ -247,6 +240,10 @@ func (wt *WorkspaceTracker) GetGitStatusWithDetails(ctx context.Context, fresh b
 func (wt *WorkspaceTracker) gitStatusEnrichmentForFingerprint(fingerprint string) *gitStatusEnrichmentJob {
 	wt.gitStatusEnrichmentMu.Lock()
 	defer wt.gitStatusEnrichmentMu.Unlock()
+	return wt.gitStatusEnrichmentForFingerprintLocked(fingerprint)
+}
+
+func (wt *WorkspaceTracker) gitStatusEnrichmentForFingerprintLocked(fingerprint string) *gitStatusEnrichmentJob {
 	if wt.gitStatusEnrichmentNext != nil && wt.gitStatusEnrichmentNext.fingerprint == fingerprint {
 		return wt.gitStatusEnrichmentNext
 	}
@@ -352,15 +349,28 @@ func (wt *WorkspaceTracker) computeGitStatusObservation(
 	correctionPermitted bool,
 ) (types.GitStatusUpdate, string, *gitStatusEnrichmentJob, error) {
 	if observer == nil && (observation == "basic" || observation == "basic_fresh" || observation == "basic_retry") {
-		capture, err := wt.captureBasicGitStatus(ctx)
-		if err != nil {
-			return types.GitStatusUpdate{}, "", nil, err
+		for attempt := 0; attempt < 2; attempt++ {
+			capture, err := wt.captureBasicGitStatus(ctx)
+			if err == nil {
+				if capture.job != nil {
+					capture.job.correctionPermitted = correctionPermitted
+					capture.job.explicitRetry = observation == "basic_retry"
+				}
+				return capture.status, capture.fingerprint, capture.job, nil
+			}
+			if attempt != 0 || !errors.Is(err, errGitStatusEvidenceChanged) {
+				return types.GitStatusUpdate{}, "", nil, err
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return types.GitStatusUpdate{}, "", nil, ctxErr
+			}
+			if wt.cancelCtx != nil {
+				if shutdownErr := wt.cancelCtx.Err(); shutdownErr != nil {
+					return types.GitStatusUpdate{}, "", nil, shutdownErr
+				}
+			}
+			wt.logger.Debug("workspace Git status evidence changed; retrying basic capture")
 		}
-		if capture.job != nil {
-			capture.job.correctionPermitted = correctionPermitted
-			capture.job.explicitRetry = observation == "basic_retry"
-		}
-		return capture.status, capture.fingerprint, capture.job, nil
 	}
 	compute := observer
 	if compute == nil {
@@ -1110,7 +1120,7 @@ func (wt *WorkspaceTracker) parseGitStatusOutputWithSnapshot(ctx context.Context
 	}
 
 	if wt.gitStatusBetweenQueries != nil {
-		wt.gitStatusBetweenQueries()
+		wt.gitStatusBetweenQueries(ctx)
 	}
 
 	untrackedOut, err := wt.runGitOutputClass(statusCtx, class, true, gitUntrackedFilesArgs...)

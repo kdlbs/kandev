@@ -107,6 +107,27 @@ Normal mode performs these stages:
 
 GHCR images are built before the GitHub Release. npm, Homebrew, and Scoop start only after the GitHub Release and may run in parallel. A late failure can therefore leave some channels complete and others missing.
 
+## Notify release contributors
+
+The **Release** workflow has a `notify_contributors` checkbox. It defaults to unchecked. If selected, it posts notices after GitHub Release, npm, Homebrew, and Scoop publication succeed. The release job passes its exact tag, including on a backfill. Nightly, dry-run, desktop-validation, cancellations before the notification job starts, and failed publication paths skip notices. Cancelling after posting starts can leave partial results; rerun the exact tag to finish safely.
+
+Use the separate workflow to post notices, preview them, or recover after a partial notification run:
+
+1. Open **Actions**.
+2. Select **Notify release contributors**.
+3. Select **Run workflow** to show the input form.
+4. Choose `main` as the branch.
+5. Leave **Release tag** empty to select the latest published Stable release.
+6. To select another release, enter its exact tag, such as `v1.2.3`.
+7. To preview notices, select **Preview targets and comments without posting**.
+8. To post notices, clear the preview checkbox.
+9. Select **Run workflow**.
+10. Read the run summary for the result of each PR.
+
+Notices target merged PRs from this repository that appear in the release notes. The workflow skips bot accounts and maintainers listed in `cliff.toml`. It posts as `github-actions[bot]`. Only notices posted by that bot or a listed maintainer count as already sent.
+
+If a notification run stops after publication succeeds, start a new manual run with the exact release tag. The workflow skips confirmed notices and tries the remaining PRs. It also recognizes the unmarked notices posted for `v0.97.0`. If GitHub applies a rate limit, wait for it to clear before the next run.
+
 Stable default archive names contain the standard runtime. The `-full` names contain the offline
 command-line runtime. npm Stable packages, Homebrew, Scoop, winget, Chocolatey, and Desktop use the
 standard form. Desktop has one installer and updater track. Containers and npm Nightlies retain all
@@ -139,6 +160,12 @@ npm uses GitHub OIDC trusted publishers; there is no `NPM_TOKEN` release path. T
 Release-tag signing applies to future normal releases only. Backfills reuse the existing tag, and historical unsigned tags are not recreated or moved.
 
 Desktop OS signing and notarization are conditional on a complete secret set. Without them, the workflow can publish unsigned installers and adds a warning to release notes. Tauri updater signatures are stricter: the workflow publishes updater artifacts and `latest.json` only when the required signed set is complete. Do not claim in-app update availability from the presence of installers alone.
+
+The Windows runtime bundle is signed separately from the desktop installer through SignPath. Configure the repository secret `SIGNPATH_API_TOKEN` and repository variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`, and `SIGNPATH_SIGNING_POLICY_SLUG`. The bundle job has no environment, so environment-scoped values are unavailable. Missing or blank inputs produce an unsigned runtime bundle with a workflow notice.
+
+Signing runs before packaging, so both Stable archive variants and their checksums contain the same signed host binaries. Signed output is staged separately and adopted only after the action succeeds and both binaries are present and non-empty; their executable modes are restored before packaging. Upload, signing, or incomplete-output failures retain the original unsigned binaries and report a warning.
+
+A test-signing policy (slug `test` or starting with `test-`) is allowed only during `desktop_validation_only`, where nothing is published. Its self-signed certificate is not trusted by Windows; a Stable publishing run skips that policy with a warning. Scheduled and manual nightlies are never signed because the SignPath Foundation requires manual approval for each release signing request. Stable signing waits up to one hour for approval before falling back to an unsigned bundle.
 
 Never print signing material, tokens, certificate contents, or generated updater private data in logs.
 

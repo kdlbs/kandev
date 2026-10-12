@@ -315,6 +315,9 @@ func TestReconcileRepositories_PrunesRemovedTrackerAndPreservesSubscription(t *t
 	}
 	sub := m.SubscribeWorkspaceStream()
 	defer m.UnsubscribeWorkspaceStream(sub)
+	// Stop the stale tracker before simulating rollback so Windows can remove
+	// its working tree while reconciliation still owns pruning and detachment.
+	rolledBackTracker.Stop()
 	if err := os.RemoveAll(rolledBack); err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +532,7 @@ func assertLinkedSourceFileOperations(t *testing.T, tracker *WorkspaceTracker, p
 	if err := tracker.CreateFile(path); err != nil {
 		t.Fatalf("create %q through linked source: %v", path, err)
 	}
-	if _, _, err := tracker.ApplyFileDiff(context.Background(), path, "", "not a diff", stringPtr("updated")); err != nil {
+	if _, _, err := tracker.ApplyFileDiff(context.Background(), path, path, "", "not a diff", stringPtr("updated")); err != nil {
 		t.Fatalf("write %q through linked source: %v", path, err)
 	}
 	content, _, _, _, err := tracker.GetFileContent(path)

@@ -2,7 +2,7 @@
 status: current
 system: tasks
 created: 2026-09-10
-updated: 2026-09-29
+updated: 2026-10-08
 requirements:
   - REQ-TASKS-WORKTREE-METADATA-RECOVERY-001
   - REQ-TASKS-WORKTREE-METADATA-RECOVERY-002
@@ -29,7 +29,7 @@ retain authority over their own filesystems.
 | --- | --- |
 | `REQ-TASKS-WORKTREE-METADATA-RECOVERY-001` | Selected environment admission |
 | `REQ-TASKS-WORKTREE-METADATA-RECOVERY-002` | Classification and preservation, Multiple repositories |
-| `REQ-TASKS-WORKTREE-METADATA-RECOVERY-003` | Recovery authority, Restart and failure, Response path |
+| `REQ-TASKS-WORKTREE-METADATA-RECOVERY-003` | Recovery authority, Restart and failure, Response path, Inspection contention during resume |
 | `REQ-TASKS-WORKTREE-METADATA-RECOVERY-004` | Missing canonical checkout recovery |
 
 ## Implemented integration
@@ -136,6 +136,46 @@ Symbolic links are copied as links. Unsupported special files stop recovery.
 The new branch retains the existing `<branch>-recovered-<operation-prefix>` form.
 The original directory and snapshot remain available. Recovery does not restore
 the old index or unavailable commits.
+
+### Snapshot permission preservation
+
+This correction implements AC-TASKS-WORKTREE-METADATA-RECOVERY-002.2 and .002.3.
+The delivery record is the
+[permission fix package](../../../plans/workspace-recovery-permissions/plan.md).
+
+`recovery_files.go` must preserve `os.ModePerm`, `os.ModeSetuid`,
+`os.ModeSetgid`, and `os.ModeSticky` wherever the host filesystem supports them.
+`FileMode.Perm()` alone discards the three special bits. File creation also
+applies the process umask. These differences conflict with the full mode that
+`checkoutManifest` records.
+
+Create regular destinations privately, copy their bytes, and apply the final
+mode after writing. Apply directory modes after their children, in reverse
+order. Use the same mode policy in `snapshotCheckout`, `copySnapshotEntries`,
+`copySnapshotFile`, and `applyRecoveryDirectoryModes`. Keep the snapshot root
+private. Preserve symlink targets without following them. Unsupported entries
+and permission failures stop publication. Do not weaken the manifest comparison.
+
+Set-ID modes also require their source identity. Before applying setuid,
+retain the source UID. Before applying setgid, retain the source GID.
+Use descriptor-based ownership and mode operations on the new entry.
+If the destination identity differs, change only the identity required by the
+source bit, before applying the final mode. If the host denies that change,
+refuse recovery. Never turn a source-owned executable into a backend-owned
+setuid executable. Verify the required identity and mode after copying and
+before publication. A changing source identity stops recovery.
+This does not promise general UID/GID, ACL, xattr, hard-link, or timestamp
+preservation. It adds no capability to execute snapshot files.
+
+Do not change the existing manifest format or invalidate retained complete
+snapshots. Verify required set-ID identity separately on source, snapshot, and
+replacement. Ordinary permissions remain portable. Special-mode checks use
+host-specific helpers and refuse unsupported preservation. Unix tests use a
+child process for umask changes. They must not change the shared test process.
+
+Generic metadata recovery still refuses blocked records. Only explicit clone
+relocation has the narrow compatibility retry defined in
+[managed clone relocation](managed-clone-relocation.md).
 
 ### Main-repository checkout compatibility
 
@@ -248,6 +288,115 @@ Structured diagnostics identify the operation, session, environment, repository
 slot, generation, and outcome. They do not include file contents or credentials.
 Retained snapshots can contain ignored secrets and require the same protection
 as the original workspace.
+
+## Inspection contention during resume
+
+This amendment defines criteria 003.6 through 003.9. Implementation and
+verification are recorded in the
+[task-opening contention package](../../../plans/task-open-inspection-contention/plan.md).
+
+### Admission and lock order
+
+Opening Chat also requests commit and cumulative-diff data. Those handlers call
+`GetOrEnsureExecution`, which can create workspace-only infrastructure. Creation
+and agent `Launch` share lifecycle's session-keyed singleflight. Executor resume
+performs selected-worktree admission before it reaches that singleflight.
+That admission can therefore collide with inspection inside workspace creation.
+
+Keep lifecycle admission nonblocking. A lifecycle waiter cannot hold its
+singleflight slot while waiting for an outer recovery owner that needs that slot.
+Retain stable worktree-lock order, durable recovery claims, and their release
+boundaries. Do not replace them with a global task mutex.
+
+Extend the existing `RecoveryAdmissionRequest.InspectionWait` policy to outer
+resume admission. Apply it in `prepareResumePreflight` and
+`admitResumeSelectionAfterRequest`, outside lifecycle singleflight. A borrowed
+`RecoveryAdmission` remains non-reentrant and does not reacquire its owned locks.
+
+Use one absolute inspection deadline for a logical recovery request. Start the
+15-second budget at its first outer inspection admission. When explicit
+`PreflightSessionWorktreeRecovery` and resume belong to the same request, carry
+the deadline through both. Each later admission receives only the remaining
+budget. Request construction and earlier waits do not reset it.
+If runtime setup detaches its context, retain the original caller deadline.
+This is a process-local wait policy, not recovery authority or a durable lease.
+Do not extend the 30-second resume client timeout or reset provider startup budgets.
+
+When no wait budget remains, acquisition can succeed immediately on an available
+lock. A contended lock returns `RecoveryInspectionContentionError` immediately.
+Keep workspace-only, background, and nested lifecycle callers on immediate
+refusal. Do not convert durable-claim refusal or metadata damage into contention.
+
+After acquisition, retain `lockRecoverySlots`' complete selection-snapshot check.
+Revalidate session binding, owner, generation, and every active repository slot.
+An unchanged healthy slot cannot hide a changed or invalid sibling. Recheck
+cancellation, archive, cleanup, and current-attempt identity before external start.
+
+### Failure bookkeeping
+
+`resumeTaskSessionWithContinuation` must distinguish safe inspection deferral
+before `handleSessionLaunchFailure`. A typed inspection conflict before startup
+does not justify `recordSessionLaunchFailure`, task failure, or durable error
+history. Preserve the existing task workflow state on successful silent resume.
+Do not move a Review task into Running merely because its runtime resumes.
+
+The second executor admission follows credential setup, which can already
+persist `STARTING`. Use the existing attempt-guarded rollback and credential
+snapshot restoration before returning a retryable conflict. Report rollback
+failure as a real failure. A cancelled or superseded attempt cannot restore an
+old state or clear a successor's error.
+
+If nonblocking lifecycle admission encounters inspection contention before agent
+start, apply the same safe classification. Preserve `Launch`'s workspace promotion
+and singleflight behavior. Release only resources owned by the refused attempt.
+Never stop a peer's workspace runtime to resolve contention.
+
+Do not suppress every error whose chain contains a contention type. The retryable
+outcome requires successful safe rollback and no agent dispatch. Joined cleanup,
+persistence, or provider failures retain their failure handling. Other launch
+paths retain their current bookkeeping.
+
+### Browser response and recovery
+
+Reuse the existing conflict response with `details.kind = recovery_inspection_busy`.
+Classification uses this structured kind, never the English error string.
+No new endpoint, WebSocket action, persisted state, or successful `recovering`
+response is required. An inspection mutex is not a durable workspace recovery
+operation and cannot fabricate its progress projection.
+
+Add typed recognition and localized copy to `session-recovery-service.ts`.
+In `finishSilentResume`, handle this conflict before `restoreAfterResumeFailure`.
+Rollback the optimistic local `STARTING` projection and retain a request-local
+retry notice. Use the existing recovery owner and same-session Resume action.
+Do not offer fresh-start or branch replacement as a remedy for inspection
+contention. Existing manual recovery actions use the same error mapping.
+
+Keep existing request-generation, pending-action, and archive guards. A stale
+completion cannot publish an error in another task or clear a newer failure.
+Successful same-session retry restores normal composer availability only after
+the authoritative resume result. Draft text and attachments remain intact.
+
+The existing inline recovery region owns the notice on desktop and phone.
+Desktop actions retain their wrapping row. Phone retains stacked touch controls,
+safe-area behavior, and the existing scroll owner. Pending feedback uses the
+existing localized resuming status. Localize the contention message in all seven
+shipped languages and regenerate pseudo and Traditional Chinese catalogs.
+
+### Verification boundary
+
+Backend regressions hold the real inspection mutex with channel barriers and
+exercise the production resume path. Prove released-lock success, shared budget
+exhaustion, safe rollback, cancellation, ownership drift, and one agent start.
+Include a healthy slot plus a changed or invalid sibling.
+
+Browser tests use a scoped WebSocket proxy for deterministic conflict and retry
+responses. They prove notice ownership, no workspace fallback, draft retention,
+and same-session retry on desktop and phone. They do not prove backend mutex
+coordination. Keep that proof in Go tests with a real selected inventory.
+
+Historical task failures from older binaries require separate repair evidence.
+This amendment prevents new false failure writes. It does not rewrite old task
+states or clear unrelated provider failures.
 
 ## Missing canonical checkout recovery
 

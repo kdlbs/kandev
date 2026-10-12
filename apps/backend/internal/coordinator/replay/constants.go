@@ -45,7 +45,7 @@ const (
 	Retention = 400 * 24 * time.Hour
 	// PromptVersion keys baseline reuse; it is bumped on any change to the
 	// prompt frame, the replay paragraph, the note section or the answer schema.
-	PromptVersion = "replay-v1"
+	PromptVersion = "replay-v2"
 )
 
 // Guard results, verdicts and reasons of a replay.

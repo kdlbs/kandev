@@ -304,7 +304,9 @@ type mockAgentManager struct {
 	launchAgentFunc                 func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
 	initialPromptDispatchCallback   func()
 	initialPromptFailureCallback    func()
-	initialPromptAdmissionCallback  func() error
+	initialPromptAdmissionCallback  func(context.Context, string, []v1.MessageAttachment) error
+	promptAdmissionEntered          chan struct{}
+	promptAdmissionRelease          chan struct{}
 	startAgentProcessCalls          []string
 	startAgentProcessErr            error
 	startAgentProcessFunc           func(context.Context, string) error
@@ -483,7 +485,7 @@ func (m *mockAgentManager) RegisterInitialPromptDispatchCallbacks(_ string, onDi
 
 func (m *mockAgentManager) RegisterInitialPromptAdmissionCallbacks(
 	_ string,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) error {
 	m.mu.Lock()
@@ -559,11 +561,24 @@ func (m *mockAgentManager) PromptAgentWithAdmissionCallback(
 	executionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*executor.PromptResult, error) {
+	m.mu.Lock()
+	entered := m.promptAdmissionEntered
+	release := m.promptAdmissionRelease
+	m.mu.Unlock()
+	if entered != nil {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+	}
+	if release != nil {
+		<-release
+	}
 	if beforeAdmission != nil {
-		if err := beforeAdmission(); err != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
 			return nil, err
 		}
 	}
@@ -851,6 +866,13 @@ func (m *mockAgentManager) PollRemoteStatusForRecords(_ context.Context, _ []exe
 func (m *mockAgentManager) CleanupStaleExecutionBySessionID(_ context.Context, _ string) error {
 	return nil
 }
+func (m *mockAgentManager) CleanupStaleExecutionBySessionIDIfCurrent(
+	ctx context.Context,
+	sessionID, _ string,
+	_ time.Time,
+) error {
+	return m.CleanupStaleExecutionBySessionID(ctx, sessionID)
+}
 func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(_ context.Context, _, _ string) error {
 	return nil
 }
@@ -968,7 +990,7 @@ func setupTestRepo(t *testing.T) *sqliterepo.Repository {
 }
 
 // seedSession creates a task, workspace, workflow and session in the repo for testing.
-func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, workflowStepID string) {
+func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, workflowStepID string, queueIncarnationID ...string) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -1009,6 +1031,9 @@ func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, w
 		State:     models.TaskSessionStateRunning,
 		StartedAt: now,
 		UpdatedAt: now,
+	}
+	if len(queueIncarnationID) == 1 {
+		session.QueueIncarnationID = queueIncarnationID[0]
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to create task session: %v", err)
@@ -2993,7 +3018,7 @@ func TestClassifyManagedRuntimeNpmStartFailureUsesStructuredError(t *testing.T) 
 		Details: "npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
 	})
 
-	classified := classifyManagedRuntimeNpmStartFailure(err)
+	classified := classifyManagedRuntimeStartupFailure(err)
 	if classified == nil {
 		t.Fatal("expected structured npm startup error to classify")
 	}
@@ -3008,22 +3033,34 @@ func TestClassifyManagedRuntimeNpmStartFailureUsesStructuredError(t *testing.T) 
 		Code:    routingerr.CodeAgentRuntime,
 		Details: "sanitized runtime failure",
 	})
-	if classifyManagedRuntimeNpmStartFailure(generic) != nil {
+	if classifyManagedRuntimeStartupFailure(generic) != nil {
 		t.Fatal("generic structured startup failure must not use the npm recovery card")
 	}
 
-	if classifyManagedRuntimeNpmStartFailure(errors.New(
+	if classifyManagedRuntimeStartupFailure(errors.New(
 		"npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
 	)) != nil {
 		t.Fatal("unstructured npm text must not select the managed runtime recovery card")
 	}
 
-	policy := classifyManagedRuntimeNpmStartFailure(fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+	policy := classifyManagedRuntimeStartupFailure(fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
 		Code:    routingerr.Code("managed_runtime_npm_policy"),
 		Details: "npm error code ETARGET\nnpm error notarget No matching version found with a date before <release-date>",
 	}))
 	if policy == nil || policy.Code != routingerr.Code("managed_runtime_npm_policy") {
 		t.Fatalf("policy startup failure = %#v, want managed runtime policy classification", policy)
+	}
+
+	startup := classifyManagedRuntimeStartupFailure(fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.CodeManagedRuntimeStartup,
+		Details: "reason=unexpected_process_exit attempts=2",
+	}))
+	if startup == nil || startup.Code != routingerr.CodeManagedRuntimeStartup ||
+		startup.RawExcerpt != "reason=unexpected_process_exit attempts=2" || startup.AutoRetryable || startup.FallbackAllowed {
+		t.Fatalf("managed startup classification = %#v, want exact safe details without generic recovery", startup)
+	}
+	if !isManagedRuntimeStartupFailureCode(string(routingerr.CodeManagedRuntimeStartup)) {
+		t.Fatal("managed startup code must route through managed-runtime recovery")
 	}
 }
 

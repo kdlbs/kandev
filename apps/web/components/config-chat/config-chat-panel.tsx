@@ -1,9 +1,9 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
-import { IconArrowsMaximize, IconSparkles } from "@tabler/icons-react";
+import { IconSparkles } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -13,6 +13,7 @@ import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-sess
 import { ChatPopoverShell } from "./chat-popover-shell";
 import { ConfigChatSetup } from "./config-chat-setup";
 import { useConfigChat } from "./use-config-chat";
+import { ConfigChatHeader } from "./config-chat-header";
 
 function useConfigChatPanelStore() {
   return useAppStore(
@@ -53,6 +54,10 @@ function useConfigChatPanelController(workspaceId: string) {
     [chat.startSession],
   );
 
+  useEffect(() => {
+    handleOpenChange(false);
+  }, [workspaceId, handleOpenChange]);
+
   const handleExpand = useCallback(() => {
     chat.reset();
     if (session) {
@@ -72,6 +77,41 @@ function useConfigChatPanelController(workspaceId: string) {
     handleStart,
     handleExpand,
   };
+}
+
+function ConfigChatPanelBody({
+  panel,
+}: {
+  panel: ReturnType<typeof useConfigChatPanelController>;
+}) {
+  const { t } = useTranslation();
+  if (panel.restartBlocked)
+    return (
+      <div
+        role="status"
+        className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-muted-foreground"
+      >
+        {t(panel.isRestarting ? "configChat:restartingSession" : "configChat:restartCheckStatus")}
+      </div>
+    );
+  if (panel.session)
+    return (
+      <QuickChatSessionView
+        session={panel.session}
+        onInitialPromptAttempted={() =>
+          panel.setQuickChatInitialPrompt(panel.session!.sessionId, undefined)
+        }
+      />
+    );
+  return (
+    <ConfigChatSetup
+      presentation="floating"
+      defaultProfileId={panel.defaultProfileId}
+      isStarting={panel.isStarting}
+      error={null}
+      onStart={panel.handleStart}
+    />
+  );
 }
 
 type ConfigChatPanelProps = {
@@ -109,24 +149,14 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
       title={t("common:configurationChat")}
       closeLabel={t("configChat:closePanel")}
       beforeBody={<ConfigChatFloatingActionsHost setHost={setFloatingActionsHost} />}
-      headerActions={
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span tabIndex={panel.isStarting ? 0 : -1} className="inline-flex">
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-11 w-11 cursor-pointer rounded-none"
-                onClick={panel.handleExpand}
-                aria-label={t("configChat:openInQuickChat")}
-                disabled={panel.isStarting}
-              >
-                <IconArrowsMaximize className="h-4 w-4" />
-              </Button>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{t("configChat:openInQuickChat")}</TooltipContent>
-        </Tooltip>
+      header={
+        <ConfigChatHeader
+          session={panel.session}
+          busy={panel.isStarting || panel.restartBlocked}
+          onRestart={(session) => void panel.restartSession(session)}
+          onExpand={panel.handleExpand}
+          onClose={() => panel.handleOpenChange(false)}
+        />
       }
       trigger={
         <Tooltip open={panel.isOpen ? false : undefined}>
@@ -148,22 +178,21 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
         </Tooltip>
       }
     >
-      {panel.session ? (
-        <QuickChatSessionView
-          session={panel.session}
-          onInitialPromptAttempted={() =>
-            panel.setQuickChatInitialPrompt(panel.session!.sessionId, undefined)
-          }
-        />
-      ) : (
-        <ConfigChatSetup
-          presentation="floating"
-          defaultProfileId={panel.defaultProfileId}
-          isStarting={panel.isStarting}
-          error={panel.error}
-          onStart={panel.handleStart}
-        />
+      {panel.error && (
+        <div role="alert" className="shrink-0 border-b p-3 text-sm text-destructive">
+          {panel.error}
+          {panel.restartBlocked && !panel.isRestarting && (
+            <Button
+              variant="outline"
+              className="ml-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+              onClick={() => void panel.refreshRestart()}
+            >
+              {t("configChat:refreshSessionStatus")}
+            </Button>
+          )}
+        </div>
       )}
+      <ConfigChatPanelBody panel={panel} />
     </ChatPopoverShell>
   );
 });

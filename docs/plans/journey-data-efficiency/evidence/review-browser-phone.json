@@ -1,0 +1,1892 @@
+{
+  "source": "corrected working tree; isolated production-build fixture",
+  "tests": [
+    {
+      "title": "phone boot and history paging preserve bounded turn context",
+      "file": "session/mobile-message-turn-window.spec.ts",
+      "project": "mobile-chrome",
+      "status": "passed",
+      "duration_ms": 3419,
+      "attachments": [
+        {
+          "name": "message-window-initial-state.json",
+          "data": {
+            "id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+            "messages": {
+              "bySession": {
+                "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7": [
+                  {
+                    "id": "f4d1e719-129b-462a-8af0-81f18078a38a",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 5",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.173125712Z",
+                    "updated_at": "2026-10-10T13:46:06.173125712Z"
+                  },
+                  {
+                    "id": "d411822b-4a2f-440b-8b13-cd581167966f",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 6",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.179607434Z",
+                    "updated_at": "2026-10-10T13:46:06.179607434Z"
+                  },
+                  {
+                    "id": "c90798d1-624f-4b57-a031-b2714f10837b",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 7",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.185084948Z",
+                    "updated_at": "2026-10-10T13:46:06.185084948Z"
+                  },
+                  {
+                    "id": "522e16bb-1f83-46e8-bd64-fc3744db1965",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 8",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.191073383Z",
+                    "updated_at": "2026-10-10T13:46:06.191073383Z"
+                  },
+                  {
+                    "id": "cceba61d-fba8-4bf1-a075-4e4b0b57d67c",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 9",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.200090349Z",
+                    "updated_at": "2026-10-10T13:46:06.200090349Z"
+                  },
+                  {
+                    "id": "b3322bb3-4bb8-475a-bfea-f09e150f71cc",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 10",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.205896555Z",
+                    "updated_at": "2026-10-10T13:46:06.205896555Z"
+                  },
+                  {
+                    "id": "5babe9d3-38db-4cfa-b27d-3716957ad85b",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 11",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.212789782Z",
+                    "updated_at": "2026-10-10T13:46:06.212789782Z"
+                  },
+                  {
+                    "id": "feb18ad7-69b8-4b50-8a40-522dcda29ca8",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 12",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.21859747Z",
+                    "updated_at": "2026-10-10T13:46:06.21859747Z"
+                  },
+                  {
+                    "id": "e3a5abd8-e73f-4970-94bd-3f335a6a86b5",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 13",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.225092437Z",
+                    "updated_at": "2026-10-10T13:46:06.225092437Z"
+                  },
+                  {
+                    "id": "0c054e64-f10a-4d7b-aca9-cb574dbddf39",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 14",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.231235619Z",
+                    "updated_at": "2026-10-10T13:46:06.231235619Z"
+                  },
+                  {
+                    "id": "149baed5-07e6-40c9-ab86-ab4bec66f2a0",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 15",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.238094412Z",
+                    "updated_at": "2026-10-10T13:46:06.238094412Z"
+                  },
+                  {
+                    "id": "25e09f78-5a94-49e2-9b85-549f7896c714",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 16",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.244913601Z",
+                    "updated_at": "2026-10-10T13:46:06.244913601Z"
+                  },
+                  {
+                    "id": "23c2aab6-a1fb-46e9-a539-4ad158e70cc4",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 17",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.251806107Z",
+                    "updated_at": "2026-10-10T13:46:06.251806107Z"
+                  },
+                  {
+                    "id": "4891da3f-0d26-45bb-a5e3-e6893b701eec",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 18",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.257938319Z",
+                    "updated_at": "2026-10-10T13:46:06.257938319Z"
+                  },
+                  {
+                    "id": "33aeb5fa-a50a-4cd6-a0e2-c6fd2b51b30f",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 19",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.263463732Z",
+                    "updated_at": "2026-10-10T13:46:06.263463732Z"
+                  },
+                  {
+                    "id": "870e9740-738b-4d1f-be98-1bb5bbbf1ca1",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 20",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.270461494Z",
+                    "updated_at": "2026-10-10T13:46:06.270461494Z"
+                  },
+                  {
+                    "id": "e0b14613-fb3a-4674-b91a-1909fe6cbfea",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 21",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.280788475Z",
+                    "updated_at": "2026-10-10T13:46:06.280788475Z"
+                  },
+                  {
+                    "id": "ab94087f-7c62-4b27-8b9e-0eb9d1e7ab99",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 22",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.288753154Z",
+                    "updated_at": "2026-10-10T13:46:06.288753154Z"
+                  },
+                  {
+                    "id": "2dd238ef-61d2-4a84-888f-ca458cc59b7c",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 23",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.297407276Z",
+                    "updated_at": "2026-10-10T13:46:06.297407276Z"
+                  },
+                  {
+                    "id": "b5d8b1ed-8ed7-43d5-a7b1-80e47170b600",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 24",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.303491158Z",
+                    "updated_at": "2026-10-10T13:46:06.303491158Z"
+                  },
+                  {
+                    "id": "93993ff1-e3e5-4e07-a103-c4289d7bb2ff",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 25",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.31006455Z",
+                    "updated_at": "2026-10-10T13:46:06.31006455Z"
+                  },
+                  {
+                    "id": "987dc816-bdec-4e7a-a137-84208fbc742a",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 26",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.316942038Z",
+                    "updated_at": "2026-10-10T13:46:06.316942038Z"
+                  },
+                  {
+                    "id": "e993b376-4219-4d28-a846-698c4f8ed62a",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 27",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.323937595Z",
+                    "updated_at": "2026-10-10T13:46:06.323937595Z"
+                  },
+                  {
+                    "id": "94b22847-7cd0-4676-adcc-16027b7adfad",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 28",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.331398247Z",
+                    "updated_at": "2026-10-10T13:46:06.331398247Z"
+                  },
+                  {
+                    "id": "080e7e64-9a96-4b92-addb-3fb80c6d6d25",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 29",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.338931173Z",
+                    "updated_at": "2026-10-10T13:46:06.338931173Z"
+                  },
+                  {
+                    "id": "bf08793f-d195-437c-b4a2-24ebcd9f2cc6",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 30",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.346088662Z",
+                    "updated_at": "2026-10-10T13:46:06.346088662Z"
+                  },
+                  {
+                    "id": "8dcc8524-93b3-4d27-b832-9180499c6e4a",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 31",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.35268151Z",
+                    "updated_at": "2026-10-10T13:46:06.35268151Z"
+                  },
+                  {
+                    "id": "614599d4-a9ee-45ce-9c69-332c04e3d793",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 32",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.360291369Z",
+                    "updated_at": "2026-10-10T13:46:06.360291369Z"
+                  },
+                  {
+                    "id": "0130c3f0-e795-4162-a450-d729c00233f2",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 33",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.366426357Z",
+                    "updated_at": "2026-10-10T13:46:06.366426357Z"
+                  },
+                  {
+                    "id": "2f5642c8-276e-428f-be59-822cd3f11a7c",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 34",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.373141643Z",
+                    "updated_at": "2026-10-10T13:46:06.373141643Z"
+                  },
+                  {
+                    "id": "e8528095-7bed-45da-9cf7-e1451c763343",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 35",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.379579733Z",
+                    "updated_at": "2026-10-10T13:46:06.379579733Z"
+                  },
+                  {
+                    "id": "4fb2f50f-9569-4063-8ce4-fe1e0afcb0f4",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 36",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.386353368Z",
+                    "updated_at": "2026-10-10T13:46:06.386353368Z"
+                  },
+                  {
+                    "id": "7aa6f2a9-1203-4d93-ba8b-49e8bd743858",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 37",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.391971584Z",
+                    "updated_at": "2026-10-10T13:46:06.391971584Z"
+                  },
+                  {
+                    "id": "70e15d0d-a980-4e05-9c7a-dcb2d0b7b140",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 38",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.398106641Z",
+                    "updated_at": "2026-10-10T13:46:06.398106641Z"
+                  },
+                  {
+                    "id": "d265ac20-ba7a-47a7-a81c-65b98b7b88e9",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 39",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.404260965Z",
+                    "updated_at": "2026-10-10T13:46:06.404260965Z"
+                  },
+                  {
+                    "id": "71e79a63-cfce-4618-9cb3-8c68ec8f81f5",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 40",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.410984245Z",
+                    "updated_at": "2026-10-10T13:46:06.410984245Z"
+                  },
+                  {
+                    "id": "2d936234-8ff4-41c5-82aa-f7c1b281e7f3",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 41",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.416878305Z",
+                    "updated_at": "2026-10-10T13:46:06.416878305Z"
+                  },
+                  {
+                    "id": "2fe84adb-cd9f-4c5d-8dc9-63ff7bbc9ff4",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 42",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.4227593Z",
+                    "updated_at": "2026-10-10T13:46:06.4227593Z"
+                  },
+                  {
+                    "id": "a86bcb43-00be-4fcc-ab83-68a41459da1b",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 43",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.43007932Z",
+                    "updated_at": "2026-10-10T13:46:06.43007932Z"
+                  },
+                  {
+                    "id": "d651d115-03d8-4bbe-b3b3-5ef0a400d9f9",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 44",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.437509335Z",
+                    "updated_at": "2026-10-10T13:46:06.437509335Z"
+                  },
+                  {
+                    "id": "a9ae236a-8142-4bf7-b9ac-0417e77480a3",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 45",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.444120718Z",
+                    "updated_at": "2026-10-10T13:46:06.444120718Z"
+                  },
+                  {
+                    "id": "f0f7c444-e9c0-456a-9997-d8c63317d157",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 46",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.450818341Z",
+                    "updated_at": "2026-10-10T13:46:06.450818341Z"
+                  },
+                  {
+                    "id": "f11539ed-25d5-4927-9bd6-d9f793bcc56a",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 47",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.461403553Z",
+                    "updated_at": "2026-10-10T13:46:06.461403553Z"
+                  },
+                  {
+                    "id": "77e82cf0-78e4-4bb5-914c-b608f5b30b68",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 48",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.467354247Z",
+                    "updated_at": "2026-10-10T13:46:06.467354247Z"
+                  },
+                  {
+                    "id": "eccfcdab-a77f-42d1-ae55-16f62058f326",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 49",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.473847451Z",
+                    "updated_at": "2026-10-10T13:46:06.473847451Z"
+                  },
+                  {
+                    "id": "a09d8172-d8f3-426d-ab4e-1ed9be51a869",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 50",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.481154798Z",
+                    "updated_at": "2026-10-10T13:46:06.481154798Z"
+                  },
+                  {
+                    "id": "8a92ee39-69d3-4197-ae6f-549c5dbec64b",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 51",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.488821813Z",
+                    "updated_at": "2026-10-10T13:46:06.488821813Z"
+                  },
+                  {
+                    "id": "dc4d983a-7e0e-44bb-94d5-6808943a1333",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 52",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.495095188Z",
+                    "updated_at": "2026-10-10T13:46:06.495095188Z"
+                  },
+                  {
+                    "id": "47786fdc-358f-4b42-bd86-0187a7e15f10",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 53",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.501466063Z",
+                    "updated_at": "2026-10-10T13:46:06.501466063Z"
+                  },
+                  {
+                    "id": "f4860536-6582-42e6-8239-d1623c99dbc4",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "author_type": "agent",
+                    "type": "message",
+                    "content": "Mobile windowed turn history 54",
+                    "requests_input": false,
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "created_at": "2026-10-10T13:46:06.50925731Z",
+                    "updated_at": "2026-10-10T13:46:06.50925731Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 55",
+                    "created_at": "2026-10-10T13:46:06.516008032Z",
+                    "id": "6706f39e-5853-4cf2-82a8-380dffb636b5",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.516008032Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 56",
+                    "created_at": "2026-10-10T13:46:06.52218663Z",
+                    "id": "1740edc1-48ec-4bfa-8b9e-09785552e3b1",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.52218663Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 57",
+                    "created_at": "2026-10-10T13:46:06.528056264Z",
+                    "id": "7324e02c-d6e3-4911-8a6b-87a0d929ca4a",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.528056264Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 58",
+                    "created_at": "2026-10-10T13:46:06.54812008Z",
+                    "id": "b2268915-fa54-4304-afbf-9e8fae1a4a0a",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.54812008Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 59",
+                    "created_at": "2026-10-10T13:46:06.559811097Z",
+                    "id": "58fc85f8-1633-4395-ae82-c4af6c5b55d9",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.559811097Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 60",
+                    "created_at": "2026-10-10T13:46:06.565848493Z",
+                    "id": "53f584dd-b096-43e5-836f-cd79740fc281",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.565848493Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 61",
+                    "created_at": "2026-10-10T13:46:06.572301522Z",
+                    "id": "9e96521c-a332-4f14-a6ac-a94f1bf4a793",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.572301522Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 62",
+                    "created_at": "2026-10-10T13:46:06.579816444Z",
+                    "id": "ace8e7b2-4aab-4dce-bc00-223e78a580a1",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.579816444Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 63",
+                    "created_at": "2026-10-10T13:46:06.586819776Z",
+                    "id": "a7348b34-7d0e-4798-8272-e469fb85be2a",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.586819776Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 64",
+                    "created_at": "2026-10-10T13:46:06.592955835Z",
+                    "id": "024b59ba-a607-4210-9e8a-3b832e61ad23",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.592955835Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 65",
+                    "created_at": "2026-10-10T13:46:06.600432658Z",
+                    "id": "1767c6be-9d01-43dd-b512-6e0ab79223b8",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.600432658Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 66",
+                    "created_at": "2026-10-10T13:46:06.606660888Z",
+                    "id": "84d88fe0-034c-4e5c-8ac4-f2221b02ecb6",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.606660888Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 67",
+                    "created_at": "2026-10-10T13:46:06.612774966Z",
+                    "id": "d05dba76-df31-4b77-b2ed-a6de550ae0d4",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.612774966Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 68",
+                    "created_at": "2026-10-10T13:46:06.620629471Z",
+                    "id": "4711d81a-d75d-4854-9820-37b01042e5e9",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.620629471Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 69",
+                    "created_at": "2026-10-10T13:46:06.627195249Z",
+                    "id": "28a686d5-dd42-4dd0-96a1-bfe60dcdfc19",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.627195249Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 70",
+                    "created_at": "2026-10-10T13:46:06.633484062Z",
+                    "id": "08bd01aa-b3b8-493d-aa7a-b162017a29f0",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.633484062Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 71",
+                    "created_at": "2026-10-10T13:46:06.639740705Z",
+                    "id": "56dc8e5f-1cec-4c29-bf8f-89fa35c1219d",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.639740705Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 72",
+                    "created_at": "2026-10-10T13:46:06.645883376Z",
+                    "id": "b173b208-ff29-461c-b65e-047962838c0e",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.645883376Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 73",
+                    "created_at": "2026-10-10T13:46:06.652800478Z",
+                    "id": "cccb755b-d5c1-415f-88ce-ea61d220f570",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.652800478Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 74",
+                    "created_at": "2026-10-10T13:46:06.659547633Z",
+                    "id": "425c276a-819a-4970-afef-34ab46c577df",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.659547633Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 75",
+                    "created_at": "2026-10-10T13:46:06.665824935Z",
+                    "id": "2bcdbedf-2609-4bd2-bcb7-7f5fc622dbd9",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.665824935Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 76",
+                    "created_at": "2026-10-10T13:46:06.672707332Z",
+                    "id": "70a7464f-2c85-468c-8fde-806d0b89a0ad",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.672707332Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 77",
+                    "created_at": "2026-10-10T13:46:06.678899415Z",
+                    "id": "1758cfb1-33e0-4b6a-bab0-7d94379c014b",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.678899415Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 78",
+                    "created_at": "2026-10-10T13:46:06.686064668Z",
+                    "id": "ac233127-30b8-47f4-ae13-f79ea655a69e",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.686064668Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 79",
+                    "created_at": "2026-10-10T13:46:06.692517195Z",
+                    "id": "3a16e47a-0f60-4dea-9952-adc1a722fd33",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.692517195Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 80",
+                    "created_at": "2026-10-10T13:46:06.699811157Z",
+                    "id": "b390570d-2ff2-4869-ba3f-85eef242f5a4",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.699811157Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 81",
+                    "created_at": "2026-10-10T13:46:06.706718501Z",
+                    "id": "bbb0e09a-ebef-4ca6-8bad-51882fb378aa",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.706718501Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 82",
+                    "created_at": "2026-10-10T13:46:06.713479702Z",
+                    "id": "aae25cef-f560-4b1e-bb22-51227793f997",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.713479702Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 83",
+                    "created_at": "2026-10-10T13:46:06.719751233Z",
+                    "id": "576acf25-f866-4a88-9543-e6294859f55c",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.719751233Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 84",
+                    "created_at": "2026-10-10T13:46:06.726574039Z",
+                    "id": "f56cd3c1-c9c6-4c1b-8f60-aad852d34829",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.726574039Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 85",
+                    "created_at": "2026-10-10T13:46:06.732760292Z",
+                    "id": "aa7f075b-ce53-4500-ad2e-3b83f3f0892f",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.732760292Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 86",
+                    "created_at": "2026-10-10T13:46:06.739486077Z",
+                    "id": "4c74a753-b482-4213-b20e-ca7715e398ec",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.739486077Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 87",
+                    "created_at": "2026-10-10T13:46:06.746776132Z",
+                    "id": "34911030-04da-41e1-9418-627940887aec",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.746776132Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 88",
+                    "created_at": "2026-10-10T13:46:06.752930986Z",
+                    "id": "402bd8f3-21a2-4787-a4d7-37b51e140e79",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.752930986Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 89",
+                    "created_at": "2026-10-10T13:46:06.759992706Z",
+                    "id": "58d91636-00b6-482a-ac2a-42bb82fc214f",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.759992706Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 90",
+                    "created_at": "2026-10-10T13:46:06.766747676Z",
+                    "id": "9f8a9df8-f7b5-4545-b0cd-4053ca4db212",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.766747676Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 91",
+                    "created_at": "2026-10-10T13:46:06.774428327Z",
+                    "id": "4b288802-31c4-4b5f-bcd8-1d86555300dd",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.774428327Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 92",
+                    "created_at": "2026-10-10T13:46:06.782047865Z",
+                    "id": "0527d587-9c43-4d98-bc5a-17a3841f30ae",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.782047865Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 93",
+                    "created_at": "2026-10-10T13:46:06.788605588Z",
+                    "id": "3776c11e-2cc1-44aa-89b4-9c3cd10aefe2",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.788605588Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 94",
+                    "created_at": "2026-10-10T13:46:06.797102076Z",
+                    "id": "13f8ad5e-1b24-46cd-b94c-067e34ac8d0a",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.797102076Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 95",
+                    "created_at": "2026-10-10T13:46:06.804587384Z",
+                    "id": "7e83c46b-b34f-44ff-bfd4-06334423e1d5",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.804587384Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 96",
+                    "created_at": "2026-10-10T13:46:06.811698556Z",
+                    "id": "b83393bc-f2ff-4b79-b4d5-c33b619166bc",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.811698556Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 97",
+                    "created_at": "2026-10-10T13:46:06.818072647Z",
+                    "id": "0bcd3cfb-7513-4c6c-8fa8-1b709c1a4dd7",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.818072647Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 98",
+                    "created_at": "2026-10-10T13:46:06.824684712Z",
+                    "id": "7ed2216e-6980-4606-bc53-f1bd488d7e06",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.824684712Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 99",
+                    "created_at": "2026-10-10T13:46:06.839717683Z",
+                    "id": "054b15dd-c46a-49e5-a11b-092e672629eb",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.839717683Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 100",
+                    "created_at": "2026-10-10T13:46:06.847285244Z",
+                    "id": "bd38ef4b-4ba5-47c7-966f-f31a0ce07034",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.847285244Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 101",
+                    "created_at": "2026-10-10T13:46:06.856384703Z",
+                    "id": "2bb59221-6ba0-4587-926c-330d64c965ac",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.856384703Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 102",
+                    "created_at": "2026-10-10T13:46:06.865295391Z",
+                    "id": "2eac1749-d5b3-48e6-9fde-8be373af5423",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.865295391Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 103",
+                    "created_at": "2026-10-10T13:46:06.872522048Z",
+                    "id": "a91c385d-8915-4646-b91e-a21197abb2c3",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.872522048Z"
+                  },
+                  {
+                    "author_type": "agent",
+                    "content": "Mobile windowed turn history 104",
+                    "created_at": "2026-10-10T13:46:06.879818585Z",
+                    "id": "dae7ae32-750f-4970-9b54-8e147ceddeb5",
+                    "metadata": {
+                      "seeded_by_e2e_mock": true
+                    },
+                    "requests_input": false,
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "turn_id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "type": "message",
+                    "updated_at": "2026-10-10T13:46:06.879818585Z"
+                  }
+                ]
+              },
+              "metaBySession": {
+                "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7": {
+                  "hasMore": true,
+                  "isLoading": false,
+                  "oldestCursor": "f4d1e719-129b-462a-8af0-81f18078a38a",
+                  "historyInitialized": true
+                }
+              }
+            },
+            "turns": {
+              "bySession": {
+                "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7": [
+                  {
+                    "created_at": "2026-10-10T13:46:06.122888052Z",
+                    "id": "073e545a-0663-4122-9fdd-7adc945870f6",
+                    "session_id": "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "started_at": "2026-10-01T00:00:00.000000000Z",
+                    "task_id": "1be6759e-f401-47f1-ab0e-377fb8cd2dd7",
+                    "updated_at": "2026-10-10T13:46:06.122890026Z"
+                  }
+                ]
+              },
+              "activeBySession": {},
+              "windowCoverageBySession": {
+                "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7": {
+                  "messageIds": [
+                    "dae7ae32-750f-4970-9b54-8e147ceddeb5",
+                    "a91c385d-8915-4646-b91e-a21197abb2c3",
+                    "2eac1749-d5b3-48e6-9fde-8be373af5423",
+                    "2bb59221-6ba0-4587-926c-330d64c965ac",
+                    "bd38ef4b-4ba5-47c7-966f-f31a0ce07034",
+                    "054b15dd-c46a-49e5-a11b-092e672629eb",
+                    "7ed2216e-6980-4606-bc53-f1bd488d7e06",
+                    "0bcd3cfb-7513-4c6c-8fa8-1b709c1a4dd7",
+                    "b83393bc-f2ff-4b79-b4d5-c33b619166bc",
+                    "7e83c46b-b34f-44ff-bfd4-06334423e1d5",
+                    "13f8ad5e-1b24-46cd-b94c-067e34ac8d0a",
+                    "3776c11e-2cc1-44aa-89b4-9c3cd10aefe2",
+                    "0527d587-9c43-4d98-bc5a-17a3841f30ae",
+                    "4b288802-31c4-4b5f-bcd8-1d86555300dd",
+                    "9f8a9df8-f7b5-4545-b0cd-4053ca4db212",
+                    "58d91636-00b6-482a-ac2a-42bb82fc214f",
+                    "402bd8f3-21a2-4787-a4d7-37b51e140e79",
+                    "34911030-04da-41e1-9418-627940887aec",
+                    "4c74a753-b482-4213-b20e-ca7715e398ec",
+                    "aa7f075b-ce53-4500-ad2e-3b83f3f0892f",
+                    "f56cd3c1-c9c6-4c1b-8f60-aad852d34829",
+                    "576acf25-f866-4a88-9543-e6294859f55c",
+                    "aae25cef-f560-4b1e-bb22-51227793f997",
+                    "bbb0e09a-ebef-4ca6-8bad-51882fb378aa",
+                    "b390570d-2ff2-4869-ba3f-85eef242f5a4",
+                    "3a16e47a-0f60-4dea-9952-adc1a722fd33",
+                    "ac233127-30b8-47f4-ae13-f79ea655a69e",
+                    "1758cfb1-33e0-4b6a-bab0-7d94379c014b",
+                    "70a7464f-2c85-468c-8fde-806d0b89a0ad",
+                    "2bcdbedf-2609-4bd2-bcb7-7f5fc622dbd9",
+                    "425c276a-819a-4970-afef-34ab46c577df",
+                    "cccb755b-d5c1-415f-88ce-ea61d220f570",
+                    "b173b208-ff29-461c-b65e-047962838c0e",
+                    "56dc8e5f-1cec-4c29-bf8f-89fa35c1219d",
+                    "08bd01aa-b3b8-493d-aa7a-b162017a29f0",
+                    "28a686d5-dd42-4dd0-96a1-bfe60dcdfc19",
+                    "4711d81a-d75d-4854-9820-37b01042e5e9",
+                    "d05dba76-df31-4b77-b2ed-a6de550ae0d4",
+                    "84d88fe0-034c-4e5c-8ac4-f2221b02ecb6",
+                    "1767c6be-9d01-43dd-b512-6e0ab79223b8",
+                    "024b59ba-a607-4210-9e8a-3b832e61ad23",
+                    "a7348b34-7d0e-4798-8272-e469fb85be2a",
+                    "ace8e7b2-4aab-4dce-bc00-223e78a580a1",
+                    "9e96521c-a332-4f14-a6ac-a94f1bf4a793",
+                    "53f584dd-b096-43e5-836f-cd79740fc281",
+                    "58fc85f8-1633-4395-ae82-c4af6c5b55d9",
+                    "b2268915-fa54-4304-afbf-9e8fae1a4a0a",
+                    "7324e02c-d6e3-4911-8a6b-87a0d929ca4a",
+                    "1740edc1-48ec-4bfa-8b9e-09785552e3b1",
+                    "6706f39e-5853-4cf2-82a8-380dffb636b5",
+                    "f4860536-6582-42e6-8239-d1623c99dbc4",
+                    "47786fdc-358f-4b42-bd86-0187a7e15f10",
+                    "dc4d983a-7e0e-44bb-94d5-6808943a1333",
+                    "8a92ee39-69d3-4197-ae6f-549c5dbec64b",
+                    "a09d8172-d8f3-426d-ab4e-1ed9be51a869",
+                    "eccfcdab-a77f-42d1-ae55-16f62058f326",
+                    "77e82cf0-78e4-4bb5-914c-b608f5b30b68",
+                    "f11539ed-25d5-4927-9bd6-d9f793bcc56a",
+                    "f0f7c444-e9c0-456a-9997-d8c63317d157",
+                    "a9ae236a-8142-4bf7-b9ac-0417e77480a3",
+                    "d651d115-03d8-4bbe-b3b3-5ef0a400d9f9",
+                    "a86bcb43-00be-4fcc-ab83-68a41459da1b",
+                    "2fe84adb-cd9f-4c5d-8dc9-63ff7bbc9ff4",
+                    "2d936234-8ff4-41c5-82aa-f7c1b281e7f3",
+                    "71e79a63-cfce-4618-9cb3-8c68ec8f81f5",
+                    "d265ac20-ba7a-47a7-a81c-65b98b7b88e9",
+                    "70e15d0d-a980-4e05-9c7a-dcb2d0b7b140",
+                    "7aa6f2a9-1203-4d93-ba8b-49e8bd743858",
+                    "4fb2f50f-9569-4063-8ce4-fe1e0afcb0f4",
+                    "e8528095-7bed-45da-9cf7-e1451c763343",
+                    "2f5642c8-276e-428f-be59-822cd3f11a7c",
+                    "0130c3f0-e795-4162-a450-d729c00233f2",
+                    "614599d4-a9ee-45ce-9c69-332c04e3d793",
+                    "8dcc8524-93b3-4d27-b832-9180499c6e4a",
+                    "bf08793f-d195-437c-b4a2-24ebcd9f2cc6",
+                    "080e7e64-9a96-4b92-addb-3fb80c6d6d25",
+                    "94b22847-7cd0-4676-adcc-16027b7adfad",
+                    "e993b376-4219-4d28-a846-698c4f8ed62a",
+                    "987dc816-bdec-4e7a-a137-84208fbc742a",
+                    "93993ff1-e3e5-4e07-a103-c4289d7bb2ff",
+                    "b5d8b1ed-8ed7-43d5-a7b1-80e47170b600",
+                    "2dd238ef-61d2-4a84-888f-ca458cc59b7c",
+                    "ab94087f-7c62-4b27-8b9e-0eb9d1e7ab99",
+                    "e0b14613-fb3a-4674-b91a-1909fe6cbfea",
+                    "870e9740-738b-4d1f-be98-1bb5bbbf1ca1",
+                    "33aeb5fa-a50a-4cd6-a0e2-c6fd2b51b30f",
+                    "4891da3f-0d26-45bb-a5e3-e6893b701eec",
+                    "23c2aab6-a1fb-46e9-a539-4ad158e70cc4",
+                    "25e09f78-5a94-49e2-9b85-549f7896c714",
+                    "149baed5-07e6-40c9-ab86-ab4bec66f2a0",
+                    "0c054e64-f10a-4d7b-aca9-cb574dbddf39",
+                    "e3a5abd8-e73f-4970-94bd-3f335a6a86b5",
+                    "feb18ad7-69b8-4b50-8a40-522dcda29ca8",
+                    "5babe9d3-38db-4cfa-b27d-3716957ad85b",
+                    "b3322bb3-4bb8-475a-bfea-f09e150f71cc",
+                    "cceba61d-fba8-4bf1-a075-4e4b0b57d67c",
+                    "522e16bb-1f83-46e8-bd64-fc3744db1965",
+                    "c90798d1-624f-4b57-a031-b2714f10837b",
+                    "d411822b-4a2f-440b-8b13-cd581167966f",
+                    "f4d1e719-129b-462a-8af0-81f18078a38a"
+                  ],
+                  "activeTurnObserved": true
+                }
+              },
+              "loadedBySession": {},
+              "reconcileEpochBySession": {},
+              "settledBoundaryBySession": {
+                "mobile-message-turn-window-1be6759e-f401-47f1-ab0e-377fb8cd2dd7": "2026-10-10T13:46:06.122890026Z"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "title": "phone keeps one visible session stream while switching sessions",
+      "file": "session/mobile-visible-session-demand.spec.ts",
+      "project": "mobile-chrome",
+      "status": "passed",
+      "duration_ms": 12630,
+      "attachments": [
+        {
+          "name": "visible-chat-navigation-generations.json",
+          "data": [
+            {
+              "sessionId": "mobile-visible-first-cd3f2bbc-7433-4812-91f6-080d66803e49",
+              "newMetadataRequests": {
+                "[null,false,0,\"/api/v1/workspaces/f75cba69-19f2-4303-bdbb-f73ab6b15202/repositories\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/workflows?include_hidden=true&workspace_id=f75cba69-19f2-4303-bdbb-f73ab6b15202\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/workspaces/f75cba69-19f2-4303-bdbb-f73ab6b15202/repositories\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/github/tasks/cd3f2bbc-7433-4812-91f6-080d66803e49/ci-options\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/agent-profiles/786231d8-82b9-4cb3-b8f3-3888a2b3e540/mcp-config\"]": 0
+              }
+            },
+            {
+              "sessionId": "mobile-visible-second-cd3f2bbc-7433-4812-91f6-080d66803e49",
+              "newMetadataRequests": {
+                "[null,false,0,\"/api/v1/workspaces/f75cba69-19f2-4303-bdbb-f73ab6b15202/repositories\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/workflows?include_hidden=true&workspace_id=f75cba69-19f2-4303-bdbb-f73ab6b15202\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/workspaces/f75cba69-19f2-4303-bdbb-f73ab6b15202/repositories\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/github/tasks/cd3f2bbc-7433-4812-91f6-080d66803e49/ci-options\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/agent-profiles/786231d8-82b9-4cb3-b8f3-3888a2b3e540/mcp-config\"]": 0
+              }
+            },
+            {
+              "sessionId": "mobile-visible-first-cd3f2bbc-7433-4812-91f6-080d66803e49",
+              "newMetadataRequests": {
+                "[null,false,0,\"/api/v1/workspaces/f75cba69-19f2-4303-bdbb-f73ab6b15202/repositories\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/workflows?include_hidden=true&workspace_id=f75cba69-19f2-4303-bdbb-f73ab6b15202\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/workspaces/f75cba69-19f2-4303-bdbb-f73ab6b15202/repositories\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/github/tasks/cd3f2bbc-7433-4812-91f6-080d66803e49/ci-options\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/agent-profiles/786231d8-82b9-4cb3-b8f3-3888a2b3e540/mcp-config\"]": 0
+              }
+            },
+            {
+              "sessionId": "mobile-visible-second-cd3f2bbc-7433-4812-91f6-080d66803e49",
+              "newMetadataRequests": {
+                "[null,false,0,\"/api/v1/workspaces/f75cba69-19f2-4303-bdbb-f73ab6b15202/repositories\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/workflows?include_hidden=true&workspace_id=f75cba69-19f2-4303-bdbb-f73ab6b15202\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/workspaces/f75cba69-19f2-4303-bdbb-f73ab6b15202/repositories\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/github/tasks/cd3f2bbc-7433-4812-91f6-080d66803e49/ci-options\"]": 0,
+                "[\"default-user\",true,0,\"/api/v1/agent-profiles/786231d8-82b9-4cb3-b8f3-3888a2b3e540/mcp-config\"]": 0
+              }
+            }
+          ]
+        },
+        {
+          "name": "visible-chat-metadata-resources.json",
+          "data": {
+            "[null,false,0,\"/api/v1/workspaces/f75cba69-19f2-4303-bdbb-f73ab6b15202/repositories\"]": {
+              "requests": 1,
+              "active": 0,
+              "peak": 1,
+              "cancelled": 1,
+              "statuses": {}
+            },
+            "[\"default-user\",true,0,\"/api/v1/workflows?include_hidden=true&workspace_id=f75cba69-19f2-4303-bdbb-f73ab6b15202\"]": {
+              "requests": 5,
+              "active": 0,
+              "peak": 1,
+              "cancelled": 0,
+              "statuses": {
+                "200": 5
+              }
+            },
+            "[\"default-user\",true,0,\"/api/v1/workspaces/f75cba69-19f2-4303-bdbb-f73ab6b15202/repositories\"]": {
+              "requests": 1,
+              "active": 0,
+              "peak": 1,
+              "cancelled": 0,
+              "statuses": {
+                "200": 1
+              }
+            },
+            "[\"default-user\",true,0,\"/api/v1/github/tasks/cd3f2bbc-7433-4812-91f6-080d66803e49/ci-options\"]": {
+              "requests": 1,
+              "active": 0,
+              "peak": 1,
+              "cancelled": 0,
+              "statuses": {
+                "200": 1
+              }
+            },
+            "[\"default-user\",true,0,\"/api/v1/agent-profiles/786231d8-82b9-4cb3-b8f3-3888a2b3e540/mcp-config\"]": {
+              "requests": 1,
+              "active": 0,
+              "peak": 1,
+              "cancelled": 0,
+              "statuses": {
+                "200": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "title": "boots one phone board and loads the selected workflow through its picker",
+      "file": "task/mobile-journey-boot-loading.spec.ts",
+      "project": "mobile-chrome",
+      "status": "passed",
+      "duration_ms": 2377,
+      "attachments": [
+        {
+          "name": "journey-metadata-resources.json",
+          "data": {
+            "[null,false,0,\"/api/v1/workflows?include_hidden=true&workspace_id=f75cba69-19f2-4303-bdbb-f73ab6b15202\"]": {
+              "requests": 1,
+              "active": 0,
+              "peak": 1,
+              "cancelled": 1,
+              "statuses": {}
+            },
+            "[\"default-user\",true,0,\"/api/v1/workflows?include_hidden=true&workspace_id=f75cba69-19f2-4303-bdbb-f73ab6b15202\"]": {
+              "requests": 3,
+              "active": 0,
+              "peak": 1,
+              "cancelled": 0,
+              "statuses": {
+                "200": 3
+              }
+            },
+            "[\"default-user\",true,0,\"/api/v1/workspaces\"]": {
+              "requests": 1,
+              "active": 0,
+              "peak": 1,
+              "cancelled": 0,
+              "statuses": {
+                "200": 1
+              }
+            },
+            "[\"default-user\",true,0,\"/api/v1/user/settings\"]": {
+              "requests": 1,
+              "active": 0,
+              "peak": 1,
+              "cancelled": 0,
+              "statuses": {
+                "200": 1
+              }
+            },
+            "[\"default-user\",true,0,\"/api/v1/workspaces/f75cba69-19f2-4303-bdbb-f73ab6b15202/repositories\"]": {
+              "requests": 1,
+              "active": 0,
+              "peak": 1,
+              "cancelled": 0,
+              "statuses": {
+                "200": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "title": "phone task picker navigation keeps a large workflow bounded",
+      "file": "task/mobile-journey-review-loading.spec.ts",
+      "project": "mobile-chrome",
+      "status": "passed",
+      "duration_ms": 4841,
+      "attachments": [
+        {
+          "name": "review-client-navigation.json",
+          "data": {
+            "snapshots": [],
+            "pageSizes": [
+              100
+            ],
+            "state": {
+              "tasks": 100,
+              "coverage": false,
+              "completeBoard": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "title": "all-workflow phone reads follow the focused board",
+      "file": "task/mobile-journey-review-loading.spec.ts",
+      "project": "mobile-chrome",
+      "status": "passed",
+      "duration_ms": 3820,
+      "attachments": [
+        {
+          "name": "review-board-demand.json",
+          "data": {
+            "firstId": "efa4d4df-20a0-4605-a0c7-b57a82a2a022",
+            "requests": [
+              "071df696-ef96-46d9-965b-391411f694cd"
+            ],
+            "boards": [
+              "efa4d4df-20a0-4605-a0c7-b57a82a2a022",
+              "5d22ed5b-4abb-4a41-8d5e-6527b8dbe452",
+              "e97cc249-d5ff-4834-b39a-35f697091fa3",
+              "9928c4cd-c38c-417e-a148-ac4ff2fdc725",
+              "ea867972-ab08-4a71-8487-5ca6298a7f9c",
+              "0cc6fd13-b193-4c1d-ad23-d058951a9615",
+              "4c4772a5-d5c9-4e93-8223-495420a19d28",
+              "be2d8c4a-4d5c-4520-ba29-bf15b64037e4",
+              "5f10db17-efa1-4b8b-a7fa-2a0ba961a61d",
+              "5e4340cc-2c10-4001-9ea0-6f4ddae16b90",
+              "525251ed-1e6a-4b80-aae1-b4660818903d",
+              "0a4f6ff5-4a16-4556-8ff3-58a6d7c1a041",
+              "38746524-3328-4cf1-9293-1d92ac719236",
+              "e2b22d2f-ce25-467a-8815-6dd029d7a928",
+              "94f2d522-6e35-4a24-a825-bd06074b576c",
+              "1637ab05-f431-439a-bb86-6039ab8314b1",
+              "73181637-03da-4cb8-9138-cb7b0422c971",
+              "224d0089-7ab8-434c-81ff-c62c3401218d",
+              "21519274-fe66-42bc-98ed-22362dfb1b10",
+              "071df696-ef96-46d9-965b-391411f694cd"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "stats": {
+    "startTime": "2026-10-10T13:46:04.185Z",
+    "duration": 28952.784,
+    "expected": 5,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "errors": []
+}

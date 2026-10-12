@@ -37,12 +37,14 @@ type runtimeFlagIdentity struct {
 }
 
 const (
-	keyCodexAppServer                  = "features.codexAppServer"
-	envCodexAppServer                  = "KANDEV_FEATURES_CODEX_APP_SERVER"
-	retiredAppStatusBarKey             = "features.appStatusBar"
-	retiredAppStatusBarEnvVar          = "KANDEV_FEATURES_APP_STATUS_BAR"
-	retiredOfficeSessionIdentityKey    = "features.officeSessionIdentity"
-	retiredOfficeSessionIdentityEnvVar = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+	keyCodexAppServer                             = "features.codexAppServer"
+	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
+	retiredAppStatusBarKey                        = "features.appStatusBar"
+	retiredAppStatusBarEnvVar                     = "KANDEV_FEATURES_APP_STATUS_BAR"
+	retiredOfficeSessionIdentityKey               = "features.officeSessionIdentity"
+	retiredOfficeSessionIdentityEnvVar            = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+	retiredProviderInterruptionContinuationKey    = "features.providerInterruptionContinuation"
+	retiredProviderInterruptionContinuationEnvVar = "KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION"
 )
 
 // retiredRuntimeFlagIdentities is append-only. When a flag graduates, remove
@@ -54,6 +56,7 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: retiredAppStatusBarKey, envVar: retiredAppStatusBarEnvVar},
 	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
 	{key: "features.remoteExecutorPlugins", envVar: "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"},
+	{key: retiredProviderInterruptionContinuationKey, envVar: retiredProviderInterruptionContinuationEnvVar},
 }
 
 var registrations = []runtimeFlagRegistration{

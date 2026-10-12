@@ -5,6 +5,13 @@ export type AgentErrorCause = {
   operation?: string;
   code?: string;
   detail?: string;
+  reason?: string;
+  requested_model?: string;
+  effective_model?: string;
+  attempted_model?: string;
+  requested_mode?: string;
+  effective_mode?: string;
+  prompt_not_sent?: boolean;
 };
 
 export type TaskStatusSummaryActiveError = {
@@ -54,6 +61,8 @@ export type TaskStatusSummary = {
     id: string;
     state: TaskSessionState;
   } | null;
+  /** Task-wide RUNNING evidence. Undefined identifies a legacy summary. */
+  has_running_session?: boolean;
   foreground_activity?: ForegroundActivity;
   active_subagent_count?: number;
   pending_action?: TaskPendingAction;

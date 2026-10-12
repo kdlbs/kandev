@@ -25,12 +25,16 @@ type Queue struct {
 	grader *Grader
 	log    *zap.Logger
 
-	mu      sync.Mutex
-	pending map[string]time.Time
-	order   chan string
-	stopCh  chan struct{}
-	stopped bool
-	wg      sync.WaitGroup
+	mu            sync.Mutex
+	pending       map[string]time.Time
+	order         chan string
+	stopCh        chan struct{}
+	stopped       bool
+	started       bool
+	sweepsStarted bool
+	cancel        context.CancelFunc
+	sweepCancel   context.CancelFunc
+	wg            sync.WaitGroup
 }
 
 // NewQueue builds a stopped queue over grader.
@@ -65,19 +69,31 @@ func (q *Queue) Enqueue(proposalID string, decidedAt time.Time) {
 
 // Start runs the worker.
 func (q *Queue) Start(ctx context.Context) {
+	q.mu.Lock()
+	if q.stopped || q.started || ctx.Err() != nil {
+		q.mu.Unlock()
+		return
+	}
+	q.started = true
+	ctx, q.cancel = context.WithCancel(ctx)
 	q.wg.Add(1)
+	q.mu.Unlock()
 	go q.run(ctx)
 }
 
 // Stop ends the worker and waits for it; it is idempotent.
 func (q *Queue) Stop() {
 	q.mu.Lock()
-	if q.stopped {
-		q.mu.Unlock()
-		return
+	if !q.stopped {
+		q.stopped = true
+		close(q.stopCh)
+		if q.cancel != nil {
+			q.cancel()
+		}
+		if q.sweepCancel != nil {
+			q.sweepCancel()
+		}
 	}
-	q.stopped = true
-	close(q.stopCh)
 	q.mu.Unlock()
 	q.wg.Wait()
 }
@@ -100,16 +116,19 @@ func (q *Queue) run(ctx context.Context) {
 	}
 }
 
-func (q *Queue) gradeOne(ctx context.Context, id string, at time.Time) {
+func (q *Queue) gradeOne(ctx context.Context, id string, at time.Time) (graded bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			bump(observerPanicTotal, ObserverGrader)
 			q.log.Error("coordinator outcome grader: panic", zap.String("proposal_id", id), zap.Any("panic", r))
 		}
 	}()
-	if err := q.grader.Grade(ctx, id, at); err != nil {
+	graded, err := q.grader.grade(ctx, id, at)
+	if err != nil {
 		q.log.Warn("coordinator outcome grade failed", zap.String("proposal_id", id), zap.Error(err))
+		return false
 	}
+	return graded
 }
 
 // OnDecision implements coordinator.DecisionObserver: it queues the decided

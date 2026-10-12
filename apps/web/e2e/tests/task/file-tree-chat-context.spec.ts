@@ -7,6 +7,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
 import { watchWs } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { waitForWorkspaceFile } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 async function setupDesktopContextTask(
@@ -61,11 +62,14 @@ async function setupDesktopContextTask(
     )
     .toBe(true);
 
-  const gateway = watchWs(testPage);
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 45_000 });
+  if (!task.session_id) throw new Error("file tree context task did not return a session_id");
+  await waitForWorkspaceFile(apiClient, task.session_id, filePath);
+  await waitForWorkspaceFile(apiClient, task.session_id, directoryPath);
+  const gateway = watchWs(testPage);
   const treeResponse = gateway.waitForResponse("workspace.tree.get");
   await testPage.reload();
   await session.waitForLoad();

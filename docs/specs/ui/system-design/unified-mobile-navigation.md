@@ -14,6 +14,13 @@ requirements:
 
 # Unified mobile navigation design
 
+## Navigation hierarchy revision
+
+The [navigation hierarchy design](navigation-hierarchy.md) updates default action order,
+phone tool placement, and primary creation presentation. Existing controller, routing,
+provider eligibility, persistence, and focus ownership remain authoritative.
+
+
 ## Revised target after user testing (2026-09-17)
 
 This section supersedes the original pinned-shortcut and separate View options
@@ -273,8 +280,8 @@ Keep a labelled section and an integration settings entry in that state; retain
 `useAppDestinations` filtering for actual provider/plugin links. Reuse the
 existing workspace settings links; do not invent a new integrations page.
 
-Phone hierarchy: workspace, Home, existing local navigation, Tasks, workspace
-quick actions, Automations, plugin/integration sections, Utilities. The fixed
+Phone hierarchy: fixed workspace; primary New Task, Home/quick actions, eligible
+tools and plugin/integration sections, local navigation and Tasks, then Utilities. The fixed
 menu header and single safe-area-aware scroller remain. Desktop/tablet stay as
 shipped. Validate 393px, 767px and the 768px boundary; compare dark and light
 screenshots to the Utilities section. No new animation or dependency is needed.
@@ -294,9 +301,9 @@ composition for other callers. Only the phone navigation variant gets a two-colu
 quick-action row; use min-width zero and wrapping labels with minimum 44px height.
 Do not move plugin content, search or metrics into that row.
 
-Phone sequence: workspace picker; Home and quick actions; existing page-local
-navigation; Tasks; canvases; Automations; Plugins; Integrations; optional fallback
-system metrics; Utilities. Optional
+Phone sequence: fixed workspace picker; primary New Task; Home and quick actions;
+Automations; eligible canvases; Plugins; Integrations; existing page-local navigation;
+Tasks; optional fallback system metrics; Utilities. Optional
 extension slots remain reachable without breaking the adjacency of Home/quick
 actions or the relative order of the named sections. Office retains its local
 navigation and suppression of the Kanban task and automation sections.
@@ -332,9 +339,9 @@ their composition. The delivery record is the
 [coherent mobile plugin menu plan](../../../plans/mobile-plugin-menu-coherence/plan.md).
 
 A saved sidebar layout retains visibility and the relative order of optional
-tools and plugin destinations. On phones, keep Home and quick actions before
-the embedded Tasks section, followed by those optional nodes; when Home is
-hidden, quick actions remain first. Home still covers all listing modes. Keep
+tools and plugin destinations. On phones, put the visible primary New Task,
+Home and quick actions before those optional nodes, then embedded Tasks; when
+Home is hidden, quick actions remain available. Home still covers all listing modes. Keep
 workspace/task plugin controls together after the configurable projection,
 followed by metrics and Utilities. Do not duplicate saved plugin destinations,
 Automations, Canvases, or Integrations in default sections, or persist this phone

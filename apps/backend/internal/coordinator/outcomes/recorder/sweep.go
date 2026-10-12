@@ -56,8 +56,9 @@ func (p SQLProposals) Sweep(ctx context.Context, q *Queue) int {
 			}
 			tried[id] = true
 			progressed = true
-			q.gradeOne(ctx, id, time.Time{})
-			total++
+			if q.gradeOne(ctx, id, time.Time{}) {
+				total++
+			}
 		}
 		if !progressed {
 			return total
@@ -68,7 +69,15 @@ func (p SQLProposals) Sweep(ctx context.Context, q *Queue) int {
 
 // RunSweeps sweeps once now and then every day until ctx ends.
 func (q *Queue) RunSweeps(ctx context.Context, p SQLProposals) {
+	q.mu.Lock()
+	if q.stopped || q.sweepsStarted || ctx.Err() != nil {
+		q.mu.Unlock()
+		return
+	}
+	q.sweepsStarted = true
+	ctx, q.sweepCancel = context.WithCancel(ctx)
 	q.wg.Add(1)
+	q.mu.Unlock()
 	go func() {
 		defer q.wg.Done()
 		p.Sweep(ctx, q)

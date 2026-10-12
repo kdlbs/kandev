@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -566,6 +567,46 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
 	require.Equal(t, []string{"s1"}, canceller.expiredSessions)
 	require.Equal(t, []bool{true}, canceller.expireContextDeadline)
+}
+
+func TestRollbackResumeFailureIfCurrentAttemptPublishesTransition(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "resume-rollback-task", "resume-rollback-session", "step1")
+	session, err := repo.GetTaskSession(ctx, "resume-rollback-session")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateStarting
+	session.ErrorMessage = "old error"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, session.ID, map[string]interface{}{
+		models.SessionMetaKeyAgentStartAttemptID:   "attempt-current",
+		models.SessionMetaKeyGitCredentialSnapshot: map[string]interface{}{"source": "current"},
+		"retained": "value",
+	}))
+
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+	changed, err := svc.rollbackResumeFailureIfCurrentAttempt(ctx, executor.ResumeFailureRollbackRequest{
+		TaskID: "resume-rollback-task", SessionID: "resume-rollback-session",
+		AttemptID: "attempt-current", ExpectedState: models.TaskSessionStateStarting,
+		NextState: models.TaskSessionStateFailed, ErrorMessage: "resume failed",
+		CredentialSnapshot: &executor.ResumeCredentialSnapshotRestore{
+			Value: map[string]interface{}{"source": "previous"}, Present: true,
+		},
+	})
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	stored, err := repo.GetTaskSession(ctx, "resume-rollback-session")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateFailed, stored.State)
+	require.Equal(t, "resume failed", stored.ErrorMessage)
+	require.Equal(t, map[string]interface{}{"source": "previous"}, stored.Metadata[models.SessionMetaKeyGitCredentialSnapshot])
+	require.Equal(t, "attempt-current", stored.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+	require.Equal(t, "value", stored.Metadata["retained"])
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
 }
 
 func TestTransitionTaskSessionStateRejectsUnexpectedSourceState(t *testing.T) {
@@ -3374,7 +3415,17 @@ func TestTransitionBootstrapFailurePersistsSessionHistory(t *testing.T) {
 
 	reloaded, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
 	require.NoError(t, err)
-	resolvedAt := svc.markRecoveryResolved(ctx, reloaded.ID, reloaded, interruptedMarkerSnapshot{}, false)
+	retainedBeforeRecovery, ok := models.LoadLastAgentError(reloaded.Metadata)
+	require.True(t, ok)
+	resolvedAt := svc.markRecoveryResolvedForAttempt(
+		ctx,
+		reloaded.ID,
+		reloaded,
+		"resume-1",
+		retainedBeforeRecovery.Stamp(),
+		interruptedMarkerSnapshot{},
+		false,
+	)
 	require.NotNil(t, resolvedAt)
 
 	afterRecovery, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
@@ -4890,6 +4941,41 @@ func TestHandleSessionModelsEventPublishesPersistedConfigBaselineAfterRestart(t 
 		"model":            "gpt-5.6-sol",
 		"reasoning_effort": "high",
 	}, payload["config_baseline"])
+}
+
+func TestHandleSessionModelsEventPublishesProviderUpdateIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateRunning, ""))
+	eventBus := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eventBus}
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		AgentID:     "a1",
+		ExecutionID: "execution-live",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-sol",
+			SessionModels:  []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6 Sol"}},
+			ConfigOptions: []streams.ConfigOption{{
+				ID: "collaboration_mode", CurrentValue: "plan",
+			}},
+			Data: map[string]any{"config_options_source": "provider_update"},
+		},
+	})
+
+	require.Len(t, eventBus.events, 1)
+	serialized, err := json.Marshal(eventBus.events[0].event.Data)
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(serialized, &payload))
+	require.Equal(t, "provider_update", payload["config_options_source"])
+	require.Equal(t, "execution-live", payload["agent_execution_id"])
+	if _, present := payload["config_options_settled"]; present {
+		t.Fatal("provider update should retain the post-startup wire shape without config_options_settled")
+	}
 }
 
 func TestHandleSessionModelsEventCapturesSettledConfigBaselineOnce(t *testing.T) {

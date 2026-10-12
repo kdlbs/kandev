@@ -54,11 +54,11 @@ type Cases interface {
 	// SelectTurns returns the turns to replay in running order: the newest
 	// decided turns, then the override turns not already selected.
 	SelectTurns(ctx context.Context, coordinatorID string, now time.Time) ([]Turn, error)
-	Proposal(ctx context.Context, proposalID string) (Proposal, error)
+	Proposal(ctx context.Context, coordinatorID, proposalID string) (Proposal, error)
 	Snapshot(ctx context.Context, hash string) (string, error)
 	// TriggerText is the text of a message turn's trigger.
 	TriggerText(ctx context.Context, turn Turn) (string, error)
-	TaskTitle(ctx context.Context, taskID string) (string, error)
+	TaskTitle(ctx context.Context, coordinatorID, taskID string) (string, error)
 }
 
 // Profile is the coordinator's agent profile as the replay may use it.

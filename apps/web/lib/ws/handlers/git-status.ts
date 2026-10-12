@@ -130,9 +130,10 @@ export function applyGitStatusUpdateWithOutcome(
 }
 
 function getAcceptedGitStatus(state: AppState, environmentId: string, repositoryName: string) {
-  return repositoryName
-    ? state.gitStatus.byEnvironmentRepo[environmentId]?.[repositoryName]
-    : state.gitStatus.byEnvironmentId[environmentId];
+  const scoped = state.gitStatus.byEnvironmentRepo[environmentId]?.[repositoryName];
+  if (scoped || repositoryName) return scoped;
+  const legacy = state.gitStatus.byEnvironmentId[environmentId];
+  return legacy?.repository_name ? undefined : legacy;
 }
 
 function getGitStatusRefresh(state: AppState, environmentId: string, repositoryName: string) {

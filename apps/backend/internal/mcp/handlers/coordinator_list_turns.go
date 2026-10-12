@@ -36,7 +36,7 @@ func (h *Handlers) SetCoordinatorTurnReader(r CoordinatorTurnReader) {
 func (h *Handlers) handleListCoordinatorTurns(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	fields, err := automationPayloadFields(msg.Payload)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid JSON payload", nil)
 	}
 	principal, ok := mcpscope.PrincipalFromContext(ctx)
 	if !ok || !principal.IsCoordinator() {
@@ -44,6 +44,9 @@ func (h *Handlers) handleListCoordinatorTurns(ctx context.Context, msg *ws.Messa
 	}
 	if h.coordinatorTurns == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, "turn ledger is not available", nil)
+	}
+	if !h.coordinatorWorkspaceMatches(ctx, principal) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "coordinator not found", nil)
 	}
 	args, err := coordinatorTurnArgs(fields)
 	if err != nil {

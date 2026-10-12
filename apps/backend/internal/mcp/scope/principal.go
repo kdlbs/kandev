@@ -57,7 +57,8 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.validatePrincipalSession(ctx, taskID, sessionID); err != nil {
+	session, err := r.principalSession(ctx, taskID, sessionID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -69,6 +70,12 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 	automationID, coordinatorID, surface, err := r.principalSurface(ctx, task)
 	if err != nil {
 		return nil, fmt.Errorf("resolve MCP principal task %s: %w", taskID, err)
+	}
+	if surface == mcpprofile.SurfaceKanbanTask || surface == mcpprofile.SurfaceOfficeTask {
+		surface, err = configurationPrincipalSurface(task, session, surface)
+		if err != nil {
+			return nil, fmt.Errorf("resolve MCP principal task %s: %w", taskID, err)
+		}
 	}
 	return WithPrincipal(ctx, Principal{
 		AutomationID:    automationID,
@@ -91,21 +98,39 @@ func (r *Resolver) resolvePrincipalTask(ctx context.Context, taskID string) (*mo
 	return task, nil
 }
 
-func (r *Resolver) validatePrincipalSession(ctx context.Context, taskID, sessionID string) error {
+func (r *Resolver) principalSession(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
 	lookup, ok := r.tasks.(interface {
 		GetTaskSession(context.Context, string) (*models.TaskSession, error)
 	})
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	session, err := lookup.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("resolve MCP principal session %s: %w", sessionID, err)
+		return nil, fmt.Errorf("resolve MCP principal session %s: %w", sessionID, err)
 	}
-	if session == nil || session.TaskID != taskID {
-		return fmt.Errorf("resolve MCP principal: session %s does not belong to task %s", sessionID, taskID)
+	if session == nil || session.ID != sessionID || session.TaskID != taskID {
+		return nil, fmt.Errorf("resolve MCP principal: session %s does not belong to task %s", sessionID, taskID)
 	}
-	return nil
+	return session, nil
+}
+
+func configurationPrincipalSurface(task *models.Task, session *models.TaskSession, surface mcpprofile.Surface) (mcpprofile.Surface, error) {
+	if session == nil {
+		return surface, nil
+	}
+	configMode, _ := session.Metadata["config_mode"].(bool)
+	if !configMode {
+		return surface, nil
+	}
+	_, managed, err := models.ManagedToolPolicyFromTask(task)
+	if err != nil {
+		return surface, err
+	}
+	if managed {
+		return mcpprofile.SurfaceManagedConversation, nil
+	}
+	return mcpprofile.SurfaceConfiguration, nil
 }
 
 func (r *Resolver) resolvePrincipalWorkspace(ctx context.Context, task *models.Task) (string, error) {

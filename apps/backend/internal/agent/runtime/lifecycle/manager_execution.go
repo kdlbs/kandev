@@ -823,7 +823,7 @@ func (m *Manager) prepareExecutionCreation(
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
 	}
-	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch); err != nil {
+	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch, ""); err != nil {
 		return nil, err
 	}
 	if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
@@ -917,7 +917,7 @@ func (m *Manager) createExecutionWithMode(
 		inputs.preparation,
 	)
 
-	if err := m.ensureExecutionAdmission(operationCtx, taskID, info, agentLaunch); err != nil {
+	if err := m.ensureExecutionAdmission(operationCtx, taskID, info, agentLaunch, execution.ID); err != nil {
 		m.rollbackLaunchExecution(operationCtx, inputs.runtime, runtimeInstance, execution, "session ended during runtime creation")
 		return nil, err
 	}
@@ -980,7 +980,7 @@ func (m *Manager) registerAndPublishCreatedExecution(
 		m.rollbackRegisteredLaunchAfterPersistFailure(inputs.runtime, runtimeInstance, execution)
 		return nil, errors.Join(fmt.Errorf("persist execution registration: %w", err), secretCleanupErr)
 	}
-	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch); err != nil {
+	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch, execution.ID); err != nil {
 		execution.remoteInstanceLifecycleMu.Unlock()
 		if errors.Is(err, errTaskCleanupActive) {
 			m.rollbackRegisteredLaunchForTaskCleanup(inputs.runtime, runtimeInstance, execution)
@@ -1004,11 +1004,15 @@ func (m *Manager) ensureExecutionAdmission(
 	taskID string,
 	info *WorkspaceInfo,
 	agentLaunch bool,
+	expectedExecutionID string,
 ) error {
 	if agentLaunch {
 		return m.ensureLaunchSessionStillActive(ctx, info.SessionID, executionAdmissionAgent)
 	}
-	return m.ensureWorkspaceSessionAdmitted(ctx, taskID, info)
+	if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
+		return err
+	}
+	return m.ensureWorkspaceRecoveryResolved(ctx, info.SessionID, expectedExecutionID)
 }
 
 type executionCreatePreparation struct {
@@ -1053,11 +1057,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if !ok {
 		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
-	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(
-		ctx,
-		models.ExecutorType(info.ExecutorType).Runtime(),
-		agentConfig,
-	)
+	managedRuntimeOptions, err := m.resolveManagedRuntimeCommandOptions(ctx, models.ExecutorType(info.ExecutorType).Runtime(), agentConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1075,6 +1075,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 	for key, value := range info.Metadata {
 		metadata[key] = value
 	}
+	delete(metadata, managedGoCacheMetadataKey)
 	m.seedExecutionBaseBranches(ctx, taskID, executionID, metadata)
 	if envPreparation.managedGoCachePath != "" {
 		metadata[managedGoCacheMetadataKey] = envPreparation.managedGoCachePath
@@ -1123,6 +1124,10 @@ func (m *Manager) prepareExecutionCreateRequest(
 	}
 
 	officeAgentProfileID := workspaceOfficeAgentProfileID(info)
+	journalOwnerID := info.SessionID
+	if journalOwnerID == "" {
+		journalOwnerID = info.TaskEnvironmentID
+	}
 	preparation := &executionCreatePreparation{
 		request: &ExecutorCreateRequest{
 			InstanceID:                     executionID,
@@ -1130,6 +1135,11 @@ func (m *Manager) prepareExecutionCreateRequest(
 			TaskID:                         taskID,
 			SessionID:                      info.SessionID,
 			TaskEnvironmentID:              info.TaskEnvironmentID,
+			DurableJournalHostRoot:         m.dataDir,
+			DurableJournalOwnerID:          journalOwnerID,
+			DeliveryIncarnationID:          info.DeliveryIncarnationID,
+			DeliveryHarnessGeneration:      info.DeliveryHarnessGeneration,
+			DeliveryStreamID:               info.DeliveryStreamID,
 			WorkspaceReuseRequired:         info.TaskEnvironmentID != "",
 			AgentProfileID:                 executionProfileID,
 			OfficeAgentProfileID:           officeAgentProfileID,
@@ -1150,7 +1160,10 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AgentctlStartupConfig:          agentctlStartupConfigForExecutor(m.agentctlStartupConfig, info.ExecutorType),
 			RemoteContributions:            remoteContributions,
 			ContributionDestinations:       contributionDestinations,
-			ManagedRuntimeVersion:          managedRuntimeVersion,
+			ManagedRuntimeVersion:          managedRuntimeOptions.ManagedRuntimeVersion,
+			ManagedRuntimeFamily:           managedRuntimeOptions.ManagedRuntimeFamily,
+			ManagedRuntimeSource:           managedRuntimeOptions.ManagedRuntimeSource,
+			NativeRuntimeVersion:           managedRuntimeOptions.NativeRuntimeVersion,
 			ComparisonTargets:              comparisonTargets,
 		},
 		profileInfo: profileInfo,
@@ -1321,7 +1334,8 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInfo) (*worktree.RecoveryAdmission, error) {
 	if m == nil || m.worktreeMgr == nil || info == nil ||
 		info.ExecutorType != string(models.ExecutorTypeWorktree) ||
-		info.TaskEnvironmentID == "" || len(info.WorkspaceRepositories) == 0 {
+		info.TaskEnvironmentID == "" || (len(info.WorkspaceRepositories) == 0 &&
+		(info.RecoveryErrorObservation == nil || len(info.RecoveryErrorObservation.SelectionSnapshot.Slots) == 0)) {
 		return nil, nil
 	}
 	ownerTaskID := info.EnvironmentOwnerTaskID
@@ -1331,17 +1345,29 @@ func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInf
 	if ownerTaskID == "" || info.SessionID == "" || info.OwnershipGeneration <= 0 {
 		return nil, fmt.Errorf("worktree recovery admission: workspace environment identity is incomplete")
 	}
-	slots := make([]worktree.RecoverySlot, 0, len(info.WorkspaceRepositories))
+	cloneRelocationByRepository := make(map[string]*worktree.ManagedCloneRelocationProof, len(info.WorkspaceRepositories))
 	for _, repository := range info.WorkspaceRepositories {
-		if repository.WorktreeID == "" {
+		cloneRelocationByRepository[repository.RepositoryID] = repository.CloneRelocation
+	}
+	var selectionSnapshot models.WorkspaceRecoverySelectionSnapshot
+	if info.RecoveryErrorObservation != nil {
+		selectionSnapshot = info.RecoveryErrorObservation.SelectionSnapshot
+	}
+	if !selectionSnapshot.Complete() {
+		return nil, fmt.Errorf("worktree recovery admission: selected repository inventory is unavailable")
+	}
+	slots := make([]worktree.RecoverySlot, 0, len(info.WorkspaceRepositories))
+	for _, selected := range selectionSnapshot.Canonical().Slots {
+		if selected.WorktreeID == "" {
 			continue
 		}
+		if !selected.RepositoryPresent || selected.RepositoryID == "" || selected.RepositoryLocalPath == "" {
+			return nil, fmt.Errorf("selected worktree recovery inventory is incomplete")
+		}
 		slots = append(slots, worktree.RecoverySlot{
-			WorktreeID:      repository.WorktreeID,
-			RepositoryID:    repository.RepositoryID,
-			BranchSlug:      repository.BranchSlug,
-			RepositoryPath:  repository.RepositoryPath,
-			CloneRelocation: repository.CloneRelocation,
+			WorktreeID: selected.WorktreeID, RepositoryID: selected.RepositoryID,
+			BranchSlug: selected.BranchSlug, RepositoryPath: selected.RepositoryLocalPath,
+			CloneRelocation: cloneRelocationByRepository[selected.RepositoryID],
 		})
 	}
 	if len(slots) == 0 {
@@ -1354,10 +1380,29 @@ func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInf
 		OwnerTaskID:         ownerTaskID,
 		OwnershipGeneration: info.OwnershipGeneration,
 		ExecutorType:        info.ExecutorType,
+		SelectionSnapshot:   selectionSnapshot,
 		Slots:               slots,
 	}
 	admission, err := m.worktreeMgr.AdmitRecovery(ctx, request)
 	if err != nil {
+		var relocationRequired *worktree.ManagedCloneRelocationRequiredError
+		if errors.As(err, &relocationRequired) && m.workspaceRecoveryErrorReporter != nil {
+			if info.RecoveryErrorObservation == nil {
+				return nil, &WorkspaceRecoveryProjectionError{PersistFailed: true}
+			}
+			stamp, reportErr := m.workspaceRecoveryErrorReporter.ReportManagedCloneRelocationRequired(ctx, *info.RecoveryErrorObservation)
+			if reportErr != nil {
+				m.logger.Warn("failed to project workspace recovery refusal",
+					zap.String("task_id", info.TaskID),
+					zap.String("session_id", info.SessionID),
+					zap.Error(reportErr))
+				return nil, &WorkspaceRecoveryProjectionError{PersistFailed: true}
+			}
+			if stamp == "" {
+				return nil, &WorkspaceRecoveryProjectionError{Stale: true}
+			}
+			return nil, &WorkspaceRecoveryProjectionError{Stamp: stamp}
+		}
 		return nil, err
 	}
 	info.WorktreeRecoveryAdmitted = true
@@ -1436,6 +1481,7 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 		client.Close()
 	}
 	execution.EndSessionSpan()
+	m.cleanupPassthroughMCPConfig(execution)
 }
 
 const (

@@ -79,13 +79,13 @@ export const test = base.extend<{ testPage: Page }, OfficeFixtures>({
   },
 });
 
-// Tests in this suite deliberately exercise status transitions. Reset the
-// worker-shared CEO before every test so a previous paused/stopped/working
-// state cannot make the scheduler silently reject the next assignment.
-test.beforeEach(async ({ backend, officeApi, officeSeed }) => {
-  await runWithBackendRecovery(backend, () =>
-    officeApi.updateAgentStatus(officeSeed.agentId, "idle"),
-  );
+// Tests in this suite share a worker-scoped CEO. Reset its name and status so
+// earlier tests cannot leak state into assertions or scheduler admission.
+test.beforeEach(async ({ officeApi, backend, officeSeed }) => {
+  await runWithBackendRecovery(backend, async () => {
+    await officeApi.updateAgent(officeSeed.agentId, { name: "CEO" });
+    await officeApi.updateAgentStatus(officeSeed.agentId, "idle");
+  });
 });
 
 // Office's approval gate (apps/backend/internal/office/dashboard/service_tasks.go

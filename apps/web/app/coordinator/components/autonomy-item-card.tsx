@@ -3,8 +3,6 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@kandev/ui/card";
 import Link from "@/components/routing/app-link";
-import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { cn } from "@/lib/utils";
 import type { NeedsYouAutonomyItem } from "@/lib/coordinator/attention";
 import { heldFixText, heldReasonText } from "@/lib/coordinator/autonomy-text";
 import { formatAge } from "@/lib/coordinator/format";
@@ -28,7 +26,6 @@ export function AutonomyItemCard({
   canManage,
 }: AutonomyItemCardProps) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
   const fix = heldFixText(item.reason, item.detail, item.conditions, t);
   return (
     <Card className="border-l-[3px] border-l-destructive" data-testid={`needs-you-item-${item.id}`}>
@@ -63,7 +60,7 @@ export function AutonomyItemCard({
             asChild
             variant="outline"
             size="sm"
-            className={cn(!isFinePointer && "min-h-11 min-w-11")}
+            className="max-md:min-h-11 max-md:min-w-11 max-md:w-full [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
           >
             <Link
               href={linkToCoordinatorAutonomySettings(workspaceId, coordinatorId)}

@@ -7,6 +7,7 @@ import { ClarificationPanelSection } from "@/components/task/chat/clarification-
 import type { ClarificationOutcome } from "@/hooks/domains/session/use-clarification-group";
 import type { RelayClarification } from "@/lib/api/domains/coordinator-relay-api";
 import { rowPrimaryText } from "@/lib/needs-you-inbox/row-presentation";
+import { shouldEngageQuestion } from "@/lib/coordinator/question-engagement";
 
 export type QuestionAnswerProps = {
   bundle: RelayClarification;
@@ -49,10 +50,8 @@ export function QuestionAnswer({ bundle, itemRef, onEngaged, onOutcome }: Questi
   );
 
   const engage = useCallback(
-    (event: { target: EventTarget }) => {
-      const target = event.target as HTMLElement;
-      if (target.closest?.('[data-testid="clarification-collapse-toggle"]')) return;
-      onEngaged();
+    (event: { target: EventTarget; key?: string }) => {
+      if (shouldEngageQuestion(event)) onEngaged();
     },
     [onEngaged],
   );

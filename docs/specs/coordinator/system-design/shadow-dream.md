@@ -267,7 +267,8 @@ condition the manager can fix says so (`005.2`); a `failed` last dream shows
 again once the condition clears. Row 6 makes `fresh` reachable right after an
 accepted dream although the evidence trigger is then unmet. The **evidence debt
 age** is `now - max(last accepted window_end, completion time of the fifth
-completed non-dream turn after it)` when the trigger's evidence condition holds,
+completed non-dream turn after it, first qualifying decision or override time)`
+when the trigger's evidence condition holds,
 and none otherwise (`006.3`). All copy is in six locales with no em dash. An
 unreadable input gives no health state and the section shows the failure, never
 `fresh`.

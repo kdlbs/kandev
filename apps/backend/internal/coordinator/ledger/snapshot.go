@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/coordinator"
+	"github.com/kandev/kandev/internal/coordinator/watch"
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
@@ -104,6 +105,13 @@ func snapshotTasks(ctx context.Context, db *sqlx.DB, workspaceID string, ws coor
 		where += clause
 		args = append(args, inArgs...)
 	}
+	projects, err := coordinator.ResolveWatchProjectsSQL(ctx, db, workspaceID, ws.Projects)
+	if err != nil {
+		return nil, 0, fmt.Errorf("snapshot projects: %w", err)
+	}
+	projectWhere, projectArgs := watch.TaskSQL(projects)
+	where += " AND " + projectWhere
+	args = append(args, projectArgs...)
 	var total int
 	if err := db.GetContext(ctx, &total, db.Rebind(`SELECT COUNT(*) FROM tasks t WHERE `+where), args...); err != nil {
 		return nil, 0, fmt.Errorf("snapshot task count: %w", err)

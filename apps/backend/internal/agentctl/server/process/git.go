@@ -1002,15 +1002,20 @@ func (g *GitOperator) Stage(ctx context.Context, paths []string) (*GitOperationR
 	}
 
 	var args []string
+	var environmentOverrides map[string]string
 	if len(paths) == 0 {
 		// Stage all changes
 		args = []string{"add", "-A"}
 	} else {
 		// Stage specific files
-		args = append([]string{"add", "--"}, paths...)
+		args = []string{"add", "--"}
+		for _, path := range paths {
+			args = append(args, literalGitPathspec(path))
+		}
+		environmentOverrides = map[string]string{gitLiteralPathspecEnv: "0", gitICasePathspecEnv: "0"}
 	}
 
-	output, err := g.runGitCommand(ctx, args...)
+	output, err := g.runGitCommandWithEnvironment(ctx, environmentOverrides, args...)
 	result.Output = output
 
 	if err != nil {
@@ -1030,7 +1035,7 @@ func (g *GitOperator) Stage(ctx context.Context, paths []string) (*GitOperationR
 }
 
 // Unstage unstages files from the index using git reset.
-// If paths is empty, unstages all changes (git reset HEAD).
+// If paths is empty, unstages all changes (git reset --).
 func (g *GitOperator) Unstage(ctx context.Context, paths []string) (*GitOperationResult, error) {
 	if !g.tryLock("unstage") {
 		return nil, ErrOperationInProgress
@@ -1042,15 +1047,20 @@ func (g *GitOperator) Unstage(ctx context.Context, paths []string) (*GitOperatio
 	}
 
 	var args []string
+	var environmentOverrides map[string]string
 	if len(paths) == 0 {
 		// Unstage all changes
-		args = []string{"reset", "HEAD"}
+		args = []string{"reset", "--"}
 	} else {
 		// Unstage specific files
-		args = append([]string{"reset", "HEAD", "--"}, paths...)
+		args = []string{"reset", "HEAD", "--"}
+		for _, path := range paths {
+			args = append(args, literalGitPathspec(path))
+		}
+		environmentOverrides = map[string]string{gitLiteralPathspecEnv: "0", gitICasePathspecEnv: "0"}
 	}
 
-	output, err := g.runGitCommand(ctx, args...)
+	output, err := g.runGitCommandWithEnvironment(ctx, environmentOverrides, args...)
 	result.Output = output
 
 	if err != nil {
@@ -1088,40 +1098,22 @@ func (g *GitOperator) Discard(ctx context.Context, paths []string) (*GitOperatio
 		return result, nil
 	}
 
-	// Separate files into categories based on their git status
-	// We need to handle untracked/new files differently from tracked files
-	untrackedFiles := []string{}
-	trackedFiles := []string{}
-
-	// Get status for each file to determine how to discard it
-	for _, path := range paths {
-		statusArgs := []string{"status", "--porcelain", "--", path}
-		statusOutput, err := g.runGitCommand(ctx, statusArgs...)
-		if err != nil {
-			// If we can't get status, assume it's tracked and try to restore it
-			trackedFiles = append(trackedFiles, path)
-			continue
-		}
-
-		statusLine := strings.TrimSpace(statusOutput)
-		if len(statusLine) >= 2 {
-			indexStatus := statusLine[0]
-			workTreeStatus := statusLine[1]
-
-			// Untracked files (??), or added files (A ) that don't exist in HEAD
-			if (indexStatus == '?' && workTreeStatus == '?') || indexStatus == 'A' {
-				untrackedFiles = append(untrackedFiles, path)
-			} else {
-				trackedFiles = append(trackedFiles, path)
-			}
-		} else if statusLine == "" {
-			// Empty status means file is not modified - nothing to discard
-			continue
-		}
+	renames, identities, err := g.prepareDiscardRenames(ctx, paths)
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
 	}
+	trackedFiles, selected := discardRenameRestorePaths(renames, identities)
 
+	untrackedFiles, ordinaryTracked := g.discardFileCategories(ctx, paths, selected)
+	trackedFiles = append(trackedFiles, ordinaryTracked...)
+
+	if err := g.checkDiscardRenameSources(renames); err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
 	outputs, errors := g.discardUntrackedFiles(ctx, untrackedFiles)
-	trackedOutputs, trackedErrors := g.discardTrackedFiles(ctx, trackedFiles)
+	trackedOutputs, trackedErrors := g.discardTrackedFilesWithRenames(ctx, trackedFiles, renames)
 	outputs = append(outputs, trackedOutputs...)
 	errors = append(errors, trackedErrors...)
 
@@ -1316,8 +1308,9 @@ func (g *GitOperator) Reset(ctx context.Context, commitSHA string, mode string) 
 
 func (g *GitOperator) discardUntrackedFiles(ctx context.Context, paths []string) (outputs, errors []string) {
 	for _, path := range paths {
-		resetArgs := []string{"rm", "--cached", "--force", "--", path}
-		resetOutput, resetErr := g.runGitCommand(ctx, resetArgs...)
+		resetArgs := []string{"rm", "--cached", "--force", "--", literalGitPathspec(path)}
+		resetOutput, resetErr := g.runGitCommandWithEnvironment(ctx,
+			map[string]string{gitLiteralPathspecEnv: "0", gitICasePathspecEnv: "0"}, resetArgs...)
 		if resetErr != nil && !strings.Contains(resetErr.Error(), "did not match any files") {
 			errors = append(errors, fmt.Sprintf("failed to unstage %s: %s", path, resetErr.Error()))
 		}
@@ -1336,8 +1329,12 @@ func (g *GitOperator) discardTrackedFiles(ctx context.Context, paths []string) (
 	if len(paths) == 0 {
 		return nil, nil
 	}
-	args := append([]string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}, paths...)
-	output, err := g.runGitCommand(ctx, args...)
+	args := []string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}
+	for _, path := range paths {
+		args = append(args, literalGitPathspec(path))
+	}
+	output, err := g.runGitCommandWithEnvironment(ctx,
+		map[string]string{gitLiteralPathspecEnv: "0", gitICasePathspecEnv: "0"}, args...)
 	if output != "" {
 		outputs = append(outputs, output)
 	}

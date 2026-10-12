@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -45,7 +47,24 @@ func newExplicitResumeNoticeFixture(t *testing.T, providerRestored bool) explici
 			CurrentModelID:    "provider-model",
 			CurrentModeID:     "provider-mode",
 			SettingsAttemptID: attempt.identity(),
+			Models:            []streams.SessionModelInfo{{ModelID: "provider-model", Name: "Provider Model"}},
 		}))
+		lastError := models.LastAgentError{
+			Message:          "The saved model could not be applied.",
+			OccurredAt:       time.Date(2026, time.September, 30, 10, 0, 0, 0, time.UTC),
+			AgentExecutionID: "prior-execution",
+			ExecutionID:      "prior-execution",
+			AttemptID:        "prior-attempt",
+			Phase:            models.LaunchErrorPhaseBootstrap,
+			StampValue:       "prior-selection-failure",
+			Causes: []models.AgentErrorCause{{
+				Operation: models.AgentErrorCauseOperationResume,
+				Code:      models.AgentErrorCauseCodeModelUnavailable,
+			}},
+		}
+		require.NoError(t, repo.SetSessionMetadataKey(ctx, session.ID, models.SessionMetaKeyLastAgentError, lastError))
+		session.Metadata[models.SessionMetaKeyLastAgentError] = lastError
+		require.True(t, registry.setRecoveryErrorStamp(attempt, lastError.Stamp()))
 	}
 	attempt.setExecutionID("resume-notice-execution")
 
@@ -92,7 +111,9 @@ func TestExplicitResumeNoticeAttemptOwnership(t *testing.T) {
 	require.Equal(t, true, messages[0].Metadata["effective_model_known"])
 	require.Equal(t, true, messages[0].Metadata["effective_mode_known"])
 	require.Equal(t, "provider-model", messages[0].Metadata["effective_model_id"])
+	require.Equal(t, "Provider Model", messages[0].Metadata["effective_model_name"])
 	require.Equal(t, "provider-mode", messages[0].Metadata["effective_mode_id"])
+	require.Equal(t, "prior-selection-failure", messages[0].Metadata["resolved_error_stamp"])
 }
 
 func TestExplicitResumeNoticeRetriesAfterFailedWriteAndAttemptCleanup(t *testing.T) {
@@ -110,6 +131,7 @@ func TestExplicitResumeNoticeRetriesAfterFailedWriteAndAttemptCleanup(t *testing
 	messages := f.messages(t)
 	require.Len(t, messages, 1, "replayed boot-ready should retry a failed idempotent write after attempt cleanup")
 	require.Equal(t, f.attempt.identity(), messages[0].Metadata["attempt_id"])
+	require.Equal(t, "prior-selection-failure", messages[0].Metadata["resolved_error_stamp"])
 }
 
 func TestExplicitResumeNoticeKeepsSelectorsUnknownWhenSnapshotBelongsToAnotherAttempt(t *testing.T) {
@@ -127,6 +149,274 @@ func TestExplicitResumeNoticeKeepsSelectorsUnknownWhenSnapshotBelongsToAnotherAt
 	require.Equal(t, false, messages[0].Metadata["effective_mode_known"])
 	require.NotContains(t, messages[0].Metadata, "effective_model_id")
 	require.NotContains(t, messages[0].Metadata, "effective_mode_id")
+}
+
+func TestExplicitResumeNoticeKeepsPartialProviderReport(t *testing.T) {
+	f := newExplicitResumeNoticeFixture(t, true)
+	require.NoError(t, f.repo.SetSessionMetadataKey(f.ctx, f.session.ID, models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		CurrentModelID:    "provider-model",
+		SettingsAttemptID: f.attempt.identity(),
+		Models:            []streams.SessionModelInfo{{ModelID: "provider-model", Name: "Provider Model"}},
+	}))
+	f.service.handleAgentBootReady(f.ctx, f.event)
+
+	messages := f.messages(t)
+	require.Len(t, messages, 1)
+	require.Equal(t, true, messages[0].Metadata["effective_model_known"])
+	require.Equal(t, "provider-model", messages[0].Metadata["effective_model_id"])
+	require.Equal(t, "Provider Model", messages[0].Metadata["effective_model_name"])
+	require.Equal(t, false, messages[0].Metadata["effective_mode_known"])
+	require.NotContains(t, messages[0].Metadata, "effective_mode_id")
+}
+
+func TestExplicitResumeNoticeSanitizesProviderModelEvidence(t *testing.T) {
+	tests := []struct {
+		name      string
+		modelID   string
+		modelName string
+		wantKnown bool
+		wantID    string
+		wantName  string
+		forbidden string
+	}{
+		{
+			name:      "safe friendly label",
+			modelID:   "vendor/model-5",
+			modelName: "Gemini 3.7 Flash",
+			wantKnown: true,
+			wantID:    "vendor/model-5",
+			wantName:  "Gemini 3.7 Flash",
+		},
+		{
+			name:      "credential assignment label falls back to confirmed ID",
+			modelID:   "vendor/model-5",
+			modelName: "token=synthetic-private-value",
+			wantKnown: true,
+			wantID:    "vendor/model-5",
+			forbidden: "synthetic-private-value",
+		},
+		{
+			name:      "authenticated URL label falls back to confirmed ID",
+			modelID:   "vendor/model-5",
+			modelName: "https://alice:synthetic-password@private.example/models/key",
+			wantKnown: true,
+			wantID:    "vendor/model-5",
+			forbidden: "synthetic-password",
+		},
+		{
+			name:      "private path label falls back to confirmed ID",
+			modelID:   "vendor/model-5",
+			modelName: "/home/alice/synthetic-private-model",
+			wantKnown: true,
+			wantID:    "vendor/model-5",
+			forbidden: "synthetic-private-model",
+		},
+		{
+			name:      "control label falls back to confirmed ID",
+			modelID:   "vendor/model-5",
+			modelName: "Gemini\x1b[31msynthetic-control",
+			wantKnown: true,
+			wantID:    "vendor/model-5",
+			forbidden: "synthetic-control",
+		},
+		{
+			name:      "unsafe model ID uses unknown success",
+			modelID:   "token=synthetic-private-value",
+			modelName: "Synthetic Private Model",
+			forbidden: "synthetic-private-value",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			f := newExplicitResumeNoticeFixture(t, true)
+			require.NoError(t, f.repo.SetSessionMetadataKey(f.ctx, f.session.ID, models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+				CurrentModelID:    test.modelID,
+				SettingsAttemptID: f.attempt.identity(),
+				Models:            []streams.SessionModelInfo{{ModelID: test.modelID, Name: test.modelName}},
+			}))
+			f.service.handleAgentBootReady(f.ctx, f.event)
+
+			messages := f.messages(t)
+			require.Len(t, messages, 1)
+			metadata := messages[0].Metadata
+			require.Equal(t, test.wantKnown, metadata["effective_model_known"])
+			if test.wantID == "" {
+				require.NotContains(t, metadata, "effective_model_id")
+			} else {
+				require.Equal(t, test.wantID, metadata["effective_model_id"])
+			}
+			if test.wantName == "" {
+				require.NotContains(t, metadata, "effective_model_name")
+			} else {
+				require.Equal(t, test.wantName, metadata["effective_model_name"])
+			}
+			if test.forbidden != "" {
+				encoded, err := json.Marshal(metadata)
+				require.NoError(t, err)
+				require.NotContains(t, string(encoded), test.forbidden)
+			}
+		})
+	}
+}
+
+func TestSuccessfulResumePersistsExactResolutionWithoutTranscriptNotice(t *testing.T) {
+	f := newExplicitResumeNoticeFixture(t, false)
+	lastError := models.LastAgentError{
+		Message:    "The selected model could not be applied.",
+		OccurredAt: time.Date(2026, time.September, 30, 10, 0, 0, 0, time.UTC),
+		StampValue: "strict-selection-failure",
+		Phase:      models.LaunchErrorPhaseBootstrap,
+		Causes: []models.AgentErrorCause{{
+			Operation: models.AgentErrorCauseOperationResume,
+			Code:      models.AgentErrorCauseCodeModelSelectionFailed,
+			Reason:    models.AgentErrorCauseReasonApplicationFailed,
+		}},
+	}
+	require.NoError(t, f.repo.SetSessionMetadataKey(f.ctx, f.session.ID, models.SessionMetaKeyLastAgentError, lastError))
+	require.True(t, f.registry.setRecoveryErrorStamp(f.attempt, lastError.Stamp()))
+	f.service.messageCreator = &failOnceBootstrapMessageCreator{
+		serviceBackedMessageCreator: newServiceBackedMessageCreator(f.repo),
+		err:                         errors.New("temporary transcript write failure"),
+	}
+	f.service.handleAgentBootReady(f.ctx, f.event)
+
+	reloaded, err := f.repo.GetTaskSession(f.ctx, f.session.ID)
+	require.NoError(t, err)
+	encoded, err := json.Marshal(reloaded.Metadata["recovery_resolutions"])
+	require.NoError(t, err)
+	var resolutions []map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &resolutions))
+	require.Len(t, resolutions, 1)
+	require.Equal(t, lastError.Stamp(), resolutions[0]["error_stamp"])
+	require.Equal(t, f.attempt.identity(), resolutions[0]["attempt_id"])
+	require.NotEmpty(t, resolutions[0]["resolved_at"])
+	require.Empty(t, f.messages(t), "strict recovery must not depend on a provider-restored transcript row")
+}
+
+func TestSuccessfulResumeResolutionDoesNotDismissSuccessorFailure(t *testing.T) {
+	f := newExplicitResumeNoticeFixture(t, true)
+	successor := models.LastAgentError{
+		Message:    "A later resumed attempt failed.",
+		OccurredAt: time.Date(2026, time.September, 30, 10, 1, 0, 0, time.UTC),
+		StampValue: "successor-failure",
+		Phase:      models.LaunchErrorPhaseBootstrap,
+	}
+	require.NoError(t, f.repo.SetSessionMetadataKey(f.ctx, f.session.ID, models.SessionMetaKeyLastAgentError, successor))
+	f.service.messageCreator = &failOnceBootstrapMessageCreator{
+		serviceBackedMessageCreator: newServiceBackedMessageCreator(f.repo),
+		err:                         errors.New("temporary transcript write failure"),
+	}
+	f.service.handleAgentBootReady(f.ctx, f.event)
+
+	reloaded, err := f.repo.GetTaskSession(f.ctx, f.session.ID)
+	require.NoError(t, err)
+	storedError, ok := models.LoadLastAgentError(reloaded.Metadata)
+	require.True(t, ok)
+	require.Equal(t, successor.Stamp(), storedError.Stamp())
+	require.False(t, storedError.IsDismissed(), "an older resume must not dismiss its successor failure")
+	encoded, err := json.Marshal(reloaded.Metadata["recovery_resolutions"])
+	require.NoError(t, err)
+	var resolutions []map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &resolutions))
+	require.Len(t, resolutions, 1)
+	require.Equal(t, "prior-selection-failure", resolutions[0]["error_stamp"])
+}
+
+func TestExplicitResumeNoticeDoesNotUseAnUnrelatedCatalogLabel(t *testing.T) {
+	f := newExplicitResumeNoticeFixture(t, true)
+	require.NoError(t, f.repo.SetSessionMetadataKey(f.ctx, f.session.ID, models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		CurrentModelID:    "provider-model",
+		SettingsAttemptID: f.attempt.identity(),
+		Models:            []streams.SessionModelInfo{{ModelID: "another-model", Name: "Provider Model"}},
+	}))
+	f.service.handleAgentBootReady(f.ctx, f.event)
+
+	messages := f.messages(t)
+	require.Len(t, messages, 1)
+	require.Equal(t, true, messages[0].Metadata["effective_model_known"])
+	require.Equal(t, "provider-model", messages[0].Metadata["effective_model_id"])
+	require.NotContains(t, messages[0].Metadata, "effective_model_name")
+}
+
+func TestExplicitResumeNoticeResolvesOnlyTheFailureCapturedByItsAttempt(t *testing.T) {
+	f := newExplicitResumeNoticeFixture(t, true)
+	newerError := models.LastAgentError{
+		Message:          "A newer startup attempt failed.",
+		OccurredAt:       time.Date(2026, time.September, 30, 10, 5, 0, 0, time.UTC),
+		AgentExecutionID: "resume-notice-execution",
+		ExecutionID:      "resume-notice-execution",
+		AttemptID:        f.attempt.identity(),
+		Phase:            models.LaunchErrorPhaseBootstrap,
+		StampValue:       "newer-selection-failure",
+		Causes: []models.AgentErrorCause{{
+			Operation: models.AgentErrorCauseOperationResume,
+			Code:      models.AgentErrorCauseCodeModelUnavailable,
+		}},
+	}
+	require.NoError(t, f.repo.SetSessionMetadataKey(f.ctx, f.session.ID, models.SessionMetaKeyLastAgentError, newerError))
+	f.session.Metadata[models.SessionMetaKeyLastAgentError] = newerError
+
+	f.service.handleAgentBootReady(f.ctx, f.event)
+
+	messages := f.messages(t)
+	require.Len(t, messages, 1)
+	require.Equal(t, "prior-selection-failure", messages[0].Metadata["resolved_error_stamp"])
+	stored, err := f.repo.GetTaskSession(f.ctx, f.session.ID)
+	require.NoError(t, err)
+	storedError, found := models.LoadLastAgentError(stored.Metadata)
+	require.True(t, found)
+	require.Equal(t, "newer-selection-failure", storedError.Stamp())
+	require.False(t, storedError.IsDismissed(), "a prior attempt must not retire a newer failure")
+}
+
+func TestExplicitResumeNoticeDoesNotClaimUncapturedFailureAsRecovered(t *testing.T) {
+	f := newExplicitResumeNoticeFixture(t, true)
+	require.True(t, f.registry.setRecoveryErrorStamp(f.attempt, ""))
+	f.service.handleAgentBootReady(f.ctx, f.event)
+
+	messages := f.messages(t)
+	require.Len(t, messages, 1)
+	require.NotContains(t, messages[0].Metadata, "resolved_error_stamp")
+}
+
+func TestBeginResumeAttemptCapturesOnlyTheActiveRecoveryFailure(t *testing.T) {
+	t.Run("active failure", func(t *testing.T) {
+		f := newExplicitResumeNoticeFixture(t, false)
+		lastError := models.LastAgentError{
+			Message:    "The saved model could not be applied.",
+			OccurredAt: time.Date(2026, time.September, 30, 10, 0, 0, 0, time.UTC),
+			StampValue: "captured-selection-failure",
+			Causes: []models.AgentErrorCause{{
+				Operation: models.AgentErrorCauseOperationResume,
+				Code:      models.AgentErrorCauseCodeModelUnavailable,
+			}},
+		}
+		require.NoError(t, f.repo.SetSessionMetadataKey(f.ctx, f.session.ID, models.SessionMetaKeyLastAgentError, lastError))
+		f.attempt.finish(f.registry)
+
+		attempt, owner, err := f.service.beginResumeAttempt(f.ctx, f.session.TaskID, f.session.ID)
+		require.NoError(t, err)
+		require.True(t, owner)
+		require.Equal(t, lastError.Stamp(), f.registry.recoveryErrorStamp(f.session.ID, attempt.identity()))
+	})
+
+	t.Run("manually dismissed failure", func(t *testing.T) {
+		f := newExplicitResumeNoticeFixture(t, false)
+		dismissedAt := time.Date(2026, time.September, 30, 10, 1, 0, 0, time.UTC)
+		lastError := models.LastAgentError{
+			Message:     "The saved model could not be applied.",
+			OccurredAt:  time.Date(2026, time.September, 30, 10, 0, 0, 0, time.UTC),
+			StampValue:  "dismissed-selection-failure",
+			DismissedAt: &dismissedAt,
+		}
+		require.NoError(t, f.repo.SetSessionMetadataKey(f.ctx, f.session.ID, models.SessionMetaKeyLastAgentError, lastError))
+		f.attempt.finish(f.registry)
+
+		attempt, owner, err := f.service.beginResumeAttempt(f.ctx, f.session.TaskID, f.session.ID)
+		require.NoError(t, err)
+		require.True(t, owner)
+		require.Empty(t, f.registry.recoveryErrorStamp(f.session.ID, attempt.identity()))
+	})
 }
 
 func TestExplicitResumeNoticeRejectsSuccessorAndOrdinaryResume(t *testing.T) {

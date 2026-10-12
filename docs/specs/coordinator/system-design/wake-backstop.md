@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-30
-last_updated: 2026-09-30
+last_updated: 2026-10-12
 requirements:
   - REQ-COORDINATOR-WAKE-002
 ---
@@ -50,6 +50,10 @@ The backstop is a `WakeBackstop` value owned by the `Service`, with
   returns promptly). `Stop` also latches the value closed: a `Start` after
   `Stop` is a no-op, so a shutdown that lands before the detached startup pass
   reaches `StartWakeBackstop` leaves no ticker behind. Tests use a fresh value.
+- Route startup follows ledger, outcome and dream dependency wiring. The startup
+  pass owns a cancellation context and completion handle; cleanup cancels and
+  joins it before closing sweep, retention and detached-resume admission. A
+  stopped startup pass never invokes a later hook.
 - One goroutine runs passes serially, so two passes never overlap; a pass that
   takes longer than 60 seconds makes the ticker drop the missed ticks rather
   than queue them.

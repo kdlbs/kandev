@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -135,6 +136,67 @@ func TestCreateRecoveryStatusMessage_ManagedRuntimeNpmUsesOneRetryAction(t *test
 	}
 }
 
+func TestCreateRecoveryStatusMessage_ManagedRuntimeStartupKeepsTypedReasonAndAttempts(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-startup", "s-startup", "step1")
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:                 "t-startup",
+		SessionID:              "s-startup",
+		ErrorMessage:           "managed runtime startup failed",
+		FailureCode:            "managed_runtime_startup",
+		FailureDetails:         "reason=early_exit attempts=2",
+		StartupFailureReason:   "early_exit",
+		StartupFailureAttempts: 2,
+	}, ""))
+
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("recovery messages = %d, want one", len(mc.sessionMessages))
+	}
+	metadata := mc.sessionMessages[0].metadata
+	if metadata["startup_reason"] != "early_exit" || metadata["startup_attempts"] != 2 {
+		t.Fatalf("startup metadata = %#v, want typed reason and attempts", metadata)
+	}
+	if metadata["failure_kind"] != "managed_runtime_startup" {
+		t.Fatalf("failure_kind = %#v", metadata["failure_kind"])
+	}
+	actions, ok := metadata["actions"].([]map[string]interface{})
+	if !ok || len(actions) != 1 || actions[0]["test_id"] != "managed-runtime-npm-retry-button" {
+		t.Fatalf("recovery actions = %#v, want one runtime retry", metadata["actions"])
+	}
+}
+
+func TestCreateRecoveryStatusMessage_AuthFailureKeepsStartupAttempts(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-auth-startup", "s-auth-startup", "step1")
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:                 "t-auth-startup",
+		SessionID:              "s-auth-startup",
+		ErrorMessage:           "Authentication required: please log in",
+		FailureCode:            string(routingerr.CodeAuthRequired),
+		FailureDetails:         "reason=retry_initialize_failed attempts=2\nfinal_diagnostic=Authentication required: please log in",
+		StartupFailureReason:   "retry_initialize_failed",
+		StartupFailureAttempts: 2,
+	}, ""))
+
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("recovery messages = %d, want one", len(mc.sessionMessages))
+	}
+	metadata := mc.sessionMessages[0].metadata
+	if metadata["is_auth_error"] != true || metadata["startup_reason"] != "retry_initialize_failed" || metadata["startup_attempts"] != 2 {
+		t.Fatalf("authentication recovery metadata = %#v, want auth classification and startup attempts", metadata)
+	}
+}
+
 func TestCreateRecoveryStatusMessage_ManagedRuntimePolicyUsesOneRetryAction(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -198,7 +260,7 @@ func TestCreateRecoveryStatusMessage_ResumeCorrupted(t *testing.T) {
 	}
 }
 
-func TestCreateRecoveryStatusMessage_TransientExhaustionUsesSafeReason(t *testing.T) {
+func TestCreateRecoveryStatusMessage_TransientManualRecoveryUsesSafeReason(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t-capacity", "s-capacity", "step1")
@@ -218,12 +280,14 @@ func TestCreateRecoveryStatusMessage_TransientExhaustionUsesSafeReason(t *testin
 		t.Fatalf("expected 1 session message, got %d", len(mc.sessionMessages))
 	}
 	content := mc.sessionMessages[0].content
-	if !strings.Contains(content, "model remained at capacity") {
+	if !strings.Contains(content, "Model at capacity") {
 		t.Fatalf("content = %q, want provider-neutral capacity reason", content)
 	}
 	if strings.Contains(content, "Please try a different model") {
 		t.Fatalf("content copied raw provider evidence: %q", content)
 	}
+	require.NotContains(t, content, "after several retries")
+	require.Equal(t, "provider_interrupted", mc.sessionMessages[0].metadata["failure_kind"])
 }
 
 func TestCreateRecoveryStatusMessage_OpenCodeQuotaCarriesSafeMetadata(t *testing.T) {

@@ -392,23 +392,107 @@ func TestLoadRecordedWorkflowSessionRouteReturnsCommittedDestination(t *testing.
 	require.Equal(t, fixture.current.ID, session.ID)
 }
 
-func TestLoadRecordedWorkflowSessionRouteRejectsDeletedDestination(t *testing.T) {
+func TestLoadRecordedWorkflowSessionRouteAllowsFreshFallbackFromDeletedDestination(t *testing.T) {
+	for _, phase := range []string{workflowSessionRoutePrepared, workflowSessionRouteCommitted} {
+		t.Run(phase, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+			target := &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetInitial}
+			step := &wfmodels.WorkflowStep{ID: "step-review", WorkflowID: "wf1", Position: 1, SessionTarget: target}
+			operationID := workflowSessionRouteID("t1", step.ID, "entry:00000000000000000007", target, models.WorkflowProfileSessionStartPolicyReuse)
+			require.NoError(t, fixture.repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyWorkflowSessionRoute, models.WorkflowSessionRoute{
+				OperationID:       operationID,
+				DestinationStepID: step.ID,
+				TargetKind:        string(target.Kind),
+				AgentProfileID:    "profile-a",
+				DestinationID:     "deleted-destination",
+				Phase:             phase,
+			}))
+
+			route, session, err := fixture.svc.loadRecordedWorkflowSessionRoute(ctx, "t1", operationID, step, "profile-a")
+			require.NoError(t, err, "a deleted destination must not block every start in this step entry")
+			require.NotNil(t, route)
+			require.Nil(t, session, "the caller allocates the target profile's fresh session")
+		})
+	}
+}
+
+func TestPrepareExplicitWorkflowSessionReplacesDeletedRouteDestinationOnce(t *testing.T) {
+	for _, phase := range []string{workflowSessionRoutePrepared, workflowSessionRouteCommitted} {
+		t.Run(phase, func(t *testing.T) {
+			ctx := context.Background()
+			startPolicy := models.WorkflowProfileSessionStartPolicyNew
+			fixture := newProfileSwitchFixture(t, startPolicy, models.WorkflowProfileSessionEndPolicyPark)
+			target := &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetInitial}
+			step := &wfmodels.WorkflowStep{
+				ID: "step-review", WorkflowID: "wf1", Position: 1,
+				SessionTarget: target, ProfileSessionStartPolicy: startPolicy,
+			}
+			source := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", AgentProfileID: "profile-a"}
+			const entryID = int64(7)
+			entry := fixture.svc.workflowEntryIdentity(ctx, "t1", entryID)
+			require.NoError(t, fixture.repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyWorkflowSessionRoute, models.WorkflowSessionRoute{
+				OperationID:       workflowSessionRouteID("t1", step.ID, entry, target, startPolicy),
+				DestinationStepID: step.ID,
+				EntryIdentity:     entry,
+				TargetKind:        string(target.Kind),
+				AgentProfileID:    "profile-a",
+				SourceSessionID:   fixture.current.ID,
+				DestinationID:     "deleted-destination",
+				Phase:             phase,
+			}))
+
+			replacement, switched, err := fixture.svc.prepareExplicitWorkflowSession(ctx, "t1", fixture.current, step, source, entryID)
+			require.NoError(t, err)
+			require.True(t, switched)
+			require.NotNil(t, replacement)
+			require.NotEqual(t, fixture.current.ID, replacement.ID)
+			task, err := fixture.repo.GetTask(ctx, "t1")
+			require.NoError(t, err)
+			route, ok := models.LoadWorkflowSessionRoute(task.Metadata)
+			require.True(t, ok)
+			require.Equal(t, replacement.ID, route.DestinationID, "the route records the replacement")
+
+			// A retry of the same entry reuses the replacement instead of
+			// allocating another session.
+			retried, _, err := fixture.svc.prepareExplicitWorkflowSession(ctx, "t1", replacement, step, source, entryID)
+			require.NoError(t, err)
+			require.NotNil(t, retried)
+			require.Equal(t, replacement.ID, retried.ID)
+			sessions, err := fixture.repo.ListTaskSessions(ctx, "t1")
+			require.NoError(t, err)
+			require.Len(t, sessions, 2)
+		})
+	}
+}
+
+type failingWorkflowDestinationRepo struct {
+	sessionExecutorStore
+	err error
+}
+
+func (r failingWorkflowDestinationRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	return nil, r.err
+}
+
+func TestLoadRecordedWorkflowSessionRouteKeepsDestinationLoadFailureFatal(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	target := &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetInitial}
 	step := &wfmodels.WorkflowStep{ID: "step-review", WorkflowID: "wf1", Position: 1, SessionTarget: target}
-	operationID := workflowSessionRouteID("t1", step.ID, "entry:00000000000000000007", target, models.WorkflowProfileSessionStartPolicyReuse)
+	operationID := workflowSessionRouteID("t1", step.ID, "entry:00000000000000000011", target, models.WorkflowProfileSessionStartPolicyReuse)
 	require.NoError(t, fixture.repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyWorkflowSessionRoute, models.WorkflowSessionRoute{
 		OperationID:       operationID,
 		DestinationStepID: step.ID,
 		TargetKind:        string(target.Kind),
 		AgentProfileID:    "profile-a",
-		DestinationID:     "deleted-destination",
+		DestinationID:     fixture.current.ID,
 		Phase:             workflowSessionRoutePrepared,
 	}))
+	fixture.svc.repo = failingWorkflowDestinationRepo{sessionExecutorStore: fixture.svc.repo, err: errors.New("session store unavailable")}
 
 	_, _, err := fixture.svc.loadRecordedWorkflowSessionRoute(ctx, "t1", operationID, step, "profile-a")
-	require.ErrorContains(t, err, "recorded workflow session route destination")
+	require.ErrorContains(t, err, "load recorded workflow session route destination")
 }
 
 func TestLoadRecordedWorkflowSessionRouteAllowsFreshFallbackFromTerminalDestination(t *testing.T) {

@@ -44,7 +44,9 @@ type WorkspaceRepoChipsProps = {
   showDiscoveryControls?: boolean;
   onOpenDiscoverySettings?: () => void;
   onAddHomeAndOpenDiscovery?: () => void;
+  ariaDescribedBy?: string;
   canAddMore: boolean;
+  showAddButton?: boolean;
   addHint?: string;
   addLabel?: string;
   allowDuplicateRepositories?: boolean;
@@ -83,7 +85,9 @@ export function WorkspaceRepoChips({
   showDiscoveryControls = false,
   onOpenDiscoverySettings,
   onAddHomeAndOpenDiscovery,
+  ariaDescribedBy,
   canAddMore,
+  showAddButton = true,
   addHint,
   addLabel,
   allowDuplicateRepositories = true,
@@ -123,6 +127,7 @@ export function WorkspaceRepoChips({
           preferredDefaultBranchLoading={isLocalExecutor ? currentLocalBranchLoading : false}
           lastUsedBranch={lastUsedBranch}
           userSettingsLoaded={userSettingsLoaded}
+          ariaDescribedBy={ariaDescribedBy}
           isLocalExecutor={!!isLocalExecutor}
           branchValue={isLocalExecutor ? row.branch : row.baseBranch || row.branch}
           savedBaseBranch={row.baseBranch}
@@ -153,12 +158,15 @@ export function WorkspaceRepoChips({
         />
       ))}
       {freshBranchToggle}
-      <AddRepositoryButton
-        canAddMore={canAddMore}
-        addHint={addHint}
-        addLabel={addLabel}
-        onAdd={onAdd}
-      />
+      {showAddButton && (
+        <AddRepositoryButton
+          canAddMore={canAddMore}
+          addHint={addHint}
+          addLabel={addLabel}
+          ariaDescribedBy={ariaDescribedBy}
+          onAdd={onAdd}
+        />
+      )}
     </>
   );
 }
@@ -269,6 +277,7 @@ type RepoChipProps = {
   showDiscoveryControls?: boolean;
   onOpenDiscoverySettings?: () => void;
   onAddHomeAndOpenDiscovery?: () => void;
+  ariaDescribedBy?: string;
   onRemove: () => void;
   onCreateRepository?: () => void;
   onRefreshRepositories?: () => void;
@@ -494,6 +503,7 @@ function RepoChipContent({
   showDiscoveryControls,
   onOpenDiscoverySettings,
   onAddHomeAndOpenDiscovery,
+  ariaDescribedBy,
 }: RepoChipProps & { data: RepoChipData; branchPolicies: RepositoryBranchPolicy[] }) {
   const {
     repoOptions,
@@ -540,6 +550,7 @@ function RepoChipContent({
         onAddHomeAndOpenDiscovery={showDiscoveryControls ? onAddHomeAndOpenDiscovery : undefined}
         onRefreshRepositories={onRefreshRepositories}
         repositoriesRefreshing={repositoriesRefreshing}
+        ariaDescribedBy={ariaDescribedBy}
       />
       <RepoChipBranchPill
         branchPicker={branchPicker}
@@ -547,6 +558,7 @@ function RepoChipContent({
         branchLocked={branchLocked}
         branchesLoading={branchesLoading}
         refreshBranches={refreshBranches}
+        ariaDescribedBy={ariaDescribedBy}
       />
       {isLocalExecutor && savedBaseBranch ? (
         <RepoChipBaseBranchPill
@@ -557,6 +569,7 @@ function RepoChipContent({
           branchesLoading={branchesLoading}
           onSelect={onBaseBranchChange ?? (() => undefined)}
           refreshBranches={refreshBranches}
+          ariaDescribedBy={ariaDescribedBy}
         />
       ) : null}
       <RepoChipRemoveButton onRemove={onRemove} />

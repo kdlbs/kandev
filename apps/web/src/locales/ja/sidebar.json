@@ -137,5 +137,6 @@
   "filterListLimit": "フィルター {{filter}} の選択数が多すぎます。{{limit}} 件以内で選択してください。",
   "filterValueLimit": "フィルター {{filter}} の値が長すぎます。{{limit}} バイト以内にしてください。",
   "filterInvalid": "フィルター {{filter}} が無効です。値と演算子を確認してください。",
-  "filterCountLimit": "このビューのフィルター数が多すぎます。{{limit}} 個以内にしてください。"
+  "filterCountLimit": "このビューのフィルター数が多すぎます。{{limit}} 個以内にしてください。",
+  "filtersActive": "フィルター適用中"
 }

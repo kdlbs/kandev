@@ -23,6 +23,7 @@ func fullyPopulatedExportAutomation(t *testing.T) exportAutomation {
 		TaskMode:           TaskModeNormalTask,
 		RepositoryMode:     RepositoryModeSelected,
 		TaskTitleTemplate:  "Daily Review ({{trigger.timestamp}})",
+		RetryPolicy:        exportRetryPolicy{Mode: RetryModeDisabled, MaxRetries: "0", DelaySeconds: "0", Backoff: RetryBackoffFixed, HistoryMode: RetryHistoryAttempts},
 		Prompt:             promptNode,
 		AgentProfile:       &exportAgentProfile{AgentName: "Claude Code", Model: "opus[1m]", Mode: "auto"},
 		ExecutorProfile:    &exportExecutorProfile{Executor: "exec-worktree", Name: "Worktree"},
@@ -37,7 +38,7 @@ func fullyPopulatedExportAutomation(t *testing.T) exportAutomation {
 // AC-40: top-level keys in fixed order version, type, automations, warnings (warnings
 // omitted here since empty); automation keys in fixed order name, description,
 // enabled, max_concurrent_runs, continuation_policy, task_mode, repository_mode,
-// task_title_template, prompt, agent_profile,
+// retry_policy, task_title_template, prompt, agent_profile,
 // executor_profile, workflow, repositories, triggers; trigger keys in fixed order
 // type, enabled, config.
 func TestMarshalExportDocument_AC40KeyOrder(t *testing.T) {
@@ -58,6 +59,7 @@ func TestMarshalExportDocument_AC40KeyOrder(t *testing.T) {
 		"continuation_policy:",
 		"task_mode:",
 		"repository_mode:",
+		"retry_policy:",
 		"task_title_template:",
 		"prompt:",
 		"agent_profile:",
@@ -106,7 +108,7 @@ func TestMarshalExportDocument_OmitsEmptyOptionalFields(t *testing.T) {
 			t.Errorf("expected %q omitted for empty field, got:\n%s", absent, s)
 		}
 	}
-	assertKeysAppearInOrder(t, s, []string{"name:", "enabled:", "max_concurrent_runs:", "continuation_policy:", "task_mode:", "repository_mode:", "triggers:"})
+	assertKeysAppearInOrder(t, s, []string{"name:", "enabled:", "max_concurrent_runs:", "continuation_policy:", "task_mode:", "repository_mode:", "retry_policy:", "triggers:"})
 }
 
 // AC-12: indentation is 2 spaces per nesting level, not yaml.v3's package-level

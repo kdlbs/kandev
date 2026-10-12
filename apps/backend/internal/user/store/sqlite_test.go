@@ -117,8 +117,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("read migrated settings: %v", err)
 	}
-	if settings.Revision != 0 {
-		t.Fatalf("migrated revision = %d, want 0", settings.Revision)
+	if settings.Revision != 1 {
+		t.Fatalf("migrated revision = %d, want 1", settings.Revision)
 	}
 	settings.AppStatusBarEnabled = true
 	settings.UpdatedAt = now.Add(time.Second)
@@ -126,8 +126,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("write migrated settings: %v", err)
 	}
-	if updated.Revision != 1 {
-		t.Fatalf("updated revision = %d, want 1", updated.Revision)
+	if updated.Revision != 2 {
+		t.Fatalf("updated revision = %d, want 2", updated.Revision)
 	}
 
 	replayedRepo, err := newSQLiteRepositoryWithDB(conn, conn)
@@ -138,8 +138,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("read settings after migration replay: %v", err)
 	}
-	if replayed.Revision != 1 {
-		t.Fatalf("revision after migration replay = %d, want 1", replayed.Revision)
+	if replayed.Revision != 2 {
+		t.Fatalf("revision after migration replay = %d, want 2", replayed.Revision)
 	}
 	if !replayed.AppStatusBarEnabled {
 		t.Fatal("status bar preference was not preserved across migration replay")
@@ -183,12 +183,14 @@ func TestScanUserSettingsStartupPage(t *testing.T) {
 
 // TestScanUserSettingsSidebarDefaults verifies the canonical default sidebar view and that explicit sidebar settings are preserved.
 func TestScanUserSettingsSidebarDefaults(t *testing.T) {
+	groupIndent := true
 	defaultView := models.SidebarView{
 		ID:              "view-all-tasks",
 		Name:            "All tasks",
 		Filters:         []models.SidebarViewClause{},
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
 		Group:           "repository",
+		GroupIndent:     &groupIndent,
 		CollapsedGroups: []string{},
 		TaskRow:         models.DefaultSidebarTaskRowPresentation(),
 	}

@@ -12,7 +12,7 @@ export async function assertImmediateTaskReturn(
   backend: BackendContext,
   mobile: boolean,
 ) {
-  const [a, b] = await seedNavigationTasks(api, seed, backend);
+  const [a, b] = await seedNavigationTasks(api, seed, backend, { withRepository: false });
   for (const task of [a, b]) {
     await expect
       .poll(

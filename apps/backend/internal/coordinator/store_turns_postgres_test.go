@@ -9,11 +9,18 @@ import (
 
 func TestStartUnattendedTurnPostgres_ConcurrentStartsYieldOneOpenTurn(t *testing.T) {
 	s := newMultiConnStorePostgres(t)
-	c := newTestCoordinator(t, s, "ws-1")
+	fixture := newWakeFixture(t, s)
+	c := fixture.c
+	fixture.addOwn(t, "task-1", "wf-1")
+	fixture.addOwn(t, "task-2", "wf-1")
 	mustExec(t, s, `UPDATE coordinators SET autonomy_enabled = ?, cost_ceiling_subcents = 1000, conversation_task_id = ? WHERE id = ?`, 1, "conv", c.ID)
 	now := time.Now().UTC()
 	insertWakeRow(t, s, c, "w1", "task-1", string(WakeKindQuestion), "q1", "pending", now)
 	insertWakeRow(t, s, c, "w2", "task-2", string(WakeKindQuestion), "q2", "pending", now)
+	watchSet, err := s.LoadWatchSet(context.Background(), s.ro, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var mu sync.Mutex
 	started := 0
@@ -23,7 +30,7 @@ func TestStartUnattendedTurnPostgres_ConcurrentStartsYieldOneOpenTurn(t *testing
 		go func() {
 			defer wg.Done()
 			got, err := s.startUnattendedTurn(context.Background(), turnStart{
-				CoordinatorID: c.ID, ConvTaskID: "conv", SessionID: "sess", WakeIDs: []string{"w1", "w2"},
+				CoordinatorID: c.ID, ConvTaskID: "conv", SessionID: "sess", WakeIDs: []string{"w1", "w2"}, WatchSet: &watchSet,
 			})
 			if err != nil {
 				t.Errorf("startUnattendedTurn: %v", err)

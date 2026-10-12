@@ -620,6 +620,7 @@ export function PreviewSessionBody({
           // Read-only kanban hover preview — a transient glance, not "opening"
           // the task. Never advances the Slack-style read cursor.
           isVisible={false}
+          detailActive
         />
       </TaskLaunchErrorProvider>
     </div>

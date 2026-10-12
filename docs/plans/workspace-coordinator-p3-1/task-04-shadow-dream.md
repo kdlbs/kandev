@@ -1,7 +1,7 @@
 ---
 id: "04-shadow-dream"
 title: "Shadow dream, report, ratings and Learning section"
-status: implemented
+status: in_progress
 wave: 3
 depends_on:
   - "01-turn-ledger"
@@ -63,6 +63,13 @@ system_design:
 # Task 04: Shadow dream, report, ratings and Learning section (WP 3.1-4)
 
 ## Summary
+
+Integration verification for PR #4044 is pending. Focused regressions reproduced
+acceptance of a null answer, protected-setting phrase bypasses, and omission of
+the next-dream timestamp. The same assertions pass after remediation in the
+inspected offline container. Persistence, scheduler wiring, evidence debt,
+override evidence and report redaction checks remain pending in hosted CI;
+these focused proofs do not verify the episode runtime.
 
 Runs the dream end to end in Shadow: scheduler tick and lease, the one-tool
 episode, the report, the gate, replay of up to five items, ratings, health,
@@ -174,3 +181,12 @@ Phone: full-screen page; rating is a segmented control.
 - Addition: health reads "fresh" when a debt exists but is at most 36 hours old and nothing has been accepted yet, so a new coordinator is not shown as Stale on day one.
 - The rating PUT returns 204.
 - Reader (`auth` project) read-only behavior is covered by the section's Vitest cases; the Playwright specs cover the manager path.
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.

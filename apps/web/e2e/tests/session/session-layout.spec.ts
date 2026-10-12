@@ -279,6 +279,8 @@ test.describe("Session tab cleanup", () => {
       )
       .toBe(true);
 
+    // The task is already complete. Open it directly because terminal tasks
+    // can be hidden by the board's current filters.
     await testPage.goto(`/t/${task.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 

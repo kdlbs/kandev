@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-29
-last_updated: 2026-09-30
+last_updated: 2026-10-12
 requirements:
   - REQ-COORDINATOR-WAKE-001
   - REQ-COORDINATOR-WAKE-002
@@ -20,19 +20,15 @@ requirements:
 
 ## Purpose and boundaries
 
-This design turns episodes on a coordinator's own tasks into durable wake
-rows, and pending wake rows into at most one unattended turn at a time in the
-coordinator's existing conversation. It owns the wake store, the recorder, the
-backstop, admission and delivery, the unattended turn record, and the autonomy
-read route. [Containment](containment.md) and [spend](spend.md) supply two
-admission checks. The task system keeps owning `task.stalled`, session state,
-pending actions and errors; this design reads them and adds no task field.
+Own-task episodes become durable wakes and at most one unattended turn in the
+existing conversation. This design owns recording, backstop, delivery, turn
+records and autonomy reads. [Containment](containment.md) and [spend](spend.md)
+provide admission checks. Task state, stalls, pending actions and errors remain
+task-owned; no task fields are added.
 
-It does not use the automation runner, the Office wakeup dispatcher or the
-shared `runs` queue. Those serve a different principal and bring the
-replacement fork of analysis finding 5.2 (`prepareAutomationTask` creating a
-replacement when the continuation session is merely busy). The coordinator has
-exactly one conversation, and the rules below never create another.
+Automation, Office wake dispatch and the shared `runs` queue serve different
+principals and may replace busy continuation sessions. Coordinator delivery
+uses none of them: it keeps exactly one conversation and never replaces it.
 
 ## Requirement mapping
 
@@ -47,16 +43,13 @@ exactly one conversation, and the rules below never create another.
 
 ## Flag and settings
 
-- `features.coordinatorPhase3` (environment
-  `KANDEV_FEATURES_COORDINATOR_PHASE3`) is registered in
-  `internal/runtimeflags/registry.go` with `RestartRequired: true` and in root
-  `profiles.yaml` as `prod: "false"`, `dev: "false"`, `e2e: "true"`, per the
-  `/runtime-feature-flags` checklist. Phase 3 is **effective** only when it,
-  `features.coordinatorPhase2` and `features.coordinator` are all on
-  ([integration](integration.md#effective-condition));
-  `internal/backendapp/coordinator.go`
-  computes that once at startup and builds none of this design's subscribers,
-  tickers or routes otherwise, so their routes return 404.
+- `features.coordinatorPhase3` (`KANDEV_FEATURES_COORDINATOR_PHASE3`) is in the
+  typed `internal/runtimeflags/registry.go`, restart-required, with root
+  `profiles.yaml` defaults `prod: "false"`, `dev: "false"`, `e2e: "true"`.
+  It requires `features.coordinatorPhase2` and `features.coordinator`
+  ([integration](integration.md#effective-condition)). Backend startup computes
+  that conjunction once; disabled subscribers, tickers and routes are absent,
+  so those routes return 404. Follow `/runtime-feature-flags` for rollout.
 - The `coordinators` table gains, by additive `ALTER`:
 
   | Column | Type | Notes |
@@ -76,16 +69,12 @@ exactly one conversation, and the rules below never create another.
   `UPDATE coordinator_wakes SET status='superseded', updated_at=? WHERE
   coordinator_id=? AND status='pending'`. An open unattended turn is not
   touched.
-- Every coordinator GET and list response carries both fields
-  (`cost_ceiling_usd` as a decimal string with two places, or `null`) while
-  phase 3 is effective, and carries neither key otherwise, the way phase 2's
-  fields are omitted while its flag is off. The activity row's
-  `unattended_turn_id` follows the same rule: present (string or `null`) only
-  while phase 3 is effective; task 01 owns that DTO field and its omission,
-  task 05 the stamping. The web computes "effective" as the AND of the
-  three `useFeature` reads (`coordinator`, `coordinatorPhase2`,
-  `coordinatorPhase3`) in one hook, and the typed client marks the new fields
-  optional.
+- GET and list responses include both fields only when phase 3 is effective:
+  `cost_ceiling_usd` is a two-decimal string or `null`. The activity row's
+  `unattended_turn_id` follows the same omission rule (string or `null` when
+  enabled). Task 01 owns its DTO and omission; task 05 stamps it. Web
+  "effective" uses one hook AND-ing `useFeature` for `coordinator`,
+  `coordinatorPhase2` and `coordinatorPhase3`; typed client fields are optional.
 
 The PATCH field rules (check order, presence, idempotency, post-commit
 `Kick` and `autonomy_changed`) are in
@@ -210,7 +199,7 @@ returns `autonomy_off` with detail `read_error`).
 | 2 | containment passes ([containment](containment.md#check)): `AdmitCounting` calls `CheckForAdmission` (counts and logs), `AdmitReadOnly` calls `Check` (never counts) | `containment`, detail = the failing condition name |
 | 3 | spend is measurable ([spend](spend.md#measurement)) | `spend_unmeasured` |
 | 4 | spend below the ceiling | `ceiling_reached` |
-| 5 | `conversation_task_id` set and that task exists, is not archived | `no_conversation` |
+| 5 | Unarchived coordinator-origin conversation matches stored task ID, workspace and coordinator metadata; not a dream | `no_conversation` |
 | 6 | the task's primary session exists and is usable: not `FAILED`, `CANCELLED`, `COMPLETED` or `CREATED` | `conversation_unavailable`, detail `session_not_started` for `CREATED` |
 | 7 | that session is `WAITING_FOR_INPUT` or `IDLE` (the direct prompt's promptable set), has no pending action, no queued message (`messagequeue.Service.HasPendingForSession`), no active turn, and the coordinator has no turn row with `outcome IS NULL` | `conversation_busy`, detail `turn_open` for the open turn row, `read_error` for a failed read |
 | 8 | the newest turn row with `finished_at` set (`ORDER BY finished_at DESC, id DESC LIMIT 1`), whatever its outcome (including `send_failed` and `interrupted`), has `finished_at` at least 5 minutes before now on the service clock (inclusive), or there is none | `cooldown` |
@@ -237,9 +226,8 @@ Reads go through two coordinator-side interfaces, not orchestrator types:
   fails check 7 with `conversation_busy` and detail `read_error`.
 - A message finder ([Finding the turn's message](wake-recovery.md#finding-the-turns-message)).
 
-A queue whose auto-run is paused still holds check 7 with
-`conversation_busy`: the design adds no separate reason or strip copy for it,
-and a manager clears or resumes the queue.
+A paused auto-run queue holds check 7 with `conversation_busy`, without
+separate strip copy. A manager clears or resumes it.
 
 The eight reads are sequential, not a snapshot. A change between them is
 covered by step 3 of Delivery and the unique index, not by `Admit`.
@@ -309,7 +297,14 @@ below also counts and publishes as the [Observability](#observability) and
    (`AC-COORDINATOR-WAKE-005.1`): an episode ending after it is still
    delivered, and the turn message tells the agent to read current state.
 3. In one transaction under the [wake lock](#wake-lock): re-read the
-   coordinator row and roll back if `autonomy_enabled` is not 1; insert the
+   coordinator row and roll back if `autonomy_enabled` is not 1 or the raw
+   workflow/project watch scope changed after evaluation. Scope resolution stays
+   outside the writer lock; project reads can prune deleted entries and re-enter
+   coordinator repair. Recheck approved create-task ownership, workspace, archive
+   and ephemeral boundaries in the conditional wake claim, using the current
+   effective workflows. The same UPDATE checks live project membership,
+   repository/set workspace and repository deletion. A refused claim leaves
+   wakes pending. Insert the
    turn row (`outcome` null, `message_id` null, `start_ceiling_subcents`
    copied from the re-read row's `cost_ceiling_subcents`, which autonomy on
    guarantees is set), where a unique violation
@@ -318,10 +313,12 @@ below also counts and publishes as the [Observability](#observability) and
    status='pending'`, and roll back if it changed no row; then read back
    `SELECT ... FROM coordinator_wakes WHERE turn_id=? ORDER BY created_at, id`
    in the same transaction and set `wake_count` to the rows read back (zero
-   rows rolls back); commit, then count `coordinator_wake_delivered_total` by
-   `wake_count` and publish `coordinator.updated` with `autonomy_changed: true`
-   (the same post-commit publish as a wake insert; a failure is logged and
-   changes nothing). Those rows, and only those, are the turn's wakes
+   rows rolls back); commit and publish `coordinator.updated` with
+   `autonomy_changed: true` (the wake-insert post-commit notification;
+   a failure is logged and changes nothing). Count
+   `coordinator_wake_delivered_total` by `wake_count` only from the prompt
+   acceptance callback, once per send. A known refusal or unknown send outcome
+   without acceptance is not a delivery. Those rows, and only those, are the turn's wakes
    for the transcript. The unattended turn starts at this commit, so
    an autonomy-off PATCH that commits first makes this step roll back, and one
    that commits after it finds a running turn (`AC-COORDINATOR-WAKE-004.3`).
@@ -509,7 +506,7 @@ Counters `coordinator_wake_recorded_total{kind}`,
 `coordinator_unattended_turn_total{outcome}`,
 `coordinator_admission_held_total{reason}` and
 `coordinator_backstop_skipped_total`, as expvar plus structured zap logs.
-Owners: the recorder counts recorded and dropped, delivery step 3 counts
+Owners: the recorder counts recorded and dropped, delivery prompt acceptance counts
 delivered, steps 1 and 2 count superseded and admission holds (only
 `AdmitCounting` counts a hold), and every settle of a turn row counts
 `coordinator_unattended_turn_total` once, only when it changed a row

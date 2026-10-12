@@ -5,29 +5,9 @@ import { DEFAULT_LOCALE, i18n, t } from "./index";
  * i18next instance. `pseudo` is a QA locale with no real CLDR data, so
  * Intl-based formatters map it to `en`.
  */
-function intlLocale(): string {
+export function intlLocale(): string {
   const locale = i18n.language || DEFAULT_LOCALE;
   return locale === "pseudo" ? DEFAULT_LOCALE : locale;
-}
-
-/**
- * Compact relative time without the "ago" suffix — for rows that already
- * carry an elapsed-time affordance (e.g. the prompt history duration
- * hourglass), where "5h ago" would be redundant. Same buckets as
- * `formatRelative`; "just now" is kept as-is.
- */
-export function formatRelativeCompact(dateStr: string, now: number = Date.now()): string {
-  if (!dateStr) return "";
-  const date = new Date(dateStr);
-  if (Number.isNaN(date.getTime())) return "";
-  const diffSec = Math.floor((now - date.getTime()) / 1000);
-  if (diffSec < 60) return t("common:justNow");
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return t("common:mShort", { diffMin });
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return t("common:hShort", { diffHr });
-  const diffDay = Math.floor(diffHr / 24);
-  return t("common:dShort", { diffDay });
 }
 
 /**

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -30,6 +31,24 @@ const (
 const deliveryWakeLimit = 20
 
 var errTurnNotStarted = errors.New("coordinator: unattended turn not started")
+
+// The claim checks live project membership in its write snapshot. External
+// project readers can repair coordinator scope and must stay outside this lock.
+const wakeClaimProjectFence = ` AND (
+	(c.include_no_repository = 1 AND NOT EXISTS (
+		SELECT 1 FROM task_repositories tr WHERE tr.task_id = t.id AND tr.repository_id <> ''
+	)) OR EXISTS (
+		SELECT 1 FROM task_repositories tr JOIN repositories r ON r.id = tr.repository_id
+		WHERE tr.task_id = t.id AND r.workspace_id = c.workspace_id AND r.deleted_at IS NULL AND (
+			EXISTS (SELECT 1 FROM coordinator_watch_projects wp
+				WHERE wp.coordinator_id = c.id AND wp.entry_kind = 'repository' AND wp.entry_id = r.id)
+			OR EXISTS (SELECT 1 FROM coordinator_watch_projects wp
+				JOIN repository_sets rs ON rs.id = wp.entry_id AND rs.workspace_id = c.workspace_id
+				JOIN repository_set_items ri ON ri.repository_set_id = rs.id AND ri.repository_id = r.id
+				WHERE wp.coordinator_id = c.id AND wp.entry_kind = 'repository_set')
+		)
+	)
+)`
 
 type pendingWake struct {
 	ID         string
@@ -82,6 +101,7 @@ type turnStart struct {
 	ConvTaskID    string
 	SessionID     string
 	WakeIDs       []string
+	WatchSet      *WatchSet
 }
 
 // startedTurn is a committed turn start.
@@ -128,7 +148,7 @@ func (s *Store) startTurnTx(ctx context.Context, tx coordinatorExec, in turnStar
 	if inserted, err := matchedRow(res); err != nil || !inserted {
 		return nil, notStarted(err)
 	}
-	wakes, err := s.claimWakes(ctx, tx, in, turnID)
+	wakes, err := s.claimWakes(ctx, tx, in, turnID, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -157,20 +177,50 @@ func (s *Store) readTurnStartGuard(ctx context.Context, tx coordinatorExec, in t
 	if pausedAt.Valid || autonomy != 1 || !ceil.Valid || !convTask.Valid || convTask.String != in.ConvTaskID {
 		return "", 0, errTurnNotStarted
 	}
+	current, err := s.LoadWatchSet(ctx, tx, in.CoordinatorID)
+	if err != nil {
+		return "", 0, err
+	}
+	if in.WatchSet == nil || !reflect.DeepEqual(current, *in.WatchSet) {
+		return "", 0, errTurnNotStarted
+	}
 	return workspaceID, ceil.Int64, nil
 }
 
 // claimWakes marks the chosen pending wakes delivered to the turn and reads
 // back exactly the rows it now holds. No row claimed or read back rolls back.
-func (s *Store) claimWakes(ctx context.Context, tx coordinatorExec, in turnStart, turnID string) ([]deliveredWake, error) {
+func (s *Store) claimWakes(ctx context.Context, tx coordinatorExec, in turnStart, turnID, workspaceID string) ([]deliveredWake, error) {
+	if len(in.WakeIDs) == 0 {
+		return nil, errTurnNotStarted
+	}
+	watchSet, err := s.EffectiveWatchSet(ctx, tx, in.CoordinatorID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	marks := strings.TrimSuffix(strings.Repeat("?,", len(in.WakeIDs)), ",")
 	args := []any{wakeStatusDelivered, turnID, in.CoordinatorID, wakeStatusPending}
 	for _, id := range in.WakeIDs {
 		args = append(args, id)
 	}
+	workflowFence := " AND COALESCE(t.workflow_id, '') <> ''"
+	projectFence := ""
+	if watchSet.Projects.Selected {
+		projectFence = wakeClaimProjectFence
+	}
+	if !watchSet.All {
+		if len(watchSet.WorkflowIDs) == 0 {
+			return nil, errTurnNotStarted
+		}
+		workflowFence += " AND t.workflow_id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(watchSet.WorkflowIDs)), ",") + ")"
+		for _, id := range watchSet.WorkflowIDs {
+			args = append(args, id)
+		}
+	}
 	res, err := tx.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_wakes SET status = ?, turn_id = ?
-		WHERE coordinator_id = ? AND status = ? AND id IN (`+marks+`)`), args...)
+		WHERE coordinator_id = ? AND status = ? AND id IN (`+marks+`)
+		AND EXISTS (SELECT 1 `+ownTaskJoins+` WHERE p.coordinator_id = coordinator_wakes.coordinator_id
+		AND t.id = coordinator_wakes.task_id AND `+ownTaskPredicates+workflowFence+projectFence+`)`), args...)
 	if err != nil {
 		return nil, fmt.Errorf("deliver wakes: %w", err)
 	}

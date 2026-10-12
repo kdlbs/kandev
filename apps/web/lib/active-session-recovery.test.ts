@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { selectActiveSessionRecovery } from "./active-session-recovery";
+import {
+  readLastAgentError,
+  readLastAgentErrorIncludingDismissed,
+} from "./session-last-agent-error";
 const FAILED_AT = "2026-09-20T10:00:00Z";
 const RESOLVED_AT = "2026-09-20T11:00:00Z";
 const NEW_FAILURE_AT = "2026-09-20T12:00:00Z";
 const error = { message: "Connection lost", stamp: "current", details: "diagnostic" };
 const session = { id: "session", state: "FAILED", metadata: { last_agent_error: error } };
+const resolution = (stamp = "current") => ({
+  recovery_resolved_at: RESOLVED_AT,
+  recovery_resolutions: [{ error_stamp: stamp, resolved_at: RESOLVED_AT, attempt_id: "resume-1" }],
+});
 const message = (stamp: string, kind?: string) => ({
   id: stamp,
   session_id: "session",
@@ -27,14 +35,14 @@ describe("resolved session recovery ownership", () => {
             ...session,
             state,
             error_message: error.message,
-            metadata: { ...session.metadata, recovery_resolved_at: RESOLVED_AT },
+            metadata: { ...session.metadata, ...resolution() },
           },
           [message("current", "provider_quota_limited")],
         ),
       ).toBeNull();
     },
   );
-  it("does not reuse a failed recovery after a successful boot from the same session", () => {
+  it("does not infer stamped recovery from an uncorrelated successful boot", () => {
     expect(
       selectActiveSessionRecovery(session, [
         message("current", "provider_quota_limited"),
@@ -46,7 +54,7 @@ describe("resolved session recovery ownership", () => {
           metadata: { script_type: "agent_boot", status: "exited", exit_code: 0 },
         },
       ]),
-    ).toBeNull();
+    ).not.toBeNull();
   });
   it("keeps a new failure actionable after an earlier recovery", () => {
     const model = selectActiveSessionRecovery(
@@ -68,7 +76,7 @@ describe("resolved session recovery ownership", () => {
           ...session,
           metadata: {
             last_agent_error: { ...error, occurred_at: FAILED_AT },
-            recovery_resolved_at: RESOLVED_AT,
+            ...resolution(),
           },
         },
         [],
@@ -87,6 +95,88 @@ describe("resolved session recovery ownership", () => {
       },
     ]);
     expect(model?.kind).toBe("provider_quota_limited");
+  });
+});
+
+describe("selection failure recovery occurrence ownership", () => {
+  const selectionError = {
+    ...error,
+    causes: [{ operation: "resume", code: "model_unavailable" }],
+  };
+  const selectionMessage = {
+    ...message("current"),
+    metadata: {
+      ...message("current").metadata,
+      causes: [{ operation: "resume", code: "model_unavailable" }],
+    },
+  };
+  const success = (stamp: string) => ({
+    id: `success-${stamp}`,
+    session_id: "session",
+    type: "status",
+    created_at: RESOLVED_AT,
+    metadata: {
+      variant: "resume_settings_provider_restored",
+      resolved_error_stamp: stamp,
+    },
+  });
+
+  it("resolves only when the successful attempt names the same error stamp", () => {
+    const failedSession = { ...session, metadata: { last_agent_error: selectionError } };
+    expect(
+      selectActiveSessionRecovery(failedSession, [selectionMessage, success("other")]),
+    ).not.toBeNull();
+    expect(
+      selectActiveSessionRecovery(failedSession, [selectionMessage, success("current")]),
+    ).not.toBeNull();
+    expect(
+      selectActiveSessionRecovery(
+        {
+          ...failedSession,
+          metadata: { ...failedSession.metadata, ...resolution() },
+        },
+        [selectionMessage],
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps a later selection failure active after an older success", () => {
+    const laterFailure = {
+      ...selectionMessage,
+      id: "later-selection-failure",
+      created_at: NEW_FAILURE_AT,
+      metadata: { ...selectionMessage.metadata, error_stamp: "failure-later" },
+    };
+    const model = selectActiveSessionRecovery(
+      {
+        ...session,
+        metadata: {
+          last_agent_error: {
+            ...selectionError,
+            stamp: "failure-later",
+            occurred_at: NEW_FAILURE_AT,
+          },
+          ...resolution(),
+        },
+      },
+      [success("current"), laterFailure],
+    );
+    expect(model?.stamp).toBe("failure-later");
+  });
+
+  it("does not treat manual dismissal as successful recovery", () => {
+    expect(
+      selectActiveSessionRecovery(
+        {
+          ...session,
+          state: "FAILED",
+          metadata: {
+            last_agent_error: { ...selectionError, dismissed_at: RESOLVED_AT },
+          },
+        },
+        [selectionMessage, success("other")],
+      ),
+    ).toBeNull();
   });
 });
 
@@ -127,7 +217,25 @@ describe("active session recovery ownership", () => {
       ),
     ).toBeNull();
   });
-  it("keeps a canceled session actionable only for the typed managed clone repair", () => {
+  it("keeps a canceled legacy error hidden until the typed managed clone repair is projected", () => {
+    expect(
+      selectActiveSessionRecovery(
+        {
+          ...session,
+          state: "CANCELLED",
+          error_message: "The previous agent launch failed.",
+          metadata: {
+            last_agent_error: {
+              message: "The previous agent launch failed.",
+              occurred_at: FAILED_AT,
+              stamp: "legacy-generic-stamp",
+              scope: "session",
+            },
+          },
+        },
+        [],
+      ),
+    ).toBeNull();
     const managedError = {
       message: "Workspace needs repair",
       occurred_at: FAILED_AT,
@@ -143,6 +251,27 @@ describe("active session recovery ownership", () => {
     expect(model?.kind).toBe("managed_clone_relocation_required");
     expect(model?.stamp).toBe("managed-clone-stamp");
     expect(selectActiveSessionRecovery({ ...session, state: "CANCELLED" }, [])).toBeNull();
+  });
+  it.each(["CANCELLED", "COMPLETED"])("owns a new cleanup failure while %s", (state) => {
+    const cleanupError = {
+      ...error,
+      stamp: "cleanup-resume",
+      occurred_at: FAILED_AT,
+      phase: "bootstrap",
+      scope: "session",
+      causes: [{ operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true }],
+    };
+    const failedSession = { ...session, state, metadata: { last_agent_error: cleanupError } };
+    expect(selectActiveSessionRecovery(failedSession, [])?.stamp).toBe("cleanup-resume");
+    expect(
+      selectActiveSessionRecovery(
+        {
+          ...failedSession,
+          metadata: { ...failedSession.metadata, ...resolution("cleanup-resume") },
+        },
+        [],
+      ),
+    ).toBeNull();
   });
   it.each(["RUNNING", "STARTING", "COMPLETED", "CANCELLED"])(
     "does not block %s from retained errors",
@@ -163,22 +292,80 @@ it("keeps the composer usable after durable recovery or a successful later boot"
     selectActiveSessionRecovery(
       {
         ...waiting,
-        metadata: { ...session.metadata, recovery_resolved_at: RESOLVED_AT },
+        metadata: { ...session.metadata, ...resolution() },
       },
       [message("current")],
     ),
   ).toBeNull();
   expect(
-    selectActiveSessionRecovery(waiting, [
-      message("current"),
+    selectActiveSessionRecovery(
+      { ...waiting, metadata: { ...session.metadata, ...resolution() } },
+      [
+        message("current"),
+        {
+          id: "boot",
+          session_id: "session",
+          type: "script_execution",
+          created_at: RESOLVED_AT,
+          metadata: { script_type: "agent_boot", status: "exited", exit_code: 0 },
+        },
+      ],
+    ),
+  ).toBeNull();
+});
+
+it("keeps a dismissed legacy delivery error as history without active recovery after restoration", () => {
+  const legacyError = {
+    message: "Prompt delivery outcome is uncertain",
+    code: "DURABLE_DELIVERY_UNCERTAIN",
+    execution_id: "execution-1",
+    details: "prompt:initial:<redacted>",
+    occurred_at: FAILED_AT,
+    dismissed_at: RESOLVED_AT,
+  };
+  const metadata = {
+    agent_delivery_recovery: {
+      phase: "restored",
+      revision: 4,
+      session_id: "session",
+      agent_execution_id: "execution-1",
+      submission_id: "submission-1",
+      stream_id: "stream-1",
+      incarnation_id: "incarnation-1",
+      harness_generation: 2,
+      prompt_generation: 3,
+    },
+    last_agent_error: legacyError,
+  };
+  const recoveryHistory = {
+    id: "delivery-recovery-history",
+    session_id: "session",
+    type: "status",
+    created_at: FAILED_AT,
+    content: legacyError.message,
+    metadata: {
+      recovery_actions: true,
+      error_stamp: `${FAILED_AT}:${legacyError.message}`,
+    },
+  };
+
+  expect(readLastAgentError(metadata)).toBeNull();
+  expect(readLastAgentErrorIncludingDismissed(metadata)).toMatchObject({
+    code: "DURABLE_DELIVERY_UNCERTAIN",
+    details: "prompt:initial:<redacted>",
+    dismissedAt: RESOLVED_AT,
+  });
+  expect(readLastAgentErrorIncludingDismissed(metadata)?.deliverySubmissionId).toBeUndefined();
+  expect(
+    selectActiveSessionRecovery(
       {
-        id: "boot",
-        session_id: "session",
-        type: "script_execution",
-        created_at: RESOLVED_AT,
-        metadata: { script_type: "agent_boot", status: "exited", exit_code: 0 },
+        ...session,
+        state: "WAITING_FOR_INPUT",
+        error_message: null,
+        metadata,
       },
-    ]),
+      [recoveryHistory],
+    ),
   ).toBeNull();
 });
 
@@ -205,7 +392,7 @@ it("reconstructs unresolved recovery on a fresh STARTING mount", () => {
     selectActiveSessionRecovery(
       {
         ...starting,
-        metadata: { ...session.metadata, recovery_resolved_at: RESOLVED_AT },
+        metadata: { ...session.metadata, ...resolution() },
       },
       [message("current")],
     ),
@@ -223,7 +410,7 @@ it("retains a durable unresolved startup failure before history finishes loading
     selectActiveSessionRecovery(
       {
         ...starting,
-        metadata: { ...starting.metadata, recovery_resolved_at: RESOLVED_AT },
+        metadata: { ...starting.metadata, ...resolution() },
       },
       [],
     ),

@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-30
-last_updated: 2026-10-01
+last_updated: 2026-10-12
 requirements:
   - REQ-COORDINATOR-PAUSE-001
   - REQ-COORDINATOR-PAUSE-002
@@ -121,7 +121,11 @@ anything else that has an effect:
    the proposal is one the automatic class would handle (phase 3 on, kind
    `create_task`, no agent start, the class setting `automatic`) and before the
    raiser check, the claim and the ten-per-day counter. A proposal of any other
-   kind or class never receives the paused note.
+   kind or class never receives the paused note. The automatic claim re-reads
+   `paused_at` with the policy under the coordinator row lock, before the
+   ten-per-day count and claim. A Pause committed during the raiser check
+   therefore leaves the proposal pending with the paused note and consumes
+   no allowance. A claim committed before Pause retains its existing owner.
 
 The wake recorder and the backstop keep recording wakes and supersede none
 because of Pause (`002.1`): Pause adds no code to the recorder, and the only

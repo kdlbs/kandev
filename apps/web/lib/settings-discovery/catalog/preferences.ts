@@ -29,6 +29,8 @@ export const GENERAL_SETTINGS_TARGETS = {
   changesPanelLayout: "setting-changes-panel-layout",
   resourceMetrics: "setting-resource-metrics",
   layoutProfiles: "setting-layout-profiles",
+  sidebarFastActions: "setting-sidebar-fast-actions",
+  sidebarNewTaskStyle: "setting-sidebar-new-task-style",
   preferredShell: "setting-preferred-shell",
   desktopNotifications: "setting-desktop-notifications",
   notificationSound: "setting-notification-sound",
@@ -49,6 +51,7 @@ export const GENERAL_SETTINGS_TARGETS = {
   sessionCapacity: "setting-session-capacity",
   spritesConnection: "setting-sprites-connection",
   spritesInstances: "setting-sprites-instances",
+  messageTimeDisplay: "setting-message-time-display",
 } as const;
 
 export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
@@ -208,6 +211,26 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: SIDEBAR_LAYOUT_TAB_HREF,
     order: 22,
+  },
+  {
+    id: "layouts-sidebar-fast-actions",
+    kind: "control",
+    labelKey: "settings:sidebarFastActions",
+    parentId: "layouts-sidebar",
+    groupId: "preferences",
+    href: SIDEBAR_LAYOUT_TAB_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.sidebarFastActions,
+    order: 23,
+  },
+  {
+    id: "layouts-sidebar-new-task-style",
+    kind: "control",
+    labelKey: "settings:sidebarNewTaskStyle",
+    parentId: "layouts-sidebar",
+    groupId: "preferences",
+    href: SIDEBAR_LAYOUT_TAB_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.sidebarNewTaskStyle,
+    order: 24,
   },
   {
     id: TERMINAL_EDITORS_ID,
@@ -442,6 +465,16 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     href: TASK_BEHAVIOR_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.transcriptNavigation,
     order: 65,
+  },
+  {
+    id: "task-actions-message-time-display",
+    kind: "control",
+    labelKey: "settings:messageTimeDisplay",
+    parentId: TASK_BEHAVIOR_ID,
+    groupId: "preferences",
+    href: TASK_BEHAVIOR_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.messageTimeDisplay,
+    order: 65.5,
   },
   {
     id: "task-behavior-message-queue",

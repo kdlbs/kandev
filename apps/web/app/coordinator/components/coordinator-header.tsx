@@ -5,7 +5,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { cn } from "@/lib/utils";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import {
   linkToCoordinatorNeedsYou,
@@ -59,6 +58,7 @@ export function CoordinatorTitleSlot({
           onValueChange={(value) => router.push(hrefFor(workspaceId, value, view))}
         >
           <SelectTrigger
+            className="max-md:min-h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
             aria-label={t("coordinator:selectCoordinator")}
             data-testid="coordinator-selector"
           >
@@ -96,13 +96,13 @@ export function CoordinatorConfigureAction({
   workspaceId,
 }: CoordinatorConfigureActionProps) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   return (
     <Button
       asChild
       variant="outline"
       size="sm"
-      className={cn(!isFinePointer && "min-h-11 min-w-11")}
+      className={isMobile || !isFinePointer ? "min-h-11 min-w-11" : undefined}
     >
       <Link href={linkToCoordinatorSettings(workspaceId, coordinator.id)}>
         {t("coordinator:configure")}

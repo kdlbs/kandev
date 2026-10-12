@@ -39,6 +39,7 @@ import type { AgentProfileOption } from "@/lib/state/slices";
 import { AgentLogo } from "@/components/agent-logo";
 import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { WorkflowSelectorPopoverHeader } from "@/components/workflow-selector-popover-header";
 
 type StepItem = {
   id: string;
@@ -72,7 +73,9 @@ function InlineSteps({
                 className="h-1.5 w-1.5 rounded-full shrink-0"
                 style={{ backgroundColor: s.color || "hsl(var(--muted-foreground))" }}
               />
-              <span className="min-w-0 wrap-anywhere">{s.title}</span>
+              <span className="min-w-0 wrap-anywhere" data-testid="workflow-option-step-name">
+                {s.title}
+              </span>
               {s.is_start_step && (
                 <TooltipProvider>
                   <Tooltip>
@@ -446,18 +449,8 @@ function WorkflowSelectorOptionList({
   portalContainer,
 }: WorkflowSelectorOptionListProps) {
   const { t } = useTranslation();
-  const previewStatusAnnouncement = workflows
-    .map((workflow) => {
-      const statusKey = getWorkflowPreviewStatusKey(previews[workflow.id]);
-      return statusKey
-        ? t("workflows:workflowPreviewStatusAnnouncement", {
-            workflowName: workflow.name,
-            status: t(statusKey),
-          })
-        : null;
-    })
-    .filter((message): message is string => message !== null)
-    .join(" ");
+  const usesTouchDrawer = useTouchDrawer();
+  const previewStatusAnnouncement = getWorkflowPreviewStatusAnnouncement(workflows, previews, t);
   const closeAndRestoreFocus = () => {
     restoreFocusOnCloseRef.current = true;
     onClose();
@@ -485,9 +478,10 @@ function WorkflowSelectorOptionList({
         });
       }}
     >
-      <div className="shrink-0 border-b px-2 py-1.5 text-xs text-muted-foreground">
-        {t("workflows:workflow")}
-      </div>
+      <WorkflowSelectorPopoverHeader
+        showTouchClose={usesTouchDrawer}
+        onClose={closeAndRestoreFocus}
+      />
       <div
         className="sr-only"
         role="status"
@@ -530,6 +524,25 @@ function WorkflowSelectorOptionList({
       </div>
     </PopoverContent>
   );
+}
+
+function getWorkflowPreviewStatusAnnouncement(
+  workflows: WorkflowSelectorOptionListProps["workflows"],
+  previews: Record<string, WorkflowOptionPreview>,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  return workflows
+    .map((workflow) => {
+      const statusKey = getWorkflowPreviewStatusKey(previews[workflow.id]);
+      return statusKey
+        ? t("workflows:workflowPreviewStatusAnnouncement", {
+            workflowName: workflow.name,
+            status: t(statusKey),
+          })
+        : null;
+    })
+    .filter((message): message is string => message !== null)
+    .join(" ");
 }
 
 export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({

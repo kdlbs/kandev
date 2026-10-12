@@ -1,7 +1,7 @@
 ---
 id: "01-turn-ledger"
 title: "Turn ledger, stamp and query tool"
-status: draft
+status: in_progress
 wave: 1
 depends_on:
   - "phase 3 merged"
@@ -102,3 +102,12 @@ job. Recording ships ahead of the flag.
 
 - `make -C apps/backend test` for the touched packages, with `synctest` for any timer and no `time.Sleep`; store conformance on SQLite and PostgreSQL for each new table or column.
 - `python3 scripts/list-docs.py validate` if a specification changes.
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.

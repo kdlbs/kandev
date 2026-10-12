@@ -831,7 +831,12 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 // UpdateStepWithDemotedStartSteps updates a workflow step and returns any
 // previously-start steps demoted as part of the same transaction.
 func (r *Repository) UpdateStepWithDemotedStartSteps(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
-	return r.updateStepWithDemotedStartSteps(ctx, step, nil, nil)
+	return r.UpdateStepWithDemotedStartStepsIntent(ctx, step, &step.IsStartStep)
+}
+
+// UpdateStepWithDemotedStartStepsIntent preserves omitted start selection in the update transaction.
+func (r *Repository) UpdateStepWithDemotedStartStepsIntent(ctx context.Context, step *models.WorkflowStep, isStartStep *bool) ([]*models.WorkflowStep, error) {
+	return r.updateStepWithDemotedStartSteps(ctx, step, isStartStep, nil, nil)
 }
 
 // UpdateStepWithDemotedStartStepsIfUnchanged updates a step and any start-step
@@ -839,11 +844,11 @@ func (r *Repository) UpdateStepWithDemotedStartSteps(ctx context.Context, step *
 func (r *Repository) UpdateStepWithDemotedStartStepsIfUnchanged(
 	ctx context.Context, step *models.WorkflowStep, expectedWorkflow, expectedStep time.Time,
 ) ([]*models.WorkflowStep, error) {
-	return r.updateStepWithDemotedStartSteps(ctx, step, &expectedWorkflow, &expectedStep)
+	return r.updateStepWithDemotedStartSteps(ctx, step, &step.IsStartStep, &expectedWorkflow, &expectedStep)
 }
 
 func (r *Repository) updateStepWithDemotedStartSteps(
-	ctx context.Context, step *models.WorkflowStep, expectedWorkflow, expectedStep *time.Time,
+	ctx context.Context, step *models.WorkflowStep, isStartStep *bool, expectedWorkflow, expectedStep *time.Time,
 ) ([]*models.WorkflowStep, error) {
 	step.UpdatedAt = time.Now().UTC()
 	step.ProfileSessionStartPolicy = taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy))
@@ -865,7 +870,7 @@ func (r *Repository) updateStepWithDemotedStartSteps(
 	defer func() { _ = tx.Rollback() }()
 
 	var demoted []*models.WorkflowStep
-	if step.IsStartStep {
+	if isStartStep != nil && *isStartStep {
 		if expectedWorkflow == nil {
 			demoted, err = r.demoteOtherStartSteps(ctx, tx, step.WorkflowID, step.ID, step.UpdatedAt)
 		} else {
@@ -876,36 +881,59 @@ func (r *Repository) updateStepWithDemotedStartSteps(
 		}
 	}
 
+	savedFlag, err := r.writeStepUpdate(ctx, tx, step, isStartStep, expectedWorkflow, expectedStep, eventsJSON, sessionTargetJSON)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	step.IsStartStep = savedFlag
+	return demoted, nil
+}
+
+func (r *Repository) writeStepUpdate(
+	ctx context.Context, tx *sqlx.Tx, step *models.WorkflowStep, isStartStep *bool,
+	expectedWorkflow, expectedStep *time.Time, eventsJSON []byte, sessionTargetJSON interface{},
+) (bool, error) {
+	startValue := 0
+	if isStartStep != nil {
+		startValue = dialect.BoolToInt(*isStartStep)
+	}
 	query := `
 		UPDATE workflow_steps SET
 			name = ?, position = ?, color = ?,
 			prompt = ?, events = ?,
-			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, profile_session_start_policy = ?, profile_session_end_policy = ?, disable_unclassified_fallback = ?, stage_type = ?, auto_advance_requires_signal = ?, cancel_triggers_turn_complete = ?, complete_task_on_enter = ?, wip_limit = ?, pull_from_step_id = ?, session_target = ?, updated_at = ?
+			allow_manual_move = ?, is_start_step = CASE WHEN ? = 1 THEN ? ELSE is_start_step END, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, profile_session_start_policy = ?, profile_session_end_policy = ?, disable_unclassified_fallback = ?, stage_type = ?, auto_advance_requires_signal = ?, cancel_triggers_turn_complete = ?, complete_task_on_enter = ?, wip_limit = ?, pull_from_step_id = ?, session_target = ?, updated_at = ?
 		WHERE id = ?
 	`
 	args := []interface{}{step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON),
-		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)), dialect.BoolToInt(step.DisableUnclassifiedFallback), normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), dialect.BoolToInt(step.CancelTriggersTurnComplete), dialect.BoolToInt(step.CompleteTaskOnEnter), step.WIPLimit, step.PullFromStepID, sessionTargetJSON, step.UpdatedAt, step.ID}
+		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(isStartStep != nil), startValue, dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)), dialect.BoolToInt(step.DisableUnclassifiedFallback), normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), dialect.BoolToInt(step.CancelTriggersTurnComplete), dialect.BoolToInt(step.CompleteTaskOnEnter), step.WIPLimit, step.PullFromStepID, sessionTargetJSON, step.UpdatedAt, step.ID}
 	if expectedWorkflow != nil && expectedStep != nil {
 		query += ` AND workflow_id = ? AND updated_at = ? AND EXISTS (SELECT 1 FROM workflows WHERE id = ? AND updated_at = ?)`
 		args = append(args, step.WorkflowID, *expectedStep, step.WorkflowID, *expectedWorkflow)
 	}
 	result, err := tx.ExecContext(ctx, tx.Rebind(query), args...)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
 	if rows == 0 {
 		if expectedWorkflow != nil && expectedStep != nil {
-			return nil, repoerrors.ErrTaskVersionConflict
+			return false, repoerrors.ErrTaskVersionConflict
 		}
-		return nil, fmt.Errorf("workflow step not found: %s", step.ID)
+		return false, fmt.Errorf("workflow step not found: %s", step.ID)
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
+	var savedFlag int
+	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT is_start_step FROM workflow_steps WHERE id = ? AND workflow_id = ?`), step.ID, step.WorkflowID).Scan(&savedFlag); err != nil {
+		return false, err
 	}
-	return demoted, nil
+	return savedFlag != 0, nil
 }
 
 func (r *Repository) demoteOtherStartStepsIfWorkflowUnchanged(

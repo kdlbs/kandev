@@ -1,7 +1,7 @@
 ---
 id: "06-watch-projects"
 title: "Watches by project"
-status: draft
+status: in_progress
 wave: 2
 depends_on:
   - "phase 3 merged"
@@ -47,7 +47,7 @@ copilot hint. Work order 01 and 04 call the same filter, so 06 may land before
   `AttentionTask.repositoryIds`, the Projects part of the Watches section, the
   guided-setup step, the copilot scope hint, copy in six locales.
 - If work order 01 has landed, the ledger snapshot and digest use `watch.Task`
-  and the row stores `project_scope`.
+  or its centralized SQL form `watch.TaskSQL`, and the row stores `project_scope`.
 
 ## Out of scope
 
@@ -88,3 +88,18 @@ Watches
 - `make -C apps/backend test` for the touched packages, with `synctest` for any timer and no `time.Sleep`; store conformance on SQLite and PostgreSQL for each new table or column.
 - `cd apps && pnpm --filter @kandev/web` typecheck, lint and Vitest for the touched modules, `cd apps/web && pnpm run i18n:check`, and the Playwright spec of this work order (plan verification strategy) on desktop and `mobile-chrome`, with the `auth` project for reader cases.
 - `python3 scripts/list-docs.py validate` if a specification changes.
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.
+
+The integration audit found project scope missing from ledger snapshots, digest
+readers and dream decision evidence. The current remediation adds the shared
+SQL predicate, read-only live membership resolution and SQLite/PostgreSQL
+regressions. Focused predicate checks passed; full current-head caller and
+database verification remains pending.

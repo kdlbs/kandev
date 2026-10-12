@@ -40,7 +40,7 @@ export const ActivityChip = memo(function ActivityChip({
         type="button"
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
-        className="flex items-center gap-2 w-full text-left px-2 py-1.5 -mx-2 rounded hover:bg-muted/30 transition-colors cursor-pointer"
+        className="flex items-center gap-2 w-full text-left px-2 py-1.5 -mx-2 rounded hover:bg-muted/30 transition-colors cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
       >
         {expanded ? (
           <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />

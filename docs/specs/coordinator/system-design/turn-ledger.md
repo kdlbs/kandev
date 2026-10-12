@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-30
-last_updated: 2026-09-30
+last_updated: 2026-10-12
 requirements:
   - REQ-COORDINATOR-TURN-LEDGER-001
   - REQ-COORDINATOR-TURN-LEDGER-002
@@ -335,6 +335,11 @@ the snapshot's conflict check and the ledger commit, leaves a row whose snapshot
 as `no_snapshot`, never as an error. A snapshot capped by the item limit carries `"truncated":
 true` and the total. It holds no title or text (`006.2`); a failed build leaves
 `snapshot_hash` empty (`006.3`).
+
+The SQL snapshot and digest readers enforce current workflow and stored
+Projects scope using `watch.TaskSQL` and the read-only SQL project resolver.
+Project filtering precedes the snapshot count and cap. Failed membership reads
+produce no snapshot or tool page; digest targets outside scope are redacted.
 
 ## Query tool
 

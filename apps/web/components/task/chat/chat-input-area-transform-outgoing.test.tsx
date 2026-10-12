@@ -62,6 +62,7 @@ function panelState(overrides = {}) {
     handleClearPRFeedback: vi.fn(),
     handleClearWalkthroughComments: vi.fn(),
     clearEphemeral: vi.fn(),
+    consumeSubmittedEphemeral: vi.fn(),
     addContextFile: vi.fn(),
     planModeEnabled: false,
     planCommentMigration: {

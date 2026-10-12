@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 export type ModelSelectorOption = {
+  source?: "static" | "dynamic" | "cli" | "acp";
   id: string;
   name: string;
   description?: string;
@@ -207,6 +208,9 @@ export type ModelConfigSelectorProps = {
 
   /** Optional title tooltip on the trigger (e.g. explains a live-only note). */
   triggerTitle?: string;
+
+  /** Offers a free-text "use this as a model ID" row (opt-in; see model-config-selector-content). */
+  allowCustomModel?: boolean;
 };
 
 type ModelConfigSelectorTriggerProps = Pick<
@@ -301,6 +305,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   currentModelSuffix,
   configOptionsLoading = false,
   keepOpenOnModelChange = false,
+  allowCustomModel,
 }: ModelConfigSelectorProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -369,6 +374,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
           onConfigBack={() => setActiveConfigId(null)}
           onConfigChange={onConfigChange}
           configOptionsLoading={configOptionsLoading}
+          allowCustomModel={Boolean(allowCustomModel)}
         />
       </PopoverContent>
     </Popover>

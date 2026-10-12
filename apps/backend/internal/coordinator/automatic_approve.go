@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"expvar"
 	"fmt"
@@ -135,6 +136,7 @@ func (s *Service) pendingResult(p *Proposal, note string) *AutomaticResult {
 }
 
 type automaticClaim struct {
+	paused  bool
 	stale   bool
 	limited bool
 	matched bool
@@ -157,6 +159,8 @@ func (s *Service) approveAutomatically(ctx, raiserCtx context.Context, proposal 
 	case err != nil:
 		s.logger.Error("automatic approval: claim section failed", zap.String("proposal_id", proposal.ID), zap.Error(err))
 		return s.pendingResult(proposal, unavailableNote), nil
+	case claim.paused:
+		return s.pendingResult(proposal, pausedNote), nil
 	case claim.stale:
 		return nil, nil
 	case claim.limited:
@@ -215,7 +219,8 @@ func (s *Service) guardedLock(ctx context.Context, coordinatorID string, fn func
 // 24-hour limit and takes the claim on tx.
 func (s *Service) automaticClaimSection(ctx context.Context, tx coordinatorExec, proposal *Proposal, raiser string, spec ProposalSpec) (automaticClaim, error) {
 	var raw *string
-	if err := tx.QueryRowContext(ctx, s.store.db.Rebind(`SELECT policy_json FROM coordinators WHERE id = ?`), proposal.CoordinatorID).Scan(&raw); err != nil {
+	var pausedAt sql.NullTime
+	if err := tx.QueryRowContext(ctx, s.store.db.Rebind(`SELECT policy_json, paused_at FROM coordinators WHERE id = ?`), proposal.CoordinatorID).Scan(&raw, &pausedAt); err != nil {
 		return automaticClaim{}, fmt.Errorf("read coordinator policy: %w", err)
 	}
 	stored, _ := ParsePolicy(raw)
@@ -232,6 +237,9 @@ func (s *Service) automaticClaimSection(ctx context.Context, tx coordinatorExec,
 	}
 	if changedBy != raiser {
 		return automaticClaim{stale: true}, nil
+	}
+	if pausedAt.Valid {
+		return automaticClaim{paused: true}, nil
 	}
 	now := s.store.now().UTC()
 	count, err := s.store.CountAutomaticDecidedTx(ctx, tx, proposal.CoordinatorID, now.Add(-automaticLimitWindow))

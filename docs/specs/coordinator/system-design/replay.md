@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-30
-last_updated: 2026-10-02
+last_updated: 2026-10-12
 requirements:
   - REQ-COORDINATOR-REPLAY-001
   - REQ-COORDINATOR-REPLAY-002
@@ -19,16 +19,11 @@ requirements:
 
 ## Purpose and boundaries
 
-The harness re-runs decided past turns against a candidate instruction change
-with the board frozen and every tool stubbed, and scores what the candidate would
-have proposed against what a manager decided. It is a library package,
-`internal/coordinator/replay`, with one entry point, `Harness.Run(ctx, req)`,
-called by the shadow dream and by tests; it has no HTTP route and no tool. Its
-evaluator, cases, scoring and planted suite are repository code (`005.3`). It
-gates nothing in phase 3.1 (`005.5`). The `ExtraSpend` term of the spend reader
-(below) is additive and nil-safe and is deliberately not gated by
-`features.coordinatorPhase31`; the replay itself is only reachable from the dream,
-which is.
+`internal/coordinator/replay` scores decided turns under candidate instructions
+against manager decisions, with frozen boards and stubbed tools. `Harness.Run(ctx, req)` serves dreams and tests; it exposes
+no route or tool. Evaluators, cases, scoring and planted tests are repository
+code (`005.3`), and gate nothing in phase 3.1 (`005.5`). Replay is dream-only and
+requires `features.coordinatorPhase31`. `ExtraSpend` is additive and nil-safe regardless of that flag.
 
 ## Requirement mapping
 
@@ -44,13 +39,12 @@ which is.
 
 `replay.New(deps Deps) *Harness`. `Deps` holds only interfaces defined in
 `replay`, so the package imports no coordinator, office or task package:
-`Cases` (reads turns, outcomes, snapshots, trigger text and titles; a case id is the ledger turn id), `Profiles` (`Resolve(ctx, coordinatorID) (Profile, error)`, where `Profile` holds the profile id, the resolved model id, `AutoApprove`, the command prefix and the enabled CLI flags), `Prompts`
+`Cases` (reads turns, outcomes, snapshots, trigger text and titles; a case id is the ledger turn id), `Profiles` (`Resolve(ctx, coordinatorID) (Profile, error)`, with profile and resolved model IDs, `AutoApprove`, command prefix and enabled CLI flags), `Prompts`
 (`Run(ctx, profileID, prompt) (text, promptTokens, responseTokens, error)`; the model it might report is never used), `Prices` (`Lookup(ctx, model) (commoncosts.ModelPricing, found bool, err error)`, bounded by `PriceTimeout = 5s`), `Spend` (`Reading(ctx,
 coordinatorID, now) (windowSubcents, measurable, ceilingSubcents *int64)`),
 `Instructions` (`Render(ctx, coordinatorID, Override) (Renders, error)`, where `Renders` holds the baseline and the candidate text and hash read from one snapshot of the coordinator's context and orders, so both sides share one baseline; it returns the sentinel `ErrNoTarget` for `no_target` and any other error is `read_failed`; the adapter reads the standing orders through `Store.ActiveStandingOrders` and returns its error as is (it never uses the production reader that logs and builds the instructions without orders), so an unreadable order list is `read_failed`, never an orders-less baseline),
-`Results` (the result-row store) and `Clock`. The adapters over the real
-packages live in `replay/wire`, which the dream's composition root builds; the
-package `replay` and `replay/stub` do not import it.
+`Results` stores rows; `Clock` supplies time. The dream composition root builds
+adapters in `replay/wire`; neither `replay` nor `replay/stub` imports it.
 
 `Request`: `CoordinatorID`; `Candidate` (`Kind`, `Text`, `TargetID` for
 `standing_order_retire`, `CitedTurnIDs`); `DreamID` and `ItemID` (both empty in
@@ -127,11 +121,15 @@ output without the improvement section, with the candidate's override applied);
 then the fixed replay paragraph (`replay.PromptVersion` constant text: "This is a
 replay. You have no tools; ignore every statement about tools above. Reply with
 the JSON answer only."), which makes the render's tool lines inert; then the
-turn's trigger as stored (message text, or the wake kinds for a wake); then a
-data block: the turn's snapshot body, and the titles of the needed tasks (the
+one JSON record in a `<data kind="replay-input">` envelope: the turn's trigger
+as stored (message text, or the wake kinds for a wake), its snapshot body, and
+the titles of the needed tasks (the
 targets of the turn's expected proposals of every kind but `create_task`; a turn has no trigger task) read from the
 task rows when the replay runs, labelled as titles, a rename since the turn
-being visible by design; then the answer schema: a JSON array of
+being visible by design. JSON encoding escapes tags and line breaks in every
+historical field so they cannot terminate the envelope. These fields describe
+the recorded scenario and grant no permission. After the envelope comes the
+answer schema: a JSON array of
 `{kind, target_task_id, workflow_id, title}`. The prompt never carries the turn's
 own proposals, outcomes or decisions; the snapshot already excludes proposals
 created at or after the turn's start.
@@ -155,19 +153,19 @@ tool, no write the harness performs, and no native tool that needs a permission
 the call denies; native read-only tools a CLI runs without asking are not
 removable and are not claimed removed.
 
-Isolation of writers is a dependency boundary: `replay` and `replay/stub` are
-tested with `go list -deps`, and the test fails when the closure of either
-contains any package other than the standard library, `internal/common/costs`
-(pricing arithmetic, imports only `math` and `strings`), `replay` and `replay/stub`. An allow-list
-rather than a forbidden list, so no writer package (`internal/coordinator`,
-`internal/office`, `internal/task/service`, `internal/task/repository`, the
-settings and message stores) can enter by name or by transitive import. `replay`
-therefore redeclares the few constants it needs from `internal/coordinator/outcomes` and
-`internal/coordinator/ledger` (decision values, the `dream` trigger), with a test in
-`replay/wire` asserting they equal the originals. `replay/wire` is the only package that imports those and
-nothing in `replay` or `replay/stub` imports it. The only caller allowed to start
-a run is the dream episode's server-side code and tests; the tool surface has no
-entry (`001.4`).
+Writer isolation is tested with `go list -deps`: either closure may contain
+only the standard library, `internal/common/costs` (pricing arithmetic, importing
+only `math` and `strings`), `replay` and `replay/stub`. No coordinator, Office,
+task, settings or message writer can enter directly or transitively. Replay
+redeclares outcome decision values and the ledger dream trigger; tests in
+`replay/wire` assert equality. Only `replay/wire` imports their owner packages,
+and neither replay package imports it. Only dream server code and tests may
+start a run; no tool entry exists (`001.4`).
+
+`Cases.Proposal` and `Cases.TaskTitle` receive `Request.CoordinatorID`
+explicitly. Proposal and outcome reads enforce that owner. Current task-title
+reads enforce its workspace and effective workflow/Projects scope; an excluded
+or moved task is `input_gone`. Failed scope reads remain `read_failed`.
 
 ## Decision key
 
@@ -279,6 +277,10 @@ turns (a candidate with no citations, such as the planted set, holds out every
 case). `replay.PromptVersion` is a constant of the harness, bumped on any change
 to the prompt frame, the replay paragraph or the answer schema, and keys baseline
 reuse.
+
+The integrated frame uses `replay-v2`; baseline results from the previous frame
+are not reused. Candidate standing-order markers are formatted only for the
+new order's position, without replacing text in existing orders or context.
 
 **Applying a candidate.** The `Instructions` renderer receives an `Override` and
 returns the production render (without the improvement section) with it

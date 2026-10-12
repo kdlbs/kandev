@@ -1,6 +1,10 @@
 package lifecycle
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
+)
 
 // ErrCursorMCPRecoverySessionBusy is returned when recovery would interfere
 // with an active conversational turn. Recovery never stops or replays work.
@@ -30,4 +34,5 @@ type CursorMCPRetryResult struct {
 	Status     string
 	ReasonCode string
 	ToolCount  int
+	Diagnostic *mcpconfig.NativeMCPDiagnostic `json:"mcp_diagnostic,omitempty"`
 }

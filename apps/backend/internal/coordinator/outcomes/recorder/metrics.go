@@ -41,12 +41,19 @@ const (
 	ObserverOverride = "override"
 )
 
+// Reasons of coordinator_override_capture_dropped_total; the set is closed.
+const (
+	CaptureDroppedQueueFull = "queue_full"
+	CaptureDroppedStopped   = "stopped"
+)
+
 var (
-	gradeFailedTotal   = expvar.NewMap("coordinator_outcome_grade_failed_total")
-	ignoredTotal       = expvar.NewMap("coordinator_override_ignored_total")
-	readFailedTotal    = expvar.NewMap("coordinator_override_read_failed_total")
-	scanDroppedTotal   = expvar.NewMap("coordinator_override_scan_dropped_total")
-	observerPanicTotal = expvar.NewMap("coordinator_outcomes_observer_panic_total")
+	gradeFailedTotal    = expvar.NewMap("coordinator_outcome_grade_failed_total")
+	ignoredTotal        = expvar.NewMap("coordinator_override_ignored_total")
+	readFailedTotal     = expvar.NewMap("coordinator_override_read_failed_total")
+	scanDroppedTotal    = expvar.NewMap("coordinator_override_scan_dropped_total")
+	observerPanicTotal  = expvar.NewMap("coordinator_outcomes_observer_panic_total")
+	captureDroppedTotal = expvar.NewMap("coordinator_override_capture_dropped_total")
 )
 
 func bump(m *expvar.Map, label string) { m.Add(label, 1) }

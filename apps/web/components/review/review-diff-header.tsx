@@ -5,7 +5,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { CollapsibleFileHeader } from "@/components/diff/collapsible-file-header";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
-import type { ReviewFile } from "./types";
+import { isReviewFileDetailReady, type ReviewFile } from "./types";
 import { FileDiffToolbar } from "./review-diff-toolbar";
 import { useTranslation } from "react-i18next";
 
@@ -67,57 +67,66 @@ function StaleIndicator({ compact = false }: { compact?: boolean }) {
   );
 }
 
+function DisplayFreshnessIndicator({ state }: { state: ReviewFile["diff_state"] }) {
+  const { t } = useTranslation();
+  return (
+    <span
+      data-testid="review-header-refresh-status"
+      role="status"
+      className="shrink-0 text-[11px] text-muted-foreground"
+    >
+      {state === "unavailable" ? t("task:gitDiffUnavailable") : t("task:gitDiffLoading")}
+    </span>
+  );
+}
+
 function MobileReviewCheckbox({
   checked,
   onCheckedChange,
+  disabled,
 }: {
   checked: boolean;
   onCheckedChange: ReviewDiffHeaderProps["onCheckboxChange"];
+  disabled?: boolean;
 }) {
   return (
     <span className="flex size-10 shrink-0 items-center justify-center">
       <Checkbox
         checked={checked}
         onCheckedChange={onCheckedChange}
+        disabled={disabled}
         className="relative size-4 cursor-pointer after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
       />
     </span>
   );
 }
 
-export function ReviewDiffHeader({
-  file,
-  isReviewed,
-  isStale,
-  collapsed,
-  wordWrap,
-  expandUnchanged,
-  hasStickyRepoHeader = false,
-  sessionId,
-  onCheckboxChange,
-  onDiscard,
-  onCommentFile,
-  onOpenFile,
-  markdownPreview,
-  onToggleMarkdownPreview,
-  onToggleCollapse,
-  onToggleExpandUnchanged,
-  onToggleWordWrap,
-  baseBranchByRepo,
-  fallbackBaseBranch,
-  taskId,
-  publishedPRBranch,
-  publishedPRRepositoryId,
-}: ReviewDiffHeaderProps) {
-  const { t } = useTranslation();
-  const { isMobile } = useResponsiveBreakpoint();
+function ReviewDiffToolbarActions(props: ReviewDiffHeaderProps) {
+  const {
+    file,
+    sessionId,
+    wordWrap,
+    expandUnchanged,
+    onDiscard,
+    onCommentFile,
+    onOpenFile,
+    markdownPreview,
+    onToggleMarkdownPreview,
+    onToggleExpandUnchanged,
+    onToggleWordWrap,
+    baseBranchByRepo,
+    fallbackBaseBranch,
+    taskId,
+    publishedPRBranch,
+    publishedPRRepositoryId,
+  } = props;
   const hasPublishedPR =
     file.source === "pr" && (!file.repository_id || file.repository_id === publishedPRRepositoryId);
   const publishedBranch = hasPublishedPR ? publishedPRBranch : undefined;
   const baseBranch =
     baseBranchByRepo[file.repository_name ?? ""] ??
     (file.repository_name ? undefined : fallbackBaseBranch);
-  const toolbar = (
+  return (
     <FileDiffToolbar
       filePath={file.path}
       sessionId={sessionId}
@@ -140,6 +149,38 @@ export function ReviewDiffHeader({
       repo={file.repository_name}
     />
   );
+}
+
+function ReviewDiffMetadata({
+  file,
+  isStale,
+  compact,
+}: {
+  file: ReviewFile;
+  isStale: boolean;
+  compact?: boolean;
+}) {
+  if (!file.display_stale && !isStale) return undefined;
+  return (
+    <div className="flex items-center gap-1.5">
+      {file.display_stale && <DisplayFreshnessIndicator state={file.diff_state} />}
+      {isStale && <StaleIndicator compact={compact} />}
+    </div>
+  );
+}
+
+export function ReviewDiffHeader(props: ReviewDiffHeaderProps) {
+  const {
+    file,
+    isReviewed,
+    isStale,
+    collapsed,
+    hasStickyRepoHeader = false,
+    onCheckboxChange,
+    onToggleCollapse,
+  } = props;
+  const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
 
   return (
     <div
@@ -161,20 +202,25 @@ export function ReviewDiffHeader({
         collapseLabel={t("review:collapseFile", { path: file.path })}
         onToggleCollapse={onToggleCollapse}
         mobileLeading={
-          <MobileReviewCheckbox checked={isReviewed} onCheckedChange={onCheckboxChange} />
+          <MobileReviewCheckbox
+            checked={isReviewed}
+            onCheckedChange={onCheckboxChange}
+            disabled={!isReviewFileDetailReady(file)}
+          />
         }
         desktopLeading={
           <Checkbox
             checked={isReviewed}
             onCheckedChange={onCheckboxChange}
+            disabled={!isReviewFileDetailReady(file)}
             className="size-4 cursor-pointer"
           />
         }
-        mobileMetadata={isStale ? <StaleIndicator compact /> : undefined}
-        desktopMetadata={isStale ? <StaleIndicator /> : undefined}
+        mobileMetadata={<ReviewDiffMetadata file={file} isStale={isStale} compact />}
+        desktopMetadata={<ReviewDiffMetadata file={file} isStale={isStale} />}
         mobileStats={<ReviewDiffStats file={file} compact />}
         desktopStats={<ReviewDiffStats file={file} />}
-        actions={toolbar}
+        actions={<ReviewDiffToolbarActions {...props} />}
         actionsTestId="review-file-actions"
         identityTestId="review-file-identity"
       />

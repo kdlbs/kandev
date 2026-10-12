@@ -29,7 +29,7 @@ type preparedCase struct {
 
 // prepareCase reads what a turn needs. A skip is recorded in the case; a read
 // that fails other than by not-found is returned as an error and never a skip.
-func prepareCase(ctx context.Context, c Cases, turn Turn) (preparedCase, error) {
+func prepareCase(ctx context.Context, c Cases, coordinatorID string, turn Turn) (preparedCase, error) {
 	out := preparedCase{record: CaseRecord{TurnID: turn.ID}}
 	if turn.Trigger == TriggerDream {
 		out.record.Skip = SkipDreamTurn
@@ -43,7 +43,7 @@ func prepareCase(ctx context.Context, c Cases, turn Turn) (preparedCase, error) 
 		out.record.Skip = SkipNoSnapshot
 		return out, nil
 	}
-	exp, notes, err := expectations(ctx, c, turn)
+	exp, notes, err := expectations(ctx, c, coordinatorID, turn)
 	if err != nil {
 		return out, err
 	}
@@ -54,7 +54,7 @@ func prepareCase(ctx context.Context, c Cases, turn Turn) (preparedCase, error) 
 		return out, err
 	}
 	if !gone {
-		gone, err = readTitles(ctx, c, exp, &in)
+		gone, err = readTitles(ctx, c, coordinatorID, exp, &in)
 		if err != nil {
 			return out, err
 		}
@@ -99,7 +99,7 @@ func readTrigger(ctx context.Context, c Cases, turn Turn, in *caseInput) (bool, 
 // readTitles fills the titles of the tasks the expected proposals of every
 // kind but create_task target, once each in task id order. It reports true
 // when a title is confirmed absent.
-func readTitles(ctx context.Context, c Cases, e expectation, in *caseInput) (bool, error) {
+func readTitles(ctx context.Context, c Cases, coordinatorID string, e expectation, in *caseInput) (bool, error) {
 	seen := map[string]bool{}
 	var ids []string
 	for _, x := range append(append([]expected(nil), e.reproduced...), e.avoided...) {
@@ -110,7 +110,7 @@ func readTitles(ctx context.Context, c Cases, e expectation, in *caseInput) (boo
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		title, err := c.TaskTitle(ctx, id)
+		title, err := c.TaskTitle(ctx, coordinatorID, id)
 		if errors.Is(err, ErrNotFound) {
 			return true, nil
 		}
@@ -130,12 +130,12 @@ const (
 // expectations derives what a manager decided from the turn's outcome rows,
 // each outcome's decision key coming from its proposal as the coordinator made
 // it. An improvement proposal is never an expectation.
-func expectations(ctx context.Context, c Cases, turn Turn) (expectation, []string, error) {
+func expectations(ctx context.Context, c Cases, coordinatorID string, turn Turn) (expectation, []string, error) {
 	var notes []string
 	reproduced := map[string]expected{}
 	avoided := map[string]expected{}
 	for _, o := range turn.Outcomes {
-		p, err := c.Proposal(ctx, o.ProposalID)
+		p, err := c.Proposal(ctx, coordinatorID, o.ProposalID)
 		if errors.Is(err, ErrNotFound) {
 			notes = append(notes, noteProposalGone)
 			continue

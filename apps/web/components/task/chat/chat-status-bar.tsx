@@ -124,6 +124,7 @@ export type ChatStatusBarProps = {
   todoItems: TodoDisplayItem[];
   taskId: string | null;
   sessionId: string | null;
+  detailActive?: boolean;
   sessionState: string | null;
   previewTarget?: WorkflowMovePreviewTarget;
   nextStepName: string | null;
@@ -177,6 +178,7 @@ type ChatStatusBarRightControlsProps = Pick<
   ChatStatusBarProps,
   | "taskId"
   | "sessionId"
+  | "detailActive"
   | "showJumpToLatest"
   | "onJumpToLatest"
   | "showScrollToLastPrompt"
@@ -198,6 +200,7 @@ function ChatStatusBarRightControls({
   showThreadsLink,
   taskId,
   sessionId,
+  detailActive,
   showJumpToLatest,
   onJumpToLatest,
   showScrollToLastPrompt,
@@ -226,7 +229,11 @@ function ChatStatusBarRightControls({
         onScrollToStart={onScrollToStart}
         usageControl={
           showConversationUsage && taskId && sessionId ? (
-            <ConversationUsageDisplay taskId={taskId} sessionId={sessionId} />
+            <ConversationUsageDisplay
+              taskId={taskId}
+              sessionId={sessionId}
+              detailActive={detailActive}
+            />
           ) : null
         }
       />
@@ -276,6 +283,7 @@ export function ChatStatusBar({
   todoItems,
   taskId,
   sessionId,
+  detailActive = true,
   sessionState,
   previewTarget,
   nextStepName,
@@ -326,6 +334,7 @@ export function ChatStatusBar({
     showThreadsLink,
     taskId,
     sessionId,
+    detailActive,
     showJumpToLatest,
     onJumpToLatest,
     showScrollToLastPrompt,
@@ -357,7 +366,7 @@ export function ChatStatusBar({
       <TaskDependencyChip taskId={taskId} />
       {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
       {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
-      <BackgroundWorkChip sessionId={sessionId} />
+      <BackgroundWorkChip sessionId={sessionId} detailActive={detailActive} />
       {queueChip}
       <ChatStatusBarArchiveBanners taskId={taskId} />
       <ChatStatusBarActions

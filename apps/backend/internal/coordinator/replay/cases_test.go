@@ -9,7 +9,7 @@ import (
 
 func prep(t *testing.T, w *world, turn Turn) preparedCase {
 	t.Helper()
-	pc, err := prepareCase(context.Background(), w, turn)
+	pc, err := prepareCase(context.Background(), w, "c1", turn)
 	if err != nil {
 		t.Fatalf("prepareCase: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestSnapshotReadErrorIsNotASkip(t *testing.T) {
 	w := newWorld()
 	w.proposalErr = errBoom
 	turn := baseTurn(w, Outcome{ProposalID: "a", Decision: DecisionApproved})
-	if _, err := prepareCase(context.Background(), w, turn); err == nil {
+	if _, err := prepareCase(context.Background(), w, "c1", turn); err == nil {
 		t.Fatal("a failed read must stop the replay, not skip the case")
 	}
 }
@@ -168,7 +168,7 @@ func TestWakeTurnHasNoTriggerTextAndPromptCarriesWakeKinds(t *testing.T) {
 		t.Fatalf("wake turn skipped %q", pc.record.Skip)
 	}
 	p := buildPrompt("RENDER", pc.input)
-	for _, want := range []string{"RENDER", replayParagraph, "Trigger (wake): task_done, stalled", "body", "task-a: T"} {
+	for _, want := range []string{"RENDER", replayParagraph, `"trigger_kind":"wake"`, `"wake_kinds":["task_done","stalled"]`, `"snapshot":"body"`, `"task_id":"task-a","title":"T"`} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("prompt lacks %q:\n%s", want, p)
 		}

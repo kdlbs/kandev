@@ -1,11 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import type { Locator } from "@playwright/test";
 import {
   RICH_OUTPUT_FILE,
   RICH_OUTPUT_FILE_CONTENT,
   seedRichOutputTask,
 } from "./rich-output-helpers";
+
+async function revealChartPlot(chart: Locator): Promise<void> {
+  await chart.getByTestId("rich-output-chart-plot").scrollIntoViewIfNeeded();
+}
 
 test("renders and persists native rich output with an explicit file preview", async ({
   testPage,
@@ -28,16 +33,15 @@ test("renders and persists native rich output with an explicit file preview", as
   const barPlot = barChart.getByTestId("rich-output-chart-plot");
   await expect(lineChart).toBeVisible();
   await expect(barChart).toBeVisible();
-  await lineChart.scrollIntoViewIfNeeded();
+  await revealChartPlot(lineChart);
   await expect(lineChart.locator(".recharts-xAxis text").first()).toBeVisible();
-  await expect(lineChart.locator(".recharts-line-curve")).toHaveAttribute("stroke-dasharray", /\d/);
+  await expect(lineChart.locator(".recharts-line-curve")).toHaveAttribute("d", /^M[\d.,-]+[CL]/);
   await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(lineChart.locator(".recharts-xAxis")).toContainText("Aug 12");
   // Scroll the observed plot once. Repeating scroll actions while the lazy
   // chart mounts can keep the virtualized transcript in motion indefinitely.
-  await barPlot.evaluate((element) =>
-    element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }),
-  );
+  await barPlot.scrollIntoViewIfNeeded();
+  await expect(barPlot).toBeInViewport();
   await expect(barPlot.locator("svg")).toBeVisible({ timeout: 30_000 });
   await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible({ timeout: 30_000 });
   await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible();
@@ -81,7 +85,7 @@ test("renders and persists native rich output with an explicit file preview", as
   const persisted = session.activeChat().getByTestId("rich-output");
   await expect(persisted.getByTestId("rich-output-chart-line")).toBeVisible();
   await expect(persisted.getByTestId("rich-output-chart-bar")).toBeVisible();
-  await persisted.getByTestId("rich-output-chart-line").scrollIntoViewIfNeeded();
+  await revealChartPlot(persisted.getByTestId("rich-output-chart-line"));
   await expect(
     persisted.getByTestId("rich-output-chart-line").locator(".recharts-xAxis text").first(),
   ).toBeVisible();
@@ -90,7 +94,7 @@ test("renders and persists native rich output with an explicit file preview", as
       .getByTestId("rich-output-chart-line")
       .getByTestId("rich-output-chart-legend-series_0"),
   ).toContainText("p95");
-  await persisted.getByTestId("rich-output-chart-bar").scrollIntoViewIfNeeded();
+  await revealChartPlot(persisted.getByTestId("rich-output-chart-bar"));
   await expect(persisted.getByRole("button", { name: "Errors" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -165,6 +169,7 @@ test("renders complete chart geometry when device animation is disabled", async 
   await lineChart.scrollIntoViewIfNeeded();
   const line = lineChart.locator(".recharts-line-curve");
   await expect(line).toBeVisible({ timeout: 30_000 });
+  await expect(line).toHaveAttribute("d", /^M[\d.,-]+[CL]/);
   await expect(line).not.toHaveAttribute("stroke-dasharray", /\d/);
 
   await barPlot.evaluate((element) =>

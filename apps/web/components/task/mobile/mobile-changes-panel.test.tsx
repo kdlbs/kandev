@@ -75,6 +75,8 @@ function makeData() {
   return {
     activeTaskId: "task-1",
     activeSessionId: "session-1",
+    refreshStatus: "loading",
+    gitStatusPresentation: { hasPriorData: true, failedRepositories: ["frontend"] },
     relation: { kind: "diverged", action: "diverged_replace" },
     contributionHistoryTarget: target,
     resolution: {},
@@ -133,6 +135,9 @@ describe("MobileChangesPanel contribution comparison", () => {
     );
 
     expect(mocks.headerProps?.contributionHistoryTarget).toEqual(target);
+    expect(mocks.headerProps?.refreshStatus).toBe("loading");
+    expect(mocks.headerProps?.hasPriorData).toBe(true);
+    expect(mocks.headerProps?.failedRepositories).toEqual(["frontend"]);
 
     const key = contributionHistoryExplanationKey(target);
     expect(key).not.toBeNull();

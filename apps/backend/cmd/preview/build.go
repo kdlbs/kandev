@@ -56,7 +56,7 @@ func buildLinuxBinaries(ctx context.Context, outDir string) error {
 	} {
 		out := filepath.Join(outDir, b.name)
 		fmt.Fprintf(os.Stderr, "  go build %s -> %s\n", b.pkg, out)
-		cmd := exec.CommandContext(ctx, "go", "build", "-ldflags", "-s -w", "-o", out, b.pkg)
+		cmd := exec.CommandContext(ctx, "go", "build", "-trimpath", "-ldflags", "-s -w", "-o", out, b.pkg)
 		cmd.Env = append(untrustedBuildEnv(os.Environ()), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -99,7 +99,7 @@ func buildKandevDocker(ctx context.Context, out string) error {
 		"-v", goModCache+":/go/pkg/mod",
 		"-w", "/work",
 		goDockerImage,
-		"go", "build", "-ldflags", "-s -w",
+		"go", "build", "-trimpath", "-ldflags", "-s -w",
 		"-o", containerOut,
 		"./cmd/kandev",
 	)

@@ -1,7 +1,7 @@
 ---
 id: "05-pause"
 title: "Pause"
-status: implemented
+status: in_progress
 wave: 2
 depends_on:
   - "phase 3 merged"
@@ -172,3 +172,14 @@ Phone: [ Pause ] full-width button at the end of the strip's second line.
   `node scripts/validate-public-docs.mjs`
 - `cd apps/web && pnpm e2e:run --host -- e2e/tests/coordinator/pause.spec.ts` (3 passed);
   `pnpm e2e:run --host --no-build -- --project=mobile-chrome e2e/tests/coordinator/mobile-pause.spec.ts` (1 passed)
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.
+
+Review integration: the automatic claim rechecks committed Pause under its row lock before claiming or consuming allowance. Deterministic SQLite/PostgreSQL caller regressions pause during raiser validation; full hosted verification is pending.

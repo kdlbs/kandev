@@ -61,6 +61,7 @@ func RegisterSessionStreamNotifications(ctx context.Context, eventBus bus.EventB
 	b.subscribe(eventBus, events.BuildSessionUsageUpdatedWildcardSubject(), ws.ActionSessionUsageUpdated)
 	b.subscribe(eventBus, events.BuildBackgroundWorkUpdatedWildcardSubject(), ws.ActionSessionBackgroundWorkUpdated)
 	b.subscribe(eventBus, events.BuildBackgroundWorkOutputWildcardSubject(), ws.ActionSessionBackgroundWorkOutput)
+	b.subscribeSessionWorkspaceRecovery(eventBus)
 
 	go func() {
 		<-ctx.Done()
@@ -68,6 +69,60 @@ func RegisterSessionStreamNotifications(ctx context.Context, eventBus bus.EventB
 	}()
 
 	return b
+}
+
+func (b *SessionStreamBroadcaster) subscribeSessionWorkspaceRecovery(eventBus bus.EventBus) {
+	sub, err := eventBus.Subscribe(events.SessionWorkspaceRecoveryChanged, func(_ context.Context, event *bus.Event) error {
+		payload, ok := event.Data.(map[string]any)
+		if !ok {
+			return nil
+		}
+		sessionIDs := workspaceRecoverySessionIDs(payload["session_ids"])
+		if len(sessionIDs) == 0 {
+			return nil
+		}
+		msg, err := ws.NewNotification(ws.ActionSessionWorkspaceRecoveryChanged, event.Data)
+		if err != nil {
+			b.logger.Error("failed to build websocket notification",
+				zap.String("action", ws.ActionSessionWorkspaceRecoveryChanged), zap.Error(err))
+			return nil
+		}
+		for _, sessionID := range sessionIDs {
+			if sessionID != "" {
+				b.hub.BroadcastToSession(sessionID, msg)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		b.logger.Error("failed to subscribe to workspace recovery events", zap.Error(err))
+		return
+	}
+	b.subscriptions = append(b.subscriptions, sub)
+}
+
+func workspaceRecoverySessionIDs(value any) []string {
+	var values []any
+	switch sessionIDs := value.(type) {
+	case []string:
+		values = make([]any, len(sessionIDs))
+		for i, sessionID := range sessionIDs {
+			values[i] = sessionID
+		}
+	case []any:
+		values = sessionIDs
+	default:
+		return nil
+	}
+
+	sessionIDs := make([]string, 0, len(values))
+	for _, value := range values {
+		sessionID, ok := value.(string)
+		if ok && sessionID != "" {
+			sessionIDs = append(sessionIDs, sessionID)
+		}
+	}
+	return sessionIDs
 }
 
 func (b *SessionStreamBroadcaster) Close() {

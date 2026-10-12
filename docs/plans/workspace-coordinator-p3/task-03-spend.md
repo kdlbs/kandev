@@ -1,7 +1,7 @@
 ---
 id: "03-spend"
 title: "Spend measurement and the ceiling stop"
-status: pending
+status: in_progress
 wave: 2
 depends_on:
   - "01-flag-schema-settings"
@@ -163,3 +163,12 @@ make -C apps/backend lint
 
 - The observer must never block the usage writer: the enqueue is
   non-blocking and a test fills the queue.
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.

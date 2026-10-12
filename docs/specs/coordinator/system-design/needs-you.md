@@ -209,26 +209,28 @@ with `detected_at` older than 30 days. There is no timer.
   load coordinators." with **Try again**, which re-reads the list
   (`listCoordinators`). The sidebar entries are unaffected.
 - `components/app-sidebar/sections/coordinators-section.tsx` renders the
-  entries as a `CoordinatorsSection` built on `AppSidebarSection`, the way
-  `AutomationsSection` is: id `coordinators` in `APP_SIDEBAR_SECTION_IDS`,
-  mounted immediately above the Automations section (in `app-sidebar.tsx` and,
-  for a saved layout, beside the automations node in
-  `sidebar-layout-navigation.tsx`). It self-gates on the flag and an active
-  workspace and renders nothing until the list has loaded. Rows link to the
-  Needs you screen with the open-proposal badge; `defaultExpanded` is true, and
-  the folded `collapsedSummary` is the badge sum when above zero, otherwise the
-  coordinator count. The header shortcut links to `/workspaces/:id/coordinator`;
-  with no coordinator the body is one "Set up a coordinator" row
-  (`sidebar-coordinators-empty`) linking to the settings list. The phone menu uses
-  `MobileCoordinatorsSection` (`components/navigation/mobile-coordinators-section.tsx`),
-  built like `MobileAutomationsSection`: a header toggle with `aria-expanded` and
-  `aria-controls`, the list shortcut, and the rows, all 44px targets. It shares the
-  desktop `appSidebar.sectionExpanded.coordinators` state (default expanded), folded
-  summary and empty row (`mobile-sidebar-coordinators-empty`). It is mounted above the
-  automations node in `mobile-sidebar-layout-navigation.tsx`, or in
-  `MobileRequiredRows` when the layout has no automations node. Badge values come from a small store keyed by coordinator id, seeded by
-  the list route's `open_proposals` field and replaced by each
-  `coordinator.updated` payload.
+  entries through `CoordinatorsSection` and `AppSidebarSection` with navigation
+  presentation. The stable collapse identity is `coordinators`.
+  `defaultExpanded` stays true. Rows link to Needs you with their proposal badges.
+  The folded summary uses the badge sum above zero, otherwise the coordinator count.
+  The list shortcut links to `/workspaces/:id/coordinator`.
+  With no coordinator, `sidebar-coordinators-empty` links to the settings list.
+  The section self-gates on the feature and active workspace.
+  It renders nothing until the list has loaded.
+- Personal placement follows the reusable
+  [sidebar layout design](../../ui/system-design/sidebar-customization.md#feature-gated-layout-entries).
+  The independent builtin node defaults to immediately before Automations.
+  Saved visibility and order take precedence over that default.
+  The fast action preference controls header placement of the list shortcut.
+  A labelled body link provides the destination when fast actions are hidden.
+- `MobileCoordinatorsSection` shares the collapse identity, summary, rows,
+  readiness guard, and empty setup destination through the phone navigation drawer.
+  Its controls retain 44px targets. The saved-layout renderer mounts it only
+  for the Coordinators node, subject to the same eligibility and visibility.
+  It does not add a fallback when Automations or Coordinators is hidden.
+- Badge values come from the store keyed by coordinator ID.
+  The list route seeds them from `open_proposals`.
+  Each `coordinator.updated` payload replaces the affected value.
 
 ## Screens
 

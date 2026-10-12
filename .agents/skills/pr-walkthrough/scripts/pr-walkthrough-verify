@@ -90,6 +90,7 @@ def verify() -> tuple[Path, Path]:
         expected_html = trusted_build.build(
             data,
             require_impact=True,
+            require_feature_flags=True,
             changed_paths=changed_paths,
         ).encode("utf-8")
     except trusted_build.BuildError as exc:

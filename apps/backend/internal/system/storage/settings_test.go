@@ -49,9 +49,10 @@ func TestSettingsStoreMissingUsesDisabledDefaults(t *testing.T) {
 		KandevContainers:         ResourceSettings{Enabled: true},
 		TemporaryArtifacts:       ResourceSettings{Enabled: false},
 		GoCache: GoCacheSettings{
-			Enabled:     false,
-			MaxBytes:    16106127360,
-			AdoptedPath: "",
+			Enabled:               false,
+			MaxBytes:              16106127360,
+			AdoptedPath:           "",
+			AllowCleanupWhileBusy: false,
 		},
 		Docker: DockerSettings{
 			DedicatedDaemonAcknowledged: false,
@@ -64,6 +65,25 @@ func TestSettingsStoreMissingUsesDisabledDefaults(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("settings = %#v, want %#v", got, want)
+	}
+}
+
+func TestSettingsStorePersistsBusyGoCacheCleanupPolicy(t *testing.T) {
+	store, _ := newTestStores(t)
+	settings := DefaultSettings()
+	if settings.GoCache.AllowCleanupWhileBusy {
+		t.Fatal("busy Go-cache cleanup must default off")
+	}
+	settings.GoCache.AllowCleanupWhileBusy = true
+	if _, err := store.SaveSettings(context.Background(), settings); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	loaded, err := store.GetSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if !loaded.GoCache.AllowCleanupWhileBusy {
+		t.Fatal("busy Go-cache cleanup policy was not persisted")
 	}
 }
 

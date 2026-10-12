@@ -5,6 +5,7 @@ type SessionViewActions = Pick<
   SessionRuntimeSlice,
   | "setAgentCapabilities"
   | "setSessionModels"
+  | "invalidateConfirmedConfigOptions"
   | "setEmbeddedVscodeSupport"
   | "setSessionMCPStatus"
   | "setPromptUsage"
@@ -23,6 +24,41 @@ export function buildSessionViewActions(set: ImmerSet): SessionViewActions {
     setSessionModels: (sessionId, data) =>
       set((draft) => {
         draft.sessionModels.bySessionId[sessionId] = data;
+      }),
+    invalidateConfirmedConfigOptions: (sessionId, executionId) =>
+      set((draft) => {
+        const models = draft.sessionModels.bySessionId[sessionId];
+        if (!models) return;
+
+        if (executionId) {
+          if (models.confirmedConfigOptionsExecutionId === executionId) {
+            delete models.pendingConfirmedConfigOptions;
+            return;
+          }
+
+          const pending = models.pendingConfirmedConfigOptions;
+          if (pending?.executionId === executionId) {
+            models.confirmedConfigOptions = pending.values;
+            models.confirmedConfigOptionsExecutionId = executionId;
+          } else {
+            delete models.confirmedConfigOptions;
+            delete models.confirmedConfigOptionsExecutionId;
+          }
+          delete models.pendingConfirmedConfigOptions;
+          return;
+        }
+
+        if (
+          models.confirmedConfigOptions !== undefined &&
+          models.confirmedConfigOptionsExecutionId
+        ) {
+          models.pendingConfirmedConfigOptions = {
+            executionId: models.confirmedConfigOptionsExecutionId,
+            values: models.confirmedConfigOptions,
+          };
+        }
+        delete models.confirmedConfigOptions;
+        delete models.confirmedConfigOptionsExecutionId;
       }),
     setEmbeddedVscodeSupport: (sessionId, supported) =>
       set((draft) => {

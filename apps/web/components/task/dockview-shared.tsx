@@ -45,7 +45,6 @@ import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { PluginTaskPanel } from "./plugin-task-panel";
 import { PluginPanelTab } from "./plugin-panel-tab";
-import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
 
@@ -126,7 +125,6 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   vscode: PortalSlot,
   plan: PortalSlot,
   todos: PortalSlot,
-  "prompt-history": PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   "review-detail": PortalSlot,
@@ -210,12 +208,12 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     }
     return state.tasks.activeTaskId;
   });
-  const { openFile } = useFileEditors();
+  const isVisible = usePanelActive(panelId);
+  const { openFile } = useFileEditors(isVisible);
   const isPassthrough = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
   );
   useChatSessionTitle(panelId, sessionId, !!paramSessionId);
-  const isVisible = usePanelActive(panelId);
 
   if (isPassthrough) {
     return (
@@ -235,6 +233,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
       isVisible={isVisible}
+      detailActive={isVisible}
       panelId={panelId}
     />
   );
@@ -262,7 +261,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
   const isVisible = usePanelActive(panelId);
-  return useSessionGitRefresh(sessionId, isVisible);
+  useSessionGitRefresh(sessionId, isVisible);
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
@@ -324,7 +323,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count — use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
-  const retryGitStatus = useResyncGitStatusOnTabActivate(panelId, activeSessionId);
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { commits } = useSessionCommits(activeSessionId);
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
@@ -362,7 +361,6 @@ function ChangesContent({ panelId }: { panelId: string }) {
 
   return (
     <ChangesPanel
-      onRetryGitStatus={retryGitStatus}
       onOpenDiffFile={handleOpenDiffFile}
       onEditFile={handleEditFile}
       onOpenCommitDetail={handleOpenCommitDetail}
@@ -424,7 +422,6 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
-  "prompt-history": () => <PromptHistoryContent />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),
@@ -459,5 +456,3 @@ export function renderPanel(
   if (renderer) return renderer(panelId, params);
   return <div className="p-4 text-muted-foreground">{t("common:unknownPanel", { component })}</div>;
 }
-
-export const VALID_COMPONENTS = new Set(Object.keys(dockviewComponents));

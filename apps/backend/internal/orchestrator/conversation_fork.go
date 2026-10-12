@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/task/models"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
 )
@@ -68,6 +69,9 @@ func (s *Service) ForkConversation(ctx context.Context, req ForkConversationRequ
 	completed, err := s.resumeCodexForkOperation(ctx, state)
 	if err != nil || completed != nil {
 		return completed, err
+	}
+	if s.automationOwnsRetrySession(ctx, req.TaskID, "") {
+		return nil, automation.ErrRetryLaunchUncertain
 	}
 	if err := s.validateCodexForkTurn(ctx, state); err != nil {
 		return nil, err
@@ -265,7 +269,7 @@ func (s *Service) ensureCodexForkDestination(ctx context.Context, state *codexFo
 	if state.destinationID != "" {
 		return nil
 	}
-	destinationID, err := s.PrepareTaskSession(ctx, state.request.TaskID, state.source.AgentProfileID, state.source.ExecutorID, state.source.ExecutorProfileID, "", false)
+	destinationID, err := s.PrepareTaskSession(models.WithExplicitManualCreation(ctx, state.request.TaskID), state.request.TaskID, state.source.AgentProfileID, state.source.ExecutorID, state.source.ExecutorProfileID, "", false)
 	if err != nil {
 		return err
 	}

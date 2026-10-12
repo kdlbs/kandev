@@ -171,14 +171,37 @@ func TestDynamicRelaunchCreatedSessionCarriesRecoveryAttemptIdentity(t *testing.
 
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	processStarted := make(chan struct{})
+	releaseProcessStart := make(chan struct{})
+	var releaseProcessOnce sync.Once
+	asyncCleanupDone := make(chan struct{})
 	var launchAttemptID string
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(lctx context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 			launchAttemptID = executor.ResumeAttemptIDFromContext(lctx)
 			return &executor.LaunchAgentResponse{AgentExecutionID: "dynamic-successor-execution"}, nil
 		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			close(processStarted)
+			<-releaseProcessStart
+			return nil
+		},
 	}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.executor.SetOnCancelledResumeExecutionCleanup(svc.cleanupCancelledResumeExecution)
+	startFailed := svc.handleAgentProcessStartFailed
+	svc.executor.SetOnAgentProcessStartFailed(func(ctx context.Context, callbackTaskID, callbackSessionID, executionID string, err error) {
+		startFailed(ctx, callbackTaskID, callbackSessionID, executionID, err)
+		close(asyncCleanupDone)
+	})
+	t.Cleanup(func() {
+		releaseProcessOnce.Do(func() { close(releaseProcessStart) })
+		select {
+		case <-asyncCleanupDone:
+		case <-time.After(5 * time.Second):
+			t.Error("asynchronous cancelled-start cleanup did not finish")
+		}
+	})
 	prior, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
 	if err != nil || !owner {
 		t.Fatalf("begin prior resume attempt: owner=%v err=%v", owner, err)
@@ -197,6 +220,11 @@ func TestDynamicRelaunchCreatedSessionCarriesRecoveryAttemptIdentity(t *testing.
 	}
 	if execution == nil || execution.AgentExecutionID != "dynamic-successor-execution" {
 		t.Fatalf("dynamic successor execution = %+v, want mock successor execution", execution)
+	}
+	select {
+	case <-processStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("asynchronous process startup did not reach its barrier")
 	}
 	if launchAttemptID == "" {
 		t.Fatal("dynamic successor launch omitted its recovery attempt identity")
@@ -231,6 +259,12 @@ func TestDynamicRelaunchCreatedSessionCarriesRecoveryAttemptIdentity(t *testing.
 	initialPromptAccepted()
 	if registry.accept(attempt, execution.AgentExecutionID) {
 		t.Fatal("late initial-prompt acceptance transferred ownership after cancellation")
+	}
+	releaseProcessOnce.Do(func() { close(releaseProcessStart) })
+	select {
+	case <-asyncCleanupDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("asynchronous cancelled-start cleanup did not finish")
 	}
 	agentManager.mu.Lock()
 	defer agentManager.mu.Unlock()

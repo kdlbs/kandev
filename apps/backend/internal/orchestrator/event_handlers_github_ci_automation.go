@@ -241,6 +241,9 @@ func (s *Service) evalTaskPRLifecycle(
 	if errors.Is(err, errTaskPRAgentInactive) {
 		return false, nil
 	}
+	if isSessionRecoveryRequiredError(err) {
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("dispatch %s prompt: %w", decision.Event, err)
 	}
@@ -439,6 +442,9 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 		s.markCIAutoFixExhausted(ctx, pr)
 		return true, ""
 	}
+	if isSessionRecoveryRequiredError(err) {
+		return true, ""
+	}
 	if err != nil {
 		return true, err.Error()
 	}
@@ -502,6 +508,9 @@ func (s *Service) handleTaskPRCIAutoFixLegacyAttempt(
 	result, err := s.dispatchCIAutomationPromptForPR(ctx, session, pr, prompt, signature, allowNewRound)
 	if errors.Is(err, errCIAutoFixRoundCapReached) {
 		s.markCIAutoFixExhausted(ctx, pr)
+		return true, ""
+	}
+	if isSessionRecoveryRequiredError(err) {
 		return true, ""
 	}
 	if err != nil {

@@ -352,7 +352,7 @@ func TestWorkspaceTrackerRetriesOnlyFailedDiffAfterTransientGitFailure(t *testin
 	t.Cleanup(tracker.Stop)
 	failBrokenDiff := true
 	tracker.gitStatusDiffOutput = func(ctx context.Context, workDir string, args ...string) (string, bool, error) {
-		if failBrokenDiff && len(args) > 0 && args[0] == "diff" && args[len(args)-1] == "broken.txt" {
+		if failBrokenDiff && len(args) > 0 && args[0] == "diff" && args[len(args)-1] == ":(literal)broken.txt" {
 			return "", false, errors.New("injected transient diff failure")
 		}
 		return capDiffOutput(ctx, workDir, args...)
@@ -398,7 +398,7 @@ func TestWorkspaceTrackerOnlyRetriesUnavailableDetailsOnExplicitRefresh(t *testi
 	failDiff.Store(true)
 	var diffCalls atomic.Int32
 	tracker.gitStatusDiffOutput = func(ctx context.Context, workDir string, args ...string) (string, bool, error) {
-		if len(args) > 0 && args[0] == "diff" && args[len(args)-1] == "README.md" {
+		if len(args) > 0 && args[0] == "diff" && args[len(args)-1] == ":(literal)README.md" {
 			diffCalls.Add(1)
 			if failDiff.Load() {
 				return "", false, errors.New("injected transient diff failure")
@@ -503,7 +503,7 @@ func TestWorkspaceTrackerQueuesRetryAfterUnavailablePublicationBeforeWorkerSettl
 	var unavailableHookCalls atomic.Int32
 	failDiff.Store(true)
 	tracker.gitStatusDiffOutput = func(ctx context.Context, workDir string, args ...string) (string, bool, error) {
-		if failDiff.Load() && len(args) > 0 && args[0] == "diff" && args[len(args)-1] == "README.md" {
+		if failDiff.Load() && len(args) > 0 && args[0] == "diff" && args[len(args)-1] == ":(literal)README.md" {
 			diffCalls.Add(1)
 			return "", false, errors.New("injected transient diff failure")
 		}
@@ -660,26 +660,18 @@ func TestWorkspaceTrackerDetailsWaitCanCancelWithoutCancelingEnrichment(t *testi
 	case <-time.After(time.Second):
 		t.Fatal("canceled detail waiter did not return")
 	}
+	tracker.gitStatusDetailsWaitJoined = nil
 
 	close(release)
 	released = true
-	deadline := time.After(3 * time.Second)
-	for {
-		status, err := tracker.GetGitStatus(context.Background(), false)
-		if err != nil {
-			t.Fatalf("cached status error = %v", err)
-		}
-		if status.DetailState == gitStatusDetailReady {
-			if status.TrackerEpoch != initial.TrackerEpoch || status.SnapshotRevision <= initial.SnapshotRevision {
-				t.Fatalf("completed status = %+v, want same epoch and a later revision than %+v", status, initial)
-			}
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("enrichment did not complete after waiter cancellation: %+v", status)
-		case <-time.After(10 * time.Millisecond):
-		}
+	completeCtx, cancelComplete := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelComplete()
+	completed, err := tracker.GetGitStatusWithDetails(completeCtx, false)
+	if err != nil || completed.DetailState != gitStatusDetailReady {
+		t.Fatalf("enrichment did not complete after waiter cancellation: status=%+v err=%v", completed, err)
+	}
+	if completed.TrackerEpoch != initial.TrackerEpoch || completed.SnapshotRevision <= initial.SnapshotRevision {
+		t.Fatalf("completed status = %+v, want same epoch and a later revision than %+v", completed, initial)
 	}
 }
 

@@ -46,15 +46,15 @@ func (c *ReplayCases) SelectTurns(ctx context.Context, coordinatorID string, now
 	var one, two []replayTurnRow
 	if err := s.ro.SelectContext(ctx, &one, s.ro.Rebind(`
 		SELECT t.id, t."trigger", t.wake_kinds, t.snapshot_hash FROM coordinator_turns t
-		WHERE t.coordinator_id = ? AND EXISTS (SELECT 1 FROM coordinator_outcomes o WHERE o.turn_id = t.id AND o.decision IN `+replayDecidedList+`)
+		WHERE t.coordinator_id = ? AND EXISTS (SELECT 1 FROM coordinator_outcomes o WHERE o.turn_id = t.id AND o.coordinator_id = t.coordinator_id AND o.decision IN `+replayDecidedList+`)
 		ORDER BY t.started_at DESC, t.id DESC LIMIT ?`), coordinatorID, replay.FirstGroupSize); err != nil {
 		return nil, fmt.Errorf("select replay turns: %w", err)
 	}
 	if err := s.ro.SelectContext(ctx, &two, s.ro.Rebind(`
 		SELECT t.id, t."trigger", t.wake_kinds, t.snapshot_hash FROM coordinator_turns t
 		WHERE t.coordinator_id = ? AND t.started_at >= ? AND t.started_at <= ?
-		  AND EXISTS (SELECT 1 FROM coordinator_feedback f WHERE f.turn_id = t.id)
-		  AND EXISTS (SELECT 1 FROM coordinator_outcomes o WHERE o.turn_id = t.id AND o.decision IN `+replayDecidedList+`)
+		  AND EXISTS (SELECT 1 FROM coordinator_feedback f WHERE f.turn_id = t.id AND f.coordinator_id = t.coordinator_id)
+		  AND EXISTS (SELECT 1 FROM coordinator_outcomes o WHERE o.turn_id = t.id AND o.coordinator_id = t.coordinator_id AND o.decision IN `+replayDecidedList+`)
 		ORDER BY t.started_at DESC, t.id DESC LIMIT ?`),
 		coordinatorID, now.UTC().Add(-replay.OverrideHorizon), now.UTC(), replay.FirstGroupSize+replay.SecondGroupSize); err != nil {
 		return nil, fmt.Errorf("select replay override turns: %w", err)
@@ -73,10 +73,10 @@ func (c *ReplayCases) SelectTurns(ctx context.Context, coordinatorID string, now
 		added++
 		rows = append(rows, r)
 	}
-	return c.withOutcomes(ctx, rows)
+	return c.withOutcomes(ctx, coordinatorID, rows)
 }
 
-func (c *ReplayCases) withOutcomes(ctx context.Context, rows []replayTurnRow) ([]replay.Turn, error) {
+func (c *ReplayCases) withOutcomes(ctx context.Context, coordinatorID string, rows []replayTurnRow) ([]replay.Turn, error) {
 	out := make([]replay.Turn, 0, len(rows))
 	for _, r := range rows {
 		var kinds []string
@@ -86,7 +86,7 @@ func (c *ReplayCases) withOutcomes(ctx context.Context, rows []replayTurnRow) ([
 		var outs []replayOutcomeRow
 		if err := c.store.ro.SelectContext(ctx, &outs, c.store.ro.Rebind(`
 			SELECT turn_id, proposal_id, decision, automatic, edited_fields FROM coordinator_outcomes
-			WHERE turn_id = ? ORDER BY proposal_id`), r.ID); err != nil {
+			WHERE turn_id = ? AND coordinator_id = ? ORDER BY proposal_id`), r.ID, coordinatorID); err != nil {
 			return nil, fmt.Errorf("read outcomes of %s: %w", r.ID, err)
 		}
 		turn := replay.Turn{ID: r.ID, Trigger: r.Trigger, WakeKinds: kinds, SnapshotHash: r.SnapshotHash}
@@ -103,13 +103,15 @@ func (c *ReplayCases) withOutcomes(ctx context.Context, rows []replayTurnRow) ([
 }
 
 // Proposal returns the proposal as the coordinator made it, from spec_json.
-func (c *ReplayCases) Proposal(ctx context.Context, proposalID string) (replay.Proposal, error) {
+func (c *ReplayCases) Proposal(ctx context.Context, coordinatorID, proposalID string) (replay.Proposal, error) {
 	var row struct {
 		Kind         string         `db:"kind"`
 		TargetTaskID sql.NullString `db:"target_task_id"`
 		SpecJSON     string         `db:"spec_json"`
 	}
-	err := c.store.ro.GetContext(ctx, &row, c.store.ro.Rebind(`SELECT kind, target_task_id, spec_json FROM coordinator_proposals WHERE id = ?`), proposalID)
+	err := c.store.ro.GetContext(ctx, &row, c.store.ro.Rebind(`SELECT p.kind, p.target_task_id, p.spec_json FROM coordinator_proposals p
+		JOIN coordinators owner ON owner.id = p.coordinator_id AND owner.workspace_id = p.workspace_id
+		WHERE p.id = ? AND p.coordinator_id = ?`), proposalID, coordinatorID)
 	if err != nil {
 		return replay.Proposal{}, notFound(err, "read proposal")
 	}
@@ -148,9 +150,14 @@ func (c *ReplayCases) TriggerText(ctx context.Context, turn replay.Turn) (string
 }
 
 // TaskTitle returns the task's current title.
-func (c *ReplayCases) TaskTitle(ctx context.Context, taskID string) (string, error) {
+func (c *ReplayCases) TaskTitle(ctx context.Context, coordinatorID, taskID string) (string, error) {
+	where, scopeArgs, err := c.store.recordingTaskScope(ctx, coordinatorID)
+	if err != nil {
+		return "", err
+	}
+	args := append([]any{taskID}, scopeArgs...)
 	var title string
-	err := c.store.ro.GetContext(ctx, &title, c.store.ro.Rebind(`SELECT title FROM tasks WHERE id = ?`), taskID)
+	err = c.store.ro.GetContext(ctx, &title, c.store.ro.Rebind(`SELECT t.title FROM tasks t WHERE t.id = ? AND `+where), args...)
 	if err != nil {
 		return "", notFound(err, "read task title")
 	}

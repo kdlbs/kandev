@@ -3,7 +3,6 @@ package coordinator
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"strings"
 
 	"github.com/kandev/kandev/internal/coordinator/replay"
 )
@@ -26,7 +25,7 @@ type ReplayRenderInput struct {
 // production StandingInstructions output without the improvement section,
 // with the override applied to the candidate side.
 func ReplayRender(in ReplayRenderInput, o replay.Override) (replay.Renders, error) {
-	base := renderReplayInstructions(in.Context, in.Orders, in, "")
+	base := renderReplayInstructions(in.Context, in.Orders, in, "", -1)
 	ctxText, orders, note := in.Context, in.Orders, ""
 	switch o.Kind {
 	case replay.KindContextDiff:
@@ -49,18 +48,16 @@ func ReplayRender(in ReplayRenderInput, o replay.Override) (replay.Renders, erro
 	default:
 		return replay.Renders{}, ErrReplayNoTarget
 	}
-	cand := renderReplayInstructions(ctxText, orders, in, note)
+	candidateIndex := -1
 	if o.Kind == replay.KindStandingOrderAdd {
-		cand = strings.Replace(cand, "(added "+time0Format+", id candidate)", "(added candidate, id candidate)", 1)
+		candidateIndex = len(orders) - 1
 	}
+	cand := renderReplayInstructions(ctxText, orders, in, note, candidateIndex)
 	return replay.Renders{BaselineText: base, BaselineHash: hashText(base), CandidateText: cand, CandidateHash: hashText(cand)}, nil
 }
 
-// time0Format is the date a zero CreatedAt renders as in a standing order line.
-const time0Format = "0001-01-01"
-
-func renderReplayInstructions(ctxText string, orders []StandingOrder, in ReplayRenderInput, note string) string {
-	sections := []string{StandingOrdersSection(orders), in.GoalSection}
+func renderReplayInstructions(ctxText string, orders []StandingOrder, in ReplayRenderInput, note string, candidateIndex int) string {
+	sections := []string{standingOrdersSection(orders, candidateIndex), in.GoalSection}
 	if note != "" {
 		sections = append(sections, note)
 	}

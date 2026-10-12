@@ -120,6 +120,22 @@ func TestHandleStreamDisconnectFailsOwningGeneration(t *testing.T) {
 		"the owning prompt's disconnect fails the execution so the orchestrator can reconcile")
 }
 
+func TestHandleStreamDisconnectPreservesExecutionAfterCancelEscalation(t *testing.T) {
+	h := newWorkspaceEventsHarness(t)
+	h.exec.Status = v1.AgentStatusRunning
+	h.exec.promptDoneCh = make(chan PromptCompletionSignal, 1)
+	generation, err := h.mgr.BeginPrompt("exec-1")
+	require.NoError(t, err)
+	h.exec.Status = v1.AgentStatusReady
+	h.exec.cancelEscalatedPromptGeneration.Store(generation)
+
+	h.mgr.handleStreamDisconnect(h.exec, errors.New("use of closed network connection"), generation)
+
+	require.Equal(t, v1.AgentStatusReady, h.exec.Status,
+		"a disconnect caused by cancel escalation must preserve the reusable execution")
+	require.Zero(t, h.count(), "expected cancel teardown must not publish a stream error")
+}
+
 func TestNotifyWorktreeMaterializedPublishesAgentctlReady(t *testing.T) {
 	h := newWorkspaceEventsHarness(t)
 	h.exec.TaskEnvironmentID = "env-1"
@@ -167,6 +183,34 @@ func TestNotifyWorktreeMaterializedWithoutEventBusIsNoOp(t *testing.T) {
 	mgr.eventPublisher = NewEventPublisher(nil, newTestLogger())
 
 	mgr.NotifyWorktreeMaterialized(context.Background(), MaterializedWorktree{SessionID: "session-1"})
+}
+
+func TestPublishAgentctlDeliveryRecoveryKeepsCapturedSubmissionIdentity(t *testing.T) {
+	h := newWorkspaceEventsHarness(t)
+	identity := DeliveryReconciliationIdentity{
+		SessionID: "session-1", ExecutionID: "exec-1", IncarnationID: "inc-1",
+		HarnessGeneration: 7, StreamID: "stream-1", SubmissionID: "submission-1",
+		PromptGeneration: 12,
+	}
+	h.mgr.eventPublisher.PublishAgentctlDeliveryRecovery(
+		context.Background(), h.exec, identity, DeliveryReconciliationPhaseUncertain,
+	)
+
+	got := h.only(t)
+	if got.Subject != events.AgentctlError {
+		t.Fatalf("subject = %q, want %q", got.Subject, events.AgentctlError)
+	}
+	payload, ok := got.Event.Data.(AgentctlEventPayload)
+	if !ok {
+		t.Fatalf("payload type = %T", got.Event.Data)
+	}
+	if payload.DeliveryRecoveryPhase != string(DeliveryReconciliationPhaseUncertain) ||
+		payload.DeliverySubmissionID != identity.SubmissionID || payload.DeliveryStreamID != identity.StreamID ||
+		payload.DeliveryIncarnationID != identity.IncarnationID ||
+		payload.DeliveryHarnessGeneration != identity.HarnessGeneration ||
+		payload.PromptGeneration != identity.PromptGeneration {
+		t.Fatalf("recovery identity = %+v, want captured identity %+v", payload, identity)
+	}
 }
 
 func TestBranchSnapshotErrorWrapsCause(t *testing.T) {

@@ -71,12 +71,17 @@ function makeApi(panelIds: string[]): { api: DockviewApi; panels: FakePanel[] } 
   return { api, panels };
 }
 
-function makeAutoSessionAppStore(taskId: string | null, sessionIds: string[]) {
+function makeAutoSessionAppStore(
+  taskId: string | null,
+  sessionIds: string[],
+  sessionListLoaded = true,
+) {
   const itemsByTaskId = taskId ? { [taskId]: sessionIds.map((id) => ({ id })) } : {};
+  const loadedByTaskId = taskId ? { [taskId]: sessionListLoaded } : {};
   return {
     getState: () => ({
       tasks: { activeTaskId: taskId },
-      taskSessionsByTask: { itemsByTaskId },
+      taskSessionsByTask: { itemsByTaskId, loadedByTaskId },
     }),
   };
 }
@@ -503,6 +508,18 @@ describe("resolveSessionTabSyncTarget", () => {
     expect(target).toEqual({ taskId: "task-A", sessionId: "s-pending-hydration" });
   });
 
+  it("accepts a compact task-session member before its environment mapping is available", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-compact",
+      activeTaskId: "task-A",
+      activeSessionId: "s-current",
+      taskSessionsById: { "s-compact": makeSession("s-compact", "task-A") },
+      environmentIdBySessionId: {},
+    });
+
+    expect(target).toEqual({ taskId: "task-A", sessionId: "s-compact" });
+  });
+
   /**
    * Regression for a one-frame UI glitch: `removeTaskSession` clears
    * `taskSessions.items[sid]` and `environmentIdBySessionId[sid]` atomically.
@@ -603,6 +620,19 @@ describe("runAutoSessionTabEffect", () => {
     });
 
     expect(activePanelId()).toBe(`session:${sessionId}`);
+  });
+
+  it("keeps restored sibling session panels while the task session list is loading", () => {
+    const { api, panels } = makeApi(["session:A", "session:B"]);
+    const restoredSibling = panelById(panels, "session:B");
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, ["A"], false);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api }, () => {
+      runAutoSessionTabEffect(null, appStore as never, refs as never);
+    });
+
+    expect(restoredSibling?.api.close).not.toHaveBeenCalled();
   });
 
   it("replaces selected Chat without activating Plan while Files owns global focus", () => {

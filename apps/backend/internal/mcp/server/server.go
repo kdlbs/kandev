@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
@@ -36,6 +38,9 @@ type BackendClient interface {
 	// RequestPayload sends a request to the backend and unmarshals the response.
 	RequestPayload(ctx context.Context, action string, payload, result interface{}) error
 }
+
+const rejectedTransferToolAuditTimeout = 2 * time.Second
+const rejectedTransferToolAuditAttempts = 3
 
 type backendSessionSetter interface {
 	SetSessionID(sessionID string)
@@ -117,6 +122,7 @@ type Server struct {
 	disableAskQuestion         bool
 	mode                       string // "task" (default), "task-title-pending", "config", "external", "office", or "automation"
 	mcpProviders               []string
+	sseBaseURL                 string
 	profile                    mcpprofile.Context
 	legacyModeCapabilities     []mcpprofile.Capability
 	namespacesMCPToolsByServer bool
@@ -150,6 +156,14 @@ func WithMCPToolNamespacingByServer(enabled bool) ServerOption {
 	}
 }
 
+// WithSSEBaseURL sets the origin advertised in the SSE message endpoint event.
+// The default remains localhost for callers that do not set an instance host.
+func WithSSEBaseURL(baseURL string) ServerOption {
+	return func(s *Server) {
+		s.sseBaseURL = strings.TrimSuffix(baseURL, "/")
+	}
+}
+
 type mcpAttachmentAttemptContextKey struct{}
 
 // New creates a new MCP server for agentctl.
@@ -166,7 +180,7 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 	// WithBaseURL ensures the SSE endpoint event includes the full message URL
 	// (e.g. http://localhost:10005/message?sessionId=xxx) so MCP clients can POST back.
 	s.sseServer = server.NewSSEServer(s.mcpServer,
-		server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)),
+		server.WithBaseURL(s.sseBaseURLForPort(port)),
 	)
 
 	// Create Streamable HTTP server for Codex
@@ -188,13 +202,20 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 	}
 	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext, options...)
 	s.sseServer = server.NewSSEServer(s.mcpServer,
-		server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)),
+		server.WithBaseURL(s.sseBaseURLForPort(port)),
 	)
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
 		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 	return s
+}
+
+func (s *Server) sseBaseURLForPort(port int) string {
+	if s.sseBaseURL != "" {
+		return s.sseBaseURL
+	}
+	return fmt.Sprintf("http://localhost:%d", port)
 }
 
 // NewExternal creates an MCP server for the Kandev backend's external endpoint.
@@ -285,8 +306,9 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 	hooks.AddAfterInitialize(func(ctx context.Context, _ any, _ *mcp.InitializeRequest, _ *mcp.InitializeResult) {
 		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
 	})
-	hooks.AddBeforeCallTool(func(_ context.Context, _ any, request *mcp.CallToolRequest) {
+	hooks.AddBeforeCallTool(func(_ context.Context, id any, request *mcp.CallToolRequest) {
 		s.restoreCanonicalToolName(request)
+		stampTransportRequestID(request, id)
 	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
 		s.presentTransportToolNames(result)
@@ -679,6 +701,9 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 		var result *mcp.CallToolResult
 		var err error
 		if validationErr != nil {
+			if toolName == "transfer_task_kandev" {
+				s.auditRejectedTransferTool(ctx, req.GetRawArguments())
+			}
 			result = mcp.NewToolResultError(validationErr.Error())
 		} else {
 			result, err = handler(ctx, validatedReq)
@@ -725,6 +750,32 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 		}
 
 		return result, err
+	}
+}
+
+func (s *Server) auditRejectedTransferTool(ctx context.Context, arguments any) {
+	payload := make(map[string]any)
+	if provided, ok := arguments.(map[string]any); ok {
+		for key, value := range provided {
+			payload[key] = value
+		}
+	}
+	payload["audit_attempt_id"] = uuid.NewString()
+	var ignored map[string]interface{}
+	auditCtx, cancel := context.WithTimeout(mcporigin.WithTrustedInternalCall(context.WithoutCancel(ctx)), rejectedTransferToolAuditTimeout)
+	defer cancel()
+	var err error
+	for attempt := 0; attempt < rejectedTransferToolAuditAttempts; attempt++ {
+		err = s.backend.RequestPayload(auditCtx, ws.ActionMCPAuditTaskTransferAttempt, payload, &ignored)
+		if err == nil {
+			return
+		}
+		if auditCtx.Err() != nil {
+			break
+		}
+	}
+	if err != nil {
+		s.logger.Warn("failed to durably audit rejected transfer tool call", zap.Error(err))
 	}
 }
 
@@ -1148,6 +1199,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "configuration-prompts", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigPromptTools() }},
 		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
 		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
+		{name: "task-transfer", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) || office(ctx) }, register: func(s *Server) { s.registerTaskTransferTool() }},
 		{name: "configuration-settings", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigSettingsTools() }},
 		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
 		{name: "external-questions", enabled: external, register: func(s *Server) { s.registerQuestionAnsweringTools() }},
@@ -1178,6 +1230,30 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 		{name: "canvas-authoring", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityCanvas)), register: func(s *Server) { s.registerCanvasTools() }},
 	}
+}
+
+func (s *Server) registerTaskTransferTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("transfer_task_kandev",
+			mcp.WithDescription("Atomically transfer one exact task identity to an authorized workspace and equivalent workflow lane. Requires the current source placement and generation, a unique idempotency key, and the preserve-task-identity-v1 policy. Ordinary task agents cannot access this tool."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("Exact task UUID to preserve")),
+			mcp.WithString("expected_source_workspace_id", mcp.Required()),
+			mcp.WithString("expected_source_workflow_id", mcp.Required()),
+			mcp.WithString("expected_source_workflow_step_id", mcp.Required()),
+			mcp.WithString("expected_task_updated_at", mcp.Required(), mcp.Description("Current task updated_at in RFC3339Nano format")),
+			mcp.WithString("destination_workspace_id", mcp.Required()),
+			mcp.WithString("destination_workflow_id", mcp.Required()),
+			mcp.WithString("destination_workflow_step_id", mcp.Description("Stable destination lane ID; provide this or destination_workflow_step_name")),
+			mcp.WithString("destination_workflow_step_name", mcp.Description("Exact destination lane name; accepted only when uniquely mapped")),
+			mcp.WithString("idempotency_key", mcp.Required()),
+			mcp.WithString("preservation_policy", mcp.Required(), mcp.Description("Must be preserve-task-identity-v1")),
+		),
+		s.wrapHandler("transfer_task_kandev", s.transferTaskHandler()),
+	)
 }
 
 func (s *Server) registerAgentPermissionTools() {
@@ -1961,8 +2037,11 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_plan_kandev",
-			mcp.WithDescription("Get the current plan for a task, including any user edits. task_id selects the task: pass your own task ID for your current task, or another task's ID to read that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithDescription("Get the current plan for a task, including user edits and its version. task_id selects your current task by default or another task within your reach (same workspace / task tree); an outside task is rejected, never silently redirected to your own. Omit offset and limit to read the whole plan; supply either for a bounded exact fragment. Ranges count Unicode code points, not bytes. Partial reads return total length, has_more, and next_offset; continue with that offset and expected_version to avoid mixing versions. A fragment is not a replacement document: use edit_task_plan_kandev for local changes or update_task_plan_kandev with mode=\"append\" for additions."),
 			mcp.WithString("task_id", mcp.Description("The task ID to get the plan for. Defaults to your current task when omitted; pass another task's ID to read it directly.")),
+			mcp.WithInteger("offset", mcp.Min(0), mcp.Max(float64(taskcontract.MaxPlanReadOffset)), mcp.Description("Optional zero-based Unicode character offset. Supplying offset or limit enables partial reading. Defaults to 0 only in partial mode.")),
+			mcp.WithInteger("limit", mcp.Min(1), mcp.Max(taskcontract.MaxPlanReadCharacters), mcp.Description("Optional maximum characters to return: 1 through 8192. Defaults to 4096 only when a range argument is supplied; omit both range arguments for a full read.")),
+			mcp.WithString("expected_version", mcp.Description("Optional non-empty version from an earlier read or successful write. A changed or deleted plan returns a conflict without content. Use the first page's version for subsequent pages and reconcile on conflict.")),
 		),
 		s.wrapHandler("get_task_plan_kandev", s.getTaskPlanHandler()),
 	)

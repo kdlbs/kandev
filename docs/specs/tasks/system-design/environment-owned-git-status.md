@@ -227,7 +227,8 @@ A live-query error does not permit a persisted fallback while any environment
 execution is live. Foreground refresh first uses `fresh`, then runs `recover`
 once if complete membership is still missing. If detail-completion delivery is
 missed, it uses `replay` once. A later focus or activation can start a new
-attempt; there is no interval refresh loop.
+attempt. Failed reads use Platform's [delayed recovery](../../platform/system-design/changes-refresh-recovery.md)
+while Changes is active. That policy retains the environment authority described here.
 
 A migrated row without session provenance remains valid until its environment
 is removed. Provenance loss does not change current-status authority.

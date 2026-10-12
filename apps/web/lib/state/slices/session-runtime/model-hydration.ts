@@ -120,6 +120,17 @@ function mapSnapshotConfigOptions(
   return configOptions;
 }
 
+function mapConfirmedConfigOptions(
+  snapshot: Record<string, unknown>,
+): Record<string, string> | undefined {
+  if (snapshot.config_options_settled !== true) return undefined;
+  return Object.fromEntries(
+    objectList(snapshot.config_options)
+      .map((option) => [stringValue(option.id) ?? "", stringValue(option.current_value)])
+      .filter((entry): entry is [string, string] => !!entry[0] && typeof entry[1] === "string"),
+  );
+}
+
 function buildProviderRestoredModelsState(
   metadata: SessionModelHydrationMetadata,
 ): SessionModelsHydration {
@@ -135,6 +146,8 @@ function buildProviderRestoredModelsState(
           models,
           configOptions,
           configOptionsSettled: snapshot.config_options_settled === true,
+          confirmedConfigOptions: mapConfirmedConfigOptions(snapshot),
+          confirmedConfigOptionsExecutionId: stringValue(snapshot.settings_source_execution_id),
           configBaseline: stringMap(session.metadata?.acp_config_baseline),
           settingsPolicy: "provider_restored",
         },
@@ -166,7 +179,12 @@ function buildStrictModelsState(metadata: SessionModelHydrationMetadata): Sessio
     "";
   const models = mapSnapshotModels(snapshot);
   const configOptions = mapSnapshotConfigOptions(snapshot, runtimeOptions);
-  if (!currentModelId && models.length === 0 && configOptions.length === 0) {
+  if (
+    !currentModelId &&
+    models.length === 0 &&
+    configOptions.length === 0 &&
+    snapshot.config_options_settled !== true
+  ) {
     return {};
   }
 
@@ -178,6 +196,8 @@ function buildStrictModelsState(metadata: SessionModelHydrationMetadata): Sessio
           models,
           configOptions,
           configOptionsSettled: snapshot.config_options_settled === true,
+          confirmedConfigOptions: mapConfirmedConfigOptions(snapshot),
+          confirmedConfigOptionsExecutionId: stringValue(snapshot.settings_source_execution_id),
           configBaseline: stringMap(session.metadata?.acp_config_baseline),
         },
       },

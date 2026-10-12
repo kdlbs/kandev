@@ -1,4 +1,5 @@
 import type { SessionPrepareState } from "./types";
+import { normalizeNativeMcpDiagnostic } from "@/lib/prepare/native-mcp-diagnostic";
 
 /**
  * Raw `prepare_result` shape as stored in a session's `metadata` (snake_case,
@@ -18,6 +19,7 @@ type RawPrepareStep = {
   error?: string;
   warning?: string;
   warning_detail?: string;
+  mcp_diagnostic?: unknown;
   started_at?: string;
   ended_at?: string;
 };
@@ -54,6 +56,7 @@ export function prepareResultToSessionState(
     preparationStartedAt: pr.preparation_started_at,
     steps: (pr.steps ?? []).map((s) => {
       const isMcp = s.kind?.startsWith("agent_mcp_") === true;
+      const mcpDiagnostic = isMcp ? normalizeNativeMcpDiagnostic(s.mcp_diagnostic) : undefined;
       return {
         name: isMcp ? "" : s.name,
         kind: s.kind,
@@ -67,6 +70,7 @@ export function prepareResultToSessionState(
         error: isMcp ? undefined : s.error,
         warning: isMcp ? undefined : s.warning,
         warningDetail: isMcp ? undefined : s.warning_detail,
+        ...(mcpDiagnostic ? { mcpDiagnostic } : {}),
         startedAt: s.started_at,
         endedAt: s.ended_at,
       };

@@ -314,18 +314,20 @@ raise SystemExit(0)
         self.assertEqual(self.outcome(2)["stop_reason"], "incomplete_zero_exit")
 
     def test_both_attempts_share_one_deadline(self) -> None:
-        marker = repr("invocations")
-        source = f"""from pathlib import Path
-import time
-counter = Path({marker})
-if not counter.exists():
-    counter.write_text('1')
-    time.sleep(0.28)
-    raise SystemExit(0)
-Path('agent.ready').write_text('ready')
-while True: time.sleep(0.01)
-"""
-        command = self.write_agent(source)
+        elapsed = 0.0
+
+        def advance_clock(timeout: float) -> bool:
+            nonlocal elapsed
+            elapsed = round(elapsed + timeout, 6)
+            return False
+
+        cancellation = mock.Mock()
+        cancellation.is_set.return_value = False
+        cancellation.wait.side_effect = advance_clock
+        first_process = mock.Mock(returncode=0)
+        first_process.poll.side_effect = lambda: 0 if elapsed >= 0.28 else None
+        second_process = mock.Mock(returncode=None)
+        second_process.poll.return_value = None
         config = runner.RunConfig(
             deadline_seconds=0.5,
             poll_interval_seconds=0.01,
@@ -334,15 +336,33 @@ while True: time.sleep(0.01)
             verifier_timeout_seconds=0.5,
             max_attempts=2,
         )
-        start = time.monotonic()
 
-        result = runner.run_agent(command, cwd=self.worktree, env=self.env, config=config)
+        with (
+            mock.patch.object(runner.time, "monotonic", side_effect=lambda: elapsed),
+            mock.patch.object(
+                runner.subprocess, "Popen", side_effect=[first_process, second_process]
+            ) as launch,
+            mock.patch.object(runner, "stop_process_group", return_value=True) as cleanup,
+        ):
+            result = runner.run_agent(
+                ["fake-agent"],
+                cwd=self.worktree,
+                env=self.env,
+                config=config,
+                cancellation=cancellation,
+            )
 
-        elapsed = time.monotonic() - start
         self.assertNotEqual(result, 0)
+        self.assertEqual(launch.call_count, 2)
+        self.assertEqual(
+            cleanup.call_args_list,
+            [mock.call(first_process, config), mock.call(second_process, config)],
+        )
+        self.assertEqual(self.outcome(1)["stop_reason"], "incomplete_zero_exit")
         self.assertEqual(self.outcome(2)["stop_reason"], "deadline")
-        self.assertLess(elapsed, 0.7)
-        self.assertLess(self.outcome(2)["elapsed_seconds"], 0.35)
+        self.assertAlmostEqual(elapsed, 0.5)
+        self.assertAlmostEqual(self.outcome(1)["elapsed_seconds"], 0.28)
+        self.assertAlmostEqual(self.outcome(2)["elapsed_seconds"], 0.22)
 
     def test_external_cancellation_fails_even_with_output_files_present(self) -> None:
         source = """from pathlib import Path

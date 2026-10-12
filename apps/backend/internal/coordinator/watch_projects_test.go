@@ -81,7 +81,7 @@ func (f *fakeProjects) ListTaskRepositoryIDsByTaskIDs(_ context.Context, ids []s
 // projectScope stores a selected project scope for the coordinator.
 func projectScope(t *testing.T, store *Store, coordinatorID string, includeNoRepo bool, entries ...ProjectEntry) {
 	t.Helper()
-	mustExec(t, store, `UPDATE coordinators SET project_scope = 'selected', include_no_repository = ? WHERE id = ?`, includeNoRepo, coordinatorID)
+	mustExec(t, store, `UPDATE coordinators SET project_scope = 'selected', include_no_repository = ? WHERE id = ?`, autonomyColumn(includeNoRepo), coordinatorID)
 	for _, e := range entries {
 		mustExec(t, store, `INSERT INTO coordinator_watch_projects (coordinator_id, entry_kind, entry_id, workspace_id, created_at) VALUES (?, ?, ?, 'ws-1', ?)`,
 			coordinatorID, e.Kind, e.ID, time.Now().UTC())
@@ -220,6 +220,9 @@ func TestBackstop_ProjectScopeFiltersAndResolverFailureSkipsTheCoordinator(t *te
 
 func TestDeliver_ResolverFailureAbortsWithoutSupersedingAnything(t *testing.T) {
 	f := newDeliverFixture(t)
+	seedClaimProjectTables(t, f.store)
+	mustExec(t, f.store, `INSERT INTO repositories (id, workspace_id) VALUES ('repo-a', 'ws-1'), ('repo-b', 'ws-1')`)
+	mustExec(t, f.store, `INSERT INTO task_repositories VALUES ('link-a', 't1', 'repo-a'), ('link-b', 't2', 'repo-b')`)
 	p := newFakeProjects()
 	p.addRepo("repo-a", "a")
 	f.svc.SetProjectReader(p)

@@ -59,8 +59,11 @@ explicitly requests task tracking.
 
 4. **Screenshots — capture and validate before publication.** For a UI-visible
    change, capture fresh screenshots for every affected viewport before creating
-   the PR. When the changed surface is structurally absent on another viewport,
-   record that rationale instead of capturing an unrelated screen.
+   the PR. For repository UI, use `/playwright-cli` with an isolated headless
+   session or the managed `apps/web` E2E runner. See step 7 for capture routing
+   and blocker classification. When the changed surface is structurally absent
+   on another viewport, record that rationale instead of capturing an unrelated
+   screen.
    Use synthetic or redacted data, validate the assets, and compress PNGs using
    the recipe in step 7. If capture is impossible, report the concrete blocker
    and stop before PR publication. For non-UI changes, record that screenshots
@@ -125,11 +128,23 @@ required screenshot embedding in step 7 is complete.
 7. **Screenshots — publish already captured assets.** If the diff touches user-visible UI (typically under `apps/web/`, excluding e2e-only or backend-only edits), publish the affected-viewport assets captured and validated in step 4 through the host-specific flow before treating the PR as complete — do not wait to be asked. Preserve any structural-absence rationale recorded in step 4.
 
    **Capture prerequisite:**
+   - Start repository UI verification with `/playwright-cli` or the managed E2E
+     runner, rather than a connected personal browser or in-app browser tool.
+     The CLI's default profile is isolated; do not use `--extension` or a user's
+     persistent browser profile for disposable repository captures.
    - If `pnpm --dir apps exec playwright-cli list` has no local browser, use the
      managed `apps/web` E2E runner with a disposable capture spec instead of
      treating capture as blocked. Name mobile specs `mobile-*.spec.ts`, write
      assets to ignored `apps/web/.pr-assets`, inspect/compress them, then remove
      the temporary spec and confirm `git status` is clean.
+   - Classify failures against the capability that failed. A connected-browser
+     saved-site denial does not prove that the repository Playwright workflow
+     cannot capture. Honor that tool's denial and any prohibition on alternate
+     routes; do not evade it by changing hosts, ports, profiles, or providers.
+     If alternate execution needs authorization, explain the boundary once and
+     request it. Filesystem sandbox changes can justify retrying a failed local
+     Playwright launch, but do not clear saved browser permissions. Report a
+     capture blocker only with evidence from the authorized capture workflow.
    - After opening a popover or dialog, assert that the intended surface is
      visible and await finite active CSS animations (`element.getAnimations().finished`)
      before capture; do not publish a mid-transition asset.

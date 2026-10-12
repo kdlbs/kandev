@@ -106,6 +106,9 @@ func (h *Handlers) authorizeCoordinatorSurface(
 	ctx context.Context, principal mcpscope.Principal, msg *ws.Message,
 ) (*ws.Message, *ws.Message, error) {
 	phase2 := h.coordinatorSvc != nil && h.coordinatorSvc.Phase2()
+	if phase2 && !h.coordinatorWorkspaceMatches(ctx, principal) {
+		return coordinatorNotFound(msg)
+	}
 	if phase2 && principal.WorkspaceID != "" {
 		if refused, response, err := h.authorizeCoordinatorPolicy(ctx, principal, msg); refused {
 			return response, nil, err
@@ -121,7 +124,7 @@ func (h *Handlers) authorizeCoordinatorSurface(
 	fields, err := automationPayloadFields(msg.Payload)
 	if err != nil {
 		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest,
-			"Invalid payload: "+err.Error(), nil)
+			"Invalid JSON payload", nil)
 		return response, nil, responseErr
 	}
 	if !h.authorizeCoordinatorReferenceFields(ctx, principal, msg.Action, fields) {
@@ -131,6 +134,14 @@ func (h *Handlers) authorizeCoordinatorSurface(
 		return coordinatorNotFound(msg)
 	}
 	return nil, msg, nil
+}
+
+func (h *Handlers) coordinatorWorkspaceMatches(ctx context.Context, principal mcpscope.Principal) bool {
+	if h.coordinatorSvc == nil || principal.WorkspaceID == "" {
+		return false
+	}
+	workspaceID, err := h.coordinatorSvc.WorkspaceIDOf(ctx, principal.CoordinatorID)
+	return err == nil && workspaceID == principal.WorkspaceID
 }
 
 // phaseOneToolNames is the tool list of a conversation that has no binding.

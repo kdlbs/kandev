@@ -62,10 +62,12 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 		return &ProbeResponse{Error: err.Error()}, nil
 	}
 	start := time.Now()
-	client, cleanup, stderr, err := e.start(ctx, command, args, req.InferenceConfig)
+	client, cleanupCommand, stderr, err := e.start(ctx, command, args, req.InferenceConfig)
 	if err != nil {
 		return &ProbeResponse{Error: fmt.Sprintf("start Codex app-server: %v", err), DurationMs: int(time.Since(start).Milliseconds())}, nil
 	}
+	var cleanupOnce sync.Once
+	cleanup := func() { cleanupOnce.Do(cleanupCommand) }
 	defer cleanup()
 	if err := initializeCodexAppServer(ctx, client); err != nil {
 		// Join the process and stderr copier before classifying its failure.

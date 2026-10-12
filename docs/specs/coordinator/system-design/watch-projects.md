@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-30
-last_updated: 2026-09-30
+last_updated: 2026-10-12
 requirements:
   - REQ-COORDINATOR-PERMISSIONS-005
 ---
@@ -80,9 +80,20 @@ resolver returns an error and the caller fails closed as the Error handling tabl
 says. Because nothing is stored, adding
 a repository to a set widens every coordinator that lists it on the next read
 (`005.3`). A task in several repositories is in scope when any one matches.
-`watch.Task(task)` is the single function that combines the workflow test and
-`InProjects`; every path below calls it and none compares repositories
-directly (`005.4`).
+`watch.Task` combines the workflow test and `InProjects`. SQL recording
+queries use `watch.TaskSQL`, its project predicate for the task alias `t`, with
+the workflow predicate in the same query. Both forms live in `watch`; callers
+do not compare repository membership themselves (`005.4`).
+
+Ledger snapshots, digest targets and dream decision evidence resolve stored
+scope through `ResolveWatchProjectsSQL`. This read-only adapter uses current
+repository sets and live repositories in the coordinator workspace, without
+calling task-service readers that may repair rows. Missing project tables or
+failed reads return an error with no partial data. Snapshot filtering precedes
+the item cap and total count; digest targets outside scope are omitted, and
+a task-filtered ledger request for an excluded task returns not found.
+Repository-less matching ignores empty links; dangling nonempty links stay
+bound and never become repository-less.
 
 The predicate is compiled in and reads the stored fields whatever the phase 3.1
 flag, so a stored `selected` scope is never silently widened by turning the flag

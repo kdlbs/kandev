@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 created: 2026-08-13
-updated: 2026-08-17
+updated: 2026-10-06
 owners:
   - cfl
 ---
@@ -19,6 +19,72 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 | Requirement | Design section |
 | --- | --- |
 | `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` (`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.9`) | [Standalone settings save publication](#standalone-settings-save-publication) |
+
+## Standalone settings save publication
+
+Agents owns profile values and their shared picker projection. Platform's
+[editor reconciliation contract](../../platform/system-design/agent-settings-parity.md#editor-reconciliation)
+owns the existing draft, acknowledgement, conflict, and settings-save interface
+behavior. This section covers collection publication after one standalone
+dynamic-profile save; it adds no server concurrency or owner-lifetime policy.
+
+`AgentProfilePage` renders `DynamicAgentProfileEditor`, whose
+`useDynamicAgentProfileEditorState` registers the standalone save with
+`useSettingsSaveContributor`. `updateAgentProfileAction` sends the existing
+PATCH and returns the canonical `normalizeAgentProfile` result. While that
+request is pending, registered `agent.profile.created`, `agent.profile.updated`,
+and `agent.profile.deleted` handlers can change `settingsAgents.items` and
+`agentProfiles.items` in the same app store. An option can be present even when
+its Settings owner is absent.
+
+After the awaited response, obtain the current store through `useAppStoreApi`.
+Build the next agent list from that current `settingsAgents.items`, replacing
+only the response's existing profile under the editor's existing owner.
+Compare the response against the current matching profile using
+`isProfileRevisionNewer`; preserve a newer current revision. That predicate
+uses `compareTimestamps` and the established editable-snapshot equality rule
+for equal timestamps. Do not substitute lexical timestamp ordering or a new
+dynamic-version arbitration rule. An identical response needs no replacement.
+
+Map only existing rows. If the owner or matching profile is absent at response
+time, do not synthesize it from captured props or append the response. This is
+a bounded absence behavior, not a cross-owner movement or resurrection policy.
+If a same-profile option survives without a Settings row, preserve the current
+option through existing option reconciliation; do not reconstruct its owner.
+
+Publish the next list and reconcile flattened options against the current
+`agentProfiles.items` using `reconcileAgentProfileOptions` from
+`agent-profile-page-state.ts`, directly or through its existing
+`useSyncAgentsToStore` helper. Its `mergeOptionsByNewest` preserves all IDs not
+represented by the rebuild and selects the newer timestamp per represented ID;
+equal or missing timestamps retain the established rebuilt-option tie behavior.
+The map uses the latest agent list, so a deleted unrelated profile contributes
+no rebuilt option and cannot reappear from a captured list. Preserve newer
+flattened options even when their represented Settings snapshot is older.
+Keep this response-publication sequence synchronous after the current-state
+read, without another awaited step or a new synchronization framework.
+
+Continue passing the response and submitted snapshot to the existing draft
+acknowledgement path. Candidate policies, version submission, dirty revision,
+edits made during the request, external conflict recovery, toast/error handling,
+and saving cleanup retain their existing semantics. Rejection publishes no
+collection. An embedded editor with `onDraftChange` remains parent-owned and
+does not submit or publish a standalone save. The current coordinator's policy
+validation gate remains in force.
+
+Desktop and phone consume this same state path. No markup, copy, layout, touch,
+navigation, scroll, or breakpoint change is required; a real-state component
+regression with the rendered `AgentProfilePicker` covers the state-only mobile
+parity exception. Use the existing dynamic-routing feature opt-in in tests;
+the flag registry, profiles, defaults, and release policy are unchanged.
+
+The focused delivery is [Preserve profiles during dynamic saves](../../../plans/preserve-dynamic-profile-saves/plan.md).
+Its real-provider/coordinator/registered-WS regressions cover concurrent
+unrelated create/update/delete, mixed represented and unrepresented options,
+retained picker labels, newer target revisions, absence, and the existing ACK,
+failure, policy-validation, and embedded-draft controls. This repair does not
+rewrite concrete-profile saves or add a caller for `useProfileEnabledToggle`.
 
 ## Migrated source detail
 

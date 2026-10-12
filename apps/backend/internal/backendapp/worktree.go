@@ -52,10 +52,23 @@ type bootMsgAdapter struct {
 
 func (a *bootMsgAdapter) CreateMessage(ctx context.Context, req *lifecycle.BootMessageRequest) (*models.Message, error) {
 	isResuming, _ := req.Metadata["is_resuming"].(bool)
+	completedTurn := isResuming
+	turnID := ""
+	if !isResuming {
+		active, err := a.svc.GetActiveTurn(ctx, req.TaskSessionID)
+		if err != nil {
+			return nil, err
+		}
+		completedTurn = active == nil
+		if active != nil {
+			turnID = active.ID
+		}
+	}
 	return a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        req.TaskID,
-		CompletedTurn: isResuming,
+		CompletedTurn: completedTurn,
+		TurnID:        turnID,
 		Content:       req.Content,
 		AuthorType:    req.AuthorType,
 		Type:          req.Type,
@@ -76,6 +89,7 @@ func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Log
 		lifecycleMgr.SetWorktreeManager(manager)
 		lifecycleMgr.SetBootMessageService(&bootMsgAdapter{svc: taskSvc})
 	}
+	manager.SetRecoveryProgressReporter(taskSvc)
 	taskSvc.SetWorktreeCleanup(manager)
 	if lifecycleMgr != nil {
 		taskSvc.SetEnvironmentDestroyer(&environmentDestroyerAdapter{

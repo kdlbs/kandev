@@ -29,7 +29,7 @@ func (h *Handlers) proposeKindHandler(kind string) func(context.Context, *ws.Mes
 			StandingOrderIDs []string `json:"standing_order_ids"`
 		}
 		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid JSON payload", nil)
 		}
 		proposal, deduplicated, err := h.coordinatorSvc.ProposeKind(ctx, principal.CoordinatorID, kind, msg.Payload, payload.StandingOrderIDs)
 		if err != nil {
@@ -44,6 +44,9 @@ func (h *Handlers) proposeKindHandler(kind string) func(context.Context, *ws.Mes
 }
 
 func (h *Handlers) proposeKindErrorResponse(msg *ws.Message, kind string, err error) (*ws.Message, error) {
+	if errors.Is(err, coordinator.ErrNotFound) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "coordinator not found", nil)
+	}
 	var fieldErr *coordinator.FieldError
 	if errors.As(err, &fieldErr) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fieldErr.Message,

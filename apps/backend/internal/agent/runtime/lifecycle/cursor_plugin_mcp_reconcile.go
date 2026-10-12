@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	agentctlconfig "github.com/kandev/kandev/internal/agentctl/server/config"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
@@ -90,6 +91,7 @@ func composeEffectiveMCPServers(
 	allowedProfileServers []agentctltypes.McpServer,
 	userOwnedProjectServers map[string]json.RawMessage,
 	allowedImportCandidates map[string]agentctltypes.McpServer,
+	host string,
 ) (map[string]any, map[string]string) {
 	newMCPServers := make(map[string]any)
 	newOwnership := make(map[string]string)
@@ -97,7 +99,7 @@ func composeEffectiveMCPServers(
 	port := passthroughMCPConfigPort(execution)
 	if port > 0 {
 		newMCPServers[kandevMCPServerName] = map[string]any{
-			"url": fmt.Sprintf("http://localhost:%d/mcp", port),
+			"url": agentctlconfig.MCPServerURL(host, port, "/mcp"),
 		}
 	}
 

@@ -1,4 +1,5 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentModelConfigResponse,
@@ -7,6 +8,7 @@ import type {
   ProfileCapabilityRequest,
   ResolveAgentModelConfigRequest,
 } from "@/lib/types/http";
+import type { AgentUpdateJob } from "@/lib/api";
 
 const MOCK_AGENT_NAME = "mock-agent";
 const PROFILE_ID_A = "profile-a";
@@ -31,6 +33,34 @@ vi.mock("@/lib/api/domains/profile-capability-api", () => ({
 }));
 
 import { useProfileModelCapabilities } from "./use-profile-model-capabilities";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+
+let profileStore: ReturnType<typeof useAppStoreApi> | null = null;
+
+function StoreCapture() {
+  profileStore = useAppStoreApi();
+  return null;
+}
+
+function profileStoreWrapper({ children }: { children: ReactNode }) {
+  return (
+    <StateProvider>
+      <StoreCapture />
+      {children}
+    </StateProvider>
+  );
+}
+
+function updateJob(overrides: Partial<AgentUpdateJob> = {}): AgentUpdateJob {
+  return {
+    job_id: "activation-1",
+    agent_name: MOCK_AGENT_NAME,
+    status: "succeeded",
+    started_at: "2026-01-01T00:00:00.000Z",
+    finished_at: "2026-01-01T00:01:00.000Z",
+    ...overrides,
+  };
+}
 
 const modelConfig: ModelConfig = {
   default_model: SAVED_MODEL_ID,
@@ -42,6 +72,7 @@ const modelConfig: ModelConfig = {
 function capabilityResponse(
   models: { id: string; name: string }[],
   contextRevision: string,
+  observedVersion?: string,
 ): DynamicModelsResponse {
   return {
     agent_name: MOCK_AGENT_NAME,
@@ -52,6 +83,24 @@ function capabilityResponse(
     current_model_id: models[0]?.id,
     current_mode_id: "default",
     context_revision: contextRevision,
+    ...(observedVersion
+      ? {
+          runtime_info: {
+            scope: "host",
+            observed_at: "2026-01-01T00:00:00.000Z",
+            components: [
+              {
+                role: "bridge",
+                name: "ACP bridge",
+                source: "managed",
+                owner: "kandev",
+                effective_version: "1.1.0",
+                observed_version: observedVersion,
+              },
+            ],
+          },
+        }
+      : {}),
     error: null,
   };
 }
@@ -83,6 +132,7 @@ const initialProfile = {
 
 afterEach(() => {
   cleanup();
+  profileStore = null;
   probeAgentProfileMock.mockReset();
   resolveAgentModelConfigMock.mockReset();
 });
@@ -172,6 +222,172 @@ describe("useProfileModelCapabilities", () => {
     expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(2);
     expect(result.current.configStatus).toBe("ok");
     expect(result.current.configIsLoading).toBe(false);
+  });
+});
+
+describe("profile discovery after runtime activation", () => {
+  it("refreshes the current draft once after a matching successful update", async () => {
+    probeAgentProfileMock
+      .mockResolvedValueOnce(
+        capabilityResponse([{ id: SAVED_MODEL_ID, name: SAVED_MODEL_NAME }], REVISION_A, "1.0.0"),
+      )
+      .mockResolvedValueOnce(
+        capabilityResponse([{ id: "new-model", name: "New model" }], REVISION_B, "2.0.0"),
+      );
+
+    const onChange = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ profile }) =>
+        useProfileModelCapabilities(MOCK_AGENT_NAME, profile, modelConfig, onChange, {
+          profileId: PROFILE_ID_A,
+          savedLaunchSettings,
+        }),
+      { initialProps: { profile: initialProfile }, wrapper: profileStoreWrapper },
+    );
+
+    await waitFor(() => expect(result.current.discoveryState).toBe("ready"));
+    expect(probeAgentProfileMock).toHaveBeenCalledTimes(1);
+
+    const draft = {
+      ...initialProfile,
+      env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: "activated-draft" }],
+      command_prefix: "mock-agent --activated-profile",
+    };
+    rerender({ profile: draft });
+    expect(result.current.discoveryState).toBe("stale");
+
+    await act(async () => {
+      profileStore!.getState().upsertAgentUpdateJob(updateJob());
+    });
+
+    await waitFor(() => expect(probeAgentProfileMock).toHaveBeenCalledTimes(2));
+    expect(probeAgentProfileMock).toHaveBeenLastCalledWith(MOCK_AGENT_NAME, {
+      profile_id: PROFILE_ID_A,
+      launch_settings: {
+        env_vars: [
+          {
+            key: "MOCK_AGENT_PROFILE_CATALOG",
+            value: "activated-draft",
+            secret_id: undefined,
+          },
+        ],
+        cli_flags: [],
+        command_prefix: "mock-agent --activated-profile",
+      },
+      refresh: true,
+    });
+    expect(result.current.capabilities.models).toEqual([{ id: "new-model", name: "New model" }]);
+    expect(result.current.discoveryState).toBe("ready");
+    expect(result.current.runtimeInfo?.components[0]?.observed_version).toBe("2.0.0");
+    expect(draft.model).toBe(SAVED_MODEL_ID);
+    expect(onChange).not.toHaveBeenCalled();
+
+    await act(async () => {
+      profileStore!.getState().upsertAgentUpdateJob(updateJob());
+    });
+    expect(probeAgentProfileMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("stale profile runtime observations", () => {
+  it("keeps the last runtime observation visible when the launch draft changes", async () => {
+    probeAgentProfileMock.mockResolvedValueOnce(
+      capabilityResponse([{ id: SAVED_MODEL_ID, name: SAVED_MODEL_NAME }], REVISION_A, "1.0.0"),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ profile }) =>
+        useProfileModelCapabilities(MOCK_AGENT_NAME, profile, modelConfig, vi.fn(), {
+          profileId: PROFILE_ID_A,
+          savedLaunchSettings,
+        }),
+      { initialProps: { profile: initialProfile } },
+    );
+
+    await waitFor(() => expect(result.current.discoveryState).toBe("ready"));
+    rerender({
+      profile: {
+        ...initialProfile,
+        env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: "edited-draft" }],
+      },
+    });
+
+    expect(result.current.discoveryState).toBe("stale");
+    expect(result.current.capabilities.models).toEqual([]);
+    expect(result.current.runtimeInfo?.components[0]?.observed_version).toBe("1.0.0");
+  });
+});
+
+describe("runtime update job baselines", () => {
+  it("ignores historical, failed, and unrelated runtime update jobs", async () => {
+    const historical = updateJob({ job_id: "historical" });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <StateProvider initialState={{ updateJobs: { byAgent: { [MOCK_AGENT_NAME]: historical } } }}>
+        <StoreCapture />
+        {children}
+      </StateProvider>
+    );
+    probeAgentProfileMock.mockResolvedValueOnce(
+      capabilityResponse([{ id: SAVED_MODEL_ID, name: SAVED_MODEL_NAME }], REVISION_A, "1.0.0"),
+    );
+
+    const { result } = renderHook(
+      () =>
+        useProfileModelCapabilities(MOCK_AGENT_NAME, initialProfile, modelConfig, vi.fn(), {
+          profileId: PROFILE_ID_A,
+          savedLaunchSettings,
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.discoveryState).toBe("ready"));
+    expect(probeAgentProfileMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      profileStore!
+        .getState()
+        .upsertAgentUpdateJob(updateJob({ job_id: "failed", status: "failed" }));
+      profileStore!
+        .getState()
+        .upsertAgentUpdateJob(updateJob({ job_id: "unrelated", agent_name: "other-agent" }));
+    });
+    expect(probeAgentProfileMock).toHaveBeenCalledTimes(1);
+    expect(result.current.capabilities.models).toEqual([
+      { id: SAVED_MODEL_ID, name: SAVED_MODEL_NAME },
+    ]);
+    expect(result.current.runtimeInfo?.components[0]?.observed_version).toBe("1.0.0");
+  });
+});
+
+describe("activation refresh failure", () => {
+  it("keeps the last successful snapshot when activation refresh fails", async () => {
+    probeAgentProfileMock
+      .mockResolvedValueOnce(
+        capabilityResponse([{ id: SAVED_MODEL_ID, name: SAVED_MODEL_NAME }], REVISION_A, "1.0.0"),
+      )
+      .mockRejectedValueOnce(new Error("temporary profile refresh failure"));
+
+    const { result } = renderHook(
+      () =>
+        useProfileModelCapabilities(MOCK_AGENT_NAME, initialProfile, modelConfig, vi.fn(), {
+          profileId: PROFILE_ID_A,
+          savedLaunchSettings,
+        }),
+      { wrapper: profileStoreWrapper },
+    );
+
+    await waitFor(() => expect(result.current.discoveryState).toBe("ready"));
+    await act(async () => {
+      profileStore!
+        .getState()
+        .upsertAgentUpdateJob(updateJob({ job_id: "activation-after-ready" }));
+    });
+
+    await waitFor(() => expect(result.current.discoveryState).toBe("failed"));
+    expect(result.current.capabilities.models).toEqual([
+      { id: SAVED_MODEL_ID, name: SAVED_MODEL_NAME },
+    ]);
+    expect(result.current.runtimeInfo?.components[0]?.observed_version).toBe("1.0.0");
   });
 });
 

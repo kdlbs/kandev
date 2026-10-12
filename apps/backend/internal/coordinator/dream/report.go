@@ -49,7 +49,7 @@ func (s *Scheduler) report(ctx context.Context, c *coordinator.Coordinator, p pl
 		case row.Gate == GatePass:
 			row.Verdict = replay.VerdictUnmeasured
 		default:
-			row.Text, row.TargetID = withheld(row, in.HasCredential)
+			row.Text, row.TargetID, row.CitedTurnIDs = withheld(row, in.HasCredential)
 		}
 		items = append(items, row)
 	}
@@ -82,14 +82,17 @@ func contextLimit(_ *coordinator.Coordinator) int {
 	return coordinator.ContextMaxRunes
 }
 
-// withheld is what is stored of a refused item: nothing when text or target
-// holds a credential, a bounded text otherwise, and a bounded target.
-func withheld(row coordinator.DreamItem, hasCredential func(string) bool) (text, target string) {
-	if hasCredential != nil && (hasCredential(row.Text) || hasCredential(row.TargetID)) {
-		return "", ""
+// withheld stores no untrusted field when any field carries a credential.
+func withheld(row coordinator.DreamItem, hasCredential func(string) bool) (text, target string, citations []string) {
+	if hasCredential != nil {
+		for _, field := range append([]string{row.Text, row.TargetID}, row.CitedTurnIDs...) {
+			if hasCredential(field) {
+				return "", "", []string{}
+			}
+		}
 	}
 	if row.Gate == GateSize {
-		return truncateRunes(row.Text, MaxItemTextRunes), ""
+		return truncateRunes(row.Text, MaxItemTextRunes), "", row.CitedTurnIDs
 	}
-	return row.Text, truncateRunes(row.TargetID, MaxItemTextRunes)
+	return row.Text, truncateRunes(row.TargetID, MaxItemTextRunes), row.CitedTurnIDs
 }

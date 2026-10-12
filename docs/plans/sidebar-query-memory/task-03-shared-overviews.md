@@ -150,3 +150,35 @@ passed and four skipped out of 20,891 discovered, followed by a successful build
 The backend snapshot/scope regressions also passed in run `36707127038`, including
 both PostgreSQL variants. The final fixture correction does not change normalization
 or any overview producer. No product tests, typechecks, or benchmarks ran locally.
+
+### PR3898 hosted mobile reconnect remediation
+
+Hosted E2E run `38180631658`, shard 2, failed the phone shared-context
+reconnect case. The retained retry trace completes both workspace switches,
+then the document intercepts the next task-picker tap until the original
+120-second test deadline. Its pinned Vaul/Radix source was inspected; the
+workspace key replaces the open modal while its pointer-lock lifecycle is
+active. Keep the existing Tasks drawer instance as workspace contents change.
+Keep the contents keyed by workspace so scoped controls and confirmations
+still dispose at that boundary. The desktop sidebar, phone entry point, inset drawer, scrolling, safe-area
+layout, and 44px controls keep their existing composition. Data generation
+fences remain authoritative. Add actual drawer identity/close/reopen coverage;
+retain the existing desktop and phone reconnect assertions and timeouts.
+
+The first attempt also failed its task-route assertion; no first-attempt trace
+was retained, so that symptom is not claimed resolved by the modal correction.
+Full component and browser verification belongs to hosted CI; no local Vite
+install, build, browser, or live backend instance was executed.
+
+### Tasks dismissal follow-up
+
+Hosted CI at retry PR head `5115a271` reproduces the retained lock in both the
+actual drawer close/reopen component regression and the phone shared-context
+scenario (all four attempts). Keeping the open modal stable is necessary but
+does not settle a closing portal waiting on Presence animation completion.
+The Tasks drawer now removes its content portal when `open` becomes false,
+using Radix unmount cleanup for pointer/scroll locks and focus. Dismissal is
+immediate; entry motion, open geometry, workspace-keyed contents and the sole
+confirmation host are unchanged. The existing assertions and timeouts remain;
+close coverage also checks portal disposal and scroll-lock release. Full
+frontend/browser verification of this follow-up is pending hosted CI.

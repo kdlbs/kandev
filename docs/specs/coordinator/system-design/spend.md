@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-29
-last_updated: 2026-09-29
+last_updated: 2026-10-12
 requirements:
   - REQ-COORDINATOR-SPEND-001
   - REQ-COORDINATOR-SPEND-002
@@ -58,31 +58,26 @@ best-effort, change-only rule of
 `SpendReading{WindowSubcents, Mean7dSubcents int64; Measurable, Degraded,
 Mean7dKnown bool}`.
 
-**Contract.** `now` is supplied by the caller (production callers pass the
-coordinator service clock; tests pass a controlled clock). The result follows
-one rule: the error is non-nil exactly when `Measurable` is false because a
-read failed, and then every amount is zero (no partial total from chunks that
-succeeded is ever returned). `Measurable` is false with a nil error only when
-the 24-hour window holds an unpriced row (`Degraded` is then true). The one
-exception is a caller scope error: an empty coordinator id or an empty
-workspace id returns `ErrSpendScope` with `Measurable` false and every amount
-zero, and issues no query, because `ListCoordinatorOriginTasks` reads every
-workspace for an empty workspace id. It is not a failed read, so it is not
-counted in `coordinator_spend_read_failed_total`; it is logged at warn.
-Callers (admission checks 3 and 4, `CheckCeiling`, the autonomy read) treat
-"error non-nil or `Measurable` false" as one condition, unmeasurable, which
-includes `ErrSpendScope`; no decision (admit, hold, stop) ever inspects the
-amounts of an unmeasurable reading. Unmeasurable is the fail-closed reading: a
-failed read, a task list that cannot be read, or an unpriced row is never
-treated as zero spend. The values of a degraded reading (nil error,
-`Measurable` false) are defined, because the autonomy read displays the mean
-([wire shape](wake-screens.md#autonomy-read)):
-`WindowSubcents` is the sum of the priced rows in the 24-hour window (a lower
-bound, never sent), `Degraded` is true, and `Mean7dSubcents` and
-`Mean7dKnown` are computed exactly as for a measurable reading, so the
-seven-day mean stays visible while the window holds an unpriced row. A reading
-with a non-nil error has every amount zero and `Mean7dKnown` false, and the
-seven-day read is not attempted.
+**Contract.** Callers supply `now`: the service clock in production and a
+controlled clock in tests. A failed read returns an error, `Measurable: false`,
+all amounts zero and `Mean7dKnown: false`; partial chunk totals never escape,
+and the seven-day read is not attempted. An unpriced row in the 24-hour window
+instead gives a nil error, `Measurable: false` and `Degraded: true`.
+
+Empty coordinator or workspace IDs return `ErrSpendScope` with all amounts zero
+and `Measurable: false`, without querying. This prevents the empty-workspace
+`ListCoordinatorOriginTasks` query from reading every workspace. Scope errors
+log at warn and do not increment `coordinator_spend_read_failed_total`.
+
+Admission, `CheckCeiling` and autonomy reads treat a non-nil error or false
+`Measurable` as unmeasurable, including scope errors. They never use those
+amounts to admit, hold or stop; failed reads, unreadable task lists and unpriced
+rows cannot count as zero spend.
+
+For display, a degraded nil-error reading exposes `WindowSubcents` as the priced
+24-hour lower bound (never sent). `Mean7dSubcents` and `Mean7dKnown` follow the
+normal measurable calculation, keeping the seven-day mean visible while the
+24-hour window contains an unpriced row ([wire shape](wake-screens.md#autonomy-read)).
 
 1. **Conversation tasks.** `ListCoordinatorOriginTasks(ctx, workspaceID)`
    (phase 1, [copilot](copilot.md#conversation-cleanup)) filtered in Go to
@@ -249,9 +244,15 @@ during that drain, and each successful insert still offers a notice, so the
 notice channel is open until the worker has exited. Only then does `Stop`
 close the notice channel (the worker is its only sender, so the close cannot
 race an offer), cancel the observer context at once (so a running `fn`
-returns promptly and the join cannot hang on it), discard notices still queued
-without a metric, and join the consumer, which has its own wait group so the
-worker's wait does not depend on it. The [backstop](wake.md#backstop) covers
+receives cancellation), discard notices still queued without a metric, and join
+the consumer, which has its own wait group so the worker's wait does not depend
+on it. A cooperative callback is joined before shutdown returns. A callback
+that ignores cancellation gets at most the existing `drainDeadline` grace
+period at shutdown. A callback still running after that grace, or after its
+45-second deadline, disables further callbacks for that writer and increments
+`coordinator_usage_observer_abandoned_total`. Its completion channel is retained;
+shutdown never reports that unfinished call as joined. Go cannot forcibly stop
+an arbitrary callback, so its exit remains unknown until it actually returns. The [backstop](wake.md#backstop) covers
 every discarded notice. A usage event that arrives after `Stop` began is
 refused by the writer's existing `dropped:shutdown` path and never reaches the
 worker. Registering an observer after `Stop` has no effect and returns no

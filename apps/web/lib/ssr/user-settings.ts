@@ -21,6 +21,7 @@ import { parseSidebarTaskColors } from "@/lib/task-colors";
 import type {
   LspStatusLocation,
   LastSeenDisplay,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http-user-settings";
@@ -100,8 +101,11 @@ export function createDefaultUserSettings(): UserSettingsState {
     terminalFontSize: null,
     changesPanelLayout: "tree",
     lastSeenDisplay: "absolute",
+    messageTimeDisplay: "relative",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
+    sidebarFastActionsEnabled: false,
+    sidebarNewTaskStyle: "simple",
     sidebarHoverEnabled: true,
     sidebarHoverDelayMs: 500,
     resolveSessionHostnames: false,
@@ -128,6 +132,11 @@ export function parseChangesPanelLayout(value: string | undefined): "flat" | "tr
 /** Parses the last-seen display format, defaulting to "absolute". */
 export function parseLastSeenDisplay(value: string | undefined): LastSeenDisplay {
   return value === "relative" ? "relative" : "absolute";
+}
+
+/** Parses the transcript message-time display, defaulting to relative. */
+export function parseMessageTimeDisplay(value: string | undefined): MessageTimeDisplay {
+  return value === "absolute_short" || value === "absolute_long" ? value : "relative";
 }
 
 export function parseAgentTabCloseBehavior(
@@ -317,6 +326,11 @@ function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) 
       current.releaseNotesLastSeenVersion,
     ),
     lastSeenDisplay: mapDefined(s.last_seen_display, current.lastSeenDisplay, parseLastSeenDisplay),
+    messageTimeDisplay: mapDefined(
+      s.message_time_display,
+      current.messageTimeDisplay,
+      parseMessageTimeDisplay,
+    ),
   };
 }
 
@@ -395,6 +409,8 @@ export function buildCoreFields(
       parseAppStatusBarOrder,
     ),
     appStatusBarEnabled: s.app_status_bar_enabled ?? current.appStatusBarEnabled,
+    sidebarFastActionsEnabled: s.sidebar_fast_actions_enabled ?? current.sidebarFastActionsEnabled,
+    sidebarNewTaskStyle: s.sidebar_new_task_style ?? current.sidebarNewTaskStyle,
     sidebarHoverEnabled: s.sidebar_hover_enabled ?? current.sidebarHoverEnabled,
     sidebarHoverDelayMs: s.sidebar_hover_delay_ms ?? current.sidebarHoverDelayMs,
     quickChatTabOrderByWorkspace:
@@ -461,4 +477,13 @@ export function mapUserSettingsResponse(
     revision: s.revision ?? null,
     shellOptions,
   };
+}
+
+/** An older HTTP response must not replace a newer settings event. */
+export function mapLatestUserSettingsResponse(
+  response: UserSettingsResponse,
+  current: UserSettingsState,
+): UserSettingsState {
+  if ((response.settings.revision ?? 0) < (current.revision ?? 0)) return current;
+  return mapUserSettingsResponse(response, current);
 }

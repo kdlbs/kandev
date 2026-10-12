@@ -1,7 +1,7 @@
 ---
 id: "07-agent-for-created-tasks"
 title: "Agent for created tasks"
-status: draft
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -182,3 +182,12 @@ Review row  Agent for created tasks | Claude, Local | Identity | [Change]
   spec of this order on desktop and `mobile-chrome`.
 - `python3 scripts/list-docs.py validate` and
   `python3 scripts/lint-spec-files.py --all`.
+
+
+## Current integration verification
+
+Source implementation is present in the current-main integration for PR #4044.
+Review remediation and complete exact-head hosted verification are still in
+progress. Historical contributor CI and focused dependency projections do not
+complete this work order. Merge and completion remain blocked until the full
+integrated suites and every review finding are resolved.

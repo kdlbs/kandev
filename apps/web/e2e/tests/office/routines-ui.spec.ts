@@ -134,15 +134,11 @@ test.describe("Routines UI", () => {
         "Create Routine dialog with assignee, concurrency/catch-up policy, task template and cron schedule filled in",
     });
 
-    // AC-OFFICE-ROUTINE-WIRE-002.1/.2: before this capability, the trigger
-    // create call this arms was rejected outright (`cronExpression` bound to
-    // "" -> `ErrInvalidTrigger` -> 400), so a cron schedule could not be
-    // armed from the UI at all.
+    // AC-OFFICE-ROUTINE-WIRE-002.2/.10: the routine and its cron trigger are
+    // created in one request, so a rejected trigger writes no routine.
     const routineCreated = waitForHttp(testPage, "POST", /\/workspaces\/[^/]+\/routines$/);
-    const triggerCreated = waitForHttp(testPage, "POST", /\/routines\/[^/]+\/triggers$/);
     await testPage.getByRole("button", { name: "Create" }).click();
     await routineCreated;
-    await triggerCreated;
     await expect(testPage.getByText(name)).toBeVisible({ timeout: 10_000 });
 
     const listed = (await officeApi.listRoutines(officeSeed.workspaceId)) as {

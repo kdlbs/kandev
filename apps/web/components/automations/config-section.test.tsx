@@ -72,6 +72,8 @@ const mockState = {
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
+  useOptionalAppStoreApi: () => null,
+  useOptionalAppStore: (_selector: unknown, fallback: unknown) => fallback,
 }));
 
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({

@@ -100,9 +100,15 @@ func (s *Scheduler) gather(ctx context.Context, c *coordinator.Coordinator, star
 	if held, err := st.InsertRunningDream(ctx, d); err != nil || !held {
 		return plan{}, false
 	}
-	byID := make(map[string]coordinator.DreamTurn, len(rows))
+	included := make(map[string]bool, len(ev.TurnIDs))
+	for _, id := range ev.TurnIDs {
+		included[id] = true
+	}
+	byID := make(map[string]coordinator.DreamTurn, len(ev.TurnIDs))
 	for _, r := range rows {
-		byID[r.ID] = r
+		if included[r.ID] {
+			byID[r.ID] = r
+		}
 	}
 	return plan{dream: d, evidence: ev, turns: byID}, true
 }

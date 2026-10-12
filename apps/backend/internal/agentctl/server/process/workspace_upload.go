@@ -115,78 +115,93 @@ func (wt *WorkspaceTracker) WriteFileStream(
 	if err != nil {
 		return "", 0, err
 	}
-	cleanup := func() {
+	published := false
+	defer func() {
 		_ = tmp.Close()
-		_ = path.root.Remove(tmpRel)
-	}
+		if !published {
+			_ = path.root.Remove(tmpRel)
+		}
+	}()
 
 	written, err := io.Copy(tmp, src)
 	if err != nil {
-		cleanup()
 		return "", 0, fmt.Errorf("failed to write upload: %w", err)
 	}
-	if err := tmp.Sync(); err != nil {
-		cleanup()
-		return "", 0, fmt.Errorf("failed to flush upload: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = path.root.Remove(tmpRel)
-		return "", 0, fmt.Errorf("failed to close upload: %w", err)
-	}
-
-	// Re-check and place the staged file under a real tracker lock. This lock
-	// covers only metadata and rename, not the unbounded source read above.
-	wt.mutationMu.Lock()
-	targetRel, targetReq, err := resolveUploadTarget(path.root, path.rel, reqPath, resolution)
+	targetRel, targetReq, err := wt.publishUpload(path.root, tmp, tmpRel, path.rel, reqPath, resolution)
 	if err != nil {
-		wt.mutationMu.Unlock()
-		_ = path.root.Remove(tmpRel)
 		return "", 0, err
 	}
-	if err := path.root.Rename(tmpRel, targetRel); err != nil {
-		wt.mutationMu.Unlock()
-		_ = path.root.Remove(tmpRel)
-		return "", 0, fmt.Errorf("failed to place upload: %w", err)
-	}
-	wt.mutationMu.Unlock()
 
+	published = true
 	notifyRel := wt.mutationNotificationPath(filepath.Join(filepath.Dir(path.safe), filepath.Base(targetRel)))
 	wt.notifyFileChange(notifyRel, types.FileOpCreate)
 
 	return targetReq, written, nil
 }
 
+// publishUpload preserves the final destination's ordinary permissions before
+// publishing complete bytes. Source reads happen outside the mutation lock.
+func (wt *WorkspaceTracker) publishUpload(
+	root *os.Root,
+	tmp *os.File,
+	tmpRel, rel, reqPath string,
+	resolution UploadResolution,
+) (string, string, error) {
+	wt.mutationMu.Lock()
+	defer wt.mutationMu.Unlock()
+
+	targetRel, targetReq, info, err := resolveUploadTarget(root, rel, reqPath, resolution)
+	if err != nil {
+		return "", "", err
+	}
+	if info != nil && info.Mode().IsRegular() {
+		if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+			return "", "", fmt.Errorf("failed to preserve upload permissions: %w", err)
+		}
+	}
+	if err := tmp.Sync(); err != nil {
+		return "", "", fmt.Errorf("failed to flush upload: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", "", fmt.Errorf("failed to close upload: %w", err)
+	}
+	if err := root.Rename(tmpRel, targetRel); err != nil {
+		return "", "", fmt.Errorf("failed to place upload: %w", err)
+	}
+	return targetRel, targetReq, nil
+}
+
 // resolveUploadTarget applies the caller's resolution and returns the rooted
-// relative path to write plus the request-shaped path to report back.
+// relative path, request-shaped path and existing regular Replace metadata.
 func resolveUploadTarget(
 	root *os.Root,
 	rel string,
 	reqPath string,
 	resolution UploadResolution,
-) (string, string, error) {
+) (string, string, os.FileInfo, error) {
 	info, err := root.Stat(rel)
 	switch {
 	case os.IsNotExist(err):
 		// Destination is free; the resolution is irrelevant.
-		return rel, reqPath, nil
+		return rel, reqPath, nil, nil
 	case err != nil:
-		return "", "", fmt.Errorf("failed to stat target: %w", err)
+		return "", "", nil, fmt.Errorf("failed to stat target: %w", err)
 	}
 
 	switch resolution {
 	case UploadResolutionReplace:
 		if info.IsDir() {
-			return "", "", fmt.Errorf("cannot replace destination: %s is a directory", reqPath)
+			return "", "", nil, fmt.Errorf("cannot replace destination: %s is a directory", reqPath)
 		}
-		return rel, reqPath, nil
+		return rel, reqPath, info, nil
 	case UploadResolutionKeepBoth:
 		freeRel, err := nextFreeUploadName(root, rel)
 		if err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
-		return freeRel, replaceLastSegment(reqPath, filepath.Base(freeRel)), nil
+		return freeRel, replaceLastSegment(reqPath, filepath.Base(freeRel)), nil, nil
 	default:
-		return "", "", fmt.Errorf("%w: %s", ErrUploadConflict, reqPath)
+		return "", "", nil, fmt.Errorf("%w: %s", ErrUploadConflict, reqPath)
 	}
 }
 

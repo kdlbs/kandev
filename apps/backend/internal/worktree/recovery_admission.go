@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -16,7 +17,9 @@ import (
 
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryartifact"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/recoveryoperation"
 )
 
 // RecoverySlot is one canonical repository entry selected for recovery
@@ -66,20 +69,79 @@ type RecoveryAdmissionRequest struct {
 	OwnerTaskID            string
 	OwnershipGeneration    int64
 	ExecutorType           string
+	SelectionSnapshot      models.WorkspaceRecoverySelectionSnapshot
 	OperationID            string
+	ErrorStamp             string
 	AllowBranchReplacement bool
 	RelocateDirty          bool
-	Slots                  []RecoverySlot
+	// InspectionWait allows only an outer preflight to wait for a read-only
+	// inspection lock. It does not authorize dirty relocation.
+	InspectionWait     time.Duration
+	InspectionDeadline time.Time
+	Slots              []RecoverySlot
+}
+
+// RecoveryInspectionWaitBudget bounds inspection waits across outer admission
+// steps in one logical resume request.
+const RecoveryInspectionWaitBudget = 15 * time.Second
+
+type recoveryInspectionDeadlineContextKey struct{}
+
+// WithRecoveryInspectionWait starts or preserves the bounded inspection
+// deadline for one logical request. Nested admissions cannot restart it.
+func WithRecoveryInspectionWait(ctx context.Context, maxWait time.Duration) (context.Context, time.Time) {
+	if ctx == nil || maxWait <= 0 {
+		return ctx, time.Time{}
+	}
+	if maxWait > RecoveryInspectionWaitBudget {
+		maxWait = RecoveryInspectionWaitBudget
+	}
+	deadline := time.Now().Add(maxWait)
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	if current, ok := ctx.Value(recoveryInspectionDeadlineContextKey{}).(time.Time); ok &&
+		!current.IsZero() && current.Before(deadline) {
+		deadline = current
+	}
+	return context.WithValue(ctx, recoveryInspectionDeadlineContextKey{}, deadline), deadline
+}
+
+func recoveryInspectionDeadline(ctx context.Context, maxWait time.Duration) time.Time {
+	if maxWait <= 0 {
+		return time.Time{}
+	}
+	if maxWait > RecoveryInspectionWaitBudget {
+		maxWait = RecoveryInspectionWaitBudget
+	}
+	deadline := time.Now().Add(maxWait)
+	if ctx != nil {
+		if current, ok := ctx.Value(recoveryInspectionDeadlineContextKey{}).(time.Time); ok &&
+			!current.IsZero() && current.Before(deadline) {
+			deadline = current
+		}
+		if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+			deadline = callerDeadline
+		}
+	}
+	return deadline
 }
 
 // RecoveryAdmission retains the environment authority and per-worktree locks
 // until the caller crosses the external workspace-start boundary.
 type RecoveryAdmission struct {
-	claim          *models.TaskEnvironmentRecoveryClaim
-	operationLocks []*recoveryLock
-	releaseFunc    func(context.Context) error
-	once           sync.Once
-	releaseErr     error
+	claim            *models.TaskEnvironmentRecoveryClaim
+	operationLocks   []*recoveryLock
+	releaseFunc      func(context.Context) error
+	releaseClaimFunc func(context.Context) error
+	releaseLocalFunc func()
+	progress         *recoveryProgressTracker
+	operationCtx     context.Context
+	operationCancel  context.CancelFunc
+	heartbeatDone    <-chan struct{}
+	once             sync.Once
+	releaseErr       error
+	borrowed         bool
 }
 
 type recoveryAdmissionContextKey struct{}
@@ -87,6 +149,41 @@ type recoveryAdmissionContextKey struct{}
 type recoveryAdmissionContextValue struct {
 	admission *RecoveryAdmission
 	cleared   bool
+}
+
+// recoveryAdmissionOperationContext keeps the accepted operation's lifetime
+// while preserving launch-specific values required by lifecycle callbacks.
+type recoveryAdmissionOperationContext struct {
+	context.Context
+	values context.Context
+}
+
+func (ctx recoveryAdmissionOperationContext) Value(key any) any {
+	if value := ctx.values.Value(key); value != nil {
+		return value
+	}
+	return ctx.Context.Value(key)
+}
+
+func withRecoveryAdmissionOperationLifetime(
+	values context.Context,
+	operation context.Context,
+	borrowed bool,
+) context.Context {
+	if values == nil {
+		values = operation
+	}
+	if borrowed && values != nil && values.Done() != nil {
+		nested, cancel := context.WithCancel(operation)
+		if values.Err() != nil {
+			cancel()
+		} else {
+			stop := context.AfterFunc(values, cancel)
+			context.AfterFunc(nested, func() { stop() })
+		}
+		operation = nested
+	}
+	return recoveryAdmissionOperationContext{Context: operation, values: values}
 }
 
 // Claim returns the durable authority carried into nested lifecycle calls.
@@ -99,15 +196,69 @@ func (a *RecoveryAdmission) Claim() *models.TaskEnvironmentRecoveryClaim {
 
 // Release releases the durable authority and local locks exactly once.
 func (a *RecoveryAdmission) Release(ctx context.Context) error {
-	if a == nil {
+	if a == nil || a.borrowed {
 		return nil
 	}
-	a.once.Do(func() {
-		if a.releaseFunc != nil {
-			a.releaseErr = a.releaseFunc(ctx)
-		}
-	})
+	a.once.Do(func() { a.release(ctx) })
 	return a.releaseErr
+}
+
+func (a *RecoveryAdmission) release(ctx context.Context) {
+	cleanupSource := a.operationCtx
+	if cleanupSource == nil {
+		cleanupSource = ctx
+	}
+	cleanupCtx, cancelCleanup := recoveryProgressCleanupContext(cleanupSource)
+	defer cancelCleanup()
+	a.stopOperation()
+
+	if err := a.finishUncompletedResume(cleanupCtx); err != nil {
+		a.releaseErr = err
+		a.endProgressRunner(cleanupCtx)
+		a.releaseLocalResources()
+		return
+	}
+	a.endProgressRunner(cleanupCtx)
+	a.releaseDurableClaim(cleanupCtx)
+	a.releaseLocalResources()
+}
+
+func (a *RecoveryAdmission) stopOperation() {
+	if a.operationCancel != nil {
+		a.operationCancel()
+	}
+	if a.heartbeatDone != nil {
+		<-a.heartbeatDone
+	}
+}
+
+func (a *RecoveryAdmission) finishUncompletedResume(ctx context.Context) error {
+	if a.progress == nil || a.progress.terminal() {
+		return nil
+	}
+	return a.progress.finish(ctx, recoveryoperation.StateFailed, recoveryoperation.PhaseResuming, "resume_not_completed", false)
+}
+
+func (a *RecoveryAdmission) endProgressRunner(ctx context.Context) {
+	if a.progress != nil {
+		a.progress.endRunner(ctx)
+	}
+}
+
+func (a *RecoveryAdmission) releaseDurableClaim(ctx context.Context) {
+	if a.releaseClaimFunc != nil {
+		a.releaseErr = a.releaseClaimFunc(ctx)
+		return
+	}
+	if a.releaseFunc != nil {
+		a.releaseErr = a.releaseFunc(ctx)
+	}
+}
+
+func (a *RecoveryAdmission) releaseLocalResources() {
+	if a.releaseLocalFunc != nil {
+		a.releaseLocalFunc()
+	}
 }
 
 // WithRecoveryClaim carries an admission through the executor-to-lifecycle
@@ -123,8 +274,34 @@ func WithRecoveryAdmission(ctx context.Context, admission *RecoveryAdmission) co
 	if admission == nil {
 		return ctx
 	}
+	if admission.operationCtx != nil {
+		ctx = withRecoveryAdmissionOperationLifetime(ctx, admission.operationCtx, admission.borrowed)
+	}
 	ctx = recoveryclaim.WithClaim(ctx, admission.Claim())
 	return context.WithValue(ctx, recoveryAdmissionContextKey{}, recoveryAdmissionContextValue{admission: admission})
+}
+
+// CompleteRecoveryResume stores the existing resume path's terminal outcome
+// before the admission releases its durable claim.
+func (a *RecoveryAdmission) CompleteRecoveryResume(ctx context.Context, agentReady bool, reasonCode string) error {
+	if a == nil || a.borrowed || a.progress == nil {
+		return nil
+	}
+	state := string(SyncProgressFailed)
+	if agentReady {
+		state = recoveryoperation.StateCompleted
+		reasonCode = ""
+	}
+	return a.progress.finish(ctx, state, recoveryoperation.PhaseResuming, reasonCode, agentReady)
+}
+
+func (a *RecoveryAdmission) borrowedView() *RecoveryAdmission {
+	if a == nil {
+		return nil
+	}
+	return &RecoveryAdmission{
+		claim: a.claim, progress: a.progress, operationCtx: a.operationCtx, borrowed: true,
+	}
 }
 
 func recoveryAdmissionFromContext(ctx context.Context) *RecoveryAdmission {
@@ -271,6 +448,15 @@ func (m *Manager) admitRecovery(
 	if admission, handled, err := m.admitWithContextAuthority(ctx, &req); handled || err != nil {
 		return admission, err
 	}
+	if reader, ok := m.recoveryProgressReporter.(RecoveryProgressLiveReader); ok {
+		live, err := reader.WorkspaceRecoveryIsLive(ctx, req.TaskEnvironmentID)
+		if err != nil {
+			return nil, recoveryAdmissionError(req, "workspace recovery operation status is unavailable")
+		}
+		if live {
+			return nil, recoveryoperation.ErrInProgress
+		}
+	}
 	return m.admitRecoverySlots(ctx, &req, outcome)
 }
 
@@ -285,7 +471,7 @@ func (m *Manager) admitWithContextAuthority(
 		if _, err := m.resolveRecoverySlots(ctx, req); err != nil {
 			return nil, true, err
 		}
-		return admission, true, nil
+		return admission.borrowedView(), true, nil
 	}
 	claim := recoveryclaim.ClaimFromContext(ctx)
 	if claim == nil {
@@ -301,7 +487,7 @@ func (m *Manager) admitWithContextAuthority(
 	if _, err := m.resolveRecoverySlots(ctx, req); err != nil {
 		return nil, true, err
 	}
-	return &RecoveryAdmission{claim: claim}, true, nil
+	return (&RecoveryAdmission{claim: claim}).borrowedView(), true, nil
 }
 
 func (m *Manager) admitRecoverySlots(
@@ -424,19 +610,13 @@ func (m *Manager) admitClaimedRecovery(
 	operationLocks []*recoveryLock,
 	outcome *string,
 ) (*RecoveryAdmission, error) {
-	fail := func(err error) (*RecoveryAdmission, error) {
-		_ = m.releaseRecoveryClaim(ctx, claim)
-		releaseMissingCheckoutOperationLocks(operationLocks)
-		releaseLocks()
-		return nil, err
-	}
 	claimCtx := recoveryclaim.WithClaim(ctx, claim)
 	inspection, err := m.inspectRecoverySlots(claimCtx, req, indices)
 	if err != nil {
-		return fail(err)
+		return m.failClaimedRecovery(ctx, req, claim, nil, nil, nil, nil, false, err, releaseLocks, operationLocks)
 	}
 	if inspection.dirty && !req.RelocateDirty {
-		return fail(managedCloneRelocationRequiredError(req.TaskID))
+		return m.failClaimedRecovery(ctx, req, claim, nil, nil, nil, nil, false, managedCloneRelocationRequiredError(req.TaskID), releaseLocks, operationLocks)
 	}
 	if !inspection.needsRecovery {
 		_ = m.releaseRecoveryClaim(ctx, claim)
@@ -446,22 +626,202 @@ func (m *Manager) admitClaimedRecovery(
 	}
 	if inspection.dirty && req.RelocateDirty {
 		if err := validateDirtyCloneRelocationAuthorization(claimCtx); err != nil {
-			return fail(err)
+			return m.failClaimedRecovery(ctx, req, claim, nil, nil, nil, nil, false, err, releaseLocks, operationLocks)
 		}
 	}
+	if err := m.preflightPermissionOnlyBlockedRetries(claimCtx, req, indices); err != nil {
+		return m.failClaimedRecovery(ctx, req, claim, nil, nil, nil, nil, false, err, releaseLocks, operationLocks)
+	}
+
+	var progress *recoveryProgressTracker
+	var operationCtx context.Context
+	var operationCancel context.CancelFunc
+	var heartbeatDone <-chan struct{}
+	if inspection.needsRelocation && m.recoveryProgressReporter != nil &&
+		managedCloneRelocationErrorStampFromContext(claimCtx) != "" {
+		var start RecoveryProgressStart
+		progress, start, err = m.beginWorkspaceRecoveryProgress(claimCtx, req, indices, claim)
+		if err != nil {
+			cleanupCtx, cancelCleanup := recoveryProgressCleanupContext(claimCtx)
+			keepClaim := m.retainClaimForUnsettledProgressBegin(cleanupCtx, start)
+			cancelCleanup()
+			return m.failClaimedRecovery(ctx, req, claim, nil, nil, nil, nil, keepClaim, err, releaseLocks, operationLocks)
+		}
+		operationCtx, operationCancel = acceptedRecoveryContext(claimCtx)
+		claimCtx = withRecoveryProgress(recoveryclaim.WithClaim(operationCtx, claim), progress)
+		heartbeatDone = startRecoveryHeartbeat(claimCtx, progress)
+	}
 	if err := m.recoverClaimedRecoverySlots(claimCtx, req, indices, claim, outcome); err != nil {
-		return fail(err)
+		return m.failClaimedRecovery(ctx, req, claim, progress, operationCtx, operationCancel, heartbeatDone, false, err, releaseLocks, operationLocks)
+	}
+	if progress != nil {
+		current := progress.currentUpdate()
+		current.State = recoveryoperation.StateRunning
+		current.Phase = recoveryoperation.PhaseResuming
+		current.WorkspaceComplete = true
+		current.AgentReady = false
+		current.ReasonCode = ""
+		current.EndedAt = nil
+		if err := progress.updateProgress(claimCtx, current); err != nil {
+			return m.failClaimedRecovery(ctx, req, claim, progress, operationCtx, operationCancel, heartbeatDone, false, err, releaseLocks, operationLocks)
+		}
 	}
 	return &RecoveryAdmission{
 		claim: claim, operationLocks: operationLocks,
-		releaseFunc: func(releaseCtx context.Context) error {
-			releaseErr := m.releaseRecoveryClaim(releaseCtx, claim)
+		progress: progress, operationCtx: operationCtx, operationCancel: operationCancel,
+		heartbeatDone: heartbeatDone,
+		releaseClaimFunc: func(releaseCtx context.Context) error {
+			return m.releaseRecoveryClaim(releaseCtx, claim)
+		},
+		releaseLocalFunc: func() {
 			releaseMissingCheckoutOperationLocks(operationLocks)
 			releaseLocks()
-			return releaseErr
 		},
 	}, nil
 }
+
+func (m *Manager) beginWorkspaceRecoveryProgress(
+	ctx context.Context,
+	req *RecoveryAdmissionRequest,
+	indices []int,
+	claim *models.TaskEnvironmentRecoveryClaim,
+) (*recoveryProgressTracker, RecoveryProgressStart, error) {
+	ordered := append([]int(nil), indices...)
+	sort.Slice(ordered, func(i, j int) bool {
+		return recoverySlotKey(req.Slots[ordered[i]]) < recoverySlotKey(req.Slots[ordered[j]])
+	})
+	selected := make([]string, 0, len(ordered))
+	for _, index := range ordered {
+		repositoryID := strings.TrimSpace(req.Slots[index].RepositoryID)
+		if repositoryID == "" && req.Slots[index].Worktree != nil {
+			repositoryID = req.Slots[index].Worktree.RepositoryID
+		}
+		if repositoryID == "" {
+			return nil, RecoveryProgressStart{}, recoveryAdmissionError(*req, "selected recovery repository identity is incomplete")
+		}
+		selected = append(selected, repositoryID)
+	}
+	stamp := managedCloneRelocationErrorStampFromContext(ctx)
+	start := RecoveryProgressStart{
+		TaskID: req.TaskID, SessionID: claim.SessionID, TaskEnvironmentID: claim.TaskEnvironmentID,
+		OwnerTaskID: claim.OwnerTaskID, OwnershipGeneration: claim.OwnershipGeneration,
+		OperationID: claim.OperationID, ErrorStamp: stamp, Kind: recoveryoperation.KindManagedCloneRelocation,
+		SelectedRepositoryIDs: selected, RepositoryTotal: len(selected),
+	}
+	binding, err := m.recoveryProgressReporter.BeginWorkspaceRecovery(ctx, start)
+	if err != nil {
+		return nil, start, err
+	}
+	return &recoveryProgressTracker{
+		reporter: m.recoveryProgressReporter,
+		binding:  binding,
+		update: RecoveryProgressUpdate{
+			State: recoveryoperation.StateRunning, Phase: recoveryoperation.PhaseChecking,
+			RepositoryTotal: len(selected),
+		},
+	}, start, nil
+}
+
+func (m *Manager) retainClaimForUnsettledProgressBegin(
+	ctx context.Context,
+	start RecoveryProgressStart,
+) bool {
+	reader, ok := m.recoveryProgressReporter.(RecoveryProgressProjectionReader)
+	if !ok {
+		return true
+	}
+	operation, _, err := reader.WorkspaceRecoveryProjection(ctx, start.TaskEnvironmentID)
+	if err != nil {
+		return true
+	}
+	if operation == nil || operation.State != recoveryoperation.StateRunning ||
+		!recoveryProgressOperationMatchesStart(operation, start) {
+		return false
+	}
+	// A running projection keeps its exact claim until a same-claim retry settles it.
+	return true
+}
+
+func recoveryProgressOperationMatchesStart(
+	operation *models.TaskEnvironmentRecoveryOperation,
+	start RecoveryProgressStart,
+) bool {
+	return operation != nil && operation.TaskEnvironmentID == start.TaskEnvironmentID &&
+		operation.OwnerTaskID == start.OwnerTaskID && operation.OwnershipGeneration == start.OwnershipGeneration &&
+		operation.SessionID == start.SessionID && operation.OperationID == start.OperationID &&
+		operation.ErrorStamp == start.ErrorStamp && operation.Kind == start.Kind &&
+		operation.RepositoryTotal == start.RepositoryTotal &&
+		slices.Equal(operation.SelectedRepositoryIDs, start.SelectedRepositoryIDs)
+}
+
+func startRecoveryHeartbeat(ctx context.Context, tracker *recoveryProgressTracker) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				tracker.heartbeat(ctx)
+			}
+		}
+	}()
+	return done
+}
+
+func (m *Manager) failClaimedRecovery(
+	ctx context.Context,
+	req *RecoveryAdmissionRequest,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	progress *recoveryProgressTracker,
+	operationCtx context.Context,
+	operationCancel context.CancelFunc,
+	heartbeatDone <-chan struct{},
+	keepClaim bool,
+	operationErr error,
+	releaseLocks func(),
+	operationLocks []*recoveryLock,
+) (*RecoveryAdmission, error) {
+	cleanupSource := operationCtx
+	if cleanupSource == nil {
+		cleanupSource = ctx
+	}
+	cleanupCtx, cancelCleanup := recoveryProgressCleanupContext(cleanupSource)
+	defer cancelCleanup()
+	if operationCancel != nil {
+		operationCancel()
+	}
+	if heartbeatDone != nil {
+		<-heartbeatDone
+	}
+	if progress != nil {
+		current := progress.currentUpdate()
+		if err := progress.finish(cleanupCtx, recoveryoperation.StateFailed, current.Phase, recoveryProgressFailureReason(operationErr), false); err != nil {
+			keepClaim = true
+		}
+		progress.endRunner(cleanupCtx)
+	}
+	var releaseErr error
+	if !keepClaim {
+		releaseErr = m.releaseRecoveryClaim(cleanupCtx, claim)
+	}
+	releaseMissingCheckoutOperationLocks(operationLocks)
+	if releaseLocks != nil {
+		releaseLocks()
+	}
+	if releaseErr != nil {
+		return nil, fmt.Errorf("%w (recovery claim release failed: %v)", operationErr, releaseErr)
+	}
+	if operationErr == nil && req != nil {
+		operationErr = recoveryAdmissionError(*req, "recovery stopped")
+	}
+	return nil, operationErr
+}
+
+func recoveryProgressFailureReason(error) string { return "recovery_failed" }
 
 func (m *Manager) recoverClaimedRecoverySlots(
 	ctx context.Context,
@@ -474,9 +834,33 @@ func (m *Manager) recoverClaimedRecoverySlots(
 	sort.Slice(ordered, func(i, j int) bool {
 		return recoverySlotKey(req.Slots[ordered[i]]) < recoverySlotKey(req.Slots[ordered[j]])
 	})
-	for _, index := range ordered {
-		if err := m.recoverClaimedRecoverySlot(ctx, req, &req.Slots[index], claim, outcome); err != nil {
+	tracker := recoveryProgressFromContext(ctx)
+	completed := 0
+	total := len(ordered)
+	for position, index := range ordered {
+		slot := &req.Slots[index]
+		repositoryID := slot.RepositoryID
+		if repositoryID == "" && slot.Worktree != nil {
+			repositoryID = slot.Worktree.RepositoryID
+		}
+		slotCtx := withRecoverySlotProgress(ctx, recoverySlotProgress{
+			repositoryID: repositoryID, position: position + 1, total: total, completedSlots: completed,
+		})
+		if err := reportRecoveryPhase(slotCtx, recoveryoperation.PhaseChecking); err != nil {
 			return err
+		}
+		if err := m.recoverClaimedRecoverySlot(slotCtx, req, slot, claim, outcome); err != nil {
+			return err
+		}
+		completed++
+		if tracker != nil {
+			slotCtx = withRecoverySlotProgress(slotCtx, recoverySlotProgress{
+				repositoryID: repositoryID, position: position + 1,
+				total: total, completedSlots: completed,
+			})
+			if err := reportRecoveryPhase(slotCtx, recoveryoperation.PhaseChecking); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -506,6 +890,9 @@ func (m *Manager) recoverClaimedRecoverySlot(
 		return nil
 	}
 	if inspection.needsMissingCheckout {
+		if err := reportRecoveryPhase(ctx, recoveryoperation.PhaseRestoring); err != nil {
+			return err
+		}
 		return m.restoreMissingCheckout(ctx, req, slot, claim)
 	}
 	if inspection.needsBranchReplacement {
@@ -513,6 +900,9 @@ func (m *Manager) recoverClaimedRecoverySlot(
 	}
 	if inspectLinkedWorktree(slot.Worktree.Path).class != linkedWorktreeMissingAdmin {
 		return nil
+	}
+	if err := reportRecoveryPhase(ctx, recoveryoperation.PhaseRestoring); err != nil {
+		return err
 	}
 	recovered, err := m.RecoverWorktree(ctx, slot.Worktree, CreateRequest{
 		TaskID:              req.OwnerTaskID,
@@ -625,8 +1015,19 @@ func (m *Manager) lockRecoverySlots(ctx context.Context, req *RecoveryAdmissionR
 	sort.Slice(sorted, func(i, j int) bool {
 		return recoverySlotKey(req.Slots[sorted[i]]) < recoverySlotKey(req.Slots[sorted[j]])
 	})
+	waitDeadline := recoveryInspectionDeadline(ctx, req.InspectionWait)
+	if req.InspectionWait > 0 && !req.InspectionDeadline.IsZero() &&
+		req.InspectionDeadline.Before(waitDeadline) {
+		waitDeadline = req.InspectionDeadline
+	}
+	selection := snapshotRecoverySlotIdentities(req, indices)
 	locks := make([]*sync.Mutex, 0, len(sorted))
 	seen := make(map[string]struct{}, len(sorted))
+	unlock := func() {
+		for i := len(locks) - 1; i >= 0; i-- {
+			locks[i].Unlock()
+		}
+	}
 	for _, index := range sorted {
 		key := recoverySlotKey(req.Slots[index])
 		if _, ok := seen[key]; ok {
@@ -635,41 +1036,192 @@ func (m *Manager) lockRecoverySlots(ctx context.Context, req *RecoveryAdmissionR
 		seen[key] = struct{}{}
 		lockValue, _ := m.recoveryLocks.LoadOrStore(key, &sync.Mutex{})
 		lock := lockValue.(*sync.Mutex)
-		if req.RelocateDirty {
-			// The stamped repair runs outside lifecycle singleflight and can wait
-			// for an in-flight read-only inspection to finish.
-			ticker := time.NewTicker(10 * time.Millisecond)
-			for !lock.TryLock() {
-				select {
-				case <-ctx.Done():
-					ticker.Stop()
-					for i := len(locks) - 1; i >= 0; i-- {
-						locks[i].Unlock()
-					}
-					return nil, recoveryAdmissionError(*req, ctx.Err().Error())
-				case <-ticker.C:
-				}
-			}
-			ticker.Stop()
-			if err := ctx.Err(); err != nil {
-				lock.Unlock()
-				for i := len(locks) - 1; i >= 0; i-- {
-					locks[i].Unlock()
-				}
-				return nil, recoveryAdmissionError(*req, err.Error())
-			}
-		} else if !lock.TryLock() {
-			// Session startup is coalesced by lifecycle singleflight. Waiting here
-			// can make a competing workspace request own that flight while the
-			// recovery caller waits for it, so ordinary admissions never queue.
-			for i := len(locks) - 1; i >= 0; i-- {
-				locks[i].Unlock()
-			}
-			return nil, recoveryAdmissionError(*req, "selected worktree is already being recovered")
+		if err := waitForRecoveryInspectionLock(ctx, lock, waitDeadline); err != nil {
+			unlock()
+			return nil, err
 		}
 		locks = append(locks, lock)
 	}
+	if err := ctx.Err(); err != nil {
+		unlock()
+		return nil, err
+	}
+	if err := m.revalidateRecoverySelectionSnapshot(ctx, req); err != nil {
+		unlock()
+		return nil, err
+	}
+	if m.store != nil {
+		resolved, err := m.resolveRecoverySlots(ctx, req)
+		if err != nil {
+			unlock()
+			return nil, err
+		}
+		if !sameRecoverySlotIndices(indices, resolved) || !recoverySlotIdentitiesMatch(selection, req) {
+			unlock()
+			return nil, recoveryAdmissionError(*req, "selected worktree inventory changed while waiting for inspection")
+		}
+	}
 	return locks, nil
+}
+
+func (m *Manager) revalidateRecoverySelectionSnapshot(ctx context.Context, req *RecoveryAdmissionRequest) error {
+	snapshot := req.SelectionSnapshot
+	if snapshot.Present() && !snapshot.Valid() {
+		return recoveryAdmissionError(*req, "selected worktree inventory identity is incomplete")
+	}
+	reader, ok := m.store.(RecoverySelectionSnapshotReader)
+	if !snapshot.Valid() {
+		if ok {
+			return recoveryAdmissionError(*req, "selected worktree inventory identity is unavailable")
+		}
+		return nil
+	}
+	if !snapshot.Complete() {
+		return recoveryAdmissionError(*req, "selected worktree inventory is incomplete")
+	}
+	if !recoverySelectionSnapshotMatchesRequest(snapshot, req) {
+		return recoveryAdmissionError(*req, "selected worktree inventory identity is inconsistent")
+	}
+	if !ok {
+		return recoveryAdmissionError(*req, "selected worktree inventory cannot be revalidated")
+	}
+	current, err := reader.ReadRecoverySelectionSnapshot(ctx, snapshot)
+	if err != nil {
+		return recoveryAdmissionError(*req, "selected worktree inventory cannot be revalidated")
+	}
+	if !snapshot.Equal(current) {
+		return recoveryAdmissionError(*req, "selected worktree inventory changed while waiting for inspection")
+	}
+	return nil
+}
+
+func recoverySelectionSnapshotMatchesRequest(snapshot models.WorkspaceRecoverySelectionSnapshot, req *RecoveryAdmissionRequest) bool {
+	return snapshot.TaskID == req.TaskID && snapshot.SessionID == req.SessionID &&
+		snapshot.SessionEnvironmentMatchesSelected() && snapshot.TaskEnvironmentID == req.TaskEnvironmentID &&
+		snapshot.EnvironmentOwnerTaskID == req.OwnerTaskID &&
+		snapshot.OwnershipGeneration == req.OwnershipGeneration && snapshot.ExecutorType == req.ExecutorType
+}
+
+func waitForRecoveryInspectionLock(ctx context.Context, lock *sync.Mutex, deadline time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return recoveryInspectionWaitError(err)
+	}
+	if lock.TryLock() {
+		if err := ctx.Err(); err != nil {
+			lock.Unlock()
+			return recoveryInspectionWaitError(err)
+		}
+		return nil
+	}
+	if deadline.IsZero() {
+		return &RecoveryInspectionContentionError{}
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return recoveryInspectionWaitError(ctx.Err())
+	}
+
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return recoveryInspectionWaitError(ctx.Err())
+		case <-timer.C:
+			return recoveryInspectionWaitError(ctx.Err())
+		case <-ticker.C:
+		}
+		if err := ctx.Err(); err != nil {
+			return recoveryInspectionWaitError(err)
+		}
+		if lock.TryLock() {
+			if err := ctx.Err(); err != nil {
+				lock.Unlock()
+				return recoveryInspectionWaitError(err)
+			}
+			return nil
+		}
+	}
+}
+
+func recoveryInspectionWaitError(ctxErr error) error {
+	if errors.Is(ctxErr, context.Canceled) {
+		return ctxErr
+	}
+	return &RecoveryInspectionContentionError{}
+}
+
+type recoverySlotIdentity struct {
+	worktreeID      string
+	sessionID       string
+	taskID          string
+	taskDirName     string
+	environmentID   string
+	repositoryID    string
+	branchSlug      string
+	repositoryPath  string
+	worktreePath    string
+	branch          string
+	sourceClonePath string
+	sourceCommonDir string
+	status          string
+	deleted         bool
+}
+
+func snapshotRecoverySlotIdentities(req *RecoveryAdmissionRequest, indices []int) map[int]recoverySlotIdentity {
+	identities := make(map[int]recoverySlotIdentity, len(indices))
+	for _, index := range indices {
+		wt := req.Slots[index].Worktree
+		if wt == nil {
+			identities[index] = recoverySlotIdentity{}
+			continue
+		}
+		identities[index] = recoverySlotIdentity{
+			worktreeID: wt.ID, sessionID: wt.SessionID, taskID: wt.TaskID, taskDirName: wt.TaskDirName,
+			environmentID: wt.TaskEnvironmentID, repositoryID: wt.RepositoryID, branchSlug: wt.BranchSlug,
+			repositoryPath: wt.RepositoryPath, worktreePath: wt.Path, branch: wt.Branch,
+			sourceClonePath: wt.SourceClonePath, sourceCommonDir: wt.SourceCommonDir,
+			status: wt.Status, deleted: wt.DeletedAt != nil,
+		}
+	}
+	return identities
+}
+
+func recoverySlotIdentitiesMatch(identities map[int]recoverySlotIdentity, req *RecoveryAdmissionRequest) bool {
+	for index, expected := range identities {
+		wt := req.Slots[index].Worktree
+		if wt == nil {
+			if expected != (recoverySlotIdentity{}) {
+				return false
+			}
+			continue
+		}
+		actual := recoverySlotIdentity{
+			worktreeID: wt.ID, sessionID: wt.SessionID, taskID: wt.TaskID, taskDirName: wt.TaskDirName,
+			environmentID: wt.TaskEnvironmentID, repositoryID: wt.RepositoryID, branchSlug: wt.BranchSlug,
+			repositoryPath: wt.RepositoryPath, worktreePath: wt.Path, branch: wt.Branch,
+			sourceClonePath: wt.SourceClonePath, sourceCommonDir: wt.SourceCommonDir,
+			status: wt.Status, deleted: wt.DeletedAt != nil,
+		}
+		if actual != expected {
+			return false
+		}
+	}
+	return true
+}
+
+func sameRecoverySlotIndices(expected, actual []int) bool {
+	if len(expected) != len(actual) {
+		return false
+	}
+	for index := range expected {
+		if expected[index] != actual[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Manager) inspectRecoverySlots(ctx context.Context, req *RecoveryAdmissionRequest, indices []int) (recoverySlotInspection, error) {
@@ -837,7 +1389,7 @@ func (m *Manager) recoveryOperationID(ctx context.Context, req *RecoveryAdmissio
 		}
 		return operationID, nil
 	}
-	operationID, err := recoveryOperationIDFromSlots(req, indices)
+	operationID, err := m.recoveryOperationIDFromSlots(ctx, req, indices)
 	if err != nil {
 		return "", err
 	}
@@ -854,8 +1406,11 @@ func (m *Manager) recoveryOperationID(ctx context.Context, req *RecoveryAdmissio
 	return uuid.NewString(), nil
 }
 
-func recoveryOperationIDFromSlots(req *RecoveryAdmissionRequest, indices []int) (string, error) {
-	operationID := ""
+func (m *Manager) recoveryOperationIDFromSlots(ctx context.Context, req *RecoveryAdmissionRequest, indices []int) (string, error) {
+	operationID, err := m.registeredRelocationOperationIDFromSlots(ctx, req, indices)
+	if err != nil {
+		return "", err
+	}
 	for _, index := range indices {
 		slot := req.Slots[index]
 		if slot.Worktree == nil || slot.Worktree.Path == "" {
@@ -875,14 +1430,94 @@ func recoveryOperationIDFromSlots(req *RecoveryAdmissionRequest, indices []int) 
 	return operationID, nil
 }
 
+func (m *Manager) registeredRelocationOperationIDFromSlots(
+	ctx context.Context,
+	req *RecoveryAdmissionRequest,
+	indices []int,
+) (string, error) {
+	registry, ok := m.store.(recoveryArtifactRegistry)
+	if !ok {
+		return "", nil
+	}
+	registered, err := registry.ListTaskEnvironmentRecoveryArtifacts(ctx, req.TaskEnvironmentID)
+	if err != nil {
+		return "", recoveryAdmissionError(*req, "recovery artifact registry could not be read")
+	}
+	operationID := ""
+	for _, index := range indices {
+		worktree := req.Slots[index].Worktree
+		if worktree == nil {
+			continue
+		}
+		candidates, err := registeredRelocationOperationIDsForWorktree(registered, worktree)
+		if err != nil {
+			return "", recoveryAdmissionError(*req, "registered managed-clone relocation record is unreadable")
+		}
+		for _, candidate := range candidates {
+			operationID, err = mergeRecoveryOperationID(*req, operationID, candidate)
+			if err != nil {
+				return "", err
+			}
+		}
+	}
+	return operationID, nil
+}
+
+func registeredRelocationOperationIDsForWorktree(
+	registered []recoveryartifact.Registered,
+	wt *Worktree,
+) ([]string, error) {
+	var candidates []string
+	for _, item := range registered {
+		if item.LayoutVersion != 2 || !registeredArtifactMatchesSlot(item, wt) {
+			continue
+		}
+		candidate, err := registeredRelocationOperationID(item)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, candidate)
+	}
+	return candidates, nil
+}
+
+func registeredArtifactMatchesSlot(item recoveryartifact.Registered, wt *Worktree) bool {
+	return wt != nil && item.TaskEnvironmentID == wt.TaskEnvironmentID && item.OwnerTaskID == wt.TaskID &&
+		item.RepositoryID == wt.RepositoryID && ((item.WorktreeID == wt.ID && item.OriginalPath == wt.Path) ||
+		(item.ReplacementID == wt.ID && item.ReplacementPath == wt.Path))
+}
+
+func registeredRelocationOperationID(item recoveryartifact.Registered) (string, error) {
+	path, found := registeredRelocationRecordPath(item.ArtifactPaths)
+	if !found {
+		return "", errors.New("registered relocation record path is missing")
+	}
+	record, err := readManagedCloneRelocationRecord(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return item.OperationID, nil
+	}
+	if err != nil || !registeredRelocationRecordMatches(item, record) {
+		return "", errors.New("registered relocation record does not match its proof")
+	}
+	return activeRelocationOperationID(record), nil
+}
+
+func activeRelocationOperationID(record managedCloneRelocationRecord) string {
+	if record.State == managedCloneRelocationStatePrepared || record.State == managedCloneRelocationStateMaterialized {
+		return record.OperationID
+	}
+	return ""
+}
+
 func recoveryOperationIDsForSlot(req RecoveryAdmissionRequest, slot RecoverySlot) ([]string, error) {
 	ids := make([]string, 0, 3)
-	relocationID, err := pendingManagedCloneRelocationOperationID(slot.Worktree.Path + ".kandev-clone-relocation.json")
-	if err != nil {
+	relocation, relocationErr := readManagedCloneRelocationRecord(slot.Worktree.Path + ".kandev-clone-relocation.json")
+	if relocationErr != nil && !errors.Is(relocationErr, os.ErrNotExist) {
 		return nil, recoveryAdmissionError(req, "managed-clone relocation record is unreadable")
 	}
-	if relocationID != "" {
-		ids = append(ids, relocationID)
+	if relocationErr == nil &&
+		(relocation.State == managedCloneRelocationStatePrepared || relocation.State == managedCloneRelocationStateMaterialized) {
+		ids = append(ids, relocation.OperationID)
 	}
 	if missing := slot.missingCheckout; missing != nil && missing.record != nil && missing.record.State == missingCheckoutRecordInProgress {
 		ids = append(ids, missing.record.OperationID)
@@ -894,11 +1529,31 @@ func recoveryOperationIDsForSlot(req RecoveryAdmissionRequest, slot RecoverySlot
 	if err != nil {
 		return nil, recoveryAdmissionError(req, fmt.Sprintf("read recovery record for %q: %v", slot.Worktree.Path, err))
 	}
+	if record.State == RecoveryStateBlocked {
+		return blockedRecoveryOperationID(req, slot, record, relocation, relocationErr, ids)
+	}
 	if record.State != RecoveryStateSnapshotting && record.State != RecoveryStateRematerializing {
 		return nil, recoveryAdmissionError(req, fmt.Sprintf("recovery record for %q is already %s", slot.Worktree.Path, record.State))
 	}
 	if _, err := uuid.Parse(record.OperationID); err != nil {
 		return nil, recoveryAdmissionError(req, fmt.Sprintf("recovery record for %q has an invalid operation identity", slot.Worktree.Path))
+	}
+	return append(ids, record.OperationID), nil
+}
+
+func blockedRecoveryOperationID(
+	req RecoveryAdmissionRequest,
+	slot RecoverySlot,
+	record recoveryRecord,
+	relocation managedCloneRelocationRecord,
+	relocationErr error,
+	ids []string,
+) ([]string, error) {
+	if relocationErr != nil {
+		return nil, recoveryAdmissionError(req, "blocked recovery has no matching materialized relocation")
+	}
+	if err := blockedPermissionRetryCandidate(req, slot, record, relocation); err != nil {
+		return nil, err
 	}
 	return append(ids, record.OperationID), nil
 }
@@ -942,21 +1597,10 @@ func (m *Manager) recoveryOperationIDFromClaim(
 		}
 		return claim.OperationID, nil
 	}
+	if recoveryClaimMatchesRequest(claim, *req) {
+		return claim.OperationID, nil
+	}
 	return "", nil
-}
-
-func pendingManagedCloneRelocationOperationID(path string) (string, error) {
-	record, err := readManagedCloneRelocationRecord(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if record.State != managedCloneRelocationStatePrepared && record.State != managedCloneRelocationStateMaterialized {
-		return "", nil
-	}
-	return record.OperationID, nil
 }
 
 func (m *Manager) releaseRecoveryClaim(ctx context.Context, claim *models.TaskEnvironmentRecoveryClaim) error {

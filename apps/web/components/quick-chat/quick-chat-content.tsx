@@ -25,14 +25,16 @@ import {
 } from "@/components/task/chat/route-panel-mouse-down";
 import { useQuickChatInitialPrompt } from "./use-quick-chat-initial-prompt";
 import { useQuickChatInitialDraft } from "./use-quick-chat-initial-draft";
+import { useQuickChatInitialPromptRecovery } from "./use-quick-chat-initial-prompt-recovery";
 import { QuickChatCancelCommands } from "./quick-chat-cancel-commands";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
+import type { QuickChatInitialPrompt } from "@/lib/state/slices/ui/types";
 
 type QuickChatContentProps = {
   sessionId: string;
   minimalToolbar?: boolean;
   placeholderOverride?: string;
-  initialPrompt?: string;
+  initialPrompt?: QuickChatInitialPrompt;
   onInitialPromptAttempted?: () => void;
   /** Inserted once through `chatInputRef.insertText`, not sent. See
    *  {@link useQuickChatInitialDraft}. */
@@ -62,20 +64,16 @@ function useQuickChatComposerPriming({
 }: {
   sessionId: string;
   taskId: string | null;
-  initialPrompt?: string;
+  initialPrompt?: QuickChatInitialPrompt;
   initialDraft?: string;
   blocked: boolean;
   handleSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
   onInitialPromptAttempted?: () => void;
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>;
 }) {
-  const restoreRejectedPrompt = useCallback(
-    (rejectedSessionId: string, prompt: string) => {
-      const input = chatInputRef.current;
-      if (rejectedSessionId === sessionId && input && !input.getValue())
-        input.insertText(prompt, 0, 0);
-    },
-    [chatInputRef, sessionId],
+  const { restoreRejectedPrompt, clearAcceptedPrompt } = useQuickChatInitialPromptRecovery(
+    sessionId,
+    chatInputRef,
   );
 
   useQuickChatInitialPrompt({
@@ -85,6 +83,7 @@ function useQuickChatComposerPriming({
     blocked,
     submit: handleSubmit,
     onAttempted: onInitialPromptAttempted,
+    onAccepted: clearAcceptedPrompt,
     onRejected: restoreRejectedPrompt,
   });
 
@@ -114,6 +113,13 @@ function useQuickChatState(sessionId: string, transformOutgoing?: (message: stri
   };
 }
 
+function useFocusComposerOnMount(chatInputRef: React.RefObject<ChatInputContainerHandle | null>) {
+  useEffect(() => {
+    const timer = setTimeout(() => chatInputRef.current?.focusInput(), 50);
+    return () => clearTimeout(timer);
+  }, [chatInputRef]);
+}
+
 export const QuickChatContent = memo(function QuickChatContent({
   sessionId,
   minimalToolbar,
@@ -134,17 +140,18 @@ export const QuickChatContent = memo(function QuickChatContent({
   const activity = useCopilotActivity(activityDisplay, panelState);
   const items = useVisibleItems(activity.items, hideStartupRows);
 
-  useEffect(() => {
-    const timer = setTimeout(() => chatInputRef.current?.focusInput(), 50);
-    return () => clearTimeout(timer);
-  }, [chatInputRef]);
+  useFocusComposerOnMount(chatInputRef);
 
   useQuickChatComposerPriming({
     sessionId,
     taskId,
     initialPrompt,
     initialDraft,
-    blocked: panelState.planCommentMigration?.isBlocking ?? false,
+    blocked:
+      !panelState.session ||
+      panelState.inputMode === "unavailable" ||
+      (panelState.inputMode === "queue" && (!panelState.isQueueReady || panelState.isLoading)) ||
+      (panelState.planCommentMigration?.isBlocking ?? false),
     handleSubmit,
     onInitialPromptAttempted,
     chatInputRef,

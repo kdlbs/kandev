@@ -35,7 +35,7 @@ func TestContainmentReaders_CredentialAndRepositoryReadersAreAlwaysWired(t *test
 func TestRegisterCoordinatorRoutes_Phase3WiresContainment(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	origPass := runCoordinatorBackgroundPass
-	runCoordinatorBackgroundPass = func(context.Context, time.Time, []func(context.Context, time.Time)) {}
+	runCoordinatorBackgroundPass = func(context.Context, time.Time, []func(context.Context, time.Time)) func() { return func() {} }
 	t.Cleanup(func() { runCoordinatorBackgroundPass = origPass })
 	for _, p3 := range []bool{false, true} {
 		svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, true, true, p3, false, newTestLogger())

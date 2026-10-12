@@ -109,6 +109,10 @@ publication; do not substitute the default `gh` account. No delegation authorize
 
 ## Risks
 
+The [convergence fix package](../managed-clone-recovery-convergence/plan.md)
+covers actual source-clone changes and recovery error projection.
+This package's unchanged-source tests remain compatibility evidence.
+
 - An overly broad reuse bypass could accept a foreign clone or hide a missing
   registered destination. Require exact filesystem and origin proof.
 - macOS path casing must use real directory identity, not global lowercasing.

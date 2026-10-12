@@ -1,0 +1,61 @@
+{
+  "source_sha": "5aa06bcefe02b6ce7b7c321f7092efe89f0c8992",
+  "node": "24.16.0",
+  "pnpm": "9.15.9",
+  "workers": 2,
+  "runner": "local task VM; 11 available CPUs; not GitHub hosted",
+  "cache_state": "Installed frozen-lockfile dependencies; OS page cache and shared-host load were not controlled",
+  "manifest_sha256": "3fbe6ced2d0345b909a558e03b3b8363b7625d2e66664bf7c040c0ac3419a848",
+  "method": "Three alternating pairs over 48 newly migrated Node files and 48 newly migrated browser files, stratified across directories and dependency sizes. Command elapsed includes pnpm/Vitest startup; no pretest generation in either sample arm.",
+  "files": 96,
+  "assertions": 925,
+  "all_six_identity_outcome_multisets_equal": true,
+  "medians_seconds": {
+    "baseline": 60.608,
+    "candidate": 20.4
+  },
+  "results": [
+    {
+      "mode": "baseline",
+      "sample": 1,
+      "seconds": 60.332,
+      "exit": 0,
+      "report_sha256": "6f09098d9f6c35642752e1c32b7a67cd01c2c747096ee6175055126dc5d42664"
+    },
+    {
+      "mode": "candidate",
+      "sample": 1,
+      "seconds": 20.4,
+      "exit": 0,
+      "report_sha256": "ae688dac32e5309f091dd2e901931c8d26ea22a9d3a4b2af8d4c79f92a04a61f"
+    },
+    {
+      "mode": "candidate",
+      "sample": 2,
+      "seconds": 20.314,
+      "exit": 0,
+      "report_sha256": "e3238cabfc0cb35e8d2fe5bdd057697d9f73bf04f722d072814ee57ef1530ecd"
+    },
+    {
+      "mode": "baseline",
+      "sample": 2,
+      "seconds": 60.608,
+      "exit": 0,
+      "report_sha256": "65897c7858609bd4d34bc336891b260683f7d08ea8ea2dadace325adc7fd6374"
+    },
+    {
+      "mode": "baseline",
+      "sample": 3,
+      "seconds": 64.428,
+      "exit": 0,
+      "report_sha256": "3770aa9e5b77d667476c7838965170920a27d9a8d69f8e6cc0600e6b2a7926f8"
+    },
+    {
+      "mode": "candidate",
+      "sample": 3,
+      "seconds": 22.069,
+      "exit": 0,
+      "report_sha256": "67f6d3d526a1fe07b54d6d55d8c8f4ae269eb8a67a2690a814f3aeb0e39ba48c"
+    }
+  ]
+}

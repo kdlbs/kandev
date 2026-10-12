@@ -15,4 +15,46 @@ describe("prepare progress status", () => {
       }),
     ).toBe("preparing");
   });
+
+  it("derives completed_with_warnings when completed with warnings and no fatal failed steps", () => {
+    expect(
+      deriveStatus({
+        prepareStatus: "completed",
+        sessionState: "RUNNING",
+        agentctlStatus: "ready",
+        hasFailedStep: false,
+        hasWarnings: true,
+        hasRunningStep: false,
+        hasPreparationAttempt: true,
+      }),
+    ).toBe("completed_with_warnings");
+  });
+
+  it("prioritizes completed_with_error when completed with both failed steps and warnings", () => {
+    expect(
+      deriveStatus({
+        prepareStatus: "completed",
+        sessionState: "RUNNING",
+        agentctlStatus: "ready",
+        hasFailedStep: true,
+        hasWarnings: true,
+        hasRunningStep: false,
+        hasPreparationAttempt: true,
+      }),
+    ).toBe("completed_with_error");
+  });
+
+  it("derives failed when prepareStatus is failed regardless of warnings", () => {
+    expect(
+      deriveStatus({
+        prepareStatus: "failed",
+        sessionState: "FAILED",
+        agentctlStatus: undefined,
+        hasFailedStep: false,
+        hasWarnings: true,
+        hasRunningStep: false,
+        hasPreparationAttempt: true,
+      }),
+    ).toBe("failed");
+  });
 });

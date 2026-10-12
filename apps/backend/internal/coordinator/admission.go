@@ -127,6 +127,10 @@ func (s *Service) admitConversation(ctx context.Context, coord *Coordinator) (Ad
 	if err != nil || task == nil || task.ArchivedAt != nil {
 		return held(admitNoConversation, ""), false
 	}
+	if task.ID != *coord.ConversationTaskID || task.WorkspaceID != coord.WorkspaceID ||
+		task.Origin != taskmodels.TaskOriginCoordinator || conversationTaskCoordinatorID(task) != coord.ID || isDreamTask(task) {
+		return held(admitNoConversation, ""), false
+	}
 	if s.convReader == nil {
 		return held(admitConvUnavailable, admitDetailReadError), false
 	}

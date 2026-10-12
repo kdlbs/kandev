@@ -32,6 +32,7 @@ func TestHTTPCreateTaskExecutorProfileWithoutAgent(t *testing.T) {
 		"workspace_id": "ws-1",
 		"title": "Analyse integrations",
 		"project_id": "proj-1",
+		"repositories": [],
 		"priority": "medium", "executor_profile_id": "executor-profile"
 	}`))
 	c.Request.Header.Set("Content-Type", "application/json")

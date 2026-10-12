@@ -11,8 +11,9 @@ import (
 // Observers fans one decision out to several observers. A panic in one is
 // counted and logged and never reaches the others or the decision.
 type Observers struct {
-	log  *zap.Logger
-	list []namedObserver
+	log     *zap.Logger
+	list    []namedObserver
+	capture *decisionCaptureQueue
 }
 
 type namedObserver struct {
@@ -25,7 +26,17 @@ func NewObservers(log *zap.Logger, q *Queue, c *Capture) *Observers {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	return &Observers{log: log, list: []namedObserver{{ObserverGrader, q}, {ObserverOverride, c}}}
+	o := &Observers{log: log}
+	o.capture = newDecisionCaptureQueue(o, c)
+	o.list = []namedObserver{{ObserverGrader, q}, {ObserverOverride, o.capture}}
+	return o
+}
+
+// Stop closes capture admission, cancels its I/O and joins its worker.
+func (o *Observers) Stop() {
+	if o.capture != nil {
+		o.capture.Stop()
+	}
 }
 
 // OnDecision implements coordinator.DecisionObserver.
