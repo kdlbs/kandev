@@ -107,6 +107,11 @@ It retains the 44-pixel geometry, hidden overlay, collapsed/expanded ARIA state,
 waiting session and reopen assertions. The 90-second test limit is unchanged.
 Actual updated-head browser verification remains pending; no local E2E ran.
 
+The desktop Escape regression reported the same ambiguous collapsed-control
+locator in the later shard result. It now targets the uniquely accessible Expand
+button while preserving waiting-state, reopen, answer/resume and Inbox-clear
+assertions. This is a test-only follow-up to the real hosted failure.
+
 Source implementation is present in the current-main integration for PR #4044.
 Review remediation and complete exact-head hosted verification are still in
 progress. Historical contributor CI and focused dependency projections do not

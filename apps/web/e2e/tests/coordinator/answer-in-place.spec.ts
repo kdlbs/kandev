@@ -55,7 +55,8 @@ test.describe("Coordinator answer in place: question", () => {
     await databaseOption.focus();
     await databaseOption.press("Escape");
     await expect(overlay).toBeHidden();
-    const disclosure = card.getByTestId("clarification-collapse-toggle");
+    const disclosure = card.getByRole("button", { name: "Expand clarification", exact: true });
+    await expect(disclosure).toHaveCount(1);
     await expect(disclosure).toHaveAttribute("aria-expanded", "false");
     await waitForSessionState(apiClient, {
       taskId: task.id,
