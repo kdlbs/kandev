@@ -1,7 +1,10 @@
 ---
 status: in_progress
 created: 2026-10-11
-spec: ../../specs/tasks/requirements/bounded-queue-recovery.md
+requirements:
+  - REQ-TASKS-QUEUE-RECOVERY-001
+system_design:
+  - ../../specs/tasks/system-design/bounded-queue-recovery.md
 ---
 
 # Bounded session and direct-child queue recovery
@@ -86,8 +89,17 @@ Modify only where required:
 - docs/plans/guarded-exact-task-retirement/task-03-preservation-handoff.md: coordinate source-reference linkage only with owner; do not change retirement eligibility.
 No frontend UI, generated protobuf, package lock, Docker image or executor paths anticipated.
 
+## Work packets
+
+- [task-01-contract](task-01-contract.md)
+- [task-02-read](task-02-read.md)
+- [task-03-projection](task-03-projection.md)
+- [task-04-authority](task-04-authority.md)
+- [task-05-mcp](task-05-mcp.md)
+- [task-06-delivery](task-06-delivery.md)
+
 ## 7. Implementation Steps
-Six ordered work packets; execute in this primary session. Each later repository task file includes status: pending, wave, depends_on, spec, plan, owned files, ACs, exact commands and risks. No subagents or additional platform tasks authorized.
+Six ordered work packets; execute in this primary session. Each repository task file records status, wave, dependencies, plan and contract links, acceptance criteria, owned files, verification commands and risks. No subagents or additional platform tasks authorized.
 
 1. Contract/reuse package (task-01-contract; depends_on none).
 Refresh upstream/main and linked PR/task states. Coordinate #3377 census overlap with ca015838 and Coordinator: reuse its read-only subset/contract if suitable; do not wait for or import unrelated disposal/runtime work. Record which implementation supersedes local census behavior. Materialize spec, ADR, plan and six task files before code. Establish exact upstream source baseline without changing the user's checkout. Create local PROMPT.md when writes are allowed. AC1-11 mapped; verification: python3 scripts/list-docs.py validate; python3 scripts/lint-spec-files.py --all; git diff --check. Risk: overlapping pending work; ownership resolved before source edits.

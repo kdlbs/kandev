@@ -5,7 +5,12 @@ status: in_progress
 wave: 6
 depends_on: ["05-mcp"]
 plan: plan.md
-spec: ../../specs/tasks/requirements/bounded-queue-recovery.md
+requirements:
+  - REQ-TASKS-QUEUE-RECOVERY-001
+acceptance_criteria:
+  - AC-TASKS-QUEUE-RECOVERY-001.9
+system_design:
+  - ../../specs/tasks/system-design/bounded-queue-recovery.md
 ---
 
 # Work packet 6: delivery

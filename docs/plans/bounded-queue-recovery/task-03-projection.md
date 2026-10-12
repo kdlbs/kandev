@@ -5,7 +5,14 @@ status: in_progress
 wave: 3
 depends_on: ["02-read"]
 plan: plan.md
-spec: ../../specs/tasks/requirements/bounded-queue-recovery.md
+requirements:
+  - REQ-TASKS-QUEUE-RECOVERY-001
+acceptance_criteria:
+  - AC-TASKS-QUEUE-RECOVERY-001.4
+  - AC-TASKS-QUEUE-RECOVERY-001.5
+  - AC-TASKS-QUEUE-RECOVERY-001.7
+system_design:
+  - ../../specs/tasks/system-design/bounded-queue-recovery.md
 ---
 
 # Work packet 3: projection

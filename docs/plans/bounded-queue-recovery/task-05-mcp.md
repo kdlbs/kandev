@@ -5,7 +5,13 @@ status: in_progress
 wave: 5
 depends_on: ["04-authority"]
 plan: plan.md
-spec: ../../specs/tasks/requirements/bounded-queue-recovery.md
+requirements:
+  - REQ-TASKS-QUEUE-RECOVERY-001
+acceptance_criteria:
+  - AC-TASKS-QUEUE-RECOVERY-001.8
+  - AC-TASKS-QUEUE-RECOVERY-001.9
+system_design:
+  - ../../specs/tasks/system-design/bounded-queue-recovery.md
 ---
 
 # Work packet 5: mcp

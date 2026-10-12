@@ -5,7 +5,15 @@ status: in_progress
 wave: 2
 depends_on: ["01-contract"]
 plan: plan.md
-spec: ../../specs/tasks/requirements/bounded-queue-recovery.md
+requirements:
+  - REQ-TASKS-QUEUE-RECOVERY-001
+acceptance_criteria:
+  - AC-TASKS-QUEUE-RECOVERY-001.3
+  - AC-TASKS-QUEUE-RECOVERY-001.6
+  - AC-TASKS-QUEUE-RECOVERY-001.7
+  - AC-TASKS-QUEUE-RECOVERY-001.9
+system_design:
+  - ../../specs/tasks/system-design/bounded-queue-recovery.md
 ---
 
 # Work packet 2: read
