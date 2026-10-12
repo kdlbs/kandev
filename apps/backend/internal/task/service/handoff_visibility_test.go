@@ -92,12 +92,34 @@ func TestGetTaskVisibilityRequiresDeletedTombstoneForAbsentTask(t *testing.T) {
 	deleted, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "deleted", Scope: RelatedReadScopeWorkspaceTaskTree})
 	require.NoError(t, err)
 	require.Equal(t, "deleted", deleted.Visibility.Disposition)
-	for _, target := range []string{"active", "missing"} {
+	active, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "active", Scope: RelatedReadScopeWorkspaceTaskTree})
+	require.NoError(t, err)
+	require.Equal(t, "unknown", active.Visibility.Disposition)
+
+	for _, target := range []string{"missing"} {
 		_, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: target, Scope: RelatedReadScopeWorkspaceTaskTree})
 		require.ErrorIs(t, err, ErrAccessDenied)
 		reason, ok := RelatedReadDenialReasonFor(err)
 		require.True(t, ok)
 		require.Equal(t, RelatedReadDenialTargetUnavailable, reason)
+	}
+}
+
+func TestGetTaskVisibilityReturnsUnknownForSameWorkspaceInconsistentEvidence(t *testing.T) {
+	ctx := context.Background()
+	tasks := newFakeTaskRepo()
+	tasks.addTask("caller", "", "workspace-a")
+	tasks.addTask("deleted-receipt", "", "workspace-a")
+	repo := &visibilityReceiptRepo{fakeCascadeRepo: newCascadeRepo(tasks), receipts: map[string]*models.TaskLifecycleReceipt{
+		"deleted-receipt": {TaskID: "deleted-receipt", WorkspaceID: "workspace-a", Title: "Still live", Disposition: "deleted", ChangedAt: time.Now().UTC(), Revision: 4, Provenance: "delete"},
+		"active-receipt":  {TaskID: "active-receipt", WorkspaceID: "workspace-a", Title: "Missing live task", Disposition: "active", ChangedAt: time.Now().UTC(), Revision: 2, Provenance: "create"},
+	}}
+	svc := NewHandoffService(repo, nil, nil, nil, nil, nil)
+
+	for _, target := range []string{"deleted-receipt", "active-receipt"} {
+		visibility, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: target, Scope: RelatedReadScopeWorkspaceTaskTree})
+		require.NoError(t, err)
+		require.Equal(t, "unknown", visibility.Visibility.Disposition)
 	}
 }
 

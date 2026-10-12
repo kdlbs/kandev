@@ -11,6 +11,7 @@ import (
 
 const taskVisibilitySchemaVersion = 1
 const taskVisibilityDispositionDeleted = "deleted"
+const taskVisibilityDispositionUnknown = "unknown"
 
 // TaskVisibility is the compact, backend-authorized lifecycle projection.
 // The durable receipt store may refine the disposition for deleted tasks;
@@ -78,12 +79,23 @@ func taskVisibilityFromEvidence(task *models.Task, receipt *models.TaskLifecycle
 		if receipt.Disposition == taskVisibilityDispositionDeleted {
 			return taskVisibilityFromReceipt(receipt), nil
 		}
-		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "target lifecycle evidence is inconsistent")
+		return taskVisibilityUnknownFromEvidence(nil, receipt), nil
 	}
 	if receipt.Disposition == taskVisibilityDispositionDeleted {
-		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "target lifecycle evidence is inconsistent")
+		return taskVisibilityUnknownFromEvidence(task, receipt), nil
 	}
 	return taskVisibilityFromLiveTask(task, receipt), nil
+}
+
+func taskVisibilityUnknownFromEvidence(task *models.Task, receipt *models.TaskLifecycleReceipt) *TaskVisibility {
+	var visibility *TaskVisibility
+	if task == nil {
+		visibility = taskVisibilityFromReceipt(receipt)
+	} else {
+		visibility = taskVisibilityFromLiveTask(task, receipt)
+	}
+	visibility.Visibility.Disposition = taskVisibilityDispositionUnknown
+	return visibility
 }
 
 func taskVisibilityFromLiveTask(task *models.Task, receipt *models.TaskLifecycleReceipt) *TaskVisibility {
