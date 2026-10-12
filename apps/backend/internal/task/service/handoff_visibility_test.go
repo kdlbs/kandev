@@ -275,4 +275,30 @@ func TestArchiveTaskTreeKeepsCommittedChildReceiptWhenLaterRootReceiptFails(t *t
 	require.Equal(t, "archived", childReceipt.Disposition)
 	require.Equal(t, "archive", childReceipt.Provenance)
 	require.EqualValues(t, 2, childReceipt.Revision)
+
+	_, err = repo.DB().Exec(`DROP TRIGGER fail_root_receipt`)
+	require.NoError(t, err)
+	completed, err := handoff.ArchiveTaskTree(ctx, root.ID, true)
+	require.NoError(t, err)
+	require.Equal(t, []string{root.ID}, completed.ArchivedTaskIDs)
+	rootReceipt, err = repo.GetTaskLifecycleReceipt(ctx, workspaceID, root.ID)
+	require.NoError(t, err)
+	require.Equal(t, "archived", rootReceipt.Disposition)
+	require.Equal(t, "archive", rootReceipt.Provenance)
+	require.EqualValues(t, 2, rootReceipt.Revision)
+	childReceipt, err = repo.GetTaskLifecycleReceipt(ctx, workspaceID, child.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, childReceipt.Revision)
+
+	beforeReplayRoot := *rootReceipt
+	beforeReplayChild := *childReceipt
+	replayed, err := handoff.ArchiveTaskTree(ctx, root.ID, true)
+	require.NoError(t, err)
+	require.Empty(t, replayed.ArchivedTaskIDs)
+	rootReceipt, err = repo.GetTaskLifecycleReceipt(ctx, workspaceID, root.ID)
+	require.NoError(t, err)
+	childReceipt, err = repo.GetTaskLifecycleReceipt(ctx, workspaceID, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, beforeReplayRoot, *rootReceipt)
+	require.Equal(t, beforeReplayChild, *childReceipt)
 }
