@@ -78,7 +78,7 @@ export function registerMissingEnvironmentTerminalTest(mobile: boolean) {
       await expect
         .poll(() => closeOutcomes)
         .toContainEqual({ code: 1000, reason: "environment_not_found" });
-      await expect(panel.getByTestId("passthrough-session-ended")).toBeVisible({ timeout: 15_000 });
+      await expect(panel.getByTestId("passthrough-session-ended")).toBeVisible();
       await expect(panel.getByTestId("passthrough-loading")).toBeHidden();
       const settledAttempts = attempts.length;
       await dwell(
