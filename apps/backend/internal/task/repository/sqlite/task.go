@@ -1064,12 +1064,19 @@ func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, ex
 	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
 		return err
 	}
+	previous, err := r.taskLifecycleSnapshotInTx(ctx, tx, task.ID)
+	if err != nil {
+		return err
+	}
+	if previous == nil {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
 
 	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, preservePosition, protectDeferredLaunch, nil)
 	if err != nil {
 		return err
 	}
-	if task.FromWorkflowID != "" && (task.FromWorkflowID != task.WorkflowID || task.FromStepID != task.WorkflowStepID) {
+	if previous.WorkflowID != task.WorkflowID || previous.WorkflowStepID != task.WorkflowStepID {
 		if err := r.recordTaskLifecycleReceipt(ctx, tx, task, "active", "move", task.UpdatedAt); err != nil {
 			return err
 		}
