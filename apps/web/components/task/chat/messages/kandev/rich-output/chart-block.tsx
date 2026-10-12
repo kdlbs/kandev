@@ -138,16 +138,6 @@ function useChartPresentation(chart: ChartProps) {
     [setHidden],
   );
 
-  return { formatXAxisTick, formatYAxisValue, hiddenSeries, toggleSeries };
-}
-
-export const Chart = memo(function Chart(chart: ChartProps) {
-  const { formatXAxisTick, formatYAxisValue, hiddenSeries, toggleSeries } =
-    useChartPresentation(chart);
-  const { plotRef, shouldMountPlot } = useChartPlotVisibility();
-  const shouldAnimate = useRichOutputChartAnimations();
-  const data = useMemo(() => chartData(chart), [chart.labels, chart.series]);
-  const config = useMemo(() => chartConfig(chart), [chart.series]);
   const legend = useMemo(
     () => (
       <ChartLegend
@@ -156,6 +146,16 @@ export const Chart = memo(function Chart(chart: ChartProps) {
     ),
     [chart, hiddenSeries, toggleSeries],
   );
+
+  return { formatXAxisTick, formatYAxisValue, hiddenSeries, legend };
+}
+
+export const Chart = memo(function Chart(chart: ChartProps) {
+  const { formatXAxisTick, formatYAxisValue, hiddenSeries, legend } = useChartPresentation(chart);
+  const { plotRef, shouldMountPlot } = useChartPlotVisibility();
+  const shouldAnimate = useRichOutputChartAnimations();
+  const data = useMemo(() => chartData(chart), [chart.labels, chart.series]);
+  const config = useMemo(() => chartConfig(chart), [chart.series]);
 
   return (
     <figure className="min-w-0 space-y-3" data-testid={`rich-output-chart-${chart.chart_type}`}>

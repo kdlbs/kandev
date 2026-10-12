@@ -34,6 +34,9 @@ export function buildGuardedSetters(
     setNotice: (notice) => {
       if (guard()) setters.setNotice?.(notice);
     },
+    setNoticeKind: (kind) => {
+      if (guard()) setters.setNoticeKind?.(kind);
+    },
     setWorktreePath: (p) => {
       if (guard()) setters.setWorktreePath(p);
     },

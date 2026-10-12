@@ -16,17 +16,7 @@ type SeedOpts = {
 async function seedApproveTest(opts: SeedOpts) {
   const { apiClient, workspaceId, agentProfileId, repositoryId, title, currentUser } = opts;
   const workflow = await apiClient.createWorkflow(workspaceId, `${title} Workflow`);
-  const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
-  const workingStep = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
-  const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
-
-  await apiClient.updateWorkflowStep(workingStep.id, {
-    prompt: 'e2e:message("done")\n{{task_prompt}}',
-    events: {
-      on_enter: [{ type: "auto_start_agent" }],
-      on_turn_complete: [{ type: "move_to_step", config: { step_id: doneStep.id } }],
-    },
-  });
+  const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 0);
 
   await apiClient.saveUserSettings({
     workspace_id: workspaceId,
@@ -39,12 +29,17 @@ async function seedApproveTest(opts: SeedOpts) {
 
   const task = await apiClient.createTask(workspaceId, title, {
     workflow_id: workflow.id,
-    workflow_step_id: inboxStep.id,
+    workflow_step_id: doneStep.id,
     agent_profile_id: agentProfileId,
     repository_ids: [repositoryId],
   });
 
-  return { workflow, workingStep, doneStep, task };
+  await apiClient.seedTaskSession(task.id, {
+    state: "IDLE",
+    agentProfileId,
+    repositoryId,
+  });
+  return { workflow, doneStep, task };
 }
 
 async function openTaskAndPRPanel(testPage: Page, doneStepId: string, title: string) {
@@ -68,7 +63,7 @@ test.describe("PR Approve button visibility", () => {
   test("is hidden when current user authored the PR", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
 
-    const { workflow, workingStep, doneStep, task } = await seedApproveTest({
+    const { workflow, doneStep, task } = await seedApproveTest({
       apiClient,
       workspaceId: seedData.workspaceId,
       agentProfileId: seedData.agentProfileId,
@@ -78,8 +73,7 @@ test.describe("PR Approve button visibility", () => {
     });
 
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await apiClient.moveTask(task.id, workflow.id, workingStep.id);
+    await kanban.goto(workflow.id);
 
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
@@ -113,7 +107,7 @@ test.describe("PR Approve button visibility", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const { workflow, workingStep, doneStep, task } = await seedApproveTest({
+    const { workflow, doneStep, task } = await seedApproveTest({
       apiClient,
       workspaceId: seedData.workspaceId,
       agentProfileId: seedData.agentProfileId,
@@ -123,8 +117,7 @@ test.describe("PR Approve button visibility", () => {
     });
 
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await apiClient.moveTask(task.id, workflow.id, workingStep.id);
+    await kanban.goto(workflow.id);
 
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,

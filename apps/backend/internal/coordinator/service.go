@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/authz"
@@ -64,10 +65,14 @@ type CoordinatorWithOpenProposals struct {
 // conversation, approve/reject, and subscriber routes are added by later work
 // packages on the same Store.
 type Service struct {
-	store     *Store
-	validator *Validator
-	authz     WorkspaceAuthorizer
-	logger    *logger.Logger
+	// kinds is the registry of non-create proposal kinds; executeTimeout bounds one Execute.
+	kinds          map[string]KindExecutor
+	kindDeps       KindDeps
+	executeTimeout time.Duration
+	store          *Store
+	validator      *Validator
+	authz          WorkspaceAuthorizer
+	logger         *logger.Logger
 
 	onConversationCleared ConversationClearedHook
 	onCoordinatorDeleted  CoordinatorDeletedHook
@@ -88,6 +93,14 @@ type Service struct {
 	decisionSteps WorkflowStepReader
 	eventBus      bus.EventBus
 
+	// undoTasks is the task-service seam undo and the activity list read
+	// through; nil until SetUndoDeps.
+	undoTasks UndoTaskService
+	undoLocks keyedLock
+
+	retentionWG      sync.WaitGroup
+	retentionRunning atomic.Bool
+
 	// sweepMu guards sweepStarted against concurrent StartApprovalSweep
 	// calls; sweepWG lets Stop (and tests) wait for the loop to drain. See
 	// docs/specs/coordinator/system-design/proposal-recovery.md#recovery.
@@ -95,22 +108,53 @@ type Service struct {
 	sweepStarted bool
 	sweepWG      sync.WaitGroup
 
+	// launchWG tracks resume launches that may outlive their Execute deadline.
+	launchWG sync.WaitGroup
+
 	// afterSweepPass is a test-only hook invoked once at the end of every
 	// approval-sweep pass (including a pass with nothing to recover). nil in
 	// production; only tests in this package set it, to join on a pass
 	// completing instead of sleeping.
 	afterSweepPass func()
+
+	// phase2 is true when the control surface is on. It gates every phase-2
+	// behavior of the service; false leaves the phase-1 product unchanged.
+	phase2 bool
+	// policyErrLogged holds one entry per "coordinatorID:policy_revision" whose
+	// unreadable stored policy has been logged.
+	policyErrLogged sync.Map
+
+	// afterApproveRecheck is a test-only hook run between the approve policy
+	// re-check and the claim.
+	afterApproveRecheck func()
 }
+
+// ServiceOption configures optional Service behavior.
+type ServiceOption func(*Service)
+
+// WithPhase2 turns the phase-2 control surface on or off. Off is the default.
+func WithPhase2(on bool) ServiceOption {
+	return func(s *Service) { s.phase2 = on }
+}
+
+// Phase2Enabled reports whether the phase-2 control surface is on.
+func (s *Service) Phase2Enabled() bool { return s.phase2 }
 
 // NewService builds a Service over store, validator, the workspace
 // authorizer and a logger.
-func NewService(store *Store, validator *Validator, authorizer WorkspaceAuthorizer, log *logger.Logger) *Service {
-	return &Service{
+func NewService(store *Store, validator *Validator, authorizer WorkspaceAuthorizer, log *logger.Logger, opts ...ServiceOption) *Service {
+	s := &Service{
 		store:     store,
 		validator: validator,
 		authz:     authorizer,
 		logger:    log.WithFields(zap.String("component", "coordinator-service")),
 	}
+	s.registerKinds()
+	s.executeTimeout = executeDeadline
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // SetConversationHooks registers the conversation-lifecycle hooks a later
@@ -132,6 +176,10 @@ func (s *Service) SetDecisionDeps(tasks DecisionTaskService, steps WorkflowStepR
 	s.eventBus = eventBus
 }
 
+// SetUndoDeps wires the task-service seam behind undo and the list's task
+// identifiers.
+func (s *Service) SetUndoDeps(tasks UndoTaskService) { s.undoTasks = tasks }
+
 // publishCoordinatorUpdated recomputes coordinatorID's open-proposal count
 // and publishes events.CoordinatorUpdated (proposals.md#events). A nil
 // eventBus (SetDecisionDeps not called, e.g. in a store-only test) makes
@@ -141,7 +189,7 @@ func (s *Service) publishCoordinatorUpdated(ctx context.Context, workspaceID, co
 	if s.eventBus == nil {
 		return
 	}
-	open, err := s.store.CountOpenProposals(ctx, coordinatorID)
+	open, err := s.store.CountOpenProposals(ctx, coordinatorID, s.phase2)
 	if err != nil {
 		s.logger.Warn("failed to count open proposals for coordinator.updated",
 			zap.String("coordinator_id", coordinatorID), zap.Error(err))
@@ -220,7 +268,7 @@ func (s *Service) ListCoordinators(ctx context.Context, workspaceID string) ([]C
 	if err != nil {
 		return nil, err
 	}
-	counts, err := s.store.CountOpenProposalsByWorkspace(ctx, workspaceID)
+	counts, err := s.store.CountOpenProposalsByWorkspace(ctx, workspaceID, s.phase2)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +386,7 @@ func (s *Service) GetProposal(ctx context.Context, workspaceID, coordinatorID, i
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead); err != nil {
 		return nil, err
 	}
-	return s.store.GetProposal(ctx, workspaceID, coordinatorID, id)
+	return s.store.GetProposal(ctx, workspaceID, coordinatorID, id, s.phase2)
 }
 
 // ListProposals returns a coordinator's proposals per status (Build decision
@@ -351,7 +399,7 @@ func (s *Service) ListProposals(ctx context.Context, workspaceID, coordinatorID 
 	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
 		return nil, err
 	}
-	return s.store.ListProposals(ctx, workspaceID, coordinatorID, status)
+	return s.store.ListProposals(ctx, workspaceID, coordinatorID, status, s.phase2)
 }
 
 // CoordinatorForConversationTask returns the id of the coordinator whose

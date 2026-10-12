@@ -5,16 +5,19 @@ import { ApiError } from "@/lib/api/client";
 import {
   approveProposal,
   getProposalConflict,
+  isStoredProposal,
   rejectProposal,
   type ApproveProposalEdits,
-  type Proposal,
+  type StoredProposal,
+  type WireProposal,
 } from "@/lib/api/domains/coordinator-api";
 import { useProposalsStore, type ProposalApplyResult } from "./use-proposals";
 
 export type ProposalDecisionOutcome =
-  | { kind: "decided"; proposal: Proposal }
+  | { kind: "decided"; proposal: StoredProposal }
   | { kind: "validation"; message: string; field: string | null }
-  | { kind: "conflict"; proposal: Proposal }
+  | { kind: "conflict"; proposal: StoredProposal }
+  | { kind: "policy_denied" }
   | { kind: "forbidden" }
   | { kind: "not_found" }
   | { kind: "network" };
@@ -33,6 +36,38 @@ function fieldErrorBody(body: unknown): { message: string; field: string | null 
     message: typeof record.error === "string" ? record.error : "",
     field: typeof record.field === "string" ? record.field : null,
   };
+}
+
+// The 409 body carries `error` "policy_denied" and no `error_code`.
+function isPolicyDeniedBody(body: unknown): boolean {
+  return (
+    !!body && typeof body === "object" && (body as { error?: unknown }).error === "policy_denied"
+  );
+}
+
+function outcomeFromError(
+  error: unknown,
+  apply: (result: ProposalApplyResult) => void,
+): ProposalDecisionOutcome {
+  if (!(error instanceof ApiError)) return { kind: "network" };
+  if (error.status === 409) {
+    if (isPolicyDeniedBody(error.body)) return { kind: "policy_denied" };
+    const conflict = getProposalConflict(error);
+    if (conflict && isStoredProposal(conflict)) {
+      apply({ kind: "success", proposal: conflict });
+      return { kind: "conflict", proposal: conflict };
+    }
+  }
+  if (error.status === 400) {
+    const { message, field } = fieldErrorBody(error.body);
+    return { kind: "validation", message, field };
+  }
+  if (error.status === 403) return { kind: "forbidden" };
+  if (error.status === 404) {
+    apply({ kind: "not_found" });
+    return { kind: "not_found" };
+  }
+  return { kind: "network" };
 }
 
 /**
@@ -65,32 +100,18 @@ export function useProposalDecision(
   );
 
   const run = useCallback(
-    async (action: () => Promise<Proposal>): Promise<ProposalDecisionOutcome> => {
+    async (action: () => Promise<WireProposal>): Promise<ProposalDecisionOutcome> => {
       setBusy(true);
       try {
         const proposal = await action();
+        if (!isStoredProposal(proposal)) {
+          apply({ kind: "not_found" });
+          return { kind: "not_found" };
+        }
         apply({ kind: "success", proposal });
         return { kind: "decided", proposal };
       } catch (error) {
-        if (error instanceof ApiError) {
-          if (error.status === 409) {
-            const conflict = getProposalConflict(error);
-            if (conflict) {
-              apply({ kind: "success", proposal: conflict });
-              return { kind: "conflict", proposal: conflict };
-            }
-          }
-          if (error.status === 400) {
-            const { message, field } = fieldErrorBody(error.body);
-            return { kind: "validation", message, field };
-          }
-          if (error.status === 403) return { kind: "forbidden" };
-          if (error.status === 404) {
-            apply({ kind: "not_found" });
-            return { kind: "not_found" };
-          }
-        }
-        return { kind: "network" };
+        return outcomeFromError(error, apply);
       } finally {
         setBusy(false);
       }

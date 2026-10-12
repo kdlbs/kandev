@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { resizeColumnViaSplitview } from "../../helpers/dockview-resize";
 import { expectNoPageHorizontalOverflow } from "./large-changes-helpers";
 import { refreshSpacingAndExpectAnchor } from "./changes-commit-spacing-helpers";
 import {
@@ -54,7 +55,10 @@ test.describe("Changes history regression", () => {
     const session = await openHistoryRegression(testPage, apiClient, seedData, false);
     await seedHistoryRelation(testPage, "diverged");
     await expectDivergedHistory(testPage);
-    await expectHeaderGeometry(testPage, 28, true);
+    // Measure single-line density in a pane wide enough for the full labels.
+    // The narrower viewport loop below separately covers dynamic wrapping.
+    await resizeColumnViaSplitview(testPage, "right", 400);
+    await expectHeaderGeometry(testPage, 28);
     await expectExpandedPRContiguous(testPage);
     for (const width of [1040, 768, 1280]) {
       await testPage.setViewportSize({ width, height: 900 });
@@ -63,7 +67,8 @@ test.describe("Changes history regression", () => {
     }
     await session.clickSessionChatTab();
     await session.clickTab("Changes");
-    await expectHeaderGeometry(testPage, 28, true);
+    await resizeColumnViaSplitview(testPage, "right", 400);
+    await expectHeaderGeometry(testPage, 28);
     await expectNoPageHorizontalOverflow(testPage);
     await prCapture.screenshot("history-header-spacing-desktop", {
       caption: "Compact Changes history headers",

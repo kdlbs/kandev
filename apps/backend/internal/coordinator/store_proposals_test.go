@@ -36,7 +36,7 @@ func TestInsertProposal_AssignsIDAndPendingStatus(t *testing.T) {
 	c := newTestCoordinator(t, store, "ws-1")
 
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	if p.ID == "" {
@@ -49,7 +49,7 @@ func TestInsertProposal_AssignsIDAndPendingStatus(t *testing.T) {
 		t.Fatal("InsertProposal did not stamp timestamps")
 	}
 
-	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestInsertProposal_AssignsIDAndPendingStatus(t *testing.T) {
 func TestInsertProposal_UnknownCoordinatorIsNotFound(t *testing.T) {
 	store := newTestStore(t)
 	p := &Proposal{CoordinatorID: "missing", WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(context.Background(), p); !errors.Is(err, ErrNotFound) {
+	if err := store.InsertProposal(context.Background(), p, false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("InsertProposal(missing coordinator): err = %v, want ErrNotFound", err)
 	}
 }
@@ -73,7 +73,7 @@ func TestInsertProposal_WrongWorkspaceIsNotFound(t *testing.T) {
 	store := newTestStore(t)
 	c := newTestCoordinator(t, store, "ws-1")
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-2", Spec: sampleSpec()}
-	if err := store.InsertProposal(context.Background(), p); !errors.Is(err, ErrNotFound) {
+	if err := store.InsertProposal(context.Background(), p, false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("InsertProposal(wrong workspace): err = %v, want ErrNotFound", err)
 	}
 }
@@ -85,17 +85,17 @@ func TestInsertProposal_CapReachedAt25(t *testing.T) {
 
 	for i := 0; i < maxOpenProposals; i++ {
 		p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-		if err := store.InsertProposal(ctx, p); err != nil {
+		if err := store.InsertProposal(ctx, p, false); err != nil {
 			t.Fatalf("InsertProposal #%d: %v", i, err)
 		}
 	}
 
 	overflow := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, overflow); !errors.Is(err, ErrCoordinatorProposalCapReached) {
+	if err := store.InsertProposal(ctx, overflow, false); !errors.Is(err, ErrCoordinatorProposalCapReached) {
 		t.Fatalf("InsertProposal #%d: err = %v, want ErrCoordinatorProposalCapReached", maxOpenProposals, err)
 	}
 
-	count, err := store.CountOpenProposals(ctx, c.ID)
+	count, err := store.CountOpenProposals(ctx, c.ID, false)
 	if err != nil {
 		t.Fatalf("CountOpenProposals: %v", err)
 	}
@@ -122,14 +122,14 @@ func TestCountOpenProposalsByWorkspace_GroupsByCoordinatorAndExcludesClosed(t *t
 	other := newTestCoordinator(t, store, "ws-2")
 
 	// busy: two open (pending), one closed (rejected) -> count 2, closed excluded.
-	if err := store.InsertProposal(ctx, &Proposal{CoordinatorID: busy.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}); err != nil {
+	if err := store.InsertProposal(ctx, &Proposal{CoordinatorID: busy.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
-	if err := store.InsertProposal(ctx, &Proposal{CoordinatorID: busy.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}); err != nil {
+	if err := store.InsertProposal(ctx, &Proposal{CoordinatorID: busy.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	closed := &Proposal{CoordinatorID: busy.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, closed); err != nil {
+	if err := store.InsertProposal(ctx, closed, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	if matched, err := store.RejectProposal(ctx, closed.ID, "", "", time.Now().UTC()); err != nil || !matched {
@@ -139,11 +139,11 @@ func TestCountOpenProposalsByWorkspace_GroupsByCoordinatorAndExcludesClosed(t *t
 	// idle: no proposals at all -> absent from the map.
 
 	// other: a different workspace's open proposal must not leak into ws-1's counts.
-	if err := store.InsertProposal(ctx, &Proposal{CoordinatorID: other.ID, WorkspaceID: "ws-2", Spec: sampleSpec()}); err != nil {
+	if err := store.InsertProposal(ctx, &Proposal{CoordinatorID: other.ID, WorkspaceID: "ws-2", Spec: sampleSpec()}, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 
-	counts, err := store.CountOpenProposalsByWorkspace(ctx, "ws-1")
+	counts, err := store.CountOpenProposalsByWorkspace(ctx, "ws-1", false)
 	if err != nil {
 		t.Fatalf("CountOpenProposalsByWorkspace: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestInsertProposal_ConcurrentCapEnforcement(t *testing.T) {
 			defer wg.Done()
 			<-start
 			p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-			err := store.InsertProposal(ctx, p)
+			err := store.InsertProposal(ctx, p, false)
 			switch {
 			case err == nil:
 				atomic.AddInt64(&succeeded, 1)
@@ -201,7 +201,7 @@ func TestInsertProposal_ConcurrentCapEnforcement(t *testing.T) {
 		t.Fatalf("capped = %d, want %d", capped, attempts-maxOpenProposals)
 	}
 
-	count, err := store.CountOpenProposals(ctx, c.ID)
+	count, err := store.CountOpenProposals(ctx, c.ID, false)
 	if err != nil {
 		t.Fatalf("CountOpenProposals: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestClaimProposal_ClaimsPendingNotOthers(t *testing.T) {
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestClaimProposal_ClaimsPendingNotOthers(t *testing.T) {
 		t.Fatal("ClaimProposal did not match the pending row")
 	}
 
-	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestReclaimStale_OnlyWhenClaimedBeforeThreshold(t *testing.T) {
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	claimedAt := time.Now().UTC().Add(-3 * time.Minute)
@@ -286,7 +286,7 @@ func TestReclaimStale_OnlyWhenClaimedBeforeThreshold(t *testing.T) {
 
 	// Not yet stale relative to a threshold before the original claim.
 	tooRecentThreshold := claimedAt.Add(-time.Minute)
-	matched, err := store.ReclaimStale(ctx, p.ID, "token-2", now, tooRecentThreshold)
+	matched, err := store.ReclaimStale(ctx, p.ID, "token-2", now, tooRecentThreshold, false)
 	if err != nil {
 		t.Fatalf("ReclaimStale (not stale): %v", err)
 	}
@@ -294,7 +294,7 @@ func TestReclaimStale_OnlyWhenClaimedBeforeThreshold(t *testing.T) {
 		t.Fatal("ReclaimStale matched a claim that is not stale relative to the threshold")
 	}
 
-	matched, err = store.ReclaimStale(ctx, p.ID, "token-2", now, staleBefore)
+	matched, err = store.ReclaimStale(ctx, p.ID, "token-2", now, staleBefore, false)
 	if err != nil {
 		t.Fatalf("ReclaimStale (stale): %v", err)
 	}
@@ -302,7 +302,7 @@ func TestReclaimStale_OnlyWhenClaimedBeforeThreshold(t *testing.T) {
 		t.Fatal("ReclaimStale did not match a stale claim")
 	}
 
-	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -337,14 +337,14 @@ func TestClaimProposal_NonUTCClaimedAtStillOrdersCorrectly(t *testing.T) {
 	staleClaimedAt := staleInstant.In(positiveOffsetZone)
 
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	if _, err := store.ClaimProposal(ctx, p.ID, "tok", sampleSpec(), "user-1", staleClaimedAt); err != nil {
 		t.Fatalf("ClaimProposal: %v", err)
 	}
 
-	got, err := store.ListApprovingClaimedBefore(ctx, cutoff)
+	got, err := store.ListApprovingClaimedBefore(ctx, cutoff, false)
 	if err != nil {
 		t.Fatalf("ListApprovingClaimedBefore: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestReclaimStale_NonUTCStaleBeforeStillMatches(t *testing.T) {
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 
@@ -381,7 +381,7 @@ func TestReclaimStale_NonUTCStaleBeforeStillMatches(t *testing.T) {
 	negativeOffsetZone := time.FixedZone("test-05:00", -5*60*60)
 	staleBeforeInstant := time.Now().UTC().Add(-2 * time.Minute)
 	nowInstant := time.Now().UTC()
-	matched, err := store.ReclaimStale(ctx, p.ID, "token-2", nowInstant, staleBeforeInstant.In(negativeOffsetZone))
+	matched, err := store.ReclaimStale(ctx, p.ID, "token-2", nowInstant, staleBeforeInstant.In(negativeOffsetZone), false)
 	if err != nil {
 		t.Fatalf("ReclaimStale: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestReclaimStale_NonUTCStaleBeforeStillMatches(t *testing.T) {
 		t.Fatal("ReclaimStale did not match a genuinely-stale claim against a staleBefore carrying a non-UTC offset")
 	}
 
-	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestReclaimStale_NonUTCNowStillOrdersCorrectlyLater(t *testing.T) {
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	if _, err := store.ClaimProposal(ctx, p.ID, "token-1", sampleSpec(), "user-1", time.Now().UTC().Add(-10*time.Minute)); err != nil {
@@ -421,7 +421,7 @@ func TestReclaimStale_NonUTCNowStillOrdersCorrectlyLater(t *testing.T) {
 
 	positiveOffsetZone := time.FixedZone("test+08:00", 8*60*60)
 	reclaimInstant := time.Now().UTC()
-	matched, err := store.ReclaimStale(ctx, p.ID, "token-2", reclaimInstant.In(positiveOffsetZone), time.Now().UTC().Add(-2*time.Minute))
+	matched, err := store.ReclaimStale(ctx, p.ID, "token-2", reclaimInstant.In(positiveOffsetZone), time.Now().UTC().Add(-2*time.Minute), false)
 	if err != nil {
 		t.Fatalf("ReclaimStale: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestReclaimStale_NonUTCNowStillOrdersCorrectlyLater(t *testing.T) {
 	}
 
 	laterCutoff := reclaimInstant.Add(time.Minute)
-	got, err := store.ListApprovingClaimedBefore(ctx, laterCutoff)
+	got, err := store.ListApprovingClaimedBefore(ctx, laterCutoff, false)
 	if err != nil {
 		t.Fatalf("ListApprovingClaimedBefore: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestCompleteProposal_FencedByToken(t *testing.T) {
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	now := time.Now().UTC()
@@ -468,7 +468,7 @@ func TestCompleteProposal_FencedByToken(t *testing.T) {
 		t.Fatal("CompleteProposal did not match the claimed row")
 	}
 
-	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -488,7 +488,7 @@ func TestFailProposal_TruncatesErrorAndFences(t *testing.T) {
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	now := time.Now().UTC()
@@ -508,7 +508,7 @@ func TestFailProposal_TruncatesErrorAndFences(t *testing.T) {
 		t.Fatal("FailProposal did not match the claimed row")
 	}
 
-	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -542,7 +542,7 @@ func TestFailProposal_FencedByToken(t *testing.T) {
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	now := time.Now().UTC()
@@ -558,7 +558,7 @@ func TestFailProposal_FencedByToken(t *testing.T) {
 		t.Fatal("FailProposal matched with the wrong claim token")
 	}
 
-	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestRejectProposal_TrimsAndNullsEmptyReason(t *testing.T) {
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 
@@ -588,7 +588,7 @@ func TestRejectProposal_TrimsAndNullsEmptyReason(t *testing.T) {
 		t.Fatal("RejectProposal did not match the pending row")
 	}
 
-	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -608,7 +608,7 @@ func TestRejectProposal_TruncatesLongReason(t *testing.T) {
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 
@@ -620,7 +620,7 @@ func TestRejectProposal_TruncatesLongReason(t *testing.T) {
 		t.Fatalf("RejectProposal: %v", err)
 	}
 
-	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(ctx, "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -634,7 +634,7 @@ func TestRejectProposal_OnlyFromPendingOrFailed(t *testing.T) {
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	now := time.Now().UTC()
@@ -659,21 +659,21 @@ func TestListProposals_PendingOrderedAscending(t *testing.T) {
 	var ids []string
 	for i := 0; i < 3; i++ {
 		p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-		if err := store.InsertProposal(ctx, p); err != nil {
+		if err := store.InsertProposal(ctx, p, false); err != nil {
 			t.Fatalf("InsertProposal: %v", err)
 		}
 		ids = append(ids, p.ID)
 	}
 	// A rejected proposal must not appear in the pending list.
 	rejected := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, rejected); err != nil {
+	if err := store.InsertProposal(ctx, rejected, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 	if _, err := store.RejectProposal(ctx, rejected.ID, "", "user-1", time.Now().UTC()); err != nil {
 		t.Fatalf("RejectProposal: %v", err)
 	}
 
-	list, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsPending)
+	list, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsPending, false)
 	if err != nil {
 		t.Fatalf("ListProposals: %v", err)
 	}
@@ -695,13 +695,13 @@ func TestListProposals_AllOrderedDescendingLimited(t *testing.T) {
 	var ids []string
 	for i := 0; i < 3; i++ {
 		p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-		if err := store.InsertProposal(ctx, p); err != nil {
+		if err := store.InsertProposal(ctx, p, false); err != nil {
 			t.Fatalf("InsertProposal: %v", err)
 		}
 		ids = append(ids, p.ID)
 	}
 
-	list, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsAll)
+	list, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsAll, false)
 	if err != nil {
 		t.Fatalf("ListProposals: %v", err)
 	}
@@ -730,7 +730,7 @@ func TestListProposals_AllRespectsFiftyRowCap(t *testing.T) {
 	ids := make([]string, 0, total)
 	for i := 0; i < total; i++ {
 		p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-		if err := store.InsertProposal(ctx, p); err != nil {
+		if err := store.InsertProposal(ctx, p, false); err != nil {
 			t.Fatalf("InsertProposal[%d]: %v", i, err)
 		}
 		ids = append(ids, p.ID)
@@ -739,7 +739,7 @@ func TestListProposals_AllRespectsFiftyRowCap(t *testing.T) {
 		}
 	}
 
-	list, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsAll)
+	list, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsAll, false)
 	if err != nil {
 		t.Fatalf("ListProposals: %v", err)
 	}
@@ -763,14 +763,14 @@ func TestGetProposal_WrongCoordinatorOrWorkspaceIsNotFound(t *testing.T) {
 	c1 := newTestCoordinator(t, store, "ws-1")
 	c2 := newTestCoordinator(t, store, "ws-1")
 	p := &Proposal{CoordinatorID: c1.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 
-	if _, err := store.GetProposal(ctx, "ws-1", c2.ID, p.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := store.GetProposal(ctx, "ws-1", c2.ID, p.ID, false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetProposal(wrong coordinator): err = %v, want ErrNotFound", err)
 	}
-	if _, err := store.GetProposal(ctx, "ws-2", c1.ID, p.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := store.GetProposal(ctx, "ws-2", c1.ID, p.ID, false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetProposal(wrong workspace): err = %v, want ErrNotFound", err)
 	}
 }
@@ -792,7 +792,7 @@ func assertListPendingReturnsEveryOpenProposal(t *testing.T, store *Store) {
 	insert := func() *Proposal {
 		t.Helper()
 		p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-		if err := store.InsertProposal(ctx, p); err != nil {
+		if err := store.InsertProposal(ctx, p, false); err != nil {
 			t.Fatalf("InsertProposal: %v", err)
 		}
 		return p
@@ -828,7 +828,7 @@ func assertListPendingReturnsEveryOpenProposal(t *testing.T, store *Store) {
 		t.Fatalf("CompleteProposal = %v, %v; want true, nil", ok, err)
 	}
 
-	list, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsPending)
+	list, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsPending, false)
 	if err != nil {
 		t.Fatalf("ListProposals(pending): %v", err)
 	}
@@ -849,7 +849,7 @@ func assertListPendingReturnsEveryOpenProposal(t *testing.T, store *Store) {
 		}
 	}
 
-	all, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsAll)
+	all, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsAll, false)
 	if err != nil {
 		t.Fatalf("ListProposals(all): %v", err)
 	}

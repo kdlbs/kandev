@@ -54,6 +54,14 @@ vi.mock("@/lib/api/domains/github-api", () => ({
   listWorkspaceTaskPRs: (...args: unknown[]) => mockListWorkspaceTaskPRs(...args),
 }));
 
+vi.mock("@/hooks/domains/features/use-feature", () => ({ useFeature: () => false }));
+vi.mock("./use-coordinator-watch-set", () => ({
+  useCoordinatorWatchSet: () => ({
+    input: { value: undefined, error: false, loadedAt: undefined },
+    retry: vi.fn(),
+  }),
+}));
+
 import { useCoordinatorAttention } from "./use-coordinator-attention";
 
 beforeEach(() => {

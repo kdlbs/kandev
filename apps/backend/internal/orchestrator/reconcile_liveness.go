@@ -359,6 +359,10 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 		return fmt.Errorf("load executor row for idle reclaim: %w", err)
 	}
 	agentRunning, probeErr := s.probeAgentRunning(ctx, sessionID)
+	if errors.Is(probeErr, runtimeapi.ErrRuntimeLeaseRetired) && s.rowLiveness(running) == models.ProcessLivenessDead {
+		probeErr = nil
+		agentRunning = false
+	}
 	if probeErr != nil {
 		s.logger.Warn("idle reclaim skipped; agent liveness probe failed",
 			zap.String("session_id", sessionID),

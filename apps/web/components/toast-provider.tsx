@@ -10,13 +10,16 @@ import { scheduleFrontendErrorReport } from "@/lib/api/domains/frontend-error-lo
 type ToastVariant = "default" | "success" | "error" | "loading";
 type ToastPlacement = "top";
 
+type ToastAction = { label: string } & ({ href: string } | { onClick: () => void });
+
 type Toast = {
-  action?: { href: string; label: string };
   id: string;
   title?: string;
   description?: string;
   variant?: ToastVariant;
   placement?: ToastPlacement;
+  /** A link (`href`) or a button (`onClick`, which also dismisses the toast). */
+  action?: ToastAction;
 };
 
 type ToastInput = Omit<Toast, "id"> & { duration?: number };
@@ -151,12 +154,39 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <ToastList toasts={toasts} />
+      <ToastList toasts={toasts} dismissToast={dismissToast} />
     </ToastContext.Provider>
   );
 }
 
-function ToastList({ toasts }: { toasts: Toast[] }) {
+function ToastActionButton({
+  action,
+  onDone,
+}: {
+  action: { label: string; onClick: () => void };
+  onDone: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="pointer-events-auto cursor-pointer text-xs font-medium underline max-md:min-h-11 pointer-coarse:min-h-11"
+      onClick={() => {
+        action.onClick();
+        onDone();
+      }}
+    >
+      {action.label}
+    </button>
+  );
+}
+
+function ToastList({
+  toasts,
+  dismissToast,
+}: {
+  toasts: Toast[];
+  dismissToast: (id: string) => void;
+}) {
   const bottomToasts = toasts.filter((toast) => toast.placement !== "top");
   const topToasts = toasts.filter((toast) => toast.placement === "top");
   return (
@@ -167,10 +197,12 @@ function ToastList({ toasts }: { toasts: Toast[] }) {
       aria-relevant="additions text"
     >
       <ToastStack
+        dismissToast={dismissToast}
         toasts={bottomToasts}
         className="absolute bottom-[calc(1rem+var(--app-status-bar-height))] right-4 flex w-[calc(100vw-2rem)] max-w-[360px] flex-col-reverse gap-2"
       />
       <ToastStack
+        dismissToast={dismissToast}
         toasts={topToasts}
         className="absolute top-[calc(3.25rem+env(safe-area-inset-top,0px)+var(--app-status-bar-height))] right-4 flex w-[calc(100vw-2rem)] max-w-[360px] flex-col-reverse gap-2"
       />
@@ -178,7 +210,15 @@ function ToastList({ toasts }: { toasts: Toast[] }) {
   );
 }
 
-function ToastStack({ toasts, className }: { toasts: Toast[]; className: string }) {
+function ToastStack({
+  toasts,
+  className,
+  dismissToast,
+}: {
+  toasts: Toast[];
+  className: string;
+  dismissToast: (id: string) => void;
+}) {
   if (toasts.length === 0) return null;
   return (
     <div className={cn("pointer-events-none", className)}>
@@ -201,7 +241,7 @@ function ToastStack({ toasts, className }: { toasts: Toast[]; className: string 
             </div>
             <div className="min-w-0 flex-1 space-y-1">
               {t.title && <div className="text-sm font-semibold leading-tight">{t.title}</div>}
-              {t.action && (
+              {t.action && "href" in t.action && (
                 <Button
                   asChild
                   size="sm"
@@ -213,6 +253,9 @@ function ToastStack({ toasts, className }: { toasts: Toast[]; className: string 
               )}
               {t.description && (
                 <div className="text-xs leading-relaxed text-muted-foreground">{t.description}</div>
+              )}
+              {t.action && "onClick" in t.action && (
+                <ToastActionButton action={t.action} onDone={() => dismissToast(t.id)} />
               )}
             </div>
           </div>

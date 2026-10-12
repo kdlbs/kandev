@@ -113,7 +113,8 @@ describe("buildSettingsInitialStateForRoute", () => {
 
       expect(state.workspaces).toEqual({ items: [], activeId: null });
       expect(state.executors).toEqual({ items: [] });
-      expect(state.agentProfiles).toEqual({ items: [], version: 0 });
+      expect(state.agentProfiles?.items).toEqual([]);
+      expect(state.agentProfiles?.version).toBe(0);
       expect(state.settingsAgents).toEqual({ items: [] });
       expect(state.agentDiscovery).toEqual({ items: [], loading: false, loaded: true });
       expect(state.availableAgents).toEqual({
@@ -597,5 +598,17 @@ describe("settings breadcrumb coverage", () => {
       expect(parents.length, `${path} has no owning page crumb`).toBeGreaterThanOrEqual(2);
       expect(parents[0].label).toBe("common:settings");
     }
+  });
+});
+
+describe("workflow settings route", () => {
+  it("redirects the legacy workflow URL to the scoped workspace route", () => {
+    const route = renderSettingsRoute(
+      "/settings/workspace/demo-workspace/workflows",
+    ) as ReactElement<{ to: string }>;
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe("/settings/workspaces/demo-workspace/workflows");
   });
 });

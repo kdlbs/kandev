@@ -6,7 +6,7 @@ requirements:
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-002
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-003
 created: 2026-09-27
-updated: 2026-10-06
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -221,6 +221,13 @@ Record reason categories through the existing sanitized failure and relocation
 outcome paths. Never log file bytes, UID/GID details, or absolute paths in public
 errors. No install-wide startup scan or claim expiry is added.
 
+Workspace preparation and agent launch share the existing session-keyed
+lifecycle singleflight. `StartAgentProcess` coalesces subprocess startup
+separately by execution ID. A workspace result cannot satisfy subprocess
+startup or report its success; concurrent callers starting the same execution
+share only that startup result. Recovery admission and claim ownership remain
+unchanged.
+
 ## Inspection contention and explicit preflight
 
 This section defines admission for AC-TASKS-MANAGED-CLONE-RELOCATION-001.1,
@@ -232,14 +239,18 @@ singleflight. Its inspection can collide with Files, Changes, or commit requests
 that reconstruct workspace access inside that flight. An occupied inspection
 mutex does not establish checkout corruption.
 
-`RecoveryAdmissionRequest` has a separate inspection-wait policy. Only manual
-recovery preflight outside lifecycle execution creation selects it. This policy
+`RecoveryAdmissionRequest` has a separate inspection-wait policy. Manual recovery
+preflight and outer resume admission outside lifecycle execution creation select
+it. The outer-resume extension is implemented in the
+[task-opening contention package](../../../plans/task-open-inspection-contention/plan.md).
+The [inspection-contention design](worktree-metadata-recovery.md#inspection-contention-during-resume)
+defines its shared deadline and failure bookkeeping. This policy
 grants no dirty-relocation permission. `RelocateDirty`, operation stamps, and
 durable claims retain their current meanings. Lifecycle launch and workspace
 reconstruction return immediate lock refusal. They do not wait for an admission
 that can later join their own singleflight.
 
-Manual preflight waits for at most 15 seconds, or the caller's remaining
+Outer preflight waits for at most 15 seconds, or the caller's remaining
 deadline, whichever is shorter. It uses cancellation-aware acquisition in
 stable slot order and releases earlier locks on cancellation or timeout.
 The existing 30-second ordinary recovery client deadline remains unchanged.
@@ -257,7 +268,7 @@ Then re-resolve the original canonical worktree slots and verify their branch,
 path, source, and repository identity.
 
 Represent inspection contention with a distinct typed internal error.
-Ordinary background callers fail promptly. A manual wait that expires returns
+Ordinary background callers fail promptly. An outer wait that expires returns
 a bounded, path-free conflict response and leaves its existing error active.
 Do not report metadata corruption, evict a claim, stop a runtime, or authorize
 transfer because a mutex is occupied. An acquired mutex does not replace

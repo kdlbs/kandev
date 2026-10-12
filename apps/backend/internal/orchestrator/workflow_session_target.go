@@ -251,6 +251,16 @@ func (s *Service) loadRecordedWorkflowSessionRoute(
 		return &route, nil, nil
 	}
 	session, err := s.repo.GetTaskSession(ctx, route.DestinationID)
+	if errors.Is(err, models.ErrTaskSessionNotFound) {
+		// A deleted destination cannot satisfy reuse either. Let the caller
+		// allocate the target profile's fresh fallback and replace this bounded
+		// route record, as for a terminal destination below.
+		s.logger.Warn("recorded workflow session route destination was deleted; allocating a fresh session",
+			zap.String("task_id", taskID),
+			zap.String("step_id", step.ID),
+			zap.String("destination_id", route.DestinationID))
+		return &route, nil, nil
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("load recorded workflow session route destination: %w", err)
 	}

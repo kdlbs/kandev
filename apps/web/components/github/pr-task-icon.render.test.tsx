@@ -100,7 +100,10 @@ beforeEach(() => {
   getTaskCIAutomationOptionsMock.mockReset().mockResolvedValue(undefined);
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("PRTaskIcon corrupted store entry", () => {
   it("reuses one empty list for missing or malformed PR data", () => {
@@ -154,7 +157,7 @@ describe("PRTaskIcon corrupted store entry", () => {
     expect(icon?.getAttribute("data-pr-ready-to-merge")).toBe("false");
   });
 
-  it("opens a loading disclosure for a compact PR projection", () => {
+  it("opens a loading disclosure for a compact PR projection after deliberate hover", async () => {
     renderWithStore(
       { workspaces: { items: [], activeId: WORKSPACE_ID } },
       <TaskContributionIcons
@@ -167,7 +170,9 @@ describe("PRTaskIcon corrupted store entry", () => {
     expect(icon.getAttribute("role")).toBe("img");
     fireEvent.pointerEnter(icon, { pointerType: "mouse" });
 
-    expect(screen.getAllByTestId(TOOLTIP_LOADING_TEST_ID).length).toBeGreaterThan(0);
+    await waitFor(() =>
+      expect(screen.getAllByTestId(TOOLTIP_LOADING_TEST_ID).length).toBeGreaterThan(0),
+    );
   });
 
   it("opens a loading disclosure when a compact PR projection receives keyboard focus", () => {

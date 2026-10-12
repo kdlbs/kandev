@@ -387,7 +387,7 @@ func TestWorkflowEntrySavedPrompt_Recovery(t *testing.T) {
 
 	err = svc.fallbackFreshLaunchOnMissingExecution(
 		ctx, taskID, sessionID, composedPrompt, true, composedPrompt, false,
-		trustedContext, false, nil, nil, nil,
+		trustedContext, false, nil, nil, nil, true,
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, launchedPrompt)
@@ -444,7 +444,7 @@ func TestWorkflowEntrySavedPrompt_UncomposedRecoveryCarriesTrustedContext(t *tes
 	// accepted before the saved definition changed.
 	err = svc.fallbackFreshLaunchOnMissingExecution(
 		ctx, taskID, sessionID, "Follow @principles.", false, "", false,
-		trustedContext, false, nil, nil, nil,
+		trustedContext, false, nil, nil, nil, true,
 	)
 	require.NoError(t, err)
 	require.Contains(t, launchedPrompt, "Use the accepted recovery principles.")

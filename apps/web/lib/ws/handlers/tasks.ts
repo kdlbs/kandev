@@ -462,6 +462,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       for (const sid of sessionIds) {
         useContextFilesStore.getState().clearSession(sid);
         currentState.clearQueueStatus?.(sid);
+        currentState.removeTaskSession?.(deletedId, sid);
       }
 
       const wasActive = currentState.tasks.activeTaskId === deletedId;

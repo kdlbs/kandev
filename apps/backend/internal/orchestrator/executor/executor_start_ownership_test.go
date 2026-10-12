@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -110,6 +111,63 @@ func TestExistingWorkspaceStart_PreparedWorkspaceCanStart(t *testing.T) {
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("prepared workspace did not start an agent process")
+	}
+}
+
+func TestExistingWorkspaceStart_BindsInitialDeliveryBeforeAdmission(t *testing.T) {
+	ctx := context.Background()
+	repo := newMockRepository()
+	task := &v1.Task{ID: "task-delivery", WorkspaceID: "workspace-delivery"}
+	session := &models.TaskSession{
+		ID: "session-delivery", TaskID: task.ID, State: models.TaskSessionStateCreated,
+		AgentProfileID: "profile-delivery",
+	}
+	repo.sessions[session.ID] = cloneMockTaskSession(session)
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID: "runtime-delivery", TaskID: task.ID, SessionID: session.ID,
+		Status: models.ExecutorRunningStatusPrepared, AgentExecutionID: "execution-delivery",
+	}
+	var order atomic.Int32
+	var identityOrder, admissionOrder, startOrder atomic.Int32
+	started := make(chan struct{}, 1)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-delivery", nil
+		},
+		setInitialDeliverySubmissionIDFunc: func(_ context.Context, executionID, submissionID string) error {
+			if executionID != "execution-delivery" || submissionID != "message-delivery" {
+				t.Fatalf("initial delivery identity = %q/%q", executionID, submissionID)
+			}
+			identityOrder.Store(order.Add(1))
+			return nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			startOrder.Store(order.Add(1))
+			started <- struct{}{}
+			return nil
+		},
+	}
+	request := &LaunchAgentRequest{
+		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
+		InitialDeliverySubmissionID: "message-delivery",
+		BeforeAgentStart: func(_ context.Context, _ string, prompt string) error {
+			require.Equal(t, "initial prompt", prompt)
+			admissionOrder.Store(order.Add(1))
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+	_, err := exec.startAgentOnExistingWorkspaceWithRequest(
+		ctx, task, session, "initial prompt", true, "", request, nil, nil, nil, nil, false,
+	)
+	require.NoError(t, err)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("existing workspace did not start the agent")
+	}
+	if identityOrder.Load() == 0 || admissionOrder.Load() <= identityOrder.Load() || startOrder.Load() <= admissionOrder.Load() {
+		t.Fatalf("initial identity/admission/start ordering = %d/%d/%d", identityOrder.Load(), admissionOrder.Load(), startOrder.Load())
 	}
 }
 
@@ -259,4 +317,44 @@ func TestSessionStartingRaceWithRunningStateReturnsBusy(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrExecutionAlreadyRunning)
 	require.ErrorIs(t, err, errSessionAdvancedToRunning)
+}
+
+func TestInitialAdmissionReceivesTheFinalHandoverPrompt(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing_%t", existing), func(t *testing.T) {
+			repo := newMockRepository()
+			task := &v1.Task{ID: "task-handover", WorkspaceID: "workspace-handover"}
+			repo.tasks[task.ID] = &models.Task{ID: task.ID}
+			repo.sessions["prior-session"] = &models.TaskSession{ID: "prior-session", TaskID: task.ID}
+			session := &models.TaskSession{ID: "new-session", TaskID: task.ID, AgentProfileID: "profile", State: models.TaskSessionStateCreated}
+			repo.sessions[session.ID] = session
+			if existing {
+				repo.executorsRunning[session.ID] = &models.ExecutorRunning{ID: "runtime", TaskID: task.ID, SessionID: session.ID, AgentExecutionID: "execution", Status: models.ExecutorRunningStatusPrepared}
+			}
+			var dispatchedPrompt string
+			manager := &mockAgentManager{
+				getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return "execution", nil },
+				setExecutionDescriptionFunc:  func(_ context.Context, _ string, prompt string) error { dispatchedPrompt = prompt; return nil },
+				launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+					dispatchedPrompt = req.TaskDescription
+					return &LaunchAgentResponse{AgentExecutionID: "execution", Status: v1.AgentStatusStarting}, nil
+				},
+			}
+			exec := newTestExecutor(t, manager, repo)
+			admitted := false
+			_, err := exec.LaunchPreparedSession(context.Background(), task, session.ID, LaunchOptions{
+				AgentProfileID: "profile", Prompt: "original instruction", StartAgent: true,
+				BeforeAgentStart: func(_ context.Context, executionID, prompt string) error {
+					require.Equal(t, "execution", executionID)
+					require.NotEqual(t, "original instruction", prompt, "sibling history must be included")
+					require.Contains(t, prompt, "original instruction")
+					require.Equal(t, dispatchedPrompt, prompt, "canonical admission must match the final runtime instruction")
+					admitted = true
+					return nil
+				},
+			})
+			require.NoError(t, err)
+			require.True(t, admitted)
+		})
+	}
 }

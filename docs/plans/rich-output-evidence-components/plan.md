@@ -349,7 +349,7 @@ shape/examples easy to discover without expanding a manually maintained
 supported models. Preserve strict validation and the existing renderer. The
 completed deterministic checks remain valid; agent usability remains an open
 quality issue. Full authorized example histories are retained privately at
-`/tmp/kandev-rich-ui-k921jmkz/usage-diagnosis.json`. The diagnostic overlay was
+the privately retained usage-diagnosis receipt. The diagnostic overlay was
 removed after recording its output; the user's demo remains running.
 
 The follow-up [authoring-recovery package](../rich-output-authoring-recovery/plan.md)

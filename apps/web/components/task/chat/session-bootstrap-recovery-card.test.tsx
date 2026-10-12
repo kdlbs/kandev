@@ -20,6 +20,7 @@ const recoveryActionState = vi.hoisted(() => ({
   } | null,
   guardDetails: null as { retryable: boolean } | null,
   recoveryNotice: null as string | null,
+  recoveryNoticeKind: null as string | null,
   managedCloneRecoveryStamp: null as string | null,
   workspaceRecovery: null as WorkspaceRecoveryProjection | null,
   providerRestoredResumeEligible: false,
@@ -79,6 +80,7 @@ afterEach(() => {
   recoveryActionState.branchDetails = null;
   recoveryActionState.guardDetails = null;
   recoveryActionState.recoveryNotice = null;
+  recoveryActionState.recoveryNoticeKind = null;
   recoveryActionState.managedCloneRecoveryStamp = null;
   recoveryActionState.workspaceRecovery = null;
   recoveryActionState.providerRestoredResumeEligible = false;
@@ -129,6 +131,53 @@ describe("SessionBootstrapRecoveryCard", () => {
     expect(recoveryActionState.handleRecover).toHaveBeenNthCalledWith(1, "resume");
     expect(recoveryActionState.handleRestore).toHaveBeenCalledTimes(1);
     expect(recoveryActionState.handleRecover).toHaveBeenNthCalledWith(2, "fresh_start");
+  });
+
+  it("offers only same-session Resume while inspection contention is pending", () => {
+    recoveryActionState.recoveryNotice = "task:workspaceRecoveryInspectionBusy";
+    recoveryActionState.recoveryNoticeKind = "inspection_busy";
+    render(<SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />);
+
+    expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId("recovery-restore-workspace-button")).toBeNull();
+    expect(screen.queryByTestId("recovery-fresh-button")).toBeNull();
+    expect(screen.queryByTestId("recovery-new-branch-button")).toBeNull();
+
+    fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
+    expect(recoveryActionState.handleRecover).toHaveBeenCalledWith("resume");
+  });
+
+  it("prioritizes a manual inspection notice over a matching automatic owner", () => {
+    recoveryActionState.recoveryNotice = "task:workspaceRecoveryInspectionBusy";
+    recoveryActionState.recoveryNoticeKind = "inspection_busy";
+    recoveryActionState.providerRestoredResumeEligible = true;
+    const automaticResume = vi.fn().mockResolvedValue(true);
+    render(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={error}
+        automaticRecovery={{
+          requestIdentity: {
+            taskId: "task-1",
+            sessionId: "session-1",
+            generation: 1,
+            attemptId: 1,
+          },
+          resumptionState: "idle",
+          error: null,
+          notice: "task:workspaceRecoveryInspectionBusy",
+          noticeKind: "inspection_busy",
+          recoveryFailure: null,
+          resumeSession: automaticResume,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
+
+    expect(recoveryActionState.handleRecover).toHaveBeenCalledWith("resume");
+    expect(automaticResume).not.toHaveBeenCalled();
   });
 
   it("keeps the automatic read-only result inside the shared informational card", () => {
@@ -344,6 +393,12 @@ describe("SessionBootstrapRecoveryCard", () => {
         sessionId="session-1"
         error={error}
         automaticRecovery={{
+          requestIdentity: {
+            taskId: "task-1",
+            sessionId: "session-1",
+            generation: 1,
+            attemptId: 1,
+          },
           resumptionState: "resuming",
           error: null,
           notice: null,

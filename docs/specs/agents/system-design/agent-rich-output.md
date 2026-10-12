@@ -284,7 +284,7 @@ legend filtering, formatting helpers, deferred plot mounting, and motion
 preferences. Library tree composition must not insert wrappers inside the
 Recharts plot's discovery boundary.
 
-Within the FilePreview registry adapter, key the actual the native FilePreview component by
+Within the FilePreview registry adapter, key the native FilePreview component by
 the serialized `(sessionId, repo, path)` tuple. Its element identity separates
 two cards referencing the same target. A tuple change unmounts only that card;
 `useWorkspaceFilePreview` invalidates the old request's settlement. Stable

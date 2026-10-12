@@ -198,8 +198,7 @@ before file access with discovery-refresh guidance.
   including measured 44px minimum targets after pressed scaling, chart filters,
   vertical grouping, containment, native viewer, and historical CSV replay.
 - Desktop and phone viewport captures were inspected against UI-01/UI-02.
-  Local captures: `/tmp/kandev-json-render-composed-desktop.png` and
-  `/tmp/kandev-json-render-composed-phone.png` (ephemeral verification evidence).
+  Desktop and phone captures are privately retained verification evidence.
 
 Native controls use 48px nominal phone/coarse-pointer height to preserve a
 44px minimum when pressed. The input byte limit avoids optional HTML escaping,

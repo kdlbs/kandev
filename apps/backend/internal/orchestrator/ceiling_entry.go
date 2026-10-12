@@ -614,6 +614,8 @@ func (s *Service) enrichCeilingDeferralBinding(
 func ceilingDeferralsEquivalentForAdmission(a, b models.CeilingDeferral) (bool, error) {
 	left := cloneCeilingPayload(a.Payload)
 	right := cloneCeilingPayload(b.Payload)
+	normalizeCeilingAutomationRun(left)
+	normalizeCeilingAutomationRun(right)
 	_, leftBound := left[models.CeilingLaunchEntryBindingKey]
 	_, rightBound := right[models.CeilingLaunchEntryBindingKey]
 	if leftBound != rightBound {

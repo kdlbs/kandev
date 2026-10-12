@@ -56,6 +56,51 @@ func TestCatalog(t *testing.T) {
 	}
 }
 
+func TestAgentSettingsRequiresProfileOrderTables(t *testing.T) {
+	for _, descriptor := range Catalog() {
+		if descriptor.ID != "agent-settings" {
+			continue
+		}
+		required := map[string]bool{}
+		for _, table := range descriptor.RequiredTables {
+			required[table] = true
+		}
+		for _, table := range []string{"agents", "agent_profiles", "agent_profile_orders"} {
+			if !required[table] {
+				t.Errorf("agent-settings required tables omit %q", table)
+			}
+		}
+		return
+	}
+	t.Fatal("agent-settings descriptor not found")
+}
+
+func TestTaskCatalogIncludesDurableSessionTables(t *testing.T) {
+	var task Descriptor
+	for _, descriptor := range Catalog() {
+		if descriptor.ID == "task" {
+			task = descriptor
+			break
+		}
+	}
+	if task.ID == "" {
+		t.Fatal("task descriptor is missing")
+	}
+	want := map[string]struct{}{
+		"harness_session_generations": {}, "session_restore_attempts": {},
+		"session_continuation_snapshots": {}, "session_recovery_blocks": {},
+		"agent_delivery_submissions": {}, "agent_delivery_inbox": {},
+		"agent_delivery_cursors": {}, "agent_delivery_effects": {},
+		"agent_delivery_cleanup_jobs": {}, "agent_delivery_retention_state": {},
+	}
+	for _, table := range task.RequiredTables {
+		delete(want, table)
+	}
+	if len(want) != 0 {
+		t.Fatalf("task descriptor is missing durable tables: %v", want)
+	}
+}
+
 func TestValidateCatalogRejectsInvalidDescriptors(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -43,6 +43,17 @@ test.describe("Nested submodule Review on mobile", () => {
 
       const review = session.reviewDialog();
       await expect(review).toBeVisible({ timeout: 15_000 });
+      // The root working-tree diff can render before cumulative nested diffs.
+      // Wait for all three README sections before checking their scope labels.
+      await expect
+        .poll(
+          () =>
+            review
+              .locator('[data-testid="review-file-header"][data-file-path="README.md"]')
+              .count(),
+          { timeout: 45_000, message: "root and both nested review sections must load" },
+        )
+        .toBe(3);
       const repositoryLabels = review.getByTestId("review-file-repository");
       await expect(repositoryLabels).toHaveCount(2);
       await expect(repositoryLabels.filter({ hasText: /^vendor\/outer$/ })).toBeVisible();

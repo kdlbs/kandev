@@ -118,7 +118,7 @@ string fabricated by a helper or merely snapshot the generator's implementation.
 
 No new presentation UI is introduced. Actual end-to-end evidence is collected
 through the existing isolated ACP/MCP/tool/result/renderer pipeline, followed by
-`/tmp/kandev-rich-ui-k921jmkz/browser-evidence.cjs` on desktop and phone. Preserve
+the privately retained browser helper on desktop and phone. Preserve
 the existing Playwright catalog/replay receipts; no broad browser rerun is
 required for schema annotations or backend error text alone.
 
@@ -184,3 +184,20 @@ case each), with ephemeral specs removed and a two-asset manifest validated.
 The 300-line web harness limit was restored without removing guidance; harness
 lint/tests and specification lint/tests passed. Screenshot binaries are kept
 outside the feature commit and will be published through the orphan media ref.
+
+
+PR fixup (2026-10-12): reconciled the current main branch without restoring
+legacy authoring. Preserved upstream chart-legend derivation, browser-demo
+build support and delivery-recovery translations. Adapted the added chart
+visibility regression to the native catalog component. CodeRabbit's aggregate
+review identified private lab links and a FilePreview design typo; trial records
+now retain task IDs and outcomes with privately held evidence, and the typo is
+corrected. No behavior or contract change requires new acceptance criteria.
+
+Post-merge validation: 17 focused Vitest files passed all 234 tests; MCP/server
+and sysprompt tests passed. Schema drift, full web lint, i18n, harness/spec and
+public-doc checks passed. Desktop rich-output suites passed seven tests; the
+mobile-chrome suites passed five, using fresh managed E2E builds and isolated
+fixtures. The full typecheck passed with an 8 GiB Node heap after the default
+heap exhausted memory. Two incoming documentation whitespace defects were
+corrected for the normal hooks. The disposable user demo remains stopped.

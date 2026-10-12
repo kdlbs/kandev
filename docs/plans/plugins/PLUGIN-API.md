@@ -166,6 +166,8 @@ interface PluginHostApi {
   // (mounted once at the app root with its own tooltip provider and isolated
   // behind its own error boundary).
   // Independent of keybindings — any plugin code path may call it.
+  // Closing restores focus to an available opener; nested modals keep focus
+  // inside the surviving surface.
   openModal(options: PluginModalOptions): PluginModalHandle;
   // Opens Kandev's native one-field task change-request linking workflow.
   // Provider code supplies copy, parsing, and mutation only; the host owns
@@ -323,7 +325,7 @@ interface PluginModalOptions {
 }
 
 interface PluginModalHandle {
-  close(): void; // closes this modal instance; no-op if already closed
+  close(): void; // closes this instance and restores focus when its opener remains available
 }
 
 interface PluginTaskLinkDialogOptions {

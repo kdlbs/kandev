@@ -50,7 +50,7 @@ func TestCursorNativeMCPAdapterEnablesExactIdentityThenVerifiesTools(t *testing.
 
 	result := adapter.EnableAndVerify(context.Background(), "/workspace/task", env, "plugin-MyPlugin-GitHub")
 
-	if result.Status != NativeMCPStatusReady || result.ToolCount == nil || *result.ToolCount != 2 {
+	if result.Status != NativeMCPStatusReady || result.ToolCount == nil || *result.ToolCount != 2 || result.Diagnostic != nil {
 		t.Fatalf("EnableAndVerify() = %#v, want ready with two tools", result)
 	}
 	if len(runner.calls) != 2 {

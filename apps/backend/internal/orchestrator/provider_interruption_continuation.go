@@ -85,7 +85,7 @@ func (s *Service) continuationBindingForFailure(ctx context.Context, data watche
 }
 
 func (s *Service) continuationFailureHasEvidence(data watcher.AgentEventData) bool {
-	return s.config.ProviderInterruptionContinuation && data.OwnerKind == queueStatusScopeTask && !data.DynamicRouteAttempt &&
+	return data.OwnerKind == queueStatusScopeTask && !data.DynamicRouteAttempt &&
 		data.ContinuationSafety.SafeFor(data.PromptGeneration) && data.EvidenceKnown && s.continuationPromptIdentityMatches(data)
 }
 
@@ -102,9 +102,6 @@ func (s *Service) continuationRefusalReason(ctx context.Context, data watcher.Ag
 	classified := classifyKanbanFailure(data)
 	if classified != nil && classified.Code == routingerr.CodeModelCapacity {
 		return s.capacityContinuationRefusalReason(ctx, data)
-	}
-	if !s.config.ProviderInterruptionContinuation {
-		return "disabled"
 	}
 	safety := data.ContinuationSafety
 	if safety == nil || !safety.Known || !data.EvidenceKnown || !s.continuationPromptIdentityMatches(data) {

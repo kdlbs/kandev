@@ -68,6 +68,18 @@ describe("resolveProposalSourceTask", () => {
     expect(resolveProposalSourceTask(proposal(), openTasksById)).toEqual(task("t-1"));
   });
 
+  it("resolves a resume, message or move proposal by its target task_id", () => {
+    const item = proposal({ source_task_id: undefined, task_id: "t-2" });
+    item.proposal.kind = "resume";
+    const openTasksById = new Map([
+      ["t-1", task("t-1")],
+      ["t-2", task("t-2")],
+    ]);
+    expect(resolveProposalSourceTask(item, openTasksById)).toEqual(task("t-2"));
+    item.proposal.spec.task_id = undefined;
+    expect(resolveProposalSourceTask(item, openTasksById)).toBeUndefined();
+  });
+
   it("returns undefined when the source task is absent or archived", () => {
     expect(resolveProposalSourceTask(proposal(), new Map())).toBeUndefined();
   });

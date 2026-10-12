@@ -304,7 +304,7 @@ type mockAgentManager struct {
 	launchAgentFunc                 func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
 	initialPromptDispatchCallback   func()
 	initialPromptFailureCallback    func()
-	initialPromptAdmissionCallback  func() error
+	initialPromptAdmissionCallback  func(context.Context, string, []v1.MessageAttachment) error
 	promptAdmissionEntered          chan struct{}
 	promptAdmissionRelease          chan struct{}
 	startAgentProcessCalls          []string
@@ -485,7 +485,7 @@ func (m *mockAgentManager) RegisterInitialPromptDispatchCallbacks(_ string, onDi
 
 func (m *mockAgentManager) RegisterInitialPromptAdmissionCallbacks(
 	_ string,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) error {
 	m.mu.Lock()
@@ -561,7 +561,7 @@ func (m *mockAgentManager) PromptAgentWithAdmissionCallback(
 	executionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*executor.PromptResult, error) {
 	m.mu.Lock()
@@ -578,7 +578,7 @@ func (m *mockAgentManager) PromptAgentWithAdmissionCallback(
 		<-release
 	}
 	if beforeAdmission != nil {
-		if err := beforeAdmission(); err != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
 			return nil, err
 		}
 	}
@@ -866,6 +866,13 @@ func (m *mockAgentManager) PollRemoteStatusForRecords(_ context.Context, _ []exe
 func (m *mockAgentManager) CleanupStaleExecutionBySessionID(_ context.Context, _ string) error {
 	return nil
 }
+func (m *mockAgentManager) CleanupStaleExecutionBySessionIDIfCurrent(
+	ctx context.Context,
+	sessionID, _ string,
+	_ time.Time,
+) error {
+	return m.CleanupStaleExecutionBySessionID(ctx, sessionID)
+}
 func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(_ context.Context, _, _ string) error {
 	return nil
 }
@@ -983,7 +990,7 @@ func setupTestRepo(t *testing.T) *sqliterepo.Repository {
 }
 
 // seedSession creates a task, workspace, workflow and session in the repo for testing.
-func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, workflowStepID string) {
+func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, workflowStepID string, queueIncarnationID ...string) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -1024,6 +1031,9 @@ func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, w
 		State:     models.TaskSessionStateRunning,
 		StartedAt: now,
 		UpdatedAt: now,
+	}
+	if len(queueIncarnationID) == 1 {
+		session.QueueIncarnationID = queueIncarnationID[0]
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to create task session: %v", err)

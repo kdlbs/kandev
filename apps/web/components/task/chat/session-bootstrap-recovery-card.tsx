@@ -10,6 +10,7 @@ import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import {
   isSessionRecoveryBusy,
+  matchingAutomaticRecovery,
   sessionRecoveryOwnerId,
   type SessionRecoveryOwner,
 } from "@/lib/session-recovery-presentation";
@@ -35,6 +36,7 @@ type BootstrapRecoveryViewProps = {
   model: ReturnType<typeof buildRecoveryCardModel>;
   profileExists: boolean;
   providerRestoredResumeEligible: boolean;
+  inspectionBusy: boolean;
   effectiveBusyAction: ReturnType<typeof useSessionRecoveryActions>["busyAction"];
   needsManagedCloneRelocation: boolean;
   showDialog: boolean;
@@ -51,6 +53,67 @@ type BootstrapRecoveryViewProps = {
   t: ReturnType<typeof useTranslation>["t"];
 };
 
+function useBootstrapResumeHandler({
+  automaticBusy,
+  manualInspectionBusy,
+  profileExists,
+  matchingRecovery,
+  clearInspectionContentionNotice,
+  handleRecover,
+}: {
+  automaticBusy: boolean;
+  manualInspectionBusy: boolean;
+  profileExists: boolean;
+  matchingRecovery: ReturnType<typeof matchingAutomaticRecovery>;
+  clearInspectionContentionNotice?: () => void;
+  handleRecover: ReturnType<typeof useSessionRecoveryActions>["handleRecover"];
+}) {
+  return useCallback(() => {
+    if (automaticBusy || !profileExists) return;
+    if (manualInspectionBusy) {
+      void handleRecover("resume");
+      return;
+    }
+    if (matchingRecovery?.noticeKind === "inspection_busy") {
+      void matchingRecovery.resumeSession().then((success) => {
+        if (success) clearInspectionContentionNotice?.();
+      });
+      return;
+    }
+    void handleRecover("resume");
+  }, [
+    automaticBusy,
+    clearInspectionContentionNotice,
+    handleRecover,
+    manualInspectionBusy,
+    matchingRecovery,
+    profileExists,
+  ]);
+}
+
+function bootstrapRecoveryCopy(
+  t: ReturnType<typeof useTranslation>["t"],
+): BootstrapRecoveryViewProps["copy"] {
+  return {
+    launchNeedsAttention: t("task:launchNeedsAttention"),
+    launchErrorNoChanges: t("task:launchErrorNoChanges"),
+    sessionRecoveryDetails: t("task:sessionRecoveryDetails"),
+  };
+}
+
+function useSessionAgentDisplayName(sessionId: string) {
+  return useOptionalAppStore((state) => {
+    const session = state.taskSessions.items[sessionId];
+    const profileId = session?.execution_profile_id || session?.agent_profile_id;
+    const profile = profileId
+      ? state.agentProfiles.items.find((candidate) => candidate.id === profileId)
+      : undefined;
+    return profile
+      ? state.availableAgents.items.find((agent) => agent.name === profile.agent_name)?.display_name
+      : undefined;
+  }, undefined);
+}
+
 function BootstrapRecoveryControls({
   taskId,
   sessionId,
@@ -61,16 +124,7 @@ function BootstrapRecoveryControls({
   const { t } = useTranslation();
   const [showDialog, setShowDialog] = useState(false);
   const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
-  const agentDisplayName = useOptionalAppStore((state) => {
-    const session = state.taskSessions.items[sessionId];
-    const profileId = session?.execution_profile_id || session?.agent_profile_id;
-    const profile = profileId
-      ? state.agentProfiles.items.find((candidate) => candidate.id === profileId)
-      : undefined;
-    return profile
-      ? state.availableAgents.items.find((agent) => agent.name === profile.agent_name)?.display_name
-      : undefined;
-  }, undefined);
+  const agentDisplayName = useSessionAgentDisplayName(sessionId);
   const recovery = useSessionRecoveryActions({ taskId, sessionId, errorStamp: error.stamp });
   const {
     busyAction,
@@ -79,6 +133,8 @@ function BootstrapRecoveryControls({
     branchDetails,
     guardDetails,
     recoveryNotice,
+    recoveryNoticeKind,
+    clearInspectionContentionNotice,
     managedCloneRecoveryStamp,
     handleRecover,
   } = recovery;
@@ -87,9 +143,12 @@ function BootstrapRecoveryControls({
     error.category === "managed_clone_relocation_required" ||
     managedCloneRecoveryStamp !== null;
   const profileExists = useSessionProfileExists(sessionId);
+  const matchingRecovery = matchingAutomaticRecovery(automaticRecovery, taskId, sessionId);
   const automaticBusy = Boolean(
-    automaticRecovery && isSessionRecoveryBusy(automaticRecovery.resumptionState),
+    matchingRecovery && isSessionRecoveryBusy(matchingRecovery.resumptionState),
   );
+  const inspectionBusy =
+    recoveryNoticeKind === "inspection_busy" || matchingRecovery?.noticeKind === "inspection_busy";
   const effectiveBusyAction = automaticBusy ? "resume" : busyAction;
   const model = buildRecoveryCardModel({
     error,
@@ -97,6 +156,7 @@ function BootstrapRecoveryControls({
     manualFailure: manualRecoveryFailure,
     manualError: recoveryError,
     recoveryNotice,
+    recoveryNoticeKind,
     translate: t,
     agentDisplayName,
   });
@@ -108,22 +168,20 @@ function BootstrapRecoveryControls({
     model.summary = t("task:branchIsNoLongerAvailable");
     model.showSummary = true;
   }
-  const copy = {
-    launchNeedsAttention: t("task:launchNeedsAttention"),
-    launchErrorNoChanges: t("task:launchErrorNoChanges"),
-    sessionRecoveryDetails: t("task:sessionRecoveryDetails"),
-  };
+  const copy = bootstrapRecoveryCopy(t);
 
-  const handleResume = useCallback(() => {
-    if (!automaticBusy && profileExists) void handleRecover("resume");
-  }, [automaticBusy, handleRecover, profileExists]);
+  const handleResume = useBootstrapResumeHandler({
+    automaticBusy,
+    manualInspectionBusy: recoveryNoticeKind === "inspection_busy",
+    profileExists,
+    matchingRecovery,
+    clearInspectionContentionNotice,
+    handleRecover,
+  });
 
   const handleFreshStart = useCallback(() => {
     if (automaticBusy) return;
-    if (!profileExists) {
-      setShowDialog(true);
-      return;
-    }
+    if (!profileExists) return setShowDialog(true);
     void handleRecover("fresh_start");
   }, [automaticBusy, handleRecover, profileExists]);
 
@@ -134,6 +192,7 @@ function BootstrapRecoveryControls({
       model={model}
       profileExists={profileExists}
       providerRestoredResumeEligible={recovery.providerRestoredResumeEligible}
+      inspectionBusy={inspectionBusy}
       effectiveBusyAction={effectiveBusyAction}
       needsManagedCloneRelocation={needsManagedCloneRelocation}
       showDialog={showDialog}
@@ -154,6 +213,7 @@ function BootstrapRecoveryView({
   model,
   profileExists,
   providerRestoredResumeEligible,
+  inspectionBusy,
   effectiveBusyAction,
   needsManagedCloneRelocation,
   showDialog,
@@ -192,6 +252,7 @@ function BootstrapRecoveryView({
         error={error}
         profileExists={profileExists}
         providerRestoredResumeEligible={providerRestoredResumeEligible}
+        inspectionBusy={inspectionBusy}
         busyAction={effectiveBusyAction}
         hasBranchRecovery={branchDetails !== null}
         blocked={Boolean(guardDetails && !guardDetails.retryable)}

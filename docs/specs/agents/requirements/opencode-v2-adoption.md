@@ -58,6 +58,9 @@ The dialog must explain the shared scope before the user starts the upgrade.
   Dismissal before submission, rejection, or a failed candidate validation shall not record v2 as active.
 - **AC-AGENTS-OPENCODE-V2-001.11:** When a user independently replaces a native OpenCode v1 installation with a supported v2 installation, Kandev shall use compatible arguments for the observed version and retain existing session identity.
   An unknown major version shall produce an explicit compatibility error rather than a guessed launch command.
+- **AC-AGENTS-OPENCODE-V2-001.12:** A native version check that fails, times out, or prints no readable version shall be retried before it blocks a launch.
+  When the retries still fail and the same executable was detected successfully within the last ten minutes, the launch shall use that detection.
+  A missing executable or an unsupported major is a definite answer and shall not be retried. A final failure shall state a timeout and quote a bounded, home-redacted excerpt of the output.
 
 ### REQ-AGENTS-OPENCODE-V2-002: Existing conversation continuity
 

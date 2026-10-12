@@ -12,6 +12,14 @@ legacy_specs: []
 
 # Implementation plan: Sidebar sort chains and color ranking
 
+## Follow-up running predicate amendment
+
+The [task-wide running fix](../sidebar-task-wide-running-rank/plan.md) replaces
+this package's primary-only predicate with any-session runtime evidence.
+This package remains a completed historical delivery record. Its recorded
+checks cover the original predicate. The follow-up owns mixed-session,
+absent-primary, upgrade, and desktop/phone regression evidence.
+
 ## Overview
 
 Deliver configurable sorting with several rules. The user's example is Running

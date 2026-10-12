@@ -3,6 +3,7 @@ import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { getDockviewGroupWidth, resizeColumnViaSplitview } from "../../helpers/dockview-resize";
+import { snapshotPersistedLayouts } from "../../helpers/dockview-persistence";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
@@ -231,6 +232,13 @@ test.describe("right-panel visibility", () => {
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
 
     await session.clickTab("Files");
+    // Reload must restore a selection that has reached the debounced layout save.
+    await expect
+      .poll(() => snapshotPersistedLayouts(testPage), {
+        timeout: 10_000,
+        message: "Files selection never reached the saved layout",
+      })
+      .toContain('"activeView":"files"');
     await session.clickMaximize();
     await session.expectMaximized();
 

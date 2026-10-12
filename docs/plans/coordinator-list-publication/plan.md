@@ -19,7 +19,7 @@ design handoff and its failed Node setup receipt remain recorded below.
 
 Coordinator owns workspace coordinator identity and its settings list. Reuse
 [the requirement](../../specs/coordinator/requirements/coordinators.md) and
-[design](../../specs/coordinator/system-design/coordinators.md#settings-list-read-publication).
+[design](../../specs/coordinator/system-design/list-publication.md#settings-list-read-publication).
 Only `AC-COORDINATOR-COORDINATORS-004.8` is added. The earlier
 [workspace-coordinator package](../workspace-coordinator/plan.md) and its task 02
 remain broader feature records; this order does not claim their unfinished work.

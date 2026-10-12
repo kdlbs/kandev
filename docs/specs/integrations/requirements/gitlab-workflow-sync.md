@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-08-06
-updated: 2026-10-06
+updated: 2026-10-09
 owners:
   - tbd
 ---
@@ -80,6 +80,57 @@ owned by the [workspace authorization contract](../../tasks/requirements/workflo
 The [settings lifetime design](../system-design/workflow-sync-settings-lifetime.md)
 defines this clause's technical boundary. Earlier provider requirements and
 the migrated source detail below retain their existing scope.
+
+### REQ-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003: Source draft preservation during Save
+
+**Intent:** Save shall record an accepted source without discarding a newer draft
+or dismissing its dialog. This newly admitted contract extends the earlier
+lifetime scope, which excluded these edits in AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.8.
+
+**Raw draft:** Provider, both providers' identifiers, branch, directory, interval,
+auto-sync choice and displayed link/project-path text before normalization.
+Equality compares all these values with the submitted draft, not the saved
+source or normalized payload.
+
+#### Acceptance criteria
+
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.1:** When a current Save succeeds,
+  settings shall record canonical configuration and existing success feedback
+  even with newer edits. Success shall still resolve true under
+  AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.5 when preserving a draft/open dialog.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.2:** When any raw draft value
+  differs from its submitted value when Save is acknowledged, settings shall
+  preserve the complete current draft and keep its still-current dialog open.
+  This includes field/provider edits and valid, invalid or equivalently parsed
+  link text, even when parsed identifiers have not changed.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.3:** When complete raw drafts match
+  at acknowledgement, settings shall adopt canonical editable values/link and
+  dismiss the still-current dialog, including normalized, first and
+  provider-switch Save. Editing away and back to submitted values shall likewise
+  permit adoption/dismissal.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.4:** Reverting to pre-Save stored
+  values while saving a different draft shall preserve that reverted draft and
+  its current open dialog at acknowledgement. Next Save shall submit the retained
+  draft through existing validation/provider rules.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.5:** Current failure shall preserve
+  the complete raw draft/open dialog for retry, show existing error feedback and
+  resolve false. Saving shall settle under existing control ownership. Retained
+  invalid input shall prevent Save until corrected.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.6:** Explicit close/reopen shall
+  preserve existing editable-state behavior and old-dismissal retirement under
+  AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.7. Acknowledgement shall not reopen a
+  closed dialog, dismiss a reopened one, reactivate retired settings or couple
+  independent instances.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.7:** Desktop and phone shall share
+  this acknowledgement behavior through the existing controls. Initial load,
+  status-only background refresh, provider parsing, Delete, Sync now, polling,
+  authorization and API payload/response shapes shall retain their existing
+  contracts. This extension defines no ordering among overlapping operations,
+  transport cancellation, persistent draft, or new layout/copy/navigation.
+
+The [settings lifetime and Save draft design](../system-design/workflow-sync-settings-lifetime.md#save-draft-acknowledgement)
+defines the local acknowledgement boundary. Delivery is tracked in the
+[draft-preservation plan](../../../plans/preserve-workflow-sync-save-drafts/plan.md).
 
 ## Migrated source detail
 

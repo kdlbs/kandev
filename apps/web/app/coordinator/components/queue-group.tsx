@@ -30,16 +30,23 @@ export type QueueGroupProps = {
   stepNameByTaskId: Map<string, string>;
   prsByTaskId: ReadonlyMap<string, TaskPR[]>;
   defaultOpen?: boolean;
+  /** Phase 2 on: Ready to merge rows get their actions and the group its header line. */
+  phase2?: boolean;
+  canManage?: boolean;
 };
 
 function QueueGroupRows({
   items,
   stepNameByTaskId,
   prsByTaskId,
+  phase2,
+  canManage,
 }: {
   items: QueueItem[];
   stepNameByTaskId: Map<string, string>;
   prsByTaskId: ReadonlyMap<string, TaskPR[]>;
+  phase2?: boolean;
+  canManage?: boolean;
 }) {
   return (
     // Rows sit in one bordered panel rather than floating on the page
@@ -54,6 +61,8 @@ function QueueGroupRows({
           item={item}
           stepNameByTaskId={stepNameByTaskId}
           prsByTaskId={prsByTaskId}
+          phase2={phase2}
+          canManage={canManage}
         />
       ))}
     </div>
@@ -70,6 +79,8 @@ export function QueueGroup({
   stepNameByTaskId,
   prsByTaskId,
   defaultOpen,
+  phase2,
+  canManage,
 }: QueueGroupProps) {
   const { t } = useTranslation();
   const label = t(GROUP_LABEL_KEY[group]);
@@ -86,10 +97,15 @@ export function QueueGroup({
           <span>{label}</span>
           <Badge variant="secondary">{items.length}</Badge>
         </h3>
+        {phase2 && group === "ready_to_merge" && (
+          <p className="text-muted-foreground text-xs">{t("coordinator:mergeAlwaysHuman")}</p>
+        )}
         <QueueGroupRows
           items={items}
           stepNameByTaskId={stepNameByTaskId}
           prsByTaskId={prsByTaskId}
+          phase2={phase2}
+          canManage={canManage}
         />
       </section>
     );

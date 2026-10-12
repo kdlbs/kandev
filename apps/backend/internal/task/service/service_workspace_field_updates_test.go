@@ -234,6 +234,10 @@ func TestWorkspaceFieldUpdatesPresenceAndDefaults(t *testing.T) {
 	var allNull bool
 	require.NoError(t, f[0].gate.DB().QueryRowContext(ctx, `SELECT default_executor_id IS NULL AND default_environment_id IS NULL AND default_agent_profile_id IS NULL AND default_config_agent_profile_id IS NULL FROM workspaces WHERE id='settings-row'`).Scan(&allNull))
 	require.True(t, allNull)
+	_, err = f[0].gate.DB().ExecContext(ctx, `UPDATE workspaces SET updated_at = ? WHERE id = ?`, time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), row.ID)
+	require.NoError(t, err)
+	row, err = f[0].gate.Repository.GetWorkspace(ctx, row.ID)
+	require.NoError(t, err)
 	before := *row
 	row, err = f[0].service.UpdateWorkspace(ctx, "settings-row", &UpdateWorkspaceRequest{})
 	require.NoError(t, err)

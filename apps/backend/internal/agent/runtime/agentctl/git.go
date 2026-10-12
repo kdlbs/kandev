@@ -296,7 +296,7 @@ func (c *Client) GitStage(ctx context.Context, paths []string, repo string) (*Gi
 }
 
 // GitUnstage unstages files from the index.
-// If paths is empty, unstages all changes (git reset HEAD).
+// If paths is empty, unstages all changes (git reset --).
 // repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
 func (c *Client) GitUnstage(ctx context.Context, paths []string, repo string) (*GitOperationResult, error) {
 	payload := struct {

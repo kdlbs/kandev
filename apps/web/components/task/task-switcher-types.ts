@@ -31,6 +31,8 @@ export type TaskSwitcherItem = {
   priority?: TaskPriority;
   state?: TaskState;
   sessionState?: TaskSessionState;
+  /** Task-wide RUNNING aggregate; undefined preserves the legacy primary fallback. */
+  hasRunningSession?: boolean;
   /** Task-level most-active-wins busy aggregate (ADR-0049) from the task record. */
   foregroundActivity?: ForegroundActivity | null;
   /** True when the task's session was mid-turn when the backend died. */

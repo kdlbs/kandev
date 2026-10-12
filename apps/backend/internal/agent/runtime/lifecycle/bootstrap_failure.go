@@ -69,7 +69,7 @@ func (e *BootstrapFailure) safeDetail() string {
 	if e == nil {
 		return ""
 	}
-	if e.Detail == "" || isSelectionBootstrapCause(e.safeCode()) {
+	if e.Detail == "" || isSelectionBootstrapCause(e.safeCode()) || e.safeCode() == models.AgentErrorCauseCodeRuntimeCleanupFailed {
 		return bootstrapFailureDetail(e.safeCode())
 	}
 	return routingerr.Sanitize(e.Detail)
@@ -143,6 +143,7 @@ func isKnownBootstrapCauseCode(code string) bool {
 		models.AgentErrorCauseCodeDestinationInvalid,
 		models.AgentErrorCauseCodeSourceBranchMissing,
 		models.AgentErrorCauseCodeTransportUnavailable,
+		models.AgentErrorCauseCodeRuntimeCleanupFailed,
 		models.AgentErrorCauseCodeTimeout,
 		models.AgentErrorCauseCodeModelUnavailable,
 		models.AgentErrorCauseCodeModelSelectionFailed,
@@ -198,6 +199,8 @@ func bootstrapFailureDetail(code string) string {
 		return "The contribution destination is not valid."
 	case models.AgentErrorCauseCodeSourceBranchMissing:
 		return "The contribution source branch is not available."
+	case models.AgentErrorCauseCodeRuntimeCleanupFailed:
+		return "The previous runtime could not be stopped. Check executor connectivity, then retry Resume."
 	case models.AgentErrorCauseCodeTransportUnavailable:
 		return "The contribution service could not be reached."
 	case models.AgentErrorCauseCodeTimeout:

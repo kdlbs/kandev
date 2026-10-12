@@ -46,17 +46,20 @@ const (
 // consumers. Revision and UpdatedAt are transport metadata and are ignored by
 // SemanticEqual when deciding whether a projection actually changed.
 type TaskStatusSummary struct {
-	Revision            uint64                 `json:"revision"`
-	UpdatedAt           time.Time              `json:"updated_at"`
-	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
-	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
-	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
-	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
-	PendingAction       string                 `json:"pending_action,omitempty"`
-	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
-	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
-	Git                 *GitSummary            `json:"git,omitempty"`
-	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
+	Revision       uint64                 `json:"revision"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+	LastActivityAt *time.Time             `json:"last_activity_at,omitempty"`
+	PrimarySession *PrimarySessionSummary `json:"primary_session,omitempty"`
+	// HasRunningSession is authoritative when present. A nil value identifies
+	// summaries written before the task-wide session projection was available.
+	HasRunningSession   *bool               `json:"has_running_session,omitempty"`
+	ForegroundActivity  string              `json:"foreground_activity,omitempty"`
+	ActiveSubagentCount int                 `json:"active_subagent_count,omitempty"`
+	PendingAction       string              `json:"pending_action,omitempty"`
+	ActiveError         *ActiveErrorSummary `json:"active_error,omitempty"`
+	TaskError           *ActiveErrorSummary `json:"task_error,omitempty"`
+	Git                 *GitSummary         `json:"git,omitempty"`
+	PullRequest         *PullRequestSummary `json:"pull_request,omitempty"`
 	// QueuedPromptCount is the number of prompts currently en-queued for the
 	// task across all of its sessions (pending semantics identical to
 	// message.queue.get). Omitted when zero so task rows without queued work
@@ -373,6 +376,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 	return json.Marshal(semanticPayload{
 		LastActivityAt:      s.LastActivityAt,
 		PrimarySession:      s.PrimarySession,
+		HasRunningSession:   s.HasRunningSession,
 		ForegroundActivity:  s.ForegroundActivity,
 		ActiveSubagentCount: s.ActiveSubagentCount,
 		PendingAction:       s.PendingAction,
@@ -389,6 +393,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 type semanticPayload struct {
 	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
 	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
+	HasRunningSession   *bool                  `json:"has_running_session,omitempty"`
 	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
 	PendingAction       string                 `json:"pending_action,omitempty"`

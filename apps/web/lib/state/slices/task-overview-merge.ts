@@ -7,11 +7,7 @@ export function mergeTaskOverview(
   patch: TaskOverviewPatch,
 ): TaskOverview {
   if (current === patch) return current;
-  const before = parseStrictRfc3339Timestamp(current?.updatedAt?.replace(" ", "T"));
-  const incoming = parseStrictRfc3339Timestamp(patch.updatedAt?.replace(" ", "T"));
-  const stale = before !== null && incoming !== null && incoming < before;
-  const next = { ...current, ...(stale ? {} : patch) } as TaskOverview;
-  next.statusSummary = pickFreshestStatusSummary(patch.statusSummary, current?.statusSummary);
+  const next = mergeTaskOverviewPatch(current, patch) as TaskOverview;
   if (!current) return next;
   // Reuse equal projection fields so an unchanged HTTP row keeps its canonical identity.
   for (const key of Object.keys(next) as Array<keyof TaskOverview>) {
@@ -24,6 +20,23 @@ export function mergeTaskOverview(
     Object.keys(current).every((key) => key in next)
     ? current
     : next;
+}
+
+function mergeTaskOverviewPatch(
+  current: TaskOverviewPatch | undefined,
+  patch: TaskOverviewPatch,
+): TaskOverviewPatch {
+  const before = parseStrictRfc3339Timestamp(current?.updatedAt?.replace(" ", "T"));
+  const incoming = parseStrictRfc3339Timestamp(patch.updatedAt?.replace(" ", "T"));
+  const stale = before !== null && incoming !== null && incoming < before;
+  const next = { ...current, ...(stale ? {} : patch) } as TaskOverviewPatch;
+  if (
+    Object.hasOwn(patch, "statusSummary") ||
+    (current && Object.hasOwn(current, "statusSummary"))
+  ) {
+    next.statusSummary = pickFreshestStatusSummary(patch.statusSummary, current?.statusSummary);
+  }
+  return next;
 }
 
 function equalOverviewValue(left: unknown, right: unknown): boolean {
@@ -51,7 +64,8 @@ export function recordTaskOverviewChange(
   const encoder = new TextEncoder();
   for (const [id, read] of Object.entries(reads)) {
     const previous = read.changes[taskId];
-    const change = patch === null || previous === null ? null : { ...previous, ...patch };
+    const change =
+      patch === null || previous === null ? null : mergeTaskOverviewPatch(previous, patch);
     const changes = { ...read.changes, [taskId]: change };
     const previousBytes = Object.hasOwn(read.changes, taskId)
       ? encoder.encode(JSON.stringify([taskId, previous])).byteLength

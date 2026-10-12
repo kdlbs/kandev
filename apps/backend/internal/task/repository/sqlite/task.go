@@ -1519,8 +1519,30 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil)
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil)
 	return admitted, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionAndEffect atomically moves a task into a
+// workflow step and records the durable delivery effect key. A repeated effect
+// returns admitted=false, applied=false without rewriting the task row.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndEffect(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+	effect *models.AgentDeliveryEffect,
+) (admitted, applied bool, err error) {
+	if effect == nil || effect.EffectKey == "" {
+		return false, false, fmt.Errorf("effect key is required")
+	}
+	if effect.CreatedAt.IsZero() {
+		effect.CreatedAt = r.nowUTC()
+	}
+	return r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, effect,
+	)
 }
 
 // UpdateTaskWithWorkflowStepAdmissionAndState is the manual-move variant of
@@ -1544,7 +1566,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil, nil,
 	)
 	return admitted, err
 }
@@ -1590,6 +1612,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionExact(
 			queueExitPending, "", expectedWorkflowID, nil, nil,
 			&exactTaskMoveOperation{workspaceID: workspaceID, expectedVersion: expectedResourceVersion, operationID: operationID, payloadDigest: payloadDigest, claimFence: fence},
 			&alreadyApplied,
+			nil,
 		)
 		unlock()
 		var changed *admissionSourceChangedError
@@ -1617,7 +1640,7 @@ func (r *Repository) UpdateTaskWithWorkflowChangeAdmissionAndState(
 		return false, fmt.Errorf("workflow change source guard is required")
 	}
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source, nil,
 	)
 	return admitted, err
 }
@@ -1640,7 +1663,29 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 ) (applied bool, err error) {
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
-	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil)
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, nil)
+	return applied, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect is the guarded
+// transition variant that records a durable delivery effect in the same
+// transaction as the compare-and-swap task move.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID, targetStepID string,
+	limit int,
+	effect *models.AgentDeliveryEffect,
+) (applied bool, err error) {
+	if effect == nil || effect.EffectKey == "" {
+		return false, fmt.Errorf("effect key is required")
+	}
+	if effect.CreatedAt.IsZero() {
+		effect.CreatedAt = r.nowUTC()
+	}
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, effect,
+	)
 	return applied, err
 }
 
@@ -1654,7 +1699,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
 	return r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil,
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil, nil,
 	)
 }
 
@@ -1901,9 +1946,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	expectedWorkflowID string,
 	deferredMove *messagequeue.PendingMoveRecord,
 	workflowChangeSource *models.WorkflowChangeSource,
+	effect *models.AgentDeliveryEffect,
 ) (admitted bool, applied bool, err error) {
 	return r.updateTaskWithWorkflowStepAdmissionExactInner(ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending,
-		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil)
+		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect)
 }
 
 type exactTaskMoveOperation struct {
@@ -1928,6 +1974,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 	workflowChangeSource *models.WorkflowChangeSource,
 	exactOperation *exactTaskMoveOperation,
 	alreadyApplied *bool,
+	effect *models.AgentDeliveryEffect,
 ) (admitted bool, applied bool, err error) {
 	currentSourceStepID := sourceStepID
 	for attempt := 0; attempt < admissionSourceRetryLimit; attempt++ {
@@ -1946,6 +1993,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 			workflowChangeSource,
 			exactOperation,
 			alreadyApplied,
+			effect,
 		)
 		unlock()
 
@@ -1982,6 +2030,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	workflowChangeSource *models.WorkflowChangeSource,
 	exactOperation *exactTaskMoveOperation,
 	alreadyApplied *bool,
+	effect *models.AgentDeliveryEffect,
 ) (admitted bool, applied bool, err error) {
 	now := time.Now().UTC()
 	task.UpdatedAt = now
@@ -2117,6 +2166,40 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 			return false, false, err
 		}
 		if !casApplied {
+			return false, false, nil
+		}
+	}
+	if effect != nil {
+		if effect.WorkflowStepID != "" || effect.WorkflowPolicyUpdatedAt != nil {
+			policyMatches, err := r.workflowPolicyMatchesTx(ctx, tx, actualWorkflowID, actualSourceStepID, effect)
+			if err != nil {
+				return false, false, err
+			}
+			if !policyMatches {
+				return false, false, nil
+			}
+		}
+		if effect.TaskID != "" && effect.SessionID != "" && effect.IncarnationID != "" &&
+			effect.HarnessGeneration > 0 && effect.SubmissionID != "" && effect.StreamID != "" && effect.Sequence > 0 {
+			if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), effect.SessionID); err != nil {
+				return false, false, err
+			}
+			if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{effect.SessionID}, []string{effect.StreamID}); err != nil {
+				return false, false, err
+			}
+			terminalMatches, err := r.agentDeliveryWorkflowTerminalMatchesTx(ctx, tx, effect)
+			if err != nil {
+				return false, false, err
+			}
+			if !terminalMatches {
+				return false, false, nil
+			}
+		}
+		inserted, err := insertDeliveryEffectTx(ctx, tx, r.db.Rebind, effect)
+		if err != nil {
+			return false, false, err
+		}
+		if !inserted {
 			return false, false, nil
 		}
 	}
@@ -3619,6 +3702,9 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 		return "", err
 	}
 	if err := r.purgeTaskPromptSequenceTx(ctx, tx, id, sessions); err != nil {
+		return "", err
+	}
+	if err := r.retireAgentDeliveryTaskSessionsTx(ctx, tx, id); err != nil {
 		return "", err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
@@ -5383,7 +5469,14 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 	if err != nil {
 		return false, err
 	}
+	identities, err := r.agentDeliverySessionIdentitiesInTx(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessions...); err != nil {
+		return false, err
+	}
+	if err := r.lockAgentDeliverySessionIdentitiesTx(ctx, tx, identities); err != nil {
 		return false, err
 	}
 	query := "WITH candidate AS (" + candidate + ") DELETE FROM tasks WHERE id = ? AND EXISTS (SELECT 1 FROM candidate)"
@@ -5397,6 +5490,9 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 		return false, err
 	}
 	if rows > 0 {
+		if err := r.insertAgentDeliveryRetirementJobsTx(ctx, tx, identities); err != nil {
+			return false, err
+		}
 		if err := r.purgePromptSequencesForSessionsTx(ctx, tx, sessions); err != nil {
 			return false, err
 		}

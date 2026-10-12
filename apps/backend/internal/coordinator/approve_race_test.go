@@ -63,7 +63,7 @@ func TestApproveProposal_WorkflowReadErrorPropagatesBeforeClaim(t *testing.T) {
 		t.Fatalf("err = %v, want a plain error, not a conflict", err)
 	}
 
-	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if rerr != nil {
 		t.Fatalf("GetProposal: %v", rerr)
 	}
@@ -101,7 +101,7 @@ func TestApproveFailed_LookupErrorPropagatesRowUnchanged(t *testing.T) {
 		t.Fatalf("err = %v, want a plain error, not a conflict", err)
 	}
 
-	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if rerr != nil {
 		t.Fatalf("GetProposal: %v", rerr)
 	}
@@ -136,7 +136,7 @@ func TestApproveProposal_StepGraphReadErrorPreCreateLeavesApproving(t *testing.T
 		t.Fatalf("err = %v, want a plain error, not a conflict", err)
 	}
 
-	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if rerr != nil {
 		t.Fatalf("GetProposal: %v", rerr)
 	}
@@ -169,7 +169,7 @@ func TestApproveProposal_StaleReclaimLookupErrorLeavesApprovingWithNewToken(t *t
 		t.Fatalf("err = %v, want %v", err, wantErr)
 	}
 
-	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if rerr != nil {
 		t.Fatalf("GetProposal: %v", rerr)
 	}
@@ -198,7 +198,7 @@ func TestApproveProposal_StaleReclaimStepGraphReadErrorLeavesApprovingWithNewTok
 		t.Fatalf("err = %v, want %v", err, wantErr)
 	}
 
-	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if rerr != nil {
 		t.Fatalf("GetProposal: %v", rerr)
 	}
@@ -266,7 +266,7 @@ func TestSettleWriteRace_CurrentRowFoundReturnsCurrentRowUnchanged(t *testing.T)
 	p := insertProposal(t, store, c, sampleSpec())
 
 	claimDirectly(t, store, p, "tokenA", sampleSpec(), time.Now().Add(-3*time.Minute))
-	if matched, err := store.ReclaimStale(context.Background(), p.ID, "tokenB", time.Now(), time.Now().Add(-2*time.Minute)); err != nil || !matched {
+	if matched, err := store.ReclaimStale(context.Background(), p.ID, "tokenB", time.Now(), time.Now().Add(-2*time.Minute), false); err != nil || !matched {
 		t.Fatalf("ReclaimStale (setup): matched=%v err=%v", matched, err)
 	}
 	if matched, err := store.FailProposal(context.Background(), p.ID, "tokenB", "setup failure", time.Now()); err != nil || !matched {
@@ -294,7 +294,7 @@ func TestSettleWriteRace_CurrentRowFoundAfterRejectReturnsCurrentRowUnchanged(t 
 	p := insertProposal(t, store, c, sampleSpec())
 
 	claimDirectly(t, store, p, "tokenA", sampleSpec(), time.Now().Add(-3*time.Minute))
-	if matched, err := store.ReclaimStale(context.Background(), p.ID, "tokenB", time.Now(), time.Now().Add(-2*time.Minute)); err != nil || !matched {
+	if matched, err := store.ReclaimStale(context.Background(), p.ID, "tokenB", time.Now(), time.Now().Add(-2*time.Minute), false); err != nil || !matched {
 		t.Fatalf("ReclaimStale (setup): matched=%v err=%v", matched, err)
 	}
 	if matched, err := store.FailProposal(context.Background(), p.ID, "tokenB", "setup failure", time.Now()); err != nil || !matched {

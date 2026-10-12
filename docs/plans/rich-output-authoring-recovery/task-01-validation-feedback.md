@@ -112,6 +112,6 @@ failures, bounded sanitized details and task/Office rejected/corrected calls.
 - `git diff --check`: passed.
 
 Go commands used `GOFLAGS='-trimpath -p=4'`, private `GOCACHE` and
-`GOLANGCI_LINT_CACHE` under `/tmp/kandev-rich-ui-k921jmkz`. Full authoritative
+`GOLANGCI_LINT_CACHE` under the privately retained isolated environment. Full authoritative
 validation still runs before source reads; only its diagnostic projection
 selects relevant branches. No argument repair or new dependencies.

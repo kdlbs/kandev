@@ -142,6 +142,23 @@ describe("Chart plot scheduling", () => {
     expect(screen.getByTestId(MOCK_LINE_CHART)).not.toBeNull();
   });
 
+  it("mounts when a later observation in the same batch intersects", () => {
+    render(<Chart {...BLOCK} />);
+    const record = observerRecords[0];
+
+    act(() => {
+      record.callback(
+        [
+          { isIntersecting: false, target: record.target },
+          { isIntersecting: true, target: record.target },
+        ] as IntersectionObserverEntry[],
+        record.instance,
+      );
+    });
+
+    expect(screen.getByTestId(MOCK_LINE_CHART)).not.toBeNull();
+  });
+
   it("waits for a background tab to become visible after intersection", () => {
     setDocumentVisibility("hidden");
     render(<Chart {...BLOCK} />);

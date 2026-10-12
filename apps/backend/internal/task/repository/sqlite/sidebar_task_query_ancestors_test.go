@@ -117,8 +117,12 @@ func TestSidebarComposableRunningAndActivitySortsBeforePaging(t *testing.T) {
 				if row.primary != "" {
 					primary = fmt.Sprintf(`,"primary_session":{"state":%q}`, row.primary)
 				}
-				summary := fmt.Sprintf(`{"last_activity_at":%q%s}`,
-					base.Add(row.activity).Format(time.RFC3339Nano), primary)
+				running := `,"has_running_session":false`
+				if row.id == "running-child" || row.id == "running-root" {
+					running = `,"has_running_session":true`
+				}
+				summary := fmt.Sprintf(`{"last_activity_at":%q%s%s}`,
+					base.Add(row.activity).Format(time.RFC3339Nano), primary, running)
 				_, err := repo.db.ExecContext(t.Context(), repo.db.Rebind(`INSERT INTO task_status_summaries
 					(task_id, workspace_id, revision, summary, updated_at) VALUES (?, ?, 1, ?, ?)`),
 					row.id, workspace, summary, base)

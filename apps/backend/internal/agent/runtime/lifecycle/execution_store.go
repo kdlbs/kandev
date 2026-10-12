@@ -383,6 +383,7 @@ func beginExecutionPromptLocked(execution *AgentExecution) uint64 {
 	// recovered-but-not-yet-adopted generation must not later clobber it with
 	// a stale pre-restart completion (see recoveredPromptGenerationPending).
 	execution.recoveredPromptGenerationPending.Store(false)
+	execution.cancelEscalatedPromptGeneration.Store(0)
 	execution.promptGeneration++
 	if execution.promptTurnID != "" {
 		if execution.promptTurnIDs == nil {
@@ -451,6 +452,33 @@ func (s *ExecutionStore) WithLock(executionID string, fn func(execution *AgentEx
 		return ErrExecutionNotFound
 	}
 	fn(execution)
+	return nil
+}
+
+// WithPromptLifecycleLock executes fn with the execution's promptLifecycleMu
+// and then the store lock held, so fn may read and write prompt lifecycle
+// fields such as promptTurnID directly. The lock order matches BeginPrompt and
+// the completion claim: promptLifecycleMu is never acquired while the store
+// lock is held, because a completion handler that owns promptLifecycleMu and
+// waits for the store lock would otherwise deadlock every store reader.
+// Returns ErrExecutionNotFound when the ID is missing or was re-registered to a
+// different execution between the lookup and the store lock.
+func (s *ExecutionStore) WithPromptLifecycleLock(executionID string, fn func(execution *AgentExecution)) error {
+	execution, exists := s.Get(executionID)
+	if !exists {
+		return ErrExecutionNotFound
+	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, exists := s.executions[executionID]
+	if !exists || current != execution {
+		return ErrExecutionNotFound
+	}
+	fn(current)
 	return nil
 }
 

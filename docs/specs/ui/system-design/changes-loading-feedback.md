@@ -91,10 +91,9 @@ Accepted live status clears the matching warning without hiding another reposito
 Do not translate raw Git output or expose it in the tooltip.
 Continue to suppress `EmptyChangesPanel` until `membershipReady` is true.
 
-`FileRowStats` omits the pending detail label and unknown line counts.
+`FileRowStats` omits the pending detail label and unknown counts without a retained display value.
 Keep file status icons and unavailable detail labels.
-Known counts appear when details become ready.
-Diff viewers keep their existing pending states.
+Displayed counts and diff continuity follow the [Platform design](../../platform/system-design/git-refresh-continuity.md).
 
 `changes-timeline-history-model.ts` stops emitting `commit-status` rows for idle or loading details.
 Remove the corresponding loading branch from `CommitStatusHistoryRow` and narrow its row type.

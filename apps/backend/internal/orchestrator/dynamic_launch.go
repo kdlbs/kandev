@@ -130,21 +130,7 @@ func (d *dynamicTaskDownstream) Launch(
 	defer releaseDispatchCommit()
 	execution, err := d.service.executor.LaunchPreparedSession(dispatchCtx, d.task, d.sessionID, options)
 	if err != nil {
-		var classified *routingerr.Error
-		if errors.As(err, &classified) {
-			return dynamicruntime.DownstreamExecution{}, err
-		}
-		classified = routingerr.Classify(routingerr.Input{
-			Phase:      routingerr.PhaseProcessStart,
-			ProviderID: launch.ExecutionProfileID,
-			Stderr:     err.Error(),
-		})
-		// Unknown low-confidence launch failures are workspace/runtime errors,
-		// not provider failures. Let the ordinary launch recovery own them.
-		if classified.Confidence == routingerr.ConfLow {
-			return dynamicruntime.DownstreamExecution{}, err
-		}
-		return dynamicruntime.DownstreamExecution{}, fmt.Errorf("%w: %v", classified, err)
+		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID)
 	}
 	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
 	d.service.bindPromptAttemptToExecution(dispatchCtx, d.sessionID, execution.AgentExecutionID)
@@ -1397,24 +1383,6 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 	}
 	succeeded = true
 	return nil
-}
-
-func (s *Service) dynamicFailureSession(
-	ctx context.Context,
-	data watcher.AgentEventData,
-) (*models.TaskSession, bool) {
-	if s.profileExecutionResolver == nil || data.SessionID == "" {
-		return nil, false
-	}
-	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
-	if err != nil || session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
-		return nil, false
-	}
-	if session.AgentExecutionID != "" && data.AgentExecutionID != "" &&
-		session.AgentExecutionID != data.AgentExecutionID {
-		return nil, false
-	}
-	return session, true
 }
 
 func (s *Service) unclassifiedPromptEvidence(

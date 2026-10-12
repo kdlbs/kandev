@@ -566,6 +566,30 @@ describe("ChatMessage sender badge", () => {
   });
 });
 
+describe("ChatMessage blocked delivery badge", () => {
+  it("keeps the saved user instruction visible with its blocked delivery state", () => {
+    const Wrapper = wrapper();
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            content: "Inspect the saved work and continue",
+            metadata: { delivery_status: "blocked" },
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByTestId("user-message-delivery-blocked").textContent).toBe(
+      "Delivery is blocked while session recovery is pending.",
+    );
+    expect(screen.getByText("Inspect the saved work and continue", { exact: true })).not.toBeNull();
+  });
+});
+
 describe("ChatMessage raw view", () => {
   it("shows user raw_content with hidden kandev-system blocks when raw view is enabled", () => {
     const raw = `<kandev-system>This message was sent by an agent working in task "Sender" (${SENDER_TASK_ID}).</kandev-system>

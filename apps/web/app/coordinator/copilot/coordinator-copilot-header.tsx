@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconMessageChatbot, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -8,6 +9,8 @@ export type CoordinatorCopilotHeaderProps = {
   coordinatorName: string;
   busy: boolean;
   onClose: () => void;
+  /** Controls placed before Close (the workspace host's switcher and page link). */
+  actions?: ReactNode;
 };
 
 /** The panel header: title, a busy status while the coordinator works, and Close. */
@@ -15,6 +18,7 @@ export function CoordinatorCopilotHeader({
   coordinatorName,
   busy,
   onClose,
+  actions,
 }: CoordinatorCopilotHeaderProps) {
   const { t } = useTranslation();
   return (
@@ -34,15 +38,18 @@ export function CoordinatorCopilotHeader({
           </span>
         )}
       </div>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="h-11 w-11 cursor-pointer rounded-none"
-        onClick={onClose}
-        aria-label={t("coordinator:copilotClose")}
-      >
-        <IconX className="h-4 w-4" />
-      </Button>
+      <div className="flex shrink-0 items-center gap-1">
+        {actions}
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-11 w-11 cursor-pointer rounded-none"
+          onClick={onClose}
+          aria-label={t("coordinator:copilotClose")}
+        >
+          <IconX className="h-4 w-4" />
+        </Button>
+      </div>
     </header>
   );
 }

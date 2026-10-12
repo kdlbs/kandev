@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
@@ -35,6 +36,8 @@ func TestWorkspaceFieldUpdatesStorage(t *testing.T) {
 	api := workspaceSettingsAPI(t, repo)
 	ctx := t.Context()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "settings-storage", Name: "Before", Description: "Kept"}))
+	_, err := repo.DB().ExecContext(ctx, `UPDATE workspaces SET updated_at = ? WHERE id = ?`, time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), "settings-storage")
+	require.NoError(t, err)
 	before, err := repo.GetWorkspace(ctx, "settings-storage")
 	require.NoError(t, err)
 	require.False(t, before.ACPIdleSuspensionEnabled)
@@ -81,6 +84,10 @@ func TestWorkspaceFieldUpdatesStorage(t *testing.T) {
 
 func workspaceSettingsDirectStorage(t *testing.T, repo *tasksqlite.Repository, before *models.Workspace) {
 	t.Helper()
+	_, err := repo.DB().ExecContext(t.Context(), `UPDATE workspaces SET updated_at = ? WHERE id = ?`, time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), before.ID)
+	require.NoError(t, err)
+	before, err = repo.GetWorkspace(t.Context(), before.ID)
+	require.NoError(t, err)
 	name, description, unit := "", "Direct description", "storage-unit"
 	executor, environment, agent, config := "executor", "environment", "agent", "config"
 	executorID, environmentID, agentID, configID := &executor, &environment, &agent, &config

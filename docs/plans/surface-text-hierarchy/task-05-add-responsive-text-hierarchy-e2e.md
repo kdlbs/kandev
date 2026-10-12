@@ -136,3 +136,40 @@ tests/task/sidebar-delete-confirm.spec.ts` (2 tests).
   assertions. Final reruns remained green: mobile 4/4, desktop 2/2, and existing
   long-dialog/delete regressions 2/2; focused lint, Prettier, the sleep ratchet,
   diff checks, and specification lint also passed.
+
+
+### CI fixture follow-up (2026-10-07)
+
+The long-text dialog case now exercises collapsed navigation explicitly, then
+expands it through the real navigation control before opening the dialog. The
+collapsed fixture reproduced the hosted intercepted-click timeout with retries
+disabled. Its corrected first attempt passed with all overflow and dropdown
+assertions intact.
+
+The inline rename-on-blur case retains 60 intervening file rows to reproduce
+virtualizer pressure. Its previous distant blur target unmounted the input
+before the click and failed to create the renamed file. An adjacent visible
+companion now causes a real blur; input focus, tree state and disk state remain
+asserted. Three repetitions passed without retries. Commands from the root:
+
+```sh
+E2E_PORT_OFFSET=0 pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project chromium tests/task/file-tree-rename.spec.ts -- --grep 'rename commits on blur' --retries=0 --repeat-each=3
+E2E_PORT_OFFSET=0 pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project chromium tests/task/dialog-long-text-overflow.spec.ts -- --retries=0
+```
+
+Fresh hosted verification remains pending.
+
+### Tasks dismissal fixture ownership
+
+Retry PR head `6cf6050a` passes the frontend drawer close/reopen regression
+and the phone shared-context scenario, but its mobile Delete text-hierarchy
+case fails in all four attempts because it queries the Tasks drawer title
+after `surfaceAction` has closed Tasks and opened the separate rich Delete
+AlertDialog. The trace confirms the AlertDialog is visible before that
+obsolete drawer query. The fixture keeps the exact Drawer title visibility
+and balanced-text assertions while Tasks is open, before selecting Delete.
+It additionally asserts that the dismissed Tasks portal is detached while
+Delete is visible. All Delete geometry, typography, scroll, action hitboxes,
+consent, Cancel/task survival, deletion assertions and original timeouts remain
+unchanged. This fixture correction awaits full hosted E2E verification; the
+historical local GREEN results above are not claims for this head.

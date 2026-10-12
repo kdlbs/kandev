@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -89,6 +91,147 @@ func TestResumeAttemptCancellationInterruptsDetachedContext(t *testing.T) {
 		t.Fatalf("cancelled attempt validation error = %v, want ErrResumeAttemptCancelled", err)
 	}
 	attempt.finish(registry)
+}
+
+func TestCancelAgentStopsUnacceptedResumeStartupWithoutWaitingForAgentCancel(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-cancel-resume-startup"
+		sessionID   = "session-cancel-resume-startup"
+		executionID = "execution-cancel-resume-startup"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
+
+	releaseAgentCancel := make(chan struct{})
+	var releaseCancelOnce sync.Once
+	releaseCancel := func() { releaseCancelOnce.Do(func() { close(releaseAgentCancel) }) }
+	cancelEntered := make(chan struct{}, 1)
+	stopped := make(chan string, 1)
+	agentManager := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		cancelAgentBlock:       releaseAgentCancel,
+		cancelAgentEntered:     cancelEntered,
+		stopAgentWithReasonFunc: func(_ context.Context, stoppedID, _ string, _ bool) error {
+			stopped <- stoppedID
+			return nil
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	attempt, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
+	if err != nil || !owner {
+		t.Fatalf("begin resume attempt: owner=%v err=%v", owner, err)
+	}
+	attempt.setExecutionID(executionID)
+	t.Cleanup(func() {
+		releaseCancel()
+		attempt.finish(svc.resumeAttemptStore())
+	})
+
+	cancelDone := make(chan error, 1)
+	go func() { cancelDone <- svc.CancelAgent(ctx, sessionID) }()
+	select {
+	case err := <-cancelDone:
+		if err != nil {
+			t.Fatalf("CancelAgent: %v", err)
+		}
+	case <-cancelEntered:
+		releaseCancel()
+		<-cancelDone
+		t.Fatal("CancelAgent sent a protocol cancel while native session restore was still starting")
+	case <-time.After(resumeCancellationTestTimeout(t)):
+		releaseCancel()
+		<-cancelDone
+		t.Fatal("CancelAgent did not stop the unaccepted startup execution")
+	}
+
+	select {
+	case stoppedID := <-stopped:
+		if stoppedID != executionID {
+			t.Fatalf("stopped execution = %q, want %q", stoppedID, executionID)
+		}
+	default:
+		t.Fatal("CancelAgent did not stop the exact resume startup execution")
+	}
+	assertResumeSessionState(t, repo, sessionID, models.TaskSessionStateWaitingForInput)
+}
+
+func TestCancelAgentSettlesSessionStateChangedDuringStartupStop(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-cancel-resume-state-race"
+		sessionID   = "session-cancel-resume-state-race"
+		executionID = "execution-cancel-resume-state-race"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
+
+	agentManager := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		stopAgentWithReasonFunc: func(stopCtx context.Context, stoppedID, _ string, _ bool) error {
+			if stoppedID != executionID {
+				return fmt.Errorf("stopped execution = %q, want %q", stoppedID, executionID)
+			}
+			return repo.UpdateTaskSessionState(stopCtx, sessionID, models.TaskSessionStateRunning, "")
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	attempt, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
+	if err != nil || !owner {
+		t.Fatalf("begin resume attempt: owner=%v err=%v", owner, err)
+	}
+	attempt.setExecutionID(executionID)
+	t.Cleanup(func() { attempt.finish(svc.resumeAttemptStore()) })
+
+	if err := svc.CancelAgent(ctx, sessionID); err != nil {
+		t.Fatalf("CancelAgent after startup state changed during stop: %v", err)
+	}
+	assertResumeSessionState(t, repo, sessionID, models.TaskSessionStateWaitingForInput)
+}
+
+func TestResumeAttemptPreservesRecoveryInspectionDeadlineAcrossDetachment(t *testing.T) {
+	for _, manualPreflight := range []bool{false, true} {
+		name := "automatic session open"
+		if manualPreflight {
+			name = "explicit manual preflight"
+		}
+		t.Run(name, func(t *testing.T) {
+			requestCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			defer cancel()
+			callerDeadline, ok := requestCtx.Deadline()
+			if !ok {
+				t.Fatal("request context has no caller deadline")
+			}
+			if manualPreflight {
+				requestCtx, _ = worktree.WithRecoveryInspectionWait(
+					requestCtx, worktree.RecoveryInspectionWaitBudget,
+				)
+			}
+
+			registry := newResumeAttemptRegistry()
+			attempt, owner := registry.begin(requestCtx, "task-deadline", "session-deadline")
+			if !owner {
+				t.Fatal("resume attempt was not admitted")
+			}
+			defer attempt.finish(registry)
+
+			_, inspectionDeadline := worktree.WithRecoveryInspectionWait(
+				attempt.context(), worktree.RecoveryInspectionWaitBudget,
+			)
+			if !inspectionDeadline.Equal(callerDeadline) {
+				t.Fatalf("inspection deadline after request detachment = %s, want caller deadline %s",
+					inspectionDeadline, callerDeadline)
+			}
+		})
+	}
 }
 
 func TestResumeAttemptRegistryFencesEvictedCancelledIdentities(t *testing.T) {

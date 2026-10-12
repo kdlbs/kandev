@@ -68,6 +68,16 @@ describe("isContextWindowReliable", () => {
   });
 });
 
+describe("TokenUsageDisplay detail demand", () => {
+  it("does not request session updates for a hidden chat", () => {
+    vi.mocked(useSessionContextWindow).mockClear().mockReturnValue(undefined);
+
+    render(<TokenUsageDisplay sessionId="sess-1" detailActive={false} />);
+
+    expect(useSessionContextWindow).toHaveBeenCalledWith("sess-1", false);
+  });
+});
+
 describe("TokenUsageDisplay", () => {
   it("transitions only the context ring arc", () => {
     vi.mocked(useSessionContextWindow).mockReturnValue({

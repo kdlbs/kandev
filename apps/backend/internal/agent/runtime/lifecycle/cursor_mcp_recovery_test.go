@@ -54,6 +54,8 @@ func TestCursorMCPRecoverySnapshotReplacesOnlyTheRetriedServer(t *testing.T) {
 			if !success {
 				environmentStatus = PrepareStepFailed
 			}
+			diagnosticA := &mcpconfig.NativeMCPDiagnostic{Operation: "list_tools", Stage: "wait", Kind: "wait_failed", Message: "server A failure"}
+			diagnosticB := &mcpconfig.NativeMCPDiagnostic{Operation: "list_tools", Stage: "wait", Kind: "wait_failed", Message: "server B failure"}
 			manager, eventBus := newPrepareEventsTestManager(t, "cursor-recovery-profile")
 			execution := &AgentExecution{
 				TaskID: "task-mcp", SessionID: "session-mcp", WorkspacePath: "/workspace",
@@ -61,8 +63,8 @@ func TestCursorMCPRecoverySnapshotReplacesOnlyTheRetriedServer(t *testing.T) {
 					{Name: "Environment", Kind: "executor_environment", Status: environmentStatus},
 					{Name: "Discovery A", Kind: PrepareStepKindAgentMCPDiscovery, MCPServerID: "server-a", Status: PrepareStepCompleted},
 					{Name: "Selection A", Kind: PrepareStepKindAgentMCPSelection, MCPServerID: "server-a", Status: PrepareStepCompleted},
-					{Name: "Verification A", Kind: PrepareStepKindAgentMCPVerification, MCPServerID: "server-a", Status: PrepareStepFailed},
-					{Name: "Verification B", Kind: PrepareStepKindAgentMCPVerification, MCPServerID: "server-b", Status: PrepareStepFailed},
+					{Name: "Verification A", Kind: PrepareStepKindAgentMCPVerification, MCPServerID: "server-a", Status: PrepareStepFailed, Diagnostic: diagnosticA},
+					{Name: "Verification B", Kind: PrepareStepKindAgentMCPVerification, MCPServerID: "server-b", Status: PrepareStepFailed, Diagnostic: diagnosticB},
 				}},
 			}
 			recorder := manager.newPreparationAttemptRecorder(execution.TaskID, execution.SessionID)
@@ -79,6 +81,14 @@ func TestCursorMCPRecoverySnapshotReplacesOnlyTheRetriedServer(t *testing.T) {
 			requirePrepareStep(t, steps, "Discovery A")
 			requirePrepareStep(t, steps, "Selection A")
 			requirePrepareStep(t, steps, "Verification B")
+			for _, step := range steps {
+				if step.MCPServerID == "server-a" {
+					require.Nil(t, step.Diagnostic)
+				}
+				if step.MCPServerID == "server-b" && step.Kind == PrepareStepKindAgentMCPVerification {
+					require.Equal(t, diagnosticB, step.Diagnostic)
+				}
+			}
 			for _, step := range steps {
 				require.NotEqual(t, "Verification A", step.Name)
 			}
@@ -330,6 +340,83 @@ func TestRetryCursorMCPConnectionRejectsBusySessionBeforeNativeCommands(t *testi
 	require.Empty(t, runner.commands())
 }
 
+func TestRetryCursorMCPConnectionPreservesDiagnosticsWhenPromptStartsBeforeReload(t *testing.T) {
+	manager, execution, profile := newCursorMCPRecoveryFixture(t)
+	prepareCursorMCPRecoveryWorkspace(t, manager, execution, profile)
+	eventBus := &MockEventBusWithTracking{}
+	manager.eventPublisher = NewEventPublisher(eventBus, manager.logger)
+
+	approvalDiagnostic := &mcpconfig.NativeMCPDiagnostic{
+		Operation: "enable", Stage: "wait", Kind: "output_wait_timeout", Message: "previous approval failure",
+	}
+	verificationDiagnostic := &mcpconfig.NativeMCPDiagnostic{
+		Operation: "list_tools", Stage: "wait", Kind: "wait_failed", Message: "previous verification failure",
+	}
+	otherServerDiagnostic := &mcpconfig.NativeMCPDiagnostic{
+		Operation: "list_tools", Stage: "output", Kind: "unrecognized_output", Message: "other server failure",
+	}
+	originalSteps := []PrepareStep{
+		{Name: "Environment", Kind: "executor_environment", Status: PrepareStepCompleted},
+		{Name: "Verify server B", Kind: PrepareStepKindAgentMCPVerification, MCPProvider: "cursor", MCPServerID: "server-b", Status: PrepareStepFailed, Diagnostic: otherServerDiagnostic},
+		{Name: "Approve target", Kind: PrepareStepKindAgentMCPApproval, MCPProvider: "cursor", MCPServerID: "plugin-harness-figma", Status: PrepareStepFailed, FailureCode: "connection_failed", Diagnostic: approvalDiagnostic},
+		{Name: "Verify target", Kind: PrepareStepKindAgentMCPVerification, MCPProvider: "cursor", MCPServerID: "plugin-harness-figma", Status: PrepareStepFailed, FailureCode: "connection_failed", Diagnostic: verificationDiagnostic},
+	}
+	execution.PrepareResult = &EnvPrepareResult{Success: true, PreparationID: "previous-attempt", Steps: originalSteps}
+	execution.setMetadataValue("prepare_result", SerializePrepareResult(execution.PrepareResult))
+	execution.PrepareResult = nil
+	runner := &cursorMCPRecoveryLateBusyRunner{manager: manager, execution: execution}
+	manager.SetCursorNativeMCPCommandRunner(runner)
+
+	server := newMockAgentServer(t)
+	defer server.Close()
+	client := createTestClient(t, server.server.URL)
+	defer client.Close()
+	streamCtx, cancelStream := context.WithCancel(context.Background())
+	defer cancelStream()
+	require.NoError(t, client.StreamUpdates(streamCtx, func(agentctl.AgentEvent) {}, nil, nil))
+	select {
+	case <-server.wsConnected:
+	case <-time.After(time.Second):
+		t.Fatal("agent stream did not connect")
+	}
+	execution.agentctl = client
+
+	_, err := manager.RetryCursorMCPConnection(context.Background(), execution.SessionID, "plugin-harness-figma")
+
+	require.ErrorIs(t, err, ErrCursorMCPRecoverySessionBusy)
+	require.Greater(t, runner.startedPromptGeneration, uint64(0), "a prompt starts after the retry preflight")
+	require.Equal(t, []string{"mcp enable plugin-harness-figma", "mcp list-tools plugin-harness-figma"}, runner.commands())
+	require.Empty(t, server.getActionLog(), "late busy rejection must not initialize, load, or replay a prompt")
+	require.Empty(t, server.getHTTPActionLog(), "late busy rejection must not stop or restart ACP")
+	require.NotEqual(t, "previous-attempt", execution.PrepareResult.PreparationID)
+	require.Equal(t, originalSteps, execution.PrepareResult.Steps)
+
+	completed := prepareCompletedPayloads(eventBus)
+	require.Len(t, completed, 1)
+	require.Equal(t, execution.PrepareResult.PreparationID, completed[0].PreparationID)
+	require.Equal(t, originalSteps, completed[0].Steps)
+	progress := prepareProgressPayloads(eventBus)
+	require.NotEmpty(t, progress)
+	latestProgress := make(map[int]*PrepareProgressEventPayload)
+	for _, payload := range progress {
+		require.Equal(t, completed[0].PreparationID, payload.PreparationID)
+		latestProgress[payload.StepIndex] = payload
+	}
+	for index, step := range originalSteps {
+		payload := latestProgress[index]
+		require.NotNil(t, payload)
+		require.Equal(t, step.Name, payload.StepName)
+		require.Equal(t, step.Kind, payload.StepKind)
+		require.Equal(t, step.MCPServerID, payload.MCPServerID)
+		require.Equal(t, string(step.Status), payload.Status)
+		require.Equal(t, step.Diagnostic, payload.Diagnostic)
+	}
+
+	persisted := SerializePrepareResult(execution.PrepareResult)
+	reloaded := persistedPrepareSteps(map[string]interface{}{"prepare_result": persisted})
+	require.Equal(t, originalSteps, reloaded)
+}
+
 func TestRetryCursorMCPConnectionFailsClosedForPassthroughWithoutOwnedChatID(t *testing.T) {
 	manager, execution, profile := newCursorMCPRecoveryFixture(t)
 	prepareCursorMCPRecoveryWorkspace(t, manager, execution, profile)
@@ -489,6 +576,14 @@ type cursorMCPRecoveryRecordingRunner struct {
 	calls []string
 }
 
+type cursorMCPRecoveryLateBusyRunner struct {
+	manager                 *Manager
+	execution               *AgentExecution
+	mu                      sync.Mutex
+	calls                   []string
+	startedPromptGeneration uint64
+}
+
 type cursorMCPRecoveryCommandBarrierRunner struct {
 	mu             sync.Mutex
 	calls          []string
@@ -511,6 +606,31 @@ func (r *cursorMCPRecoveryRecordingRunner) Run(_ context.Context, _ string, args
 }
 
 func (r *cursorMCPRecoveryRecordingRunner) commands() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.calls...)
+}
+
+func (r *cursorMCPRecoveryLateBusyRunner) Run(_ context.Context, _ string, args []string, _ string, _ map[string]string) (mcpconfig.NativeMCPCommandResult, error) {
+	if len(args) != 3 || args[0] != "mcp" {
+		return mcpconfig.NativeMCPCommandResult{}, mcpconfig.ErrNativeMCPExecutableUnavailable
+	}
+	command := "mcp " + args[1] + " " + args[2]
+	r.mu.Lock()
+	r.calls = append(r.calls, command)
+	r.mu.Unlock()
+	if args[1] == "list-tools" {
+		generation, err := r.manager.executionStore.BeginPrompt(r.execution.ID)
+		if err != nil {
+			return mcpconfig.NativeMCPCommandResult{}, err
+		}
+		r.startedPromptGeneration = generation
+		return mcpconfig.NativeMCPCommandResult{ExitCode: 0, Stdout: []byte("Tools for " + args[2] + " (1):\n- fixture_tool ()\n")}, nil
+	}
+	return mcpconfig.NativeMCPCommandResult{ExitCode: 0}, nil
+}
+
+func (r *cursorMCPRecoveryLateBusyRunner) commands() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]string(nil), r.calls...)

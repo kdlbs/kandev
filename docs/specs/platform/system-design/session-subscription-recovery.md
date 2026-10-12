@@ -60,6 +60,11 @@ Preserve message reconciliation, the plugin conversation facade's projection ind
 An obsolete response cannot overwrite another session or clear a newer episode's error.
 Partial live messages remain visible while initial reconciliation is pending.
 
+A background reconcile (`doFetchMessages` with `background: true`: the turn-end refresh and core conversation gap recovery) is silent when the session already has messages on screen.
+It skips the hook's loading state, the `loading` and `retrying` history states, and the shared store loading flag, because that flag drives the transcript's inline loading row.
+In-flight bookkeeping counts total and visible fetches separately, so the flag clears when the last visible fetch settles even while a silent one continues.
+A failure still sets `unavailable` and offers Retry, so a stale transcript is never left without notice.
+
 ## Presentation
 
 Use the existing dedicated phone chat layout in `components/task/task-layout.tsx` as the mobile composition exemplar.

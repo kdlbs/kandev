@@ -1,12 +1,11 @@
-import {
-  IconBolt,
-  IconInbox,
-  IconLayoutGrid,
-  IconList,
-  IconPlus,
-  IconQuestionMark,
-} from "@tabler/icons-react";
+import { IconQuestionMark } from "@tabler/icons-react";
 import type { DestinationIcon } from "@/lib/navigation/types";
+import {
+  builtinLayoutNodeForDestination,
+  defaultBuiltinLayoutContext,
+  isBuiltinLayoutNodeEligible,
+  type BuiltinLayoutContext,
+} from "./builtin-layout-nodes";
 import {
   DEFAULT_SIDEBAR_NODE_IDS,
   targetKey,
@@ -41,16 +40,7 @@ export type SidebarLayoutProjection = {
 type ProjectionOptions = {
   unavailableLabel?: string;
   builtinLabels?: Record<string, string>;
-};
-
-const BUILTIN_ICONS: Record<string, DestinationIcon> = {
-  home: IconList,
-  inbox: IconInbox,
-  needs_you_inbox: IconInbox,
-  new_task: IconPlus,
-  automations: IconBolt,
-  canvases: IconLayoutGrid,
-  integrations: IconList,
+  builtinContext?: BuiltinLayoutContext;
 };
 
 function unavailableShortcut(shortcut: SidebarShortcut, label: string): ProjectedShortcut {
@@ -67,7 +57,15 @@ function projectShortcut(
   shortcut: SidebarShortcut,
   catalog: Map<string, ShortcutCatalogEntry>,
   unavailableLabel: string,
+  builtinContext: BuiltinLayoutContext,
 ): ProjectedShortcut {
+  const builtin =
+    shortcut.target.kind === "destination"
+      ? builtinLayoutNodeForDestination(shortcut.target.id)
+      : undefined;
+  if (builtin && !isBuiltinLayoutNodeEligible(builtin, builtinContext)) {
+    return unavailableShortcut(shortcut, unavailableLabel);
+  }
   const entry = catalog.get(catalogEntryKey({ target: shortcut.target }));
   return entry
     ? {
@@ -132,28 +130,71 @@ export function materializeSidebarPluginNodes(
     : { ...layout, nodes };
 }
 
+function projectBuiltinNodePresentation(
+  node: SidebarLayoutNode,
+  unavailableLabel: string,
+  builtinLabels: Record<string, string>,
+  builtinContext: BuiltinLayoutContext,
+): Pick<ProjectedSidebarNode, "label" | "icon" | "pluginItemId" | "available"> {
+  const builtin = builtinLayoutNodeForDestination(node.destinationId);
+  const label =
+    node.name ?? builtinLabels[node.destinationId ?? ""] ?? builtin?.labelKey ?? unavailableLabel;
+  const available = Boolean(builtin && isBuiltinLayoutNodeEligible(builtin, builtinContext));
+  return {
+    label,
+    icon: builtin?.icon ?? unavailableShortcutIcon,
+    available,
+  };
+}
+
+function projectPluginNodePresentation(
+  node: SidebarLayoutNode,
+  destination: ShortcutCatalogEntry | undefined,
+  unavailableLabel: string,
+  builtinLabels: Record<string, string>,
+): Pick<ProjectedSidebarNode, "label" | "icon" | "pluginItemId" | "available"> {
+  if (!destination || destination.available === false) {
+    return {
+      label: destination?.label ?? unavailableLabel,
+      icon: unavailableShortcutIcon,
+      available: false,
+    };
+  }
+  return {
+    label:
+      node.name ??
+      destination.label ??
+      (node.destinationId ? builtinLabels[node.destinationId] : undefined) ??
+      node.id,
+    icon: destination.icon ?? IconQuestionMark,
+    ...(destination?.pluginItemId ? { pluginItemId: destination.pluginItemId } : {}),
+    available: true,
+  };
+}
+
 function projectNodePresentation(
   node: SidebarLayoutNode,
   catalog: Map<string, ShortcutCatalogEntry>,
   unavailableLabel: string,
   builtinLabels: Record<string, string>,
+  builtinContext: BuiltinLayoutContext,
 ): Pick<ProjectedSidebarNode, "label" | "icon" | "pluginItemId" | "available"> {
-  const builtinIcon = node.destinationId ? BUILTIN_ICONS[node.destinationId] : undefined;
+  if (node.kind === "builtin") {
+    return projectBuiltinNodePresentation(node, unavailableLabel, builtinLabels, builtinContext);
+  }
   const destination = node.destinationId
     ? catalog.get(`destination:${node.destinationId}`)
     : undefined;
-  if (node.kind === "plugin" && !destination) {
-    return { label: unavailableLabel, icon: unavailableShortcutIcon, available: false };
+  if (node.kind === "plugin") {
+    return projectPluginNodePresentation(node, destination, unavailableLabel, builtinLabels);
   }
-  const label =
-    node.name ??
-    destination?.label ??
-    (node.destinationId ? builtinLabels[node.destinationId] : undefined) ??
-    node.id;
-  const icon = destination?.icon ?? builtinIcon ?? IconQuestionMark;
   return {
-    label,
-    icon,
+    label:
+      node.name ??
+      destination?.label ??
+      (node.destinationId ? builtinLabels[node.destinationId] : undefined) ??
+      node.id,
+    icon: destination?.icon ?? IconQuestionMark,
     ...(destination?.pluginItemId ? { pluginItemId: destination.pluginItemId } : {}),
     available: true,
   };
@@ -164,10 +205,17 @@ function projectNode(
   catalog: Map<string, ShortcutCatalogEntry>,
   unavailableLabel: string,
   builtinLabels: Record<string, string>,
+  builtinContext: BuiltinLayoutContext,
 ): ProjectedSidebarNode {
-  const presentation = projectNodePresentation(node, catalog, unavailableLabel, builtinLabels);
+  const presentation = projectNodePresentation(
+    node,
+    catalog,
+    unavailableLabel,
+    builtinLabels,
+    builtinContext,
+  );
   const shortcuts = (node.shortcuts ?? []).map((shortcut) =>
-    projectShortcut(shortcut, catalog, unavailableLabel),
+    projectShortcut(shortcut, catalog, unavailableLabel, builtinContext),
   );
   return {
     ...node,
@@ -182,8 +230,15 @@ export function projectSidebarLayout(
   options: ProjectionOptions = {},
 ): SidebarLayoutProjection {
   const byTarget = new Map(catalog.map((entry) => [catalogEntryKey(entry), entry]));
+  const builtinContext = options.builtinContext ?? defaultBuiltinLayoutContext();
   const nodes = materializeSidebarPluginNodes(layout, catalog).nodes.map((node) =>
-    projectNode(node, byTarget, options.unavailableLabel ?? node.id, options.builtinLabels ?? {}),
+    projectNode(
+      node,
+      byTarget,
+      options.unavailableLabel ?? node.id,
+      options.builtinLabels ?? {},
+      builtinContext,
+    ),
   );
   return {
     nodes,

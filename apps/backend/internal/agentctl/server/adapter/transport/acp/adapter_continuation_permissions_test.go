@@ -13,7 +13,6 @@ import (
 func continuationPermissionFixture(t *testing.T) (*Adapter, *promptTurnState, *PermissionRequest) {
 	t.Helper()
 	a, turn := newCursorPromptTurn(t, 7)
-	a.cfg.ProviderInterruptionContinuation = true
 	a.capabilities.LoadSession = true
 	a.sessionID = "session-1"
 	a.handleACPUpdate(makeNotification("session-1", acpsdk.SessionUpdate{ToolCall: &acpsdk.SessionUpdateToolCall{
@@ -82,7 +81,6 @@ func TestCursorContinuationEvidencePendingPermission(t *testing.T) {
 
 func TestCursorContinuationEvidencePermissionRequiresTrackedTool(t *testing.T) {
 	a, turn := newCursorPromptTurn(t, 7)
-	a.cfg.ProviderInterruptionContinuation = true
 	a.capabilities.LoadSession = true
 	a.sessionID = "session-1"
 	a.SetPermissionHandler(func(context.Context, *PermissionRequest) (*PermissionResponse, error) {
@@ -97,7 +95,6 @@ func TestCursorContinuationEvidencePermissionRequiresTrackedTool(t *testing.T) {
 
 func TestCursorContinuationEvidencePermissionBeforeToolNotification(t *testing.T) {
 	a, turn := newCursorPromptTurn(t, 7)
-	a.cfg.ProviderInterruptionContinuation = true
 	a.capabilities.LoadSession = true
 	a.sessionID = "session-1"
 	a.SetPermissionHandler(func(context.Context, *PermissionRequest) (*PermissionResponse, error) {
@@ -137,25 +134,18 @@ func TestCursorContinuationEvidencePermissionResolutionKeepsTurnOwner(t *testing
 	require.True(t, a.continuationSafetySnapshot(successor).SafeFor(8), "a delayed refusal cannot poison the successor")
 }
 
-func TestCursorContinuationEvidencePermissionV1AndDisabled(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		a, turn := newCursorPromptTurn(t, 7)
-		a.cfg.ProviderInterruptionContinuation = enabled
-		a.dialect.continuationSupport = streams.ContinuationNativeSavedHistoryV1
-		a.capabilities.LoadSession = true
-		a.sessionID = "session-1"
-		a.SetPermissionHandler(func(context.Context, *PermissionRequest) (*PermissionResponse, error) {
-			return &PermissionResponse{OptionID: "allow"}, nil
-		})
-		_, err := a.handlePermissionRequest(t.Context(), &PermissionRequest{SessionID: "session-1", ToolCallID: "read-1"})
-		require.NoError(t, err)
-		if enabled {
-			require.False(t, a.continuationSafetySnapshot(turn).SafeFor(7), "V1 keeps its original permission veto")
-		} else {
-			require.Nil(t, a.continuationSafetySnapshot(turn))
-			require.False(t, turn.continuationUnsafe, "disabled mode derives no permission evidence")
-		}
-	}
+func TestCursorContinuationEvidencePermissionV1IsUnsafe(t *testing.T) {
+	a, turn := newCursorPromptTurn(t, 7)
+	a.dialect.continuationSupport = streams.ContinuationNativeSavedHistoryV1
+	a.capabilities.LoadSession = true
+	a.sessionID = "session-1"
+	a.SetPermissionHandler(func(context.Context, *PermissionRequest) (*PermissionResponse, error) {
+		return &PermissionResponse{OptionID: "allow"}, nil
+	})
+	_, err := a.handlePermissionRequest(t.Context(), &PermissionRequest{SessionID: "session-1", ToolCallID: "read-1"})
+	require.NoError(t, err)
+	require.False(t, a.continuationSafetySnapshot(turn).SafeFor(7), "V1 keeps its original permission veto")
+	require.True(t, turn.continuationUnsafe)
 }
 
 func TestCursorContinuationEvidenceHandoffCannotOwnLatePermission(t *testing.T) {

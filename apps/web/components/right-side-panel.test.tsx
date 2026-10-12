@@ -118,6 +118,13 @@ describe("RightSidePanel layout", () => {
     expect((mainBefore.parentElement as HTMLElement).style.width).toBe("");
   });
 
+  it("hosts fluid main content in a flex column so a flex-1 page keeps the full height", () => {
+    renderPanel({ mainSizing: "fluid" });
+    const wrapper = screen.getByTestId(MAIN_ID).parentElement as HTMLElement;
+    expect(wrapper.classList.contains("flex")).toBe(true);
+    expect(wrapper.classList.contains("flex-col")).toBe(true);
+  });
+
   it("keeps the panel content mounted across inline, floating and full screen relayouts", () => {
     const { rerender, onClose, onWidthChange } = renderPanel({
       mainSizing: "fluid",

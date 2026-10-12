@@ -1029,7 +1029,17 @@ const (
 )
 
 type ResumeOptions struct {
-	RequiredNativeConversationID     string
+	RequiredNativeConversationID string
+	InterruptedSubmissionID      string
+	InterruptedStreamID          string
+	InterruptedHarnessGeneration uint64
+	// CandidateExecutionID pins a restart-only restore process to the durable
+	// checkpoint allocated before lifecycle launch side effects.
+	CandidateExecutionID string
+	// OnExecutionAllocated is runtime-only and advances the exact restore
+	// checkpoint before lifecycle can load the native conversation.
+	OnExecutionAllocated func(context.Context, string) error
+
 	SettingsPolicy                   ResumeSettingsPolicy
 	AllowBranchReplacement           bool
 	RepairWorkspaceInventory         bool
@@ -1045,6 +1055,9 @@ type ResumeOptions struct {
 	// NoInitialPrompt keeps the task description out of a fresh recovery boot;
 	// the owning continuation delivers the captured submission after readiness.
 	NoInitialPrompt bool
+	// SuppressInitialMessageBackfill is used only by silent restart restore,
+	// which must preserve the transcript exactly until an ordinary prompt arrives.
+	SuppressInitialMessageBackfill bool
 	// HoldForInitialPrompt keeps boot-ready queue draining behind an explicit
 	// fresh-start submission until its provider admission resolves.
 	HoldForInitialPrompt bool
@@ -1059,6 +1072,24 @@ type ResumeOptions struct {
 	// automatic and logs the omission — it is never silently treated as a
 	// manual override.
 	Origin string
+	// ForceContextContinuation starts a new native conversation using the
+	// explicit, bounded continuation prompt rather than the persisted native
+	// session identity.
+	ForceContextContinuation bool
+	ContinuationPrompt       string
+	// DeferInitialPrompt starts a context-continuation candidate without
+	// dispatching its bounded prompt. The orchestrator commits the replacement
+	// harness generation before it admits that prompt through the durable
+	// submission path.
+	DeferInitialPrompt bool
+	// RecoveryAction carries the one explicit operator settlement through the
+	// executor. Office continuations use this to retain scheduler admission;
+	// ordinary resume paths leave it empty.
+	RecoveryAction string
+	// StartAgentSynchronously makes a candidate launch return only after the
+	// native session is initialized and promptable. It is required before a
+	// generation CAS can authorize context-continuation dispatch.
+	StartAgentSynchronously bool
 }
 
 type resumePreflight struct {
@@ -1263,17 +1294,19 @@ func (e *Executor) resumeSession(
 	}
 	defer unlock()
 	resumeInitialState := session.State
+	resumeInitialErrorMessage := session.ErrorMessage
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
 	completedResume := options.AllowCompletedSessionResume &&
 		resumeInitialState == models.TaskSessionStateCompleted
 	wasTerminalResume := isTerminalSessionState(resumeInitialState) || completedResume
-	// Terminal sessions cannot own a live agent. Remove any stale runtime row
-	// before selected-environment admission can claim the environment.
+	// A terminal session may retain an unconfirmed runtime. Stop it before
+	// selected-environment admission can claim the environment.
 	if wasTerminalResume {
 		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(ctx, session.ID); cleanupErr != nil {
 			e.logger.Warn("failed to force-cleanup stale execution before terminal-state resume",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
+			return nil, newResumeCleanupFailure(cleanupErr, session)
 		}
 	}
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
@@ -1288,7 +1321,7 @@ func (e *Executor) resumeSession(
 		_ = releaseSelectedWorktreeRecovery(resumeOwnedCleanupContext(ctx), &preflight.admission)
 	}()
 	if err := e.prepareResumePreflight(ctx, task, session, options, requestedExecutorType, preflight); err != nil {
-		return nil, err
+		return nil, safeResumeInspectionDeferral(err)
 	}
 	resumeStatePersisted := false
 	resumeAttemptID := ""
@@ -1348,9 +1381,23 @@ func (e *Executor) resumeSession(
 	recoveryAdmission, err := e.admitResumeSelectionAfterRequest(preflight, task.ID, session, existingEnv, req)
 	if err != nil {
 		if resumeStatePersisted {
-			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err, nil)
+			if worktree.IsRecoveryInspectionContentionOnly(err) {
+				if rollbackErr := e.rollbackResumeStateForInspectionContention(
+					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState,
+					resumeInitialErrorMessage,
+					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+				); rollbackErr != nil {
+					return nil, errors.Join(err, rollbackErr)
+				}
+			} else {
+				if rollbackErr := e.rollbackResumeStateAfterFailure(
+					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err, nil,
+				); rollbackErr != nil {
+					return nil, errors.Join(err, rollbackErr)
+				}
+			}
 		}
-		return nil, err
+		return nil, safeResumeInspectionDeferral(err)
 	}
 	if existingEnv != nil {
 		session.TaskEnvironmentID = existingEnv.ID
@@ -1374,13 +1421,8 @@ func (e *Executor) resumeSession(
 
 	resp, err := e.agentManager.LaunchAgent(launchCtx, req)
 	if err != nil && isAgentAlreadyRunningError(err) && options.RequiredNativeConversationID == "" {
-		// "already has an agent running" fires both for live executions (a concurrent
-		// resume raced us) and stale ones (agent never started or exited without
-		// cleanup). Probe liveness before deciding what to do — otherwise we'd kill a
-		// healthy agent mid-prompt. For terminal states the agent is dead by definition,
-		// so skip the probe and go straight to cleanup+retry — this avoids a silent
-		// regression to ErrExecutionAlreadyRunning if the preemptive cleanup above
-		// failed and agentctl still reports a stale "starting" status.
+		// A registered execution may be live or stale. Only clean up a live-state
+		// session after checking liveness; terminal sessions already passed cleanup.
 		if !wasTerminalResume && e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
 			e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
 				zap.String("task_id", task.ID),
@@ -1405,8 +1447,10 @@ func (e *Executor) resumeSession(
 			e.logger.Warn("failed to clean up stale execution",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
+			err = newResumeCleanupFailure(cleanupErr, nil)
+		} else {
+			resp, err = e.agentManager.LaunchAgent(launchCtx, req)
 		}
-		resp, err = e.agentManager.LaunchAgent(launchCtx, req)
 	}
 	if err != nil && isCancellableResumeContext(launchCtx) && launchCtx.Err() != nil {
 		// The cancellation owner reconciles the session state. Do not run the
@@ -1421,11 +1465,26 @@ func (e *Executor) resumeSession(
 	}
 	if err != nil {
 		if startAgent {
-			e.rollbackResumeStateAfterFailure(
-				launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
-				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+			credentialSnapshotBackup := resumeCredentialSnapshotBackupIfPersisted(
+				credentialSnapshotPersisted, previousCredentialSnapshot,
 			)
+			if worktree.IsRecoveryInspectionContentionOnly(err) {
+				if rollbackErr := e.rollbackResumeStateForInspectionContention(
+					launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState,
+					resumeInitialErrorMessage, credentialSnapshotBackup,
+				); rollbackErr != nil {
+					err = errors.Join(err, rollbackErr)
+				} else {
+					err = safeResumeInspectionDeferral(err)
+				}
+			} else if rollbackErr := e.rollbackResumeStateAfterFailure(
+				launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
+				credentialSnapshotBackup,
+			); rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
 		}
+		e.captureResumeCleanupFailureSnapshot(launchCtx, err, session.ID, resumeAttemptID, terminalRollbackState(resumeInitialState))
 		e.logger.Error("failed to relaunch agent for session",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
@@ -1485,23 +1544,49 @@ func (e *Executor) resumeSession(
 	}
 
 	if startAgent {
-		startupCtx := worktree.WithoutRecoveryClaim(launchCtx)
-		if options.RequiredNativeConversationID != "" {
-			startupCtx = context.WithValue(WithCancellableResumeContext(startupCtx), nativeRestoreStartupContextKey{}, true)
-		}
-		result := e.startAgentProcessOnResumeWithTaskPromotion(
-			startupCtx,
-			task.ID,
-			session,
-			resp.AgentExecutionID,
-			!completedResume,
-		)
-		if options.RequiredNativeConversationID != "" {
-			if startupErr := awaitNativeRestoreStartup(startupCtx, result); startupErr != nil {
-				if releaseErr := releaseSelectedWorktreeRecovery(cleanupCtx, &recoveryAdmission); releaseErr != nil {
-					startupErr = errors.Join(startupErr, fmt.Errorf("release worktree recovery admission: %w", releaseErr))
+		if options.StartAgentSynchronously && options.RequiredNativeConversationID == "" {
+			if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
+				if e.claimForcedExecutionCleanup(session.ID, resp.AgentExecutionID) {
+					e.stopUnstartedExecution(ctx, session.ID, resp.AgentExecutionID)
 				}
-				return execution, startupErr
+				if rollbackErr := e.rollbackResumeStateAfterFailure(
+					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
+					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+				); rollbackErr != nil {
+					err = errors.Join(err, rollbackErr)
+				}
+				return execution, err
+			}
+			if terminalState, terminal := e.stopStartedExecutionIfSessionTerminal(
+				ctx, session.ID, resp.AgentExecutionID, "terminal continuation start race",
+			); terminal {
+				return nil, &SessionStateSupersededError{SessionID: session.ID, State: terminalState}
+			}
+			if !completedResume && options.RecoveryAction == "" {
+				if err := e.writeTaskInProgressForRuntime(ctx, task.ID, session.ID); err != nil {
+					e.logger.Warn("failed to update task state after synchronous resume start",
+						zap.String("task_id", task.ID), zap.String("session_id", session.ID), zap.Error(err))
+				}
+			}
+		} else {
+			startupCtx := worktree.WithoutRecoveryClaim(launchCtx)
+			if options.RequiredNativeConversationID != "" {
+				startupCtx = context.WithValue(WithCancellableResumeContext(startupCtx), nativeRestoreStartupContextKey{}, true)
+			}
+			result := e.startAgentProcessOnResumeWithTaskPromotion(
+				startupCtx,
+				task.ID,
+				session,
+				resp.AgentExecutionID,
+				!completedResume,
+			)
+			if options.RequiredNativeConversationID != "" {
+				if startupErr := awaitNativeRestoreStartup(startupCtx, result); startupErr != nil {
+					if releaseErr := releaseSelectedWorktreeRecovery(cleanupCtx, &recoveryAdmission); releaseErr != nil {
+						startupErr = errors.Join(startupErr, fmt.Errorf("release worktree recovery admission: %w", releaseErr))
+					}
+					return execution, startupErr
+				}
 			}
 		}
 	}
@@ -1558,9 +1643,12 @@ func (e *Executor) prepareResumePreflight(
 		e.selectedWorktreeRecoveryAdmission == nil {
 		return nil
 	}
+	ctx, _ = worktree.WithRecoveryInspectionWait(ctx, worktree.RecoveryInspectionWaitBudget)
+	preflight.ctx = ctx
 
 	preflight.admission, err = e.admitSelectedWorktreeRecovery(
-		ctx, task.ID, session, selectedEnv, requestedExecutorType, options.AllowBranchReplacement, 0, true,
+		ctx, task.ID, session, selectedEnv, requestedExecutorType, options.AllowBranchReplacement,
+		worktree.RecoveryInspectionWaitBudget, true,
 	)
 	if err != nil {
 		return err
@@ -1584,7 +1672,8 @@ func (e *Executor) admitResumeSelectionAfterRequest(
 	// Re-admit after request construction so Git checkout state is inspected
 	// immediately before launch even when the database selection is unchanged.
 	admission, err := e.admitSelectedWorktreeRecovery(
-		preflight.ctx, taskID, session, existingEnv, req.ExecutorType, req.AllowBranchReplacement, 0, true,
+		preflight.ctx, taskID, session, existingEnv, req.ExecutorType, req.AllowBranchReplacement,
+		worktree.RecoveryInspectionWaitBudget, true,
 	)
 	if err != nil {
 		return nil, err
@@ -1677,51 +1766,106 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 	priorState models.TaskSessionState,
 	resumeErr error,
 	credentialSnapshot *resumeCredentialSnapshotBackup,
-) {
-	if attemptID == "" {
-		e.logger.Warn("skipped resume rollback without startup-attempt identity",
-			zap.String("task_id", taskID), zap.String("session_id", sessionID))
-		return
-	}
-	var restore *ResumeCredentialSnapshotRestore
-	if credentialSnapshot != nil {
-		restore = &ResumeCredentialSnapshotRestore{
-			Value: credentialSnapshot.value, Present: credentialSnapshot.present,
-		}
-	}
-	request := ResumeFailureRollbackRequest{
+) error {
+	return e.rollbackResumeState(ctx, ResumeFailureRollbackRequest{
 		TaskID: taskID, SessionID: sessionID, AttemptID: attemptID,
 		ExpectedState: models.TaskSessionStateStarting,
 		NextState:     terminalRollbackState(priorState),
-		ErrorMessage:  resumeErr.Error(), CredentialSnapshot: restore,
+		ErrorMessage:  resumeErr.Error(), CredentialSnapshot: resumeCredentialSnapshotRestore(credentialSnapshot),
+	})
+}
+
+func (e *Executor) rollbackResumeStateForInspectionContention(
+	ctx context.Context,
+	taskID, sessionID, attemptID string,
+	priorState models.TaskSessionState,
+	priorErrorMessage string,
+	credentialSnapshot *resumeCredentialSnapshotBackup,
+) error {
+	return e.rollbackResumeState(ctx, ResumeFailureRollbackRequest{
+		TaskID: taskID, SessionID: sessionID, AttemptID: attemptID,
+		ExpectedState: models.TaskSessionStateStarting,
+		NextState:     priorState,
+		ErrorMessage:  priorErrorMessage, CredentialSnapshot: resumeCredentialSnapshotRestore(credentialSnapshot),
+	})
+}
+
+func resumeCredentialSnapshotRestore(
+	backup *resumeCredentialSnapshotBackup,
+) *ResumeCredentialSnapshotRestore {
+	if backup == nil {
+		return nil
+	}
+	return &ResumeCredentialSnapshotRestore{Value: backup.value, Present: backup.present}
+}
+
+func (e *Executor) rollbackResumeState(ctx context.Context, request ResumeFailureRollbackRequest) error {
+	taskID, sessionID, attemptID := request.TaskID, request.SessionID, request.AttemptID
+	if attemptID == "" {
+		e.logger.Warn("skipped resume rollback without startup-attempt identity",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID))
+		return errors.New("resume rollback has no startup-attempt identity")
 	}
 	if e.onResumeFailureRollback != nil {
-		if _, err := e.onResumeFailureRollback(ctx, request); err != nil {
+		changed, err := e.onResumeFailureRollback(ctx, request)
+		if err != nil {
 			e.logger.Warn("failed to roll back session state after resume failure",
 				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			return fmt.Errorf("roll back session state after resume failure: %w", err)
 		}
-		return
+		if !changed {
+			return e.resumeRollbackSupersededError(ctx, request)
+		}
+		return nil
 	}
 	updater, ok := e.repo.(resumeStateAttemptUpdater)
 	if !ok {
+		err := errors.New("session repository does not support attempt-fenced resume rollback")
 		e.logger.Warn("failed to roll back session state after resume failure",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID),
-			zap.Error(errors.New("session repository does not support attempt-fenced resume rollback")))
-		return
+			zap.Error(err))
+		return err
 	}
 	changed, _, err := updater.UpdateTaskSessionResumeStateIfCurrentAttempt(
 		ctx, taskID, sessionID, attemptID, request.ExpectedState, request.NextState,
-		request.ErrorMessage, true, restore != nil, restore != nil && restore.Present,
-		credentialSnapshotValue(restore),
+		request.ErrorMessage, true, request.CredentialSnapshot != nil,
+		request.CredentialSnapshot != nil && request.CredentialSnapshot.Present,
+		credentialSnapshotValue(request.CredentialSnapshot),
 	)
 	if err != nil {
 		e.logger.Warn("failed to roll back session state after resume failure",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-		return
+		return fmt.Errorf("roll back session state after resume failure: %w", err)
 	}
-	if changed && e.onCeilingReservationRelease != nil {
+	if !changed {
+		return e.resumeRollbackSupersededError(ctx, request)
+	}
+	e.releaseResumeRollbackReservation(sessionID)
+	return nil
+}
+
+func (e *Executor) releaseResumeRollbackReservation(sessionID string) {
+	if e.onCeilingReservationRelease != nil {
 		e.onCeilingReservationRelease(sessionID)
 	}
+}
+
+func (e *Executor) resumeRollbackSupersededError(
+	ctx context.Context,
+	request ResumeFailureRollbackRequest,
+) error {
+	current, err := e.repo.GetTaskSession(ctx, request.SessionID)
+	if err != nil {
+		return fmt.Errorf("read session after resume rollback lost ownership: %w", err)
+	}
+	if current == nil {
+		return &SessionStateSupersededError{SessionID: request.SessionID}
+	}
+	if current.State != request.ExpectedState ||
+		models.StringFromAny(current.Metadata[models.SessionMetaKeyAgentStartAttemptID]) != request.AttemptID {
+		return &SessionStateSupersededError{SessionID: request.SessionID, State: current.State}
+	}
+	return errors.New("resume rollback did not update the current startup attempt")
 }
 
 func credentialSnapshotValue(snapshot *ResumeCredentialSnapshotRestore) interface{} {
@@ -1847,7 +1991,7 @@ func (e *Executor) refreshResumeSessionState(
 func (e *Executor) rejectRunningResume(session *models.TaskSession, options ResumeOptions) error {
 	completedResume := options.AllowCompletedSessionResume &&
 		session.State == models.TaskSessionStateCompleted
-	if isTerminalSessionState(session.State) || completedResume {
+	if isTerminalSessionState(session.State) || completedResume || options.ForceContextContinuation {
 		return nil
 	}
 	if existing, ok := e.GetExecutionBySession(session.ID); ok && existing != nil {
@@ -1888,6 +2032,9 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	options ResumeOptions,
 ) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
 	req, metadata := newResumeLaunchRequest(task, session, startAgent, options)
+	if err := e.applyDeliveryIdentity(ctx, req, session); err != nil {
+		return nil, "", executorConfig{}, nil, nil, err
+	}
 	existingRunning, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
 	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
 		return nil, "", executorConfig{}, nil, nil,
@@ -1959,6 +2106,12 @@ func newResumeLaunchRequest(
 		TaskID:                       task.ID,
 		SessionSettingsPolicy:        options.SettingsPolicy,
 		RequiredNativeConversationID: options.RequiredNativeConversationID,
+		ACPSessionID:                 options.RequiredNativeConversationID,
+		InterruptedSubmissionID:      options.InterruptedSubmissionID,
+		InterruptedStreamID:          options.InterruptedStreamID,
+		InterruptedHarnessGeneration: options.InterruptedHarnessGeneration,
+		CandidateExecutionID:         options.CandidateExecutionID,
+		OnExecutionAllocated:         options.OnExecutionAllocated,
 		WorkspaceID:                  task.WorkspaceID,
 		SessionID:                    session.ID,
 		TaskTitle:                    task.Title,
@@ -1970,7 +2123,18 @@ func newResumeLaunchRequest(
 		IsEphemeral:                  task.IsEphemeral,
 		IsPassthrough:                session.IsPassthrough,
 		TaskEnvironmentID:            session.TaskEnvironmentID,
+		OriginalWorkspacePath:        session.WorkspacePath,
 		AllowBranchReplacement:       options.AllowBranchReplacement,
+		ForceContextContinuation:     options.ForceContextContinuation,
+		RecoveryAction:               options.RecoveryAction,
+		SuppressBootStatusMessage:    options.SuppressInitialMessageBackfill,
+	}
+	if options.ForceContextContinuation {
+		if options.DeferInitialPrompt {
+			req.TaskDescription = ""
+		} else {
+			req.TaskDescription = options.ContinuationPrompt
+		}
 	}
 	if options.NoInitialPrompt {
 		req.TaskDescription = ""
@@ -1990,6 +2154,46 @@ func newResumeLaunchRequest(
 	}
 	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
 	return req, metadata
+}
+
+// ContextContinuation is the bounded, provider-neutral context used by the
+// explicit continue_from_history recovery action.
+type ContextContinuation struct {
+	Prompt          string
+	SourceMessageID string
+	ByteCount       int
+	OmittedMessages int
+	Truncated       bool
+	ContentHash     string
+}
+
+// BuildContextContinuation returns the bounded, provider-neutral context used
+// by the explicit continue_from_history recovery action.
+func BuildContextContinuation(
+	taskObjective, plan, workspace string, messages []*models.Message,
+) ContextContinuation {
+	snapshot := lifecycle.BuildContinuationSnapshot(lifecycle.ContinuationSnapshotInput{
+		TaskObjective:     taskObjective,
+		Plan:              plan,
+		OriginalWorkspace: workspace,
+		Messages:          messages,
+	})
+	return ContextContinuation{
+		Prompt:          snapshot.Content,
+		SourceMessageID: snapshot.SourceMessageID,
+		ByteCount:       snapshot.ByteCount,
+		OmittedMessages: snapshot.OmittedMessages,
+		Truncated:       snapshot.Truncated,
+		ContentHash:     snapshot.ContentHash,
+	}
+}
+
+// BuildContextContinuationPrompt returns only the prompt text for callers that
+// do not need to persist the continuation checkpoint.
+func BuildContextContinuationPrompt(
+	taskObjective, plan, workspace string, messages []*models.Message,
+) string {
+	return BuildContextContinuation(taskObjective, plan, workspace, messages).Prompt
 }
 
 func (e *Executor) prepareResumeRepositorySettings(
@@ -2295,6 +2499,9 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 			(session.State == models.TaskSessionStateFailed &&
 				req.SessionSettingsPolicy == ResumeSettingsPolicyProviderRestored)
 		if startAgent && noAutoPromptState {
+			if req.ForceContextContinuation {
+				return nil
+			}
 			if token := persistedSessionResumeToken(session); token != "" {
 				req.ACPSessionID = token
 				req.TaskDescription = ""
@@ -2329,7 +2536,7 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 		}
 	}
 
-	if token := resumeTokenForExecutionProfile(running, req.AgentProfileID); token != "" && startAgent {
+	if token := resumeTokenForExecutionProfile(running, req.AgentProfileID); token != "" && startAgent && !req.ForceContextContinuation {
 		req.ACPSessionID = token
 		// Clear TaskDescription so the agent doesn't receive an automatic prompt on resume.
 		// The session context is restored via ACP session/load; sending a prompt here would
@@ -2339,7 +2546,7 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
 			zap.Bool("has_resume_token", running.ResumeToken != ""))
-	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput ||
+	} else if startAgent && !req.ForceContextContinuation && (session.State == models.TaskSessionStateWaitingForInput ||
 		isRecoverableCancelledResumeSession(session) || session.State == models.TaskSessionStateCompleted) {
 		// Fresh-start resume (no resume token): don't auto-prompt with the task
 		// description. Also covers completed and system-cancelled sessions whose

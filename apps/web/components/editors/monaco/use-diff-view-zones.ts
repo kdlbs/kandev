@@ -8,13 +8,19 @@ import { CommentForm } from "@/components/diff/comment-form";
 import { CommentDisplay } from "@/components/diff/comment-display";
 import { createElement } from "react";
 
-type ViewZoneEntry = { id: string; root: Root; editorSide: "modified" | "original" };
+type ViewZoneEntry = {
+  id: string;
+  root: Root;
+  editorSide: "modified" | "original";
+  renderWithSubmitDisabled?: (disabled: boolean) => void;
+};
 
 interface UseViewZonesParams {
   modifiedEditor: monacoEditor.ICodeEditor | null;
   originalEditor: monacoEditor.ICodeEditor | null;
   comments: DiffComment[];
   showCommentForm: boolean;
+  submitDisabled: boolean;
   selectedLineRange: { start: number; end: number; side: string } | null;
   editingCommentId: string | null;
   setEditingComment: (id: string | null) => void;
@@ -35,10 +41,19 @@ interface AddZoneParams {
   afterLine: number;
   heightPx: number;
   content: React.ReactNode;
+  renderWithSubmitDisabled?: (disabled: boolean) => React.ReactNode;
   zones: ViewZoneEntry[];
 }
 
-function addZone({ targetEditor, side, afterLine, heightPx, content, zones }: AddZoneParams) {
+function addZone({
+  targetEditor,
+  side,
+  afterLine,
+  heightPx,
+  content,
+  renderWithSubmitDisabled,
+  zones,
+}: AddZoneParams) {
   const domNode = document.createElement("div");
   domNode.style.zIndex = "10";
   const root = createRoot(domNode);
@@ -47,7 +62,14 @@ function addZone({ targetEditor, side, afterLine, heightPx, content, zones }: Ad
   targetEditor.changeViewZones((accessor) => {
     zoneId = accessor.addZone({ afterLineNumber: afterLine, heightInPx: heightPx, domNode });
   });
-  zones.push({ id: zoneId, root, editorSide: side });
+  zones.push({
+    id: zoneId,
+    root,
+    editorSide: side,
+    renderWithSubmitDisabled: renderWithSubmitDisabled
+      ? (disabled) => root.render(renderWithSubmitDisabled(disabled))
+      : undefined,
+  });
 }
 
 function removeZones(
@@ -74,6 +96,7 @@ type CreateZonesParams = {
   originalEditor: monacoEditor.ICodeEditor;
   comments: DiffComment[];
   showCommentForm: boolean;
+  submitDisabled: boolean;
   selectedLineRange: { start: number; end: number; side: string } | null;
   editingCommentId: string | null;
   setEditingComment: (id: string | null) => void;
@@ -133,6 +156,7 @@ function createZones(params: CreateZonesParams): ViewZoneEntry[] {
     originalEditor,
     comments,
     showCommentForm,
+    submitDisabled,
     selectedLineRange,
     editingCommentId,
     handleCommentSubmitRef,
@@ -162,28 +186,31 @@ function createZones(params: CreateZonesParams): ViewZoneEntry[] {
   if (showCommentForm && selectedLineRange) {
     const side = selectedLineRange.side === "deletions" ? "original" : "modified";
     const editor = side === "modified" ? modifiedEditor : originalEditor;
-    const node = createElement(
-      "div",
-      { className: "px-2 py-1" },
-      createElement(CommentForm, {
-        onSubmit: (c: string) => handleCommentSubmitRef.current?.(c),
-        onSubmitAndRun: handleCommentSubmitAndRunRef?.current
-          ? (c: string) => handleCommentSubmitAndRunRef.current?.(c)
-          : undefined,
-        onCancel: () => {
-          setShowCommentForm(false);
-          setSelectedLineRange(null);
-          clearModifiedGutter();
-          clearOriginalGutter();
-        },
-      }),
-    );
+    const renderWithSubmitDisabled = (disabled: boolean) =>
+      createElement(
+        "div",
+        { className: "px-2 py-1" },
+        createElement(CommentForm, {
+          onSubmit: (c: string) => handleCommentSubmitRef.current?.(c),
+          onSubmitAndRun: handleCommentSubmitAndRunRef?.current
+            ? (c: string) => handleCommentSubmitAndRunRef.current?.(c)
+            : undefined,
+          submitDisabled: disabled,
+          onCancel: () => {
+            setShowCommentForm(false);
+            setSelectedLineRange(null);
+            clearModifiedGutter();
+            clearOriginalGutter();
+          },
+        }),
+      );
     addZone({
       targetEditor: editor,
       side,
       afterLine: Math.max(selectedLineRange.start, selectedLineRange.end),
       heightPx: 120,
-      content: node,
+      content: renderWithSubmitDisabled(submitDisabled),
+      renderWithSubmitDisabled,
       zones,
     });
   }
@@ -197,6 +224,7 @@ export function useViewZones({
   originalEditor,
   comments,
   showCommentForm,
+  submitDisabled,
   selectedLineRange,
   editingCommentId,
   setEditingComment,
@@ -226,6 +254,7 @@ export function useViewZones({
       originalEditor,
       comments,
       showCommentForm,
+      submitDisabled,
       selectedLineRange,
       editingCommentId,
       setEditingComment,
@@ -249,6 +278,7 @@ export function useViewZones({
         /* editors may be disposed */
       }
     };
+    // Submit readiness is updated in place below so open comment drafts survive refreshes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     modifiedEditor,
@@ -258,4 +288,10 @@ export function useViewZones({
     selectedLineRange,
     editingCommentId,
   ]);
+
+  useEffect(() => {
+    for (const zone of viewZonesRef.current) {
+      zone.renderWithSubmitDisabled?.(submitDisabled);
+    }
+  }, [submitDisabled]);
 }

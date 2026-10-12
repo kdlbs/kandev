@@ -15,6 +15,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@kandev/ui/dropdown-menu";
+import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
 import type { KanbanCardMenuEntry } from "./kanban-card-menu-items";
 
 function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {
@@ -31,9 +32,11 @@ function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {
           {entry.label}
         </ContextMenuSubTrigger>
         <ContextMenuSubContent className={entry.className}>
-          {entry.children.map((child) => (
-            <ContextEntry key={child.key} entry={child} />
-          ))}
+          {entry.stepTarget ? (
+            <DestinationStepItems target={entry.stepTarget} mode="context" />
+          ) : (
+            entry.children.map((child) => <ContextEntry key={child.key} entry={child} />)
+          )}
         </ContextMenuSubContent>
       </ContextMenuSub>
     );
@@ -80,9 +83,11 @@ function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
         </DropdownMenuSubTrigger>
         <DropdownMenuPortal>
           <DropdownMenuSubContent className={entry.className}>
-            {entry.children.map((child) => (
-              <DropdownEntry key={child.key} entry={child} />
-            ))}
+            {entry.stepTarget ? (
+              <DestinationStepItems target={entry.stepTarget} mode="dropdown" />
+            ) : (
+              entry.children.map((child) => <DropdownEntry key={child.key} entry={child} />)
+            )}
           </DropdownMenuSubContent>
         </DropdownMenuPortal>
       </DropdownMenuSub>
@@ -133,4 +138,29 @@ export function KanbanCardDropdownMenuItems({ entries }: { entries: KanbanCardMe
       ))}
     </>
   );
+}
+
+function DestinationStepItems({
+  target,
+  mode,
+}: {
+  target: { workflowId: string; onSelect: (stepId: string) => void };
+  mode: "context" | "dropdown";
+}) {
+  const { steps, loading } = useWorkflowSteps(target.workflowId);
+  const Item = mode === "context" ? ContextMenuItem : DropdownMenuItem;
+  if (steps.length === 0)
+    return <Item disabled>{stepPlaceholder(target.workflowId, loading, 0)}</Item>;
+  return steps.map((step) => (
+    <Item
+      key={step.id}
+      data-testid={`task-context-step-${step.id}`}
+      className="[@media(pointer:coarse)]:min-h-12"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onSelect={() => target.onSelect(step.id)}
+    >
+      {step.name}
+    </Item>
+  ));
 }

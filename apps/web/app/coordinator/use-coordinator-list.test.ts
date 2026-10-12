@@ -109,3 +109,18 @@ describe("useCoordinatorList - stale request protection", () => {
     expect(result.current.coordinators).toEqual([coordinator("c-fresh")]);
   });
 });
+
+describe("useCoordinatorList - workspace becomes null", () => {
+  it("drops a read still in flight for the previous workspace", async () => {
+    let resolveRead: (value: unknown) => void = () => {};
+    listCoordinatorsMock.mockReturnValue(new Promise((resolve) => (resolveRead = resolve)));
+    const { result, rerender } = renderHook(({ ws }) => useCoordinatorList(ws), {
+      initialProps: { ws: WORKSPACE_ID as string | null },
+    });
+
+    rerender({ ws: null });
+    await act(async () => resolveRead({ coordinators: [coordinator("c-1")] }));
+
+    expect(result.current.coordinators).toBeUndefined();
+  });
+});

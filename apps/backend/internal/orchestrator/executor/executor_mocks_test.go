@@ -24,30 +24,32 @@ import (
 
 // mockAgentManager implements AgentManagerClient for testing
 type mockAgentManager struct {
-	launchAgentFunc                  func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
-	startAgentProcessFunc            func(ctx context.Context, agentExecutionID string) error
-	stopAgentFunc                    func(ctx context.Context, agentExecutionID string, force bool) error
-	stopAgentWithReasonFunc          func(ctx context.Context, agentExecutionID string, reason string, force bool) error
-	resolveAgentProfileFunc          func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
-	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
-	setExecutionEnvFunc              func(ctx context.Context, agentExecutionID string, env map[string]string) error
-	executorProfileEnvFunc           func(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error)
-	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
-	listExecutionsForTaskFunc        func(taskID string) []lifecycle.ExecutionReference
-	isAgentCommandConfiguredFunc     func(agentExecutionID string) bool
-	isAgentRunningForSessionFunc     func(ctx context.Context, sessionID string) bool
-	cleanupStaleExecutionFunc        func(ctx context.Context, sessionID string) error
-	promptAgentFunc                  func(ctx context.Context, agentExecutionID, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error)
-	isPassthroughSessionFunc         func(ctx context.Context, sessionID string) bool
-	writePassthroughStdinFunc        func(ctx context.Context, sessionID, data string) error
-	markPassthroughRunningFunc       func(sessionID string) error
-	resolvePassthroughConfigFunc     func(ctx context.Context, sessionID string) (agents.PassthroughConfig, error)
-	launchAgentCallCount             int
-	cleanupStaleExecutionCallCount   int
-	isAgentRunningForSessionCallArgs []string
-	promptAgentCallCount             int
-	writePassthroughStdinCalls       []passthroughStdinCall
-	markPassthroughRunningCalls      []string
+	launchAgentFunc                    func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
+	startAgentProcessFunc              func(ctx context.Context, agentExecutionID string) error
+	startupDisposition                 lifecycle.AgentStartupDisposition
+	stopAgentFunc                      func(ctx context.Context, agentExecutionID string, force bool) error
+	stopAgentWithReasonFunc            func(ctx context.Context, agentExecutionID string, reason string, force bool) error
+	resolveAgentProfileFunc            func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+	setExecutionDescriptionFunc        func(ctx context.Context, agentExecutionID string, description string) error
+	setInitialDeliverySubmissionIDFunc func(ctx context.Context, agentExecutionID, submissionID string) error
+	setExecutionEnvFunc                func(ctx context.Context, agentExecutionID string, env map[string]string) error
+	executorProfileEnvFunc             func(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error)
+	getExecutionIDForSessionFunc       func(ctx context.Context, sessionID string) (string, error)
+	listExecutionsForTaskFunc          func(taskID string) []lifecycle.ExecutionReference
+	isAgentCommandConfiguredFunc       func(agentExecutionID string) bool
+	isAgentRunningForSessionFunc       func(ctx context.Context, sessionID string) bool
+	cleanupStaleExecutionFunc          func(ctx context.Context, sessionID string) error
+	promptAgentFunc                    func(ctx context.Context, agentExecutionID, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error)
+	isPassthroughSessionFunc           func(ctx context.Context, sessionID string) bool
+	writePassthroughStdinFunc          func(ctx context.Context, sessionID, data string) error
+	markPassthroughRunningFunc         func(sessionID string) error
+	resolvePassthroughConfigFunc       func(ctx context.Context, sessionID string) (agents.PassthroughConfig, error)
+	launchAgentCallCount               int
+	cleanupStaleExecutionCallCount     int
+	isAgentRunningForSessionCallArgs   []string
+	promptAgentCallCount               int
+	writePassthroughStdinCalls         []passthroughStdinCall
+	markPassthroughRunningCalls        []string
 }
 
 // passthroughStdinCall captures one invocation of WritePassthroughStdin for assertions.
@@ -74,6 +76,13 @@ func (m *mockAgentManager) SetExecutionDescription(ctx context.Context, agentExe
 	}
 	return nil
 }
+
+func (m *mockAgentManager) SetInitialDeliverySubmissionID(ctx context.Context, agentExecutionID, submissionID string) error {
+	if m.setInitialDeliverySubmissionIDFunc != nil {
+		return m.setInitialDeliverySubmissionIDFunc(ctx, agentExecutionID, submissionID)
+	}
+	return nil
+}
 func (m *mockAgentManager) SetExecutionEnv(ctx context.Context, executionID string, env map[string]string) error {
 	if m.setExecutionEnvFunc != nil {
 		return m.setExecutionEnvFunc(ctx, executionID, env)
@@ -97,6 +106,13 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecution
 		return m.startAgentProcessFunc(ctx, agentExecutionID)
 	}
 	return nil
+}
+
+func (m *mockAgentManager) StartupDisposition(string) lifecycle.AgentStartupDisposition {
+	if m.startupDisposition == "" {
+		return lifecycle.AgentStartupCreatedByAttempt
+	}
+	return m.startupDisposition
 }
 
 func (m *mockAgentManager) IsAgentCommandConfigured(agentExecutionID string) bool {

@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -302,6 +303,16 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// human-driven turn where the session already left WAITING_FOR_INPUT.
 		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
 	}
+	if sessionID != "" && (eventType == agentEventComplete || eventType == agentEventError) {
+		settlementCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if err := s.reconcileAgentDeliverySettlements(settlementCtx, sessionID); err != nil {
+			s.logger.Warn("failed to finish durable delivery terminal settlement",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		cancel()
+	}
 }
 
 func (s *Service) persistNativeCodexTurnID(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
@@ -492,15 +503,16 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 	}
 	if sessionID != "" {
 		failure := watcher.AgentEventData{
-			TaskID:           taskID,
-			SessionID:        sessionID,
-			OwnerKind:        string(payload.OwnerKind),
-			AgentExecutionID: executionID,
-			AgentID:          payload.AgentID,
-			AgentProfileID:   payload.AgentProfileID,
-			PromptGeneration: payload.Data.PromptGeneration,
-			ErrorMessage:     payload.Data.Error,
-			ProviderError:    payload.Data.ProviderError,
+			TaskID:             taskID,
+			SessionID:          sessionID,
+			OwnerKind:          string(payload.OwnerKind),
+			AgentExecutionID:   executionID,
+			AgentID:            payload.AgentID,
+			AgentProfileID:     payload.AgentProfileID,
+			ExecutionProfileID: payload.ExecutionProfileID,
+			PromptGeneration:   payload.Data.PromptGeneration,
+			ErrorMessage:       payload.Data.Error,
+			ProviderError:      payload.Data.ProviderError,
 		}
 		if failure.ErrorMessage == "" {
 			failure.ErrorMessage = payload.Data.Text
@@ -805,6 +817,10 @@ func (s *Service) handleStreamingEventKind(
 	if payload.Data.Text == "" || payload.SessionID == "" {
 		return
 	}
+	if payload.Data.CanonicalProjection {
+		s.publishCanonicalMessageEvent(ctx, payload)
+		return
+	}
 	if s.messageCreator == nil {
 		return
 	}
@@ -821,6 +837,57 @@ func (s *Service) handleStreamingEventKind(
 	}
 	turnID := s.getActiveTurnID(payload.SessionID)
 	s.createStreamingChunk(ctx, kind, messageID, payload.TaskID, payload.Data.Text, payload.SessionID, turnID, createFn)
+}
+
+type canonicalMessageEventPublisher interface {
+	PublishMessageEvent(context.Context, string, *models.Message) error
+}
+
+type canonicalMessageReader interface {
+	GetMessage(context.Context, string) (*models.Message, error)
+}
+
+// publishCanonicalMessageEvent announces a message that was already persisted
+// by the durable delivery projector. The projector owns the canonical write;
+// this notification only keeps connected clients current without duplicating
+// that write through the legacy streaming-message path.
+func (s *Service) publishCanonicalMessageEvent(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
+	if payload == nil || payload.Data == nil || payload.Data.MessageID == "" || s.repo == nil {
+		return
+	}
+	publisher, ok := s.messageCreator.(canonicalMessageEventPublisher)
+	if !ok {
+		return
+	}
+	reader, ok := s.repo.(canonicalMessageReader)
+	if !ok {
+		s.logger.Debug("canonical message reader is unavailable",
+			zap.String("session_id", payload.SessionID),
+			zap.String("message_id", payload.Data.MessageID))
+		return
+	}
+	message, err := reader.GetMessage(ctx, payload.Data.MessageID)
+	if err != nil || message == nil {
+		s.logger.Warn("failed to load canonical message for notification",
+			zap.String("session_id", payload.SessionID),
+			zap.String("message_id", payload.Data.MessageID),
+			zap.Error(err))
+		return
+	}
+	eventType := events.MessageUpdated
+	if !payload.Data.IsAppend {
+		eventType = events.MessageAdded
+	}
+	if err := publisher.PublishMessageEvent(ctx, eventType, message); err != nil {
+		s.logger.Warn("failed to publish canonical message notification",
+			zap.String("session_id", payload.SessionID),
+			zap.String("message_id", payload.Data.MessageID),
+			zap.String("event_type", eventType),
+			zap.Error(err))
+	}
 }
 
 // handleMessageStreamingEvent handles streaming message events for real-time text updates.
@@ -1976,6 +2043,14 @@ func (s *Service) publishTaskSessionStateChanged(
 	}
 	if session.TaskEnvironmentID != "" {
 		eventData["task_environment_id"] = session.TaskEnvironmentID
+	}
+	if reader, ok := s.repo.(dto.SessionRecoveryBlockProjectionReader); ok {
+		projection := dto.TaskSessionDTO{}
+		if err := dto.EnrichSessionRecoveryBlocks(ctx, &projection, session, reader); err == nil {
+			eventData["session_recovery_blocks"] = projection.SessionRecoveryBlocks
+		} else {
+			s.logger.Warn("cannot project session recovery blocks", zap.String("session_id", sessionID), zap.Error(err))
+		}
 	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
 }
@@ -3238,14 +3313,18 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 	// After turn completion the poll mode can drop to slow (30s) if the user
 	// navigates away, so the cached value could stay stale for a long time.
 	//
-	// This runs BEFORE the RUNNING-state guard so it fires regardless of which
-	// event (READY vs COMPLETE) will drive the session state transition.
-	//
-	// Capture synchronously so the snapshot is persisted before the handler
-	// returns. Running async risks the backend being killed (e.g. E2E restart)
-	// before the snapshot is written. Retries handle transient git lock
-	// contention between concurrent worktrees.
-	s.captureCompleteEventGitStatus(ctx, payload.SessionID)
+	// Ordinary chats release prompt admission after guarded settlement, then
+	// capture synchronously before returning. Office and automation capture
+	// before settlement can tear down the runtime. Every path captures even
+	// when READY owns the state transition; retries cover transient Git locks.
+	if s.completeEventRetainsRuntime(ctx, payload.TaskID) {
+		defer func() {
+			streamGuard.unlock()
+			s.captureCompleteEventGitStatus(ctx, payload.SessionID)
+		}()
+	} else {
+		s.captureCompleteEventGitStatus(ctx, payload.SessionID)
+	}
 
 	// Office sessions park at IDLE between scheduler runs; cancelled turns skip that path so the session stays promptable.
 	if s.reconcileCompleteEventRuntime(ctx, payload, session, completionTurnID) {
@@ -3352,6 +3431,14 @@ func (s *Service) captureCompleteEventGitStatus(ctx context.Context, sessionID s
 	}
 }
 
+func (s *Service) completeEventRetainsRuntime(ctx context.Context, taskID string) bool {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return false
+	}
+	return !task.IsFromOffice && task.Origin != models.TaskOriginAutomationTask && task.Origin != models.TaskOriginAutomationRun
+}
+
 func (s *Service) reconcileCompleteEventRuntime(
 	ctx context.Context,
 	payload *lifecycle.AgentStreamEventPayload,
@@ -3365,6 +3452,12 @@ func (s *Service) reconcileCompleteEventRuntime(
 	if s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
 		return true
 	}
+	if payload.Data.TurnID != "" && payload.Data.TurnID == completionTurnID {
+		if !s.observeAutomationRetryTurnTerminal(ctx, payload.TaskID, payload.SessionID, completionTurnID, payload.ExecutionID) {
+			return false
+		}
+	}
+
 	return s.handleAutomationTurnCompleteForTurn(
 		ctx,
 		payload.TaskID,

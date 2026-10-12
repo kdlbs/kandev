@@ -219,6 +219,7 @@ describe("CoordinatorCopilot - ready conversation", () => {
       },
       automaticRecovery: false,
       hideSessionSelectors: true,
+      activityDisplay: true,
       taskArchiveState: false,
     });
   });
@@ -329,6 +330,34 @@ describe("CoordinatorCopilot - ready conversation: transformOutgoing", () => {
     expect(transformOutgoing("Why is this here?")).toBe(
       "About KAN-418 [task:task-418]: Why is this here?",
     );
+  });
+
+  it.each([
+    [
+      { id: "wf-1", label: "Sprint: board\nA", ref: { kind: "workflow", id: "wf-1" } },
+      "About Sprint - board A [workflow:wf-1]: hi",
+    ],
+    [
+      { id: "task-7", label: "KAN-7", ref: { kind: "task", id: "task-7" } },
+      "About KAN-7 [task:task-7]: hi",
+    ],
+  ])("prefixes the label and the reference of chip %#", async (workspaceChip, expected) => {
+    mockController({
+      open: true,
+      openSequence: {
+        state: { kind: "ready", session: conversation },
+        open: vi.fn(),
+        retry: vi.fn(),
+      },
+      routeSession: conversation,
+      chip: workspaceChip as unknown as typeof chip,
+    });
+    renderCopilot();
+    await waitFor(() => screen.getByTestId(QUICK_CHAT_MARKER_TEST_ID));
+    const transformOutgoing = quickChatSessionViewCalls[0].transformOutgoing as (
+      message: string,
+    ) => string;
+    expect(transformOutgoing("hi")).toBe(expected);
   });
 
   it("passes no transformOutgoing when no chip is set", async () => {

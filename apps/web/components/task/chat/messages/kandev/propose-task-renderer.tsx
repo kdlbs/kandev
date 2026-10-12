@@ -3,6 +3,7 @@
 import { IconBulb } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { ProposalCard, type ProposalCardForm } from "@/app/coordinator/proposal-card/proposal-card";
+import { isCreateTaskProposal, type StoredProposal } from "@/lib/api/domains/coordinator-api";
 import { useProposalById } from "@/hooks/domains/coordinator/use-proposals";
 import { useProposalWorkflowNames } from "@/hooks/domains/coordinator/use-proposal-workflow-names";
 import { linkToCoordinatorNeedsYouForm } from "@/lib/coordinator/links";
@@ -19,18 +20,19 @@ import type { KandevRenderer } from "./types";
 // The plain "Kandev: Propose Task" row, with no expandable content: what a
 // tool call whose result is an error, or whose text has no string
 // `proposal_id`, renders (proposal-cards.md#cards).
-function PlainProposeTaskRow({ status }: { status: KandevStatus }) {
+function PlainProposeTaskRow({ status, titleKey }: { status: KandevStatus; titleKey: string }) {
   const { t } = useTranslation();
   return (
     <div data-testid="propose-task-renderer">
-      <KandevRow
-        Icon={IconBulb}
-        title={t("task:kandevProposeTask")}
-        status={status}
-        hasExpandableContent={false}
-      />
+      <KandevRow Icon={IconBulb} title={t(titleKey)} status={status} hasExpandableContent={false} />
     </div>
   );
+}
+
+function proposalWorkflowId(proposal: StoredProposal): string | undefined {
+  if (isCreateTaskProposal(proposal)) return effectiveProposalSpec(proposal).workflow_id;
+  if (proposal.kind === "move") return (proposal.final_spec ?? proposal.spec).workflow_id;
+  return undefined;
 }
 
 function ConnectedProposalCard({
@@ -43,10 +45,8 @@ function ConnectedProposalCard({
   const { t } = useTranslation();
   const router = useRouter();
   const { proposal, notFound } = useProposalById(ctx.workspaceId, ctx.coordinatorId, proposalId);
-  const effSpec = proposal ? effectiveProposalSpec(proposal) : undefined;
-  const { workflowNameById, stepNameByWorkflowStep } = useProposalWorkflowNames(
-    effSpec?.workflow_id ?? null,
-  );
+  const workflowId = proposal ? (proposalWorkflowId(proposal) ?? null) : null;
+  const { workflowNameById, stepNameByWorkflowStep } = useProposalWorkflowNames(workflowId);
 
   if (notFound) {
     return <p className="text-xs text-muted-foreground">{t("coordinator:toastNotFound")}</p>;
@@ -84,34 +84,41 @@ function ConnectedProposalCard({
 // (proposal-cards.md#cards). It reads the card's own row independently of
 // the Needs-you pending list, via `useProposalById`, so a reload can still
 // show a settled proposal with no other proposal ever having been listed.
-export const ProposeTaskRenderer: KandevRenderer = ({ result, status }) => {
-  // Both hooks run unconditionally on every call, before the branch below,
-  // because this renderer is invoked as a plain function inside
-  // `KandevToolMessage`'s render rather than as its own JSX element — a
-  // conditional hook call here would corrupt that caller's hook order.
-  const { t } = useTranslation();
-  const ctx = useCoordinatorProposalContext();
-  const proposalId = pickString(result, "proposal_id");
+function proposeRenderer(titleKey: string): KandevRenderer {
+  return function ProposeRenderer({ result, status }) {
+    // Both hooks run unconditionally on every call, before the branch below,
+    // because this renderer is invoked as a plain function inside
+    // `KandevToolMessage`'s render rather than as its own JSX element — a
+    // conditional hook call here would corrupt that caller's hook order.
+    const { t } = useTranslation();
+    const ctx = useCoordinatorProposalContext();
+    const proposalId = pickString(result, "proposal_id");
 
-  if (status === "error" || !proposalId || !ctx) {
-    return <PlainProposeTaskRow status={status} />;
-  }
+    if (status === "error" || !proposalId || !ctx) {
+      return <PlainProposeTaskRow status={status} titleKey={titleKey} />;
+    }
 
-  // The card is attached to the tool-call row, not nested inside its
-  // collapsible body: unlike every other Kandev tool, this one exists so the
-  // manager can act on it (Approve/Edit/Reject), so it must not be hidden
-  // behind an expand toggle the way KandevBody content normally is.
-  return (
-    <div data-testid="propose-task-renderer">
-      <KandevRow
-        Icon={IconBulb}
-        title={t("task:kandevProposeTask")}
-        status={status}
-        hasExpandableContent={false}
-      />
-      <div className="mt-2 ml-7">
-        <ConnectedProposalCard proposalId={proposalId} ctx={ctx} />
+    // The card is attached to the tool-call row, not nested inside its
+    // collapsible body: unlike every other Kandev tool, this one exists so the
+    // manager can act on it (Approve/Edit/Reject), so it must not be hidden
+    // behind an expand toggle the way KandevBody content normally is.
+    return (
+      <div data-testid="propose-task-renderer">
+        <KandevRow
+          Icon={IconBulb}
+          title={t(titleKey)}
+          status={status}
+          hasExpandableContent={false}
+        />
+        <div className="mt-2 ml-7">
+          <ConnectedProposalCard proposalId={proposalId} ctx={ctx} />
+        </div>
       </div>
-    </div>
-  );
-};
+    );
+  };
+}
+
+export const ProposeTaskRenderer = proposeRenderer("task:kandevProposeTask");
+export const ProposeResumeRenderer = proposeRenderer("task:kandevProposeResume");
+export const ProposeMessageRenderer = proposeRenderer("task:kandevProposeMessage");
+export const ProposeMoveRenderer = proposeRenderer("task:kandevProposeMove");

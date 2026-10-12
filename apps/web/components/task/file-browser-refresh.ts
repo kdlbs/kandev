@@ -40,6 +40,11 @@ export class FolderRefreshes {
     if (this.latest.get(path) === ticket) this.latest.delete(path);
   }
 
+  invalidate(path: string) {
+    const ticket = this.latest.get(path);
+    if (ticket) this.fail(path, ticket);
+  }
+
   committed() {
     // Keep queued publication tokens until their updater has committed.
     for (const [path, ticket] of this.latest) {
@@ -64,7 +69,9 @@ type RefreshContext = {
   refreshes?: FolderRefreshes;
 };
 
-function changedFolders({ changes, expandedPaths }: RefreshContext) {
+type ChangedFoldersContext = Pick<RefreshContext, "changes" | "expandedPaths">;
+
+function changedFolders({ changes, expandedPaths }: ChangedFoldersContext) {
   const folders = new Set<string>();
   for (const change of changes) {
     if (change.operation === "refresh") {
@@ -80,6 +87,10 @@ function changedFolders({ changes, expandedPaths }: RefreshContext) {
     }
   }
   return folders;
+}
+
+export function invalidateFileChanges(ctx: ChangedFoldersContext, refreshes: FolderRefreshes) {
+  for (const path of changedFolders(ctx)) refreshes.invalidate(path);
 }
 
 type FolderUpdate = { path: string; children?: FileTreeNode[]; ticket: RefreshTicket };

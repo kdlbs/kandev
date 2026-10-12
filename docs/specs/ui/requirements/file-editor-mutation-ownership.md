@@ -10,15 +10,18 @@ owners:
 
 ## Purpose and ownership
 
-An outstanding file action must not change the editor that replaces its source.
+An outstanding file action or workspace refresh must not change the editor that
+replaces its source or discard newer acknowledged content and unsaved typing.
 UI owns this reusable editor presentation and reply-publication contract.
 Workspaces retain filesystem mutation and authorization authority; tasks retain
 session eligibility and lifecycle. This supplements the stale-view boundary in
 [task navigation responsiveness](task-navigation-responsiveness.md), whose
 existing read coordination does not define editor mutation completion.
 
-The contract covers both Dockview editors and the tablet TaskCenterPanel file
-tabs. Each owns its local buffer lifetime and action consumer.
+The mutation contract covers both Dockview editors and the tablet TaskCenterPanel
+file tabs. Each owns its local buffer lifetime and action consumer. The refresh
+criteria cover background reconciliation of already-open Dockview buffers;
+independent tablet restoration and phone file-viewer reads are outside that scope.
 
 ## Terminology
 
@@ -28,6 +31,8 @@ tabs. Each owns its local buffer lifetime and action consumer.
   consumer. Returning after selecting another session starts another visit.
 - **Owned completion:** A completion whose originating consumer, session visit,
   affected editor incarnation, and panel host remain available.
+- **Eligible refresh:** A workspace content read admitted by a live consumer for
+  its current session visit and existing repository/file editor incarnation.
 
 ## Requirements
 
@@ -68,6 +73,25 @@ filesystem actions finish.
   consumer, session visit or editor incarnation retires, it shall not overwrite
   the replacement editor. Desktop, tablet and phone shall retain their existing
   composition, navigation, scrolling and touch behavior.
+- **AC-UI-FILE-EDITOR-MUTATION-001.7:** When eligible refreshes overlap for the
+  same open editor, only the most recently admitted refresh shall publish its
+  reply, regardless of completion order or initiating consumer. Once a newer
+  refresh is admitted, an older reply shall remain superseded even if the newer
+  read fails. Different files and repositories shall refresh independently.
+- **AC-UI-FILE-EDITOR-MUTATION-001.8:** A refresh whose consumer, session visit,
+  editor incarnation or panel host retires during fetching or content preparation
+  shall not change the live buffer, baseline, hash, remote-update indication or
+  panel dirty/title state. A same-key reopen or identical replacement shall not
+  revive the old reply. A later eligible refresh shall remain able to publish.
+- **AC-UI-FILE-EDITOR-MUTATION-001.9:** A current refresh shall reconcile against
+  the live buffer after content preparation, preserving typing made while that
+  preparation was pending. Matching dirty content shall advance its baseline
+  and clear buffer/panel dirtiness; different dirty content shall retain local
+  typing and offer the current remote content for explicit reload. A clean
+  buffer shall accept the current content, including an empty file, with its
+  actual content hash and existing binary/resolved-path metadata. A failed read
+  shall leave the editor usable and unchanged. Desktop, tablet and phone shall
+  retain their existing composition and interaction paths.
 
 ## Out of scope
 
@@ -75,8 +99,9 @@ filesystem actions finish.
   the server, and background persistence of inactive editor buffers.
 - New mutation ordering, deduplication, retry or conflict-resolution policy
   within an unchanged editor lifetime.
-- General workspace resync/read races, transport/authorization redesign,
-  backend APIs, new settings, and responsive presentation changes.
+- Workspace read races outside background refresh of already-open Dockview
+  buffers; ordering reads against saves/deletes, transport/authorization
+  redesign, backend APIs, new settings, and responsive presentation changes.
 
 ## System design
 
@@ -85,3 +110,4 @@ filesystem actions finish.
 ## Implementation plans
 
 - [File editor mutation ownership](../../../plans/file-editor-mutation-ownership/plan.md)
+- [Preserve editor workspace refresh](../../../plans/editor-workspace-refresh-ownership/plan.md)

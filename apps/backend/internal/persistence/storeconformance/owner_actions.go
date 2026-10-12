@@ -511,7 +511,10 @@ func taskAction() apiAction {
 		return nil
 	}
 	action.transaction = func(s testconformance.ScenarioContext, id string) error {
-		return transactionAPICheck(action, s, id)
+		if err := transactionAPICheck(action, s, id); err != nil {
+			return err
+		}
+		return silentRestoreRepositoryCheck(s, id)
 	}
 	return action
 }

@@ -445,12 +445,10 @@ component's rule. The two caps are distinct layers: the backend retains at most
 (`AC-OFFICE-CONFIG-SYNC-004.5a`); the card then displays at most 10 of what it
 received.
 
-New: `lib/types/office-config-sync.ts`, `lib/api/domains/office-config-sync-api.ts`,
-and `hooks/domains/office/use-office-config-sync.ts`, mirroring
-`use-workflow-sync.ts` including its provider switch that clears the other
-provider's fields and its background refresh so poller results appear without a
-reload. The directory field renders the repository root label when empty — a
-state that, unlike in workflow sync, is reachable here.
+The settings form's provider fields and save acknowledgment are designed in
+[Config Sync Surfaces](config-sync-surfaces.md). Its background refresh exposes
+poller results without reloading; an empty directory displays the repository
+root.
 
 Copy goes into the existing `office` namespace under a `configSync.` prefix.
 **No key moves**: `workflows` keeps every key it has. Duplicating a handful of

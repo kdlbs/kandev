@@ -89,6 +89,14 @@ A canceled launch caller must not abandon readers while the supervised child rem
 The existing survival configuration remains unchanged.
 This correction does not redesign post-exit log-tail retention or standalone adoption.
 
+When combined with in-process runtime replacement, complete bounded stderr records
+also enter the existing sanitized 8 KiB exit-diagnostic tail.
+An oversized stderr record contributes only the fixed discard marker, once per stream;
+no truncated record prefix enters either diagnostic surface.
+The launcher's owned-reader wait group remains attached to both stream goroutines.
+Exit publication waits for those readers after `Cmd.Wait` releases their descriptors,
+preserving the replacement coordinator's exit-evidence boundary.
+
 ## Routine diagnostic sites
 
 `requiredstores.Health.logTransition` currently emits info on every probe.

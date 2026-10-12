@@ -14,6 +14,7 @@ const (
 	ErrorCodeProposalConflict              = "proposal_conflict"
 	ErrorCodeConversationConflict          = "conversation_conflict"
 	ErrorCodeCoordinatorProfileUnavailable = "coordinator_profile_unavailable"
+	ErrorCodeStandingOrderLimit            = "standing_order_limit"
 )
 
 // ErrorResponse is the body of a plain coordinator-route error response
@@ -55,6 +56,72 @@ type CoordinatorDTO struct {
 	OpenProposals         *int           `json:"open_proposals,omitempty"`
 	AgentProfileStatus    *ProfileStatus `json:"agent_profile_status,omitempty"`
 	ExecutorProfileStatus *ProfileStatus `json:"executor_profile_status,omitempty"`
+	Summary               *SummaryDTO    `json:"summary,omitempty"`
+
+	*CoordinatorPhase2
+}
+
+// CoordinatorPhase2 carries the phase-2 read fields; nil (and so absent from
+// the JSON) while phase 2 is off.
+type CoordinatorPhase2 struct {
+	Policy         CoordinatorPolicyDTO `json:"policy"`
+	PolicyRevision int                  `json:"policy_revision"`
+	Watches        CoordinatorWatchDTO  `json:"watches"`
+}
+
+// SummaryDTO is the list route's per-coordinator card summary, present only
+// while phase 2 is on. WatchedCount is the effective watch set size and is 0
+// for scope all; ApprovalActions counts actions set to requires_approval.
+type SummaryDTO struct {
+	WatchScope      string `json:"watch_scope"`
+	WatchedCount    int    `json:"watched_count"`
+	ApprovalActions int    `json:"approval_actions"`
+	ActiveOrders    int    `json:"active_orders"`
+}
+
+// WithSummary derives the card summary from the attached phase-2 fields and
+// the active standing order count, and returns the receiver. It is a no-op
+// while phase 2 is off.
+func (d *CoordinatorDTO) WithSummary(activeOrders int) *CoordinatorDTO {
+	if d.CoordinatorPhase2 == nil {
+		return d
+	}
+	sum := &SummaryDTO{WatchScope: d.Watches.Scope, ActiveOrders: activeOrders}
+	if d.Watches.Scope != watchScopeAll {
+		sum.WatchedCount = len(d.Watches.WorkflowIDs)
+	}
+	for _, setting := range d.Policy.Actions {
+		if setting == SettingRequiresApproval {
+			sum.ApprovalActions++
+		}
+	}
+	d.Summary = sum
+	return d
+}
+
+// CoordinatorPolicyDTO is the effective permission map.
+type CoordinatorPolicyDTO struct {
+	Actions map[Action]Setting `json:"actions"`
+}
+
+// CoordinatorWatchDTO is the watch scope; workflow_ids is [] unless selected.
+type CoordinatorWatchDTO struct {
+	Scope       string   `json:"scope"`
+	WorkflowIDs []string `json:"workflow_ids"`
+}
+
+// WithPolicyView attaches the phase-2 fields and returns the receiver.
+func (d *CoordinatorDTO) WithPolicyView(v PolicyView) *CoordinatorDTO {
+	ids := v.WorkflowIDs
+	if ids == nil {
+		ids = []string{}
+	}
+	d.CoordinatorPhase2 = &CoordinatorPhase2{
+		Policy:         CoordinatorPolicyDTO{Actions: v.Actions},
+		PolicyRevision: v.PolicyRevision,
+		Watches:        CoordinatorWatchDTO{Scope: v.WatchScope, WorkflowIDs: ids},
+	}
+	return d
 }
 
 // NewCoordinatorDTO builds the base DTO shape shared by every coordinator
@@ -168,7 +235,7 @@ type ProposalDTO struct {
 	CoordinatorID string         `json:"coordinator_id"`
 	WorkspaceID   string         `json:"workspace_id"`
 	Status        ProposalStatus `json:"status"`
-	Spec          ProposalSpec   `json:"spec"`
+	Spec          any            `json:"spec"`
 	FinalSpec     *ProposalSpec  `json:"final_spec"`
 	ClaimedAt     *time.Time     `json:"claimed_at"`
 	TaskID        *string        `json:"task_id"`
@@ -177,24 +244,72 @@ type ProposalDTO struct {
 	DecidedBy     *string        `json:"decided_by"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
+
+	// ProposalPhase2 is nil, and its fields are absent from the body, while
+	// the phase-2 flag is off.
+	*ProposalPhase2
 }
 
-// NewProposalDTO builds a ProposalDTO from the domain type.
+// ProposalPhase2 holds the proposal wire fields added by phase 2.
+type ProposalPhase2 struct {
+	Kind             string          `json:"kind"`
+	TargetTaskID     *string         `json:"target_task_id"`
+	StandingOrderIDs []string        `json:"standing_order_ids"`
+	StartsAgent      bool            `json:"starts_agent"`
+	Outcome          json.RawMessage `json:"outcome"`
+}
+
+// NewProposalDTO builds the phase-1 ProposalDTO from the domain type.
 func NewProposalDTO(p *Proposal) *ProposalDTO {
+	return newProposalDTO(p, false)
+}
+
+// NewProposalDTOFor builds a ProposalDTO carrying the phase-2 fields when
+// phase2 is true. Spec is the ProposalSpec of a create_task proposal and the
+// raw stored JSON of any other kind.
+func NewProposalDTOFor(p *Proposal, phase2 bool) *ProposalDTO {
+	return newProposalDTO(p, phase2)
+}
+
+func newProposalDTO(p *Proposal, phase2 bool) *ProposalDTO {
+	var spec any = p.Spec
+	if p.RawSpec != "" {
+		spec = json.RawMessage(p.RawSpec)
+	}
+	kind := p.Kind
+	if kind == "" {
+		kind = ProposalKindCreateTask
+	}
+	ids := p.StandingOrderIDs
+	if ids == nil {
+		ids = []string{}
+	}
+	outcome := json.RawMessage("null")
+	if p.OutcomeJSON != nil && json.Valid([]byte(*p.OutcomeJSON)) {
+		outcome = json.RawMessage(*p.OutcomeJSON)
+	}
+	var extra *ProposalPhase2
+	if phase2 {
+		extra = &ProposalPhase2{
+			Kind: kind, TargetTaskID: p.TargetTaskID, StandingOrderIDs: ids,
+			StartsAgent: p.StartsAgent, Outcome: outcome,
+		}
+	}
 	return &ProposalDTO{
-		ID:            p.ID,
-		CoordinatorID: p.CoordinatorID,
-		WorkspaceID:   p.WorkspaceID,
-		Status:        p.Status,
-		Spec:          p.Spec,
-		FinalSpec:     p.FinalSpec,
-		ClaimedAt:     p.ClaimedAt,
-		TaskID:        p.TaskID,
-		Error:         p.Error,
-		RejectReason:  p.RejectReason,
-		DecidedBy:     p.DecidedBy,
-		CreatedAt:     p.CreatedAt,
-		UpdatedAt:     p.UpdatedAt,
+		ProposalPhase2: extra,
+		ID:             p.ID,
+		CoordinatorID:  p.CoordinatorID,
+		WorkspaceID:    p.WorkspaceID,
+		Status:         p.Status,
+		Spec:           spec,
+		FinalSpec:      p.FinalSpec,
+		ClaimedAt:      p.ClaimedAt,
+		TaskID:         p.TaskID,
+		Error:          p.Error,
+		RejectReason:   p.RejectReason,
+		DecidedBy:      p.DecidedBy,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      p.UpdatedAt,
 	}
 }
 
@@ -223,11 +338,11 @@ type ProposalConflictResponse struct {
 
 // NewProposalConflictResponse builds the 409 body from the proposal row, as
 // re-read after the conflict.
-func NewProposalConflictResponse(p *Proposal) *ProposalConflictResponse {
+func NewProposalConflictResponse(p *Proposal, phase2 bool) *ProposalConflictResponse {
 	return &ProposalConflictResponse{
 		Error:     ErrorCodeProposalConflict,
 		ErrorCode: ErrorCodeProposalConflict,
-		Proposal:  *NewProposalDTO(p),
+		Proposal:  *NewProposalDTOFor(p, phase2),
 	}
 }
 
@@ -349,4 +464,21 @@ func (r ApproveProposalRequest) StringField(field string) (*string, bool, error)
 // this lands in task 07.
 type RejectProposalRequest struct {
 	Reason *string `json:"reason"`
+}
+
+// StandingOrderLimitResponse is the 400 body for an add or restore refused at
+// the active-order limit. Both keys are always present.
+type StandingOrderLimitResponse struct {
+	Error     string `json:"error"`
+	ErrorCode string `json:"error_code"`
+}
+
+// NewStandingOrderLimitResponse builds the limit refusal body.
+func NewStandingOrderLimitResponse() *StandingOrderLimitResponse {
+	return &StandingOrderLimitResponse{Error: ErrorCodeStandingOrderLimit, ErrorCode: ErrorCodeStandingOrderLimit}
+}
+
+// StandingOrderListResponse is the body of the standing orders list route.
+type StandingOrderListResponse struct {
+	Orders []Order `json:"orders"`
 }

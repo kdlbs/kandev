@@ -44,16 +44,27 @@ env:
   GOFLAGS: -trimpath
 
 jobs:
-  runner_plan:
-    name: Plan external runner allocation
+  # The former trigger-level `paths:` list, applied one level down so a skip
+  # still produces a conclusion. `.github/scripts/changed-paths.py` implements
+  # the same last-match-wins semantics GitHub applies to `paths:`.
+  changes:
+    name: Detect relevant changes
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       plan: ${{ steps.plan.outputs.plan }}
+      run: ${{ steps.detect.outputs.run }}
+      sidebar_resources: ${{ steps.detect.outputs.sidebar_resources }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          # The base commit has to be present locally for the diff below. Every
+          # other job in this workflow already pays for a full clone.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Plan runner allocation
@@ -68,28 +79,6 @@ jobs:
           percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
           light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
           standard-label: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
-
-  # The former trigger-level `paths:` list, applied one level down so a skip
-  # still produces a conclusion. `.github/scripts/changed-paths.py` implements
-  # the same last-match-wins semantics GitHub applies to `paths:`.
-  changes:
-    name: Detect relevant changes
-    # Checkout receives the short-lived job token. Keep this credential-bearing
-    # path on GitHub-hosted capacity during the external-runner pilot.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      run: ${{ steps.detect.outputs.run }}
-      sidebar_resources: ${{ steps.detect.outputs.sidebar_resources }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          # The base commit has to be present locally for the diff below. Every
-          # other job in this workflow already pays for a full clone.
-          fetch-depth: 0
-          persist-credentials: false
 
       - name: Detect relevant changes
         id: detect
@@ -106,6 +95,8 @@ jobs:
             scripts/check-make-shells
             .github/workflows/backend-tests.yml
             .github/scripts/changed-paths.py
+            .github/scripts/runner-plan.py
+            .github/actions/plan-external-runners/**
             .github/scripts/bounded-step-summary.py
             !**/*.md
             !**/*.mdx
@@ -372,10 +363,19 @@ jobs:
           fi
 
           echo "Running ${#shard_packages[@]} packages in shard ${SHARD_NUMBER}/2"
+          # Covered million-event fixtures share a two-hour package budget.
+          # Per-batch deadlines and preservation assertions remain independent.
+          test_timeout=10m
+          for package in "${shard_packages[@]}"; do
+            if [[ "${package}" == github.com/kandev/kandev/internal/task/repository/sqlite ]]; then
+              test_timeout=120m
+            fi
+          done
           # Keep complete JSON for reports/artifacts while limiting live output
           # to compiler/process lines and package-level pass/fail summaries.
           go test \
             -race \
+            -timeout="${test_timeout}" \
             -coverprofile="coverage-${SHARD_NUMBER}.out" \
             -covermode=atomic \
             -json \
@@ -512,10 +512,9 @@ jobs:
   # `test-windows` were outside it before this workflow became a gate.
   test:
     name: Run Backend Tests
-    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).test_runner }}
+    runs-on: ${{ fromJSON(needs.changes.outputs.plan || '{"test_runner":"ubuntu-latest"}').test_runner }}
     needs:
       - changes
-      - runner_plan
       - static_checks
       - test_shards
       - test_ambient_env
@@ -525,52 +524,32 @@ jobs:
       - test-windows
     if: ${{ always() }}
     steps:
-      - name: Require backend checks to pass
+      - name: Verify required jobs and evidence
+        if: always()
         env:
-          RUNNER_PLAN_RESULT: ${{ needs.runner_plan.result }}
           CHANGES_RESULT: ${{ needs.changes.result }}
+          RUNNER_PLAN: ${{ needs.changes.outputs.plan }}
+          RUN_REQUIRED: ${{ needs.changes.outputs.run }}
+          SIDEBAR_REQUIRED: ${{ needs.changes.outputs.sidebar_resources }}
           STATIC_CHECKS_RESULT: ${{ needs.static_checks.result }}
           TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
           TEST_AMBIENT_ENV_RESULT: ${{ needs.test_ambient_env.result }}
           POSTGRES_BOOT_RESULT: ${{ needs['postgres-boot'].result }}
-          SIDEBAR_RESOURCES_RESULT: ${{ needs['sidebar-resources'].result }}
           POSTGRES_18_RESULT: ${{ needs['postgres-18'].result }}
+          SIDEBAR_RESOURCES_RESULT: ${{ needs['sidebar-resources'].result }}
           TEST_WINDOWS_RESULT: ${{ needs['test-windows'].result }}
         run: |
           set -euo pipefail
-
-          echo "Runner plan: ${RUNNER_PLAN_RESULT}"
-          echo "Change detection: ${CHANGES_RESULT}"
-          echo "Static checks: ${STATIC_CHECKS_RESULT}"
-          echo "Test shards: ${TEST_SHARDS_RESULT}"
-          echo "Ambient env tests: ${TEST_AMBIENT_ENV_RESULT}"
-          echo "Postgres boot: ${POSTGRES_BOOT_RESULT}"
-          echo "Sidebar resources: ${SIDEBAR_RESOURCES_RESULT}"
-          echo "Postgres 18: ${POSTGRES_18_RESULT}"
-          echo "Windows tests: ${TEST_WINDOWS_RESULT}"
-
-          # Runner planning must succeed because its outputs select the runner
-          # fleet. A planner error cannot silently become a hosted fallback.
-          if [[ "${RUNNER_PLAN_RESULT}" != "success" ]]; then
-            echo "Runner planning did not succeed; refusing to report a pass." >&2
+          if [[ "${CHANGES_RESULT}" != "success" || -z "${RUNNER_PLAN}" ]]; then
+            echo "Change detection or runner planning failed or produced no plan: ${CHANGES_RESULT}" >&2
             exit 1
           fi
-
-          # Change detection itself must succeed: if it errored we do not know
-          # whether the skips below were deliberate.
-          if [[ "${CHANGES_RESULT}" != "success" ]]; then
-            echo "Change detection did not succeed; refusing to report a pass." >&2
+          if [[ "${RUN_REQUIRED}" != "true" && "${RUN_REQUIRED}" != "false" ]]; then
+            echo "Missing change-selection verdict." >&2
             exit 1
           fi
-
-          # `skipped` is a pass — the change-detection job decided nothing this
-          # workflow covers was touched. `cancelled` is not: a cancelled job
-          # never reached a verdict, and treating that as a pass would let an
-          # untested merge group through.
-          #
-          # This gate is the one check a human opens when a merge is blocked, so
-          # name the job that failed here rather than making them correlate the
-          # list above by eye.
+          expected=skipped
+          if [[ "${RUN_REQUIRED}" == "true" ]]; then expected=success; fi
           for entry in \
             "static_checks:${STATIC_CHECKS_RESULT}" \
             "test_shards:${TEST_SHARDS_RESULT}" \
@@ -581,8 +560,16 @@ jobs:
             "test-windows:${TEST_WINDOWS_RESULT}"; do
             name="${entry%%:*}"
             result="${entry#*:}"
-            if [[ "${result}" != "success" && "${result}" != "skipped" ]]; then
-              echo "${name} finished with result: ${result}" >&2
+            required="${expected}"
+            if [[ "${name}" == "sidebar-resources" ]]; then
+              case "${SIDEBAR_REQUIRED}" in
+                true) required=success ;;
+                false) required=skipped ;;
+                *) echo "Missing sidebar selection verdict." >&2; exit 1 ;;
+              esac
+            fi
+            if [[ "${result}" != "${required}" ]]; then
+              echo "${name}: expected ${required}, got ${result}" >&2
               exit 1
             fi
           done
@@ -595,9 +582,9 @@ jobs:
     permissions:
       contents: read
       packages: read
-    # Allow the full race-enabled persistence suite twenty minutes per package,
+    # Million-event retention fixtures need the ninety-minute suite budget,
     # plus time for the service, cold compilation, and job cleanup.
-    timeout-minutes: 30
+    timeout-minutes: 120
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
       postgres:
@@ -613,7 +600,10 @@ jobs:
           POSTGRES_USER: kandev
           POSTGRES_PASSWORD: kandev
           POSTGRES_DB: kandev_admin
+        # PostgreSQL parallel checks of million-row fixtures exceed Docker
+        # default shared memory even after logical row retirement.
         options: >-
+          --shm-size=256m
           --health-cmd "pg_isready -U kandev -d kandev_admin"
           --health-interval 5s
           --health-timeout 5s
@@ -673,7 +663,11 @@ jobs:
             ./internal/workflowsync
             ./internal/worktree
           )
-          go test -v -race -timeout 20m "${POSTGRES_PACKAGES[@]}"
+          # SQLite million-event fixtures run in test_shards. Keep all other
+          # SQLite cases and every PostgreSQL case in this persistence gate.
+          go test -v -race -timeout 90m \
+            -skip '^TestDeliveryRetentionStorage(ProtectedGap)?$/SQLite$' \
+            "${POSTGRES_PACKAGES[@]}"
 
   sidebar-resources:
     name: Sidebar resource bounds (${{ matrix.mode }})
@@ -853,9 +847,13 @@ jobs:
         if: matrix.suite == 'native'
         run: go vet ./...
 
+      - name: Test Windows process cohort runner
+        if: matrix.suite == 'process'
+        run: go test -race -timeout 25m ./cmd/windows-process-tests
+
       - name: Test Windows process package
         if: matrix.suite == 'process'
-        run: go test -race -v -json -timeout 25m ./internal/agentctl/server/process/...
+        run: go run ./cmd/windows-process-tests
 
       # Scope to packages with non-trivial Windows-specific code paths.
       # Tests that genuinely cannot run on Windows (Unix sockets, POSIX
@@ -865,7 +863,7 @@ jobs:
       # every platform.
       - name: Test windows-sensitive packages
         if: matrix.suite == 'native'
-        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/...
 
       - name: Test Windows recovery mode preservation
         if: matrix.suite == 'native'
@@ -916,6 +914,24 @@ jobs:
           go test -trimpath -tags fts5 -race -p 1 ./internal/task/service -run '^TestDocumentAttachment.*$' -count=1 -timeout=4m -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Test Windows profile enabled omission
+        if: matrix.suite == 'native'
+        timeout-minutes: 6
+        run: |
+          $env:GOMAXPROCS = '2'
+          $env:GOMEMLIMIT = '512MiB'
+          go test -trimpath -tags fts5 -race -p 1 -count=1 -timeout=4m -v ./internal/agent/settings/store ./internal/agent/settings/controller ./internal/agent/settings/handlers ./internal/mcp/server ./internal/backendapp -run '^(TestProfileEnabledIntent(Caller|OwnCommit|Controls|DynamicCaller|DynamicRejection|Storage|HTTP|MCP|Compact)|TestUpdateAgentProfileModelIfEmptyIsConditional|TestUpdateAgentProfile_DoesNotOverwriteWorkingOwner|TestAgentProfileEnabled_RoundTrip|TestDynamicProfileCreateAndUpdatePersistsCandidates|TestSQLiteRepositoryDynamicProfileCRUDUsesOptimisticVersions)$'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test Windows executor profile scripts
+        if: matrix.suite == 'native'
+        timeout-minutes: 6
+        run: |
+          $env:GOMAXPROCS = '2'
+          $env:GOMEMLIMIT = '512MiB'
+          go test -trimpath -tags fts5 -race -p=1 -count=1 -timeout=4m -v -run '^(TestExecutorProfileScripts(IndependentSQLite|Presence|OwnCommit|Storage|Failures|Compatibility|SettingsDomain|ApplyProfile|StoreConformance)|TestRegisteredExecutorProfileScripts(HTTP|WS))$' ./internal/task/service ./internal/task/repository/sqlite ./internal/task/handlers ./internal/backendapp ./internal/orchestrator/executor ./internal/persistence/storeconformance
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       # Keep SQLite path coverage targeted: other tests in these packages
       # assert POSIX file modes or depend on Git path output.
       - name: Test Windows SQLite database paths
@@ -944,6 +960,16 @@ jobs:
           GOMEMLIMIT: 512MiB
         run: |
           go test -trimpath -tags fts5 -race -p=1 -count=1 -json -timeout=4m -run '^TestWorkflowStartSelection(ControllerOmission|ControllerControls|SQLiteIndependentStores|RepositoryRollback|LegacyAndExact|RegisteredREST|AccessFailures|RegisteredMCP)$' ./internal/workflow/controller ./internal/workflow/repository ./internal/workflow/handlers ./internal/mcp/handlers
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test Windows repository checkout defaults
+        if: matrix.suite == 'native'
+        timeout-minutes: 6
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 512MiB
+        run: |
+          go test -trimpath -tags fts5 -race -p=1 -count=1 -json -timeout=4m -run '^Test(RepositoryCheckoutDefaults(ConcurrentSQLite|Presence|CompanionAtomicity|OwnMutationProjection|Failures|Storage|LegacyAndExact)|RegisteredRepositoryCheckoutDefaults(HTTP|WS))$' ./internal/task/service ./internal/task/repository/sqlite ./internal/task/handlers
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test Cursor project slug path normalization

@@ -173,6 +173,55 @@ Tooltips are not essential disclosures. Plugins retain explicit click/tap access
 to details through their chosen native overlay. Host-owned copy uses existing
 localization rules, including all required locale catalogs.
 
+### Host modal focus lifecycle
+
+`pluginModalManager` owns imperative modal instances. `PluginModalHost` renders
+each instance through `PluginDialog` or `PluginDrawer`. These surfaces do not
+mount `DialogTrigger` or `DrawerTrigger`. Their close lifecycle must therefore
+restore the initiating focus explicitly. This implements AC-PLUGINS-ACTION-UX-003.6
+through .8 without changing Action events or the public modal options.
+
+Capture `document.activeElement` in the manager's shared `open` path before
+publishing the instance. Store an eligible `HTMLElement` reference on that
+instance as host-only metadata. Exclude the document body and document root.
+Guard absent DOM globals so non-browser consumers remain safe.
+The same path covers `openModal` and `openTaskLinkDialog`.
+The reference belongs to one instance and ends with that instance's lifetime.
+
+Pass an explicit `onCloseAutoFocus` handler to both content primitives. Prevent
+the default trigger restoration because these roots have no registered trigger.
+Perform restoration at this lifecycle boundary, after content removal, rather
+than in the manager's `close` method or an Action callback.
+Use `focus({ preventScroll: true })` for an available opener.
+Preserve the existing close handles, owner cleanup, and dismissibility guards.
+
+Evaluate eligibility again at closure. Reject disconnected, disabled, hidden,
+and inert targets, including targets inside hidden or inert ancestors.
+Do not use a selector to find a replacement Action after remount or unload.
+When a surviving overlay owns focus, restoration must remain inside that
+surface. Closing a child can restore its parent opener. Closing a background
+instance cannot reclaim focus from a newer active overlay.
+For an invalid opener, preserve valid focus in the surviving surface. If that
+surface lacks focus, use its existing focus entry behavior or a focusable
+surface container. Without such a surface, leave focus to the browser.
+Do not introduce a second overlay registry or retain closed instance history.
+
+The restoration handler must also tolerate several cleanup callbacks from
+`closeAllForPlugin`. Delayed cleanup cannot reclaim focus from a newer modal.
+Use the manager's live snapshot and the primitives' rendered active surfaces
+at the callback boundary. Do not identify an active surface from a closed
+portal retained only for an exit animation.
+
+Phone controls remain in `MobilePluginNavSection` and `AppStatusDrawer`.
+When a plugin modal closes, a still-open parent drawer retains focus ownership.
+The same restoration applies to an explicitly requested plugin drawer.
+This repair does not change Vaul opening autofocus, drawer composition, touch
+targets, scrolling, safe-area padding, or desktop widths.
+
+The [repair plan](../../../plans/plugin-modal-focus-restoration/plan.md) owns
+the regression cases and browser evidence. The accepted additive Action
+decision and host-owned overlay boundary remain unchanged.
+
 ## Mobile composition
 
 Reuse `MobilePluginNavSection`, `AppStatusDrawer`, and the mobile composer toolbar.

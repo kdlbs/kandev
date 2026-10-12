@@ -30,7 +30,12 @@ vi.mock("@/app/coordinator/proposal-card/proposal-card", () => ({
   },
 }));
 
-import { ProposeTaskRenderer } from "./propose-task-renderer";
+import {
+  ProposeMessageRenderer,
+  ProposeMoveRenderer,
+  ProposeResumeRenderer,
+  ProposeTaskRenderer,
+} from "./propose-task-renderer";
 
 const WORKSPACE_ID = "ws-1";
 const COORDINATOR_ID = "co-1";
@@ -172,4 +177,39 @@ describe("ProposeTaskRenderer - card states", () => {
     );
     expect(closePopoverMock).toHaveBeenCalledTimes(1);
   });
+});
+
+describe("propose_resume, propose_message and propose_move renderers", () => {
+  const cases = [
+    ["resume", ProposeResumeRenderer, "Kandev: Propose Resume"],
+    ["message", ProposeMessageRenderer, "Kandev: Propose Message"],
+    ["move", ProposeMoveRenderer, "Kandev: Propose Move"],
+  ] as const;
+
+  for (const [kind, Renderer, title] of cases) {
+    it(`${kind}: attaches the compact card by proposal_id under its own title`, () => {
+      const row = { ...proposal(), kind } as unknown as Proposal;
+      useProposalByIdMock.mockReturnValue({ proposal: row, notFound: false });
+      render(
+        <CoordinatorProposalProvider
+          value={{
+            workspaceId: WORKSPACE_ID,
+            coordinatorId: COORDINATOR_ID,
+            closePopover: closePopoverMock,
+          }}
+        >
+          <Renderer args={undefined} result={{ proposal_id: PROPOSAL_ID }} status="complete" />
+        </CoordinatorProposalProvider>,
+      );
+      expect(screen.getByText(title)).not.toBeNull();
+      expect(screen.getByTestId(`proposal-card-${PROPOSAL_ID}`)).not.toBeNull();
+      expect(proposalCardCalls[0].variant).toBe("compact");
+    });
+
+    it(`${kind}: renders the plain row with no card when the call errored`, () => {
+      render(<Renderer args={undefined} result={{ proposal_id: PROPOSAL_ID }} status="error" />);
+      expect(screen.getByText(title)).not.toBeNull();
+      expect(screen.queryByTestId(`proposal-card-${PROPOSAL_ID}`)).toBeNull();
+    });
+  }
 });

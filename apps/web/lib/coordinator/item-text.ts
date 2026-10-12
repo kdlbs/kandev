@@ -22,7 +22,10 @@ export function resolveProposalSourceTask(
   openTasksById: Map<string, AttentionTask>,
 ): AttentionTask | undefined {
   if (item.kind !== "proposal") return undefined;
-  return openTasksById.get(item.proposal.spec.source_task_id);
+  const { kind, spec } = item.proposal;
+  const isCreate = kind === undefined || kind === "create_task";
+  const taskId = isCreate ? spec.source_task_id : spec.task_id;
+  return taskId === undefined ? undefined : openTasksById.get(taskId);
 }
 
 export type WhyClearsText = { why: string; clears: string };

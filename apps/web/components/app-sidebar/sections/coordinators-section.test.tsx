@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   entries: undefined as unknown as UseCoordinatorSidebarEntriesResult,
   featureOn: true,
   activeWorkspaceId: null as string | null,
+  fastActionsEnabled: true,
   sectionExpanded: {} as Record<string, boolean>,
   pathname: "/",
   toggleSection: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       workspaces: { activeId: mocks.activeWorkspaceId },
       appSidebar: { sectionExpanded: mocks.sectionExpanded },
+      userSettings: { sidebarFastActionsEnabled: mocks.fastActionsEnabled },
       toggleAppSidebarSection: mocks.toggleSection,
       setAppSidebarCollapsed: mocks.setCollapsed,
     }),
@@ -65,6 +67,7 @@ const TWO = [coordinator("c-1", "Planner"), coordinator("c-2", "Reviewer")];
 beforeEach(() => {
   mocks.featureOn = true;
   mocks.activeWorkspaceId = "ws-1";
+  mocks.fastActionsEnabled = true;
   mocks.sectionExpanded = {};
   mocks.pathname = "/";
   mocks.entries = { coordinators: TWO, badgeByCoordinatorId: new Map() };
@@ -158,7 +161,9 @@ describe("CoordinatorsSection", () => {
     expect(screen.getByTestId("sidebar-coordinator-c-1")).toBeTruthy();
     expect(screen.queryByTestId("sidebar-section-collapsed-summary")).toBeNull();
   });
+});
 
+describe("CoordinatorsSection navigation presentation", () => {
   it("renders the set-up row linking to the coordinators settings tab when there are none", () => {
     mocks.entries = { coordinators: [], badgeByCoordinatorId: new Map() };
     renderSection();
@@ -174,5 +179,23 @@ describe("CoordinatorsSection", () => {
     const shortcut = screen.getByTestId("coordinators-open-list");
     expect(shortcut.getAttribute("href")).toBe("/workspaces/ws-1/coordinator");
     expect(shortcut.getAttribute("aria-label")).toBe("Open coordinators");
+  });
+
+  it("uses navigation presentation and keeps a labelled list link when fast actions are off", () => {
+    mocks.fastActionsEnabled = false;
+    renderSection();
+
+    const header = screen.getByRole("button", { name: /Coordinators/ });
+    expect(header.className).toContain("text-[13px]");
+    expect(screen.queryByTestId("coordinators-open-list")).toBeNull();
+    expect(screen.getByTestId("coordinators-open-list-body").getAttribute("href")).toBe(
+      "/workspaces/ws-1/coordinator",
+    );
+  });
+
+  it("uses a 28px fine-pointer target for the header shortcut", () => {
+    renderSection();
+
+    expect(screen.getByTestId("coordinators-open-list").className).toContain("h-7 w-7");
   });
 });

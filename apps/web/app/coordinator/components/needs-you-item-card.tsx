@@ -133,6 +133,7 @@ export function NeedsYouItemCard({
             coordinatorId={coordinatorId}
             workflowNameById={workflowNameById}
             stepNameByWorkflowStep={stepNameByWorkflowStep}
+            openTasksById={openTasksById}
             coordinatorName={coordinatorName}
             autoOpenForm={autoOpenForm}
             onAutoFormOpened={onAutoFormOpened}
@@ -151,7 +152,7 @@ export function NeedsYouItemCard({
       </CardContent>
       {item.kind !== "proposal" && (
         <CardFooter>
-          <NeedsYouItemPrimaryActions item={item} />
+          <NeedsYouItemPrimaryActions item={item} canManage={canManage} />
         </CardFooter>
       )}
     </Card>

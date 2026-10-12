@@ -59,7 +59,10 @@ type PullRequestInput struct {
 // observed by its corresponding boolean so an unavailable optional provider
 // does not masquerade as an authoritative empty value.
 type RebuildInput struct {
-	Sessions         []RebuildSession
+	Sessions []RebuildSession
+	// SessionsObserved distinguishes a complete empty snapshot from an
+	// unavailable or partial session source.
+	SessionsObserved bool
 	TaskError        *ActiveErrorSummary
 	PendingActions   map[string]string
 	ActivityObserved bool
@@ -84,6 +87,7 @@ type RebuildInput struct {
 func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	state := &projectionState{
 		sessions:               make(map[string]sessionObservation, len(input.Sessions)),
+		sessionsObserved:       input.SessionsObserved,
 		pending:                make(map[string]string, len(input.PendingActions)),
 		pendingRequests:        make(map[string]pendingRequestIdentity),
 		errors:                 make(map[string]*ActiveErrorSummary),

@@ -43,6 +43,9 @@ func (s *Service) retireInterruptedNoticesOnStartup(ctx context.Context) {
 }
 
 func (s *Service) retireInterruptedNoticeOnStartup(ctx context.Context, session *models.TaskSession) {
+	if s.hasPendingRemoteRecovery(session.ID, session.AgentExecutionID) {
+		return
+	}
 	guard, releaseGuard := s.acquireCancelInFlightGuard(session.ID)
 	guard.Lock()
 	defer guard.Unlock()

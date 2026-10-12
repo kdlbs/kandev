@@ -18,13 +18,18 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 type e2eResetTaskDeleterStub struct {
-	taskID  string
-	options taskservice.DeleteTaskOptions
+	taskID   string
+	options  taskservice.DeleteTaskOptions
+	calls    int
+	errors   []error
+	failure  error
+	onDelete func()
 }
 
 type e2eAttachTaskAuthorizerStub struct {
@@ -44,7 +49,52 @@ func (s *e2eResetTaskDeleterStub) DeleteTaskWithOptions(
 ) error {
 	s.taskID = taskID
 	s.options = options
-	return nil
+	s.calls++
+	if s.onDelete != nil {
+		s.onDelete()
+	}
+	if s.calls <= len(s.errors) {
+		return s.errors[s.calls-1]
+	}
+	return s.failure
+}
+
+func TestDeleteTaskForE2EResetWaitsForSessionTransfer(t *testing.T) {
+	deleter := &e2eResetTaskDeleterStub{
+		errors: []error{messagequeue.ErrSessionTransferInProgress, messagequeue.ErrSessionTransferInProgress},
+	}
+	if err := deleteTaskForE2EReset(context.Background(), deleter, "task-1"); err != nil {
+		t.Fatalf("deleteTaskForE2EReset: %v", err)
+	}
+	if deleter.calls != 3 {
+		t.Fatalf("delete calls = %d, want 3", deleter.calls)
+	}
+	if !deleter.options.DiscardWorktreeChanges {
+		t.Fatal("settled deletion must still discard disposable worktree changes")
+	}
+}
+
+func TestDeleteTaskForE2EResetPreservesOtherErrors(t *testing.T) {
+	failure := errors.New("deletion unavailable")
+	deleter := &e2eResetTaskDeleterStub{failure: failure}
+	if err := deleteTaskForE2EReset(context.Background(), deleter, "task-1"); !errors.Is(err, failure) {
+		t.Fatalf("delete error = %v, want %v", err, failure)
+	}
+	if deleter.calls != 1 {
+		t.Fatalf("delete calls = %d, want 1", deleter.calls)
+	}
+}
+
+func TestDeleteTaskForE2EResetHonorsCancellationDuringTransfer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	deleter := &e2eResetTaskDeleterStub{failure: messagequeue.ErrSessionTransferInProgress, onDelete: cancel}
+	if err := deleteTaskForE2EReset(ctx, deleter, "task-1"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("delete error = %v, want cancellation", err)
+	}
+	if deleter.calls != 1 {
+		t.Fatalf("delete calls = %d, want 1 before cancellation", deleter.calls)
+	}
 }
 
 func TestDeleteTaskForE2EResetDiscardsWorktreeChanges(t *testing.T) {
@@ -399,5 +449,49 @@ func assertWorkspaceRows(t *testing.T, database *sqlx.DB, table, workspaceID str
 	}
 	if got != want {
 		t.Fatalf("%s rows for %s = %d, want %d", table, workspaceID, got, want)
+	}
+}
+
+func TestE2EResetDeletionOrdersChildrenBeforeParents(t *testing.T) {
+	tasks := []*taskmodels.Task{
+		{ID: "root"}, {ID: "other"}, {ID: "child", ParentID: "root"},
+		{ID: "grandchild", ParentID: "child"}, {ID: "sibling", ParentID: "root"},
+		{ID: "external-child", ParentID: "outside-workspace"},
+	}
+	for _, reverse := range []bool{false, true} {
+		input := append([]*taskmodels.Task(nil), tasks...)
+		if reverse {
+			for i, j := 0, len(input)-1; i < j; i, j = i+1, j-1 {
+				input[i], input[j] = input[j], input[i]
+			}
+		}
+		ordered, err := orderE2ETasksForDeletion(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		positions := make(map[string]int)
+		for i, task := range ordered {
+			if _, duplicate := positions[task.ID]; duplicate {
+				t.Fatalf("duplicate deletion of %s", task.ID)
+			}
+			positions[task.ID] = i
+		}
+		if len(positions) != len(tasks) {
+			t.Fatalf("deletion count = %d, want %d", len(positions), len(tasks))
+		}
+		for _, task := range tasks {
+			if parentIndex, exists := positions[task.ParentID]; exists && positions[task.ID] >= parentIndex {
+				t.Fatalf("parent %s would be deleted before child %s", task.ParentID, task.ID)
+			}
+		}
+	}
+}
+
+func TestE2EResetDeletionRejectsHierarchyCycleBeforeDeleting(t *testing.T) {
+	ordered, err := orderE2ETasksForDeletion([]*taskmodels.Task{
+		{ID: "a", ParentID: "b"}, {ID: "b", ParentID: "a"},
+	})
+	if err == nil || len(ordered) != 0 {
+		t.Fatalf("cyclic deletion plan = %v, %v; want no deletions and an error", ordered, err)
 	}
 }

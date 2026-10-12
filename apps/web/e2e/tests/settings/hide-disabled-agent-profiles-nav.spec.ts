@@ -24,7 +24,7 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
     const profileLink = new RegExp(escapeRegExp(profile.name));
 
     try {
-      // Disable this test's profile via the API. The profile editor toggle
+      // Disable this test's unreferenced profile via the API. The profile editor toggle
       // itself is covered by agent-profile-disable.spec.ts.
       await apiClient.updateAgentProfile(profile.id, { enabled: false });
 

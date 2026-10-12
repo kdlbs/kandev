@@ -24,8 +24,6 @@ import { KanbanPage } from "../../pages/kanban-page";
 useRegularMode();
 
 test.describe("Create-task URL flow - branches after reopen", () => {
-  test.describe.configure({ retries: 1 });
-
   test("repo added via GitHub URL still lists branches when re-picked from the workspace dropdown", async ({
     testPage,
     apiClient,

@@ -458,6 +458,12 @@ type PromptTurnIDSetter interface {
 	SetPromptTurnID(ctx context.Context, agentExecutionID, turnID string) error
 }
 
+// InitialDeliverySubmissionIDSetter binds a persisted first message to a
+// prepared execution before the harness process can receive its initial prompt.
+type InitialDeliverySubmissionIDSetter interface {
+	SetInitialDeliverySubmissionID(ctx context.Context, agentExecutionID, submissionID string) error
+}
+
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.
 type RemoteRuntimeStatus struct {
 	RuntimeName   agentruntime.Runtime
@@ -504,12 +510,18 @@ type AgentProfileInfo struct {
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
 	RequiredNativeConversationID string
-	TaskID                       string
-	TaskScope                    lifecycle.TaskLaunchScope
-	SessionSettingsPolicy        ResumeSettingsPolicy
-	WorkspaceID                  string // Kandev workspace ID — used to build scratch dir for repo-less tasks
-	SessionID                    string
-	TaskEnvironmentID            string // Env owning this session (shared across sessions in the same task)
+	InterruptedSubmissionID      string
+	InterruptedStreamID          string
+	InterruptedHarnessGeneration uint64
+	CandidateExecutionID         string
+	OnExecutionAllocated         func(context.Context, string) error
+
+	TaskID                string
+	TaskScope             lifecycle.TaskLaunchScope
+	SessionSettingsPolicy ResumeSettingsPolicy
+	WorkspaceID           string // Kandev workspace ID — used to build scratch dir for repo-less tasks
+	SessionID             string
+	TaskEnvironmentID     string // Env owning this session (shared across sessions in the same task)
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool
@@ -522,6 +534,13 @@ type LaunchAgentRequest struct {
 	TaskTitle                         string // Human-readable task title for semantic worktree naming
 	AgentProfileID                    string
 	TurnID                            string // Durable Kandev turn for the initial prompt, when present
+	// ForceContextContinuation bypasses native resume and starts a new native
+	// conversation with the bounded prompt in TaskDescription. It is set only
+	// by the explicit continue_from_history recovery action.
+	ForceContextContinuation bool
+	// RecoveryAction carries a server-side explicit recovery settlement through
+	// the launch boundary. It is never accepted from the client wire request.
+	RecoveryAction string
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -543,16 +562,30 @@ type LaunchAgentRequest struct {
 	// every managed runtime value and can perform the final strict resolution.
 	EnvironmentDefinitions        []runtimeenv.Definition
 	EnvironmentResolutionRequired bool
-	ACPSessionID                  string              // ACP session ID to resume, if available
-	ModelOverride                 string              // If set, use this model instead of the profile's model
-	ExecutorType                  string              // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
-	ExecutorConfig                map[string]string   // Executor config (docker_host, git_token, etc.)
-	PreviousExecutionID           string              // Previous execution ID for runtime reconnect
-	McpMode                       string              // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
-	McpProviders                  []string            // Normalized provider capabilities attached to the task
-	McpProfile                    *mcpprofile.Context // Backend-owned base surface and additive MCP capabilities
-	IsEphemeral                   bool                // Ephemeral task (quick chat) — enables fallback workspace creation
-	WorkspacePath                 string              // Optional host folder for repo-less tasks (overrides scratch fallback)
+	ACPSessionID                  string // ACP session ID to resume, if available
+	// Durable delivery identity is persisted with the session continuity
+	// record and propagated to agentctl for generation fencing.
+	DeliveryStreamID            string
+	DeliveryIncarnationID       string
+	DeliveryHarnessGeneration   uint64
+	InitialDeliverySubmissionID string
+	// SuppressBootStatusMessage is set only for silent restart restore so
+	// startup does not create a lifecycle-only transcript turn.
+	SuppressBootStatusMessage bool
+	// BeforeAgentStart runs inside the executor before it starts the harness.
+	// It receives the final prompt after handover context is composed.
+	// The callback is never forwarded into the runtime request.
+	BeforeAgentStart      func(context.Context, string, string) error
+	ModelOverride         string              // If set, use this model instead of the profile's model
+	ExecutorType          string              // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
+	ExecutorConfig        map[string]string   // Executor config (docker_host, git_token, etc.)
+	PreviousExecutionID   string              // Previous execution ID for runtime reconnect
+	McpMode               string              // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
+	McpProviders          []string            // Normalized provider capabilities attached to the task
+	McpProfile            *mcpprofile.Context // Backend-owned base surface and additive MCP capabilities
+	IsEphemeral           bool                // Ephemeral task (quick chat) — enables fallback workspace creation
+	WorkspacePath         string              // Optional host folder for repo-less tasks (overrides scratch fallback)
+	OriginalWorkspacePath string              // First agent-visible path used for native restore policy
 
 	// IsPassthrough is the session's mode snapshot (TaskSession.IsPassthrough)
 	// at session-creation time. Forwarded to the lifecycle manager so
@@ -704,6 +737,12 @@ type LaunchOptions struct {
 	OfficeAgentProfileID string
 	ExecutorID           string
 	TurnID               string
+	// DeliverySubmissionID binds a persisted direct first message to the
+	// initial agentctl prompt.
+	DeliverySubmissionID string
+	// BeforeAgentStart binds the first-prompt identity after the execution
+	// exists. Final payload admission runs after runtime preparation.
+	BeforeAgentStart func(context.Context, string, string) error
 	// OnExecutionAdmitted runs after the launch path has identified and
 	// persisted the execution that will receive this turn, but before its
 	// process is started. Callers use this boundary to bind turn-scoped
@@ -714,7 +753,7 @@ type LaunchOptions struct {
 	// closes that ownership when delivery fails before acceptance.
 	OnInitialPromptAccepted     func(executionID string)
 	OnInitialPromptFailed       func()
-	BeforeInitialPromptDispatch func(executionID string) error
+	BeforeInitialPromptDispatch func(context.Context, string, string, []v1.MessageAttachment) error
 	Prompt                      string
 	PriorACPSession             string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID              string
@@ -1049,6 +1088,7 @@ type GitLabCredentialResolver interface {
 type CoordinatorLookup interface {
 	CoordinatorForConversationTask(ctx context.Context, taskID string) (coordinatorID string, ok bool, err error)
 	CoordinatorProfilesReady(ctx context.Context, coordinatorID string) (bool, error)
+	Phase2Enabled() bool
 }
 
 // Executor manages agent execution for tasks

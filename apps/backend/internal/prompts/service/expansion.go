@@ -18,6 +18,10 @@ import (
 // re-scan the block and append a duplicate one below it.
 const expansionMarker = "EXPANDED PROMPT REFERENCES:"
 
+const expansionInstruction = "The message above references saved prompts by @name. Use these expansions as hidden context while preserving the original @mentions."
+
+const expansionBlockHeader = expansionMarker + " " + expansionInstruction
+
 const browserPromptContextMarker = "CONTEXT PROMPTS:"
 
 // expansionBlockPrefix is the exact, literal prefix that
@@ -124,6 +128,69 @@ func (s *Service) AppendReferenceExpansionsWithContext(
 	return prompt + "\n\n" + sysprompt.Wrap(trustedContext), trustedContext
 }
 
+// AppendReferenceExpansionsToTrustedContext adds references from newly
+// composed content while retaining the exact context captured at message
+// acceptance. References already present in that context keep their accepted
+// definitions and do not trigger another lookup.
+func (s *Service) AppendReferenceExpansionsToTrustedContext(
+	ctx context.Context,
+	prompt string,
+	trustedContext string,
+	log *zap.Logger,
+) string {
+	expansions, err := s.ResolvePromptReferences(ctx, prompt)
+	if err != nil {
+		if log != nil {
+			log.Warn("failed to resolve additional prompt references", zap.Error(err))
+		}
+		return trustedContext
+	}
+	if len(expansions) == 0 {
+		return trustedContext
+	}
+
+	acceptedNames := promptReferenceExpansionNames(trustedContext)
+	additional := make([]PromptReferenceExpansion, 0, len(expansions))
+	for _, expansion := range expansions {
+		if _, exists := acceptedNames[expansion.Name]; exists {
+			continue
+		}
+		additional = append(additional, expansion)
+	}
+	if len(additional) == 0 {
+		return trustedContext
+	}
+	return mergePromptReferenceContexts(trustedContext, FormatPromptReferenceExpansions(additional))
+}
+
+func promptReferenceExpansionNames(trustedContext string) map[string]struct{} {
+	if trustedContext == "" {
+		return nil
+	}
+	names := make(map[string]struct{})
+	for _, line := range strings.Split(trustedContext, "\n") {
+		name, ok := strings.CutPrefix(line, "### @")
+		if ok && name != "" {
+			names[name] = struct{}{}
+		}
+	}
+	return names
+}
+
+func mergePromptReferenceContexts(accepted, additional string) string {
+	if accepted == "" {
+		return additional
+	}
+	if additional == "" {
+		return accepted
+	}
+	if strings.HasPrefix(accepted, expansionBlockHeader) && strings.HasPrefix(additional, expansionBlockHeader) {
+		additional = strings.TrimPrefix(additional, expansionBlockHeader)
+		additional = strings.TrimPrefix(additional, "\n\n")
+	}
+	return accepted + "\n\n" + additional
+}
+
 // FormatPromptReferenceExpansions renders resolved prompt-reference
 // expansions into the hidden system-context block appended after a prompt.
 // Both name and content are sanitized to strip any embedded
@@ -131,8 +198,7 @@ func (s *Service) AppendReferenceExpansionsWithContext(
 // surrounding <kandev-system> wrapper.
 func FormatPromptReferenceExpansions(expansions []PromptReferenceExpansion) string {
 	var b strings.Builder
-	b.WriteString(expansionMarker + " The message above references saved prompts by @name. ")
-	b.WriteString("Use these expansions as hidden context while preserving the original @mentions.")
+	b.WriteString(expansionBlockHeader)
 	for _, expansion := range expansions {
 		b.WriteString("\n\n### @")
 		b.WriteString(sanitizePromptExpansionSystemText(expansion.Name))

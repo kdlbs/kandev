@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- session WebSocket handlers share one event registry. */
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type { AppState } from "@/lib/state/store";
 import type { QueueMeta } from "@/lib/state/slices/session/types";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
@@ -23,6 +24,7 @@ import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fiel
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
+import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
 import {
   sanitizeWorkspaceRestorationDetails,
   type WorkspaceRestorationAttempt,
@@ -36,11 +38,6 @@ const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "CANCELLED",
   "FAILED",
 ]);
-
-// States that imply agentctl is up and processing (or has fully processed) input.
-// If we observe a session in one of these, agentctl must be ready even if we
-// missed the agentctl_ready WS event (e.g. it fired before our subscription).
-const AGENT_LIVE_STATES: ReadonlySet<TaskSessionState> = new Set(["RUNNING", "WAITING_FOR_INPUT"]);
 
 export function isTerminalSessionState(state: TaskSessionState | undefined): boolean {
   return !!state && TERMINAL_SESSION_STATES.has(state);
@@ -134,9 +131,19 @@ function maybePromoteAgentctlReady(
   newState: TaskSessionState | undefined,
   timestamp: string | undefined,
 ): void {
-  if (!newState || !AGENT_LIVE_STATES.has(newState)) return;
-  const current = store.getState().sessionAgentctl?.itemsBySessionId?.[sessionId];
-  if (current?.status === "ready") return;
+  const state = store.getState();
+  const current = state.sessionAgentctl?.itemsBySessionId?.[sessionId];
+  const session = state.taskSessions?.items?.[sessionId];
+  if (
+    !sessionStateConfirmsAgentctlExecutionReady(
+      newState,
+      session?.agent_execution_id,
+      current?.agentExecutionId,
+    )
+  ) {
+    return;
+  }
+  if (current?.status === "ready" && !current.startingExecutionId) return;
   store.getState().setSessionAgentctlStatus(sessionId, {
     status: "ready",
     agentExecutionId: current?.agentExecutionId,
@@ -220,9 +227,9 @@ export function isStaleSessionStateEvent(
   payloadUpdatedAt: string | undefined,
 ): boolean {
   if (!payloadUpdatedAt || !existing?.updated_at) return false;
-  const payloadTime = Date.parse(payloadUpdatedAt);
-  const existingTime = Date.parse(existing.updated_at);
-  if (Number.isNaN(payloadTime) || Number.isNaN(existingTime)) return false;
+  const payloadTime = parseStrictRfc3339Timestamp(payloadUpdatedAt);
+  const existingTime = parseStrictRfc3339Timestamp(existing.updated_at);
+  if (payloadTime === null || existingTime === null) return false;
   // Strict less-than: equal timestamps are treated as not-stale so identical
   // events upsert idempotently rather than being silently dropped.
   return payloadTime < existingTime;
@@ -236,6 +243,7 @@ export function isStaleSessionStateEvent(
 // composer can switch affordance without a refetch; cancellation_* carry the
 // backend-owned cancellation projection.
 const CARRIED_WHEN_DEFINED = [
+  "session_recovery_blocks",
   "review_status",
   "error_message",
   "is_passthrough",
@@ -927,8 +935,13 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
           .getState()
           .invalidateConfirmedConfigOptions(
             sessionId,
-            agentctl?.status === "starting" ? agentctl.agentExecutionId : undefined,
+            agentctl?.startingExecutionId ??
+              (agentctl?.status === "starting" ? agentctl.agentExecutionId : undefined),
           );
+        if (agentctl?.startingExecutionId) {
+          const { startingExecutionId: _startingExecutionId, ...status } = agentctl;
+          store.getState().setSessionAgentctlStatus(sessionId, status);
+        }
       }
 
       // A confirmed RUNNING transition clears the resume-skipped marker

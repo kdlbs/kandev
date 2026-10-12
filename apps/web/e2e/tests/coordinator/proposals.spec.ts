@@ -291,7 +291,9 @@ test.describe("Coordinator proposals", () => {
     await rejected;
 
     const toast = testPage.getByTestId("toast-message");
-    await expect(toast.getByText("Rejected. Nothing was created", { exact: false })).toBeVisible();
+    await expect(
+      toast.getByText("Rejected. Keep the reason as a standing order?", { exact: false }),
+    ).toBeVisible();
     await expect(needsYouCard).toHaveCount(0);
 
     const proposal = await apiClient.getProposal(seedData.workspaceId, coordinator.id, proposalId);

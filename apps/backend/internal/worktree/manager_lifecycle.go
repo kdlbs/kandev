@@ -2178,7 +2178,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	}
 	refreshedStartPoint := ""
 	if shouldRefreshRecreatedBranch(req, recoveredFromHead, emptyRemoteBaseRef) {
-		sourceBranch, selectedRef, prepareErr := m.prepareRecreatedBranch(ctx, existing, req)
+		sourceBranch, selectedRef, prepareErr := m.prepareRecreatedBranch(ctx, existing, req, exists)
 		if prepareErr != nil {
 			return nil, prepareErr
 		}
@@ -2301,11 +2301,21 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 }
 
 func (m *Manager) prepareRecreatedBranch(
-	ctx context.Context, existing *Worktree, req CreateRequest,
+	ctx context.Context, existing *Worktree, req CreateRequest, localBranchExists bool,
 ) (string, string, error) {
 	sourceBranch := existing.Branch
 	if req.CheckoutBranch != "" {
 		sourceBranch = req.CheckoutBranch
+	}
+	// Ordinary task branches can remain local until the user publishes them.
+	if localBranchExists && req.CheckoutBranch == "" && req.PRNumber == 0 {
+		remoteExists, err := m.branchExists(ctx, req.RepositoryPath, "refs/remotes/origin/"+sourceBranch)
+		if err != nil {
+			return sourceBranch, "", err
+		}
+		if !remoteExists {
+			return sourceBranch, existing.Branch, nil
+		}
 	}
 	selectedRef, err := m.prepareBranchFromRefreshedOrigin(
 		ctx, req.RepositoryPath, existing.Branch, sourceBranch, req.PRNumber,

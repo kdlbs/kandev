@@ -23,70 +23,17 @@ import { SessionRecoveryActionButtons, sessionRecoveryAction } from "./action-me
 import { RecoveryHistory, resolveRecoveryHistoryState } from "./action-message-recovery-history";
 import { readableFailureSummary } from "./action-message-utils";
 import {
-  lastAgentErrorStamp,
-  readLastAgentError,
-  readLastAgentErrorIncludingDismissed,
-  type LastAgentError,
-} from "@/lib/session-last-agent-error";
-import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
+  isCurrentRecoveryMessage,
+  isSessionActive,
+  currentSessionRecoveryError,
+  shouldShowRecoveryActions,
+} from "./action-message-recovery-model";
+import { GitPushErrorDismissAction } from "./git-push-error-dismiss-button";
 import {
   interruptionRecoveryKey,
   retainedTurnRecoveryKey,
   retryNoticeVisible,
 } from "./interruption-recovery-feedback";
-
-function isSessionActive(state?: TaskSessionState) {
-  return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
-}
-
-function currentSessionRecoveryError(sessionMetadata: Record<string, unknown> | null) {
-  if (!sessionMetadata) return null;
-  return readLastAgentError(sessionMetadata);
-}
-
-function isCurrentRecoveryMessage(
-  isRecoveryMessage: boolean,
-  messageRecoveryStamp: string | undefined,
-  currentRecoveryError: LastAgentError | null,
-  comment: Message,
-  sessionMetadata: Record<string, unknown> | null | undefined,
-) {
-  if (!isRecoveryMessage) return true;
-  if (messageRecoveryStamp) {
-    const latestError = readLastAgentErrorIncludingDismissed(sessionMetadata);
-    if (!latestError || latestError.dismissedAt) return false;
-    return lastAgentErrorStamp(latestError) === messageRecoveryStamp;
-  }
-  if (!currentRecoveryError) return true;
-  return legacyRecoveryMessageMatchesError(
-    comment.content,
-    comment.created_at,
-    currentRecoveryError,
-  );
-}
-
-function shouldShowRecoveryActions({
-  isRecoveryMessage,
-  isCurrentRecovery,
-  recoveryResolvedDurably,
-  agentRebooted,
-  recoveryRequested,
-  recoveryFailedAgain,
-  sessionState,
-}: {
-  isRecoveryMessage: boolean;
-  isCurrentRecovery: boolean;
-  recoveryResolvedDurably: boolean;
-  agentRebooted: boolean;
-  recoveryRequested: boolean;
-  recoveryFailedAgain: boolean;
-  sessionState?: TaskSessionState;
-}) {
-  if (!isRecoveryMessage) return true;
-  if (!isCurrentRecovery || recoveryResolvedDurably || agentRebooted) return false;
-  if (recoveryRequested && !recoveryFailedAgain) return false;
-  return !isSessionActive(sessionState);
-}
 
 export const ActionMessage = memo(function ActionMessage({ comment }: { comment: Message }) {
   const owner = useSessionComposerRecovery(comment.session_id);
@@ -122,9 +69,7 @@ const ActionMessageControls = memo(function ActionMessageControls({
 }: {
   comment: Message;
 }) {
-  // Read session state from the store instead of receiving it as a prop, so a
-  // state transition doesn't re-render every message in the list (only the
-  // rare action messages that actually depend on it).
+  // Session state is read from the store so a transition re-renders only dependent cards.
   const { t } = useTranslation();
   const { sessionState, sessionError, sessionMetadata, activeTurnId } = useActionMessageSession(
     comment.session_id,
@@ -196,6 +141,7 @@ const ActionMessageControls = memo(function ActionMessageControls({
       sessionState={sessionState}
       taskId={comment.task_id}
       sessionId={comment.session_id}
+      comment={comment}
       recoveryActionsVisible={recoveryActionsVisible}
       onRecoveryRequested={() => setRecoveryRequested(true)}
     />
@@ -209,6 +155,7 @@ function SettledActionMessage({
   sessionState,
   taskId,
   sessionId,
+  comment,
   recoveryActionsVisible,
   onRecoveryRequested,
 }: {
@@ -218,6 +165,7 @@ function SettledActionMessage({
   sessionState?: TaskSessionState;
   taskId?: string;
   sessionId?: string;
+  comment: Message;
   recoveryActionsVisible: boolean;
   onRecoveryRequested: () => void;
 }) {
@@ -245,6 +193,7 @@ function SettledActionMessage({
       sessionError={sessionError}
       taskId={taskId}
       sessionId={sessionId}
+      comment={comment}
       recoveryActionsVisible={recoveryActionsVisible}
       onRecoveryRequested={onRecoveryRequested}
     />
@@ -257,6 +206,7 @@ function SettledFailureMessage({
   sessionError,
   taskId,
   sessionId,
+  comment,
   recoveryActionsVisible,
   onRecoveryRequested,
 }: {
@@ -265,6 +215,7 @@ function SettledFailureMessage({
   sessionError?: string;
   taskId?: string;
   sessionId?: string;
+  comment: Message;
   recoveryActionsVisible: boolean;
   onRecoveryRequested: () => void;
 }) {
@@ -305,6 +256,7 @@ function SettledFailureMessage({
             actions: renderedMetadata?.actions,
             taskId,
             sessionId,
+            extraContent: <GitPushErrorDismissAction message={comment} />,
             isRecoveryMessage: metadata?.recovery_actions === true,
             errorStamp: metadata?.error_stamp ?? metadata?.recovery_stamp,
             onRecoveryRequested,
@@ -357,6 +309,7 @@ function renderSettledActionButtons({
   actions,
   taskId,
   sessionId,
+  extraContent,
   isRecoveryMessage,
   errorStamp,
   onRecoveryRequested,
@@ -364,21 +317,25 @@ function renderSettledActionButtons({
   actions?: MessageAction[];
   taskId?: string;
   sessionId?: string;
+  extraContent?: ReactElement;
   isRecoveryMessage: boolean;
   errorStamp?: string;
   onRecoveryRequested: () => void;
 }): ReactElement | null {
-  if (!actions || actions.length === 0) return null;
+  if (!actions || actions.length === 0) return extraContent ?? null;
   const hasSessionRecoveryAction = actions.some((action) => sessionRecoveryAction(action));
   if (hasSessionRecoveryAction && taskId && sessionId) {
     return (
-      <SessionRecoveryActionButtons
-        actions={actions}
-        taskId={taskId}
-        sessionId={sessionId}
-        errorStamp={errorStamp}
-        onRecoveryRequested={onRecoveryRequested}
-      />
+      <>
+        <SessionRecoveryActionButtons
+          actions={actions}
+          taskId={taskId}
+          sessionId={sessionId}
+          errorStamp={errorStamp}
+          onRecoveryRequested={onRecoveryRequested}
+        />
+        {extraContent}
+      </>
     );
   }
   return (
@@ -386,6 +343,7 @@ function renderSettledActionButtons({
       actions={actions}
       taskId={taskId}
       onRecoveryRequested={isRecoveryMessage ? onRecoveryRequested : undefined}
+      extraContent={extraContent}
     />
   );
 }
@@ -517,7 +475,6 @@ function RunningActionNotice({
     </div>
   );
 }
-
 function MissingBranchRecovery({
   metadata,
   taskId,

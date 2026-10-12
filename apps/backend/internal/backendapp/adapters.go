@@ -318,6 +318,11 @@ var _ interface {
 	PreparePassthroughRunning(sessionID string) (func(), error)
 	RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error
 } = (*lifecycleAdapter)(nil)
+var _ runtimeapi.DurableDeliveryCapabilityReader = (*lifecycleAdapter)(nil)
+var _ interface {
+	InspectDeliveryRecordEvidence(context.Context, runtimeapi.DeliveryRecordEvidenceRequest) (*runtimeapi.DeliveryRecordEvidence, error)
+	ReadDeliveryRecordSubmission(context.Context, runtimeapi.DeliveryRecordSubmissionRequest) (*runtimeapi.DeliveryRecordSubmission, error)
+} = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
 func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *logger.Logger) *lifecycleAdapter {
@@ -448,17 +453,26 @@ func buildLifecycleLaunchRequest(
 		TaskScope:                     req.TaskScope,
 		SessionSettingsPolicy:         lifecycleSessionSettingsPolicy(req.SessionSettingsPolicy),
 		RequiredNativeConversationID:  req.RequiredNativeConversationID,
+		InterruptedSubmissionID:       req.InterruptedSubmissionID,
+		InterruptedStreamID:           req.InterruptedStreamID,
+		InterruptedHarnessGeneration:  req.InterruptedHarnessGeneration,
+		CandidateExecutionID:          req.CandidateExecutionID,
+		OnExecutionAllocated:          req.OnExecutionAllocated,
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
 		WorkspaceReuseRequired:        req.WorkspaceReuseRequired,
 		AllowBranchReplacement:        req.AllowBranchReplacement,
+		ForceContextContinuation:      req.ForceContextContinuation,
+		RecoveryAction:                req.RecoveryAction,
 		TaskTitle:                     req.TaskTitle,
 		AgentProfileID:                officeProfileID,
 		ExecutionProfileID:            req.AgentProfileID,
 		StartAgent:                    req.StartAgent,
+		SuppressBootStatusMessage:     req.SuppressBootStatusMessage,
 		TurnID:                        req.TurnID,
 		WorkspacePath:                 workspacePath,
+		OriginalWorkspacePath:         req.OriginalWorkspacePath,
 		TaskDescription:               req.TaskDescription,
 		Attachments:                   convertToLifecycleAttachments(req.Attachments),
 		Env:                           req.Env,
@@ -467,6 +481,10 @@ func buildLifecycleLaunchRequest(
 		EnvironmentDefinitions:        append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...),
 		EnvironmentResolutionRequired: req.EnvironmentResolutionRequired,
 		ACPSessionID:                  req.ACPSessionID,
+		DeliveryStreamID:              req.DeliveryStreamID,
+		DeliveryIncarnationID:         req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:     req.DeliveryHarnessGeneration,
+		InitialDeliverySubmissionID:   req.InitialDeliverySubmissionID,
 		Metadata:                      req.Metadata,
 		ModelOverride:                 req.ModelOverride,
 		ExecutorType:                  req.ExecutorType,
@@ -615,6 +633,10 @@ func (a *lifecycleAdapter) SetExecutionDescription(ctx context.Context, agentExe
 
 func (a *lifecycleAdapter) SetPromptTurnID(ctx context.Context, agentExecutionID, turnID string) error {
 	return a.mgr.SetPromptTurnID(ctx, agentExecutionID, turnID)
+}
+
+func (a *lifecycleAdapter) SetInitialDeliverySubmissionID(ctx context.Context, agentExecutionID, submissionID string) error {
+	return a.mgr.SetInitialDeliverySubmissionID(ctx, agentExecutionID, submissionID)
 }
 
 // RequiresCloneURL implements executor.ExecutorTypeCapabilities by delegating to
@@ -831,7 +853,7 @@ func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, 
 // ownership check and acceptance callbacks to the lifecycle execution.
 func (a *lifecycleAdapter) RegisterInitialPromptAdmissionCallbacks(
 	executionID string,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) error {
 	return a.mgr.RegisterInitialPromptAdmissionCallbacks(
@@ -845,7 +867,7 @@ func (a *lifecycleAdapter) PromptAgentWithAdmissionCallback(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*executor.PromptResult, error) {
 	result, err := a.mgr.PromptAgentWithAdmissionCallback(
@@ -854,10 +876,42 @@ func (a *lifecycleAdapter) PromptAgentWithAdmissionCallback(
 	if err != nil {
 		return nil, err
 	}
-	return &executor.PromptResult{
-		StopReason:   result.StopReason,
-		AgentMessage: result.AgentMessage,
-	}, nil
+	return &executor.PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage}, nil
+}
+
+func (a *lifecycleAdapter) PromptAgentWithAdmissionCallbackAndSubmissionID(
+	ctx context.Context,
+	agentInstanceID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
+	onDispatched func(),
+	submissionID string,
+) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgentWithAdmissionCallbackAndSubmissionID(
+		ctx, agentInstanceID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, submissionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage}, nil
+}
+
+func (a *lifecycleAdapter) PromptAgentWithDispatchCallbackAndSubmissionID(
+	ctx context.Context,
+	agentInstanceID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+	submissionID string,
+) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgentWithDispatchCallbackAndSubmissionID(
+		ctx, agentInstanceID, prompt, attachments, dispatchOnly, onDispatched, submissionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage}, nil
 }
 
 // Compile-time guard for the steer capability. The executor selects the steer
@@ -871,7 +925,7 @@ var _ interface {
 } = (*lifecycleAdapter)(nil)
 
 var _ interface {
-	RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+	RegisterInitialPromptAdmissionCallbacks(string, func(context.Context, string, []v1.MessageAttachment) error, func(), func()) error
 	RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
 } = (*lifecycleAdapter)(nil)
 
@@ -974,6 +1028,27 @@ func (a *lifecycleAdapter) RecoverAgentPromptStream(ctx context.Context, session
 	return a.mgr.RecoverAgentPromptStream(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) RecoverAgentPromptStreamWithIdentity(
+	ctx context.Context,
+	identity lifecycle.AgentDeliveryRecoveryIdentity,
+) lifecycle.DeliveryReconciliationResult {
+	return a.mgr.RecoverAgentPromptStreamWithIdentity(ctx, identity)
+}
+
+func (a *lifecycleAdapter) InspectDeliveryRecordEvidence(
+	ctx context.Context,
+	request runtimeapi.DeliveryRecordEvidenceRequest,
+) (*runtimeapi.DeliveryRecordEvidence, error) {
+	return a.mgr.InspectDeliveryRecordEvidence(ctx, request)
+}
+
+func (a *lifecycleAdapter) ReadDeliveryRecordSubmission(
+	ctx context.Context,
+	request runtimeapi.DeliveryRecordSubmissionRequest,
+) (*runtimeapi.DeliveryRecordSubmission, error) {
+	return a.mgr.ReadDeliveryRecordSubmission(ctx, request)
+}
+
 func (a *lifecycleAdapter) BindResumeAttempt(ctx context.Context, sessionID, attemptID string) error {
 	return a.mgr.BindResumeAttempt(ctx, sessionID, attemptID)
 }
@@ -1036,6 +1111,13 @@ func (a *lifecycleAdapter) EnsureWorkspaceExecutionForSession(ctx context.Contex
 
 func (a *lifecycleAdapter) GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error) {
 	return a.mgr.GetExecutionIDForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) DurableDeliveryCapabilityForExecution(
+	ctx context.Context,
+	executionID string,
+) (runtimeapi.DurableDeliveryCapability, bool) {
+	return a.mgr.DurableDeliveryCapabilityForExecution(ctx, executionID)
 }
 
 func (a *lifecycleAdapter) ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference {
@@ -1110,6 +1192,12 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 // and this lookup must never lazily create an execution.
 func (a *lifecycleAdapter) HasLiveExecution(sessionID string) bool {
 	return a.mgr.HasLiveAgentExecution(sessionID)
+}
+
+// HasPendingRemoteRecovery reports whether the exact remote execution owner
+// still has retryable lifecycle recovery pending.
+func (a *lifecycleAdapter) HasPendingRemoteRecovery(sessionID, executionID string) bool {
+	return a.mgr.HasPendingRemoteRecovery(sessionID, executionID)
 }
 
 // GetGitLog retrieves the git log for a session from baseCommit to HEAD.
@@ -1198,11 +1286,50 @@ type orchestratorWrapper struct {
 }
 
 var _ taskhandlers.AtomicQueuedPromptCoordinator = (*orchestratorWrapper)(nil)
+var _ orchestrator.DeliverySubmissionPromptStarter = (*orchestratorWrapper)(nil)
+var _ orchestrator.DirectPromptStarterWithDeliverySubmission = (*orchestratorWrapper)(nil)
 
 // PromptTask forwards directly to the orchestrator service.
 // Attachments (images) are passed through to the agent.
 func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {
 	return w.svc.PromptTask(ctx, taskID, taskSessionID, prompt, model, planMode, attachments, dispatchOnly)
+}
+
+// PromptTaskWithPromptContext forwards an accepted direct message together
+// with its server-owned reference snapshot and validated entity references.
+func (w *orchestratorWrapper) PromptTaskWithPromptContext(
+	ctx context.Context,
+	taskID, taskSessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+) (*orchestrator.PromptResult, error) {
+	return w.svc.PromptTaskWithPromptContext(
+		ctx, taskID, taskSessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, dispatchOnly,
+	)
+}
+
+// PromptTaskWithPromptContextAndDispatchOwnership lets the accepted first
+// prompt pass the session's in-memory first-boundary admission gate.
+func (w *orchestratorWrapper) PromptTaskWithPromptContextAndDispatchOwnership(
+	ctx context.Context,
+	taskID, taskSessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+	initialTaskBriefDispatchOwner bool,
+) (*orchestrator.PromptResult, error) {
+	return w.svc.PromptTaskWithPromptContextAndDispatchOwnership(
+		ctx, taskID, taskSessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, dispatchOnly, initialTaskBriefDispatchOwner,
+	)
 }
 
 // ResumeTaskSession forwards to the orchestrator service, discarding the TaskExecution result.
@@ -1221,6 +1348,45 @@ func (w *orchestratorWrapper) HasActiveSessionRecoveryForFailure(ctx context.Con
 // provider acceptance for the handler's internal retry.
 func (w *orchestratorWrapper) ResumeTaskSessionAndPrompt(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
 	return w.svc.ResumeTaskSessionAndPrompt(ctx, taskID, taskSessionID, prompt, model, planMode, attachments)
+}
+
+// ResumeTaskSessionAndPromptWithPromptContext preserves the accepted direct
+// prompt context through the handler's compound recovery retry.
+func (w *orchestratorWrapper) ResumeTaskSessionAndPromptWithPromptContext(
+	ctx context.Context,
+	taskID, taskSessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	initialTaskBriefDispatchOwner bool,
+	submissionIDs ...string,
+) (*orchestrator.PromptResult, error) {
+	return w.svc.ResumeTaskSessionAndPromptWithPromptContext(
+		ctx, taskID, taskSessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner, submissionIDs...,
+	)
+}
+
+func (w *orchestratorWrapper) WithInitialTaskBriefAdmission(
+	ctx context.Context,
+	sessionID string,
+	fn func(context.Context) error,
+) error {
+	return w.svc.WithInitialTaskBriefAdmission(ctx, sessionID, fn)
+}
+
+func (w *orchestratorWrapper) MarkInitialTaskBriefDispatchPending(sessionID string) {
+	w.svc.MarkInitialTaskBriefDispatchPending(sessionID)
+}
+
+func (w *orchestratorWrapper) InitialTaskBriefDispatchPending(sessionID string) bool {
+	return w.svc.InitialTaskBriefDispatchPending(sessionID)
+}
+
+func (w *orchestratorWrapper) CompleteInitialTaskBriefDispatch(ctx context.Context, taskID, sessionID string) {
+	w.svc.CompleteInitialTaskBriefDispatch(ctx, taskID, sessionID)
 }
 
 // StartCreatedSession forwards to the orchestrator service, discarding the TaskExecution result.
@@ -1290,6 +1456,16 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuida
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
 		promptReferencesPrepared, canvasGuidanceResolved, includeCanvasGuidance,
+	)
+}
+
+func (w *orchestratorWrapper) StartCreatedSessionWithDeliverySubmission(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	options orchestrator.DirectPromptStartOptions,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithDeliverySubmission(
+		ctx, taskID, sessionID, agentProfileID, prompt, options,
 	)
 }
 
@@ -1842,6 +2018,13 @@ func (a *messageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context,
 // AppendAgentMessage appends additional content to an existing streaming message.
 func (a *messageCreatorAdapter) AppendAgentMessage(ctx context.Context, messageID, additionalContent string) error {
 	return a.svc.AppendMessageContent(ctx, messageID, additionalContent)
+}
+
+// PublishMessageEvent announces a message that was already persisted by a
+// canonical projector. It is used by the orchestrator's durable streaming
+// path to notify connected clients without repeating the message write.
+func (a *messageCreatorAdapter) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
+	return a.svc.PublishMessageEvent(ctx, eventType, message)
 }
 
 // CreateThinkingMessageStreaming creates a new thinking message with a pre-generated ID.

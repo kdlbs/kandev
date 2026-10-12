@@ -48,7 +48,7 @@ test.describe("Coordinator missing/empty/failure states", () => {
         "href",
         `/settings/workspaces/${workspace.id}/coordinators`,
       );
-      await expect(testPage.getByTestId("coordinators-open-list")).toHaveAttribute(
+      await expect(testPage.getByTestId("coordinators-open-list-body")).toHaveAttribute(
         "href",
         linkToCoordinator(workspace.id),
       );

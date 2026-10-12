@@ -314,7 +314,7 @@ func TestTransientTurnFailureDoesNotOverrideRuntimeDisconnect(t *testing.T) {
 	t.Run("disconnect before error event", func(t *testing.T) {
 		fixture := readyForRetainedTurnFailure(t)
 		execution := fixture.execution
-		fixture.manager.handleStreamDisconnectWithAttempt(execution, errors.New("stream closed"), 1, "")
+		fixture.manager.handleStreamDisconnectWithAttempt(execution, errors.New("stream closed"), 1, "", nil)
 
 		require.True(t, fixture.manager.handleCompleteEvent(execution, retainedCapacityEvent(execution)))
 		require.Equal(t, v1.AgentStatusFailed, execution.Status)
@@ -328,7 +328,7 @@ func TestTransientTurnFailureDoesNotOverrideRuntimeDisconnect(t *testing.T) {
 		execution := fixture.execution
 		require.True(t, fixture.manager.handleCompleteEvent(execution, retainedCapacityEvent(execution)))
 
-		fixture.manager.handleStreamDisconnectWithAttempt(execution, errors.New("stream closed"), 1, "")
+		fixture.manager.handleStreamDisconnectWithAttempt(execution, errors.New("stream closed"), 1, "", nil)
 		require.Equal(t, v1.AgentStatusFailed, execution.Status)
 	})
 }

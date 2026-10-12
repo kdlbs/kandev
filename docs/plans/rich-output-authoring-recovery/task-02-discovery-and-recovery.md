@@ -38,11 +38,11 @@ the repaired validator, recording failures as clearly as successes.
   local-example validity and actual task/Office registration. Keep existing
   650-rune tool, 750-rune Office and 4404-byte task budgets.
 - Run the plan's four natural trials plus two controlled-recovery trials in
-  `/tmp/kandev-rich-ui-k921jmkz`. Update only that owned instance from current
+  the owned isolated test environment. Update only that instance from current
   binaries/assets. Confirm exact models with runtime metadata; preserve fixed
   fictional repository data and the unmodified natural prompt.
 - Browser-check each successful natural report with the existing desktop/phone
-  helper. Record every trial's task link, prompt, model, calls/errors, accepted
+  helper. Record every trial's task ID, prompt, model, calls/errors, accepted
   components and screenshot receipt; reconcile owning docs and earlier plans
   without deleting their historical failed attempts or passing renderer checks.
 
@@ -76,7 +76,6 @@ Run the deterministic commands from repository root:
 (cd apps/backend && golangci-lint run ./internal/mcp/server/...)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
-node /tmp/kandev-rich-ui-k921jmkz/docs-coverage.cjs
 git diff --check
 ```
 
@@ -84,17 +83,11 @@ Before generating artifacts, run new meaningful catalog/generator tests RED.
 After generation, run the block GREEN. If scripts or product copy change,
 include their specific lint/i18n checks rather than skipping affected checks.
 
-Real-model commands require the owned demo from this session. Inspect its
-manifest, `restart-current.py`, `seed-evidence.py`, `seed-evidence-sol.py` and
-`browser-evidence.cjs` before adapting them. At implementation time, write a
-private bounded trial driver at `/tmp/kandev-rich-ui-k921jmkz/run-recovery-trials.py`
-for the six trials defined in the plan, then run:
-
-```bash
-python3 /tmp/kandev-rich-ui-k921jmkz/restart-current.py
-python3 /tmp/kandev-rich-ui-k921jmkz/run-recovery-trials.py
-node /tmp/kandev-rich-ui-k921jmkz/browser-evidence.cjs
-```
+Real-model verification used a privately retained bounded trial driver and
+browser helper in the owned isolated environment. The six-trial protocol and
+unchanged prompt are recorded in the plan. Supporting command receipts,
+trial histories and captures are privately retained, rather than portable
+repository scripts.
 
 The driver must wait for each isolated conversation's terminal waiting state,
 retain actual prompts and all pages of history, assert exact model routing and
@@ -160,10 +153,10 @@ Runtime build: `make build-kandev build-agentctl` passed with the task-private G
 cache. The unchanged frontend renderer/assets were retained because this repair
 changes producer diagnostics and build-time MCP metadata, with no browser
 runtime modules or presentation changes. Rebuilt both native binaries, then
-`python3 /tmp/kandev-rich-ui-k921jmkz/restart-current.py` refreshed only the owned
-lab. Main :9998/PID 27220 remained unchanged. Lab PID is now 2192358.
+the privately retained restart helper refreshed only the owned lab. Main
+:9998 remained unchanged. The lab has since been shut down at the user’s request.
 
-`python3 /tmp/kandev-rich-ui-k921jmkz/run-recovery-trials.py` completed all six
+The privately retained trial driver completed all six
 planned trials exactly once. Actual routing confirms the requested model in
 each conversation; fixture SHA-256 values remained unchanged. Every natural
 trial composed Stack, Table, StatusList and Callout with zero schema rejections.
@@ -173,27 +166,21 @@ and label, then succeeded on the next call while preserving titles, label and
 cell. Raw histories and actual prompts are retained privately in
 `recovery-trials.json` and the per-trial JSON files.
 
-| Actual model | Trial | Rejections | Successes | Link |
+| Actual model | Trial | Rejections | Successes | Task ID |
 | --- | --- | --- | --- | --- |
-| gpt-6-sol | natural | 0 | 1 | [Example](http://100.105.155.17:48479/t/43545cb3-ae4f-481f-a75c-584988817256) |
-| gpt-6-sol | natural | 0 | 1 | [Example](http://100.105.155.17:48479/t/0c901d9e-1111-4f75-8c56-804866bc0732) |
-| gpt-6-luna | natural | 0 | 1 | [Example](http://100.105.155.17:48479/t/39df507f-01a3-463c-bb90-c64a3b01b1f6) |
-| gpt-6-luna | natural | 0 | 1 | [Example](http://100.105.155.17:48479/t/8e080698-b97e-40ed-a577-b301912de242) |
-| gpt-6-sol | controlled | 1 | 1 | [Example](http://100.105.155.17:48479/t/4120e854-361b-4904-8b56-71913df3f25e) |
-| gpt-6-luna | controlled | 1 | 1 | [Example](http://100.105.155.17:48479/t/9c3a7fe3-0a95-4595-94cf-e20e72975b88) |
+| gpt-6-sol | natural | 0 | 1 | `43545cb3-ae4f-481f-a75c-584988817256` |
+| gpt-6-sol | natural | 0 | 1 | `0c901d9e-1111-4f75-8c56-804866bc0732` |
+| gpt-6-luna | natural | 0 | 1 | `39df507f-01a3-463c-bb90-c64a3b01b1f6` |
+| gpt-6-luna | natural | 0 | 1 | `8e080698-b97e-40ed-a577-b301912de242` |
+| gpt-6-sol | controlled | 1 | 1 | `4120e854-361b-4904-8b56-71913df3f25e` |
+| gpt-6-luna | controlled | 1 | 1 | `9c3a7fe3-0a95-4595-94cf-e20e72975b88` |
 
 The two controlled rejections are intentional tests, not natural-authoring
 failures. These six observed runs pass the package gate; they do not establish
 universal provider reliability or prove which schema annotations the model saw.
 
-Browser invocations (each passed desktop and phone):
-
-```bash
-node /tmp/kandev-rich-ui-k921jmkz/browser-evidence.cjs recovery-natural-gpt-6-sol-1-trial.json
-node /tmp/kandev-rich-ui-k921jmkz/browser-evidence.cjs recovery-natural-gpt-6-sol-2-trial.json
-node /tmp/kandev-rich-ui-k921jmkz/browser-evidence.cjs recovery-natural-gpt-6-luna-1-trial.json
-node /tmp/kandev-rich-ui-k921jmkz/browser-evidence.cjs recovery-natural-gpt-6-luna-2-trial.json
-```
+The privately retained browser helper checked all four natural trials on
+desktop and phone.
 
 Each invocation checked report component selection, every literal table cell,
 all desktop headers and phone row labels, note semantics, document width and
@@ -201,10 +188,9 @@ page errors. Eight viewport checks passed with no page errors/phone overflow.
 Screenshots and per-trial `*-browser.json` receipts remain in the private lab;
 representative desktop/phone screenshots were inspected.
 
-Direct Tailscale URL: http://100.105.155.17:48479 . Shutdown command:
-`/tmp/kandev-rich-ui-k921jmkz/stop.sh`. User demo remains running. No delegation,
-commit, push or PR publication occurred.
-
+The disposable environment used direct Tailscale access and was subsequently
+shut down at the user's request. Main :9998 remained unchanged. Supporting
+evidence is privately retained; no copied credentials remain in the lab.
 
 Follow-up fixture correction (2026-10-12): the status-color verification added
 an existing full-consumer suite to the run and exposed eight failures caused by

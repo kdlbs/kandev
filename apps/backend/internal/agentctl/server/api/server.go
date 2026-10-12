@@ -131,6 +131,15 @@ func (s *Server) setupRoutes() {
 		// Agent stream: bidirectional WebSocket for agent events, MCP, and agent operations
 		// (initialize, session/new, session/load, prompt, cancel, stderr, permissions/respond)
 		api.GET("/agent/stream", s.handleAgentStreamWS)
+		api.GET("/agent/session", s.handleAgentSessionAssociation)
+		api.GET("/agent/delivery", s.handleDeliveryStatus)
+		api.POST("/agent/submissions", s.handleDeliverySubmission)
+		api.GET("/agent/submissions", s.handleDeliverySubmissions)
+		api.GET("/agent/submissions/:id", s.handleDeliverySubmissionByID)
+		api.POST("/agent/submissions/:id/cancel", s.handleDeliverySubmissionCancel)
+		api.POST("/agent/submissions/:id/retire", s.handleDeliverySubmissionRetire)
+		api.GET("/agent/delivery/stream", s.handleDeliveryReplay)
+		api.POST("/agent/delivery/stream/ack", s.handleDeliveryAcknowledgement)
 		api.GET("/lsp/stream", s.handleLSPStreamWS)
 
 		// Unified workspace stream (git status, files, shell)
@@ -399,15 +408,17 @@ func (s *Server) handleSetPluginTools(c *gin.Context) {
 
 // Status response
 type StatusResponse struct {
-	AgentStatus string                 `json:"agent_status"`
-	ProcessInfo map[string]interface{} `json:"process_info"`
-	Uptime      string                 `json:"uptime,omitempty"`
+	DeliveryHealth process.DeliveryHealth `json:"delivery_health"`
+	AgentStatus    string                 `json:"agent_status"`
+	ProcessInfo    map[string]interface{} `json:"process_info"`
+	Uptime         string                 `json:"uptime,omitempty"`
 }
 
 func (s *Server) handleStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, StatusResponse{
-		AgentStatus: string(s.procMgr.Status()),
-		ProcessInfo: s.procMgr.GetProcessInfo(),
+		AgentStatus:    string(s.procMgr.Status()),
+		DeliveryHealth: s.procMgr.DeliveryHealth(),
+		ProcessInfo:    s.procMgr.GetProcessInfo(),
 	})
 }
 

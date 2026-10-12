@@ -4,6 +4,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ type Repository struct {
 	log                     *logger.Logger
 	migrate                 *db.MigrateLogger
 	queuePurgeMu            sync.RWMutex
+	clarificationAdmission  clarificationReadAdmission
 	queuePurger             func(context.Context, string)
 	queuePurgePrepare       func(context.Context, string)
 	queuePurgeNotify        func(context.Context, string)
@@ -52,6 +54,12 @@ type Repository struct {
 	// tests prove that a failed cleanup leaves the source tables and legacy
 	// tables unchanged for a retry.
 	failConversationJournalCleanupAfter string
+	// agentDeliveryRetentionFailpoint injects transaction failures at durable
+	// retention write boundaries for rollback tests.
+	agentDeliveryRetentionFailpoint func(string) error
+	agentDeliveryReloadStatements   agentDeliveryReloadStatementCache
+	agentDeliveryOwnerStatements    agentDeliveryOwnerStatementCache
+	agentDeliveryReceiptStatements  agentDeliveryReceiptStatementCache
 	// failUsageEventAttempts/failUsageEventErr are a test-only failpoint for
 	// CreateTaskUsageEvent's AC-32 transient-retry loop: while
 	// failUsageEventAttempts > 0, insertUsageEventAndRollup returns
@@ -92,8 +100,15 @@ type Repository struct {
 	// without touching the database, and decrements the counter. Same
 	// rationale as failParticipantSeatReconcileAttempts above.
 	failAgentErrorReconcileAttempts int
-	failUsageEventRollupAttempts    int
-	failUsageEventRollupErr         error
+	// failOnCommentReconcileAttempts is a test-only failpoint for the
+	// on_comment fan-out reconciler's bounded retry loop
+	// (REQ-OFFICE-GATE-COMMENT-004): while > 0, tryHealOnCommentRow reports a
+	// synthetic concurrent-modification retry without touching the database,
+	// and decrements the counter. Same rationale as
+	// failAgentErrorReconcileAttempts above.
+	failOnCommentReconcileAttempts int
+	failUsageEventRollupAttempts   int
+	failUsageEventRollupErr        error
 	// usageEventPreRollupHook is a test-only synchronization seam, called (if
 	// set) inside insertUsageEventAndRollup's transaction at the same point as
 	// the failUsageEventRollup* failpoint - after the ledger row insert
@@ -304,10 +319,14 @@ func newRepositoryContext(ctx context.Context, writer, reader *sqlx.DB, log *log
 
 // Close closes the database connection
 func (r *Repository) Close() error {
+	statementErr := errors.Join(r.closeAgentDeliveryReloadStatement(), r.closeAgentDeliveryOwnerStatements(), r.closeAgentDeliveryReceiptStatement())
 	if !r.ownsDB {
-		return nil
+		return statementErr
 	}
-	return r.db.Close()
+	if err := r.db.Close(); err != nil {
+		return errors.Join(statementErr, err)
+	}
+	return statementErr
 }
 
 // DB returns the underlying sql.DB instance for shared access

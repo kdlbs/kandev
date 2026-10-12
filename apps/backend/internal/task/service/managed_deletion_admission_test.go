@@ -349,14 +349,19 @@ func TestManagedDeletionAdmissionOwnershipRecovery(t *testing.T) {
 				} else {
 					_, err = repos[0].PrepareManagedDeletion(ctx, *claim, fmt.Sprintf(`{"workspace_id":"admission-workspace","sessions":[{"id":%q,"task_id":%q}]}`, first.SessionID, first.TaskID))
 					require.NoError(t, err)
+					primary, err := repos[0].GetTaskSession(ctx, first.SessionID)
+					require.NoError(t, err)
+					seedConversationDeliveryEvidence(t, repos[0], primary)
 					_, err = repos[0].FinalizeManagedDeletion(ctx, *claim)
 					require.NoError(t, err)
+					assertManagedDeletionRetirementJob(t, ctx, repos[0], primary)
 					events.ClearEvents()
 					replayErr := lifecycle.DeleteManagedConversationTask(ctx, request)
 					var outcome *ManagedDeletionError
 					require.ErrorAs(t, replayErr, &outcome)
 					require.Equal(t, "committed", outcome.Outcome)
 					require.Empty(t, events.GetPublishedEvents())
+					assertManagedDeletionRetirementJob(t, ctx, repos[0], primary)
 				}
 				return
 			}
@@ -420,6 +425,16 @@ func TestManagedDeletionAdmissionOwnershipRecovery(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func assertManagedDeletionRetirementJob(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, session *models.TaskSession) {
+	t.Helper()
+	var jobs int
+	err := repo.DB().QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM agent_delivery_cleanup_jobs WHERE session_id = ? AND incarnation_id = ?`,
+		session.ID, session.QueueIncarnationID).Scan(&jobs)
+	require.NoError(t, err)
+	require.Equal(t, 1, jobs, "managed finalization must atomically retain one delivery cleanup job")
 }
 
 // Observe the real due query reached only after startup prepared reconciliation.

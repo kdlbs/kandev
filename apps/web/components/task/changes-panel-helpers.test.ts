@@ -188,6 +188,23 @@ describe("selectPRFilesForReviewProgress", () => {
 });
 
 describe("computeReviewProgress PR files", () => {
+  it("keeps retained files in the total without certifying their old patch", () => {
+    const key = reviewFileKey({ path: "src/retained.ts" });
+    const retained = progressLocalFile("src/retained.ts", {
+      diff: "previous patch",
+      diff_state: "pending",
+      display_stale: true,
+    });
+
+    expect(
+      computeReviewProgress(
+        [retained],
+        { files: { "src/retained.ts": { diff: "previous patch" } } },
+        new Map([[key, { reviewed: true, diffHash: hashDiff("previous patch") }]]),
+      ),
+    ).toEqual({ reviewedCount: 0, totalFileCount: 1 });
+  });
+
   it("does not count a pending diff as reviewable progress", () => {
     const pending = progressLocalFile("src/pending.ts", { diff_state: "pending" });
     const key = reviewFileKey({ path: pending.path });

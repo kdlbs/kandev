@@ -144,7 +144,9 @@ describe("SidebarFilterPopover task-row editor", () => {
     await waitFor(() => expect(document.activeElement).toBe(deleteButton));
     expect(state.deleteSidebarView).not.toHaveBeenCalled();
   });
+});
 
+describe("SidebarFilterPopover editor state", () => {
   it("keeps view settings collapsed until the user opens them", () => {
     render(
       <SidebarFilterPopover
@@ -174,6 +176,42 @@ describe("SidebarFilterPopover task-row editor", () => {
     fireEvent.click(screen.getByTestId("task-row-settings-toggle"));
     expect(screen.getByTestId("task-row-details-toggle")).toBeTruthy();
     expect(state.updateSidebarDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("remounts reorder gestures when the active view changes with the same sort values", () => {
+    const sort = {
+      key: "running" as const,
+      direction: "desc" as const,
+      thenBy: [
+        { key: "lastActivityAt" as const, direction: "desc" as const },
+        { key: "createdAt" as const, direction: "desc" as const },
+      ],
+    };
+    state.sidebarViews.views = [
+      { ...VIEW, sort },
+      { ...SECOND_VIEW, sort },
+    ];
+    state.sidebarViews.activeViewId = VIEW.id;
+    const props = {
+      trigger: <button type="button">Open</button>,
+      open: true,
+      onOpenChange: vi.fn(),
+    };
+    const { rerender } = render(<SidebarFilterPopover {...props} />);
+    fireEvent.click(screen.getByTestId("sidebar-sort-settings-toggle"));
+    const originalHandle = screen.getByTestId("sort-rule-handle-0");
+    originalHandle.focus();
+    fireEvent.keyDown(originalHandle, { key: " " });
+    fireEvent.keyDown(originalHandle, { key: "ArrowDown" });
+
+    state.sidebarViews.activeViewId = SECOND_VIEW.id;
+    rerender(<SidebarFilterPopover {...props} />);
+
+    const replacementHandle = screen.getByTestId("sort-rule-handle-0");
+    expect(originalHandle.isConnected).toBe(false);
+    expect(replacementHandle).not.toBe(originalHandle);
+    fireEvent.keyDown(originalHandle, { key: " " });
+    expect(state.updateSidebarDraft).not.toHaveBeenCalled();
   });
 
   it("gives each collapsed view setting the same bottom separator", () => {

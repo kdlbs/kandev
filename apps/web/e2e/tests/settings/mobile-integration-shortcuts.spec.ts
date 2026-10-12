@@ -63,6 +63,12 @@ test("configures integration hotkeys through phone settings and keeps controls c
     await testPage.reload();
     await expect(recorder).toContainText("G");
     await testPage.goto("/");
+    const navigationStatus = testPage.getByRole("button", {
+      name: "Open navigation menu",
+      exact: true,
+    });
+    await expect(navigationStatus).toBeVisible();
+    await navigationStatus.focus();
     await testPage.keyboard.press(INTEGRATION_CHORD);
     await expect(testPage).toHaveURL(/\/github$/);
     await testPage.goto(INTEGRATION_SHORTCUTS_SETTINGS_PATH);

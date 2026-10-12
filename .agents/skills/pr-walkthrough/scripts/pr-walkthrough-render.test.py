@@ -35,6 +35,8 @@ class PRWalkthroughRenderTest(unittest.TestCase):
             for item in category.get("items", [])
         }
         manifest_paths.update(change["file"] for change in self.data["changes"])
+        manifest_paths.update(flag["file"] for flag in self.data["feature_flags"]["flags"])
+        manifest_paths.update(item["file"] for item in self.data["feature_flags"]["off_ux"]["items"])
         manifest = {
             "files": [{"path": path, "status": "M"} for path in sorted(manifest_paths)]
         }
@@ -237,6 +239,13 @@ class PRWalkthroughRenderTest(unittest.TestCase):
         result = self.run_render(data)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("changed file in the prepared manifest", result.stderr)
+
+    def test_managed_renderer_requires_feature_flag_assessment(self) -> None:
+        data = json.loads(json.dumps(self.data))
+        data.pop("feature_flags", None)
+        result = self.run_render(data)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("feature_flags is required for new walkthroughs", result.stderr)
 
 
 if __name__ == "__main__":

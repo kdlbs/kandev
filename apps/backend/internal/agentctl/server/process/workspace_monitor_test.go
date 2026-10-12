@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestWorkspaceTracker_StopsWhenWorkDirDeleted(t *testing.T) {
+func TestWorkspaceTracker_StopsWhenWorkDirRemoved(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows refuses to unlink a directory while a process holds a handle inside it; the scenario this test exercises cannot occur on Windows")
 	}
@@ -20,19 +20,26 @@ func TestWorkspaceTracker_StopsWhenWorkDirDeleted(t *testing.T) {
 
 	log := newTestLogger(t)
 	wt := NewWorkspaceTracker(repoDir, log)
+	defer wt.Stop()
+	wt.filePollInterval = 100 * time.Millisecond
 	wt.gitPollInterval = 100 * time.Millisecond
-	// Default mode is slow (30s) — set fast so the test exercises real polling
-	// cadence rather than sitting on a 30s timer.
+	// Exercise both polling loops at the configured fast cadence.
 	wt.SetPollMode(PollModeFast)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	wt.Start(context.Background())
+	select {
+	case <-wt.initialScanDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("workspace tracker did not complete its initial scan")
+	}
 
-	wt.Start(ctx)
-
-	// Delete the work directory to simulate worktree removal
-	if err := os.RemoveAll(repoDir); err != nil {
-		t.Fatalf("failed to remove workdir: %v", err)
+	// Remove the watched path atomically; delete its contents after Git stops.
+	removedDir := filepath.Join(t.TempDir(), "removed-worktree")
+	if err := os.Rename(repoDir, removedDir); err != nil {
+		t.Fatalf("failed to remove watched workdir: %v", err)
+	}
+	if _, err := os.Stat(repoDir); !os.IsNotExist(err) {
+		t.Fatalf("watched workdir still exists after removal: %v", err)
 	}
 
 	// Both monitorLoop and pollGitChanges should exit within a few poll cycles
@@ -46,7 +53,7 @@ func TestWorkspaceTracker_StopsWhenWorkDirDeleted(t *testing.T) {
 	case <-done:
 		// Both goroutines exited — success
 	case <-time.After(5 * time.Second):
-		t.Fatal("workspace tracker goroutines did not stop after workdir was deleted")
+		t.Fatal("workspace tracker goroutines did not stop after workdir was removed")
 	}
 }
 

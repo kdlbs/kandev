@@ -5,6 +5,53 @@ import { buildRecoveryCardModel } from "./session-bootstrap-recovery-model";
 
 const translate = ((key: string) => key) as unknown as TFunction;
 
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.12
+it("shows cleanup guidance from durable evidence after reload", () => {
+  const model = buildRecoveryCardModel({
+    error: error([
+      { operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true } as NonNullable<
+        TaskStatusSummaryActiveError["causes"]
+      >[number],
+    ]),
+    manualFailure: null,
+    manualError: null,
+    recoveryNotice: null,
+    translate,
+  });
+  expect(model).toMatchObject({
+    primaryCause: { code: "runtime_cleanup_failed" },
+    titleKey: "task:sessionRuntimeCleanupFailedTitle",
+    summary: "task:sessionRuntimeCleanupFailedBody",
+    noPromptSent: true,
+  });
+});
+
+it("keeps request-local cleanup and separate workspace restore causes", () => {
+  const model = buildRecoveryCardModel({
+    error: error([]),
+    automaticRecovery: {
+      resumptionState: "error",
+      error: "Resume and restore failed",
+      notice: null,
+      recoveryFailure: {
+        outcome: "recovery_failed",
+        resumeError: "Safe cleanup failure",
+        resumeCauses: [
+          { operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true },
+        ],
+        restoreError: "Workspace is unavailable",
+      } as never,
+      resumeSession: async () => false,
+    },
+    manualFailure: null,
+    manualError: null,
+    recoveryNotice: null,
+    translate,
+  });
+  expect(model.primaryCause?.code).toBe("runtime_cleanup_failed");
+  expect(model.causes.some((cause) => cause.operation === "restore_workspace")).toBe(true);
+});
+
 function error(
   causes: NonNullable<TaskStatusSummaryActiveError["causes"]>,
   stamp = "failure-1",
@@ -79,6 +126,7 @@ describe("buildRecoveryCardModel", () => {
       manualFailure: null,
       manualError: null,
       recoveryNotice: null,
+      recoveryNoticeKind: "workspace_read_only",
       translate,
       agentDisplayName: "Auggie",
     });
@@ -165,6 +213,32 @@ it("does not claim the configured model when the attempted selector is unsafe", 
 });
 
 describe("buildRecoveryCardModel request-local failures", () => {
+  it("presents inspection contention as a retry notice, not a read-only outcome", () => {
+    const model = buildRecoveryCardModel({
+      error: error([]),
+      automaticRecovery: {
+        resumptionState: "error",
+        error: null,
+        notice: "workspace is still being checked",
+        noticeKind: "inspection_busy",
+        recoveryFailure: null,
+        resumeSession: async () => false,
+      },
+      manualFailure: null,
+      manualError: null,
+      recoveryNotice: null,
+      recoveryNoticeKind: "inspection_busy",
+      translate,
+    });
+
+    expect(model).toMatchObject({
+      displayNotice: "workspace is still being checked",
+      isReadOnly: false,
+      hasRecoveryFailure: false,
+      titleKey: "task:sessionBootstrapRecoveryTitle",
+    });
+  });
+
   it("ignores a request-local failure owned by an earlier error stamp", () => {
     const model = buildRecoveryCardModel({
       error: error(

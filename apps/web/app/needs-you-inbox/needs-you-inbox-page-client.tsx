@@ -225,7 +225,7 @@ function InboxHistoryTabContent({ controller }: { controller: InboxHistoryContro
 // carries the phone nav trigger (design-03#D4).
 export function NeedsYouInboxPageClient() {
   const { t } = useTranslation();
-  const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
+  const requestRetry = useAppStore((s) => s.requestNeedsYouInboxRetry);
   const needsYouCount = useAppStore(selectNeedsYouInboxCount);
   const needsYouHasMore = useAppStore(selectNeedsYouInboxHasMore);
   const failedCount = useAppStore(selectFailedInboxCount);
@@ -248,7 +248,7 @@ export function NeedsYouInboxPageClient() {
   // which tab is active), never from the Needs-you slice or its refresh tick.
   const historyController = useInboxHistoryController();
 
-  const retry = useCallback(() => bumpRefreshTick(), [bumpRefreshTick]);
+  const retry = useCallback(() => requestRetry(), [requestRetry]);
   const selectTab = useCallback(
     (tab: InboxTab) => router.replace(buildInboxTabHref(pathname, tab, searchParams)),
     [router, pathname, searchParams],

@@ -55,6 +55,11 @@ async function switchSurfaceWorkspace(
     await page.getByTestId(`task-card-${context.anchor.id}`).click();
   }
   await expect(page).toHaveURL(new RegExp(`/t/${context.anchor.id}$`));
+  if (mobile) {
+    await expect
+      .poll(() => page.evaluate(() => getComputedStyle(document.body).pointerEvents))
+      .not.toBe("none");
+  }
   return surface(page, mobile);
 }
 

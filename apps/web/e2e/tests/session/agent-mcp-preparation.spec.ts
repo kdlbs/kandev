@@ -5,7 +5,11 @@ import {
   createMcpRecoveryFixture,
   destroyMcpRecoveryTerminals,
   E2E_MCP_SERVER_ID,
+  E2E_MCP_SECOND_SERVER_ID,
+  E2E_MCP_LEGACY_ERROR,
+  E2E_MCP_LEGACY_OUTPUT,
   installAgentMcpRecoveryRoutes,
+  seedMcpDiagnosticPreparation,
 } from "../../helpers/agent-mcp-preparation";
 
 test.describe("Agent MCP preparation recovery", () => {
@@ -96,6 +100,135 @@ test.describe("Agent MCP preparation recovery", () => {
       const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
       expect(sessions.map((item) => item.id)).toContain(fixture.sessionId);
       expect(sessions).toHaveLength(1);
+    } finally {
+      await destroyMcpRecoveryTerminals(apiClient, fixture);
+    }
+  });
+
+  test("retains command details through reload and preserves another server after busy and ready retries", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    test.setTimeout(90_000);
+    const fixture = await createMcpRecoveryFixture(
+      apiClient,
+      seedData,
+      "Agent MCP Diagnostic Recovery",
+    );
+    await seedMcpDiagnosticPreparation(apiClient, seedData, fixture);
+    const requests = await installAgentMcpRecoveryRoutes(testPage, {
+      sessionId: fixture.sessionId,
+      taskEnvironmentId: fixture.taskEnvironmentId,
+      terminalId: fixture.authenticationTerminalId,
+      retryResponses: [
+        {
+          status: 409,
+          body: {
+            error: "The agent is using this session.",
+            error_code: "mcp_recovery_session_busy",
+          },
+        },
+        {
+          status: 200,
+          body: {
+            provider_id: "cursor",
+            server_id: E2E_MCP_SERVER_ID,
+            status: "ready",
+            tool_count: 3,
+          },
+        },
+      ],
+    });
+
+    try {
+      await testPage.goto(`/t/${fixture.taskId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      let preparation = testPage.getByTestId("prepare-progress-panel");
+      await expect(preparation).toHaveAttribute("data-status", "failed");
+      await testPage.getByRole("button", { name: "Show preparation details" }).click();
+
+      let primaryRow = testPage.locator(
+        `[data-testid="agent-mcp-recovery-actions"][data-mcp-server-id="${E2E_MCP_SERVER_ID}"]`,
+      );
+      let otherRow = testPage.locator(
+        `[data-testid="agent-mcp-recovery-actions"][data-mcp-server-id="${E2E_MCP_SECOND_SERVER_ID}"]`,
+      );
+      await expect(primaryRow).toContainText("Native command failed during server approval.");
+      await expect(primaryRow).toContainText("exec: WaitDelay expired before I/O complete");
+      await expect(primaryRow).toContainText("Exit status: 0");
+      await expect(primaryRow).toContainText("Cleanup error: process cleanup failed");
+      await expect(otherRow).toContainText("Native MCP connection verification command failed");
+      for (const row of [primaryRow, otherRow]) {
+        await expect(row).not.toContainText(E2E_MCP_LEGACY_ERROR);
+        await expect(row).not.toContainText(E2E_MCP_LEGACY_OUTPUT);
+      }
+      await testPage.screenshot({ path: testInfo.outputPath("agent-mcp-diagnostic-desktop.png") });
+
+      await testPage.reload();
+      await session.waitForLoad();
+      preparation = testPage.getByTestId("prepare-progress-panel");
+      await expect(preparation).toHaveAttribute("data-status", "failed");
+      await testPage.getByRole("button", { name: "Show preparation details" }).click();
+      await expect(primaryRow).toContainText("exec: WaitDelay expired before I/O complete");
+      await expect(primaryRow).toContainText("Cleanup error: process cleanup failed");
+      await expect(otherRow).toContainText("Native MCP connection verification command failed");
+      for (const row of [primaryRow, otherRow]) {
+        await expect(row).not.toContainText(E2E_MCP_LEGACY_ERROR);
+        await expect(row).not.toContainText(E2E_MCP_LEGACY_OUTPUT);
+      }
+
+      await testPage.setViewportSize({ width: 420, height: 900 });
+      const narrowPreparation = testPage.locator('[data-testid="prepare-progress-panel"]:visible');
+      await expect(narrowPreparation).toHaveCount(1);
+      if ((await narrowPreparation.getAttribute("data-expanded")) !== "true") {
+        await narrowPreparation.getByRole("button", { name: "Show preparation details" }).click();
+      }
+      const narrowOtherRow = narrowPreparation.locator(
+        `[data-testid="agent-mcp-recovery-actions"][data-mcp-server-id="${E2E_MCP_SECOND_SERVER_ID}"]`,
+      );
+      const narrowRetry = narrowOtherRow.getByTestId("agent-mcp-retry");
+      await expect(narrowRetry).toBeVisible();
+      const narrowRetryBox = await narrowRetry.boundingBox();
+      expect(narrowRetryBox?.height).toBeGreaterThanOrEqual(44);
+      const narrowDocument = await testPage.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      expect(narrowDocument.scrollWidth).toBeLessThanOrEqual(narrowDocument.clientWidth);
+
+      await testPage.setViewportSize({ width: 1280, height: 900 });
+      preparation = testPage.locator('[data-testid="prepare-progress-panel"]:visible');
+      await expect(preparation).toHaveCount(1);
+      if ((await preparation.getAttribute("data-expanded")) !== "true") {
+        await preparation.getByRole("button", { name: "Show preparation details" }).click();
+      }
+      primaryRow = preparation.locator(
+        `[data-testid="agent-mcp-recovery-actions"][data-mcp-server-id="${E2E_MCP_SERVER_ID}"]`,
+      );
+      otherRow = preparation.locator(
+        `[data-testid="agent-mcp-recovery-actions"][data-mcp-server-id="${E2E_MCP_SECOND_SERVER_ID}"]`,
+      );
+
+      const desktopRetry = primaryRow.getByTestId("agent-mcp-retry");
+      const desktopRetryBox = await desktopRetry.boundingBox();
+      expect(desktopRetryBox?.height).toBeGreaterThanOrEqual(27);
+      expect(desktopRetryBox?.height).toBeLessThanOrEqual(29);
+      await desktopRetry.click();
+      await expect(primaryRow).toContainText(
+        "The agent is using this session. Wait for its current turn to finish, then retry.",
+      );
+      await expect(primaryRow).toContainText("exec: WaitDelay expired before I/O complete");
+
+      await desktopRetry.click();
+      await expect(primaryRow.getByRole("status").last()).toHaveText("Connection ready.");
+      await expect(primaryRow.getByTestId("agent-mcp-diagnostic")).toHaveCount(0);
+      await expect(otherRow).toContainText("Native MCP connection verification command failed");
+      expect(requests.retry).toEqual([
+        { server_id: E2E_MCP_SERVER_ID },
+        { server_id: E2E_MCP_SERVER_ID },
+      ]);
     } finally {
       await destroyMcpRecoveryTerminals(apiClient, fixture);
     }

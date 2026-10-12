@@ -84,6 +84,12 @@ artifact, and each shard validates that immutable identity after download.
 `KANDEV_E2E_BIN` selects a custom backend binary. The setup still checks the
 local mock agent and other required artifacts.
 
+Recovery tests also require `bin/e2e-delivery-fixture`. The managed runner builds
+it with `make build-e2e-delivery-fixture`. CI and Docker runs use the compiled
+fixture, so test execution does not require Go. Its test-only source has its own
+freshness check. The fixture fills an isolated, stopped session's retained
+journal to the shipped 256 MiB limit and checks pruning after Retry.
+
 ## Playwright projects
 
 The suite is split into six projects. Pick one with `--project=<name>`.
@@ -291,9 +297,11 @@ every report, but only a successful `main` workflow run is eligible to seed a
 future plan. Manifests are retained for 3 days; timing profiles for 30 days;
 retry diagnostics for 14 days.
 
-Dispatch the workflow with `fail_on_flaky=true` to set
-`failOnFlakyTests: true` for a diagnostic run. Normal PR runs retain the
-existing two-retry policy while the summary makes retry groups visible.
+The standard, container-backed, and Kubernetes compatibility CI runs accept
+passes after a retry. The shared CI default allows three retries after the initial
+attempt (four attempts total); tests that exhaust their retries still fail the run.
+Set `E2E_FAIL_ON_FLAKY=1` to opt into failing on retry passes for diagnostics.
+Local Playwright runs keep zero retries and fail on retry passes by default.
 
 Container-backed CI jobs also cache the browser directory used by the host
 runner. The workflow resolves the `runtime-latest` convenience tag once to a
@@ -314,7 +322,7 @@ baseline.
 
 ### Flake rate and trend
 
-CI retries hide flakes: with `retries: 2` and `failOnFlakyTests: false`, a test
+CI retries hide flakes: with `retries: 3` and `failOnFlakyTests: false`, a test
 that fails and then passes never fails the build. The **E2E flake rate** section
 of the `e2e-report` job summary makes that number visible without downloading
 anything. It reports, for the run:
@@ -375,6 +383,8 @@ Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5
 > This used to break when e2e was launched from a shell that had inherited `KANDEV_FEATURES_OFFICE=false` (e.g. from a host kandev backend running the prod profile): `profiles.ApplyProfile` only sets vars that are **unset** (so launchers/shells win — see `docs/decisions/0007-runtime-feature-flags.md`), and the fixture spreads `process.env` into the spawned backend, so the stale prod value won and 404'd every office spec. Fixed at the source: `sanitizeInheritedEnv` in `e2e/fixtures/backend.ts` strips all inherited `KANDEV_FEATURES_*` before spawn, so the e2e profile — not whatever the host exported — decides feature flags. No `unset` needed.
 
 > **Profile-managed environment variables:** when adding an environment variable with an `e2e:` or `dev:` profile default, add it to `sanitizeInheritedEnv` in `e2e/fixtures/backend.ts` so inherited shell/task values cannot override the selected profile. Keep explicit `backend.restart({ ... })` overrides applied after baseline sanitization, so a spec can still opt into a deliberate per-test value.
+
+> **Service install identity:** the fixture strips `KANDEV_RUNNING_AS_SERVICE`, `KANDEV_SERVICE_MODE`, `KANDEV_SERVICE_MANAGER`, `KANDEV_INSTALL_KIND`, and `KANDEV_SERVICE_METADATA` from the host environment. Inheriting a managed-service identity makes the source-built E2E backend appear eligible for Nightly updates. A spec that exercises a managed service can set these values through `backend.restart({ ... })`.
 
 > **Host oversubscription:** running >=5 heavy shards concurrently on one machine (each = Go backend + Vite-served SPA assets + Chromium + mock agent) starves CPU/IO and induces timing flakes that CI's isolated runners never see. The managed runner allows at most three local shards and one Playwright worker per shard, with a lower shard limit on hosts with less available memory. Use the default single shard or two to three concurrent shards locally for a clean signal. A deliberate pressure experiment must set `KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM=1`.
 
@@ -835,3 +845,7 @@ finite preparation failure, retained/replaced workspaces, independent daemons,
 Pod cgroup ancestry and exact cleanup including an untouched existing claim.
 The cgroup case fails if nested work escapes the Pod budget. Missing image input
 skips the suite; skips and test discovery do not count as execution acceptance.
+
+### Original-artifact retention rollback evidence
+
+The frozen format-1 rollback case in `tests/session/delivery-retention.spec.ts` is optional for the current retention issue fix. It reports a skip when `KANDEV_RETENTION_COMPAT_BINARY` is absent; the required suite still exercises current delivery cleanup, saved-history recovery and provider continuation on desktop and mobile. When the original binary is supplied, the test verifies its fixed hash and retains all rollback/new-write/deletion/forward-upgrade assertions. A skip is not original rollback acceptance. The 2026-10-11 user-directed scope change is recorded in `docs/plans/backend-agent-delivery-retention/task-08-integration-and-storage.md`; historical benchmark failures remain labelled there.

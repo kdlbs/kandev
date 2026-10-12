@@ -42,6 +42,12 @@ async function createToolbarTask(
       repository_ids: [seedData.repositoryId],
     },
   );
+  await expect
+    .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+      timeout: 60_000,
+      message: `Waiting for ${title} workspace preparation`,
+    })
+    .toBe("ready");
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();

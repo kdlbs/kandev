@@ -10,7 +10,8 @@ requirements:
 ## Purpose and boundaries
 
 This is a focused supplement to [task navigation responsiveness](task-navigation-responsiveness.md),
-covering publication of Files search and file-watch refresh replies. UI owns
+covering publication of Files search, file-watch refresh replies, and file-move
+settlement into the same current and retained tree. UI owns
 the current view and request intent. Workspaces and the existing WebSocket APIs
 remain authoritative for filesystem contents and authorization.
 
@@ -21,6 +22,7 @@ remain authoritative for filesystem contents and authorization.
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5` | Search ownership; folder refresh ownership |
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.3` and `.4` | Folder refresh ownership |
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.6` | Shared presentation |
+| `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.15` and `.16` | File-move settlement; move verification |
 
 ## Components and responsibilities
 
@@ -85,6 +87,104 @@ GetFileTree/HTTP error response and WebSocket rejection keep that failure out of
 successful refresh publication. A genuinely empty directory still succeeds
 with omitted children. Failed descendant reads remain directory placeholders;
 depth limits, path validation, and containment retain their existing semantics.
+
+## File-move settlement
+
+`FileBrowser.useDragAndDrop` captures selected paths from native `DataTransfer`
+and delegates to `executeMoveFiles`. `computeMoveTargets` defines the exact
+source/destination mappings, including existing collision-name handling.
+`useFileOperations.renameFile` calls the production `workspace.file.rename`
+transport and converts both `success: false` and rejected requests to `false`,
+with the existing per-file error toast. The requests are independent remote
+mutations. Their request order and concurrency stay unchanged.
+
+Remove the whole-selection optimistic move and captured-tree restoration.
+Pending requests leave their rows at the last known locations until acceptance
+or a workspace event establishes the new location. Keep selection clearing and
+native drag state cleanup. Track each captured mapping's outcome independently;
+wait for every dispatched request to settle before batch failure feedback and
+final reconciliation. An unexpected callback rejection must not abandon accepted
+or still-pending siblings. There is no retry or remote undo.
+
+At each confirmed success, before queueing tree publication, supersede only the
+existing pending tickets for that mapping's affected folders. Reuse
+`changedFolders` and `nearestExpandedFolder` rules in `file-browser-refresh.ts`
+through the actual subscription owner's guarded invalidation callback. Do not
+issue reads at this boundary or retire unrelated tickets. A pre-acceptance root
+or destination reply cannot erase the accepted row while a sibling remains
+pending; a genuine later workspace refresh acquires fresh tickets and remains
+authoritative. Keep the single final reconciliation after full settlement.
+
+For a confirmed success, use a functional update against the latest tree. Capture
+only that mapping's source node identity before dispatch. If it is still the same
+node, its destination parent exists, and its exact destination is unoccupied,
+remove that source and insert its renamed subtree at the captured destination.
+Use `findNodeByPath`, `renameNodeInTree`, `removeNodeFromTree`, and
+`insertNodeInTree`; never recompute collision names after dispatch. A directory's
+loaded descendants follow the existing prefix-renaming behavior. Preserve node
+identities outside the edited ancestry so one accepted sibling does not make
+another captured directory appear replaced. If a newer refresh replaced, removed,
+or relocated the source, or changed the destination,
+leave that authoritative data untouched and rely on reconciliation. A failure
+never inversely moves a node or restores any earlier tree.
+
+Expose a narrow production `refreshChanges` callback from the existing
+`useFileChangeSubscription` owner through `useFileBrowserTree`. Both actual
+`session.workspace.file.changes` events and move settlement feed
+`applyFileChanges` through this same owner and `FolderRefreshes` instance.
+After all outcomes settle, submit the distinct captured old/new paths once;
+existing nearest-expanded-folder grouping bounds the reads to affected visible
+parents. Sharing tickets keeps a later event authoritative over a pending
+settlement read. Do not create a second folder-ordering registry, root reload
+loop, or optimistic overlay. Failed reads preserve the current tree; a failed
+transport request cannot establish that the remote rename did not happen.
+
+Reuse this owner's current/context guard for immediate success updates as well
+as reconciliation, checking inside queued functional updaters. Retirement must
+prevent a move's tree/cache publication into its replacement; this is immediate
+Files ownership, not a global editor or writer lifetime redesign. Keep the
+returned production callbacks stable and include them in the memoized tree
+result. Move execution may live in `file-browser-move.ts`, imported by the real
+browser, to keep the existing component below its file limit. Export no test-only
+predicate, execution entry point, cache reset, or cache inspection API.
+
+`useFileTreeState` remains the sole tree publication path. Its existing effect
+writes the reconciled immutable tree into `FileBrowserTreeCache` under the
+current binding. Never write the old snapshot directly to the cache or bypass
+its scope/retention budget. [File-tree retention](task-navigation-responsiveness.md#file-tree-retention)
+continues to own cache limits and restoration behavior.
+
+### Move verification
+
+Author permanent tests independently of the protected ROOT proof. Mount real
+`FileBrowser`, `useFileOperations`, `StateProvider`/store, tree/virtualizer/cache,
+`ToastProvider`, and `TooltipProvider`. Drive multiple selection and native
+`dragStart`/`drop` with `DataTransfer` data; keep the real workspace-file transport
+helpers and actual workspace-change subscription. Substitute only external
+HTTP/WS endpoints, bounded DOM geometry, and the stable connection subscription.
+Initial root and destination reads must be causally settled before moving.
+
+Deferred request fixtures record exact rename payloads, accepted remote paths,
+and current server-tree responses. Assert the accepted destination is rendered
+by a real subscribed refresh before releasing the failing sibling, then assert
+it stays there after settlement. Cover no-event mixed outcomes, both completion
+orders and both accepted source positions, all-success/all-failure controls,
+`success: false`, and transport rejection normalized by the real hook. Also cover
+unrelated authoritative addition/removal/metadata and newer affected-path data,
+failed reconciliation reads, and exact captured collision targets. Hold old
+root/destination replies before acceptance, release them while the sibling is
+pending, then reject final reads; accepted DOM/cache paths must survive while
+an unrelated pending folder read and later authoritative updates remain valid. Observe the
+actual retained result by remounting the browser within the same providers/store
+while its next tree read is held; release all owned reads/timers in teardown.
+Tests must not reproduce the settlement predicate or mock internal owners.
+
+These are rendered client integration regressions, not real browser, filesystem,
+or backend transaction proof. Existing DnD E2E protects native gesture reachability;
+no new browser/build/E2E run is required for the state-only settlement correction.
+The [single repair work order](../../../plans/preserve-successful-file-moves/task-01-settle-file-moves.md)
+owns the exact scenario matrix and capped commands. No new ADR, schema, API,
+copy, metric, persistence format, or request-concurrency policy is introduced.
 
 ## Shared presentation
 

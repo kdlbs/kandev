@@ -43,10 +43,14 @@ export function resolveRecoveryHistoryState(
   const currentStamp = currentError ? lastAgentErrorStamp(currentError) : undefined;
   const activeOwner = ownerMessageId === comment.id;
   const isHistorical = Boolean(messageStamp && currentStamp && messageStamp !== currentStamp);
+  const cleanupFailure = normalizeAgentErrorCauses(metadata.causes).some(
+    (cause) => cause.operation === "resume" && cause.code === "runtime_cleanup_failed",
+  );
   if (
     activeOwner ||
     isRecoveryMessageDismissed(comment, metadata, sessionMetadata) ||
-    isHistorical
+    isHistorical ||
+    cleanupFailure
   ) {
     return { activeOwner };
   }

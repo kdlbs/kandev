@@ -1,7 +1,7 @@
 import { reconcileTaskWorkflowCoverage } from "@/lib/state/slices/task-workflow-coverage";
 import { useCallback, useEffect, useRef } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { listWorkflows } from "@/lib/api";
+import { readJourneyWorkflows } from "@/hooks/journey-metadata-resources";
 import {
   classifyWorkspaceContextReadError,
   isCurrentWorkspaceContext,
@@ -83,6 +83,7 @@ function useWorkflowsFetchEffect(
   useEffect(() => {
     if (!enabled || !workspaceId) return;
     let cancelled = false;
+    const controller = new AbortController();
     const requestId = trackRecovery ? generateUUID() : undefined;
     const generation = store.getState().workspaceContextGeneration;
     const overviewRead = store.getState().beginTaskOverviewRead?.();
@@ -98,7 +99,7 @@ function useWorkflowsFetchEffect(
           requestId,
         );
     }
-    listWorkflows(workspaceId, { cache: "no-store", includeHidden: true })
+    readJourneyWorkflows(store, workspaceId, { includeHidden: true, signal: controller.signal })
       .then((response) => {
         const state = store.getState();
         const staleWorkspaceContext = requireActiveWorkspace
@@ -163,6 +164,7 @@ function useWorkflowsFetchEffect(
       });
     return () => {
       cancelled = true;
+      controller.abort();
       if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
       if (
         trackRecovery &&

@@ -1,24 +1,30 @@
 package config
 
 import (
-	commonconfig "github.com/kandev/kandev/internal/common/config"
-	"github.com/stretchr/testify/require"
+	"encoding/json"
 	"reflect"
 	"testing"
-	"time"
+
+	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/stretchr/testify/require"
 )
 
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-002.5
-func TestContinuationConfigManagedStartup(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		startup := commonconfig.AgentctlStartupConfig{Configured: true, IdleReaperInterval: time.Minute, NotificationQueueCapacity: 4096, ProviderInterruptionContinuation: enabled}
-		cfg, err := LoadWithStartup(startup)
-		require.NoError(t, err)
-		field := reflect.ValueOf(cfg).Elem().FieldByName("ProviderInterruptionContinuation")
-		require.True(t, field.IsValid(), "server must carry managed continuation flag")
-		require.Equal(t, enabled, field.Bool())
-		instance := reflect.ValueOf(cfg.NewInstanceConfig(41001, nil)).Elem().FieldByName("ProviderInterruptionContinuation")
-		require.True(t, instance.IsValid(), "instance must inherit continuation flag")
-		require.Equal(t, enabled, instance.Bool())
+func TestLegacyContinuationStartupSettingIsIgnored(t *testing.T) {
+	t.Setenv("KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION", "false")
+	startup, err := commonconfig.DecodeAgentctlStartupConfig(`{"configured":true,"idleReaperInterval":60000000000,"notificationQueueCapacity":4096,"providerInterruptionContinuation":false}`)
+	require.NoError(t, err)
+
+	encodedStartup, err := json.Marshal(startup)
+	require.NoError(t, err)
+	require.NotContains(t, string(encodedStartup), "providerInterruptionContinuation")
+
+	managed, err := LoadWithStartup(startup)
+	require.NoError(t, err)
+	standalone := Load()
+	instance := managed.NewInstanceConfig(41001, nil)
+	for _, typ := range []reflect.Type{reflect.TypeOf(startup), reflect.TypeOf(managed).Elem(), reflect.TypeOf(standalone).Elem(), reflect.TypeOf(instance).Elem()} {
+		_, exists := typ.FieldByName("ProviderInterruptionContinuation")
+		require.False(t, exists, "%s must not carry the retired setting", typ)
 	}
 }

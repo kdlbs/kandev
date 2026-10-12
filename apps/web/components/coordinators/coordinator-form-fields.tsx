@@ -16,7 +16,7 @@ import { coordinatorProfileStatusMessageKey } from "@/lib/coordinators/profile-s
 import { withUnavailableExecutorOption } from "@/lib/coordinators/executor-option";
 import { flattenExecutorProfiles } from "@/lib/coordinators/profile-lookup";
 import type { CoordinatorFormState } from "@/lib/coordinators/coordinator-form";
-import type { CoordinatorFieldError } from "@/lib/coordinators/field-error";
+import type { CoordinatorErrorField, CoordinatorFieldError } from "@/lib/coordinators/field-error";
 import type { ProfileStatus } from "@/lib/api/domains/coordinator-api";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Executor } from "@/lib/types/http";
@@ -31,7 +31,14 @@ export type CoordinatorFormFieldsProps = {
   agentProfileStatus?: ProfileStatus;
   executorProfileStatus?: ProfileStatus;
   fieldError: CoordinatorFieldError | null;
+  /** Setup mode: show only these fields, in the phase-1 order. */
+  only?: readonly CoordinatorFieldKey[];
+  /** Setup mode: one message per field, replacing `fieldError`. */
+  messages?: Partial<Record<CoordinatorErrorField, string>>;
+  onLeave?: (field: CoordinatorErrorField) => void;
 };
+
+export type CoordinatorFieldKey = "name" | "agent" | "executor" | "context";
 
 function FieldError({ testId, message }: { testId: string; message: string | undefined }) {
   if (!message) return null;
@@ -89,82 +96,94 @@ export function CoordinatorFormFields({
   agentProfileStatus,
   executorProfileStatus,
   fieldError,
+  only,
+  messages,
+  onLeave,
 }: CoordinatorFormFieldsProps) {
   const { t } = useTranslation();
   const executorOptions = useCoordinatorExecutorOptions(executors, form.executorProfileId);
+  const shows = (key: CoordinatorFieldKey) => !only || only.includes(key);
+  const messageOf = (field: CoordinatorErrorField) => {
+    if (messages) return messages[field];
+    return fieldError?.field === field ? fieldError.message : undefined;
+  };
 
   return (
     <div className="space-y-4">
-      <div className="space-y-1.5">
-        <Label htmlFor="coordinator-name">{t("coordinator:nameLabel")}</Label>
-        <Input
-          id="coordinator-name"
-          value={form.name}
-          maxLength={COORDINATOR_NAME_MAX_LENGTH}
-          disabled={disabled}
-          onChange={(event) => onChange("name", event.target.value)}
-        />
-        <FieldError
-          testId="coordinator-name-error"
-          message={fieldError?.field === "name" ? fieldError.message : undefined}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label>{t("coordinator:agentProfileLabel")}</Label>
-        <AgentProfilePicker
-          profiles={[...agentProfiles]}
-          value={form.agentProfileId}
-          onValueChange={(value) => onChange("agentProfileId", value)}
-          testId="coordinator-agent-profile-picker"
-          placeholder={t("coordinator:agentProfilePlaceholder")}
-          disabledOptionReason={(profile) =>
-            profile.cli_passthrough ? t("coordinator:passthroughDisabledReason") : undefined
-          }
-          disabled={disabled}
-        />
-        <ProfileStatusMessage
-          testId="coordinator-agent-profile-status"
-          field="agent"
-          status={agentProfileStatus}
-        />
-        <FieldError
-          testId="coordinator-agent-profile-error"
-          message={fieldError?.field === "agent_profile_id" ? fieldError.message : undefined}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label>{t("coordinator:executorLabel")}</Label>
-        <ExecutorProfileSelector
-          options={executorOptions}
-          value={form.executorProfileId}
-          onValueChange={(value) => onChange("executorProfileId", value)}
-          disabled={disabled}
-          placeholder={t("coordinator:executorPlaceholder")}
-        />
-        <ProfileStatusMessage
-          testId="coordinator-executor-status"
-          field="executor"
-          status={executorProfileStatus}
-        />
-        <FieldError
-          testId="coordinator-executor-error"
-          message={fieldError?.field === "executor_profile_id" ? fieldError.message : undefined}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="coordinator-context">{t("coordinator:contextLabel")}</Label>
-        <Textarea
-          id="coordinator-context"
-          className={LONG_TEXT_FIELD_CLASS}
-          value={form.context}
-          disabled={disabled}
-          onChange={(event) => onChange("context", event.target.value)}
-        />
-        <FieldError
-          testId="coordinator-context-error"
-          message={fieldError?.field === "context" ? fieldError.message : undefined}
-        />
-      </div>
+      {shows("name") && (
+        <div className="space-y-1.5">
+          <Label htmlFor="coordinator-name">{t("coordinator:nameLabel")}</Label>
+          <Input
+            id="coordinator-name"
+            value={form.name}
+            maxLength={COORDINATOR_NAME_MAX_LENGTH}
+            disabled={disabled}
+            onChange={(event) => onChange("name", event.target.value)}
+            onBlur={() => onLeave?.("name")}
+          />
+          <FieldError testId="coordinator-name-error" message={messageOf("name")} />
+        </div>
+      )}
+      {shows("agent") && (
+        <div className="space-y-1.5">
+          <Label>{t("coordinator:agentProfileLabel")}</Label>
+          <AgentProfilePicker
+            profiles={[...agentProfiles]}
+            value={form.agentProfileId}
+            onValueChange={(value) => onChange("agentProfileId", value)}
+            testId="coordinator-agent-profile-picker"
+            placeholder={t("coordinator:agentProfilePlaceholder")}
+            disabledOptionReason={(profile) =>
+              profile.cli_passthrough ? t("coordinator:passthroughDisabledReason") : undefined
+            }
+            disabled={disabled}
+          />
+          <ProfileStatusMessage
+            testId="coordinator-agent-profile-status"
+            field="agent"
+            status={agentProfileStatus}
+          />
+          <FieldError
+            testId="coordinator-agent-profile-error"
+            message={messageOf("agent_profile_id")}
+          />
+        </div>
+      )}
+      {shows("executor") && (
+        <div className="space-y-1.5">
+          <Label>{t("coordinator:executorLabel")}</Label>
+          <ExecutorProfileSelector
+            options={executorOptions}
+            value={form.executorProfileId}
+            onValueChange={(value) => onChange("executorProfileId", value)}
+            disabled={disabled}
+            placeholder={t("coordinator:executorPlaceholder")}
+          />
+          <ProfileStatusMessage
+            testId="coordinator-executor-status"
+            field="executor"
+            status={executorProfileStatus}
+          />
+          <FieldError
+            testId="coordinator-executor-error"
+            message={messageOf("executor_profile_id")}
+          />
+        </div>
+      )}
+      {shows("context") && (
+        <div className="space-y-1.5">
+          <Label htmlFor="coordinator-context">{t("coordinator:contextLabel")}</Label>
+          <Textarea
+            id="coordinator-context"
+            className={LONG_TEXT_FIELD_CLASS}
+            value={form.context}
+            disabled={disabled}
+            onChange={(event) => onChange("context", event.target.value)}
+            onBlur={() => onLeave?.("context")}
+          />
+          <FieldError testId="coordinator-context-error" message={messageOf("context")} />
+        </div>
+      )}
     </div>
   );
 }

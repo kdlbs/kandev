@@ -243,18 +243,14 @@ Completed on 2026-10-10.
   WAITING_FOR_INPUT. The browser verified desktop/phone native rendering and
   all 25 phone label/value fields without page errors or horizontal overflow.
   This demonstrates observed composition, not universal model compliance.
-  [Open the final real-agent example](http://100.105.155.17:48479/t/f3eecd44-0da0-4830-8a28-4b40c6ea0c52).
+  The supporting trial and browser evidence is privately retained.
 - Public documentation validation passed (47 pages), owning spec/catalog lint
   passed (361 decisions, 1433 specifications), and final diff documentation
   coverage is covered with no errors and six accepted work-order references.
   `git diff --check` passed. Owning requirements/design are active/current;
   this package is implemented. Repository changes remain uncommitted.
 
-Trial inputs/results and browser receipts are stored privately under
-`/tmp/kandev-rich-ui-k921jmkz/evidence-{first,luna-repeat,sol-first,sol-envelope}-*.json`
-and `evidence-final-receipt.json`/`evidence-browser.json`; native phone screenshots were inspected.
-
-The test environment binds `127.0.0.1` and Tailscale IP `100.105.155.17` directly
-at port `48479`; it does not use Tailscale Serve. Main port `9998` and PID `27220`
-remain unchanged. Stop only this disposable environment with
-`/tmp/kandev-rich-ui-k921jmkz/stop.sh`.
+Trial inputs/results and browser receipts are privately retained; native phone
+screenshots were inspected. The disposable environment used direct Tailscale
+access and has since been shut down at the user's request. Main :9998 remained
+unchanged.

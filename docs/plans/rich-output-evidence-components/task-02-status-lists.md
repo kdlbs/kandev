@@ -179,5 +179,5 @@ The real persisted Luna report was checked with Playwright at 1440x1000 and
 390x844 in both light and dark themes. Passed/failed/pending/skipped have distinct
 computed badge colors matching their icons, tinted backgrounds, unchanged
 labels, no page errors and no horizontal overflow. Screenshots were inspected;
-private receipts are `/tmp/kandev-rich-ui-k921jmkz/status-colors-receipt.json`.
+private status-color receipts are retained with the session evidence.
 Main :9998/PID 27220 remained unchanged. The isolated lab was refreshed.

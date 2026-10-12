@@ -15,6 +15,7 @@ import { KanbanBoard } from "./kanban-board";
 import { TaskPreviewPanel } from "./task-preview-panel";
 import { RightSidePanel } from "./right-side-panel";
 import { useKanbanPreview } from "@/hooks/use-kanban-preview";
+import { useRightPanelBridge } from "@/hooks/domains/coordinator/workspace-copilot-context";
 import { useTaskSession } from "@/hooks/use-task-session";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
@@ -384,6 +385,48 @@ function usePreviewSessionFocus({
   return { activeSessionId, handleSessionChange };
 }
 
+/** The board preview sharing the right-hand slot with the workspace copilot. */
+function useKanbanPreviewInSlot(initialTaskId: string | undefined) {
+  const { copilotHoldsPanel, claimPreview, releasePreview } = useRightPanelBridge();
+  const {
+    selectedTaskId,
+    isOpen,
+    previewWidthPx,
+    open: openPreview,
+    close: closePreview,
+    displace,
+    updatePreviewWidth,
+  } = useKanbanPreview({
+    initialTaskId,
+    displaced: copilotHoldsPanel,
+    onClose: () => {
+      // Cleanup handled by close
+    },
+  });
+
+  // The copilot holding the right-hand slot hides the preview; it never clears
+  // it, so the saved task returns once the copilot closes.
+  useEffect(() => displace(copilotHoldsPanel), [displace, copilotHoldsPanel]);
+  // A URL-driven preview is an explicit open and takes the slot.
+  useEffect(() => {
+    if (initialTaskId) claimPreview();
+  }, [initialTaskId, claimPreview]);
+
+  const open = useCallback(
+    (taskId: string) => {
+      claimPreview();
+      openPreview(taskId);
+    },
+    [claimPreview, openPreview],
+  );
+  const close = useCallback(() => {
+    closePreview();
+    releasePreview();
+  }, [closePreview, releasePreview]);
+
+  return { selectedTaskId, isOpen, previewWidthPx, open, close, updatePreviewWidth };
+}
+
 export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWithPreviewProps) {
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
@@ -400,12 +443,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   });
 
   const { selectedTaskId, isOpen, previewWidthPx, open, close, updatePreviewWidth } =
-    useKanbanPreview({
-      initialTaskId,
-      onClose: () => {
-        // Cleanup handled by close
-      },
-    });
+    useKanbanPreviewInSlot(initialTaskId);
 
   const { previewIsOpen, previewTaskId } = usePreviewRemovalState(selectedTaskId, isOpen);
 

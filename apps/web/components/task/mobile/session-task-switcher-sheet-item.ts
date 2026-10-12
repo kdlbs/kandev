@@ -63,6 +63,10 @@ function sheetLastActivity(task: KanbanState["tasks"][number]) {
   return task.statusSummary?.last_activity_at ?? task.updatedAt ?? task.createdAt;
 }
 
+function sheetHasRunningSession(task: KanbanState["tasks"][number]) {
+  return task.statusSummary?.has_running_session;
+}
+
 function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
   const summary = task.statusSummary;
   const hasSummary = summary != null;
@@ -71,6 +75,7 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
     sessionState: hasSummary
       ? summary?.primary_session?.state
       : (task.primarySessionState as TaskSessionState | undefined),
+    hasRunningSession: sheetHasRunningSession(task),
     foregroundActivity: hasSummary ? summary?.foreground_activity : task.foregroundActivity,
     repositoryPath: sheetRepositoryPath(task, ctx),
     repositories: resolveTaskRepositorySlugs(task.repositories, ctx.repositoryPathsById),

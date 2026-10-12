@@ -71,6 +71,11 @@ and task state; this design consumes them and adds no task field.
   through the screen-level inputs hook below; once that store exists, the
   proposals input is read from it and the hook's own proposals read is
   removed.
+- **Watch set (phase 2 only):** the coordinator's effective watch set from
+  `GET .../coordinators/:cid/settings`, through `useCoordinatorWatchSet`; tasks
+  and stalls are filtered by it before classification
+  ([permissions](permissions-ui.md#client-watch-filter)). Not read while the phase-2
+  flag is off.
 - **Screen inputs hook:** `apps/web/app/coordinator/use-coordinator-inputs.ts`
   holds the stall records and pending proposals for the viewed coordinator,
   each as `{value, loadedAt, error}`: `value` is the last successful response
@@ -204,26 +209,28 @@ with `detected_at` older than 30 days. There is no timer.
   load coordinators." with **Try again**, which re-reads the list
   (`listCoordinators`). The sidebar entries are unaffected.
 - `components/app-sidebar/sections/coordinators-section.tsx` renders the
-  entries as a `CoordinatorsSection` built on `AppSidebarSection`, the way
-  `AutomationsSection` is: id `coordinators` in `APP_SIDEBAR_SECTION_IDS`,
-  mounted immediately above the Automations section (in `app-sidebar.tsx` and,
-  for a saved layout, beside the automations node in
-  `sidebar-layout-navigation.tsx`). It self-gates on the flag and an active
-  workspace and renders nothing until the list has loaded. Rows link to the
-  Needs you screen with the open-proposal badge; `defaultExpanded` is true, and
-  the folded `collapsedSummary` is the badge sum when above zero, otherwise the
-  coordinator count. The header shortcut links to `/workspaces/:id/coordinator`;
-  with no coordinator the body is one "Set up a coordinator" row
-  (`sidebar-coordinators-empty`) linking to the settings list. The phone menu uses
-  `MobileCoordinatorsSection` (`components/navigation/mobile-coordinators-section.tsx`),
-  built like `MobileAutomationsSection`: a header toggle with `aria-expanded` and
-  `aria-controls`, the list shortcut, and the rows, all 44px targets. It shares the
-  desktop `appSidebar.sectionExpanded.coordinators` state (default expanded), folded
-  summary and empty row (`mobile-sidebar-coordinators-empty`). It is mounted above the
-  automations node in `mobile-sidebar-layout-navigation.tsx`, or in
-  `MobileRequiredRows` when the layout has no automations node. Badge values come from a small store keyed by coordinator id, seeded by
-  the list route's `open_proposals` field and replaced by each
-  `coordinator.updated` payload.
+  entries through `CoordinatorsSection` and `AppSidebarSection` with navigation
+  presentation. The stable collapse identity is `coordinators`.
+  `defaultExpanded` stays true. Rows link to Needs you with their proposal badges.
+  The folded summary uses the badge sum above zero, otherwise the coordinator count.
+  The list shortcut links to `/workspaces/:id/coordinator`.
+  With no coordinator, `sidebar-coordinators-empty` links to the settings list.
+  The section self-gates on the feature and active workspace.
+  It renders nothing until the list has loaded.
+- Personal placement follows the reusable
+  [sidebar layout design](../../ui/system-design/sidebar-customization.md#feature-gated-layout-entries).
+  The independent builtin node defaults to immediately before Automations.
+  Saved visibility and order take precedence over that default.
+  The fast action preference controls header placement of the list shortcut.
+  A labelled body link provides the destination when fast actions are hidden.
+- `MobileCoordinatorsSection` shares the collapse identity, summary, rows,
+  readiness guard, and empty setup destination through the phone navigation drawer.
+  Its controls retain 44px targets. The saved-layout renderer mounts it only
+  for the Coordinators node, subject to the same eligibility and visibility.
+  It does not add a fallback when Automations or Coordinators is hidden.
+- Badge values come from the store keyed by coordinator ID.
+  The list route seeds them from `open_proposals`.
+  Each `coordinator.updated` payload replaces the affected value.
 
 ## Screens
 
@@ -275,7 +282,12 @@ present in `kanbanMulti.snapshots`, so a partial failure shows the workflows
 that loaded, with the banner. When no workflow snapshot is present and the
 read failed, the lists and the count strip are replaced by the banner.
 **Try again** for tasks calls `requestWorkspaceContextRefresh()`, which makes
-the hook re-fetch only the workflows that failed. A failed PR detail read is not a banner case: rows fall back
+the hook re-fetch only the workflows that failed. While the phase-2 flag is on the banner may also carry a fourth line for the
+watch set, after the proposals line, with its own load time and the same
+first-load and re-read wording rules; it is specified in
+[permissions](permissions-ui.md#client-watch-filter) and adds no case to
+`AC-COORDINATOR-NEEDS-YOU-007.3` to `007.5`, which are unchanged with the
+flag off. A failed PR detail read is not a banner case: rows fall back
 as described in [Classification](#classification). A copilot session failure is contained in the copilot panel and does not
 affect these inputs.
 

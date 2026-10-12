@@ -548,13 +548,17 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	if fromStep != nil {
 		fromStepID = fromStep.ID
 	}
-	if err := s.updateTransitionTaskWithCapacity(transitionCtx, task, fromStepID, targetStep); err != nil {
+	applied, err := s.updateTransitionTaskWithCapacityAndEffect(transitionCtx, task, fromStepID, targetStep)
+	if err != nil {
 		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
 			zap.String("to_step", targetStep.Name),
 			zap.Error(err))
 		settleFailedTransitionSession(err)
+		return
+	}
+	if !applied {
 		return
 	}
 	queued := task.QueuedForStepID != ""
@@ -696,15 +700,33 @@ func (s *Service) updateTransitionTaskWithCapacity(
 	fromStepID string,
 	targetStep *wfmodels.WorkflowStep,
 ) error {
+	_, err := s.updateTransitionTaskWithCapacityAndEffect(ctx, task, fromStepID, targetStep)
+	return err
+}
+
+func (s *Service) updateTransitionTaskWithCapacityAndEffect(
+	ctx context.Context,
+	task *models.Task,
+	fromStepID string,
+	targetStep *wfmodels.WorkflowStep,
+) (bool, error) {
 	if targetStep == nil {
-		return s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
+		return true, s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
+	}
+	if effect := workflowEffectFromContext(ctx); effect != nil {
+		if effectRepo, ok := s.repo.(workflowMoveAdmissionEffectRepository); ok {
+			_, applied, err := effectRepo.UpdateTaskWithWorkflowStepAdmissionAndEffect(
+				ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit, effect,
+			)
+			return applied, err
+		}
 	}
 	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {
-		return fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
+		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
 	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit)
-	return err
+	return true, err
 }
 
 // engineTriggerIsSessionOriginated reports whether an engine.Trigger is
@@ -5002,7 +5024,12 @@ func (s *Service) engineOnEnterCallback(kind engine.ActionKind) engine.ActionCal
 	case engine.ActionClearDecisions:
 		return engine.ClearDecisionsCallback{Decisions: s.engineDecisions}
 	case engine.ActionQueueRunForEachParticipant:
-		return engine.QueueRunForEachParticipantCallback{Adapter: s.engineRunQueue, Participants: s.engineParticipants}
+		return engine.QueueRunForEachParticipantCallback{
+			Adapter:      s.engineRunQueue,
+			Participants: s.engineParticipants,
+			Decisions:    s.engineDecisions,
+			Logger:       s.logger,
+		}
 	default:
 		return nil
 	}
@@ -5496,6 +5523,14 @@ func (s *Service) drainQueuedMessageForPromptableSessionOutcome(ctx context.Cont
 			zap.String("session_id", sessionID), zap.Error(err))
 		return queueDrainSkipped
 	}
+	if session == nil {
+		return queueDrainSkipped
+	}
+	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
+		s.logger.Info("skipping queue drain while session recovery is required",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return queueDrainSkipped
+	}
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
 		s.logger.Debug("skipping drain: session is not promptable once the guard is held",
 			zap.String("session_id", sessionID), zap.Error(err))
@@ -5544,6 +5579,11 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIden
 	if identity != nil && session.QueueIncarnationID != identity.SessionIncarnationID {
 		return queueDrainSkipped
 	}
+	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
+		s.logger.Info("skipping admission-gated queue drain while session recovery is required",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return queueDrainSkipped
+	}
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
 		return queueDrainSkipped
 	}
@@ -5556,7 +5596,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIden
 		return queueDrainSkipped
 	}
 	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
-		ctx, taskID, sessionID, identity,
+		ctx, taskID, sessionID, identity, nil,
 	)
 }
 
@@ -5584,7 +5624,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(
 	taskID, sessionID string,
 ) queueDrainOutcome {
 	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
-		ctx, taskID, sessionID, nil,
+		ctx, taskID, sessionID, nil, nil,
 	)
 }
 
@@ -5621,6 +5661,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	ctx context.Context,
 	taskID, sessionID string,
 	identity *messagequeue.QueueSessionIdentity,
+	completionEffect *models.AgentDeliveryEffect,
 ) queueDrainOutcome {
 	if s.messageQueue == nil || s.isCancelInFlight(sessionID) ||
 		s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
@@ -5642,6 +5683,11 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	if managedConversationBlocksQueueDispatch(task) {
 		return queueDrainPaused
 	}
+	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
+		s.logger.Info("skipping admission-gated queue reservation while session recovery is required",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return queueDrainSkipped
+	}
 	queueIdentity, ok := s.resolveQueueDrainIdentity(ctx, taskID, sessionID, identity)
 	if !ok {
 		return queueDrainSkipped
@@ -5655,6 +5701,17 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	}
 	if !autoRun {
 		return queueDrainPaused
+	}
+	if ok && queuedMsg != nil && completionEffect != nil {
+		hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, queuedMsg)
+		if hasInput && inputErr == nil {
+			if err := s.settleQueuedDeliveryPredecessor(ctx, taskID, sessionID, completionEffect); err != nil {
+				s.logger.Warn("failed to settle delivery before queued successor",
+					zap.String("session_id", sessionID), zap.Error(err))
+				s.requeueMessageForReservation(ctx, &queuedDispatchReservation{identity: queueIdentity}, queuedMsg, queuedMsg.QueuedBy)
+				return queueDrainSkipped
+			}
+		}
 	}
 	if s.dispatchTakenQueuedMessageForSession(ctx, queueIdentity, queuedMsg, ok) {
 		return queueDrainDispatched
@@ -6273,7 +6330,7 @@ func (s *Service) launchCreatedAutoStartStepPrompt(state *autoStartStepPromptSta
 	execution, err := s.startCreatedSessionWithComposedPrompt(
 		launchCtx, state.taskID, state.sessionID, state.session.AgentProfileID,
 		state.recordedPrompt, state.agentPrompt, state.promptReferenceContext,
-		true, state.planMode, true, state.initialCreatePromptPassthrough, state.attachments, state.references,
+		true, state.planMode, true, state.initialCreatePromptPassthrough, state.attachments, state.references, false,
 	)
 	if execution == nil {
 		workflowAttempt.retire()
@@ -6347,7 +6404,7 @@ func (s *Service) handleAutoStartPromptAttemptError(
 		return true, s.fallbackFreshLaunchOnMissingExecution(
 			state.ctx, state.taskID, state.sessionID, state.recordedPrompt, true,
 			state.dispatchPrompt, state.planMode, state.promptReferenceContext,
-			state.initialCreatePromptPassthrough, state.takenMsg, state.attachments, state.references,
+			state.initialCreatePromptPassthrough, state.takenMsg, state.attachments, state.references, false,
 		)
 	}
 	if isAgentAlreadyRunningError(err) && state.shouldQueueIfBusy {
@@ -6404,6 +6461,28 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	takenMsg *messagequeue.QueuedMessage,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
+	promptReferencesPrepared bool,
+) error {
+	return s.fallbackFreshLaunchOnMissingExecutionWithLifecycleOwnership(
+		ctx, taskID, sessionID, prompt, promptAlreadyComposed, retryPrompt, planMode,
+		promptReferenceContext, initialCreatePromptPassthrough, takenMsg, attachments,
+		references, promptReferencesPrepared, false,
+	)
+}
+
+func (s *Service) fallbackFreshLaunchOnMissingExecutionWithLifecycleOwnership(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	promptAlreadyComposed bool,
+	retryPrompt string,
+	planMode bool,
+	promptReferenceContext string,
+	initialCreatePromptPassthrough bool,
+	takenMsg *messagequeue.QueuedMessage,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferencesPrepared bool,
+	lifecycleLockHeld bool,
 ) error {
 	requeue := func() {
 		if takenMsg != nil {
@@ -6433,15 +6512,16 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 
 	var launchErr error
 	if promptAlreadyComposed {
-		_, launchErr = s.startCreatedSessionWithComposedPrompt(
+		_, launchErr = s.startCreatedSessionWithComposedPromptAndLifecycleOwnership(
 			ctx, taskID, sessionID, fresh.AgentProfileID,
 			prompt, retryPrompt, promptReferenceContext,
 			true, planMode, true, initialCreatePromptPassthrough, attachments, references,
+			promptReferencesPrepared, lifecycleLockHeld,
 		)
 	} else {
-		_, launchErr = s.startCreatedSession(
+		_, launchErr = s.startCreatedSessionWithLifecycleOwnership(
 			ctx, taskID, sessionID, fresh.AgentProfileID,
-			prompt, true, planMode, true, attachments, references, promptReferenceContext, startCreatedSessionOptions{},
+			prompt, true, planMode, true, attachments, references, promptReferenceContext, lifecycleLockHeld,
 		)
 	}
 	if launchErr != nil {
@@ -6451,6 +6531,22 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		return launchErr
 	}
 	return nil
+}
+
+func (s *Service) startCreatedSessionWithLifecycleOwnership(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	lifecycleLockHeld bool,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSession(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		startCreatedSessionOptions{lifecycleLockHeld: lifecycleLockHeld},
+	)
 }
 
 func (s *Service) resetSessionForFreshFallback(
@@ -7491,7 +7587,20 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	session *models.TaskSession,
 	cause turnCompletionCause,
 ) bool {
-	if session == nil || models.IsCompletionFollowUpSession(session.Metadata) {
+	if session == nil {
+		return false
+	}
+	effect := workflowEffectFromContext(ctx)
+	if effect != nil && agentDeliveryEffectCarriesDeliveryIdentity(effect) && !isBoundAgentDeliveryWorkflowEffect(effect) {
+		s.logger.Warn("deferring workflow completion with incomplete delivery identity",
+			zap.String("task_id", taskID), zap.String("effect_key", effect.EffectKey))
+		return false
+	}
+	if models.IsCompletionFollowUpSession(session.Metadata) {
+		if err := s.recordNotRequiredDeliveryWorkflowOutcome(ctx, taskID, effect); err != nil {
+			s.logger.Warn("failed to record non-workflow completion outcome",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
 		return false
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
@@ -7507,17 +7616,40 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	if !proceed {
 		return false
 	}
-
-	if s.workflowEngine == nil {
-		return s.processOnTurnCompleteWithCause(ctx, task, session, cause)
+	if s.workflowEffectAlreadyApplied(ctx, workflowEffectFromContext(ctx)) {
+		s.settleReplayedTurnWithoutSuccessor(ctx, taskID, session.ID)
+		return false
 	}
-
-	if !s.prepareEngineTurnCompletion(ctx, taskID, task, session, cause) {
+	if task.WorkflowStepID == "" || task.IsEphemeral {
+		if !s.recordDeliveryWorkflowNoOp(ctx, task, effect, "not_required") {
+			return false
+		}
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return false
 	}
 
-	state := s.buildMachineState(ctx, task, session)
-	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
+	if s.workflowEngine == nil {
+		if isBoundAgentDeliveryWorkflowEffect(effect) {
+			s.logger.Warn("leaving delivery terminal pending because workflow engine is unavailable",
+				zap.String("task_id", taskID), zap.String("effect_key", effect.EffectKey))
+			return false
+		}
+		return s.processOnTurnCompleteWithCause(ctx, task, session, cause)
+	}
+
+	currentStep, eligible := s.prepareEngineTurnCompletion(ctx, taskID, task, session, cause)
+	if !eligible {
+		if cause == turnCompletionCauseUserCancellation && currentStep != nil && !currentStep.CancelTriggersTurnComplete {
+			if !s.recordDeliveryWorkflowNoOp(ctx, task, effect, "not_required") {
+				return false
+			}
+		}
+		return false
+	}
+	evaluationCtx := withWorkflowPolicy(ctx, task, currentStep.UpdatedAt)
+
+	state := s.buildMachineState(evaluationCtx, task, session)
+	result, err := s.workflowEngine.HandleTrigger(evaluationCtx, engine.HandleInput{
 		TaskID:         taskID,
 		SessionID:      session.ID,
 		Trigger:        engine.TriggerOnTurnComplete,
@@ -7534,6 +7666,9 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	}
 
 	if !result.Transitioned {
+		if !s.recordDeliveryWorkflowNoOp(evaluationCtx, task, workflowEffectFromContext(evaluationCtx), "no_automatic_transition") {
+			return false
+		}
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return false
 	}
@@ -7545,9 +7680,37 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		zap.String("to_step_id", result.ToStepID))
 
 	if cause == turnCompletionCauseUserCancellation {
-		ctx = cancellationTransitionAttribution(ctx)
+		evaluationCtx = cancellationTransitionAttribution(evaluationCtx)
 	}
-	return s.applyEngineTransitionWithMode(ctx, taskID, session, result, engine.TriggerOnTurnComplete, task.Description, transitionLifecycleWithOnEnter)
+	transitionCtx := withWorkflowOutcome(evaluationCtx, "applied")
+	return s.applyEngineTransitionWithMode(transitionCtx, taskID, session, result, engine.TriggerOnTurnComplete, task.Description, transitionLifecycleWithOnEnter)
+}
+
+func (s *Service) settleReplayedTurnWithoutSuccessor(ctx context.Context, taskID, sessionID string) {
+	if s.turnService == nil {
+		return
+	}
+	activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to check active turn after replayed workflow effect",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if activeTurn != nil {
+		return
+	}
+
+	currentSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload session after replayed workflow effect",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if currentSession == nil || currentSession.TaskID != taskID ||
+		(currentSession.State != models.TaskSessionStateRunning && currentSession.State != models.TaskSessionStateStarting) {
+		return
+	}
+	s.setSessionWaitingForInput(ctx, taskID, sessionID, currentSession)
 }
 
 // acquireTurnCompletionCriticalSection serializes on_turn_complete
@@ -7641,9 +7804,9 @@ func (s *Service) prepareEngineTurnCompletion(
 	task *models.Task,
 	session *models.TaskSession,
 	cause turnCompletionCause,
-) bool {
+) (*wfmodels.WorkflowStep, bool) {
 	if s.shouldSkipEngineTurnCompletion(ctx, taskID, task, session, cause) {
-		return false
+		return nil, false
 	}
 
 	// ADR 0015 — explicit completion signal gating. Steps marked
@@ -7665,19 +7828,19 @@ func (s *Service) prepareEngineTurnCompletion(
 			zap.String("step_id", task.WorkflowStepID),
 			zap.Error(stepErr))
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-		return false
+		return nil, false
 	}
 	if s.turnCompleteBlockedByUserInput(ctx, taskID, session.ID, session) {
-		return false
+		return currentStep, false
 	}
 	if cause == turnCompletionCauseUserCancellation && !currentStep.CancelTriggersTurnComplete {
 		s.logger.Debug("user cancellation completion is disabled for step",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.String("step_id", currentStep.ID))
-		return false
+		return currentStep, false
 	}
-	return s.allowEngineSignalCompletion(ctx, taskID, session, currentStep, cause)
+	return currentStep, s.allowEngineSignalCompletion(ctx, taskID, session, currentStep, cause)
 }
 
 func (s *Service) shouldSkipEngineTurnCompletion(

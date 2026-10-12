@@ -204,6 +204,7 @@ function panelState(overrides = {}) {
 function composerPanelState(overrides = {}) {
   return {
     ...panelState(),
+    hasPendingClarification: true,
     session: { state: "WAITING_FOR_INPUT", pending_action: "clarification" },
     task: { id: "task-1", title: "Task" },
     taskDescription: "Task description",
@@ -297,6 +298,7 @@ describe("ChatInputArea proceed visibility", () => {
         handleCancelTurn={vi.fn().mockResolvedValue(undefined)}
         showRequestChangesTooltip={false}
         panelState={composerPanelState({
+          hasPendingClarification: false,
           session: { state: "WAITING_FOR_INPUT", pending_action: null },
         })}
         isSending={false}

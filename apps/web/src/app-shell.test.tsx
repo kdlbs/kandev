@@ -47,6 +47,9 @@ vi.mock("@/components/theme-provider", () => ({ ThemeProvider: mocks.passthrough
 vi.mock("@/components/workspace-scope-provider", () => ({
   WorkspaceScopeProvider: mocks.passthrough,
 }));
+vi.mock("@/app/coordinator/copilot/workspace-copilot-host", () => ({
+  WorkspaceCopilotHost: mocks.passthrough,
+}));
 vi.mock("@/components/ws-connector", () => ({ WebSocketConnector: () => null }));
 vi.mock("@/hooks/use-task-color-migration", () => ({
   useTaskColorMigration: () => undefined,

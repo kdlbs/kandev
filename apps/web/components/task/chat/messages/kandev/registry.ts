@@ -30,7 +30,12 @@ import {
 import { AskUserQuestionRenderer } from "./ask-user-question-renderer";
 import { ShowWalkthroughRenderer } from "./walkthrough-renderer";
 import { RichOutputRenderer } from "./rich-output/rich-output-renderer";
-import { ProposeTaskRenderer } from "./propose-task-renderer";
+import {
+  ProposeMessageRenderer,
+  ProposeMoveRenderer,
+  ProposeResumeRenderer,
+  ProposeTaskRenderer,
+} from "./propose-task-renderer";
 import type { KandevRenderer } from "./types";
 
 export const KANDEV_RENDERERS: Record<string, KandevRenderer> = {
@@ -60,6 +65,9 @@ export const KANDEV_RENDERERS: Record<string, KandevRenderer> = {
   show_walkthrough: ShowWalkthroughRenderer,
   show_rich_output: RichOutputRenderer,
   propose_task: ProposeTaskRenderer,
+  propose_resume: ProposeResumeRenderer,
+  propose_message: ProposeMessageRenderer,
+  propose_move: ProposeMoveRenderer,
 };
 
 export function getKandevRenderer(stem: string | null): KandevRenderer | null {

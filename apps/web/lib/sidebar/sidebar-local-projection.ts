@@ -94,6 +94,7 @@ function projectLocalSidebarTask(
     parentTaskId: task.parentTaskId ?? undefined,
     isArchived: task.isArchived,
     sessionState: summary?.primary_session?.state,
+    hasRunningSession: summary?.has_running_session,
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     repositoryLinks: links,
     repositoryRuleIdentities: repositoryIdentities(ids, lookups.repos),

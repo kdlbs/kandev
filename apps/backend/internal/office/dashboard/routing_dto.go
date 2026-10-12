@@ -107,6 +107,8 @@ type RunRouting struct {
 	ResolvedProviderID         string            `json:"resolved_provider_id,omitempty"`
 	ResolvedModel              string            `json:"resolved_model,omitempty"`
 	BlockedStatus              string            `json:"blocked_status,omitempty"`
+	SessionRecoveryBlockID     string            `json:"session_recovery_block_id,omitempty"`
+	SessionRecoveryReason      string            `json:"session_recovery_reason,omitempty"`
 	EarliestRetryAt            *string           `json:"earliest_retry_at,omitempty"`
 	Attempts                   []RouteAttemptDTO `json:"attempts"`
 }

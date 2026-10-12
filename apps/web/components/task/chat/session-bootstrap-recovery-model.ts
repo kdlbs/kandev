@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import type { ManualSessionRecoveryFailure } from "@/hooks/domains/session/use-session-recovery-actions";
+import type { SessionRecoveryNoticeKind } from "@/hooks/domains/session/use-session-resumption";
 import type { SessionRecoveryOwner } from "@/lib/session-recovery-presentation";
 import type { SessionErrorDetailsField } from "@/lib/session-error-details";
 import { normalizeAgentErrorCauses } from "@/lib/session-last-agent-error";
@@ -27,6 +28,8 @@ export function causeLabel(code: string | undefined, translate: TFunction): stri
       return translate("task:sessionBootstrapCauseDestinationInvalid");
     case "source_branch_missing":
       return translate("task:sessionBootstrapCauseSourceBranchMissing");
+    case "runtime_cleanup_failed":
+      return translate("task:sessionRuntimeCleanupFailedBody");
     case "transport_unavailable":
       return translate("task:sessionBootstrapCauseTransportUnavailable");
     case "timeout":
@@ -59,15 +62,26 @@ export function automaticRecoveryCauses(
   translate: TFunction,
 ): AgentErrorCause[] {
   if (!recovery) return [];
+  const resumeCauses =
+    recovery.recoveryFailure && "resumeCauses" in recovery.recoveryFailure
+      ? normalizeAgentErrorCauses(recovery.recoveryFailure.resumeCauses)
+      : [];
   if (recovery.recoveryFailure?.outcome === "recovery_failed") {
     return [
-      {
-        operation: "resume",
-        code: "unknown",
-        detail: [translate("task:failedToResumeSession"), recovery.recoveryFailure.resumeError]
-          .filter(Boolean)
-          .join("\n"),
-      },
+      ...(resumeCauses.length
+        ? resumeCauses
+        : [
+            {
+              operation: "resume",
+              code: "unknown",
+              detail: [
+                translate("task:failedToResumeSession"),
+                recovery.recoveryFailure.resumeError,
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            },
+          ]),
       {
         operation: "restore_workspace",
         code: "unknown",
@@ -77,6 +91,7 @@ export function automaticRecoveryCauses(
       },
     ];
   }
+  if (resumeCauses.length) return resumeCauses;
   if (recovery.recoveryFailure?.outcome === "workspace_read_only" || recovery.error) {
     return [
       {
@@ -105,6 +120,7 @@ function manualRecoveryCauses(
   if (!failure || failure.sessionId !== error.session_id || failure.errorStamp !== error.stamp) {
     return [];
   }
+  if (failure.causes?.length) return normalizeAgentErrorCauses(failure.causes);
   const restore = failure.operation === "restore_workspace";
   return [
     {
@@ -130,6 +146,7 @@ export type RecoveryCardModel = {
   freshStartWarning: boolean;
   detailFields: SessionErrorDetailsField[];
   hasTypedSelectionCause: boolean;
+  hasTypedCleanupCause: boolean;
   titleKey: string;
   summary: string;
 };
@@ -267,6 +284,7 @@ function isStartupSelectionCause(cause: AgentErrorCause): boolean {
 
 function selectPrimaryCause(causes: AgentErrorCause[]): AgentErrorCause | null {
   return (
+    causes.find((cause) => cause.code === "runtime_cleanup_failed") ??
     causes.find(isStartupSelectionCause) ??
     causes.find((cause) => cause.operation !== "restore_workspace") ??
     causes[0] ??
@@ -386,11 +404,12 @@ function currentManualRecoveryFailure(
 
 function readOnlyWorkspaceOutcome(
   automaticRecovery: SessionRecoveryOwner | null | undefined,
-  recoveryNotice: string | null,
+  recoveryNoticeKind: SessionRecoveryNoticeKind | null | undefined,
 ): boolean {
   return (
     automaticRecovery?.recoveryFailure?.outcome === "workspace_read_only" ||
-    Boolean(recoveryNotice ?? automaticRecovery?.notice)
+    automaticRecovery?.noticeKind === "workspace_read_only" ||
+    recoveryNoticeKind === "workspace_read_only"
   );
 }
 
@@ -418,6 +437,7 @@ function recoveryCardStatus({
   automaticRecovery,
   manualFailure,
   recoveryNotice,
+  recoveryNoticeKind,
   primaryCause,
   translate,
 }: {
@@ -425,11 +445,12 @@ function recoveryCardStatus({
   automaticRecovery: SessionRecoveryOwner | null | undefined;
   manualFailure: ManualSessionRecoveryFailure | null;
   recoveryNotice: string | null;
+  recoveryNoticeKind?: SessionRecoveryNoticeKind | null;
   primaryCause: AgentErrorCause | null;
   translate: TFunction;
 }): RecoveryCardStatus {
   const displayNotice = recoveryNotice ?? automaticRecovery?.notice ?? null;
-  const readOnlyOutcome = readOnlyWorkspaceOutcome(automaticRecovery, recoveryNotice);
+  const readOnlyOutcome = readOnlyWorkspaceOutcome(automaticRecovery, recoveryNoticeKind);
   const hasRecoveryFailure = anyRecoveryFailure(
     automaticRecovery,
     currentManualRecoveryFailure(error, manualFailure),
@@ -455,6 +476,7 @@ export function buildRecoveryCardModel({
   manualFailure,
   manualError,
   recoveryNotice,
+  recoveryNoticeKind,
   translate,
   agentDisplayName,
 }: {
@@ -463,6 +485,7 @@ export function buildRecoveryCardModel({
   manualFailure: ManualSessionRecoveryFailure | null;
   manualError: Error | null;
   recoveryNotice: string | null;
+  recoveryNoticeKind?: SessionRecoveryNoticeKind | null;
   translate: TFunction;
   agentDisplayName?: string;
 }): RecoveryCardModel {
@@ -477,13 +500,17 @@ export function buildRecoveryCardModel({
     automaticRecovery,
     manualFailure,
     recoveryNotice,
+    recoveryNoticeKind,
     primaryCause,
     translate,
   });
   const hasTypedSelectionCause = causes.some(isStartupSelectionCause);
   const causeTitleKey =
     primaryCause && isStartupSelectionCause(primaryCause) ? selectionTitleKey(primaryCause) : null;
-  const titleKey = causeTitleKey ?? recoveryTitleKey(status.isReadOnly, status.hasRecoveryFailure);
+  const hasTypedCleanupCause = primaryCause?.code === "runtime_cleanup_failed";
+  const titleKey = hasTypedCleanupCause
+    ? "task:sessionRuntimeCleanupFailedTitle"
+    : (causeTitleKey ?? recoveryTitleKey(status.isReadOnly, status.hasRecoveryFailure));
 
   return {
     causes,
@@ -492,11 +519,14 @@ export function buildRecoveryCardModel({
     showSummary: !status.isReadOnly || Boolean(primaryCause),
     hasDetails: causes.length > 0 || Boolean(error.details),
     noPromptSent: Boolean(
-      primaryCause && isStartupSelectionCause(primaryCause) && primaryCause.prompt_not_sent,
+      primaryCause &&
+      (isStartupSelectionCause(primaryCause) || hasTypedCleanupCause) &&
+      primaryCause.prompt_not_sent,
     ),
     freshStartWarning: Boolean(primaryCause && isStartupSelectionCause(primaryCause)),
     detailFields: recoveryDetailFields(error, causes, translate),
     hasTypedSelectionCause,
+    hasTypedCleanupCause,
     titleKey,
     summary: causeSummary(primaryCause, agentDisplayName, translate),
   };

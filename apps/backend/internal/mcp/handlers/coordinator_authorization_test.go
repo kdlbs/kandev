@@ -181,6 +181,32 @@ func TestAuthorizeCoordinatorRequest_ForeignWorkflowOrTaskRefused(t *testing.T) 
 	})
 }
 
+// TestAuthorizeCoordinatorRequest_UnknownWorkflowOrTaskRefused proves an id
+// naming no entity reads as not found for a coordinator, the same as another
+// workspace's id (a page chip's id may name either).
+func TestAuthorizeCoordinatorRequest_UnknownWorkflowOrTaskRefused(t *testing.T) {
+	h, _ := newCoordinatorGuardTestHandlers(t)
+	ctx := context.Background()
+	workspaces, err := h.taskSvc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	principalCtx := mcpscope.WithPrincipal(ctx, coordinatorTestPrincipal(workspaces[0].ID))
+
+	cases := map[string]map[string]interface{}{
+		ws.ActionMCPListWorkflowSteps:   {"workflow_id": "wf-does-not-exist"},
+		ws.ActionMCPListTasks:           {"workflow_id": "wf-does-not-exist"},
+		ws.ActionMCPGetTaskConversation: {"task_id": "task-does-not-exist"},
+	}
+	for action, payload := range cases {
+		t.Run(action, func(t *testing.T) {
+			msg := makeWSMessage(t, action, payload)
+			guarded, _, err := h.authorizeCoordinatorRequest(principalCtx, msg)
+			require.NoError(t, err)
+			assertWSError(t, guarded, ws.ErrorCodeNotFound)
+		})
+	}
+}
+
 // TestAuthorizeCoordinatorRequest_ProposeTaskRequiresCoordinatorPrincipal
 // covers the guard's other half: coordinator.propose_task from a principal
 // that is not a coordinator is refused, naming the action as unknown rather

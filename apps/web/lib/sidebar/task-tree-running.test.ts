@@ -31,4 +31,26 @@ describe("task tree running projection", () => {
 
     expect(resolveTaskTreeRunning([parent], children)).toEqual(new Map([["parent", false]]));
   });
+
+  it("uses an explicit task-wide aggregate and keeps the legacy primary fallback", () => {
+    const taskWide = task({
+      id: "task-wide",
+      sessionState: "WAITING_FOR_INPUT",
+      hasRunningSession: true,
+    });
+    const explicitFalse = task({
+      id: "explicit-false",
+      sessionState: "RUNNING",
+      hasRunningSession: false,
+    });
+    const legacy = task({ id: "legacy", sessionState: "RUNNING" });
+
+    expect(resolveTaskTreeRunning([taskWide, explicitFalse, legacy], new Map())).toEqual(
+      new Map([
+        ["task-wide", true],
+        ["explicit-false", false],
+        ["legacy", true],
+      ]),
+    );
+  });
 });

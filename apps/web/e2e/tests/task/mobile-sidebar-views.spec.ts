@@ -12,8 +12,13 @@
 import { test, expect, type SeedData } from "../../fixtures/test-base";
 import type { Page, Locator } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
-import { dwell } from "../../helpers/causal-waits";
+import {
+  scrollSidebarFilterListTopIntoView,
+  touchDragBetween,
+  touchDragToPoint,
+} from "../../helpers/touch-drag";
 import { SessionPage } from "../../pages/session-page";
+import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { requireBox } from "../../helpers/layout-assertions";
 import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
@@ -79,37 +84,57 @@ async function touchDrag(page: Page, source: Locator, target: Locator): Promise<
   const targetBox = await target.boundingBox();
   expect(sourceBox).not.toBeNull();
   expect(targetBox).not.toBeNull();
-
-  const client = await page.context().newCDPSession(page);
-  const start = {
-    x: sourceBox!.x + sourceBox!.width / 2,
-    y: sourceBox!.y + sourceBox!.height / 2,
-  };
-  const end = {
-    x: targetBox!.x + targetBox!.width / 2,
-    y: targetBox!.y + targetBox!.height / 2,
-  };
-  await client.send("Input.dispatchTouchEvent", {
-    type: "touchStart",
-    touchPoints: [{ id: 1, x: start.x, y: start.y }],
-  });
-  await dwell(300, "library-timer", "dnd-kit TouchSensor waits 250ms before activating");
-  for (let step = 1; step <= 12; step += 1) {
-    const progress = step / 12;
-    await client.send("Input.dispatchTouchEvent", {
-      type: "touchMove",
-      touchPoints: [
-        {
-          id: 1,
-          x: start.x + (end.x - start.x) * progress,
-          y: start.y + (end.y - start.y) * progress,
-        },
-      ],
-    });
-  }
-  await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await client.detach();
+  await touchDragBetween(
+    page,
+    { x: sourceBox!.x + sourceBox!.width / 2, y: sourceBox!.y + sourceBox!.height / 2 },
+    { x: targetBox!.x + targetBox!.width / 2, y: targetBox!.y + targetBox!.height / 2 },
+  );
 }
+
+test("wider coarse-pointer task-row controls stay inside their cards", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await testPage.setViewportSize({ width: 900, height: 1000 });
+  expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+  const navigation = await apiClient.seedTask(seedData.workspaceId, "Tablet coarse pointer nav", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+  await testPage.goto(`/t/${navigation.task_id}`);
+  await new SessionPage(testPage).waitForLoad();
+
+  const filters = new SidebarFilterPopoverPage(testPage);
+  await expect(filters.gear).toBeVisible();
+  await filters.open();
+  const taskRowSettings = filters.popover.getByTestId("task-row-settings");
+  await taskRowSettings.getByTestId("task-row-settings-toggle").click();
+  const detailRow = taskRowSettings.getByTestId("task-row-detail-relative_time");
+  await detailRow.scrollIntoViewIfNeeded();
+  const cardBox = await detailRow.boundingBox();
+  expect(cardBox).not.toBeNull();
+  for (const control of [
+    taskRowSettings.getByTestId("task-row-detail-handle-relative_time"),
+    taskRowSettings.getByTestId("task-row-detail-more-relative_time"),
+    taskRowSettings.getByTestId("task-row-detail-toggle-relative_time"),
+  ]) {
+    const controlBox = await control.boundingBox();
+    expect(controlBox?.height).toBeGreaterThanOrEqual(44);
+    expect(controlBox?.width).toBeGreaterThanOrEqual(44);
+    expect(controlBox?.x).toBeGreaterThanOrEqual(cardBox!.x);
+    expect(controlBox!.x + controlBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+    expect(controlBox?.y).toBeGreaterThanOrEqual(cardBox!.y);
+    expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(cardBox!.y + cardBox!.height);
+  }
+  const editorBox = await filters.popover.boundingBox();
+  expect(editorBox).not.toBeNull();
+  expect(editorBox!.x).toBeGreaterThanOrEqual(0);
+  expect(editorBox!.x + editorBox!.width).toBeLessThanOrEqual(900);
+  expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+    true,
+  );
+});
 
 test.describe("Mobile sidebar — view system", () => {
   test("multi-repository group shows the complete ordered label", async ({
@@ -664,6 +689,57 @@ test.describe("Mobile sidebar — view system", () => {
 
     const pullRequestHandle = settings.getByTestId("task-row-detail-handle-pull_request_number");
     const relativeTimeHandle = settings.getByTestId("task-row-detail-handle-relative_time");
+    const detailList = settings.locator("[data-sidebar-reorder-list]");
+    const readDetailOrder = () =>
+      detailList
+        .locator(":scope > div")
+        .evaluateAll((rows) =>
+          rows.map((row) => row.getAttribute("data-testid")?.replace("task-row-detail-", "")),
+        );
+    await expect(relativeTimeHandle).toHaveAttribute("data-vaul-no-drag", "");
+    await scrollSidebarFilterListTopIntoView(detailList);
+    const detailListBox = await detailList.boundingBox();
+    const editorBox = await popover.boundingBox();
+    expect(detailListBox).not.toBeNull();
+    expect(editorBox).not.toBeNull();
+    const outsideY = detailListBox!.y - 8;
+    expect(outsideY).toBeGreaterThan(editorBox!.y);
+    await touchDragToPoint(testPage, pullRequestHandle, {
+      x: detailListBox!.x + detailListBox!.width / 2,
+      y: outsideY,
+    });
+    await expect
+      .poll(readDetailOrder)
+      .toEqual(["relative_time", "repository", "pull_request_number"]);
+
+    await scrollSidebarFilterListTopIntoView(detailList);
+    await waitForFiniteAnimations(settings);
+    const drawerBeforeDownwardDrag = await drawer.boundingBox();
+    const repositoryBox = await settings.getByTestId("task-row-detail-repository").boundingBox();
+    expect(repositoryBox).not.toBeNull();
+    await touchDragToPoint(testPage, relativeTimeHandle, {
+      x: repositoryBox!.x + repositoryBox!.width / 2,
+      y: repositoryBox!.y + 2,
+    });
+    await expect
+      .poll(readDetailOrder)
+      .toEqual(["repository", "relative_time", "pull_request_number"]);
+    await expect(drawer).toBeVisible();
+    await waitForFiniteAnimations(drawer);
+    const drawerAfterDownwardDrag = await drawer.boundingBox();
+    expect(drawerBeforeDownwardDrag).not.toBeNull();
+    expect(drawerAfterDownwardDrag).not.toBeNull();
+    expect(Math.abs(drawerAfterDownwardDrag!.y - drawerBeforeDownwardDrag!.y)).toBeLessThan(1);
+    await settings.getByTestId("task-row-detail-more-relative_time").tap();
+    const relativeTimeMoveUp = testPage.getByTestId("task-row-detail-more-relative_time-move-up");
+    await waitForFiniteAnimations(testPage.getByRole("menu").filter({ has: relativeTimeMoveUp }));
+    await relativeTimeMoveUp.tap();
+    await expect
+      .poll(readDetailOrder)
+      .toEqual(["relative_time", "repository", "pull_request_number"]);
+    await scrollSidebarFilterListTopIntoView(detailList);
+    await waitForFiniteAnimations(settings);
+
     await touchDrag(testPage, pullRequestHandle, relativeTimeHandle);
     await expect
       .poll(async () =>
@@ -674,6 +750,23 @@ test.describe("Mobile sidebar — view system", () => {
           ),
       )
       .toEqual(["pull_request_number", "relative_time", "repository"]);
+
+    const repositoryMore = settings.getByTestId("task-row-detail-more-repository");
+    await repositoryMore.tap();
+    const repositoryMoveUp = testPage.getByTestId("task-row-detail-more-repository-move-up");
+    await waitForFiniteAnimations(testPage.getByRole("menu").filter({ has: repositoryMoveUp }));
+    const repositoryMoveUpBox = await repositoryMoveUp.boundingBox();
+    expect(repositoryMoveUpBox?.height).toBeGreaterThanOrEqual(44);
+    await repositoryMoveUp.tap();
+    await expect
+      .poll(async () =>
+        settings
+          .locator("div[data-testid^='task-row-detail-']")
+          .evaluateAll((rows) =>
+            rows.map((row) => row.getAttribute("data-testid")?.replace("task-row-detail-", "")),
+          ),
+      )
+      .toEqual(["pull_request_number", "repository", "relative_time"]);
 
     await settings.getByTestId("task-row-detail-toggle-repository").tap();
     await settings.getByTestId("task-row-details-toggle").tap();

@@ -15,6 +15,7 @@ import {
   resolveAgentProfileLabel,
   resolveExecutorProfileLabel,
 } from "@/lib/coordinators/profile-lookup";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { CoordinatorCard } from "./coordinator-card";
 import type { WorkspaceState } from "@/lib/state/slices";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
@@ -114,6 +115,7 @@ function CoordinatorsListBody({
 }
 
 export function CoordinatorsListPage({ workspaceId }: CoordinatorsListPageProps) {
+  const phase2 = useFeature("coordinatorPhase2");
   const { t } = useTranslation();
   const router = useRouter();
   useSettingsData(true);
@@ -157,12 +159,14 @@ export function CoordinatorsListPage({ workspaceId }: CoordinatorsListPageProps)
         missingLabel={missingLabel}
         workspaceId={workspaceId}
       />
-      <p
-        className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground"
-        data-testid="coordinators-later-phase-note"
-      >
-        {t("coordinator:laterPhaseNote")}
-      </p>
+      {!phase2 && (
+        <p
+          className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground"
+          data-testid="coordinators-later-phase-note"
+        >
+          {t("coordinator:laterPhaseNote")}
+        </p>
+      )}
     </div>
   );
 }

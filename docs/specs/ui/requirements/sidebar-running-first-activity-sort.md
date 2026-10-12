@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-10-06
-updated: 2026-10-06
+updated: 2026-10-07
 owners:
   - kandev
 ---
@@ -23,7 +23,8 @@ This revision replaces the original fixed-preset proposal. It extends
 ## Terminology
 
 - **Sort chain:** An ordered list of one to ten rules, evaluated from first to last.
-- **Running task:** A task whose sidebar primary session has runtime state `RUNNING`.
+- **Running task:** A task with at least one session in runtime state `RUNNING`.
+  The session can be primary or secondary. A primary session is not required.
   Workflow placement alone does not establish that an agent runs.
 - **Included subtree:** A task and all descendants remaining after view filters.
   Collapse hides rows without removing their contributions.
@@ -60,7 +61,7 @@ for every possible combination.
 - **AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.5:** Saved views and drafts shall retain
   all rules, rule order, directions, and selected colors across save, reload,
   boot hydration, settings updates, workspace switches, and another signed-in client.
-  Existing single-sort views and default views shall retain their behavior.
+  Existing views shall retain their saved configuration.
 - **AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.6:** Server-backed pages and complete
   local data shall produce the same chain order. Only after all rules tie shall
   the existing canonical sidebar tie order apply. Pages shall retain the existing
@@ -95,6 +96,21 @@ for every possible combination.
   preferred colors can occupy separate rules. Invalid queries shall identify
   the invalid rule without silently discarding ranking. Unsupported stored data
   shall follow documented normalization without discarding valid rules.
+- **AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.14:** Running first shall rank a task
+  with any `RUNNING` session ahead of tasks without a `RUNNING` session.
+  An absent, waiting, completed, failed, or cancelled primary shall not hide a
+  running secondary. Other sessions in those states shall not cancel its rank.
+  `STARTING`, workflow placement, and settled background processes alone shall
+  not establish running rank. Others first shall reverse these two sets.
+- **AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.15:** Accepted session creation, state
+  changes, and removal shall update running rank on desktop and phone.
+  A task shall keep running rank until its last running session stops or disappears.
+  Switching the selected session or primary designation alone shall not change rank.
+- **AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.16:** Existing saved Running rules shall
+  use task-wide session state without rewriting the view.
+  Older task summaries shall not permanently hide running secondary sessions.
+  Incomplete local runtime evidence shall use authoritative server evaluation.
+  An unavailable runtime source shall not invent a running task.
 
 ### REQ-UI-SIDEBAR-GROUP-INDENT-001: Optional grouped-task indentation
 
@@ -130,7 +146,7 @@ while retaining group headings and subtask hierarchy.
 
 - Arbitrary expressions, numeric color scores, or changes to shared task priority.
 - Inferring named priority from custom hexadecimal color appearance.
-- Color aggregation from descendants or independent secondary-session ranking.
+- Color aggregation from descendants or separate rows for secondary sessions.
 - Changing task state, activity publication, pins, manual child order, or group headings.
 - Changing Kanban, List, Threads, Office, command-panel, or quick-chat ordering.
 - Replacing the user's defaults with the example chain.
@@ -138,3 +154,7 @@ while retaining group headings and subtask hierarchy.
 ## Implementation plan
 
 - [Sidebar sort chain and color ranking](../../../plans/sidebar-running-first-activity-sort/plan.md)
+- [Task-wide running rank fix](../../../plans/sidebar-task-wide-running-rank/plan.md)
+
+This draft amends the primary-only running definition. The group-indentation
+contract is unchanged. Implementation and regression evidence belong to the fix plan.

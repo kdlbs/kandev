@@ -46,10 +46,12 @@ export function deriveSessionFlags(session: TaskSession | null | undefined) {
 
 type UseSessionStateOptions = {
   taskIdHint?: string | null;
+  detailActive?: boolean;
 };
 
 export function useSessionState(sessionId: string | null, options: UseSessionStateOptions = {}) {
   const { taskIdHint = null } = options;
+  const detailActive = options.detailActive ?? true;
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
 
@@ -65,9 +67,9 @@ export function useSessionState(sessionId: string | null, options: UseSessionSta
 
   const resolvedSessionId = sessionId ?? validatedActiveSessionId;
 
-  const { session } = useSession(resolvedSessionId);
+  const { session } = useSession(resolvedSessionId, { detailActive });
   const taskId = session?.task_id ?? taskIdHint ?? null;
-  const task = useTask(taskId);
+  const task = useTask(taskId, detailActive);
   const prepareStatus = useAppStore((state) =>
     resolvedSessionId ? state.prepareProgress.bySessionId[resolvedSessionId]?.status : undefined,
   );

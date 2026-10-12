@@ -1,6 +1,18 @@
 import type { SortRule } from "@/lib/state/slices/ui/sidebar-view-types";
+import { arrayMove } from "@dnd-kit/sortable";
 
 export type IdentifiedSortRule = { id: string; rule: SortRule };
+
+export function moveIdentifiedSortRuleById(
+  entries: IdentifiedSortRule[],
+  activeId: string,
+  overId: string,
+): IdentifiedSortRule[] {
+  const oldIndex = entries.findIndex((entry) => entry.id === activeId);
+  const newIndex = entries.findIndex((entry) => entry.id === overId);
+  if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return entries;
+  return arrayMove(entries, oldIndex, newIndex);
+}
 
 export function changeIdentifiedSortRule(
   entries: IdentifiedSortRule[],

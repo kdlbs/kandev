@@ -234,7 +234,9 @@ func run(cfg *config.Config, log *logger.Logger) {
 			zap.String("session_id", instCfg.SessionID))
 
 		srv := api.NewServer(instCfg, procMgr, mcpSrv, mcpBackendClient, instLog)
-		srv.SetCredentialSource(controlServer.CredentialSource())
+		if cfg.AuthToken != "" {
+			srv.SetCredentialSource(controlServer.CredentialSource())
+		}
 		return srv.Router()
 	})
 

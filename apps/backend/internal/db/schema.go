@@ -118,6 +118,41 @@ func ColumnExistsContext(ctx context.Context, conn ContextSchemaQuerier, table, 
 	return exists, nil
 }
 
+// IndexExistsContext reports whether index exists in the active database
+// schema. Missing indexes are reported as false without an error.
+func IndexExistsContext(ctx context.Context, conn ContextSchemaQuerier, index string) (bool, error) {
+	query := `SELECT EXISTS (
+		SELECT 1 FROM pg_indexes
+		WHERE schemaname = current_schema() AND indexname = ?
+	)`
+	if !isPostgresSchema(conn) {
+		query = `SELECT EXISTS (
+			SELECT 1 FROM sqlite_master
+			WHERE type = 'index' AND name = ?
+		)`
+	}
+	var exists bool
+	if err := conn.QueryRowContext(ctx, conn.Rebind(query), index).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+// IndexDefinitionContext returns the index DDL in the active database schema.
+// A missing index returns an empty definition.
+func IndexDefinitionContext(ctx context.Context, conn ContextSchemaQuerier, index string) (string, error) {
+	query := `SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?`
+	if !isPostgresSchema(conn) {
+		query = `SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`
+	}
+	var definition string
+	err := conn.QueryRowContext(ctx, conn.Rebind(query), index).Scan(&definition)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return definition, err
+}
+
 func isPostgresSchema(conn SchemaQuerier) bool {
 	return conn.DriverName() == "pgx"
 }

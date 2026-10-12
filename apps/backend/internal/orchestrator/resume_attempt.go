@@ -15,6 +15,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // ErrResumeAttemptCancelled is returned when a startup continuation no longer
@@ -151,6 +152,7 @@ func (r *resumeAttemptRegistry) begin(parent context.Context, taskID, sessionID 
 	if parent == nil {
 		parent = context.Background()
 	}
+	parent, _ = worktree.WithRecoveryInspectionWait(parent, worktree.RecoveryInspectionWaitBudget)
 	if owned, _ := parent.Value(continuationOwnedContextKey{}).(bool); !owned {
 		parent = context.WithoutCancel(parent)
 	}
@@ -206,11 +208,18 @@ func (r *resumeAttemptRegistry) settingsPolicy(attempt *resumeAttempt) executor.
 // session's cancellation guard so registration and invalidation are ordered
 // against prompt admission and lifecycle event handling.
 func (r *resumeAttemptRegistry) invalidate(sessionID string) bool {
+	return r.invalidateAttempt(sessionID) != nil
+}
+
+func (r *resumeAttemptRegistry) invalidateAttempt(sessionID string) *resumeAttempt {
+	if sessionID == "" {
+		return nil
+	}
 	r.mu.Lock()
 	attempt := r.attempts[sessionID]
 	if attempt == nil || attempt.ctx.Err() != nil || attempt.accepted {
 		r.mu.Unlock()
-		return false
+		return nil
 	}
 	attempt.cancel()
 	finishPending := attempt.awaitingInitialPrompt
@@ -221,7 +230,7 @@ func (r *resumeAttemptRegistry) invalidate(sessionID string) bool {
 		// ownership record now so a cancelled callback cannot leave it active.
 		attempt.finish(r)
 	}
-	return true
+	return attempt
 }
 
 func (r *resumeAttemptRegistry) cancelAll() {
@@ -832,6 +841,50 @@ func (s *Service) resumeAttemptAllowsExecution(sessionID, executionID string, or
 	return resumeAttemptTombstoneAllowsExecution(registry, sessionID, executionID, originID)
 }
 
+func (s *Service) activeResumeAttemptOwnsStartup(sessionID, executionID, originID string) bool {
+	id, ok := parseResumeAttemptIdentity(originID)
+	if !ok || sessionID == "" || executionID == "" {
+		return false
+	}
+	registry := s.resumeAttemptStore()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	current := registry.attempts[sessionID]
+	if current == nil || current.id != id || current.ctx.Err() != nil || current.accepted {
+		return false
+	}
+	return activeResumeAttemptAllowsExecutionLocked(registry, current, executionID, originID)
+}
+
+// resumeAttemptOwnsUnacceptedStartupStop identifies a stop from the exact
+// latest resume attempt that never transferred startup ownership to a
+// provider turn. Such a callback can accompany a failed startup, but it must
+// not complete a turn after that failure has already been projected.
+func (s *Service) resumeAttemptOwnsUnacceptedStartupStop(sessionID, executionID, originID string) bool {
+	id, ok := parseResumeAttemptIdentity(originID)
+	if !ok || sessionID == "" || executionID == "" {
+		return false
+	}
+	registry := s.resumeAttemptStore()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if current := registry.attempts[sessionID]; current != nil {
+		return current.id == id && current.ctx.Err() == nil && !current.accepted &&
+			activeResumeAttemptAllowsExecutionLocked(registry, current, executionID, originID)
+	}
+	tombstone, found := registry.tombstoneLocked(sessionID, id)
+	if !found || tombstone.cancelled || tombstone.accepted ||
+		tombstone.executionID != executionID {
+		return false
+	}
+	for _, later := range registry.tombstones[sessionID] {
+		if later.id > id {
+			return false
+		}
+	}
+	return true
+}
+
 // resumeAttemptOwnsNotice reports whether the attempt is still the session's
 // newest accepted startup owner. A completed attempt remains eligible for a
 // replay after its owner releases the registry entry, but an older event cannot
@@ -936,6 +989,11 @@ func resumeAttemptTombstoneAllowsExecution(
 	if tombstone.cancelled {
 		return false
 	}
+	for _, later := range registry.tombstones[sessionID] {
+		if later.id > id {
+			return false
+		}
+	}
 	return tombstone.executionID == "" || executionID == "" || tombstone.executionID == executionID
 }
 
@@ -969,11 +1027,11 @@ func (s *Service) lockResumeAttemptAdmission(
 	return guard, nil
 }
 
-func (s *Service) invalidateResumeAttempt(sessionID string) {
+func (s *Service) invalidateResumeAttempt(sessionID string) *resumeAttempt {
 	if sessionID == "" {
-		return
+		return nil
 	}
-	s.resumeAttemptStore().invalidate(sessionID)
+	return s.resumeAttemptStore().invalidateAttempt(sessionID)
 }
 
 func (s *Service) cancelResumeAttempts() {

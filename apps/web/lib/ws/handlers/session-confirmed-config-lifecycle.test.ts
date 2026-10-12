@@ -210,3 +210,36 @@ it("ignores a delayed settled snapshot while startup identity is unresolved", ()
   expect(confirmedMode(store)).toEqual({ collaboration_mode: "plan" });
   expect(menuMode(store)).toBe("active");
 });
+
+it.each([true, false])(
+  "does not reuse an inferred startup identity for a later startup (STARTING observed: %s)",
+  (observeStarting) => {
+    const store = makeStore();
+    agentctlStarting(store, previousExecutionId);
+    if (observeStarting) sessionStarting(store);
+    expect(confirmedMode(store)).toEqual({ collaboration_mode: "plan" });
+    registerTaskSessionHandlers(store)["session.state_changed"]!({
+      id: "running-1",
+      type: "notification",
+      action: "session.state_changed",
+      payload: {
+        task_id: taskId,
+        session_id: sessionId,
+        new_state: "RUNNING",
+        updated_at: "2026-10-05T00:02:00.000Z",
+      },
+    } as never);
+    registerTaskSessionHandlers(store)["session.state_changed"]!({
+      id: "starting-2",
+      type: "notification",
+      action: "session.state_changed",
+      payload: {
+        task_id: taskId,
+        session_id: sessionId,
+        new_state: "STARTING",
+        updated_at: "2026-10-05T00:03:00.000Z",
+      },
+    } as never);
+    expect(confirmedMode(store)).toBeUndefined();
+  },
+);

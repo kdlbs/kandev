@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-10-02
-updated: 2026-10-05
+updated: 2026-10-08
 owners:
   - Kandev
 ---
@@ -19,8 +19,8 @@ transitions.
 
 This extends [Provider Error Recovery](provider-error-recovery.md) with a
 separate continuation contract. Its original-prompt replay fence remains in
-criteria `.8` and `.15`; eligible post-output recovery uses the experimental,
-default-off continuation path described here.
+criteria `.8` and `.15`; eligible post-output recovery uses the normal
+continuation path described here, without an installation opt-in.
 
 Continuation permits output and successfully completed foreground tools,
 including shell, write, and MCP tools. Pending or uncertain tool outcomes require
@@ -53,8 +53,8 @@ when conversation restoration and the interrupted work are unambiguous.
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1:** On an enabled installation,
-  a current, high-confidence short-retryable provider failure in a supported
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1:** A current,
+  high-confidence short-retryable provider failure in a supported
   concrete-profile task session shall permit continuation after assistant or
   thought output when the provider conversation is restorable and all foreground
   tool outcomes are known and successful. Unsupported providers, passthrough,
@@ -131,12 +131,19 @@ bounded and subordinate to user actions.
   successful task completion, advance a workflow, drain queued work ahead of
   recovery, or complete a CI-fix outcome. Normal successful continuation shall
   return to existing completion processing exactly once.
-- **AC-PLATFORM-INTERRUPTION-CONTINUATION-002.5:** The release toggle shall be
-  off in all shipped profiles initially. Disabled installations shall retain
-  existing replay and manual-recovery behavior without collecting new
-  continuation evidence, dispatching continuation, or advertising it as an
-  available automatic operation. Operators shall enable it on a selected
-  installation with the existing runtime-toggle precedence and restart rules.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-002.5:** Supported interruption
+  continuation shall be available in every shipped profile without enabling a
+  feature toggle or setting an environment variable. Former configuration
+  values and stored overrides, including false values, shall not disable it.
+  Continuation shall still require the safety and ownership evidence in
+  criteria `001.1` through `001.5`.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-002.6:** Feature Toggles and the
+  public feature-state response shall omit
+  `features.providerInterruptionContinuation`. Its former key and environment
+  variable shall remain permanently reserved against reuse. Upgrade shall
+  preserve existing conversations and stored overrides without rewriting
+  history or redispatching an interrupted turn solely because recovery is now
+  available by default.
 
 ### REQ-PLATFORM-INTERRUPTION-CONTINUATION-003: Accurate recovery feedback
 
@@ -155,8 +162,8 @@ continuing, exhausted, or deliberately unavailable.
   Manual recovery shall distinguish unsafe or unknown work, unsupported
   restoration, missing evidence, cancellation, and exhaustion. Only a genuinely
   exhausted episode shall claim exhaustion; its displayed count shall reflect
-  attempts actually started. This correction shall also apply with the toggle
-  disabled.
+  attempts actually started. Historical failure records shall remain readable
+  after the former release toggle is removed.
 - **AC-PLATFORM-INTERRUPTION-CONTINUATION-003.3:** Success, cancellation,
   exhaustion, supersession, or shutdown shall retire actionable retry notices.
   Reload and another viewer shall not resurrect a resolved countdown after
@@ -176,7 +183,7 @@ continuing, exhausted, or deliberately unavailable.
 - Detecting Wi-Fi changes, altering host networking, HTTP compatibility modes,
   provider purchase/authentication, or interpreting inactivity as a failure.
 - New provider switching, dynamic candidate policies, persistent retry jobs,
-  response-attempt transcript retraction, or automatic flag promotion.
+  response-attempt transcript retraction, or unverified provider support.
 
 ## System design and delivery
 
@@ -184,3 +191,4 @@ continuing, exhausted, or deliberately unavailable.
 - [Hidden continuation and truthful Cursor errors plan](../../../plans/cursor-hidden-continuation/plan.md)
 
 - [Original implementation package](../../../plans/provider-interruption-continuation/plan.md)
+- [Continuation graduation package](../../../plans/provider-interruption-continuation-graduation/plan.md)

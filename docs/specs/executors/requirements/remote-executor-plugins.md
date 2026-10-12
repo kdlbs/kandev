@@ -78,6 +78,7 @@ AC-EXECUTORS-PLUGIN-001.5 covered the initial release toggle. It is retired; the
 - **AC-EXECUTORS-PLUGIN-004.3:** Delayed status, checkpoint, or cleanup operations shall not alter a successor execution or a transferred environment. Unconfirmed cleanup shall preserve its retry information.
 - **AC-EXECUTORS-PLUGIN-004.4:** Recovery shall resolve interrupted allocation by its original operation identity, including interruption before a resource handle was returned. Unknown outcomes shall block replacement allocation.
 - **AC-EXECUTORS-PLUGIN-004.5:** Resumable conversation information shall remain intact after compute loss. Recovery shall make no new guarantee about remote transcript replay.
+- **AC-EXECUTORS-PLUGIN-004.6:** Backend shutdown or disconnection shall preserve the remote agentctl and active agent process, independently of the local agent-survival feature toggle. Backend startup shall reconnect to the recorded surviving execution without a new prompt. Provider expiry, explicit Stop, and authorized environment destruction remain distinct lifecycle events. Supported durable-delivery runtimes shall retain and replay output according to REQ-PLATFORM-DURABLE-AGENT-DELIVERY-004.
 
 ### REQ-EXECUTORS-PLUGIN-005: Plugin changes with retained resources
 

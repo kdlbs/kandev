@@ -128,6 +128,11 @@ func TestRecoveryInspectionConflictResponseIsSanitized(t *testing.T) {
 	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
 	require.Equal(t, "workspace recovery inspection is busy", payload.Message)
 	require.Equal(t, "recovery_inspection_busy", payload.Details["kind"])
+
+	joined := errors.Join(err, errors.New("lifecycle cleanup failed"))
+	response, responseErr = recoveryInspectionConflictResponse(msg, joined)
+	require.NoError(t, responseErr)
+	require.Nil(t, response, "joined lifecycle failures must use normal failure handling")
 }
 
 func TestSessionRecoveryGuardConflictResponseMapsRetryableToConflict(t *testing.T) {
@@ -171,6 +176,38 @@ func TestSessionRecoveryGuardConflictResponseIgnoresUnrelatedError(t *testing.T)
 
 	response, responseErr := sessionRecoveryGuardConflictResponse(msg, errors.New("boom"))
 
+	require.NoError(t, responseErr)
+	require.Nil(t, response)
+}
+
+type restoreRequiredTestError struct {
+	reason string
+}
+
+func (e restoreRequiredTestError) Error() string { return "restore is required" }
+
+func (e restoreRequiredTestError) RecoveryReason() string { return e.reason }
+
+func TestRestoreRequiredRecoveryResponseExposesBoundedContinuationDetails(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{})
+	response, responseErr := restoreRequiredRecoveryResponse(msg, restoreRequiredTestError{
+		reason: "native_state_missing",
+	}, "session-1")
+	require.NoError(t, responseErr)
+	require.NotNil(t, response)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	require.Equal(t, "session_restore_required", payload.Details["kind"])
+	require.Equal(t, "continue_from_history", payload.Details["recovery_action"])
+	require.Equal(t, "native_state_missing", payload.Details["reason"])
+	require.Equal(t, "session-1", payload.Details["session_id"])
+}
+
+func TestRestoreRequiredRecoveryResponseDoesNotExposeUnboundedReasons(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{})
+	response, responseErr := restoreRequiredRecoveryResponse(msg, restoreRequiredTestError{
+		reason: "transport_failure",
+	}, "session-1")
 	require.NoError(t, responseErr)
 	require.Nil(t, response)
 }

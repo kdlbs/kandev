@@ -57,6 +57,36 @@ func (r *Repository) GetTaskWorkflowStepID(ctx context.Context, taskID string) (
 	return r.stepIDForTask(ctx, taskID)
 }
 
+// GetTaskWorkflowStepEntry returns the current step and its latest immutable
+// transition identity from one read, so callers can detect a task that left a
+// step and later returned to the same step ID.
+func (r *Repository) GetTaskWorkflowStepEntry(ctx context.Context, taskID string) (string, int64, error) {
+	var stepID sql.NullString
+	var transitionID int64
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT COALESCE(t.workflow_step_id, ''),
+		       COALESCE((
+		           SELECT id
+		           FROM task_step_transitions
+		           WHERE task_id = t.id
+		           ORDER BY id DESC
+		           LIMIT 1
+		       ), 0)
+		FROM tasks t
+		WHERE t.id = ?
+	`), taskID).Scan(&stepID, &transitionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", 0, nil
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	if !stepID.Valid {
+		return "", transitionID, nil
+	}
+	return stepID.String, transitionID, nil
+}
+
 // GetTaskWorkflowID returns the task's current workflow_id. Returns "" with
 // no error when the task has no workflow bound. Exposed so the cascade
 // producer can workflow-scope its fan-out seat resolution the same way the

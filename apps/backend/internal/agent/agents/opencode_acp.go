@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -34,10 +33,6 @@ const OpenCodeACPAgentID = "opencode-acp"
 // agent startups and refreshes never depend on per-launch `npx --prefer-
 // offline` resolution (see ManagedNPMRuntimeSpec.NativeBinary).
 const opencodeNativeBinary = "opencode"
-
-const opencodeNativeVersionTimeout = 3 * time.Second
-
-var opencodeNativeVersionPattern = regexp.MustCompile(`[0-9]+\.[0-9]+\.[0-9]+(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`)
 
 type OpenCodeNativeRuntime struct {
 	Family  managedruntime.OpenCodeFamily
@@ -126,43 +121,6 @@ func NewOpenCodeACP() *OpenCodeACP {
 			},
 		},
 	}
-}
-
-// DetectOpenCodeNativeRuntime reads the bounded version output of the native
-// OpenCode CLI and rejects unsupported majors before a launch can guess flags.
-func DetectOpenCodeNativeRuntime(ctx context.Context) (OpenCodeNativeRuntime, bool, error) {
-	path, err := exec.LookPath(opencodeNativeBinary)
-	if err != nil {
-		var execErr *exec.Error
-		if errors.As(err, &execErr) && errors.Is(execErr.Err, exec.ErrNotFound) {
-			return OpenCodeNativeRuntime{}, false, nil
-		}
-		if errors.Is(err, exec.ErrNotFound) {
-			return OpenCodeNativeRuntime{}, false, nil
-		}
-		return OpenCodeNativeRuntime{}, false, fmt.Errorf("locate native OpenCode executable: %w", err)
-	}
-	versionCtx, cancel := context.WithTimeout(ctx, opencodeNativeVersionTimeout)
-	defer cancel()
-	output, err := exec.CommandContext(versionCtx, path, "--version").CombinedOutput()
-	if err != nil {
-		return OpenCodeNativeRuntime{}, true, fmt.Errorf("read native OpenCode version: %w", err)
-	}
-	match := opencodeNativeVersionPattern.FindString(string(output))
-	parsed, err := managedruntime.ParseStableVersion(strings.TrimSpace(match))
-	if err != nil {
-		return OpenCodeNativeRuntime{}, true, fmt.Errorf("read native OpenCode version: unsupported output")
-	}
-	family := managedruntime.OpenCodeFamily("")
-	switch parsed.Major() {
-	case 1:
-		family = managedruntime.OpenCodeFamilyV1
-	case 2:
-		family = managedruntime.OpenCodeFamilyV2
-	default:
-		return OpenCodeNativeRuntime{}, true, fmt.Errorf("native OpenCode major %d is not supported", parsed.Major())
-	}
-	return OpenCodeNativeRuntime{Family: family, Version: parsed.Original()}, true, nil
 }
 
 func (a *OpenCodeACP) ID() string          { return OpenCodeACPAgentID }

@@ -11,7 +11,7 @@ import { requireBox } from "../../helpers/layout-assertions";
 import { expectTouchControl } from "../../helpers/control-sizing";
 import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 import { closeQuickTerminalTab } from "../terminal/terminal-test-helpers";
-import { swipeDeckLeft } from "./mobile-threads-swipe-helpers";
+import { swipeDeckLeft, swipeDeckRight } from "./mobile-threads-swipe-helpers";
 import {
   captureThreadSettings,
   capturePresentation,
@@ -291,8 +291,22 @@ test.describe("Mobile Threads view", () => {
     await testPage.keyboard.press("Escape");
     await expect(testPage.getByRole("dialog", { name: "Menu", exact: true })).toBeHidden();
 
-    await swipeDeckLeft(testPage);
+    const columnIds = await board
+      .locator("[data-thread-column-id]")
+      .evaluateAll((columns) =>
+        columns.map((column) => column.getAttribute("data-thread-column-id")),
+      );
+    const selectedIndex = columnIds.indexOf(tasks[2].id);
+    expect(selectedIndex).toBeGreaterThanOrEqual(0);
+    const hasNextThread = selectedIndex < columnIds.length - 1;
+    const neighborId = columnIds[selectedIndex + (hasNextThread ? 1 : -1)];
+    expect(neighborId).toBeTruthy();
+    if (hasNextThread) await swipeDeckLeft(testPage);
+    else await swipeDeckRight(testPage);
     await expect(selected.getByTestId("session-chat")).toHaveCount(0);
+    await expect(
+      board.getByTestId(`thread-column-${neighborId}`).getByTestId("session-chat"),
+    ).toHaveCount(1);
     await expect(board.getByTestId("session-chat")).toHaveCount(1);
     await expect
       .poll(() =>

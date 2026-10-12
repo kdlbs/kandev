@@ -578,10 +578,10 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await waitForPluginBundleReady(testPage);
 
     // --- manifest.yaml declares `ui.keybindings: [{ id: open-demo, default:
-    // mod+shift+j }]`; bundle.js binds it to host.openModal(...). "mod"
+    // mod+alt+shift+j }]`; bundle.js binds it to host.openModal(...). "mod"
     // resolves to Ctrl/Cmd per-platform, matching Playwright's
     // "ControlOrMeta" pseudo-modifier. ---
-    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
     const modal = testPage.getByTestId("hello-demo-modal");
     await expect(modal).toBeVisible();
     // toContainText, not toHaveText: the modal body also carries the tooltip
@@ -611,7 +611,7 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.goto("/");
     await testPage.reload();
     await waitForPluginBundleReady(testPage);
-    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
 
     const dialog = testPage.getByRole("dialog", { name: "Demo Modal" });
     const body = dialog.locator('[data-testid^="plugin-modal-body-"]');
@@ -697,7 +697,7 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.reload();
     await waitForPluginBundleReady(testPage);
 
-    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
     const modal = testPage.getByTestId("hello-demo-modal");
     await expect(modal).toBeVisible();
 
@@ -994,6 +994,11 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     ];
     try {
       const expand = testPage.getByTestId("sidebar-navigation-expand");
+      if ((await expand.getAttribute("aria-expanded")) === "true") {
+        const collapsed = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+        await expand.click();
+        expect((await collapsed).ok()).toBeTruthy();
+      }
       await expect(expand).toHaveAttribute("aria-expanded", "false");
       const saved = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
       await expand.click();

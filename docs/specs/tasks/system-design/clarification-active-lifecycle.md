@@ -149,6 +149,15 @@ acknowledgement before an armed watchdog can observe and cancel itself. Terminal
 publication remains after successful delivery; watchdog registration does not publish those messages
 early.
 
+An exact MCP retry registers and pins its in-memory waiter before reading durable state. A
+`response_delivery_pending` claim is provisional, so the retry joins live delivery instead of
+returning that answer immediately. Clearing the durable marker alone does not permit an early
+response while the same live confirmation callback is still arming the watchdog. Registered
+waiters retain their original entry through map removal; session cancellation atomically preserves
+an in-flight confirmation so a later retry can join it. Confirmation failure returns an error, and
+detached-delivery ownership continues to prevent a second tool response. A finalized outcome with
+no live confirmation can be replayed through its exact retry identity.
+
 Each watchdog has an armed phase and a fallback-recovery phase. Independent live stream activity
 cancels either phase, and service shutdown cancels all phases. Once fallback owns the per-session
 cancel-and-handoff sequence, it marks the silent cancellation as recovery-owned. The cancellation

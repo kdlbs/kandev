@@ -12,6 +12,28 @@ const entries: IdentifiedSortRule[] = [
 ];
 
 describe("identified sort rules", () => {
+  it("inserts an identified rule at any position without changing its fields", async () => {
+    const model = (await import("./sort-chain-editor-model")) as unknown as Record<string, unknown>;
+    const move = model.moveIdentifiedSortRuleById as (
+      items: IdentifiedSortRule[],
+      activeId: string,
+      overId: string,
+    ) => IdentifiedSortRule[];
+    const threeEntries: IdentifiedSortRule[] = [
+      entries[0]!,
+      { id: "blue", rule: { key: "color", color: "blue", direction: "asc" } },
+      entries[1]!,
+    ];
+
+    expect(move).toEqual(expect.any(Function));
+    const moved = move(threeEntries, "running", "red");
+
+    expect(moved).toEqual([threeEntries[1], threeEntries[2], threeEntries[0]]);
+    expect(threeEntries.map((entry) => entry.id)).toEqual(["running", "blue", "red"]);
+    expect(move(threeEntries, "missing", "red")).toBe(threeEntries);
+    expect(move(threeEntries, "running", "running")).toBe(threeEntries);
+  });
+
   it("keeps identity when a rule field or color changes", () => {
     const colorChanged = changeIdentifiedSortRule(entries, 1, {
       key: "color",

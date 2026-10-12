@@ -1,9 +1,41 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import { SessionPage } from "../../pages/session-page";
 import { dwell } from "../../helpers/causal-waits";
 
 const OVERLAY_SCROLLBAR_SELECTOR =
   "[data-slot='scroll-area-scrollbar'][data-orientation='vertical']";
+
+async function selectTaskAndExpectReveal(page: Page, taskId: string, select: () => Promise<void>) {
+  const cue = await page.evaluateHandle((id) => {
+    const state = { seen: false };
+    const selector = `[data-task-row-id="${CSS.escape(id)}"]`;
+    const observer = new MutationObserver((records) => {
+      state.seen ||= records.some(
+        (record) =>
+          record.target instanceof Element &&
+          record.target.matches(selector) &&
+          (record.target.classList.contains("task-sidebar-row-reveal") ||
+            record.oldValue?.split(/\s+/).includes("task-sidebar-row-reveal")),
+      );
+      if (state.seen) observer.disconnect();
+    });
+    observer.observe(document, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ["class"],
+      attributeOldValue: true,
+    });
+    return { state, observer };
+  }, taskId);
+  try {
+    await select();
+    await expect.poll(() => cue.evaluate(({ state }) => state.seen)).toBe(true);
+  } finally {
+    await cue.evaluate(({ observer }) => observer.disconnect());
+    await cue.dispose();
+  }
+}
 
 /**
  * Regression: when clicking another task in the sidebar, the sidebar's
@@ -351,14 +383,13 @@ test.describe("sidebar scrolling", () => {
     await dialog.getByRole("combobox").fill(targetTask.title);
     const option = dialog.getByRole("option").filter({ hasText: targetTask.title });
     await expect(option).toBeVisible({ timeout: 10_000 });
-    await option.click();
+    await selectTaskAndExpectReveal(testPage, targetTask.id, () => option.click());
 
     await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));
     await expect(session.activeSidebarTaskItem(targetTask.title).first()).toHaveAttribute(
       "aria-current",
       "true",
     );
-    await expect(targetRow).toHaveClass(/task-sidebar-row-reveal/, { timeout: 1_000 });
     await expect
       .poll(
         async () => {
@@ -544,14 +575,13 @@ test.describe("sidebar scrolling", () => {
     await dialog.getByRole("combobox").fill(targetTask.title);
     const option = dialog.getByRole("option").filter({ hasText: targetTask.title });
     await expect(option).toBeVisible({ timeout: 10_000 });
-    await option.click();
+    await selectTaskAndExpectReveal(testPage, targetTask.id, () => option.click());
 
     await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));
     await expect(session.activeSidebarTaskItem(targetTask.title).first()).toHaveAttribute(
       "aria-current",
       "true",
     );
-    await expect(targetRow).toHaveClass(/task-sidebar-row-reveal/, { timeout: 1_000 });
     await expect
       .poll(
         () =>

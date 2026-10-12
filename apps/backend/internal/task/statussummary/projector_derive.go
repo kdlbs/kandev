@@ -12,6 +12,7 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 	primary, foregroundActivity, activeSubagentCount := deriveSessionFields(state)
 	return TaskStatusSummary{
 		PrimarySession:      primary,
+		HasRunningSession:   deriveHasRunningSession(state),
 		ForegroundActivity:  foregroundActivity,
 		ActiveSubagentCount: activeSubagentCount,
 		PendingAction:       derivePendingAction(state),
@@ -24,6 +25,38 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		LaunchQueue:         cloneLaunchQueue(state.launchQueue),
 		CompletionGate:      cloneCompletionGate(state.completionGate),
 	}
+}
+
+func deriveHasRunningSession(state *projectionState) *bool {
+	if state.sessionsObserved {
+		running := false
+		for _, session := range state.sessions {
+			if session.state == sessionStateRunning {
+				running = true
+				break
+			}
+		}
+		return &running
+	}
+	for _, session := range state.sessions {
+		if session.state == sessionStateRunning {
+			return boolPtr(true)
+		}
+	}
+	if state.current != nil {
+		return cloneBoolPtr(state.current.HasRunningSession)
+	}
+	return nil
+}
+
+func boolPtr(value bool) *bool { return &value }
+
+func cloneBoolPtr(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func cloneCompletionGate(gate *CompletionGateSummary) *CompletionGateSummary {

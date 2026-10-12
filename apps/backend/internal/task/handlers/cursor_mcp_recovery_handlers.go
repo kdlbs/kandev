@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	terminalmodels "github.com/kandev/kandev/internal/terminal/models"
@@ -47,11 +48,12 @@ type cursorMCPAuthenticationResponse struct {
 }
 
 type cursorMCPRetryResponse struct {
-	ProviderID string `json:"provider_id"`
-	ServerID   string `json:"server_id"`
-	Status     string `json:"status"`
-	ReasonCode string `json:"reason_code,omitempty"`
-	ToolCount  int    `json:"tool_count,omitempty"`
+	ProviderID string                         `json:"provider_id"`
+	ServerID   string                         `json:"server_id"`
+	Status     string                         `json:"status"`
+	ReasonCode string                         `json:"reason_code,omitempty"`
+	ToolCount  int                            `json:"tool_count,omitempty"`
+	Diagnostic *mcpconfig.NativeMCPDiagnostic `json:"mcp_diagnostic,omitempty"`
 }
 
 func (h *ProcessHandlers) httpAuthenticateCursorMCP(c *gin.Context) {
@@ -171,7 +173,15 @@ func (h *ProcessHandlers) httpRetryCursorMCP(c *gin.Context) {
 	c.JSON(http.StatusOK, cursorMCPRetryResponse{
 		ProviderID: result.ProviderID, ServerID: result.ServerID, Status: result.Status,
 		ReasonCode: result.ReasonCode, ToolCount: result.ToolCount,
+		Diagnostic: normalizeCursorMCPRetryDiagnostic(result.Diagnostic),
 	})
+}
+
+func normalizeCursorMCPRetryDiagnostic(diagnostic *mcpconfig.NativeMCPDiagnostic) *mcpconfig.NativeMCPDiagnostic {
+	if diagnostic == nil {
+		return nil
+	}
+	return mcpconfig.NormalizeNativeMCPDiagnostic(diagnostic, diagnostic.Operation)
 }
 
 func (h *ProcessHandlers) authorizeCursorMCPRecovery(c *gin.Context) bool {
@@ -206,7 +216,7 @@ func validCursorMCPRecoveryServerID(serverID string) bool {
 func (h *ProcessHandlers) writeCursorMCPRecoveryError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, runtime.ErrCursorMCPAuthenticationUnsupported):
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "mcp_recovery_unsupported", "reason_code": "unsupported_shell"})
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "mcp_recovery_unsupported", "error_code": "mcp_recovery_unsupported", "reason_code": "unsupported_shell"})
 	case errors.Is(err, runtime.ErrCursorMCPRecoverySessionBusy):
 		writeCursorMCPRecoveryUnavailable(c, "session_busy")
 	case errors.Is(err, runtime.ErrCursorMCPRecoveryUnavailable):
@@ -224,15 +234,15 @@ func writeCursorMCPRecoveryUnavailable(c *gin.Context, reasonCode string) {
 	if reasonCode == "session_busy" {
 		errorCode = "mcp_recovery_session_busy"
 	}
-	c.JSON(http.StatusConflict, gin.H{"error": errorCode, "reason_code": reasonCode})
+	c.JSON(http.StatusConflict, gin.H{"error": errorCode, "error_code": errorCode, "reason_code": reasonCode})
 }
 
 func writeCursorMCPRecoveryInternalError(c *gin.Context) {
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "mcp_recovery_failed"})
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "mcp_recovery_failed", "error_code": "mcp_recovery_failed"})
 }
 
 func writeCursorMCPRecoveryDependencyUnavailable(c *gin.Context) {
-	c.JSON(http.StatusServiceUnavailable, gin.H{"error": "mcp_recovery_unavailable"})
+	c.JSON(http.StatusServiceUnavailable, gin.H{"error": "mcp_recovery_unavailable", "error_code": "mcp_recovery_unavailable"})
 }
 
 func validCursorMCPRetryResult(result runtime.CursorMCPRetryResult, serverID string) bool {

@@ -109,6 +109,9 @@ func stampTurnDefaults(turn *models.Turn) {
 // dispatched without a user message (auto-start, workflow on_enter) must
 // reset the clock even though no message row exists yet.
 func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecutor, turn *models.Turn) error {
+	if err := r.authorizeManualCreation(ctx, execer, "turn", turn.ID, turn.TaskID); err != nil {
+		return err
+	}
 	metadataJSON := "{}"
 	if turn.Metadata != nil {
 		metadataBytes, err := json.Marshal(turn.Metadata)
@@ -122,6 +125,9 @@ func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecut
 		INSERT INTO task_session_turns (id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.ExecutionProfileID, turn.RouteGeneration, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt); err != nil {
+		return err
+	}
+	if err := r.clearManualCreation(ctx, execer, "turn", turn.ID, turn.TaskID); err != nil {
 		return err
 	}
 	_, err := execer.ExecContext(ctx, r.db.Rebind(`
@@ -1022,6 +1028,18 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	if session.ID == "" {
 		session.ID = uuid.New().String()
 	}
+	if tx, ok := exec.(*sqlx.Tx); ok {
+		if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{session.ID}, nil); err != nil {
+			return fmt.Errorf("lock agent delivery identity before session creation: %w", err)
+		}
+	}
+	queryer, ok := exec.(taskSessionQueryRowExecutor)
+	if !ok {
+		return fmt.Errorf("task session executor cannot check delivery retirement")
+	}
+	if err := r.ensureAgentDeliveryIdentityAvailable(ctx, queryer, session.ID); err != nil {
+		return err
+	}
 	if session.QueueIncarnationID == "" {
 		session.QueueIncarnationID = uuid.New().String()
 	}
@@ -1053,6 +1071,9 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		}
 	}
 
+	if err := r.authorizeManualCreation(ctx, exec, "session", session.ID, session.TaskID); err != nil {
+		return err
+	}
 	metadataJSON, err := json.Marshal(session.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to serialize agent session metadata: %w", err)
@@ -1106,7 +1127,10 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
 
-	return err
+	if err != nil {
+		return err
+	}
+	return r.clearManualCreation(ctx, exec, "session", session.ID, session.TaskID)
 }
 
 // verifyTaskRunnerResolutionTx rejects a session built from a task snapshot
@@ -3015,12 +3039,29 @@ func (r *Repository) SetSessionMetadataKeyIfJSONValue(
 			path, string(expectedJSON), path, string(expectedJSON), string(expectedJSON), path,
 		}
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}
 	rows, err := result.RowsAffected()
-	return rows > 0, err
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 // SetSessionMetadataKeyIfState atomically sets one metadata key only while the
@@ -4162,6 +4203,10 @@ func (r *Repository) deleteEphemeralTaskForProfileTx(
 	tx *sqlx.Tx,
 	taskID, agentProfileID string,
 ) (bool, error) {
+	identities, err := r.agentDeliverySessionIdentitiesInTx(ctx, tx, taskID)
+	if err != nil {
+		return false, err
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM tasks
 		WHERE id = ? AND is_ephemeral = 1
@@ -4174,7 +4219,16 @@ func (r *Repository) deleteEphemeralTaskForProfileTx(
 		return false, err
 	}
 	rows, err := result.RowsAffected()
-	return rows > 0, err
+	if err != nil || rows == 0 {
+		return rows > 0, err
+	}
+	if err := r.lockAgentDeliverySessionIdentitiesTx(ctx, tx, identities); err != nil {
+		return false, err
+	}
+	if err := r.insertAgentDeliveryRetirementJobsTx(ctx, tx, identities); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // scanTaskSessions is a helper to scan multiple agent session rows
@@ -4302,6 +4356,12 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	if err := r.confirmTaskSessionDeletionIdentityTx(ctx, tx, session); err != nil {
 		return nil, err
 	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), session.ID); err != nil {
+		return nil, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{session.ID}, nil); err != nil {
+		return nil, err
+	}
 	var environmentID string
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COALESCE(task_environment_id, '') FROM task_sessions WHERE id = ?`), session.ID).Scan(&environmentID); err != nil {
 		return nil, fmt.Errorf("load deleted session environment: %w", err)
@@ -4361,6 +4421,11 @@ func (r *Repository) purgeTaskSessionStateTx(
 	session *models.TaskSession,
 ) ([]*models.TaskMessageAttachment, error) {
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), session.ID); err != nil {
+		return nil, err
+	}
+	if err := r.retireAgentDeliverySessionsTx(ctx, tx, []agentDeliverySessionIdentity{{
+		sessionID: session.ID, incarnationID: session.QueueIncarnationID,
+	}}); err != nil {
 		return nil, err
 	}
 

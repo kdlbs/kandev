@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/service"
@@ -318,10 +319,33 @@ func TestCursorMCPRecoveryValidatesExactServerIDAndMapsTypedErrors(t *testing.T)
 			if tc.managerErr != nil && strings.Contains(rec.Body.String(), tc.managerErr.Error()) {
 				t.Fatalf("response leaked manager error: %s", rec.Body.String())
 			}
+			if tc.managerErr != nil {
+				var body map[string]interface{}
+				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+					t.Fatalf("decode recovery error: %v", err)
+				}
+				if body["error_code"] != body["error"] {
+					t.Fatalf("recovery error envelope = %#v, want matching error and error_code", body)
+				}
+			}
 			if tc.serverID != "" && len(tc.serverID) <= 512 && len(manager.serverIDs) != 1 {
 				t.Fatalf("manager server IDs = %#v", manager.serverIDs)
 			}
 		})
+	}
+}
+
+func TestCursorMCPRetryReturnsRetainedDiagnostic(t *testing.T) {
+	diagnostic := &mcpconfig.NativeMCPDiagnostic{Operation: "enable", Stage: "wait", Kind: "wait_failed", Message: "native helper failed"}
+	result := runtime.CursorMCPRetryResult{
+		ProviderID: "cursor", ServerID: "server-exact", Status: "connection_failed",
+		ReasonCode: "connection_failed", Diagnostic: diagnostic,
+	}
+	manager := &fakeCursorMCPRecoveryManager{retryResult: result}
+	router := newCursorMCPRecoveryRouter(t, manager, &fakeCursorMCPRecoveryTerminals{})
+	rec := performMCPRecoveryRequest(router, http.MethodPost, "/api/v1/task-sessions/session-1/mcp/retry", `{"server_id":"server-exact"}`)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"mcp_diagnostic"`) {
+		t.Fatalf("status=%d body=%s, want retained diagnostic", rec.Code, rec.Body.String())
 	}
 }
 

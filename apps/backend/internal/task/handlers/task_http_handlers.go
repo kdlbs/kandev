@@ -230,7 +230,7 @@ func buildTaskDTOsWithSessionInfo(
 	for i, t := range tasks {
 		taskIDs[i] = t.ID
 	}
-	sessionsByTask, err := svc.BatchGetSessionsForTasks(ctx, taskIDs)
+	sessionObservationsByTask, err := svc.BatchGetTaskSessionSummaryObservations(ctx, taskIDs)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
@@ -240,16 +240,8 @@ func buildTaskDTOsWithSessionInfo(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	primarySessionInfoMap, err := svc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
+	sessionsByTask := taskSessionModelsFromSummaryObservations(sessionObservationsByTask)
+	primarySessionInfoMap := primaryTaskSessionModelsFromSummaryObservations(sessionObservationsByTask)
 	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(ctx, svc, sessionsByTask)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
@@ -269,19 +261,13 @@ func buildTaskDTOsWithSessionInfo(
 		log.Warn("failed to load task status summaries, using coarse task fields", zap.Error(summaryErr))
 		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
 	}
-	if summaryErr == nil && pendingErr == nil {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		reconciledSummaries, reconcileErr := svc.ReconcileTaskStatusSummaries(
-			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
+	if summaryErr == nil {
+		var reconcileErr error
+		statusSummaries, reconcileErr = reconcileTaskStatusSummariesAfterRevision(
+			ctx, svc, log, tasks, taskIDs, statusSummaries,
 		)
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-		statusSummaries = reconciledSummaries
 		if reconcileErr != nil {
-			log.Warn("failed to reconcile task status summaries", zap.Error(reconcileErr))
+			return nil, reconcileErr
 		}
 	}
 	// Stamp the authoritative per-task queued prompt count onto every summary.
@@ -378,6 +364,75 @@ func buildTaskDTOsWithSessionInfo(
 	return result, nil
 }
 
+func reconcileTaskStatusSummariesAfterRevision(
+	ctx context.Context,
+	svc *service.Service,
+	log *logger.Logger,
+	tasks []*models.Task,
+	taskIDs []string,
+	statusSummaries map[string]*statussummary.TaskStatusSummary,
+) (map[string]*statussummary.TaskStatusSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// The summary revision fences repairs, so observations used for a repair
+	// must be captured after that revision.
+	sessionObservations, err := svc.BatchGetTaskSessionSummaryObservations(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if err != nil {
+		log.Warn("failed to refresh task sessions for status summary reconciliation", zap.Error(err))
+		return statusSummaries, nil
+	}
+	sessions := taskSessionModelsFromSummaryObservations(sessionObservations)
+	pendingActions, err := pendingActionsForInputCapableSessions(ctx, svc, sessions)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if err != nil {
+		log.Warn("failed to refresh pending actions for status summary reconciliation", zap.Error(err))
+		return statusSummaries, nil
+	}
+	reconciled, err := svc.ReconcileTaskStatusSummaries(ctx, tasks, sessions, pendingActions, statusSummaries)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if err != nil {
+		log.Warn("failed to reconcile task status summaries", zap.Error(err))
+	}
+	return reconciled, nil
+}
+
+func taskSessionModelsFromSummaryObservations(
+	observations map[string][]*models.TaskSessionSummaryObservation,
+) map[string][]*models.TaskSession {
+	sessionsByTask := make(map[string][]*models.TaskSession, len(observations))
+	for taskID, taskObservations := range observations {
+		sessions := make([]*models.TaskSession, 0, len(taskObservations))
+		for _, observation := range taskObservations {
+			sessions = append(sessions, observation.ToTaskSession())
+		}
+		sessionsByTask[taskID] = sessions
+	}
+	return sessionsByTask
+}
+
+func primaryTaskSessionModelsFromSummaryObservations(
+	observations map[string][]*models.TaskSessionSummaryObservation,
+) map[string]*models.TaskSession {
+	primaryByTask := make(map[string]*models.TaskSession, len(observations))
+	for taskID, taskObservations := range observations {
+		for _, observation := range taskObservations {
+			if observation != nil && observation.IsPrimary {
+				primaryByTask[taskID] = observation.ToTaskSession()
+				break
+			}
+		}
+	}
+	return primaryByTask
+}
+
 type sessionInfoFields struct {
 	sessionID         *string
 	reviewStatus      models.ReviewStatus
@@ -458,7 +513,11 @@ func pendingActionsForInputCapableSessions(
 }
 
 func isInputCapableSession(session *models.TaskSession) bool {
-	return session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput)
+	return session != nil && isInputCapableSessionState(session.State)
+}
+
+func isInputCapableSessionState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateRunning || state == models.TaskSessionStateWaitingForInput
 }
 
 func pendingActionPtr(
@@ -513,6 +572,12 @@ func (h *TaskHandlers) taskSessionDTOWithPendingActions(
 	read pendingActionProjectionReader,
 ) dto.TaskSessionDTO {
 	result := dto.FromTaskSession(session)
+	if reader, ok := any(h.repo).(dto.SessionRecoveryBlockProjectionReader); ok {
+		if err := dto.EnrichSessionRecoveryBlocks(ctx, &result, session, reader); err != nil {
+			h.logger.Warn("get task session recovery blocks failed",
+				zap.String("session_id", session.ID), zap.Error(err))
+		}
+	}
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
 	dto.EnrichParkedProjection(&result, h.parkedProjection)
 	if session != nil && session.TaskEnvironmentID != "" {
@@ -576,7 +641,7 @@ func (h *TaskHandlers) httpGetArchiveSourceManifest(c *gin.Context) {
 
 func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 	ctx := c.Request.Context()
-	sessions, err := h.service.ListTaskSessions(ctx, c.Param("id"))
+	sessions, err := h.service.ListTaskSessionSummaryObservations(ctx, c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task sessions not found")
 		return
@@ -2591,6 +2656,12 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 			AgentProfileID: item.AgentProfileID,
 		})
 		sessionDTO := dto.FromTaskSession(item.Session)
+		if reader, ok := any(h.repo).(dto.SessionRecoveryBlockProjectionReader); ok {
+			if err := dto.EnrichSessionRecoveryBlocks(c.Request.Context(), &sessionDTO, item.Session, reader); err != nil {
+				h.logger.Warn("get quick chat session recovery blocks failed",
+					zap.String("session_id", item.Session.ID), zap.Error(err))
+			}
+		}
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 		if item.Session != nil && item.Session.TaskEnvironmentID != "" {

@@ -22,6 +22,9 @@ export type SessionRecoveryOwner = {
   resumptionState: ResumptionState;
   error: string | null;
   notice: string | null;
+  noticeKind?:
+    | import("@/hooks/domains/session/use-session-resumption").SessionRecoveryNoticeKind
+    | null;
   recoveryFailure: SessionRecoveryFailure | null;
   resumeSession: () => Promise<boolean>;
 };

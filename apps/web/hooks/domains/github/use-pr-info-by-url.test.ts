@@ -327,6 +327,28 @@ describe("usePRInfoByURL — GitHub pull requests", () => {
 });
 
 describe("usePRInfoByURL — non-PR and issue URLs", () => {
+  it.each([
+    REPO_URL,
+    "https://gitlab.com/acme/site",
+    "https://dev.azure.com/acme/project/_git/site",
+  ])("settles a plain repository URL without metadata fetch: %s", (url) => {
+    const { result } = renderHook(() => usePRInfoByURL(WORKSPACE_ID));
+
+    expect(result.current.settled(url)).toBe(false);
+    act(() => result.current.ensure(` ${url} `));
+    expect(result.current.settled(url)).toBe(true);
+    expect(result.current.loading(url)).toBe(false);
+    expect(result.current.info(url)).toBeUndefined();
+    expect(result.current.error(url)).toBeUndefined();
+    expect(fetchPRInfoMock).not.toHaveBeenCalled();
+    expect(fetchIssueInfoMock).not.toHaveBeenCalled();
+
+    act(() => result.current.clear(url));
+    expect(result.current.settled(url)).toBe(false);
+    act(() => result.current.ensure(url));
+    expect(result.current.settled(url)).toBe(true);
+  });
+
   it("no-ops (no fetch, no cached info) for a non-PR repo URL", async () => {
     const { result } = renderHook(() => usePRInfoByURL("ws-1"));
 

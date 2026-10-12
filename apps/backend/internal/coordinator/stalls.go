@@ -57,7 +57,7 @@ func (h *stallSubscriber) handle(ctx context.Context, event *bus.Event) error {
 	}
 
 	for _, c := range coordinators {
-		count, err := h.svc.store.CountOpenProposals(ctx, c.ID)
+		count, err := h.svc.store.CountOpenProposals(ctx, c.ID, h.svc.phase2)
 		if err != nil {
 			h.logger.Warn("failed to count open proposals for coordinator.updated after stall",
 				zap.String("workspace_id", stall.WorkspaceID),

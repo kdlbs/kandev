@@ -8,6 +8,7 @@ import { waitForSessionState } from "../../helpers/session";
 import {
   seedActiveSessionForegroundActivity,
   waitForActiveSessionForegroundActivity,
+  waitForTaskSessionsSettled,
 } from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -200,6 +201,7 @@ test.describe("Session resume (ACP mode)", () => {
       message: "Resumed session did not settle before activity reconciliation",
       timeout: 30_000,
     });
+    await waitForTaskSessionsSettled(testPage, task.id);
 
     // Reproduce the stale client projection left behind when the reconnect
     // state_changed event is missed. The real session-list refresh must clear it.
@@ -430,8 +432,8 @@ test.describe("Session resume (TUI passthrough mode)", () => {
       },
     );
 
-    // 3. Open the task by its API id. The Kanban projection can lag while a
-    // passthrough task is starting, even though the task already exists.
+    // 3. Open by task API id. Kanban hydration can lag while passthrough starts
+    // and is unrelated to reconnecting the session after a backend restart.
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}(?:[?]|$)`));
