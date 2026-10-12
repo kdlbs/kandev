@@ -3,8 +3,10 @@ created: 2026-10-12
 status: in_progress
 requirements:
   - REQ-UI-MOBILE-TASK-ACTION-BAR-001
+  - REQ-UI-MOBILE-TASK-CHROME-001
 system_design:
   - ../../specs/ui/system-design/mobile-task-action-bar.md
+  - ../../specs/ui/system-design/mobile-task-chrome.md
 legacy_specs: []
 ---
 
@@ -28,6 +30,8 @@ request. No delegation is authorized. Keep design files uncommitted at handoff.
 - Affected control touch sizing and localized terminal notices/touched labels.
 - Focused component and mobile/desktop rendered regression coverage.
 - Fresh screenshots, Conventional Commit, PR, required CI/review handling, merge.
+- A minimal nested-workspace-menu correction needed for the existing mobile
+  reconnect regression that fails identically on the untouched main baseline.
 
 ### Out of scope
 
@@ -109,6 +113,20 @@ Archive:   existing phone confirmation with Archive / Cancel
 Cancel restores the unchanged task/notice; dismiss removes only the notice.
 No notice means no blank row. Long translated notices expand vertically; long
 step labels wrap inside their target. Criteria: 001.4, 001.6, 001.7.
+
+### UI-04: Existing Tasks picker workspace recovery
+
+```text
+Before: Tasks sheet > workspace menu > select workspace B
+        Both surfaces close; page remains pointer-blocked.
+After:  Tasks sheet (modal owner) > workspace menu (non-modal)
+        Select workspace B; close surfaces; task picker remains usable.
+```
+
+The visible composition and workspace navigation policy are unchanged. The
+parent picker is the only modal boundary. This restores
+AC-UI-MOBILE-TASK-CHROME-001.3; the existing shared-context browser scenario
+checks pointer unlock and the reopened picker after both workspace switches.
 
 ## Tests
 
