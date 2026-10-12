@@ -86,3 +86,22 @@ changed-package golangci-lint (0 issues); all listed documentation/diff gates. T
 new drain-before-wait regression failed on the old initial timer, then passed for
 both deletion and forward discovery. No browser or PostgreSQL rerun: those layers
 were unchanged and the user requested focused verification.
+
+## CI remediation
+
+The independent SQLite holder test still expected the removed startup timer, causing
+both the main backend shard and PostgreSQL job to fail on that SQLite case. Remove
+obsolete startup-timer advancement from repository worker fixtures. The steady-state
+fixture drains startup work before changing its virtual clock; its pass helper now
+follows productive continuation until the worker reaches an actual idle timer.
+Snapshot waiting retains the prior ten-second bounded-pass guard.
+
+Verification: go test -trimpath -race ./internal/task/repository/sqlite -run
+'^TestDeliveryRetention(IntegrationSQLiteIndependentHolder|WorkerRepository|Metrics|StorageSteadyState.*)$'
+-count=1 -timeout=4m passed (22.7 seconds before the wait-guard adjustment). Full
+backend golangci-lint against the PR base passed with zero issues. Final repeat of
+the affected fixtures is recorded below before pushing.
+
+Final affected-fixture race run passed (20.97 seconds); full backend lint passed
+again with zero issues. PostgreSQL-specific branches were skipped locally; the
+reported CI failure was the SQLite holder case in both jobs.
