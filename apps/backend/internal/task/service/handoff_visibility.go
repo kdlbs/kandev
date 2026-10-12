@@ -10,6 +10,7 @@ import (
 )
 
 const taskVisibilitySchemaVersion = 1
+const taskVisibilityDispositionDeleted = "deleted"
 
 // TaskVisibility is the compact, backend-authorized lifecycle projection.
 // The durable receipt store may refine the disposition for deleted tasks;
@@ -53,34 +54,46 @@ func (s *HandoffService) GetTaskVisibilityForRequest(ctx context.Context, req Re
 		}
 		return nil, err
 	}
-	if receipts, ok := s.tasks.(taskLifecycleReceiptReader); ok {
-		receipt, err := receipts.GetTaskLifecycleReceipt(ctx, caller.WorkspaceID, req.TargetTaskID)
-		if err != nil {
-			return nil, err
-		}
-		if receipt != nil {
-			return taskVisibilityFromReceipt(receipt), nil
-		}
-	}
 	task, err := s.tasks.GetTask(ctx, req.TargetTaskID)
-	if errors.Is(err, repository.ErrTaskNotFound) || task == nil || (task != nil && task.WorkspaceID != caller.WorkspaceID) {
-		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "target unavailable after authorization")
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, repository.ErrTaskNotFound) {
 		return nil, err
 	}
-	disposition := "active"
-	provenance := "legacy_backfill"
-	changedAt := task.UpdatedAt.UTC()
-	if task.ArchivedAt != nil {
-		disposition = "archived"
-		changedAt = task.ArchivedAt.UTC()
-		provenance = "archive"
+	if task != nil && task.WorkspaceID != caller.WorkspaceID {
+		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "target unavailable after authorization")
 	}
+	if receipts, ok := s.tasks.(taskLifecycleReceiptReader); ok {
+		receipt, receiptErr := receipts.GetTaskLifecycleReceipt(ctx, caller.WorkspaceID, req.TargetTaskID)
+		if receiptErr != nil {
+			return nil, receiptErr
+		}
+		if receipt != nil {
+			return taskVisibilityFromEvidence(task, receipt)
+		}
+	}
+	// A task without durable lifecycle evidence is deliberately indistinguishable
+	// from an unavailable target. Reads must never synthesize a receipt.
+	return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "target lifecycle evidence unavailable")
+}
+
+func taskVisibilityFromEvidence(task *models.Task, receipt *models.TaskLifecycleReceipt) (*TaskVisibility, error) {
+	if task == nil {
+		if receipt.Disposition == taskVisibilityDispositionDeleted {
+			return taskVisibilityFromReceipt(receipt), nil
+		}
+		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "target lifecycle evidence is inconsistent")
+	}
+	if receipt.Disposition == taskVisibilityDispositionDeleted {
+		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "target lifecycle evidence is inconsistent")
+	}
+	return taskVisibilityFromLiveTask(task, receipt), nil
+}
+
+func taskVisibilityFromLiveTask(task *models.Task, receipt *models.TaskLifecycleReceipt) *TaskVisibility {
 	return &TaskVisibility{SchemaVersion: taskVisibilitySchemaVersion, TaskID: task.ID,
 		Identity:    TaskVisibilityIdentity{Identifier: task.Identifier, Title: task.Title},
 		WorkspaceID: task.WorkspaceID, WorkflowID: task.WorkflowID, WorkflowStepID: task.WorkflowStepID,
-		State: string(task.State), Visibility: TaskVisibilityReceipt{Disposition: disposition, ChangedAt: changedAt, Revision: 1, Provenance: provenance}}, nil
+		State: string(task.State), Visibility: TaskVisibilityReceipt{Disposition: receipt.Disposition,
+			ChangedAt: receipt.ChangedAt.UTC(), Revision: receipt.Revision, Provenance: receipt.Provenance}}
 }
 
 func taskVisibilityFromReceipt(receipt *models.TaskLifecycleReceipt) *TaskVisibility {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -14,7 +13,11 @@ type lifecycleReceiptExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
-func (r *Repository) taskLifecycleSnapshotInTx(ctx context.Context, tx *sqlx.Tx, taskID string) (*models.Task, error) {
+type lifecycleReceiptQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (r *Repository) taskLifecycleSnapshotInTx(ctx context.Context, tx lifecycleReceiptQueryer, taskID string) (*models.Task, error) {
 	var task models.Task
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, workspace_id, workflow_id, workflow_step_id, title, state, identifier, updated_at
@@ -50,6 +53,29 @@ func (r *Repository) recordTaskLifecycleReceipt(ctx context.Context, tx lifecycl
 	`), task.ID, task.WorkspaceID, task.Identifier, task.Title, task.WorkflowID, task.WorkflowStepID,
 		string(task.State), disposition, changedAt.UTC(), provenance)
 	return err
+}
+
+// recordTaskLifecycleReceiptForCurrentTask records a transition from the row
+// that the same transaction has just made authoritative. Keeping this lookup
+// in the mutation transaction prevents a placement receipt from lagging a
+// successful move or workspace transfer.
+func (r *Repository) recordTaskLifecycleReceiptForCurrentTask(
+	ctx context.Context,
+	tx interface {
+		lifecycleReceiptExecutor
+		lifecycleReceiptQueryer
+	},
+	taskID, disposition, provenance string,
+	changedAt time.Time,
+) error {
+	task, err := r.taskLifecycleSnapshotInTx(ctx, tx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return errors.New("task lifecycle receipt target disappeared")
+	}
+	return r.recordTaskLifecycleReceipt(ctx, tx, task, disposition, provenance, changedAt)
 }
 
 // GetTaskLifecycleReceipt returns evidence only when the caller already has a

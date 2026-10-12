@@ -1147,13 +1147,13 @@ func (r *Repository) UpdateTaskExactOperation(
 	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
 		return false, err
 	}
-	query := `SELECT workspace_id, updated_at FROM tasks WHERE id = ?`
+	query := `SELECT workspace_id, workflow_id, workflow_step_id, updated_at FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += forUpdateClause
 	}
-	var currentWorkspaceID string
+	var currentWorkspaceID, currentWorkflowID, currentWorkflowStepID string
 	var currentVersion time.Time
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), task.ID).Scan(&currentWorkspaceID, &currentVersion); err != nil {
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), task.ID).Scan(&currentWorkspaceID, &currentWorkflowID, &currentWorkflowStepID, &currentVersion); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 		}
@@ -1185,6 +1185,11 @@ func (r *Repository) UpdateTaskExactOperation(
 	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, "", true, false, nil)
 	if err != nil {
 		return false, err
+	}
+	if currentWorkflowID != task.WorkflowID || currentWorkflowStepID != task.WorkflowStepID {
+		if err := r.recordTaskLifecycleReceipt(ctx, tx, task, "active", "move", task.UpdatedAt); err != nil {
+			return false, err
+		}
 	}
 	resultVersion = task.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -2279,6 +2284,11 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, false, false, workflowChangeSource)
 	if err != nil {
 		return false, false, err
+	}
+	if actualWorkflowID != task.WorkflowID || actualSourceStepID != task.WorkflowStepID {
+		if err := r.recordTaskLifecycleReceipt(ctx, tx, task, "active", "move", task.UpdatedAt); err != nil {
+			return false, false, err
+		}
 	}
 	if exactOperation != nil {
 		resultVersion := task.UpdatedAt.UTC().Format(time.RFC3339Nano)
@@ -5561,6 +5571,13 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 	if err := r.lockAgentDeliverySessionIdentitiesTx(ctx, tx, identities); err != nil {
 		return false, err
 	}
+	visibilityTask, err := r.taskLifecycleSnapshotInTx(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+	if visibilityTask == nil {
+		return false, nil
+	}
 	query := "WITH candidate AS (" + candidate + ") DELETE FROM tasks WHERE id = ? AND EXISTS (SELECT 1 FROM candidate)"
 	candidateArgs = append(candidateArgs, id)
 	result, err := tx.ExecContext(ctx, r.db.Rebind(query), candidateArgs...)
@@ -5572,6 +5589,9 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 		return false, err
 	}
 	if rows > 0 {
+		if err := r.recordTaskLifecycleReceipt(ctx, tx, visibilityTask, "deleted", "delete", time.Now().UTC()); err != nil {
+			return false, err
+		}
 		if err := r.insertAgentDeliveryRetirementJobsTx(ctx, tx, identities); err != nil {
 			return false, err
 		}
