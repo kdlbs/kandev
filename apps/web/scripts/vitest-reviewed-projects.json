@@ -109,6 +109,7 @@
     "components/threads/threads-view-editor-utils.test.ts",
     "components/workspace-source-picker/executor-capabilities.test.ts",
     "e2e/helpers/agent-fixtures.test.ts",
+    "e2e/helpers/backend-fixture-lifecycle.test.ts",
     "e2e/helpers/causal-waits.test.ts",
     "e2e/helpers/github-origin.test.ts",
     "e2e/helpers/inline-script-json.test.ts",

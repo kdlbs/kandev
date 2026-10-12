@@ -4,12 +4,12 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { test } from "@playwright/test";
+import { describe, test } from "vitest";
 
-import { observeLogFile, runOwnedBackendFixture, waitForHealth } from "../../fixtures/backend";
-import { stopSSHServer, type SSHServerHandle } from "../../helpers/ssh";
+import { observeLogFile, runOwnedBackendFixture, waitForHealth } from "../fixtures/backend";
+import { stopSSHServer, type SSHServerHandle } from "./ssh";
 
-test.describe("backend fixture lifecycle", () => {
+describe("backend fixture lifecycle", () => {
   test("fails fast when the backend exited before health polling began", async () => {
     const exitedProcess = Object.assign(new EventEmitter(), {
       exitCode: 17,

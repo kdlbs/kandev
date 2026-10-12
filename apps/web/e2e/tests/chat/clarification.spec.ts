@@ -751,7 +751,7 @@ test.describe("Clarification flow", () => {
 test.describe("Multi-question clarification carousel", () => {
   test.describe.configure({ retries: 1 });
 
-  test("renders stepper with 3 steps and shows the first question", async ({
+  test("three-question carousel preserves navigation, answers and submission gating", async ({
     testPage,
     apiClient,
     seedData,
@@ -760,25 +760,49 @@ test.describe("Multi-question clarification carousel", () => {
       testPage,
       apiClient,
       seedData,
-      "Multi-q stepper",
+      "Multi-question journey",
       "clarification-multi",
     );
-
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-
-    // 3 stepper buttons rendered; the first is active and unanswered.
     await expect(session.clarificationSteps()).toHaveCount(3);
     await expect(session.clarificationStep(0)).toHaveAttribute("data-active", "true");
     await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "false");
     await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "false");
-
-    // Group progress + per-question chip both rendered.
     await expect(session.clarificationGroupProgress()).toContainText("0 of 3 answered");
     await expect(session.clarificationOverlay()).toContainText("Question 1 of 3");
-
-    // Only one card is visible at a time (carousel UX, not stacked).
     await expect(session.clarificationQuestionCards()).toHaveCount(1);
     await expect(session.clarificationOverlay()).toContainText("Which database");
+    await expect(session.clarificationPrev()).toBeDisabled();
+
+    await session.clarificationStep(2).click();
+    await expect(session.clarificationStep(2)).toHaveAttribute("data-active", "true");
+    await expect(session.clarificationOverlay()).toContainText("Question 3 of 3");
+    await expect(session.clarificationOverlay()).toContainText("How should we deploy");
+    const submit = session.clarificationSubmit();
+    await expect(submit).toBeVisible();
+    await expect(submit).toBeDisabled();
+
+    await session.clarificationStep(0).click();
+    await session.clarificationOption("PostgreSQL").click();
+    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
+    await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "true");
+    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
+    await expect(session.clarificationOverlay()).toContainText("Question 2 of 3");
+    await expect(session.clarificationOverlay()).toContainText("Which language");
+    await session.clarificationPrev().click();
+    await expect(session.clarificationStep(0)).toHaveAttribute("data-active", "true");
+    const selectedOption = session
+      .clarificationQuestionCardById("db")
+      .locator('[data-testid="clarification-option"][data-selected="true"]');
+    await expect(selectedOption).toContainText("PostgreSQL");
+    await session.clarificationStep(1).click();
+    await session.clarificationOption("Go").click();
+    await session.clarificationOption("Docker").click();
+    await expect(submit).toBeEnabled();
+    await submit.click();
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("selected_option");
   });
 
   test("renders shared context once above the active question", async ({
@@ -825,130 +849,6 @@ test.describe("Multi-question clarification carousel", () => {
     await expect(context).toHaveText(
       "Picking the foundational stack.\n\nAnswer all three so we can move forward.",
     );
-  });
-
-  test("answering option auto-advances to next step and marks step as answered", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedClarificationTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Multi-q advance",
-      "clarification-multi",
-    );
-
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-
-    // Pick an option on step 1; auto-advances to step 2.
-    await session.clarificationOption("PostgreSQL").click();
-    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
-    await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "true");
-    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
-    await expect(session.clarificationOverlay()).toContainText("Question 2 of 3");
-    await expect(session.clarificationOverlay()).toContainText("Which language");
-  });
-
-  test("Back button restores the previous question and the prior selection", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedClarificationTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Multi-q back",
-      "clarification-multi",
-    );
-
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-
-    await session.clarificationOption("PostgreSQL").click();
-    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
-
-    await session.clarificationPrev().click();
-    await expect(session.clarificationStep(0)).toHaveAttribute("data-active", "true");
-
-    // Previous answer is still selected.
-    const selectedOption = session
-      .clarificationQuestionCardById("db")
-      .locator('[data-testid="clarification-option"][data-selected="true"]');
-    await expect(selectedOption).toContainText("PostgreSQL");
-  });
-
-  test("clicking a step in the stepper jumps directly to that question", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedClarificationTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Multi-q jump",
-      "clarification-multi",
-    );
-
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-
-    await session.clarificationStep(2).click();
-    await expect(session.clarificationStep(2)).toHaveAttribute("data-active", "true");
-    await expect(session.clarificationOverlay()).toContainText("Question 3 of 3");
-    await expect(session.clarificationOverlay()).toContainText("How should we deploy");
-  });
-
-  test("Submit button disabled until every question is answered", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedClarificationTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Multi-q submit gating",
-      "clarification-multi",
-    );
-
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-
-    // Jump to last step without answering.
-    await session.clarificationStep(2).click();
-    const submit = session.clarificationSubmit();
-    await expect(submit).toBeVisible();
-    await expect(submit).toBeDisabled();
-  });
-
-  test("happy path: answer all 3 then Submit unblocks the agent", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedClarificationTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Multi-q happy path",
-      "clarification-multi",
-    );
-
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-
-    await session.clarificationOption("PostgreSQL").click();
-    await session.clarificationOption("Go").click();
-    await session.clarificationOption("Docker").click();
-
-    // We're on the last step; Submit is enabled.
-    const submit = session.clarificationSubmit();
-    await expect(submit).toBeEnabled();
-    await submit.click();
-
-    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
-    await expect(session.chat).toContainText("selected_option");
   });
 
   test("mix custom text + option selections round-trips", async ({
@@ -1393,19 +1293,6 @@ test.describe("Multi-question clarification carousel", () => {
       .clarificationQuestionCardById("db")
       .locator('[data-testid="clarification-option"][data-selected="true"]');
     await expect(selectedOption).toContainText("PostgreSQL");
-  });
-
-  test("Back button is disabled on the first step", async ({ testPage, apiClient, seedData }) => {
-    const session = await seedClarificationTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Multi-q back disabled",
-      "clarification-multi",
-    );
-
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-    await expect(session.clarificationPrev()).toBeDisabled();
   });
 
   test("typing in the custom input auto-selects it and deselects the picked option", async ({
