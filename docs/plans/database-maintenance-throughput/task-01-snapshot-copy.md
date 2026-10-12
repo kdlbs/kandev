@@ -86,3 +86,10 @@ Agentctl cross-builds use CGO_ENABLED=0. The native Backup API is absent from th
 driver build. Isolate the implementation behind the cgo build constraint and supply
 an explicit unsupported stub for non-CGO helpers. The failing E2E/preview build was
 reproduced with CGO_ENABLED=0 go build -trimpath ./internal/db. Passed: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/kandev-4433-agentctl ./cmd/agentctl; native persistence backup regressions under -race (1.04 seconds).
+
+Review coverage: TestCopySQLiteSnapshotCancelsLockedCopy uses fake time and a real
+SQLite write transaction to reach the native LOCKED retry, cancel the active copy,
+assert partial-file removal and source-connection release, then retry successfully
+and verify integrity. TestCopySQLiteSnapshotAllowsActiveWALWriter proves a committed
+snapshot can complete while a separate WAL writer has uncommitted work. Both passed
+under -race (1.04 seconds); fixtures contain only one or two rows.

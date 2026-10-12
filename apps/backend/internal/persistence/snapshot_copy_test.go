@@ -2,10 +2,13 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"github.com/kandev/kandev/internal/db"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
+	"time"
 )
 
 // @covers AC-PLATFORM-SQLITE-SNAPSHOT-001.1
@@ -98,5 +101,80 @@ func TestCopySQLiteSnapshotMemoryAndFailureCleanup(t *testing.T) {
 	}
 	if _, err := os.Stat(canceledPath); !os.IsNotExist(err) {
 		t.Fatalf("failed output remains: %v", err)
+	}
+}
+
+// @covers AC-PLATFORM-SQLITE-SNAPSHOT-001.2
+func TestCopySQLiteSnapshotCancelsLockedCopy(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := fileSQLiteDB(t, ":memory:")
+		src.SetMaxOpenConns(1)
+		src.MustExec(`CREATE TABLE items (value TEXT)`)
+		src.MustExec(`INSERT INTO items VALUES ('committed')`)
+		// The source connection's open write transaction makes backup_step return
+		// LOCKED. The copy has acquired both connections and created its output.
+		src.MustExec(`BEGIN IMMEDIATE`)
+		src.MustExec(`INSERT INTO items VALUES ('uncommitted')`)
+		path := filepath.Join(t.TempDir(), "interrupted.db")
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		_, err := CopySQLiteSnapshotContext(ctx, src, path)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("locked copy error: %v", err)
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("partial backup remains: %v", err)
+		}
+		if src.Stats().InUse != 0 {
+			t.Fatal("copy leaked source connection")
+		}
+		src.MustExec(`ROLLBACK`)
+		if _, err := CopySQLiteSnapshotContext(t.Context(), src, path); err != nil {
+			t.Fatal(err)
+		}
+		copied := fileSQLiteDB(t, path)
+		var count int
+		var integrity string
+		if err := copied.Get(&count, `SELECT COUNT(*) FROM items`); err != nil {
+			t.Fatal(err)
+		}
+		if err := copied.Get(&integrity, `PRAGMA integrity_check`); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 || integrity != "ok" {
+			t.Fatalf("retry produced invalid copy: count=%d integrity=%s", count, integrity)
+		}
+	})
+}
+
+func TestCopySQLiteSnapshotAllowsActiveWALWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.db")
+	writer := fileSQLiteDB(t, path)
+	writer.MustExec(`PRAGMA journal_mode=WAL`)
+	writer.MustExec(`CREATE TABLE items (value TEXT)`)
+	writer.MustExec(`INSERT INTO items VALUES ('committed')`)
+	reader := fileSQLiteDB(t, path)
+	tx, err := writer.Beginx()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	tx.MustExec(`INSERT INTO items VALUES ('uncommitted')`)
+	destination := filepath.Join(t.TempDir(), "copy.db")
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if _, err := CopySQLiteSnapshotContext(ctx, reader, destination); err != nil {
+		t.Fatal(err)
+	}
+	copied := fileSQLiteDB(t, destination)
+	var count int
+	if err := copied.Get(&count, `SELECT COUNT(*) FROM items`); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("copy included uncommitted write: %d rows", count)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 }
