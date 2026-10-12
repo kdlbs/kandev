@@ -101,6 +101,37 @@ func TestGetTaskVisibilityRequiresDeletedTombstoneForAbsentTask(t *testing.T) {
 	}
 }
 
+type failingVisibilitySnapshotRepo struct {
+	*visibilityReceiptRepo
+	err error
+}
+
+func (r *failingVisibilitySnapshotRepo) GetTaskVisibilitySnapshot(context.Context, string, string) (*models.Task, *models.TaskLifecycleReceipt, error) {
+	return nil, nil, r.err
+}
+
+func TestGetTaskVisibilityFailsClosedWithoutSnapshotOrOnSnapshotError(t *testing.T) {
+	ctx := context.Background()
+	tasks := newFakeTaskRepo()
+	tasks.addTask("caller", "", "workspace-a")
+	tasks.addTask("target", "", "workspace-a")
+	base := &visibilityReceiptRepo{fakeCascadeRepo: newCascadeRepo(tasks), receipts: map[string]*models.TaskLifecycleReceipt{
+		"target": {TaskID: "target", WorkspaceID: "workspace-a", Disposition: "active", Provenance: "create", ChangedAt: time.Now().UTC(), Revision: 1},
+	}}
+
+	withoutSnapshot := NewHandoffService(base.fakeCascadeRepo, nil, nil, nil, nil, nil)
+	_, err := withoutSnapshot.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "target", Scope: RelatedReadScopeWorkspaceTaskTree})
+	require.ErrorIs(t, err, ErrAccessDenied)
+	reason, ok := RelatedReadDenialReasonFor(err)
+	require.True(t, ok)
+	require.Equal(t, RelatedReadDenialTargetUnavailable, reason)
+
+	snapshotErr := errors.New("snapshot read failed")
+	withError := NewHandoffService(&failingVisibilitySnapshotRepo{visibilityReceiptRepo: base, err: snapshotErr}, nil, nil, nil, nil, nil)
+	_, err = withError.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "target", Scope: RelatedReadScopeWorkspaceTaskTree})
+	require.ErrorIs(t, err, snapshotErr)
+}
+
 type deleteAfterVisibilitySnapshotRepo struct {
 	*sqlite.Repository
 	deleteTargetID string

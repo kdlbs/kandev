@@ -2,7 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +13,125 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
+
+func TestTaskVisibilitySnapshotKeepsTaskAndReceiptCoherentAcrossDelete(t *testing.T) {
+	ctx := context.Background()
+	repo, writer := newVisibilitySnapshotRepo(t)
+	seedWorkspace(t, repo, "visibility-snapshot-workspace")
+	task := &models.Task{ID: "visibility-snapshot-task", WorkspaceID: "visibility-snapshot-workspace", Title: "Before delete", Identifier: "VIS-3"}
+	require.NoError(t, repo.CreateTask(ctx, task))
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "visibility-snapshot-session", TaskID: task.ID, State: models.TaskSessionStateCompleted,
+		StartedAt: now, CompletedAt: &now, UpdatedAt: now,
+	}))
+	_, err := writer.Exec(`
+		INSERT INTO task_documents (id, task_id, key, type, title, content, author_kind, author_name, filename, mime_type, size_bytes, disk_path, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, "visibility-snapshot-document", task.ID, "visibility", "plan", "Visibility", "content", "agent", "test", "", "", 0, "", now, now)
+	require.NoError(t, err)
+	_, err = writer.Exec(`
+		INSERT INTO task_document_revisions (id, task_id, document_key, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+	`, "visibility-snapshot-document-revision", task.ID, "visibility", 1, "Visibility", "content", "agent", "test", now, now)
+	require.NoError(t, err)
+	tables := []string{"tasks", "task_lifecycle_receipts", "task_sessions", "task_documents", "task_document_revisions"}
+	beforeRead := make(map[string][]string, len(tables))
+	for _, table := range tables {
+		beforeRead[table] = snapshotTableRows(t, writer, table)
+	}
+	readTaskOnly, readReceiptOnly, err := repo.GetTaskVisibilitySnapshot(ctx, task.WorkspaceID, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, readTaskOnly)
+	require.NotNil(t, readReceiptOnly)
+	for _, table := range tables {
+		require.Equal(t, beforeRead[table], snapshotTableRows(t, writer, table), table)
+	}
+
+	readTask := make(chan struct{})
+	continueRead := make(chan struct{})
+	var continueOnce sync.Once
+	releaseRead := func() { continueOnce.Do(func() { close(continueRead) }) }
+	t.Cleanup(releaseRead)
+	repo.visibilitySnapshotAfterTaskRead = func() {
+		close(readTask)
+		<-continueRead
+	}
+	type result struct {
+		task    *models.Task
+		receipt *models.TaskLifecycleReceipt
+		err     error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		task, receipt, err := repo.GetTaskVisibilitySnapshot(ctx, "visibility-snapshot-workspace", "visibility-snapshot-task")
+		resultCh <- result{task: task, receipt: receipt, err: err}
+	}()
+	<-readTask
+	require.NoError(t, repo.DeleteTask(ctx, task.ID))
+	releaseRead()
+	first := <-resultCh
+	require.NoError(t, first.err)
+	require.NotNil(t, first.task)
+	require.NotNil(t, first.receipt)
+	require.Equal(t, "Before delete", first.task.Title)
+	require.Equal(t, "active", first.receipt.Disposition)
+	require.Equal(t, "create", first.receipt.Provenance)
+	require.EqualValues(t, 1, first.receipt.Revision)
+
+	repo.visibilitySnapshotAfterTaskRead = nil
+	nextTask, nextReceipt, err := repo.GetTaskVisibilitySnapshot(ctx, "visibility-snapshot-workspace", task.ID)
+	require.NoError(t, err)
+	require.Nil(t, nextTask)
+	require.NotNil(t, nextReceipt)
+	require.Equal(t, "deleted", nextReceipt.Disposition)
+	require.Equal(t, "delete", nextReceipt.Provenance)
+	require.EqualValues(t, 2, nextReceipt.Revision)
+
+	second := &models.Task{ID: "visibility-split-mutant", WorkspaceID: "visibility-snapshot-workspace", Title: "Split target"}
+	require.NoError(t, repo.CreateTask(ctx, second))
+	oldTask, err := repo.GetTask(ctx, second.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.DeleteTask(ctx, second.ID))
+	newReceipt, err := repo.GetTaskLifecycleReceipt(ctx, second.WorkspaceID, second.ID)
+	require.NoError(t, err)
+	require.NotNil(t, oldTask)
+	require.NotNil(t, newReceipt)
+	require.Equal(t, "deleted", newReceipt.Disposition, "a split read mutant produces a torn task/receipt pair")
+}
+
+func newVisibilitySnapshotRepo(t *testing.T) (*Repository, *sqlx.DB) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "visibility-snapshot.db")
+	writerConn, err := db.OpenSQLite(path)
+	require.NoError(t, err)
+	readerConn, err := db.OpenSQLiteReader(path)
+	require.NoError(t, err)
+	writer := sqlx.NewDb(writerConn, "sqlite3")
+	reader := sqlx.NewDb(readerConn, "sqlite3")
+	repo, err := NewWithDB(writer, reader, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+	return repo, writer
+}
+
+func snapshotTableRows(t *testing.T, db *sqlx.DB, table string) []string {
+	t.Helper()
+	rows, err := db.Queryx("SELECT * FROM " + table + " ORDER BY rowid")
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	var result []string
+	for rows.Next() {
+		values, err := rows.SliceScan()
+		require.NoError(t, err)
+		result = append(result, fmt.Sprint(values...))
+	}
+	require.NoError(t, rows.Err())
+	return result
+}
 
 func TestTaskLifecycleReceiptsPersistCreateArchiveUnarchiveAndDelete(t *testing.T) {
 	ctx := context.Background()

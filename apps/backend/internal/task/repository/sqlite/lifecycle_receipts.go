@@ -114,6 +114,9 @@ func (r *Repository) GetTaskVisibilitySnapshot(ctx context.Context, workspaceID,
 	if err != nil {
 		return nil, nil, err
 	}
+	if r.visibilitySnapshotAfterTaskRead != nil {
+		r.visibilitySnapshotAfterTaskRead()
+	}
 	var receipt models.TaskLifecycleReceipt
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT task_id, workspace_id, identifier, title, workflow_id, workflow_step_id,
