@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	"sort"
 	"time"
 
@@ -21,6 +22,7 @@ type workspaceAdoptionRepository interface {
 	CommitWorkspaceAdoption(context.Context, models.WorkspaceAdoptionPreview, string, *models.TaskEnvironmentRecoveryClaim, func() error) (*models.WorkspaceAdoptionReceipt, error)
 	GetWorkspaceAdoption(context.Context, string) (*models.WorkspaceAdoptionReceipt, error)
 	ValidateWorkspaceAdoption(context.Context, *models.WorkspaceAdoptionReceipt) error
+	FinalizeWorkspaceAdoption(context.Context, *models.WorkspaceAdoptionReceipt) error
 }
 
 type WorkspaceAdoptionRequest struct {
@@ -139,6 +141,11 @@ func (s *Service) ApplyWorkspaceAdoption(ctx context.Context, taskID string, p m
 	if p.Selection.Snapshot.TaskID != taskID || p.Token == "" || p.Token != p.Digest() {
 		return nil, models.ErrWorkspaceAdoptionStale
 	}
+	unlock, err := s.lockWorkspaceAdoption(ctx, taskID, p, manager)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	prior, err := repo.GetWorkspaceAdoption(ctx, operationID)
 	if err != nil {
 		return nil, err
@@ -147,7 +154,7 @@ func (s *Service) ApplyWorkspaceAdoption(ctx context.Context, taskID string, p m
 		if prior.Preview.Token != p.Token {
 			return nil, models.ErrWorkspaceAdoptionStale
 		}
-		return s.ValidateWorkspaceAdoption(ctx, taskID, operationID)
+		return s.finalizeWorkspaceAdoptionReplay(ctx, taskID, operationID, repo, manager)
 	}
 	snapshot := p.Selection.Snapshot
 	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, models.TaskEnvironmentRecoveryClaimRequest{TaskEnvironmentID: snapshot.TaskEnvironmentID, OwnerTaskID: taskID, OwnershipGeneration: snapshot.OwnershipGeneration, SessionID: snapshot.SessionID, OperationID: operationID, ExecutorType: "worktree"})
@@ -157,7 +164,7 @@ func (s *Service) ApplyWorkspaceAdoption(ctx context.Context, taskID string, p m
 	defer func() {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		if releaseErr := repo.ReleaseTaskEnvironmentRecoveryClaim(releaseCtx, claim); releaseErr != nil {
+		if releaseErr := repo.ReleaseTaskEnvironmentRecoveryClaim(releaseCtx, claim); releaseErr != nil && !errors.Is(releaseErr, recoveryclaim.ErrClaimNotFound) {
 			s.logger.Error("release workspace adoption claim", zap.Error(releaseErr))
 			resultErr = errors.Join(resultErr, releaseErr)
 		}
@@ -252,4 +259,31 @@ func (s *Service) publishWorkspaceAdoption(ctx context.Context, taskID string, p
 		manager.InvalidateWorkspaceAdoptionCache(slot.WorktreeID)
 	}
 	return receipt, err
+}
+
+func (s *Service) lockWorkspaceAdoption(ctx context.Context, taskID string, p models.WorkspaceAdoptionPreview, manager *worktree.Manager) (func(), error) {
+	session, err := s.GetTaskSession(ctx, p.Selection.Snapshot.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session.TaskID != taskID || session.TaskEnvironmentID != p.Selection.Snapshot.TaskEnvironmentID {
+		return nil, models.ErrWorkspaceAdoptionStale
+	}
+	return manager.TryLockWorkspaceAdoption(ctx, session.TaskEnvironmentID)
+}
+
+func (s *Service) finalizeWorkspaceAdoptionReplay(ctx context.Context, taskID, operationID string, repo workspaceAdoptionRepository, manager *worktree.Manager) (*models.WorkspaceAdoptionReceipt, error) {
+	receipt, err := s.ValidateWorkspaceAdoption(ctx, taskID, operationID)
+	if err != nil {
+		return nil, err
+	}
+	slot, err := receipt.Preview.Slot()
+	if err != nil {
+		return nil, err
+	}
+	manager.InvalidateWorkspaceAdoptionCache(slot.WorktreeID)
+	if err := repo.FinalizeWorkspaceAdoption(ctx, receipt); err != nil {
+		return nil, err
+	}
+	return receipt, nil
 }

@@ -78,6 +78,15 @@ func exerciseWorkspaceAdoptionPublication(t *testing.T, r *Repository) {
 	require.Equal(t, p.Token, stored.Preview.Token)
 	require.NoError(t, reopened.ensureWorkspaceAdoptionsSchema())
 	require.NoError(t, reopened.ValidateWorkspaceAdoption(context.Background(), stored))
+	wrong := *stored
+	wrong.OperationID = "22222222-2222-4222-8222-222222222222"
+	require.ErrorIs(t, reopened.FinalizeWorkspaceAdoption(context.Background(), &wrong), models.ErrWorkspaceAdoptionStale)
+	require.NoError(t, reopened.FinalizeWorkspaceAdoption(context.Background(), stored))
+	var claims int
+	require.NoError(t, r.db.Get(&claims, `SELECT COUNT(*) FROM task_environment_recovery_claims WHERE task_environment_id='adopt-env'`))
+	require.Zero(t, claims)
+	require.NoError(t, reopened.FinalizeWorkspaceAdoption(context.Background(), stored))
+
 	_, err = r.db.Exec(`UPDATE task_environments SET ownership_generation=2 WHERE id='adopt-env'`)
 	require.NoError(t, err)
 	require.ErrorIs(t, r.ValidateWorkspaceAdoption(context.Background(), stored), models.ErrWorkspaceAdoptionStale)
@@ -127,4 +136,24 @@ func TestWorkspaceAdoptionSelectionCASSQLite(t *testing.T) {
 
 func TestWorkspaceAdoptionSelectionCASPostgres(t *testing.T) {
 	exerciseWorkspaceAdoptionSelectionCAS(t, func(t *testing.T) *Repository { r, _, _ := newTaskPostgresRepoPair(t); return r })
+}
+
+func exerciseWorkspaceAdoptionBorrowedConsumer(t *testing.T, r *Repository) {
+	p := seedWorkspaceAdoptionDB(t, r)
+	claim := acquireWorkspaceAdoptionClaim(t, r, p)
+	var executorID string
+	require.NoError(t, r.db.Get(&executorID, `SELECT id FROM executors ORDER BY id LIMIT 1`))
+	_, err := r.db.Exec(r.db.Rebind(`INSERT INTO executors_running(id,session_id,task_id,executor_id,status,created_at,updated_at) VALUES('adopt-runtime','adopt-session','adopt-task',?,'running',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`), executorID)
+	require.NoError(t, err)
+	_, err = r.CommitWorkspaceAdoption(context.Background(), p, claim.OperationID, claim, func() error { return nil })
+	require.ErrorIs(t, err, recoveryclaim.ErrBusy)
+	assertAdoptionDBUnpublished(t, r, p)
+}
+
+func TestWorkspaceAdoptionBorrowedConsumerSQLite(t *testing.T) {
+	exerciseWorkspaceAdoptionBorrowedConsumer(t, newRepoForEntityTests(t))
+}
+func TestWorkspaceAdoptionBorrowedConsumerPostgres(t *testing.T) {
+	r, _, _ := newTaskPostgresRepoPair(t)
+	exerciseWorkspaceAdoptionBorrowedConsumer(t, r)
 }

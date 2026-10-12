@@ -4,6 +4,8 @@ import (
 	"context"
 	"github.com/kandev/kandev/internal/task/checkoutadoption"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"sync"
 )
 
 func (s *SQLiteStore) GetCurrentWorkspaceAdoption(ctx context.Context, worktreeID string) (*models.WorkspaceAdoptionReceipt, error) {
@@ -50,4 +52,18 @@ func (m *Manager) InvalidateWorkspaceAdoptionCache(worktreeID string) {
 			delete(m.worktrees, key)
 		}
 	}
+}
+
+// TryLockWorkspaceAdoption prevents simultaneous same-operation borrowers in
+// this manager. Durable claims and publication CAS protect independent writers.
+func (m *Manager) TryLockWorkspaceAdoption(ctx context.Context, environmentID string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	value, _ := m.recoveryLocks.LoadOrStore("workspace-adoption:"+environmentID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	if !lock.TryLock() {
+		return nil, recoveryclaim.ErrBusy
+	}
+	return lock.Unlock, nil
 }

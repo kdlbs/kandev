@@ -37,11 +37,8 @@ func (r *Repository) ValidateWorkspaceAdoption(ctx context.Context, receipt *mod
 // CommitWorkspaceAdoption publishes the slot and receipt under the current claim.
 // verify retains the caller's pinned objects through the transaction commit.
 func (r *Repository) CommitWorkspaceAdoption(ctx context.Context, p models.WorkspaceAdoptionPreview, operationID string, claim *models.TaskEnvironmentRecoveryClaim, verify func() error) (*models.WorkspaceAdoptionReceipt, error) {
-	if _, err := uuid.Parse(operationID); err != nil {
-		return nil, models.ErrWorkspaceAdoptionStale
-	}
-	if claim == nil || claim.OperationID != operationID || p.Token == "" || p.Token != p.Digest() || verify == nil {
-		return nil, models.ErrWorkspaceAdoptionStale
+	if err := validateWorkspaceAdoptionPublication(p, operationID, claim, verify); err != nil {
+		return nil, err
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -49,6 +46,9 @@ func (r *Repository) CommitWorkspaceAdoption(ctx context.Context, p models.Works
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := recoveryclaim.ValidateTx(ctx, r.db, tx, claim); err != nil {
+		return nil, err
+	}
+	if err := recoveryclaim.EnsureQuiescentTx(ctx, r.db, tx, claim); err != nil {
 		return nil, err
 	}
 	if err := r.validateAdoptionSelectionTx(ctx, tx, p, claim); err != nil {
@@ -147,4 +147,53 @@ func (r *Repository) publishAdoptionTx(ctx context.Context, tx *sqlx.Tx, p model
 
 func adoptionClaimMatchesSelection(s models.WorkspaceRecoverySelectionSnapshot, claim *models.TaskEnvironmentRecoveryClaim) bool {
 	return claim != nil && claim.OperationID != "" && claim.TaskEnvironmentID == s.TaskEnvironmentID && claim.OwnerTaskID == s.TaskID && claim.SessionID == s.SessionID && claim.OwnershipGeneration == s.OwnershipGeneration && s.TaskID == s.EnvironmentOwnerTaskID && s.ExecutorType == string(models.ExecutorTypeWorktree) && claim.ExecutorType == string(models.ExecutorTypeWorktree) && s.EnvironmentStatus == string(models.TaskEnvironmentStatusReady) && s.Complete()
+}
+
+// FinalizeWorkspaceAdoption releases only a claim proven by a committed receipt.
+// This closes the crash window between publication and normal claim release.
+func (r *Repository) FinalizeWorkspaceAdoption(ctx context.Context, receipt *models.WorkspaceAdoptionReceipt) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	claim, err := recoveryclaim.GetTx(ctx, r.db, tx, receipt.Preview.Selection.Snapshot.TaskEnvironmentID)
+	if err != nil {
+		return err
+	}
+	if claim == nil {
+		return nil
+	}
+	s := receipt.Preview.Selection.Snapshot
+	if claim.OperationID != receipt.OperationID || claim.OwnerTaskID != s.EnvironmentOwnerTaskID || claim.SessionID != s.SessionID || claim.OwnershipGeneration != s.OwnershipGeneration {
+		return models.ErrWorkspaceAdoptionStale
+	}
+	if err := recoveryclaim.ValidateTx(ctx, r.db, tx, claim); err != nil {
+		return err
+	}
+	if err := checkoutadoption.ValidateCurrentTx(ctx, r.db, tx, receipt); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_recovery_claims WHERE task_environment_id=? AND operation_id=? AND owner_task_id=? AND ownership_generation=? AND session_id=?`), claim.TaskEnvironmentID, claim.OperationID, claim.OwnerTaskID, claim.OwnershipGeneration, claim.SessionID)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return models.ErrWorkspaceAdoptionStale
+	}
+	return tx.Commit()
+}
+
+func validateWorkspaceAdoptionPublication(p models.WorkspaceAdoptionPreview, operationID string, claim *models.TaskEnvironmentRecoveryClaim, verify func() error) error {
+	if _, err := uuid.Parse(operationID); err != nil {
+		return models.ErrWorkspaceAdoptionStale
+	}
+	if claim == nil || claim.OperationID != operationID || p.Token == "" || p.Token != p.Digest() || verify == nil {
+		return models.ErrWorkspaceAdoptionStale
+	}
+	return nil
 }

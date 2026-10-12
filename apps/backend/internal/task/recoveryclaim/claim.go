@@ -520,3 +520,19 @@ func isUniqueViolation(err error) bool {
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "unique") || strings.Contains(strings.ToLower(err.Error()), "duplicate")
 }
+
+// EnsureQuiescentTx rechecks all consumers before publication, including when
+// a retry borrowed the same durable claim left by an interrupted operation.
+func EnsureQuiescentTx(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, claim *models.TaskEnvironmentRecoveryClaim) error {
+	if claim == nil {
+		return ErrClaimMismatch
+	}
+	busy, err := environmentHasConsumers(ctx, db, tx, claim.TaskEnvironmentID, claim.SessionID, false)
+	if err != nil {
+		return err
+	}
+	if busy {
+		return ErrBusy
+	}
+	return nil
+}

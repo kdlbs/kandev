@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,4 +65,53 @@ func TestWorkspaceAdoptionSelectedRecoveryRefusesDamagedAdoptedMetadata(t *testi
 	var path string
 	require.NoError(t, f.db.Get(&path, `SELECT worktree_path FROM task_environment_repos WHERE id='slot-adoption'`))
 	require.Equal(t, f.clone, path)
+}
+
+func TestWorkspaceAdoptionReplayFinalizesCommittedOrphanClaim(t *testing.T) {
+	f := newAdoptionHTTPFixture(t)
+	p := adoptionPreview(t, f)
+	const operation = "11111111-1111-4111-8111-111111111111"
+	apply := func() *httptest.ResponseRecorder {
+		return adoptionRequest(f.router, "/api/v1/tasks/task-adoption/workspace-adoption/apply", map[string]any{"preview": p, "operation_id": operation})
+	}
+	require.Equal(t, http.StatusOK, apply().Code)
+	// Simulate a restart after the binding/receipt committed but before claim release.
+	repo := tasksqlite.NewWithInitializedDB(f.db, f.db, nil)
+	_, err := repo.AcquireTaskEnvironmentRecoveryClaim(context.Background(), models.TaskEnvironmentRecoveryClaimRequest{TaskEnvironmentID: "env-adoption", OwnerTaskID: "task-adoption", OwnershipGeneration: 1, SessionID: "session-adoption", OperationID: operation, ExecutorType: "worktree"})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, apply().Code)
+	var count int
+	require.NoError(t, f.db.Get(&count, `SELECT COUNT(*) FROM task_environment_recovery_claims WHERE task_environment_id='env-adoption'`))
+	require.Zero(t, count)
+}
+
+func TestWorkspaceAdoptionBorrowedClaimRechecksPersistedConsumer(t *testing.T) {
+	f := newAdoptionHTTPFixture(t)
+	p := adoptionPreview(t, f)
+	const operation = "11111111-1111-4111-8111-111111111111"
+	repo := tasksqlite.NewWithInitializedDB(f.db, f.db, nil)
+	_, err := repo.AcquireTaskEnvironmentRecoveryClaim(context.Background(), models.TaskEnvironmentRecoveryClaimRequest{TaskEnvironmentID: "env-adoption", OwnerTaskID: "task-adoption", OwnershipGeneration: 1, SessionID: "session-adoption", OperationID: operation, ExecutorType: "worktree"})
+	require.NoError(t, err)
+	var executorID string
+	require.NoError(t, f.db.Get(&executorID, `SELECT id FROM executors ORDER BY id LIMIT 1`))
+	_, err = f.db.Exec(`INSERT INTO executors_running(id,session_id,task_id,executor_id,status,created_at,updated_at) VALUES('native-runtime','session-adoption','task-adoption',?,'running',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, executorID)
+	require.NoError(t, err)
+	rec := adoptionRequest(f.router, "/api/v1/tasks/task-adoption/workspace-adoption/apply", map[string]any{"preview": p, "operation_id": operation})
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	var path string
+	require.NoError(t, f.db.Get(&path, `SELECT worktree_path FROM task_environment_repos WHERE id='slot-adoption'`))
+	require.Equal(t, f.old, path)
+}
+
+func TestWorkspaceAdoptionConcurrentRequestRefusesWhileOperationOwnsManager(t *testing.T) {
+	f := newAdoptionHTTPFixture(t)
+	p := adoptionPreview(t, f)
+	unlock, err := f.manager.TryLockWorkspaceAdoption(context.Background(), "env-adoption")
+	require.NoError(t, err)
+	request := map[string]any{"preview": p, "operation_id": "11111111-1111-4111-8111-111111111111"}
+	rec := adoptionRequest(f.router, "/api/v1/tasks/task-adoption/workspace-adoption/apply", request)
+	require.Equal(t, http.StatusConflict, rec.Code)
+	unlock()
+	rec = adoptionRequest(f.router, "/api/v1/tasks/task-adoption/workspace-adoption/apply", request)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }

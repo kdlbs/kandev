@@ -29,7 +29,19 @@ func Load(ctx context.Context, db *sqlx.DB, operationID string) (*models.Workspa
 }
 
 // ValidateCurrent checks the original session incarnation and current slot owner.
+type receiptQuery interface {
+	GetContext(context.Context, any, string, ...any) error
+}
+
 func ValidateCurrent(ctx context.Context, db *sqlx.DB, receipt *models.WorkspaceAdoptionReceipt) error {
+	return validateCurrent(ctx, db, db, receipt)
+}
+
+func ValidateCurrentTx(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, receipt *models.WorkspaceAdoptionReceipt) error {
+	return validateCurrent(ctx, db, tx, receipt)
+}
+
+func validateCurrent(ctx context.Context, db *sqlx.DB, q receiptQuery, receipt *models.WorkspaceAdoptionReceipt) error {
 	p := receipt.Preview
 	s := p.Selection.Snapshot
 	slot, err := p.Slot()
@@ -37,7 +49,7 @@ func ValidateCurrent(ctx context.Context, db *sqlx.DB, receipt *models.Workspace
 		return err
 	}
 	var count int
-	err = db.GetContext(ctx, &count, db.Rebind(`SELECT COUNT(*) FROM task_environment_repos er
+	err = q.GetContext(ctx, &count, db.Rebind(`SELECT COUNT(*) FROM task_environment_repos er
  JOIN task_environments te ON te.id=er.task_environment_id
  JOIN tasks t ON t.id=te.task_id
  JOIN repositories r ON r.id=er.repository_id
