@@ -178,7 +178,7 @@ made for this repair; the package remains unstaged and uncommitted.
 
 PR preparation (2026-10-12): user requested a ready PR and shutdown of the demo.
 The owned :48479 instance was stopped and copied Codex authentication removed;
-main :9998/PID 27220 stayed running. Fresh PR screenshots were captured in
+the primary instance stayed running. Fresh PR screenshots were captured in
 separate managed E2E fixtures (desktop Chromium and mobile Chrome, one passing
 case each), with ephemeral specs removed and a two-asset manifest validated.
 The 300-line web harness limit was restored without removing guidance; harness
@@ -229,5 +229,20 @@ catalog/lint, documentation coverage and diff whitespace checks passed.
 Current-main integration: the later upstream admission fix merged cleanly.
 Its five focus/admission regressions passed, and fresh managed rich-output E2E
 runs passed all seven desktop and five phone cases. Temporary PostgreSQL test
-resources were removed. The disposable user demo remains stopped, and main
-:9998/PID 27220 is unchanged.
+resources were removed. The disposable user demo remains stopped, and the
+primary instance is unchanged.
+
+
+Final review follow-up: public reserved-ID guidance includes `__proto__`, and
+machine-local process identifiers were removed from the trial records. The
+suggested persistent standalone fallback store is intentionally not adopted:
+it retains an open file disclosure across authentication changes. A regression
+verifies same-identity rerender preservation, auth-change collapse and no
+unrequested preview read. The current renderer passes; a temporary application
+of the suggested change fails the collapse assertion. The original renderer
+was restored unchanged. Keyed stores retain the existing bounded persistence.
+
+The final review regression run passed all 20 renderer/state/file-target tests
+across three files, and targeted lint passed. Public documentation validation,
+specification catalog/lint and diff whitespace checks passed. No production
+renderer change was made; the authentication reset remains intentional.

@@ -5,10 +5,10 @@ import { RichOutputRenderer } from "./rich-output-renderer";
 const TOGGLE = "rich-output-file-preview-toggle";
 const EXPANDED = "aria-expanded";
 const owner = {};
-const transport = vi.hoisted(() => ({ read: vi.fn(), client: {} }));
+const transport = vi.hoisted(() => ({ read: vi.fn(), client: {}, auth: "user-a" }));
 vi.mock("@/components/state-provider", () => ({
   useOptionalAppStoreApi: () => owner,
-  useOptionalAppStore: () => "user-a",
+  useOptionalAppStore: () => transport.auth,
 }));
 vi.mock("@/lib/ws/connection", () => ({ getWebSocketClient: () => transport.client }));
 vi.mock("@/lib/ws/workspace-files", () => ({ requestFileContent: transport.read }));
@@ -18,6 +18,7 @@ function Harness(props: KandevRendererProps) {
 afterEach(() => {
   cleanup();
   transport.read.mockReset();
+  transport.auth = "user-a";
 });
 
 // @covers AC-AGENTS-AGENT-RICH-OUTPUT-003.9
@@ -85,4 +86,35 @@ it("keeps identical file leaves independent by element identity", async () => {
   await screen.findByText("Shared source");
   expect(first.getAttribute(EXPANDED)).toBe("true");
   expect(second.getAttribute(EXPANDED)).toBe("false");
+});
+
+// @covers AC-AGENTS-AGENT-RICH-OUTPUT-003.9
+it("retains standalone disclosure on rerender and clears it across authentication", async () => {
+  const props: KandevRendererProps = {
+    sessionId: "standalone-session",
+    status: "complete",
+    result: undefined,
+    args: {
+      version: 2,
+      catalog_version: 1,
+      title: "Standalone report",
+      spec: {
+        root: "file",
+        elements: { file: { type: "FilePreview", props: { path: "notes.txt" }, children: [] } },
+      },
+    },
+  };
+  transport.read.mockResolvedValueOnce({ content: "Standalone bytes", is_binary: false });
+  const view = render(<Harness {...props} />);
+  fireEvent.click(screen.getByTestId(TOGGLE));
+  await screen.findByText("Standalone bytes");
+  const renamed = { ...props, args: { ...props.args, title: "Renamed report" } };
+  view.rerender(<Harness {...renamed} />);
+  expect(screen.getByTestId(TOGGLE).getAttribute(EXPANDED)).toBe("true");
+  expect(transport.read).toHaveBeenCalledTimes(1);
+  transport.auth = "user-b";
+  view.rerender(<Harness {...renamed} />);
+  expect(screen.getByTestId(TOGGLE).getAttribute(EXPANDED)).toBe("false");
+  expect(screen.queryByText("Standalone bytes")).toBeNull();
+  expect(transport.read).toHaveBeenCalledTimes(1);
 });

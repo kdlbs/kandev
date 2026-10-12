@@ -501,7 +501,7 @@ The input is limited to 64 KiB, 64 elements, eight levels, and four total
 `Chart`, `Metrics`, `FilePreview`, `Table` or `StatusList` elements. Callout is
 explanatory text under the same byte, node and depth limits. Element IDs start with an ASCII
 letter and contain at most 64 letters, digits, underscores, or hyphens;
-`constructor` and `prototype` are reserved. Every element must be reachable
+`constructor`, `prototype` and `__proto__` are reserved. Every element must be reachable
 exactly once from the root. Containers require children, leaves have none, and
 cycles, shared children, unknown fields, and unsupported versions are rejected.
 Titles are limited to 120 characters and the presentation description to 500.
