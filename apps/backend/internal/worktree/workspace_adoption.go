@@ -86,6 +86,10 @@ func (m *Manager) inspectWorkspaceAdoption(ctx context.Context, selection models
 		i.Close()
 		return nil, err
 	}
+	if err := i.pinSourceMetadata(ctx); err != nil {
+		i.Close()
+		return nil, err
+	}
 	if err := i.inspectCandidate(ctx); err != nil {
 		i.Close()
 		return nil, err
@@ -145,6 +149,13 @@ func (i *WorkspaceAdoptionInspection) inspectOldMarker() error {
 
 func (i *WorkspaceAdoptionInspection) inspectCandidate(ctx context.Context) error {
 	path := i.Proof.CandidatePath
+	metadata, err := i.candidateMetadata()
+	if err != nil {
+		return err
+	}
+	if err := validateAdoptionMetadata(ctx, metadata, filepath.Join(path, ".git"), true); err != nil {
+		return err
+	}
 	inspected := i.manager.inspectCheckout(ctx, path, i.handles[path])
 	if inspected.operationalErr != nil {
 		return inspected.operationalErr
@@ -152,11 +163,11 @@ func (i *WorkspaceAdoptionInspection) inspectCandidate(ctx context.Context) erro
 	if inspected.class != checkoutMainHealthy {
 		return models.ErrWorkspaceAdoptionStale
 	}
-	origin, err := i.manager.runBoundedGitInspect(ctx, i.source, "config", "--get", "remote.origin.url")
+	origin, err := i.rawGitInspect(ctx, i.source, "config", "--get", "remote.origin.url")
 	if err != nil {
 		return err
 	}
-	other, err := i.manager.runBoundedGitInspect(ctx, path, "config", "--get", "remote.origin.url")
+	other, err := i.rawGitInspect(ctx, path, "config", "--get", "remote.origin.url")
 	if err != nil {
 		return err
 	}
@@ -164,14 +175,14 @@ func (i *WorkspaceAdoptionInspection) inspectCandidate(ctx context.Context) erro
 		return models.ErrWorkspaceAdoptionStale
 	}
 	i.Proof.OriginSHA256 = adoptionHash([]byte(strings.TrimSpace(origin)))
-	branch, err := i.manager.runBoundedGitInspect(ctx, path, "symbolic-ref", "--short", "HEAD")
+	branch, err := i.rawGitInspect(ctx, path, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(branch) != i.Proof.Branch {
 		return models.ErrWorkspaceAdoptionStale
 	}
-	head, err := i.manager.runBoundedGitInspect(ctx, path, "rev-parse", "--verify", "HEAD^{commit}")
+	head, err := i.rawGitInspect(ctx, path, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
 		return err
 	}
@@ -179,36 +190,15 @@ func (i *WorkspaceAdoptionInspection) inspectCandidate(ctx context.Context) erro
 	if err := i.inspectCandidateHistory(ctx, path); err != nil {
 		return err
 	}
-	metadata, err := i.handles[path].OpenSubdirectory(".git")
-	if err != nil {
-		return err
-	}
-	i.handles[filepath.Join(path, ".git")] = metadata
 	index, err := metadata.ReadFile("index")
 	if err != nil {
 		return err
 	}
 	i.Proof.IndexSHA256 = adoptionHash(index)
-	return nil
+	return validateAdoptionMetadata(ctx, metadata, filepath.Join(path, ".git"), true)
 }
 
 func (i *WorkspaceAdoptionInspection) pinIdentityPaths() error {
-	source, err := storageworkspaces.OpenDirectoryNoFollow(filepath.Dir(i.source), i.source)
-	if err != nil {
-		return err
-	}
-	if existing := i.handles[i.source]; existing != nil {
-		_ = existing.Close()
-	}
-	i.handles[i.source] = source
-	metadata, err := source.OpenSubdirectory(".git")
-	if err != nil {
-		return err
-	}
-	if existing := i.handles[filepath.Join(i.source, ".git")]; existing != nil {
-		_ = existing.Close()
-	}
-	i.handles[filepath.Join(i.source, ".git")] = metadata
 	i.Proof.Identities = make(map[string]string)
 	for path, h := range i.handles {
 		if err := h.VerifyPath(path); err != nil {
@@ -270,6 +260,9 @@ func (i *WorkspaceAdoptionInspection) Verify(ctx context.Context) error {
 
 func (i *WorkspaceAdoptionInspection) verifyGit(ctx context.Context) error {
 	before := i.Proof
+	if err := validateAdoptionMetadata(ctx, i.handles[filepath.Join(i.source, ".git")], filepath.Join(i.source, ".git"), false); err != nil {
+		return err
+	}
 	// Reinspection owns temporary metadata handles, not this inspection's pins.
 	other := &WorkspaceAdoptionInspection{manager: i.manager, Proof: before, source: i.source, sourceHead: i.sourceHead, handles: map[string]storageworkspaces.DirectoryHandle{i.Proof.CandidatePath: i.handles[i.Proof.CandidatePath]}}
 	err := other.inspectCandidate(ctx)
@@ -334,7 +327,7 @@ func (i *WorkspaceAdoptionInspection) pinRoot(selection models.WorkspaceAdoption
 func (i *WorkspaceAdoptionInspection) inspectCandidateHistory(ctx context.Context, path string) error {
 	sourceHead := i.sourceHead
 	if sourceHead == "" {
-		head, err := i.manager.runBoundedGitInspect(ctx, i.source, "rev-parse", "--verify", i.Proof.Branch+"^{commit}")
+		head, err := i.rawGitInspect(ctx, i.source, "rev-parse", "--verify", i.Proof.Branch+"^{commit}")
 		if err != nil {
 			return err
 		}
@@ -343,7 +336,7 @@ func (i *WorkspaceAdoptionInspection) inspectCandidateHistory(ctx context.Contex
 	if !relocationCommitPattern.MatchString(sourceHead) {
 		return models.ErrWorkspaceAdoptionStale
 	}
-	if _, err := i.manager.runBoundedGitInspect(ctx, path, "merge-base", "--is-ancestor", sourceHead, "HEAD"); err != nil {
+	if _, err := i.rawGitInspect(ctx, path, "merge-base", "--is-ancestor", sourceHead, "HEAD"); err != nil {
 		return models.ErrWorkspaceAdoptionStale
 	}
 	i.Proof.SourceHead = sourceHead
@@ -353,4 +346,9 @@ func (i *WorkspaceAdoptionInspection) inspectCandidateHistory(ctx context.Contex
 func validWorkspaceAdoptionPaths(selection models.WorkspaceAdoptionSelection, slot models.WorkspaceRecoveryInventorySlot, candidate, base string) bool {
 	root := selection.Snapshot.WorkspacePath
 	return filepath.IsAbs(candidate) && filepath.Clean(candidate) == candidate && candidate != slot.WorktreePath && filepath.Dir(candidate) == root && filepath.Dir(slot.WorktreePath) == root && filepath.Join(base, selection.Snapshot.TaskDirName) == root
+}
+
+// All adoption identity/history reads use the actual objects, not refs/replace.
+func (i *WorkspaceAdoptionInspection) rawGitInspect(ctx context.Context, path string, args ...string) (string, error) {
+	return i.manager.runBoundedGitInspect(ctx, path, append([]string{"--no-replace-objects"}, args...)...)
 }

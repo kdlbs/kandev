@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-12
 owners:
   - kandev
 ---
@@ -57,7 +57,9 @@ Decision: [explicit checkout adoption](../../../decisions/2026-10-11-portable-ch
 - **AC-TASKS-PORTABLE-ADOPTION-002.3:** The candidate has independent pinned Git metadata,
   the registered origin and an existing commit on the selected branch descended from
   the registered source branch commit. Foreign roots,
-  symlinks, redirected common directories and competing bindings refuse adoption.
+  symlinks, redirected common/object directories and competing bindings refuse adoption.
+  Ancestry uses raw objects; replacement refs cannot supply proof. Legacy grafts
+  and external alternate object storage refuse adoption. Legitimate packed refs remain valid.
 - **AC-TASKS-PORTABLE-ADOPTION-002.4:** A malformed or foreign old pointer, restored
   administration, changed marker or changed candidate identity refuses adoption.
 

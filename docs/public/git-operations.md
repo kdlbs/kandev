@@ -614,7 +614,9 @@ Stop every runtime that consumes the selected environment through its normal
 lifecycle. The existing session must be waiting for input. The prepared clone must
 be a direct child of the same owned task root, with independent Git metadata,
 the registered origin and the slot's selected branch on an existing commit. The
-candidate history must contain the registered source branch commit as an ancestor.
+candidate history must contain the registered source branch commit as a real ancestor.
+Replacement refs cannot provide that proof. Escaped ref/object metadata, legacy grafts
+and external alternate object storage are refused; ordinary packed refs are supported.
 The original pointer must identify missing administration in the registered source.
 
 Use the operator HTTP API:

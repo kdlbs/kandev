@@ -48,7 +48,8 @@ func adoptionGit(t *testing.T, path string, args ...string) string {
 func newAdoptionHTTPFixture(t *testing.T) adoptionHTTPFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	home := t.TempDir()
+	home, resolveErr := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, resolveErr)
 	tasks := filepath.Join(home, "tasks")
 	root := filepath.Join(tasks, "task-adoption")
 	require.NoError(t, os.MkdirAll(root, 0700))
