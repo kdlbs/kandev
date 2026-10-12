@@ -3,6 +3,11 @@
 This is the frozen interface every frontend + example task builds against. Do not
 diverge without updating this file.
 
+Remote executor providers are a server-side Go/gRPC plugin capability. They do
+not add browser APIs or grants. See the
+[remote executor provider contract](GRPC-CONTRACT.md#remote-executor-providers)
+and [manifest declarations](../../public/plugins-manifest.md#remote-executor-providers).
+
 ## Loading model
 
 1. Backend boot payload gains `plugins: ActivePlugin[]` where
@@ -16,6 +21,17 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    (`~/.kandev/plugins/<id>/<version>/ui/...`, per manifest `ui.bundle`). There is no
    reverse proxy and no live upstream request: the plugin subprocess does not need to
    be running to serve the UI bundle, since installation already extracted the file.
+   Before importing a bundle, the Host calls authenticated
+   `GET /api/plugins/{id}/conversation/binding`. Success returns
+   `{bindingToken,generation,expiresAt}` with `expiresAt` RFC3339 UTC; every
+   response, including errors, sends `Cache-Control: no-store`. Errors use
+   `{ "error": { "code": "...", "message": "...", "retryable": false|true } }`:
+   `401/unauthenticated/false`, `404/not_found/false`, and
+   `409/generation_superseded/true`. On `401` or `404`, the current load is
+   skipped without disabling persisted state; on `409`, binding is retried with
+   bounded backoff and import waits for success. Expiry rebinds or aborts. The
+   grant remains in a Host-only closure and is never passed to bundle code/public
+   API values.
 2. On SPA boot, the **plugin host** (`apps/web/lib/plugins/host.ts`) iterates
    `bootPayload.plugins`, injects any `styleUrls` as `<link>`, and dynamically
    `import(/* @vite-ignore */ bundleUrl)` each bundle as a native ES module. Before a
@@ -33,21 +49,19 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
      destroy?(): void,
    })
    ```
+   The loader serializes stages per plugin and creates a private Host-only `(pluginId,generation,stageId,stageToken)` registration context before import. The public `window.registerKandevPlugin(id,plugin)` signature is unchanged; the Host routes each call to the currently open stage context for that plugin ID through an internal import-context handshake (closure-held stage token, never a public argument). Only the open stage's first registration is accepted. Registration after context closure (timeout, failure, or settled stage), a duplicate registration within the same stage, and a call presenting a foreign or retired stage token are rejected without mutating active state; the next stage does not import until the prior import settles.
+   Generation lifecycle is `pending -> active -> retired` with one commit linearization point. `pending` owns staged style links keyed by `(pluginId,generation)`, staged registry contributions, staged runtime handles/subscriptions, and the staged binding grant. `active` is the single committed generation serving panels. `retired` is revoked and reclaimed. Failed or timed-out staging removes only pending style links, contributions, handles, and grants. Commit atomically swaps active registry contributions and styles, then retires the old generation: revoke its grant and binding token, call its `destroy?.()`, remove its `(pluginId,generation)` styles and registrations, and close its panels. Prior contributions stay visible until replacement succeeds.
 4. After the module resolves, the host calls `initialize(registry, host)`. A
-   reload/update may unregister the previous generation before starting the next
-   one; the host keeps that transition unresolved until the current generation's
-   initialization finishes. Slow or failed reloads do not by themselves revoke
-   open or saved task panels. On explicit plugin disable/uninstall the host calls
-   `destroy?.()`, removes the plugin's registrations, and closes its panels.
-   Each initialization attempt is transactional for plugin-owned runtime state:
-   failure or timeout aborts plugin-owned work and fences callbacks from the
-   expired generation. The same generation owns host-created subscriptions,
-   modal and task-link handles, toasts, and review surfaces; the loader closes or
-   unsubscribes them before calling `destroy` exactly once. Requests and callbacks
-   from an expired generation cannot mutate the replacement generation. Failure or
-   timeout does **not** unregister `registry` contributions (nav items, routes,
-   etc.) already made before the failure — those persist, and only the plugin's
-   lifecycle status becomes failed, until the plugin's _next_ load revokes them.
+   reload/update stages binding, import, and initialization for the successor;
+   the previous active generation remains usable until the successor commits.
+   Failed or timed-out staging fences only the pending generation and leaves
+   open/saved panels on the previous generation. On explicit disable/uninstall
+   the host calls `destroy?.()`, revokes the active grant, removes registrations,
+   and closes panels. Each initialization attempt is transactional for
+   plugin-owned runtime state; its callbacks, subscriptions, and handles are
+   fenced on failure, while successful replacement revokes the old generation.
+   Failure does not unregister prior registry contributions until replacement
+   succeeds.
 
 ## Global entry point
 
@@ -60,6 +74,11 @@ The independently consumable frontend type contract is the runtime-free
 these types instead of re-declaring this document or importing `apps/web` internals.
 The host has a compile-time assignability test, and the real Bitbucket package is a
 required exact-head compatibility consumer.
+`HostReact` includes `Fragment`, `createElement`, `useState`, `useEffect`,
+`useMemo`, `useCallback`, and `useLayoutEffect` with structural React-compatible
+signatures. `host.ui.PromptMentionText` is a curated host component with
+`{ text: string; interactive?: boolean }` props and owns alias loading plus
+fine/coarse-pointer disclosure.
 
 ## `host: PluginHostApi`
 
@@ -105,6 +124,13 @@ interface PluginHostApi {
     baseUrl: string;
   };
   ui: PluginUIApi; // named curated host components; no open Record index
+  conversation: PluginConversationApi;
+  // Optional on older hosts. Browser reads use the authenticated task API and
+  // return bounded canonical projections; they do not expose app-store state.
+  queries?: PluginHostQueriesApi;
+  // Optional on older hosts. Issues a single-use receipt after native
+  // session.control authorization for a pending human interaction.
+  interactions?: PluginHostInteractionsApi;
   // Plugin-scoped locale and translation API. Components use the reactive
   // hook; registry getters may use the imperative translator.
   i18n: {
@@ -140,6 +166,8 @@ interface PluginHostApi {
   // (mounted once at the app root with its own tooltip provider and isolated
   // behind its own error boundary).
   // Independent of keybindings — any plugin code path may call it.
+  // Closing restores focus to an available opener; nested modals keep focus
+  // inside the surviving surface.
   openModal(options: PluginModalOptions): PluginModalHandle;
   // Opens Kandev's native one-field task change-request linking workflow.
   // Provider code supplies copy, parsing, and mutation only; the host owns
@@ -297,7 +325,7 @@ interface PluginModalOptions {
 }
 
 interface PluginModalHandle {
-  close(): void; // closes this modal instance; no-op if already closed
+  close(): void; // closes this instance and restores focus when its opener remains available
 }
 
 interface PluginTaskLinkDialogOptions {
@@ -340,6 +368,7 @@ transport/runtime errors become 503 without exposing internal error text. Plugin
 should use explicit statuses only for safe domain outcomes that callers can act on.
 
 `host.ui` contents: shadcn primitives (Accordion*, Alert*, Badge, Button,
+`Action`, `ActionGroup`,
 Card*, Checkbox, Collapsible*, Dialog*, DropdownMenu*, Empty*, Input, Kbd,
 KbdGroup, Label, Pagination*, Popover*, Progress, ScrollArea, Select*,
 Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea,
@@ -353,10 +382,58 @@ provider-neutral code-host dashboard set: `ChangeRequestList`,
 `ChangeRequestRow`, `ChangeRequestDetail`, `IntegrationListToolbar`, `IntegrationScopeBar`,
 `IntegrationSaveQueryDialog`, `IntegrationRepositoryFilter`, `IntegrationCursorPagination`,
 `IntegrationStartTaskMenu`, `IntegrationIcon`, `IntegrationChangeRequestStatus`, and
-`TaskRowIndicator`, plus native integration settings surfaces:
+`TaskRowIndicator`, `PromptMentionText`, plus native integration settings
 `IntegrationAuthStatusBanner`, `IntegrationEnabledControl`, `SettingsSection`,
 `SettingsCard`, and `WorkspaceScopedSection`. The authoritative list is
 `apps/web/lib/plugins/host-api.ts` (`PLUGIN_UI`).
+
+### Standard actions in existing slots
+
+The SDK exports these additive host-owned controls. `PluginActionProps` has a
+required localized `label` and optional `icon`, visible `text`, short `badge`,
+semantic `tone`, `pressed`, `disabled`, `busy`, `tooltip`, `ref`, trigger
+ARIA metadata, and supported button events. Busy shows activity but does not
+disable the action. Icon-only actions use the label as the fine-pointer desktop
+tooltip unless `tooltip` is an empty string.
+
+```ts
+interface PluginActionGroupProps {
+  children?: HostNode;
+  label?: string;
+}
+
+interface PluginUIShape {
+  Action: Component<PluginActionProps>;
+  ActionGroup: Component<PluginActionGroupProps>;
+}
+```
+
+The complete `PluginActionProps`, including exact event/ref field types, is exported from
+`@kandev/plugin-sdk` and defined in `apps/packages/plugin-sdk/src/index.ts`.
+`Action` renders one native button. The host owns its outer geometry, icon box,
+state styling, tooltip behavior, and responsive presentation. It does not
+accept `className`, `style`, `size`, `variant`, `asChild`, arbitrary props, or
+interactive children. Use `ActionGroup` to space multiple standard actions in
+one contribution. The host owns spacing between different registrations.
+
+| Slot locations | Action presentation |
+| --- | --- |
+| `chat-input-actions`, `task-create-input-actions`, `new-session-input-actions` | Composer-sized controls on desktop; stay beside the active composer on phone |
+| `main-top-bar`, `chat-top-bar` | Match the adjacent 28px toolbar controls; phone actions render in the shared Plugins navigation section |
+| `sidebar-workspace-actions` | Compact 24px desktop action; phone actions render in Plugins navigation |
+| `app-status-bar-left`, `app-status-bar-right` | Fit the 24px status bar; phone uses a touch-sized Status drawer row |
+
+Phone/coarse-pointer controls outside the compact status bar have at least a
+44px active dimension. Tablet status-bar actions retain the existing 24px
+exception. Use `Action` from a component registered in one of these slots;
+there is no separate action registry. Existing raw component slots and
+`host.ui.Button` remain supported, and their appearance is unchanged.
+
+For mixed host versions, feature-detect `host.ui.Action` inside the existing
+component and return either the Action tree or the current legacy Button tree.
+Register one component, do not register both branches. A plugin that cannot use
+a legacy fallback can declare its actual `min_kandev_version`. This additive UI
+export does not require a manifest API-version bump by itself.
 
 In create mode, `TaskCreateDialog` accepts this optional transport seam:
 
@@ -681,6 +758,212 @@ that already filters to this plugin's own events, applies your `scope`/
 tab's own writes (so an editor never clobbers its own caret/selection from its
 own write).
 
+### host.conversation - live paginated session history
+
+The Host-only conversation contract is source-backed. The
+[source reconciliation plan](../conversation-storage-replacement/plan.md) and
+its system design define storage and transport behavior; this section defines
+the browser-visible API and the private v2 wire shape.
+
+This browser-only facade requires the manifest capability
+capabilities.api_read: ["messages"] and min_kandev_version: "0.91.1" or higher.
+It is the only supported browser way to read prompt history. It does not expose
+Zustand state, first-party /api/v1 URLs, raw content, arbitrary metadata, cursors,
+revision tokens, or WebSocket payloads. The Host binds every request and
+notification to the current plugin generation and task-panel session context.
+
+    type PluginConversationErrorCode =
+      | "unauthenticated"
+      | "not_found"
+      | "invalid_query"
+      | "upstream_failure";
+
+    interface PluginConversationError {
+      code: PluginConversationErrorCode;
+      message: string;
+      retryable: boolean;
+    }
+
+    type PluginConversationAuthor = "user" | "agent";
+    type PluginConversationSort = "asc" | "desc";
+
+    interface PluginConversationMessage {
+      id: string;
+      taskId: string | null;
+      sessionId: string;
+      turnId?: string;
+      authorType: PluginConversationAuthor;
+      type: string;
+      content: string;
+      createdAt: string;
+      updatedAt: string;
+      promptIndex?: number;
+      senderTaskId?: string;
+    }
+
+    interface PluginConversationTurn {
+      id: string;
+      taskId: string | null;
+      sessionId: string;
+      startedAt: string;
+      completedAt?: string;
+      updatedAt: string;
+    }
+
+    interface PluginSessionMessagesQuery {
+      sessionId: string | null;
+      taskId?: string | null;
+      authorTypes?: readonly PluginConversationAuthor[];
+      sort?: PluginConversationSort;
+      pageSize?: number;
+    }
+
+    interface PluginSessionMessagesState {
+      messages: readonly PluginConversationMessage[];
+      loading: boolean;
+      hydrated: boolean;
+      loadingMore: boolean;
+      error: PluginConversationError | null;
+      hasMore: boolean;
+      removed: boolean;
+      loadMore(): Promise<number>;
+      retry(): void;
+    }
+
+interface PluginSessionTurnsState {
+      turns: readonly PluginConversationTurn[];
+      loading: boolean;
+      hydrated: boolean;
+      error: PluginConversationError | null;
+      removed: boolean;
+      retry(): void;
+    }
+
+    interface PluginConversationApi {
+      useSessionMessages(query: PluginSessionMessagesQuery): PluginSessionMessagesState;
+      useSessionTurns(sessionId: string | null, taskId?: string | null): PluginSessionTurnsState;
+      useMessageFavorite(sessionId: string | null, messageId: string): boolean;
+    }
+
+Within a task-panel render, host.conversation resolves the Host-injected panel
+scope; props.conversation.history is the equivalent explicit handle. Outside a
+panel scope, nullable session reads return empty state. taskId is tri-state:
+undefined inherits the active panel task, null selects every task in the session,
+and an explicit string must equal the panel task. A mismatch fails before
+network activity. Cache identity, cursor fingerprints, and live filtering retain
+that tri-state distinction.
+
+Messages and turns are read from current source rows in bounded deterministic
+keyset pages. The Host maps safe DTOs, strips system content and arbitrary
+metadata, and keeps source cursors private. It owns page invalidation, retries,
+deduplication, recovery, and lifecycle abort. The public state retains projected
+rows when session.removed arrives, sets removed to true, and stops pagination and
+retry without issuing more network requests. Each mounted panel has an
+independent scope, cache, Host-minted identity, and abort controller.
+
+The Host reconciles source notifications by epoch and decimal revision. A
+matching complete receipt applies its operations by entity ID. A reset marker,
+malformed payload, wrong scope, epoch change, revision gap, or failed operation
+starts a fresh source read. Notifications received before their matching
+snapshot commits remain buffered. A source read and its revision are checked
+together, then the buffered changes are applied. There is no durable payload
+journal, ACK protocol, poison queue, replay promise, content hash, or caller
+selectable as-of read.
+
+#### Host-only v2 conversation wire contract
+
+The private subscribe actions are session.conversation.subscribe and
+session.conversation.unsubscribe. A request uses this shape:
+
+    type ConversationSubscribeRequest = {
+      protocol_version: 2;
+      scope_id: string;
+      session_id: string;
+      consumer_kind: "core" | "plugin";
+      plugin_id?: string;
+      generation?: number;
+      binding_token?: string;
+      task_id?: string | null;
+      authors?: string[];
+      sort?: "asc" | "desc";
+    };
+
+Plugin requests include plugin_id, generation, and binding_token. Core requests
+use consumer_kind: "core". The server validates the session through the normal
+user/workspace boundary and rejects stale legacy session.subscribe payloads with
+ordered fields. Unsubscribe uses the same scope and binding identity.
+
+    type ConversationSubscribeSuccess = {
+      success: true;
+      protocol_version: 2;
+      scope_id: string;
+      session_id: string;
+      epoch: string;
+      revision: string;
+    };
+
+    type ConversationSubscribeFailure = {
+      success: false;
+      error: {
+        code: "invalid_request" | "invalid_binding" | "generation_superseded"
+          | "session_not_found" | "unauthorized" | "upstream_failure";
+        message: string;
+        retryable: boolean;
+      };
+    };
+
+    type ConversationChangeOperation = {
+      kind: "upsert" | "remove";
+      entity: "message" | "turn";
+      id: string;
+      message?: object;
+      turn?: object;
+    };
+
+    type ConversationChangedPayload = {
+      protocol_version: 2;
+      scope_id: string;
+      session_id: string;
+      epoch: string;
+      base_revision: string;
+      revision: string;
+      reset?: boolean;
+      operations: ConversationChangeOperation[];
+    };
+
+The server publishes a changed payload only after the source transaction
+commits. Complete mutation receipts carry the represented operations and the
+base and committed revision. Incomplete receipts and uninstrumented writes
+carry reset: true, so the client performs source reconciliation. An operation
+may be filtered out for a task or author subscription while the revision still
+advances; an empty operations array with matching revisions is a valid
+coverage-only notification.
+
+Revision values are decimal strings because JavaScript numbers cannot safely
+represent every database revision. The process epoch changes after restart or
+restore. The Host accepts only a newer contiguous revision in the current epoch,
+buffers changes until snapshots commit, and recovers on a gap or epoch change.
+A terminal session.removed notification is delivered through the normal
+notification channel and closes every matching source scope.
+
+HTTP pages are:
+GET /api/plugins/{id}/conversation/v2/task-sessions/{sessionId}/messages
+GET /api/plugins/{id}/conversation/v2/task-sessions/{sessionId}/turns
+GET /api/plugins/{id}/conversation/v2/task-sessions/{sessionId}/revision
+GET /api/plugins/{id}/conversation/binding
+
+Source pages return the public records plus private epoch, revision, cursor, and
+hasMore fields. expected_revision is an optional decimal guard. Binding and all
+error responses use Cache-Control: no-store. Stable public errors are
+401/unauthenticated, 404/not_found, 400/invalid_query, and authorized
+5xx/upstream_failure. Binding failures may use a Host-only retryable
+generation_superseded response; it never reaches plugin code.
+
+The continuation-renew endpoint from the predecessor transport is not part of
+the source contract. Load-more and retry use a current source read and preserve
+the public state until that read succeeds. No browser code imports a persistence
+store or writes conversation history.
+
 ## `registry: PluginRegistry`
 
 ```ts
@@ -690,13 +973,17 @@ own write).
 // section: "main" (default) renders as a top-level sidebar entry;
 // "integrations" renders inside the sidebar's Integrations section alongside
 // the first-party integration links (GitHub, Jira, ...); "sidebar-footer"
-// renders as an icon button in the sidebar footer's icon row and as a
-// labelled row in the phone menu's Utilities group, subject to the footer's
-// inline budget — an over-budget item is reached through the footer's
+// renders as a labelled item in the desktop footer's utilities menu and as a
+// labelled row in the phone menu's Utilities group. All desktop items use the
 // overflow menu instead of an inline button; "settings" is accepted but
 // renders on no surface. Hosts predating a section value, or seeing an
 // unrecognised one, simply degrade to "main"'s placement — nothing is ever
 // silently dropped.
+// A curated name (`PLUGIN_ICONS` in the host) or a plugin-owned component.
+// Task menu entries additionally render a ready-made React element unchanged,
+// for plugins that registered one before icons were resolved this way; that
+// tolerance is menu-only (other surfaces map an element to the fallback glyph)
+// and is not part of the type.
 type PluginIcon = string | React.ComponentType<{ className?: string }>;
 export type PluginNavSection =
   | "main"
@@ -710,6 +997,186 @@ interface NavItem {
   path: string;
   icon?: PluginIcon;
   section?: PluginNavSection;
+}
+
+interface PluginTaskStatusSnapshot {
+  taskId: string;
+  title: string;
+  state: string;
+  workflowStepId?: string;
+  statusSummary?: {
+    revision: number;
+    foregroundActivity?: string;
+    activeSubagentCount?: number;
+    queuedPromptCount?: number;
+    completionGate?: { verifiedCount: number; criteriaCount: number; blocked: boolean };
+    activeError?: { preview: string; category?: string };
+  } | null;
+}
+
+interface PluginTaskUsageSnapshot {
+  taskId: string;
+  sessionId?: string;
+  tokensIn: number;
+  tokensCachedRead: number;
+  tokensCachedWrite: number;
+  tokensOut: number;
+  tokensThought: number;
+  tokensTotal: number;
+  /** Integer hundredths of a cent. */
+  costSubcents: number;
+  eventCount: number;
+  estimatedEventCount: number;
+  unpricedEventCount: number;
+  outputTokensComplete: boolean;
+  firstEventAt?: string | null;
+  lastEventAt?: string | null;
+}
+
+interface PluginQueryState<Value> {
+  data: Value | null;
+  loading: boolean;
+  error: string | null;
+  refetch(): Promise<void>;
+}
+
+interface PluginHostQueriesApi {
+  useTaskStatus(taskId: string | null): PluginQueryState<PluginTaskStatusSnapshot>;
+  useTaskUsage(taskId: string | null, sessionId?: string | null): PluginQueryState<PluginTaskUsageSnapshot>;
+}
+
+interface PluginManagedConversationSnapshot {
+  workspaceId: string;
+  instanceKey: string;
+  taskId: string;
+  sessionId: string | null;
+  revision: number;
+  sessionResourceVersion: string;
+  executionId?: string;
+  sessionState?: string;
+  state: "loading" | "ready" | "paused" | "disconnected" | "revoked" | "unsupported" | "unavailable" | "detached";
+  readOnly?: boolean;
+  statusReason?: string;
+  recoverySupported?: boolean;
+  recoveryReason?: string;
+  pendingInteractions: readonly PluginManagedConversationInteraction[];
+}
+
+interface PluginManagedConversationOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+interface PluginManagedConversationQuestion {
+  id: string;
+  title: string;
+  prompt?: string;
+  options?: readonly PluginManagedConversationOption[];
+}
+
+interface PluginManagedConversationClarificationAnswer {
+  questionId: string;
+  selectedOptions?: readonly string[];
+  customText?: string;
+}
+
+interface PluginManagedConversationInputIntent {
+  requestId: string;
+  idempotencyKey: string;
+  occurrenceKey: string;
+  origin: "human";
+  payload: string;
+}
+
+interface PluginHostV2ManagedAgentInputReceipt {
+  hostInputId: string;
+  occurrenceKey: string;
+  sequence: number;
+  origin: "human" | "automation" | "periodic" | "interaction";
+  payload: string;
+  conversationRevision: number;
+  state: "accepted" | "running" | "completed" | "failed" | "cancelled" | "uncertain";
+  executionId: string;
+}
+
+interface PluginManagedConversationController {
+  getStatus(): Promise<PluginManagedConversationSnapshot>;
+  listInputs(input: { sequenceCursor: number; limit: number }): Promise<{
+    inputs: readonly PluginHostV2ManagedAgentInputReceipt[];
+    nextSequenceCursor: number;
+    hasMore: boolean;
+  }>;
+  enqueue(input: PluginManagedConversationInputIntent & { expectedConversationRevision: number }): Promise<{ receipt: PluginHostV2ManagedAgentInputReceipt }>;
+  cancelInput(input: {
+    requestId: string;
+    idempotencyKey: string;
+    expectedConversationRevision: number;
+    hostInputId: string;
+    expectedExecutionId?: string;
+  }): Promise<{ receipt: PluginHostV2ManagedAgentInputReceipt }>;
+  setPaused(input: { requestId: string; idempotencyKey: string; expectedConversationRevision: number; paused: boolean }): Promise<PluginManagedConversationSnapshot>;
+  recover(input: {
+    requestId: string;
+    idempotencyKey: string;
+    expectedConversationRevision: number;
+    expectedSessionResourceVersion: string;
+    expectedExecutionId: string;
+  }): Promise<PluginManagedConversationSnapshot>;
+  respondToPermission(input: {
+    requestId: string; interactionId: string; expectedResourceVersion: string;
+    optionId?: string; cancelled?: boolean; humanResponseReceiptId: string;
+  }): Promise<void>;
+  answerClarification(input: {
+    requestId: string; interactionId: string; expectedResourceVersion: string;
+    answers: readonly PluginManagedConversationClarificationAnswer[]; humanResponseReceiptId: string;
+  }): Promise<void>;
+}
+
+interface PluginManagedConversationInteraction {
+  id: string;
+  kind: "permission" | "clarification";
+  title: string;
+  context?: string;
+  expectedResourceVersion: string;
+  options?: readonly PluginManagedConversationOption[];
+  questions?: readonly PluginManagedConversationQuestion[];
+  agentDisconnected?: boolean;
+}
+
+interface PluginWorkspaceAgentChatProps {
+  conversation: PluginManagedConversationSnapshot;
+  controller: PluginManagedConversationController;
+  instances?: readonly { key: string; label: string }[];
+  onSelectInstance?(instanceKey: string): void;
+  tasksPanel?: React.ReactNode;
+  outcomesPanel?: React.ReactNode;
+  onStatus?(status: PluginManagedConversationSnapshot): void;
+}
+
+interface PluginHumanInteractionResponseInput {
+  workspaceId: string;
+  interactionId: string;
+  expectedResourceVersion: string;
+  response:
+    | { kind: "permission"; optionId: string; cancelled?: false }
+    | { kind: "permission"; optionId?: never; cancelled: true }
+    | { kind: "clarification"; answers: readonly PluginManagedConversationClarificationAnswer[] };
+}
+
+interface PluginHostInteractionsApi {
+  issueResponseReceipt(input: PluginHumanInteractionResponseInput): Promise<{
+    id: string;
+    interactionId: string;
+    resourceVersion: string;
+    expiresAt: string;
+  }>;
+}
+
+interface PluginUIApi {
+  WorkspaceAgentChat: React.ComponentType<PluginWorkspaceAgentChatProps>;
+  WorkspaceTaskStatus: React.ComponentType<{ taskId: string }>;
+  WorkspaceTaskUsage: React.ComponentType<{ taskId: string; sessionId?: string | null }>;
 }
 
 // Configuration for the kandev-style title bar the host renders above a plugin
@@ -793,6 +1260,11 @@ interface PluginRegistry {
   // "new-session-input-actions" render composer actions for task/Quick Chat,
   // task creation, and new-session creation. Each forwards the typed
   // `PluginComposerSlotProps`, including native insert/focus/submit capabilities.
+  // Only create-mode "task-create-input-actions" receives
+  // `registerTaskCreatedHandler`; it is absent from edit and new-session slots.
+  // These composer slots, both topbars, sidebar workspace actions, and both
+  // status-bar slots support host.ui.Action and ActionGroup. Existing raw
+  // components remain valid and retain their current appearance.
   // "chat-submit-decoration" renders *over* the chat composer's send button
   // rather than beside it — for adornments that belong on the send affordance
   // itself (a progress ring, a state dot), which a sibling slot cannot draw.
@@ -814,19 +1286,33 @@ interface PluginRegistry {
   // mid-turn with an empty composer the button is replaced by Cancel, and the
   // decoration goes with it.
   // "chat-top-bar" renders status in the session top bar (beside the
-  // document/editor/debug controls) and forwards
-  // `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }`. Both
-  // carry the active session plus every kandev session id on the task.
+  // document/editor/debug controls on desktop) and forwards
+  // `ChatTopBarSlotProps`: `{ taskId, taskTitle, workspaceId,
+  // activeSessionId, sessionIds, presentation }`. On a phone, presentation is
+  // "mobile" and contributions live inside the shared Plugins menu section.
+  // When task controls are present, a plugin's chat-top-bar registrations
+  // replace its main-top-bar registrations in that menu. Every registration
+  // in the selected slot renders; sidebar workspace actions stay independent.
+  // Null-rendering task controls retain the workspace fallback until content
+  // appears; the fallback returns if the task content disappears.
+  // The host gives `host.ui.Button` controls a 44px touch target. `Action`
+  // selects the host-owned surface geometry. Arbitrary
+  // plugin interaction does not dismiss the menu. Both presentations carry
+  // the active session plus every kandev session id on the task.
   // "main-top-bar" renders status/actions in the default app top bar on the
   // Home / Kanban / Tasks views (beside the CPU/DB metrics and the view/display
   // controls) and forwards `{ workspaceId, workspaceLabel, currentPage,
   // presentation }`, where presentation is "desktop" or "mobile". On a phone,
-  // contributions join the horizontally scrollable middle action strip between
-  // the fixed Kandev link and menu button. Documented host ui.Button icon
-  // contributions are normalized to a 32px box with a 16px SVG icon on phones;
-  // desktop contribution sizing is unchanged. It is the app-wide,
+  // listing contributions live inside the topbar menu with 44px touch targets
+  // and 16px SVG icons. Slots own their controls and disclosure state; the host
+  // does not dismiss the menu on arbitrary plugin interactions. Desktop
+  // contribution sizing is unchanged. It is the app-wide,
   // task-agnostic counterpart to "chat-top-bar", so it carries no task/session
-  // ids.
+  // ids. `Action` provides native 28px desktop geometry and touch-sized phone
+  // presentation; legacy component controls keep their prior sizing.
+  // Phone listings and archived tasks retain main-top-bar controls. On other
+  // task pages, workspace-only plugins remain alongside the selected task
+  // toolbars in one group without Workspace/Task subheadings.
   // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
   // Terminal and Quick Chat actions in the desktop sidebar's New Task row and
   // in the shared phone navigation sheet. It forwards
@@ -843,9 +1329,11 @@ interface PluginRegistry {
   // registered by the plugin currently being viewed, so your card appears on
   // your own settings page and never on another plugin's — no per-id gating
   // needed in your component.
-  registerComponent(
+  // `Props` can provide an imported SDK slot contract such as
+  // `PluginComposerSlotProps` instead of narrowing `slotProps` from `unknown`.
+  registerComponent<Props = { slotProps?: unknown }>(
     slot: string,
-    Component: React.ComponentType<{ slotProps?: unknown }>,
+    Component: React.ComponentType<Props>,
   ): void;
 
   // WS action handler. Bridged into the existing lib/ws dispatch; called with the
@@ -899,8 +1387,9 @@ interface PluginRegistry {
   registerTaskPanel(registration: TaskPanelRegistration): void;
 
   // Contributes an item to the kanban card's Edit submenu (group "edit") or
-  // a flat, top-level card menu item between "Move to"/"Send to workflow"
-  // and "Link" (group "primary"). See "Kanban card contributions" below.
+  // a flat, top-level card menu item after "Move to"/"Send to workflow"
+  // and before "Archive"/"Delete" (group "primary"), optionally as a
+  // submenu of plugin-provided children (`items`). See "Kanban card contributions" below.
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
 
   // Contributes a client-side filter section to the kanban board's display
@@ -1130,6 +1619,17 @@ interface PluginReviewPanelProps {
 
 type PluginPresentation = "desktop" | "mobile";
 
+interface PluginTaskCreatedIdentity {
+  readonly id: string;
+  readonly workspace_id: string;
+}
+type PluginTaskCreatedHandler = (
+  task: PluginTaskCreatedIdentity,
+) => void | Promise<void>;
+type RegisterPluginTaskCreatedHandler = (
+  handler: PluginTaskCreatedHandler,
+) => () => void;
+
 type PluginComposerSurface =
   | "task-chat"
   | "quick-chat"
@@ -1154,21 +1654,41 @@ interface PluginComposerSlotProps {
   submittable: boolean;
   disabledReason?: string;
   composer: PluginComposerCapability;
+  /**
+   * Create-mode task-create-input-actions only. Registrations belong to one
+   * open cycle and receive a frozen task identity after successful creation.
+   * Cleanup unregisters the handler; close or replacement revokes that cycle.
+   * Handler errors are logged and do not change or delay task creation.
+   */
+  registerTaskCreatedHandler?: RegisterPluginTaskCreatedHandler;
+}
+type PluginOpenMessageResult = { status: "accepted" | "unavailable" };
+interface PluginTaskPanelConversationCapability {
+  openMessage(messageId: string): PluginOpenMessageResult;
+  /** Host-created API bound to this panel's context and generation. */
+  history: PluginConversationApi;
 }
 
-interface PluginTaskPanelProps {
-  panelId: string; // this registration's panel id, so one Component can back multiple panels
+interface PluginTaskPanelContext {
   taskId: string;
   sessionId: string | null;
+  sessionKind: PluginSessionKind;
   presentation: PluginPresentation;
+}
+
+interface PluginTaskPanelProps extends PluginTaskPanelContext {
+  panelId: string; // this registration's panel id, so one Component can back multiple panels
+  conversation: PluginTaskPanelConversationCapability;
 }
 
 interface TaskPanelRegistration {
   id: string; // plugin-local panel id (unique within the plugin, not globally)
   title: string; // add-panel-menu row label and dockview tab title
+  titleKey?: string;
   icon?: PluginIcon;
   Component: React.ComponentType<PluginTaskPanelProps>; // wrapped in a PluginErrorBoundary
   mobileEnabled?: boolean; // include in the phone's grouped Panels picker. Default: false.
+  visible?(context: PluginTaskPanelContext): boolean;
 }
 
 interface PluginTaskMenuContext {
@@ -1179,15 +1699,39 @@ interface PluginTaskMenuContext {
   presentation: PluginPresentation; // the actual kanban layout: desktop or mobile
 }
 
+interface TaskMenuSubItemRegistration {
+  id: string; // unique within the action; contributes to the entry's React key
+  label: string;
+  icon?: PluginIcon;
+  disabled?: boolean;
+  run(context: PluginTaskMenuContext): void | Promise<void>; // a rejection is caught and logged
+}
+
 interface TaskMenuActionRegistration {
   id: string;
   label: string;
-  icon?: React.ReactNode;
+  icon?: PluginIcon;
   // "edit" nests the item in the card's Edit submenu; "primary" renders it
-  // as a flat, top-level item between the "Move to"/"Send to workflow"
-  // submenus and the "Link" submenu.
+  // as a flat, top-level item after the "Move to"/"Send to workflow"
+  // submenus and before the "Archive"/"Delete" items.
   group: "edit" | "primary";
   visible?(context: PluginTaskMenuContext): boolean; // default: always visible
+  // Declaring this renders the action as a submenu instead of a flat item:
+  // `label` becomes an unselectable trigger and these are its children, in
+  // order. Must be synchronous, and is evaluated on every menu build (see
+  // "Kanban card contributions"). Nesting stops at this one level. A child
+  // needs a non-blank id and label, a callable run, and optional fields of the
+  // shapes above (a boolean or `null` `disabled`, an `icon` that is a name,
+  // component or element; `null` means absent for both) -- ids unique within the
+  // action: children the host cannot read or render are dropped (and reported),
+  // duplicate ids keep their first occurrence, and a result with nothing usable
+  // left falls back to `run`.
+  items?(
+    context: PluginTaskMenuContext,
+  ): readonly TaskMenuSubItemRegistration[];
+  // Flat behavior, and the fallback whenever `items` is absent, yields no
+  // entries, or throws (caught and logged) -- so a host that predates
+  // `items` still renders a working flat item.
   run(context: PluginTaskMenuContext): void | Promise<void>; // a rejection is caught and logged
 }
 
@@ -1253,6 +1797,10 @@ render a compact bar control or touch-usable drawer row for the supplied present
 The host neither inspects nor separately reorders children inside a registration, and
 does not add a nested interactive wrapper.
 
+Use `host.ui.Action` for a standard action inside a status contribution. It fits
+the 24px bar on desktop and tablet; the phone Status drawer uses a touch-sized
+row. Keep the registration and ordering identity unchanged when adopting it.
+
 A full-bleed plugin route (`topbar: false`) opts out of host chrome. It may mount
 the host-provided Status drawer trigger when its own chrome should expose status;
 otherwise status access is intentionally its responsibility.
@@ -1299,11 +1847,43 @@ action calls `run(context)`; a rejected promise is caught and logged to the
 console, and the menu still closes either way (Radix's own close-on-select,
 independent of the async result).
 
-Group `"primary"` renders each visible action as its own flat, top-level menu
-item instead of nesting it under `Edit`. It appears on cards and on the shared
-desktop/mobile task-row menu. Group `"edit"` remains card-only. Visibility
-filtering, registration order, and `run()`/error handling are identical; the
-two groups are independent lists (an action only ever belongs to one).
+Group `"primary"` renders each visible action as its own top-level menu item
+instead of nesting it under `Edit`. It appears after the movement items
+and before the Archive/Delete items on cards and on the shared desktop/mobile
+task-row menu. Group `"edit"` remains card-only. Visibility filtering,
+registration order, and `run()`/error handling are identical; the two groups
+are independent lists (an action only ever belongs to one).
+
+An action from either group that declares `items(context)` renders as a
+submenu instead of a flat item: `label` is the trigger (there is nothing to
+run on the trigger itself), and the returned items are its children in order,
+each invoked with the same `PluginTaskMenuContext` as the action. `items()` is
+called synchronously while the host builds that card's or row's menu entries —
+on every render, with a card's dropdown and context variants sharing one
+evaluation, whether or not a menu is open — so it must read cached state rather
+than fetch, and anything expensive behind it should be memoized on the state it
+reads. A child's `disabled` (or the
+action's own host-level disabled state, e.g. while a row-local move is
+running) still renders the entry, unlike `visible()`, which filters.
+
+`run` is not a second action for a submenu: it stays the flat behavior for a
+host that predates `items` — such a host ignores the unknown field and renders
+the item it has always rendered — and the fallback whenever `items` yields no
+usable children. That boundary is deliberately runtime-defensive, because a
+bundle is plain JavaScript and these types are not enforced at run time: an
+empty list, a throw, a promise (the contract is synchronous, and its rejection
+is observed so it cannot escape as an unhandled rejection), a non-array, and an
+array whose entries lack a non-blank `id` or `label`, a callable `run`, a
+boolean `disabled` or a recognizable `icon` (a name, component, element or
+`null`) all fall back to the flat item instead of crashing the render or
+producing a trigger nothing can open. Children are read once, inside the same guard, so a
+throwing getter or a Proxy fails that child rather than the card's render;
+unusable children are dropped when others remain, duplicate ids keep their
+first occurrence, and each defect is logged once per action and kind rather
+than on every menu build. An action can therefore ship both: a
+quick child list on a host that supports it, and its existing flat behavior
+elsewhere. Submenu nesting stops at this one level; a `run` rejection is
+caught and logged, and the menu closes either way.
 
 `"task-card-indicators"` (documented above with the other slots) is the
 matching read-only surface: a small icon/badge rendered beside the PR status
@@ -1429,6 +2009,31 @@ defaults, or the bare component when the route opted out (`topbar: false`).
   `user.settings.updated`).
 
 ## Security posture (documented, enforced where cheap)
+
+Backend exact commands use the optional Go `pluginsdk.ExactHost` extension. The
+frontend `PluginHostApi` does not expose privileged Host gRPC calls. The
+`PluginHostV2*` TypeScript interfaces are data contracts for a plugin's own
+backend-to-UI projection; they do not confer authority. See the
+[gRPC Host v2 contract](GRPC-CONTRACT.md#host-v2-exact-task-update) for exact
+task updates, source-identified creation, labels, human assignment, workflow
+moves, archive, and task completion criteria/evidence. See [task completion gates](GRPC-CONTRACT.md#host-v2-task-completion-gates) and [managed conversation lifetime](GRPC-CONTRACT.md#host-v2-managed-conversation-lifetime)
+for installation-scoped identity, revision checks, workspace approval, and
+retention behavior. Go plugins use the exact Host v2 methods for durable managed
+conversation input; the browser API does not expose these privileged calls. See
+[managed conversation inputs](GRPC-CONTRACT.md#host-v2-managed-conversation-inputs)
+for receipt, cancellation, and immediate-dispatch behavior. Go plugins can also
+manage installation-owned schedules with separate automation grants; see
+[managed conversation schedules](GRPC-CONTRACT.md#host-v2-managed-conversation-schedules)
+for schedule ownership, revision, delivery, and portable-binding rules. They can also
+use the optional snapshot-bound [exact workspace observation contract](GRPC-CONTRACT.md#host-v2-exact-workspace-observations)
+to reconcile tasks, sessions, interactions, sanitized messages, relations,
+pending moves, change-request evidence, and usage. These reads do not create a
+privileged browser API; a plugin must project any data its UI needs through its
+own backend. Exact run, stop, recovery, transition cancellation, and provider
+mode commands use the workspace-approved execution extension. Exact permission
+and clarification responses also require a short-lived human response receipt
+from the authenticated native UI; legacy v1 response methods return
+`PermissionDenied`. See [execution controls and human responses](GRPC-CONTRACT.md#host-v2-execution-controls-and-human-responses).
 
 Plugin JS runs in the kandev origin with store access — this is the accepted
 tradeoff of option C. v1 mitigations: only **active, operator-installed** plugins

@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"errors"
+	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -10,16 +11,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 type e2eResetTaskDeleterStub struct {
-	taskID  string
-	options taskservice.DeleteTaskOptions
+	taskID   string
+	options  taskservice.DeleteTaskOptions
+	calls    int
+	errors   []error
+	failure  error
+	onDelete func()
+}
+
+type e2eAttachTaskAuthorizerStub struct {
+	err    error
+	taskID string
+}
+
+func (s *e2eAttachTaskAuthorizerStub) AuthorizeTaskAccess(_ context.Context, taskID string) error {
+	s.taskID = taskID
+	return s.err
 }
 
 func (s *e2eResetTaskDeleterStub) DeleteTaskWithOptions(
@@ -29,7 +49,52 @@ func (s *e2eResetTaskDeleterStub) DeleteTaskWithOptions(
 ) error {
 	s.taskID = taskID
 	s.options = options
-	return nil
+	s.calls++
+	if s.onDelete != nil {
+		s.onDelete()
+	}
+	if s.calls <= len(s.errors) {
+		return s.errors[s.calls-1]
+	}
+	return s.failure
+}
+
+func TestDeleteTaskForE2EResetWaitsForSessionTransfer(t *testing.T) {
+	deleter := &e2eResetTaskDeleterStub{
+		errors: []error{messagequeue.ErrSessionTransferInProgress, messagequeue.ErrSessionTransferInProgress},
+	}
+	if err := deleteTaskForE2EReset(context.Background(), deleter, "task-1"); err != nil {
+		t.Fatalf("deleteTaskForE2EReset: %v", err)
+	}
+	if deleter.calls != 3 {
+		t.Fatalf("delete calls = %d, want 3", deleter.calls)
+	}
+	if !deleter.options.DiscardWorktreeChanges {
+		t.Fatal("settled deletion must still discard disposable worktree changes")
+	}
+}
+
+func TestDeleteTaskForE2EResetPreservesOtherErrors(t *testing.T) {
+	failure := errors.New("deletion unavailable")
+	deleter := &e2eResetTaskDeleterStub{failure: failure}
+	if err := deleteTaskForE2EReset(context.Background(), deleter, "task-1"); !errors.Is(err, failure) {
+		t.Fatalf("delete error = %v, want %v", err, failure)
+	}
+	if deleter.calls != 1 {
+		t.Fatalf("delete calls = %d, want 1", deleter.calls)
+	}
+}
+
+func TestDeleteTaskForE2EResetHonorsCancellationDuringTransfer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	deleter := &e2eResetTaskDeleterStub{failure: messagequeue.ErrSessionTransferInProgress, onDelete: cancel}
+	if err := deleteTaskForE2EReset(ctx, deleter, "task-1"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("delete error = %v, want cancellation", err)
+	}
+	if deleter.calls != 1 {
+		t.Fatalf("delete calls = %d, want 1 before cancellation", deleter.calls)
+	}
 }
 
 func TestDeleteTaskForE2EResetDiscardsWorktreeChanges(t *testing.T) {
@@ -43,6 +108,78 @@ func TestDeleteTaskForE2EResetDiscardsWorktreeChanges(t *testing.T) {
 	}
 	if !deleter.options.DiscardWorktreeChanges {
 		t.Fatal("E2E reset must discard disposable worktree changes")
+	}
+}
+
+func TestOrderE2ETasksForDeletionPlacesChildrenFirst(t *testing.T) {
+	tasks := []*taskmodels.Task{
+		{ID: "root"},
+		{ID: "sibling"},
+		{ID: "child", ParentID: "root"},
+		{ID: "grandchild", ParentID: "child"},
+		{ID: "sibling-child", ParentID: "sibling"},
+	}
+
+	ordered, err := orderE2ETasksForDeletion(tasks)
+	if err != nil {
+		t.Fatalf("orderE2ETasksForDeletion(): %v", err)
+	}
+	if len(ordered) != len(tasks) {
+		t.Fatalf("ordered task count = %d, want %d", len(ordered), len(tasks))
+	}
+
+	positions := make(map[string]int, len(ordered))
+	for index, task := range ordered {
+		positions[task.ID] = index
+	}
+	for _, task := range tasks {
+		if task.ParentID == "" {
+			continue
+		}
+		parentPosition, parentInList := positions[task.ParentID]
+		if parentInList && positions[task.ID] >= parentPosition {
+			t.Errorf(
+				"task %q at %d must precede parent %q at %d",
+				task.ID,
+				positions[task.ID],
+				task.ParentID,
+				parentPosition,
+			)
+		}
+	}
+}
+
+func TestOrderE2ETasksForDeletionRejectsParentCycles(t *testing.T) {
+	tasks := []*taskmodels.Task{
+		{ID: "first", ParentID: "second"},
+		{ID: "second", ParentID: "first"},
+	}
+
+	if _, err := orderE2ETasksForDeletion(tasks); err == nil {
+		t.Fatal("orderE2ETasksForDeletion() error = nil, want a hierarchy cycle error")
+	}
+}
+
+func TestE2EAttachGitHubContributionRejectsUnauthorizedTask(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	authorizer := &e2eAttachTaskAuthorizerStub{err: errors.New("task is not visible")}
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	context.Params = gin.Params{{Key: "id", Value: "other-task"}}
+	context.Request = httptest.NewRequest(
+		"POST",
+		"/api/v1/e2e/tasks/other-task/remote-contribution",
+		strings.NewReader(`{"pr_url":"https://github.com/testorg/testrepo/pull/1"}`),
+	)
+	context.Request.Header.Set("Content-Type", "application/json")
+
+	handleE2EAttachGitHubContribution(nil, authorizer, nil, nil)(context)
+
+	if response.Code != 404 {
+		t.Fatalf("status = %d, want 404", response.Code)
+	}
+	if authorizer.taskID != "other-task" {
+		t.Fatalf("authorized task ID = %q, want other-task", authorizer.taskID)
 	}
 }
 
@@ -92,6 +229,69 @@ func TestE2EResetDeletesWorkspaceGitHubAuthentication(t *testing.T) {
 	}
 	if ws1Secrets != 0 || ws2Secrets != 1 {
 		t.Fatalf("secret counts = ws-1:%d ws-2:%d, want 0 and 1", ws1Secrets, ws2Secrets)
+	}
+}
+
+func TestDeleteCoordinatorStateForReset_NilServiceIsNoop(t *testing.T) {
+	if err := deleteCoordinatorStateForReset(context.Background(), nil, "ws-1"); err != nil {
+		t.Fatalf("deleteCoordinatorStateForReset(nil service) = %v, want nil", err)
+	}
+}
+
+func TestDeleteCoordinatorStateForReset_DeletesOnlyTargetWorkspace(t *testing.T) {
+	raw, err := db.OpenSQLite(filepath.Join(t.TempDir(), "e2e-reset-coordinator.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	database := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = database.Close() })
+
+	store, err := coordinator.NewStore(database, database)
+	if err != nil {
+		t.Fatalf("new coordinator store: %v", err)
+	}
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	svc := coordinator.NewService(store, nil, nil, log)
+
+	seedCoordinatorWorkspaceRows(t, database, "ws-1")
+	seedCoordinatorWorkspaceRows(t, database, "ws-2")
+
+	if err := deleteCoordinatorStateForReset(context.Background(), svc, "ws-1"); err != nil {
+		t.Fatalf("deleteCoordinatorStateForReset: %v", err)
+	}
+
+	for _, table := range []string{"coordinators", "coordinator_proposals", "coordinator_stalls"} {
+		assertWorkspaceRows(t, database, table, "ws-1", 0)
+		assertWorkspaceRows(t, database, table, "ws-2", 1)
+	}
+}
+
+func seedCoordinatorWorkspaceRows(t *testing.T, database *sqlx.DB, workspaceID string) {
+	t.Helper()
+	coordinatorID := "coordinator-" + workspaceID
+	if _, err := database.Exec(
+		`INSERT INTO coordinators (id, workspace_id, name, agent_profile_id, executor_profile_id, context, created_at, updated_at)
+		 VALUES (?, ?, 'Planner', 'agent-1', 'executor-1', '', datetime('now'), datetime('now'))`,
+		coordinatorID, workspaceID,
+	); err != nil {
+		t.Fatalf("seed coordinators: %v", err)
+	}
+	if _, err := database.Exec(
+		`INSERT INTO coordinator_proposals (id, coordinator_id, workspace_id, status, spec_json, created_at, updated_at)
+		 VALUES (?, ?, ?, 'open', '{}', datetime('now'), datetime('now'))`,
+		"proposal-"+workspaceID, coordinatorID, workspaceID,
+	); err != nil {
+		t.Fatalf("seed coordinator_proposals: %v", err)
+	}
+	if _, err := database.Exec(
+		`INSERT INTO coordinator_stalls (task_id, workspace_id, stalled_for_ms, last_event_at, detected_at)
+		 VALUES (?, ?, 1000, datetime('now'), datetime('now'))`,
+		"task-"+workspaceID, workspaceID,
+	); err != nil {
+		t.Fatalf("seed coordinator_stalls: %v", err)
 	}
 }
 
@@ -249,5 +449,49 @@ func assertWorkspaceRows(t *testing.T, database *sqlx.DB, table, workspaceID str
 	}
 	if got != want {
 		t.Fatalf("%s rows for %s = %d, want %d", table, workspaceID, got, want)
+	}
+}
+
+func TestE2EResetDeletionOrdersChildrenBeforeParents(t *testing.T) {
+	tasks := []*taskmodels.Task{
+		{ID: "root"}, {ID: "other"}, {ID: "child", ParentID: "root"},
+		{ID: "grandchild", ParentID: "child"}, {ID: "sibling", ParentID: "root"},
+		{ID: "external-child", ParentID: "outside-workspace"},
+	}
+	for _, reverse := range []bool{false, true} {
+		input := append([]*taskmodels.Task(nil), tasks...)
+		if reverse {
+			for i, j := 0, len(input)-1; i < j; i, j = i+1, j-1 {
+				input[i], input[j] = input[j], input[i]
+			}
+		}
+		ordered, err := orderE2ETasksForDeletion(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		positions := make(map[string]int)
+		for i, task := range ordered {
+			if _, duplicate := positions[task.ID]; duplicate {
+				t.Fatalf("duplicate deletion of %s", task.ID)
+			}
+			positions[task.ID] = i
+		}
+		if len(positions) != len(tasks) {
+			t.Fatalf("deletion count = %d, want %d", len(positions), len(tasks))
+		}
+		for _, task := range tasks {
+			if parentIndex, exists := positions[task.ParentID]; exists && positions[task.ID] >= parentIndex {
+				t.Fatalf("parent %s would be deleted before child %s", task.ParentID, task.ID)
+			}
+		}
+	}
+}
+
+func TestE2EResetDeletionRejectsHierarchyCycleBeforeDeleting(t *testing.T) {
+	ordered, err := orderE2ETasksForDeletion([]*taskmodels.Task{
+		{ID: "a", ParentID: "b"}, {ID: "b", ParentID: "a"},
+	})
+	if err == nil || len(ordered) != 0 {
+		t.Fatalf("cyclic deletion plan = %v, %v; want no deletions and an error", ordered, err)
 	}
 }

@@ -28,26 +28,34 @@ func (m *Manager) ResolveAgentProfile(ctx context.Context, profileID string) (*A
 // getAgentConfigForExecution retrieves the agent configuration for an execution.
 // The execution must have AgentCommand set (which includes the agent type).
 func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (agents.Agent, error) {
+	agentConfig, _, err := m.getAgentConfigAndProfileForExecution(context.Background(), execution)
+	return agentConfig, err
+}
+
+func (m *Manager) getAgentConfigAndProfileForExecution(ctx context.Context, execution *AgentExecution) (agents.Agent, *AgentProfileInfo, error) {
 	if execution.AgentProfileID == "" {
-		return nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
+		return nil, nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
 	}
 
 	if m.profileResolver == nil {
-		return nil, fmt.Errorf("profile resolver not configured")
+		return nil, nil, fmt.Errorf("profile resolver not configured")
 	}
 
-	profileInfo, err := m.profileResolver.ResolveProfile(context.Background(), execution.AgentProfileID)
+	profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve profile: %w", err)
+		return nil, nil, fmt.Errorf("failed to resolve profile: %w", err)
+	}
+	if profileInfo == nil {
+		return nil, nil, errors.New("failed to resolve profile: empty profile")
 	}
 
 	agentTypeName := profileInfo.AgentName
 	agentConfig, ok := m.registry.Get(agentTypeName)
 	if !ok {
-		return nil, fmt.Errorf("agent type not found: %s", agentTypeName)
+		return nil, nil, fmt.Errorf("agent type not found: %s", agentTypeName)
 	}
 
-	return agentConfig, nil
+	return agentConfig, profileInfo, nil
 }
 
 // resolveMcpServers centralizes MCP resolution for a session:
@@ -171,9 +179,10 @@ func (m *Manager) resolveProfileSessionConfigAndPolicy(ctx context.Context, prof
 		return "", "", nil, StartModelPolicy{}
 	}
 	return info.Model, info.Mode, info.ConfigOptions, StartModelPolicy{
-		Model:         info.Model,
-		FallbackModel: info.FallbackModel,
-		AutoFallback:  info.AutoFallback,
+		Model:             info.Model,
+		FallbackModel:     info.FallbackModel,
+		AutoFallback:      info.AutoFallback,
+		RequireExactModel: info.RequireExactModel,
 	}
 }
 
@@ -190,9 +199,10 @@ func (m *Manager) resolveStartModelPolicy(ctx context.Context, profileID string)
 		return StartModelPolicy{}
 	}
 	return StartModelPolicy{
-		Model:         info.Model,
-		FallbackModel: info.FallbackModel,
-		AutoFallback:  info.AutoFallback,
+		Model:             info.Model,
+		FallbackModel:     info.FallbackModel,
+		AutoFallback:      info.AutoFallback,
+		RequireExactModel: info.RequireExactModel,
 	}
 }
 
@@ -208,13 +218,17 @@ func (m *Manager) resolveStartModelPolicy(ctx context.Context, profileID string)
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
 	profileModel, profileMode, profileConfigOptions, policy := m.resolveProfileSessionConfigAndPolicy(ctx, execution.AgentProfileID)
 	runtimeModel, runtimeMode, runtimeConfigOptions := m.sessionRuntimeOverrides(ctx, execution)
+	startupGeneration := execution.startupAttemptSnapshot()
+	markBootReady := func(executionID string) error {
+		return m.markBootReadyForStartup(context.Background(), executionID, startupGeneration)
+	}
 	// The effective runtime model (user-selected, persisted session state)
 	// takes precedence over the profile's start model for the session; the
 	// policy still carries the profile's fallback settings so a gone
 	// effective model is handled the same way (InitializeAndPromptWithLayers
 	// resolves the effective model and applies the policy).
 	return m.sessionManager.InitializeAndPromptWithLayers(
-		ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady,
+		ctx, execution, agentConfig, taskDescription, attachments, mcpServers, markBootReady,
 		profileModel, profileMode, profileConfigOptions,
 		runtimeModel, runtimeMode, runtimeConfigOptions,
 		policy,
@@ -277,11 +291,39 @@ func (m *Manager) effectiveSessionRuntimeConfigWithPresence(
 // reverting to the profile default. Falls back to profileMode when no provider
 // is wired, the lookup fails, or no session mode is set. See issue #1183.
 func (m *Manager) effectiveSessionMode(ctx context.Context, execution *AgentExecution, profileMode string) string {
+	mode, _ := m.effectiveSessionModeWithSource(ctx, execution, profileMode)
+	return mode
+}
+
+// ModeSource names which layer supplied the effective session mode.
+type ModeSource string
+
+const (
+	// ModeSourceAgentProfile means the mode came from the agent profile.
+	ModeSourceAgentProfile ModeSource = "agent_profile"
+	// ModeSourceSessionOverride means a persisted session_mode won. It is
+	// written both by the user's mode toggle and by a set_session_mode
+	// workflow action, so a profile mode losing here is expected, not a bug —
+	// but it has to be visible.
+	ModeSourceSessionOverride ModeSource = "session_override"
+	// ModeSourceNone means no layer requested a mode.
+	ModeSourceNone ModeSource = "none"
+)
+
+// effectiveSessionModeWithSource returns the effective mode and the layer that
+// supplied it. Without the source, a profile mode that lost to a persisted
+// override is invisible: the session simply runs in a mode nobody can trace.
+func (m *Manager) effectiveSessionModeWithSource(
+	ctx context.Context, execution *AgentExecution, profileMode string,
+) (string, ModeSource) {
 	info := m.sessionWorkspaceInfo(ctx, execution)
-	if info == nil || info.SessionMode == "" {
-		return profileMode
+	if info != nil && info.SessionMode != "" {
+		return info.SessionMode, ModeSourceSessionOverride
 	}
-	return info.SessionMode
+	if profileMode == "" {
+		return "", ModeSourceNone
+	}
+	return profileMode, ModeSourceAgentProfile
 }
 
 func (m *Manager) sessionWorkspaceInfo(ctx context.Context, execution *AgentExecution) *WorkspaceInfo {

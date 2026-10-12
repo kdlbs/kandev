@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-23
-updated: 2026-08-28
+updated: 2026-09-22
 owners:
   - kandev
 ---
@@ -37,7 +37,9 @@ defaults, persistence ownership, accessibility, or responsive interaction behavi
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.11:** A failed draft, create, or save request cannot roll back a later confirmed sidebar write; all sidebar writes share one synchronization journal and restore only the latest confirmed state.
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.12:** The editor and task rows cause no document-level horizontal overflow at supported widths, and the mobile task row remains the primary tap target.
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.13:** Relative time on the right uses localized compact seconds, minutes, hours, days, weeks, or years without direction words or calendar phrases such as **ago** or **yesterday**.
-- **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.14:** Every rendered right-side time uses the same fixed visual width, right alignment, and tabular numbers. A missing or invalid timestamp reserves no time width, and assistive technology receives the full localized relative time.
+- **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.14:** Right-side time uses right alignment and tabular numbers. A missing or invalid timestamp reserves no time width, and assistive technology receives the full localized relative time. Column sizing follows criterion 1.15.
+- **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.15:** On desktop fine-pointer rows, the time/action column occupies only the wider of the localized time and the menu button. Long titles use the remaining space after visible badges and normal row spacing. Hover, keyboard focus, and opening or closing the menu do not change the title's available width for an unchanged timestamp. Short titles keep their badges adjacent.
+- **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.16:** Phone rows retain a visible action with a target of at least 44 by 44 CSS pixels. Time and action remain contained without overlap, and tapping the row still navigates to the task.
 
 ## Migrated source detail
 
@@ -95,8 +97,9 @@ belongs to the same view because a review view and a planning view can need diff
   pull request status and does not cover its pointer or keyboard target.
 - Relative time on the right uses a compact elapsed-time ladder: seconds, minutes, hours, days,
   weeks, and years. It does not show direction words or calendar phrases.
-- Every right-side time uses one fixed visual column with right-aligned tabular numbers. The full
-  localized relative phrase remains available to assistive technology.
+- Desktop time columns fit their content with a menu-button minimum and right-aligned tabular numbers.
+  Their width stays stable during hover, focus, and menu use for an unchanged timestamp.
+  Different time values can use different widths. The full localized phrase remains available to assistive technology.
 
 ## Editor behavior
 
@@ -181,7 +184,7 @@ portable user settings.
   request, **THEN** the provider status uses the idle far-right edge without a blank menu gap. The
   menu appears beside it on row hover or keyboard focus.
 - **GIVEN** relative time is selected for the right side, **WHEN** rows contain timestamps from
-  seconds through years ago, **THEN** each row uses the same short time column and shows only a
+  seconds through years ago, **THEN** each row uses a content-sized desktop time column and shows only a
   localized number and unit.
 - **GIVEN** a view is grouped by repository, **WHEN** repository is enabled in its details, **THEN**
   the task rows omit the repeated repository while the saved field remains enabled.
@@ -206,3 +209,5 @@ portable user settings.
 [Sidebar task row presentation plan](../../../plans/sidebar-task-row-presentation/plan.md)
 
 [Compact sidebar trailing content plan](../../../plans/sidebar-task-row-compact-trailing/plan.md)
+
+[Sidebar title width plan](../../../plans/sidebar-title-width/plan.md) supersedes the earlier fixed-width time-column delivery contract.

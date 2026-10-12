@@ -95,7 +95,10 @@ test.describe("Mobile code walkthrough", () => {
   }) => {
     await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-setup", "changes ready");
 
-    await testPage.getByRole("button", { name: "Changes" }).click();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .click();
     const changes = testPage.getByTestId("mobile-changes-panel");
     await expect(changes).toBeVisible({ timeout: 15_000 });
     const request = changes.getByTestId("changes-request-walkthrough");
@@ -120,7 +123,7 @@ test.describe("Mobile code walkthrough", () => {
     });
     await request.click();
 
-    await testPage.getByRole("button", { name: "Chat" }).click();
+    await testPage.getByRole("button", { name: "Chat", exact: true }).click();
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.activeChat()).toContainText("Walkthrough: Tour of the change", {
@@ -167,8 +170,9 @@ test.describe("Mobile code walkthrough", () => {
     await expect(discardConfirmation).toBeVisible();
     await expect(discardConfirmation).toHaveAttribute("role", "group");
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await expect(testPage.getByRole("dialog")).toHaveAttribute("data-slot", "drawer-content");
     await prCapture.screenshot("mobile-walkthrough-discard-confirmation", {
-      caption: "Mobile walkthrough keeps discard confirmation inside its touch launcher",
+      caption: "Mobile walkthrough discard uses a named bottom sheet with stacked actions",
     });
     const actionBoxes = await Promise.all(
       ["Cancel", "Discard walkthrough"].map((name) =>

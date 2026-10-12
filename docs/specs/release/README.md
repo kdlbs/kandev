@@ -17,35 +17,20 @@ artifact verification across Kandev distributions.
 ## Ownership
 
 This system owns stable and nightly channel semantics, npm, Homebrew, Scoop,
-container, and desktop release publication contracts.
+container, and desktop release publication contracts. It also owns contributor
+notifications tied to published releases. Optional Windows runtime signing is
+defined by its [requirements](requirements/windows-runtime-signing.md) and
+[system design](system-design/windows-runtime-signing.md).
 
 ## Exclusions
 
 - Desktop runtime lifecycle belongs to the [desktop system](../desktop/README.md).
 - Agent runtime update behavior belongs to the [agent system](../agents/README.md).
 
-## Specification map
-
-### Requirements
-
-
-
-- [Homebrew Core Submission](requirements/homebrew-core.md)
-- [npm nightly channel](requirements/npm-nightly-channel.md)
-- [Resilient GHCR release publishing](requirements/release-ghcr-secondary-limit.md)
-- [Stable release PR queue bypass](requirements/release-pr-queue-bypass.md)
-- [Scoop Stable Release Automation](requirements/scoop-release-automation.md)
-
-### System design
-
-
-
-- None.
-
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents above.
+canonical requirement and system-design documents. Use the catalog command to find them.
 
 ## Related systems
 

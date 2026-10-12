@@ -1,8 +1,11 @@
+/* eslint-disable max-lines -- the mobile task switcher owns its complete data and action boundary */
 "use client";
 
+import { reconcileTaskWorkflowCoverage } from "@/lib/state/slices/task-workflow-coverage";
 import { useCallback, useMemo, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { replaceTaskUrl } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
+import { useRouter } from "@/lib/routing/client-router";
 import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import {
@@ -12,13 +15,17 @@ import {
 } from "@/hooks/use-task-actions";
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
-import { useTaskRemoval } from "@/hooks/use-task-removal";
+import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
-import { type Repository, type Task } from "@/lib/types/http";
+import { type Repository, type SidebarTaskPageResponse, type Task } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
-import { mapSnapshotToKanban, sortByUpdatedAtDesc } from "./session-task-switcher-sheet-helpers";
+import {
+  mapSnapshotToKanban,
+  reconcileMobileSnapshot,
+  sortByUpdatedAtDesc,
+} from "./session-task-switcher-sheet-helpers";
 import { toSheetItem, type SheetItemCtx } from "./session-task-switcher-sheet-item";
 import {
   selectTaskFromSheet,
@@ -26,10 +33,15 @@ import {
 } from "./session-task-switcher-sheet-selection";
 import { taskPendingSelectionSnapshot } from "../task-select-helpers";
 import { useTranslation } from "react-i18next";
-import { useArchivedTaskState } from "../task-archived-context";
-import { buildArchivedSidebarItem } from "../task-session-sidebar-archived-item";
-import type { SidebarItemContext } from "../task-session-sidebar-item";
 import type { TaskSwitcherItem } from "../task-switcher";
+import {
+  classifyWorkspaceContextReadError,
+  isCurrentWorkspaceContext,
+  retryAfterMilliseconds,
+} from "@/lib/state/workspace-context";
+import { generateUUID } from "@/lib/utils";
+import type { AggregatedSidebarTasks } from "../task-session-sidebar-aggregate";
+import { applySidebarPageMetadata } from "../sidebar-page-metadata";
 
 function findSheetTask(
   state: ReturnType<ReturnType<typeof useAppStoreApi>["getState"]>,
@@ -44,17 +56,89 @@ function findSheetTask(
   return undefined;
 }
 
+function buildSheetItems(params: {
+  workspaceId: string | null;
+  repositoriesByWorkspace: Record<string, Repository[]>;
+  allTasks: AggregatedSidebarTasks["allTasks"];
+  allSteps: AggregatedSidebarTasks["allSteps"];
+  pageEntries: SidebarTaskPageResponse["entries"] | undefined;
+  workflows: Array<{ id: string; name: string }>;
+  wipQueueByTaskId: NonNullable<ReturnType<typeof useWorkspaceSidebarTasks>["wipQueueByTaskId"]>;
+  acknowledgedAgentErrors: Record<string, string>;
+  dismissedAgentErrors: Record<string, string>;
+  automaticColorSettings: SheetItemCtx["automaticColorSettings"];
+  manualColors: SheetItemCtx["manualColors"];
+  pendingRemovalTaskIds: ReadonlySet<string>;
+  workspaceContextAccessDenied: boolean;
+}): TaskSwitcherItem[] {
+  const {
+    workspaceId,
+    repositoriesByWorkspace,
+    allTasks,
+    allSteps,
+    pageEntries,
+    workflows,
+    wipQueueByTaskId,
+    acknowledgedAgentErrors,
+    dismissedAgentErrors,
+    automaticColorSettings,
+    manualColors,
+    pendingRemovalTaskIds,
+    workspaceContextAccessDenied,
+  } = params;
+  if (workspaceContextAccessDenied) return [];
+  const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
+  const repositoriesById = new Map(
+    Object.values(repositoriesByWorkspace)
+      .flat()
+      .map((repo) => [repo.id, repo]),
+  );
+  const workflowNameById = new Map(workflows.map((workflow) => [workflow.id, workflow.name]));
+  const stepTitleById = new Map(allSteps.map((step) => [step.id, step.title]));
+  const stepColorById = new Map(allSteps.map((step) => [step.id, step.color]));
+  const titleById = new Map(allTasks.map((task) => [task.id, task.title]));
+  applySidebarPageMetadata(pageEntries ?? [], {
+    titleById,
+    workflowNameById,
+    stepTitleById,
+    stepColorById,
+  });
+  const context: SheetItemCtx = {
+    repositoryPathsById: new Map(repositories.map((repo) => [repo.id, repositorySlug(repo)])),
+    workflowNameById,
+    stepTitleById,
+    acknowledgedAgentErrors,
+    dismissedAgentErrors,
+    wipQueueByTaskId,
+    workspaceId: workspaceId ?? undefined,
+    repositoriesById,
+    stepColorById,
+    automaticColorSettings,
+    manualColors,
+    pendingRemovalTaskIds,
+  };
+  return allTasks.map((task) => toSheetItem(task, context));
+}
+
+// eslint-disable-next-line max-lines-per-function -- task projection and recovery status share one memoized view model
 export function useSheetData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const {
     allTasks,
+    pendingRemovalTaskIds,
     allSteps,
     stepsByWorkflowId,
+    page,
+    pageEntries,
     wipQueueByTaskId,
     workflows,
     isLoading: tasksLoading,
     archivedError,
     retryArchivedTasks,
+    workspaceContextError,
+    workspaceContextPending,
+    workspaceContextAccessDenied,
+    retryWorkspaceContext,
   } = useWorkspaceSidebarTasks(workspaceId);
   const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
@@ -62,67 +146,45 @@ export function useSheetData(workspaceId: string | null) {
   const automaticColorSettings = useAppStore(
     (state) => state.userSettings.sidebarTaskColorAutomation,
   );
+  const manualColors = useAppStore((state) => state.userSettings.sidebarTaskColors);
   const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
   const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
-  const archivedState = useArchivedTaskState();
 
   const selectedTaskId = activeTaskId;
 
-  const tasksWithRepositories = useMemo(() => {
-    const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
-    const repositoriesById = new Map(
-      Object.values(repositoriesByWorkspace)
-        .flat()
-        .map((repo: Repository) => [repo.id, repo]),
-    );
-    const ctx: SheetItemCtx = {
-      repositoryPathsById: new Map(
-        repositories.map((repo: Repository) => [repo.id, repositorySlug(repo)]),
-      ),
-      workflowNameById: new Map(workflows.map((w) => [w.id, w.name])),
-      stepTitleById: new Map(allSteps.map((s) => [s.id, s.title])),
+  const tasksWithRepositories = useMemo(
+    () =>
+      buildSheetItems({
+        workspaceId,
+        repositoriesByWorkspace,
+        allTasks,
+        allSteps,
+        pageEntries,
+        workflows,
+        wipQueueByTaskId,
+        acknowledgedAgentErrors,
+        dismissedAgentErrors,
+        automaticColorSettings,
+        manualColors,
+        pendingRemovalTaskIds,
+        workspaceContextAccessDenied,
+      }),
+    [
+      repositoriesByWorkspace,
+      allTasks,
+      pageEntries,
+      allSteps,
+      workflows,
+      workspaceId,
       acknowledgedAgentErrors,
       dismissedAgentErrors,
       wipQueueByTaskId,
-      workspaceId: workspaceId ?? undefined,
-      repositoriesById,
-      stepColorById: new Map(allSteps.map((step) => [step.id, step.color])),
       automaticColorSettings,
-    };
-    const items: TaskSwitcherItem[] = allTasks.map((task) => toSheetItem(task, ctx));
-    if (
-      archivedState.isArchived &&
-      archivedState.archivedTaskId &&
-      !items.some((task) => task.id === archivedState.archivedTaskId)
-    ) {
-      const archivedContext: SidebarItemContext = {
-        repositorySlugById: ctx.repositoryPathsById,
-        titleById: new Map(allTasks.map((task) => [task.id, task.title])),
-        workflowNameById: ctx.workflowNameById,
-        stepTitleById: ctx.stepTitleById,
-        wipQueueByTaskId: ctx.wipQueueByTaskId,
-        acknowledgedAgentErrors: ctx.acknowledgedAgentErrors,
-        dismissedAgentErrors: ctx.dismissedAgentErrors,
-        workspaceId: ctx.workspaceId,
-        repositoriesById: ctx.repositoriesById,
-        stepColorById: ctx.stepColorById,
-        automaticColorSettings: ctx.automaticColorSettings,
-      };
-      items.unshift(buildArchivedSidebarItem(archivedState, archivedContext));
-    }
-    return items;
-  }, [
-    repositoriesByWorkspace,
-    allTasks,
-    allSteps,
-    workflows,
-    workspaceId,
-    acknowledgedAgentErrors,
-    dismissedAgentErrors,
-    wipQueueByTaskId,
-    automaticColorSettings,
-    archivedState,
-  ]);
+      manualColors,
+      pendingRemovalTaskIds,
+      workspaceContextAccessDenied,
+    ],
+  );
 
   const dialogSteps = useMemo(
     () =>
@@ -136,6 +198,7 @@ export function useSheetData(workspaceId: string | null) {
   );
 
   return {
+    allTasks,
     activeTaskId,
     selectedTaskId,
     workspaces,
@@ -145,12 +208,19 @@ export function useSheetData(workspaceId: string | null) {
     tasksLoading,
     archivedError,
     retryArchivedTasks,
+    workspaceContextError,
+    workspaceContextPending,
+    workspaceContextAccessDenied,
+    retryWorkspaceContext,
     tasksWithRepositories,
+    page,
+    pageEntries,
     dialogSteps,
   };
 }
 
 type SheetNavOptions = {
+  navigate: (taskId: string, sessionId?: string) => void;
   workspaceId: string | null;
   store: ReturnType<typeof useAppStoreApi>;
   loadTaskSessionsForTask: (
@@ -162,21 +232,86 @@ type SheetNavOptions = {
   onOpenChange: (open: boolean) => void;
 };
 
+export type WorkspaceTaskSession = {
+  id: string;
+  updated_at?: string | null;
+};
+
+export async function loadWorkspaceTaskSessions(
+  loader: SheetNavOptions["loadTaskSessionsForTask"],
+  taskId: string,
+): Promise<WorkspaceTaskSession[]> {
+  try {
+    return await loader(taskId);
+  } catch {
+    return [];
+  }
+}
+
+// eslint-disable-next-line max-lines-per-function -- workspace switching keeps its generation guard around every async phase
 async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
   const { store, loadTaskSessionsForTask, setActiveSession, setActiveTask, onOpenChange } = opts;
+  store.getState().setActiveWorkspace(newWorkspaceId);
+  const generation = store.getState().workspaceContextGeneration;
+  const requestId = generateUUID();
+  const overviewRead = store.getState().beginTaskOverviewRead?.();
+  store
+    .getState()
+    .setWorkspaceContextRead(
+      "workflows",
+      newWorkspaceId,
+      generation,
+      "pending",
+      undefined,
+      requestId,
+    );
   store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: true } }));
   try {
     const workflowsResponse = await listWorkflows(newWorkspaceId, {
       cache: "no-store",
       includeHidden: true,
     });
+    if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
     const newWorkspaceWorkflows = workflowsResponse.workflows ?? [];
     const firstWorkflow = newWorkspaceWorkflows.find((w) => !w.hidden);
     if (!firstWorkflow) {
+      store
+        .getState()
+        .setWorkspaceContextRead(
+          "workflows",
+          newWorkspaceId,
+          generation,
+          "success",
+          undefined,
+          requestId,
+        );
       store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
       return;
     }
     const snapshot = await fetchWorkflowSnapshot(firstWorkflow.id);
+    if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
+    const kanban = reconcileMobileSnapshot(
+      store.getState(),
+      mapSnapshotToKanban(snapshot, firstWorkflow.id),
+      overviewRead,
+    );
+    if (!kanban) return;
+    const taskWorkflowCoverage = reconcileTaskWorkflowCoverage(
+      store.getState(),
+      workflowsResponse.task_workflow_coverage,
+      overviewRead,
+    );
+    if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
+    store
+      .getState()
+      .setWorkspaceContextRead(
+        "workflows",
+        newWorkspaceId,
+        generation,
+        "success",
+        undefined,
+        requestId,
+      );
     store.setState((state) => ({
       ...state,
       workflows: {
@@ -193,24 +328,50 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
           })),
         ],
         activeId: firstWorkflow.id,
+        taskWorkflowCoverage,
       },
-      kanban: mapSnapshotToKanban(snapshot, firstWorkflow.id),
+      kanban,
+      kanbanMulti: {
+        ...state.kanbanMulti,
+        snapshots: {
+          ...state.kanbanMulti.snapshots,
+          [firstWorkflow.id]: { ...kanban, workflowName: firstWorkflow.name },
+        },
+      },
     }));
-    const mostRecentTask = sortByUpdatedAtDesc(snapshot.tasks)[0];
+    const mostRecentTask = sortByUpdatedAtDesc(
+      kanban.tasks.map((task) => ({ id: task.id, updated_at: task.updatedAt })),
+    )[0];
     if (mostRecentTask) {
-      const sessions = await loadTaskSessionsForTask(mostRecentTask.id);
+      const sessions = await loadWorkspaceTaskSessions(loadTaskSessionsForTask, mostRecentTask.id);
+      if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
       const mostRecentSession = sortByUpdatedAtDesc(sessions)[0];
       if (mostRecentSession) {
         setActiveSession(mostRecentTask.id, mostRecentSession.id);
       } else {
         setActiveTask(mostRecentTask.id);
       }
-      replaceTaskUrl(mostRecentTask.id);
+      opts.navigate(mostRecentTask.id);
     }
     onOpenChange(false);
   } catch (error) {
     console.error("Failed to switch workspace:", error);
-    store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
+    const state = store.getState();
+    if (!isCurrentWorkspaceContext(state, newWorkspaceId, generation)) return;
+    state.setWorkspaceContextRead(
+      "workflows",
+      newWorkspaceId,
+      generation,
+      classifyWorkspaceContextReadError(error),
+      retryAfterMilliseconds(error),
+      requestId,
+    );
+    store.setState((current) => ({
+      ...current,
+      kanban: { ...current.kanban, isLoading: false },
+    }));
+  } finally {
+    if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
   }
 }
 
@@ -328,6 +489,7 @@ function buildKanbanTaskUpsert(
 
 function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
   const {
+    navigate,
     workspaceId,
     store,
     loadTaskSessionsForTask,
@@ -340,6 +502,7 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
     async (newWorkspaceId: string) => {
       if (newWorkspaceId === workspaceId) return;
       await switchWorkspace(newWorkspaceId, {
+        navigate,
         workspaceId,
         store,
         loadTaskSessionsForTask,
@@ -350,11 +513,23 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
     },
     // Spread the individual fields rather than the `opts` object so callers
     // re-passing a fresh literal each render don't defeat memoization.
-    [workspaceId, store, loadTaskSessionsForTask, setActiveSession, setActiveTask, onOpenChange],
+    [
+      workspaceId,
+      store,
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask,
+      onOpenChange,
+      navigate,
+    ],
   );
 
   const handleTaskCreated = useCallback(
-    (task: Task, _mode: "create" | "edit", meta?: { taskSessionId?: string | null }) => {
+    (
+      task: Task,
+      _mode: "create" | "edit",
+      meta?: { taskSessionId?: string | null; autoFocus?: boolean },
+    ) => {
       store.setState((state) => {
         if (state.kanban.workflowId !== task.workflow_id) return state;
         const existing = state.kanban.tasks.find(
@@ -375,14 +550,18 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
           },
         };
       });
+      if (meta?.autoFocus === false) {
+        onOpenChange(false);
+        return;
+      }
       setActiveTask(task.id);
       if (meta?.taskSessionId) {
         setActiveSession(task.id, meta.taskSessionId);
       }
-      replaceTaskUrl(task.id);
+      navigate(task.id);
       onOpenChange(false);
     },
-    [store, setActiveTask, setActiveSession, onOpenChange],
+    [store, setActiveTask, setActiveSession, onOpenChange, navigate],
   );
 
   return { handleWorkspaceChange, handleTaskCreated };
@@ -390,7 +569,7 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
 
 function useSheetDeleteActions(
   store: ReturnType<typeof useAppStoreApi>,
-  removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
+  runTaskRemoval: ReturnType<typeof useTaskRemoval>["runTaskRemoval"],
 ) {
   const { t } = useTranslation();
   const { deleteTaskById } = useTaskActions();
@@ -419,13 +598,12 @@ function useSheetDeleteActions(
       if (!deletingTask || isDeleting) return;
       const taskId = deletingTask.id;
       setIsDeleting(true);
-      // Capture active state before the async API call — the WS "task.deleted"
-      // handler may clear activeTaskId/activeSessionId before removeTaskFromBoard runs.
-      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-        store.getState().tasks;
       try {
-        await deleteTaskById(taskId, opts);
-        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+        await runTaskRemoval(
+          "delete",
+          { taskId, mutate: () => deleteTaskById(taskId, opts) },
+          { cascade: opts?.cascade },
+        );
       } catch (error) {
         console.error("Failed to delete task:", error);
       } finally {
@@ -433,7 +611,7 @@ function useSheetDeleteActions(
         setDeletingTask(null);
       }
     },
-    [deletingTask, isDeleting, deleteTaskById, removeTaskFromBoard, store],
+    [deletingTask, isDeleting, deleteTaskById, runTaskRemoval],
   );
 
   const deletingTaskId = isDeleting ? (deletingTask?.id ?? null) : null;
@@ -452,8 +630,8 @@ function useSheetDeleteActions(
  * Re-parent via drag: runs the same composite nest operation the context menu
  * uses, resolving the workflow from the snapshot keys.
  */
-function useSheetNestTask() {
-  return useNestTaskByDrag();
+function useSheetNestTask(pageTasks: readonly TaskSwitcherItem[]) {
+  return useNestTaskByDrag(pageTasks);
 }
 
 export function useSheetArchiveActions(
@@ -524,16 +702,33 @@ export function useSheetActions(
   workspaceId: string | null,
   onOpenChange: (open: boolean) => void,
   selection: TaskSheetSelectionController,
+  navigate?: (taskId: string, sessionId?: string) => void,
+  pageTasks: readonly TaskSwitcherItem[] = [],
 ) {
+  const router = useRouter();
+  const navigateTask = useCallback(
+    (taskId: string, sessionId?: string) => {
+      if (navigate) {
+        navigate(taskId, sessionId);
+        return;
+      }
+      router.replace(linkToTask(taskId, { sessionId }));
+    },
+    [navigate, router],
+  );
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const store = useAppStoreApi();
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const archiveActions = useSheetArchiveActions(store, archiveAndSwitch);
-  const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
-  const deleteActions = useSheetDeleteActions(store, removeTaskFromBoard);
-  const detachActions = useTaskDetachDialog(store);
-  const handleNestTask = useSheetNestTask();
+  const notifySuccess = useTaskRemovalSuccessNotifier();
+  const { runTaskRemoval, loadTaskSessionsForTask } = useTaskRemoval({
+    store,
+    notifySuccess,
+  });
+  const deleteActions = useSheetDeleteActions(store, runTaskRemoval);
+  const detachActions = useTaskDetachDialog(store, pageTasks);
+  const handleNestTask = useSheetNestTask(pageTasks);
   const handleSelectTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
@@ -553,14 +748,23 @@ export function useSheetActions(
           const selectedTask = findSheetTask(store.getState(), selectedTaskId);
           return selectedTask ? taskPendingSelectionSnapshot(selectedTask) : undefined;
         },
-        navigate: replaceTaskUrl,
+        navigate: navigateTask,
         onOpenChange,
       });
     },
-    [loadTaskSessionsForTask, setActiveSession, setActiveTask, store, onOpenChange, selection],
+    [
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask,
+      store,
+      onOpenChange,
+      selection,
+      navigateTask,
+    ],
   );
 
   const { handleWorkspaceChange, handleTaskCreated } = useWorkspaceAndTaskCreatedActions({
+    navigate: navigateTask,
     workspaceId,
     store,
     loadTaskSessionsForTask,

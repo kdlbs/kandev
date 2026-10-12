@@ -109,7 +109,8 @@ test.describe("mobile: Markdown table wrapping", () => {
     const table = markdown.locator("table");
     const tableWrapper = table.locator("xpath=..");
 
-    await expect(table).toBeVisible();
+    // The expandable header renders before the streamed thinking body.
+    await expect(table).toBeVisible({ timeout: 30_000 });
     await expect(markdown.getByTestId(/^markdown-table-resizer-/)).toHaveCount(0);
     expect(
       await tableWrapper.evaluate((element) => element.scrollWidth > element.clientWidth + 1),

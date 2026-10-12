@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
@@ -130,10 +131,27 @@ func TestAddTaskParticipant_ClaimsUndecidedAutoSeat(t *testing.T) {
 	seedParticipantTask(t, repo, "ap-claim", "step-1")
 	seedAutoSeat(t, repo, "auto-seat-1", "step-1", "ap-claim", "reviewer", "agent-auto")
 	seedParticipantAgent(t, repo, "agent-human")
+	// Distinctive position and creation time: the invariance assertions
+	// below compare real values rather than two column defaults.
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE workflow_step_participants
+		SET position = 3, created_at = '2020-05-05 01:02:03'
+		WHERE id = 'auto-seat-1'
+	`); err != nil {
+		t.Fatalf("set distinctive seat fields: %v", err)
+	}
+	before := readParticipantSeatRow(t, repo, "auto-seat-1")
+	// Guard against a vacuous comparison: if the seed above silently failed,
+	// before and after would both hold column defaults and every invariance
+	// assertion would pass without proving anything.
+	if before.Position != 3 || before.CreatedAt.IsZero() {
+		t.Fatalf("seeded seat = %+v, want position 3 and a non-zero created_at", before)
+	}
 
 	if _, err := repo.AddTaskParticipant(ctx, "ap-claim", "agent-human", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant: %v", err)
 	}
+	after := readParticipantSeatRow(t, repo, "auto-seat-1")
 
 	if n := participantRowCount(t, repo, "ap-claim"); n != 1 {
 		t.Fatalf("rows = %d, want 1 (claimed in place, not duplicated)", n)
@@ -154,6 +172,50 @@ func TestAddTaskParticipant_ClaimsUndecidedAutoSeat(t *testing.T) {
 	if provenance != "manual" {
 		t.Errorf("provenance = %q, want %q after claim", provenance, "manual")
 	}
+
+	// AC-OFFICE-SEAT-ASSURANCE-002.9: the agent profile and provenance are
+	// the only two fields a claim may touch. The seat's identity, its
+	// decision-required flag, its position in the slate and its creation
+	// time are the same row's, unchanged — a claim reassigns a seat, it does
+	// not mint one (AC-OFFICE-SEAT-PROVENANCE-002.2).
+	if after.ID != before.ID {
+		t.Errorf("seat id = %q, want %q (a claim reassigns the seat, not replaces it)", after.ID, before.ID)
+	}
+	if after.DecisionRequired != before.DecisionRequired {
+		t.Errorf("decision_required = %v, want %v (unchanged)", after.DecisionRequired, before.DecisionRequired)
+	}
+	if after.Position != before.Position {
+		t.Errorf("position = %d, want %d (unchanged)", after.Position, before.Position)
+	}
+	if !after.CreatedAt.Equal(before.CreatedAt) {
+		t.Errorf("created_at = %v, want %v (unchanged)", after.CreatedAt, before.CreatedAt)
+	}
+}
+
+// participantSeatRow is the seat as the table stores it. The office-side
+// Participant projection carries neither provenance nor a real creation
+// time, so an invariance assertion has to read the columns. Named distinctly
+// from this package's other seat-row test helper (participant_claim_decision_guard_test.go),
+// which reads a different column set for a different test.
+type participantSeatRow struct {
+	ID               string    `db:"id"`
+	AgentProfileID   string    `db:"agent_profile_id"`
+	Provenance       string    `db:"provenance"`
+	DecisionRequired bool      `db:"decision_required"`
+	Position         int       `db:"position"`
+	CreatedAt        time.Time `db:"created_at"`
+}
+
+func readParticipantSeatRow(t *testing.T, repo *sqlite.Repository, seatID string) participantSeatRow {
+	t.Helper()
+	var row participantSeatRow
+	if err := repo.ReaderDB().Get(&row, `
+		SELECT id, agent_profile_id, provenance, decision_required, position, created_at
+		FROM workflow_step_participants WHERE id = ?
+	`, seatID); err != nil {
+		t.Fatalf("read seat row %s: %v", seatID, err)
+	}
+	return row
 }
 
 // TestAddTaskParticipant_DoesNotClaimADecidedAutoSeat: once the auto-cast
@@ -435,4 +497,17 @@ func participantRowCount(t *testing.T, repo *sqlite.Repository, taskID string) i
 		t.Fatalf("count participants: %v", err)
 	}
 	return n
+}
+
+// seedManualSeat inserts a seat already carrying "manual" provenance — an
+// operator's confirmed choice, which no claim may consume.
+func seedManualSeat(t *testing.T, repo *sqlite.Repository, id, stepID, taskID, role, agentID string) {
+	t.Helper()
+	if _, err := repo.ExecRaw(context.Background(), `
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES (?, ?, ?, ?, ?, 1, 0, 'manual')
+	`, id, stepID, taskID, role, agentID); err != nil {
+		t.Fatalf("seed manual seat: %v", err)
+	}
 }

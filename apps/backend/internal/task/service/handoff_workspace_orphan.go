@@ -2,12 +2,21 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+// errWorkspaceMetadataChangedConcurrently is returned by the delete path's
+// workspace-mode normalization (handoff_cascade.go) when its guarded write
+// loses its CAS. Unlike the marker writers (AC-005.5's no-op success), this
+// write is a precondition for reparenting a child while it is still
+// inherit_parent, so a lost guard is a hard error the caller retries with a
+// fresh read rather than a tolerated outcome.
+var errWorkspaceMetadataChangedConcurrently = errors.New("workspace metadata changed concurrently")
 
 // stampOrphanedWorkspaceMetadata and clearOrphanedWorkspaceMetadata are the
 // single source of truth for the four orphan-marker keys written under a
@@ -25,8 +34,16 @@ const (
 	orphanedReasonParentArchived = "parent_archived"
 )
 
-type taskMetadataKeySetter interface {
-	SetTaskMetadataKey(ctx context.Context, taskID, key string, value interface{}) error
+// taskWorkspaceMetadataCASSetter is the optional compare-and-set capability
+// used to guard every $.workspace write against a concurrent archive,
+// unarchive, reparent, or delete-normalize touching the same sub-map.
+// Production always wires the concrete SQLite repository, which implements
+// this; a wiring that does not skips the write and logs Warn.
+type taskWorkspaceMetadataCASSetter interface {
+	SetTaskWorkspaceMetadataIfUnchanged(
+		ctx context.Context, taskID string,
+		guard models.OrphanWriteGuard, value map[string]interface{},
+	) (bool, error)
 }
 
 func stampOrphanedWorkspaceMetadata(workspace map[string]interface{}, parentID string) {
@@ -106,11 +123,21 @@ func (s *HandoffService) markOrphanedInheritParentChild(
 	}
 
 	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	guard := models.ObservedWorkspaceGuard(workspace)
+	guard.RequireParentArchivedID = archived.ID
+	guard.RequireParentID = archived.ID
+	guard.RequireTaskNotArchived = true
 	stampOrphanedWorkspaceMetadata(workspace, archived.ID)
 
-	if err := s.updateWorkspaceMetadata(ctx, child); err != nil {
+	landed, err := s.updateWorkspaceMetadata(ctx, child, guard)
+	if err != nil {
 		s.logf().Warn("mark orphaned inherit_parent child failed",
 			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID), zap.Error(err))
+		return
+	}
+	if !landed {
+		s.logf().Debug("mark orphaned inherit_parent child lost its guard",
+			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID))
 		return
 	}
 	if s.eventPublisher != nil {
@@ -164,13 +191,21 @@ func (s *HandoffService) clearOrphanedInheritParentChild(ctx context.Context, pa
 	if orphanedParentID, _ := workspace[orphanedParentIDKey].(string); orphanedParentID != parentID {
 		return
 	}
+	guard := models.ObservedWorkspaceGuard(workspace)
+	guard.RequireParentUnarchivedID = parentID
 	if !clearOrphanedWorkspaceMetadata(workspace) {
 		return
 	}
 
-	if err := s.updateWorkspaceMetadata(ctx, child); err != nil {
+	landed, err := s.updateWorkspaceMetadata(ctx, child, guard)
+	if err != nil {
 		s.logf().Warn("clear orphaned inherit_parent child marker failed",
 			zap.String("task_id", child.ID), zap.String("parent_task_id", parentID), zap.Error(err))
+		return
+	}
+	if !landed {
+		s.logf().Debug("clear orphaned inherit_parent child marker lost its guard",
+			zap.String("task_id", child.ID), zap.String("parent_task_id", parentID))
 		return
 	}
 	if s.eventPublisher != nil {
@@ -180,13 +215,21 @@ func (s *HandoffService) clearOrphanedInheritParentChild(ctx context.Context, pa
 		zap.String("task_id", child.ID), zap.String("parent_task_id", parentID))
 }
 
-func (s *HandoffService) updateWorkspaceMetadata(ctx context.Context, task *models.Task) error {
+// updateWorkspaceMetadata writes the whole workspace sub-map guarded by cas,
+// reporting whether the write landed. A wiring without the CAS capability
+// (never true in production, where s.tasks is the concrete SQLite
+// repository) skips the write and logs Warn rather than falling back to an
+// unguarded whole-row UpdateTask, which would silently reopen AC-005.2/.3.
+func (s *HandoffService) updateWorkspaceMetadata(ctx context.Context, task *models.Task, guard models.OrphanWriteGuard) (bool, error) {
 	if task == nil {
-		return nil
+		return false, nil
 	}
 	workspace, _ := task.Metadata["workspace"].(map[string]interface{})
-	if setter, ok := s.tasks.(taskMetadataKeySetter); ok {
-		return setter.SetTaskMetadataKey(ctx, task.ID, "workspace", workspace)
+	setter, ok := s.tasks.(taskWorkspaceMetadataCASSetter)
+	if !ok {
+		s.logf().Warn("task repository does not support guarded workspace metadata writes",
+			zap.String("task_id", task.ID))
+		return false, nil
 	}
-	return s.tasks.UpdateTask(ctx, task)
+	return setter.SetTaskWorkspaceMetadataIfUnchanged(ctx, task.ID, guard, workspace)
 }

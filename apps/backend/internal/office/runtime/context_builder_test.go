@@ -3,10 +3,13 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
+
+var errBoom = errors.New("boom")
 
 func TestContextBuilderBuildsAndPersistsRuntimeSnapshot(t *testing.T) {
 	agents := &recordingAgentReader{
@@ -71,7 +74,12 @@ func (r *recordingAgentReader) ListAgentInstancesByIDs(
 }
 
 type recordingRunSnapshotStore struct {
-	calls []snapshotCall
+	calls    []snapshotCall
+	casCalls []snapshotCall
+	runs     map[string]*models.Run
+	casWins  bool
+	casErr   error
+	getErr   error
 }
 
 type snapshotCall struct {
@@ -79,6 +87,10 @@ type snapshotCall struct {
 	Capabilities  string
 	InputSnapshot string
 	SessionID     string
+	// PrevCapabilities is recorded only on a CAS call — it is the value the
+	// compare-and-swap guarantee rests on, so an assertion on it can tell a
+	// correctly-fed CAS from one seeded with the wrong prior value.
+	PrevCapabilities string
 }
 
 func (s *recordingRunSnapshotStore) UpdateRunRuntimeSnapshot(
@@ -95,4 +107,257 @@ func (s *recordingRunSnapshotStore) UpdateRunRuntimeSnapshot(
 		SessionID:     sessionID,
 	})
 	return nil
+}
+
+type stubSeatResolver struct {
+	held    bool
+	err     error
+	taskID  string
+	agentID string
+}
+
+func (r *stubSeatResolver) HoldsDecisionSeat(_ context.Context, taskID, agentID string) (bool, error) {
+	r.taskID = taskID
+	r.agentID = agentID
+	return r.held, r.err
+}
+
+func buildTestRunContext(t *testing.T, seats DecisionSeatResolver) RunContext {
+	t.Helper()
+	agents := &recordingAgentReader{
+		agent: &models.AgentInstance{ID: "agent-1", WorkspaceID: "ws-1", Role: models.AgentRoleWorker},
+	}
+	builder := ContextBuilder{Agents: agents, Runs: &recordingRunSnapshotStore{}, Seats: seats}
+	run := &models.Run{
+		ID:             "run-1",
+		AgentProfileID: "agent-1",
+		Reason:         "task_assigned",
+		Payload:        `{"task_id":"task-1"}`,
+	}
+	runCtx, err := builder.Build(context.Background(), run)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	return runCtx
+}
+
+func hasAvailableAction(runCtx RunContext, want string) bool {
+	for _, action := range runCtx.AvailableActions {
+		if action == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestContextBuilderGrantsRecordStepDecisionForSeatHolder(t *testing.T) {
+	runCtx := buildTestRunContext(t, &stubSeatResolver{held: true})
+	if !hasAvailableAction(runCtx, AvailableActionRecordStepDecision) {
+		t.Fatal("expected seat holder to be granted record_step_decision")
+	}
+}
+
+func TestContextBuilderDeniesRecordStepDecisionForNonHolder(t *testing.T) {
+	runCtx := buildTestRunContext(t, &stubSeatResolver{held: false})
+	if hasAvailableAction(runCtx, AvailableActionRecordStepDecision) {
+		t.Fatal("expected non-holder to be denied record_step_decision")
+	}
+}
+
+func TestContextBuilderDeniesRecordStepDecisionWhenResolverNil(t *testing.T) {
+	runCtx := buildTestRunContext(t, nil)
+	if hasAvailableAction(runCtx, AvailableActionRecordStepDecision) {
+		t.Fatal("expected nil resolver to deny record_step_decision")
+	}
+}
+
+func TestContextBuilderReturnsResolverError(t *testing.T) {
+	seats := &stubSeatResolver{held: true, err: errBoom}
+	builder := ContextBuilder{
+		Agents: &recordingAgentReader{
+			agent: &models.AgentInstance{ID: "agent-1", WorkspaceID: "ws-1", Role: models.AgentRoleWorker},
+		},
+		Seats: seats,
+	}
+	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"task-1"}`}
+	if _, err := builder.Build(context.Background(), run); !errors.Is(err, errBoom) {
+		t.Fatalf("expected resolver error to abort context build, got %v", err)
+	}
+}
+
+func TestContextBuilderDeniesRecordStepDecisionForTasklessRun(t *testing.T) {
+	agents := &recordingAgentReader{
+		agent: &models.AgentInstance{ID: "agent-1", WorkspaceID: "ws-1", Role: models.AgentRoleWorker},
+	}
+	builder := ContextBuilder{
+		Agents: agents,
+		Runs:   &recordingRunSnapshotStore{},
+		Seats:  &stubSeatResolver{held: true},
+	}
+	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Reason: "heartbeat", Payload: "{}"}
+	runCtx, err := builder.Build(context.Background(), run)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if hasAvailableAction(runCtx, AvailableActionRecordStepDecision) {
+		t.Fatal("expected taskless run to deny record_step_decision")
+	}
+}
+
+func TestContextBuilderPersistsSeatActionAsAdvisoryMetadata(t *testing.T) {
+	store := &recordingRunSnapshotStore{}
+	seats := &stubSeatResolver{held: true}
+	builder := ContextBuilder{
+		Agents: &recordingAgentReader{
+			agent: &models.AgentInstance{
+				ID:          "agent-1",
+				WorkspaceID: "ws-1",
+				Role:        models.AgentRoleWorker,
+			},
+		},
+		Runs:  store,
+		Seats: seats,
+	}
+	run := &models.Run{
+		ID:             "run-1",
+		AgentProfileID: "agent-1",
+		Reason:         "task_review_requested",
+		Payload:        `{"task_id":"task-1"}`,
+	}
+
+	runCtx, err := builder.BuildAndPersist(context.Background(), run)
+	if err != nil {
+		t.Fatalf("BuildAndPersist: %v", err)
+	}
+	if seats.taskID != "task-1" || seats.agentID != "agent-1" {
+		t.Fatalf("seat resolver received task=%q agent=%q", seats.taskID, seats.agentID)
+	}
+
+	rawContext, err := json.Marshal(runCtx)
+	if err != nil {
+		t.Fatalf("marshal run context: %v", err)
+	}
+	var contextSnapshot map[string]any
+	if err := json.Unmarshal(rawContext, &contextSnapshot); err != nil {
+		t.Fatalf("decode run context: %v", err)
+	}
+	actions, ok := contextSnapshot["available_actions"].([]any)
+	if !ok || len(actions) != 1 || actions[0] != "record_step_decision" {
+		t.Fatalf("expected advisory record_step_decision action, got %#v", contextSnapshot["available_actions"])
+	}
+
+	var capabilities map[string]any
+	if err := json.Unmarshal([]byte(store.calls[0].Capabilities), &capabilities); err != nil {
+		t.Fatalf("decode capabilities: %v", err)
+	}
+	if _, ok := capabilities["record_step_decision"]; ok {
+		t.Fatalf("record_step_decision must not be serialized as a runtime capability: %s", store.calls[0].Capabilities)
+	}
+}
+
+// TestContextBuilderLostCASRaceAdoptsWinnerSnapshotVerbatim proves a build
+// that loses the scope CAS race adopts the winner's exact persisted
+// input_snapshot instead of re-marshaling its own RunContext with only the
+// task scope patched in. Before this fix, the loser's own (possibly
+// different, e.g. after a concurrent agent permission change) capabilities
+// and session id would silently overwrite the winner's already-persisted
+// values via a second, unguarded write.
+func TestContextBuilderLostCASRaceAdoptsWinnerSnapshotVerbatim(t *testing.T) {
+	winnerCtx := RunContext{
+		WorkspaceID: "ws-1",
+		AgentID:     "agent-1",
+		RunID:       "run-1",
+		SessionID:   "winner-session",
+		Capabilities: Capabilities{
+			CanCreateTasks:  true,
+			AllowedTaskIDs:  []string{"task-9"},
+			TaskScopeSource: TaskScopeSourceRunnerSet,
+		},
+	}
+	winnerCaps, err := MarshalCapabilities(winnerCtx.Capabilities)
+	if err != nil {
+		t.Fatalf("marshal winner capabilities: %v", err)
+	}
+	winnerInput, err := MarshalRunContext(winnerCtx)
+	if err != nil {
+		t.Fatalf("marshal winner run context: %v", err)
+	}
+
+	store := &recordingRunSnapshotStore{
+		casWins: false,
+		runs: map[string]*models.Run{
+			"run-1": {
+				ID:            "run-1",
+				Capabilities:  winnerCaps,
+				InputSnapshot: winnerInput,
+				SessionID:     winnerCtx.SessionID,
+			},
+		},
+	}
+	builder := ContextBuilder{
+		Agents: &recordingAgentReader{
+			// This build's own agent read disagrees with the winner's
+			// snapshot (CanCreateTasks=false here vs. true above), modeling
+			// a concurrent permission change between the two builds.
+			agent: &models.AgentInstance{ID: "agent-1", WorkspaceID: "ws-1", Role: models.AgentRoleWorker},
+		},
+		Runs: store,
+	}
+	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Reason: "heartbeat", Payload: "{}"}
+
+	runCtx, err := builder.BuildAndPersist(context.Background(), run)
+	if err != nil {
+		t.Fatalf("BuildAndPersist: %v", err)
+	}
+
+	if runCtx.SessionID != winnerCtx.SessionID {
+		t.Fatalf("session id = %q, want winner's %q", runCtx.SessionID, winnerCtx.SessionID)
+	}
+	if !runCtx.Capabilities.CanCreateTasks {
+		t.Fatal("expected winner's CanCreateTasks=true to survive, not this build's own false")
+	}
+	if len(runCtx.Capabilities.AllowedTaskIDs) != 1 || runCtx.Capabilities.AllowedTaskIDs[0] != "task-9" {
+		t.Fatalf("unexpected allowed task ids: %v", runCtx.Capabilities.AllowedTaskIDs)
+	}
+	if len(store.calls) != 0 {
+		t.Fatalf("expected no additional snapshot write after adopting winner's snapshot, got %d", len(store.calls))
+	}
+	if run.Capabilities != winnerCaps || run.InputSnapshot != winnerInput || run.SessionID != winnerCtx.SessionID {
+		t.Fatal("expected run's in-memory fields to mirror the winner's persisted snapshot")
+	}
+}
+
+func (s *recordingRunSnapshotStore) UpdateRunRuntimeSnapshotCAS(
+	_ context.Context,
+	id string,
+	prevCapabilities string,
+	capabilities string,
+	inputSnapshot string,
+	sessionID string,
+) (bool, error) {
+	s.casCalls = append(s.casCalls, snapshotCall{
+		RunID:            id,
+		Capabilities:     capabilities,
+		InputSnapshot:    inputSnapshot,
+		SessionID:        sessionID,
+		PrevCapabilities: prevCapabilities,
+	})
+	if s.casErr != nil {
+		return false, s.casErr
+	}
+	win := s.casWins
+	if win {
+		s.calls = append(s.calls, s.casCalls[len(s.casCalls)-1])
+	}
+	return win, nil
+}
+
+func (s *recordingRunSnapshotStore) GetRunByID(_ context.Context, id string) (*models.Run, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if run, ok := s.runs[id]; ok {
+		return run, nil
+	}
+	return &models.Run{ID: id}, nil
 }

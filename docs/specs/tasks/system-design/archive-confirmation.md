@@ -4,6 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-ARCHIVE-CONFIRMATION-001
 created: 2026-08-24
+updated: 2026-09-10
 owners:
   - kandev
 ---
@@ -26,7 +27,7 @@ programmatic archive callers remain separate contracts.
 
 - The user-settings service reads and writes the preference.
 - Task archive actions ask the settings state whether confirmation is required.
-- The archive dialog remains responsible for cleanup summary and optional
+- The shared archive confirmation remains responsible for cleanup summary and optional
   cascade selection.
 - The task-navigation coordinator selects a surviving task or the task
   overview after a successful archive.
@@ -42,8 +43,10 @@ changes.
 
 ## Control flow
 
-When confirmation is enabled, user archive actions open the existing dialog.
-The dialog may request a cascade archive. When confirmation is disabled, the
+When confirmation is enabled, user archive actions open the confirmation
+surface. The [UI mobile confirmation design](../../ui/system-design/mobile-action-confirmations.md)
+owns phone presentation; this task contract does not prescribe a dialog or
+sheet. The confirmation may request cascade archive. When confirmation is disabled, the
 action archives only the requested task immediately; it never silently adds
 subtasks.
 
@@ -56,8 +59,10 @@ overview is the destination.
 
 The settings client keeps the previous value when persistence fails. Until
 settings load successfully, the client requires confirmation. If an archive
-fails after temporary navigation, the coordinator restores the original task
-and URL. Existing archive-surface error handling remains authoritative.
+fails after temporary navigation, recovery preserves any subsequent user
+navigation and restores only an available original task. The shared [removal
+coordinator](removal-navigation.md) defines the departure gate and
+uncertain-response recovery for local task actions.
 
 ## Persistence and compatibility
 
@@ -78,3 +83,4 @@ preference.
 
 - [Archive Confirmation Preference](../../../plans/archive-confirmation-preference/plan.md)
 - [Cascade Archive Navigation](../../../plans/cascade-archive-navigation/plan.md)
+- [Task removal navigation](../../../plans/task-removal-navigation/plan.md)

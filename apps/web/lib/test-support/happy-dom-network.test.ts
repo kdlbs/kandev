@@ -7,3 +7,9 @@ it("disables external stylesheet loads without dispatching an error", () => {
   expect(settings.disableCSSFileLoading).toBe(true);
   expect(settings.handleDisabledFileLoadingAsSuccess).toBe(true);
 });
+
+it("does not navigate main-frame test fixtures over the network", () => {
+  const settings = (window as unknown as HappyDOMWindow).happyDOM.settings;
+
+  expect(settings.navigation.disableMainFrameNavigation).toBe(true);
+});

@@ -151,6 +151,114 @@ func TestListComments_BrowserCallerUnaffectedByAgentBranch(t *testing.T) {
 	}
 }
 
+// TestListComments_TasklessRunReadsTaskInWorkspace covers
+// AC-OFFICE-AGENT-COMMENT-READS-009.1: a taskless run caller (empty task
+// claim, non-empty run and workspace claims) reads comments on any task in
+// its own workspace, even one it has no caller-task relation to.
+func TestListComments_TasklessRunReadsTaskInWorkspace(t *testing.T) {
+	f := newCommentSecurityFixture(t)
+	agent := seedCommentAgent(t, f.agentsSvc, f.repo, "agent-a", "ws-1")
+	seedCommentTask(t, f.repo, "task-1", "ws-1", "")
+	seedComment(t, f.repo, "c1", "task-1", "user", "user", "hello", "user", time.Unix(1000, 0))
+	seedComment(t, f.repo, "c2", "task-1", "user", "user", "world", "user", time.Unix(2000, 0))
+
+	token, err := f.agentsSvc.MintRuntimeJWT(agent.ID, "", agent.WorkspaceID, "run-1", "sess-1", "")
+	if err != nil {
+		t.Fatalf("mint jwt: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, getCommentsReq("task-1", token, ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var window struct {
+		Total    int `json:"total"`
+		Returned int `json:"returned"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &window); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rec.Body.String())
+	}
+	if window.Total != 2 || window.Returned != 2 {
+		t.Fatalf("window = %+v, want total=2 returned=2", window)
+	}
+}
+
+// TestListComments_TasklessRunDeniedCrossWorkspaceAndMissing covers
+// AC-OFFICE-AGENT-COMMENT-READS-009.2: a foreign-workspace target and a
+// nonexistent target return the identical forbidden response.
+func TestListComments_TasklessRunDeniedCrossWorkspaceAndMissing(t *testing.T) {
+	f := newCommentSecurityFixture(t)
+	agent := seedCommentAgent(t, f.agentsSvc, f.repo, "agent-a", "ws-1")
+	seedCommentTask(t, f.repo, "task-foreign", "ws-2", "")
+
+	token, err := f.agentsSvc.MintRuntimeJWT(agent.ID, "", agent.WorkspaceID, "run-1", "sess-1", "")
+	if err != nil {
+		t.Fatalf("mint jwt: %v", err)
+	}
+
+	recForeign := httptest.NewRecorder()
+	f.router.ServeHTTP(recForeign, getCommentsReq("task-foreign", token, ""))
+	recMissing := httptest.NewRecorder()
+	f.router.ServeHTTP(recMissing, getCommentsReq("does-not-exist", token, ""))
+
+	if recForeign.Code != http.StatusForbidden {
+		t.Fatalf("foreign workspace status = %d, want 403; body=%s", recForeign.Code, recForeign.Body.String())
+	}
+	if recMissing.Code != http.StatusForbidden {
+		t.Fatalf("missing target status = %d, want 403; body=%s", recMissing.Code, recMissing.Body.String())
+	}
+	if recForeign.Body.String() != recMissing.Body.String() {
+		t.Fatalf("bodies differ: foreign=%s missing=%s", recForeign.Body.String(), recMissing.Body.String())
+	}
+}
+
+// TestListComments_TasklessTokenWithoutRunStillDenied covers
+// AC-OFFICE-AGENT-COMMENT-READS-001.13: a token with an empty task claim AND
+// an empty run claim is not a taskless run caller, so it keeps the blanket
+// denial for every target, including a same-workspace one.
+func TestListComments_TasklessTokenWithoutRunStillDenied(t *testing.T) {
+	f := newCommentSecurityFixture(t)
+	agent := seedCommentAgent(t, f.agentsSvc, f.repo, "agent-a", "ws-1")
+	seedCommentTask(t, f.repo, "task-1", "ws-1", "")
+
+	token, err := f.agentsSvc.MintRuntimeJWT(agent.ID, "", agent.WorkspaceID, "", "sess-1", "")
+	if err != nil {
+		t.Fatalf("mint jwt: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, getCommentsReq("task-1", token, ""))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestListComments_TaskBoundRunKeepsRelationGuard covers
+// AC-OFFICE-AGENT-COMMENT-READS-009.4: a task-bound token (non-empty task
+// claim) does not gain the taskless run's workspace-wide reach — an
+// unrelated same-workspace task is still denied.
+func TestListComments_TaskBoundRunKeepsRelationGuard(t *testing.T) {
+	f := newCommentSecurityFixture(t)
+	agent := seedCommentAgent(t, f.agentsSvc, f.repo, "agent-a", "ws-1")
+	seedCommentTask(t, f.repo, "task-1", "ws-1", agent.ID)
+	seedCommentTask(t, f.repo, "task-2", "ws-1", "")
+
+	token, err := f.agentsSvc.MintRuntimeJWT(agent.ID, "task-1", agent.WorkspaceID, "run-1", "sess-1", "")
+	if err != nil {
+		t.Fatalf("mint jwt: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, getCommentsReq("task-2", token, ""))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func seedComment(
 	t *testing.T, repo *sqlite.Repository,
 	id, taskID, authorType, authorID, body, source string, createdAt time.Time,

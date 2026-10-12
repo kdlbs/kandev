@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -103,6 +104,19 @@ func TestVerifyPassthroughEnabledWithoutResolver(t *testing.T) {
 	_, err := mgr.verifyPassthroughEnabled(context.Background(), "session-1", "profile-1")
 
 	require.ErrorContains(t, err, "has no profile configured for passthrough mode")
+}
+
+func TestPassthroughProviderGuardRejectsGatewayProfiles(t *testing.T) {
+	err := validatePassthroughProvider(&AgentProfileInfo{
+		CLIPassthrough: true,
+		ProviderKind:   settingsmodels.ProviderKindOpenAICompatible,
+	})
+
+	require.ErrorContains(t, err, "CLI passthrough cannot use an OpenAI-compatible provider")
+}
+
+func TestPassthroughProviderGuardAllowsNativeProfiles(t *testing.T) {
+	require.NoError(t, validatePassthroughProvider(&AgentProfileInfo{CLIPassthrough: true}))
 }
 
 // TestEnsurePassthroughExecutionChecksAccessBeforeCacheLookup pins that a

@@ -7,6 +7,7 @@ import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export function TaskAutopilotToggle({
   checked,
@@ -23,7 +24,10 @@ export function TaskAutopilotToggle({
   return (
     <div
       className={cn(
-        "inline-flex h-11 w-fit max-w-full items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-0 sm:h-7",
+        controlSizingClassName(
+          "standard",
+          "inline-flex w-fit max-w-full items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-0",
+        ),
         checked ? "border-yellow-500/40 bg-yellow-500/5" : "border-border/60",
       )}
       data-testid="autopilot-toggle-row"
@@ -44,8 +48,8 @@ export function TaskAutopilotToggle({
             <Button
               type="button"
               variant="ghost"
-              size="icon-sm"
-              className="relative size-11 shrink-0 cursor-help text-muted-foreground after:absolute after:-inset-1 hover:text-foreground focus-visible:text-foreground sm:size-7"
+              size="icon"
+              className="relative shrink-0 cursor-help text-muted-foreground after:absolute after:-inset-1 hover:text-foreground focus-visible:text-foreground"
               aria-label={t("task:autopilotInfoLabel")}
               onClick={() => setHelpOpen((current) => !current)}
               data-testid="autopilot-info"

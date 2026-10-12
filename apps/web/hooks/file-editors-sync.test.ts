@@ -53,6 +53,7 @@ function seedOpenFile(state: Partial<FileEditorState> = {}) {
       key,
       {
         path: PATH,
+        instanceId: Symbol(),
         name: "foo.ts",
         content: "v1",
         originalContent: "v1",
@@ -109,6 +110,30 @@ describe("buildGitFileSignature", () => {
   });
 });
 
+it("clears symlink identity when unchanged content becomes a regular file", async () => {
+  vi.clearAllMocks();
+  const updateFileState = vi.fn();
+  seedOpenFile({
+    content: "v1",
+    originalContent: "v1",
+    originalHash: "h:2:v1",
+    resolvedPath: "target",
+  });
+  mockRequestFileContent.mockResolvedValueOnce({ content: "v1", is_binary: false });
+  await syncOpenFileFromWorkspace({
+    isCurrent: () => true,
+    client: FAKE_CLIENT,
+    sessionId: SESSION_ID,
+    fileKey: PATH,
+    path: PATH,
+    updateFileState,
+  });
+  expect(updateFileState).toHaveBeenCalledWith(
+    PATH,
+    expect.objectContaining({ resolvedPath: undefined }),
+  );
+});
+
 describe("syncOpenFileFromWorkspace", () => {
   let updateFileState: ReturnType<
     typeof vi.fn<(path: string, updates: Partial<FileEditorState>) => void>
@@ -131,6 +156,7 @@ describe("syncOpenFileFromWorkspace", () => {
     });
 
     await syncOpenFileFromWorkspace({
+      isCurrent: () => true,
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
       fileKey: PATH,
@@ -168,6 +194,7 @@ describe("syncOpenFileFromWorkspace", () => {
     });
 
     await syncOpenFileFromWorkspace({
+      isCurrent: () => true,
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
       fileKey: PATH,
@@ -186,7 +213,12 @@ describe("syncOpenFileFromWorkspace", () => {
   });
 
   it("is a no-op when remote content matches the editor buffer", async () => {
-    seedOpenFile({ content: "v1", originalContent: "v1", originalHash: "h:2:v1" });
+    seedOpenFile({
+      resolvedPath: PATH,
+      content: "v1",
+      originalContent: "v1",
+      originalHash: "h:2:v1",
+    });
     mockRequestFileContent.mockResolvedValueOnce({
       content: "v1",
       is_binary: false,
@@ -194,6 +226,7 @@ describe("syncOpenFileFromWorkspace", () => {
     });
 
     await syncOpenFileFromWorkspace({
+      isCurrent: () => true,
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
       fileKey: PATH,
@@ -233,6 +266,7 @@ describe("syncOpenFileFromWorkspace repo scoping", () => {
     });
 
     await syncOpenFileFromWorkspace({
+      isCurrent: () => true,
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
       fileKey: key,
@@ -273,6 +307,7 @@ describe("syncOpenFileFromWorkspace repo scoping", () => {
     });
 
     await syncOpenFileFromWorkspace({
+      isCurrent: () => true,
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
       fileKey: key,
@@ -328,11 +363,13 @@ function renderSyncHook(initial: SyncProps) {
     (props: SyncProps) => {
       const activeSessionIdRef = useRef<string | null>(SESSION_ID);
       const gitFileSignaturesRef = useRef<Map<string, string>>(new Map());
+      const activeEditorVisitRef = useRef<symbol | null>(Symbol());
       useOpenFileWorkspaceSync({
         gitStatus: props.gitStatus,
         openFiles: props.openFiles,
         updateFileState: props.updateFileState,
         activeSessionIdRef,
+        activeEditorVisitRef,
         gitFileSignaturesRef,
       });
     },

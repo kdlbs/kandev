@@ -193,6 +193,19 @@ func TestIsRestorableQuickChatTask(t *testing.T) {
 			task: &models.Task{IsEphemeral: true, Origin: models.TaskOriginAutomationRun},
 			want: false,
 		},
+		{
+			name: "coordinator conversation",
+			task: &models.Task{IsEphemeral: true, Origin: models.TaskOriginCoordinator},
+			want: false,
+		},
+		{
+			name: "managed conversation",
+			task: &models.Task{
+				IsEphemeral: true,
+				Metadata:    map[string]interface{}{metaKeyPluginID: "plugin-coordinator"},
+			},
+			want: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

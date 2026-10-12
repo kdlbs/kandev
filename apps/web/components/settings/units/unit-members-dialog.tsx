@@ -15,6 +15,10 @@ import { Combobox } from "@/components/combobox";
 import { useAssignablePeople } from "@/hooks/domains/users/use-assignable-people";
 import { listUnitMembers, type OrgUnit, type UnitMember } from "@/lib/api/domains/org-units-api";
 import { ASSIGNABLE_WORKSPACE_ROLES } from "@/lib/types/team-access";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
 
 type Props = {
   unit: OrgUnit | null;
@@ -103,7 +107,7 @@ export function UnitMembersDialog({ unit, busy, onClose, onAdd, onRemove }: Prop
             placeholder={t("settings:unitPickPerson")}
             searchPlaceholder={t("task:searchPeople")}
             emptyMessage={t("task:noPeopleFound")}
-            triggerClassName="h-8 min-w-48"
+            triggerClassName={settingsControlClassName("min-w-48")}
             testId="unit-member-picker"
           />
           <Combobox
@@ -111,10 +115,14 @@ export function UnitMembersDialog({ unit, busy, onClose, onAdd, onRemove }: Prop
             value={role}
             onValueChange={setRole}
             showSearch={false}
-            triggerClassName="h-8 w-40"
+            triggerClassName={settingsControlClassName("w-40")}
             testId="unit-role-picker"
           />
-          <Button size="sm" disabled={busy || !userId} onClick={() => void add()}>
+          <Button
+            className={settingsActionClassName()}
+            disabled={busy || !userId}
+            onClick={() => void add()}
+          >
             {t("settings:unitAddMember")}
           </Button>
         </div>

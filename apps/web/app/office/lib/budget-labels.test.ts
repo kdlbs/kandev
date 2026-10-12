@@ -17,7 +17,12 @@ describe("budget label maps", () => {
       "notify_only",
       "pause_agent",
     ]);
-    expect(Object.keys(BUDGET_PERIOD_LABEL_KEYS).sort()).toEqual(["monthly", "total"]);
+    expect(Object.keys(BUDGET_PERIOD_LABEL_KEYS).sort()).toEqual([
+      "daily",
+      "monthly",
+      "total",
+      "yearly",
+    ]);
   });
 
   it("resolves every mapped key to real copy", () => {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -212,7 +213,58 @@ func (a *Adapter) sendPrompt(
 		return nil
 	}
 	if err != nil {
-		return normalizePromptErrorAfterCancel(traceCtx, err)
+		// The SDK guarantees that notifications received before this prompt RPC
+		// settles reached enqueueACPUpdate, but our worker processes them
+		// asynchronously. Drain it before returning the error so a diagnostic
+		// agent_message_chunk cannot be overtaken by the terminal failure event.
+		notificationsDrained := a.syncNotifQueue()
+		if a.dialect.continuationError != nil && a.dialect.continuationError(err) {
+			// Recognized interruptions follow queued output regardless of continuation eligibility.
+			snapshot := a.continuationSafetySnapshot(turn)
+			a.cancelAsyncTurnComplete(sessionID)
+			failure := AgentEvent{Type: streams.EventTypeError, SessionID: sessionID,
+				PromptGeneration: promptGeneration, Error: "peer disconnected before response", ContinuationSafety: snapshot,
+			}
+			if snapshot != nil {
+				failure.PromptFailureDisposition = a.promptFailureDisposition(
+					conn, sessionID, turn, promptGeneration, notificationsDrained,
+				)
+			}
+			a.sendUpdate(failure)
+			return nil
+		}
+		normalizedErr := normalizePromptErrorAfterCancel(traceCtx, err)
+		if a.agentID == codexAgentID &&
+			!errors.Is(normalizedErr, errPromptAbandonedAfterCancel) &&
+			isGenericCodexPromptError(err) {
+			if providerError, ok := turn.codexUsageLimitFailure(); ok {
+				return &providerPromptError{ProviderError: *providerError, cause: normalizedErr}
+			}
+		}
+		if providerError, ok := a.retainableACPApplicationError(normalizedErr); ok {
+			if disposition := a.promptFailureDisposition(
+				conn, sessionID, turn, promptGeneration, notificationsDrained,
+			); disposition != "" {
+				var capacityContinuation *streams.CapacityContinuationSnapshot
+				if classified := routingerr.Classify(routingerr.Input{
+					Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: providerError.Message,
+				}); classified.Code == routingerr.CodeModelCapacity {
+					capacityContinuation = a.capacityContinuationSnapshot(turn, notificationsDrained)
+				}
+				a.cancelAsyncTurnComplete(sessionID)
+				a.sendUpdate(AgentEvent{
+					Type:                     streams.EventTypeError,
+					SessionID:                sessionID,
+					PromptGeneration:         promptGeneration,
+					Error:                    providerError.Message,
+					ProviderError:            providerError,
+					CapacityContinuation:     capacityContinuation,
+					PromptFailureDisposition: disposition,
+				})
+				return nil
+			}
+		}
+		return normalizedErr
 	}
 
 	// Drain queued ACP notifications before running the post-prompt sweeps and
@@ -228,10 +280,12 @@ func (a *Adapter) sendPrompt(
 	//   - The complete event emitted to updatesCh outruns the final text chunk,
 	//     so the downstream buffer flush yields empty and the turn persists as
 	//     had_output=false even when the agent did produce text.
-	a.syncNotifQueue()
+	notificationsDrained := a.syncNotifQueue()
 
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).
+	continuationSafety := a.continuationSafetySnapshot(turn)
+	capacityContinuation := a.capacityContinuationSnapshot(turn, notificationsDrained)
 	a.cancelPromptEndToolCalls(sessionID)
 
 	// Mark any tracked Monitors as ended. They live longer than a typical tool
@@ -244,25 +298,29 @@ func (a *Adapter) sendPrompt(
 	// a subagent tool_call this turn.
 	a.sweepCursorTaskMetaOnPromptEnd(sessionID)
 
-	if cursorRetriable, occurredAt := turn.cursorRetriableFailureAt(); cursorRetriable {
-		const safeMessage = cursorRetriableStreamResetMessage
+	if cursorRetriable, safeMessage, occurredAt, identityComplete := turn.cursorRetriableFailureDetails(); cursorRetriable {
 		if occurredAt.IsZero() {
 			occurredAt = time.Now().UTC()
 		}
-		a.logger.Info("cursor prompt ended with retriable stream-reset evidence",
+		a.logger.Info("cursor prompt ended with retriable provider-error evidence",
 			zap.String("session_id", sessionID),
 			zap.Uint64("prompt_generation", promptGeneration))
 		a.cancelAsyncTurnComplete(sessionID)
 		a.sendUpdate(AgentEvent{
-			Type:             streams.EventTypeError,
-			SessionID:        sessionID,
-			PromptGeneration: promptGeneration,
-			Error:            safeMessage,
+			Type:               streams.EventTypeError,
+			SessionID:          sessionID,
+			PromptGeneration:   promptGeneration,
+			Error:              safeMessage,
+			ContinuationSafety: continuationSafety,
+			PromptFailureDisposition: a.promptFailureDisposition(
+				conn, sessionID, turn, promptGeneration, notificationsDrained,
+			),
 			ProviderError: &streams.ProviderError{
-				Source:     streams.ProviderErrorSourceCursorACP,
-				ProviderID: acpcompat.CursorAgentID,
-				Message:    safeMessage,
-				OccurredAt: occurredAt,
+				Source:                     streams.ProviderErrorSourceCursorACP,
+				ProviderID:                 acpcompat.CursorAgentID,
+				Message:                    safeMessage,
+				OccurredAt:                 occurredAt,
+				DiagnosticIdentityComplete: identityComplete,
 			},
 		})
 		return nil
@@ -275,10 +333,14 @@ func (a *Adapter) sendPrompt(
 			zap.Uint64("prompt_generation", promptGeneration))
 		a.cancelAsyncTurnComplete(sessionID)
 		a.sendUpdate(AgentEvent{
-			Type:             streams.EventTypeError,
-			SessionID:        sessionID,
-			PromptGeneration: promptGeneration,
-			Error:            safeMessage,
+			Type:                 streams.EventTypeError,
+			SessionID:            sessionID,
+			PromptGeneration:     promptGeneration,
+			Error:                safeMessage,
+			CapacityContinuation: capacityContinuation,
+			PromptFailureDisposition: a.promptFailureDisposition(
+				conn, sessionID, turn, promptGeneration, notificationsDrained,
+			),
 			ProviderError: &streams.ProviderError{
 				Source:     streams.ProviderErrorSourceCodexACP,
 				ProviderID: codexAgentID,
@@ -368,6 +430,12 @@ func normalizePromptErrorAfterCancel(promptCtx context.Context, err error) error
 		return errPromptAbandonedAfterCancel
 	}
 	return err
+}
+
+func isGenericCodexPromptError(err error) bool {
+	var requestErr *acp.RequestError
+	return errors.As(err, &requestErr) && requestErr != nil &&
+		requestErr.Code == -32603 && requestErr.Message == "Internal error"
 }
 
 func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.MessageAttachment) []acp.ContentBlock {
@@ -585,7 +653,7 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 	}
 
 	turn := a.signalPromptTurnAbort()
-	if err := waitForPromptRPCAfterCancel(turn); err != nil {
+	if err := a.waitForPromptRPCAfterCancel(turn); err != nil {
 		span.RecordError(err)
 		a.logger.Warn("session/cancel sent but in-flight prompt did not end",
 			zap.String("session_id", sessionID),

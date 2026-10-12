@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 import { SettingsSaveProvider } from "./settings-save-provider";
-import { AppearanceSettings } from "./general-settings";
+import { AppearanceSettings, KeyboardShortcutsSettings } from "./general-settings";
 
 const apiMocks = vi.hoisted(() => ({ updateUserSettings: vi.fn() }));
 const SHOW_STATUS_BAR_LABEL = "Show status bar";
@@ -26,8 +26,11 @@ const storeMocks = vi.hoisted(() => ({
   commitSettingsMenuMode: vi.fn(),
   restoreSettingsMenuMode: vi.fn(),
   previewRichOutputAnimations: vi.fn(),
+  previewChatAnimations: vi.fn(),
   commitRichOutputAnimations: vi.fn(),
+  commitChatAnimations: vi.fn(),
   restoreRichOutputAnimations: vi.fn(),
+  restoreChatAnimations: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -50,6 +53,7 @@ vi.mock("@/components/theme/app-theme", () => ({
 }));
 
 vi.mock("@/components/settings/language-settings", () => ({ LanguageSettings: () => null }));
+vi.mock("@/hooks/domains/plugins/use-plugins", () => ({ usePlugins: () => ({ items: [] }) }));
 vi.mock("@/components/settings/startup-page-settings-card", () => ({
   StartupPageSettingsCard: () => null,
 }));
@@ -247,8 +251,11 @@ beforeEach(() => {
   storeMocks.commitSettingsMenuMode.mockReset();
   storeMocks.restoreSettingsMenuMode.mockReset();
   storeMocks.previewRichOutputAnimations.mockReset();
+  storeMocks.previewChatAnimations.mockReset();
   storeMocks.commitRichOutputAnimations.mockReset();
+  storeMocks.commitChatAnimations.mockReset();
   storeMocks.restoreRichOutputAnimations.mockReset();
+  storeMocks.restoreChatAnimations.mockReset();
   storeMocks.state = {
     userSettings: {
       ...defaultSettingsState.userSettings,
@@ -256,13 +263,17 @@ beforeEach(() => {
     },
     settingsMenu: { savedMode: "flat" },
     richOutputMotion: { enabled: true, savedEnabled: true },
+    chatMotion: { enabled: true, savedEnabled: true },
     setUserSettings: storeMocks.setUserSettings,
     previewSettingsMenuMode: storeMocks.previewSettingsMenuMode,
     commitSettingsMenuMode: storeMocks.commitSettingsMenuMode,
     restoreSettingsMenuMode: storeMocks.restoreSettingsMenuMode,
     previewRichOutputAnimations: storeMocks.previewRichOutputAnimations,
+    previewChatAnimations: storeMocks.previewChatAnimations,
     commitRichOutputAnimations: storeMocks.commitRichOutputAnimations,
+    commitChatAnimations: storeMocks.commitChatAnimations,
     restoreRichOutputAnimations: storeMocks.restoreRichOutputAnimations,
+    restoreChatAnimations: storeMocks.restoreChatAnimations,
   };
 });
 
@@ -295,6 +306,36 @@ describe("AppearanceSettings rich-output motion preference", () => {
 
     await waitFor(() => expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE));
     expect(storeMocks.restoreRichOutputAnimations).toHaveBeenCalledOnce();
+  });
+});
+
+describe("AppearanceSettings chat motion preference", () => {
+  it("previews and saves chat motion locally without a user-settings request", async () => {
+    renderAppearance();
+
+    const toggle = screen.getByRole("switch", { name: "Chat animations" });
+    expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
+
+    fireEvent.click(toggle);
+    expect(storeMocks.previewChatAnimations).toHaveBeenCalledWith(false);
+    expect(toggle.getAttribute(DATA_SETTINGS_DIRTY_ATTRIBUTE)).toBe("true");
+
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+
+    await waitFor(() => expect(storeMocks.commitChatAnimations).toHaveBeenCalledWith(false));
+    expect(apiMocks.updateUserSettings).not.toHaveBeenCalled();
+    expect(storeMocks.setUserSettings).not.toHaveBeenCalled();
+  });
+
+  it("restores the saved chat motion preference through Reset", async () => {
+    renderAppearance();
+
+    const toggle = screen.getByRole("switch", { name: "Chat animations" });
+    fireEvent.click(toggle);
+    fireEvent.click(await screen.findByRole("button", { name: "Reset" }));
+
+    await waitFor(() => expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE));
+    expect(storeMocks.restoreChatAnimations).toHaveBeenCalledOnce();
   });
 });
 
@@ -395,5 +436,177 @@ describe("AppearanceSettings status bar preference", () => {
   it(
     "applies a newer save response after an older live update",
     verifyNewerSaveResponseWinsOverOlderLiveUpdate,
+  );
+});
+
+it("validates hover drafts, preserves them after a failed save, and discards", async () => {
+  renderAppearance();
+  const delay = screen.getByRole("spinbutton", { name: "Hover delay (ms)" });
+  fireEvent.change(delay, { target: { value: "" } });
+  expect(
+    (screen.getByRole("button", { name: SAVE_CHANGES_LABEL }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  fireEvent.change(delay, { target: { value: "750" } });
+  apiMocks.updateUserSettings.mockRejectedValueOnce(new Error("Save failed"));
+  fireEvent.click(screen.getByRole("button", { name: SAVE_CHANGES_LABEL }));
+  await waitFor(() =>
+    expect(apiMocks.updateUserSettings).toHaveBeenCalledWith({ sidebar_hover_delay_ms: 750 }),
+  );
+  await waitFor(() =>
+    expect((screen.getByRole("button", { name: "Retry save" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
+  );
+  expect((delay as HTMLInputElement).value).toBe("750");
+  fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+  expect((delay as HTMLInputElement).value).toBe("500");
+});
+
+function renderKeyboardSettings() {
+  return render(
+    <SettingsSaveProvider>
+      <KeyboardShortcutsSettings />
+    </SettingsSaveProvider>,
+  );
+}
+function keyboardStore(patch: Record<string, unknown> = {}) {
+  storeMocks.state = {
+    ...storeMocks.state,
+    userSettings: {
+      ...defaultSettingsState.userSettings,
+      loaded: true,
+      revision: 1,
+      keyboardShortcuts: {},
+      ...patch,
+    },
+  };
+}
+const GITHUB_INTEGRATION_SHORTCUT_ID = "integration:github";
+const GITHUB_INTEGRATION_RECORDER_ID = `shortcut-recorder-${GITHUB_INTEGRATION_SHORTCUT_ID}`;
+
+function recordIntegration(key: string) {
+  fireEvent.click(screen.getByTestId(GITHUB_INTEGRATION_RECORDER_ID));
+  fireEvent.keyDown(window, { key, ctrlKey: true, altKey: true });
+}
+
+describe("integration keyboard settings persistence", () => {
+  // @covers AC-UI-INTEGRATION-PAGE-SHORTCUTS-001.3
+  it("saves navigation edits over the latest unrelated shortcut map", async () => {
+    keyboardStore();
+    apiMocks.updateUserSettings.mockImplementation(async (patch) => ({
+      settings: { ...patch, revision: 3 },
+    }));
+    renderKeyboardSettings();
+    recordIntegration("g");
+    storeMocks.state.userSettings = {
+      ...(storeMocks.state.userSettings as object),
+      revision: 2,
+      keyboardShortcuts: { "plugin:other:keep": { key: "x" } },
+    };
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+    await waitFor(() => expect(apiMocks.updateUserSettings).toHaveBeenCalledOnce());
+    expect(apiMocks.updateUserSettings.mock.lastCall![0].keyboard_shortcuts).toEqual({
+      "plugin:other:keep": { key: "x" },
+      [GITHUB_INTEGRATION_SHORTCUT_ID]: { key: "g", modifiers: { ctrlOrCmd: true, alt: true } },
+    });
+  });
+
+  it("retains edits made during an in-flight navigation save", async () => {
+    keyboardStore();
+    let resolve!: (value: unknown) => void;
+    apiMocks.updateUserSettings.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    renderKeyboardSettings();
+    recordIntegration("g");
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+    await waitFor(() => expect(apiMocks.updateUserSettings).toHaveBeenCalledOnce());
+    recordIntegration("h");
+    resolve({
+      settings: {
+        keyboard_shortcuts: {
+          [GITHUB_INTEGRATION_SHORTCUT_ID]: { key: "g", modifiers: { ctrlOrCmd: true, alt: true } },
+        },
+        revision: 2,
+      },
+    });
+    await waitFor(() => expect(storeMocks.setUserSettings).toHaveBeenCalled());
+    expect(
+      screen.getByTestId(GITHUB_INTEGRATION_RECORDER_ID).getAttribute("data-settings-dirty"),
+    ).toBe("true");
+    expect(screen.getByRole("button", { name: SAVE_CHANGES_LABEL })).toBeTruthy();
+  });
+
+  it("keeps a failed navigation save dirty and does not activate its binding", async () => {
+    keyboardStore();
+    apiMocks.updateUserSettings.mockRejectedValueOnce(new Error("save failed"));
+    renderKeyboardSettings();
+    recordIntegration("g");
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+    await waitFor(() => expect(apiMocks.updateUserSettings).toHaveBeenCalledOnce());
+    expect(storeMocks.setUserSettings).not.toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: "Retry save" })).toBeTruthy();
+    expect(
+      screen.getByTestId(GITHUB_INTEGRATION_RECORDER_ID).getAttribute("data-settings-dirty"),
+    ).toBe("true");
+  });
+});
+
+it("does not let an older navigation save replace newer synchronized shortcuts", async () => {
+  keyboardStore();
+  let resolve!: (value: unknown) => void;
+  apiMocks.updateUserSettings.mockReturnValue(
+    new Promise((r) => {
+      resolve = r;
+    }),
+  );
+  const view = renderKeyboardSettings();
+  recordIntegration("g");
+  fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+  await waitFor(() => expect(apiMocks.updateUserSettings).toHaveBeenCalledOnce());
+  keyboardStore({
+    revision: 3,
+    keyboardShortcuts: {
+      [GITHUB_INTEGRATION_SHORTCUT_ID]: { key: "h", modifiers: { ctrlOrCmd: true, alt: true } },
+    },
+  });
+  view.rerender(
+    <SettingsSaveProvider>
+      <KeyboardShortcutsSettings />
+    </SettingsSaveProvider>,
+  );
+  resolve({
+    settings: {
+      revision: 2,
+      keyboard_shortcuts: {
+        [GITHUB_INTEGRATION_SHORTCUT_ID]: { key: "g", modifiers: { ctrlOrCmd: true, alt: true } },
+      },
+    },
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId(GITHUB_INTEGRATION_RECORDER_ID).textContent).toContain("H"),
+  );
+  expect(storeMocks.setUserSettings).not.toHaveBeenCalled();
+});
+
+it("clears the last saved navigation binding when the response omits the empty map", async () => {
+  keyboardStore({
+    keyboardShortcuts: {
+      [GITHUB_INTEGRATION_SHORTCUT_ID]: { key: "g", modifiers: { ctrlOrCmd: true, alt: true } },
+    },
+  });
+  apiMocks.updateUserSettings.mockResolvedValue({ settings: { revision: 2 } });
+  renderKeyboardSettings();
+  fireEvent.click(
+    screen
+      .getByTestId(GITHUB_INTEGRATION_RECORDER_ID)
+      .parentElement!.querySelector("button[aria-label='Reset (clear shortcut)']")!,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+  await waitFor(() => expect(storeMocks.setUserSettings).toHaveBeenCalledOnce());
+  expect(storeMocks.setUserSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ keyboardShortcuts: {} }),
   );
 });

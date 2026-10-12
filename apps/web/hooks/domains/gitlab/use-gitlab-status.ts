@@ -5,31 +5,45 @@ import { fetchGitLabStatus } from "@/lib/api/domains/gitlab-api";
 import { useAppStore } from "@/components/state-provider";
 import { subscribeIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
 
+const requestVersions = new Map<string, number>();
+
+function nextRequestVersion(workspaceId: string) {
+  const version = (requestVersions.get(workspaceId) ?? 0) + 1;
+  requestVersions.set(workspaceId, version);
+  return version;
+}
+
+function isCurrentRequest(workspaceId: string, version: number) {
+  return requestVersions.get(workspaceId) === version;
+}
+
 /**
  * useGitLabStatus subscribes the slice to the latest GitLab connection status.
  * Fetches on mount, retries are caller-driven via the returned `refresh`.
  *
- * Effect-driven and imperative fetches share one generation guard so a stale
- * workspace response cannot overwrite the currently selected workspace.
+ * Requests are shared by workspace so a consumer unmount cannot strand a
+ * status request that another consumer relies on.
  */
-export function useGitLabStatus() {
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const statusSnapshot = useAppStore((state) => state.gitlabStatus);
-  const ownsSnapshot = statusSnapshot.workspaceId === workspaceId;
-  const status = ownsSnapshot ? statusSnapshot.data : null;
-  const loading = ownsSnapshot ? statusSnapshot.loading : Boolean(workspaceId);
+export function useGitLabStatus(requestedWorkspaceId?: string | null) {
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceId = requestedWorkspaceId ?? activeWorkspaceId;
+  const statusEntry = useAppStore((state) =>
+    workspaceId ? state.gitlabStatus.byWorkspaceId[workspaceId] : undefined,
+  );
+  const status = statusEntry?.data ?? null;
+  const loading = statusEntry?.loading ?? Boolean(workspaceId);
   const setStatus = useAppStore((state) => state.setGitLabStatus);
   const setStatusLoading = useAppStore((state) => state.setGitLabStatusLoading);
-  const requestGeneration = useRef(0);
+  const resetStatus = useAppStore((state) => state.resetGitLabStatus);
   const currentWorkspaceId = useRef(workspaceId);
   currentWorkspaceId.current = workspaceId;
 
   const loadStatus = useCallback(
     async (requestedWorkspaceId: string) => {
-      const generation = ++requestGeneration.current;
-      const isCurrentRequest = () =>
-        generation === requestGeneration.current &&
-        requestedWorkspaceId === currentWorkspaceId.current;
+      const version = nextRequestVersion(requestedWorkspaceId);
+      const isCurrentConsumerRequest = () =>
+        isCurrentRequest(requestedWorkspaceId, version) &&
+        currentWorkspaceId.current === requestedWorkspaceId;
 
       setStatusLoading(requestedWorkspaceId, true);
       try {
@@ -37,40 +51,37 @@ export function useGitLabStatus() {
           cache: "no-store",
           workspaceId: requestedWorkspaceId,
         });
-        if (isCurrentRequest()) setStatus(requestedWorkspaceId, res ?? null);
+        if (isCurrentConsumerRequest()) {
+          setStatus(requestedWorkspaceId, res ?? null);
+        }
       } catch {
-        if (isCurrentRequest()) setStatus(requestedWorkspaceId, null);
+        if (isCurrentConsumerRequest()) {
+          setStatus(requestedWorkspaceId, null);
+        }
       } finally {
-        if (isCurrentRequest()) setStatusLoading(requestedWorkspaceId, false);
+        if (isCurrentConsumerRequest()) {
+          setStatusLoading(requestedWorkspaceId, false);
+        }
       }
     },
     [setStatus, setStatusLoading],
   );
 
   useEffect(() => {
-    if (!workspaceId) {
-      requestGeneration.current++;
-      setStatus(null, null);
-      setStatusLoading(null, false);
+    if (!workspaceId) return;
+    if (!statusEntry) {
+      resetStatus(workspaceId);
+      void loadStatus(workspaceId);
       return;
     }
-    setStatus(workspaceId, null);
-    void loadStatus(workspaceId);
-    return () => {
-      requestGeneration.current++;
-    };
-  }, [workspaceId, loadStatus, setStatus, setStatusLoading]);
+    if (statusEntry.loadedAt === null && !statusEntry.loading) void loadStatus(workspaceId);
+  }, [loadStatus, resetStatus, statusEntry?.loadedAt, statusEntry?.loading, workspaceId]);
 
   const refresh = useCallback(async () => {
     const requestedWorkspaceId = currentWorkspaceId.current;
-    if (!requestedWorkspaceId) {
-      requestGeneration.current++;
-      setStatus(null, null);
-      setStatusLoading(null, false);
-      return;
-    }
+    if (!requestedWorkspaceId) return;
     await loadStatus(requestedWorkspaceId);
-  }, [loadStatus, setStatus, setStatusLoading]);
+  }, [loadStatus]);
 
   useEffect(() => subscribeIntegrationAvailability(() => void refresh()), [refresh]);
 

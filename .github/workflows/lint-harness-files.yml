@@ -49,6 +49,12 @@ jobs:
       - name: Lint harness files
         run: python3 .github/scripts/lint-harness-files.py --all
 
+      - name: Test documentation catalog
+        run: python3 scripts/list-docs.test.py
+
+      - name: Validate documentation catalog
+        run: python3 scripts/list-docs.py validate
+
       - name: Test specification linter
         run: python3 scripts/lint-spec-files.test.py
 

@@ -184,13 +184,13 @@ export function WorkflowCycleGuardDialog({
           </div>
         </div>
         <AlertDialogFooter className="border-t bg-background p-4 sm:px-6">
-          <AlertDialogCancel className="min-h-12 w-full cursor-pointer sm:w-auto">
+          <AlertDialogCancel className="w-full cursor-pointer sm:w-auto">
             {isBlocking ? t("workflows:returnToWorkflow") : t("common:cancel")}
           </AlertDialogCancel>
           {!isBlocking && (
             <AlertDialogAction
               data-dialog-default-action
-              className="min-h-12 w-full cursor-pointer sm:w-auto"
+              className="w-full cursor-pointer sm:w-auto"
               onClick={handleConfirm}
             >
               {actionLabel}

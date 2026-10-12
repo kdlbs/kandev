@@ -15,7 +15,9 @@ const REPO_CHIP_TRIGGER = "repo-chip-trigger";
 const SECOND_REPO_NAME = "Repository Sets Target";
 const SET_NAME = "Full-stack";
 
-type TaskWithRepos = { repositories?: Array<{ repository_id: string }> };
+type TaskWithRepos = {
+  repositories?: Array<{ repository_id: string; base_branch?: string }>;
+};
 
 /**
  * Seeds a second workspace repository plus a set containing both, and returns
@@ -32,25 +34,33 @@ async function seedSetWithTwoRepositories(
     createRepositorySet: (
       workspaceId: string,
       name: string,
-      repositoryIds: string[],
+      repositoryIds: string[] | Array<{ repositoryId: string; baseBranch?: string }>,
     ) => Promise<{ id: string; name: string }>;
   },
   seedData: { workspaceId: string; repositoryId: string },
   backend: { tmpDir: string },
-  options: { setName?: string; dirName?: string } = {},
+  options: { setName?: string; dirName?: string; savedBases?: boolean } = {},
 ) {
   const dir = path.join(backend.tmpDir, "repos", options.dirName ?? "repository-sets-target");
   fs.mkdirSync(dir, { recursive: true });
   const gitEnv = makeGitEnv(backend.tmpDir);
   execSync("git init -b main", { cwd: dir, env: gitEnv });
   execSync('git commit --allow-empty -m "init"', { cwd: dir, env: gitEnv });
+  execSync("git branch develop", { cwd: dir, env: gitEnv });
   const second = await apiClient.createRepository(seedData.workspaceId, dir, "main", {
     name: SECOND_REPO_NAME,
   });
+  const members: string[] | Array<{ repositoryId: string; baseBranch?: string }> =
+    options.savedBases
+      ? [
+          { repositoryId: seedData.repositoryId, baseBranch: "main" },
+          { repositoryId: second.id, baseBranch: "develop" },
+        ]
+      : [seedData.repositoryId, second.id];
   const set = await apiClient.createRepositorySet(
     seedData.workspaceId,
     options.setName ?? SET_NAME,
-    [seedData.repositoryId, second.id],
+    members,
   );
   return { secondRepositoryId: second.id, setId: set.id };
 }
@@ -61,8 +71,11 @@ test.describe("Task creation with repository sets", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
-    const { secondRepositoryId } = await seedSetWithTwoRepositories(apiClient, seedData, backend);
+    const { secondRepositoryId } = await seedSetWithTwoRepositories(apiClient, seedData, backend, {
+      savedBases: true,
+    });
 
     await testPage.goto("/");
     await testPage.getByTestId("create-task-button").first().click();
@@ -80,6 +93,10 @@ test.describe("Task creation with repository sets", () => {
     const chips = dialog.getByTestId(REPO_CHIP_TRIGGER);
     await expect(chips).toHaveCount(2);
     await expect(chips.nth(1)).toContainText(SECOND_REPO_NAME);
+    await expect(dialog.getByTestId("repo-chip").nth(1)).toContainText("develop");
+    await prCapture.screenshot("desktop-repository-set-applied", {
+      caption: "Applying a repository set on desktop fills the task picker with saved bases.",
+    });
 
     const title = `Repository set task ${Date.now()}`;
     await dialog.getByTestId("task-title-input").fill(title);
@@ -106,6 +123,9 @@ test.describe("Task creation with repository sets", () => {
     const repoIds = data.repositories?.map((entry) => entry.repository_id) ?? [];
     expect(repoIds).toEqual(expect.arrayContaining([seedData.repositoryId, secondRepositoryId]));
     expect(repoIds).toHaveLength(2);
+    expect(
+      data.repositories?.find((entry) => entry.repository_id === secondRepositoryId)?.base_branch,
+    ).toBe("develop");
   });
 
   test("applying the same set twice adds no duplicate rows", async ({

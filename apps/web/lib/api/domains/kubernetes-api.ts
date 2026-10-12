@@ -113,6 +113,13 @@ function normalizeSession(value: unknown): KubernetesSession[] {
     restarts: finiteNumber(record.restarts),
   };
   for (const key of SESSION_STRING_KEYS) assignOptionalString(session, key, record[key]);
+  const requests = asRecord(record.main_container_requests);
+  if (requests) {
+    const normalized = {} as NonNullable<KubernetesSession["main_container_requests"]>;
+    assignOptionalString(normalized, "cpu", requests.cpu);
+    assignOptionalString(normalized, "memory", requests.memory);
+    if (normalized.cpu || normalized.memory) session.main_container_requests = normalized;
+  }
   return [session];
 }
 
@@ -123,10 +130,14 @@ const SESSION_STRING_KEYS = [
   "workspace_kind",
   "created_at",
   "failure_reason",
+  "session_state",
+  "retention_state",
 ] as const;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function finiteNumber(value: unknown): number {

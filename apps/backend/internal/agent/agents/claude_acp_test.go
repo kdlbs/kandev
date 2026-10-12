@@ -1,11 +1,40 @@
 package agents
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestClaudeACPRemoteAuthWritesPrivateCredentialsToSelectedConfigDir(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, "session", ".claude")
+	script := NewClaudeACP().RemoteAuth().Methods[0].SetupScript
+	cmd := exec.Command("bash", "-eu", "-c", script)
+	cmd.Env = []string{
+		"HOME=" + home,
+		"CLAUDE_CONFIG_DIR=" + configDir,
+		"CLAUDE_CODE_OAUTH_TOKEN=test-token",
+	}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("auth setup failed: %v: %s", err, output)
+	}
+	credentialPath := filepath.Join(configDir, ".credentials.json")
+	info, err := os.Stat(credentialPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("credential permissions = %04o, want 0600", got)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", ".credentials.json")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected credentials in default home: %v", err)
+	}
+}
 
 func TestClaudeACPUsesManagedRuntime(t *testing.T) {
 	a := NewClaudeACP()

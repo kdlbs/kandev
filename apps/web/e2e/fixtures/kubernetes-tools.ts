@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { dwell } from "../helpers/causal-waits";
 import { waitForHealth } from "./backend";
+import { prepareCompactRuntimeFixture } from "./compact-runtime";
+import { runFixtureCommand } from "./fixture-command";
 import {
   assertRuntimeImageTagAvailable,
   FixtureResourceOwnership,
@@ -36,10 +38,12 @@ const BACKEND_DIR = path.join(REPO_ROOT, "apps/backend");
 const WEB_DIST_DIR = path.join(REPO_ROOT, "apps/web/dist");
 const CONTROL_NAMESPACE = "kandev-e2e-control";
 const WORKLOAD_NAMESPACE = "kandev-e2e-workloads";
+const WORKLOAD_SERVICE_ACCOUNT = "kandev-workload";
 const HOST_SERVICE_ACCOUNT = "kandev-host";
 const IN_CLUSTER_SERVICE_ACCOUNT = "kandev-in-cluster";
 const RESTRICTED_SERVICE_ACCOUNT = "kandev-restricted";
 const TOOL_DOWNLOAD_TIMEOUT_MS = 120_000;
+const KIND_IMAGE_LOAD_TIMEOUT_MS = 300_000;
 
 export type KubernetesPod = {
   metadata: {
@@ -85,6 +89,7 @@ export type KubernetesCluster = {
   namespace: string;
   controlNamespace: string;
   image: string;
+  remoteHelperCachePath: string;
   kubectl: (args: string[], options?: KubectlOptions) => string;
   json: <T>(args: string[], options?: KubectlOptions) => T;
   podTemplate: (overrides?: PodTemplateOverrides) => string;
@@ -207,28 +212,34 @@ function requireBuildArtifacts(): void {
   }
 }
 
-function buildRuntimeImage(tag: string): void {
+function buildRuntimeImage(tag: string): string {
   requireBuildArtifacts();
   const context = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-kubernetes-e2e-image-"));
+  const runtime = prepareCompactRuntimeFixture({
+    bundleDir: path.join(context, "runtime"),
+    homeDir: path.join(context, "home"),
+    sourceBinDir: path.join(BACKEND_DIR, "bin"),
+  });
+  const helperCache = path.join(context, "helper-cache");
+  fs.cpSync(runtime.cacheRoot, helperCache, { recursive: true });
+  const podCachePath = path.posix.join(
+    "/data/home",
+    path.relative(path.join(context, "home"), runtime.cachePath).split(path.sep).join("/"),
+  );
   const dockerfile = `FROM ${KUBERNETES_E2E_BASE_IMAGE}
-RUN apt-get update \\
- && apt-get install -y --no-install-recommends ca-certificates curl git \\
- && rm -rf /var/lib/apt/lists/*
 COPY kandev /usr/local/bin/kandev
-COPY agentctl-linux-amd64 /usr/local/bin/agentctl-linux-amd64
+COPY runtime /opt/kandev/runtime
+COPY helper-cache /opt/kandev/helper-cache
 COPY mock-agent-linux-amd64 /usr/local/bin/mock-agent
 COPY web-dist /opt/kandev/web
-RUN chmod 0755 /usr/local/bin/kandev /usr/local/bin/agentctl-linux-amd64 /usr/local/bin/mock-agent \
- && ln -s /usr/local/bin/agentctl-linux-amd64 /usr/local/bin/agentctl
+RUN chmod 0755 /usr/local/bin/kandev /usr/local/bin/mock-agent /opt/kandev/runtime/bin/* \
+ && chmod -R 0755 /opt/kandev/helper-cache
 ENV PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV KANDEV_BUNDLE_DIR=/opt/kandev/runtime
 WORKDIR /workspace
 `;
   try {
     fs.copyFileSync(path.join(BACKEND_DIR, "bin/kandev"), path.join(context, "kandev"));
-    fs.copyFileSync(
-      path.join(BACKEND_DIR, "bin/agentctl-linux-amd64"),
-      path.join(context, "agentctl-linux-amd64"),
-    );
     fs.copyFileSync(
       path.join(BACKEND_DIR, "bin/mock-agent-linux-amd64"),
       path.join(context, "mock-agent-linux-amd64"),
@@ -239,6 +250,7 @@ WORKDIR /workspace
       timeout: 300_000,
       stdio: process.env.E2E_DEBUG ? ["pipe", "inherit", "inherit"] : ["pipe", "ignore", "inherit"],
     });
+    return podCachePath;
   } finally {
     fs.rmSync(context, { recursive: true, force: true });
   }
@@ -277,6 +289,7 @@ function runKubectl(
   ).trim();
 }
 
+/** Create a fixture-owned workload identity independently of the namespace controller. */
 function workloadRBAC(): string {
   return `apiVersion: v1
 kind: Namespace
@@ -287,6 +300,12 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: ${WORKLOAD_NAMESPACE}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${WORKLOAD_SERVICE_ACCOUNT}
+  namespace: ${WORKLOAD_NAMESPACE}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -417,6 +436,7 @@ function serviceAccountKubeconfig(
   );
 }
 
+/** Render workload Pods with the fixture-owned identity and optional image or placement overrides. */
 function podTemplate(image: string, overrides: PodTemplateOverrides = {}): string {
   const nodeSelector = overrides.nodeSelector
     ? `\n    nodeSelector:\n${Object.entries(overrides.nodeSelector)
@@ -427,6 +447,7 @@ function podTemplate(image: string, overrides: PodTemplateOverrides = {}): strin
 kind: PodTemplate
 template:
   spec:${nodeSelector}
+    serviceAccountName: ${WORKLOAD_SERVICE_ACCOUNT}
     containers:
       - name: kandev-agent
         image: ${overrides.image ?? image}
@@ -448,6 +469,18 @@ function uniqueClusterName(workerIndex: number): string {
     return normalized;
   }
   return `kandev-e2e-${process.pid}-${workerIndex}-${randomUUID().slice(0, 6)}`;
+}
+
+function kindClusterConfig(): string {
+  return `apiVersion: kind.x-k8s.io/v1alpha4
+kind: Cluster
+kubeadmConfigPatches:
+  - |
+    apiVersion: kubelet.config.k8s.io/v1beta1
+    kind: KubeletConfiguration
+    featureGates:
+      KubeletInUserNamespace: true
+`;
 }
 
 async function waitForPortForward(proc: ChildProcess, timeoutMs = 30_000): Promise<number> {
@@ -481,6 +514,12 @@ async function waitForPortForward(proc: ChildProcess, timeoutMs = 30_000): Promi
   });
 }
 
+export function waitForInClusterBackendReady(baseUrl: string, proc?: ChildProcess): Promise<void> {
+  // /health only proves that the listener is bound; /ready gates API
+  // requests until the in-cluster backend has finished wiring routes.
+  return waitForHealth(`${baseUrl}/ready`, 30_000, proc);
+}
+
 async function stopChild(proc: ChildProcess): Promise<void> {
   if (proc.exitCode !== null) return;
   proc.kill("SIGTERM");
@@ -496,7 +535,7 @@ async function stopChild(proc: ChildProcess): Promise<void> {
   });
 }
 
-function inClusterBackendPod(image: string): string {
+export function inClusterBackendPod(image: string): string {
   return `apiVersion: v1
 kind: Pod
 metadata:
@@ -513,19 +552,24 @@ spec:
       imagePullPolicy: Never
       command: ["/bin/sh", "-c"]
       args:
-        - mkdir -p /data/home /data/worktrees /data/repos && exec /usr/local/bin/kandev __backend
+        - >-
+          mkdir -p /data/home /data/worktrees /data/repos /data/home/cache/remote-helpers &&
+          cp -a /opt/kandev/helper-cache/. /data/home/cache/remote-helpers/ &&
+          exec /usr/local/bin/kandev __backend
       ports:
         - name: http
           containerPort: 8080
       readinessProbe:
         httpGet:
-          path: /health
+          path: /ready
           port: http
         periodSeconds: 1
         failureThreshold: 60
       env:
         - {name: HOME, value: /data}
         - {name: KANDEV_HOME_DIR, value: /data/home}
+        - {name: KANDEV_BUNDLE_DIR, value: /opt/kandev/runtime}
+        - {name: PATH, value: "/opt/kandev/runtime/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
         - {name: KANDEV_SERVER_PORT, value: "8080"}
         - {name: KANDEV_SERVER_HOST, value: "0.0.0.0"}
         - {name: KANDEV_WEB_DIST_DIR, value: /opt/kandev/web}
@@ -535,9 +579,8 @@ spec:
         - {name: KANDEV_REPOCLONE_BASEPATH, value: /data/repos}
         - {name: KANDEV_E2E_MOCK, value: "true"}
         - {name: KANDEV_DOCKER_ENABLED, value: "false"}
-        - {name: KANDEV_AGENTCTL_LINUX_BINARY, value: /usr/local/bin/agentctl-linux-amd64}
         - {name: KANDEV_MOCK_AGENT_LINUX_BINARY, value: /usr/local/bin/mock-agent}
-        - {name: KANDEV_LOG_LEVEL, value: warn}
+        - {name: KANDEV_LOG_LEVEL, value: debug}
       volumeMounts:
         - {name: data, mountPath: /data}
   volumes:
@@ -683,7 +726,9 @@ export async function provisionKubernetesCluster(
   const adminKubeconfig = path.join(root, `${name}.kubeconfig`);
   const hostKubeconfig = path.join(root, `${name}.host.kubeconfig`);
   const restrictedKubeconfig = path.join(root, `${name}.restricted.kubeconfig`);
+  const kindConfigPath = path.join(root, `${name}.kind.yaml`);
   const image = `kandev-kubernetes-e2e:${name}`;
+  let remoteHelperCachePath = "";
   const marker = ownershipMarkerPath();
   const ownership = new FixtureResourceOwnership();
   let inCluster: { context: InClusterBackend; proc: ChildProcess } | undefined;
@@ -731,16 +776,21 @@ export async function provisionKubernetesCluster(
       throw new Error(`refusing to reuse existing Kind cluster ${name}`);
     }
     assertRuntimeImageTagAvailable(image, dockerImageTagExists(image));
-    ownership.acquire("image", () => buildRuntimeImage(image));
+    ownership.acquire("image", () => {
+      remoteHelperCachePath = buildRuntimeImage(image);
+    });
+    fs.writeFileSync(kindConfigPath, kindClusterConfig(), { mode: 0o600 });
     writeClusterOwnershipMarker(marker, name);
     ownership.acquire("cluster", () =>
-      execFileSync(
+      runFixtureCommand(
         tools.kind,
         [
           "create",
           "cluster",
           "--name",
           name,
+          "--config",
+          kindConfigPath,
           "--image",
           fixturePin.nodeImage,
           "--kubeconfig",
@@ -748,11 +798,11 @@ export async function provisionKubernetesCluster(
           "--wait",
           "180s",
         ],
-        { timeout: 300_000, stdio: process.env.E2E_DEBUG ? "inherit" : "ignore" },
+        { timeout: 300_000 },
       ),
     );
     execFileSync(tools.kind, ["load", "docker-image", image, "--name", name], {
-      timeout: 180_000,
+      timeout: KIND_IMAGE_LOAD_TIMEOUT_MS,
       stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",
     });
     kubectl(["apply", "-f", "-"], { input: workloadRBAC() });
@@ -833,7 +883,7 @@ export async function provisionKubernetesCluster(
     try {
       const port = await waitForPortForward(proc);
       const baseUrl = `http://127.0.0.1:${port}`;
-      await waitForHealth(`${baseUrl}/health`, 30_000, proc);
+      await waitForInClusterBackendReady(baseUrl, proc);
       const context: InClusterBackend = {
         baseUrl,
         frontendUrl: baseUrl,
@@ -883,6 +933,7 @@ export async function provisionKubernetesCluster(
     namespace: WORKLOAD_NAMESPACE,
     controlNamespace: CONTROL_NAMESPACE,
     image,
+    remoteHelperCachePath,
     kubectl,
     json,
     podTemplate: (overrides) => podTemplate(image, overrides),

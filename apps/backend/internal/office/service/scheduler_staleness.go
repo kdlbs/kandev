@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -34,6 +35,20 @@ func (si *SchedulerIntegration) evaluateRunStaleness(
 	if expectedStepID == "" || taskID == "" {
 		return false, "", nil
 	}
+	if expectedTransitionID, hasEntryIdentity := payload["workflow_step_transition_id"]; hasEntryIdentity {
+		entryID, err := strconv.ParseInt(expectedTransitionID, 10, 64)
+		if err != nil || entryID < 0 {
+			return true, "invalid_workflow_step_entry", nil
+		}
+		currentStepID, currentEntryID, err := si.svc.repo.GetTaskWorkflowStepEntry(ctx, taskID)
+		if err != nil {
+			return false, "", fmt.Errorf("resolve current workflow step entry for task %s: %w", taskID, err)
+		}
+		if currentStepID != expectedStepID || currentEntryID != entryID {
+			return true, "workflow_step_entry_changed", nil
+		}
+		return false, "", nil
+	}
 	currentStepID, err := si.svc.repo.GetTaskWorkflowStepID(ctx, taskID)
 	if err != nil {
 		return false, "", fmt.Errorf("resolve current workflow step for task %s: %w", taskID, err)
@@ -44,7 +59,11 @@ func (si *SchedulerIntegration) evaluateRunStaleness(
 	return false, "", nil
 }
 
-// cancelStaleRun marks the run cancelled, logs the event, and releases any checkout.
+// cancelStaleRun marks the run cancelled, logs the event, and releases
+// any checkout. Terminal-shape recording, the OfficeRunProcessed
+// broadcast, and the activity log entry only happen when the cancel
+// actually applied: a run another writer already finished or failed
+// must not be reported as cancelled.
 func (si *SchedulerIntegration) cancelStaleRun(
 	ctx context.Context,
 	run *models.Run,
@@ -60,12 +79,18 @@ func (si *SchedulerIntegration) cancelStaleRun(
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
 
-	if err := si.svc.repo.CancelRun(ctx, run.ID, reason); err != nil {
+	cancelled, err := si.svc.repo.CancelRun(ctx, run.ID, reason)
+	if err != nil {
 		si.logger.Error("failed to cancel stale run",
 			zap.String("run_id", run.ID), zap.Error(err))
-	} else {
-		si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
+		return
 	}
+	if !cancelled {
+		return
+	}
+
+	si.svc.recordTerminalShape(ctx, run, RunStatusCancelled, nil)
+	si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
 
 	si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 		"scheduler", "office-scheduler",

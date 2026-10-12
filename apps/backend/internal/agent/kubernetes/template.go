@@ -147,9 +147,14 @@ func validatePodSpecFields(spec *corev1.PodSpec) error {
 
 func validateTemplateContainers(spec *corev1.PodSpec, mainContainer string) error {
 	mainIndex := -1
+	names := make(map[string]bool)
 	for i := range spec.Containers {
 		container := &spec.Containers[i]
 		path := fmt.Sprintf(".template.spec.containers[%d]", i)
+		if names[container.Name] {
+			return fieldError(podTemplateFieldPrefix+path+".name", "duplicates a container name")
+		}
+		names[container.Name] = true
 		if container.Image == "" {
 			return fieldError(podTemplateFieldPrefix+path+".image", "is required")
 		}
@@ -161,6 +166,13 @@ func validateTemplateContainers(spec *corev1.PodSpec, mainContainer string) erro
 			if err := validateMainContainerFields(container, path); err != nil {
 				return err
 			}
+		}
+		if container.Name != mainContainer {
+			checked, _, err := companionWithoutWorkspaceGrant(container)
+			if err != nil {
+				return fieldError(podTemplateFieldPrefix+path+".volumeMounts", err.Error())
+			}
+			container = checked
 		}
 		if err := validateContainerReservedFields(container, path); err != nil {
 			return err

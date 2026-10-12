@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	gorillaws "github.com/gorilla/websocket"
@@ -16,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
+	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 )
 
 // UserService interface for getting user preferences.
@@ -29,7 +31,14 @@ type TerminalHandler struct {
 	lifecycleMgr  *lifecycle.Manager
 	userService   UserService
 	scriptService scripts.ScriptService
+	terminalSvc   *terminalservice.Service
 	logger        *logger.Logger
+}
+
+// SetTerminalService enables server-side recovery of persisted ordinary
+// terminal launch commands. Those commands are never sent by the client.
+func (h *TerminalHandler) SetTerminalService(svc *terminalservice.Service) {
+	h.terminalSvc = svc
 }
 
 // NewTerminalHandler creates a new TerminalHandler instance.
@@ -186,15 +195,22 @@ func (h *TerminalHandler) handleRemoteUserShellWS(
 		return
 	}
 
-	_, initialCommand, httpErr := h.resolveShellLabel(c)
+	label, initialCommand, httpErr := h.resolveShellLabel(c)
 	if httpErr != "" {
 		releaseClient()
 		c.JSON(http.StatusBadRequest, gin.H{"error": httpErr})
 		return
 	}
+	var initialCommandOnce bool
+	_, initialCommand, initialCommandOnce, httpErr = h.resolveOrdinaryTerminalLaunch(c, execution, scopeID, terminalID, label, initialCommand)
+	if httpErr != "" {
+		releaseClient()
+		c.JSON(http.StatusNotFound, gin.H{"error": httpErr})
+		return
+	}
 	// The per-terminal WS URL carries only env + terminalId, so recover the
 	// command pre-registered by wsUserShellCreate for script/dev terminals.
-	if initialCommand == "" {
+	if initialCommand == "" && !initialCommandOnce {
 		if runner := h.lifecycleMgr.GetInteractiveRunner(); runner != nil {
 			initialCommand = runner.LookupShellInitialCommand(scopeID, terminalID)
 		}
@@ -250,6 +266,8 @@ func (h *TerminalHandler) handleRemoteUserShellWS(
 			h.logger.Debug("failed to send initial command to remote terminal shell",
 				zap.String("terminal_id", terminalID),
 				zap.Error(err))
+		} else if h.terminalSvc != nil {
+			h.terminalSvc.MarkCursorMCPAuthenticationAttemptStarted(terminalID)
 		}
 	}
 
@@ -404,12 +422,33 @@ func (h *TerminalHandler) startUserShellProcess(
 	if httpErr != "" {
 		return "", http.StatusBadRequest, httpErr
 	}
-
+	var initialCommandOnce bool
+	label, initialCommand, initialCommandOnce, httpErr = h.resolveOrdinaryTerminalLaunch(c, execution, scopeID, terminalID, label, initialCommand)
+	if httpErr != "" {
+		return "", http.StatusNotFound, httpErr
+	}
+	if initialCommandOnce && initialCommand == "" && !interactiveRunner.IsUserShellAlive(scopeID, terminalID) {
+		if h.terminalSvc != nil && h.terminalSvc.CursorMCPAuthenticationAttemptPending(terminalID) {
+			return "", http.StatusConflict, "terminal_command_starting"
+		}
+		if h.terminalSvc != nil {
+			h.terminalSvc.MarkCursorMCPAuthenticationAttemptFailed(terminalID)
+		}
+		return "", http.StatusGone, "terminal_command_completed"
+	}
+	launchFailed := initialCommandOnce
+	if launchFailed {
+		defer func() {
+			if launchFailed && h.terminalSvc != nil {
+				h.terminalSvc.MarkCursorMCPAuthenticationAttemptFailed(terminalID)
+			}
+		}()
+	}
 	h.logger.Info("handleUserShellWS: starting user shell handling",
 		zap.String("session_id", sessionID),
 		zap.String("terminal_id", terminalID),
 		zap.String("label", label),
-		zap.String("initial_command", initialCommand))
+		zap.Bool("has_initial_command", initialCommand != ""))
 
 	preferredShell := h.resolvePreferredShell(c.Request.Context())
 	workingDir, err := h.resolveWorkingDir(execution)
@@ -444,7 +483,9 @@ func (h *TerminalHandler) startUserShellProcess(
 		}
 	}
 
-	opts := &process.UserShellOptions{Label: label, InitialCommand: initialCommand, Env: shellEnv}
+	opts := &process.UserShellOptions{
+		Label: label, InitialCommand: initialCommand, InitialCommandOnce: initialCommandOnce, Env: shellEnv,
+	}
 
 	h.logger.Info("handleUserShellWS: calling StartUserShell",
 		zap.String("session_id", sessionID),
@@ -452,7 +493,7 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.String("working_dir", workingDir),
 		zap.String("preferred_shell", preferredShell),
 		zap.String("label", opts.Label),
-		zap.String("initial_command", opts.InitialCommand),
+		zap.Bool("has_initial_command", opts.InitialCommand != ""),
 		zap.Int("profile_env_count", len(profileEnv)),
 		zap.Int("shell_env_count", len(shellEnv)))
 
@@ -466,6 +507,10 @@ func (h *TerminalHandler) startUserShellProcess(
 			zap.Error(err))
 		return "", http.StatusServiceUnavailable, err.Error()
 	}
+	if h.terminalSvc != nil {
+		h.terminalSvc.MarkCursorMCPAuthenticationAttemptStarted(terminalID)
+	}
+	launchFailed = false
 
 	h.logger.Info("handleUserShellWS: user shell started successfully",
 		zap.String("session_id", sessionID),
@@ -474,6 +519,23 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.Int("os_pid", info.OSPID))
 
 	return info.ID, 0, ""
+}
+
+func (h *TerminalHandler) resolveOrdinaryTerminalLaunch(
+	c *gin.Context,
+	execution *lifecycle.AgentExecution,
+	scopeID, terminalID, label, initialCommand string,
+) (string, string, bool, string) {
+	if h.terminalSvc == nil || !terminalservice.IsManaged(terminalID) {
+		return label, initialCommand, false, ""
+	}
+	info, err := h.terminalSvc.ClaimShellLaunchInfo(c.Request.Context(), execution.TaskID, scopeID, terminalID)
+	if err != nil {
+		h.logger.Warn("failed to resolve persisted terminal launch info",
+			zap.String("session_id", execution.SessionID), zap.Error(err))
+		return "", "", false, "terminal not found"
+	}
+	return info.Label, info.InitialCommand, info.InitialCommandOnce, ""
 }
 
 // handleUserShellWS handles WebSocket connections for user shell terminals.
@@ -490,6 +552,17 @@ func (h *TerminalHandler) handleUserShellWS(
 		c, execution, scopeID, terminalID, interactiveRunner,
 	)
 	if errMsg != "" {
+		if httpStatus == http.StatusGone && errMsg == "terminal_command_completed" {
+			conn, err := terminalUpgrader.Upgrade(c.Writer, c.Request, nil)
+			if err != nil {
+				h.logger.Debug("failed to upgrade completed terminal websocket", zap.Error(err))
+				return
+			}
+			closeFrame := gorillaws.FormatCloseMessage(gorillaws.CloseNormalClosure, "initial_command_completed")
+			_ = conn.WriteControl(gorillaws.CloseMessage, closeFrame, time.Now().Add(time.Second))
+			_ = conn.Close()
+			return
+		}
 		c.JSON(httpStatus, gin.H{"error": errMsg})
 		return
 	}

@@ -47,7 +47,7 @@ function runEvent(seq: number, eventType: string): RunEvent {
 type Props = {
   runId: string;
   initialEvents: RunEvent[];
-  initialStatus: "claimed";
+  initialStatus: "claimed" | "finished" | "failed" | "cancelled";
 };
 
 function renderLiveSync(initialProps: Props) {
@@ -163,5 +163,36 @@ describe("useRunLiveSync", () => {
       expect(api.getRunDetail).toHaveBeenCalledWith("agent-1", "run-1");
       expect(result.current.outputSummary).toBe("final answer");
     });
+  });
+
+  it("keeps listening for events written after a terminal status", () => {
+    const { result } = renderLiveSync({
+      ...initialProps,
+      initialStatus: "finished",
+    });
+
+    expect(clients.active.subscribeRun).toHaveBeenCalledWith("run-1");
+
+    const delayedWarning = runEvent(1, "continuation_summary.upsert_failed");
+    act(() => {
+      handlers.listener!({ run_id: "run-1", event: delayedWarning });
+    });
+
+    expect(result.current.status).toBe("finished");
+    expect(result.current.events).toEqual([delayedWarning]);
+  });
+
+  it("keeps listening when a terminal event arrives before a delayed warning", () => {
+    const { result } = renderLiveSync(initialProps);
+
+    const complete = runEvent(1, "complete");
+    const delayedWarning = runEvent(2, "continuation_summary.load_failed");
+    act(() => {
+      handlers.listener!({ run_id: "run-1", event: complete });
+      handlers.listener!({ run_id: "run-1", event: delayedWarning });
+    });
+
+    expect(result.current.status).toBe("finished");
+    expect(result.current.events).toEqual([complete, delayedWarning]);
   });
 });

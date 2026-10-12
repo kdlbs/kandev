@@ -80,6 +80,41 @@ function renderList(
   );
 }
 
+// @covers AC-UI-LIST-STEP-GROUPING-001.2
+it("groups by configured step despite different runtime states", () => {
+  const tasks = [
+    makeTask({
+      id: toTaskId("a"),
+      title: "First",
+      workflow_id: "wf" as Task["workflow_id"],
+      state: "COMPLETED",
+    }),
+    makeTask({
+      id: toTaskId("b"),
+      title: "Second",
+      workflow_id: "wf" as Task["workflow_id"],
+      state: "WAITING_FOR_INPUT",
+    }),
+  ];
+  const metadata = {
+    workflowStepPreviews: {
+      wf: {
+        status: "success" as const,
+        steps: [{ id: "step-1", title: "Implementation", position: 0, color: "#123456" }],
+      },
+    },
+  };
+  render(
+    <StateProvider>
+      <TooltipProvider>
+        <TasksListView {...props(tasks)} {...metadata} tasksListGroup="workflow_step" />
+      </TooltipProvider>
+    </StateProvider>,
+  );
+  expect(screen.getAllByTestId(TASKS_LIST_SECTION)).toHaveLength(1);
+  expect(screen.getByTestId(TASKS_LIST_SECTION).textContent).toContain("Implementation");
+});
+
 describe("TasksListView row — waiting-for-input parity", () => {
   it("renders the message-question for a pending clarification (path previously disabled)", () => {
     const { container } = renderList(makeTask({}), {
@@ -121,6 +156,26 @@ describe("TasksListView row — waiting-for-input parity", () => {
   it("shows the plain waiting question for a finished turn awaiting a reply", () => {
     const { container } = renderList(makeTask({}), { "session-1": [] });
     expect(container.querySelector(".tabler-icon-message-question")).not.toBeNull();
+  });
+});
+
+describe("TasksListView row — parked on background work (AC-73a)", () => {
+  it("renders the background-work task icon for a parked task", () => {
+    const { container } = renderList(makeTask({ parked_on_background_work: true }));
+    expect(container.querySelector('[data-testid="task-state-background-running"]')).not.toBeNull();
+  });
+
+  it("lets a pending clarification win over the parked reading", () => {
+    const { container } = renderList(makeTask({ parked_on_background_work: true }), {
+      "session-1": [message({ type: "clarification_request", metadata: { status: "pending" } })],
+    });
+    expect(container.querySelector(".tabler-icon-message-question")).not.toBeNull();
+    expect(container.querySelector('[data-testid="task-state-background-running"]')).toBeNull();
+  });
+
+  it("does not render the parked icon when the flag is absent", () => {
+    const { container } = renderList(makeTask({}), { "session-1": [] });
+    expect(container.querySelector('[data-testid="task-state-background-running"]')).toBeNull();
   });
 });
 

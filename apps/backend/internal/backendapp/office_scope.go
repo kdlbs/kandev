@@ -12,10 +12,12 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -199,7 +201,33 @@ func officeWorkspaceScopeMiddleware(
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 			return
 		}
+		if requiresOfficeWorkspaceManage(c) && officeagents.CallerFromContext(c) == nil {
+			if err := taskSvc.AuthorizeWorkspaceScope(c.Request.Context(), c.Param("wsId"), authz.ScopeWorkspaceManage); err != nil {
+				if taskservice.IsForbidden(err) {
+					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": err.Error()})
+					return
+				}
+				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+				return
+			}
+		}
 		c.Next()
+	}
+}
+
+// requiresOfficeWorkspaceManage identifies the two workspace-pause mutation
+// routes. Their ordinary Office scope check grants reach with workspace.read;
+// the state-changing operation also needs the canonical workspace.manage
+// permission. Other Office mutations use their own action scopes.
+func requiresOfficeWorkspaceManage(c *gin.Context) bool {
+	if c.Request.Method != http.MethodPost || c.Param("wsId") == "" {
+		return false
+	}
+	switch c.FullPath() {
+	case officeRoutePrefix + "/workspaces/:wsId/pause", officeRoutePrefix + "/workspaces/:wsId/resume":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -519,10 +547,11 @@ func mountOfficeRoutes(
 	taskSvc *taskservice.Service,
 	officeRepo *officesqlite.Repository,
 	handoffSvc *taskservice.HandoffService,
+	handoffDeps officeruntime.HandoffDependencies,
 	log *logger.Logger,
 ) {
 	api := router.Group(officeRoutePrefix)
 	api.Use(officeagents.AgentAuthMiddleware(svcs.Agents))
 	api.Use(officeWorkspaceScopeMiddleware(authSvc, taskSvc, officeRepo))
-	office.RegisterAllRoutes(api, svcs, handoffSvc, log)
+	office.RegisterAllRoutes(api, svcs, handoffSvc, handoffDeps, log)
 }

@@ -16,6 +16,7 @@ function makeStore() {
 
 function updateJob(overrides: Record<string, unknown> = {}) {
   return {
+    update_mode: "pinned",
     job_id: "update-1",
     agent_name: AGENT_NAME,
     status: "updating",
@@ -49,6 +50,70 @@ describe("user settings snapshots", () => {
       appStatusBarEnabled: false,
       revision: 2,
     });
+  });
+});
+
+describe("notification provider availability", () => {
+  it("changes only Apprise availability", () => {
+    const store = makeStore();
+    const before = store.getState().notificationProviders;
+
+    // @covers AC-PLATFORM-APPRISE-RESCAN-001.4
+    store.getState().setAppriseAvailable(true);
+
+    const after = store.getState().notificationProviders;
+    expect(after.appriseAvailable).toBe(true);
+    expect(after.items).toBe(before.items);
+    expect(after.events).toBe(before.events);
+    expect(after.loaded).toBe(before.loaded);
+    expect(after.loading).toBe(before.loading);
+  });
+
+  it("preserves availability when a provider update omits it", () => {
+    const store = makeStore();
+    store.getState().setAppriseAvailable(true);
+    const before = store.getState().notificationProviders;
+
+    store.getState().setNotificationProviders({
+      items: before.items,
+      events: before.events,
+      loaded: true,
+      loading: false,
+    });
+
+    expect(store.getState().notificationProviders.appriseAvailable).toBe(true);
+  });
+});
+
+describe("settings update job identity", () => {
+  // @covers AC-AGENTS-RUNTIME-NOTIFY-002.6
+  it("preserves immutable automatic origin through partial updates and same-job readiness snapshots", () => {
+    const store = makeStore();
+    const actions = store.getState() as SettingsSlice & {
+      upsertAgentUpdateJob: (job: ReturnType<typeof updateJob>) => void;
+      setAgentUpdateJobs: (jobs: ReturnType<typeof updateJob>[]) => void;
+    };
+    actions.upsertAgentUpdateJob(
+      updateJob({ automatic: true, runtime_id: "npm:claude-runtime", previous_version: "0.9.0" }),
+    );
+    actions.upsertAgentUpdateJob(updateJob({ status: "refreshing" }));
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME]).toMatchObject({
+      automatic: true,
+      runtime_id: "npm:claude-runtime",
+      previous_version: "0.9.0",
+    });
+    actions.setAgentUpdateJobs([updateJob({ status: "succeeded" })]);
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME]).toMatchObject({
+      automatic: true,
+      runtime_id: "npm:claude-runtime",
+      previous_version: "0.9.0",
+    });
+    actions.setAgentUpdateJobs([
+      updateJob({ job_id: "manual-retry", started_at: NEWER_TIMESTAMP }),
+    ]);
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME].automatic).toBeUndefined();
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME].runtime_id).toBeUndefined();
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME].previous_version).toBeUndefined();
   });
 });
 
@@ -332,4 +397,240 @@ describe("setAvailableAgents capability propagation", () => {
 
     expect(store.getState().agentProfiles.items[0]?.capability_status).toBe("probing");
   });
+});
+
+describe("ssh reachability", () => {
+  const EXEC_ID = "exec-1";
+  const BASE_TIMESTAMP = "2026-09-17T00:00:00Z";
+
+  function reachabilityRecord(
+    overrides: Partial<import("@/lib/types/http-ssh").SSHReachabilityRecord> = {},
+  ): import("@/lib/types/http-ssh").SSHReachabilityRecord {
+    return {
+      executor_id: EXEC_ID,
+      state: "reachable",
+      reason: "",
+      consecutive_failures: 0,
+      host: "build.example",
+      checked_at: BASE_TIMESTAMP,
+      last_success_at: BASE_TIMESTAMP,
+      updated_at: BASE_TIMESTAMP,
+      probing_enabled: true,
+      probe_interval_seconds: 60,
+      persisted: true,
+      ...overrides,
+    };
+  }
+
+  it("stores a record keyed by executor id", () => {
+    const store = makeStore();
+    store.getState().setSSHReachability(reachabilityRecord());
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(reachabilityRecord());
+  });
+
+  it("keeps the record with the later updated_at and discards an older one", () => {
+    const store = makeStore();
+    const newer = reachabilityRecord({ state: "unreachable", updated_at: "2026-09-17T01:00:00Z" });
+    const older = reachabilityRecord({ state: "reachable", updated_at: BASE_TIMESTAMP });
+
+    store.getState().setSSHReachability(newer);
+    store.getState().setSSHReachability(older);
+
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(newer);
+  });
+
+  it("applies a reset (null checked_at, newer updated_at) over a stored reachable/unreachable record", () => {
+    // A connection-configuration reset clears checked_at but still advances
+    // updated_at. Reconciling on checked_at would make this reset compare as
+    // older than the record it just invalidated and get discarded, leaving a
+    // stale reachable/unreachable state showing for a host the user just
+    // re-pointed.
+    const store = makeStore();
+    const stale = reachabilityRecord({
+      state: "unreachable",
+      checked_at: "2026-09-17T02:00:00Z",
+      updated_at: "2026-09-17T02:00:00Z",
+    });
+    const reset = reachabilityRecord({
+      state: "unknown",
+      checked_at: null,
+      updated_at: "2026-09-17T03:00:00Z",
+      persisted: false,
+    });
+
+    store.getState().setSSHReachability(stale);
+    store.getState().setSSHReachability(reset);
+
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(reset);
+  });
+
+  it("discards a null-updated_at placeholder applied after a record with a real timestamp", () => {
+    // The synthesized never-probed placeholder always loses.
+    const store = makeStore();
+    const real = reachabilityRecord({ updated_at: BASE_TIMESTAMP });
+    const placeholder = reachabilityRecord({ state: "unknown", updated_at: null });
+
+    store.getState().setSSHReachability(real);
+    store.getState().setSSHReachability(placeholder);
+
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(real);
+  });
+
+  it("applies the first record for an executor even when its updated_at is null", () => {
+    const store = makeStore();
+    const placeholder = reachabilityRecord({ state: "unknown", updated_at: null });
+
+    store.getState().setSSHReachability(placeholder);
+
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(placeholder);
+  });
+
+  it("tracks distinct executors independently", () => {
+    const store = makeStore();
+    const first = reachabilityRecord({ executor_id: EXEC_ID });
+    const second = reachabilityRecord({ executor_id: "exec-2", state: "unreachable" });
+
+    store.getState().setSSHReachability(first);
+    store.getState().setSSHReachability(second);
+
+    expect(store.getState().sshReachability.byExecutorId).toEqual({
+      [EXEC_ID]: first,
+      "exec-2": second,
+    });
+  });
+});
+
+describe("folder opener discovery", () => {
+  it("defaults unavailable and preserves capability through editor preference updates", () => {
+    const store = makeStore();
+    expect(store.getState().editors.folderOpeningAvailable).not.toBe(true);
+    store.getState().setEditors([], true);
+    expect(store.getState().editors.folderOpeningAvailable).toBe(true);
+    store.getState().setEditors([]);
+    expect(store.getState().editors.folderOpeningAvailable).toBe(true);
+    store.getState().setEditors([], false);
+    expect(store.getState().editors.folderOpeningAvailable).toBe(false);
+  });
+});
+describe("agent profile ordering snapshots", () => {
+  // @covers AC-AGENTS-PROFILE-LIST-ORDERING-003.14
+  it("keeps selector baseline independent of saved, optimistic, and remote Settings orders", () => {
+    const store = makeStore();
+    const snapshot = [
+      {
+        id: "agent-a",
+        name: "Agent A",
+        profiles: [
+          { id: "old", name: "Old", createdAt: "2026-01-01T00:00:00Z" },
+          { id: "new-b", name: "New B", createdAt: "2026-02-01T00:00:00Z" },
+          { id: "new-a", name: "New A", createdAt: "2026-02-01T00:00:00Z" },
+        ],
+        profile_order_revision: 2,
+      },
+    ] as never;
+    store.getState().applyAgentListSnapshot(snapshot, 0);
+    const selectorIds = () => store.getState().agentProfiles.items.map((profile) => profile.id);
+    expect(selectorIds()).toEqual(["new-a", "new-b", "old"]);
+    expect(store.getState().settingsAgents.items[0].profiles.map((profile) => profile.id)).toEqual([
+      "old",
+      "new-b",
+      "new-a",
+    ]);
+    store.getState().setAgentProfileOrder("agent-a", ["new-b", "old", "new-a"]);
+    expect(selectorIds()).toEqual(["new-a", "new-b", "old"]);
+    store.getState().setAgentProfileOrderIntent("agent-a", ["new-b", "old", "new-a"], null);
+    store.getState().acceptAgentProfileOrder("agent-a", ["old", "new-a", "new-b"], 3);
+    store.getState().setAgentProfileOrderIntent("agent-a", null, null);
+    expect(selectorIds()).toEqual(["new-a", "new-b", "old"]);
+    expect(store.getState().settingsAgents.items[0].profiles.map((profile) => profile.id)).toEqual([
+      "old",
+      "new-a",
+      "new-b",
+    ]);
+  });
+
+  it("applies agent snapshots atomically only at the captured membership epoch", () => {
+    const store = makeStore();
+    const snapshot = [
+      {
+        id: "agent-a",
+        name: "Agent A",
+        profiles: [
+          { id: "p1", name: "First" },
+          { id: "p2", name: "Second" },
+        ],
+        profile_order_revision: 2,
+      },
+    ] as never;
+    expect(store.getState().applyAgentListSnapshot(snapshot, 1)).toBe(false);
+    expect(store.getState().settingsAgents.items).toEqual([]);
+    expect(store.getState().applyAgentListSnapshot(snapshot, 0)).toBe(true);
+    expect(store.getState().agentProfiles.orderByAgent["agent-a"]).toMatchObject({
+      revision: 2,
+      order: ["p1", "p2"],
+    });
+    store.getState().bumpAgentProfilesVersion();
+    expect(store.getState().applyAgentListSnapshot([], 0)).toBe(false);
+    expect(store.getState().settingsAgents.items[0].profiles.map((profile) => profile.id)).toEqual([
+      "p1",
+      "p2",
+    ]);
+  });
+
+  it("keeps newer server orders and optimistic intents over older list writers", () => {
+    const store = makeStore();
+    const actions = store.getState();
+    actions.setSettingsAgents([
+      {
+        id: "agent-a",
+        name: "Agent A",
+        profiles: [
+          { id: "p1", name: "One" },
+          { id: "p2", name: "Two" },
+        ],
+        profile_order_revision: 4,
+      },
+    ] as never);
+    actions.acceptAgentProfileOrder("agent-a", ["p2", "p1"], 5);
+    actions.setAgentProfileOrder("agent-a", ["p1", "p2"]);
+    actions.setSettingsAgents([
+      {
+        id: "agent-a",
+        name: "Agent A",
+        profiles: [
+          { id: "p1", name: "One" },
+          { id: "p2", name: "Two" },
+        ],
+        profile_order_revision: 4,
+      },
+    ] as never);
+    expect(store.getState().settingsAgents.items[0].profiles.map((profile) => profile.id)).toEqual([
+      "p1",
+      "p2",
+    ]);
+    expect(store.getState().agentProfiles.orderByAgent["agent-a"]).toMatchObject({
+      revision: 5,
+      order: ["p2", "p1"],
+      queued: ["p1", "p2"],
+    });
+  });
+});
+
+it("retains a workspace profile owned by a refreshed global agent", () => {
+  const store = makeStore();
+  store
+    .getState()
+    .setAgentProfiles([
+      { id: "office", agent_id: "agent", workspace_id: "workspace", label: "Office" },
+    ] as never);
+  store
+    .getState()
+    .applyAgentListSnapshot(
+      [{ id: "agent", name: "Agent", profiles: [{ id: "global", name: "Global" }] }] as never,
+      0,
+    );
+  expect(store.getState().agentProfiles.items.map((profile) => profile.id)).toEqual([
+    "global",
+    "office",
+  ]);
 });

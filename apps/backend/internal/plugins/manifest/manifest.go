@@ -54,11 +54,15 @@ type Manifest struct {
 	Endpoints    Endpoints    `yaml:"endpoints" json:"endpoints"`
 	Capabilities Capabilities `yaml:"capabilities" json:"capabilities"`
 
+	AutomationConditions []AutomationCondition `yaml:"automation_conditions,omitempty" json:"automation_conditions,omitempty"`
+
 	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
 	Actions  []Action  `yaml:"actions,omitempty" json:"actions,omitempty"`
 	// RepositoryProviders declares provider IDs this plugin owns while active.
 	// Ownership is checked across active plugins by the runtime registry.
 	RepositoryProviders []string `yaml:"repository_providers,omitempty" json:"repository_providers,omitempty"`
+	// ExecutorProviders declares remote compute providers this plugin owns.
+	ExecutorProviders []ExecutorProvider `yaml:"executor_providers,omitempty" json:"executor_providers,omitempty"`
 	// ReferenceSources declares composer sources this plugin owns while active.
 	ReferenceSources []ReferenceSource `yaml:"reference_sources,omitempty" json:"reference_sources,omitempty"`
 
@@ -76,11 +80,17 @@ type Manifest struct {
 
 	Runtime          Runtime `yaml:"runtime,omitempty" json:"runtime,omitempty"`
 	MinKandevVersion string  `yaml:"min_kandev_version,omitempty" json:"min_kandev_version,omitempty"`
+
+	// Distribution declares an optional portable package profile. Legacy
+	// plugins and locally-authored canvases may omit it; registry-ready canvas
+	// packages must provide the complete profile.
+	Distribution *Distribution `yaml:"distribution,omitempty" json:"distribution,omitempty"`
 }
 
 const (
-	AgentToolSurfaceKanban = "kanban-task"
-	AgentToolSurfaceOffice = "office-task"
+	AgentToolSurfaceKanban  = "kanban-task"
+	AgentToolSurfaceOffice  = "office-task"
+	AgentToolSurfaceManaged = "managed-conversation"
 )
 
 // AgentTool is an MCP tool a plugin contributes to matching task sessions.
@@ -128,8 +138,8 @@ type Capabilities struct {
 	APIWrite []string `yaml:"api_write,omitempty" json:"api_write,omitempty"`
 	State    bool     `yaml:"state,omitempty" json:"state,omitempty"`
 	Secrets  bool     `yaml:"secrets,omitempty" json:"secrets,omitempty"`
-	// AgentInvoke gates Host.InvokeUtilityAgent (ADR 0048): a one-shot,
-	// non-interactive completion run by the operator-configured utility agent.
+	// AgentInvoke gates Host.InvokeUtilityAgent: a one-shot, non-interactive
+	// completion run by the platform default or an explicitly selected profile.
 	AgentInvoke bool `yaml:"agent_invoke,omitempty" json:"agent_invoke,omitempty"`
 	// Auth gates a plugin's ability to establish an authenticated kandev
 	// browser session for an external identity it has validated against an
@@ -147,6 +157,44 @@ type Capabilities struct {
 	// browser session's user with no Go backend of its own (Approach D1,
 	// docs/decisions/2026-08-01-per-user-plugin-storage.md).
 	UserState bool `yaml:"user_state,omitempty" json:"user_state,omitempty"`
+	// AgentConversation gates the plugin's access to managed workspace agent
+	// conversations (EnsureAgentConversation / DispatchAgentConversation /
+	// DeleteAgentConversation Host RPCs). A plugin holding this capability can
+	// create, prompt, and delete a hidden workflowless ephemeral task/session
+	// per (plugin_id, workspace_id, conversation_key). The host owns identity,
+	// visibility, and lifecycle — the plugin never receives raw database or
+	// user identity through this surface.
+	AgentConversation bool `yaml:"agent_conversation,omitempty" json:"agent_conversation,omitempty"`
+	// ExecutorProvider permits the plugin to allocate and manage remote
+	// execution environments through the host's operation-scoped provider API.
+	ExecutorProvider bool `yaml:"executor_provider,omitempty" json:"executor_provider,omitempty"`
+}
+
+// ExecutorProvider describes one provider implementation owned by a plugin.
+// Provider identities are derived as plugin:<plugin-id>:<key>.
+type ExecutorProvider struct {
+	Key                    string                       `yaml:"key" json:"key"`
+	DisplayName            string                       `yaml:"display_name" json:"display_name"`
+	Description            string                       `yaml:"description" json:"description"`
+	LocalizedMessages      map[string]string            `yaml:"localized_messages,omitempty" json:"localized_messages,omitempty"`
+	ContractVersion        int                          `yaml:"contract_version" json:"contract_version"`
+	SupportedStateVersions []int                        `yaml:"supported_state_versions" json:"supported_state_versions"`
+	ProfileSchema          map[string]any               `yaml:"profile_schema" json:"profile_schema"`
+	ResourceStateSchema    map[string]any               `yaml:"resource_state_schema" json:"resource_state_schema"`
+	Capabilities           ExecutorProviderCapabilities `yaml:"capabilities" json:"capabilities"`
+}
+
+// ExecutorProviderCapabilities is the maximum feature set a provider can
+// offer. Profile and inspected resource capabilities can only narrow it.
+type ExecutorProviderCapabilities struct {
+	Terminal            bool   `yaml:"terminal,omitempty" json:"terminal,omitempty"`
+	Files               bool   `yaml:"files,omitempty" json:"files,omitempty"`
+	Git                 bool   `yaml:"git,omitempty" json:"git,omitempty"`
+	EmbeddedEditor      bool   `yaml:"embedded_editor,omitempty" json:"embedded_editor,omitempty"`
+	Preview             bool   `yaml:"preview,omitempty" json:"preview,omitempty"`
+	Reattach            bool   `yaml:"reattach,omitempty" json:"reattach,omitempty"`
+	Retention           string `yaml:"retention" json:"retention"`
+	MaximumLifetimeSecs int64  `yaml:"maximum_lifetime_seconds,omitempty" json:"maximum_lifetime_seconds,omitempty"`
 }
 
 // AuthProvider is a login option a plugin contributes to the pre-auth login

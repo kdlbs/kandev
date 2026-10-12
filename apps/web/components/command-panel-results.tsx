@@ -1,5 +1,7 @@
 "use client";
+import { workflowMoveShortcutLabel } from "./task/use-workflow-move-submit";
 
+import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
 import { IconArchive, IconArrowRight, IconLoader2 } from "@tabler/icons-react";
@@ -23,6 +25,7 @@ import {
   type CommandPanelLiveTask,
 } from "@/lib/commands/task-result-activity";
 
+export const MODE_COMMAND_CHILDREN: CommandPanelMode = "command-children";
 export const MODE_COMMANDS: CommandPanelMode = "commands";
 export const MODE_SEARCH_TASKS: CommandPanelMode = "search-tasks";
 export const MODE_SEARCH_FILES: CommandPanelMode = "search-files";
@@ -66,7 +69,14 @@ function CommandItemRow({
       key={cmd.id}
       value={cmd.id}
       keywords={getCommandSearchTerms(cmd)}
-      onSelect={() => onSelect(cmd)}
+      disabled={cmd.disabled}
+      className={cn(
+        "cursor-pointer [@media(pointer:coarse)]:min-h-12",
+        cmd.destructive && "text-destructive",
+      )}
+      onSelect={() => {
+        if (!cmd.disabled) onSelect(cmd);
+      }}
     >
       {cmd.icon && (
         <span
@@ -86,7 +96,8 @@ function CommandItemRow({
         )}
       </span>
       {cmd.shortcut && <CommandShortcut>{formatShortcut(cmd.shortcut)}</CommandShortcut>}
-      {cmd.enterMode && (
+      {cmd.immediateAction && <CommandShortcut>{workflowMoveShortcutLabel()}</CommandShortcut>}
+      {(cmd.enterMode || cmd.children || cmd.immediateAction) && (
         <span className="ml-auto text-muted-foreground">
           <IconArrowRight className="size-3" />
         </span>

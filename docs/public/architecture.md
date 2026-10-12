@@ -5,7 +5,7 @@ description: "Understand Kandev's process, code, runtime, persistence, event, pr
 
 # Architecture
 
-Kandev is a server-first development workbench. A Go backend owns durable product state and orchestration. The browser UI is a Vite-built React SPA. Agent processes run behind an `agentctl` sidecar in local, worktree, container, or remote task environments.
+Kandev is a server-first development workbench. The released application is a single native Go binary with the compiled web frontend embedded. It serves the web UI, HTTP API, WebSocket API, and MCP endpoint from one backend listener. Agent processes run behind an `agentctl` sidecar in local, worktree, container, or remote task environments.
 
 ## Read this page in order
 
@@ -34,7 +34,10 @@ These adjacent launch layers have different jobs:
 - The published `apps/cli/bin/` npm shim selects the matching `@kdlbs/runtime-*` package and starts its native `kandev` binary.
 - `apps/desktop/` is a Tauri shell. Rust starts its bundled `kandev --headless` on an owned loopback origin and owns native windows, external links, notifications, and updates. The product UI is still the backend-served SPA.
 
-The root build embeds generated web assets in the Go binary. `make dev` instead starts Vite and configures Go to proxy it, so HTTP, API, and WebSocket traffic still enters through Go.
+The release build embeds generated web assets in the Go binary. `make dev`
+instead starts Vite and configures Go to proxy it, so HTTP, API, and WebSocket
+traffic still enters through Go. Installed releases do not use a separate web
+server.
 
 ## Backend ownership
 

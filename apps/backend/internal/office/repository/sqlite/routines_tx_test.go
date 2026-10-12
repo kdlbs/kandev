@@ -50,9 +50,11 @@ func TestCreateRoutineTx_CommitPersists(t *testing.T) {
 		got.TaskTemplate != want.TaskTemplate || got.ConcurrencyPolicy != want.ConcurrencyPolicy {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
-	// CreateRoutineTx must apply the same defaulting as CreateRoutine.
-	if got.CatchUpPolicy != "enqueue_missed_with_cap" || got.CatchUpMax != 25 {
-		t.Errorf("catch-up defaults = (%q, %d), want (enqueue_missed_with_cap, 25)", got.CatchUpPolicy, got.CatchUpMax)
+	// CreateRoutineTx must apply the same defaulting as CreateRoutine
+	// (AC-OFFICE-ROUTINE-CATCHUP-003.1: no creation path persists the
+	// deprecated alias, even when CatchUpPolicy is left unset).
+	if got.CatchUpPolicy != "summarize_missed" || got.CatchUpMax != 25 {
+		t.Errorf("catch-up defaults = (%q, %d), want (summarize_missed, 25)", got.CatchUpPolicy, got.CatchUpMax)
 	}
 }
 

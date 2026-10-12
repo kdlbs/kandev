@@ -33,7 +33,10 @@ func TestGetAvailableCommandsForSessionReturnsCachedCommands(t *testing.T) {
 	mgr := newTestManager(t)
 	exec := &AgentExecution{ID: "exec-1", SessionID: "session-1"}
 	exec.SetAvailableCommands([]streams.AvailableCommand{
-		{Name: "review", Description: "Review the diff"},
+		{
+			Name: "review", Kind: "skill", Description: "Review the diff", InputHint: "target",
+			Action: &streams.AvailableCommandAction{Kind: "set_config_option", ConfigID: "collaboration_mode", Value: "plan", ResetValue: "default"},
+		},
 		{Name: "commit"},
 	})
 	require.NoError(t, mgr.executionStore.Add(exec))
@@ -42,7 +45,10 @@ func TestGetAvailableCommandsForSessionReturnsCachedCommands(t *testing.T) {
 
 	require.Len(t, got, 2)
 	require.Equal(t, "review", got[0].Name)
+	require.Equal(t, "skill", got[0].Kind)
 	require.Equal(t, "Review the diff", got[0].Description)
+	require.Equal(t, "target", got[0].InputHint)
+	require.Equal(t, &streams.AvailableCommandAction{Kind: "set_config_option", ConfigID: "collaboration_mode", Value: "plan", ResetValue: "default"}, got[0].Action)
 	require.Equal(t, "commit", got[1].Name)
 	require.Nil(t, mgr.GetAvailableCommandsForSession("session-absent"))
 }
@@ -177,6 +183,29 @@ func TestIsAgentCommandConfigured(t *testing.T) {
 	require.False(t, mgr.IsAgentCommandConfigured("exec-workspace"),
 		"a workspace-only execution has not been promoted to an agent execution")
 	require.False(t, mgr.IsAgentCommandConfigured("exec-absent"))
+}
+
+func TestHasLiveAgentExecutionIgnoresWorkspaceInfrastructureAndTerminalAgents(t *testing.T) {
+	mgr := newTestManager(t)
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-workspace", SessionID: "session-workspace", Status: v1.AgentStatusRunning,
+	}))
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-agent", SessionID: "session-agent", AgentCommand: "claude",
+		Status: v1.AgentStatusStarting,
+	}))
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-terminal", SessionID: "session-terminal", AgentCommand: "claude",
+		Status: v1.AgentStatusFailed,
+	}))
+
+	require.False(t, mgr.HasLiveAgentExecution("session-workspace"),
+		"workspace-only execution must not shield an orphaned session")
+	require.True(t, mgr.HasLiveAgentExecution("session-agent"),
+		"a configured non-terminal agent execution must shield its session")
+	require.False(t, mgr.HasLiveAgentExecution("session-terminal"),
+		"terminal executions must not shield a session")
+	require.False(t, mgr.HasLiveAgentExecution("session-absent"))
 }
 
 func TestResolveTaskEnvironmentIDPrefersInMemoryExecution(t *testing.T) {
@@ -405,14 +434,18 @@ func TestStopAgentWithReasonRetainsExecutionWhenBackendCleanupFails(t *testing.T
 }
 
 func TestStopAgentWithReasonCleansPersistedKubernetesInventoryAfterRestart(t *testing.T) {
-	testPersistedKubernetesCleanupAfterRestart(t, StopReasonTaskDeleted, true)
+	testPersistedKubernetesCleanupAfterRestart(t, StopReasonTaskDeleted, true, false)
 }
 
 func TestForceStopAgentCleansPersistedKubernetesInventoryAfterRestartWithoutTerminalReason(t *testing.T) {
-	testPersistedKubernetesCleanupAfterRestart(t, "", true)
+	testPersistedKubernetesCleanupAfterRestart(t, "", true, false)
 }
 
-func testPersistedKubernetesCleanupAfterRestart(t *testing.T, reason string, force bool) {
+func TestPendingKubernetesStopAfterTaskDeletionUsesExactPersistedOwner(t *testing.T) {
+	testPersistedKubernetesCleanupAfterRestart(t, StopReasonTaskDeleted, true, true)
+}
+
+func testPersistedKubernetesCleanupAfterRestart(t *testing.T, reason string, force, missingSession bool) {
 	t.Helper()
 	controlPort := startKubernetesAgentctlServer(t, true, 41001)
 	instancePort := startKubernetesAgentctlServer(t, false, 0)
@@ -474,6 +507,10 @@ func testPersistedKubernetesCleanupAfterRestart(t *testing.T, reason string, for
 	cleanupManagerStopCh(t, mgr)
 	mgr.SetExecutorRunningWriter(store)
 	mgr.SetSecretStore(runtimeSecrets)
+	if missingSession {
+		mgr.workspaceInfoProvider = &deletedTaskSessionSnapshotProvider{err: models.ErrTaskSessionNotFound}
+		require.NotNil(t, mgr.queueRemoteRecovery(row, task08RemoteSnapshot(row)))
+	}
 
 	err = mgr.StopAgentWithReason(context.Background(), instance.InstanceID, reason, force)
 

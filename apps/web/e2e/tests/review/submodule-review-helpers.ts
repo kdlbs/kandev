@@ -8,10 +8,11 @@ import { waitForFiniteAnimations } from "../../helpers/animations";
 import { dwell } from "../../helpers/causal-waits";
 import type { SeedData } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { retryGitIndexLock } from "./git-retry";
 
 const GIT_PROTOCOL_ARGS = ["-c", "protocol.file.allow=always"];
-const GIT_INDEX_LOCK_ATTEMPTS = 3;
-const GIT_INDEX_LOCK_RETRY_MS = 300;
+
+export { retryGitIndexLock };
 
 export async function expectStickyReviewHeaderClearance(
   review: Locator,
@@ -89,26 +90,6 @@ function runGit(repoPath: string, args: string[], env: NodeJS.ProcessEnv): strin
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
-}
-
-/** Retries the short-lived index lock taken by the backend's Git status refresh. */
-export async function retryGitIndexLock<T>(operation: () => T): Promise<T> {
-  for (let attempt = 0; attempt < GIT_INDEX_LOCK_ATTEMPTS; attempt++) {
-    try {
-      return operation();
-    } catch (error) {
-      const isLastAttempt = attempt === GIT_INDEX_LOCK_ATTEMPTS - 1;
-      if (!(error instanceof Error) || !error.message.includes("index.lock") || isLastAttempt) {
-        throw error;
-      }
-      await dwell(
-        GIT_INDEX_LOCK_RETRY_MS,
-        "poll-interval",
-        "the backend's periodic Git status refresh can briefly hold the submodule index lock without publishing a completion event",
-      );
-    }
-  }
-  throw new Error("Git index lock retry exhausted");
 }
 
 function initializeRepository(

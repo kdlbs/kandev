@@ -119,7 +119,7 @@ function buildCollapsibleItems(props: DesktopToolbarProps): ToolbarItemConfig[] 
     {
       id: "model",
       section: "right",
-      render: () => <ModelSelector sessionId={props.sessionId} />,
+      render: () => <ModelSelector sessionId={props.sessionId} showAgentIcon />,
     },
     {
       id: "enhance",
@@ -140,6 +140,7 @@ function DesktopRightSection(props: {
   showCollapsed: boolean;
   rightItems: ToolbarItemConfig[];
   sessionId: string | null;
+  detailActive: boolean;
   taskId: string | null;
   taskTitle?: string;
   hideAgentControls: boolean;
@@ -148,6 +149,7 @@ function DesktopRightSection(props: {
   canCancelAgent?: boolean;
   hasContent: boolean;
   onImplementPlan?: (fresh: boolean) => void;
+  planActionDisabledReason?: string;
   isDisabled: boolean;
   submitDisabledReason?: string;
   isSending: boolean;
@@ -162,9 +164,13 @@ function DesktopRightSection(props: {
       {!props.showCollapsed && (
         <CollapsibleItems items={props.rightItems} testIdPrefix="toolbar-item-" />
       )}
-      <TokenUsageDisplay sessionId={props.sessionId} />
+      <TokenUsageDisplay sessionId={props.sessionId} detailActive={props.detailActive} />
       {props.planModeEnabled && !props.isAgentBusy && props.onImplementPlan && (
-        <ImplementPlanButton onClick={props.onImplementPlan} />
+        <ImplementPlanButton
+          onClick={props.onImplementPlan}
+          disabled={Boolean(props.planActionDisabledReason)}
+          disabledReason={props.planActionDisabledReason}
+        />
       )}
       {!props.hideAgentControls && (
         <ChatInputPluginActions
@@ -266,6 +272,7 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
         showCollapsed={showCollapsed}
         rightItems={rightItems}
         sessionId={props.sessionId}
+        detailActive={props.detailActive ?? true}
         taskId={props.taskId}
         taskTitle={props.taskTitle}
         hideAgentControls={props.hideAgentControls}
@@ -274,6 +281,7 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
         canCancelAgent={props.canCancelAgent}
         hasContent={props.hasContent ?? false}
         onImplementPlan={props.onImplementPlan}
+        planActionDisabledReason={props.planActionDisabledReason}
         isDisabled={props.isDisabled}
         submitDisabledReason={props.submitDisabledReason}
         isSending={props.isSending}

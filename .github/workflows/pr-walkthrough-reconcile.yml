@@ -69,7 +69,7 @@ jobs:
           if ! curl --fail --silent --show-error --location --max-time 30 \
             --retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 30 \
             --output "$PUBLIC_HTML_PATH" \
-            --write-out '%{http_code}\t%{content_type}\t%{url_effective}' \
+            --write-out '%{http_code}\t%{content_type}\t%{url_effective}\n' \
             > "$RESPONSE_META_PATH" \
             "$PUBLIC_URL"; then
             echo "Canonical walkthrough is not publicly available; skipping repair." >> "$GITHUB_STEP_SUMMARY"

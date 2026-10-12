@@ -5,10 +5,12 @@ import { IconWand, IconMessageDots, IconFile, IconFolder } from "@tabler/icons-r
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
+import { TASK_DESCRIPTION_SYNTHETIC_ID } from "@/hooks/initial-prompt-preview";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
-import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
+import { SenderTaskBadge } from "./sender-task-badge";
+import type { SenderTaskInfo } from "@/hooks/domains/session/use-sender-task-badge-model";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import {
   WorkflowStepMessageBadge,
@@ -25,6 +27,7 @@ import { entityReferencesFromMetadata } from "@/lib/entity-references/message-re
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { renderUserMessageBody } from "./user-message-body";
+import { useMessageTaskOrigin } from "./message-task-origin-context";
 
 type ChatMessageProps = {
   comment: Message;
@@ -93,7 +96,7 @@ type UserMessageProps = {
 };
 
 type UserMessageMetadata = WorkflowMessageMetadata & {
-  attachments?: Array<{ type: string; data: string; mime_type: string; name?: string }>;
+  attachments?: UserMessageAttachment[];
   plan_mode?: boolean;
   has_review_comments?: boolean;
   has_hidden_prompts?: boolean;
@@ -102,53 +105,74 @@ type UserMessageMetadata = WorkflowMessageMetadata & {
   sender_task_title?: string;
   sender_session_id?: string;
   sender_session_name?: string;
+  delivery_status?: string;
 };
+
+function userMessageAttachments(metadata: UserMessageMetadata | undefined) {
+  const attachments = metadata?.attachments || [];
+  return {
+    imageAttachments: attachments.filter((attachment) => attachment.type === "image"),
+    fileAttachments: attachments.filter((attachment) => attachment.type === "resource"),
+  };
+}
+
+function userMessageSenderTask(metadata: UserMessageMetadata | undefined): SenderTaskInfo | null {
+  if (!metadata?.sender_task_id) return null;
+  return {
+    id: metadata.sender_task_id,
+    snapshotTitle: metadata.sender_task_title || "",
+    sessionId: metadata.sender_session_id,
+    sessionName: metadata.sender_session_name,
+  };
+}
+
+function userMessageMetadataFlags(
+  metadata: UserMessageMetadata | undefined,
+  hasContent: boolean,
+  hasAttachments: boolean,
+) {
+  return {
+    hasPlanMode: !!metadata?.plan_mode,
+    hasReviewComments: !!metadata?.has_review_comments,
+    hasHiddenPrompts: !!metadata?.has_hidden_prompts,
+    hasContent,
+    hasAttachments,
+    deliveryBlocked: metadata?.delivery_status === "blocked",
+  };
+}
 
 function parseUserMessageMetadata(comment: Message) {
   const metadata = comment.metadata as UserMessageMetadata | undefined;
-  const imageAttachments = (metadata?.attachments || []).filter((att) => att.type === "image");
-  const fileAttachments = (metadata?.attachments || []).filter((att) => att.type === "resource");
-  const contextFiles = metadata?.context_files || [];
-  const hasPlanMode = !!metadata?.plan_mode;
-  const hasReviewComments = !!metadata?.has_review_comments;
-  const hasHiddenPrompts = !!metadata?.has_hidden_prompts;
+  const { imageAttachments, fileAttachments } = userMessageAttachments(metadata);
   const hasContent = !!(comment.content && comment.content.trim() !== "");
   const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
-  const senderTask: SenderTaskInfo | null = metadata?.sender_task_id
-    ? {
-        id: metadata.sender_task_id,
-        snapshotTitle: metadata.sender_task_title || "",
-        sessionId: metadata.sender_session_id,
-        sessionName: metadata.sender_session_name,
-      }
-    : null;
   const workflowMessage = workflowMessageInfoFromMetadata(metadata);
   return {
     imageAttachments,
     fileAttachments,
-    contextFiles,
-    hasPlanMode,
-    hasReviewComments,
-    hasHiddenPrompts,
-    hasContent,
-    hasAttachments,
-    senderTask,
+    contextFiles: metadata?.context_files || [],
+    ...userMessageMetadataFlags(metadata, hasContent, hasAttachments),
+    senderTask: userMessageSenderTask(metadata),
     workflowMessage,
   };
 }
 
 function UserContextBadges({
+  destinationTaskId,
   hasPlanMode,
   hasReviewComments,
   contextFiles,
   senderTask,
   workflowMessage,
+  deliveryBlocked,
 }: {
+  destinationTaskId: string;
   hasPlanMode: boolean;
   hasReviewComments: boolean;
   contextFiles: Array<{ path: string; name: string; is_directory?: boolean }>;
   senderTask: SenderTaskInfo | null;
   workflowMessage: WorkflowStepMessageInfo | null;
+  deliveryBlocked: boolean;
 }) {
   const { t } = useTranslation();
   if (
@@ -156,13 +180,23 @@ function UserContextBadges({
     !hasReviewComments &&
     contextFiles.length === 0 &&
     !senderTask &&
-    !workflowMessage
+    !workflowMessage &&
+    !deliveryBlocked
   )
     return null;
   return (
     <div className="flex justify-end gap-1.5 mb-1 flex-wrap">
       {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} />}
-      {senderTask && <SenderTaskBadge sender={senderTask} />}
+      {deliveryBlocked && (
+        <span
+          role="status"
+          data-testid="user-message-delivery-blocked"
+          className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-700 dark:text-amber-300"
+        >
+          {t("task:deliveryMessageBlocked")}
+        </span>
+      )}
+      {senderTask && <SenderTaskBadge sender={senderTask} destinationTaskId={destinationTaskId} />}
       {hasPlanMode && (
         <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/20 px-2 py-0.5 text-[10px] text-slate-400">
           <IconWand size={10} /> {t("task:planMode")}
@@ -269,6 +303,7 @@ function UserMessageContent({
   onScrollToMessage,
 }: UserMessageProps) {
   const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
+  const taskOrigin = useMessageTaskOrigin();
   const promptNames = usePromptMentionNames();
   const { isFavorite, toggleFavorite } = useMessageFavorite(comment.session_id, comment.id);
   const entityReferences = useMemo(
@@ -287,17 +322,20 @@ function UserMessageContent({
     hasAttachments,
     senderTask,
     workflowMessage,
+    deliveryBlocked,
   } = parseUserMessageMetadata(comment);
 
   return (
     <div className="flex justify-end w-full overflow-hidden">
       <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl overflow-hidden group">
         <UserContextBadges
+          destinationTaskId={comment.task_id}
           hasPlanMode={hasPlanMode}
           hasReviewComments={hasReviewComments}
           contextFiles={contextFiles}
           senderTask={senderTask}
           workflowMessage={workflowMessage}
+          deliveryBlocked={deliveryBlocked}
         />
         <div
           data-testid="user-message-bubble"
@@ -323,6 +361,7 @@ function UserMessageContent({
             taskId: comment.task_id,
             worktreePath,
             onOpenFile,
+            taskOrigin,
           })}
         </div>
         <MessageActions
@@ -335,7 +374,9 @@ function UserMessageContent({
           isRawView={showRaw}
           onToggleRaw={onToggleRaw}
           isFavorite={isFavorite}
-          onToggleFavorite={toggleFavorite}
+          onToggleFavorite={
+            comment.id === TASK_DESCRIPTION_SYNTHETIC_ID ? undefined : toggleFavorite
+          }
           onNavigatePrev={() => {
             if (userNavigation.previousId && onScrollToMessage)
               onScrollToMessage(userNavigation.previousId);

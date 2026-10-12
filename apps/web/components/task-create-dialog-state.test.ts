@@ -211,6 +211,24 @@ describe("useDialogFormState — remoteRepos mode", () => {
   });
 });
 
+describe("useDialogFormState — workspace changes", () => {
+  it("clears task-specific workflow overrides while the dialog remains open", async () => {
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId: string }) => useDialogFormState(true, workspaceId, null),
+      { initialProps: { workspaceId: "workspace-a" } },
+    );
+
+    act(() => {
+      result.current.setWorkflowAgentOverrides({ source: "replacement" });
+    });
+    expect(result.current.workflowAgentOverrides).toEqual({ source: "replacement" });
+
+    rerender({ workspaceId: "workspace-b" });
+
+    await waitFor(() => expect(result.current.workflowAgentOverrides).toEqual({}));
+  });
+});
+
 describe("useDialogFormState — canvas task preset", () => {
   it("restores the repository-free source and launch-only local preference", async () => {
     const { result } = renderHook(() =>

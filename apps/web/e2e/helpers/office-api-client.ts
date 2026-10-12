@@ -19,6 +19,16 @@ export class OfficeApiClient {
     return res.json() as Promise<T>;
   }
 
+  /** Like {@link request}, but returns the raw Response instead of throwing on non-2xx —
+   * for endpoints a test exercises across success and rejection status codes (409, 503). */
+  async rawRequest(method: string, path: string, body?: unknown): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/v1/office${path}`, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
   // --- Onboarding ---
 
   async getOnboardingState(): Promise<Record<string, unknown>> {
@@ -65,6 +75,7 @@ export class OfficeApiClient {
       name: string;
       role: string;
       agent_profile_id?: string;
+      executor_preference?: string;
     },
   ): Promise<Record<string, unknown>> {
     const res = await this.request<{ agent: Record<string, unknown> }>(
@@ -93,11 +104,17 @@ export class OfficeApiClient {
     await this.request("DELETE", `/agents/${id}`);
   }
 
-  async updateAgentStatus(id: string, status: string): Promise<Record<string, unknown>> {
+  async updateAgentStatus(
+    id: string,
+    status: string,
+    pauseReason?: string,
+  ): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = { status };
+    if (pauseReason !== undefined) body.pause_reason = pauseReason;
     const res = await this.request<{ agent: Record<string, unknown> }>(
       "PATCH",
       `/agents/${id}/status`,
-      { status },
+      body,
     );
     return res.agent ?? (res as unknown as Record<string, unknown>);
   }
@@ -183,14 +200,18 @@ export class OfficeApiClient {
   /**
    * Create a project in the workspace. Onboarding does not seed a default
    * project (see e2e/tests/office/project-repository-picker.spec.ts), so
-   * tests that need a real project_id to reassign a task to must create
-   * one first.
+   * tests that need a project must create one first. Optional repository
+   * paths seed the project's source list for task-creation coverage.
    */
-  async createProject(wsId: string, name: string): Promise<Record<string, unknown>> {
+  async createProject(
+    wsId: string,
+    name: string,
+    repositories?: string[],
+  ): Promise<Record<string, unknown>> {
     const res = await this.request<{ project?: Record<string, unknown> }>(
       "POST",
       `/workspaces/${wsId}/projects`,
-      { name },
+      { name, ...(repositories === undefined ? {} : { repositories }) },
     );
     return res.project ?? (res as unknown as Record<string, unknown>);
   }
@@ -549,7 +570,16 @@ export class OfficeApiClient {
 
   async createRoutine(
     wsId: string,
-    data: { name: string; description?: string },
+    data: {
+      name: string;
+      description?: string;
+      catch_up_policy?: string;
+      assignee_agent_profile_id?: string;
+      concurrency_policy?: string;
+      catch_up_max?: number;
+      task_template?: string;
+      variables?: string;
+    },
   ): Promise<Record<string, unknown>> {
     const res = await this.request<{ routine: Record<string, unknown> }>(
       "POST",
@@ -557,6 +587,48 @@ export class OfficeApiClient {
       data,
     );
     return res.routine ?? (res as unknown as Record<string, unknown>);
+  }
+
+  async getRoutine(id: string): Promise<Record<string, unknown>> {
+    const res = await this.request<{ routine: Record<string, unknown> }>("GET", `/routines/${id}`);
+    return res.routine ?? (res as unknown as Record<string, unknown>);
+  }
+
+  async listRoutineRuns(routineId: string): Promise<Record<string, unknown>> {
+    return this.request("GET", `/routines/${routineId}/runs`);
+  }
+
+  /** Manual fire (AC-OFFICE-KILL-SWITCH-002.4). Raw: a paused workspace answers 409. */
+  async runRoutine(routineId: string): Promise<Response> {
+    return this.rawRequest("POST", `/routines/${routineId}/run`);
+  }
+
+  async listRoutineTriggers(routineId: string): Promise<Record<string, unknown>[]> {
+    const res = await this.request<{ triggers: Record<string, unknown>[] | null }>(
+      "GET",
+      `/routines/${routineId}/triggers`,
+    );
+    return res.triggers ?? [];
+  }
+
+  // --- Workspace pause (kill switch) ---
+
+  async getWorkspacePause(wsId: string): Promise<{
+    workspace_id: string;
+    paused: boolean;
+    pause: Record<string, unknown> | null;
+  }> {
+    return this.request("GET", `/workspaces/${wsId}/pause`);
+  }
+
+  /** Raw: exercised at both 200 (success) and 400 (invalid reason). */
+  async pauseWorkspace(wsId: string, reason: string): Promise<Response> {
+    return this.rawRequest("POST", `/workspaces/${wsId}/pause`, { reason });
+  }
+
+  /** Raw: exercised at 200 both paused and not-paused. */
+  async resumeWorkspace(wsId: string, reason?: string): Promise<Response> {
+    return this.rawRequest("POST", `/workspaces/${wsId}/resume`, reason ? { reason } : undefined);
   }
 
   // --- Costs ---

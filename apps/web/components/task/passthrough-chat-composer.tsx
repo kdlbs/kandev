@@ -1,8 +1,9 @@
 "use client";
 
+import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { useCallback, type RefObject } from "react";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import { buildSubmitMessage } from "./chat/chat-input-area";
@@ -13,18 +14,25 @@ import {
   type MessageAttachment,
 } from "./chat/chat-input-container";
 import type { useChatPanelState } from "./chat/use-chat-panel-state";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
-import { buildContextFilesContext, buildTaskMentionsContext } from "@/hooks/use-message-handler";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import {
+  buildContextFilesContext,
+  buildTaskMentionsContext,
+  sendMessageRequest,
+} from "@/hooks/use-message-handler";
 import { getTaskPlan } from "@/lib/api/domains/plan-api";
 import type { AppState } from "@/lib/state/store";
-import { generateUUID } from "@/lib/utils";
-import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
+import { useComposerWorkspace } from "@/hooks/domains/task/use-composer-workspace";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
+import { planCommentAdmissionConflict, toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
+import type { TaskPlanCommentRef } from "@/lib/types/http";
+import { isMessageSendError, MessageSendError } from "@/lib/chat/message-send-error";
+import { t as translate } from "@/lib/i18n";
+import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
+import { PreviewFeedbackCollectionSurface } from "@/components/task/inspector/preview-feedback-collection";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -55,17 +63,7 @@ export function PassthroughComposerPanel({
     panelState.pendingPRFeedback.length > 0 ||
     panelState.walkthroughComments.length > 0 ||
     panelState.messageComments.length > 0;
-  const workspaceId = useAppStore((state) =>
-    resolveComposerWorkspaceId({
-      sessionId: panelState.resolvedSessionId,
-      taskId,
-      quickChatSessions: state.quickChat.sessions,
-      activeWorkflowId: state.kanban.workflowId,
-      activeTasks: state.kanban.tasks,
-      snapshots: Object.values(state.kanbanMulti.snapshots),
-      workflows: state.workflows.items,
-    }),
-  );
+  const composerWorkspace = useComposerWorkspace(panelState.resolvedSessionId, taskId);
   return (
     <div
       data-testid="passthrough-composer"
@@ -73,12 +71,27 @@ export function PassthroughComposerPanel({
         if (event.key === "Escape") onCancel();
       }}
     >
+      <PlanCommentMigrationNotice {...panelState.planCommentMigration} />
+      {panelState.previewFeedbackState && (
+        <PreviewFeedbackCollectionSurface
+          taskId={taskId}
+          collection={panelState.previewFeedbackState}
+          open={panelState.previewFeedbackOpen ?? false}
+          onOpenChange={panelState.setPreviewFeedbackOpen ?? (() => undefined)}
+          showTrigger={Boolean(
+            panelState.previewFeedback.length > 0 &&
+            (!panelState.resolvedSessionId || panelState.isCompleted),
+          )}
+        />
+      )}
       <ChatInputContainer
         ref={refHandle}
         onSubmit={onSubmit}
         sessionId={panelState.resolvedSessionId}
         taskId={taskId}
-        workspaceId={workspaceId}
+        workspaceId={composerWorkspace.workspaceId}
+        workspaceResolutionFailed={composerWorkspace.status === "failed"}
+        onRetryWorkspaceResolution={composerWorkspace.retry}
         entityReferencesEnabled={false}
         taskTitle={panelState.task?.title}
         taskDescription={panelState.taskDescription ?? ""}
@@ -88,6 +101,8 @@ export function PassthroughComposerPanel({
         mcpAttachmentHistory={panelState.mcpAttachmentHistory}
         onPlanModeChange={panelState.handlePlanModeChange}
         isAgentBusy={false}
+        isWorking={panelState.isWorking}
+        showCancelAgent={false}
         isCompleted={panelState.isCompleted}
         isStarting={panelState.isStarting}
         isPreparingEnvironment={panelState.isPreparingEnvironment}
@@ -114,14 +129,15 @@ export function PassthroughComposerPanel({
 
 type PassthroughFinalMessage = {
   content: string;
-  commentsToSend: Array<DiffComment | AgentMessageComment>;
+  commentsToSend: Array<ReviewComment | AgentMessageComment>;
   contextFilesMeta?: Array<{ path: string; name: string }>;
+  planCommentRefs: TaskPlanCommentRef[];
 };
 
 export function formatPassthroughBaseMessage(
   content: string,
-  reviewComments: DiffComment[] | undefined,
-  pendingComments: DiffComment[],
+  reviewComments: ReviewComment[] | undefined,
+  pendingComments: ReviewComment[],
   panelState: ReturnType<typeof useChatPanelState>,
 ) {
   const commentsToSend = reviewComments ?? pendingComments;
@@ -203,8 +219,8 @@ export async function buildPassthroughFinalMessage({
 }: {
   taskId: string | null;
   content: string;
-  reviewComments?: DiffComment[];
-  pendingComments: DiffComment[];
+  reviewComments?: ReviewComment[];
+  pendingComments: ReviewComment[];
   panelState: ReturnType<typeof useChatPanelState>;
   inlineMentions?: ContextFile[];
   inlineTaskMentions?: TaskMentionData[];
@@ -230,6 +246,7 @@ export async function buildPassthroughFinalMessage({
     content: visibleContent + contextFilesContext + planContext + taskMentionsContext,
     commentsToSend,
     contextFilesMeta: buildContextFilesMeta(allContextFiles),
+    planCommentRefs: toTaskPlanCommentRefs(panelState.planComments),
   };
 }
 
@@ -252,29 +269,21 @@ async function requestPassthroughMessage({
   message: PassthroughFinalMessage;
   attachments?: MessageAttachment[];
 }) {
-  const client = getWebSocketClient();
-  if (!client) throw new Error(t("task:websocketClientNotAvailable"));
-  const hasAttachments = !!(attachments && attachments.length > 0);
-  await client.request(
-    "message.add",
-    {
-      task_id: taskId,
-      session_id: sessionId,
-      client_message_id: generateUUID(),
-      content: message.content,
-      ...(hasAttachments && { attachments }),
-      ...(message.contextFilesMeta && { context_files: message.contextFilesMeta }),
-    },
-    hasAttachments ? 30_000 : 10_000,
-  );
+  await sendMessageRequest({
+    taskId,
+    resolvedSessionId: sessionId,
+    finalMessage: message.content,
+    modelToSend: undefined,
+    planMode: false,
+    attachments,
+    contextFilesMeta: message.contextFilesMeta,
+    planCommentRefs: message.planCommentRefs,
+  });
 }
 
 export function clearPassthroughComposerContext(panelState: ReturnType<typeof useChatPanelState>) {
   if (panelState.pendingPRFeedback.length > 0) {
     panelState.handleClearPRFeedback();
-  }
-  if (panelState.planComments.length > 0) {
-    panelState.clearSessionPlanComments();
   }
   if (panelState.walkthroughComments.length > 0) {
     panelState.handleClearWalkthroughComments();
@@ -292,6 +301,14 @@ export function clearPassthroughComposerContext(panelState: ReturnType<typeof us
   }
 }
 
+export function assertPlanCommentMigrationReady(panelState: ReturnType<typeof useChatPanelState>) {
+  if (!panelState.planCommentMigration?.isBlocking) return;
+  throw new MessageSendError(
+    "plan-comment-migration-pending",
+    translate("task:planCommentMigrationPending"),
+  );
+}
+
 export function useSendPassthroughMessage({
   taskId,
   sessionId,
@@ -301,7 +318,7 @@ export function useSendPassthroughMessage({
 }: {
   taskId: string | null;
   sessionId: string | null | undefined;
-  pendingComments: DiffComment[];
+  pendingComments: ReviewComment[];
   panelState: ReturnType<typeof useChatPanelState>;
   onSent: () => void;
 }) {
@@ -323,6 +340,7 @@ export function useSendPassthroughMessage({
         throw new Error(t("task:sessionNotReady"));
       }
       try {
+        assertPlanCommentMigrationReady(panelState);
         const message = await buildPassthroughFinalMessage({
           taskId,
           content,
@@ -340,8 +358,23 @@ export function useSendPassthroughMessage({
         clearPassthroughComposerContext(panelState);
         onSent();
       } catch (error) {
-        console.error("Failed to send passthrough message:", error);
-        toast({ title: t("task:failedToSendMessage"), variant: "error" });
+        const conflict = planCommentAdmissionConflict(error);
+        if (conflict?.snapshot) {
+          storeApi.getState().setTaskPlanComments(taskId, conflict.snapshot);
+        }
+        console.error("Failed to send passthrough message:", sanitizeSessionErrorDetails(error));
+        let title = t("task:failedToSendMessage");
+        if (isMessageSendError(error)) title = t("task:messageNotSent");
+        else if (conflict?.code === "plan_comments_changed") {
+          title = t("task:planCommentsChangedRetry");
+        }
+        toast({
+          title,
+          ...(isMessageSendError(error)
+            ? { description: sanitizeSessionErrorDetails(error, 240) }
+            : {}),
+          variant: "error",
+        });
         throw error;
       }
     },

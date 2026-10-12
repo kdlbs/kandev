@@ -7,6 +7,65 @@ import (
 	"strings"
 )
 
+// WorktreeRecoveryError reports an existing checkout that must be preserved
+// instead of passing through destructive recreation.
+type WorktreeRecoveryError struct {
+	TaskID           string
+	Checkout         string
+	PointerTarget    string
+	ExpectedBacklink string
+	ActualBacklink   string
+	State            string
+	Reason           string
+}
+
+// ManagedCloneRelocationRequiredError identifies a verified dirty worktree
+// that can move only after the user confirms the staged-content limitation.
+type ManagedCloneRelocationRequiredError struct {
+	TaskID string
+}
+
+// RecoveryInspectionContentionError reports that a selected worktree is
+// already being inspected and the caller's bounded wait has expired.
+type RecoveryInspectionContentionError struct{}
+
+func (*RecoveryInspectionContentionError) Error() string {
+	return "workspace recovery inspection is busy"
+}
+
+// IsRecoveryInspectionContentionOnly reports contention that is not joined
+// with another failure. Callers may offer a retry only when contention is the
+// complete error outcome.
+func IsRecoveryInspectionContentionOnly(err error) bool {
+	for err != nil {
+		if _, ok := err.(*RecoveryInspectionContentionError); ok {
+			return true
+		}
+		unwrapped := errors.Unwrap(err)
+		if unwrapped == nil {
+			return false
+		}
+		err = unwrapped
+	}
+	return false
+}
+
+func (e *ManagedCloneRelocationRequiredError) Error() string {
+	return "managed repository worktree needs an explicit file-preserving recovery"
+}
+
+func managedCloneRelocationRequiredError(taskID string) error {
+	return &ManagedCloneRelocationRequiredError{TaskID: taskID}
+}
+
+func (e *WorktreeRecoveryError) Error() string {
+	return fmt.Sprintf("%s: task %q checkout %q: %s", ErrWorktreeCorrupted, e.TaskID, e.Checkout, e.Reason)
+}
+
+func (e *WorktreeRecoveryError) Unwrap() error {
+	return ErrWorktreeCorrupted
+}
+
 var (
 	// ErrWorktreeExists is returned when attempting to create a worktree that already exists.
 	ErrWorktreeExists = errors.New("worktree already exists for task")
@@ -57,6 +116,10 @@ var (
 	// ErrNonFastForward is returned when a fetch/pull is rejected due to non-fast-forward updates.
 	ErrNonFastForward = errors.New("non-fast-forward update rejected")
 
+	// ErrWorkspaceCheckoutFailed is returned when a launch cannot materialize
+	// the requested checkout ref without risking an existing local branch.
+	ErrWorkspaceCheckoutFailed = errors.New("workspace checkout failed")
+
 	// ErrGitCryptFailed is returned when git-crypt unlock fails during worktree creation.
 	ErrGitCryptFailed = errors.New("git-crypt unlock failed")
 
@@ -72,8 +135,8 @@ var (
 	ErrInvalidRepoName = errors.New("repo name has no usable characters after sanitization")
 
 	// ErrBranchUnrecoverable is returned by recreate when the worktree's
-	// branch no longer exists locally (archive deletes it via `git branch
-	// -D`) and could not be fetched from origin either. Callers can treat
+	// branch no longer exists locally, has no exact managed recovery head,
+	// and could not be fetched from origin either. Callers can treat
 	// this as "prior work is gone" and fall back to a fresh worktree.
 	ErrBranchUnrecoverable = errors.New("worktree branch no longer exists locally or on origin")
 
@@ -93,6 +156,11 @@ var (
 	// the just-created physical worktree instead of admitting it after
 	// cleanup inventory was captured.
 	ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
+
+	// ErrManagedCloneRelocationAuthorizationStale means the error stamp that
+	// authorized a dirty clone relocation no longer identifies the current
+	// session failure.
+	ErrManagedCloneRelocationAuthorizationStale = errors.New("managed-clone relocation authorization is stale")
 
 	// ErrReuseWorktreeUnavailable is returned when an attach-only launch cannot
 	// find a valid canonical worktree. Callers must surface this as a workspace

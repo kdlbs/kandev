@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
 }));
 const PAGER_URL = "json://pager";
 const CLARIFICATION_EVENT = "session.clarification_requested";
+const SAVED_EVENT = "task.completed";
+const DRAFT_NAME = "Draft name";
 const SEMANTIC_NOTIFICATION_EVENTS = [CLARIFICATION_EVENT, "session.turn_finished"];
 
 vi.mock("@/lib/api", () => ({
@@ -39,21 +41,29 @@ const savedProvider: NotificationProvider = {
   type: "apprise",
   config: { urls: ["json://saved"] },
   enabled: true,
-  events: ["task.completed"],
+  events: [SAVED_EVENT],
   created_at: "",
   updated_at: "",
 };
+const localProvider: NotificationProvider = {
+  ...savedProvider,
+  id: "provider-local",
+  name: "Local provider",
+  type: "local",
+  config: {},
+};
 
 let notificationProviders = [savedProvider];
-let notificationEvents = ["task.completed"];
+let notificationEvents = [SAVED_EVENT];
 let notificationProvidersLoaded = true;
+let notificationAppriseAvailable = true;
 const originalNotification = globalThis.Notification;
 
 vi.mock("@/hooks/domains/settings/use-notification-providers", () => ({
   useNotificationProviders: () => ({
     providers: notificationProviders,
     events: notificationEvents,
-    appriseAvailable: true,
+    appriseAvailable: notificationAppriseAvailable,
     loaded: notificationProvidersLoaded,
   }),
 }));
@@ -90,8 +100,9 @@ const createdProvider: NotificationProvider = {
 beforeEach(() => {
   vi.clearAllMocks();
   notificationProviders = [savedProvider];
-  notificationEvents = ["task.completed"];
+  notificationEvents = [SAVED_EVENT];
   notificationProvidersLoaded = true;
+  notificationAppriseAvailable = true;
   mocks.nativeAvailable.mockReturnValue(true);
   mocks.createNotificationProvider.mockResolvedValue(createdProvider);
 });
@@ -152,19 +163,19 @@ describe("notification provider draft hydration", () => {
 
   it("does not replace an edited draft when providers refresh", () => {
     const { result, rerender } = renderHook(useHarness);
-    act(() => result.current.actions.handleAppriseNameEdit(savedProvider.id, "Draft name"));
+    act(() => result.current.actions.handleAppriseNameEdit(savedProvider.id, DRAFT_NAME));
 
     const refreshedProvider = { ...savedProvider, name: "Server refresh" };
     notificationProviders = [refreshedProvider];
     rerender();
 
-    expect(result.current.state.providers[0]?.name).toBe("Draft name");
+    expect(result.current.state.providers[0]?.name).toBe(DRAFT_NAME);
     expect(result.current.state.baselineProviders[0]?.name).toBe(savedProvider.name);
   });
 
   it("hydrates a deferred provider refresh after discarding the draft", () => {
     const { result, rerender } = renderHook(useHarness);
-    act(() => result.current.actions.handleAppriseNameEdit(savedProvider.id, "Draft name"));
+    act(() => result.current.actions.handleAppriseNameEdit(savedProvider.id, DRAFT_NAME));
     const refreshedProvider = { ...savedProvider, name: "Server refresh" };
     notificationProviders = [refreshedProvider];
     rerender();
@@ -173,6 +184,37 @@ describe("notification provider draft hydration", () => {
 
     expect(result.current.state.providers).toEqual([refreshedProvider]);
     expect(result.current.state.baselineProviders).toEqual([refreshedProvider]);
+  });
+
+  it("updates availability without replacing dirty drafts or pending removals", () => {
+    notificationProviders = [savedProvider, localProvider];
+    const { result, rerender } = renderHook(useHarness);
+
+    act(() => {
+      result.current.actions.handleAppriseNameEdit(savedProvider.id, DRAFT_NAME);
+      result.current.actions.handleAppriseEdit(savedProvider.id, PAGER_URL);
+      result.current.actions.handleToggleEvent(savedProvider, CLARIFICATION_EVENT);
+      result.current.actions.handleDeleteProvider(localProvider.id);
+      result.current.actions.openAppriseForm("create");
+      result.current.state.setAppriseName("New provider");
+      result.current.state.setAppriseUrls("json://new");
+    });
+
+    notificationAppriseAvailable = false;
+    rerender();
+
+    expect(result.current.state.appriseAvailable).toBe(false);
+    expect(result.current.state.providers).toEqual([
+      expect.objectContaining({
+        id: savedProvider.id,
+        name: DRAFT_NAME,
+        config: { urls: [PAGER_URL] },
+        events: [SAVED_EVENT, CLARIFICATION_EVENT],
+      }),
+    ]);
+    expect(result.current.state.pendingDeletes).toEqual(new Set([localProvider.id]));
+    expect(result.current.state.appriseName).toBe("New provider");
+    expect(result.current.state.appriseUrls).toBe("json://new");
   });
 });
 
@@ -245,6 +287,38 @@ describe("notification provider draft saving", () => {
 
     expect(result.current.state.providers).toEqual([savedProvider]);
     expect(result.current.isDirty).toBe(false);
+  });
+
+  it("does not overwrite a rescan that completes during a provider save", async () => {
+    let resolveUpdate: (provider: NotificationProvider) => void = () => undefined;
+    const updatePromise = new Promise<NotificationProvider>((resolve) => {
+      resolveUpdate = resolve;
+    });
+    mocks.updateNotificationProvider.mockReturnValueOnce(updatePromise);
+    const { result, rerender } = renderHook(useHarness);
+
+    act(() => result.current.actions.handleAppriseNameEdit(savedProvider.id, DRAFT_NAME));
+    let savePromise: Promise<unknown>;
+    act(() => {
+      savePromise = result.current.saveRequest.run();
+    });
+    await waitFor(() => expect(mocks.updateNotificationProvider).toHaveBeenCalledOnce());
+
+    notificationAppriseAvailable = false;
+    rerender();
+
+    await act(async () => {
+      resolveUpdate({ ...savedProvider, name: DRAFT_NAME });
+      await savePromise;
+    });
+
+    const lastSnapshot = mocks.setNotificationProviders.mock.lastCall?.[0];
+    expect(lastSnapshot).toEqual({
+      items: [{ ...savedProvider, name: DRAFT_NAME }],
+      events: [SAVED_EVENT],
+      loaded: true,
+      loading: false,
+    });
   });
 });
 

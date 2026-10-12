@@ -8,6 +8,11 @@ status: complete
 
 ## Overview
 
+Follow-up: [Task removal navigation](../task-removal-navigation/plan.md) replaces
+the visible wait on the outgoing task, strengthens navigation ownership, and
+extends protection to deletion. This completed package and its recorded test
+counts describe the earlier implementation; they are not new verification evidence.
+
 Make the shared archive switch logic aware of the full task tree selected by a
 cascade archive. The client will select only a live task outside that tree. If
 none exists, it will wait for archive success before it opens Home. Focused unit

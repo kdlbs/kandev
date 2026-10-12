@@ -87,7 +87,7 @@ function WorkspaceSettingsSwitcher({
             // Same control, sized for a page heading rather than a sidebar
             // row, at a fixed 240px: long names truncate, short ones leave
             // the chevron anchored instead of the header jumping per page.
-            className="h-9 w-60 flex-none gap-2 px-3 text-base font-semibold"
+            className="w-60 flex-none gap-2 px-3 text-base font-semibold"
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-72">
@@ -132,8 +132,9 @@ export function WorkspaceSettingsShell({
   const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const canvasesEnabled = useFeature("canvases");
+  const coordinatorEnabled = useFeature("coordinator");
   const workspace = workspaces.find((item) => item.id === workspaceId);
-  const tabs = getWorkspaceSettingsTabs(canvasesEnabled);
+  const tabs = getWorkspaceSettingsTabs(canvasesEnabled, coordinatorEnabled);
   const tabsRef = useRef<HTMLElement | null>(null);
 
   // Each tab is its own route, so navigating remounts this shell and the

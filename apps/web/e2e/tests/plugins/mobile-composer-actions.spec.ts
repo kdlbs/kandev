@@ -14,8 +14,10 @@ import { expect, test } from "../../fixtures/test-base";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { SessionPage } from "../../pages/session-page";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { expectTaskDescription } from "../../pages/task-description-editor";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Locator, Page } from "@playwright/test";
+import { selectAgentIfNeeded } from "../chat/quick-chat-helpers";
 
 const DICTATED = "DICTATED";
 
@@ -151,7 +153,7 @@ test.describe("Mobile plugin composer actions", () => {
     await caretBackFromEnd(description, " tail".length);
 
     await composerAction.getByTestId("e2e-composer-insert").tap();
-    await expect(description).toHaveValue(`head ${DICTATED} tail`);
+    await expectTaskDescription(description, `head ${DICTATED} tail`);
 
     // The dialog still owns its own scrolling and the page does not pan.
     await expectNoHorizontalOverflow(testPage);
@@ -198,7 +200,7 @@ test.describe("Mobile plugin composer actions", () => {
     await caretBackFromEnd(description, " tail".length);
 
     await composerAction.getByTestId("e2e-composer-insert").tap();
-    await expect(description).toHaveValue(`head ${DICTATED} tail`);
+    await expectTaskDescription(description, `head ${DICTATED} tail`);
 
     await composerAction.getByTestId("e2e-composer-submit").tap();
     await expect(composerAction).toHaveAttribute("data-status", "submitted");
@@ -208,6 +210,50 @@ test.describe("Mobile plugin composer actions", () => {
         timeout: 60_000,
       })
       .toBeGreaterThan(before);
+    await expectNoHorizontalOverflow(testPage);
+  });
+
+  test("Quick Chat: touch action inserts and sends the opening prompt", async ({
+    testPage,
+    apiClient,
+  }) => {
+    await installFixturePlugin(testPage);
+    await testPage.goto("/");
+    await testPage.waitForLoadState("networkidle");
+    await testPage.getByTestId("app-nav-trigger").tap();
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
+
+    const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible();
+    await selectAgentIfNeeded(dialog, testPage);
+    const editor = dialog.getByTestId("task-description-input");
+    const composerAction = action(dialog);
+    await expect(composerAction).toHaveAttribute("data-surface", "quick-chat");
+    await expect(composerAction).toHaveAttribute("data-presentation", "mobile");
+    await expectTouchReachable(testPage, composerAction.getByTestId("e2e-composer-insert"));
+
+    await editor.fill("head tail");
+    await caretBackFromEnd(editor, " tail".length);
+    await composerAction.getByTestId("e2e-composer-insert").tap();
+    await expect(editor).toHaveText(`head ${DICTATED} tail`);
+
+    const startResponse = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/quick-chat") &&
+        response.request().method() === "POST" &&
+        response.ok(),
+    );
+    await composerAction.getByTestId("e2e-composer-submit").tap();
+    const started = (await (await startResponse).json()) as { session_id: string };
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(started.session_id);
+        return messages.filter(
+          (message) =>
+            message.author_type === "user" && message.content === `head ${DICTATED} tail`,
+        ).length;
+      })
+      .toBe(1);
     await expectNoHorizontalOverflow(testPage);
   });
 });

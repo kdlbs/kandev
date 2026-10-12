@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -26,6 +27,12 @@ import (
 // set.
 func TestPostgresQueueRun_DedupesOnIdempotencyIndexRace(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	// agent_profiles must exist before the office repo's schema init, since
+	// resolveCausation's workspace lookup (AC-OFFICE-RUN-CAUSATION-001.20)
+	// queries it during QueueRun below.
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
 	// runs is created by the office repo's own schema init, but that init
 	// references the tasks table, so the task repository's schema must
 	// run first — mirroring production boot order (see failure_postgres_test.go).
@@ -36,6 +43,7 @@ func TestPostgresQueueRun_DedupesOnIdempotencyIndexRace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init office repo: %v", err)
 	}
+	seedAgentProfile(t, db, "a1")
 
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	eb := bus.NewMemoryEventBus(log)
@@ -89,5 +97,72 @@ func TestPostgresQueueRun_DedupesOnIdempotencyIndexRace(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("runs with idempotency_key %q = %d, want 1", key, count)
+	}
+}
+
+// TestPostgresQueueRun_DedupesOnWakeWaveKeyIndexRace is the PostgreSQL twin
+// of TestQueueRun_DedupesOnWakeWaveKeyIndexRace. idx_run_wake_wave has no
+// windowed pre-check the way idempotency_key does (AC-OFFICE-WAKE-WAVE-
+// IDENTITY-002.6 requires it stay unbounded), so unlike the idempotency
+// race above this needs no artificial aging step: the second insert always
+// reaches the unique index. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresQueueRun_DedupesOnWakeWaveKeyIndexRace(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	// agent_profiles must exist before the office repo's schema init, since
+	// resolveCausation's workspace lookup (AC-OFFICE-RUN-CAUSATION-001.20)
+	// queries it during QueueRun below.
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
+	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init task repo: %v", err)
+	}
+	officeRepo, err := officesqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init office repo: %v", err)
+	}
+	seedAgentProfile(t, db, "a1")
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	eb := bus.NewMemoryEventBus(log)
+	svc := runsservice.New(officeRepo.RunsRepository(), eb, log, nil)
+	repo := officeRepo.RunsRepository()
+	ctx := context.Background()
+
+	const waveKey = "task_children_completed:parent-1:deadbeef"
+
+	first, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_children_completed",
+		WakeWaveKey:    waveKey,
+		WakeWaveString: "parent-1|child-1,child-2",
+		Payload:        map[string]any{"agent_profile_id": "a1", "task_id": "t1"},
+	})
+	if err != nil {
+		t.Fatalf("queue first run: %v", err)
+	}
+	if first != runsservice.QueueOutcomeQueued {
+		t.Fatalf("first outcome = %q, want %q", first, runsservice.QueueOutcomeQueued)
+	}
+
+	second, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_children_completed",
+		WakeWaveKey:    waveKey,
+		WakeWaveString: "parent-1|child-1,child-2",
+		Payload:        map[string]any{"agent_profile_id": "a1", "task_id": "t1"},
+	})
+	if err != nil {
+		t.Fatalf("queue racing run: %v", err)
+	}
+	if second != runsservice.QueueOutcomeDeduped {
+		t.Fatalf("racing outcome = %q, want %q", second, runsservice.QueueOutcomeDeduped)
+	}
+
+	var count int
+	if err := repo.Reader().GetContext(ctx, &count,
+		repo.Reader().Rebind(`SELECT COUNT(*) FROM runs WHERE wake_wave_key = ?`), waveKey); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("runs with wake_wave_key %q = %d, want 1", waveKey, count)
 	}
 }

@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -19,6 +23,72 @@ type policyRecordingWorktreeCleanup struct {
 	worktrees       []*worktree.Worktree
 	defaultCalls    int
 	preservingCalls int
+}
+
+type omissionCheckingWorktreeCleanup struct {
+	*worktree.Manager
+	repo          *sqliterepo.Repository
+	taskID        string
+	trigger       models.TaskResourceCleanupTrigger
+	expectedPaths []string
+	evidenceSeen  bool
+}
+
+func (c *omissionCheckingWorktreeCleanup) assertPersistedOmissions() error {
+	var encoded string
+	err := c.repo.DB().QueryRowContext(context.Background(), `
+		SELECT resource_snapshot FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger = ?
+		ORDER BY created_at DESC LIMIT 1
+	`, c.taskID, c.trigger).Scan(&encoded)
+	if err != nil {
+		return fmt.Errorf("load cleanup snapshot before worktree removal: %w", err)
+	}
+	var snapshot taskResourceCleanupSnapshot
+	if err := json.Unmarshal([]byte(encoded), &snapshot); err != nil {
+		return fmt.Errorf("decode cleanup snapshot before worktree removal: %w", err)
+	}
+	if !snapshot.ArchiveSourceManifestCaptured || len(snapshot.ArchiveSourceManifest) != 1 {
+		return errors.New("source manifest was not persisted before worktree removal")
+	}
+	found := make(map[string]bool, len(c.expectedPaths))
+	for _, entry := range snapshot.ArchiveSourceManifest[0].Entries {
+		entryPath := strings.TrimSuffix(filepath.ToSlash(entry.Path), "/")
+		for _, expected := range c.expectedPaths {
+			if entryPath == expected {
+				if entry.ContentOmission != "ignored_directory" || entry.ContentSHA256 != "" {
+					return fmt.Errorf("directory %q omission evidence = %+v", expected, entry)
+				}
+				found[expected] = true
+			}
+			if strings.HasPrefix(entryPath, expected+"/") {
+				return fmt.Errorf("manifest opened descendant %q of omitted directory %q", entryPath, expected)
+			}
+		}
+	}
+	for _, expected := range c.expectedPaths {
+		if !found[expected] {
+			return fmt.Errorf("cleanup snapshot omitted evidence for ignored directory %q", expected)
+		}
+	}
+	c.evidenceSeen = true
+	return nil
+}
+
+func (c *omissionCheckingWorktreeCleanup) CleanupWorktrees(ctx context.Context, worktrees []*worktree.Worktree) error {
+	if err := c.assertPersistedOmissions(); err != nil {
+		return err
+	}
+	return c.Manager.CleanupWorktrees(ctx, worktrees)
+}
+
+func (c *omissionCheckingWorktreeCleanup) CleanupWorktreesPreservingBranches(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) error {
+	if err := c.assertPersistedOmissions(); err != nil {
+		return err
+	}
+	return c.Manager.CleanupWorktreesPreservingBranches(ctx, worktrees)
 }
 
 func (*policyRecordingWorktreeCleanup) OnTaskDeleted(context.Context, string) error {
@@ -39,7 +109,7 @@ func (c *policyRecordingWorktreeCleanup) CleanupWorktreesPreservingBranches(cont
 	return nil
 }
 
-func (*archiveManagerEnvironmentDestroyer) DestroyContainer(context.Context, string) error {
+func (*archiveManagerEnvironmentDestroyer) DestroyContainer(context.Context, *models.TaskEnvironment) error {
 	return nil
 }
 
@@ -55,7 +125,7 @@ func (*archiveManagerEnvironmentDestroyer) PushEnvironmentBranch(context.Context
 	return nil
 }
 
-func (*archiveManagerEnvironmentDestroyer) GetContainerLiveStatus(context.Context, string) (*ContainerLiveStatus, error) {
+func (*archiveManagerEnvironmentDestroyer) GetContainerLiveStatus(context.Context, *models.TaskEnvironment) (*ContainerLiveStatus, error) {
 	return nil, nil
 }
 
@@ -108,6 +178,12 @@ func TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity(t *testing.T) {
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("UpdateTaskSession: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "README.md"), []byte("changed before archive\n"), 0o644); err != nil {
+		t.Fatalf("write tracked change: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "untracked.txt"), []byte("untracked before archive\n"), 0o644); err != nil {
+		t.Fatalf("write untracked change: %v", err)
+	}
 
 	svc.SetWorktreeCleanup(mgr)
 	svc.SetEnvironmentDestroyer(&archiveManagerEnvironmentDestroyer{mgr: mgr})
@@ -128,6 +204,55 @@ func TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity(t *testing.T) {
 	if cleanupState != models.TaskResourceCleanupStateSucceeded {
 		t.Fatalf("cleanup state = %q, want %q", cleanupState, models.TaskResourceCleanupStateSucceeded)
 	}
+	var encodedSnapshot string
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT resource_snapshot FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger = 'archive'
+		ORDER BY created_at DESC LIMIT 1
+	`, taskID).Scan(&encodedSnapshot); err != nil {
+		t.Fatalf("load archive cleanup snapshot: %v", err)
+	}
+	var snapshot struct {
+		ArchiveSourceManifest []struct {
+			TaskID           string `json:"task_id"`
+			CleanupJobID     string `json:"cleanup_job_id"`
+			WorktreeID       string `json:"worktree_id"`
+			RepositoryID     string `json:"repository_id"`
+			HeadOID          string `json:"head_oid"`
+			IndexStateSHA256 string `json:"index_state_sha256"`
+			Entries          []struct {
+				Path          string `json:"path"`
+				ContentSHA256 string `json:"content_sha256"`
+			} `json:"entries"`
+		} `json:"archive_source_manifest"`
+	}
+	if err := json.Unmarshal([]byte(encodedSnapshot), &snapshot); err != nil {
+		t.Fatalf("decode archive source manifest: %v", err)
+	}
+	if len(snapshot.ArchiveSourceManifest) != 1 {
+		t.Fatalf("archive source manifest = %#v, want one worktree", snapshot.ArchiveSourceManifest)
+	}
+	manifest := snapshot.ArchiveSourceManifest[0]
+	if manifest.TaskID != taskID || manifest.CleanupJobID == "" || manifest.WorktreeID != wt.ID || manifest.RepositoryID != repositoryID {
+		t.Fatalf("archive source manifest identity = %+v, want task/job/worktree/repository binding", manifest)
+	}
+	if manifest.HeadOID == "" || manifest.IndexStateSHA256 == "" {
+		t.Fatalf("archive source manifest lacks git identities: %+v", manifest)
+	}
+	entries := make(map[string]string, len(manifest.Entries))
+	for _, entry := range manifest.Entries {
+		entries[entry.Path] = entry.ContentSHA256
+	}
+	if entries["README.md"] == "" || entries["untracked.txt"] == "" {
+		t.Fatalf("archive source manifest entries = %#v, want tracked and untracked content identities", entries)
+	}
+	retrieved, err := svc.GetArchiveSourceManifest(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetArchiveSourceManifest: %v", err)
+	}
+	if len(retrieved) != 1 || retrieved[0].CleanupJobID != manifest.CleanupJobID || retrieved[0].WorktreeID != wt.ID {
+		t.Fatalf("retrieved archive source manifest = %#v, want persisted task-scoped evidence", retrieved)
+	}
 
 	env, err := repo.GetTaskEnvironment(ctx, environmentID)
 	if err != nil {
@@ -141,8 +266,129 @@ func TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity(t *testing.T) {
 		gotRepo.WorktreeBranch != wt.Branch || gotRepo.BranchSlug != wt.BranchSlug {
 		t.Fatalf("repository identity after archive = %+v, want worktree %+v", gotRepo, wt)
 	}
-	if gotRepo.DeletedAt == nil {
-		t.Fatal("repository row remains active after physical archive cleanup")
+	// REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-001 (AC-.1, AC-.3): a dirty checkout is
+	// preserved on disk with its active worktree record, not force-removed,
+	// even though its source manifest was captured as evidence above.
+	if gotRepo.DeletedAt != nil {
+		t.Fatal("repository row was deleted for a dirty checkout archive should have preserved")
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "README.md")); err != nil {
+		t.Fatalf("tracked change on disk after archive: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "untracked.txt")); err != nil {
+		t.Fatalf("untracked file on disk after archive: %v", err)
+	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.1
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.7
+func TestCleanupIgnoredDependenciesLifecycle(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		trigger models.TaskResourceCleanupTrigger
+	}{
+		{name: "archive", trigger: models.TaskResourceCleanupTriggerArchive},
+		{name: "delete", trigger: models.TaskResourceCleanupTriggerDelete},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			svc, _, repo := createTestService(t)
+			taskID := "task-ignored-dependencies-" + test.name
+			sessionID := "session-ignored-dependencies-" + test.name
+			environmentID := "env-ignored-dependencies-" + test.name
+			repositoryID := "repo-ignored-dependencies-" + test.name
+			seedCleanupTaskAndSession(t, repo, taskID, sessionID)
+
+			sourcePath := initSimpleGitRepo(t)
+			if err := os.WriteFile(filepath.Join(sourcePath, ".gitignore"), []byte("node_modules/\ndist/\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGitTestCmd(t, sourcePath, "add", ".gitignore")
+			runGitTestCmd(t, sourcePath, "commit", "-m", "ignore generated directories")
+			if err := repo.CreateRepository(ctx, &models.Repository{
+				ID: repositoryID, WorkspaceID: "ws-" + taskID, Name: repositoryID,
+				SourceType: "local", LocalPath: sourcePath,
+			}); err != nil {
+				t.Fatalf("CreateRepository: %v", err)
+			}
+			mgr := newCleanupTestWorktreeManager(t, repo)
+			wt, err := mgr.Create(ctx, worktree.CreateRequest{
+				TaskID: taskID, SessionID: sessionID, TaskTitle: "Ignored dependencies",
+				RepositoryID: repositoryID, RepositoryPath: sourcePath,
+				BaseBranch: "main", TaskDirName: taskID, RepoName: repositoryID,
+			})
+			if err != nil {
+				t.Fatalf("Create worktree: %v", err)
+			}
+			if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+				ID: environmentID, TaskID: taskID, ExecutorType: "worktree",
+				WorkspacePath: filepath.Dir(wt.Path), TaskDirName: taskID, Status: models.TaskEnvironmentStatusReady,
+				Repos: []*models.TaskEnvironmentRepo{{
+					ID: "env-repo-" + test.name, RepositoryID: repositoryID,
+					WorktreeID: wt.ID, WorktreePath: wt.Path, WorktreeBranch: wt.Branch, Status: "active",
+				}},
+			}); err != nil {
+				t.Fatalf("CreateTaskEnvironment: %v", err)
+			}
+			session, err := repo.GetTaskSession(ctx, sessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			session.TaskEnvironmentID = environmentID
+			if err := repo.UpdateTaskSession(ctx, session); err != nil {
+				t.Fatalf("UpdateTaskSession: %v", err)
+			}
+			for path, contents := range map[string]string{
+				"node_modules/pkg/index.js": "installed dependency",
+				"dist/app.js":               "generated build output",
+			} {
+				fullPath := filepath.Join(wt.Path, filepath.FromSlash(path))
+				if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(fullPath, []byte(contents), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if status := strings.TrimSpace(string(runGitTestCmd(t, wt.Path, "status", "--porcelain"))); status != "" {
+				t.Fatalf("ignored fixtures changed Git-visible status: %q", status)
+			}
+
+			cleanup := &omissionCheckingWorktreeCleanup{
+				Manager: mgr, repo: repo, taskID: taskID, trigger: test.trigger,
+				expectedPaths: []string{"node_modules", "dist"},
+			}
+			svc.SetWorktreeCleanup(cleanup)
+			svc.SetEnvironmentDestroyer(&archiveManagerEnvironmentDestroyer{mgr: mgr})
+			svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+			switch test.trigger {
+			case models.TaskResourceCleanupTriggerArchive:
+				err = svc.ArchiveTask(ctx, taskID)
+			case models.TaskResourceCleanupTriggerDelete:
+				err = svc.DeleteTask(ctx, taskID)
+			}
+			if err != nil {
+				t.Fatalf("%s task: %v", test.name, err)
+			}
+			waitForCleanupDone(t, svc)
+			job := latestCleanupJob(t, repo, taskID, test.trigger)
+			if job.State != models.TaskResourceCleanupStateSucceeded {
+				t.Fatalf("cleanup state = %q, want succeeded; error=%s", job.State, job.LastError)
+			}
+			if !cleanup.evidenceSeen {
+				t.Fatal("worktree cleanup did not verify persisted omission evidence before removal")
+			}
+			if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+				t.Fatalf("worktree remains after completed %s cleanup: %v", test.name, err)
+			}
+			manifests, err := svc.GetTaskSourceManifest(ctx, taskID)
+			if err != nil {
+				t.Fatalf("GetTaskSourceManifest after %s: %v", test.name, err)
+			}
+			if len(manifests) != 1 || manifests[0].WorktreeID != wt.ID {
+				t.Fatalf("retained %s manifest = %+v, want worktree %s", test.name, manifests, wt.ID)
+			}
+		})
 	}
 }
 
@@ -151,6 +397,7 @@ func TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity(t *testing.T) {
 func TestArchiveUnarchiveResumeReactivatesLocalOnlyBranch(t *testing.T) {
 	ctx := context.Background()
 	svc, _, repo := createTestService(t)
+	svc.StopTaskResourceCleanupWorker()
 	const (
 		taskID        = "task-archive-resume"
 		sessionID     = "session-archive-resume"
@@ -205,6 +452,10 @@ func TestArchiveUnarchiveResumeReactivatesLocalOnlyBranch(t *testing.T) {
 	if err := svc.ArchiveTask(ctx, taskID); err != nil {
 		t.Fatalf("ArchiveTask: %v", err)
 	}
+	archiveJob := latestCleanupJob(t, repo, taskID, models.TaskResourceCleanupTriggerArchive)
+	if err := svc.processTaskResourceCleanupJob(ctx, archiveJob.ID); err != nil {
+		t.Fatalf("process archive cleanup: %v", err)
+	}
 	waitForCleanupDone(t, svc)
 
 	if got := strings.TrimSpace(string(runGitTestCmd(t, sourcePath, "branch", "--list", wt.Branch))); got == "" {
@@ -231,6 +482,119 @@ func TestArchiveUnarchiveResumeReactivatesLocalOnlyBranch(t *testing.T) {
 	}
 	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != wt.ID || env.Repos[0].DeletedAt != nil {
 		t.Fatalf("environment repository after resume = %+v, want reactivated worktree %q", env.Repos, wt.ID)
+	}
+}
+
+func TestArchiveCleanupSnapshotPreservesBranchMetadataAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	svc, _, repo := createTestService(t)
+	svc.StopTaskResourceCleanupWorker()
+	const (
+		taskID        = "task-archive-metadata-restart"
+		sessionID     = "session-archive-metadata-restart"
+		repositoryID  = "repo-archive-metadata-restart"
+		environmentID = "env-archive-metadata-restart"
+	)
+	seedCleanupTaskAndSession(t, repo, taskID, sessionID)
+
+	sourcePath := initSimpleGitRepo(t)
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: repositoryID, WorkspaceID: "ws-" + taskID, Name: repositoryID,
+		SourceType: "local", LocalPath: sourcePath, DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	manager := newCleanupTestWorktreeManager(t, repo)
+	manager.SetRepositoryProvider(worktree.NewRepositoryAdapter(repo))
+	wt, err := manager.Create(ctx, worktree.CreateRequest{
+		TaskID: taskID, SessionID: sessionID, TaskTitle: "Archive metadata restart",
+		RepositoryID: repositoryID, RepositoryPath: sourcePath,
+		BaseBranch: "main", IntegrationRef: "main", TaskDirName: taskID, RepoName: repositoryID,
+	})
+	if err != nil {
+		t.Fatalf("Create worktree: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: taskID, ExecutorType: "worktree",
+		WorkspacePath: filepath.Dir(wt.Path), Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-" + taskID, RepositoryID: repositoryID,
+			BranchSlug: wt.BranchSlug, WorktreeID: wt.ID, WorktreePath: wt.Path,
+			WorktreeBranch: wt.Branch, WorktreeBranchOwner: wt.BranchOwner,
+			WorktreeIntegrationRef: wt.IntegrationRef, Status: "active",
+		}},
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.TaskEnvironmentID = environmentID
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("UpdateTaskSession: %v", err)
+	}
+
+	runGitTestCmd(t, wt.Path, "commit", "--allow-empty", "-m", "archive before integration")
+	wantHead := strings.TrimSpace(string(runGitTestCmd(t, wt.Path, "rev-parse", "HEAD")))
+	svc.SetWorktreeCleanup(manager)
+	if err := svc.ArchiveTask(ctx, taskID); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+
+	job := latestCleanupJob(t, repo, taskID, models.TaskResourceCleanupTriggerArchive)
+	var snapshot struct {
+		WorktreeBranchMetadata map[string]struct {
+			BranchOwner    string `json:"branch_owner,omitempty"`
+			IntegrationRef string `json:"integration_ref,omitempty"`
+		} `json:"worktree_branch_metadata,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(job.ResourceSnapshot), &snapshot); err != nil {
+		t.Fatalf("decode archive snapshot: %v", err)
+	}
+	metadata, ok := snapshot.WorktreeBranchMetadata[wt.ID]
+	if !ok {
+		t.Fatalf("archive snapshot has no branch metadata for %s: %#v", wt.ID, snapshot.WorktreeBranchMetadata)
+	}
+	if metadata.BranchOwner != worktree.BranchOwnerManaged || metadata.IntegrationRef != "main" {
+		t.Fatalf("archive snapshot metadata = %+v, want managed/main", metadata)
+	}
+
+	// Process the durable job with a fresh manager. This models a restart and
+	// proves that the JSON boundary, not the old manager cache, supplies the
+	// cleanup policy fields.
+	restartedManager := newCleanupTestWorktreeManager(t, repo)
+	restartedManager.SetRepositoryProvider(worktree.NewRepositoryAdapter(repo))
+	svc.SetWorktreeCleanup(restartedManager)
+	svc.SetEnvironmentDestroyer(&archiveManagerEnvironmentDestroyer{mgr: restartedManager})
+	if err := svc.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
+		t.Fatalf("process archive cleanup: %v", err)
+	}
+	if got := strings.TrimSpace(string(runGitTestCmd(t, sourcePath, "rev-parse", wt.Branch))); got != wantHead {
+		t.Fatalf("archive retained branch head = %q, want %q", got, wantHead)
+	}
+
+	// The archive happened before integration. Later maintenance must still
+	// find the durable row and compact the now-integrated branch.
+	runGitTestCmd(t, sourcePath, "update-ref", "refs/heads/main", wantHead)
+	if _, err := restartedManager.MaintainArchivedBranches(ctx, 1); err != nil {
+		t.Fatalf("maintain archived branches: %v", err)
+	}
+	if got := strings.TrimSpace(string(runGitTestCmd(t, sourcePath, "branch", "--list", wt.Branch))); got != "" {
+		t.Fatalf("integrated archived branch remains after maintenance: %q", got)
+	}
+	persisted, err := restartedManager.GetByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load archived worktree: %v", err)
+	}
+	if persisted.BranchOwner != worktree.BranchOwnerManaged || persisted.IntegrationRef != "main" {
+		t.Fatalf("persisted branch metadata = owner %q integration %q, want managed/main",
+			persisted.BranchOwner, persisted.IntegrationRef)
+	}
+	if persisted.RecoveryHeadSHA != wantHead || persisted.BranchCompactedAt == nil {
+		t.Fatalf("persisted recovery state = head %q compacted %v, want %q and marker",
+			persisted.RecoveryHeadSHA, persisted.BranchCompactedAt, wantHead)
 	}
 }
 

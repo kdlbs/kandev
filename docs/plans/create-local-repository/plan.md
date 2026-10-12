@@ -9,6 +9,10 @@ status: implemented
 
 ## Overview
 
+The [repository creation availability follow-up](../repository-creation-availability/plan.md)
+removes the single-row toolbar restriction and preserves the executor for multi-row creation.
+The results below record the original implementation.
+
 The original implementation owns directory creation, Git initialization, and workspace repository
 persistence, then merges the returned repository into the task-create selector on desktop and
 mobile. This follow-up changes the initialization contract so the new repository has one empty root

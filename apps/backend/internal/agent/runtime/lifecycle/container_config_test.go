@@ -28,7 +28,6 @@ func newCMTest(t *testing.T) *ContainerManager {
 	}
 	return &ContainerManager{
 		logger:         log,
-		networkName:    "kandev",
 		commandBuilder: NewCommandBuilder(),
 	}
 }
@@ -176,6 +175,33 @@ func TestBuildContainerConfigPublishesManagedGitCredentialHelperBeforeAgentctlSt
 	want := "KANDEV_GITHUB_CREDENTIAL_HELPER_PATH=/usr/local/bin/agentctl"
 	if !containsExactString(got.Env, want) {
 		t.Fatalf("container env missing pre-start credential helper %q: %#v", want, got.Env)
+	}
+}
+
+func TestBuildContainerConfigScrubsForkPRCredentialsBeforeAgentctl(t *testing.T) {
+	cm := newCMTest(t)
+	cfg := ContainerConfig{
+		AgentConfig:   newConfigStubAgent(),
+		InstanceID:    "0123456789abcdef",
+		TaskID:        "task-1",
+		Credentials:   map[string]string{"GITHUB_TOKEN": "secret"},
+		Metadata:      map[string]interface{}{metadataCheckoutRef: "refs/pull/3527/head"},
+		PrepareScript: "echo prepare",
+	}
+
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+	script := got.Entrypoint[2]
+	if !strings.Contains(script, "${"+selectedCheckoutMarker+":-}") {
+		t.Fatalf("bootstrap marker check missing: %s", script)
+	}
+	if !strings.Contains(script, selectedCheckoutCredentialScrubCommands) {
+		t.Fatalf("bootstrap credential scrub missing: %s", script)
+	}
+	if !strings.Contains(script, "rm -f /run/kandev/auth.env") {
+		t.Fatalf("bootstrap must remove auth material: %s", script)
 	}
 }
 
@@ -389,6 +415,7 @@ func TestBuildContainerConfig_SessionDirIsKandevManagedForEveryAgent(t *testing.
 		{"gemini", agents.NewGemini()},
 		{"auggie", agents.NewAuggie()},
 		{"grok-acp", agents.NewGrokACP()},
+		{"muse-acp", agents.NewMuseACP()},
 	}
 	const kandevHome = "/tmp/kandev-test-home"
 	const instanceID = "0123456789abcdef"
@@ -441,6 +468,49 @@ func TestBuildContainerConfig_SessionDirIsKandevManagedForEveryAgent(t *testing.
 				t.Fatalf("session-dir mount source %q still references {home} placeholder", found.Source)
 			}
 		})
+	}
+}
+
+func TestBuildContainerConfig_MuseMountContainsSeededAuthAndSessionData(t *testing.T) {
+	cm := newCMTest(t)
+	cm.kandevHomeDir = "/tmp/kandev-test-home"
+	const instanceID = "muse-instance"
+	ag := agents.NewMuseACP()
+
+	got, err := cm.buildContainerConfig(ContainerConfig{
+		AgentConfig: ag,
+		InstanceID:  instanceID,
+		TaskID:      "task-1",
+	})
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+
+	root := filepath.Join(cm.kandevHomeDir, "agent-sessions", instanceID)
+	var mount *docker.MountConfig
+	for i := range got.Mounts {
+		if got.Mounts[i].Target == "/root" {
+			mount = &got.Mounts[i]
+			break
+		}
+	}
+	if mount == nil {
+		t.Fatalf("expected Muse executor-home mount at /root, got %+v", got.Mounts)
+	}
+	if mount.Source != root {
+		t.Fatalf("Muse mount source = %q, want isolated executor root %q", mount.Source, root)
+	}
+
+	auth := ag.RemoteAuth()
+	if auth == nil || len(auth.Methods) == 0 {
+		t.Fatal("Muse must declare remote auth files")
+	}
+	seededAuth := filepath.Join(root, auth.Methods[0].TargetRelDir, "auth.json")
+	if !strings.HasPrefix(seededAuth, mount.Source+string(filepath.Separator)) {
+		t.Fatalf("seeded auth path %q is outside Muse mount %q", seededAuth, mount.Source)
+	}
+	if !strings.HasPrefix(filepath.Join(root, ".local", "share", "muse"), mount.Source+string(filepath.Separator)) {
+		t.Fatalf("Muse session path is outside Muse mount %q", mount.Source)
 	}
 }
 

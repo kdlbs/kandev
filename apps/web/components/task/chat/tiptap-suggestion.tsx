@@ -1,13 +1,14 @@
 "use client";
 
 import { PluginKey } from "@tiptap/pm/state";
+import { exitSuggestion } from "@tiptap/suggestion";
 import type {
   SuggestionOptions,
   SuggestionProps,
   SuggestionKeyDownProps,
 } from "@tiptap/suggestion";
 import type { MentionItem } from "@/hooks/use-inline-mention";
-import { formatSlashCommandInsertion, type SlashCommand } from "./slash-command-types";
+import type { SlashCommand } from "./slash-command-types";
 import { formatSlashCommandDisplayLabel } from "./tiptap-slash-command-utils";
 
 import { getFileName } from "@/lib/utils/file-path";
@@ -122,6 +123,7 @@ export function createMentionSuggestion(
             // keypress.
             kd.event.stopPropagation();
             setMenuState(EMPTY_MENTION_STATE);
+            exitSuggestion(kd.view, MentionSuggestionPluginKey);
             return true;
           }
           return onKeyDown(kd.event);
@@ -185,22 +187,30 @@ export function createSlashSuggestion(
       const lq = query.toLowerCase();
       return allCommands
         .filter((cmd) => {
-          const name = cmd.agentCommandName?.toLowerCase();
-          return name?.startsWith(lq) || cmd.label.toLowerCase().includes(lq);
+          const displayName = formatSlashCommandDisplayLabel({ label: cmd.label }).toLowerCase();
+          const rawName = cmd.agentCommandName?.toLowerCase() ?? "";
+          return displayName.includes(lq) || rawName.includes(lq);
         })
         .sort((a, b) => {
-          const an = a.agentCommandName?.toLowerCase();
-          const bn = b.agentCommandName?.toLowerCase();
-          const aPre = an?.startsWith(lq) ?? false;
-          const bPre = bn?.startsWith(lq) ?? false;
-          if (aPre && !bPre) return -1;
-          if (!aPre && bPre) return 1;
+          const aDisplayPrefix = formatSlashCommandDisplayLabel({ label: a.label })
+            .toLowerCase()
+            .startsWith(lq);
+          const bDisplayPrefix = formatSlashCommandDisplayLabel({ label: b.label })
+            .toLowerCase()
+            .startsWith(lq);
+          if (aDisplayPrefix !== bDisplayPrefix) return aDisplayPrefix ? -1 : 1;
+          if (aDisplayPrefix) return 0;
+          const aRawPrefix = a.agentCommandName?.toLowerCase().startsWith(lq) ?? false;
+          const bRawPrefix = b.agentCommandName?.toLowerCase().startsWith(lq) ?? false;
+          if (aRawPrefix && !bRawPrefix) return -1;
+          if (!aRawPrefix && bRawPrefix) return 1;
           return 0;
         });
     },
 
     command: ({ editor, range, props: cmd }) => {
-      const label = formatSlashCommandInsertion(cmd).trim();
+      const label = `/${formatSlashCommandDisplayLabel({ label: cmd.label })}`;
+      const commandName = cmd.agentCommandName ?? formatSlashCommandDisplayLabel({ label });
       editor
         .chain()
         .focus()
@@ -210,7 +220,7 @@ export function createSlashSuggestion(
             attrs: {
               id: cmd.id,
               label,
-              commandName: cmd.agentCommandName ?? formatSlashCommandDisplayLabel({ label }),
+              commandName,
               description: cmd.description,
             },
           },

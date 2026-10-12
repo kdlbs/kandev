@@ -7,12 +7,48 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 type cleanupOrderRecordingScriptHandler struct {
 	cleanupRuns int
+}
+
+func TestReleaseWorktreeReference_PreservesCurrentBranchRecoveryMetadata(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-release-metadata", "session-release-metadata", models.TaskSessionStateCompleted)
+	current := createReferenceCleanupWorktree(t, mgr, "task-release-metadata", "session-release-metadata")
+	compactedAt := time.Now().UTC()
+	current.RecoveryHeadSHA = "current-recovery-head"
+	current.BranchCompactedAt = &compactedAt
+	if err := store.UpdateWorktree(ctx, current); err != nil {
+		t.Fatalf("persist current recovery metadata: %v", err)
+	}
+
+	stale := *current
+	stale.BranchOwner = ""
+	stale.IntegrationRef = ""
+	stale.RecoveryHeadSHA = "stale-recovery-head"
+	stale.BranchCompactedAt = nil
+	if err := mgr.ReleaseWorktreeReference(ctx, &stale); err != nil {
+		t.Fatalf("release stale worktree reference: %v", err)
+	}
+
+	persisted, err := store.GetWorktreeByID(ctx, current.ID)
+	if err != nil {
+		t.Fatalf("load released worktree: %v", err)
+	}
+	if persisted.BranchOwner != BranchOwnerManaged || persisted.IntegrationRef != "main" {
+		t.Fatalf("released branch metadata = owner %q integration %q, want managed/main",
+			persisted.BranchOwner, persisted.IntegrationRef)
+	}
+	if persisted.RecoveryHeadSHA != "current-recovery-head" || persisted.BranchCompactedAt == nil {
+		t.Fatalf("released recovery metadata = head %q compacted %v, want current state",
+			persisted.RecoveryHeadSHA, persisted.BranchCompactedAt)
+	}
 }
 
 func (h *cleanupOrderRecordingScriptHandler) ExecuteSetupScript(context.Context, ScriptExecutionRequest) error {
@@ -38,6 +74,42 @@ func (s *failingReleaseStore) UpdateWorktree(ctx context.Context, wt *Worktree) 
 		return errors.New("injected release failure")
 	}
 	return s.SQLiteStore.UpdateWorktree(ctx, wt)
+}
+
+func TestCleanupWorktreesPreservingBranches_RetainsBranchWhenReleaseFails(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-preserve-retry", "session-preserve-retry", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-preserve-retry", "session-preserve-retry")
+
+	mgr.store = &failingReleaseStore{SQLiteStore: store, failUpdate: true}
+	if err := mgr.CleanupWorktreesPreservingBranches(context.Background(), []*Worktree{wt}); err == nil {
+		t.Fatal("cleanup succeeded despite injected reference-release failure")
+	}
+	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
+}
+
+func TestCleanupWorktreesPreservingBranchesChecksCleanlinessUnderCleanupLock(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-archive-final-gate", "session-archive-final-gate", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-archive-final-gate", "session-archive-final-gate")
+	const contents = "keep this change"
+	if err := os.WriteFile(filepath.Join(wt.Path, "uncommitted.txt"), []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := mgr.CleanupWorktreesPreservingBranches(ctx, []*Worktree{wt})
+	if !errors.Is(err, ErrDirtyWorktreeCleanup) {
+		t.Fatalf("CleanupWorktreesPreservingBranches error = %v, want ErrDirtyWorktreeCleanup", err)
+	}
+	got, err := os.ReadFile(filepath.Join(wt.Path, "uncommitted.txt"))
+	if err != nil || string(got) != contents {
+		t.Fatalf("uncommitted file = %q, %v, want preserved contents", got, err)
+	}
+	if _, err := mgr.GetByID(ctx, wt.ID); err != nil {
+		t.Fatalf("active worktree record was removed: %v", err)
+	}
+	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
 }
 
 type swappingCleanupScriptHandler struct{}
@@ -99,6 +171,28 @@ func TestCleanupWorktrees_RejectsPathlessRetryWithoutImmutableHead(t *testing.T)
 	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
 }
 
+func TestCleanupArchivedWorktreeRevalidatesOwnerBeforeRemoval(t *testing.T) {
+	ctx := context.Background()
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-archive-owner-check", "session-archive-owner-check", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-archive-owner-check", "session-archive-owner-check")
+
+	err := mgr.CleanupArchivedWorktree(ctx, wt, "task-transferred", wt.Path, wt.RepositoryPath)
+	if !errors.Is(err, ErrArchivedWorktreeIdentityChanged) {
+		t.Fatalf("CleanupArchivedWorktree error = %v, want identity-changed", err)
+	}
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Fatalf("worktree directory was removed after owner mismatch: %v", err)
+	}
+	persisted, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load worktree after rejected cleanup: %v", err)
+	}
+	if persisted.Status != StatusActive || persisted.TaskID != "task-archive-owner-check" {
+		t.Fatalf("worktree after rejected cleanup = %+v, want original active owner", persisted)
+	}
+}
+
 func TestCleanupWorktreesPreservingBranches_RetriesAfterReleaseFailure(t *testing.T) {
 	mgr, store := newReferenceCleanupTestManager(t)
 	seedReferenceCleanupSession(t, store, "task-preserve-retry", "session-preserve-retry", models.TaskSessionStateCompleted)
@@ -117,7 +211,9 @@ func TestCleanupWorktreesPreservingBranches_RetriesAfterReleaseFailure(t *testin
 	if err := mgr.CleanupWorktreesPreservingBranches(context.Background(), []*Worktree{wt}); err != nil {
 		t.Fatalf("retry pathless branch-preserving cleanup: %v", err)
 	}
-	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
+	// The retry has now released the reference successfully, so the eligible
+	// fully integrated managed branch is safely compacted.
+	assertCleanupBranchAbsent(t, wt.RepositoryPath, wt.Branch)
 	assertWorktreeReferenceStatus(t, store, wt.ID, StatusDeleted)
 }
 

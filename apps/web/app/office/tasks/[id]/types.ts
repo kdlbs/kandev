@@ -95,9 +95,9 @@ export type TaskSession = {
 };
 
 /**
- * RunError is a chat-timeline view of a single FAILED office session.
- * Sourced from TaskSession (no separate API call) — derived in
- * task-chat.tsx for entries.kind === "error".
+ * RunError is a chat-timeline view of one retained Office session failure.
+ * Sourced from TaskSession (no separate API call) and derived in task-chat.tsx
+ * for entries.kind === "error".
  */
 export type RunError = {
   id: string;
@@ -109,10 +109,15 @@ export type RunError = {
   remediationUrl?: string;
   failureCode?: string;
   failureDetails?: string;
+  startupReason?: string;
+  startupAttempts?: number;
+  startupNpmCode?: string;
   message?: string;
   recoveryActions?: TaskLaunchRecoveryAction[];
   taskRepositoryId?: string;
   errorStamp?: string;
+  /** False when the session error is retained as history after recovery. */
+  isActive?: boolean;
 };
 
 export type TaskLabelLocal = {

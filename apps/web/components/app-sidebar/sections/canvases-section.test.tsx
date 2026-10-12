@@ -1,5 +1,6 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const state = {
+  userSettings: { sidebarFastActionsEnabled: true },
   features: { canvases: true },
   workspaces: { activeId: "workspace-1" },
   appSidebar: { sectionExpanded: { canvases: true } as Record<string, boolean> },
@@ -33,6 +35,16 @@ vi.mock("@/lib/api/domains/canvas-api", () => ({
     `/settings/workspaces/${encodeURIComponent(id)}/canvases`,
   listWorkspaceCanvases: mocks.listWorkspaceCanvases,
 }));
+vi.mock("@/components/canvas/canvas-task-create-launcher", () => ({
+  CanvasTaskCreateLauncher: ({
+    children,
+  }: {
+    children: (props: {
+      onOpen: () => void;
+      triggerRef: { current: HTMLButtonElement | null };
+    }) => ReactNode;
+  }) => children({ onOpen: vi.fn(), triggerRef: { current: null } }),
+}));
 import { CanvasesSection, isActiveWorkspaceCanvas } from "./canvases-section";
 
 const ACTIVE_CANVAS: Canvas = {
@@ -48,11 +60,14 @@ const ACTIVE_CANVAS: Canvas = {
 };
 const CANVASES_LABEL = "Canvases";
 const ACTIVE_CANVAS_TEST_ID = "sidebar-canvas-canvas-1";
+const EMPTY_CANVAS_TEST_ID = "sidebar-canvases-empty";
 
 beforeEach(() => {
+  state.userSettings.sidebarFastActionsEnabled = true;
   mocks.enabled = true;
   mocks.pathname = "/";
   state.appSidebar.sectionExpanded.canvases = true;
+  state.toggleAppSidebarSection.mockClear();
   mocks.listWorkspaceCanvases.mockReset();
   mocks.listWorkspaceCanvases.mockResolvedValue({
     canvases: [
@@ -84,6 +99,19 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("CanvasesSection", () => {
+  it("retains settings and canvas children when fast icons are disabled", async () => {
+    state.userSettings.sidebarFastActionsEnabled = false;
+    render(
+      <TooltipProvider>
+        <CanvasesSection collapsed={false} />
+      </TooltipProvider>,
+    );
+    expect(await screen.findByTestId(ACTIVE_CANVAS_TEST_ID)).toBeTruthy();
+    const settings = screen.getByTestId("sidebar-canvases-settings");
+    expect(settings.closest("#sidebar-section-canvases")).toBeTruthy();
+    expect(settings.getAttribute("href")).toBe("/settings/workspaces/workspace-1/canvases");
+  });
+
   it("lists only active workspace canvases and links the settings shortcut", async () => {
     render(
       <TooltipProvider>
@@ -103,7 +131,7 @@ describe("CanvasesSection", () => {
     expect(screen.getByTestId("sidebar-canvases-settings").getAttribute("href")).toBe(
       "/settings/workspaces/workspace-1/canvases",
     );
-    expect(screen.queryByTestId("sidebar-create-canvas")).toBeNull();
+    expect(screen.queryByTestId(EMPTY_CANVAS_TEST_ID)).toBeNull();
   });
 
   it("shows setup guidance only after expanding an empty canvas section", async () => {
@@ -117,7 +145,7 @@ describe("CanvasesSection", () => {
     );
 
     await waitFor(() => expect(screen.getByText(CANVASES_LABEL)).toBeTruthy());
-    expect(screen.queryByTestId("sidebar-canvases-empty")).toBeNull();
+    expect(screen.queryByTestId(EMPTY_CANVAS_TEST_ID)).toBeNull();
 
     state.appSidebar.sectionExpanded.canvases = true;
     rerender(
@@ -126,10 +154,31 @@ describe("CanvasesSection", () => {
       </TooltipProvider>,
     );
 
-    const setup = await screen.findByTestId("sidebar-canvases-empty");
+    const setup = await screen.findByTestId(EMPTY_CANVAS_TEST_ID);
     expect(setup.textContent).toContain("Set up a canvas");
-    expect(setup.getAttribute("href")).toBe("/settings/workspaces/workspace-1/canvases");
-    expect(screen.queryByTestId("sidebar-create-canvas")).toBeNull();
+    expect(setup.tagName).toBe("BUTTON");
+    expect(setup.getAttribute("href")).toBeNull();
+  });
+
+  it("waits for the initial canvas list before showing setup guidance", async () => {
+    let resolveList: ((value: { canvases: Canvas[] }) => void) | undefined;
+    mocks.listWorkspaceCanvases.mockReturnValueOnce(
+      new Promise<{ canvases: Canvas[] }>((resolve) => {
+        resolveList = resolve;
+      }),
+    );
+
+    render(
+      <TooltipProvider>
+        <CanvasesSection collapsed={false} />
+      </TooltipProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText(CANVASES_LABEL)).toBeTruthy());
+    expect(screen.queryByTestId(EMPTY_CANVAS_TEST_ID)).toBeNull();
+
+    resolveList?.({ canvases: [] });
+    expect(await screen.findByTestId(EMPTY_CANVAS_TEST_ID)).toBeTruthy();
   });
 
   it("starts folded while preserving the active workspace count", async () => {
@@ -164,6 +213,27 @@ describe("CanvasesSection", () => {
 
     await waitFor(() => expect(screen.getByText(CANVASES_LABEL)).toBeTruthy());
     expect(screen.queryByTestId(ACTIVE_CANVAS_TEST_ID)).toBeNull();
+  });
+});
+
+describe("CanvasesSection settings shortcut", () => {
+  it("keeps workspace settings available while closed without toggling Canvases", async () => {
+    state.appSidebar.sectionExpanded.canvases = false;
+    render(
+      <TooltipProvider>
+        <CanvasesSection collapsed={false} />
+      </TooltipProvider>,
+    );
+
+    const heading = screen.getByRole("button", { name: CANVASES_LABEL });
+    const settings = await screen.findByTestId("sidebar-canvases-settings");
+    expect(heading.getAttribute("aria-expanded")).toBe("false");
+    expect(settings.getAttribute("href")).toBe("/settings/workspaces/workspace-1/canvases");
+
+    settings.click();
+
+    expect(state.toggleAppSidebarSection).not.toHaveBeenCalled();
+    expect(heading.getAttribute("aria-expanded")).toBe("false");
   });
 });
 

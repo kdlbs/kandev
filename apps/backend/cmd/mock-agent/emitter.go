@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/google/uuid"
 )
 
 // sessionUpdater abstracts the ACP connection methods used by the emitter.
@@ -17,9 +18,29 @@ type sessionUpdater interface {
 // emitter wraps an ACP connection and session ID to provide
 // convenient methods for streaming agent updates.
 type emitter struct {
-	ctx  context.Context
-	conn sessionUpdater
-	sid  acp.SessionId
+	ctx        context.Context
+	conn       sessionUpdater
+	sid        acp.SessionId
+	mcpServers map[string]mcpServerDef
+}
+
+// callMCPTool invokes an MCP tool through the server definitions attached to
+// this ACP session. ACP can create several sessions in one mock-agent process,
+// and each session can expose a different per-session SSE endpoint.
+func (e *emitter) callMCPTool(serverName, toolName string, args map[string]any) (string, error) {
+	if e == nil || e.mcpServers == nil {
+		return callMCPTool(serverName, toolName, args)
+	}
+	return callMCPToolCtxForServers(e.ctx, e.mcpServers, serverName, toolName, args)
+}
+
+// callMCPToolCtx invokes an MCP tool with a context and the server definitions
+// attached to this ACP session.
+func (e *emitter) callMCPToolCtx(ctx context.Context, serverName, toolName string, args map[string]any) (string, error) {
+	if e == nil || e.mcpServers == nil {
+		return callMCPToolCtx(ctx, serverName, toolName, args)
+	}
+	return callMCPToolCtxForServers(ctx, e.mcpServers, serverName, toolName, args)
 }
 
 // text sends an agent text message update.
@@ -30,11 +51,44 @@ func (e *emitter) text(msg string) {
 	})
 }
 
+func (e *emitter) textWithID(msg string) {
+	messageID := acp.MessageId(uuid.NewString())
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
+			Content:   acp.TextBlock(msg),
+			MessageId: &messageID,
+		}},
+	})
+}
+
 // thought sends an agent thinking/reasoning update.
 func (e *emitter) thought(msg string) {
 	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
 		SessionId: e.sid,
 		Update:    acp.UpdateAgentThoughtText(msg),
+	})
+}
+
+func (e *emitter) thoughtWithID(msg string) {
+	messageID := acp.MessageId(uuid.NewString())
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{AgentThoughtChunk: &acp.SessionUpdateAgentThoughtChunk{
+			Content:   acp.TextBlock(msg),
+			MessageId: &messageID,
+		}},
+	})
+}
+
+func (e *emitter) responseAttemptReset() {
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{SessionInfoUpdate: &acp.SessionSessionInfoUpdate{
+			Meta: map[string]any{
+				"kandevMock": map[string]any{"responseAttemptReset": true},
+			},
+		}},
 	})
 }
 
@@ -70,6 +124,20 @@ func (e *emitter) plan(entries []acp.PlanEntry) {
 	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
 		SessionId: e.sid,
 		Update:    acp.UpdatePlan(entries...),
+	})
+}
+
+// sessionInfo sends the ACP session metadata extension used by goal-aware
+// providers. The caller supplies only the provider metadata under _meta.
+func (e *emitter) sessionInfo(meta map[string]any) {
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{
+			SessionInfoUpdate: &acp.SessionSessionInfoUpdate{
+				SessionUpdate: "session_info_update",
+				Meta:          meta,
+			},
+		},
 	})
 }
 

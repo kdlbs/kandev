@@ -184,6 +184,34 @@ func TestCreateWorkspaceWithKanban_CancelTriggersTurnCompleteDefaults(t *testing
 	}
 }
 
+func TestCreateWorkspaceWithKanban_PersistsCompletionAndWIPFields(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+	workflow, err := repo.CreateWorkspaceWithKanban(ctx, &taskmodels.Workspace{ID: "ws-kanban-completion", Name: "Kanban Completion"})
+	if err != nil {
+		t.Fatalf("create Kanban workspace: %v", err)
+	}
+
+	var wipLimit, completeTaskOnEnter int
+	var pullFromStepID string
+	if err := repo.db.QueryRowContext(ctx, repo.db.Rebind(`
+		SELECT wip_limit, pull_from_step_id, complete_task_on_enter
+		FROM workflow_steps
+		WHERE workflow_id = ? AND name = 'Done'
+	`), workflow.ID).Scan(&wipLimit, &pullFromStepID, &completeTaskOnEnter); err != nil {
+		t.Fatalf("query Kanban completion fields: %v", err)
+	}
+	if wipLimit != 0 {
+		t.Fatalf("Done WIP limit = %d, want 0", wipLimit)
+	}
+	if pullFromStepID != "" {
+		t.Fatalf("Done pull-from step = %q, want empty", pullFromStepID)
+	}
+	if completeTaskOnEnter != 1 {
+		t.Fatalf("Done complete-task-on-enter = %d, want 1", completeTaskOnEnter)
+	}
+}
+
 func TestEnsureOfficeDefaultWorkflow_TriggersJSONShape(t *testing.T) {
 	repo := newRepoForBuiltinWorkflowTests(t)
 	ctx := context.Background()

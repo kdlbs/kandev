@@ -37,7 +37,17 @@ Task rows currently obtain compact status indicators by observing large, session
   an idle agent after a restart, `status_summary.last_activity_at` shall remain
   unchanged. A later task mutation, user prompt, or conversational agent turn
   can advance it.
+- **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.11:** When a queue-status event
+  arrives after its task is deleted, the projector shall discard the task's
+  cached summary state without publishing a replacement. A transient task read
+  failure shall remain an error.
+
+- **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.12:** A hidden sibling chat tab shall not acquire a rich subscription or detail loader solely because it remains mounted. One visible desktop chat shall own one session stream, two visible split chats shall own their two streams, and the phone chat shall own one.
+- **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.13:** Hiding, revealing, moving, or restoring chat panels shall preserve drafts and selection. Hidden loaded tabs shall retain lifecycle and attention indicators through compact events. Revealing a tab shall reconcile missed detail before treating it as current.
+- **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.14:** Task switches and released panels shall release obsolete detail demand. Late results shall not update another task or restore dismissed panels. An explicitly visible preview shall retain its detail demand independently of unread acknowledgement.
 
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/bounded-task-status-delivery.md).
+
+The [journey loading design](../system-design/journey-data-loading.md) clarifies visibility-owned desktop demand without changing the existing multi-panel capability.

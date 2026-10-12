@@ -49,6 +49,7 @@ export type PerRepoCallbacks = {
   onReplaceContribution: (repo: string) => void;
   onUseContribution: (repo: string) => void;
   onViewContribution: (repo: string) => void;
+  onCompareContribution: (repo: string) => void;
 };
 
 export type PrimaryButtonConfig = {
@@ -382,7 +383,13 @@ function MultiRepoVcsDropdown({
             onReplaceContribution={() => callbacks.onReplaceContribution(blockedRepositoryName)}
             onUseContribution={() => callbacks.onUseContribution(blockedRepositoryName)}
             onViewPRVersion={() => callbacks.onViewContribution(blockedRepositoryName)}
+            onCompareVersions={() => callbacks.onCompareContribution(blockedRepositoryName)}
             prNumber={prNumber}
+            replaceLabelKey="task:publishTaskVersion"
+            useLabelKey="task:restorePublishedPRVersion"
+            viewLabelKey="task:openPROnGitHub"
+            replaceDescriptionKey="task:remoteContributionPublishDescription"
+            useDescriptionKey="task:remoteContributionRestoreDescription"
           />
         </>
       )}

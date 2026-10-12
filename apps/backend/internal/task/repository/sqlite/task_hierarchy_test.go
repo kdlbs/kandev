@@ -8,6 +8,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -143,6 +144,57 @@ func TestListChildrenIncludingArchivedKeepsArchivedButStillDropsEphemeral(t *tes
 	if empty == nil || len(empty) != 0 {
 		t.Errorf("ListChildrenIncludingArchived(\"\") = %v, want a non-nil empty slice", empty)
 	}
+}
+func TestListChildrenLimitedBoundsRowsBeforeScanning(t *testing.T) {
+	repo := seedHierarchy(t)
+	ctx := context.Background()
+
+	active, err := repo.ListChildrenLimited(ctx, hierarchyParentID, 1)
+	if err != nil {
+		t.Fatalf("ListChildrenLimited: %v", err)
+	}
+	assertIDsEqual(t, "ListChildrenLimited", taskIDs(active), []string{"task-child-a"})
+
+	all, err := repo.ListChildrenIncludingArchivedLimited(ctx, hierarchyParentID, 2)
+	if err != nil {
+		t.Fatalf("ListChildrenIncludingArchivedLimited: %v", err)
+	}
+	assertIDsEqual(t, "ListChildrenIncludingArchivedLimited", taskIDs(all),
+		[]string{"task-child-a", "task-child-b"})
+}
+
+func TestListChildrenIncludingArchivedByCascadeFiltersBeforeLimit(t *testing.T) {
+	repo := seedHierarchy(t)
+	ctx := context.Background()
+	for _, id := range []string{"task-child-other-cascade", "task-child-target-cascade"} {
+		task := &models.Task{ID: id, WorkspaceID: hierarchyWorkspaceID, ParentID: hierarchyParentID, Title: id}
+		if err := repo.CreateTask(ctx, task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", id, err)
+		}
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(
+		`UPDATE tasks SET created_at = ? WHERE id = ?`),
+		time.Date(2026, 1, 8, 0, 0, 0, 0, time.UTC), "task-child-other-cascade"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(
+		`UPDATE tasks SET created_at = ? WHERE id = ?`),
+		time.Date(2026, 1, 9, 0, 0, 0, 0, time.UTC), "task-child-target-cascade"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ArchiveTaskIfActive(ctx, "task-child-other-cascade", "cascade-other"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ArchiveTaskIfActive(ctx, "task-child-target-cascade", "cascade-target"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.ListChildrenIncludingArchivedByCascadeLimited(ctx, hierarchyParentID, "cascade-target", 1)
+	if err != nil {
+		t.Fatalf("ListChildrenIncludingArchivedByCascadeLimited: %v", err)
+	}
+	assertIDsEqual(t, "ListChildrenIncludingArchivedByCascadeLimited", taskIDs(got),
+		[]string{"task-child-target-cascade"})
 }
 
 func TestListChildCompletionRowsReturnsCompactActiveChildren(t *testing.T) {
@@ -305,5 +357,29 @@ func TestGetTasksByIDsFetchesRequestedRowsAndSkipsUnknown(t *testing.T) {
 	}
 	if len(empty) != 0 {
 		t.Errorf("GetTasksByIDs(nil) = %v, want empty", taskIDs(empty))
+	}
+}
+
+func TestGetTasksByIDsChunksAcrossHostParamLimit(t *testing.T) {
+	repo := seedHierarchy(t)
+	ctx := context.Background()
+
+	// SQLite's compiled-in SQLITE_MAX_VARIABLE_NUMBER on this build is
+	// 32766; pad well past it (and past sqliteMaxHostParams's much lower
+	// safety margin) so an unchunked IN-clause query would error, with the
+	// real id placed last so it lands in the final chunk.
+	const padCount = 33000
+	ids := make([]string, 0, padCount+1)
+	for i := 0; i < padCount; i++ {
+		ids = append(ids, fmt.Sprintf("padding-task-%d", i))
+	}
+	ids = append(ids, "task-child-a")
+
+	got, err := repo.GetTasksByIDs(ctx, ids)
+	if err != nil {
+		t.Fatalf("GetTasksByIDs with %d ids: %v", len(ids), err)
+	}
+	if len(got) != 1 || got[0].ID != "task-child-a" {
+		t.Fatalf("GetTasksByIDs = %v, want exactly [task-child-a]", taskIDs(got))
 	}
 }

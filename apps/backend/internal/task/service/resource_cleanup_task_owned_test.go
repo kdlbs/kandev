@@ -21,7 +21,7 @@ type managerEnvironmentDestroyer struct {
 	mgr *worktree.Manager
 }
 
-func (d *managerEnvironmentDestroyer) DestroyContainer(context.Context, string) error {
+func (d *managerEnvironmentDestroyer) DestroyContainer(context.Context, *models.TaskEnvironment) error {
 	return nil
 }
 
@@ -37,7 +37,7 @@ func (d *managerEnvironmentDestroyer) PushEnvironmentBranch(context.Context, *mo
 	return nil
 }
 
-func (d *managerEnvironmentDestroyer) GetContainerLiveStatus(context.Context, string) (*ContainerLiveStatus, error) {
+func (d *managerEnvironmentDestroyer) GetContainerLiveStatus(context.Context, *models.TaskEnvironment) (*ContainerLiveStatus, error) {
 	return nil, nil
 }
 
@@ -84,7 +84,7 @@ func TestDeleteTaskCleanupFindsWorktreeAfterLastSessionDeletedAndRestart(t *test
 	worktreeID := created.ID
 
 	// Delete the only session through the orchestrator-style deletion.
-	if err := repo.DeleteTaskSession(ctx, "session-zero-session"); err != nil {
+	if err := repo.DeleteTaskSession(ctx, session); err != nil {
 		t.Fatalf("delete session: %v", err)
 	}
 
@@ -179,7 +179,7 @@ func TestDeleteTaskCleanupRemovesEveryWorktreeAfterLastSessionDeletedAndRestart(
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("link task session: %v", err)
 	}
-	if err := repo.DeleteTaskSession(ctx, sessionID); err != nil {
+	if err := repo.DeleteTaskSession(ctx, session); err != nil {
 		t.Fatalf("delete task session: %v", err)
 	}
 
@@ -262,7 +262,7 @@ func TestArchiveCleanupFindsWorktreeAfterLastSessionDeleted(t *testing.T) {
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("link session: %v", err)
 	}
-	if err := repo.DeleteTaskSession(ctx, "session-archive-zero"); err != nil {
+	if err := repo.DeleteTaskSession(ctx, session); err != nil {
 		t.Fatalf("delete session: %v", err)
 	}
 

@@ -68,7 +68,35 @@ describe("isContextWindowReliable", () => {
   });
 });
 
+describe("TokenUsageDisplay detail demand", () => {
+  it("does not request session updates for a hidden chat", () => {
+    vi.mocked(useSessionContextWindow).mockClear().mockReturnValue(undefined);
+
+    render(<TokenUsageDisplay sessionId="sess-1" detailActive={false} />);
+
+    expect(useSessionContextWindow).toHaveBeenCalledWith("sess-1", false);
+  });
+});
+
 describe("TokenUsageDisplay", () => {
+  it("transitions only the context ring arc", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+      compactionCount: 0,
+    });
+
+    const { container } = render(<TokenUsageDisplay sessionId="sess-1" />);
+    const circles = container.querySelectorAll("circle");
+    const usageCircle = circles[1];
+
+    expect(usageCircle).toBeDefined();
+    expect(usageCircle.getAttribute("class")).toContain("transition-[stroke-dashoffset]");
+    expect(usageCircle.getAttribute("class")).not.toContain("transition-all");
+  });
+
   it("renders nothing when used exceeds size (wrong-window bug)", () => {
     vi.mocked(useSessionContextWindow).mockReturnValue({
       size: 200_000,

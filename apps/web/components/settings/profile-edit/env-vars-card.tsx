@@ -148,7 +148,7 @@ function EnvVarRowComponent({
         variant="ghost"
         size="icon"
         onClick={() => onRemove(index)}
-        className="h-8 w-8 shrink-0 cursor-pointer"
+        className="shrink-0 cursor-pointer"
         data-testid={`env-var-remove-${index}`}
         aria-label={
           row.key ? t("executors:removeEnvVarNamed", { key: row.key }) : t("executors:removeEnvVar")

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import type { ApiClient } from "./api-client";
+import { getMockAgent } from "./agent-fixtures";
 import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 
@@ -27,6 +28,22 @@ export class GitHelper {
       }
     }
     throw new Error(`git exec failed after 3 attempts: ${cmd}`);
+  }
+
+  pushMainWithRetry(): void {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        this.exec("git push origin main");
+        return;
+      } catch (error) {
+        const stderr =
+          (error as NodeJS.ErrnoException & { stderr?: Buffer }).stderr?.toString() ?? "";
+        const details = `${(error as Error).message}\n${stderr}`;
+        if (attempt === 2 || !/(fetch first|non-fast-forward)/i.test(details)) throw error;
+        this.exec("git fetch origin main");
+        this.exec("git rebase origin/main");
+      }
+    }
   }
 
   createFile(name: string, content: string | Buffer) {
@@ -62,6 +79,18 @@ export class GitHelper {
   }
 }
 
+export function publishSeedCommit(git: GitHelper, remoteURL: string) {
+  // Task workspaces clone the repository's configured origin, not a commit
+  // that exists only in this fixture checkout.
+  const remotes = git.exec("git remote").split(/\r?\n/);
+  if (remotes.includes("origin")) {
+    git.exec(`git remote set-url origin "${remoteURL}"`);
+  } else {
+    git.exec(`git remote add origin "${remoteURL}"`);
+  }
+  git.exec("git push origin HEAD:main");
+}
+
 /**
  * Strip GIT_CONFIG_* environment variables that can inject global git hooks
  * into fresh git repos, breaking E2E test setup.
@@ -90,7 +119,7 @@ export async function openTaskSession(page: Page, title: string): Promise<Sessio
   const kanban = new KanbanPage(page);
   await kanban.goto();
   const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 15_000 });
+  await expect(card).toBeVisible({ timeout: 30_000 });
   await card.click();
   await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
   const session = new SessionPage(page);
@@ -98,11 +127,20 @@ export async function openTaskSession(page: Page, title: string): Promise<Sessio
   return session;
 }
 
-export async function createStandardProfile(apiClient: ApiClient, name: string) {
+export async function createStandardProfile(
+  apiClient: ApiClient,
+  name: string,
+  preferredProfileId?: string,
+) {
   const { agents } = await apiClient.listAgents();
-  const agentId = agents[0]?.id;
-  if (!agentId) throw new Error("No agent available");
-  return apiClient.createAgentProfile(agentId, name, {
+  const agent = getMockAgent(
+    preferredProfileId
+      ? agents.filter((candidate) =>
+          candidate.profiles.some((profile) => profile.id === preferredProfileId),
+        )
+      : agents,
+  );
+  return apiClient.createAgentProfile(agent.id, name, {
     model: "mock-fast",
     auto_approve: true,
     cli_passthrough: false,

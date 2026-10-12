@@ -30,16 +30,6 @@ handoffs.
   request.
 - Agent runtime launch and ACP probes are not backend startup readiness.
 
-## Specification map
-
-### Requirements
-
-- [Startup recovery](requirements/startup-recovery.md)
-
-### System design
-
-- [Startup recovery](system-design/startup-recovery.md)
-
 ## Migration status
 
 The startup-recovery documents are authoritative for bind-aware readiness and

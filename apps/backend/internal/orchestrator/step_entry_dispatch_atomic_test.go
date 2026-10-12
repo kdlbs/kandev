@@ -74,6 +74,15 @@ func newSharedDBReviewLoopFixture(t *testing.T) *reviewLoopFixture {
 	svc.SetEngineParticipantStore(participants)
 	svc.SetEngineDecisionStore(workflowadapters.NewDecisionAdapter(workflowRepo))
 
+	// clear_decisions and queue_run_for_each_participant execute exclusively
+	// through the ledger dispatcher since the step-entry dispatch
+	// convergence (docs/specs/office/system-design/step-entry-dispatch-convergence.md),
+	// so this fixture must wire Repository.dispatchStepEntry's production
+	// seam — mirroring backendapp's engineStepEntryDispatcherAdapter — for
+	// TestProcessOnEnter_ClearDecisions_RealDecisionAdapter_ClearsAndCompletesAtomically
+	// to exercise anything at all.
+	taskRepo.SetStepEntryDispatcher(&testStepEntryDispatcher{eng: svc.WorkflowEngine()})
+
 	mockRepo := svc.taskRepo.(*mockTaskRepo)
 	seedMockTaskState(mockRepo, "t1", v1.TaskStateInProgress)
 

@@ -13,6 +13,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -22,6 +23,15 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 )
+
+// ErrAgentNotFound is wrapped (%w) into GetAgentInstance's not-found error
+// alongside sql.ErrNoRows itself, so a caller can distinguish "no such
+// agent" from any other read failure via either errors.Is(err,
+// ErrAgentNotFound) (the wakeup dispatcher's F41 sentinel check) or
+// errors.Is(err, sql.ErrNoRows) (GetAgentFromConfig's
+// AC-OFFICE-BUDGET-001.13 check, which calls GetAgentInstance directly)
+// without a second lookup.
+var ErrAgentNotFound = errors.New("agent instance not found")
 
 // agentInstanceColumns is the SELECT projection that maps agent_profiles
 // columns onto the AgentInstance struct shape. Used by every read in this
@@ -36,6 +46,7 @@ const agentInstanceColumns = `
 	COALESCE(agent_id, '')                  AS agent_id,
 	COALESCE(workspace_id, '')              AS workspace_id,
 	name,
+	COALESCE(enabled, 0)                    AS enabled,
 	COALESCE(agent_display_name, '')        AS agent_display_name,
 	COALESCE(model, '')                     AS model,
 	COALESCE(auto_approve, 0)               AS auto_approve,
@@ -54,6 +65,7 @@ const agentInstanceColumns = `
 	COALESCE(skill_ids, '[]')               AS skill_ids,
 	COALESCE(desired_skills, '[]')          AS desired_skills,
 	COALESCE(executor_preference, '')       AS executor_preference,
+	COALESCE(execution_agent_profile_id, '') AS execution_agent_profile_id,
 	COALESCE(pause_reason, '')              AS pause_reason,
 	COALESCE(consecutive_failures, 0)       AS consecutive_failures,
 	NULLIF(failure_threshold, 0)            AS failure_threshold,
@@ -150,7 +162,7 @@ func (r *Repository) insertAgentInstance(
 			max_concurrent_sessions, cooldown_sec, skip_idle_runs,
 			consecutive_failures, failure_threshold,
 			executor_preference, budget_monthly_cents,
-			settings, permissions
+			settings, permissions, execution_agent_profile_id
 		) VALUES (
 			?, ?, ?, ?, ?, ?,
 			?, ?, ?,
@@ -162,7 +174,7 @@ func (r *Repository) insertAgentInstance(
 			?, ?, ?,
 			?, ?,
 			?, ?,
-			'{}', ?
+			'{}', ?, ?
 		)
 	`),
 		agent.ID, agent.AgentID, agent.Name, displayName, agent.Model, agent.Mode,
@@ -175,7 +187,7 @@ func (r *Repository) insertAgentInstance(
 		agent.MaxConcurrentSessions, agent.CooldownSec, boolToInt(agent.SkipIdleRuns),
 		agent.ConsecutiveFailures, threshold,
 		agent.ExecutorPreference, agent.BudgetMonthlyCents,
-		permissions,
+		permissions, agent.ExecutionAgentProfileID,
 	)
 	return err
 }
@@ -187,7 +199,13 @@ func (r *Repository) GetAgentInstance(ctx context.Context, id string) (*models.A
 	query := `SELECT ` + agentInstanceColumns + ` FROM agent_profiles WHERE id = ? AND ` + agentInstanceFilter
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), id).StructScan(&agent)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("agent instance not found: %s", id)
+		// Wraps both ErrAgentNotFound and sql.ErrNoRows directly (Go 1.20+
+		// multi-%w) so callers can use either errors.Is(err, ErrAgentNotFound)
+		// (the wakeup dispatcher's F41 sentinel check) or errors.Is(err,
+		// sql.ErrNoRows) (AC-OFFICE-BUDGET-001.13's two dispositions) without a
+		// second lookup, and without repeating "agent instance not found"
+		// twice in the message.
+		return nil, fmt.Errorf("%w: %s: %w", ErrAgentNotFound, id, sql.ErrNoRows)
 	}
 	return &agent, err
 }
@@ -294,6 +312,7 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 			END,
 			failure_threshold = ?, settings = ?,
 			auto_approve = ?, allow_indexing = ?, cli_passthrough = ?,
+			execution_agent_profile_id = ?,
 			updated_at = ?
 		WHERE id = ? AND `+agentInstanceFilter+`
 	`), agent.Name, string(agent.Role), agent.Icon, status, status,
@@ -303,6 +322,7 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 		skillIDs, desiredSkills, agent.ExecutorPreference,
 		status, agent.PauseReason, threshold, settings,
 		boolToInt(agent.AutoApprove), boolToInt(agent.AllowIndexing), boolToInt(agent.CLIPassthrough),
+		agent.ExecutionAgentProfileID,
 		agent.UpdatedAt, agent.ID)
 	return err
 }
@@ -420,6 +440,81 @@ func (r *Repository) UpdateAgentStatusFields(
 	return err
 }
 
+// UpdateAgentStatusFieldsIfCurrent updates status fields only when the
+// agent still has expectedStatus. The affected-row result makes a stale
+// caller observable instead of allowing it to overwrite a newer status.
+func (r *Repository) UpdateAgentStatusFieldsIfCurrent(
+	ctx context.Context, id, expectedStatus, status, pauseReason string,
+) (bool, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET status = CASE WHEN ? = 'working' THEN status ELSE ? END,
+			pause_reason = CASE WHEN ? = 'working' THEN pause_reason ELSE ? END,
+			working_run_id = CASE
+				WHEN status = 'working' AND working_run_id <> '' AND ? = 'working' THEN working_run_id
+				ELSE ''
+			END,
+			updated_at = ?
+		WHERE id = ? AND status = ? AND `+agentInstanceFilter+`
+	`), status, status, status, pauseReason, status, now, id, expectedStatus)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+// UnpauseAgentIfCurrent moves a paused agent to newStatus and clears
+// pause_reason, but only while the row still has status='paused' AND
+// pause_reason=expectedReason. Gating on the pause reason as well as the
+// status closes the window where a concurrent writer changes the reason
+// (a second auto-pause landing on an already-paused agent) while status
+// stays 'paused': a status-only guard would accept that write and
+// silently clobber the newer reason instead of refusing it.
+func (r *Repository) UnpauseAgentIfCurrent(
+	ctx context.Context, id, expectedReason, newStatus string,
+) (bool, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET status = ?, pause_reason = '', working_run_id = '', updated_at = ?
+		WHERE id = ? AND status = ? AND pause_reason = ? AND `+agentInstanceFilter+`
+	`), newStatus, now, id, string(models.AgentStatusPaused), expectedReason)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+// ClearAgentPauseReasonIfCurrent clears only pause_reason when the agent
+// still has expectedStatus. This preserves a concurrent working or stopped
+// status while avoiding a stale status write.
+func (r *Repository) ClearAgentPauseReasonIfCurrent(
+	ctx context.Context, id, expectedStatus string,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET pause_reason = '', updated_at = ?
+		WHERE id = ? AND status = ? AND `+agentInstanceFilter+`
+	`), time.Now().UTC(), id, expectedStatus)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 // GetAgentInstanceByNameAny returns the first agent instance matching a name
 // across all workspaces. Used for ID-or-name lookups without workspace context.
 func (r *Repository) GetAgentInstanceByNameAny(
@@ -429,7 +524,9 @@ func (r *Repository) GetAgentInstanceByNameAny(
 	query := `SELECT ` + agentInstanceColumns + ` FROM agent_profiles WHERE name = ? AND ` + agentInstanceFilter + ` LIMIT 1`
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), name).StructScan(&agent)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("agent instance not found: %s", name)
+		// See GetAgentInstance above: wrapped so GetAgentFromConfig can
+		// distinguish "not found" from a transient error via errors.Is.
+		return nil, fmt.Errorf("agent instance not found: %s: %w", name, sql.ErrNoRows)
 	}
 	return &agent, err
 }
@@ -535,8 +632,12 @@ func (r *Repository) DeleteAgentInstanceTx(ctx context.Context, tx *sqlx.Tx, id 
 
 func (r *Repository) deleteAgentInstance(ctx context.Context, ext sqlx.ExtContext, id string) error {
 	now := time.Now().UTC()
+	if _, err := ext.ExecContext(ctx, r.db.Rebind(
+		`UPDATE agent_profiles SET deleted_at = ?, updated_at = ? WHERE id = ?`), now, now, id); err != nil {
+		return err
+	}
 	_, err := ext.ExecContext(ctx, r.db.Rebind(
-		`UPDATE agent_profiles SET deleted_at = ?, updated_at = ? WHERE id = ?`), now, now, id)
+		`DELETE FROM office_agent_pause_recoveries WHERE agent_id = ?`), id)
 	return err
 }
 

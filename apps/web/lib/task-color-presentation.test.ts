@@ -21,6 +21,7 @@ describe("task color presentation", () => {
     expect(parseWorkflowStepColor("emerald")).toEqual(taskColorPresentation("green"));
     expect(parseWorkflowStepColor("bg-neutral-400")).toEqual(taskColorPresentation("gray"));
     expect(parseWorkflowStepColor("bg-emerald-500")).toEqual(taskColorPresentation("green"));
+    expect(parseWorkflowStepColor("BG-amber-500")).toEqual(taskColorPresentation("yellow"));
     expect(parseWorkflowStepColor("bg-[url(http://evil)]")).toEqual(taskColorPresentation("gray"));
   });
 

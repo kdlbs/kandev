@@ -124,6 +124,7 @@ export type WsFrame = {
   id?: string;
   type?: string;
   action?: string;
+  eventType?: string;
   payload: Record<string, unknown>;
 };
 
@@ -131,6 +132,12 @@ export type WaitForWsOptions = {
   timeout?: number;
   /** Narrow to one subject, e.g. `(p) => p.task_id === task.id`. */
   where?: (payload: Record<string, unknown>) => boolean;
+};
+
+export type WaitForWsResponseOptions = {
+  timeout?: number;
+  /** Start the response timeout after this operation completes. */
+  timeoutAfter?: Promise<unknown>;
 };
 
 export type WsWatcher = {
@@ -144,7 +151,7 @@ export type WsWatcher = {
    * arming* gets its reply, correlated by frame `id`. Rejects if the backend
    * answers with an `error` frame.
    */
-  waitForResponse(action: string, options?: { timeout?: number }): Promise<WsFrame>;
+  waitForResponse(action: string, options?: WaitForWsResponseOptions): Promise<WsFrame>;
 };
 
 function decodeFrame(payload: string | Buffer | Uint8Array): WsFrame | null {
@@ -160,6 +167,7 @@ function decodeFrame(payload: string | Buffer | Uint8Array): WsFrame | null {
       id: typeof parsed.id === "string" ? parsed.id : undefined,
       type: typeof parsed.type === "string" ? parsed.type : undefined,
       action: typeof parsed.action === "string" ? parsed.action : undefined,
+      eventType: typeof parsed.event_type === "string" ? parsed.event_type : undefined,
       payload: body && typeof body === "object" ? (body as Record<string, unknown>) : {},
     };
   } catch {
@@ -214,6 +222,12 @@ export function watchWs(page: Page): WsWatcher {
   };
 }
 
+function matchesEventAction(frame: WsFrame, action: string): boolean {
+  if (frame.action === action) return true;
+  if (frame.type !== "session.event") return false;
+  const orderedEventType = action.startsWith("session.") ? action.slice("session.".length) : action;
+  return frame.eventType === action || frame.eventType === orderedEventType;
+}
 function waitForEvent(
   channels: Channels,
   action: string,
@@ -227,14 +241,9 @@ function waitForEvent(
       reject,
     );
     wait.listen(channels.received, (frame) => {
-      if (frame.action !== action) return;
-      // Strict, not `frame.type && ...`: a frame carrying the right `action` but
-      // no `type` is not a confirmed server push, and resolving on one would be
-      // the exact false-positive this module exists to remove. Matches the
-      // sibling guard in `waitForResponse`. Observed gateway traffic only ever
-      // carries `notification` / `response` / `request`, so nothing legitimate
-      // relies on the loose form.
-      if (frame.type !== "notification") return;
+      if (!matchesEventAction(frame, action)) return;
+      // Strictly require a server-push frame, including ordered session events.
+      if (frame.type !== "notification" && frame.type !== "session.event") return;
       if (where && !where(frame.payload)) return;
       wait.dispose();
       resolve(frame);
@@ -245,15 +254,16 @@ function waitForEvent(
 function waitForResponse(
   channels: Channels,
   action: string,
-  options: { timeout?: number },
+  options: WaitForWsResponseOptions,
 ): Promise<WsFrame> {
-  const { timeout = DEFAULT_TIMEOUT } = options;
+  const { timeout = DEFAULT_TIMEOUT, timeoutAfter } = options;
   return new Promise<WsFrame>((resolve, reject) => {
     const requestIds = new Set<string>();
     const wait = armWsWait(
       timeout,
       () => `watchWs.waitForResponse: no reply to "${action}" within ${timeout}ms`,
       reject,
+      timeoutAfter,
     );
     wait.listen(channels.sent, (frame) => {
       if (frame.action === action && frame.id) requestIds.add(frame.id);
@@ -283,25 +293,48 @@ function armWsWait(
   timeout: number,
   message: () => string,
   reject: (error: Error) => void,
+  timeoutAfter?: Promise<unknown>,
 ): ArmedWait {
   const registered: Array<[Set<FrameListener>, FrameListener]> = [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
   const unregister = () => {
     for (const [channel, listener] of registered) channel.delete(listener);
     registered.length = 0;
   };
-  const timer = setTimeout(() => {
+  const expire = () => {
+    if (disposed) return;
+    disposed = true;
     unregister();
     reject(new Error(message()));
-  }, timeout);
+  };
+  const startTimer = () => {
+    if (disposed || timer !== undefined) return;
+    timer = setTimeout(expire, timeout);
+  };
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    if (timer !== undefined) clearTimeout(timer);
+    unregister();
+  };
+
+  if (timeoutAfter) {
+    void timeoutAfter.then(startTimer, (error: unknown) => {
+      if (disposed) return;
+      dispose();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
+  } else {
+    startTimer();
+  }
+
   return {
     listen(channel, listener) {
       registered.push([channel, listener]);
       channel.add(listener);
     },
-    dispose() {
-      clearTimeout(timer);
-      unregister();
-    },
+    dispose,
   };
 }
 

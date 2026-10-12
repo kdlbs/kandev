@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-07-30
-updated: 2026-08-30
+updated: 2026-09-09
 owners:
   - Kandev
 ---
@@ -29,6 +29,9 @@ The chat toolbar currently derives its MCP list from agent-profile configuration
 - **AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.7:** **GIVEN** an Active Kandev server, **WHEN** a precise-pointer user hovers or focuses the MCP trigger, **THEN** the tooltip shows a green Kandev row and its Active status.
 - **AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.8:** **GIVEN** a precise-pointer user, **WHEN** they click the MCP trigger, **THEN** a wide dialog lists the active session's MCP servers.
 - **AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.9:** **GIVEN** a modern stateless MCP request, **WHEN** Kandev records protocol evidence, **THEN** the evidence belongs to the current attachment attempt without a fabricated connection ID or a connection-closed event at the end of the HTTP request.
+- **AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.10:** **GIVEN** a session list contains valid version-1 attachment history, **WHEN** the client loads the task, **THEN** the status surface restores it without a live event.
+- **AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.11:** **GIVEN** the client holds newer live evidence, **WHEN** an equal or older session snapshot arrives, **THEN** the status surface retains the live evidence.
+- **AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.12:** **GIVEN** session-list attachment history is malformed or unsupported, **WHEN** the client loads the task, **THEN** the client ignores it and retains other session statuses.
 
 ## System design
 

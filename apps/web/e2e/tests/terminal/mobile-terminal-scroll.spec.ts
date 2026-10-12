@@ -23,8 +23,10 @@ async function seedTaskWithSession(
   title: string,
 ): Promise<void> {
   const { agents } = await apiClient.listAgents();
-  if (agents.length === 0) throw new Error("no agents registered in this e2e profile");
-  const profile = await apiClient.createAgentProfile(agents[0].id, `${title} profile`, {
+  const mockAgent = agents.find((agent) => agent.name === "mock-agent");
+  if (!mockAgent)
+    throw new Error(`mock-agent not found (got ${agents.map((a) => a.name).join(", ")})`);
+  const profile = await apiClient.createAgentProfile(mockAgent.id, `${title} profile`, {
     model: "mock-fast",
     auto_approve: true,
     cli_passthrough: true,
@@ -143,8 +145,6 @@ async function typeAndRun(page: Page, command: string): Promise<void> {
 }
 
 test.describe("Mobile passthrough terminal — touch scroll", () => {
-  test.describe.configure({ retries: 1 });
-
   test("user swipes down on the terminal to scroll into scrollback, then up to return", async ({
     testPage,
     apiClient,

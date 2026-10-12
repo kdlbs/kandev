@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -23,6 +23,7 @@ import { JIRA_KEY_RE } from "@/components/jira/jira-ticket-common";
 import { LINEAR_KEY_RE } from "@/components/linear/linear-issue-common";
 import { extractSentryShortId } from "@/components/sentry/sentry-issue-common";
 import { useSentryInstances } from "@/hooks/domains/sentry/use-sentry-availability";
+import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import type { SentryIssue } from "@/lib/types/sentry";
 import { buildLinkedIssueTitle } from "./task-external-link-utils";
@@ -41,6 +42,9 @@ type TaskExternalLinkDialogProps = {
   provider: ExternalLinkProvider;
   task: TaskExternalLinkTarget;
   workspaceId: string;
+  /** Element to return keyboard focus to on close (AC-TASKS-TASK-ACTIONS-MENU-001.12).
+   * Omitted callers keep Radix's default restore-to-previously-focused-element behavior. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 };
 
 /** Copy fields hold CATALOG KEYS, not English: `PROVIDERS` is a module-scope
@@ -252,6 +256,7 @@ export function TaskExternalLinkDialog({
   provider,
   task,
   workspaceId,
+  focusReturnRef,
 }: TaskExternalLinkDialogProps) {
   const { t } = useTranslation();
   const config = PROVIDERS[provider];
@@ -260,7 +265,10 @@ export function TaskExternalLinkDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
+      <DialogContent
+        className="w-[calc(100vw-2rem)] sm:max-w-lg"
+        onCloseAutoFocus={createFocusReturnHandler(focusReturnRef)}
+      >
         <DialogHeader>
           <DialogTitle>{t(config.titleKey)}</DialogTitle>
           <DialogDescription>{t(config.descriptionKey)}</DialogDescription>

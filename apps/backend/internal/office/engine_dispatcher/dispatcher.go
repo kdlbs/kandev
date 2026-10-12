@@ -55,10 +55,15 @@ type EngineHandle interface {
 	RecordParticipantDecision(ctx context.Context, sessionID string, in engine.DecisionInfo) (engine.RecordDecisionResult, error)
 	EvaluateStepQuorum(ctx context.Context, taskID, sessionID string) (engine.QuorumSnapshot, error)
 	// ResolveParticipantRole is the AC-2/3/4/4a role-and-seat resolution
-	// entry point the agent decision tool needs. Reached the same way as
+	// entry point the runtime decision path needs. Reached the same way as
 	// the two methods above: via Dispatcher.ResolveParticipantRole plus a
 	// narrow caller-side type assertion.
 	ResolveParticipantRole(ctx context.Context, taskID, stepID, agentProfileID string) (role, participantID string, err error)
+	// ResolveParticipantRoleReadOnly is ResolveParticipantRole's
+	// side-effect-free counterpart, for callers that only observe seat
+	// occupancy (e.g. a runtime capability grant) rather than evaluate a
+	// guard or record a decision. Reached via Dispatcher.ResolveParticipantRoleReadOnly.
+	ResolveParticipantRoleReadOnly(ctx context.Context, taskID, stepID, agentProfileID string) (role, participantID string, err error)
 }
 
 // RecordDecisionInput is what a transport must resolve before calling
@@ -74,14 +79,10 @@ type RecordDecisionInput struct {
 	DeciderID     string
 	Role          string
 	Comment       string
-	// SessionID, when non-empty, names the decider's own calling session.
-	// RecordDecision re-evaluates against this session instead of the
-	// task's most-recently-started ("active") session, so a reviewer/
-	// approver's decision is checked against the seats their own session
-	// occupies rather than whichever session happens to be newest.
-	// Callers only populate this behind features.officeSessionIdentity
-	// (see office/dashboard.DashboardService.SetOfficeSessionIdentity);
-	// leaving it empty preserves the existing resolveActiveSessionID path.
+	// SessionID names an agent decider's calling session. RecordDecision
+	// re-evaluates against this session instead of the task's most-recently-
+	// started ("active") session. Non-agent decision paths can leave it empty
+	// and retain the task-scoped fallback.
 	SessionID string
 }
 
@@ -367,6 +368,15 @@ func (d *Dispatcher) ResolveParticipantRole(
 	return d.engine.ResolveParticipantRole(ctx, taskID, stepID, agentProfileID)
 }
 
+// ResolveParticipantRoleReadOnly is ResolveParticipantRole's side-effect-free
+// counterpart (see EngineHandle.ResolveParticipantRoleReadOnly): no session
+// resolution is needed here either.
+func (d *Dispatcher) ResolveParticipantRoleReadOnly(
+	ctx context.Context, taskID, stepID, agentProfileID string,
+) (role, participantID string, err error) {
+	return d.engine.ResolveParticipantRoleReadOnly(ctx, taskID, stepID, agentProfileID)
+}
+
 // resolveActiveSessionID returns AC-16's active-session id, or "" when no
 // such session is resolvable (AC-16a) — never an error for that case.
 func (d *Dispatcher) resolveActiveSessionID(ctx context.Context, taskID string) (string, error) {
@@ -430,9 +440,8 @@ func (d *Dispatcher) logSessionUnresolvable(taskID, sessionID, reason string) {
 // caller-supplied session id and must check task ownership itself), there
 // is no cross-task session id to smuggle in here.
 //
-// This resolver is deliberately task-scoped, and stays that way after
-// features.officeSessionIdentity gives each participant agent its own
-// session per task. Picking "the newest session" only stays well-defined
+// This resolver is deliberately task-scoped. Picking "the newest session"
+// only stays well-defined
 // because EvaluateStepQuorum — its sole caller — evaluates guards off
 // TaskID, CurrentStepID and WorkflowID, all derived from the task row
 // rather than the session (see orchestrator.assembleMachineState).

@@ -34,9 +34,9 @@ func (r *Repository) initTaskUsageEventsSchema() error {
 	if dialect.IsPostgres(r.db.DriverName()) {
 		idCol = "id BIGSERIAL PRIMARY KEY"
 	}
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS task_usage_events (
-		` + idCol + `,
+		`+idCol+`,
 		usage_event_id TEXT NOT NULL,
 		task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
 		session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL,
@@ -45,11 +45,21 @@ func (r *Repository) initTaskUsageEventsSchema() error {
 		agent_type TEXT NOT NULL DEFAULT '',
 		model TEXT NOT NULL DEFAULT '',
 		provider TEXT NOT NULL DEFAULT '',
+		provider_thread_id TEXT NOT NULL DEFAULT '',
+		provider_turn_id TEXT NOT NULL DEFAULT '',
+		provider_response_id TEXT NOT NULL DEFAULT '',
+		native_scope TEXT NOT NULL DEFAULT '',
+		measurement_source TEXT NOT NULL DEFAULT '',
+		usage_completeness TEXT NOT NULL DEFAULT '',
+		usage_schema_version INTEGER NOT NULL DEFAULT 0,
 		tokens_in BIGINT NOT NULL DEFAULT 0,
 		tokens_cached_read BIGINT,
 		tokens_cached_write BIGINT,
 		tokens_out BIGINT,
 		tokens_thought BIGINT,
+		reasoning_output_tokens BIGINT,
+		reported_cache_write_tokens BIGINT,
+		reported_total_tokens BIGINT,
 		tokens_total BIGINT NOT NULL DEFAULT 0,
 		cost_subcents BIGINT NOT NULL DEFAULT 0,
 		cost_source TEXT NOT NULL,

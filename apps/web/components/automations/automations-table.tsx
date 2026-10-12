@@ -29,6 +29,7 @@ const TRIGGER_BADGE_VARIANT: Record<TriggerType, string> = {
   github_push: GITHUB_BADGE_VARIANT,
   github_ci: GITHUB_BADGE_VARIANT,
   webhook: "bg-orange-500/15 text-orange-400 border-orange-500/20",
+  plugin_event: "bg-orange-500/15 text-orange-400 border-orange-500/20",
 };
 
 // The keys are persisted TriggerType identifiers the backend stores and
@@ -41,6 +42,7 @@ const TRIGGER_LABEL_KEYS: Record<TriggerType, string> = {
   github_push: "automations:triggerLabelGithubPush",
   github_ci: "automations:triggerLabelGithubCi",
   webhook: "automations:triggerLabelWebhook",
+  plugin_event: "automations:triggerLabelWebhook",
 };
 
 function TriggerBadges({ triggers }: { triggers: Automation["triggers"] }) {

@@ -71,8 +71,8 @@ type testStepEntryDispatcher struct {
 	eng *engine.Engine
 }
 
-func (d *testStepEntryDispatcher) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string) {
-	d.eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID)
+func (d *testStepEntryDispatcher) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string, markerEntryID int64) {
+	d.eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID, markerEntryID)
 }
 
 // reviewSeatsTestEnv wires a real task repository and a real workflow
@@ -90,6 +90,13 @@ type reviewSeatsTestEnv struct {
 	workflowID   string
 	workStepID   string
 	reviewStepID string
+	// onEnterDone receives once per completed asynchronous processOnEnter
+	// goroutine (launchProcessOnEnter runs it via `go func() {...}()` off the
+	// on_turn_complete route) — see assertReviewerSeatQueued's use of it to
+	// wait out that goroutine before checking the run queue is otherwise
+	// empty. Buffered so a completion racing ahead of a waiting receiver
+	// doesn't block the goroutine's own defer.
+	onEnterDone chan struct{}
 }
 
 func newReviewSeatsTestEnv(t *testing.T) *reviewSeatsTestEnv {
@@ -170,6 +177,9 @@ func newReviewSeatsTestEnv(t *testing.T) *reviewSeatsTestEnv {
 
 	taskRepo.SetStepEntryDispatcher(&testStepEntryDispatcher{eng: svc.WorkflowEngine()})
 
+	onEnterDone := make(chan struct{}, 1)
+	svc.onProcessOnEnterComplete = func() { onEnterDone <- struct{}{} }
+
 	return &reviewSeatsTestEnv{
 		taskRepo:     taskRepo,
 		workflowRepo: workflowRepo,
@@ -180,13 +190,17 @@ func newReviewSeatsTestEnv(t *testing.T) *reviewSeatsTestEnv {
 		workflowID:   workflowID,
 		workStepID:   workStepID,
 		reviewStepID: reviewStepID,
+		onEnterDone:  onEnterDone,
 	}
 }
 
 // assertReviewerSeatQueued asserts AC-OFFICE-REVIEW-SEATS-005.1/.2/.3: a
 // decision-required reviewer seat exists for taskID at Review, and a run
-// was queued for that seat's agent.
-func assertReviewerSeatQueued(t *testing.T, ctx context.Context, env *reviewSeatsTestEnv, taskID string) {
+// was queued for that seat's agent. productRoute selects which of the two
+// routes launched this arrival: only the product route launches
+// processOnEnter's async goroutine (see the duplicate-dispatch check
+// below), so only it needs to wait for it deterministically.
+func assertReviewerSeatQueued(t *testing.T, ctx context.Context, env *reviewSeatsTestEnv, taskID string, productRoute bool) {
 	t.Helper()
 
 	participants, err := env.workflowRepo.ListStepParticipantsForTask(ctx, env.reviewStepID, taskID)
@@ -220,6 +234,30 @@ func assertReviewerSeatQueued(t *testing.T, ctx context.Context, env *reviewSeat
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for reviewer run to be queued (AC-OFFICE-REVIEW-SEATS-005.2)")
+	}
+
+	// AC-OFFICE-STEP-ENTRY-DISPATCH-002.2/.5: exactly one run for this
+	// arrival, counted across every dispatcher. On the product route,
+	// on_turn_complete's marker-path dispatch (processOnEnter) runs
+	// asynchronously (launchProcessOnEnter) after the synchronous ledger
+	// dispatch that queued the run above, so wait deterministically for it
+	// to finish — a duplicate it enqueued could otherwise still be in
+	// flight when this check runs, and a short fixed wait can leave the
+	// goroutine still running on a slow/race-detector CI run, silently
+	// passing without ever observing a real regression. The manual route
+	// never launches that goroutine, so it skips the wait entirely instead
+	// of sharing a window that would only ever time out for it.
+	if productRoute {
+		select {
+		case <-env.onEnterDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for processOnEnter's async duplicate-dispatch check to finish")
+		}
+	}
+	select {
+	case extra := <-env.runQueue.calls:
+		t.Fatalf("unexpected second queued run (duplicate dispatch): %+v", extra)
+	default:
 	}
 }
 
@@ -304,7 +342,7 @@ func TestReviewParticipantSeats_ProductRouteQueuesReviewerRun(t *testing.T) {
 		t.Fatalf("task step = %q, want Review (%q)", updatedTask.WorkflowStepID, env.reviewStepID)
 	}
 
-	assertReviewerSeatQueued(t, ctx, env, taskID)
+	assertReviewerSeatQueued(t, ctx, env, taskID, true)
 }
 
 // TestReviewParticipantSeats_ManualMoveNoSessionQueuesReviewerRun covers the
@@ -345,5 +383,5 @@ func TestReviewParticipantSeats_ManualMoveNoSessionQueuesReviewerRun(t *testing.
 		t.Fatalf("manual move task to Review: %v", err)
 	}
 
-	assertReviewerSeatQueued(t, ctx, env, taskID)
+	assertReviewerSeatQueued(t, ctx, env, taskID, false)
 }

@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -56,6 +57,26 @@ func TestSnapshotSQLite_CreatesReadableCopy(t *testing.T) {
 	}
 	if name != "hello" {
 		t.Errorf("snapshot row name = %q, want %q", name, "hello")
+	}
+}
+
+func TestSnapshotSQLite_CanceledRemovesDestination(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "src.db")
+	dstPath := filepath.Join(dir, "snap.db")
+
+	src := fileSQLiteDB(t, srcPath)
+	if _, err := src.Exec(`CREATE TABLE things (id INTEGER PRIMARY KEY, name TEXT)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := snapshotSQLiteContext(ctx, src, dstPath); err == nil {
+		t.Fatal("canceled snapshot succeeded")
+	}
+	if _, err := os.Stat(dstPath); !os.IsNotExist(err) {
+		t.Fatalf("canceled snapshot destination stat error = %v, want not exist", err)
 	}
 }
 

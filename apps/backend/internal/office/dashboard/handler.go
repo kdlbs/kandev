@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/configloader"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -44,6 +45,7 @@ type Handler struct {
 	gitMgr       *configloader.GitManager
 	runDetail    RunDetailRepo
 	agentSummary AgentSummaryRepository
+	loopHealth   LoopHealthRepo
 	handoff      *taskservice.HandoffService
 	guard        ActiveSourceChecker
 	logger       *logger.Logger
@@ -75,6 +77,9 @@ func NewHandler(svc *DashboardService, labelRepo labelFetcher, gitMgr *configloa
 	}
 	if r, ok := labelRepo.(AgentSummaryRepository); ok {
 		h.agentSummary = r
+	}
+	if r, ok := labelRepo.(LoopHealthRepo); ok {
+		h.loopHealth = r
 	}
 	return h
 }
@@ -127,6 +132,8 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 	api.GET("/workspaces/:wsId/routing/preview", h.getWorkspaceRoutingPreview)
 	api.GET("/runs/:id/attempts", h.listRunAttempts)
 	api.GET("/agents/:id/route", h.getAgentRoute)
+
+	registerLoopHealthRoutes(api, h)
 }
 
 // -- Dashboard --
@@ -301,6 +308,10 @@ func (h *Handler) getAgentRunDetail(c *gin.Context) {
 // -- Task search --
 
 func (h *Handler) searchTasks(c *gin.Context) {
+	if rejectAgentTaskReader(c) {
+		return
+	}
+
 	wsID := c.Param("wsId")
 	query := c.Query("q")
 
@@ -353,7 +364,30 @@ func (h *Handler) searchTasks(c *gin.Context) {
 
 // -- Tasks --
 
+// rejectAgentTaskReader answers true (after writing a 403 response) for an
+// agent JWT caller on a dashboard task-read route. Every such route sits
+// under the same Office group and inherits only AgentAuthMiddleware (token
+// and workspace-claim validation, no capability check and no runtime audit
+// event) — so without this guard an agent whose capability snapshot lacks
+// list_tasks, or a taskless run with no board-read grant at all, could reach
+// the workspace's task list here regardless of what the capability-checked,
+// audited GET /runtime/tasks endpoint would have said. Mirrors the existing
+// createComment agent-caller guard in this same file.
+func rejectAgentTaskReader(c *gin.Context) bool {
+	if agents.CallerFromContext(c) == nil {
+		return false
+	}
+	c.JSON(http.StatusForbidden, gin.H{
+		"error": "agent callers must use the runtime tasks endpoint",
+	})
+	return true
+}
+
 func (h *Handler) listTasks(c *gin.Context) {
+	if rejectAgentTaskReader(c) {
+		return
+	}
+
 	ctx := c.Request.Context()
 	wsID := c.Param("wsId")
 
@@ -689,16 +723,24 @@ func (h *Handler) applyTaskMutations(c *gin.Context, taskID, actorAgentID string
 }
 
 // respondStatusUpdateError translates UpdateTaskStatus errors into HTTP
-// responses. ApprovalsPendingError → 409 with a body listing pending
-// approvers (resolved to {agent_profile_id, name}) and the redirected
-// status. Everything else → 400.
+// responses. Gate errors return 409 with a stable reason, pending approvers,
+// and the redirected status. Everything else returns 400.
 func (h *Handler) respondStatusUpdateError(c *gin.Context, err error) {
 	var pending *ApprovalsPendingError
 	if errors.As(err, &pending) {
 		c.JSON(http.StatusConflict, gin.H{
 			"error":             err.Error(),
+			"reason":            pending.ReasonCode(),
 			"pending_approvers": h.svc.resolvePendingApprovers(c.Request.Context(), pending.Pending),
 			"status":            statusInReviewLowercase,
+		})
+		return
+	}
+	var stepChanged *WorkflowStepChangedError
+	if errors.As(err, &stepChanged) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":  err.Error(),
+			"reason": "workflow_step_changed",
 		})
 		return
 	}

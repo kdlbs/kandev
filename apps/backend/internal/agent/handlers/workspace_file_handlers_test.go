@@ -19,6 +19,19 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 )
 
+type countingWorkspaceExecutionLookup struct {
+	calls int
+}
+
+func (l *countingWorkspaceExecutionLookup) GetExecutionBySessionID(string) (*lifecycle.AgentExecution, bool) {
+	return nil, false
+}
+
+func (l *countingWorkspaceExecutionLookup) GetOrEnsureExecution(context.Context, string) (*lifecycle.AgentExecution, error) {
+	l.calls++
+	return nil, context.Canceled
+}
+
 func TestWorkspaceFileHandlersValidateRequestsBeforeLookup(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -47,6 +60,35 @@ func TestWorkspaceFileHandlersValidateRequestsBeforeLookup(t *testing.T) {
 			}
 			assertWorkspaceContentSearchErrorCode(t, response, ws.ErrorCodeValidation)
 		})
+	}
+}
+
+func TestWorkspaceFileHandlersRejectAbsoluteTreePathBeforeLookup(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	log, err := commonlogger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := &countingWorkspaceExecutionLookup{}
+	handler := NewWorkspaceFileHandlers(lookup, log)
+	msg, err := ws.NewRequest("id", ws.ActionWorkspaceFileTreeGet, map[string]any{
+		"session_id": "s",
+		"path":       "/home/jcfs/project/public/assets",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := handler.wsGetFileTree(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("wsGetFileTree returned error: %v", err)
+	}
+	assertWorkspaceContentSearchErrorCode(t, response, ws.ErrorCodeValidation)
+	if lookup.calls != 0 {
+		t.Fatalf("execution lookup calls = %d, want 0", lookup.calls)
+	}
+	if logs.FilterLevelExact(zap.ErrorLevel).Len() != 0 {
+		t.Fatalf("error logs = %v, want none", logs.FilterLevelExact(zap.ErrorLevel).All())
 	}
 }
 

@@ -262,10 +262,12 @@ func (o opaqueWrap) Unwrap() error { return o.err }
 
 func TestIsNotFoundMatchesSentinelsWithoutRelyingOnWording(t *testing.T) {
 	for name, sentinel := range map[string]error{
-		"not visible":  ErrNotVisible,
-		"workspace":    repoerrors.ErrWorkspaceNotFound,
-		"task":         repoerrors.ErrTaskNotFound,
-		"task session": taskmodels.ErrTaskSessionNotFound,
+		"not visible":   ErrNotVisible,
+		"workflow":      repoerrors.ErrWorkflowNotFound,
+		"workspace":     repoerrors.ErrWorkspaceNotFound,
+		"task":          repoerrors.ErrTaskNotFound,
+		"task session":  taskmodels.ErrTaskSessionNotFound,
+		"workflow step": models.ErrWorkflowStepNotFound,
 	} {
 		t.Run(name, func(t *testing.T) {
 			require.True(t, IsNotFound(sentinel))

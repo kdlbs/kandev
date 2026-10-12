@@ -12,7 +12,7 @@ const ORPHAN_STEP_ID = "__kandev_orphan__";
 const MIN_TOUCH_TARGET_PX = 44;
 
 async function openMobileMenu(testPage: Page) {
-  await testPage.getByRole("button", { name: "Open menu" }).click();
+  await testPage.getByTestId("mobile-topbar-page-context").click();
   await testPage.getByTestId("mobile-home-menu-card").waitFor({ state: "visible" });
 }
 

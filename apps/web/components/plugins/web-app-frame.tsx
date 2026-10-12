@@ -1,11 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/theme/app-theme";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { resolveWebAppAppearance } from "./web-app-appearance";
+import {
+  createWebAppStartupNonce,
+  createWebAppStartupProbe,
+  parseWebAppStartupResult,
+  WEB_APP_STARTUP_TIMEOUT_MS,
+  type WebAppStartupFailureReason,
+} from "./web-app-startup";
 
 type WebAppFrameProps = {
   /** A short-lived capability URL returned by the backend. */
@@ -14,28 +21,160 @@ type WebAppFrameProps = {
   title: string;
   className?: string;
   onLoad?: () => void;
-  onError?: () => void;
+  onError?: (reason: WebAppStartupFailureReason) => void;
 };
 
 type FrameState = "loading" | "ready" | "unavailable";
 
+type IframeReference = { current: HTMLIFrameElement | null };
+
+type WebAppFrameLifecycleProps = {
+  runtimeUrl?: string | null;
+  iframeRef: IframeReference;
+  sendAppearance: () => void;
+  onLoad?: () => void;
+  onError?: (reason: WebAppStartupFailureReason) => void;
+};
+
+type WebAppStartupOutcome =
+  | { result: "ready" }
+  | { result: "failed"; reason: WebAppStartupFailureReason };
+
+type StartupAttempt = {
+  nonce: string;
+  frameWindow: Window | null;
+  settled: boolean;
+  timer: ReturnType<typeof setTimeout> | null;
+};
+
+function useWebAppStartupMessageListener({
+  runtimeUrl,
+  iframeRef,
+  attemptRef,
+  finishAttempt,
+}: {
+  runtimeUrl?: string | null;
+  iframeRef: IframeReference;
+  attemptRef: { current: StartupAttempt | null };
+  finishAttempt: (outcome: WebAppStartupOutcome) => void;
+}) {
+  useLayoutEffect(() => {
+    if (!runtimeUrl) return;
+    const attempt: StartupAttempt = {
+      nonce: createWebAppStartupNonce(),
+      frameWindow: null,
+      settled: false,
+      timer: null,
+    };
+    attemptRef.current = attempt;
+    attempt.timer = setTimeout(
+      () => finishAttempt({ result: "failed", reason: "timeout" }),
+      WEB_APP_STARTUP_TIMEOUT_MS,
+    );
+
+    const handleStartupMessage = (event: MessageEvent<unknown>) => {
+      if (attemptRef.current !== attempt || attempt.settled) return;
+      const currentFrameWindow = iframeRef.current?.contentWindow;
+      if (
+        !currentFrameWindow ||
+        attempt.frameWindow !== currentFrameWindow ||
+        event.source !== currentFrameWindow
+      ) {
+        return;
+      }
+      const result = parseWebAppStartupResult(event.data, attempt.nonce);
+      if (!result) return;
+      finishAttempt(
+        result.result === "ready" ? { result: "ready" } : { result: "failed", reason: result.code },
+      );
+    };
+    window.addEventListener("message", handleStartupMessage);
+    return () => {
+      window.removeEventListener("message", handleStartupMessage);
+      if (attempt.timer !== null) clearTimeout(attempt.timer);
+      attempt.timer = null;
+      if (attemptRef.current === attempt) attemptRef.current = null;
+    };
+  }, [finishAttempt, iframeRef, runtimeUrl]);
+}
+
+function useWebAppFrameLifecycle({
+  runtimeUrl,
+  iframeRef,
+  sendAppearance,
+  onLoad,
+  onError,
+}: WebAppFrameLifecycleProps) {
+  const [frameState, setFrameState] = useState<FrameState>(runtimeUrl ? "loading" : "unavailable");
+  const frameReadyRef = useRef(false);
+  const onLoadRef = useRef(onLoad);
+  const onErrorRef = useRef(onError);
+  const sendAppearanceRef = useRef(sendAppearance);
+  const attemptRef = useRef<StartupAttempt | null>(null);
+
+  useEffect(() => {
+    onLoadRef.current = onLoad;
+    onErrorRef.current = onError;
+    sendAppearanceRef.current = sendAppearance;
+  }, [onError, onLoad, sendAppearance]);
+
+  useLayoutEffect(() => {
+    frameReadyRef.current = false;
+    setFrameState(runtimeUrl ? "loading" : "unavailable");
+    attemptRef.current = null;
+  }, [runtimeUrl]);
+
+  useEffect(() => {
+    if (frameReadyRef.current) sendAppearance();
+  }, [sendAppearance]);
+
+  const finishAttempt = useCallback((outcome: WebAppStartupOutcome) => {
+    const attempt = attemptRef.current;
+    if (!attempt || attempt.settled) return;
+    attempt.settled = true;
+    if (attempt.timer !== null) {
+      clearTimeout(attempt.timer);
+      attempt.timer = null;
+    }
+    if (outcome.result === "failed") {
+      frameReadyRef.current = false;
+      setFrameState("unavailable");
+      onErrorRef.current?.(outcome.reason);
+      return;
+    }
+    frameReadyRef.current = true;
+    sendAppearanceRef.current();
+    window.requestAnimationFrame(() => {
+      if (attemptRef.current !== attempt) return;
+      setFrameState("ready");
+      onLoadRef.current?.();
+    });
+  }, []);
+
+  useWebAppStartupMessageListener({ runtimeUrl, iframeRef, attemptRef, finishAttempt });
+
+  const handleLoad = useCallback(() => {
+    const attempt = attemptRef.current;
+    const frameWindow = iframeRef.current?.contentWindow;
+    if (!attempt || attempt.settled || !frameWindow) return;
+    attempt.frameWindow = frameWindow;
+    sendAppearanceRef.current();
+    frameWindow.postMessage(createWebAppStartupProbe(attempt.nonce), "*");
+  }, [iframeRef]);
+
+  return { frameState, handleLoad };
+}
+
 /**
  * Hosts a static plugin web application without bringing it into the SPA
- * process. The sandbox deliberately omits allow-same-origin, top navigation,
- * popups, downloads, and a privileged host bridge.
+ * process. The sandbox preserves same-origin requests while omitting top
+ * navigation, popups, downloads, and a privileged host bridge.
  */
 export function WebAppFrame({ runtimeUrl, title, className, onLoad, onError }: WebAppFrameProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
-  const [frameState, setFrameState] = useState<FrameState>(runtimeUrl ? "loading" : "unavailable");
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const frameReadyRef = useRef(false);
-
-  useEffect(() => {
-    frameReadyRef.current = false;
-    setFrameState(runtimeUrl ? "loading" : "unavailable");
-  }, [runtimeUrl]);
 
   const sendAppearance = useCallback(() => {
     const target = iframeRef.current?.contentWindow;
@@ -43,22 +182,13 @@ export function WebAppFrame({ runtimeUrl, title, className, onLoad, onError }: W
     target.postMessage(resolveWebAppAppearance(document, resolvedTheme), "*");
   }, [resolvedTheme]);
 
-  useEffect(() => {
-    if (frameReadyRef.current) sendAppearance();
-  }, [sendAppearance]);
-
-  const handleLoad = () => {
-    sendAppearance();
-    frameReadyRef.current = true;
-    onLoad?.();
-    window.requestAnimationFrame(() => setFrameState("ready"));
-  };
-
-  const handleError = () => {
-    frameReadyRef.current = false;
-    setFrameState("unavailable");
-    onError?.();
-  };
+  const { frameState, handleLoad } = useWebAppFrameLifecycle({
+    runtimeUrl,
+    iframeRef,
+    sendAppearance,
+    onLoad,
+    onError,
+  });
 
   return (
     <div
@@ -72,18 +202,21 @@ export function WebAppFrame({ runtimeUrl, title, className, onLoad, onError }: W
       )}
       aria-busy={frameState === "loading"}
     >
-      {runtimeUrl ? (
+      {runtimeUrl && frameState !== "unavailable" ? (
+        // No onError here: React never attaches a DOM "error" listener for iframe/object/embed
+        // (it only listens for "load"), so a document-load failure is unobservable from the
+        // frame element itself. It surfaces only through the guest's own postMessage handshake
+        // (the "document_error" reason) or the startup timeout.
         <iframe
           key={runtimeUrl}
           title={title}
           src={runtimeUrl}
           ref={iframeRef}
-          sandbox="allow-scripts allow-forms"
+          sandbox="allow-scripts allow-forms allow-same-origin"
           referrerPolicy="no-referrer"
           loading="eager"
           className="block h-full min-h-0 w-full min-w-0 flex-1 border-0"
           onLoad={handleLoad}
-          onError={handleError}
         />
       ) : null}
       {frameState !== "ready" && (

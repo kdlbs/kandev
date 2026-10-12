@@ -52,22 +52,27 @@ flow, and regression tests share one ownership contract.
 
 ### Atomic ownership operations
 
-- Replace the repository's narrow `DetachTask` update with a transaction that
-  locks child, former parent, active group, and materialized environment; checks
-  cleanup barriers; updates hierarchy, roles, owners, and generations; and
-  commits once.
+- `archivecascade.Store.DetachTask` owns the single transaction over workspace,
+  barriers, task/revision, effects/claims, environment/repository, group/member,
+  marker, and outbox rows. Its command carries actor plus expected parent/group/
+  environment generations; SQLite code is private dialect helpers only.
+- The transaction discovers and revalidates all affected operation/barrier
+  scopes, locks barrier 4 -> task 5 -> revision 6 -> effects/claims 7-10 ->
+  environment/repository 11 -> group/member 12 -> cleanup/markers 13-14 ->
+  outbox 16, with tiers 2,3,15,17 intentionally empty, and commits once.
+- Mode/owner preconditions transfer stewardship only for inherited parent-owned
+  materialization; shared-group and new-workspace children preserve ownership.
 - Replace unguarded environment owner transfers with expected-owner and
   expected-generation compare-and-swap operations used by direct delete,
   cascade archive/delete, rollback, and detachment.
 - Add generation-aware workspace-group cleanup claim and completion methods so
   stale cleanup cannot change status or remove resources.
-
-### Canonical creation
-
 - Add workspace-policy inputs and an injected attachment coordinator to the task
   service create sequence.
-- Resolve and attach policy before `task.created` publication and before Created
-  returns; reuse partial-task rollback on failure.
+- Resolve and attach policy through a typed `CreationPlan` step before
+  `task.created` publication and before Created returns. Use handle-bound Abort
+  only when its closed predicate holds; otherwise persist pending recovery for
+  Runtime reconciliation.
 - Remove handler-owned REST and MCP attachment calls and cover WebSocket,
   plugin, workflow/internal child, REST, and MCP creation through the service
   boundary.
@@ -80,22 +85,22 @@ flow, and regression tests share one ownership contract.
   reporting for genuinely failed current-generation cleanup.
 - Prove that restart processing cannot revive an old generation's authority.
 
-## Tests
-
-- `apps/backend/internal/task/repository/sqlite/detached_workspace_continuity_test.go`:
-  SQLite transaction, idempotency, rollback, cleanup-barrier, concurrent detach,
-  and stale-generation cases.
-- `apps/backend/internal/task/repository/sqlite/detached_workspace_continuity_postgres_test.go`:
-  PostgreSQL row-lock serialization and fresh/replayed migration coverage.
+- `apps/backend/internal/task/archivecascade/detached_workspace_continuity_test.go`:
+  SQLite transaction, idempotency, mode/owner branching, rollback,
+  publication, cleanup-barrier, concurrent detach, and stale-generation cases.
+- `apps/backend/internal/task/archivecascade/detached_workspace_continuity_postgres_test.go`:
+  shared-DB crash rollback/replay, detach-vs-cleanup, sibling detach, and every
+  adjacent lock-inversion case using `KANDEV_TEST_POSTGRES_DSN`.
 - `apps/backend/internal/office/repository/sqlite/workspace_group_generation_test.go`:
   group generation claims, membership role uniqueness, stale status writes, and
   SQLite/PostgreSQL schema replay.
 - `apps/backend/internal/task/service/service_detachment_test.go` and a focused
-  cleanup test file: detached child continuity after parent archive/delete,
-  stale durable-job recovery, and unchanged physical workspace binding.
+  cleanup test file: aggregate delegation, detached child continuity after
+  parent archive/delete, stale durable-job recovery, and unchanged physical
+  workspace binding.
 - Handler, MCP, plugin adapter, and `CreateChildTask` tests: every creation route
-  reaches the service-owned workspace attachment coordinator and rolls back on
-  failure.
+  reaches the service-owned workspace attachment coordinator; failed attachment
+  uses only eligible Abort or durable recovery and never direct deletion.
 
 ## E2E tests
 
@@ -115,8 +120,9 @@ Completed on 2026-09-04.
   are covered by service and repository regressions.
 - Current-owner cleanup barriers, guarded owner-generation transfers, stale
   environment cleanup, and generation-fenced workspace cleanup are covered.
-- The task service now owns workspace attachment before publishing or returning
-  a newly created task; attachment failure rolls the task row back.
+- The task service owns workspace attachment through a typed CreationPlan step
+  before publication or return; failure uses predicate-proven handle-bound Abort
+  or durable Runtime recovery and never direct rollback deletion.
 - Focused repository tests passed: 27 tests across task and Office persistence.
 - Focused service tests passed: 19 tests.
 - Creation entry-point tests passed: 15 tests across HTTP, MCP, plugins, and

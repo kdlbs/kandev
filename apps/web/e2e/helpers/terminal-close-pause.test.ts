@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { partitionTerminalDestroyRequest } from "../tests/terminal/terminal-close-pause";
+import { partitionTerminalDestroyRequest } from "../tests/terminal/terminal-close-pause-parser";
 
 describe("partitionTerminalDestroyRequest", () => {
   it("pauses only the destroy frame in a newline-delimited batch", () => {

@@ -30,6 +30,8 @@ import type {
   ListWorkflowTemplatesResponse,
   WorkflowTemplate,
   StepDefinition,
+  WorkflowImportPreview,
+  WorkflowImportProfileBinding,
 } from "@/lib/types/http";
 
 const { apiBaseUrl } = getBackendConfig();
@@ -46,9 +48,11 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const text = response.status === 204 ? "" : await response.text();
   if (!response.ok) {
     let message = `Request failed: ${response.status} ${response.statusText}`;
+    let errorBody: unknown = null;
     if (text) {
       try {
         const body = JSON.parse(text) as { error?: string; message?: string };
+        errorBody = body;
         const detail = body.error ?? body.message;
         if (detail) {
           message = detail;
@@ -57,7 +61,10 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
         // body was not JSON, fall back to status text
       }
     }
-    throw new Error(message);
+    const error = new Error(message) as Error & { status: number; body: unknown };
+    error.status = response.status;
+    error.body = errorBody;
+    throw error;
   }
   if (!text) {
     return undefined as T;
@@ -95,6 +102,8 @@ export async function updateWorkspaceAction(
     default_environment_id?: string;
     default_agent_profile_id?: string;
     default_config_agent_profile_id?: string;
+    acp_idle_suspension_enabled?: boolean;
+    acp_idle_timeout_minutes?: number;
   },
 ) {
   return fetchJson<Workspace>(`${apiBaseUrl}/api/v1/workspaces/${id}`, {
@@ -240,6 +249,7 @@ export {
   refreshRepositoryDiscoveryAction,
   listDesktopDiscoveryRootsAction,
   addDesktopDiscoveryRootAction,
+  confirmHomeDesktopDiscoveryAction,
   reconnectDesktopDiscoveryRootAction,
   removeDesktopDiscoveryRootAction,
 } from "./repository-discovery";
@@ -301,6 +311,31 @@ export async function createRepositoryAction(payload: {
   );
 }
 
+/**
+ * Registers a provider-hosted repository in the workspace without a task. The
+ * backend verifies the locator (URL parser for built-in hosts, plugin
+ * inspection for plugin providers) and answers with the existing repository
+ * when the workspace already has one with that provider identity.
+ */
+export async function registerRemoteRepositoryAction(
+  workspaceId: string,
+  payload: {
+    remote_url: string;
+    default_branch?: string;
+    provider?: string;
+    provider_host?: string;
+    provider_scope?: string;
+    provider_repo_id?: string;
+    provider_owner?: string;
+    provider_name?: string;
+  },
+) {
+  return fetchJson<Repository>(
+    `${apiBaseUrl}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/repositories/remote`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
 export async function updateRepositoryAction(id: string, payload: Partial<Repository>) {
   return fetchJson<Repository>(`${apiBaseUrl}/api/v1/repositories/${id}`, {
     method: "PATCH",
@@ -359,8 +394,11 @@ type BackendTemplateStep = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: StepDefinition["agent_profile_id"];
+  session_target?: StepDefinition["session_target"];
   profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
   profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
+  disable_unclassified_fallback?: boolean;
+  complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -382,6 +420,7 @@ const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowT
     profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
       step.profile_session_end_policy,
     ),
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     pull_from_step_id: step.pull_from_step_id ?? null,
   }));
   return {
@@ -416,8 +455,11 @@ type BackendWorkflowStep = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  session_target?: WorkflowStep["session_target"];
   profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
   profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
+  disable_unclassified_fallback?: boolean;
+  complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -440,12 +482,15 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   show_in_command_panel: step.show_in_command_panel,
   auto_archive_after_hours: step.auto_archive_after_hours,
   agent_profile_id: step.agent_profile_id,
+  session_target: step.session_target ?? null,
   profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
     step.profile_session_start_policy,
   ),
   profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
     step.profile_session_end_policy,
   ),
+  disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
+  complete_task_on_enter: step.complete_task_on_enter,
   auto_advance_requires_signal: step.auto_advance_requires_signal,
   cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
   wip_limit: step.wip_limit ?? 0,
@@ -488,9 +533,11 @@ export async function createWorkflowStepAction(payload: {
   color: string;
   prompt?: string;
   events?: StepEvents;
+  complete_task_on_enter?: boolean;
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: string;
+  session_target?: WorkflowStep["session_target"];
   allow_manual_move?: boolean;
   auto_advance_requires_signal?: boolean;
   wip_limit?: number;
@@ -499,6 +546,7 @@ export async function createWorkflowStepAction(payload: {
   cancel_triggers_turn_complete?: boolean;
   profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
   profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
+  disable_unclassified_fallback?: boolean;
 }): Promise<WorkflowStep> {
   const body = {
     workflow_id: payload.workflow_id,
@@ -511,12 +559,15 @@ export async function createWorkflowStepAction(payload: {
     is_start_step: payload.is_start_step ?? false,
     show_in_command_panel: payload.show_in_command_panel ?? true,
     agent_profile_id: payload.agent_profile_id,
+    session_target: payload.session_target,
     wip_limit: payload.wip_limit ?? 0,
     pull_from_step_id: payload.pull_from_step_id ?? "",
     stage_type: payload.stage_type,
+    complete_task_on_enter: payload.complete_task_on_enter ?? false,
     cancel_triggers_turn_complete: payload.cancel_triggers_turn_complete ?? false,
     profile_session_start_policy: payload.profile_session_start_policy,
     profile_session_end_policy: payload.profile_session_end_policy,
+    disable_unclassified_fallback: payload.disable_unclassified_fallback ?? false,
     auto_advance_requires_signal: payload.auto_advance_requires_signal ?? false,
   };
   const response = await fetchJson<BackendWorkflowStep>(`${apiBaseUrl}/api/v1/workflow/steps`, {
@@ -541,6 +592,7 @@ export async function updateWorkflowStepAction(
       | "show_in_command_panel"
       | "auto_archive_after_hours"
       | "agent_profile_id"
+      | "session_target"
       | "auto_advance_requires_signal"
       | "cancel_triggers_turn_complete"
       | "wip_limit"
@@ -548,6 +600,8 @@ export async function updateWorkflowStepAction(
       | "stage_type"
       | "profile_session_start_policy"
       | "profile_session_end_policy"
+      | "disable_unclassified_fallback"
+      | "complete_task_on_enter"
     >
   >,
 ): Promise<WorkflowStep> {
@@ -676,9 +730,23 @@ export async function exportAllWorkflowsAction(
 export async function importWorkflowsAction(
   workspaceId: string,
   yamlContent: string,
+  stepProfileBindings: WorkflowImportProfileBinding[] = [],
 ): Promise<ImportWorkflowsResult> {
   return fetchJson<ImportWorkflowsResult>(
-    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/import`,
+    `${apiBaseUrl}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/workflows/import`,
+    {
+      method: "POST",
+      body: JSON.stringify({ yaml: yamlContent, step_profile_bindings: stepProfileBindings }),
+    },
+  );
+}
+
+export async function previewWorkflowImportAction(
+  workspaceId: string,
+  yamlContent: string,
+): Promise<WorkflowImportPreview> {
+  return fetchJson<WorkflowImportPreview>(
+    `${apiBaseUrl}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/workflows/import/preview`,
     {
       method: "POST",
       headers: { "Content-Type": "application/x-yaml" },

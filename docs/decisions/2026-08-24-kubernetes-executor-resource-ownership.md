@@ -4,6 +4,11 @@
 **Date:** 2026-08-24
 **Area:** backend, frontend, infra, security
 
+The session-scoped ownership choice is superseded for shared task pods
+by [task-owned compute](2026-09-21-kubernetes-task-pod-ownership.md).
+Its exact-resource safety invariants remain in force; existing legacy resources
+retain their recorded identity until safely adopted.
+
 ## Context
 
 The Kubernetes executor must combine an administrator-authored Pod template
@@ -38,6 +43,13 @@ containers, image-pull secrets, and workload service accounts. Structurally
 compatible privileged/host settings are warned about and left to administrator
 trust plus cluster admission policy; fields that collide with Kandev invariants
 are rejected.
+
+An ordinary non-main container may explicitly request one RO/RW workspace
+mount at exactly `/workspace`. Kandev retains the volume definition; redirected,
+overlapping, subpath, propagation and recursive grants remain prohibited.
+Admission compares grants in both directions by named recipient. Runtime/auth
+mounts and init/ephemeral recipients remain excluded. The recorded launch
+snapshot governs replacements. See the [workspace grant design](../specs/executors/system-design/kubernetes-docker-workloads.md).
 
 Managed PVCs do not receive a Pod owner reference. Kandev preserves them on
 ordinary stop, backend shutdown, and unexpected Pod loss, then explicitly

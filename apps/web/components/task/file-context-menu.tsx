@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTranslation } from "react-i18next";
 import type { FileTreeNode } from "@/lib/types/backend";
@@ -153,35 +154,6 @@ function useFileContextMenuDelete({
   };
 }
 
-function useFileMenuDeleteHandler({
-  handleDelete,
-  isBulk,
-  isFinePointer,
-  contextMenuRef,
-}: {
-  handleDelete: () => void;
-  isBulk: boolean;
-  isFinePointer: boolean;
-  contextMenuRef: React.RefObject<HTMLElement | null>;
-}) {
-  return useCallback(
-    (event: Event) => {
-      const item = event.currentTarget;
-      contextMenuRef.current =
-        item instanceof HTMLElement
-          ? (item.closest('[data-slot="context-menu-content"]') as HTMLElement | null)
-          : null;
-      if (isBulk || !isFinePointer) {
-        handleDelete();
-      } else {
-        // Let the 100 ms context-menu exit animation finish before anchoring the popover.
-        setTimeout(handleDelete, 150);
-      }
-    },
-    [handleDelete, isBulk, isFinePointer, contextMenuRef],
-  );
-}
-
 type FileContextMenuSurfaceProps = {
   children: React.ReactNode;
   node: FileTreeNode;
@@ -230,6 +202,8 @@ function FileContextMenuSurface({
   onDelete,
 }: FileContextMenuSurfaceProps) {
   const renamePendingRef = useRef(false);
+  const deletePendingRef = useRef(false);
+  const touchTriggerRef = useRef<HTMLButtonElement>(null);
 
   const handleStartRename = useCallback(() => {
     renamePendingRef.current = true;
@@ -237,16 +211,25 @@ function FileContextMenuSurface({
 
   const handleCloseAutoFocus = useCallback(
     (event: Event) => {
+      if (deletePendingRef.current) {
+        event.preventDefault();
+        deletePendingRef.current = false;
+        // Transfer focus to the confirmation after the context menu closes.
+        setDeleteConfirmationOpen(true);
+        return;
+      }
       if (!renamePendingRef.current) return;
       event.preventDefault();
       renamePendingRef.current = false;
       onStartRename();
     },
-    [onStartRename],
+    [onStartRename, setDeleteConfirmationOpen],
   );
 
   return (
-    <FileDeleteActionContext.Provider value={deleteAction}>
+    <FileDeleteActionContext.Provider
+      value={deleteAction ? { ...deleteAction, triggerRef: touchTriggerRef } : null}
+    >
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent onCloseAutoFocus={handleCloseAutoFocus}>
@@ -265,7 +248,15 @@ function FileContextMenuSurface({
             onDownloadFile={onDownloadFile}
             onUploadFilesHere={onUploadFilesHere}
             onStartRename={handleStartRename}
-            onDelete={onDelete}
+            onDelete={(event) => {
+              const item = event.currentTarget;
+              focusBoundaryRef.current =
+                item instanceof HTMLElement
+                  ? (item.closest('[data-slot="context-menu-content"]') as HTMLElement | null)
+                  : null;
+              if (isBulk) onDelete(event);
+              else deletePendingRef.current = true;
+            }}
           />
         </ContextMenuContent>
       </ContextMenu>
@@ -274,24 +265,70 @@ function FileContextMenuSurface({
           <DeleteConfirmDialog selectedCount={selectedCount} onConfirm={onConfirmDelete} />
         </AlertDialog>
       )}
-      {!isBulk && isFinePointer && deleteAction && (
-        <ActionConfirmPopover
+      {!isBulk && deleteAction && (
+        <FileDeleteConfirmation
+          action={deleteAction}
           open={deleteConfirmationOpen}
+          path={node.path}
+          isFinePointer={isFinePointer}
           anchorRef={anchorRef}
           focusBoundaryRef={focusBoundaryRef}
-          title={deleteAction.title}
-          description={deleteAction.description}
-          cancelLabel={deleteAction.cancelLabel}
-          confirmLabel={deleteAction.label}
-          confirmAriaLabel={deleteAction.title}
-          confirmTestId="file-delete-confirm"
-          testId="file-delete-confirm-popover"
+          focusReturnRef={touchTriggerRef.current ? touchTriggerRef : anchorRef}
           onOpenChange={setDeleteConfirmationOpen}
-          onCancel={() => setDeleteConfirmationOpen(false)}
           onConfirm={onConfirmDelete}
         />
       )}
     </FileDeleteActionContext.Provider>
+  );
+}
+
+function FileDeleteConfirmation({
+  action,
+  path,
+  isFinePointer,
+  anchorRef,
+  focusReturnRef,
+  focusBoundaryRef,
+  ...props
+}: {
+  action: FileDeleteAction;
+  path: string;
+  isFinePointer: boolean;
+  anchorRef: React.RefObject<HTMLElement | null>;
+  focusReturnRef: React.RefObject<HTMLElement | null>;
+  focusBoundaryRef: React.RefObject<HTMLElement | null>;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  const actions = {
+    ...props,
+    title: action.title,
+    description: action.description,
+    cancelLabel: action.cancelLabel,
+    confirmLabel: action.label,
+    confirmAriaLabel: action.title,
+    confirmTestId: "file-delete-confirm",
+  };
+  return (
+    <MobileActionConfirmation
+      {...actions}
+      targetKey={path}
+      useMobileSurfaceForCoarsePointer
+      subject={path.includes("/") ? path : undefined}
+      focusReturnRef={focusReturnRef}
+      fallback={
+        isFinePointer ? (
+          <ActionConfirmPopover
+            {...actions}
+            anchorRef={anchorRef}
+            focusBoundaryRef={focusBoundaryRef}
+            testId="file-delete-confirm-popover"
+            onCancel={() => props.onOpenChange(false)}
+          />
+        ) : null
+      }
+    />
   );
 }
 
@@ -349,13 +386,6 @@ export function FileContextMenu({
       onDeleteFile,
       selectedPaths,
     });
-  const handleMenuDelete = useFileMenuDeleteHandler({
-    handleDelete,
-    isBulk,
-    isFinePointer,
-    contextMenuRef,
-  });
-
   const deleteAction = createFileDeleteAction({
     node,
     onDeleteFile,
@@ -391,7 +421,7 @@ export function FileContextMenu({
       focusBoundaryRef={contextMenuRef}
       deleteAction={deleteAction}
       onConfirmDelete={handleConfirmDelete}
-      onDelete={handleMenuDelete}
+      onDelete={handleDelete}
     >
       {providedAnchorRef ? children : attachAnchorRef(children, anchorRef)}
     </FileContextMenuSurface>
@@ -499,42 +529,35 @@ export function useFileRename(
 /** Inline rename input or static file name */
 export function TreeNodeName({
   node,
+  displayName,
   isActive,
   gitStatus,
   rename,
 }: {
   node: FileTreeNode;
+  displayName?: string;
   isActive: boolean;
   gitStatus: GitFileStatus;
   rename: ReturnType<typeof useFileRename>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const blurEnabledRef = useRef(false);
 
   useEffect(() => {
     if (rename.isRenaming) {
-      blurEnabledRef.current = false;
       inputRef.current?.focus();
       inputRef.current?.select();
-      const blurTimer = setTimeout(() => {
-        blurEnabledRef.current = true;
-      }, 400);
-      return () => {
-        clearTimeout(blurTimer);
-      };
     }
   }, [rename.isRenaming]);
 
   const handleBlur = useCallback(() => {
-    if (blurEnabledRef.current) {
-      rename.handleConfirmRename();
-    }
+    rename.handleConfirmRename();
   }, [rename]);
 
   if (rename.isRenaming) {
     return (
       <Input
         ref={inputRef}
+        controlSize="none"
         value={rename.renameValue}
         onChange={(e) => rename.setRenameValue(e.target.value)}
         onKeyDown={rename.handleRenameKeyDown}
@@ -552,7 +575,7 @@ export function TreeNodeName({
         node.is_dir ? "font-medium" : getGitStatusTextClass(gitStatus),
       )}
     >
-      {node.name}
+      {displayName ?? node.name}
     </span>
   );
 }

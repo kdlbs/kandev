@@ -267,7 +267,7 @@ func TestSwitchSessionForStepUsesReusableSessionExecutorProfileForCredentialAdmi
 	exec.SetGitHubCredentialBroker(fakeSwitchSessionCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve")
 	svc := &Service{
 		logger: log, repo: repo, taskRepo: taskRepo, agentManager: agentMgr,
-		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,
+		messageQueue: newAuthoritativeMemoryQueue(repo, log), executor: exec,
 	}
 
 	got, err := svc.switchSessionForStep(ctx, "t1", current, "profile-b")

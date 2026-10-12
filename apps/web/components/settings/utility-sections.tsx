@@ -3,10 +3,8 @@
 import { useTranslation } from "react-i18next";
 import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { CardContent } from "@kandev/ui/card";
 import type { UtilityAgent } from "@/lib/api/domains/utility-api";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
-import { SettingsCard } from "@/components/settings/settings-card";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/standalone";
 import { isUtilityAgentDirty } from "@/components/settings/utility-dirty";
@@ -14,7 +12,7 @@ import {
   UtilityAgentProfilePicker,
   utilityProfileEligibility,
 } from "@/components/settings/utility-agent-profile-picker";
-import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsFieldLabel } from "@/components/settings/settings-typography";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 
@@ -58,16 +56,14 @@ export function DefaultModelSection({
   );
   const selected = eligibleProfiles.find((profile) => profile.id === profileId);
   return (
-    <SettingsCard
+    <SettingsGroup
       isDirty={isDirty}
+      title={t("settings:utilityDefaultModelTitle")}
+      description={t("settings:utilityDefaultModelDescription")}
       discoveryTargetId={SETTINGS_TARGETS.utilityDefaultModel}
       data-testid="utility-default-model-card"
     >
-      <SettingsCardHeader title={t("settings:utilityDefaultModelTitle")} />
-      <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          {t("settings:utilityDefaultModelDescription")}
-        </p>
+      <div className="space-y-3">
         <div className="space-y-2">
           <SettingsFieldLabel>{t("settings:utilityAgentProfile")}</SettingsFieldLabel>
           <UtilityAgentProfilePicker
@@ -83,8 +79,8 @@ export function DefaultModelSection({
             <p className="text-xs text-destructive">{t("settings:utilityProfileNeedsRepair")}</p>
           )}
         </div>
-      </CardContent>
-    </SettingsCard>
+      </div>
+    </SettingsGroup>
   );
 }
 
@@ -159,21 +155,19 @@ export function PerActionOverridesSection({
   const { t } = useTranslation();
   if (builtins.length === 0) return null;
   return (
-    <SettingsCard
+    <SettingsGroup
       isDirty={builtins.some((agent) =>
         isUtilityAgentDirty(
           agent,
           savedBuiltins.find((saved) => saved.id === agent.id),
         ),
       )}
+      title={t("settings:utilityActionsTitle")}
+      description={t("settings:utilityActionsDescription")}
       discoveryTargetId={SETTINGS_TARGETS.utilityActions}
       data-testid="utility-actions-card"
     >
-      <SettingsCardHeader title={t("settings:utilityActionsTitle")} />
-      <CardContent className="space-y-0">
-        <p className="pb-3 text-sm text-muted-foreground">
-          {t("settings:utilityActionsDescription")}
-        </p>
+      <div className="space-y-0">
         {builtins.map((agent) => (
           <BuiltinActionRow
             key={agent.id}
@@ -188,8 +182,8 @@ export function PerActionOverridesSection({
             )}
           />
         ))}
-      </CardContent>
-    </SettingsCard>
+      </div>
+    </SettingsGroup>
   );
 }
 
@@ -252,23 +246,19 @@ export function CustomAgentsSection({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard
+    <SettingsGroup
+      title={t("settings:utilityCustomAgentsTitle")}
+      description={t("settings:utilityCustomAgentsDescription")}
       discoveryTargetId={SETTINGS_TARGETS.utilityCustomAgents}
       data-testid="utility-custom-agents-card"
+      action={
+        <Button onClick={onAdd} size="sm" className={settingsActionClassName("cursor-pointer")}>
+          <IconPlus className="h-4 w-4 mr-1" />
+          {t("settings:utilityAddCustomAgent")}
+        </Button>
+      }
     >
-      <SettingsCardHeader
-        title={t("settings:utilityCustomAgentsTitle")}
-        actions={
-          <Button onClick={onAdd} size="sm" className={settingsActionClassName("cursor-pointer")}>
-            <IconPlus className="h-4 w-4 mr-1" />
-            {t("settings:utilityAddCustomAgent")}
-          </Button>
-        }
-      />
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          {t("settings:utilityCustomAgentsDescription")}
-        </p>
+      <div className="space-y-4">
         {agents.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4">
             {t("settings:utilityCustomAgentsEmpty")}
@@ -286,7 +276,7 @@ export function CustomAgentsSection({
             ))}
           </div>
         )}
-      </CardContent>
-    </SettingsCard>
+      </div>
+    </SettingsGroup>
   );
 }

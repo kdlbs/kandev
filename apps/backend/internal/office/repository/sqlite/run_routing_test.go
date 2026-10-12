@@ -11,6 +11,7 @@ import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // newTestRepoWithDB returns both the repo and the underlying *sqlx.DB
@@ -53,7 +54,7 @@ func seedAgentProfile(t *testing.T, db *sqlx.DB, id, workspaceID string) {
 func TestSetRunResolvedRoute_PersistsExecutionProfileAndSnapshots(t *testing.T) {
 	repo, _ := newTestRepoWithDB(t)
 	ctx := context.Background()
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "office-cto",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -93,14 +94,14 @@ func TestClearAllParkedRoutingForWorkspace_ClearsOnlyTargetWorkspace(t *testing.
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 	seedAgentProfile(t, db, "agent-b", "ws-b")
 
-	runA := &models.Run{
+	runA := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
 		Status:         "queued",
 		CoalescedCount: 1,
 	}
-	runB := &models.Run{
+	runB := &runsmodels.Run{
 		AgentProfileID: "agent-b",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t2"}`,
@@ -167,7 +168,7 @@ func TestClearAllParkedRoutingForWorkspace_NoParkedRuns(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -186,6 +187,80 @@ func TestClearAllParkedRoutingForWorkspace_NoParkedRuns(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-HARNESS-SESSION-CONTINUITY-006.1
+func TestParkRunForSessionRecoveryPreservesPendingWork(t *testing.T) {
+	repo, db := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, db, "agent-recovery", "ws-recovery")
+	run := &runsmodels.Run{
+		AgentProfileID: "agent-recovery",
+		Reason:         "task_assigned",
+		Payload:        `{"task_id":"task-recovery"}`,
+		Status:         "claimed",
+		CoalescedCount: 1,
+	}
+	if err := repo.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := repo.ParkRunForSessionRecovery(
+		ctx, run.ID, "block-recovery", "native_state_missing",
+	); err != nil {
+		t.Fatalf("park run: %v", err)
+	}
+
+	got, err := repo.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.Status != "queued" {
+		t.Fatalf("status = %q, want queued", got.Status)
+	}
+	if got.RoutingBlockedStatus == nil ||
+		*got.RoutingBlockedStatus != runsmodels.RoutingBlockedSessionRecoveryRequired {
+		t.Fatalf("routing block = %v, want session recovery", got.RoutingBlockedStatus)
+	}
+	if got.SessionRecoveryBlockID == nil || *got.SessionRecoveryBlockID != "block-recovery" {
+		t.Fatalf("recovery block id = %v, want block-recovery", got.SessionRecoveryBlockID)
+	}
+	if got.SessionRecoveryReason == nil || *got.SessionRecoveryReason != "native_state_missing" {
+		t.Fatalf("recovery reason = %v, want native_state_missing", got.SessionRecoveryReason)
+	}
+	if got.EarliestRetryAt != nil || got.ScheduledRetryAt != nil {
+		t.Fatalf("recovery run has retry schedule: earliest=%v scheduled=%v", got.EarliestRetryAt, got.ScheduledRetryAt)
+	}
+
+	pending, err := repo.ListPendingProviderCapacityRuns(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("list timed provider runs: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("recovery run was eligible for timed unpark: %#v", pending)
+	}
+	if err := repo.ClearRoutingBlock(ctx, run.ID); err != nil {
+		t.Fatalf("clear generic routing block: %v", err)
+	}
+	stillBlocked, err := repo.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("reload after generic clear: %v", err)
+	}
+	if stillBlocked.RoutingBlockedStatus == nil ||
+		*stillBlocked.RoutingBlockedStatus != runsmodels.RoutingBlockedSessionRecoveryRequired {
+		t.Fatalf("generic clear released recovery run: %v", stillBlocked.RoutingBlockedStatus)
+	}
+	if err := repo.ClearSessionRecoveryPark(ctx, run.ID, "block-recovery"); err != nil {
+		t.Fatalf("clear resolved recovery park: %v", err)
+	}
+	released, err := repo.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("reload after recovery clear: %v", err)
+	}
+	if released.RoutingBlockedStatus != nil || released.SessionRecoveryBlockID != nil || released.Status != "queued" {
+		t.Fatalf("resolved recovery park = %+v", released)
+	}
+}
+
 // TestListRunsWaitingOnProvider_MatchesParkedRunForProvider is the
 // happy-path sanity check that the LIKE join over logical_provider_order
 // still finds parked runs after the wildcard escape was added — without
@@ -196,7 +271,7 @@ func TestListRunsWaitingOnProvider_MatchesParkedRunForProvider(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -234,7 +309,7 @@ func TestListRunsWaitingOnProvider_WildcardProviderIDMatchesNone(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -279,7 +354,7 @@ func TestClaimNextEligibleRun_SkipsRoutingBlocked(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -322,7 +397,7 @@ func TestClearRoutingBlock_ClearsScheduledRetryAt(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -358,5 +433,182 @@ func TestClearRoutingBlock_ClearsScheduledRetryAt(t *testing.T) {
 	claimed, err := repo.ClaimNextEligibleRun(ctx)
 	if err != nil || claimed == nil {
 		t.Fatalf("expected claimable run after clear; err=%v claimed=%v", err, claimed)
+	}
+}
+
+// TestParkRunForProviderCapacity_RestampsPriorityClassToRecoveryUnlessAlreadyHuman
+// pins the requeue-path priority invariant: a run parked while a provider
+// is over capacity re-enters the queue at recovery priority so it does not
+// keep racing plain event/periodic peers at its original class, while a
+// human-rooted run parked the same way keeps top priority.
+func TestParkRunForProviderCapacity_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *testing.T) {
+	repo, db := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, db, "agent-a", "ws-a")
+
+	periodic := &runsmodels.Run{
+		AgentProfileID: "agent-a",
+		Reason:         "task_assigned",
+		Payload:        `{}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+		PriorityClass:  models.PriorityClassPeriodic,
+	}
+	human := &runsmodels.Run{
+		AgentProfileID: "agent-a",
+		Reason:         "task_assigned",
+		Payload:        `{}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+		PriorityClass:  models.PriorityClassHuman,
+	}
+	if err := repo.CreateRun(ctx, periodic); err != nil {
+		t.Fatalf("create periodic: %v", err)
+	}
+	if err := repo.CreateRun(ctx, human); err != nil {
+		t.Fatalf("create human: %v", err)
+	}
+
+	retry := time.Now().UTC().Add(10 * time.Minute)
+	if err := repo.ParkRunForProviderCapacity(ctx, periodic.ID, "waiting_for_provider_capacity", retry); err != nil {
+		t.Fatalf("park periodic: %v", err)
+	}
+	if err := repo.ParkRunForProviderCapacity(ctx, human.ID, "waiting_for_provider_capacity", retry); err != nil {
+		t.Fatalf("park human: %v", err)
+	}
+
+	gotPeriodic, err := repo.GetRunByID(ctx, periodic.ID)
+	if err != nil {
+		t.Fatalf("get periodic: %v", err)
+	}
+	if gotPeriodic.PriorityClass != models.PriorityClassRecovery {
+		t.Errorf("periodic run priority_class = %v, want %v", gotPeriodic.PriorityClass, models.PriorityClassRecovery)
+	}
+
+	gotHuman, err := repo.GetRunByID(ctx, human.ID)
+	if err != nil {
+		t.Fatalf("get human: %v", err)
+	}
+	if gotHuman.PriorityClass != models.PriorityClassHuman {
+		t.Errorf("human run priority_class = %v, want %v", gotHuman.PriorityClass, models.PriorityClassHuman)
+	}
+}
+
+// TestRequeueRunForNextCandidate_RestampsPriorityClassToRecoveryUnlessAlreadyHuman
+// covers the post-start-fallback requeue path with the same invariant as
+// ParkRunForProviderCapacity: a run bounced back to queued for a fresh
+// candidate pick re-enters at recovery priority unless it was human-rooted.
+func TestRequeueRunForNextCandidate_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *testing.T) {
+	repo, db := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, db, "agent-a", "ws-a")
+
+	periodic := &runsmodels.Run{
+		AgentProfileID: "agent-a",
+		Reason:         "task_assigned",
+		Payload:        `{}`,
+		Status:         "claimed",
+		CoalescedCount: 1,
+		PriorityClass:  models.PriorityClassPeriodic,
+	}
+	human := &runsmodels.Run{
+		AgentProfileID: "agent-a",
+		Reason:         "task_assigned",
+		Payload:        `{}`,
+		Status:         "claimed",
+		CoalescedCount: 1,
+		PriorityClass:  models.PriorityClassHuman,
+	}
+	if err := repo.CreateRun(ctx, periodic); err != nil {
+		t.Fatalf("create periodic: %v", err)
+	}
+	if err := repo.CreateRun(ctx, human); err != nil {
+		t.Fatalf("create human: %v", err)
+	}
+
+	if err := repo.RequeueRunForNextCandidate(ctx, periodic.ID); err != nil {
+		t.Fatalf("requeue periodic: %v", err)
+	}
+	if err := repo.RequeueRunForNextCandidate(ctx, human.ID); err != nil {
+		t.Fatalf("requeue human: %v", err)
+	}
+
+	gotPeriodic, err := repo.GetRunByID(ctx, periodic.ID)
+	if err != nil {
+		t.Fatalf("get periodic: %v", err)
+	}
+	if gotPeriodic.PriorityClass != models.PriorityClassRecovery {
+		t.Errorf("periodic run priority_class = %v, want %v", gotPeriodic.PriorityClass, models.PriorityClassRecovery)
+	}
+
+	gotHuman, err := repo.GetRunByID(ctx, human.ID)
+	if err != nil {
+		t.Fatalf("get human: %v", err)
+	}
+	if gotHuman.PriorityClass != models.PriorityClassHuman {
+		t.Errorf("human run priority_class = %v, want %v", gotHuman.PriorityClass, models.PriorityClassHuman)
+	}
+}
+
+// TestClearAllParkedRoutingForWorkspace_RestampsPriorityClassToRecoveryUnlessAlreadyHuman
+// isolates the clear-path's own re-stamp from ParkRunForProviderCapacity's:
+// parked state is seeded directly via SQL (not through Park) so a passing
+// assertion proves ClearAllParkedRoutingForWorkspace applies the rule
+// itself, not that Park already applied it earlier.
+func TestClearAllParkedRoutingForWorkspace_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *testing.T) {
+	repo, db := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, db, "agent-a", "ws-a")
+
+	periodic := &runsmodels.Run{
+		AgentProfileID: "agent-a",
+		Reason:         "task_assigned",
+		Payload:        `{}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+		PriorityClass:  models.PriorityClassPeriodic,
+	}
+	human := &runsmodels.Run{
+		AgentProfileID: "agent-a",
+		Reason:         "task_assigned",
+		Payload:        `{}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+		PriorityClass:  models.PriorityClassHuman,
+	}
+	if err := repo.CreateRun(ctx, periodic); err != nil {
+		t.Fatalf("create periodic: %v", err)
+	}
+	if err := repo.CreateRun(ctx, human); err != nil {
+		t.Fatalf("create human: %v", err)
+	}
+	if _, err := db.Exec(
+		`UPDATE runs SET routing_blocked_status = 'waiting_for_provider_capacity' WHERE id IN (?, ?)`,
+		periodic.ID, human.ID,
+	); err != nil {
+		t.Fatalf("seed parked state: %v", err)
+	}
+
+	if err := repo.ClearAllParkedRoutingForWorkspace(ctx, "ws-a"); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+
+	gotPeriodic, err := repo.GetRunByID(ctx, periodic.ID)
+	if err != nil {
+		t.Fatalf("get periodic: %v", err)
+	}
+	if gotPeriodic.PriorityClass != models.PriorityClassRecovery {
+		t.Errorf("periodic run priority_class = %v, want %v", gotPeriodic.PriorityClass, models.PriorityClassRecovery)
+	}
+
+	gotHuman, err := repo.GetRunByID(ctx, human.ID)
+	if err != nil {
+		t.Fatalf("get human: %v", err)
+	}
+	if gotHuman.PriorityClass != models.PriorityClassHuman {
+		t.Errorf("human run priority_class = %v, want %v", gotHuman.PriorityClass, models.PriorityClassHuman)
 	}
 }

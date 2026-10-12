@@ -8,6 +8,7 @@ import { waitForSessionState } from "../../helpers/session";
 import {
   seedActiveSessionForegroundActivity,
   waitForActiveSessionForegroundActivity,
+  waitForTaskSessionsSettled,
 } from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -200,11 +201,12 @@ test.describe("Session resume (ACP mode)", () => {
       message: "Resumed session did not settle before activity reconciliation",
       timeout: 30_000,
     });
+    await waitForTaskSessionsSettled(testPage, task.id);
 
     // Reproduce the stale client projection left behind when the reconnect
     // state_changed event is missed. The real session-list refresh must clear it.
-    await seedActiveSessionForegroundActivity(testPage, "background");
-    await waitForActiveSessionForegroundActivity(testPage, "background");
+    await seedActiveSessionForegroundActivity(testPage, "background", sessionId);
+    await waitForActiveSessionForegroundActivity(testPage, "background", sessionId);
     await expect(session.agentStatus()).toHaveAccessibleName("Background work is running");
 
     const refreshedSessions = testPage.waitForResponse((response) => {
@@ -214,7 +216,7 @@ test.describe("Session resume (ACP mode)", () => {
     await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
     expect((await refreshedSessions).ok()).toBe(true);
 
-    await waitForActiveSessionForegroundActivity(testPage, null);
+    await waitForActiveSessionForegroundActivity(testPage, null, sessionId);
     await expect(testPage.getByRole("status", { name: "Background work is running" })).toHaveCount(
       0,
     );
@@ -265,10 +267,13 @@ test.describe("Session resume (ACP mode)", () => {
     const visibleWorkspacePath = session.files.getByTestId("file-browser-workspace-path");
     await expect(visibleWorkspacePath).toHaveText(expectedDisplayPath, { timeout: 30_000 });
 
-    // Keeping Files active makes reload reconstruct the workspace-only execution
-    // before automatic session resume promotes and persists that execution.
+    // Reload can foreground Changes while the resumed execution refreshes its
+    // working tree. Wait for the hydrated workbench, then select Files before
+    // asserting the workspace path.
     await backend.restart();
     await testPage.reload();
+    await session.waitForLoad();
+    await session.clickTab("Files");
     await expect(session.files).toBeVisible({ timeout: 30_000 });
 
     await session.clickSessionChatTab();
@@ -415,23 +420,23 @@ test.describe("Session resume (TUI passthrough mode)", () => {
     const tuiProfile = await createTUIProfile(apiClient, "TUI Resume");
 
     // 2. Create task with TUI agent
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "TUI Resume Task", tuiProfile.id, {
-      description: "hello from resume test",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "TUI Resume Task",
+      tuiProfile.id,
+      {
+        description: "hello from resume test",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
 
-    // 3. Navigate and wait for TUI terminal to load
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("TUI Resume Task");
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    // 3. Open by task API id. Kanban hydration can lag while passthrough starts
+    // and is unrelated to reconnecting the session after a backend restart.
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}(?:[?]|$)`));
     await session.waitForPassthroughLoad();
     await session.waitForPassthroughLoaded();
 
@@ -451,10 +456,10 @@ test.describe("Session resume (TUI passthrough mode)", () => {
 
     // 8. Wait for passthrough terminal to reconnect after resume
     await session.waitForPassthroughLoad();
-    await session.waitForPassthroughLoaded();
+    await session.waitForPassthroughLoaded(60_000);
 
     // 9. The TUI should show the RESUMED header, confirming --resume/-c was passed
-    await session.expectPassthroughHasText("RESUMED", 30_000);
+    await session.expectPassthroughHasText("RESUMED", 60_000);
   });
 
   test("resume TUI session with multiple repos reconnects with resume flag", async ({
@@ -490,7 +495,7 @@ test.describe("Session resume (TUI passthrough mode)", () => {
 
     // 2. TUI profile + multi-repo task
     const tuiProfile = await createTUIProfile(apiClient, "TUI Multi-Repo Resume");
-    await apiClient.createTaskWithAgent(
+    const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "TUI Multi-Repo Resume Task",
       tuiProfile.id,
@@ -502,14 +507,11 @@ test.describe("Session resume (TUI passthrough mode)", () => {
       },
     );
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const card = kanban.taskCardByTitle("TUI Multi-Repo Resume Task");
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    // Open the task by its API id. The Kanban projection can lag while a
+    // multi-repo passthrough task is starting, even though the task exists.
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}(?:[?]|$)`));
     await session.waitForPassthroughLoad();
     await session.waitForPassthroughLoaded();
     await session.expectPassthroughHasText("Mock Agent");
@@ -522,8 +524,8 @@ test.describe("Session resume (TUI passthrough mode)", () => {
     //    resolution preserves resume detection.
     await backend.restart();
     await testPage.reload();
-    await session.waitForPassthroughLoad();
-    await session.waitForPassthroughLoaded();
+    await session.waitForPassthroughLoad(60_000);
+    await session.waitForPassthroughLoaded(60_000);
     await session.expectPassthroughHasText("RESUMED", 30_000);
   });
 });

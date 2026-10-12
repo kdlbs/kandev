@@ -3,8 +3,9 @@ status: draft
 system: platform
 requirements:
   - REQ-PLATFORM-LSP-FILE-INTELLIGENCE-001
+  - REQ-PLATFORM-LSP-FILE-INTELLIGENCE-002
 created: 2026-07-09
-updated: 2026-08-11
+updated: 2026-09-24
 owners:
   - tbd
 ---
@@ -19,6 +20,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-LSP-FILE-INT
 | Requirement | Design section |
 | --- | --- |
 | `REQ-PLATFORM-LSP-FILE-INTELLIGENCE-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-PLATFORM-LSP-FILE-INTELLIGENCE-002` | [Continuity scenarios](#continuity-scenarios) |
 
 ## Migrated source detail
 
@@ -50,7 +52,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-LSP-FILE-INT
 - **GIVEN** an open Monaco document has a debounced content change and its server requests save synchronization, **WHEN** Kandev successfully persists the current editor snapshot, **THEN** the server receives the final `textDocument/didChange` before `textDocument/didSave` for its canonical task-host URI and receives that persisted snapshot on the save notification only when it requests `includeText`; a rejected write sends no save notification.
 - **GIVEN** the user types again while a file save is in flight, **WHEN** the older snapshot finishes persisting, **THEN** the newer editor snapshot remains dirty and is the language server's current document, while `textDocument/didSave` omits the stale optional text instead of rewinding the document.
 - **GIVEN** an SSH, Sprites, or remote-Docker task, **WHEN** a user starts LSP, **THEN** the UI reports an unsupported executor and no language-server or task execution is started or resumed for that request.
-- **GIVEN** the configured connection cap is reached, **WHEN** another editor starts LSP for a stopped supported task, **THEN** the new connection closes with `4005` before Kandev starts or resumes that task host.
+- **GIVEN** the configured lease cap is reached and every lease is attached, **WHEN** another editor needs a new server, **THEN** the request closes with `4005` before Kandev starts or resumes that task host; an editor reattaching to its retained lease remains admissible.
 - **GIVEN** a discovered language-server executable cannot be launched, **WHEN** agentctl starts it, **THEN** the task-host error stays in logs while the browser receives `4008` with no reason and shows the localized start-failure status.
 - **GIVEN** a language server rejects `initialize` with a JSON-RPC error object, **WHEN** the browser handles that response, **THEN** the error state shows the server's `error.message` rather than `[object Object]`.
 - **GIVEN** two task/session connections have active providers, placeholder models, or diagnostics, **WHEN** one connection stops or crashes, **THEN** cleanup removes only that connection's state and leaves the other connection fully functional.
@@ -83,17 +85,35 @@ This design preserves the technical source detail for `REQ-PLATFORM-LSP-FILE-INT
 - **GIVEN** a repository contains `.kandev/lsp-servers/kotlin-lsp`, **WHEN** Kotlin LSP starts, **THEN** Kandev ignores that project-controlled executable.
 - **GIVEN** a mobile viewport, **WHEN** a supported file opens, **THEN** the mobile viewer does not start an LSP process invisibly.
 
+## Continuity scenarios
+
+- **GIVEN** a ready Go LSP lease, **WHEN** its browser tab closes, **THEN** the backend detaches the browser, continues draining the task-host stream, and does not interrupt `gopls`.
+- **GIVEN** that detached lease, **WHEN** an eligible desktop editor for the same task and language opens, **THEN** it reuses the same process, registers providers from retained and dynamic capabilities, synchronizes its current document, reaches ready with current progress, and receives diagnostics only from a qualifying new publication for that document.
+- **GIVEN** an editor has an unsaved buffer when its tab closes, **WHEN** it reattaches with the persisted file contents, **THEN** prior diagnostics for the unsaved buffer stay hidden until the server analyzes the reopened contents.
+- **GIVEN** two browser windows already have independent LSP leases, **WHEN** one closes or explicitly stops, **THEN** the other retains its process, requests, providers, progress, and diagnostics.
+- **GIVEN** a temporary WebSocket failure, **WHEN** the browser remains on the editor, **THEN** it shows reconnecting and reattaches without representing the failure as a language-server exit; a true process exit uses `4006` and Retry.
+- **GIVEN** the last editor in a connected tab remains closed for two minutes, **WHEN** its idle timer fires, **THEN** it explicitly releases the lease; tab close or network loss before that timer detaches without release.
+- **GIVEN** a browser has remained detached for one hour, **WHEN** its lease deadline passes, **THEN** the backend releases the lease and permits task-host idle reclaim; reattachment before the deadline cancels it, and a later eligible editor open starts fresh analysis.
+- **GIVEN** all LSP lease slots are occupied and at least one lease is detached, **WHEN** a new editor starts another language server, **THEN** the oldest detached lease is released and the new server is admitted; if every lease is attached, the editor gets `4005`.
+- **GIVEN** a returning tab has a valid lease hint, **WHEN** auto-start is later disabled for that language, **THEN** the tab still resumes its existing lease unless it explicitly stopped LSP; a new tab without a hint follows current auto-start or local manual-enable policy.
+- **GIVEN** a duplicated tab copied `sessionStorage`, **WHEN** it opens the same file while the original tab's lease is attached, **THEN** the original connection remains attached and the duplicate gets a separate lease or a capacity state.
+- **GIVEN** a server dynamically registers or unregisters a capability while its browser is detached, **WHEN** the editor reattaches, **THEN** the effective registration set is restored without a second `initialize`.
+- **GIVEN** per-language settings change while a browser is detached, **WHEN** the save completes, **THEN** the retained server receives `workspace/didChangeConfiguration` and later `workspace/configuration` responses use the new value.
+- **GIVEN** a request is pending at detach or explicit Stop, **WHEN** the browser generation ends, **THEN** the broker cancels its server-facing request and ignores its late response; a browser `$/cancelRequest` is translated to the mapped server ID.
+- **GIVEN** the task host or backend has stopped, **WHEN** the editor opens again, **THEN** no stale lease snapshot is shown as live and existing auto-start or manual enablement starts a new process when allowed.
+- **GIVEN** a phone file viewer, **WHEN** it opens a task with a detached LSP lease, **THEN** it does not attach or start an LSP process. The coarse-pointer tablet editor uses its existing toolbar drawer after reattachment.
+
 ## Out of scope
 
 - Remote Docker, SSH, and Sprites executor support.
 - Durable per-task/session enablement and deny lists.
-- Sharing one server process across browser windows.
+- Sharing one server process between concurrently attached browser windows.
 - Rename, code actions, document symbols, formatting, and workspace-edit application.
 - CodeMirror/mobile LSP parity.
 - A global dashboard across every session/language connection; the application status-bar item represents only the active Monaco file.
 - Estimated time remaining, predicted completion, or any guarantee that a percentage maps linearly to project readiness.
 - Inferring actual indexing state, percentage, or completion from `window/logMessage`, `window/showMessage`, process output, elapsed time, or language-specific text heuristics. Elapsed time is used only to disclose that initialization is long-running.
-- Request-scoped partial-result streaming, `partialResultToken`, `$/cancelRequest`, and progress cancellation.
+- Request-scoped partial-result streaming, `partialResultToken`, and progress cancellation. Browser `$/cancelRequest` forwarding for mapped requests is in scope.
 - Bootstrapping project dependencies such as Gradle import, `npm install`, `go mod download`, or Python virtual environments.
 - Replacing external editors or embedded VS Code.
 

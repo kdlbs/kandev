@@ -17,7 +17,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { cn } from "@/lib/utils";
 
-export type FallbackOptionKind = "automatic" | "explicit";
+export type FallbackOptionKind = "automatic" | "explicit" | "strict";
 
 function helpCopy(kind: FallbackOptionKind, t: (key: string) => string) {
   if (kind === "automatic") {
@@ -25,6 +25,13 @@ function helpCopy(kind: FallbackOptionKind, t: (key: string) => string) {
       label: t("settings:autoFallbackInfoLabel"),
       title: t("settings:autoFallbackHelpTitle"),
       body: t("settings:autoFallbackHelp"),
+    };
+  }
+  if (kind === "strict") {
+    return {
+      label: t("settings:requireExactModelInfoLabel"),
+      title: t("settings:requireExactModelHelpTitle"),
+      body: t("settings:requireExactModelHelp"),
     };
   }
   return {
@@ -94,23 +101,30 @@ export function ModelFallbackSettingsShell({
   autoFallback,
   fallbackModel,
   isDirty,
+  requireExactModel = false,
+  strictOption,
   automaticOption,
   explicitOption,
 }: {
   autoFallback: boolean;
   fallbackModel: string;
   isDirty?: boolean;
+  requireExactModel?: boolean;
+  strictOption?: ReactNode;
   automaticOption: ReactNode;
   explicitOption: ReactNode;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  let summary = t("settings:fallbackSettingsSummaryStrict");
+  let summary = t("settings:fallbackSettingsSummaryExecutorDefault");
   if (fallbackModel) {
     summary = t("settings:fallbackSettingsSummaryExplicit", { model: fallbackModel });
   }
   if (autoFallback) {
     summary = t("settings:fallbackSettingsSummaryAutomatic");
+  }
+  if (requireExactModel) {
+    summary = t("settings:fallbackSettingsSummaryExact");
   }
 
   return (
@@ -153,6 +167,14 @@ export function ModelFallbackSettingsShell({
           className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2"
           data-testid="profile-fallback-settings-grid"
         >
+          {strictOption && (
+            <div
+              className="min-w-0 rounded-md border border-border/70 bg-muted/10 p-3 md:col-span-2"
+              data-testid="profile-require-exact-model-option"
+            >
+              {strictOption}
+            </div>
+          )}
           <div
             className="min-w-0 rounded-md border border-border/70 bg-muted/10 p-3"
             data-testid="profile-auto-fallback-option"

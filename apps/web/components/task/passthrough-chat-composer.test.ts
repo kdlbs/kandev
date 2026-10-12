@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { DiffComment } from "@/lib/diff/types";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
+import { planCommentRecovery } from "@/lib/plan-comment-recovery";
 import {
   buildContextFilesMeta,
   buildPassthroughFinalMessage,
   buildPassthroughPlanContext,
+  assertPlanCommentMigrationReady,
   clearPassthroughComposerContext,
   formatPassthroughBaseMessage,
 } from "./passthrough-chat-composer";
@@ -61,6 +63,21 @@ function messageComment() {
   } as never;
 }
 
+function planComment() {
+  return {
+    id: "plan-comment-1",
+    sessionId: "",
+    taskId: TASK_ID,
+    planId: "plan-1",
+    version: 2,
+    source: "plan",
+    text: "Split this step.",
+    selectedText: "Large step",
+    createdAt: "2026-09-02T00:00:00Z",
+    status: "pending",
+  } as const;
+}
+
 function panelState(overrides: Record<string, unknown> = {}) {
   return {
     resolvedSessionId: SESSION_ID,
@@ -72,6 +89,15 @@ function panelState(overrides: Record<string, unknown> = {}) {
     walkthroughComments: [],
     messageComments: [],
     planModeEnabled: false,
+    planCommentMigration: {
+      status: "complete",
+      pendingCount: 0,
+      failure: null,
+      needsAttention: false,
+      isReady: true,
+      isBlocking: false,
+      retry: vi.fn(),
+    },
     handleClearPRFeedback: vi.fn(),
     clearSessionPlanComments: vi.fn(),
     handleClearWalkthroughComments: vi.fn(),
@@ -120,6 +146,18 @@ describe("passthrough chat composer metadata helpers", () => {
     expect(result.commentsToSend.map((item) => item.id)).toEqual(["message-comment-1"]);
   });
 
+  it("keeps task plan comment text out of the client-formatted passthrough message", () => {
+    const result = formatPassthroughBaseMessage(
+      "Ship it",
+      undefined,
+      [],
+      panelState({ planComments: [planComment()] }),
+    );
+
+    expect(result.formatted).toBe("Ship it");
+    expect(result.formatted).not.toContain("Split this step.");
+  });
+
   it("merges selected context files with inline file, prompt, and task mentions", async () => {
     const inlineTask: TaskMentionData = {
       taskId: "task-2",
@@ -161,6 +199,23 @@ describe("passthrough chat composer metadata helpers", () => {
 });
 
 describe("passthrough chat composer plan context", () => {
+  it("returns displayed task plan comment refs for backend expansion", async () => {
+    const result = await buildPassthroughFinalMessage({
+      taskId: TASK_ID,
+      content: "Please continue",
+      pendingComments: [],
+      panelState: panelState({ planComments: [planComment()] }),
+      getState: () =>
+        ({
+          kanban: { steps: [] },
+          kanbanMulti: { snapshots: {} },
+          taskPlans: { byTaskId: {} },
+        }) as never,
+    });
+
+    expect(result.planCommentRefs).toEqual([{ id: "plan-comment-1", version: 2 }]);
+  });
+
   it("expands selected plan context and strips the literal @Plan mention", async () => {
     const result = await buildPassthroughFinalMessage({
       taskId: TASK_ID,
@@ -240,7 +295,40 @@ describe("passthrough chat composer plan context", () => {
 });
 
 describe("passthrough chat composer cleanup", () => {
-  it("clears ephemeral context and re-adds plan context when plan mode stays enabled", () => {
+  it("accepts plain delivery after background read failures without identified drafts", () => {
+    expect(() =>
+      assertPlanCommentMigrationReady(
+        panelState({
+          planCommentMigration: {
+            ...planCommentRecovery({ status: "failed", pendingCount: 0, failure: "transient" }),
+            retry: vi.fn(),
+          },
+        }),
+      ),
+    ).not.toThrow();
+  });
+  it.each(["transient", "conflict", "rejected"] as const)(
+    "preserves blocked delivery without promising retries for %s recovery",
+    (failure) => {
+      expect(() =>
+        assertPlanCommentMigrationReady(
+          panelState({
+            planCommentMigration: {
+              status: "failed",
+              pendingCount: 1,
+              failure,
+              needsAttention: true,
+              isReady: false,
+              isBlocking: true,
+              retry: vi.fn(),
+            },
+          }),
+        ),
+      ).toThrow("Saved plan comments are still being restored. Your message is kept.");
+    },
+  );
+
+  it("clears session context but leaves task plan comments to the backend snapshot", () => {
     const state = panelState({
       planModeEnabled: true,
       pendingPRFeedback: [{ id: "feedback-1" }],
@@ -259,7 +347,7 @@ describe("passthrough chat composer cleanup", () => {
     clearPassthroughComposerContext(state as never);
 
     expect(state.handleClearPRFeedback).toHaveBeenCalledTimes(1);
-    expect(state.clearSessionPlanComments).toHaveBeenCalledTimes(1);
+    expect(state.clearSessionPlanComments).not.toHaveBeenCalled();
     expect(state.handleClearWalkthroughComments).toHaveBeenCalledTimes(1);
     expect(state.handleClearMessageComments).toHaveBeenCalledTimes(1);
     expect(state.clearEphemeral).toHaveBeenCalledWith(SESSION_ID);
@@ -268,4 +356,27 @@ describe("passthrough chat composer cleanup", () => {
       name: "Plan",
     });
   });
+});
+
+it("sends whole-file feedback through passthrough review context", () => {
+  const result = formatPassthroughBaseMessage(
+    "Continue.",
+    undefined,
+    [
+      {
+        id: "file",
+        source: "review-file",
+        sessionId: SESSION_ID,
+        repositoryName: "api",
+        filePath: "README.md",
+        text: "Split this file",
+        createdAt: "now",
+        status: "pending",
+      },
+    ],
+    panelState(),
+  );
+  expect(result.commentsToSend.map((c) => c.id)).toEqual(["file"]);
+  expect(result.formatted).toContain("**api/README.md**");
+  expect(result.formatted).toContain("> Split this file");
 });

@@ -356,8 +356,8 @@ func TestPluginHostData_Wire_Writes(t *testing.T) {
 
 // TestPluginHostData_Wire_InvokeUtilityAgent proves the agent_invoke gate and
 // the one-shot completion round-trip over the real transport: an undeclared
-// manifest is PermissionDenied, and a declared one resolves the configured
-// profile and returns the runner's text.
+// manifest is PermissionDenied, and a declared one resolves the platform
+// default or an explicit profile and returns the runner's text.
 func TestPluginHostData_Wire_InvokeUtilityAgent(t *testing.T) {
 	t.Run("DeniedWithoutCapability", func(t *testing.T) {
 		d := newTestDataHost(manifest.Capabilities{})
@@ -371,16 +371,36 @@ func TestPluginHostData_Wire_InvokeUtilityAgent(t *testing.T) {
 		require.Equal(t, "capability 'agent_invoke' not declared", st.Message())
 	})
 
-	t.Run("Succeeds", func(t *testing.T) {
+	t.Run("UsesDefault", func(t *testing.T) {
 		d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
-		d.utilAgents.agent = &UtilityAgent{Name: "summarizer", AgentID: "claude-acp", Model: "claude-opus-4-8", AgentProfileID: "profile-42", ProfileBindingState: "explicit", Enabled: true}
+		d.defaultProfile.profileID = "profile-default"
+		d.profiles.profilesByID = map[string]*AgentProfile{
+			"profile-default": {Enabled: true, InferenceCapable: true},
+		}
 		d.utilRun.text = "summary text"
 		host := dialPluginHostOverWire(t, d.host)
 
 		got, err := host.InvokeUtilityAgent(context.Background(), "summarize")
 		require.NoError(t, err)
 		require.Equal(t, "summary text", got)
-		require.Equal(t, "profile-42", d.utilRun.gotProfileID)
+		require.Equal(t, "profile-default", d.utilRun.gotProfileID)
+		require.Equal(t, 1, d.defaultProfile.calls)
+	})
+
+	t.Run("UsesExplicitOverride", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
+		d.defaultProfile.err = status.Error(codes.Unavailable, "default unavailable")
+		d.profiles.profilesByID = map[string]*AgentProfile{
+			"profile-override": {Enabled: true, InferenceCapable: true},
+		}
+		d.utilRun.text = "override text"
+		host := dialPluginHostOverWire(t, d.host)
+
+		got, err := host.InvokeUtilityAgent(context.Background(), "summarize", pluginsdk.UtilityAgentOptions{ProfileID: "profile-override"})
+		require.NoError(t, err)
+		require.Equal(t, "override text", got)
+		require.Equal(t, "profile-override", d.utilRun.gotProfileID)
+		require.Equal(t, 0, d.defaultProfile.calls)
 	})
 }
 

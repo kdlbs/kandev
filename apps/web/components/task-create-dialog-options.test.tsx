@@ -5,6 +5,9 @@ import type { AvailableAgent } from "@/lib/types/http-agents";
 import type { Executor } from "@/lib/types/http";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { computeExecutorHint, useAgentProfileOptions } from "./task-create-dialog-options";
+import { createAppStore } from "@/lib/state/store";
+import type { Agent } from "@/lib/types/http";
+import { AGENT_PROFILE_RECENT_USE_CONTEXTS } from "@/lib/types/http-agent-profile-recent-use";
 
 // Minimal store shape consumed by useAvailableAgents.
 type MockStore = {
@@ -52,6 +55,19 @@ const AGENT_WITH_GPT: AvailableAgent = {
     default_model: "gpt-5",
     available_models: [{ id: "gpt-5", name: "GPT-5" }],
     current_model_id: "gpt-5",
+    available_modes: [],
+    supports_dynamic_models: false,
+    status: "ok",
+  },
+} as unknown as AvailableAgent;
+
+const AGENT_WITH_OPUS_VARIATION: AvailableAgent = {
+  name: "omp-acp",
+  available: true,
+  model_config: {
+    default_model: "opus[1m]",
+    available_models: [{ id: "opus[1m]", name: "Opus (1m)" }],
+    current_model_id: "opus[1m]",
     available_modes: [],
     supports_dynamic_models: false,
     status: "ok",
@@ -184,6 +200,42 @@ describe("useAgentProfileOptions enabled filter", () => {
 });
 
 describe("useAgentProfileOptions recent-use ordering", () => {
+  // @covers AC-AGENTS-PROFILE-LIST-ORDERING-003.14
+  it.each(AGENT_PROFILE_RECENT_USE_CONTEXTS)(
+    "preserves %s recency ranking and unseen baseline after a Settings reorder",
+    (context) => {
+      const store = createAppStore();
+      store.getState().applyAgentListSnapshot(
+        [
+          {
+            id: "agent-1",
+            name: "omp-acp",
+            profile_order_revision: 2,
+            profiles: [
+              { id: "old", name: "Old", createdAt: "2026-01-01T00:00:00Z" },
+              { id: "middle", name: "Middle", createdAt: "2026-02-01T00:00:00Z" },
+              { id: "new", name: "New", createdAt: "2026-03-01T00:00:00Z" },
+            ],
+          } as Agent,
+        ],
+        0,
+      );
+      mockStore.agentProfileRecentUse = {
+        loaded: true,
+        records: {
+          [context]: { profileIds: ["old"], revision: 1, updatedAt: "2026-04-01T00:00:00Z" },
+        },
+      };
+      const { result, rerender } = renderHook(() =>
+        useAgentProfileOptions(store.getState().agentProfiles.items, context),
+      );
+      expect(result.current.map((option) => option.value)).toEqual(["old", "new", "middle"]);
+      store.getState().acceptAgentProfileOrder("agent-1", ["middle", "old", "new"], 3);
+      rerender();
+      expect(result.current.map((option) => option.value)).toEqual(["old", "new", "middle"]);
+    },
+  );
+
   it("ranks remembered eligible profiles and keeps unseen source order", () => {
     mockStore.agentProfileRecentUse = {
       loaded: true,
@@ -223,6 +275,15 @@ describe("useAgentProfileOptions executor-authoritative model hint", () => {
   it("keeps a profile with an available start model selectable", () => {
     const option = renderOptions([profileOption({ model: "gpt-5" })]);
     expect(option.getAttribute(DATA_DISABLED)).toBeNull();
+  });
+
+  it("does not infer a unique advertised variation in the host warning", () => {
+    setAvailableAgents([AGENT_WITH_OPUS_VARIATION]);
+    const option = renderOptions([profileOption({ model: "opus" })]);
+
+    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
+    expect(getModelProbeWarningLabel()).toContain("opus");
+    expect(getModelProbeWarningLabel()).not.toContain("opus[1m]");
   });
 
   it("keeps a profile with an empty (agent default) model selectable", () => {

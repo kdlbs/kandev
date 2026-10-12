@@ -12,6 +12,8 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 )
 
 const taskEnvironmentOwnershipQuery = `SELECT task_id, ownership_generation FROM task_environments WHERE id = ?`
@@ -47,6 +49,12 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 	// Serialize environment creation against the task cleanup barrier so a
 	// worktree admitted after inventory capture cannot be missed.
 	if err := r.taskCleanupBarrierLocked(ctx, tx, env.TaskID); err != nil {
+		return err
+	}
+	// A new environment for a task must not be created while one of that task's
+	// existing environments is under recovery. Otherwise a concurrent launch
+	// could escape the selected-environment authority by creating a fresh row.
+	if err := recoveryclaim.EnsureTaskAvailableTx(ctx, r.db, tx, env.TaskID); err != nil {
 		return err
 	}
 
@@ -164,6 +172,14 @@ func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID stri
 	return env, nil
 }
 
+// GetTaskEnvironmentExistenceByTaskIDs reports, for each of taskIDs, whether
+// any task_environments row exists — the same unconditional presence check
+// runnerHasEnvironment makes for one task, batched behind a single IN-clause
+// query for a projection covering many.
+func (r *Repository) GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	return r.batchedTaskIDExistence(ctx, "task_environments", taskIDs)
+}
+
 // UpdateTaskEnvironment updates an existing task environment.
 // Per-repo rows are not touched; use the TaskEnvironmentRepo CRUD methods.
 func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
@@ -178,6 +194,9 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, env.ID); err != nil {
+		return err
+	}
 	if env.Status == models.TaskEnvironmentStatusReady {
 		if err := r.validateReadyTaskEnvironment(ctx, tx, env.ID); err != nil {
 			return err
@@ -190,7 +209,8 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 			executor_type = ?, executor_id = ?, executor_profile_id = ?,
 			control_port = ?, status = ?, materialization_session_id = ?,
 			workspace_path = ?,
-			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?, task_dir_name = ?,
+			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?,
+			task_dir_name = COALESCE(NULLIF(task_dir_name, ''), NULLIF(?, ''), task_dir_name),
 			updated_at = ?
 		WHERE id = ?
 	`),
@@ -209,6 +229,43 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, env.ID)
 	}
 	return tx.Commit()
+}
+
+// SetTaskEnvironmentTaskDirNameIfEmpty claims the stable task-root identity
+// without rewriting the rest of an environment row. The compare-and-set keeps
+// concurrent inherited launches from choosing different physical roots.
+func (r *Repository) SetTaskEnvironmentTaskDirNameIfEmpty(ctx context.Context, environmentID, taskDirName string) (bool, error) {
+	if environmentID == "" || taskDirName == "" {
+		return false, fmt.Errorf("set task environment task directory name: environment and task directory name are required")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	taskID, _, err := r.taskEnvironmentStateTx(ctx, tx, environmentID)
+	if err != nil {
+		return false, err
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return false, err
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments
+		SET task_dir_name = ?, updated_at = ?
+		WHERE id = ? AND COALESCE(task_dir_name, '') = ''
+	`), taskDirName, time.Now().UTC(), environmentID)
+	if err != nil {
+		return false, err
+	}
+	claimed, _ := result.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return claimed == 1, nil
 }
 
 func (r *Repository) validateReadyTaskEnvironment(ctx context.Context, tx *sqlx.Tx, environmentID string) error {
@@ -280,6 +337,9 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
 		return err
 	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, env.ID); err != nil {
+		return err
+	}
 	// See the matching guard in CreateTaskEnvironment: a materializer that
 	// publishes ready with an empty inventory (e.g. because its prepare step
 	// failed and produced no repos) must not be allowed to land, or the
@@ -309,7 +369,7 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 			control_port = ?, status = ?, materialization_session_id = '',
 			workspace_path = ?, container_id = ?,
 			container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?,
-			sandbox_id = ?, task_dir_name = ?, updated_at = ?
+			sandbox_id = ?, task_dir_name = COALESCE(NULLIF(task_dir_name, ''), NULLIF(?, ''), task_dir_name), updated_at = ?
 		WHERE id = ? AND status = ? AND materialization_session_id = ?
 	`),
 		env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
@@ -353,6 +413,9 @@ func (r *Repository) PersistTaskEnvironmentTransition(
 		return err
 	}
 	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return err
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, env.ID); err != nil {
 		return err
 	}
 	existing, err := listTaskEnvironmentReposTx(ctx, r, tx, env.ID)
@@ -417,7 +480,8 @@ func (r *Repository) updateTaskEnvironmentTransitionTx(
 			executor_type = ?, executor_id = ?, executor_profile_id = ?,
 			control_port = ?, status = ?, materialization_session_id = ?,
 			workspace_path = ?,
-			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?, task_dir_name = ?,
+			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?,
+			task_dir_name = COALESCE(NULLIF(task_dir_name, ''), NULLIF(?, ''), task_dir_name),
 			updated_at = ?
 		WHERE id = ?
 	`),
@@ -466,10 +530,13 @@ func (r *Repository) reconcileTaskEnvironmentReposTx(
 	existing, repos []*models.TaskEnvironmentRepo,
 	replacePhysical bool,
 ) error {
-	byKey, legacyFlatByRepo := indexTaskEnvironmentReposTx(existing)
+	byKey, legacyFlatByRepo, soleByRepo := indexTaskEnvironmentReposTx(existing)
 	matched := make(map[string]struct{}, len(repos))
 	for position, incoming := range repos {
 		row := findTaskEnvironmentRepoTransition(byKey, legacyFlatByRepo, incoming)
+		if row == nil && !replacePhysical {
+			row = takeSoleUntrackedTaskEnvironmentRepo(byKey, soleByRepo, incoming)
+		}
 		if row == nil {
 			if incoming == nil || incoming.RepositoryID == "" {
 				continue
@@ -492,19 +559,40 @@ func (r *Repository) reconcileTaskEnvironmentReposTx(
 	return r.tombstoneOmittedTaskEnvironmentReposTx(ctx, tx, existing, matched)
 }
 
-func indexTaskEnvironmentReposTx(rows []*models.TaskEnvironmentRepo) (map[string]*models.TaskEnvironmentRepo, map[string]*models.TaskEnvironmentRepo) {
+func indexTaskEnvironmentReposTx(rows []*models.TaskEnvironmentRepo) (
+	map[string]*models.TaskEnvironmentRepo,
+	map[string]*models.TaskEnvironmentRepo,
+	map[string]*models.TaskEnvironmentRepo,
+) {
 	byKey := make(map[string]*models.TaskEnvironmentRepo, len(rows))
 	legacyFlatByRepo := make(map[string]*models.TaskEnvironmentRepo)
+	soleByRepo := make(map[string]*models.TaskEnvironmentRepo)
+	ambiguousRepo := make(map[string]struct{})
 	for _, row := range rows {
 		if row == nil {
 			continue
 		}
 		byKey[row.RepositoryID+"\x00"+row.BranchSlug] = row
-		if row.RepositoryID != "" && row.BranchSlug == "" {
+		if row.RepositoryID == "" {
+			continue
+		}
+		if row.BranchSlug == "" {
 			legacyFlatByRepo[row.RepositoryID] = row
 		}
+		if row.DeletedAt != nil || row.Status == "failed" || row.Status == worktreeRepoStatusDeleted {
+			continue
+		}
+		if _, ambiguous := ambiguousRepo[row.RepositoryID]; ambiguous {
+			continue
+		}
+		if _, seen := soleByRepo[row.RepositoryID]; seen {
+			delete(soleByRepo, row.RepositoryID)
+			ambiguousRepo[row.RepositoryID] = struct{}{}
+			continue
+		}
+		soleByRepo[row.RepositoryID] = row
 	}
-	return byKey, legacyFlatByRepo
+	return byKey, legacyFlatByRepo, soleByRepo
 }
 
 func findTaskEnvironmentRepoTransition(
@@ -527,6 +615,26 @@ func findTaskEnvironmentRepoTransition(
 	return row
 }
 
+// takeSoleUntrackedTaskEnvironmentRepo reuses the only active inventory row
+// for a repository when a non-replacement transition has no branch identity.
+// Local resumes intentionally do not select or switch branches, so the
+// existing canonical row is the only safe branch identity to retain.
+func takeSoleUntrackedTaskEnvironmentRepo(
+	byKey, soleByRepo map[string]*models.TaskEnvironmentRepo,
+	incoming *models.TaskEnvironmentRepo,
+) *models.TaskEnvironmentRepo {
+	if incoming == nil || incoming.RepositoryID == "" || incoming.BranchSlug != "" {
+		return nil
+	}
+	row := soleByRepo[incoming.RepositoryID]
+	if row != nil {
+		delete(soleByRepo, incoming.RepositoryID)
+		delete(byKey, row.RepositoryID+"\x00"+row.BranchSlug)
+		byKey[incoming.RepositoryID+"\x00"] = row
+	}
+	return row
+}
+
 func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -534,11 +642,26 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	position int,
 	replacePhysical bool,
 ) error {
-	row.BranchSlug = incoming.BranchSlug
+	// An incoming transition with untracked branch identity (a non-worktree
+	// local/local_pc resume never stamps req.BaseBranch) must not overwrite
+	// a row's already-known real branch with an empty one; preserve it.
+	if replacePhysical || incoming.BranchSlug != "" || row.BranchSlug == "" {
+		row.BranchSlug = incoming.BranchSlug
+	}
 	if replacePhysical || incoming.WorktreeID != "" {
 		row.WorktreeID = incoming.WorktreeID
 		row.WorktreePath = incoming.WorktreePath
 		row.WorktreeBranch = incoming.WorktreeBranch
+	}
+	if incoming.WorktreeBranchOwner != "" || incoming.WorktreeID == "" {
+		row.WorktreeBranchOwner = incoming.WorktreeBranchOwner
+	}
+	if incoming.WorktreeIntegrationRef != "" || incoming.WorktreeID == "" || replacePhysical {
+		row.WorktreeIntegrationRef = incoming.WorktreeIntegrationRef
+	}
+	if incoming.WorktreeSourceClonePath != "" {
+		row.WorktreeSourceClonePath = incoming.WorktreeSourceClonePath
+		row.WorktreeSourceCommonDir = incoming.WorktreeSourceCommonDir
 	}
 	row.Position = position
 	row.ErrorMessage = incoming.ErrorMessage
@@ -549,14 +672,21 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	if replacePhysical {
 		row.Status = worktreeRepoStatusActive
 		row.DeletedAt = nil
+		row.WorktreeRecoveryHeadSHA = ""
+		row.WorktreeBranchCompactedAt = nil
 	}
 	row.UpdatedAt = time.Now().UTC()
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos SET
 			branch_slug = ?, worktree_id = ?, worktree_path = ?, worktree_branch = ?,
+			worktree_branch_owner = ?, worktree_integration_ref = ?,
+			worktree_recovery_head_sha = ?, worktree_source_clone_path = ?, worktree_source_common_dir = ?,
+			worktree_branch_compacted_at = ?,
 			position = ?, error_message = ?, status = ?, deleted_at = ?, updated_at = ?
 		WHERE id = ?
 	`), row.BranchSlug, row.WorktreeID, row.WorktreePath, row.WorktreeBranch,
+		row.WorktreeBranchOwner, row.WorktreeIntegrationRef,
+		row.WorktreeRecoveryHeadSHA, row.WorktreeSourceClonePath, row.WorktreeSourceCommonDir, row.WorktreeBranchCompactedAt,
 		row.Position, row.ErrorMessage, row.Status, row.DeletedAt, row.UpdatedAt, row.ID)
 	return err
 }
@@ -605,7 +735,7 @@ func (r *Repository) TransferTaskEnvironmentOwnership(
 	expectedGeneration int64,
 	taskID string,
 ) error {
-	return r.transferTaskEnvironmentOwnership(ctx, envID, expectedTaskID, expectedGeneration, taskID)
+	return r.transferTaskEnvironmentOwnershipWithDeletion(ctx, envID, expectedTaskID, expectedGeneration, taskID, nil)
 }
 
 func (r *Repository) transferTaskEnvironmentOwnership(
@@ -614,11 +744,27 @@ func (r *Repository) transferTaskEnvironmentOwnership(
 	expectedGeneration int64,
 	taskID string,
 ) error {
+	return r.transferTaskEnvironmentOwnershipWithDeletion(ctx, envID, expectedTaskID, expectedGeneration, taskID, nil)
+}
+
+func (r *Repository) TransferManagedDeletionEnvironment(ctx context.Context, claim managed.DeleteClaim, envID, expectedTaskID string, expectedGeneration int64, taskID string) error {
+	if claim.TaskID != expectedTaskID {
+		return managed.ErrDeletionOwned
+	}
+	return r.transferTaskEnvironmentOwnershipWithDeletion(ctx, envID, expectedTaskID, expectedGeneration, taskID, &claim)
+}
+
+func (r *Repository) transferTaskEnvironmentOwnershipWithDeletion(ctx context.Context, envID, expectedTaskID string, expectedGeneration int64, taskID string, claim *managed.DeleteClaim) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if expectedTaskID != "" {
+		if err := r.lockTaskRowInTx(ctx, tx, expectedTaskID); err != nil {
+			return err
+		}
+	}
 	query := taskEnvironmentOwnershipQuery
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR UPDATE`
@@ -635,10 +781,13 @@ func (r *Repository) transferTaskEnvironmentOwnership(
 		return fmt.Errorf("%w: environment %s is owned by %s at generation %d",
 			ErrTaskEnvironmentOwnershipChanged, envID, currentTaskID, currentGeneration)
 	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, envID); err != nil {
+		return err
+	}
 	if currentTaskID == taskID {
 		return tx.Commit()
 	}
-	if err := r.taskCleanupBarrierLocked(ctx, tx, currentTaskID); err != nil {
+	if err := r.validateEnvironmentTransferCleanupTx(ctx, tx, currentTaskID, claim); err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -656,6 +805,16 @@ func (r *Repository) transferTaskEnvironmentOwnership(
 		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, envID)
 	}
 	return tx.Commit()
+}
+
+func (r *Repository) validateEnvironmentTransferCleanupTx(ctx context.Context, tx *sqlx.Tx, taskID string, claim *managed.DeleteClaim) error {
+	if claim == nil {
+		return r.taskCleanupBarrierLocked(ctx, tx, taskID)
+	}
+	if _, _, err := r.validateDeletionOwnerTx(ctx, tx, *claim); err != nil {
+		return err
+	}
+	return r.rejectOtherCleanupJobsTx(ctx, tx, taskID, claim.JobID)
 }
 
 // ClaimTaskEnvironmentReset reserves destructive environment reset behind the
@@ -709,6 +868,9 @@ func (r *Repository) ClaimTaskEnvironmentReset(
 		return "", fmt.Errorf("%w: environment %s is owned by %s at generation %d",
 			ErrTaskEnvironmentOwnershipChanged, environmentID, ownerTaskID, generation)
 	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return "", err
+	}
 	if err := tx.Commit(); err != nil {
 		return "", err
 	}
@@ -728,9 +890,25 @@ func (r *Repository) ReleaseTaskEnvironmentReset(
 // DeleteTaskEnvironment deletes a task environment by ID.
 // Per-repo rows are removed via ON DELETE CASCADE.
 func (r *Repository) DeleteTaskEnvironment(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM task_environments WHERE id = ?
-	`), id)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var existingID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM task_environments WHERE id = ?`), id).Scan(&existingID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, id)
+		}
+		return err
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, id); err != nil {
+		return err
+	}
+	if err := r.ensureKubernetesInventoryAbsent(ctx, tx, id); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environments WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -738,15 +916,50 @@ func (r *Repository) DeleteTaskEnvironment(ctx context.Context, id string) error
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, id)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // DeleteTaskEnvironmentsByTask deletes all task environments for a given task.
 func (r *Repository) DeleteTaskEnvironmentsByTask(ctx context.Context, taskID string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM task_environments WHERE task_id = ?
-	`), taskID)
-	return err
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := recoveryclaim.EnsureTaskAvailableTx(ctx, r.db, tx, taskID); err != nil {
+		return err
+	}
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`SELECT id FROM task_environments WHERE task_id = ?`), taskID)
+	if err != nil {
+		return err
+	}
+	var environmentIDs []string
+	for rows.Next() {
+		var environmentID string
+		if err := rows.Scan(&environmentID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		environmentIDs = append(environmentIDs, environmentID)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, environmentID := range environmentIDs {
+		if err := r.ensureKubernetesInventoryAbsent(ctx, tx, environmentID); err != nil {
+			return err
+		}
+		if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environments WHERE task_id = ?`), taskID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // CreateTaskEnvironmentRepo inserts a single per-repo environment row. The
@@ -773,6 +986,9 @@ func (r *Repository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models
 	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
 		return err
 	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, repo.TaskEnvironmentID); err != nil {
+		return err
+	}
 
 	if repo.ID == "" {
 		repo.ID = uuid.New().String()
@@ -788,11 +1004,17 @@ func (r *Repository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models
 		INSERT INTO task_environment_repos (
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch,
+			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
+			worktree_source_clone_path, worktree_source_common_dir,
+			worktree_branch_compacted_at,
 			position, error_message, status, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID, repo.BranchSlug,
 		repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
+		repo.WorktreeBranchOwner, repo.WorktreeIntegrationRef, repo.WorktreeRecoveryHeadSHA,
+		repo.WorktreeSourceClonePath, repo.WorktreeSourceCommonDir,
+		repo.WorktreeBranchCompactedAt,
 		repo.Position, repo.ErrorMessage, repo.Status, repo.CreatedAt, repo.UpdatedAt,
 	); err != nil {
 		return err
@@ -819,11 +1041,17 @@ func (r *Repository) insertTaskEnvironmentRepoTx(ctx context.Context, tx *sqlx.T
 		INSERT INTO task_environment_repos (
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch,
+			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
+			worktree_source_clone_path, worktree_source_common_dir,
+			worktree_branch_compacted_at,
 			position, error_message, status, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID, repo.BranchSlug,
 		repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
+		repo.WorktreeBranchOwner, repo.WorktreeIntegrationRef, repo.WorktreeRecoveryHeadSHA,
+		repo.WorktreeSourceClonePath, repo.WorktreeSourceCommonDir,
+		repo.WorktreeBranchCompactedAt,
 		repo.Position, repo.ErrorMessage, repo.Status, repo.CreatedAt, repo.UpdatedAt,
 	)
 	return err
@@ -835,6 +1063,12 @@ func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string)
 		SELECT id, task_environment_id, repository_id,
 			COALESCE(branch_slug, ''),
 			worktree_id, worktree_path, worktree_branch,
+			COALESCE(worktree_branch_owner, 'unknown'),
+			COALESCE(worktree_integration_ref, ''),
+			COALESCE(worktree_recovery_head_sha, ''),
+			COALESCE(worktree_source_clone_path, ''),
+			COALESCE(worktree_source_common_dir, ''),
+			worktree_branch_compacted_at,
 			position, error_message, COALESCE(status, ''),
 			created_at, updated_at, merged_at, deleted_at
 		FROM task_environment_repos
@@ -849,11 +1083,14 @@ func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string)
 	var out []*models.TaskEnvironmentRepo
 	for rows.Next() {
 		repo := &models.TaskEnvironmentRepo{}
-		var mergedAt, deletedAt sql.NullTime
+		var compactedAt, mergedAt, deletedAt sql.NullTime
 		if err := rows.Scan(
 			&repo.ID, &repo.TaskEnvironmentID, &repo.RepositoryID,
 			&repo.BranchSlug,
 			&repo.WorktreeID, &repo.WorktreePath, &repo.WorktreeBranch,
+			&repo.WorktreeBranchOwner, &repo.WorktreeIntegrationRef, &repo.WorktreeRecoveryHeadSHA,
+			&repo.WorktreeSourceClonePath, &repo.WorktreeSourceCommonDir,
+			&compactedAt,
 			&repo.Position, &repo.ErrorMessage, &repo.Status,
 			&repo.CreatedAt, &repo.UpdatedAt, &mergedAt, &deletedAt,
 		); err != nil {
@@ -862,6 +1099,10 @@ func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string)
 		if mergedAt.Valid {
 			t := mergedAt.Time
 			repo.MergedAt = &t
+		}
+		if compactedAt.Valid {
+			t := compactedAt.Time
+			repo.WorktreeBranchCompactedAt = &t
 		}
 		if deletedAt.Valid {
 			t := deletedAt.Time
@@ -876,15 +1117,36 @@ func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string)
 func (r *Repository) UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error {
 	repo.UpdatedAt = time.Now().UTC()
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var environmentID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_environment_id FROM task_environment_repos WHERE id = ?`), repo.ID).Scan(&environmentID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("task environment repo not found: %s", repo.ID)
+		}
+		return err
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos SET
 			branch_slug = ?,
 			worktree_id = ?, worktree_path = ?, worktree_branch = ?,
+			worktree_branch_owner = ?, worktree_integration_ref = ?, worktree_recovery_head_sha = ?,
+			worktree_source_clone_path = ?, worktree_source_common_dir = ?,
+			worktree_branch_compacted_at = ?,
 			position = ?, error_message = ?, status = ?,
 			merged_at = ?, deleted_at = ?, updated_at = ?
 		WHERE id = ?
 	`),
 		repo.BranchSlug, repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
+		repo.WorktreeBranchOwner, repo.WorktreeIntegrationRef, repo.WorktreeRecoveryHeadSHA,
+		repo.WorktreeSourceClonePath, repo.WorktreeSourceCommonDir,
+		repo.WorktreeBranchCompactedAt,
 		repo.Position, repo.ErrorMessage, repo.Status,
 		repo.MergedAt, repo.DeletedAt, repo.UpdatedAt,
 		repo.ID,
@@ -896,14 +1158,27 @@ func (r *Repository) UpdateTaskEnvironmentRepo(ctx context.Context, repo *models
 	if rows == 0 {
 		return fmt.Errorf("task environment repo not found: %s", repo.ID)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // DeleteTaskEnvironmentRepo removes a single per-repo row.
 func (r *Repository) DeleteTaskEnvironmentRepo(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM task_environment_repos WHERE id = ?
-	`), id)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var environmentID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_environment_id FROM task_environment_repos WHERE id = ?`), id).Scan(&environmentID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("task environment repo not found: %s", id)
+		}
+		return err
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_repos WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -911,13 +1186,21 @@ func (r *Repository) DeleteTaskEnvironmentRepo(ctx context.Context, id string) e
 	if rows == 0 {
 		return fmt.Errorf("task environment repo not found: %s", id)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // DeleteTaskEnvironmentReposByEnv removes all per-repo rows for an environment.
 func (r *Repository) DeleteTaskEnvironmentReposByEnv(ctx context.Context, envID string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM task_environment_repos WHERE task_environment_id = ?
-	`), envID)
-	return err
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, envID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_repos WHERE task_environment_id = ?`), envID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

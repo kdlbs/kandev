@@ -30,8 +30,8 @@ test.describe("Mobile plugin task-list facet", () => {
       { taskId },
     );
 
-    await testPage.getByRole("button", { name: "Open menu" }).tap();
-    const menu = testPage.getByRole("dialog", { name: "Menu" });
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
+    const menu = testPage.getByRole("dialog", { name: "View options" });
     const groupSelect = menu.getByTestId("mobile-tasks-list-group");
     await groupSelect.evaluate((element) => element.scrollIntoView({ block: "center" }));
     await expect(groupSelect).toBeInViewport();

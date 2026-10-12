@@ -3,6 +3,15 @@ import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { createEmptyRemoteRepository } from "../../helpers/empty-remote-repository";
+import { waitForHttp } from "../../helpers/causal-waits";
+import { configureGitHubOrigin } from "../../helpers/github-origin";
+import { makeGitEnv } from "../../helpers/git-helper";
+import {
+  cleanupPRLinkForkLaunchFixture,
+  createPRLinkForkLaunchFixture,
+  expectForkPRLaunchState,
+} from "./pr-link-fork-launch-helpers";
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
@@ -24,6 +33,10 @@ async function openRemoteAndPasteURL(testPage: Page, url: string): Promise<void>
 }
 
 test.describe("Task creation from GitHub URL", () => {
+  const restoreOrigins: Array<() => void> = [];
+  test.afterEach(() => {
+    for (const restore of restoreOrigins.splice(0).reverse()) restore();
+  });
   // Allow one retry for transient backend port-allocation issues on cold start.
   test.describe.configure({ retries: 1 });
 
@@ -39,6 +52,13 @@ test.describe("Task creation from GitHub URL", () => {
     // This lets FindOrCreateRepository find the repo (with its local_path) when the
     // GitHub URL is submitted, avoiding an actual clone.
     const repoDir = `${backend.tmpDir}/repos/e2e-repo`;
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/test-owner/test-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "test-owner/test-repo",
       provider: "github",
@@ -112,6 +132,13 @@ test.describe("Task creation from GitHub URL", () => {
 
     // Pre-seed the GitHub-backed repository
     const repoDir = `${backend.tmpDir}/repos/e2e-repo`;
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/test-owner/test-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "test-owner/test-repo",
       provider: "github",
@@ -173,6 +200,76 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
   });
 
+  test("starts a target-attached fork PR from its URL", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    const fixture = await createPRLinkForkLaunchFixture(
+      apiClient,
+      seedData.workspaceId,
+      backend.tmpDir,
+    );
+    let taskId: string | undefined;
+
+    try {
+      const { executors } = await apiClient.listExecutors();
+      const worktreeExec = executors.find((executor) => executor.type === "worktree");
+      if (!worktreeExec?.profiles?.[0]) {
+        test.skip(true, "No worktree executor profile available");
+        return;
+      }
+
+      const taskTitle = `Fork PR launch ${fixture.repositoryName}`;
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await openRemoteAndPasteURL(testPage, fixture.prURL);
+      await expect(testPage.getByTestId("remote-branch-chip-trigger").first()).toContainText(
+        fixture.headBranch,
+      );
+      await testPage.getByTestId("task-title-input").fill(taskTitle);
+      await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+
+      const startButton = testPage.getByTestId("submit-start-agent");
+      await expect(startButton).toBeEnabled();
+      await testPage.getByTestId("executor-profile-selector").click();
+      await testPage.getByRole("option", { name: /Worktree/i }).click();
+      const createdTaskResponse = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
+      await startButton.click();
+      const response = await createdTaskResponse;
+      const responseBody = await response.text();
+      expect(response.status(), responseBody).toBe(200);
+      const created = JSON.parse(responseBody) as { id: string };
+      taskId = created.id;
+      const requestBody = response.request().postDataJSON() as {
+        repositories?: Array<Record<string, unknown>>;
+      };
+      expect(requestBody.repositories?.[0]).not.toHaveProperty("remote_contribution");
+      expect(requestBody.repositories?.[0]).not.toHaveProperty("comparison_target");
+
+      await expect(dialog).not.toBeVisible();
+      await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}$`));
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ requireEditable: true });
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible();
+      await expect(session.idleInput()).toBeVisible();
+
+      await session.clickTab("Terminal", { force: true });
+      await expect(session.terminal).toBeVisible({ timeout: 15_000 });
+      await session.expectTerminalConnected();
+      await expectForkPRLaunchState(testPage, session, apiClient, fixture, taskId);
+      await expect(session.prTopbarButton()).toContainText("#3879", { timeout: 15_000 });
+    } finally {
+      await cleanupPRLinkForkLaunchFixture(apiClient, fixture, taskId);
+    }
+  });
+
   // Three tests previously asserted the top-level `github-url-error` testid
   // surfaced on invalid URL, nonexistent repo, and "clears on valid URL".
   // After Task 5/8 the URL input moved into a per-chip popover and no
@@ -192,6 +289,13 @@ test.describe("Task creation from GitHub URL", () => {
 
     // Seed two distinct GitHub-backed repositories
     const repoDirA = `${backend.tmpDir}/repos/e2e-repo`;
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDirA,
+        "https://github.com/owner-a/repo-a.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDirA, "main", {
       name: "owner-a/repo-a",
       provider: "github",
@@ -214,6 +318,10 @@ test.describe("Task creation from GitHub URL", () => {
     };
     execSync("git init -b main", { cwd: repoDirB, env: gitEnv });
     execSync('git commit --allow-empty -m "init"', { cwd: repoDirB, env: gitEnv });
+    execSync("git remote add origin https://github.com/owner-b/repo-b.git", {
+      cwd: repoDirB,
+      env: gitEnv,
+    });
     await apiClient.createRepository(seedData.workspaceId, repoDirB, "main", {
       name: "owner-b/repo-b",
       provider: "github",
@@ -268,6 +376,13 @@ test.describe("Task creation from GitHub URL", () => {
   }) => {
     // Pre-seed a GitHub-backed repository
     const repoDir = `${backend.tmpDir}/repos/e2e-repo`;
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/test-owner/test-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "test-owner/test-repo",
       provider: "github",
@@ -342,9 +457,20 @@ test.describe("Task creation from GitHub URL", () => {
     const repoDir = `${backend.tmpDir}/repos/e2e-repo`;
     execSync("git checkout -b feature/pr-branch", { cwd: repoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "pr commit"', { cwd: repoDir, env: gitEnv });
+    execSync("git push origin feature/pr-branch:refs/pull/99/head", {
+      cwd: repoDir,
+      env: gitEnv,
+    });
     execSync("git checkout main", { cwd: repoDir, env: gitEnv });
 
     // Pre-seed a GitHub-backed repository
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/test-owner/test-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "test-owner/test-repo",
       provider: "github",
@@ -431,7 +557,6 @@ test.describe("Task creation from GitHub URL", () => {
     test.setTimeout(90_000);
 
     const { execSync } = await import("child_process");
-    const fs = await import("fs");
     const gitEnv = {
       ...process.env,
       HOME: backend.tmpDir,
@@ -441,21 +566,32 @@ test.describe("Task creation from GitHub URL", () => {
       GIT_COMMITTER_EMAIL: "e2e@test.local",
     };
 
-    // Create a fresh repo with the PR branch available locally.
-    // No remote needed — the worktree manager falls back to local branches.
-    const repoDir = `${backend.tmpDir}/repos/e2e-pr-wt`;
-    fs.mkdirSync(repoDir, { recursive: true });
+    // Create a fresh repo with an offline origin that publishes the PR
+    // snapshot ref used by the worktree manager.
+    const repository = createEmptyRemoteRepository(backend.tmpDir, "pr-wt");
+    const repoDir = repository.localPath;
 
-    execSync("git init -b main", { cwd: repoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+    execSync("git push origin main", { cwd: repoDir, env: gitEnv });
 
     // Create the PR branch locally and switch back to main
     execSync("git checkout -b feature/pr-branch", { cwd: repoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "pr branch commit"', { cwd: repoDir, env: gitEnv });
+    execSync("git push origin feature/pr-branch:refs/pull/77/head", {
+      cwd: repoDir,
+      env: gitEnv,
+    });
     execSync("git checkout main", { cwd: repoDir, env: gitEnv });
 
     // Register the repo with a unique provider name to avoid collisions with
     // other tests that also register repos as test-owner/test-repo.
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/pr-owner/pr-wt-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "pr-owner/pr-wt-repo",
       provider: "github",
@@ -540,7 +676,7 @@ test.describe("Task creation from GitHub URL", () => {
     await session.expectTerminalHasText("feature/pr-branch");
   });
 
-  test("shows fetch warning banner when PR branch has no remote", async ({
+  test("shows a launch error when the PR branch has no remote snapshot", async ({
     testPage,
     apiClient,
     seedData,
@@ -549,7 +685,6 @@ test.describe("Task creation from GitHub URL", () => {
     test.setTimeout(90_000);
 
     const { execSync } = await import("child_process");
-    const fs = await import("fs");
     const gitEnv = {
       ...process.env,
       HOME: backend.tmpDir,
@@ -559,17 +694,22 @@ test.describe("Task creation from GitHub URL", () => {
       GIT_COMMITTER_EMAIL: "e2e@test.local",
     };
 
-    // Create a repo with the PR branch locally but NO remote.
-    // This causes fetchBranchToLocal to fail the fetch and fall back to local,
-    // which produces a warning that should be displayed in the UI.
-    const repoDir = `${backend.tmpDir}/repos/e2e-warning-repo`;
-    fs.mkdirSync(repoDir, { recursive: true });
-    execSync("git init -b main", { cwd: repoDir, env: gitEnv });
+    // Create a repo with the PR branch locally but no published PR snapshot. PR launches must
+    // fail closed when the immutable pull-request snapshot cannot be fetched.
+    const repository = createEmptyRemoteRepository(backend.tmpDir, "pr-missing-snapshot");
+    const repoDir = repository.localPath;
     execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
     execSync("git checkout -b feature/warn-branch", { cwd: repoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "feature commit"', { cwd: repoDir, env: gitEnv });
     execSync("git checkout main", { cwd: repoDir, env: gitEnv });
 
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/warn-owner/warn-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "warn-owner/warn-repo",
       provider: "github",
@@ -596,7 +736,7 @@ test.describe("Task creation from GitHub URL", () => {
       },
     ]);
 
-    // Need worktree executor to trigger fetchBranchToLocal (local executor doesn't produce warnings)
+    // Need worktree executor to exercise the authenticated PR snapshot fetch.
     const { executors } = await apiClient.listExecutors();
     const worktreeExec = executors.find((e) => e.type === "worktree");
     const worktreeProfile = worktreeExec?.profiles?.[0];
@@ -637,28 +777,20 @@ test.describe("Task creation from GitHub URL", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // Wait for agent to complete (preparation is done by this point)
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 30_000,
-    });
+    const sharedError = testPage.getByTestId("task-shared-error");
+    await expect(sharedError).toBeVisible({ timeout: 30_000 });
+    await sharedError.getByTestId("task-shared-error-details").click();
+    const launchError = testPage.getByTestId("task-launch-error-entry");
+    await expect(launchError).toBeVisible({ timeout: 30_000 });
+    await expect(launchError).toContainText(/launch needs attention/i);
 
-    // The warning banner should persist after preparation completes.
-    // It shows because fetchBranchToLocal failed to reach origin (no remote)
-    // and fell back to the local branch.
-    const warningBanner = testPage.getByTestId("prepare-warning-banner");
-    await expect(warningBanner).toBeVisible({ timeout: 10_000 });
-    await expect(warningBanner).toContainText("Could not fetch latest from origin");
-
-    // The "Details" toggle should be visible and expand raw git output on click.
-    const detailsBtn = warningBanner.getByRole("button", { name: "Details" });
-    await expect(detailsBtn).toBeVisible();
-    await detailsBtn.click();
-    // After expanding, raw git output should appear (e.g. "fatal:" from the failed fetch)
-    await expect(warningBanner.locator("pre")).toBeVisible();
-
-    // Clicking again should collapse the details.
-    await detailsBtn.click();
-    await expect(warningBanner.locator("pre")).not.toBeVisible();
+    const detailsToggle = launchError.locator("summary").filter({ hasText: "Show details" });
+    await expect(detailsToggle).toBeVisible();
+    await detailsToggle.click();
+    await expect(launchError.getByTestId("task-launch-error-details")).toContainText(
+      /pull request head 200|no remote ref|workspace checkout failed/i,
+    );
+    await expect(testPage.getByTestId("prepare-warning-banner")).toHaveCount(0);
   });
 
   test("two tasks from the same PR URL create independent worktrees", async ({
@@ -670,7 +802,6 @@ test.describe("Task creation from GitHub URL", () => {
     test.setTimeout(120_000);
 
     const { execSync } = await import("child_process");
-    const fs = await import("fs");
     const gitEnv = {
       ...process.env,
       HOME: backend.tmpDir,
@@ -680,15 +811,27 @@ test.describe("Task creation from GitHub URL", () => {
       GIT_COMMITTER_EMAIL: "e2e@test.local",
     };
 
-    // Create a repo with the PR branch locally.
-    const repoDir = `${backend.tmpDir}/repos/e2e-shared-pr`;
-    fs.mkdirSync(repoDir, { recursive: true });
-    execSync("git init -b main", { cwd: repoDir, env: gitEnv });
+    // Create a repo whose offline origin publishes the immutable PR snapshot
+    // used by both independent worktrees.
+    const repository = createEmptyRemoteRepository(backend.tmpDir, "shared-pr");
+    const repoDir = repository.localPath;
     execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+    execSync("git push origin main", { cwd: repoDir, env: gitEnv });
     execSync("git checkout -b feature/shared-pr", { cwd: repoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "shared pr commit"', { cwd: repoDir, env: gitEnv });
+    execSync("git push origin feature/shared-pr:refs/pull/50/head", {
+      cwd: repoDir,
+      env: gitEnv,
+    });
     execSync("git checkout main", { cwd: repoDir, env: gitEnv });
 
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/shared-owner/shared-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "shared-owner/shared-repo",
       provider: "github",
@@ -725,6 +868,22 @@ test.describe("Task creation from GitHub URL", () => {
     }
 
     const kanban = new KanbanPage(testPage);
+    const currentTaskId = () => {
+      const taskId = new URL(testPage.url()).pathname.match(/^\/t\/([^/]+)$/)?.[1];
+      if (!taskId) throw new Error(`Expected task route, got ${testPage.url()}`);
+      return taskId;
+    };
+    const waitForWorktree = async (taskId: string) => {
+      await expect
+        .poll(async () => (await apiClient.getTaskEnvironment(taskId))?.status ?? null, {
+          timeout: 30_000,
+          message: `Task ${taskId} has a ready worktree environment`,
+        })
+        .toBe("ready");
+      const environment = await apiClient.getTaskEnvironment(taskId);
+      if (!environment) throw new Error(`Task ${taskId} has no environment`);
+      return environment;
+    };
     await kanban.goto();
 
     // Helper: select worktree executor in the create dialog
@@ -770,10 +929,12 @@ test.describe("Task creation from GitHub URL", () => {
     });
     await expect(sessionA.idleInput()).toBeVisible({ timeout: 15_000 });
 
-    // Task A should have the direct PR branch
-    await expect(sessionA.terminal).toBeVisible({ timeout: 15_000 });
-    await sessionA.typeInTerminal("git branch --show-current");
-    await sessionA.expectTerminalHasText("feature/shared-pr");
+    const taskAId = currentTaskId();
+    const environmentA = await waitForWorktree(taskAId);
+    const repoA = environmentA.repos?.find((repo) => repo.repository_id);
+    expect(repoA?.worktree_branch).toMatch(/^feature\/shared-pr-/);
+    const worktreePathA = repoA?.worktree_path ?? environmentA.worktree_path;
+    expect(worktreePathA).toBeTruthy();
 
     // --- Task B: second task from the same PR URL ---
     await testPage.goto("/");
@@ -799,9 +960,6 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // Task B follows a full navigation away from Task A. Dockview can keep
-    // Task A's terminal mounted while Task B hydrates, so this also guards
-    // SessionPage against reading a stale, hidden terminal buffer.
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const sessionB = new SessionPage(testPage);
     await sessionB.waitForLoad();
@@ -809,11 +967,14 @@ test.describe("Task creation from GitHub URL", () => {
       timeout: 30_000,
     });
 
-    // Task B should have a suffixed branch (not the original PR branch)
-    await expect(sessionB.terminal).toBeVisible({ timeout: 15_000 });
-    await sessionB.typeInTerminal("git branch --show-current");
-    // Branch should start with the PR branch name but have a random suffix
-    await sessionB.expectTerminalHasText("feature/shared-pr-");
+    const taskBId = currentTaskId();
+    const environmentB = await waitForWorktree(taskBId);
+    const repoB = environmentB.repos?.find((repo) => repo.repository_id);
+    expect(repoB?.worktree_branch).toMatch(/^feature\/shared-pr-/);
+    expect(repoB?.worktree_branch).not.toBe(repoA?.worktree_branch);
+    const worktreePathB = repoB?.worktree_path ?? environmentB.worktree_path;
+    expect(worktreePathB).toBeTruthy();
+    expect(worktreePathB).not.toBe(worktreePathA);
   });
 
   test("can toggle between GitHub URL and repository selector", async ({ testPage }) => {

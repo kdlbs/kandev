@@ -27,6 +27,7 @@ import {
   withConfigureSessionRules,
   type AgentChoice,
 } from "./workflow-session-config-shared";
+import { settingsActionClassName } from "./settings-control";
 
 type SessionConfigEditorProps = {
   step: WorkflowStep;
@@ -361,7 +362,7 @@ function SessionConfigOptionsHeader({
           type="button"
           size="sm"
           variant="ghost"
-          className="min-h-10 cursor-pointer"
+          className={settingsActionClassName("cursor-pointer")}
           onClick={onAddRule}
           disabled={disabled || !canAddRule}
           data-testid={`${step.id}-add-session-config-rule`}

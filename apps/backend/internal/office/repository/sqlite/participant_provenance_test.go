@@ -437,8 +437,11 @@ func TestCancelDisplacedParticipantRun_CancelsOnlyTheFanOutRunForThatAgentStep(t
 	if err != nil {
 		t.Fatalf("CancelDisplacedParticipantRun: %v", err)
 	}
-	if cancelled != 1 {
-		t.Fatalf("cancelled = %d, want 1", cancelled)
+	if len(cancelled) != 1 {
+		t.Fatalf("cancelled = %d, want 1", len(cancelled))
+	}
+	if cancelled[0].ID != "run-target" {
+		t.Fatalf("cancelled[0].ID = %q, want run-target", cancelled[0].ID)
 	}
 
 	assertRunStatus(t, repo, "run-target", "cancelled")
@@ -460,8 +463,8 @@ func TestCancelDisplacedParticipantRun_NoMatchIsNotAFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CancelDisplacedParticipantRun: %v", err)
 	}
-	if cancelled != 0 {
-		t.Errorf("cancelled = %d, want 0", cancelled)
+	if len(cancelled) != 0 {
+		t.Errorf("cancelled = %d, want 0", len(cancelled))
 	}
 }
 
@@ -485,4 +488,102 @@ func assertRunStatus(t *testing.T, repo *sqlite.Repository, id, want string) {
 	if got != want {
 		t.Errorf("run %s status = %q, want %q", id, got, want)
 	}
+}
+
+// TestAddTaskParticipant_IdentityProbePrecedesClaimSearch covers
+// AC-OFFICE-SEAT-ASSURANCE-002.1, pinning
+// AC-OFFICE-SEAT-PROVENANCE-002.4's ordering.
+//
+// The slate holds agent A's manual seat and exactly one undecided auto seat
+// for a different agent B. Registering A again must report Unchanged off
+// the identity probe and leave B's seat alone. An implementation that
+// searched for a claimable seat before checking whether the named agent
+// already holds one would find B's auto seat and consume it, evicting B in
+// service of a registration that had nothing to do.
+//
+// The second assertion is the one that bites: the outcome alone reads
+// Unchanged either way once A already holds a seat, so a case that only
+// checked the outcome would pass with B silently displaced.
+func TestAddTaskParticipant_IdentityProbePrecedesClaimSearch(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	seedParticipantTask(t, repo, "probe-first", "step-1")
+	seedParticipantAgent(t, repo, "agent-a")
+	seedParticipantAgent(t, repo, "agent-b")
+	seedManualSeat(t, repo, "manual-a", "step-1", "probe-first", "reviewer", "agent-a")
+	seedAutoSeat(t, repo, "auto-b", "step-1", "probe-first", "reviewer", "agent-b")
+
+	result, err := repo.AddTaskParticipant(ctx, "probe-first", "agent-a", "reviewer")
+	if err != nil {
+		t.Fatalf("AddTaskParticipant: %v", err)
+	}
+	if result.Outcome != sqlite.ParticipantWriteOutcomeUnchanged {
+		t.Fatalf("outcome = %q, want %q (A already holds a seat)", result.Outcome, sqlite.ParticipantWriteOutcomeUnchanged)
+	}
+	if result.DisplacedAgentProfileID != "" {
+		t.Fatalf("displaced agent = %q, want empty (nothing was displaced)", result.DisplacedAgentProfileID)
+	}
+
+	// B's seat is untouched: still B's, still auto, still claimable by a
+	// registration that actually needs a seat.
+	agentID, provenance := seatProvenanceAndAgent(t, repo, "auto-b")
+	if agentID != "agent-b" {
+		t.Fatalf("auto seat agent = %q, want agent-b (claim search must not have run)", agentID)
+	}
+	if provenance != "auto" {
+		t.Fatalf("auto seat provenance = %q, want auto (not promoted)", provenance)
+	}
+	if n := participantRowCount(t, repo, "probe-first"); n != 2 {
+		t.Fatalf("rows = %d, want 2 (no seat added or removed)", n)
+	}
+}
+
+// TestAddTaskParticipant_DisplacedAgentRegistersAgain covers
+// AC-OFFICE-SEAT-ASSURANCE-002.2, pinning
+// AC-OFFICE-SEAT-PROVENANCE-002.10: a displaced agent coming back gets a
+// second manual seat rather than reclaiming the one taken from it.
+//
+// TestAddTaskParticipant_PromotionConvergencePair's "B then A" ordering
+// reaches the same final state, but cannot tell this history from
+// insert-then-promote: two manual seats naming both agents is where both
+// paths land. So this case asserts the intermediate outcome — that the
+// first registration genuinely claimed and named A as displaced — which is
+// what makes the two-seat result evidence about displacement.
+func TestAddTaskParticipant_DisplacedAgentRegistersAgain(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	seedParticipantTask(t, repo, "displaced-return", "step-1")
+	seedParticipantAgent(t, repo, "agent-a")
+	seedParticipantAgent(t, repo, "agent-b")
+	seedAutoSeat(t, repo, "auto-dr", "step-1", "displaced-return", "reviewer", "agent-a")
+
+	// B claims A's cast seat, displacing A.
+	claim, err := repo.AddTaskParticipant(ctx, "displaced-return", "agent-b", "reviewer")
+	if err != nil {
+		t.Fatalf("AddTaskParticipant(B): %v", err)
+	}
+	if claim.Outcome != sqlite.ParticipantWriteOutcomeClaimed {
+		t.Fatalf("first outcome = %q, want %q — without a claim this case proves nothing about displacement",
+			claim.Outcome, sqlite.ParticipantWriteOutcomeClaimed)
+	}
+	if claim.DisplacedAgentProfileID != "agent-a" {
+		t.Fatalf("displaced agent = %q, want agent-a", claim.DisplacedAgentProfileID)
+	}
+
+	// A registers again at the same step and role: a second manual seat,
+	// not a reclaim of the seat B now holds.
+	again, err := repo.AddTaskParticipant(ctx, "displaced-return", "agent-a", "reviewer")
+	if err != nil {
+		t.Fatalf("AddTaskParticipant(A again): %v", err)
+	}
+	if again.Outcome != sqlite.ParticipantWriteOutcomeInserted {
+		t.Fatalf("second outcome = %q, want %q", again.Outcome, sqlite.ParticipantWriteOutcomeInserted)
+	}
+	if again.DisplacedAgentProfileID != "" {
+		t.Fatalf("second call displaced %q, want empty (B keeps its seat)", again.DisplacedAgentProfileID)
+	}
+
+	assertTwoManualSeatsNamingBoth(t, repo, "displaced-return")
 }

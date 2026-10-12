@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 let finePointer = true;
+let isMobile = false;
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mocks.toast }),
@@ -29,7 +30,7 @@ vi.mock("@/hooks/domains/azure-devops/use-azure-devops-projects", () => ({
   }),
 }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isFinePointer: finePointer }),
+  useResponsiveBreakpoint: () => ({ isFinePointer: finePointer, isMobile }),
 }));
 vi.mock("@/lib/api/domains/azure-devops-api", () => ({
   deleteAzureDevOpsConfig: mocks.deleteConfig,
@@ -86,6 +87,7 @@ const config: AzureDevOpsConfig = {
 beforeEach(() => {
   vi.clearAllMocks();
   finePointer = true;
+  isMobile = false;
   mocks.getConfig.mockResolvedValue(config);
   mocks.setConfig.mockResolvedValue({
     ...config,
@@ -205,6 +207,23 @@ describe("AzureDevOpsConnectionSection", () => {
 });
 
 describe("AzureDevOpsConnectionSection removal", () => {
+  it("keeps phone removal in a sheet and restores the same button on Cancel", async () => {
+    isMobile = true;
+    finePointer = false;
+    render(
+      <SettingsSaveProvider>
+        <AzureDevOpsConnectionSection workspaceId={WORKSPACE_ID} />
+      </SettingsSaveProvider>,
+    );
+    const trigger = await screen.findByTestId(DELETE_BUTTON_TEST_ID);
+    fireEvent.click(trigger);
+    const sheet = screen.getByRole("dialog");
+    expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+    expect(trigger.isConnected).toBe(true);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(mocks.deleteConfig).not.toHaveBeenCalled();
+  });
   it("uses local fine-pointer confirmation and calls removal once after confirmation", async () => {
     const nativeConfirm = vi.fn(() => false);
     vi.stubGlobal("confirm", nativeConfirm);

@@ -5,19 +5,22 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { IconMailForward, IconUserPlus, IconUsers } from "@tabler/icons-react";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import {
+  MobileActionConfirmation,
+  useConfirmationBoundary,
+} from "@/components/confirmation/mobile-action-confirmation";
 import { useToast } from "@/components/toast-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { ApiError } from "@/lib/api/client";
 import { listUsers, updateUser, type AuthUser } from "@/lib/api/domains/auth-api";
 import { CreateUserDialog } from "./create-user-dialog";
 import { InviteDialog } from "./invite-dialog";
-import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsErrorText } from "@/components/settings/settings-typography";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 
@@ -171,8 +174,10 @@ function UserActionRegion({
   const statusAnchorRef = useRef<HTMLButtonElement>(null);
   const action = pending?.user.id === user.id ? pending : null;
   const anchorRef = action?.next.role !== undefined ? roleAnchorRef : statusAnchorRef;
+  const targetKey = `${user.id}:${JSON.stringify(action?.next)}`;
+  const { isMobile } = useConfirmationBoundary(!!action, targetKey, () => onCancel());
 
-  if (!isFinePointer && action) {
+  if (!isMobile && !isFinePointer && action) {
     return (
       <InlineConfirmActions
         density="touch"
@@ -195,14 +200,14 @@ function UserActionRegion({
       <UserActionButtons
         user={user}
         isLastActiveAdmin={isLastActiveAdmin}
-        isFinePointer={isFinePointer}
+        isFinePointer={!isMobile && isFinePointer}
         roleAnchorRef={roleAnchorRef}
         statusAnchorRef={statusAnchorRef}
         onToggleRole={onToggleRole}
         onToggleStatus={onToggleStatus}
         isMutating={isMutating}
       />
-      {isFinePointer && action ? (
+      {(isMobile || isFinePointer) && action ? (
         <UserConfirmPopover
           action={action}
           anchorRef={anchorRef}
@@ -285,19 +290,32 @@ function UserConfirmPopover({
   onConfirm: (action: PendingAction) => void;
 }) {
   const { t } = useTranslation();
+  const actions = {
+    title: action.label,
+    description: t("system:usersTakesEffectImmediately", { email: action.user.email }),
+    cancelLabel: t("common:cancel"),
+    confirmLabel: t("system:usersConfirm"),
+    confirmAriaLabel: action.label,
+    confirmTestId: "users-table-confirm",
+    onOpenChange: (open: boolean) => {
+      if (!open) onCancel();
+    },
+    onConfirm: () => onConfirm(action),
+  };
   return (
-    <ActionConfirmPopover
+    <MobileActionConfirmation
+      {...actions}
       open
-      anchorRef={anchorRef}
-      title={action.label}
-      description={t("system:usersTakesEffectImmediately", { email: action.user.email })}
-      cancelLabel={t("common:cancel")}
-      confirmLabel={t("system:usersConfirm")}
-      confirmAriaLabel={action.label}
-      confirmTestId="users-table-confirm"
-      testId="users-table-confirm-popover"
-      onOpenChange={(open) => !open && onCancel()}
-      onConfirm={() => onConfirm(action)}
+      targetKey={`${action.user.id}:${JSON.stringify(action.next)}`}
+      focusReturnRef={anchorRef}
+      fallback={
+        <ActionConfirmPopover
+          {...actions}
+          open
+          anchorRef={anchorRef}
+          testId="users-table-confirm-popover"
+        />
+      }
     />
   );
 }
@@ -425,36 +443,37 @@ export function UsersTable() {
   };
 
   return (
-    <Card data-testid="users-table-card">
-      <SettingsCardHeader
-        title={
-          <span className="flex items-center gap-2">
-            <IconUsers className="h-4 w-4" /> {t("system:usersTitle")}
-          </span>
-        }
-        actions={
-          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
-            <Button
-              size="sm"
-              variant="outline"
-              className={settingsActionClassName("cursor-pointer")}
-              onClick={() => setInviteOpen(true)}
-              data-testid="users-table-invite"
-            >
-              <IconMailForward className="h-3.5 w-3.5" /> {t("system:usersInviteLink")}
-            </Button>
-            <Button
-              size="sm"
-              className={settingsActionClassName("cursor-pointer")}
-              onClick={() => setCreateOpen(true)}
-              data-testid="users-table-create"
-            >
-              <IconUserPlus className="h-3.5 w-3.5" /> {t("system:usersAddUser")}
-            </Button>
-          </div>
-        }
-      />
-      <CardContent className="space-y-4">
+    <SettingsGroup
+      title={
+        <span className="flex items-center gap-2">
+          <IconUsers className="h-4 w-4" /> {t("system:usersTitle")}
+        </span>
+      }
+      action={
+        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+          <Button
+            size="sm"
+            variant="outline"
+            className={settingsActionClassName("cursor-pointer")}
+            onClick={() => setInviteOpen(true)}
+            data-testid="users-table-invite"
+          >
+            <IconMailForward className="h-3.5 w-3.5" /> {t("system:usersInviteLink")}
+          </Button>
+          <Button
+            size="sm"
+            className={settingsActionClassName("cursor-pointer")}
+            onClick={() => setCreateOpen(true)}
+            data-testid="users-table-create"
+          >
+            <IconUserPlus className="h-3.5 w-3.5" /> {t("system:usersAddUser")}
+          </Button>
+        </div>
+      }
+      data-testid="users-table-card"
+      contentClassName="space-y-4 divide-y-0"
+    >
+      <div className="space-y-4">
         {error && <SettingsErrorText data-testid="users-table-error">{error}</SettingsErrorText>}
         {!loaded && isLoading && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -477,7 +496,7 @@ export function UsersTable() {
             {t("system:usersEmpty")}
           </p>
         )}
-      </CardContent>
+      </div>
       <CreateUserDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
@@ -488,6 +507,6 @@ export function UsersTable() {
         onOpenChange={setInviteOpen}
         onCreated={() => void reload()}
       />
-    </Card>
+    </SettingsGroup>
   );
 }

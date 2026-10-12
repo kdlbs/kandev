@@ -16,9 +16,10 @@ import (
 const (
 	spriteUploadTimeout  = 10 * time.Minute // bundles can be large
 	spriteStepTimeout    = 2 * time.Minute
-	spriteControlRetries = 3
+	spriteControlRetries = 5
 	spriteUploadRetries  = 3
 	spriteBackoffInit    = 700 * time.Millisecond
+	spriteRetryMaxDelay  = 30 * time.Second
 )
 
 func newSpriteClient(token string) *sprites.Client {
@@ -90,11 +91,7 @@ func isTransientSpriteError(err error) bool {
 }
 
 func waitForSpriteRetry(ctx context.Context, operation string, attempt int, err error) error {
-	delay := spriteBackoffInit * time.Duration(1<<(attempt-1))
-	var apiErr *sprites.APIError
-	if errors.As(err, &apiErr) && apiErr.GetRetryAfterSeconds() > 0 {
-		delay = time.Duration(apiErr.GetRetryAfterSeconds()) * time.Second
-	}
+	delay := spriteRetryDelay(attempt, err)
 
 	fmt.Fprintf(os.Stderr, "  %s attempt %d failed (%v), retrying in %v...\n", operation, attempt, err, delay)
 	select {
@@ -102,6 +99,40 @@ func waitForSpriteRetry(ctx context.Context, operation string, attempt int, err 
 		return ctx.Err()
 	case <-time.After(delay):
 		return nil
+	}
+}
+
+func spriteRetryDelay(attempt int, err error) time.Duration {
+	delay := spriteBackoffInit * time.Duration(1<<(attempt-1))
+	if delay > spriteRetryMaxDelay {
+		delay = spriteRetryMaxDelay
+	}
+	var apiErr *sprites.APIError
+	if errors.As(err, &apiErr) && apiErr.GetRetryAfterSeconds() > 0 {
+		retryAfterSeconds := apiErr.GetRetryAfterSeconds()
+		maxRetryAfterSeconds := int(spriteRetryMaxDelay / time.Second)
+		if retryAfterSeconds > maxRetryAfterSeconds {
+			retryAfterSeconds = maxRetryAfterSeconds
+		}
+		delay = time.Duration(retryAfterSeconds) * time.Second
+	}
+	return delay
+}
+
+func retrySpriteControl(ctx context.Context, operation string, action func(context.Context) error) error {
+	for attempt := 1; ; attempt++ {
+		stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+		err := action(stepCtx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if !isTransientSpriteError(err) || attempt >= spriteControlRetries {
+			return err
+		}
+		if err := waitForSpriteRetry(ctx, operation, attempt, err); err != nil {
+			return err
+		}
 	}
 }
 

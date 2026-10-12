@@ -9,13 +9,18 @@ import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
+import { useSessionGitRefresh } from "@/hooks/domains/session/use-session-git-refresh";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
 import { t } from "@/lib/i18n";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { BrowserPanel } from "./browser-panel";
-import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
+import type {
+  CommitDetailTarget,
+  CommitFileNavigationRequest,
+  OpenDiffOptions,
+} from "@/lib/state/diff-target-types";
 import { ChangesPanel } from "./changes-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import { FileEditorPanel } from "./file-editor-panel";
@@ -27,9 +32,9 @@ import { TaskChangesPanel } from "./task-changes-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
 import { TerminalPanel } from "./terminal-panel";
-import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
+import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
 import { useTranslation } from "react-i18next";
 
 /** Resolve the chat panel's tab title: the session's agent label when present,
@@ -73,12 +78,12 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = paramSessionId ?? storeSessionId;
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
-  const { openFile } = useFileEditors();
+  const isVisible = usePanelActive(panelId);
+  const { openFile } = useFileEditors(isVisible);
   const isPassthrough = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
   );
   useChatSessionTitle(panelId, sessionId);
-  const isVisible = usePanelActive(panelId);
 
   if (isPassthrough) {
     return (
@@ -98,9 +103,20 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
       isVisible={isVisible}
+      detailActive={isVisible}
       panelId={panelId}
     />
   );
+}
+
+/**
+ * Request a fresh git-status snapshot when a diff surface becomes active.
+ * The workspace poller can be in its slower mode after startup, so relying on
+ * its next tick leaves the Changes panel showing an unavailable comparison
+ * after the target becomes reachable again.
+ */
+function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
+  useSessionGitRefresh(sessionId, usePanelActive(panelId));
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
@@ -115,6 +131,7 @@ function DiffViewerContent({
   const selectedDiff = useDockviewStore((s) => s.selectedDiff);
   const setSelectedDiff = useDockviewStore((s) => s.setSelectedDiff);
   const { openFile } = useFileEditors();
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const panelKind = (params?.kind as string) ?? "all";
   const selectedPath = panelKind === "file" ? (params?.path as string) : undefined;
   const selectedRepositoryName =
@@ -124,6 +141,7 @@ function DiffViewerContent({
     panelKind === "file" ? (params?.changeLayer as OpenDiffOptions["changeLayer"]) : undefined;
   const sourceFilter = ((params?.source as string) || "all") as "all" | ReviewSource;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const handleClosePanel = useCallback(() => {
     const dockApi = useDockviewStore.getState().api;
     const panel = dockApi?.getPanel(panelId);
@@ -158,6 +176,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count - use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const totalCount = useSessionChangesCount(activeSessionId);
 
   useEffect(() => {
@@ -181,7 +200,8 @@ function ChangesContent({ panelId }: { panelId: string }) {
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(
-    (target: CommitDetailTarget) => addCommitDetailPanel(target),
+    (target: CommitDetailTarget, fileNavigation?: CommitFileNavigationRequest) =>
+      addCommitDetailPanel(target, fileNavigation ? { fileNavigation } : undefined),
     [addCommitDetailPanel],
   );
   const handleOpenDiffAll = useCallback(() => addDiffViewerPanel(), [addDiffViewerPanel]);
@@ -224,7 +244,10 @@ function CanvasContent({ params }: { params: Record<string, unknown> }) {
       className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
       data-testid="canvas-panel-boundary"
     >
-      <CanvasHostRoute canvasId={typeof params.canvasId === "string" ? params.canvasId : ""} />
+      <CanvasHostRoute
+        canvasId={typeof params.canvasId === "string" ? params.canvasId : ""}
+        embedded
+      />
     </div>
   );
 }
@@ -260,7 +283,6 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
-  "prompt-history": () => <PromptHistoryContent />,
   canvas: (_panelId, params) => <CanvasContent params={params} />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
@@ -282,6 +304,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
       presentation="desktop"
     />
   ),
+  "background-work": (panelId, params) => <BackgroundWorkPanel panelId={panelId} params={params} />,
 };
 
 /** Render a dockview panel's portal content by looking up its (alias-resolved)

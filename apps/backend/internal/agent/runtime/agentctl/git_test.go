@@ -4,12 +4,59 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // gitOperationOK is the canonical success body every /api/v1/git/* POST returns.
 const gitOperationOK = `{"success":true,"operation":"pull","output":"Already up to date."}`
+
+func TestGitPushPreflightHonorsOperationBudget(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		timer := time.NewTimer(25 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"operation":"push-preflight"}`))
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := newHTTPOnlyClient(server.URL)
+	client.httpClient.Timeout = 10 * time.Millisecond
+	result, err := client.GitPushPreflight(context.Background(), "", PushOptions{})
+	if err != nil || result == nil || !result.Success {
+		t.Fatalf("GitPushPreflight() = result %#v, error %v; want delayed response to succeed", result, err)
+	}
+	if got := client.httpClient.Timeout; got != 10*time.Millisecond {
+		t.Fatalf("ordinary client timeout = %s, want unchanged 10ms", got)
+	}
+}
+
+func TestGitPushSendsPushOptions(t *testing.T) {
+	srv, got := captureServer(t, jsonResponder(http.StatusOK, gitOperationOK))
+	_, err := newHTTPOnlyClient(srv.URL).GitPush(context.Background(), "svc", PushOptions{
+		Remote: "backup", ExpectedBranch: "feature/work",
+	})
+	if err != nil {
+		t.Fatalf("GitPush() error = %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(got.Body, &body); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
+	for key, want := range map[string]any{
+		"repo": "svc", "remote": "backup", "expected_branch": "feature/work",
+	} {
+		if gotValue := body[key]; gotValue != want {
+			t.Errorf("body[%q] = %#v, want %#v", key, gotValue, want)
+		}
+	}
+}
 
 // TestGitOperations_PostExpectedPathAndPayload pins the endpoint and JSON body
 // of every thin wrapper over gitOperation. A wrapper that posts to the wrong
@@ -36,7 +83,7 @@ func TestGitOperations_PostExpectedPathAndPayload(t *testing.T) {
 		{
 			name: "push force with upstream",
 			call: func(c *Client) (*GitOperationResult, error) {
-				return c.GitPush(context.Background(), true, true, "svc")
+				return c.GitPush(context.Background(), "svc", PushOptions{Force: true, SetUpstream: true})
 			},
 			wantPath: "/api/v1/git/push",
 			wantBody: map[string]any{"force": true, "set_upstream": true, "repo": "svc"},
@@ -44,16 +91,43 @@ func TestGitOperations_PostExpectedPathAndPayload(t *testing.T) {
 		{
 			name: "push plain",
 			call: func(c *Client) (*GitOperationResult, error) {
-				return c.GitPush(context.Background(), false, false, "")
+				return c.GitPush(context.Background(), "", PushOptions{})
 			},
 			wantPath: "/api/v1/git/push",
 			wantBody: map[string]any{"force": false, "set_upstream": false},
 		},
 		{
-			name:     "push preflight",
-			call:     func(c *Client) (*GitOperationResult, error) { return c.GitPushPreflight(context.Background(), "svc") },
+			name: "push preflight",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitPushPreflight(context.Background(), "svc", PushOptions{})
+			},
 			wantPath: "/api/v1/git/push-preflight",
 			wantBody: map[string]any{"repo": "svc"},
+		},
+		{
+			name: "push with explicit target and expected branch",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitPush(context.Background(), "svc", PushOptions{
+					Remote: "backup", ExpectedBranch: "feature/work",
+				})
+			},
+			wantPath: "/api/v1/git/push",
+			wantBody: map[string]any{
+				"force": false, "set_upstream": false, "repo": "svc",
+				"remote": "backup", "expected_branch": "feature/work",
+			},
+		},
+		{
+			name: "push preflight with explicit target and expected branch",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitPushPreflight(context.Background(), "svc", PushOptions{
+					Remote: "backup", ExpectedBranch: "feature/work",
+				})
+			},
+			wantPath: "/api/v1/git/push-preflight",
+			wantBody: map[string]any{
+				"repo": "svc", "remote": "backup", "expected_branch": "feature/work",
+			},
 		},
 		{
 			name: "replace remote contribution",
@@ -331,7 +405,7 @@ func TestGitOperation_HonoursContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := newHTTPOnlyClient(srv.URL).GitPush(ctx, false, false, "")
+	_, err := newHTTPOnlyClient(srv.URL).GitPush(ctx, "", PushOptions{})
 	if err == nil || !strings.Contains(err.Error(), "context canceled") {
 		t.Fatalf("error = %v, want context canceled", err)
 	}
@@ -671,19 +745,28 @@ func TestGetCumulativeDiff_ReturnsErrorOnHTTPError(t *testing.T) {
 // gitStatusBody exercises every field of GitStatusResult.
 const gitStatusBody = `{
 	"success":true,"is_submodule":true,
+	"status_state":"ready","files_complete":true,"detail_state":"pending","error_code":"",
+	"tracker_id":"agentctl/tracker-1","tracker_epoch":17,"snapshot_revision":3,
 	"branch":"feature/x","remote_branch":"origin/feature/x",
 	"head_commit":"head1","base_commit":"base1",
 	"ahead":3,"behind":1,"remote_ahead":4,"remote_behind":2,
 	"remote_head_commit":"remote1",
 	"modified":["m.go"],"added":["a.go"],"deleted":["d.go"],
 	"untracked":["u.go"],"renamed":["r.go"],
-	"files":{"m.go":{"status":"M"}},
+	"files":{"m.go":{"status":"M","diff_state":"pending"}},
 	"timestamp":"2026-08-10T11:00:00Z",
 	"branch_additions":25,"branch_deletions":7
 }`
 
 func assertFullGitStatus(t *testing.T, result *GitStatusResult) {
 	t.Helper()
+	if result.StatusState != "ready" || !result.FilesComplete || result.DetailState != "pending" {
+		t.Errorf("quality = %q / %v / %q, want ready / true / pending",
+			result.StatusState, result.FilesComplete, result.DetailState)
+	}
+	if result.TrackerID != "agentctl/tracker-1" || result.TrackerEpoch != 17 || result.SnapshotRevision != 3 {
+		t.Errorf("ordering = %q / %d / %d, want tracker identity and 17 / 3", result.TrackerID, result.TrackerEpoch, result.SnapshotRevision)
+	}
 	if !result.Success || !result.IsSubmodule {
 		t.Errorf("success/is_submodule = %v / %v, want true / true", result.Success, result.IsSubmodule)
 	}
@@ -758,6 +841,35 @@ func TestGetGitStatusFresh_SendsFreshQueryParam(t *testing.T) {
 		t.Errorf("fresh = %q, want true — without it the server serves the poll-loop cache", fresh)
 	}
 	assertFullGitStatus(t, result)
+}
+
+func TestGetGitStatusWithDetailsRequestsEnrichedStatus(t *testing.T) {
+	detailedBody := strings.Replace(gitStatusBody, `"detail_state":"pending"`, `"detail_state":"ready"`, 1)
+	srv, got := captureServer(t, jsonResponder(http.StatusOK, detailedBody))
+	result, err := newHTTPOnlyClient(srv.URL).GetGitStatusWithDetails(context.Background())
+	if err != nil {
+		t.Fatalf("GetGitStatusWithDetails: %v", err)
+	}
+	if got.Path != "/api/v1/git/status" || got.Query.Get("fresh") != "true" || got.Query.Get("details") != "wait" {
+		t.Errorf("request = %s %s?%s, want fresh details wait", got.Method, got.Path, got.RawQuery)
+	}
+	if !result.Success || result.StatusState != "ready" || result.DetailState != "ready" {
+		t.Fatalf("detailed status = %+v, want a ready result", result)
+	}
+}
+
+func TestGetGitStatusMultiRefreshSendsSupportedMode(t *testing.T) {
+	for _, mode := range []string{"fresh", "recover", "replay"} {
+		t.Run(mode, func(t *testing.T) {
+			srv, got := captureServer(t, jsonResponder(http.StatusOK, `{"success":true,"repos":[]}`))
+			if _, err := newHTTPOnlyClient(srv.URL).GetGitStatusMultiRefresh(context.Background(), mode); err != nil {
+				t.Fatalf("GetGitStatusMultiRefresh: %v", err)
+			}
+			if got.Path != "/api/v1/git/status/multi" || got.Query.Get("mode") != mode {
+				t.Errorf("request = %s %s?%s, want mode %q", got.Method, got.Path, got.RawQuery, mode)
+			}
+		})
+	}
 }
 
 func TestGetGitStatusMultiFresh_UsesMultiEndpointAndDecodesPerRepoEntries(t *testing.T) {

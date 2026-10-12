@@ -198,6 +198,36 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
     });
   });
 
+  it("persists only the portable managed destination identity", () => {
+    const form = baseForm({
+      taskMode: "managed_conversation",
+      managedDestination: {
+        plugin_id: "kandev-plugin-coordinator",
+        instance_key: "daily-brief",
+        revision: 3,
+      },
+    });
+
+    expect(buildCreatePayload("ws-1", form, [], [])).toMatchObject({
+      task_mode: "managed_conversation",
+      managed_destination: {
+        plugin_id: "kandev-plugin-coordinator",
+        instance_key: "daily-brief",
+        revision: 3,
+      },
+      repository_ids: [],
+    });
+    expect(buildUpdatePayload(form, [])).toMatchObject({
+      task_mode: "managed_conversation",
+      managed_destination: {
+        plugin_id: "kandev-plugin-coordinator",
+        instance_key: "daily-brief",
+        revision: 3,
+      },
+      repository_ids: [],
+    });
+  });
+
   it("does not resolve stale repository selections for non-selected modes", async () => {
     const result = await resolveRepositoryIdsForMode(
       "ws-1",

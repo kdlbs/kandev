@@ -204,3 +204,8 @@ git diff --check
 - Backfilling historical PR associations without complete head/base repository identity. They reconcile on
   the next authoritative provider read when an exact attachment match is available.
 - Plugin-provider implementation. The provider-neutral input remains available for a later adapter.
+
+## Shared execution follow-up (2026-09-13)
+
+The [noninteractive Git execution package](../noninteractive-git-execution/plan.md) owns final runner enforcement, helper cleanup, and authentication-failure recovery coverage.
+That package is complete. Existing results above remain historical evidence for this package's original implementation; its follow-up validation is recorded in the linked package.

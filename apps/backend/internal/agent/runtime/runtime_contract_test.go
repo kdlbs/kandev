@@ -3,11 +3,14 @@ package runtime_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -20,6 +23,8 @@ type fakeBackend struct {
 	launchReq    *lifecycle.LaunchRequest
 	launchExec   *lifecycle.AgentExecution
 	launchErr    error
+	startCalls   []string
+	startErr     error
 	promptCalls  []promptCall
 	promptResult *lifecycle.PromptResult
 	promptErr    error
@@ -27,6 +32,24 @@ type fakeBackend struct {
 	stopErr      error
 	mcpCalls     []mcpCall
 	mcpErr       error
+}
+
+type evidenceBackend struct {
+	*fakeBackend
+	evidenceRequest   lifecycle.DeliveryRecordEvidenceRequest
+	submissionRequest lifecycle.DeliveryRecordSubmissionRequest
+	evidence          *lifecycle.DeliveryRecordEvidence
+	submission        *lifecycle.DeliveryRecordSubmission
+}
+
+func (f *evidenceBackend) InspectDeliveryRecordEvidence(_ context.Context, request lifecycle.DeliveryRecordEvidenceRequest) (*lifecycle.DeliveryRecordEvidence, error) {
+	f.evidenceRequest = request
+	return f.evidence, nil
+}
+
+func (f *evidenceBackend) ReadDeliveryRecordSubmission(_ context.Context, request lifecycle.DeliveryRecordSubmissionRequest) (*lifecycle.DeliveryRecordSubmission, error) {
+	f.submissionRequest = request
+	return f.submission, nil
 }
 
 type promptCall struct {
@@ -46,12 +69,39 @@ type mcpCall struct {
 	mode        string
 }
 
+type fakeOwnerAdmission struct {
+	calls int
+	err   error
+}
+
+func (f *fakeOwnerAdmission) AdmitExecution(context.Context, lifecycle.ExecutionOwner) error {
+	f.calls++
+	return f.err
+}
+
 func (f *fakeBackend) Launch(_ context.Context, req *lifecycle.LaunchRequest) (*lifecycle.AgentExecution, error) {
 	f.launchReq = req
 	if f.launchErr != nil {
 		return nil, f.launchErr
 	}
+	if f.launchExec != nil {
+		f.executions[f.launchExec.ID] = f.launchExec
+	}
 	return f.launchExec, nil
+}
+
+// StartAgentProcess is intentionally present in the test backend even before
+// Runtime.Start is wired. The failing contract test below proves the facade
+// does not expose the required start-and-prompt seam yet.
+func (f *fakeBackend) StartAgentProcess(_ context.Context, executionID string) error {
+	f.startCalls = append(f.startCalls, executionID)
+	if f.launchReq != nil && f.launchReq.TaskDescription != "" {
+		f.promptCalls = append(f.promptCalls, promptCall{
+			executionID: executionID,
+			prompt:      f.launchReq.TaskDescription,
+		})
+	}
+	return f.startErr
 }
 
 func (f *fakeBackend) PromptAgent(_ context.Context, executionID, prompt string, _ []v1.MessageAttachment, dispatchOnly bool) (*lifecycle.PromptResult, error) {
@@ -75,6 +125,15 @@ func (f *fakeBackend) GetExecution(executionID string) (*lifecycle.AgentExecutio
 func (f *fakeBackend) SetMcpMode(_ context.Context, executionID, mode string) error {
 	f.mcpCalls = append(f.mcpCalls, mcpCall{executionID: executionID, mode: mode})
 	return f.mcpErr
+}
+
+func (f *fakeBackend) ExecuteBackgroundWorkAction(_ context.Context, executionID string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error) {
+	return streams.BackgroundWorkActionResponse{
+		Success: true,
+		WorkID:  req.WorkID,
+		RunID:   req.RunID,
+		Action:  req.Action,
+	}, nil
 }
 
 func newFakeBackend() *fakeBackend {
@@ -152,6 +211,91 @@ func TestRuntime_Launch_TranslatesSpecToLaunchRequest(t *testing.T) {
 	}
 	if got.Metadata["source"] != "engine" {
 		t.Errorf("Metadata[source] = %v", got.Metadata["source"])
+	}
+}
+
+func TestRuntime_StartDispatchesInitialPromptOnce(t *testing.T) {
+	t.Parallel()
+	backend := newFakeBackend()
+	backend.launchExec = &lifecycle.AgentExecution{ID: "exec-start", SessionID: "session-start"}
+	rt := agentruntime.New(backend)
+	starter, ok := rt.(interface {
+		Start(context.Context, agentruntime.LaunchSpec) (agentruntime.ExecutionRef, error)
+	})
+	if !ok {
+		t.Fatal("runtime does not expose Start")
+	}
+	if _, err := starter.Start(context.Background(), agentruntime.LaunchSpec{Prompt: "initial"}); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if len(backend.startCalls) != 1 || backend.startCalls[0] != "exec-start" {
+		t.Fatalf("start calls = %#v, want one call for exec-start", backend.startCalls)
+	}
+	if len(backend.promptCalls) != 1 || backend.promptCalls[0].prompt != "initial" {
+		t.Fatalf("prompt calls = %#v, want one initial prompt", backend.promptCalls)
+	}
+}
+
+func TestRuntime_StartRollsBackRegistrationFailure(t *testing.T) {
+	t.Parallel()
+	backend := newFakeBackend()
+	backend.launchExec = &lifecycle.AgentExecution{ID: "exec-rollback", SessionID: "session-rollback"}
+	backend.startErr = errors.New("startup failed")
+	rt := agentruntime.New(backend)
+	starter, ok := rt.(interface {
+		Start(context.Context, agentruntime.LaunchSpec) (agentruntime.ExecutionRef, error)
+	})
+	if !ok {
+		t.Fatal("runtime does not expose Start")
+	}
+	if _, err := starter.Start(context.Background(), agentruntime.LaunchSpec{}); err == nil {
+		t.Fatal("Start returned nil error after startup failure")
+	}
+	if len(backend.stopCalls) != 1 || backend.stopCalls[0].executionID != "exec-rollback" {
+		t.Fatalf("stop calls = %#v, want one rollback for exec-rollback", backend.stopCalls)
+	}
+}
+
+func TestRuntime_RunOwnerAdmissionRejectsStaleAttempt(t *testing.T) {
+	t.Parallel()
+	backend := newFakeBackend()
+	backend.launchExec = &lifecycle.AgentExecution{ID: "exec-owner"}
+	admission := &fakeOwnerAdmission{err: errors.New("run attempt is stale")}
+	rt := agentruntime.New(backend)
+	_, err := rt.Launch(context.Background(), agentruntime.LaunchSpec{
+		Owner: lifecycle.ExecutionOwner{
+			Kind:         lifecycle.ExecutionOwnerRun,
+			WorkspaceID:  "workspace-owner",
+			RunID:        "run-owner",
+			RunSessionID: "session-owner",
+			Attempt:      3,
+		},
+		OwnerAdmission: admission,
+	})
+	if err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("Launch error = %v, want stale-owner rejection", err)
+	}
+	if admission.calls != 1 {
+		t.Fatalf("admission calls = %d, want 1", admission.calls)
+	}
+	if backend.launchReq != nil {
+		t.Fatal("backend launch ran after owner admission rejected the attempt")
+	}
+}
+
+func TestRuntime_TaskOwnerDoesNotRequireRunAdmission(t *testing.T) {
+	t.Parallel()
+	backend := newFakeBackend()
+	backend.launchExec = &lifecycle.AgentExecution{ID: "exec-task-owner"}
+	rt := agentruntime.New(backend)
+	if _, err := rt.Launch(context.Background(), agentruntime.LaunchSpec{
+		Owner: lifecycle.ExecutionOwner{
+			Kind:      lifecycle.ExecutionOwnerTask,
+			TaskID:    "task-owner",
+			SessionID: "session-owner",
+		},
+	}); err != nil {
+		t.Fatalf("task-owned Launch returned error: %v", err)
 	}
 }
 
@@ -246,6 +390,48 @@ func TestRuntime_Resume_PropagatesError(t *testing.T) {
 	rt := agentruntime.New(backend)
 	if err := rt.Resume(context.Background(), "exec-1", "p"); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestRuntime_DeliveryRecordEvidenceAndPayloadUseTypedBackendSeam(t *testing.T) {
+	t.Parallel()
+	candidate := journal.SubmissionSummary{ID: "prompt:one", SessionID: "session", StreamID: "stream"}
+	request := agentruntime.DeliveryRecordEvidenceRequest{
+		TaskID: "task", SessionID: "session", ExecutionID: "execution",
+		IncarnationID: "incarnation", HarnessGeneration: 7,
+	}
+	evidence := &lifecycle.DeliveryRecordEvidence{
+		Descriptor:      journal.RecoveryDescriptor{SessionID: "session", Submissions: []journal.SubmissionSummary{candidate}, SubmissionCount: 1},
+		LiveExecutionID: "execution",
+	}
+	submissionRequest := agentruntime.DeliveryRecordSubmissionRequest{
+		TaskID: "task", SessionID: "session", IncarnationID: "incarnation",
+		HarnessGeneration: 7, Candidate: candidate,
+	}
+	submission := &journal.Submission{ID: candidate.ID, Payload: []byte(`{"text":"original"}`)}
+	backend := &evidenceBackend{
+		fakeBackend: newFakeBackend(), evidence: evidence, submission: submission,
+	}
+	runtime := agentruntime.New(backend)
+
+	gotEvidence, err := runtime.InspectDeliveryRecordEvidence(context.Background(), request)
+	if err != nil || gotEvidence != evidence || backend.evidenceRequest != request {
+		t.Fatalf("inspection = %+v, err %v, request %+v", gotEvidence, err, backend.evidenceRequest)
+	}
+	gotSubmission, err := runtime.ReadDeliveryRecordSubmission(context.Background(), submissionRequest)
+	if err != nil || gotSubmission != submission || backend.submissionRequest != submissionRequest {
+		t.Fatalf("submission = %+v, err %v, request %+v", gotSubmission, err, backend.submissionRequest)
+	}
+}
+
+func TestRuntime_DeliveryRecordEvidenceRequiresBackendCapability(t *testing.T) {
+	t.Parallel()
+	runtime := agentruntime.New(newFakeBackend())
+	if _, err := runtime.InspectDeliveryRecordEvidence(context.Background(), agentruntime.DeliveryRecordEvidenceRequest{}); !errors.Is(err, agentruntime.ErrUnsupported) {
+		t.Fatalf("inspection error = %v, want ErrUnsupported", err)
+	}
+	if _, err := runtime.ReadDeliveryRecordSubmission(context.Background(), agentruntime.DeliveryRecordSubmissionRequest{}); !errors.Is(err, agentruntime.ErrUnsupported) {
+		t.Fatalf("payload error = %v, want ErrUnsupported", err)
 	}
 }
 

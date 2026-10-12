@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -25,6 +26,13 @@ var safeBranchRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
 
 // queryParamTrue is the string value used to indicate a true boolean in query parameters.
 const queryParamTrue = "true"
+
+const gitStatusDetailsUnavailableErrorCode = "details_unavailable"
+
+const (
+	gitStatusReadyState       = "ready"
+	gitStatusUnavailableState = "unavailable"
+)
 
 // sortCommitsByCommittedAtDesc sorts commits newest-first using committed_at.
 // Commits with unparseable timestamps preserve their original relative order
@@ -53,20 +61,38 @@ type GitPullRequest struct {
 }
 
 // GitPushRequest for POST /api/v1/git/push
+//
+// Remote and ExpectedBranch are optional. Remote is a configured remote name or
+// a remote URL that must resolve to one; ExpectedBranch is the branch the
+// caller believes it is publishing. Both are passed through untouched: this
+// surface performs no destination logic of its own.
 type GitPushRequest struct {
-	Force       bool   `json:"force"`
-	SetUpstream bool   `json:"set_upstream"`
-	Repo        string `json:"repo,omitempty"`
+	Force          bool   `json:"force"`
+	SetUpstream    bool   `json:"set_upstream"`
+	Repo           string `json:"repo,omitempty"`
+	Remote         string `json:"remote,omitempty"`
+	ExpectedBranch string `json:"expected_branch,omitempty"`
 }
 
 // GitPushPreflightRequest for POST /api/v1/git/push-preflight.
 type GitPushPreflightRequest struct {
-	Repo string `json:"repo,omitempty"`
+	Repo           string `json:"repo,omitempty"`
+	Remote         string `json:"remote,omitempty"`
+	ExpectedBranch string `json:"expected_branch,omitempty"`
 }
 
 // GitContributionRequest is shared by the managed contribution replacement
 // and provider-adoption endpoints.
 type GitContributionRequest struct {
+	ExpectedRemoteHead string `json:"expected_remote_head"`
+	Repo               string `json:"repo,omitempty"`
+}
+
+// GitContributionHistoryExplanationRequest describes the selected local and
+// published heads for a read-only history observation.
+type GitContributionHistoryExplanationRequest struct {
+	Branch             string `json:"branch"`
+	ExpectedLocalHead  string `json:"expected_local_head"`
 	ExpectedRemoteHead string `json:"expected_remote_head"`
 	Repo               string `json:"repo,omitempty"`
 }
@@ -220,7 +246,12 @@ func (s *Server) handleGitPush(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.Push(c.Request.Context(), req.Force, req.SetUpstream)
+	result, err := gitOp.Push(c.Request.Context(), process.PushOptions{
+		Force:          req.Force,
+		SetUpstream:    req.SetUpstream,
+		Remote:         req.Remote,
+		ExpectedBranch: req.ExpectedBranch,
+	})
 	if err != nil {
 		s.handleGitError(c, "push", err)
 		return
@@ -241,7 +272,10 @@ func (s *Server) handleGitPushPreflight(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.PushPreflight(c.Request.Context())
+	result, err := gitOp.PushPreflight(c.Request.Context(), process.PushOptions{
+		Remote:         req.Remote,
+		ExpectedBranch: req.ExpectedBranch,
+	})
 	if err != nil {
 		s.handleGitError(c, "push preflight", err)
 		return
@@ -259,6 +293,43 @@ func (s *Server) handleGitUseContribution(c *gin.Context) {
 	s.handleGitContribution(c, "use_remote_contribution", func(gitOp *process.GitOperator, expected string) (*process.GitOperationResult, error) {
 		return gitOp.UseRemoteContribution(c.Request.Context(), expected)
 	})
+}
+
+func (s *Server) handleGitContributionHistoryExplanation(c *gin.Context) {
+	var req GitContributionHistoryExplanationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success: false, Operation: "contribution_history_explanation", Error: "invalid request: " + err.Error(),
+		})
+		return
+	}
+	for _, required := range []struct {
+		name  string
+		value string
+	}{
+		{name: "branch", value: req.Branch},
+		{name: "expected_local_head", value: req.ExpectedLocalHead},
+		{name: "expected_remote_head", value: req.ExpectedRemoteHead},
+	} {
+		if required.value == "" {
+			c.JSON(http.StatusBadRequest, process.GitOperationResult{
+				Success: false, Operation: "contribution_history_explanation", Error: required.name + " is required",
+			})
+			return
+		}
+	}
+
+	gitOp := s.gitOpForRepo(c, "contribution_history_explanation", req.Repo)
+	if gitOp == nil {
+		return
+	}
+	result, err := gitOp.ExplainContributionHistory(
+		c.Request.Context(), req.Branch, req.ExpectedLocalHead, req.ExpectedRemoteHead)
+	if err != nil {
+		s.handleGitError(c, "contribution_history_explanation", err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func (s *Server) handleGitContribution(c *gin.Context, operation string, action func(*process.GitOperator, string) (*process.GitOperationResult, error)) {
@@ -1387,6 +1458,13 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string,
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
 	Success             bool                   `json:"success"`
+	StatusState         string                 `json:"status_state,omitempty"`
+	FilesComplete       bool                   `json:"files_complete"`
+	DetailState         string                 `json:"detail_state,omitempty"`
+	ErrorCode           string                 `json:"error_code,omitempty"`
+	TrackerID           string                 `json:"tracker_id,omitempty"`
+	TrackerEpoch        uint64                 `json:"tracker_epoch,omitempty"`
+	SnapshotRevision    uint64                 `json:"snapshot_revision,omitempty"`
 	RepositoryName      string                 `json:"repository_name,omitempty"`
 	IsSubmodule         bool                   `json:"is_submodule,omitempty"`
 	Branch              string                 `json:"branch"`
@@ -1459,12 +1537,18 @@ func (s *Server) handleGitStatusMulti(c *gin.Context) {
 	if len(subpaths) == 0 {
 		subpaths = []string{""}
 	}
-	fresh := c.Query("fresh") == queryParamTrue
+	mode := c.Query("mode")
+	fresh := c.Query("fresh") == queryParamTrue || mode == "fresh" || mode == "recover"
+	replay := mode == "replay"
+	detailsWait := c.Query("details") == "wait" && !replay
+	if fresh {
+		s.procMgr.RetryUnavailableComparisonTargets()
+	}
 	// Parallel fan-out: fresh=true skips the cache, so serial scales linearly and would blow the 2s subscribe timeout for multi-repo workspaces.
 	result := MultiRepoGitStatusResult{Success: true, Repos: make([]PerRepoGitStatus, len(subpaths))}
 	ctx := c.Request.Context()
 	outcomes := fanOutRepos(ctx, subpaths, func(ctx context.Context, sub string) PerRepoGitStatus {
-		return s.collectStatusForRepo(ctx, sub, fresh)
+		return s.collectStatusForRepo(ctx, sub, fresh, detailsWait, replay)
 	})
 	copy(result.Repos, outcomes)
 	c.JSON(http.StatusOK, result)
@@ -1476,59 +1560,124 @@ func (s *Server) handleGitStatusMulti(c *gin.Context) {
 // the cached snapshot. Failures land in Status.Error / Status.Success so the
 // caller can render partial results instead of erroring out the whole fan-out
 // when one repo is misconfigured.
-func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh bool) PerRepoGitStatus {
+func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh, detailsWait, replay bool) PerRepoGitStatus {
 	wt, wtErr := s.procMgr.GetWorkspaceTrackerFor(sub)
 	if wtErr != nil {
+		result := unavailableGitStatusResult(wtErr)
+		result.ErrorCode = "repository_unavailable"
 		return PerRepoGitStatus{
 			RepositoryName: sub,
-			Status:         GitStatusResult{Success: false, Error: wtErr.Error()},
+			Status:         result,
 		}
 	}
 	if wt == nil {
 		return PerRepoGitStatus{
 			RepositoryName: sub,
-			Status:         GitStatusResult{Success: false, Error: "workspace tracker not available"},
+			Status:         unavailableGitStatusResult(nil),
 		}
 	}
-	status, err := wt.GetGitStatus(ctx, fresh)
+	var status types.GitStatusUpdate
+	var err error
+	switch {
+	case replay:
+		status, err = wt.GetGitStatusReplay(ctx)
+	case detailsWait:
+		status, err = wt.GetGitStatusWithDetails(ctx, fresh)
+	default:
+		status, err = wt.GetGitStatus(ctx, fresh)
+	}
 	if err != nil {
-		return PerRepoGitStatus{
-			RepositoryName: sub,
-			Status:         GitStatusResult{Success: false, Error: err.Error()},
+		s.logGitStatusCaptureFailure(err)
+		result := unavailableGitStatusResult(err)
+		if status.StatusState == gitStatusReadyState && status.FilesComplete {
+			markGitStatusDetailsUnavailable(&status)
+			result = gitStatusResult(status, sub)
+			result.Success = false
+			result.ErrorCode = gitStatusDetailsUnavailableErrorCode
+			result.Error = "Git status details are unavailable."
 		}
+		return PerRepoGitStatus{RepositoryName: sub, Status: result}
 	}
+	return PerRepoGitStatus{RepositoryName: sub, Status: gitStatusResult(status, sub)}
+}
+
+func unavailableGitStatusResult(err error) GitStatusResult {
+	code := "status_unavailable"
+	message := "Git status is unavailable."
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		code = "status_timeout"
+		message = "Git status request timed out."
+	case errors.Is(err, context.Canceled):
+		code = "status_canceled"
+		message = "Git status request canceled."
+	}
+	return GitStatusResult{Success: false, StatusState: gitStatusUnavailableState, DetailState: gitStatusUnavailableState, ErrorCode: code, Error: message}
+}
+
+func (s *Server) logGitStatusCaptureFailure(err error) {
+	if process.IsGitStatusEvidenceChanged(err) {
+		s.logger.Warn("git status capture failed due to changing repository evidence",
+			zap.String("error_class", "evidence_changed"))
+	}
+}
+
+func gitStatusResult(status types.GitStatusUpdate, repositoryName string) GitStatusResult {
 	filesMap := make(map[string]interface{}, len(status.Files))
 	for k, v := range status.Files {
 		filesMap[k] = v
 	}
-	return PerRepoGitStatus{
-		RepositoryName: sub,
-		Status: GitStatusResult{
-			Success:             true,
-			RepositoryName:      sub,
-			IsSubmodule:         status.IsSubmodule,
-			Branch:              status.Branch,
-			RemoteBranch:        status.RemoteBranch,
-			HeadCommit:          status.HeadCommit,
-			BaseCommit:          status.BaseCommit,
-			ComparisonTarget:    status.ComparisonTarget,
-			ComparisonStatus:    status.ComparisonStatus,
-			ComparisonErrorCode: status.ComparisonErrorCode,
-			Ahead:               status.Ahead,
-			Behind:              status.Behind,
-			RemoteAhead:         status.RemoteAhead,
-			RemoteBehind:        status.RemoteBehind,
-			RemoteHeadCommit:    status.RemoteHeadCommit,
-			Modified:            status.Modified,
-			Added:               status.Added,
-			Deleted:             status.Deleted,
-			Untracked:           status.Untracked,
-			Renamed:             status.Renamed,
-			Files:               filesMap,
-			Timestamp:           status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
-			BranchAdditions:     status.BranchAdditions,
-			BranchDeletions:     status.BranchDeletions,
-		},
+	return GitStatusResult{
+		Success:             status.StatusState == gitStatusReadyState,
+		StatusState:         status.StatusState,
+		FilesComplete:       status.FilesComplete,
+		DetailState:         status.DetailState,
+		ErrorCode:           status.ErrorCode,
+		TrackerID:           status.TrackerID,
+		TrackerEpoch:        status.TrackerEpoch,
+		SnapshotRevision:    status.SnapshotRevision,
+		RepositoryName:      repositoryName,
+		IsSubmodule:         status.IsSubmodule,
+		Branch:              status.Branch,
+		RemoteBranch:        status.RemoteBranch,
+		HeadCommit:          status.HeadCommit,
+		BaseCommit:          status.BaseCommit,
+		ComparisonTarget:    status.ComparisonTarget,
+		ComparisonStatus:    status.ComparisonStatus,
+		ComparisonErrorCode: status.ComparisonErrorCode,
+		Ahead:               status.Ahead,
+		Behind:              status.Behind,
+		RemoteAhead:         status.RemoteAhead,
+		RemoteBehind:        status.RemoteBehind,
+		RemoteHeadCommit:    status.RemoteHeadCommit,
+		Modified:            status.Modified,
+		Added:               status.Added,
+		Deleted:             status.Deleted,
+		Untracked:           status.Untracked,
+		Renamed:             status.Renamed,
+		Files:               filesMap,
+		Timestamp:           status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+		BranchAdditions:     status.BranchAdditions,
+		BranchDeletions:     status.BranchDeletions,
+	}
+}
+
+func markGitStatusDetailsUnavailable(status *types.GitStatusUpdate) {
+	status.DetailState = gitStatusUnavailableState
+	status.ErrorCode = gitStatusDetailsUnavailableErrorCode
+	for path, file := range status.Files {
+		file.DiffState = gitStatusUnavailableState
+		if file.StagedChange != nil {
+			facet := *file.StagedChange
+			facet.DiffState = gitStatusUnavailableState
+			file.StagedChange = &facet
+		}
+		if file.UnstagedChange != nil {
+			facet := *file.UnstagedChange
+			facet.DiffState = gitStatusUnavailableState
+			file.UnstagedChange = &facet
+		}
+		status.Files[path] = file
 	}
 }
 
@@ -1553,13 +1702,38 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 		return
 	}
 
-	status, err := wt.GetGitStatus(c.Request.Context(), c.Query("fresh") == queryParamTrue)
+	mode := c.Query("mode")
+	fresh := c.Query("fresh") == queryParamTrue || mode == "fresh" || mode == "recover"
+	replay := mode == "replay"
+	detailsWait := c.Query("details") == "wait" && !replay
+	if fresh {
+		s.procMgr.RetryUnavailableComparisonTargets()
+	}
+	var status types.GitStatusUpdate
+	var err error
+	switch {
+	case replay:
+		status, err = wt.GetGitStatusReplay(c.Request.Context())
+	case detailsWait:
+		status, err = wt.GetGitStatusWithDetails(c.Request.Context(), fresh)
+	default:
+		status, err = wt.GetGitStatus(c.Request.Context(), fresh)
+	}
 	if err != nil {
-		s.logger.Error("git status failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, GitStatusResult{
-			Success: false,
-			Error:   err.Error(),
-		})
+		if process.IsGitStatusEvidenceChanged(err) {
+			s.logGitStatusCaptureFailure(err)
+		} else {
+			s.logger.Error("git status failed", zap.Error(err))
+		}
+		result := unavailableGitStatusResult(err)
+		if status.StatusState == gitStatusReadyState && status.FilesComplete {
+			markGitStatusDetailsUnavailable(&status)
+			result = gitStatusResult(status, c.Query("repo"))
+			result.Success = false
+			result.ErrorCode = gitStatusDetailsUnavailableErrorCode
+			result.Error = "Git status details are unavailable."
+		}
+		c.JSON(http.StatusOK, result)
 		return
 	}
 
@@ -1569,32 +1743,9 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 		filesMap[k] = v
 	}
 
-	c.JSON(http.StatusOK, GitStatusResult{
-		Success:             true,
-		RepositoryName:      c.Query("repo"),
-		IsSubmodule:         status.IsSubmodule,
-		Branch:              status.Branch,
-		RemoteBranch:        status.RemoteBranch,
-		HeadCommit:          status.HeadCommit,
-		BaseCommit:          status.BaseCommit,
-		ComparisonTarget:    status.ComparisonTarget,
-		ComparisonStatus:    status.ComparisonStatus,
-		ComparisonErrorCode: status.ComparisonErrorCode,
-		Ahead:               status.Ahead,
-		Behind:              status.Behind,
-		RemoteAhead:         status.RemoteAhead,
-		RemoteBehind:        status.RemoteBehind,
-		RemoteHeadCommit:    status.RemoteHeadCommit,
-		Modified:            status.Modified,
-		Added:               status.Added,
-		Deleted:             status.Deleted,
-		Untracked:           status.Untracked,
-		Renamed:             status.Renamed,
-		Files:               filesMap,
-		Timestamp:           status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
-		BranchAdditions:     status.BranchAdditions,
-		BranchDeletions:     status.BranchDeletions,
-	})
+	result := gitStatusResult(status, c.Query("repo"))
+	result.Files = filesMap
+	c.JSON(http.StatusOK, result)
 }
 
 // handleGitError handles errors from git operations.

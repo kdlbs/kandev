@@ -30,6 +30,19 @@ func (r *blockingQueueRepository) Insert(ctx context.Context, msg *messagequeue.
 	return r.Repository.Insert(ctx, msg, maxPerSession)
 }
 
+func (r *blockingQueueRepository) InsertForSession(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	msg *messagequeue.QueuedMessage,
+	maxPerSession int,
+) error {
+	r.insertOnce.Do(func() {
+		close(r.insertStarted)
+		<-r.releaseInsert
+	})
+	return r.Repository.InsertForSession(ctx, identity, msg, maxPerSession)
+}
+
 // TestSteerEligible_GatedByFlagCapabilityAndState covers every condition the
 // steer gate depends on. The matrix is the observable contract behind the
 // composer's steer-vs-queue affordance.
@@ -148,7 +161,7 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 		t.Fatalf("pause queue auto-run: %v", err)
 	}
 
-	result, err := svc.SteerTask(ctx, taskID, sessionID, "steer second", "", false, nil)
+	result, err := svc.SteerRecordedMessage(ctx, taskID, sessionID, "steer second", "", false, nil)
 	if err != nil {
 		t.Fatalf("SteerTask with a queued message errored: %v", err)
 	}
@@ -163,6 +176,9 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 	if status.Entries[0].Content != "queued first" || status.Entries[1].Content != "steer second" {
 		t.Fatalf("queue order = [%q, %q], want [queued first, steer second]",
 			status.Entries[0].Content, status.Entries[1].Content)
+	}
+	if recorded, _ := status.Entries[1].Metadata["user_message_recorded"].(bool); !recorded {
+		t.Fatalf("queued steer metadata = %#v, want user_message_recorded", status.Entries[1].Metadata)
 	}
 	if len(eventBus.events) != 1 {
 		t.Fatalf("queue status event count = %d, want 1", len(eventBus.events))
@@ -511,6 +527,10 @@ func TestDrainPaths_DeferToInFlightSteer(t *testing.T) {
 		t.Fatalf("seed queued message: %v", err)
 	}
 	entryID := svc.messageQueue.GetStatus(ctx, sessionID).Entries[0].ID
+	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
+	if err != nil {
+		t.Fatalf("resolve queue identity: %v", err)
+	}
 
 	// Simulate the race window directly, the same way TestSteerTask_SingleInFlight
 	// does: a steer has claimed the in-flight slot but not yet dispatched.
@@ -526,7 +546,7 @@ func TestDrainPaths_DeferToInFlightSteer(t *testing.T) {
 	})
 
 	t.Run("takeIfPromptableLocked backs off", func(t *testing.T) {
-		dispatched, err := svc.takeIfPromptableLocked(ctx, taskID, sessionID, entryID)
+		dispatched, err := svc.takeIfPromptableLocked(ctx, identity, entryID)
 		if err != nil {
 			t.Fatalf("takeIfPromptableLocked: %v", err)
 		}

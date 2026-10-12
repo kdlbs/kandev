@@ -31,6 +31,8 @@ test.describe("Integrations section on mobile", () => {
     const sheet = testPage.getByRole("dialog");
     await expect(sheet.getByText("Integrations", { exact: true })).toBeVisible();
 
+    await sheet.getByRole("button", { name: "Integrations", exact: true }).click();
+
     const githubLink = sheet.getByRole("link", { name: "GitHub" });
     await expect(githubLink).toBeVisible({ timeout: 10_000 });
     expect(await githubLink.getAttribute("href")).toBe("/github");

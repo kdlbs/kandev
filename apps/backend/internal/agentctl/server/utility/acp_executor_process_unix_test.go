@@ -94,6 +94,53 @@ fi
 	}
 }
 
+func TestProbeOpenCodeModelsCleansDescendantThatRetainsOutputPipes(t *testing.T) {
+	tmp := t.TempDir()
+	agentPath := filepath.Join(tmp, openCodeCommand)
+	pidFile := filepath.Join(tmp, "child.pid")
+	writeExecutable(t, agentPath, `#!/bin/sh
+trap '' TERM
+sleep 30 &
+child=$!
+echo "$child" > "$OPENCODE_CHILD_PID_FILE"
+wait "$child"
+`)
+	t.Setenv("OPENCODE_CHILD_PID_FILE", pidFile)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := probeOpenCodeModels(ctx, agentPath, tmp, false)
+		result <- err
+	}()
+
+	waitUntil(t, time.Second, func() bool {
+		_, err := os.Stat(pidFile)
+		return err == nil
+	}, "OpenCode child pid was not written")
+	pid := readPID(t, pidFile)
+	t.Cleanup(func() {
+		if processRunning(pid) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("probe unexpectedly succeeded after its context expired")
+		}
+	case <-time.After(2 * time.Second):
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		<-result
+		t.Fatal("model discovery waited for a descendant to close its output pipes")
+	}
+	if processRunning(pid) {
+		t.Fatalf("descendant process %d remained alive after model discovery returned", pid)
+	}
+}
+
 func TestProbeRefreshesOpenCodeCacheBeforeACPSession(t *testing.T) {
 	tmp := t.TempDir()
 	marker := filepath.Join(tmp, "models-refreshed")

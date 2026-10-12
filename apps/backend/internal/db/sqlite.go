@@ -33,10 +33,11 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 	// - foreign_keys=on: enforce FK constraints consistently.
 	// - busy_timeout: wait briefly on locks to reduce transient "database is locked".
 	// - journal_mode=WAL: better read concurrency with a single writer.
-	// - synchronous=NORMAL: reasonable durability/perf tradeoff for app workloads.
+	// - synchronous=FULL: committed delivery receipts must survive power loss before journal pruning.
 	// - cache=shared: allow multiple connections to share a page cache.
+	// - txlock=immediate: acquire the writer before transaction predicate reads.
 	dsn := fmt.Sprintf(
-		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=NORMAL&_cache=shared",
+		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=FULL&_cache=shared&_txlock=immediate",
 		normalizedPath,
 		int(defaultBusyTimeout/time.Millisecond),
 	)
@@ -45,7 +46,7 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Single writer connection: serializes writes and avoids SQLITE_BUSY.
+	// One connection serializes this pool's writers; independent pools may contend.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
@@ -58,10 +59,12 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 func OpenSQLiteReader(dbPath string) (*sql.DB, error) {
 	normalizedPath := normalizeSQLitePath(dbPath)
 
-	// Reader DSN: read-only mode, FK enforcement, shared cache.
-	// journal_mode and synchronous are database-level (set by the writer).
+	// Reader DSN: read-only mode and FK enforcement.
+	// Do not enable SQLite shared-cache mode: an active reader in that cache
+	// can make a later reader observe its stale snapshot after a writer commits.
+	// WAL is persistent; synchronous is connection-local and only the writer commits.
 	dsn := fmt.Sprintf(
-		"file:%s?_foreign_keys=on&_mode=ro&_busy_timeout=%d&_cache=shared",
+		"file:%s?_foreign_keys=on&mode=ro&_busy_timeout=%d",
 		normalizedPath,
 		int(defaultBusyTimeout/time.Millisecond),
 	)

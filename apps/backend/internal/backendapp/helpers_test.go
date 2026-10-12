@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/quickterminal"
 	quickterminalrepo "github.com/kandev/kandev/internal/quickterminal/repository"
 	systemsvc "github.com/kandev/kandev/internal/system"
@@ -117,7 +118,48 @@ func decodePayload(t *testing.T, raw json.RawMessage) map[string]interface{} {
 	return payload
 }
 
-func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
+func TestAppendAvailableCommandsMessagePreservesProviderMetadata(t *testing.T) {
+	action := &streams.AvailableCommandAction{
+		Kind: "set_config_option", ConfigID: "collaboration_mode", Value: "plan", ResetValue: "default",
+	}
+	commands := []streams.AvailableCommand{{
+		Name: "$retro", Kind: "skill", Description: "Run the skill", InputHint: "context", Action: action,
+	}}
+	result := appendAvailableCommandsMessageForCommands("session-1", &models.TaskSession{TaskID: "task-1"}, commands, nil)
+	if len(result) != 1 {
+		t.Fatalf("notifications = %d, want 1", len(result))
+	}
+	if result[0].Action != ws.ActionSessionAvailableCommands {
+		t.Fatalf("action = %q", result[0].Action)
+	}
+	var payload struct {
+		AvailableCommands []streams.AvailableCommand `json:"available_commands"`
+	}
+	if err := json.Unmarshal(result[0].Payload, &payload); err != nil {
+		t.Fatalf("decode reconnect payload: %v", err)
+	}
+	if len(payload.AvailableCommands) != 1 || payload.AvailableCommands[0].Name != "$retro" || payload.AvailableCommands[0].Kind != "skill" || payload.AvailableCommands[0].InputHint != "context" || payload.AvailableCommands[0].Action == nil || *payload.AvailableCommands[0].Action != *action {
+		t.Fatalf("reconnect commands = %#v", payload.AvailableCommands)
+	}
+}
+
+func TestAppendAvailableCommandsMessageNilLifecycleManagerPreservesResult(t *testing.T) {
+	var lifecycleMgr *lifecycle.Manager
+	existing := &ws.Message{Action: "existing"}
+	result := []*ws.Message{existing}
+
+	got := appendAvailableCommandsMessage(
+		"session-1",
+		&models.TaskSession{TaskID: "task-1"},
+		lifecycleMgr,
+		result,
+	)
+	if len(got) != 1 || got[0] != existing {
+		t.Fatalf("messages = %#v, want the original result unchanged", got)
+	}
+}
+
+func TestBuildGitStatusNotificationHidesUnknownAncestryEvidenceWhileDetailsArePending(t *testing.T) {
 	msg := buildGitStatusNotification("session-1", "env-1", "web", client.GitStatusResult{
 		Branch:           "feature/rewrite",
 		RemoteBranch:     "origin/feature/rewrite",
@@ -128,6 +170,10 @@ func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
 		RemoteAhead:      2,
 		RemoteBehind:     3,
 		RemoteHeadCommit: "remote-head",
+		StatusState:      "ready",
+		FilesComplete:    true,
+		DetailState:      "pending",
+		ErrorCode:        "source_timeout",
 	})
 	if msg == nil {
 		t.Fatal("buildGitStatusNotification returned nil")
@@ -141,15 +187,63 @@ func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
 		t.Fatalf("status payload = %#v, want an object", payload["status"])
 	}
 	for key, want := range map[string]interface{}{
-		"head_commit":        "local-head",
-		"base_commit":        "base-head",
-		"remote_ahead":       float64(2),
-		"remote_behind":      float64(3),
-		"remote_head_commit": "remote-head",
+		"status_state":   "ready",
+		"files_complete": true,
+		"detail_state":   "pending",
+		"error_code":     "source_timeout",
+		"head_commit":    "local-head",
+		"base_commit":    "base-head",
 	} {
 		if got := status[key]; got != want {
 			t.Errorf("status[%q] = %#v, want %#v", key, got, want)
 		}
+	}
+	for _, key := range []string{"ahead", "behind", "remote_ahead", "remote_behind", "remote_head_commit", "branch_additions", "branch_deletions"} {
+		if _, exists := status[key]; exists {
+			t.Errorf("pending detail status leaked unconfirmed field %q: %#v", key, status[key])
+		}
+	}
+}
+
+func TestMCPTaskPRListerAdapterPreservesGitHubChangeFacts(t *testing.T) {
+	ctx := context.Background()
+	store := newStatusSummaryTestStore(t)
+	draft := true
+	pr := &github.TaskPR{
+		TaskID:       "task-change-facts",
+		RepositoryID: "repo-change-facts",
+		PRNumber:     42,
+		PRURL:        "https://github.com/acme/api/pull/42",
+		PRTitle:      "Preserve exact facts",
+		State:        "open",
+		BaseBranch:   "main",
+		HeadBranch:   "feature/facts",
+		HeadSHA:      "head-sha-42",
+		IsDraft:      &draft,
+		CreatedAt:    time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, pr); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+
+	adapter := mcpTaskPRListerAdapter{gh: github.NewService(nil, "", nil, store, nil, nil)}
+	byTask, err := adapter.ListTaskPRsByTaskIDs(ctx, []string{pr.TaskID})
+	if err != nil {
+		t.Fatalf("ListTaskPRsByTaskIDs: %v", err)
+	}
+	infos := byTask[pr.TaskID]
+	if len(infos) != 1 {
+		t.Fatalf("infos = %#v, want one association", infos)
+	}
+	got := infos[0]
+	if got.RepositoryID != pr.RepositoryID || got.Number != pr.PRNumber || got.URL != pr.PRURL || got.Title != pr.PRTitle || got.State != pr.State || got.BaseRef != pr.BaseBranch || got.HeadRef != pr.HeadBranch {
+		t.Fatalf("adapter facts = %#v", got)
+	}
+	if got.Draft == nil || !*got.Draft {
+		t.Fatalf("Draft = %v, want true", got.Draft)
+	}
+	if got.HeadSHA != pr.HeadSHA {
+		t.Fatalf("HeadSHA = %q, want %q", got.HeadSHA, pr.HeadSHA)
 	}
 }
 
@@ -472,7 +566,7 @@ func (s *shutdownDeadlineExecutor) StopInstance(
 	return nil
 }
 
-func (s *shutdownDeadlineExecutor) RecoverInstances(context.Context) ([]*lifecycle.ExecutorInstance, error) {
+func (s *shutdownDeadlineExecutor) RecoverInstances(context.Context, []*models.ExecutorRunning) ([]*lifecycle.ExecutorInstance, error) {
 	return nil, nil
 }
 
@@ -711,6 +805,10 @@ func TestBootInitialStateHomePreservesSavedAllWorkflowsFilter(t *testing.T) {
 	if len(workspaces) == 0 {
 		t.Fatal("expected seeded default workspace")
 	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspaces[0].ID, true)
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("ListWorkflows: count=%d err=%v", len(workflows), err)
+	}
 	workflowB, err := harness.taskSvc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
 		WorkspaceID: workspaces[0].ID,
 		Name:        "Workflow B",
@@ -767,8 +865,11 @@ func TestBootInitialStateHomePreservesSavedAllWorkflowsFilter(t *testing.T) {
 	if decoded.UserSettings.WorkflowID != nil {
 		t.Fatalf("user settings workflow = %q, want nil for All Workflows", *decoded.UserSettings.WorkflowID)
 	}
-	if _, ok := decoded.KanbanMulti.Snapshots[workflowB.ID]; !ok {
-		t.Fatalf("expected boot snapshots to include second workflow %q", workflowB.ID)
+	if len(decoded.KanbanMulti.Snapshots) != 1 || len(decoded.KanbanMulti.Snapshots[workflows[0].ID]) == 0 {
+		t.Fatalf("All Workflows snapshot count = %d, want only first displayed workflow %q", len(decoded.KanbanMulti.Snapshots), workflows[0].ID)
+	}
+	if _, exists := decoded.KanbanMulti.Snapshots[workflowB.ID]; exists {
+		t.Fatalf("offscreen workflow %q was eagerly seeded", workflowB.ID)
 	}
 }
 
@@ -797,6 +898,15 @@ func TestBootRouteDataTaskDetailIncludesTaskPageData(t *testing.T) {
 	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
+	}
+	siblingResult, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID:    workspaces[0].ID,
+		WorkflowID:     workflows[0].ID,
+		WorkflowStepID: steps[0].ID,
+		Title:          "Sibling task",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask sibling: %v", err)
 	}
 
 	payload := webapp.NewBootPayload(
@@ -827,8 +937,14 @@ func TestBootRouteDataTaskDetailIncludesTaskPageData(t *testing.T) {
 					ID    string `json:"id"`
 					Title string `json:"title"`
 				} `json:"task"`
-				SessionID    *string                `json:"sessionId"`
-				InitialState map[string]interface{} `json:"initialState"`
+				SessionID       *string                `json:"sessionId"`
+				InitialState    map[string]interface{} `json:"initialState"`
+				SidebarTaskPage struct {
+					Entries []struct {
+						Kind   string `json:"kind"`
+						TaskID string `json:"task_id"`
+					} `json:"entries"`
+				} `json:"sidebarTaskPage"`
 			} `json:"taskDetail"`
 		} `json:"routeData"`
 	}
@@ -848,6 +964,26 @@ func TestBootRouteDataTaskDetailIncludesTaskPageData(t *testing.T) {
 	if _, ok := decoded.RouteData.TaskDetail.InitialState["kanban"]; !ok {
 		t.Fatal("task detail route data should include initialState.kanban")
 	}
+	kanban := decoded.RouteData.TaskDetail.InitialState["kanban"].(map[string]any)
+	kanbanTasks := kanban["tasks"].([]any)
+	if len(kanbanTasks) != 1 {
+		t.Fatalf("task detail kanban has %d tasks, want only selected task", len(kanbanTasks))
+	}
+	kanbanMulti := decoded.RouteData.TaskDetail.InitialState["kanbanMulti"].(map[string]any)
+	snapshots := kanbanMulti["snapshots"].(map[string]any)
+	workflowSnapshot := snapshots[workflows[0].ID].(map[string]any)
+	if workflowSnapshot["isPlaceholder"] != true {
+		t.Fatalf("task-only workflow context must remain incomplete: %#v", workflowSnapshot)
+	}
+	pageTaskIDs := make(map[string]bool)
+	for _, entry := range decoded.RouteData.TaskDetail.SidebarTaskPage.Entries {
+		if entry.Kind == "task" {
+			pageTaskIDs[entry.TaskID] = true
+		}
+	}
+	if !pageTaskIDs[task.ID] || !pageTaskIDs[siblingResult.Task.ID] {
+		t.Fatalf("sidebar page tasks = %#v, want selected and sibling tasks", pageTaskIDs)
+	}
 }
 
 func TestBootPayloadMissingTaskFallsBackToHomeKanbanState(t *testing.T) {
@@ -865,13 +1001,12 @@ func TestBootPayloadMissingTaskFallsBackToHomeKanbanState(t *testing.T) {
 	if err != nil || len(steps) == 0 {
 		t.Fatalf("ListStepsByWorkflow: count=%d err=%v", len(steps), err)
 	}
-	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	_, err = harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Visible sibling task",
 	})
-	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -913,19 +1048,8 @@ func TestBootPayloadMissingTaskFallsBackToHomeKanbanState(t *testing.T) {
 	if !ok {
 		t.Fatalf("fallback kanban snapshots = %#v", kanbanMulti["snapshots"])
 	}
-	snapshot, ok := snapshots[workflows[0].ID].(map[string]any)
-	if !ok {
-		t.Fatalf("missing fallback workflow snapshot %q: %#v", workflows[0].ID, snapshots)
-	}
-	tasks, ok := snapshot["tasks"].([]map[string]any)
-	if !ok {
-		// JSON-safe boot state is assembled with []map[string]any, so this
-		// assertion protects the sidebar's task source without depending on
-		// JSON round-tripping in the test.
-		t.Fatalf("fallback workflow tasks = %#v", snapshot["tasks"])
-	}
-	if len(tasks) != 1 || tasks[0]["id"] != task.ID {
-		t.Fatalf("fallback workflow tasks = %#v, want task %q", tasks, task.ID)
+	if len(snapshots) != 1 || snapshots[workflows[0].ID] == nil {
+		t.Fatalf("fallback all-workflows snapshot count = %d, want only first displayed workflow %q", len(snapshots), workflows[0].ID)
 	}
 }
 
@@ -995,12 +1119,16 @@ func TestBootPayloadValidTaskKeepsRouteSpecificState(t *testing.T) {
 	if !ok {
 		t.Fatalf("task detail route data = %#v", payload.RouteData["taskDetail"])
 	}
-	detailTask, ok := detail["task"].(taskdto.TaskDTO)
+	detailTaskID, ok := detail["taskId"].(string)
 	if !ok {
-		t.Fatalf("task detail task = %#v", detail["task"])
+		t.Fatalf("task detail taskId = %#v", detail["taskId"])
 	}
-	if detailTask.ID != task.ID {
-		t.Fatalf("task detail id = %q, want %q", detailTask.ID, task.ID)
+	if detailTaskID != task.ID {
+		t.Fatalf("task detail id = %q, want %q", detailTaskID, task.ID)
+	}
+	entity, ok := payload.Entities.Tasks[task.ID].(map[string]any)
+	if !ok || entity["id"] != task.ID {
+		t.Fatalf("task detail entity = %#v, want task entity %q", payload.Entities.Tasks[task.ID], task.ID)
 	}
 	if _, ok := payload.InitialState["workspaces"]; ok {
 		t.Fatal("valid task route should keep the lean initial state without home workspace data")
@@ -1209,6 +1337,13 @@ func TestBootRouteDataTaskDetailIncludesPersistedTurns(t *testing.T) {
 	if err := harness.taskRepo.CreateTurn(ctx, turn); err != nil {
 		t.Fatalf("CreateTurn: %v", err)
 	}
+	if err := harness.taskRepo.CreateMessage(ctx, &models.Message{
+		ID: "boot-persisted-message", TaskID: task.ID, TaskSessionID: session.ID, TurnID: turn.ID,
+		AuthorType: models.MessageAuthorAgent, Type: models.MessageTypeMessage, Content: "turn context",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
 
 	routeData := bootRouteData(ctx, nil, routeParams{
 		taskSvc:  harness.taskSvc,
@@ -1246,6 +1381,24 @@ func TestTaskSessionModelsBootStateOmitsUnavailableBaseline(t *testing.T) {
 	}, nil)
 	if _, ok := state["configBaseline"]; ok {
 		t.Fatal("boot selector state must omit an unavailable baseline")
+	}
+}
+
+func TestTaskSessionModelsBootStateCarriesProviderRestoredProvenance(t *testing.T) {
+	state := taskSessionModelsBootState(lifecycle.SessionModelsSnapshot{
+		CurrentModelID: "effective-model",
+		CurrentModeID:  "effective-mode",
+		SettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+	}, nil)
+	if state["settingsPolicy"] != string(streams.SessionSettingsPolicyProviderRestored) {
+		t.Fatalf("settings policy = %#v, want provider_restored", state["settingsPolicy"])
+	}
+	modeState := taskSessionModeBootState(lifecycle.SessionModelsSnapshot{
+		CurrentModeID:  "effective-mode",
+		SettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+	})
+	if modeState["currentModeId"] != "effective-mode" || modeState["settingsPolicy"] != string(streams.SessionSettingsPolicyProviderRestored) {
+		t.Fatalf("mode boot state = %#v, want restored effective mode and provenance", modeState)
 	}
 }
 
@@ -1302,14 +1455,17 @@ func TestBootRouteDataTasksIncludesFirstPageRows(t *testing.T) {
 		} `json:"initialState"`
 		RouteData struct {
 			TasksPage struct {
-				ActiveWorkspaceID string `json:"activeWorkspaceId"`
-				Tasks             []struct {
-					ID    string `json:"id"`
-					Title string `json:"title"`
-				} `json:"tasks"`
-				Total int `json:"total"`
+				ActiveWorkspaceID string   `json:"activeWorkspaceId"`
+				TaskIDs           []string `json:"taskIds"`
+				Total             int      `json:"total"`
 			} `json:"tasksPage"`
 		} `json:"routeData"`
+		Entities struct {
+			Tasks map[string]struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"tasks"`
+		} `json:"entities"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("Unmarshal payload: %v", err)
@@ -1327,8 +1483,11 @@ func TestBootRouteDataTasksIncludesFirstPageRows(t *testing.T) {
 	if decoded.RouteData.TasksPage.Total != 1 {
 		t.Fatalf("tasks total = %d, want 1", decoded.RouteData.TasksPage.Total)
 	}
-	if len(decoded.RouteData.TasksPage.Tasks) != 1 || decoded.RouteData.TasksPage.Tasks[0].ID != created.ID {
-		t.Fatalf("route tasks = %+v, want task %q", decoded.RouteData.TasksPage.Tasks, created.ID)
+	if len(decoded.RouteData.TasksPage.TaskIDs) != 1 || decoded.RouteData.TasksPage.TaskIDs[0] != created.ID {
+		t.Fatalf("route task IDs = %+v, want task %q", decoded.RouteData.TasksPage.TaskIDs, created.ID)
+	}
+	if entity, ok := decoded.Entities.Tasks[created.ID]; !ok || entity.ID != created.ID || entity.Title != created.Title {
+		t.Fatalf("route task entity = %+v, want task %q", entity, created.ID)
 	}
 }
 
@@ -1548,11 +1707,14 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 				} `json:"terminalTabs"`
 			} `json:"quickChat"`
 			TaskSessions struct {
-				Items map[string]struct {
-					TaskID string `json:"task_id"`
-				} `json:"items"`
+				SessionIDs []string `json:"sessionIds"`
 			} `json:"taskSessions"`
 		} `json:"initialState"`
+		Entities struct {
+			Sessions map[string]struct {
+				TaskID string `json:"task_id"`
+			} `json:"sessions"`
+		} `json:"entities"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("Unmarshal payload: %v", err)
@@ -1574,11 +1736,11 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	if sessions[0].AgentProfileID != "agent-old" || sessions[1].AgentProfileID != "agent-new" || sessions[2].AgentProfileID != "agent-config" {
 		t.Fatalf("agent profile IDs = %#v", sessions)
 	}
-	if got := decoded.InitialState.TaskSessions.Items["task-config-session"].TaskID; got != "task-config" {
-		t.Fatalf("config chat task session task_id = %q, want task-config", got)
+	if len(decoded.InitialState.TaskSessions.SessionIDs) != 3 {
+		t.Fatalf("task session IDs = %#v, want only the 3 restored primary sessions", decoded.InitialState.TaskSessions.SessionIDs)
 	}
-	if len(decoded.InitialState.TaskSessions.Items) != 3 {
-		t.Fatalf("taskSessions items = %#v, want only the 3 restored primary sessions", decoded.InitialState.TaskSessions.Items)
+	if got := decoded.Entities.Sessions["task-config-session"].TaskID; got != "task-config" {
+		t.Fatalf("config chat task session task_id = %q, want task-config", got)
 	}
 	if decoded.InitialState.QuickChat.IsOpen {
 		t.Fatal("quick chat should hydrate closed")
@@ -2012,21 +2174,23 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	t.Cleanup(func() { _ = workflowSvc.Close() })
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
-			Workspaces:       taskRepo,
-			Tasks:            taskRepo,
-			TaskRepos:        taskRepo,
-			Workflows:        taskRepo,
-			Messages:         taskRepo,
-			Turns:            taskRepo,
-			Sessions:         taskRepo,
-			GitSnapshots:     taskRepo,
-			RepoEntities:     taskRepo,
-			RepositorySets:   taskRepo,
-			Executors:        taskRepo,
-			Environments:     taskRepo,
-			TaskEnvironments: taskRepo,
-			Reviews:          taskRepo,
-			StatusSummaries:  taskRepo,
+			Workspaces:         taskRepo,
+			Tasks:              taskRepo,
+			TaskRepos:          taskRepo,
+			Workflows:          taskRepo,
+			Messages:           taskRepo,
+			Turns:              taskRepo,
+			Sessions:           taskRepo,
+			GitSnapshots:       taskRepo,
+			RepoEntities:       taskRepo,
+			RepositorySets:     taskRepo,
+			Executors:          taskRepo,
+			Environments:       taskRepo,
+			TaskEnvironments:   taskRepo,
+			RecoveryOperations: taskRepo,
+			Reviews:            taskRepo,
+			StatusSummaries:    taskRepo,
+			WorkspaceFolders:   taskRepo,
 		},
 		eventBus,
 		log,

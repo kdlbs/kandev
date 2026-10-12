@@ -190,7 +190,7 @@ func TestControllerTaskWorkItemRoutes(t *testing.T) {
 	}}}}
 	router, service := newRouteFixture(t, client)
 	seedRouteConfig(t, service)
-	if _, err := service.Store().db.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL)`); err != nil {
+	if _, err := service.Store().db.Exec(`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
 	if _, err := service.Store().db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1'), ('task-2', 'ws-other')`); err != nil {
@@ -229,7 +229,7 @@ func TestControllerTaskWorkItemRouteRejectsInvalidAssociations(t *testing.T) {
 	}}
 	router, service := newRouteFixture(t, client)
 	seedRouteConfig(t, service)
-	if _, err := service.Store().db.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL)`); err != nil {
+	if _, err := service.Store().db.Exec(`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
 	if _, err := service.Store().db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1'), ('task-2', 'ws-other')`); err != nil {

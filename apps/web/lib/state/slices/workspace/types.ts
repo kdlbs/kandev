@@ -23,11 +23,21 @@ export type WorkspaceState = {
     default_environment_id?: string | null;
     default_agent_profile_id?: string | null;
     default_config_agent_profile_id?: string | null;
+    acp_idle_suspension_enabled?: boolean;
+    acp_idle_timeout_minutes?: number;
     office_workflow_id?: string | null;
     created_at: string;
     updated_at: string;
   }>;
   activeId: string | null;
+  // Bumped every time `activeId` is set to a different workspace (never on a
+  // re-select of the same one). Optional so every existing partial
+  // `workspaces` object (SSR page state, WS hydration payloads) still
+  // type-checks unchanged; absent means "never bumped", same as 0. Lets a
+  // consumer that only observes state intermittently -- e.g. a slice scoped
+  // to one route -- detect that the active workspace changed while it was
+  // not watching, without itself subscribing app-wide.
+  activeIdRevision?: number;
 };
 
 export type RepositoriesState = {

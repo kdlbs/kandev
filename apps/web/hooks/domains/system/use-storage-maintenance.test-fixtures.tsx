@@ -14,7 +14,12 @@ export const settings: StorageMaintenanceSettings = {
   quarantine_retention_hours: 168,
   workspaces: { enabled: true, dependency_cleanup_enabled: false },
   kandev_containers: { enabled: true },
-  go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
+  go_cache: {
+    enabled: false,
+    max_bytes: 16106127360,
+    adopted_path: "",
+    allow_cleanup_while_busy: false,
+  },
   docker: {
     dedicated_daemon_acknowledged: true,
     build_cache_enabled: true,
@@ -69,7 +74,7 @@ export const overview: StorageOverviewResponse = {
     refresh_due_at: "2099-07-23T12:15:00Z",
     stale: false,
     error: null,
-    progress: { completed_sources: 5, total_sources: 5, sources: {} },
+    progress: { completed_sources: 8, total_sources: 8, sources: {} },
     partial_summary: null,
   } satisfies StorageAnalysisState,
   analyzed_at: "2026-07-23T12:00:00Z",

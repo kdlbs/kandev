@@ -1,10 +1,10 @@
 ---
-status: draft
+status: current
 system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-08-08
-updated: 2026-08-31
+updated: 2026-10-05
 owners:
   - Kandev
 ---
@@ -12,13 +12,14 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` during migration.
+Design for `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001`.
+Usable-runtime lifetime follows [turn continuity](transient-turn-runtime-continuity.md).
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Cursor normal-completion failure projection](#cursor-normal-completion-failure-projection), [Cursor retry-safety semantics](#cursor-retry-safety-semantics), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle) |
+| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Source detail](#migrated-source-detail), [Cursor failure projection](#cursor-normal-completion-failure-projection), [Cursor retry safety](#cursor-retry-safety-semantics), [Retry notice lifecycle](#interactive-transient-retry-notice-lifecycle). ACP diagnostic/error projection: [Part 3](provider-error-recovery-03.md#matching-acp-diagnostic-and-error-projection). |
 
 ## Migrated source detail
 
@@ -74,57 +75,8 @@ workspace modes.
 
 #### Cursor normal-completion failure projection
 
-`cursor-agent` can report an upstream HTTP/2 stream reset as an ordinary
-`agent_message_chunk`. It can later return a successful `session/prompt`
-response. The ACP transport therefore owns a Cursor-specific evidence
-projection that mirrors the existing Codex capacity projection. It does not add
-generic content scanning to orchestration.
-
-The observer runs in the ordered ACP notification worker and applies these
-checks in order:
-
-1. The adapter identity is `cursor-acp`.
-2. The normalized event is a non-empty assistant message chunk for a non-zero
-   prompt generation that matches the active turn.
-3. After trimming leading and trailing whitespace, the chunk begins with
-   `Error: RetriableError:`.
-4. A case-insensitive bounded match finds `RetriableError` and either
-   `http/2 stream closed` or `CANCEL (0x8)`.
-
-The identity, event-type, and prefix checks precede the full fingerprint. The
-prefix check uses `strings.HasPrefix(strings.TrimSpace(text), ...)`, so ordinary
-per-token traffic does not allocate a normalized copy. Prose that mentions the
-error after other text, a partial `RetriableError`, a stale generation, and the
-same text from another adapter do not match.
-
-A match sets pending evidence on the active `promptTurnState` under its existing
-evidence mutex. The observer suppresses the control chunk. A later non-empty
-assistant or thought chunk clears the marker for the same generation. A new
-tool call also clears it. This activity proves that Cursor resumed its own
-attempt. A later matching control chunk sets the marker again. Updates for an
-in-flight tool do not clear it. Such updates can arrive during error settlement
-without proving renewed provider generation.
-
-After `session/prompt` returns, `sendPrompt` drains the notification queue. Then
-it examines the turn. If the Cursor marker is pending, the adapter cancels the
-async completion owner. It emits exactly one `EventTypeError` instead of the
-ordinary complete event. The error carries this bounded constant diagnostic:
-`Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)`.
-The valid `ProviderError` uses source `cursor_acp`, provider ID `cursor-acp`, and
-a UTC occurrence time. The adapter does not copy raw assistant text into the
-structured diagnostic.
-
-The deterministic catalogue adds the dedicated rule
-`cursor.retriable_stream_reset.v1` before the generic transport-loss rule. The
-rule requires the complete normalized Cursor diagnostic
-`Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)`
-(with the existing bracketed `canceled` decoration allowed). It maps to
-`agent_transport_lost` with high confidence and class `transient`.
-It retains the existing `AutoRetryable` invariant. The rule applies the shared
-context-cancellation veto. Cursor's `[canceled]` token does not satisfy that
-veto. It lacks `context canceled`, `context deadline exceeded`, or
-`cancel escalated`. The deliberately narrow `transportLostRe` remains
-unchanged.
+See [Cursor terminal failure projection](provider-error-recovery-cursor.md#cursor-normal-completion-failure-projection)
+for ordered marker handling, bounded truthful diagnostics, and semantic categories.
 
 ### Error classes
 
@@ -132,84 +84,41 @@ The policy layer has two configurable classes:
 
 | Class | Meaning | Initial semantic codes and examples |
 | --- | --- | --- |
-| `transient` | The provider, network, transport, or selected model is temporarily unable to serve the request. | `network_unavailable`, `provider_unavailable`, `provider_overloaded`, `model_capacity`, confirmed short `rate_limited`, and launch-safe `agent_transport_lost` |
+| `transient` | The provider, network, transport, or selected model is temporarily unable to serve the request. | `network_unavailable`, `provider_unavailable`, `provider_overloaded`, `model_capacity`, confirmed short `rate_limited`, explicit retryable `provider_resource_exhausted`, and launch-safe `agent_transport_lost` |
 | `hard` | The selected account, subscription, credentials, provider configuration, or model cannot continue without a longer reset or user/configuration change. | `quota_limited`, `subscription_required`, `auth_required`, `missing_credentials`, `provider_not_configured`, and `model_unavailable` |
 
-The semantic code remains authoritative diagnostic detail. The class is the
-stable policy input. A catalogue revision can add new codes and signatures,
-but it must assign every recoverable code to exactly one class.
+Semantic codes retain diagnostic detail. Every recoverable catalogue code maps to one policy class.
+Task, repository, permission, local-runtime, cancellation, and resume-state errors remain outside classified provider policy.
 
-Task, repository, permission, local runtime, cancellation, and resume-state
-errors are not provider errors. They retain their existing owner and cannot
-trigger candidate switching through this policy.
-
-Unrecognized, low-confidence, stale, or conflicting evidence has classification
-state `unclassified`. It is not a third configurable class. It stops automatic
-recovery and surfaces manual recovery so an unknown string cannot silently
-repeat work or change providers. Historical attempts retain the semantic code,
-class, rule ID, and catalogue version assigned when the attempt occurred.
+Unknown, low-confidence, stale, or conflicting evidence is `unclassified`, not a third configurable class.
+It requires manual recovery except for the task-scoped
+[repeated-failure extension](../../agents/system-design/dynamic-unclassified-fallback.md), which also admits proven agent startup failures.
+An unknown string alone never authorizes recovery. Historical attempts retain their code, class, rule ID, and catalogue version.
 
 ### Replay and effect-safety gate
 
 Classification does not by itself authorize retry or switching.
 
-- Automatic retry, reset waiting, or fallback requires evidence tied to the
-  current invocation and a failure boundary that is known to be pre-result and
-  effect-safe.
+- Original-prompt replay, reset waiting, and fallback require current-invocation,
+  pre-result, effect-safe evidence. Native continuation has a separate
+  [interruption contract](provider-interruption-continuation.md).
 - A provider-supported resumable retry guarantee can satisfy this gate when it
   identifies the same provider-native session and generation.
 - Assistant output, tool activity, partial utility output, ambiguous prompt
   delivery, or stale event ordering fails closed unless a durable continuation
   package makes successor delivery safe under the dynamic-routing contract.
+- A correlated ACP diagnostic satisfying [Matching ACP diagnostic and error
+  projection](provider-error-recovery-03.md#matching-acp-diagnostic-and-error-projection)
+  is not assistant output for this gate; non-diagnostic later progress
+  restores the normal output/effect safety fence.
 - User configuration cannot override this gate. An unsafe transient or hard
   failure stops for manual recovery even when its class policy requests retry
   or skip.
 
 #### Cursor retry-safety semantics
 
-The Cursor label `RetriableError` is evidence about the upstream transport. It
-is not permission for Kandev to repeat a turn. The following rules define the
-Cursor recovery choices. They preserve the provider-neutral safety boundary in
-[ADR-2026-08-08-provider-neutral-agent-error-recovery](../../../decisions/2026-08-08-provider-neutral-agent-error-recovery.md):
-
-1. **Safe point.** A terminal marker is automatically replayable only when its
-   prompt-generation-correlated evidence is known and records neither assistant
-   output nor tool activity. Thoughts, message output, a pending or completed
-   tool call, and missing evidence all fail closed. The observed incident had
-   thoughts and a `Read File` call in flight, so it enters manual recovery even
-   though its classification is transient.
-2. **Continuation mode.** An eligible concrete-profile retry retains the
-   selected execution profile. It uses the existing provider-native resume
-   identity before it sends the cached original prompt again. It does not create
-   a fresh provider route or switch providers. This replay is allowed only at
-   the safe point above. An unsafe turn exposes the existing manual Resume and
-   Start fresh choices. The user, not the classifier, chooses continuation.
-3. **Cursor-owned retry.** Kandev does not schedule while the original
-   `session/prompt` RPC remains open. Provider progress after a marker clears
-   the pending marker. Only a later terminal marker can re-arm it. The prompt
-   barrier then proves that Cursor's internal retry has either resumed or
-   finished before Kandev chooses recovery. This prevents overlapping Cursor
-   and Kandev retry loops.
-4. **Budget and delay.** Eligible concrete-profile recovery reuses the single
-   orchestrator-owned retry entry, `transientMaxAttempts`, and
-   `transientRetryDelayFor`. There is no Cursor-specific nested counter, timer,
-   or backoff. Exhaustion uses the existing manual recovery path.
-
-The orchestrator records replay evidence for every interactive prompt, not only
-dynamic route attempts. The evidence remains scoped by session, execution, and
-prompt generation. Lifecycle snapshots the current prompt's evidence before it
-marks a terminal completion as activity and carries that immutable snapshot on
-`agent.failed`. This prevents separate NATS subscriptions for `agent.stream.*`
-and `agent.failed` from changing the replay decision based on delivery order.
-The concrete-profile `handleTransientFailure` path requires the same known,
-no-output, no-tool condition before scheduling. A missing record is unsafe.
-Dynamic profiles retain `dynamicPreResultSafe` and their configured policy
-owner. A model-switch restart reserves the cached prompt and replay identity
-before `StartAgentProcess` can dispatch the replacement prompt, then binds the
-identity to the replacement execution. `agent_transport_lost` remains
-same-provider recovery evidence and does not gain permission to switch
-candidates merely because Cursor supplied the new fingerprint. No orchestration
-branch inspects `cursor-acp`, `cursor_acp`, or the raw diagnostic.
+See [Cursor retry safety](provider-error-recovery-cursor.md#cursor-retry-safety-semantics)
+for original replay, versioned completed-tool continuation, and the shared owner.
 
 ### Per-class policy
 
@@ -237,7 +146,8 @@ uses the same limits, while the backend remains authoritative.
 
 Policy evaluation follows this order:
 
-1. Reject stale, unclassified, or effect-unsafe failures.
+1. Reject stale or effect-unsafe failures. Reject unclassified failures unless
+   the separate task-scoped repeated-failure extension admits them.
 2. If reset waiting is enabled, has not already been used for this candidate
    and class in the current route cycle, and a validated future `retry_after`
    or `reset_at` is no later than `max_wait_seconds`, persist a wait for that
@@ -294,11 +204,42 @@ not write legacy rule shapes.
 
 ### Interactive transient retry notice lifecycle
 
-Concrete-profile task chat persists one status message for each scheduled
-retry attempt. The message metadata contains `retrying: true`; its visible
+Concrete-profile task chat reuses one status message across scheduled
+retry attempts (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.25). The metadata contains `retrying: true`; its visible
 content includes the safe reason, provider, attempt ordinal, absolute deadline,
 and Cancel action. The backend timer owns the retry. The persisted message is a
 transcript projection of that ownership, not an independent retry state.
+
+The proposed attempt-write path lists notices through `TransientRetryMessageService`.
+It selects status messages for the exact task and session with boolean
+`retrying: true`. With no match, it uses `CreateSessionMessage` once.
+With matches, it keeps the newest message by creation time, then ID, so legacy
+duplicates leave the active row inside the newest hydration window.
+It replaces that message's retry content and metadata through task-service
+`UpdateMessage`. Message ID, creation time, and original turn association remain stable.
+The existing `session.message.updated` path updates the frontend store by ID. If
+a reused row is outside the loaded window, it upserts the retry status update.
+After a successful update, the writer removes other matching notices through
+`DeleteMessage`. This also repairs duplicates from earlier versions.
+
+List or update errors are logged and swallowed without a fallback insert.
+Duplicate deletion errors remain eligible for the next write or terminal cleanup.
+No schema migration or separate frontend retry store is required.
+Writes and terminal cleanup must preserve session event ordering: a cancelled
+or superseded attempt cannot recreate a retired notice. Database operations
+must remain outside `taskRuntimeStateMu`.
+
+The process-local notice lifecycle uses one reference-counted guard per session.
+Short operations increment its reference count before taking the guard, so a
+waiting caller cannot observe a replacement mutex. The entry remains owned
+while an accepted prompt or retry exists. Retirement clears that ownership and
+arms a five-minute fence for late provider events. A timer reclaims the entry
+only after all guard users have released it and the lifecycle is no longer
+owned. Prompt evidence uses the guard and opens the fence only after a complete
+execution identity. Reserve retry entries under the guard; arm them after failed
+turns complete and sessions enter `WAITING_FOR_INPUT`. Deletion performs the
+same retirement before removing the row. Tests cover events, fence reset,
+concurrency, churn, deletion, and guards.
 
 The orchestrator attempts to resolve every outstanding transient-retry status
 message for a session whenever retry ownership ends through success, exhaustion,
@@ -323,9 +264,11 @@ warning, preserving stale retry text and its Cancel action. The retry attempts
 remain observable through agent output and recovery history without retaining
 an actionable status projection after ownership ends.
 
-Advancing from attempt N to attempt N+1 only cancels the superseded in-memory
-timer. It does not run the retry-ending reset and therefore does not retire the
-current attempt's notice prematurely. Durable message operations do not run
+Advancing from attempt N to attempt N+1 cancels the superseded in-memory
+timer, updates the existing notice, and arms the replacement after its failed
+turn completes and the session is parked. It does not run the
+retry-ending reset.
+Durable message operations do not run
 while the orchestrator's runtime-state mutex is held.
 
 `CancelTransientRetry` authorizes the task-session pair before reading or
@@ -409,6 +352,10 @@ an earlier decision occurred.
 Raw streams, credentials, account identifiers, and unbounded error text are not
 stored in policy or route state.
 
+Continuation package sanitization tiers are defined in [Part
+4](provider-error-recovery-04.md#continuation-package-sanitization-tiers),
+relocated there at the size limit, and extended since.
+
 ## API surface
 
 - Dynamic profile CRUD accepts and returns the versioned per-class policy
@@ -428,7 +375,7 @@ stored in policy or route state.
 | `active` | Current, classified, effect-safe failure with eligible reset wait | `waiting_for_reset` |
 | `active` | Current, classified, effect-safe failure with retry budget | `retry_wait` |
 | `active` | Recovery exhausted with `skip` | `switching` |
-| `active` | Recovery exhausted with `stop`, or unsafe/unclassified failure | `action_required` |
+| `active` | Recovery exhausted with `stop`, unsafe failure, or ineligible unclassified failure | `action_required` |
 | `waiting_for_reset` | Deadline reached and generation current | `retrying` |
 | `retry_wait` | Deadline reached and generation current | `retrying` |
 | `waiting_for_reset` or `retry_wait` | Skip now | `switching` |
@@ -505,6 +452,12 @@ stored in policy or route state.
 - **GIVEN** a failure follows tool activity, **WHEN** the candidate policy says
   retry or skip, **THEN** effect safety overrides the policy and Kandev stops for
   manual recovery.
+- **GIVEN** a current prompt emits a high-confidence `provider_overloaded`
+  diagnostic and then returns a matching structured provider error before any
+  output or tool activity, **WHEN** the transient policy permits retry or
+  candidate fallback, **THEN** the transcript retains the diagnostic and the
+  policy may proceed. **GIVEN** either error does not match or later progress
+  occurs, **THEN** Kandev stops automatic recovery.
 - **GIVEN** the same dynamic profile is selected by Kanban and Office, **WHEN**
   each sees the same classified, effect-safe error, **THEN** both apply the same
   candidate policy and route transition.
@@ -517,7 +470,8 @@ stored in policy or route state.
   without creating a manual recovery message.
 - **GIVEN** an authorized user selects Cancel while a retry loop is active,
   **WHEN** cancellation completes, **THEN** the retry notice is retired and the
-  manual Resume and Start fresh recovery message is rendered.
+  composer remains available when retention is proven. Otherwise,
+  the manual Resume and Start fresh recovery message is rendered.
 
 ## Out of scope
 

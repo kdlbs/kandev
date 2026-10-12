@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: office
 requirements:
   - REQ-OFFICE-AUTOMATIONS-SETTINGS-001
@@ -17,7 +17,127 @@ This design preserves the technical source detail for `REQ-OFFICE-AUTOMATIONS-SE
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-OFFICE-AUTOMATIONS-SETTINGS-001` | [Migrated source detail](#migrated-source-detail), [Deletion confirmation](#deletion-confirmation) |
+| `REQ-OFFICE-AUTOMATIONS-SETTINGS-001` | [Migrated source detail](#migrated-source-detail), [Deletion confirmation](#deletion-confirmation), [Workspace list publication](#workspace-list-publication) |
+
+## Workspace list publication
+
+This section owns the frontend list-read contract for AC-001.12 through
+AC-001.15. The automation runtime, database, transport payloads, trigger metadata,
+and run history are unchanged.
+
+### State ownership and request authority
+
+Add `automations.byWorkspace` to `AutomationsState` in
+`apps/web/lib/state/slices/automations/types.ts`. Each workspace entry contains
+`items`, `loaded`, `loading`, and a monotonically increasing request `generation`.
+The exact scope is one `createAppStore` instance and one workspace ID, across
+every `useAutomations` instance attached to that store. Different stores have
+independent generations and snapshots. The map is browser-memory state retained
+for that store's lifetime, with one entry per visited workspace; it has no
+persistence, timers, prefetch, automatic retry, or new cache framework.
+
+`beginAutomationsList` and `finishAutomationsList` in the existing slice own
+atomic request admission and settlement. The optional `byWorkspace` type field
+preserves legacy hydration inputs; the default slice supplies an empty map.
+An initial load joins by declining a new transport request when the scoped entry
+is already loaded or loading. Explicit refresh always advances that entry's
+generation, even while another read is pending. Admission installs the new
+generation and loading state before invoking transport, preserving accepted rows.
+Settlement checks the captured generation before any row, loaded, or loading
+write. Both success and failure finish through that guarded action; an obsolete
+`finally` callback must not clear a current request's loading flag.
+
+Only rows whose `workspace_id` equals the request's workspace enter its scoped
+snapshot. A mixed response retains eligible rows and excludes foreign ones.
+Success accepts an empty/null list as an empty snapshot and marks it loaded.
+Current failure retains an existing snapshot, or accepts empty rows when there
+has been no snapshot, and marks the attempt loaded and non-loading. Failure does
+not create a new visible error surface. Explicit refresh is the recovery path.
+
+### Hook, cache, and lifecycle
+
+`apps/web/hooks/domains/settings/use-automations.ts` selects its requested
+workspace's entry and uses store actions for initial load and refresh. Remove
+the instance-local workspace-string guards and loaded-state copies. Before the
+effect admits an initial request, an absent non-null workspace entry exposes
+empty rows, `loaded=false`, and `loading=true`; a null workspace exposes empty
+rows and both flags false. Selectors use stable empty values.
+
+Cached A remains observable while B loads, and returning to A reuses that entry.
+B's eventual response may populate B's cache but cannot alter A's hook output.
+Two consumers of A share initial transport and accepted state; refresh from
+either consumer supersedes earlier reads for A. Simultaneously mounted A and B
+consumers retain their own data and loading flags in either completion order.
+
+After admission, requests belong to the store rather than the initiating
+component. Unmount, workspace switch, null selection, and StrictMode effect
+cleanup do not cancel a valid shared read. This avoids abandoning a sibling's
+request and permits a later remount to reuse its settled cache. No component
+state updates occur on completion. This contract does not require physical
+network cancellation or disposal of a still-referenced independent store.
+
+### Compatibility and bounded consumers
+
+The real `AutomationsListPage` passes hook rows to the real `AutomationsTable`
+without workspace filtering. The hook is the isolation boundary; the editor
+also calls it and must share the same workspace entry.
+
+Retain the existing flat `automations.items`, `loaded`, and `loading` fields and
+legacy action signatures as compatibility state, not the source of scoped hook
+outputs. An accepted list copies its accepted row array into flat `items`, avoiding
+array aliasing during mutation writes and retaining
+the reference-change signal used by `useSidebarShortcutCatalog` for its own
+workspace-scoped fetch. Flat `loaded` records an accepted list attempt; flat
+`loading` reflects whether any scoped entry is loading. Obsolete settlements
+must not update these mirrors. Do not restore cached lists by reading flat rows.
+
+`useSettingsBreadcrumbs` prefers the requested workspace entry when present,
+including authoritative empty entries, and otherwise retains its legacy flat
+lookup. Keep its explicit row workspace check. Thus a late B read cannot erase
+A's cached breadcrumb name, and legacy seeded breadcrumb fixtures remain valid.
+The sidebar's `useWorkspaceAutomations` continues owning its independent fetch;
+it does not consume the new settings cache.
+
+Adapt `addAutomation`, `updateAutomation`, and `removeAutomation` only enough to
+keep already-created scoped entries current after ordinary sequential mutations,
+while preserving existing flat updates and public hook/API return values.
+Create/update locate entries by the response's workspace; removal locates the
+existing row by its globally unique automation ID in cached entries. Do not
+mark an unloaded entry loaded from a mutation or create partial list snapshots.
+The create hook continues stripping `webhook_secret` before either cache write
+and returning the full response to its caller. Trigger calls remain independent.
+`triggerTypes`, `automationRuns`, hydration payloads, and unrelated store shapes
+retain their contracts. Existing initial-state spreading supplies the additive
+map default for legacy initial states without a hydration migration.
+
+### Verification and presentation
+
+Use real `StateProvider`/`createAppStore`, production hook and slice, and deferred
+automation transport for list ordering, flags, sharing, independent stores,
+null selection, cached returns, unmount/remount, and StrictMode controls.
+Exercise latest success/empty/failure and obsolete success/failure in both
+orders. Cover sequential mutation updates and secret stripping without claiming
+mutation/list concurrency coherence.
+
+The rendered integration mounts real `AutomationsListPage` and
+`AutomationsTable` under their existing state, settings-save, and tooltip
+providers. Drive A/B/A through props with distinct names and row IDs, settle B
+late, and assert A's visible rows and navigation target remain scoped. Also
+assert loading before a first list and accepted empty-state rendering. Mock
+automation transport only; use the existing browser-history router for navigation
+and restore history/local storage during test cleanup.
+
+This is pure data/state normalization. Desktop and phone reuse the existing
+rendered composition, copy, touch controls, navigation, scroll owners, and
+breakpoints. Targeted hook/component evidence satisfies the mobile-parity
+exception; no new browser, build, Playwright, or ASCII composition is required.
+Existing public documentation already describes workspace automation lists.
+
+The slice-local map follows the existing store-owned `triggerTypes` admission
+pattern. Instance-only request counters cannot order sibling publications; a
+single workspace slot cannot serve simultaneous scoped consumers. A generic
+coordinator, repository-wide writer audit, or new query framework is unnecessary
+for this bounded contract. These local choices need no separate ADR.
 
 ## Migrated source detail
 

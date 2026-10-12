@@ -156,7 +156,7 @@ func runInstanceComparisonGitShim() {
 	switch args[0] + " " + args[1] {
 	case "rev-parse --git-dir":
 		_, _ = os.Stdout.WriteString(".git\n")
-	case "remote get-url":
+	case "config --get":
 		if marker := os.Getenv("KANDEV_TEST_COMPARISON_STARTED"); marker != "" {
 			_ = os.WriteFile(marker, nil, 0o600)
 		}

@@ -45,10 +45,13 @@ that the workflow destination is not hidden.
 
 - **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.1:** When the workflow selector
   shows a selected workflow, the system shall show the immediate launch
-  destination outside the selector, immediately to its right, with an
-  adjacent localized information control followed by the muted label
-  **Start step: {{step}}**. The information control shall provide help that
-  explains the displayed destination and its action-sensitive precedence.
+  destination outside the selector, immediately to its right. A directional
+  arrow help control shall connect the workflow to the muted destination step
+  name without a visible **Start step:** prefix. On pointer hover, keyboard
+  focus, or touch activation, the control shall provide localized help that
+  explains the displayed destination and its action-sensitive precedence. The
+  control shall retain a localized accessible name, and its coarse-pointer hit
+  area shall be at least 44 CSS pixels.
 - **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.2:** When the description is empty,
   the displayed launch destination shall be the first positional step because
   **Start Plan Mode** uses the plan-mode launch path. When the description is

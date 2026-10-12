@@ -14,14 +14,42 @@ Apply this guidance whenever editing `.github/**`.
   normalized repository-relative paths, regular-file type, response path,
   size, encoding, and content. Do not grant generic `gh api`, arbitrary
   interpreters, or broad Bash merely to read PR files.
+- Before selecting or changing an external model in CI that receives PR source
+  or other sensitive context, verify the provider's current data-use and
+  training policy and identify the exact inputs sent. Do not assume a free tier
+  keeps prompts private. If the policy allows training, get an explicit owner
+  decision and record the accepted risk beside the model selection.
 - PR label/metadata cleanup jobs that operate on pull requests must declare
   `pull-requests: write`, not `issues: write`; mirror the permission shape used
   by `preview-env.yml`.
+- **Workflow and checkout identity:** A `workflow_dispatch` uses the workflow
+  definition at the selected dispatch ref. An explicit `checkout` of `main`
+  selects the files that subsequent steps consume. It does not replace the
+  running workflow definition. Record `github.workflow_ref`,
+  `github.workflow_sha`, and the checkout SHA separately. Attribute failures
+  to the definition or consumed files before deciding which branch needs a fix.
 - Release workflow changes must trace prepare/summary outputs and conditions
   through every build and publication job: skip decisions must propagate
   without accidental publishing, while backfill must reuse and validate the
   existing tag and still run its required build/publication path. Verify each
   actual publication job and artifact, not only the aggregate workflow result.
+- When validating a public artifact through redirects, inspect the final HTTP
+  status, content type, effective URL, and non-empty body. Intermediate
+  redirect headers do not prove that the delivered artifact is valid.
 - For workflow security changes, run the relevant raw workflow-contract tests,
   `python3 .github/scripts/lint-action-pinning_test.py`, `zizmor .github/workflows`,
   and `git diff --check`.
+- The `pr-docs.yml` workflow runs the validator from a trusted workflow or
+  merge-group base revision. It may fetch pull-request commits as Git objects
+  for bounded exact-head requirement searches, but must keep its worktree and
+  executable scripts at the trusted revision. Read candidate files through
+  the bounded `.github/scripts/pr-docs.cjs` adapter; never check out or execute
+  a pull-request head. The repository is public, so Git fetches are anonymous;
+  keep `persist-credentials: false`. Private-repository support needs a separate
+  security review.
+- Its `PR documentation coverage` status is revision-specific. The exact
+  `no-docs-allow` label is the only policy override, and merge-group evaluation
+  must resolve and validate every member independently against the group's
+  entry boundaries. All event types share a non-cancelling target-branch lock
+  with `queue: max` so queued label reevaluations cannot race with merge-group
+  status writes or replace the single pending run.

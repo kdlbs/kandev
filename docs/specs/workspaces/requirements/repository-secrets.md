@@ -28,6 +28,32 @@ Repository setup and agent work often need credentials that are specific to a pr
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.7:** Repository bindings contain secret references only, never literal values.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.8:** The effective repository environment is available to repository setup, the agent process, child shells, and terminal-panel terminals in every supported executor, including explicitly approved forwarding to SSH.
 
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.9:** Secret deletion shall reject existing agent-profile, executor-profile, and repository environment references with a conflict response. The response identifies references without exposing secret values or unauthorized workspace-scoped reference metadata. An explicit force option permits deletion and preserves the broken bindings.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.10:** A missing secret shall block fresh launch and cold resume. The error names the environment key and source, identifies the agent profile when available, and directs the user to select the secret again. A replacement with the same name shall not repair the reference automatically.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.11:** Reference lookup failures shall block deletion with a sanitized internal error. Secret authorization shall run before reference disclosure or a forced deletion.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.12:** Settings shall check references before enabling secret deletion. Existing references shall open a contained conflict dialog that lists visible resources and offers no destructive action. The final deletion request shall repeat the authoritative reference check.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.13:** Global and Workspace Secrets settings shall explain that saving a secret does not add it to a session environment. The guidance shall remain visible when secrets exist. Global guidance shall name agent profile, executor profile, and repository environment bindings. Workspace guidance shall name repository bindings and state that shared profiles cannot use Workspace secrets. The guidance shall be readable on desktop and phone without exposing secret values.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.14:** While the selected workspace and its supplied initial listing remain unchanged, starting, completing, or failing an unrelated Global secrets load shall preserve the Workspace Secrets metadata list, including successfully acknowledged creation, rename, and deletion. It shall not restart that workspace's loading state. This applies on desktop and phone.
+
+### REQ-WORKSPACES-REPOSITORY-SECRETS-002: Accepted Global metadata during initial loading
+
+An initial Global metadata read can overlap accepted changes in the same current list.
+Those changes remain authoritative when the older read succeeds. This is separate from
+Workspace-list independence in AC-WORKSPACES-REPOSITORY-SECRETS-001.14.
+
+#### Acceptance criteria
+
+- **AC-WORKSPACES-REPOSITORY-SECRETS-002.1:** When a Global secret creation is acknowledged while an older initial metadata read is pending, successful completion of that read, including an empty result, shall preserve the accepted secret and its rendered Settings row on desktop and phone.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-002.2:** When the current Global metadata list changes during an older initial read through acknowledged creation, update, removal, or accepted metadata events, successful completion of that read shall preserve the entire current list's membership, order, and metadata field values. Removed rows shall remain absent, updated fields shall not revert, and repeated creation acknowledgments shall not duplicate a row. This applies to every current row, including a mixed list with several changes.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-002.3:** When no metadata change intervenes, an initial successful read shall publish its complete result, including an empty list, and settle the shared loaded/loading state. Consumers shall share the existing initial-load gate and settled list; creating a secret from an already-loaded list shall retain the accepted rendered row without starting an initial read.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-002.4:** Global consumers shall retain Global and legacy unscoped metadata filtering, excluding Workspace rows. Completion of a superseded successful read shall settle shared readiness without restarting loading or replacing accepted metadata. Workspace list lifetimes and existing initial-read failure settlement shall retain their established behavior.
+
+#### Exclusions
+
+This requirement covers metadata publication in the current Global list only. It changes
+no secret plaintext, reveal, authorization, API, encryption, binding, transfer, or running
+environment policy. Cross-workspace caching and navigation/lifecycle hardening are excluded.
+
 ## Migrated source detail
 
 ## Why
@@ -107,8 +133,8 @@ updated_at: timestamp
 ```
 
 The pair `(repository_id, key)` is unique. The repository foreign key cascades on repository or
-workspace deletion. The secret reference deliberately permits a dangling ID so deleting a secret
-leaves a broken binding that blocks future launch.
+workspace deletion. The secret reference permits a dangling ID so forced deletion
+leaves a broken binding that blocks future launch. Ordinary deletion rejects existing references.
 
 Keys follow profile environment rules: at most 100 bindings per repository, maximum key length 256,
 POSIX identifier syntax, no duplicates, and no `TASK_DESCRIPTION` or `KANDEV_*` keys.
@@ -123,7 +149,7 @@ The existing HTTP and WebSocket secret CRUD contracts become scope-aware.
 - The default list returns Global secrets. A Workspace-filtered list returns that workspace's
   secrets, with an explicit option to include visible Global secrets for a repository selector.
 - Update changes name and/or value only; scope is immutable.
-- Reveal and delete preserve existing response shapes while applying scope authorization.
+- Reveal preserves its response shape while applying scope authorization. A read-only endpoint returns deletion references after applying the same scope authorization. Delete returns a conflict for an in-use secret unless explicitly forced.
 
 Repository create, get, list, update, and repository events include:
 
@@ -201,6 +227,13 @@ remove, and replace rows as part of the repository's existing manual-save flow. 
 shown as a missing reference rather than silently dropping the row.
 
 The selector never reveals values. Executor and agent profile selectors show Global secrets only.
+
+### Binding guidance
+
+Both Secrets settings pages explain that saving a secret only stores it. The Global page names
+agent profile, executor profile, and repository bindings. The Workspace page directs users to
+bind the secret to a repository in that workspace and states the shared-profile restriction.
+The guidance remains visible before and after a secret is created.
 
 ## Mobile design contract
 

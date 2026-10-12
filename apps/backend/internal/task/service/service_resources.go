@@ -35,6 +35,10 @@ const (
 	workspaceDeleteCleanupConcurrency = 8
 )
 
+type workflowDeleteTaskLister interface {
+	ListTasksForDeletion(context.Context, string, string, int, int) ([]*models.Task, int, error)
+}
+
 var ErrWorkspaceConfirmNameMismatch = errors.New("confirm_name does not match workspace name")
 
 const maxRepositorySecretBindings = 100
@@ -76,15 +80,54 @@ func validateProviderScope(raw string) (string, error) {
 	return scope, nil
 }
 
+// validateProviderScopeAndRepoIDPair enforces repoclone.Cloner's
+// WorkspaceProviderRepositoryPath invariant: a non-empty provider_scope
+// requires a paired provider_repo_id, because the scope-isolated clone
+// layout needs both to build a unique path. A bare provider_repo_id with no
+// scope is fine — that's the normal shape for every built-in provider
+// (GitHub, GitLab, Azure DevOps), none of which resolve a provider
+// connection scope — and falls through to the legacy owner/name layout.
+func validateProviderScopeAndRepoIDPair(scope, repoID string) error {
+	if strings.TrimSpace(scope) != "" && strings.TrimSpace(repoID) == "" {
+		return fmt.Errorf("%w: provider_scope requires a paired provider_repo_id", ErrInvalidRepositorySettings)
+	}
+	return nil
+}
+
 type workspaceDeleteTaskCleanup struct {
 	task        *models.Task
 	sessions    []*models.TaskSession
 	worktrees   []*worktree.Worktree
 	stopTargets []taskStopTarget
 	taskEnv     *models.TaskEnvironment
+	attachments []*models.TaskMessageAttachment
 	cleanupJob  *models.TaskResourceCleanupJob
 }
 
+type workspaceAttachmentLister interface {
+	ListMessageAttachmentsByWorkspace(ctx context.Context, workspaceID string) ([]*models.TaskMessageAttachment, error)
+}
+
+type exactWorkflowCreator interface {
+	CreateWorkflowIfWorkspaceUnchanged(context.Context, *models.Workflow, time.Time) error
+}
+
+type exactWorkflowVersionUpdater interface {
+	UpdateWorkflowIfUnchanged(context.Context, *models.Workflow, time.Time) error
+}
+
+type exactWorkflowReorderer interface {
+	ReorderWorkflowsIfUnchanged(context.Context, string, []string, time.Time, map[string]time.Time) error
+}
+
+type exactRepositoryCreator interface {
+	CreateRepositoryIfWorkspaceUnchanged(context.Context, *models.Repository, time.Time) error
+}
+
+type exactRepositoryUpdater interface {
+	UpdateRepositoryIfUnchanged(context.Context, *models.Repository, time.Time) error
+	UpdateRepositoryWithSecretBindingsIfUnchanged(context.Context, *models.Repository, []models.RepositorySecretBinding, time.Time) error
+}
 type repositorySessionPruner interface {
 	DeleteRepositoryIfNoActiveTaskSessions(ctx context.Context, id string) (bool, error)
 }
@@ -111,7 +154,9 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		// The tenant comes from the creating identity and from nowhere else.
 		// There is no org field on the request on purpose: a caller must not
 		// be able to place a workspace in another tenant.
-		OrgID: callerOrgID(ctx),
+		OrgID:                    callerOrgID(ctx),
+		ACPIdleSuspensionEnabled: false,
+		ACPIdleTimeoutMinutes:    120,
 	}
 	placement, placementErr := s.placementFor(ctx, ownerID, workspace.OrgID)
 	if placementErr != nil {
@@ -170,6 +215,9 @@ func (s *Service) GetWorkspace(ctx context.Context, id string) (*models.Workspac
 
 // UpdateWorkspace updates an existing workspace
 func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWorkspaceRequest) (*models.Workspace, error) {
+	if req.ACPIdleTimeoutMinutes != nil && *req.ACPIdleTimeoutMinutes <= 0 {
+		return nil, fmt.Errorf("%w: must be greater than zero", ErrWorkspaceIdleTimeoutInvalid)
+	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {
 		return nil, err
@@ -177,33 +225,22 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	if err := s.requireWorkspaceManage(ctx, workspace); err != nil {
 		return nil, err
 	}
+	if req.ExpectedUpdatedAt != nil && !workspace.UpdatedAt.Equal(*req.ExpectedUpdatedAt) {
+		return nil, repoerrors.ErrTaskVersionConflict
+	}
 
+	update := workspaceFieldUpdate(req)
 	if req.UnitID != nil {
+		previousUnitID := workspace.UnitID
 		if err := s.moveWorkspaceToUnit(ctx, workspace, *req.UnitID); err != nil {
 			return nil, err
 		}
+		if workspace.UnitID != previousUnitID {
+			update.UnitID = &workspace.UnitID
+		}
 	}
-	if req.Name != nil {
-		workspace.Name = *req.Name
-	}
-	if req.Description != nil {
-		workspace.Description = *req.Description
-	}
-	if req.DefaultExecutorID != nil {
-		workspace.DefaultExecutorID = normalizeOptionalID(req.DefaultExecutorID)
-	}
-	if req.DefaultEnvironmentID != nil {
-		workspace.DefaultEnvironmentID = normalizeOptionalID(req.DefaultEnvironmentID)
-	}
-	if req.DefaultAgentProfileID != nil {
-		workspace.DefaultAgentProfileID = normalizeOptionalID(req.DefaultAgentProfileID)
-	}
-	if req.DefaultConfigAgentProfileID != nil {
-		workspace.DefaultConfigAgentProfileID = normalizeOptionalID(req.DefaultConfigAgentProfileID)
-	}
-	workspace.UpdatedAt = time.Now().UTC()
-
-	if err := s.workspaces.UpdateWorkspace(ctx, workspace); err != nil {
+	workspace, err = s.workspaces.UpdateWorkspaceFields(ctx, id, update, req.ExpectedUpdatedAt)
+	if err != nil {
 		s.logger.Error("failed to update workspace", zap.String("workspace_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -240,6 +277,46 @@ func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confir
 	}
 	return s.deleteWorkspace(ctx, workspace, &confirmName)
 }
+func (s *Service) prepareWorkspaceAttachmentCleanup(ctx context.Context, workspaceID string) (*models.TaskResourceCleanupJob, error) {
+	attachmentRepo := s.attachments
+	if attachmentRepo == nil && s.attachmentSvc != nil {
+		attachmentRepo = s.attachmentSvc.repo
+	}
+	lister, ok := attachmentRepo.(workspaceAttachmentLister)
+	if !ok {
+		if attachmentRepo != nil {
+			return nil, fmt.Errorf("workspace attachment repository cannot list attachments")
+		}
+		if s.resourceCleanups == nil && s.attachmentSvc != nil {
+			return nil, fmt.Errorf("workspace attachment cleanup persistence is unavailable")
+		}
+		return nil, nil
+	}
+	attachments, err := lister.ListMessageAttachmentsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list workspace attachments for cleanup: %w", err)
+	}
+	if len(attachments) == 0 {
+		if s.resourceCleanups == nil && s.attachmentSvc == nil {
+			return nil, fmt.Errorf("workspace attachment cleanup executor is unavailable")
+		}
+		return nil, nil
+	}
+	if s.resourceCleanups == nil {
+		if s.attachmentSvc != nil {
+			return nil, fmt.Errorf("workspace attachment cleanup persistence is unavailable")
+		}
+		return nil, fmt.Errorf("workspace attachment cleanup executor is unavailable")
+	}
+	if s.attachmentSvc == nil {
+		return nil, fmt.Errorf("workspace attachment cleanup executor is unavailable")
+	}
+	return s.persistTaskResourceCleanup(
+		ctx, "", models.TaskResourceCleanupTriggerWorkspaceDelete,
+		newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, "workspace-attachments:"+workspaceID),
+		nil, nil, nil, attachments, taskEnvironmentCleanup{}, true, false, workspaceID,
+	)
+}
 
 // DeleteOrganizationWorkspaces removes every workspace in one organization
 // through the same lifecycle as an ordinary workspace deletion. Authorization
@@ -265,32 +342,64 @@ func (s *Service) DeleteOrganizationWorkspaces(ctx context.Context, orgID string
 }
 
 func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspace, confirmedName *string) error {
+	var releaseAttachmentAdmission func()
+	if s.attachmentSvc != nil {
+		releaseAttachmentAdmission = s.attachmentSvc.beginWorkspaceDeletion(workspace.ID)
+		defer releaseAttachmentAdmission()
+	}
 	tasks, err := s.listAllTasksForWorkspaceDelete(ctx, workspace.ID)
 	if err != nil {
 		return err
 	}
 	// Runtime cleanup needs task rows before the cascade removes them.
-	cleanups, err := s.prepareWorkspaceDeleteTaskCleanups(ctx, tasks)
+	workspaceAttachmentCleanup, err := s.prepareWorkspaceAttachmentCleanup(ctx, workspace.ID)
 	if err != nil {
 		return err
 	}
+	cleanups := make([]workspaceDeleteTaskCleanup, 0, len(tasks)+1)
+	if workspaceAttachmentCleanup != nil {
+		cleanups = append(cleanups, workspaceDeleteTaskCleanup{cleanupJob: workspaceAttachmentCleanup})
+	}
+	taskCleanups, err := s.prepareWorkspaceDeleteTaskCleanups(ctx, tasks)
+	if err != nil {
+		cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
+		return errors.Join(err, cancelErr)
+	}
+	cleanups = append(cleanups, taskCleanups...)
+
 	// Record canvas artifact cleanup before the workspace cascade removes its
 	// task and workspace rows. This keeps the release ownership boundary
 	// durable across a process stop between the two operations.
 	if s.canvasCleanup != nil {
 		if err := s.canvasCleanup.CleanupWorkspaceCanvases(ctx, workspace.ID); err != nil {
-			return fmt.Errorf("cleanup workspace canvases before workspace delete: %w", err)
+			return errors.Join(fmt.Errorf("cleanup workspace canvases before workspace delete: %w", err), s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups))
 		}
 	}
-
+	var deletedWorkspaceAttachments []*models.TaskMessageAttachment
 	var deletedTasks []*models.Task
 	var deletedWorkflows []*models.Workflow
 	transactionalCleanup, hasTransactionalCleanup := s.workspaceSecretDeleter.(secrets.WorkspaceSecretTransactionalDeleter)
 	transactionalCascade, hasTransactionalCascade := s.workspaces.(transactionalWorkspaceCascade)
+	useTransactionalCleanup := hasTransactionalCascade &&
+		(hasTransactionalCleanup || s.attachmentSvc != nil)
 	switch {
-	case hasTransactionalCleanup && hasTransactionalCascade:
+	case useTransactionalCleanup:
 		cleanup := func(cleanupCtx context.Context, tx *sqlx.Tx) error {
-			return transactionalCleanup.DeleteWorkspaceSecretsTx(cleanupCtx, tx, workspace.ID)
+			if hasTransactionalCleanup {
+				if err := transactionalCleanup.DeleteWorkspaceSecretsTx(cleanupCtx, tx, workspace.ID); err != nil {
+					return err
+				}
+			}
+			if s.attachmentSvc != nil {
+				var err error
+				deletedWorkspaceAttachments, err = s.attachmentSvc.DeleteWorkspaceAttachmentsTx(
+					cleanupCtx, tx, workspace.ID,
+				)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 		if confirmedName == nil {
 			deletedTasks, deletedWorkflows, err = transactionalCascade.DeleteWorkspaceCascadeWithSecretCleanup(ctx, workspace.ID, cleanup)
@@ -303,24 +412,32 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, *confirmedName)
 	}
 	if err != nil {
-		s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
-		return s.mapWorkspaceDeleteError(workspace.ID, err)
+		cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
+		return s.mapWorkspaceDeleteError(workspace.ID, errors.Join(err, cancelErr))
+	}
+	var postCommitErr error
+	if s.attachmentSvc != nil {
+		s.attachmentSvc.RemoveBytes(deletedWorkspaceAttachments)
 	}
 	if s.workspaceSecretDeleter != nil && (!hasTransactionalCleanup || !hasTransactionalCascade) {
 		if err := s.workspaceSecretDeleter.DeleteWorkspaceSecrets(ctx, workspace.ID); err != nil {
-			s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
 			s.logger.Error("failed to delete workspace secrets", zap.String("workspace_id", workspace.ID), zap.Error(err))
-			return err
+			postCommitErr = errors.Join(postCommitErr, err)
 		}
 	}
-	cleanups = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
+	var lateCleanupErr error
+	cleanups, lateCleanupErr = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
+	postCommitErr = errors.Join(postCommitErr, lateCleanupErr)
 	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
 	s.runWorkspaceDeleteTaskCleanups(cleanups, deletedTasks)
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", workspace.ID))
+	if postCommitErr != nil {
+		return &CascadePostCommitError{Err: postCommitErr}
+	}
 	return nil
-}
 
+}
 func (s *Service) prepareWorkspaceDeleteTaskCleanups(ctx context.Context, tasks []*models.Task) ([]workspaceDeleteTaskCleanup, error) {
 	cleanups := make([]workspaceDeleteTaskCleanup, 0, len(tasks))
 	for _, task := range tasks {
@@ -329,8 +446,8 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanups(ctx context.Context, tasks 
 		}
 		cleanup, err := s.prepareWorkspaceDeleteTaskCleanup(ctx, task)
 		if err != nil {
-			s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
-			return nil, err
+			cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
+			return nil, errors.Join(err, cancelErr)
 		}
 		cleanups = append(cleanups, cleanup)
 	}
@@ -341,13 +458,14 @@ func (s *Service) appendWorkspaceDeleteMissingTaskCleanups(
 	ctx context.Context,
 	cleanups []workspaceDeleteTaskCleanup,
 	deletedTasks []*models.Task,
-) []workspaceDeleteTaskCleanup {
+) ([]workspaceDeleteTaskCleanup, error) {
 	prepared := make(map[string]struct{}, len(cleanups))
 	for _, cleanup := range cleanups {
 		if cleanup.task != nil && cleanup.task.ID != "" {
 			prepared[cleanup.task.ID] = struct{}{}
 		}
 	}
+	var errs []error
 	for _, task := range deletedTasks {
 		if task == nil || task.ID == "" {
 			continue
@@ -360,12 +478,22 @@ func (s *Service) appendWorkspaceDeleteMissingTaskCleanups(
 			s.logger.Error("failed to prepare late workspace task cleanup",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
+			errs = append(errs, fmt.Errorf("prepare late workspace task cleanup %q: %w", task.ID, err))
+			if job, persistErr := s.persistTaskResourceCleanup(
+				ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
+				newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
+				nil, nil, nil, nil, taskEnvironmentCleanup{}, false, false, "",
+			); persistErr != nil {
+				errs = append(errs, fmt.Errorf("persist late workspace task cleanup %q: %w", task.ID, persistErr))
+			} else if job != nil {
+				cleanups = append(cleanups, workspaceDeleteTaskCleanup{task: task, cleanupJob: job})
+			}
 			continue
 		}
 		cleanups = append(cleanups, cleanup)
 		prepared[task.ID] = struct{}{}
 	}
-	return cleanups
+	return cleanups, errors.Join(errs...)
 }
 
 func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *models.Task) (workspaceDeleteTaskCleanup, error) {
@@ -377,7 +505,18 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *m
 	if err != nil {
 		return workspaceDeleteTaskCleanup{}, fmt.Errorf("lookup environment for workspace delete task %q: %w", task.ID, err)
 	}
-	cleanup := workspaceDeleteTaskCleanup{task: task, worktrees: worktrees, taskEnv: taskEnv}
+	var attachments []*models.TaskMessageAttachment
+	attachmentRepo := s.attachments
+	if attachmentRepo == nil && s.attachmentSvc != nil {
+		attachmentRepo = s.attachmentSvc.repo
+	}
+	if attachmentRepo != nil {
+		attachments, err = attachmentRepo.ListMessageAttachmentsByTask(ctx, task.ID)
+		if err != nil {
+			return workspaceDeleteTaskCleanup{}, fmt.Errorf("list attachments for workspace delete task %q: %w", task.ID, err)
+		}
+	}
+	cleanup := workspaceDeleteTaskCleanup{task: task, worktrees: worktrees, taskEnv: taskEnv, attachments: attachments}
 	cleanup.sessions, err = s.sessions.ListTaskSessions(ctx, task.ID)
 	if err != nil {
 		return workspaceDeleteTaskCleanup{}, fmt.Errorf("list task sessions for workspace delete task %q: %w", task.ID, err)
@@ -395,27 +534,46 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *m
 	cleanup.cleanupJob, err = s.persistTaskResourceCleanup(
 		ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
 		newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
-		cleanup.sessions, cleanup.worktrees, cleanup.stopTargets,
-		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}, true,
+		cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, cleanup.attachments,
+		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}, true, true, task.WorkspaceID,
 	)
 	return cleanup, err
 }
-
-func (s *Service) cancelWorkspaceDeleteTaskCleanupJobs(ctx context.Context, cleanups []workspaceDeleteTaskCleanup) {
+func (s *Service) cancelWorkspaceDeleteTaskCleanupJobs(ctx context.Context, cleanups []workspaceDeleteTaskCleanup) error {
+	jobIDs := make([]string, 0, len(cleanups))
+	for _, cleanup := range cleanups {
+		if cleanup.cleanupJob != nil {
+			jobIDs = append(jobIDs, cleanup.cleanupJob.ID)
+		}
+	}
+	s.cancelTaskResourceCleanupRuns(jobIDs)
 	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
 	defer cancel()
+	var cancellationErrs []error
 	for _, cleanup := range cleanups {
 		if cleanup.cleanupJob == nil || s.resourceCleanups == nil {
 			continue
 		}
-		if err := s.resourceCleanups.CompleteTaskResourceCleanupJob(
-			transitionCtx, cleanup.cleanupJob.ID, models.TaskResourceCleanupStateCancelled, "", nil,
-		); err != nil {
-			s.logger.Warn("cancel workspace delete task cleanup job",
-				zap.String("job_id", cleanup.cleanupJob.ID),
-				zap.String("task_id", cleanup.cleanupJob.TaskID), zap.Error(err))
+		cas, ok := s.resourceCleanups.(taskResourceCleanupCancellationCAS)
+		if !ok {
+			cancellationErrs = append(cancellationErrs,
+				fmt.Errorf("%w: cleanup repository cannot fence cancellation for %s",
+					ErrCleanupCancellationRace, cleanup.cleanupJob.ID))
+			continue
+		}
+		cancelled, err := cas.CancelTaskResourceCleanupJobIfPending(transitionCtx, cleanup.cleanupJob.ID)
+		if err != nil {
+			cancellationErrs = append(cancellationErrs, err)
+		} else if !cancelled {
+			cancellationErrs = append(cancellationErrs,
+				fmt.Errorf("%w: workspace-delete cleanup %s was claimed concurrently",
+					ErrCleanupCancellationRace, cleanup.cleanupJob.ID))
 		}
 	}
+	if len(cancellationErrs) > 0 {
+		return errors.Join(cancellationErrs...)
+	}
+	return nil
 }
 
 func (s *Service) publishWorkspaceDeleteChildEvents(ctx context.Context, tasks []*models.Task, workflows []*models.Workflow) {
@@ -454,13 +612,17 @@ func (s *Service) workspaceDeleteTaskCleanupJobs(
 	jobs := make([]workspaceDeleteTaskCleanup, 0, len(cleanups))
 	for _, cleanup := range cleanups {
 		if cleanup.task == nil {
+			if cleanup.cleanupJob != nil {
+				jobs = append(jobs, cleanup)
+			}
 			continue
 		}
 		if _, ok := deletedTaskIDs[cleanup.task.ID]; !ok {
 			continue
 		}
 		hasCleanup := len(cleanup.stopTargets) > 0 || s.worktreeCleanup != nil ||
-			len(cleanup.sessions) > 0 || cleanup.task.IsEphemeral || cleanup.taskEnv != nil
+			len(cleanup.sessions) > 0 || cleanup.task.IsEphemeral || cleanup.taskEnv != nil ||
+			len(cleanup.attachments) > 0
 		if !hasCleanup {
 			continue
 		}
@@ -567,7 +729,7 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 		return nil, err
 	}
 	workflow := &models.Workflow{
-		ID:                 uuid.New().String(),
+		ID:                 req.ID,
 		WorkspaceID:        req.WorkspaceID,
 		Name:               req.Name,
 		Description:        req.Description,
@@ -575,10 +737,23 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 		WorkflowTemplateID: req.WorkflowTemplateID,
 		Hidden:             req.Hidden,
 	}
+	if workflow.ID == "" {
+		workflow.ID = uuid.New().String()
+	}
 
-	if err := s.workflows.CreateWorkflow(ctx, workflow); err != nil {
-		s.logger.Error("failed to create workflow", zap.Error(err))
-		return nil, err
+	var createErr error
+	if req.ExpectedWorkspaceUpdatedAt != nil {
+		creator, ok := s.workflows.(exactWorkflowCreator)
+		if !ok {
+			return nil, errors.New("workflow creation version fencing is unavailable")
+		}
+		createErr = creator.CreateWorkflowIfWorkspaceUnchanged(ctx, workflow, *req.ExpectedWorkspaceUpdatedAt)
+	} else {
+		createErr = s.workflows.CreateWorkflow(ctx, workflow)
+	}
+	if createErr != nil {
+		s.logger.Error("failed to create workflow", zap.Error(createErr))
+		return nil, createErr
 	}
 
 	// Create workflow steps from template if specified
@@ -614,6 +789,9 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	if err != nil {
 		return nil, err
 	}
+	if req.ExpectedUpdatedAt != nil && !workflow.UpdatedAt.Equal(*req.ExpectedUpdatedAt) {
+		return nil, repoerrors.ErrTaskVersionConflict
+	}
 
 	if req.Name != nil {
 		workflow.Name = *req.Name
@@ -629,14 +807,34 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	}
 	workflow.UpdatedAt = time.Now().UTC()
 
-	if err := s.workflows.UpdateWorkflow(ctx, workflow); err != nil {
-		s.logger.Error("failed to update workflow", zap.String("workflow_id", id), zap.Error(err))
-		return nil, err
+	var updateErr error
+	if req.ExpectedUpdatedAt != nil {
+		updater, ok := s.workflows.(exactWorkflowVersionUpdater)
+		if !ok {
+			return nil, errors.New("workflow version fencing is unavailable")
+		}
+		updateErr = updater.UpdateWorkflowIfUnchanged(ctx, workflow, *req.ExpectedUpdatedAt)
+	} else {
+		workflow, updateErr = s.workflows.UpdateWorkflowFields(ctx, id, models.WorkflowFieldUpdate{
+			Name: req.Name, Description: req.Description, Prompt: req.Prompt, AgentProfileID: normalizedWorkflowProfile(req.AgentProfileID),
+		})
+	}
+	if updateErr != nil {
+		s.logger.Error("failed to update workflow", zap.String("workflow_id", id), zap.Error(updateErr))
+		return nil, updateErr
 	}
 
 	s.publishWorkflowEvent(ctx, events.WorkflowUpdated, workflow)
 	s.logger.Info("workflow updated", zap.String("workflow_id", workflow.ID))
 	return workflow, nil
+}
+
+func normalizedWorkflowProfile(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	return &trimmed
 }
 
 // SetWorkflowHidden flips the hidden flag on a workflow. Used by system
@@ -650,9 +848,8 @@ func (s *Service) SetWorkflowHidden(ctx context.Context, id string, hidden bool)
 	if workflow.Hidden == hidden {
 		return nil
 	}
-	workflow.Hidden = hidden
-	workflow.UpdatedAt = time.Now().UTC()
-	if err := s.workflows.UpdateWorkflow(ctx, workflow); err != nil {
+	workflow, err = s.workflows.UpdateWorkflowFields(ctx, id, models.WorkflowFieldUpdate{Hidden: &hidden})
+	if err != nil {
 		s.logger.Error("failed to update workflow hidden flag", zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}
@@ -671,10 +868,8 @@ func (s *Service) SetWorkflowSource(ctx context.Context, id, source, sourcePath 
 	if workflow.Source == source && workflow.SourcePath == sourcePath {
 		return nil
 	}
-	workflow.Source = source
-	workflow.SourcePath = sourcePath
-	workflow.UpdatedAt = time.Now().UTC()
-	if err := s.workflows.UpdateWorkflow(ctx, workflow); err != nil {
+	workflow, err = s.workflows.UpdateWorkflowFields(ctx, id, models.WorkflowFieldUpdate{Source: &source, SourcePath: &sourcePath})
+	if err != nil {
 		s.logger.Error("failed to update workflow source", zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}
@@ -686,6 +881,29 @@ func (s *Service) SetWorkflowSource(ctx context.Context, id, source, sourcePath 
 // they do not linger as orphan rows pointing at a workflow_id that no longer
 // exists (the tasks.workflow_id FK was dropped to support empty workflow_id
 // on ephemeral tasks, so SQLite cannot cascade for us).
+func (s *Service) listWorkflowTasksForDelete(
+	ctx context.Context,
+	workflow *models.Workflow,
+) ([]*models.Task, error) {
+	var all []*models.Task
+	for page := 1; ; page++ {
+		lister, ok := s.tasks.(workflowDeleteTaskLister)
+		if !ok {
+			return nil, errors.New("task repository cannot enumerate all task origins for workflow deletion")
+		}
+		tasks, total, err := lister.ListTasksForDeletion(
+			ctx, workflow.WorkspaceID, workflow.ID, page, workspaceDeletePageSize,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("list tasks for workflow delete cascade: %w", err)
+		}
+		all = append(all, tasks...)
+		if len(tasks) == 0 || len(all) >= total {
+			return all, nil
+		}
+	}
+}
+
 func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	if err := s.authorizeWorkflowID(ctx, id); err != nil {
 		return err
@@ -698,13 +916,14 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 		return fmt.Errorf("workflow not found: %s", id)
 	}
 
-	tasks, err := s.tasks.ListTasks(ctx, id)
+	tasks, err := s.listWorkflowTasksForDelete(ctx, workflow)
 	if err != nil {
 		s.logger.Error("failed to list tasks for workflow delete cascade",
 			zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}
 	archived := 0
+	var postCommitErr error
 	for _, task := range tasks {
 		if task == nil || task.WorkspaceID != workflow.WorkspaceID {
 			taskID, taskWorkspaceID := "", ""
@@ -719,9 +938,28 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 				zap.String("task_workspace_id", taskWorkspaceID))
 			continue
 		}
-		if err := s.ArchiveTask(ctx, task.ID); err != nil {
-			// Concurrent archive between ListTasks and here is a no-op:
-			// the task is already in the desired state, keep cascading.
+
+		var archiveErr error
+		if s.workflowTaskArchiveCoordinator != nil {
+			outcome, err := s.workflowTaskArchiveCoordinator.ArchiveTaskTree(ctx, task.ID, false)
+			if outcome != nil && len(outcome.ArchivedTaskIDs) > 0 {
+				archived += len(outcome.ArchivedTaskIDs)
+			}
+			var cascadePostCommitErr *CascadePostCommitError
+			if errors.As(err, &cascadePostCommitErr) {
+				s.logger.Warn("workflow task archived with post-commit lifecycle errors",
+					zap.String("workflow_id", id), zap.String("task_id", task.ID), zap.Error(err))
+				postCommitErr = errors.Join(postCommitErr, err)
+				continue
+			}
+		} else {
+			archiveErr = s.ArchiveTask(ctx, task.ID)
+			if errors.Is(archiveErr, ErrTaskAlreadyArchived) {
+				continue
+			}
+		}
+		if archiveErr != nil {
+			err = archiveErr
 			if errors.Is(err, ErrTaskAlreadyArchived) {
 				continue
 			}
@@ -731,7 +969,9 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 				zap.Error(err))
 			return err
 		}
-		archived++
+		if s.workflowTaskArchiveCoordinator == nil {
+			archived++
+		}
 	}
 
 	if err := s.workflows.DeleteWorkflow(ctx, id); err != nil {
@@ -743,6 +983,9 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	s.logger.Info("workflow deleted",
 		zap.String("workflow_id", id),
 		zap.Int("archived_tasks", archived))
+	if postCommitErr != nil {
+		return &CascadePostCommitError{Err: postCommitErr}
+	}
 	return nil
 }
 
@@ -784,6 +1027,26 @@ func (s *Service) ReorderWorkflows(ctx context.Context, workspaceID string, work
 	return nil
 }
 
+// ReorderWorkflowsIfUnchanged reorders a complete workspace workflow list only
+// while the workspace and every workflow still match the observed versions.
+func (s *Service) ReorderWorkflowsIfUnchanged(
+	ctx context.Context, workspaceID string, workflowIDs []string, expectedWorkspace time.Time, expectedByID map[string]time.Time,
+) error {
+	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
+		return err
+	}
+	reorderer, ok := s.workflows.(exactWorkflowReorderer)
+	if !ok {
+		return errors.New("workflow reorder version fencing is unavailable")
+	}
+	if err := reorderer.ReorderWorkflowsIfUnchanged(ctx, workspaceID, workflowIDs, expectedWorkspace, expectedByID); err != nil {
+		s.logger.Error("failed to reorder workflows", zap.String("workspace_id", workspaceID), zap.Error(err))
+		return err
+	}
+	s.logger.Info("reordered workflows", zap.String("workspace_id", workspaceID), zap.Int("count", len(workflowIDs)))
+	return nil
+}
+
 // Repository operations
 
 func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryRequest) (*models.Repository, error) {
@@ -801,6 +1064,7 @@ func (s *Service) createRepositoryWithCanonicalPath(
 	return s.createRepository(ctx, req, req.LocalPath, false)
 }
 
+//nolint:nestif // Repository creation resolves provider details before updating workspace projections.
 func (s *Service) createRepository(
 	ctx context.Context,
 	req *CreateRepositoryRequest,
@@ -844,7 +1108,7 @@ func (s *Service) createRepository(
 		return nil, err
 	}
 	repository := &models.Repository{
-		ID:                     uuid.New().String(),
+		ID:                     req.ID,
 		WorkspaceID:            req.WorkspaceID,
 		Name:                   req.Name,
 		SourceType:             sourceType,
@@ -866,12 +1130,28 @@ func (s *Service) createRepository(
 		CopyFiles:              req.CopyFiles,
 		SecretBindings:         bindings,
 	}
+	if repository.ID == "" {
+		repository.ID = uuid.New().String()
+	}
 
 	if resolveProvider {
 		resolveRepositoryProviderIdentity(repository)
 	}
 
-	if mutator, ok := s.repoEntities.(taskrepo.RepositorySecretBindingMutator); ok {
+	if err := validateProviderScopeAndRepoIDPair(repository.ProviderScope, repository.ProviderRepoID); err != nil {
+		return nil, err
+	}
+
+	if req.ExpectedWorkspaceUpdatedAt != nil {
+		creator, ok := s.repoEntities.(exactRepositoryCreator)
+		if !ok {
+			return nil, errors.New("repository registration version fencing is unavailable")
+		}
+		if err := creator.CreateRepositoryIfWorkspaceUnchanged(ctx, repository, *req.ExpectedWorkspaceUpdatedAt); err != nil {
+			s.logger.Error("failed to create repository", zap.Error(err))
+			return nil, err
+		}
+	} else if mutator, ok := s.repoEntities.(taskrepo.RepositorySecretBindingMutator); ok {
 		if err := mutator.CreateRepositoryWithSecretBindings(ctx, repository, bindings); err != nil {
 			s.logger.Error("failed to create repository", zap.Error(err))
 			return nil, err
@@ -990,10 +1270,7 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 	req.ProviderName = strings.TrimSpace(req.ProviderName)
 	req.RemoteURL = strings.TrimSpace(req.RemoteURL)
 	req.ProviderHost = normalizeProviderHost(req.Provider, req.ProviderHost)
-	existing, err := s.repoEntities.GetRepositoryByProviderIdentity(ctx, models.ProviderRepositoryIdentity{
-		WorkspaceID: req.WorkspaceID, Provider: req.Provider, Scope: req.ProviderScope,
-		RepositoryID: req.ProviderRepoID, Host: req.ProviderHost, Owner: req.ProviderOwner, Name: req.ProviderName,
-	})
+	existing, err := s.findRepositoryForRemoteSelection(ctx, req)
 	if err != nil {
 		return nil, false, fmt.Errorf("lookup repository: %w", err)
 	}
@@ -1125,6 +1402,9 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			return nil, repoerrors.ErrRepositoryNotFound
 		}
 	}
+	if req.ExpectedUpdatedAt != nil && (repository == nil || !repository.UpdatedAt.Equal(*req.ExpectedUpdatedAt)) {
+		return nil, repoerrors.ErrTaskVersionConflict
+	}
 	updates := *req
 	if req.LocalPath != nil {
 		localPath, pathErr := canonicalRepositoryLocalPath(*req.LocalPath)
@@ -1151,11 +1431,30 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 		if !ok {
 			return nil, fmt.Errorf("%w: repository secret bindings are unavailable", ErrInvalidRepositorySettings)
 		}
-		if err := mutator.UpdateRepositoryWithSecretBindings(ctx, repository, replacement); err != nil {
+		var updateErr error
+		if req.ExpectedUpdatedAt != nil {
+			exact, exactOK := s.repoEntities.(exactRepositoryUpdater)
+			if !exactOK {
+				return nil, errors.New("repository update version fencing is unavailable")
+			}
+			updateErr = exact.UpdateRepositoryWithSecretBindingsIfUnchanged(ctx, repository, replacement, *req.ExpectedUpdatedAt)
+		} else {
+			updateErr = mutator.UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx, repository, replacement, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree})
+		}
+		if updateErr != nil {
+			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(updateErr))
+			return nil, updateErr
+		}
+	} else if req.ExpectedUpdatedAt != nil {
+		updater, ok := s.repoEntities.(exactRepositoryUpdater)
+		if !ok {
+			return nil, errors.New("repository update version fencing is unavailable")
+		}
+		if err := updater.UpdateRepositoryIfUnchanged(ctx, repository, *req.ExpectedUpdatedAt); err != nil {
 			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 			return nil, err
 		}
-	} else if err := s.repoEntities.UpdateRepository(ctx, repository); err != nil {
+	} else if err := s.repoEntities.UpdateRepositoryWithCheckoutIntent(ctx, repository, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree}); err != nil {
 		s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -1247,6 +1546,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 	if req.ProviderName != nil {
 		repository.ProviderName = *req.ProviderName
 	}
+	if req.RemoteURL != nil {
+		repository.RemoteURL = strings.TrimSpace(*req.RemoteURL)
+	}
 	if req.DefaultBranch != nil {
 		if *req.DefaultBranch != "" && !securityutil.IsValidDefaultBranchName(*req.DefaultBranch) {
 			return fmt.Errorf("%w: invalid default branch", ErrInvalidRepositorySettings)
@@ -1284,6 +1586,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 			return fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
 		}
 		repository.CopyFiles = *req.CopyFiles
+	}
+	if err := validateProviderScopeAndRepoIDPair(repository.ProviderScope, repository.ProviderRepoID); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1550,10 +1855,41 @@ func (s *Service) ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []stri
 
 var ErrKubernetesAdminRequired = errors.New("administrator identity required for Kubernetes settings")
 
+// ErrRemoteDockerAdminRequired gates remote Docker executor mutation. A saved
+// profile grants effective root on the remote host, so it is not an ordinary
+// member operation.
+var ErrRemoteDockerAdminRequired = errors.New("administrator identity required for remote Docker settings")
+
 func requireKubernetesAdmin(ctx context.Context) error {
 	identity, ok := authn.IdentityFromContext(ctx)
 	if !ok || !identity.IsAdmin() {
 		return ErrKubernetesAdminRequired
+	}
+	return nil
+}
+
+func requireRemoteDockerAdmin(ctx context.Context) error {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || !identity.IsAdmin() {
+		return ErrRemoteDockerAdminRequired
+	}
+	return nil
+}
+
+// requireExecutorTypeAdmin applies the admin gate for executor types whose
+// configuration is an administrative grant over a machine.
+func requireExecutorTypeAdmin(ctx context.Context, types ...models.ExecutorType) error {
+	for _, t := range types {
+		switch t {
+		case models.ExecutorTypeKubernetes:
+			if err := requireKubernetesAdmin(ctx); err != nil {
+				return err
+			}
+		case models.ExecutorTypeRemoteDocker:
+			if err := requireRemoteDockerAdmin(ctx); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -1579,10 +1915,11 @@ func validateKubernetesProfileConfig(config map[string]string) error {
 }
 
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
-	if req.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return nil, err
-		}
+	if req.Type == models.ExecutorTypePluginRemote {
+		return nil, fmt.Errorf("%w: plugin remote executors are provider-owned", ErrInvalidExecutorConfig)
+	}
+	if err := requireExecutorTypeAdmin(ctx, req.Type); err != nil {
+		return nil, err
 	}
 	if err := validateExecutorForType(req.Type, req.Config); err != nil {
 		return nil, err
@@ -1601,11 +1938,30 @@ func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest
 		return nil, err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorCreated, executor)
+	s.notifyExecutorSaved(ctx, nil, executor)
 	return executor, nil
 }
 
+// notifyExecutorSaved forwards a committed executor create/update to the
+// wired ExecutorSaveObserver, if any. before is nil on create.
+func (s *Service) notifyExecutorSaved(ctx context.Context, before, after *models.Executor) {
+	if s.executorSaveObserver == nil {
+		return
+	}
+	s.executorSaveObserver.OnExecutorSaved(ctx, before, after)
+}
+
 func (s *Service) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
-	return s.executors.GetExecutor(ctx, id)
+	providers, err := s.syncPluginExecutorEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	executor, err := s.executors.GetExecutor(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	s.attachExecutorProvider(executor, providers)
+	return executor, nil
 }
 
 func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExecutorRequest) (*models.Executor, error) {
@@ -1613,14 +1969,15 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	if err != nil {
 		return nil, err
 	}
+	if executor.Type == models.ExecutorTypePluginRemote || (req.Type != nil && *req.Type == models.ExecutorTypePluginRemote) {
+		return nil, fmt.Errorf("%w: plugin remote executors are provider-owned", ErrInvalidExecutorConfig)
+	}
 	targetType := executor.Type
 	if req.Type != nil {
 		targetType = *req.Type
 	}
-	if executor.Type == models.ExecutorTypeKubernetes || targetType == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return nil, err
-		}
+	if err := requireExecutorTypeAdmin(ctx, executor.Type, targetType); err != nil {
+		return nil, err
 	}
 	if err := validateExecutorUpdateRequest(executor, req); err != nil {
 		return nil, err
@@ -1637,12 +1994,17 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 			return nil, ErrActiveTaskSessions
 		}
 	}
+	if err := s.guardRetainedRemoteDockerConnection(ctx, executor, req); err != nil {
+		return nil, err
+	}
+	before := *executor
 	applyExecutorUpdates(executor, req)
 	executor.UpdatedAt = time.Now().UTC()
 	if err := s.executors.UpdateExecutor(ctx, executor); err != nil {
 		return nil, err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorUpdated, executor)
+	s.notifyExecutorSaved(ctx, &before, executor)
 	return executor, nil
 }
 
@@ -1703,10 +2065,11 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if executor.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return err
-		}
+	if executor.Type == models.ExecutorTypePluginRemote {
+		return fmt.Errorf("%w: plugin remote executors are provider-owned", ErrInvalidExecutorConfig)
+	}
+	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+		return err
 	}
 	if executor.IsSystem {
 		return fmt.Errorf("system executors cannot be deleted")
@@ -1719,11 +2082,16 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if active {
 		return ErrActiveTaskSessions
 	}
-	if executor.Type == models.ExecutorTypeKubernetes {
+	// Both types retain compute past an ordinary stop, and both are reached
+	// again through this row: deleting it soft-deletes the only record that
+	// says where the Pod or container lives.
+	if executor.Type == models.ExecutorTypeKubernetes || executor.Type == models.ExecutorTypeRemoteDocker {
 		retained, inventoryErr := s.hasExecutorRunningInventory(ctx, id)
 		if inventoryErr != nil {
-			s.logger.Error("failed to check retained Kubernetes inventory for executor",
-				zap.String("executor_id", id), zap.Error(inventoryErr))
+			s.logger.Error("failed to check retained inventory for executor",
+				zap.String("executor_id", id),
+				zap.String("executor_type", string(executor.Type)),
+				zap.Error(inventoryErr))
 			return inventoryErr
 		}
 		if retained {
@@ -1737,7 +2105,64 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	return nil
 }
 
+// remoteDockerConnectionKeys are the config fields that decide which daemon a
+// remote Docker profile reaches.
+// The keys are spelled locally, as this package already does for the SSH
+// executor, rather than importing the runtime tier.
+var remoteDockerConnectionKeys = []string{
+	sshMetaHost,
+	sshMetaHostAlias,
+	sshMetaPort,
+	sshMetaUser,
+	sshMetaIdentitySource,
+	sshMetaIdentityFile,
+	sshMetaProxyJump,
+}
+
+// guardRetainedRemoteDockerConnection refuses to repoint a remote Docker
+// executor while a container it created is still retained.
+//
+// An ordinary stop preserves the container, and every later inspect, resume,
+// and teardown reaches it through this row's current connection. Changing the
+// connection leaves that container on the original host with nothing pointing
+// at it. Fields that do not select a daemon, a rename for instance, stay
+// editable: the guard protects reachability, not the row. The fingerprint is
+// intentionally excluded because an administrator must be able to re-trust
+// the same daemon after a legitimate host-key rotation.
+func (s *Service) guardRetainedRemoteDockerConnection(
+	ctx context.Context, executor *models.Executor, req *UpdateExecutorRequest,
+) error {
+	if executor.Type != models.ExecutorTypeRemoteDocker || req.Config == nil {
+		return nil
+	}
+	if !remoteDockerConnectionChanged(executor.Config, req.Config) {
+		return nil
+	}
+	retained, err := s.hasExecutorRunningInventory(ctx, executor.ID)
+	if err != nil {
+		s.logger.Error("failed to check retained remote Docker inventory before a connection change",
+			zap.String("executor_id", executor.ID), zap.Error(err))
+		return err
+	}
+	if retained {
+		return ErrActiveTaskSessions
+	}
+	return nil
+}
+
+func remoteDockerConnectionChanged(current, next map[string]string) bool {
+	for _, key := range remoteDockerConnectionKeys {
+		if strings.TrimSpace(current[key]) != strings.TrimSpace(next[key]) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) hasExecutorRunningInventory(ctx context.Context, executorID string) (bool, error) {
+	if retained, err := s.hasKubernetesEnvironmentInventory(ctx, executorID); err != nil || retained {
+		return retained, err
+	}
 	running, err := s.executors.ListExecutorsRunning(ctx)
 	if err != nil {
 		return false, err
@@ -1766,7 +2191,18 @@ func (s *Service) hasExecutorRunningInventory(ctx context.Context, executorID st
 }
 
 func (s *Service) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
-	return s.executors.ListExecutors(ctx)
+	providers, err := s.syncPluginExecutorEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	executors, err := s.executors.ListExecutors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, executor := range executors {
+		s.attachExecutorProvider(executor, providers)
+	}
+	return executors, nil
 }
 
 // Executor Profile operations
@@ -1779,14 +2215,17 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 		return nil, fmt.Errorf("executor_id is required")
 	}
 	// Verify executor exists
-	executor, err := s.executors.GetExecutor(ctx, req.ExecutorID)
+	executor, err := s.GetExecutor(ctx, req.ExecutorID)
 	if err != nil {
 		return nil, fmt.Errorf("executor not found: %w", err)
 	}
+	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+		return nil, err
+	}
+	if executor.Type == models.ExecutorTypePluginRemote {
+		return s.createPluginExecutorProfile(ctx, executor, req)
+	}
 	if executor.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return nil, err
-		}
 		if err := validateKubernetesProfileConfig(req.Config); err != nil {
 			return nil, err
 		}
@@ -1822,14 +2261,17 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	if err != nil {
 		return nil, err
 	}
-	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
+	executor, err := s.GetExecutor(ctx, profile.ExecutorID)
 	if err != nil {
 		return nil, err
 	}
+	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+		return nil, err
+	}
+	if executor.Type == models.ExecutorTypePluginRemote {
+		return s.updatePluginExecutorProfile(ctx, profile, executor, req)
+	}
 	if executor.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return nil, err
-		}
 		config := profile.Config
 		if req.Config != nil {
 			config = req.Config
@@ -1866,7 +2308,10 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	if req.ExpectedUpdatedAt != nil {
 		updateErr = s.executors.UpdateExecutorProfileIfUnmodified(ctx, profile, *req.ExpectedUpdatedAt)
 	} else {
-		updateErr = s.executors.UpdateExecutorProfile(ctx, profile)
+		updateErr = s.executors.UpdateExecutorProfileWithScriptIntent(ctx, profile, models.ExecutorProfileScriptIntent{
+			PrepareScript: req.PrepareScript,
+			CleanupScript: req.CleanupScript,
+		})
 	}
 	if updateErr != nil {
 		return nil, updateErr
@@ -1945,18 +2390,30 @@ func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
+	executor, err := s.GetExecutor(ctx, profile.ExecutorID)
 	if err != nil && !errors.Is(err, models.ErrExecutorNotFound) {
 		return err
 	}
-	if executor != nil && executor.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
+	if executor != nil {
+		if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
 			return err
 		}
+	}
+	profileInUse, _, err := s.retainedPluginExecutorReferences(ctx, id, nil)
+	if err != nil {
+		return err
+	}
+	if profileInUse {
+		return ErrExecutorProfileInUse
+	}
+	secretIDs, err := s.executorProfileSecretIDs(ctx, profile)
+	if err != nil {
+		return err
 	}
 	if err := s.executors.DeleteExecutorProfile(ctx, id); err != nil {
 		return err
 	}
+	cleanupProfileSecrets(ctx, s.secretStore, secretIDs)
 	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileDeleted, profile)
 	return nil
 }

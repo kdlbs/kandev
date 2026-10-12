@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 const TASK_VISIBLE_TIMEOUT = 10_000;
 const TASK_A = "Task in workflow A";
@@ -131,6 +132,7 @@ test.describe("Kanban step visibility filter", () => {
 
     // Switch to All Workflows so both swimlanes are visible
     await testPage.getByTestId("display-button").click();
+    await expandDisplaySettingsGroup(testPage, "filters");
     await testPage.getByTestId("display-workflow-filter").click();
     const listbox = testPage.getByRole("listbox");
     await listbox.getByRole("option", { name: "All Workflows", exact: true }).click();
@@ -222,6 +224,7 @@ test.describe("Kanban step visibility filter", () => {
 
     // Switch to All Workflows
     await testPage.getByTestId("display-button").click();
+    await expandDisplaySettingsGroup(testPage, "filters");
     await testPage.getByTestId("display-workflow-filter").click();
     const listbox = testPage.getByRole("listbox");
     await listbox.getByRole("option", { name: "All Workflows", exact: true }).click();
@@ -273,6 +276,7 @@ test.describe("Kanban step visibility filter", () => {
 
     // Switch to All Workflows
     await testPage.getByTestId("display-button").click();
+    await expandDisplaySettingsGroup(testPage, "filters");
     await testPage.getByTestId("display-workflow-filter").click();
     const listbox = testPage.getByRole("listbox");
     await listbox.getByRole("option", { name: "All Workflows", exact: true }).click();
@@ -329,6 +333,7 @@ test.describe("Kanban step visibility filter", () => {
     // Switch to All Workflows so both retained lanes are eligible for the
     // empty-state decision.
     await testPage.getByTestId("display-button").click();
+    await expandDisplaySettingsGroup(testPage, "filters");
     await testPage.getByTestId("display-workflow-filter").click();
     const listbox = testPage.getByRole("listbox");
     await listbox.getByRole("option", { name: "All Workflows", exact: true }).click();

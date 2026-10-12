@@ -5,7 +5,11 @@ description: "Set up Kandev, find the owning subsystem, run focused checks, upda
 
 # Contributing to Kandev
 
-Kandev combines a Go server and native launcher, a Vite/React web client, a TypeScript development supervisor and npm shim, a Tauri desktop shell, and task-environment helpers. Begin at the subsystem that owns the behavior; do not recreate its rules in a neighboring layer.
+Kandev ships the web client inside a native Go application binary. The source
+tree also contains the Vite/React web client, a TypeScript development
+supervisor and npm shim, a Tauri desktop shell, and task-environment helpers.
+Begin at the subsystem that owns the behavior. Do not recreate its rules in a
+neighboring layer.
 
 ## Quick path
 
@@ -68,6 +72,15 @@ Automatic port selection only applies when no port was requested, and `KANDEV_BA
 make dev PORT=38430 WEB_PORT=37430
 ```
 
+On macOS, run `make desktop-dev` to open the native Tauri shell with its bundled
+runtime. The backend uses the checkout's `.kandev-dev/` home, database at
+`.kandev-dev/data/kandev.db`, logs under `.kandev-dev/logs/`, and the dev
+runtime profile. This shares state with `make dev`, so run only one of these
+commands at a time. The existing home-owner error is shown if another process
+already uses that state. The desktop command builds its runtime before launch;
+restart it after changing the backend or web application because those parts do
+not live reload in the shell.
+
 `make dev-web` starts only Vite on its fixed development port; it has no live API by itself. `make dev-backend` starts only the backend with the normal production-profile home unless you override it. For an intentionally isolated backend-only run:
 
 ```bash
@@ -76,7 +89,11 @@ KANDEV_HOME_DIR="$PWD/.kandev-dev" KANDEV_DEBUG_DEV_MODE=true make dev-backend
 
 One backend owns a Kandev home at a time. Raw backend commands use the normal home by default, so a second backend with that home stops before it changes shared state. For an intentional second backend, use a separate `KANDEV_HOME_DIR`, database, and port.
 
-Use `make build` for a production build. Use `make start` for a production-shaped local start; it installs dependencies, builds and synchronizes the embedded web application, then launches Kandev and writes `<resolved-home>/logs/backend-logs.log`.
+Use `make build` for a production build. It builds the web application, copies
+its assets into the Go embed tree, and builds the native `kandev` binary. Use
+`make start` for a production-shaped local start. It installs dependencies,
+builds and synchronizes the embedded web application, then launches Kandev and
+writes `<resolved-home>/logs/backend-logs.log`.
 
 ## Find the owner
 

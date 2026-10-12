@@ -24,8 +24,13 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useAppStore } from "@/components/state-provider";
+import { useWorkflowBoardDemand } from "@/hooks/domains/kanban/use-workflow-board-demand";
 import { useSwimlaneCollapse } from "@/hooks/domains/kanban/use-swimlane-collapse";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import {
+  buildTaskVcsSearchIndex,
+  getTaskPRsByTaskIdForCurrentWorkspace,
+} from "@/lib/kanban/task-search-index";
 import { selectVisibleWorkflows } from "@/lib/kanban/workflow-swimlanes";
 import { reorderWorkflows } from "@/lib/api";
 import { SwimlaneSection } from "./swimlane-section";
@@ -71,6 +76,7 @@ export type SwimlaneContainerProps = {
   isMultiSelectMode?: boolean;
   onToggleMultiSelect?: () => void;
   onWorkflowChange?: (workflowId: string | null) => void;
+  onSnapshotDemandChange?: (workflowIds: string[]) => void;
 };
 
 type EmptyMessageOptions = {
@@ -88,7 +94,8 @@ function getEmptyMessage({
   visibleWorkflows,
   showEmptyBoard,
 }: EmptyMessageOptions): string | null {
-  if (isLoading && Object.keys(snapshots).length === 0) return t("common:loading");
+  if (isLoading && Object.keys(snapshots).length === 0 && orderedWorkflows.length === 0)
+    return t("common:loading");
   if (orderedWorkflows.length === 0) return t("kanban:noWorkflowsAvailableYet");
   if (visibleWorkflows.length === 0 && !showEmptyBoard) return t("kanban:noTasksYet");
   return null;
@@ -107,11 +114,14 @@ function renderEmptyState(emptyMessage: string) {
 const EMPTY_SELECTED_REPOSITORY_IDS: string[] = [];
 const EMPTY_WORKFLOW_STEPS: WorkflowSnapshotData["steps"] = [];
 const WORKFLOW_POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 8 } };
+/** Stable identity so a workspace with no GitLab MRs does not re-trigger downstream memos. */
+const EMPTY_TASK_MRS_BY_TASK_ID: Record<string, never[]> = {};
 
 type WorkflowItemProps = {
   wf: { id: string; name: string };
   repoFilter: Set<string>;
   searchQuery: string;
+  vcsSearchTextByTaskId?: Record<string, string>;
   matchesPluginTaskFilters?: (taskId: string) => boolean;
   ViewComponent: ComponentType<ViewContentProps>;
   hideHeader: boolean;
@@ -133,6 +143,7 @@ type WorkflowItemProps = {
   isMultiSelectMode?: boolean;
   onToggleMultiSelect?: () => void;
   fillHeight?: boolean;
+  compactHeight?: boolean;
   mobileWorkflowNavigation?: MobileWorkflowNavigation;
   onToggleStepVisibility: (workflowId: string, stepId: string) => void;
   onToggleAutoHideEmpty: (workflowId: string) => void;
@@ -163,6 +174,8 @@ const SortableWorkflowItem = memo(function SortableWorkflowItem({
   return (
     <div
       ref={setNodeRef}
+      data-workflow-id={wf.id}
+      data-testid={`workflow-lane-${wf.id}`}
       style={style}
       className={fillHeight ? "h-full min-h-0 flex-1" : undefined}
     >
@@ -187,6 +200,7 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
   wf,
   repoFilter,
   searchQuery,
+  vcsSearchTextByTaskId,
   matchesPluginTaskFilters,
   ViewComponent,
   hideHeader,
@@ -200,7 +214,13 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
   ...viewProps
 }: WorkflowItemContentProps) {
   const { snapshot, tasks, occupancyTasks, hiddenStepIds, hiddenSet, autoHideEmpty } =
-    useWorkflowSwimlaneData(wf.id, repoFilter, searchQuery, matchesPluginTaskFilters);
+    useWorkflowSwimlaneData(
+      wf.id,
+      repoFilter,
+      searchQuery,
+      matchesPluginTaskFilters,
+      vcsSearchTextByTaskId,
+    );
   const snapshotSteps = snapshot?.steps ?? EMPTY_WORKFLOW_STEPS;
   const derivedAutoHiddenSet = useMemo(
     () => deriveAutoHiddenStepIds(snapshotSteps, occupancyTasks, autoHideEmpty, hiddenStepIds),
@@ -215,17 +235,18 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
     () => moveTargetSteps.filter((step) => !autoHiddenSet.has(step.id)),
     [moveTargetSteps, autoHiddenSet],
   );
-  const content = (
-    <ViewComponent
-      workflowId={wf.id}
-      steps={steps}
-      moveTargetSteps={moveTargetSteps}
-      tasks={tasks}
-      {...viewProps}
-    />
-  );
-
-  if (!snapshot) return null;
+  const content =
+    snapshot || viewProps.mobileWorkflowNavigation ? (
+      <ViewComponent
+        workflowId={wf.id}
+        steps={steps}
+        moveTargetSteps={moveTargetSteps}
+        tasks={tasks}
+        {...viewProps}
+      />
+    ) : (
+      <div className="min-h-56" />
+    );
 
   if (hideHeader) {
     return <div className={fillHeight ? "h-full min-h-0" : undefined}>{content}</div>;
@@ -291,6 +312,27 @@ function useWorkflowReorder(
   return { sensors, canSort, handleDragEnd };
 }
 
+/** One lowercase `#<number>` haystack per task, built from its linked PRs/MRs in the active workspace. */
+function useVcsSearchIndex() {
+  const taskPRsByTaskId = useAppStore((state) =>
+    getTaskPRsByTaskIdForCurrentWorkspace(
+      state.taskPRs,
+      state.workspaces.activeId,
+      state.workspaceContextGeneration,
+    ),
+  );
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const taskMRsByTaskId = useAppStore(
+    (state) =>
+      (activeWorkspaceId && state.taskMRs.byWorkspaceId[activeWorkspaceId]) ||
+      EMPTY_TASK_MRS_BY_TASK_ID,
+  );
+  return useMemo(
+    () => buildTaskVcsSearchIndex(taskPRsByTaskId, taskMRsByTaskId),
+    [taskMRsByTaskId, taskPRsByTaskId],
+  );
+}
+
 function getRenderedWorkflows(
   isMobileKanban: boolean,
   focusedWorkflowId: string | null,
@@ -319,10 +361,12 @@ type WorkflowItemsProps = {
   workflows: { id: string; name: string }[];
   repoFilter: Set<string>;
   searchQuery: string;
+  vcsSearchTextByTaskId?: Record<string, string>;
   matchesPluginTaskFilters?: (taskId: string) => boolean;
   ViewComponent: ComponentType<ViewContentProps>;
   hideHeaders: boolean;
   fillHeight: boolean;
+  compactHeight: boolean;
   isMobileKanban: boolean;
   onToggleStepVisibility: (workflowId: string, stepId: string) => void;
   onToggleAutoHideEmpty: (workflowId: string) => void;
@@ -337,10 +381,12 @@ function WorkflowItems({
   workflows,
   repoFilter,
   searchQuery,
+  vcsSearchTextByTaskId,
   matchesPluginTaskFilters,
   ViewComponent,
   hideHeaders,
   fillHeight,
+  compactHeight,
   isMobileKanban,
   onToggleStepVisibility,
   onToggleAutoHideEmpty,
@@ -351,17 +397,19 @@ function WorkflowItems({
   mobileWorkflowNavigation,
 }: WorkflowItemsProps) {
   return workflows.map((workflow, index) => {
-    const collapsed = isCollapsed(workflow.id);
+    const collapsed = !hideHeaders && isCollapsed(workflow.id);
     return (
       <SortableWorkflowItem
         key={isMobileKanban ? "mobile-active-workflow" : workflow.id}
         wf={workflow}
         repoFilter={repoFilter}
         searchQuery={searchQuery}
+        vcsSearchTextByTaskId={vcsSearchTextByTaskId}
         matchesPluginTaskFilters={matchesPluginTaskFilters}
         ViewComponent={ViewComponent}
         hideHeader={hideHeaders}
         fillHeight={fillHeight && !collapsed}
+        compactHeight={compactHeight}
         isSortable={canSortWorkflows && !isMobileKanban}
         isCollapsed={collapsed}
         toggleCollapse={toggleCollapse}
@@ -401,58 +449,32 @@ function usePublishMobileFocus(focusedWorkflowId: string | null) {
   }, [focusedWorkflowId, setMobileKanbanFocusedWorkflow]);
 }
 
-function useMobileWorkflowNavigation(
-  isMobileKanban: boolean,
-  focusedWorkflowId: string | null,
-  workflowOptions: MobileWorkflowNavigation["workflows"],
-  onWorkflowChange: SwimlaneContainerProps["onWorkflowChange"],
-) {
-  return useMemo(
-    () =>
-      isMobileKanban && focusedWorkflowId && onWorkflowChange
-        ? { activeWorkflowId: focusedWorkflowId, workflows: workflowOptions, onWorkflowChange }
-        : undefined,
-    [focusedWorkflowId, isMobileKanban, onWorkflowChange, workflowOptions],
-  );
-}
+type RenderedWorkflowLayoutOptions = {
+  workflowFilter: string | null;
+  orderedWorkflows: { id: string; name: string }[];
+  getFilteredTasks: (workflowId: string) => Task[];
+  snapshots: Record<string, WorkflowSnapshotData>;
+  hasLiveHiddenSteps: (workflowId: string) => boolean;
+  isMobileKanban: boolean;
+  workflowOptions: MobileWorkflowNavigation["workflows"];
+  onWorkflowChange: SwimlaneContainerProps["onWorkflowChange"];
+};
 
-export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
-  const {
-    viewMode,
-    workflowFilter,
-    searchQuery,
-    selectedRepositoryIds = EMPTY_SELECTED_REPOSITORY_IDS,
-  } = containerProps;
-  const { isMobile } = useResponsiveBreakpoint();
-  const { onToggleStepVisibility, onToggleAutoHideEmpty } = useKanbanDisplaySettings();
-  const { isCollapsed, toggleCollapse } = useSwimlaneCollapse();
-  const {
-    snapshots,
-    isLoading,
-    orderedWorkflows,
-    workflowOptions,
-    getFilteredTasks,
-    hasLiveHiddenSteps,
-    repoFilter,
-  } = useSwimlaneRenderData(
-    workflowFilter,
-    selectedRepositoryIds,
-    searchQuery ?? "",
-    containerProps.matchesPluginTaskFilters,
-  );
-  const {
-    sensors: workflowSensors,
-    canSort: canSortWorkflows,
-    handleDragEnd: handleWorkflowDragEnd,
-  } = useWorkflowReorder(orderedWorkflows, workflowFilter);
-
-  const view = getEffectiveView(viewMode, isMobile);
-  const isMobileKanban = isMobile && view.id === "kanban";
+function useRenderedWorkflowLayout({
+  workflowFilter,
+  orderedWorkflows,
+  getFilteredTasks,
+  snapshots,
+  hasLiveHiddenSteps,
+  isMobileKanban,
+  workflowOptions,
+  onWorkflowChange,
+}: RenderedWorkflowLayoutOptions) {
   const visibleWorkflows = useStableWorkflowList(
     selectVisibleWorkflows({
       workflowFilter,
       orderedWorkflows,
-      hasTasks: (workflowId) => getFilteredTasks(workflowId).length > 0,
+      hasTasks: (workflowId) => !snapshots[workflowId] || getFilteredTasks(workflowId).length > 0,
       hasLiveHiddenSteps,
       showEmptyBoard: isMobileKanban,
     }),
@@ -470,8 +492,94 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
     isMobileKanban,
     focusedWorkflowId,
     workflowOptions,
-    containerProps.onWorkflowChange,
+    onWorkflowChange,
   );
+  return { visibleWorkflows, renderedWorkflows, sortableWorkflowIds, mobileWorkflowNavigation };
+}
+
+function useMobileWorkflowNavigation(
+  isMobileKanban: boolean,
+  focusedWorkflowId: string | null,
+  workflowOptions: MobileWorkflowNavigation["workflows"],
+  onWorkflowChange: SwimlaneContainerProps["onWorkflowChange"],
+) {
+  return useMemo(
+    () =>
+      isMobileKanban && focusedWorkflowId && onWorkflowChange
+        ? { activeWorkflowId: focusedWorkflowId, workflows: workflowOptions, onWorkflowChange }
+        : undefined,
+    [focusedWorkflowId, isMobileKanban, onWorkflowChange, workflowOptions],
+  );
+}
+
+function collapsedWorkflowIds(
+  workflows: { id: string }[],
+  isCollapsed: (id: string) => boolean,
+  hideHeaders: boolean,
+) {
+  return hideHeaders
+    ? []
+    : workflows.filter((workflow) => isCollapsed(workflow.id)).map((workflow) => workflow.id);
+}
+
+export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
+  const {
+    viewMode,
+    workflowFilter,
+    searchQuery,
+    selectedRepositoryIds = EMPTY_SELECTED_REPOSITORY_IDS,
+  } = containerProps;
+  const { isMobile } = useResponsiveBreakpoint();
+  const { onToggleStepVisibility, onToggleAutoHideEmpty } = useKanbanDisplaySettings();
+  const { isCollapsed, toggleCollapse } = useSwimlaneCollapse();
+  const vcsSearchTextByTaskId = useVcsSearchIndex();
+  const {
+    snapshots,
+    isLoading,
+    orderedWorkflows,
+    workflowOptions,
+    getFilteredTasks,
+    hasLiveHiddenSteps,
+    repoFilter,
+  } = useSwimlaneRenderData(
+    workflowFilter,
+    selectedRepositoryIds,
+    searchQuery ?? "",
+    containerProps.matchesPluginTaskFilters,
+    vcsSearchTextByTaskId,
+  );
+  const {
+    sensors: workflowSensors,
+    canSort: canSortWorkflows,
+    handleDragEnd: handleWorkflowDragEnd,
+  } = useWorkflowReorder(orderedWorkflows, workflowFilter);
+
+  const view = getEffectiveView(viewMode, isMobile);
+  const isMobileKanban = isMobile && view.id === "kanban";
+  const { visibleWorkflows, renderedWorkflows, sortableWorkflowIds, mobileWorkflowNavigation } =
+    useRenderedWorkflowLayout({
+      workflowFilter,
+      orderedWorkflows,
+      getFilteredTasks,
+      snapshots,
+      hasLiveHiddenSteps,
+      isMobileKanban,
+      workflowOptions,
+      onWorkflowChange: containerProps.onWorkflowChange,
+    });
+
+  const hideHeaders = shouldHideHeaders(
+    isMobile,
+    isMobileKanban,
+    workflowFilter,
+    orderedWorkflows.length,
+  );
+  const demandRootRef = useWorkflowBoardDemand({
+    workflowIds: renderedWorkflows.map((workflow) => workflow.id),
+    collapsedIds: collapsedWorkflowIds(renderedWorkflows, isCollapsed, hideHeaders),
+    focused: isMobileKanban || workflowFilter !== null,
+    onDemandChange: containerProps.onSnapshotDemandChange,
+  });
 
   const emptyMessage = getEmptyMessage({
     isLoading,
@@ -482,12 +590,6 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
   });
   if (emptyMessage) return renderEmptyState(emptyMessage);
 
-  const hideHeaders = shouldHideHeaders(
-    isMobile,
-    isMobileKanban,
-    workflowFilter,
-    orderedWorkflows.length,
-  );
   const containerClass = getContainerClass(isMobileKanban, isMobile);
 
   return (
@@ -497,17 +599,19 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
       onDragEnd={handleWorkflowDragEnd}
     >
       <SortableContext items={sortableWorkflowIds} strategy={verticalListSortingStrategy}>
-        <div className={containerClass} data-testid="swimlane-container">
+        <div ref={demandRootRef} className={containerClass} data-testid="swimlane-container">
           <WorkflowItems
             workflows={renderedWorkflows}
             repoFilter={repoFilter}
             searchQuery={searchQuery ?? ""}
+            vcsSearchTextByTaskId={vcsSearchTextByTaskId}
             matchesPluginTaskFilters={containerProps.matchesPluginTaskFilters}
             ViewComponent={view.component}
             hideHeaders={hideHeaders}
             onToggleStepVisibility={onToggleStepVisibility}
             onToggleAutoHideEmpty={onToggleAutoHideEmpty}
-            fillHeight={view.id === "kanban"}
+            fillHeight={view.id === "kanban" && renderedWorkflows.length === 1}
+            compactHeight={view.id === "kanban" && !isMobile && renderedWorkflows.length > 1}
             isMobileKanban={isMobileKanban}
             canSortWorkflows={canSortWorkflows}
             isCollapsed={isCollapsed}

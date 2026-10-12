@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/persistence"
+	"github.com/kandev/kandev/internal/system/maintenance"
 )
 
 // resetConfirmToken is the literal value the client must POST as
@@ -28,7 +29,7 @@ var ErrResetNotConfirmed = errors.New("factory reset requires confirm=\"RESET\""
 // caller must pass confirm == "RESET" — anything else returns
 // ErrResetNotConfirmed without starting a job. On success the job ID is
 // returned immediately; the heavy work runs asynchronously via the jobs
-// tracker.
+// tracker. Accepted jobs outlive the caller context.
 //
 // The job:
 //  1. Calls s.OrchestratorShutdown (if set) to stop running executions.
@@ -44,15 +45,24 @@ func (s *Service) FactoryReset(ctx context.Context, confirm string) (string, err
 	if confirm != resetConfirmToken {
 		return "", ErrResetNotConfirmed
 	}
-	return s.jobs.Start(ctx, "factory-reset", func(jobCtx context.Context) (map[string]interface{}, error) {
+	return s.jobs.Start(context.WithoutCancel(ctx), "factory-reset", func(jobCtx context.Context) (map[string]interface{}, error) {
 		return s.runFactoryReset(jobCtx)
 	}), nil
 }
 
-func (s *Service) runFactoryReset(_ context.Context) (map[string]interface{}, error) {
+func (s *Service) runFactoryReset(ctx context.Context) (map[string]interface{}, error) {
+	release, err := maintenance.ForPool(s.pool).Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := s.requireSQLiteMaintenance("factory reset"); err != nil {
 		return nil, err
 	}
+	if s.PersistenceUnavailable != nil {
+		s.PersistenceUnavailable()
+	}
+	s.InvalidateDatabase()
 
 	if s.OrchestratorShutdown != nil {
 		s.OrchestratorShutdown()
@@ -63,7 +73,7 @@ func (s *Service) runFactoryReset(_ context.Context) (map[string]interface{}, er
 		}
 	}
 
-	snapshotPath, err := s.createPreResetSnapshot()
+	snapshotPath, err := s.createPreResetSnapshot(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("pre-reset snapshot: %w", err)
 	}
@@ -104,10 +114,10 @@ func (s *Service) runFactoryReset(_ context.Context) (map[string]interface{}, er
 	}, nil
 }
 
-// createPreResetSnapshot performs VACUUM INTO into a stable, time-stamped
+// createPreResetSnapshot copies a consistent image into a stable, time-stamped
 // path inside the backups directory. The "kandev-" prefix is kept so the
 // existing backup retention regex continues to match the file.
-func (s *Service) createPreResetSnapshot() (string, error) {
+func (s *Service) createPreResetSnapshot(ctx context.Context) (string, error) {
 	if s.pool == nil {
 		return "", fmt.Errorf("no database pool")
 	}
@@ -117,8 +127,8 @@ func (s *Service) createPreResetSnapshot() (string, error) {
 	}
 	name := fmt.Sprintf("kandev-pre-reset-%s.db", strconv.FormatInt(time.Now().UTC().Unix(), 10))
 	path := filepath.Join(backupDir, name)
-	if _, err := s.pool.Writer().Exec(`VACUUM INTO ?`, path); err != nil {
-		return "", fmt.Errorf("vacuum into %s: %w", path, err)
+	if _, err := persistence.CopySQLiteSnapshotContext(ctx, s.pool.Reader(), path); err != nil {
+		return "", fmt.Errorf("copy snapshot %s: %w", path, err)
 	}
 	if s.log != nil {
 		s.log.Info("pre-reset snapshot created", zap.String("path", path))

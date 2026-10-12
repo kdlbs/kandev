@@ -31,7 +31,12 @@ func (m *Manager) resolveStrictEnvironment(
 	profileInfo *AgentProfileInfo,
 ) (map[string]string, error) {
 	definitions := append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...)
-	appendMapDefinitions(&definitions, req.Env, runtimeenv.OriginManagedRuntime)
+	requestEnv := req.Env
+	if req.managedGoCachePath != "" {
+		requestEnv = cloneStringMap(requestEnv)
+		delete(requestEnv, "GOCACHE")
+	}
+	appendMapDefinitions(&definitions, requestEnv, runtimeenv.OriginManagedRuntime)
 	appendAgentProfileDefinitions(&definitions, profileInfo)
 
 	appendStandardDefinitions(&definitions, executionID, req)
@@ -45,6 +50,10 @@ func (m *Manager) resolveStrictEnvironment(
 
 	resolved, records, err := runtimeenv.Resolve(ctx, definitions, m.resolveEnvironmentDefinition)
 	if err != nil {
+		var secretErr *runtimeenv.SecretError
+		if errors.As(err, &secretErr) && secretErr.Origin == runtimeenv.OriginAgentProfile && profileInfo != nil && profileInfo.ProfileName != "" {
+			err = fmt.Errorf("agent profile %q: %w", profileInfo.ProfileName, err)
+		}
 		return nil, fmt.Errorf("resolve task environment: %w", err)
 	}
 	m.logEnvironmentOverrides(req, records)

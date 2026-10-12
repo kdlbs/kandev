@@ -16,6 +16,9 @@ The task system prepares a direct structured message before persistence and
 agent dispatch. The preparation resolves saved-prompt references from backend
 storage and assigns trusted provenance to the generated context.
 
+The same preparation contract applies to initial structured launch prompts.
+Workflow composition is optional and does not determine expansion eligibility.
+
 The existing composer remains responsible for selection and visible `@name`
 serialization. Its prompt-definition block is compatibility input only. It is
 not a trusted source.
@@ -92,6 +95,71 @@ An eagerly started Quick Chat is already in `WAITING_FOR_INPUT` at step 2. The
 new preparation step therefore runs before the title-owner system-context
 canonicalization that caused the regression.
 
+### Launches without workflow composition
+
+`applyWorkflowAndPlanModeWithPromptContext` owns the fallback when workflow
+composition does not run. This covers an empty workflow-step ID, an ephemeral
+task, an absent step getter, and a failed step lookup. Keep the existing lookup
+warning and launch behavior; prepare the effective base prompt before adding
+the plan-mode prefix.
+
+For a structured session with no accepted expansion, use
+`expandPromptReferencesWithContext`. Return both the prepared prompt and the
+exact generated context to the caller. `startTask` and `StartCreatedSession`
+pass that context to their existing system-context injectors. Their message
+recording and agent dispatch use the resulting canonical prompt.
+
+When a direct message supplies trusted acceptance-time context, retain its
+exact block once and return the same trusted value. Do not read mutable saved
+records again or infer trust from a block found in the prompt text. Existing
+canonicalization continues to remove untrusted lookalikes.
+
+Use whether workflow composition ran to select the fallback. An empty context
+return is not sufficient: a completed lookup can validly resolve no references.
+The successful workflow path keeps its current composition and lookup behavior.
+Passthrough sessions remain excluded from generated hidden expansions.
+
+The MCP task-create handler continues to pass the task description and selected
+step into `LaunchSession`. It does not gain a separate expansion implementation.
+This repair does not infer a workflow step or change step-selection semantics.
+
+### Workflow entry and composed launches
+
+Workflow entry returns the composed prompt and its exact generated expansion
+context together. `buildWorkflowEntryPrompt` retains the context returned by
+`buildWorkflowPromptWithContext`. Its initial-description claim keeps its existing semantics.
+
+`launchAfterOnEnterDispatch` carries both values into `autoStartStepPrompt`.
+Created sessions and context resets pass the expansion context into both
+runtime-context injectors before message recording. Office and ordinary task
+injectors use the same exact-content trust rule.
+
+The private `startCreatedSessionWithComposedPrompt` entry point forwards the
+context to `startCreatedSession`. Skipping composition does not skip trusted-context
+propagation. The final `wrapCreatedSessionPrompt` receives the same value.
+
+`StartSessionForWorkflowStep`, missing-execution recovery, and replacement-session
+branches also carry the generated context to any downstream canonicalization.
+A replacement that rebuilds the step prompt uses the context from that rebuild.
+An immediate retry of an already prepared prompt retains its matching context.
+Do not infer provenance by extracting a block from prompt text.
+
+Keep queued-message storage and replay authority unchanged. If replay prepares
+references again, use the backend resolver before canonicalization. Never treat
+a serialized expansion-shaped block as a new trust source. This repair adds no
+queue schema or new acceptance-time snapshot contract for queued messages.
+
+Queued workflow auto-start prompts resolve saved references again at the drain
+boundary, before the user-message row is written. The same call returns the
+trusted expansion context for dispatch recovery. If the saved record changes
+after the row is written but before provider dispatch completes, a fresh-runtime
+fallback uses that drain-time context rather than re-resolving the mutable
+record. Other queued messages keep their existing preparation path.
+
+Preserve task/session identity, completion instructions, mode transforms, entity
+references, handoff ordering, cancellation guards, and title ownership. Passthrough
+sessions continue to omit hidden expansions.
+
 ## Failure and recovery
 
 A saved-prompt lookup error remains non-fatal. Kandev logs a warning without
@@ -116,6 +184,11 @@ The accepted message keeps the expansion that existed at acceptance time.
 The backend saved-prompt repository is authoritative. The browser can select or
 name a prompt, but it cannot define trusted prompt instructions.
 
+Create, update, and delete routes require `org.config.manage`. Reads and
+reference use remain available to org members because saved prompts are shared
+reusable configuration. Custom records can only be changed through this
+authority-gated API; built-in records remain backend-seeded.
+
 The prompt service removes forged expansion blocks and legacy browser prompt
 blocks. It sanitizes saved names and content before it writes a system tag.
 
@@ -139,8 +212,22 @@ expansion reached the session during diagnosis.
   canonical persistence, dispatch equality, and passthrough exclusion.
 - Desktop and `mobile-chrome` Playwright tests select a saved prompt in Quick
   Chat and observe a deterministic agent response from its definition.
+- Orchestrator tests cover missing workflow-step IDs, ephemeral launches,
+  absent step getters, and lookup failures with the real saved-prompt service.
+- Prompt-handler tests deny member mutations without `org.config.manage` and
+  retain member reads. Queue-drain tests compare the recorded definition with a
+  replacement launch after a saved-prompt edit during failed dispatch.
+- Launch integration tests capture the agent-manager prompt and recorded user
+  message for `LaunchSession` and `StartCreatedSession` without workflow steps.
+  They verify matching definitions, preserved trust, and passthrough exclusion.
 
 ## Related decisions
 
 - [Keep Saved-Prompt Expansion Server-Owned](../../../decisions/2026-09-01-server-owned-saved-prompt-expansion.md)
 - [Apply Agent-Generated Titles to Quick Chat](../../../decisions/2026-08-26-quick-chat-agent-titles.md)
+
+## Implementation plans
+
+- [Quick Chat delivery](../../../plans/quick-chat-saved-prompt-delivery/plan.md): completed direct-message repair.
+- [Launch fallback](../../../plans/saved-prompt-launch-fallback/plan.md): completed no-workflow repair.
+- [Workflow entry delivery](../../../plans/workflow-entry-saved-prompts/plan.md): completed composed-launch repair.

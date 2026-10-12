@@ -4,6 +4,7 @@ import { immer } from "zustand/middleware/immer";
 import { createGitHubSlice } from "./github-slice";
 import type { GitHubSlice } from "./types";
 import type {
+  GitHubPRDiscoveryHealth,
   GitHubStatus,
   TaskCIAutomationOptions,
   TaskIssueLink,
@@ -207,6 +208,217 @@ describe("workspace-scoped GitHub status", () => {
       "alice",
     );
     expect(store.getState().githubStatus.byWorkspaceId[WORKSPACE_B]?.status).toBeNull();
+  });
+});
+
+describe("discovery health ordering", () => {
+  it("does not let an older HTTP status replace newer discovery health", () => {
+    const store = makeStore();
+    store.getState().resetGitHubStatus(WORKSPACE_A);
+    const currentHealth: GitHubPRDiscoveryHealth = {
+      state: "degraded",
+      failed_target_count: 1,
+      category: "invalid_query",
+      revision: 4,
+      credential_generation: 2,
+    };
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      pr_discovery_health: currentHealth,
+    });
+
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      username: "stale-http",
+      pr_discovery_health: { ...currentHealth, revision: 3 },
+    });
+
+    expect(store.getState().githubStatus.byWorkspaceId[WORKSPACE_A]?.status).toMatchObject({
+      username: "stale-http",
+      pr_discovery_health: currentHealth,
+    });
+  });
+
+  it("accepts a newer credential generation even with a lower revision", () => {
+    const store = makeStore();
+    store.getState().resetGitHubStatus(WORKSPACE_A);
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      pr_discovery_health: {
+        state: "degraded",
+        failed_target_count: 1,
+        category: "unavailable",
+        revision: 9,
+        credential_generation: 1,
+      },
+    });
+
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      pr_discovery_health: {
+        state: "unknown",
+        failed_target_count: 0,
+        revision: 1,
+        credential_generation: 2,
+      },
+    });
+
+    expect(
+      store.getState().githubStatus.byWorkspaceId[WORKSPACE_A]?.status?.pr_discovery_health,
+    ).toMatchObject({ state: "unknown", credential_generation: 2 });
+  });
+});
+
+describe("discovery health merge", () => {
+  it("lets a newer pending websocket health update beat an older HTTP status", () => {
+    const store = makeStore();
+    store.getState().resetGitHubStatus(WORKSPACE_A);
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      pr_discovery_health: {
+        state: "degraded",
+        failed_target_count: 1,
+        category: "unavailable",
+        revision: 4,
+        credential_generation: 2,
+        runtime_epoch: 10,
+      },
+    });
+    store.getState().resetGitHubStatus(WORKSPACE_A);
+    store.getState().applyGitHubPRDiscoveryHealthUpdate({
+      workspace_id: WORKSPACE_A,
+      health: {
+        state: "healthy",
+        failed_target_count: 0,
+        revision: 5,
+        credential_generation: 2,
+        runtime_epoch: 10,
+      },
+    });
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      pr_discovery_health: {
+        state: "degraded",
+        failed_target_count: 1,
+        category: "unavailable",
+        revision: 4,
+        credential_generation: 2,
+        runtime_epoch: 10,
+      },
+    });
+
+    expect(
+      store.getState().githubStatus.byWorkspaceId[WORKSPACE_A]?.status?.pr_discovery_health,
+    ).toMatchObject({ state: "healthy", revision: 5 });
+  });
+
+  it("preserves current health when an authenticated HTTP status omits it", () => {
+    const store = makeStore();
+    store.getState().resetGitHubStatus(WORKSPACE_A);
+    const health: GitHubPRDiscoveryHealth = {
+      state: "degraded",
+      failed_target_count: 1,
+      category: "rate_limited",
+      revision: 8,
+      credential_generation: 3,
+      runtime_epoch: 10,
+    };
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      pr_discovery_health: health,
+    });
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+    });
+
+    expect(
+      store.getState().githubStatus.byWorkspaceId[WORKSPACE_A]?.status?.pr_discovery_health,
+    ).toEqual(health);
+  });
+});
+
+describe("runtime epoch health ordering", () => {
+  it("accepts a lower revision from a newer runtime and rejects delayed old-runtime events", () => {
+    const store = makeStore();
+    store.getState().resetGitHubStatus(WORKSPACE_A);
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      pr_discovery_health: {
+        state: "degraded",
+        failed_target_count: 1,
+        category: "unavailable",
+        revision: 100,
+        credential_generation: 7,
+        runtime_epoch: 10,
+      },
+    });
+
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      pr_discovery_health: {
+        state: "healthy",
+        failed_target_count: 0,
+        revision: 1,
+        credential_generation: 7,
+        runtime_epoch: 11,
+      },
+    });
+    expect(
+      store.getState().githubStatus.byWorkspaceId[WORKSPACE_A]?.status?.pr_discovery_health,
+    ).toMatchObject({ state: "healthy", revision: 1, runtime_epoch: 11 });
+
+    store.getState().applyGitHubPRDiscoveryHealthUpdate({
+      workspace_id: WORKSPACE_A,
+      health: {
+        state: "degraded",
+        failed_target_count: 1,
+        category: "unavailable",
+        revision: 101,
+        credential_generation: 7,
+        runtime_epoch: 10,
+      },
+    });
+    expect(
+      store.getState().githubStatus.byWorkspaceId[WORKSPACE_A]?.status?.pr_discovery_health,
+    ).toMatchObject({ state: "healthy", revision: 1, runtime_epoch: 11 });
+  });
+
+  it("clears discovery health on an authoritative disconnected status", () => {
+    const store = makeStore();
+    store.getState().resetGitHubStatus(WORKSPACE_A);
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      pr_discovery_health: {
+        state: "degraded",
+        failed_target_count: 1,
+        category: "rate_limited",
+        revision: 2,
+        credential_generation: 1,
+        runtime_epoch: 10,
+      },
+    });
+
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      authenticated: false,
+      token_configured: false,
+      workspace_id: WORKSPACE_A,
+    });
+
+    expect(
+      store.getState().githubStatus.byWorkspaceId[WORKSPACE_A]?.status?.pr_discovery_health,
+    ).toBeUndefined();
   });
 });
 

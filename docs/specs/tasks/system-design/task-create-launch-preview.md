@@ -107,12 +107,17 @@ context. Its purpose is to show how the launch step applies its own template.
 
 The selected workflow trigger renders only the workflow name and existing
 chevron. The launch destination renders as a sibling group outside the trigger,
-immediately to its right. The group contains the information button first and
-the muted localized **Start step: {{step}}** label second. The trigger keeps its
-intrinsic selector width and does not claim the full row. The information
-button exposes localized help on hover and focus. On coarse pointers, the
-information button has a hit area of at least 44 CSS pixels. Truncation keeps
-the selector row within its available width.
+immediately to its right. The group contains an `IconArrowBigRightLines` help
+button first and the muted destination step name second. The arrow expresses
+the flow from the selected workflow into its launch destination, so the visible
+**Start step:** prefix and the generic information glyph are removed. The
+trigger keeps its intrinsic selector width and does not claim the full row.
+The arrow button exposes the existing localized help in a tooltip on pointer
+hover and keyboard focus. On coarse pointers, `useTouchDrawer` replaces the
+tooltip with a drawer containing the same localized title and description. The
+button retains its localized accessible name and has a hit area of at least 44
+CSS pixels on coarse pointers. Truncation keeps the selector row within its
+available width.
 
 The existing selector visibility rules remain unchanged. A single implicit
 workflow can still omit the selector when it has no override information.
@@ -143,7 +148,8 @@ pointers, its active hit area is at least 44 CSS pixels. The read-only text wrap
 inside the composer and owns only the same bounded overflow as the textarea.
 
 The nearest mobile exemplar is the current Kanban FAB to task-create dialog
-flow. This change adds no drawer, route, fixed control, or safe-area boundary.
+flow. The launch-destination explanation uses the standard coarse-pointer
+drawer; this change adds no route, fixed control, or safe-area boundary.
 
 ## Failure and recovery
 
@@ -170,10 +176,12 @@ server-owned values.
 - Unit tests cover action-sensitive launch routing, stale workflow filtering,
   workflow-snapshot step-event synchronization, and prompt composition.
 - Component tests cover selector text, toggle state, draft preservation, and
-  the no-prompt fallback.
-- Desktop Playwright covers workflow switching and composed preview content.
-- Mobile Playwright covers the same user value, the 44-pixel hit area, viewport
-  containment, and horizontal overflow.
+  the no-prompt fallback. Focused selector coverage also verifies the arrow
+  glyph and help disclosure.
+- Desktop Playwright covers workflow switching, pointer-hover help, and composed
+  preview content.
+- Mobile Playwright covers the same user value, the touch drawer, the 44-pixel
+  hit area, viewport containment, and horizontal overflow.
 
 ## Related decisions
 

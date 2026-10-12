@@ -30,14 +30,13 @@ This spec consolidates the office task surface: lifecycle, parent/child handoffs
 ### Session constraint boundary
 
 The current schema stores the Office agent identity in
-`task_sessions.agent_profile_id`. The schema does not enforce one live Office
-row per `(task_id, agent_profile_id)` pair yet. A future migration must define
-an Office-only discriminator because Kanban rows also use this column and can
-legitimately share the pair.
+`task_sessions.agent_profile_id`. The shared table has no pair-wide constraint
+because Kanban rows also use this column and can legitimately share the pair.
 
-The repository classifies the planned constraint's PostgreSQL and SQLite errors.
-The insert path reloads the winning row. The update path returns a typed conflict
-for a future caller to handle before the constraint becomes active.
+`CreateOfficeTaskSession` guards live pairs inside a transaction. Lookup prefers
+live rows and retains existing duplicate rows. A future cross-process SQLite
+topology would need an Office-only discriminator and a partial index. No such
+schema change is part of the current design.
 
 ## What
 
@@ -200,9 +199,8 @@ task_sessions
   is_primary             bool   -- kanban resume; office never reads this
   ...
 
-  -- Planned constraint, not present in the current schema:
-  -- one live Office row per (task_id, agent_profile_id).
-  -- The Office-only discriminator remains a separate schema decision.
+  -- No table-level pair constraint. CreateOfficeTaskSession guards live
+  -- Office pairs inside a transaction and retains historical duplicates.
 
 office_task_approval_decisions
   id              TEXT PK

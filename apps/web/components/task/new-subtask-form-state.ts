@@ -47,6 +47,7 @@ export function defaultSubtaskWorkspaceMode(
  * draft, and discovered repos) are kept as inert stubs because the subtask
  * dialog renders its own title input and inherits the parent's workflow.
  */
+// eslint-disable-next-line max-lines-per-function -- the adapter must provide the complete DialogFormState contract.
 export function useSubtaskFormState(workspaceId: string | null): DialogFormState {
   const repos = useRepositoriesState();
   const remoteRepos = useRemoteReposState();
@@ -99,6 +100,10 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
       setExecutorId: NOOP,
       executorProfileId,
       setExecutorProfileId,
+      // The New Subtask dialog is create-only — there is no editing task to
+      // seed a stored profile from, so nothing is ever "seeded" here.
+      setExecutorProfileIdFromSeed: NOOP,
+      seededExecutorProfileId: null,
       autopilot,
       setAutopilot,
       discoveredRepositories,
@@ -110,6 +115,8 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
       // Subtasks inherit the parent's workflow; no selector is rendered.
       selectedWorkflowId: null,
       setSelectedWorkflowId: NOOP,
+      workflowAgentOverrides: {},
+      setWorkflowAgentOverrides: NOOP,
       fetchedSteps: EMPTY_STEPS,
       setFetchedSteps: NOOP,
       isCreatingSession: false,

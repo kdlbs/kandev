@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
-import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 const VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
 const TASK_TITLE = "Mobile rich task";
@@ -18,6 +19,7 @@ test.describe("Mobile task listing display preferences", () => {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
+      priority: "critical",
     });
     await expect
       .poll(
@@ -47,11 +49,19 @@ test.describe("Mobile task listing display preferences", () => {
       checks_state: "success",
       mergeable_state: "clean",
     });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      tasks_list_show_details: false,
+    });
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details)
+      .toBe(false);
 
     const mobile = new MobileKanbanPage(testPage);
+    const ws = watchWs(testPage);
     await mobile.goto();
-    await mobile.mobileMenuButton.click();
-    const menu = testPage.getByRole("dialog", { name: "Menu" });
+    await mobile.viewOptionsButton.click();
+    const menu = testPage.getByRole("dialog", { name: "View options" });
     await menu.getByRole("radio", { name: "List", exact: true }).click();
     await expect(testPage).toHaveURL(/\/tasks/);
     await expect(testPage.getByTestId("tasks-list")).toBeVisible();
@@ -79,21 +89,35 @@ test.describe("Mobile task listing display preferences", () => {
     await testPage.goto("/");
     await taskListLoaded;
     await expect(testPage).toHaveURL(/\/tasks/);
-    await testPage.getByRole("button", { name: "Open menu" }).click();
-    const tasksMenu = testPage.getByRole("dialog", { name: "Menu" });
-    await tasksMenu.getByText("Show task details", { exact: true }).click();
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
+    const tasksMenu = testPage.getByRole("dialog", { name: "View options" });
+    await expandDisplaySettingsGroup(testPage, "list-rows", "mobile");
+    const taskDetailsToggle = tasksMenu.getByTestId("mobile-display-task-details-toggle");
+    const settingsSaved = ws.waitForResponse("user.settings.update", { timeout: 15_000 });
+    await taskDetailsToggle.tap();
+    const savedSettings = await settingsSaved;
+    expect(savedSettings.payload).toMatchObject({
+      settings: { tasks_list_show_details: true },
+    });
+    await expect(taskDetailsToggle).toHaveAttribute("aria-checked", "true");
     await expect
       .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details, {
         message: "task detail preference was not persisted",
+        timeout: 15_000,
       })
       .toBe(true);
     await testPage.keyboard.press("Escape");
     await expect(tasksMenu).toHaveCount(0);
 
+    await testPage.reload();
+    await expect(testPage.getByTestId("tasks-list")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/tasks/);
+
     const row = testPage.getByTestId("tasks-list-row").filter({ hasText: TASK_TITLE });
     await expect(row).toContainText(SEEDED_REPOSITORY_LABEL);
     await expect(row).toContainText(TASK_DESCRIPTION);
     await expect(row.getByTestId(`pr-task-icon-${task.id}`)).toBeVisible();
+    await expect(row.getByTestId("tasks-list-row-priority")).toBeVisible();
     await expect(
       testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).resolves.toBe(true);

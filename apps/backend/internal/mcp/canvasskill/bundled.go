@@ -22,7 +22,7 @@ const (
 	Slug = "kandev-canvas-authoring"
 	// Version changes when the authoring contract or its supporting references
 	// change. Canvas releases keep the version in their authoring metadata.
-	Version = "2"
+	Version = "3"
 
 	materializedDirectory = "system-skills"
 	versionFileName       = ".kandev-version"

@@ -129,6 +129,29 @@ describe("Kubernetes session API", () => {
     ).toEqual([{ session_id: "session-1", task_id: "task-1", pod_name: "pod-1", restarts: 2 }]);
   });
 
+  it("normalizes retention state and main-container requests", () => {
+    expect(
+      normalizeKubernetesSessions([
+        {
+          session_id: "session-1",
+          task_id: "task-1",
+          session_state: "CANCELLED",
+          retention_state: "retained",
+          main_container_requests: { cpu: "0", memory: "512Mi", extra: "ignored" },
+        },
+      ]),
+    ).toEqual([
+      {
+        session_id: "session-1",
+        task_id: "task-1",
+        restarts: 0,
+        session_state: "CANCELLED",
+        retention_state: "retained",
+        main_container_requests: { cpu: "0", memory: "512Mi" },
+      },
+    ]);
+  });
+
   it("GETs encoded executor session status and normalizes rows", async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse([{ session_id: "session-1", task_id: "task-1", restarts: null }]),

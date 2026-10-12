@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
 test.describe("Automation deletion confirmation on mobile", () => {
@@ -25,6 +26,7 @@ test.describe("Automation deletion confirmation on mobile", () => {
 
     const confirmation = testPage.getByTestId("automation-delete-confirm-dialog");
     await expect(confirmation).toBeVisible();
+    await waitForFiniteAnimations(confirmation);
     await expect(confirmation).toContainText(
       "This will permanently delete Mobile Delete Automation. This action cannot be undone.",
     );

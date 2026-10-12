@@ -129,15 +129,50 @@ func TestMonitorLoop_TransitionToFastTriggersImmediateScan(t *testing.T) {
 	// captured, and the immediate-scan tick would not see any state change.
 	<-wt.initialScanDone
 	drainStream(sub)
+	baseline, _ := wt.MonitorTickStats()
+	select {
+	case <-wt.tickDone:
+	default:
+	}
 
 	// Create a change so the immediate scan finds something to notify about.
 	if err := os.WriteFile(filepath.Join(repoDir, "trigger.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 
-	// Switch to fast — the loop should wake on pollModeChanged and run a tick
-	// without waiting 30s for the timer.
+	// Admission must precede the 30s timer, even when Git work takes longer.
+	admissionDeadline := time.Now().Add(2 * time.Second)
+	admissionTimer := time.NewTimer(time.Until(admissionDeadline))
+	defer admissionTimer.Stop()
+	admissionPoll := time.NewTicker(time.Millisecond)
+	defer admissionPoll.Stop()
 	wt.SetPollMode(PollModeFast)
+	for {
+		if !time.Now().Before(admissionDeadline) {
+			t.Fatal("expected immediate monitor scan admission after transitioning to fast mode")
+		}
+		completed, _ := wt.MonitorTickStats()
+		if atomic.LoadInt32(&wt.monitorRunning) != 0 || completed > baseline {
+			break
+		}
+		select {
+		case <-admissionPoll.C:
+		case <-admissionTimer.C:
+			t.Fatal("expected immediate monitor scan admission after transitioning to fast mode")
+		}
+	}
+
+	// Join that scan before asserting delivery. Its work includes two quick
+	// Git commands, a bounded status observation and one file-list command.
+	scanTimer := time.NewTimer(workspaceGitStatusObserveTimeout + 3*gitCommandTimeout)
+	defer scanTimer.Stop()
+	select {
+	case <-wt.tickDone:
+	case <-wt.cancelCtxOrBackground().Done():
+		t.Fatal("tracker cancelled before the admitted monitor scan completed")
+	case <-scanTimer.C:
+		t.Fatal("admitted monitor scan did not complete within the fixture work guard")
+	}
 
 	if got := waitForFileChangeNotification(sub, 2*time.Second); !got {
 		t.Error("expected immediate file-change notification after transitioning to fast mode")

@@ -14,6 +14,10 @@ const PRIMARY_PR_ID = "primary-pr";
 const RENAMED_PATH = "src/renamed.ts";
 
 describe("mapToChangedFiles", () => {
+  it("preserves symlink identity", () => {
+    const file = { path: "link", status: "modified" as const, staged: false, is_symlink: true };
+    expect(mapToChangedFiles([file])[0]).toHaveProperty("isSymlink", true);
+  });
   it("preserves a projected mixed-change layer", () => {
     expect(
       mapToChangedFiles([
@@ -31,6 +35,18 @@ describe("mapToChangedFiles", () => {
         changeLayer: "staged",
       }),
     ]);
+  });
+  it("preserves pending detail state for the row placeholder", () => {
+    expect(
+      mapToChangedFiles([
+        {
+          path: "src/pending.ts",
+          status: "modified",
+          staged: false,
+          diff_state: "pending",
+        },
+      ])[0],
+    ).toMatchObject({ diffState: "pending" });
   });
 });
 
@@ -172,6 +188,33 @@ describe("selectPRFilesForReviewProgress", () => {
 });
 
 describe("computeReviewProgress PR files", () => {
+  it("keeps retained files in the total without certifying their old patch", () => {
+    const key = reviewFileKey({ path: "src/retained.ts" });
+    const retained = progressLocalFile("src/retained.ts", {
+      diff: "previous patch",
+      diff_state: "pending",
+      display_stale: true,
+    });
+
+    expect(
+      computeReviewProgress(
+        [retained],
+        { files: { "src/retained.ts": { diff: "previous patch" } } },
+        new Map([[key, { reviewed: true, diffHash: hashDiff("previous patch") }]]),
+      ),
+    ).toEqual({ reviewedCount: 0, totalFileCount: 1 });
+  });
+
+  it("does not count a pending diff as reviewable progress", () => {
+    const pending = progressLocalFile("src/pending.ts", { diff_state: "pending" });
+    const key = reviewFileKey({ path: pending.path });
+
+    expect(computeReviewProgress([pending], null, new Map([[key, { reviewed: true }]]))).toEqual({
+      reviewedCount: 0,
+      totalFileCount: 0,
+    });
+  });
+
   it("counts same-path PR reviews per repository using each patch hash", () => {
     const path = "README.md";
     const frontendPatch = "@@ -1 +1 @@\n-frontend old\n+frontend new";

@@ -5,7 +5,9 @@ description: "Change Kandev's Go backend across domain, API, event, persistence,
 
 # Backend Development
 
-The Go module in `apps/backend/` builds both the unified `kandev` binary and the `agentctl` helper installed in task environments.
+The Go module in `apps/backend/` builds the native `kandev` application binary
+with the compiled web frontend embedded. It also builds the separate `agentctl`
+helper installed in task environments.
 
 ## Quick path
 
@@ -69,6 +71,22 @@ The event bus in `internal/events/` is live fan-out, not durable storage. In-mem
 
 SQLite is the default. PostgreSQL uses the same domain repositories where supported, with `sqlx.Rebind` and helpers in `internal/db/dialect/`. A package name such as `internal/task/repository/sqlite` does not prove SQLite-only behavior.
 
+`db.OpenSQLite` is the single-connection writer factory. Its supported driver
+`_txlock=immediate` mode acquires SQLite's writer at transaction entry, before
+repositories read the current rows they will change. This applies even to a
+read-only transaction opened on that writer. Use `db.OpenSQLiteReader` for
+read-only transactions: its separate deferred pool permits WAL snapshot reads
+while an independent writer waits. PostgreSQL retains READ COMMITTED and its
+explicit domain lock ordering.
+
+SQLite writer entry uses the existing five-second busy timeout. Cancellation
+while another connection holds the writer can settle when that native wait
+returns; it does not guarantee immediate interruption. Check cancellation
+before admission, join the failed entry or roll back a returned transaction,
+and settle connection ownership before reuse. Keep external stop, worktree and
+canvas I/O outside database transactions. Arbitrary injected deferred pools do
+not inherit the factory's wait behavior and can fail safely with BUSY.
+
 Kandev has no central migration directory or external migration runner. Each repository/store creates its fresh schema and applies ordered upgrade steps during backend startup. A schema change must therefore:
 
 1. update the fresh-schema definition;
@@ -83,6 +101,30 @@ Kandev has no central migration directory or external migration runner. Each rep
 SQLite table rebuilds need explicit copy order, index/trigger recreation, and interruption tests. Before a different binary version boots an existing SQLite database, the persistence provider takes a snapshot and retains recent backups. PostgreSQL does not receive that automatic snapshot; operators remain responsible for `pg_dump`.
 
 Test fresh initialization, replay, and upgrade from representative old rows. Useful patterns include `internal/task/repository/sqlite/schema_replay_test.go` and PostgreSQL tests gated by `KANDEV_TEST_POSTGRES_DSN`. Add PostgreSQL coverage when shared SQL or startup ordering changes.
+
+Every built-in SQL schema owner is listed in the
+`internal/persistence/requiredstores` catalog. A new persisted store must add
+one catalog descriptor, wire its constructor through the required-store
+tracker, and add a fixed adapter in
+`internal/persistence/storeconformance`. Keep the store in the catalog even
+when its feature is disabled: the schema is part of the compatibility
+contract. External credentials, remote authentication, and provider probes
+remain degradable after local schema initialization.
+
+Run the local persistence gates from `apps/backend/` when changing a store:
+
+```bash
+go run ./cmd/sqlguard ./internal
+go test -race ./internal/persistence/storeconformance -count=1
+go test -race ./internal/backendapp -run 'TestPostgresBootInitializesRepositories|TestPreviousStableUpgrade' -count=1
+```
+
+The conformance package runs SQLite by default and runs PostgreSQL when
+`KANDEV_TEST_POSTGRES_DSN` is set. Package names and test markers do not count
+as PostgreSQL coverage. For a schema-history change, update the committed
+fixture under `internal/persistence/storeconformance/testdata/upgrades/` with
+the explicit stable tag, source commit, checksums, and sentinel rows; do not
+derive a baseline from the working tree.
 
 ## Agent runtime and agentctl
 

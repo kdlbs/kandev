@@ -20,6 +20,28 @@ type settingsScanner struct {
 	revision int64
 }
 
+// @covers AC-UI-LIST-STEP-GROUPING-001.5
+func TestTasksListGroupLegacySettingsRoundTrip(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: `{"tasks_list_group":"state","tasks_list_sort":"title_asc"}`, revision: 7}, DefaultUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.TasksListGroup != "workflow_step" || settings.Revision != 7 || settings.TasksListSort != "title_asc" {
+		t.Fatalf("legacy settings = (%q, %d, %q)", settings.TasksListGroup, settings.Revision, settings.TasksListSort)
+	}
+	raw, err := marshalUserSettingsPayload(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["tasks_list_group"] != "workflow_step" {
+		t.Fatalf("persisted group = %v", payload["tasks_list_group"])
+	}
+}
+
 // upsertUserSettingsForTest writes settings via UpsertUserSettingsPreservingTaskCreateLastUsed at the current stored revision.
 func upsertUserSettingsForTest(t *testing.T, repo *sqliteRepository, ctx context.Context, settings *models.UserSettings) {
 	t.Helper()
@@ -95,8 +117,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("read migrated settings: %v", err)
 	}
-	if settings.Revision != 0 {
-		t.Fatalf("migrated revision = %d, want 0", settings.Revision)
+	if settings.Revision != 1 {
+		t.Fatalf("migrated revision = %d, want 1", settings.Revision)
 	}
 	settings.AppStatusBarEnabled = true
 	settings.UpdatedAt = now.Add(time.Second)
@@ -104,8 +126,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("write migrated settings: %v", err)
 	}
-	if updated.Revision != 1 {
-		t.Fatalf("updated revision = %d, want 1", updated.Revision)
+	if updated.Revision != 2 {
+		t.Fatalf("updated revision = %d, want 2", updated.Revision)
 	}
 
 	replayedRepo, err := newSQLiteRepositoryWithDB(conn, conn)
@@ -116,8 +138,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("read settings after migration replay: %v", err)
 	}
-	if replayed.Revision != 1 {
-		t.Fatalf("revision after migration replay = %d, want 1", replayed.Revision)
+	if replayed.Revision != 2 {
+		t.Fatalf("revision after migration replay = %d, want 2", replayed.Revision)
 	}
 	if !replayed.AppStatusBarEnabled {
 		t.Fatal("status bar preference was not preserved across migration replay")
@@ -135,6 +157,7 @@ func TestScanUserSettingsStartupPage(t *testing.T) {
 		{name: "missing setting defaults to task overview", raw: `{"chat_submit_key":"cmd_enter"}`, want: "task_overview"},
 		{name: "unknown setting defaults to task overview", raw: `{"startup_page":"future_value"}`, want: "task_overview"},
 		{name: "last task is preserved", raw: `{"startup_page":"last_task"}`, want: "last_task"},
+		{name: "threads is preserved", raw: `{"startup_page":"threads"}`, want: "threads"},
 	}
 
 	for _, tt := range tests {
@@ -160,12 +183,14 @@ func TestScanUserSettingsStartupPage(t *testing.T) {
 
 // TestScanUserSettingsSidebarDefaults verifies the canonical default sidebar view and that explicit sidebar settings are preserved.
 func TestScanUserSettingsSidebarDefaults(t *testing.T) {
+	groupIndent := true
 	defaultView := models.SidebarView{
 		ID:              "view-all-tasks",
 		Name:            "All tasks",
 		Filters:         []models.SidebarViewClause{},
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
 		Group:           "repository",
+		GroupIndent:     &groupIndent,
 		CollapsedGroups: []string{},
 		TaskRow:         models.DefaultSidebarTaskRowPresentation(),
 	}
@@ -1020,6 +1045,121 @@ func TestScanUserSettingsKanbanHiddenStepIDsCorruptFallsBackToEmpty(t *testing.T
 	}
 }
 
+// TestSQLiteRepositoryKanbanSortAndPriorityFilterTokensDefaultAndRoundTrip verifies both new
+// fields default correctly and round-trip through the SQLite repository.
+func TestSQLiteRepositoryKanbanSortAndPriorityFilterTokensDefaultAndRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	if settings.KanbanSort != models.KanbanSortDefault {
+		t.Fatalf("default KanbanSort = %q, want %q", settings.KanbanSort, models.KanbanSortDefault)
+	}
+	if settings.KanbanPriorityFilterTokens == nil || len(settings.KanbanPriorityFilterTokens) != 0 {
+		t.Fatalf("default KanbanPriorityFilterTokens = %#v, want non-nil empty", settings.KanbanPriorityFilterTokens)
+	}
+
+	settings.KanbanSort = models.KanbanSortPriorityDesc
+	settings.KanbanPriorityFilterTokens = []string{"critical", "high"}
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if got.KanbanSort != models.KanbanSortPriorityDesc {
+		t.Fatalf("KanbanSort = %q, want %q", got.KanbanSort, models.KanbanSortPriorityDesc)
+	}
+	if !reflect.DeepEqual(got.KanbanPriorityFilterTokens, settings.KanbanPriorityFilterTokens) {
+		t.Fatalf("KanbanPriorityFilterTokens = %#v, want %#v", got.KanbanPriorityFilterTokens, settings.KanbanPriorityFilterTokens)
+	}
+}
+
+// TestDecodeKanbanPriorityFilterTokensFallsBackToEmpty verifies a stored value that is not a
+// list at all resolves to the empty selection (AC-004.4) instead of erroring.
+func TestDecodeKanbanPriorityFilterTokensFallsBackToEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{name: "missing", raw: nil},
+		{name: "null", raw: json.RawMessage(`null`)},
+		{name: "bare string", raw: json.RawMessage(`"critical"`)},
+		{name: "object", raw: json.RawMessage(`{"token":"critical"}`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decodeKanbanPriorityFilterTokens(tt.raw)
+			if got == nil || len(got) != 0 {
+				t.Fatalf("decodeKanbanPriorityFilterTokens(%s) = %#v, want non-nil empty", tt.raw, got)
+			}
+		})
+	}
+}
+
+// TestDecodeKanbanPriorityFilterTokensDropsInvalidMembers verifies an out-of-vocabulary member in
+// an otherwise-valid list is dropped, keeping the remaining valid tokens, per AC-004.4's read-side
+// rule for legacy rows this capability's write-side validation (AC-004.9) did not produce.
+func TestDecodeKanbanPriorityFilterTokensDropsInvalidMembers(t *testing.T) {
+	got := decodeKanbanPriorityFilterTokens(json.RawMessage(`["critical","urgent","low"]`))
+	want := []string{"critical", "low"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("decodeKanbanPriorityFilterTokens = %#v, want %#v", got, want)
+	}
+}
+
+// TestDecodeKanbanPriorityFilterTokensDropsNonStringMembers verifies a member that isn't even a
+// string (a row written directly, bypassing this capability's write-side validation) is dropped
+// like any other invalid member, keeping the remaining valid tokens rather than discarding the
+// whole list because one element failed to type-assert as a string.
+func TestDecodeKanbanPriorityFilterTokensDropsNonStringMembers(t *testing.T) {
+	got := decodeKanbanPriorityFilterTokens(json.RawMessage(`["critical",42,"low",{"x":1},null,true]`))
+	want := []string{"critical", "low"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("decodeKanbanPriorityFilterTokens = %#v, want %#v", got, want)
+	}
+}
+
+// TestDecodeKanbanPriorityFilterTokensTrimsWhitespace verifies a legacy row with surrounding
+// whitespace around an otherwise-valid token is returned trimmed, not just validated as if
+// trimmed: the board compares tokens for exact equality, so an untrimmed member would validate
+// but then silently fail every downstream match.
+func TestDecodeKanbanPriorityFilterTokensTrimsWhitespace(t *testing.T) {
+	got := decodeKanbanPriorityFilterTokens(json.RawMessage(`[" critical","low "]`))
+	want := []string{"critical", "low"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("decodeKanbanPriorityFilterTokens = %#v, want %#v", got, want)
+	}
+}
+
+// TestScanUserSettingsKanbanSortCorruptFallsBackToDefault verifies a corrupt kanban_sort value
+// falls back to the default while sibling fields still load.
+func TestScanUserSettingsKanbanSortCorruptFallsBackToDefault(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{
+		raw: `{"kanban_sort":"garbage","workspace_id":"ws-1"}`,
+	}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan settings with corrupt kanban_sort: %v", err)
+	}
+	if settings.KanbanSort != models.KanbanSortDefault {
+		t.Fatalf("KanbanSort = %q, want %q", settings.KanbanSort, models.KanbanSortDefault)
+	}
+	if settings.WorkspaceID != "ws-1" {
+		t.Fatalf("WorkspaceID = %q, want %q (sibling fields must still load)", settings.WorkspaceID, "ws-1")
+	}
+}
+
 // TestSQLiteRepositoryUpdateTaskCreateLastUsedPatchesNonEmptyFields verifies updating task-create last-used patches only non-empty fields.
 func TestSQLiteRepositoryUpdateTaskCreateLastUsedPatchesNonEmptyFields(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")
@@ -1336,6 +1476,7 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 		ExecutorProfileID: "exec-1",
 	}
 	settings.JiraSavedViews = json.RawMessage(`[{"id":"view-1"}]`)
+	settings.JiraDefaultViewID = "view-1"
 	settings.GitLabSavedPresets = json.RawMessage(`[{"id":"preset-1"}]`)
 	settings.SidebarDraft = &models.SidebarViewDraft{
 		BaseViewID: "view-1",
@@ -1370,6 +1511,9 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 	}
 	if string(got.JiraSavedViews) != `[{"id":"view-1"}]` {
 		t.Fatalf("expected Jira saved views to round-trip, got %s", string(got.JiraSavedViews))
+	}
+	if got.JiraDefaultViewID != "view-1" {
+		t.Fatalf("expected Jira default view ID to round-trip, got %q", got.JiraDefaultViewID)
 	}
 	if string(got.GitLabSavedPresets) != `[{"id":"preset-1"}]` {
 		t.Fatalf("expected GitLab presets to round-trip, got %s", string(got.GitLabSavedPresets))

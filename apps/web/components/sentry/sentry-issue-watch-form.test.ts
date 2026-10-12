@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  STATS_PERIOD_OPTIONS,
   orgSelectItems,
   projectMultiSelectItems,
   maxInflightTasksString,
@@ -15,6 +16,24 @@ const proj = (slug: string, name: string, orgSlug = "acme"): SentryProject => ({
   slug,
   name,
   orgSlug,
+});
+
+describe("STATS_PERIOD_OPTIONS", () => {
+  // The values are wire data: they are persisted on the watch filter and sent
+  // to Sentry, and the backend write guard rejects anything outside whole
+  // hours, days, or weeks. Pinning the exact set keeps a token from drifting
+  // away from its label or from the set the backend accepts.
+  //
+  // @covers AC-INTEGRATIONS-SENTRY-WATCHER-LOOKBACK-PERIODS-001.1
+  it("offers exactly the lookback tokens the backend accepts", () => {
+    expect(STATS_PERIOD_OPTIONS.map((option) => option.value)).toEqual([
+      "1h",
+      "24h",
+      "7d",
+      "14d",
+      "30d",
+    ]);
+  });
 });
 
 describe("orgSelectItems", () => {

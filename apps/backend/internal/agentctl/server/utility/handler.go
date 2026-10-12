@@ -1,23 +1,27 @@
 package utility
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
 
 // Handler provides HTTP handlers for inference operations.
 type Handler struct {
-	executor *ACPInferenceExecutor
-	logger   *zap.Logger
+	acpExecutor   *ACPInferenceExecutor
+	codexExecutor *CodexAppServerInferenceExecutor
+	logger        *zap.Logger
 }
 
 // NewHandler creates a new inference handler.
 func NewHandler(_ string, logger *zap.Logger) *Handler {
 	return &Handler{
-		executor: NewACPInferenceExecutor(logger),
-		logger:   logger,
+		acpExecutor:   NewACPInferenceExecutor(logger),
+		codexExecutor: NewCodexAppServerInferenceExecutor(logger),
+		logger:        logger,
 	}
 }
 
@@ -39,11 +43,9 @@ func (h *Handler) handleProbe(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("executing ACP probe", zap.String("agent_id", req.AgentID))
-
-	resp, err := h.executor.Probe(c.Request.Context(), &req)
+	resp, err := h.probeExecutor(req).Probe(c.Request.Context(), &req)
 	if err != nil {
-		h.logger.Error("ACP probe failed", zap.Error(err))
+		h.logger.Error("inference probe failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, ProbeResponse{
 			Success: false,
 			Error:   "probe execution failed",
@@ -79,7 +81,7 @@ func (h *Handler) handlePrompt(c *gin.Context) {
 		zap.String("model", req.Model),
 	)
 
-	resp, err := h.executor.Execute(c.Request.Context(), &req)
+	resp, err := h.promptExecutor(req).Execute(c.Request.Context(), &req)
 	if err != nil {
 		h.logger.Error("inference prompt failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, PromptResponse{
@@ -96,4 +98,23 @@ func (h *Handler) handlePrompt(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handler) probeExecutor(req ProbeRequest) inferenceExecutor {
+	if req.InferenceConfig != nil && req.InferenceConfig.Protocol == agent.ProtocolCodexAppServer {
+		return h.codexExecutor
+	}
+	return h.acpExecutor
+}
+
+func (h *Handler) promptExecutor(req PromptRequest) inferenceExecutor {
+	if req.InferenceConfig != nil && req.InferenceConfig.Protocol == agent.ProtocolCodexAppServer {
+		return h.codexExecutor
+	}
+	return h.acpExecutor
+}
+
+type inferenceExecutor interface {
+	Execute(context.Context, *PromptRequest) (*PromptResponse, error)
+	Probe(context.Context, *ProbeRequest) (*ProbeResponse, error)
 }

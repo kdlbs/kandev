@@ -2,16 +2,42 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/startup"
 )
+
+// migrateMessagePayloadStorage adds digest-backed external storage for large
+// tool-message payloads (currently shell command stdout/stderr) so
+// task_session_messages.metadata stays bounded while preserving lazy,
+// integrity-verified detail loading. See externalizeMessagePayload (write
+// path) and RehydrateMessagePayload (explicit authorized read path) in
+// message_payload.go. task_message_payloads is content-addressed by SHA-256
+// digest, so an identical payload referenced by more than one message is
+// stored exactly once.
+func (r *Repository) migrateMessagePayloadStorage() {
+	_ = r.migrate.Apply("task_session_messages.payload_digest", `ALTER TABLE task_session_messages ADD COLUMN payload_digest TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_session_messages.payload_size", `ALTER TABLE task_session_messages ADD COLUMN payload_size INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("idx_messages_payload_digest", `CREATE INDEX IF NOT EXISTS idx_messages_payload_digest ON task_session_messages(payload_digest)`)
+	_ = r.migrate.Apply("task_message_payloads.table", fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS task_message_payloads (
+			digest TEXT PRIMARY KEY,
+			compressed_content %s NOT NULL,
+			uncompressed_size INTEGER NOT NULL,
+			compressed_size INTEGER NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		)`, dialect.BlobType(r.db.DriverName())))
+}
 
 // migrateExecutorProfiles adds mcp_policy column and drops is_default from executor_profiles.
 func (r *Repository) migrateExecutorProfiles() error {
@@ -34,7 +60,7 @@ func (r *Repository) migrateTaskSessions() error {
 // A DB that no longer contains the rebuild trigger columns would never gain the
 // cost columns, breaking the office cost subscriber's IncrementTaskSessionUsage
 // with "no such column: tokens_in". These additive ALTERs are idempotent — the
-// MigrateLogger swallows "duplicate column name" on DBs that already have them.
+// required migration logger tolerates only "duplicate column name" on replay.
 func (r *Repository) migrateSessionsAddCostColumns() {
 	r.migrate.Apply("task_sessions.cost_subcents", `ALTER TABLE task_sessions ADD COLUMN cost_subcents INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.tokens_in", `ALTER TABLE task_sessions ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0`)
@@ -50,7 +76,31 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 }
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
-func (r *Repository) runMigrations() error {
+//
+//nolint:cyclop,funlen,maintidx // Legacy flat list of ~60 independent idempotent migration steps predating startup-step instrumentation; splitting it is out of scope here.
+func (r *Repository) runMigrations(ctx context.Context) error {
+	for _, migration := range []struct{ name, query string }{
+		{"control_server_records.process_id", `ALTER TABLE control_server_records ADD COLUMN process_id INTEGER NOT NULL DEFAULT 0`},
+		{"control_server_records.process_group_id", `ALTER TABLE control_server_records ADD COLUMN process_group_id INTEGER NOT NULL DEFAULT 0`},
+		{"control_server_records.process_session_id", `ALTER TABLE control_server_records ADD COLUMN process_session_id INTEGER NOT NULL DEFAULT 0`},
+		{"control_server_records.process_birth_token", `ALTER TABLE control_server_records ADD COLUMN process_birth_token TEXT NOT NULL DEFAULT ''`},
+		{"session_recovery_blocks.delivery_submission_id", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_submission_id TEXT NOT NULL DEFAULT ''`},
+		{"session_recovery_blocks.delivery_stream_id", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_stream_id TEXT NOT NULL DEFAULT ''`},
+		{"session_recovery_blocks.delivery_sequence", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_sequence BIGINT NOT NULL DEFAULT 0`},
+		{"session_recovery_blocks.delivery_turn_id", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_turn_id TEXT NOT NULL DEFAULT ''`},
+		{"session_recovery_blocks.delivery_outcome", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_outcome TEXT NOT NULL DEFAULT ''`},
+		{"session_restore_attempts.checkpoint_json", `ALTER TABLE session_restore_attempts ADD COLUMN checkpoint_json TEXT NOT NULL DEFAULT ''`},
+		{"agent_delivery_effects.session_id", `ALTER TABLE agent_delivery_effects ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
+		{"agent_delivery_effects.incarnation_id", `ALTER TABLE agent_delivery_effects ADD COLUMN incarnation_id TEXT NOT NULL DEFAULT ''`},
+		{"agent_delivery_effects.harness_generation", `ALTER TABLE agent_delivery_effects ADD COLUMN harness_generation BIGINT NOT NULL DEFAULT 0`},
+		{"agent_delivery_effects.submission_id", `ALTER TABLE agent_delivery_effects ADD COLUMN submission_id TEXT NOT NULL DEFAULT ''`},
+		{"agent_delivery_effects.turn_id", `ALTER TABLE agent_delivery_effects ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''`},
+		{"agent_delivery_effects.outcome", `ALTER TABLE agent_delivery_effects ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`},
+	} {
+		if err := r.migrate.Apply(migration.name, migration.query); err != nil {
+			return fmt.Errorf("apply migration %q: %w", migration.name, err)
+		}
+	}
 	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
 		return err
 	}
@@ -63,6 +113,7 @@ func (r *Repository) runMigrations() error {
 	if err := r.ensureTeamAccessSchema(); err != nil {
 		return err
 	}
+	_ = r.migrate.Apply("repository_set_items.base_branch", `ALTER TABLE repository_set_items ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`)
 	if err := r.ensureRepositoryBranchPoliciesSchema(); err != nil {
 		return err
 	}
@@ -71,8 +122,17 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_sessions.route_state", `ALTER TABLE task_sessions ADD COLUMN route_state TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_sessions.route_reason", `ALTER TABLE task_sessions ADD COLUMN route_reason TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_sessions.downstream_acp_session_id", `ALTER TABLE task_sessions ADD COLUMN downstream_acp_session_id TEXT NOT NULL DEFAULT ''`)
+	if err := r.migrate.Apply("session_continuation_snapshots.target_generation", `ALTER TABLE session_continuation_snapshots ADD COLUMN target_generation BIGINT NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("session_continuation_snapshots.submission_id", `ALTER TABLE session_continuation_snapshots ADD COLUMN submission_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	r.migrate.Apply("dynamic_route_states.continuation_json", `ALTER TABLE dynamic_route_states ADD COLUMN continuation_json TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("dynamic_route_states.policy_state_json", `ALTER TABLE dynamic_route_states ADD COLUMN policy_state_json TEXT NOT NULL DEFAULT ''`)
+	if err := r.backfillLegacyActiveDynamicRoutes(); err != nil {
+		return err
+	}
 	r.migrate.Apply("executors_running.execution_profile_id", `ALTER TABLE executors_running ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("executors_running.last_message_uuid", `ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
 	r.migrate.Apply("executors_running.metadata", `ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
@@ -100,12 +160,24 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_sessions.base_commit_sha", `ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
 	r.migrate.Apply("workspaces.default_config_agent_profile_id", `ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_sessions.task_environment_id", `ALTER TABLE task_sessions ADD COLUMN task_environment_id TEXT DEFAULT ''`)
+	if err := r.migrateWorkflowSessionBindings(); err != nil {
+		return err
+	}
 	r.migrate.Apply("tasks.parent_id", `ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT ''`)
 	r.migrate.Apply("tasks.autopilot_enabled", `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`)
 	// Remove FK constraint on workflow_id to allow ephemeral tasks without workflows
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
+	// Store task-local fixed-step profile substitutions after the workflow-FK
+	// rebuild so legacy databases cannot lose the column during that recreate.
+	_ = r.migrate.Apply("tasks.workflow_agent_overrides", `ALTER TABLE tasks ADD COLUMN workflow_agent_overrides TEXT`)
+	// Must run AFTER migrateTasksRemoveWorkflowFK: that migration recreates
+	// tasks from an explicit column list. Adding this column beforehand would
+	// have it silently dropped by the recreate on any database still carrying
+	// the legacy FK, leaving it absent for the remainder of that boot (the
+	// same hazard class as the task_sessions.name comment above).
+	_ = r.migrate.Apply("tasks.assignment_generation", `ALTER TABLE tasks ADD COLUMN assignment_generation INTEGER NOT NULL DEFAULT 0`)
 	if err := r.dropRetiredSlackIntegration(); err != nil {
 		return err
 	}
@@ -138,6 +210,12 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTaskEnvironmentReposAllowMultiBranch(); err != nil {
 		return err
 	}
+	_ = r.migrate.Apply("task_environment_repos.worktree_branch_owner", `ALTER TABLE task_environment_repos ADD COLUMN worktree_branch_owner TEXT NOT NULL DEFAULT 'unknown'`)
+	_ = r.migrate.Apply("task_environment_repos.worktree_integration_ref", `ALTER TABLE task_environment_repos ADD COLUMN worktree_integration_ref TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_environment_repos.worktree_recovery_head_sha", `ALTER TABLE task_environment_repos ADD COLUMN worktree_recovery_head_sha TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_environment_repos.worktree_source_clone_path", `ALTER TABLE task_environment_repos ADD COLUMN worktree_source_clone_path TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_environment_repos.worktree_source_common_dir", `ALTER TABLE task_environment_repos ADD COLUMN worktree_source_common_dir TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_environment_repos.worktree_branch_compacted_at", `ALTER TABLE task_environment_repos ADD COLUMN worktree_branch_compacted_at TIMESTAMP`)
 	r.migrate.Apply("workflows.sort_order", `ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflows.agent_profile_id", `ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
@@ -177,6 +255,13 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_plans.implementation_started_at", `ALTER TABLE task_plans ADD COLUMN implementation_started_at TIMESTAMP`)
 	r.migrate.Apply("task_plans.implementation_started_session_id", `ALTER TABLE task_plans ADD COLUMN implementation_started_session_id TEXT`)
 	r.migrate.Apply("task_plans.implementation_started_by", `ALTER TABLE task_plans ADD COLUMN implementation_started_by TEXT`)
+	_ = r.migrate.Apply("task_plans.comments_revision", `ALTER TABLE task_plans ADD COLUMN comments_revision INTEGER NOT NULL DEFAULT 0`)
+	if err := r.migrate.Apply("task_plans.write_version", `ALTER TABLE task_plans ADD COLUMN write_version TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := r.backfillTaskPlanWriteVersions(); err != nil {
+		return err
+	}
 
 	// Authoritative per-message change signal (chat render-perf). SQLite forbids a
 	// non-constant default on ADD COLUMN, so the column is added nullable and
@@ -184,14 +269,16 @@ func (r *Repository) runMigrations() error {
 	// explicitly in CreateMessage/UpdateMessage. The backfill UPDATE is idempotent
 	// (WHERE updated_at IS NULL).
 	r.migrate.Apply("task_session_messages.updated_at", `ALTER TABLE task_session_messages ADD COLUMN updated_at TIMESTAMP`)
+	startup.BeginStep(ctx, startup.StepMessageTimestampsBackfill)
 	r.migrate.Apply("task_session_messages.updated_at.backfill", `UPDATE task_session_messages SET updated_at = created_at WHERE updated_at IS NULL`)
+	startup.EndStep(ctx, startup.StepMessageTimestampsBackfill)
 	r.migrate.Apply("idx_messages_session_updated", `CREATE INDEX IF NOT EXISTS idx_messages_session_updated ON task_session_messages(task_session_id, updated_at)`)
 
 	// task_session_commits gains a uniqueness constraint before its writer
 	// starts firing from more than just archive capture (CreateSessionCommit
 	// was previously a plain INSERT). Must dedupe existing duplicates first:
-	// CREATE UNIQUE INDEX fails on a duplicate pair, and MigrateLogger.Apply
-	// swallows non-"already exists" errors, so an unhandled duplicate would
+	// CREATE UNIQUE INDEX fails on a duplicate pair, and an idempotent migration
+	// helper must not classify that data error as an existing schema object, so an unhandled duplicate would
 	// silently leave both the index and every future ON CONFLICT missing.
 	if err := r.migrateSessionCommitsDedupeAndActivation(); err != nil {
 		return err
@@ -205,6 +292,7 @@ func (r *Repository) runMigrations() error {
 	// only). Must run after migrateSessionsAddCostColumns so a legacy DB has
 	// the columns to widen before this ALTERs their type.
 	r.migrateTaskSessionsRollupColumnsToBigint()
+	r.migrateTaskUsageObservationColumns()
 
 	// Office task extensions - net-new columns on existing main tables.
 	// Idempotent ALTERs; main upgrades pick them up at first boot.
@@ -240,6 +328,10 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("workspaces.task_prefix", `ALTER TABLE workspaces ADD COLUMN task_prefix TEXT DEFAULT 'KAN'`)
 	r.migrate.Apply("workspaces.task_sequence", `ALTER TABLE workspaces ADD COLUMN task_sequence INTEGER DEFAULT 0`)
 	r.migrate.Apply("workspaces.office_workflow_id", `ALTER TABLE workspaces ADD COLUMN office_workflow_id TEXT DEFAULT ''`)
+	_ = r.migrate.Apply("workspaces.acp_idle_suspension_enabled", `ALTER TABLE workspaces ADD COLUMN acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
+	_ = r.migrate.Apply("workspaces.acp_idle_timeout_minutes", `ALTER TABLE workspaces ADD COLUMN acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0)`)
+	_ = r.migrate.Apply("executors_running.idle_suspension_state", `ALTER TABLE executors_running ADD COLUMN idle_suspension_state TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("executors_running.idle_suspension_policy_updated_at", `ALTER TABLE executors_running ADD COLUMN idle_suspension_policy_updated_at TIMESTAMP`)
 
 	// Office session cost tracking extensions are declared in
 	// initSessionWorktreeSchema's CREATE TABLE (cost_subcents, tokens_in,
@@ -287,20 +379,49 @@ func (r *Repository) runMigrations() error {
 	// task SELECTs that reference them via correlated subquery don't
 	// fail. Required for tests and any environment where the workflow
 	// repo hasn't run yet.
-	r.ensureRunnerProjectionTables()
+	if err := r.ensureRunnerProjectionTables(); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("workflow_steps.wip_limit", `ALTER TABLE workflow_steps ADD COLUMN wip_limit INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("migrate workflow_steps.wip_limit: %w", err)
+	}
+	if err := r.migrate.Apply("workflow_steps.pull_from_step_id", `ALTER TABLE workflow_steps ADD COLUMN pull_from_step_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate workflow_steps.pull_from_step_id: %w", err)
+	}
+	if err := r.migrate.Apply("workflow_step_participants.provenance", `ALTER TABLE workflow_step_participants ADD COLUMN provenance TEXT NOT NULL DEFAULT 'manual'`); err != nil {
+		return fmt.Errorf("migrate workflow_step_participants.provenance: %w", err)
+	}
+	// Keep the projection table compatible with existing task-only stores.
+	// The workflow repository owns this table in production, but task queries
+	// can run before that repository initializes its schema in isolated stores.
+	_ = r.migrate.Apply("workflow_step_participants.created_at", `
+		ALTER TABLE workflow_step_participants
+		ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
+	`)
 	// Keep the projection table compatible with databases whose workflow
 	// repository has not replayed its own migrations yet. These additive
 	// migrations are idempotent and preserve the false default for legacy rows.
 	r.migrate.Apply("workflow_steps.auto_advance_requires_signal", `ALTER TABLE workflow_steps ADD COLUMN auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflow_steps.cancel_triggers_turn_complete", `ALTER TABLE workflow_steps ADD COLUMN cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("workflow_steps.complete_task_on_enter", `ALTER TABLE workflow_steps ADD COLUMN complete_task_on_enter INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflow_steps.profile_session_start_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse'`)
-	r.migrate.Apply("workflow_steps.profile_session_end_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_end_policy TEXT NOT NULL DEFAULT 'complete'`)
+	_ = r.migrate.Apply("workflow_steps.profile_session_end_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_end_policy TEXT NOT NULL DEFAULT 'park'`)
+	_ = r.migrate.Apply("workflow_steps.disable_unclassified_fallback", `ALTER TABLE workflow_steps ADD COLUMN disable_unclassified_fallback INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("workflow_steps.session_target", `ALTER TABLE workflow_steps ADD COLUMN session_target TEXT`)
+	// Kanban task reordering (REQ-TASKS-KANBAN-TASK-REORDERING-001.25). Kept
+	// compatible with databases whose workflow repository has not replayed its
+	// own migrations yet, same as the columns above.
+	_ = r.migrate.Apply("workflow_steps.order_revision", `ALTER TABLE workflow_steps ADD COLUMN order_revision INTEGER NOT NULL DEFAULT 0`)
 
 	// Slack-style unread divider: the read cursor a session advances to the
 	// latest message id whenever it becomes the visible chat panel. The
 	// frontend snapshots the prior value before the advance to position the
 	// "New" divider (see models.TaskSession.LastReadMessageID).
 	r.migrate.Apply("task_sessions.last_read_message_id", `ALTER TABLE task_sessions ADD COLUMN last_read_message_id TEXT DEFAULT ''`)
+	_ = r.migrate.Apply("task_sessions.queue_incarnation_id", `ALTER TABLE task_sessions ADD COLUMN queue_incarnation_id TEXT NOT NULL DEFAULT ''`)
+	if err := r.backfillTaskSessionQueueIncarnations(); err != nil {
+		return err
+	}
 	r.migrate.Apply("task_session_turns.execution_profile_id", `ALTER TABLE task_session_turns ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_session_turns.route_generation", `ALTER TABLE task_session_turns ADD COLUMN route_generation BIGINT NOT NULL DEFAULT 0`)
 
@@ -329,7 +450,7 @@ func (r *Repository) runMigrations() error {
 	// table is not part of the supported upgrade path, so there is no
 	// intermediate-shape rebuild to run here. Only the historical-message
 	// backfill belongs in the migration phase.
-	r.migrateSubagentContextBackfill()
+	r.migrateSubagentContextBackfill(ctx)
 
 	// Durable per-session prompt ordinals. prompt_seq is allocated from a
 	// per-session sequence counter inside the create write boundary, so an
@@ -348,7 +469,19 @@ func (r *Repository) runMigrations() error {
 			task_session_id TEXT PRIMARY KEY,
 			last_seq INTEGER NOT NULL
 		)`)
-	if err := r.backfillPromptSeq(); err != nil {
+	if err := r.backfillPromptSeq(ctx); err != nil {
+		return err
+	}
+
+	// Bounded operational payload storage (PR-watch/storage-bounds plan,
+	// wave 2): digest-backed external storage for large tool-message
+	// payloads (currently shell command stdout/stderr - see
+	// externalizeMessagePayload/RehydrateMessagePayload) and a content
+	// digest on git snapshots so content-equivalent rows become
+	// identifiable via ListDuplicateGitSnapshotCandidates for a later,
+	// explicit maintenance pass to prune.
+	r.migrateMessagePayloadStorage()
+	if err := r.migrateGitSnapshotContentDigest(); err != nil {
 		return err
 	}
 
@@ -359,6 +492,246 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_plan_revisions.workflow_step_name", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_name TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_plan_revisions.workflow_step_color", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_color TEXT NOT NULL DEFAULT ''`)
 
+	// The allocated marker-bearing position set for a step entry
+	// (AC-OFFICE-STEP-ENTRY-DISPATCH-002.4/.9): an ordered, comma-separated
+	// list of the positions allocateStepEntryIfPending claimed markers for,
+	// computed once at allocation time and never re-derived from the live
+	// on_enter declaration. Existing rows (created before this column
+	// existed) backfill to '' — deliberately not reconstructed from the
+	// current step definition, which may have changed since that entry was
+	// allocated.
+	_ = r.migrate.Apply("workflow_step_entries.marker_positions", `ALTER TABLE workflow_step_entries ADD COLUMN marker_positions TEXT NOT NULL DEFAULT ''`)
+
+	// One row per SSH executor holding observed reachability — deliberately
+	// not columns on executors, which holds user-authored config and a
+	// user-controlled status switch. No foreign key: deletion is explicit
+	// (DeleteExecutor deletes the row in the same transaction as the soft
+	// delete), not a cascade.
+	_ = r.migrate.Apply("executor_reachability.table", `
+		CREATE TABLE IF NOT EXISTS executor_reachability (
+			executor_id          TEXT PRIMARY KEY,
+			state                TEXT NOT NULL DEFAULT 'unknown',
+			reason               TEXT NOT NULL DEFAULT '',
+			message              TEXT NOT NULL DEFAULT '',
+			consecutive_failures INTEGER NOT NULL DEFAULT 0,
+			host                 TEXT NOT NULL DEFAULT '',
+			checked_at           TIMESTAMP,
+			last_success_at      TIMESTAMP,
+			updated_at           TIMESTAMP NOT NULL
+		)`)
+
+	// Exact task command identity shares the task commit boundary. It has no
+	// foreign key because retained operation identities must survive task
+	// deletion and prevent an old command from being replayed after recovery.
+	_ = r.migrate.Apply("exact_task_command_operations.table", `
+		CREATE TABLE IF NOT EXISTS exact_task_command_operations (
+			operation_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			payload_digest TEXT NOT NULL,
+			result_resource_version TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		)`)
+	_ = r.migrate.Apply("exact_task_command_operations.task", `
+		CREATE INDEX IF NOT EXISTS idx_exact_task_command_operations_task
+			ON exact_task_command_operations(workspace_id, task_id, created_at)`)
+
+	// A task has at most one current management claim. Released claims remain
+	// as rows with an empty owner so the monotonically increasing generation
+	// cannot be reset by a later acquisition. The append-only history is kept
+	// separately so human takeover remains inspectable after owner changes.
+	_ = r.migrate.Apply("task_management_claims.table", `
+		CREATE TABLE IF NOT EXISTS task_management_claims (
+			task_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			owner_kind TEXT NOT NULL DEFAULT '' CHECK (owner_kind IN ('', 'plugin', 'human')),
+			owner_actor_id TEXT NOT NULL DEFAULT '',
+			installation_id TEXT NOT NULL DEFAULT '',
+			instance_key TEXT NOT NULL DEFAULT '',
+			generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+			resource_version TEXT NOT NULL,
+			acquired_at TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL,
+			updated_by_actor TEXT NOT NULL DEFAULT '',
+			CHECK ((owner_kind = '' AND owner_actor_id = '' AND installation_id = '' AND instance_key = '' AND acquired_at IS NULL) OR
+				(owner_kind = 'plugin' AND owner_actor_id = '' AND installation_id <> '' AND instance_key <> '' AND acquired_at IS NOT NULL) OR
+				(owner_kind = 'human' AND owner_actor_id <> '' AND installation_id = '' AND instance_key = '' AND acquired_at IS NOT NULL)),
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_management_claims.workspace", `
+		CREATE INDEX IF NOT EXISTS idx_task_management_claims_workspace
+			ON task_management_claims(workspace_id, task_id)`)
+	_ = r.migrate.Apply("task_management_claim_history.table", `
+		CREATE TABLE IF NOT EXISTS task_management_claim_history (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			action TEXT NOT NULL CHECK (action IN ('acquired', 'released', 'transferred', 'human_superseded')),
+			previous_owner_kind TEXT NOT NULL DEFAULT '',
+			previous_owner_actor_id TEXT NOT NULL DEFAULT '',
+			previous_installation_id TEXT NOT NULL DEFAULT '',
+			previous_instance_key TEXT NOT NULL DEFAULT '',
+			installation_id TEXT NOT NULL DEFAULT '',
+			instance_key TEXT NOT NULL DEFAULT '',
+			owner_kind TEXT NOT NULL DEFAULT '' CHECK (owner_kind IN ('', 'plugin', 'human')),
+			owner_actor_id TEXT NOT NULL DEFAULT '',
+			generation INTEGER NOT NULL CHECK (generation >= 0),
+			actor_id TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			resource_version TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_management_claim_history.task", `
+		CREATE INDEX IF NOT EXISTS idx_task_management_claim_history_task
+			ON task_management_claim_history(workspace_id, task_id, created_at, id)`)
+
+	// Task completion criteria remain task-owned and revisioned even when the
+	// current set is empty. Criterion evidence is replaced only by exact verify
+	// commands; history is append-only and is deleted with its task.
+	_ = r.migrate.Apply("task_completion_sets.table", `
+		CREATE TABLE IF NOT EXISTS task_completion_sets (
+			task_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_completion_criteria.table", `
+		CREATE TABLE IF NOT EXISTS task_completion_criteria (
+			task_id TEXT NOT NULL,
+			criterion_id TEXT NOT NULL,
+			description TEXT NOT NULL,
+			criterion_revision BIGINT NOT NULL CHECK (criterion_revision > 0),
+			subject_kind TEXT NOT NULL,
+			subject_id TEXT NOT NULL,
+			verified_revision BIGINT NOT NULL DEFAULT 0,
+			evidence_kind TEXT NOT NULL DEFAULT '',
+			evidence_id TEXT NOT NULL DEFAULT '',
+			evidence_revision TEXT NOT NULL DEFAULT '',
+			evidence_summary TEXT NOT NULL DEFAULT '',
+			evidence_reference TEXT NOT NULL DEFAULT '',
+			verifier_kind TEXT NOT NULL DEFAULT '',
+			verifier_id TEXT NOT NULL DEFAULT '',
+			verified_at TIMESTAMP,
+			PRIMARY KEY (task_id, criterion_id),
+			FOREIGN KEY (task_id) REFERENCES task_completion_sets(task_id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_completion_gate_history.table", `
+		CREATE TABLE IF NOT EXISTS task_completion_gate_history (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			revision BIGINT NOT NULL,
+			action TEXT NOT NULL,
+			actor_kind TEXT NOT NULL,
+			actor_id TEXT NOT NULL,
+			reason TEXT NOT NULL DEFAULT '',
+			details TEXT NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_completion_gate_history.task", `
+		CREATE INDEX IF NOT EXISTS idx_task_completion_gate_history_task
+			ON task_completion_gate_history(workspace_id, task_id, created_at, id)`)
+	// Exact plugin completion commands retain their applied result so a retry
+	// after a lost receipt can return the same gate snapshot without replaying a
+	// criteria mutation under a stale revision.
+	_ = r.migrate.Apply("task_completion_gate_operations.table", `
+		CREATE TABLE IF NOT EXISTS task_completion_gate_operations (
+			operation_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			action TEXT NOT NULL,
+			payload_digest TEXT NOT NULL,
+			result_json TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		) `)
+	_ = r.migrate.Apply("task_completion_gate_operations.task", `
+		CREATE INDEX IF NOT EXISTS idx_task_completion_gate_operations_task
+			ON task_completion_gate_operations(workspace_id, task_id, created_at)`)
+
+	// Checked last so a failure on any required migration above --
+	// including this file's own marker_positions column -- fails startup
+	// instead of leaving a schema that allocateStepEntryIfPending can't write to.
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required task migration: %w", err)
+	}
+
+	if _, err := r.db.ExecContext(ctx, kubernetesEnvironmentSchemaDDL); err != nil {
+		return fmt.Errorf("create Kubernetes environment inventory: %w", err)
+	}
+
+	return nil
+}
+
+// backfillTaskPlanWriteVersions assigns a fresh opaque token to legacy HEAD
+// rows. The empty-value predicate makes startup replay and an interrupted
+// backfill safe without changing an already assigned version.
+func (r *Repository) backfillTaskPlanWriteVersions() error {
+	ctx := r.migrationContext()
+	rows, err := r.db.QueryxContext(ctx, r.db.Rebind(`
+		SELECT id FROM task_plans
+		WHERE COALESCE(write_version, '') = ''
+	`))
+	if err != nil {
+		return fmt.Errorf("list plans missing write versions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var planIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("scan plan missing write version: %w", err)
+		}
+		planIDs = append(planIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate plans missing write versions: %w", err)
+	}
+	for _, id := range planIDs {
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+			UPDATE task_plans
+			SET write_version = ?
+			WHERE id = ? AND COALESCE(write_version, '') = ''
+		`), uuid.NewString(), id); err != nil {
+			return fmt.Errorf("backfill plan write version %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
+func (r *Repository) backfillTaskSessionQueueIncarnations() error {
+	ctx := r.migrationContext()
+	rows, err := r.db.QueryxContext(ctx, `SELECT id FROM task_sessions WHERE queue_incarnation_id = ''`)
+	if err != nil {
+		return fmt.Errorf("list sessions missing queue incarnation: %w", err)
+	}
+	var sessionIDs []string
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan session missing queue incarnation: %w", err)
+		}
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close queue incarnation rows: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate sessions missing queue incarnation: %w", err)
+	}
+	for _, sessionID := range sessionIDs {
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+			UPDATE task_sessions
+			   SET queue_incarnation_id = ?
+			 WHERE id = ? AND queue_incarnation_id = ''
+		`), uuid.NewString(), sessionID); err != nil {
+			return fmt.Errorf("backfill queue incarnation for session %s: %w", sessionID, err)
+		}
+	}
 	return nil
 }
 
@@ -368,7 +741,7 @@ func (r *Repository) runMigrations() error {
 // session's sequence counter at its backfilled maximum. Idempotent: user rows
 // already carrying a nonzero prompt_seq are untouched, and the counter seed
 // ignores existing rows.
-func (r *Repository) backfillPromptSeq() error {
+func (r *Repository) backfillPromptSeq(ctx context.Context) error {
 	nmU := dialect.NormalizedMicrosecond(r.db.DriverName(), "u.created_at")
 	nmM := dialect.NormalizedMicrosecond(r.db.DriverName(), "task_session_messages.created_at")
 	update := fmt.Sprintf(`
@@ -380,7 +753,9 @@ func (r *Repository) backfillPromptSeq() error {
 			  AND (%s < %s OR (%s = %s AND u.id <= task_session_messages.id))
 		)
 		WHERE author_type = 'user' AND prompt_seq = 0`, nmU, nmM, nmU, nmM)
-	if _, err := r.db.Exec(update); err != nil {
+	startup.BeginStep(ctx, startup.StepPromptSeqBackfill)
+	defer startup.EndStep(ctx, startup.StepPromptSeqBackfill)
+	if _, err := r.db.ExecContext(ctx, update); err != nil {
 		return fmt.Errorf("backfill prompt_seq: %w", err)
 	}
 	seed := `
@@ -389,7 +764,7 @@ func (r *Repository) backfillPromptSeq() error {
 		WHERE author_type = 'user' AND prompt_seq > 0
 		GROUP BY task_session_id
 		ON CONFLICT(task_session_id) DO NOTHING`
-	if _, err := r.db.Exec(seed); err != nil {
+	if _, err := r.db.ExecContext(ctx, seed); err != nil {
 		return fmt.Errorf("seed prompt sequence counters: %w", err)
 	}
 	return nil
@@ -542,14 +917,14 @@ func jsonBoolToInt(postgres bool, column, parent, key string) string {
 // the initial implementation, reconciles legacy bootstrap duplicates, then
 // enforces uniqueness only for the two hidden workflows created by this flow.
 func (r *Repository) ensureImproveKandevWorkflowTemplateUniqueness() error {
-	tx, err := r.db.Beginx()
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
 	if err != nil {
 		return fmt.Errorf("begin improve kandev workflow migration: %w", err)
 	}
 	// Keep this template list synchronized with every hidden Improve Kandev
 	// workflow bootstrapped by internal/improvekandev. Add new IDs to both this
 	// reconciliation query and the partial-index predicate below.
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(r.migrationContext(), `
 		UPDATE workflows
 		SET workflow_template_id = ''
 		WHERE id IN (
@@ -571,11 +946,11 @@ func (r *Repository) ensureImproveKandevWorkflowTemplateUniqueness() error {
 		_ = tx.Rollback()
 		return fmt.Errorf("reconcile improve kandev workflow duplicates: %w", err)
 	}
-	if _, err := tx.Exec(`DROP INDEX IF EXISTS uniq_workflows_workspace_template_hidden`); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `DROP INDEX IF EXISTS uniq_workflows_workspace_template_hidden`); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("drop broad workflow template index: %w", err)
 	}
-	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_improve_kandev_workflows
+	if _, err := tx.ExecContext(r.migrationContext(), `CREATE UNIQUE INDEX IF NOT EXISTS uniq_improve_kandev_workflows
 		ON workflows(workspace_id, workflow_template_id, hidden)
 		WHERE workflow_template_id IN ('improve-kandev', 'report-kandev-issue')`); err != nil {
 		_ = tx.Rollback()
@@ -591,7 +966,7 @@ func (r *Repository) ensureImproveKandevWorkflowTemplateUniqueness() error {
 // folder attachments existed. CREATE TABLE/INDEX IF NOT EXISTS is replay-safe
 // on SQLite and Postgres.
 func (r *Repository) ensureTaskWorkspaceFoldersSchema() error {
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 		CREATE TABLE IF NOT EXISTS task_workspace_folders (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
@@ -616,7 +991,7 @@ func (r *Repository) ensureTaskWorkspaceFoldersSchema() error {
 // existed. It replays the same DDL as the schema-init step; CREATE TABLE/INDEX
 // IF NOT EXISTS is replay-safe on SQLite and Postgres.
 func (r *Repository) ensureRepositorySetsSchema() error {
-	if _, err := r.db.Exec(repositorySetsSchemaDDL); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), repositorySetsSchemaDDL); err != nil {
 		return fmt.Errorf("create repository sets schema: %w", err)
 	}
 	return nil
@@ -625,7 +1000,7 @@ func (r *Repository) ensureRepositorySetsSchema() error {
 // ensureRepositoryBranchPoliciesSchema replays the policy DDL for databases
 // created before repository branch policies existed.
 func (r *Repository) ensureRepositoryBranchPoliciesSchema() error {
-	if _, err := r.db.Exec(repositoryBranchPoliciesSchemaDDL); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), repositoryBranchPoliciesSchemaDDL); err != nil {
 		return fmt.Errorf("create repository branch policies schema: %w", err)
 	}
 	return nil
@@ -645,7 +1020,7 @@ func (r *Repository) recreateTable(tableName, triggerPhrase string, statements [
 	}
 
 	var tableSql string
-	err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, tableName).Scan(&tableSql)
+	err := r.db.QueryRowContext(r.migrationContext(), `SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, tableName).Scan(&tableSql)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil // Table doesn't exist yet; migration not applicable
 	}
@@ -656,19 +1031,21 @@ func (r *Repository) recreateTable(tableName, triggerPhrase string, statements [
 		return false, nil // Trigger phrase absent; migration already applied or not needed
 	}
 
-	if _, err := r.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), `PRAGMA foreign_keys=OFF`); err != nil {
 		return false, fmt.Errorf("disable foreign keys: %w", err)
 	}
-	defer func() { _, _ = r.db.Exec(`PRAGMA foreign_keys=ON`) }()
+	// This restoration is cleanup, so it must not inherit a canceled startup
+	// context and leave the shared SQLite writer with foreign-key checks off.
+	defer func() { _, _ = r.db.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`) }()
 
-	tx, err := r.db.Beginx()
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
 	if err != nil {
 		return false, fmt.Errorf("begin migration transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	for _, stmt := range statements {
-		if _, err := tx.Exec(stmt); err != nil {
+		if _, err := tx.ExecContext(r.migrationContext(), stmt); err != nil {
 			return false, fmt.Errorf("migration %s failed: %w", tableName, err)
 		}
 	}
@@ -746,7 +1123,7 @@ func (r *Repository) backfillExecutorsRunningFromTaskSessions() error {
 	// Check whether task_sessions still has the column. If migration already ran,
 	// the column is gone and there's nothing to backfill.
 	var tableSql string
-	if err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='task_sessions'`).Scan(&tableSql); err != nil {
+	if err := r.db.QueryRowContext(r.migrationContext(), `SELECT sql FROM sqlite_master WHERE type='table' AND name='task_sessions'`).Scan(&tableSql); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -760,7 +1137,7 @@ func (r *Repository) backfillExecutorsRunningFromTaskSessions() error {
 	// SELECT … LEFT JOIN to find sessions with execution data but no executors_running row.
 	// Insert with the minimum field set; runtime/status are best-effort defaults
 	// (subsequent Launch / Resume will overwrite via the lifecycle manager's persistence).
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 		INSERT INTO executors_running (
 			id, session_id, task_id, executor_id, runtime, status, resumable,
 			resume_token, last_message_uuid, agent_execution_id, container_id,
@@ -819,16 +1196,15 @@ const commitCaptureActivatedAtMetaKey = "commit_capture_activated_at"
 // (e.g. abandoned work), not just noise.
 //
 // Must run before CreateSessionCommit starts firing from more than archive -
-// CREATE UNIQUE INDEX fails on an existing duplicate pair, and
-// MigrateLogger.Apply swallows non-"already exists" errors, so an unhandled
-// duplicate would silently leave both the index and every future
+// CREATE UNIQUE INDEX fails on an existing duplicate pair. An unhandled
+// duplicate must not silently leave both the index and every future
 // ON CONFLICT missing. That is exactly why these two statements, unlike most
 // migrations in this file, do NOT go through r.migrate.Apply: the writer's
 // ON CONFLICT (session_id, commit_sha) target hard-requires this index to
 // exist, so a failure here must abort boot (propagated below) rather than
 // leave every future commit insert failing silently forever.
 func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 		DELETE FROM task_session_commits
 		WHERE id NOT IN (
 			SELECT id FROM (
@@ -844,7 +1220,7 @@ func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
 	`); err != nil {
 		return fmt.Errorf("dedupe task_session_commits: %w", err)
 	}
-	if _, err := r.db.Exec(
+	if _, err := r.db.ExecContext(r.migrationContext(),
 		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_commits_session_sha ON task_session_commits(session_id, commit_sha)`,
 	); err != nil {
 		return fmt.Errorf("create uniq_session_commits_session_sha: %w", err)
@@ -857,7 +1233,7 @@ func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
 	// production (persistence.Provide creates it before opening any
 	// repository), but repo-level tests build a bare DB via NewWithDB where
 	// it does not, so recreate it defensively.
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 		CREATE TABLE IF NOT EXISTS kandev_meta (
 			key   TEXT PRIMARY KEY,
 			value TEXT NOT NULL DEFAULT ''
@@ -865,7 +1241,7 @@ func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
 		return fmt.Errorf("ensure kandev_meta: %w", err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := r.db.Exec(r.db.Rebind(`
+	if _, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(`
 		INSERT INTO kandev_meta (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO NOTHING
 	`), commitCaptureActivatedAtMetaKey, now); err != nil {
@@ -1022,10 +1398,10 @@ func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranch() error {
 }
 
 func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranchPostgres() error {
-	if _, err := r.db.Exec(`ALTER TABLE task_environment_repos ADD COLUMN IF NOT EXISTS branch_slug TEXT NOT NULL DEFAULT ''`); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), `ALTER TABLE task_environment_repos ADD COLUMN IF NOT EXISTS branch_slug TEXT NOT NULL DEFAULT ''`); err != nil {
 		return fmt.Errorf("add task_environment_repos.branch_slug: %w", err)
 	}
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 DO $$
 DECLARE
 	old_constraint_name text;
@@ -1195,13 +1571,13 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 // Runs before ensureTaskEnvironmentTaskUniqueIndex so the unique constraint
 // can be added cleanly. Idempotent — a no-op once the data is healed.
 func (r *Repository) healDuplicateTaskEnvironments() error {
-	tx, err := r.db.Begin()
+	tx, err := r.db.BeginTx(r.migrationContext(), nil)
 	if err != nil {
 		return fmt.Errorf("heal duplicate envs: begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	rows, err := tx.Query(`
+	rows, err := tx.QueryContext(r.migrationContext(), `
 		SELECT task_id
 		  FROM task_environments
 		 GROUP BY task_id
@@ -1226,7 +1602,7 @@ func (r *Repository) healDuplicateTaskEnvironments() error {
 	_ = rows.Close()
 
 	for _, taskID := range taskIDs {
-		if err := healDuplicateTaskEnvForTask(tx, taskID); err != nil {
+		if err := healDuplicateTaskEnvForTask(r.migrationContext(), tx, taskID); err != nil {
 			return err
 		}
 	}
@@ -1235,9 +1611,9 @@ func (r *Repository) healDuplicateTaskEnvironments() error {
 
 // healDuplicateTaskEnvForTask keeps the most recently updated env for a task,
 // re-points sessions on the loser rows to the winner, then deletes losers.
-func healDuplicateTaskEnvForTask(tx *sql.Tx, taskID string) error {
+func healDuplicateTaskEnvForTask(ctx context.Context, tx *sql.Tx, taskID string) error {
 	var winnerID string
-	if err := tx.QueryRow(`
+	if err := tx.QueryRowContext(ctx, `
 		SELECT id FROM task_environments
 		 WHERE task_id = ?
 		 ORDER BY updated_at DESC, created_at DESC
@@ -1246,7 +1622,7 @@ func healDuplicateTaskEnvForTask(tx *sql.Tx, taskID string) error {
 		return fmt.Errorf("heal duplicate envs: find winner for task %s: %w", taskID, err)
 	}
 
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE task_sessions
 		   SET task_environment_id = ?
 		 WHERE task_id = ?
@@ -1255,7 +1631,7 @@ func healDuplicateTaskEnvForTask(tx *sql.Tx, taskID string) error {
 		return fmt.Errorf("heal duplicate envs: relink sessions for task %s: %w", taskID, err)
 	}
 
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM task_environments
 		 WHERE task_id = ?
 		   AND id != ?
@@ -1270,7 +1646,7 @@ func healDuplicateTaskEnvForTask(tx *sql.Tx, taskID string) error {
 // instead of silently producing two rows for the same task. Must run AFTER
 // healDuplicateTaskEnvironments, which collapses any pre-existing duplicates.
 func (r *Repository) ensureTaskEnvironmentTaskUniqueIndex() error {
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 		CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_task_id
 		    ON task_environments(task_id)
 	`)
@@ -1292,7 +1668,7 @@ func (r *Repository) healSessionTaskEnvironmentIDs() error {
 	// ensureTaskEnvironmentTaskUniqueIndex guarantees ≤1 row per task at
 	// runtime, but the SQL reads as non-deterministic in isolation. Belt
 	// and suspenders.
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 		UPDATE task_sessions
 		   SET task_environment_id = (
 		         SELECT te.id FROM task_environments te WHERE te.task_id = task_sessions.task_id LIMIT 1

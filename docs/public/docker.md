@@ -5,7 +5,11 @@ description: "Run the Kandev control plane in Docker and understand Docker-based
 
 # Docker
 
-The published image runs the Kandev control plane: native backend, web UI, API, WebSocket endpoint, external MCP endpoint, and the host-side `agentctl`. This is different from the **Local Docker executor**, which creates a separate container for an agent.
+The published image runs the Kandev control plane from a native Go binary. The
+binary contains the compiled web UI and serves the API, WebSocket endpoint, and
+external MCP endpoint. The image also includes the host-side `agentctl`. This
+is different from the **Local Docker executor**, which creates a separate
+container for an agent.
 
 For Kubernetes, see [Kubernetes](k8s.md). For executor profiles, see [Executors](executors.md#local-docker).
 
@@ -40,10 +44,14 @@ The release workflow publishes multi-architecture `linux/amd64` and `linux/arm64
 
 | Flavor | Moving tag | Version tags | Contents |
 |---|---|---|---|
-| Base | `latest` | `X.Y.Z`, `vX.Y.Z` | Kandev, Node 24/npm, Git, `gh`, Python/pipx, Apprise, Azure CLI, and the Azure DevOps extension |
+| Base | `latest` | `X.Y.Z`, `vX.Y.Z` | Kandev, Node 24/npm, Git, `gh`, `procps`, Python/pipx, Apprise, Azure CLI, and the Azure DevOps extension |
 | Universal | `universal` | `X.Y.Z-universal`, `vX.Y.Z-universal` | Base plus Go, Rust, pnpm, build tools, common developer CLIs, and Playwright Chromium system libraries |
 
 The universal image does not include Playwright browser downloads, JDKs, .NET, or database servers. Its tool versions are pinned in `Dockerfile.universal` for each release. See the [image guide](https://github.com/kdlbs/kandev/blob/main/docs/images.md) for the inclusion policy and derived-image examples.
+
+Both flavors include `ps` through `procps` for agent process checks, including
+Droid's foreground command supervision. This requires no additional container
+permissions. Older image digests retain their original package contents.
 
 Use a version tag or digest in a persistent deployment:
 
@@ -263,7 +271,7 @@ Remote Docker profiles are not a workaround: that executor runtime is currently 
 
 ## Health and observability
 
-`GET /health` returns 200 as soon as the listener is accepting connections, even mid-startup; `GET /ready` returns 503 during startup and 200 after routes are registered:
+`GET /health` returns 200 as soon as the listener is accepting connections, even mid-startup. `GET /ready` returns 503 during startup and includes the current startup phase and elapsed time; it returns 200 after routes are registered:
 
 ```bash
 curl --fail http://localhost:38429/ready

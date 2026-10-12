@@ -27,13 +27,18 @@ Before changing code:
 - Read the scoped `AGENTS.md` for the subtree you will touch, e.g. `apps/backend/AGENTS.md`, `apps/web/AGENTS.md`, or integration-specific guidance.
 - Use `rg` to find existing patterns before inventing one.
 - Read the file you will edit and nearby tests.
-- For product features, read `docs/specs/README.md`, the owning system index,
-  adjacent indexes with similar capability names, and only the relevant
+- For product features, read `docs/specs/README.md`, the owning system `README.md`,
+  adjacent system README files with similar capability names, and only the relevant
   requirement and system-design files. Choose the owner from the durable
-  contract, not the affected code layer. During migration, use
-  `docs/specs/INDEX.md` to find a legacy source.
+  contract, not the affected code layer. Use `python3 scripts/list-docs.py
+  specs --format paths` to find documents. During migration, add
+  `--kind legacy` to find a legacy source.
 - When implementing from a plan, read `plan.md` for orientation and only the
   current work order. Follow its `REQ-*`, `AC-*`, and system-design references.
+- Dependency, sibling, and stacked PR references are snapshots. Resolve the
+  current dependency and base heads before implementation and again before
+  final fixup; if a dependency moved or landed, re-read the affected
+  requirements, designs, contracts, and traceability links.
 - For frontend/UI, include `/mobile-parity` and `/e2e` guidance when applicable.
 - For OpenAI/API docs or other fast-moving dependencies, use official docs or primary sources.
 
@@ -58,6 +63,11 @@ LOG: only the relevant error lines or a small range from the saved log
 SOURCE: file at failing line plus the code under test
 NEXT: reproduce locally before changing code
 ```
+
+When batching reads, keep their combined output within the outer tool's output
+budget. If files require full reads, split the batch or read bounded ranges.
+If a result is truncated, retrieve only the missing file or range.
+Do not repeat a completed batch to recover one missing result.
 
 ## Trust Levels
 

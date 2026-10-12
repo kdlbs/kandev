@@ -16,12 +16,10 @@ import { TaskChatPanel } from "./task-chat-panel";
 import { TaskChangesPanel } from "./task-changes-panel";
 import { FileTabContent } from "./file-tab-content";
 import { PassthroughToolbar } from "./passthrough-toolbar";
-import type { OpenFileTab, FileContentResponse } from "@/lib/types/backend";
+import type { OpenFileTab } from "@/lib/types/backend";
 import { useAppStore } from "@/components/state-provider";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { executeApprove } from "@/lib/services/session-approve";
-import { requestFileContent } from "@/lib/ws/workspace-files";
 import {
   setOpenFileTabs as saveOpenFileTabs,
   getActiveTabForSession,
@@ -35,8 +33,14 @@ import { useToast } from "@/components/toast-provider";
 import { useFileTabRestoration, useFileSaveDelete } from "./task-center-panel-restoration";
 import { useNormalizedTaskReviews } from "./review-panel-provider";
 import { useReviewItemSelection } from "./review-selection";
-import { getFileTabKey, upsertOpenFileTab } from "./task-center-panel-file-tabs";
+import {
+  getFileTabKey,
+  upsertOpenFileTab,
+  type FileEditorTab,
+} from "./task-center-panel-file-tabs";
 import { TaskCenterReviewContent } from "./task-center-review-content";
+import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
+import { getFilePreviewKind } from "@/lib/utils/file-types";
 
 import type { SelectedDiff } from "./task-layout";
 import { useTranslation } from "react-i18next";
@@ -125,7 +129,6 @@ type FileTabOperationsOptions = {
   activeSessionId: string | null;
   openFileTabs: OpenFileTab[];
   setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
-  setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
   setLeftTab: (tab: string) => void;
   handleTabChange: (tab: string) => void;
   leftTab: string;
@@ -135,12 +138,10 @@ function useFileTabOperations({
   activeSessionId,
   openFileTabs,
   setOpenFileTabs,
-  setSavingFiles,
   setLeftTab,
   handleTabChange,
   leftTab,
 }: FileTabOperationsOptions) {
-  const { t } = useTranslation();
   const { toast } = useToast();
 
   const addFileTab = useCallback(
@@ -151,43 +152,21 @@ function useFileTabOperations({
     [setOpenFileTabs, setLeftTab],
   );
 
-  const handleOpenFileFromChat = useCallback(
-    async (filePath: string, repo?: string) => {
-      const client = getWebSocketClient();
-      if (!client || !activeSessionId) return;
-      try {
-        const response: FileContentResponse = await requestFileContent(
-          client,
-          activeSessionId,
-          filePath,
-          repo,
-        );
-        const fileName = filePath.split("/").pop() || filePath;
-        const hash = await calculateHash(response.content);
-        addFileTab({
-          path: filePath,
-          repo,
-          name: fileName,
-          content: response.content,
-          originalContent: response.content,
-          originalHash: hash,
-          isDirty: false,
-          isBinary: response.is_binary,
-        });
-      } catch (error) {
-        toast({
-          title: t("task:failedToOpenFile"),
-          description: error instanceof Error ? error.message : t("task:unknownError"),
-          variant: "error",
-        });
-      }
-    },
-    [activeSessionId, toast, addFileTab],
-  );
+  const handleOpenFileFromChat = useTaskCenterFileOpen({
+    activeSessionId,
+    addFileTab,
+    toast,
+  });
 
   const handleCloseFileTab = useCallback(
-    (fileKey: string) => {
-      setOpenFileTabs((prev) => prev.filter((tab) => getFileTabKey(tab) !== fileKey));
+    (fileKey: string, instanceId?: symbol) => {
+      setOpenFileTabs((prev) =>
+        prev.filter(
+          (tab: FileEditorTab) =>
+            getFileTabKey(tab) !== fileKey ||
+            (instanceId !== undefined && tab.instanceId !== instanceId),
+        ),
+      );
       if (leftTab === `file:${fileKey}`) handleTabChange("chat");
     },
     [leftTab, handleTabChange, setOpenFileTabs],
@@ -207,22 +186,21 @@ function useFileTabOperations({
     [setOpenFileTabs],
   );
 
-  const handleMarkdownPreviewToggle = useCallback(
+  const handleRenderedPreviewToggle = useCallback(
     (fileKey: string) => {
       setOpenFileTabs((prev) =>
         prev.map((tab) =>
-          getFileTabKey(tab) === fileKey ? { ...tab, markdownPreview: !tab.markdownPreview } : tab,
+          getFileTabKey(tab) === fileKey ? { ...tab, renderedPreview: !tab.renderedPreview } : tab,
         ),
       );
     },
     [setOpenFileTabs],
   );
 
-  const { handleFileSave, handleFileDelete } = useFileSaveDelete({
+  const { handleFileSave, handleFileDelete, savingFiles } = useFileSaveDelete({
     activeSessionId,
     openFileTabs,
     setOpenFileTabs,
-    setSavingFiles,
     handleCloseFileTab,
   });
 
@@ -230,9 +208,10 @@ function useFileTabOperations({
     handleOpenFileFromChat,
     handleCloseFileTab,
     handleFileChange,
-    handleMarkdownPreviewToggle,
+    handleRenderedPreviewToggle,
     handleFileSave,
     handleFileDelete,
+    savingFiles,
     addFileTab,
   };
 }
@@ -300,11 +279,11 @@ function usePersistOpenFileTabs(activeSessionId: string | null, openFileTabs: Op
     if (!activeSessionId) return;
     saveOpenFileTabs(
       activeSessionId,
-      openFileTabs.map(({ path, name, repo, markdownPreview }) => ({
+      openFileTabs.map(({ path, name, repo, renderedPreview }) => ({
         path,
         name,
         repo,
-        markdownPreview,
+        ...(getFilePreviewKind(path) === "markdown" && renderedPreview ? { renderedPreview } : {}),
       })),
     );
   }, [activeSessionId, openFileTabs]);
@@ -332,7 +311,6 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
   );
   const { reviews, selectedReview, selectReview, reviewLabel } = useTaskReview(activeTaskId);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
-  const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const {
     leftTab,
@@ -348,7 +326,6 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     activeSessionId,
     openFileTabs,
     setOpenFileTabs,
-    setSavingFiles,
     setLeftTab,
     handleTabChange,
     leftTab,
@@ -395,7 +372,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     selectedReview,
     selectReview,
     openFileTabs,
-    savingFiles,
+    savingFiles: fileTabOps.savingFiles,
     selectedDiff,
     setSelectedDiff,
     leftTab,
@@ -438,7 +415,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
   const {
     handleOpenFileFromChat,
     handleFileChange,
-    handleMarkdownPreviewToggle,
+    handleRenderedPreviewToggle,
     handleFileSave,
     handleFileDelete,
   } = fileTabOps;
@@ -491,7 +468,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
             onFileChange={handleFileChange}
             onFileSave={handleFileSave}
             onFileDelete={handleFileDelete}
-            onToggleMarkdownPreview={() => handleMarkdownPreviewToggle(getFileTabKey(tab))}
+            onTogglePreview={() => handleRenderedPreviewToggle(getFileTabKey(tab))}
           />
         ))}
       </SessionTabs>
@@ -562,7 +539,7 @@ function ChatTabContent({
   taskId: string | null;
   showRequestChangesTooltip: boolean;
   onDismissTooltip: () => void;
-  onOpenFile: (filePath: string) => void;
+  onOpenFile: (filePath: string, repositoryName?: string) => void;
 }) {
   const { t } = useTranslation();
   if (!activeTaskId) {

@@ -27,7 +27,8 @@ change, plan sequence, or temporary migration step.
 1. Choose an ID in the form `YYYY-MM-DD-short-title`.
 2. Make sure that `docs/decisions/<id>.md` does not exist.
 3. Create the ADR with the template below.
-4. Add it to `docs/decisions/INDEX.md`.
+4. Run `python3 scripts/list-docs.py decisions --format paths` to confirm the
+   new ADR is discoverable. Do not edit a catalog row.
 5. Reconcile affected specifications.
 
 Existing numeric ADR IDs remain valid. Do not rename them.
@@ -58,8 +59,9 @@ State each meaningful alternative and why it was not selected.
 
 ## Reconcile specifications
 
-Read `docs/specs/README.md`, the owning system index, and the relevant files in
-`docs/specs/guide/`.
+Read `docs/specs/README.md`, the owning system `README.md`, and the relevant
+files in `docs/specs/guide/`. Use the catalog command to locate the owning
+requirements and designs.
 
 Apply these rules:
 
@@ -78,7 +80,10 @@ Do not copy the ADR into requirements or system design. Link the ADR from the
 affected design. Requirements contain observable outcomes, not decision
 rationale.
 
-During legacy migration, use `docs/specs/INDEX.md` to locate existing sources.
+During legacy migration, use this command to locate existing sources:
+
+    python3 scripts/list-docs.py specs --kind legacy --format paths
+
 Do not create a new generic `spec.md` file.
 
 ## Validation
@@ -87,6 +92,7 @@ Run:
 
 ```bash
 python3 scripts/lint-spec-files.py --all
+python3 scripts/list-docs.py validate
 git diff --check -- docs/decisions docs/specs
 ```
 

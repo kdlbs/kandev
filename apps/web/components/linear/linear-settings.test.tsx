@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinearConfig } from "@/lib/types/linear";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 
+const REMOVE_CONFIRM_TEST_ID = "linear-remove-confirm";
+
 const mocks = vi.hoisted(() => ({
   deleteConfig: vi.fn(),
   getConfig: vi.fn(),
@@ -13,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 let finePointer = true;
+let isMobile = false;
 const DELETE_BUTTON_TEST_ID = "linear-delete-button";
 const CONFIRM_POPOVER_TEST_ID = "linear-remove-confirm-popover";
 
@@ -23,7 +26,7 @@ vi.mock("@/hooks/domains/integrations/use-integration-availability", () => ({
   INTEGRATION_STATUS_REFRESH_MS: 100_000,
 }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isFinePointer: finePointer }),
+  useResponsiveBreakpoint: () => ({ isFinePointer: finePointer, isMobile }),
 }));
 vi.mock("@/components/linear/linear-enabled-control", () => ({
   LinearEnabledControl: () => null,
@@ -60,6 +63,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   finePointer = true;
+  isMobile = false;
   mocks.getConfig.mockResolvedValue(config);
   mocks.listTeams.mockResolvedValue({ teams: [] });
   mocks.deleteConfig.mockResolvedValue(undefined);
@@ -72,6 +76,24 @@ afterEach(() => {
 });
 
 describe("LinearConnectionSection removal", () => {
+  it("keeps the phone form controls behind a sheet and cancels locally", async () => {
+    isMobile = true;
+    finePointer = false;
+    renderSection();
+    const trigger = await screen.findByTestId(DELETE_BUTTON_TEST_ID);
+    fireEvent.click(trigger);
+    const sheet = screen.getByRole("dialog");
+    expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+    expect(trigger.isConnected).toBe(true);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(mocks.deleteConfig).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByTestId(REMOVE_CONFIRM_TEST_ID));
+    await waitFor(() =>
+      expect(mocks.deleteConfig).toHaveBeenCalledExactlyOnceWith({ workspaceId: "workspace-a" }),
+    );
+  });
   it("uses local fine-pointer confirmation and invokes deletion once", async () => {
     const nativeConfirm = vi.fn(() => false);
     vi.stubGlobal("confirm", nativeConfirm);
@@ -88,7 +110,7 @@ describe("LinearConnectionSection removal", () => {
 
     fireEvent.click(removeButton);
     fireEvent.click(
-      within(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).getByTestId("linear-remove-confirm"),
+      within(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).getByTestId(REMOVE_CONFIRM_TEST_ID),
     );
     await waitFor(() => expect(mocks.deleteConfig).toHaveBeenCalledTimes(1));
     expect(mocks.deleteConfig).toHaveBeenCalledWith({ workspaceId: "workspace-a" });
@@ -102,14 +124,14 @@ describe("LinearConnectionSection removal", () => {
     fireEvent.click(removeButton);
     const inline = screen.getByTestId("linear-remove-inline-confirmation");
     expect(screen.queryByTestId(CONFIRM_POPOVER_TEST_ID)).toBeNull();
-    expect(within(inline).getByTestId("linear-remove-confirm").className).toContain("h-11");
+    expect(within(inline).getByTestId(REMOVE_CONFIRM_TEST_ID).className).toContain("h-11");
 
     fireEvent.click(within(inline).getByRole("button", { name: "Cancel" }));
     expect(mocks.deleteConfig).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId(DELETE_BUTTON_TEST_ID));
     fireEvent.click(
       within(screen.getByTestId("linear-remove-inline-confirmation")).getByTestId(
-        "linear-remove-confirm",
+        REMOVE_CONFIRM_TEST_ID,
       ),
     );
     await waitFor(() => expect(mocks.deleteConfig).toHaveBeenCalledTimes(1));

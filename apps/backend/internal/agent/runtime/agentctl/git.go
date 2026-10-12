@@ -7,18 +7,62 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
+)
+
+const GitPushPreflightHistoryUpdateRequired = "history_update_required"
+
+const (
+	gitPushPreflightTimeout = 2 * time.Minute
+	gitStatusDetailsReady   = "ready"
 )
 
 // GitOperationResult represents the result of a git operation.
 // This matches the server-side process.GitOperationResult.
 type GitOperationResult struct {
-	Success        bool     `json:"success"`
-	Operation      string   `json:"operation"`
-	Output         string   `json:"output"`
-	Error          string   `json:"error,omitempty"`
-	ErrorCode      string   `json:"error_code,omitempty"`
-	ConflictFiles  []string `json:"conflict_files,omitempty"`
-	RecoveryBranch string   `json:"recovery_branch,omitempty"`
+	Success         bool     `json:"success"`
+	Operation       string   `json:"operation"`
+	Output          string   `json:"output"`
+	Error           string   `json:"error,omitempty"`
+	ErrorCode       string   `json:"error_code,omitempty"`
+	PreflightReason string   `json:"preflight_reason,omitempty"`
+	ConflictFiles   []string `json:"conflict_files,omitempty"`
+	RecoveryBranch  string   `json:"recovery_branch,omitempty"`
+	// Destination a push or preflight validated. A push populates these only
+	// when the request carried an explicit push target.
+	PushedRemote string `json:"pushed_remote,omitempty"`
+	PushedBranch string `json:"pushed_branch,omitempty"`
+	// Branches accompanying a mismatch refusal. CurrentBranch is empty for a
+	// detached HEAD.
+	ExpectedBranch string `json:"expected_branch,omitempty"`
+	CurrentBranch  string `json:"current_branch,omitempty"`
+	// BaselinePublished marks a mismatch refusal after empty-remote first
+	// publication already published the baseline in this request.
+	BaselinePublished bool `json:"baseline_published,omitempty"`
+}
+
+// PushOptions carries the optional inputs of a push or push-preflight call.
+// The zero value reproduces the behavior of a request that names neither.
+type PushOptions struct {
+	Force          bool
+	SetUpstream    bool
+	Remote         string
+	ExpectedBranch string
+}
+
+// ContributionHistoryExplanationResult mirrors the bounded, read-only Git
+// observation returned by the agentctl server.
+type ContributionHistoryExplanationResult struct {
+	Repo                 string `json:"repo,omitempty"`
+	Branch               string `json:"branch"`
+	ExpectedLocalHead    string `json:"expected_local_head"`
+	ExpectedRemoteHead   string `json:"expected_remote_head"`
+	Kind                 string `json:"kind"`
+	Reason               string `json:"reason"`
+	OntoHead             string `json:"onto_head,omitempty"`
+	TaskCommitCount      *int   `json:"task_commit_count,omitempty"`
+	PublishedCommitCount *int   `json:"published_commit_count,omitempty"`
+	NewBaseCommitCount   *int   `json:"new_base_commit_count,omitempty"`
 }
 
 // PRCreateResult represents the result of a PR creation operation.
@@ -48,29 +92,47 @@ func (c *Client) GitPull(ctx context.Context, rebase bool, repo string) (*GitOpe
 }
 
 // GitPush performs a git push operation on the worktree.
-// If force is true, uses --force-with-lease.
-// If setUpstream is true, uses --set-upstream.
+// If opts.Force is true, uses --force-with-lease.
+// If opts.SetUpstream is true, uses --set-upstream.
+// opts.Remote and opts.ExpectedBranch are optional and passed through.
 // repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
-func (c *Client) GitPush(ctx context.Context, force, setUpstream bool, repo string) (*GitOperationResult, error) {
+func (c *Client) GitPush(ctx context.Context, repo string, opts PushOptions) (*GitOperationResult, error) {
 	payload := struct {
-		Force       bool   `json:"force"`
-		SetUpstream bool   `json:"set_upstream"`
-		Repo        string `json:"repo,omitempty"`
+		Force          bool   `json:"force"`
+		SetUpstream    bool   `json:"set_upstream"`
+		Repo           string `json:"repo,omitempty"`
+		Remote         string `json:"remote,omitempty"`
+		ExpectedBranch string `json:"expected_branch,omitempty"`
 	}{
-		Force:       force,
-		SetUpstream: setUpstream,
-		Repo:        repo,
+		Force:          opts.Force,
+		SetUpstream:    opts.SetUpstream,
+		Repo:           repo,
+		Remote:         opts.Remote,
+		ExpectedBranch: opts.ExpectedBranch,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/push", payload)
 }
 
-// GitPushPreflight validates the configured contribution push target without
-// mutating the remote. repo is the multi-repo workspace subpath.
-func (c *Client) GitPushPreflight(ctx context.Context, repo string) (*GitOperationResult, error) {
+// GitPushPreflight validates the push destination without mutating the remote.
+// repo is the multi-repo workspace subpath; opts carries the optional explicit
+// push target and expected branch.
+func (c *Client) GitPushPreflight(ctx context.Context, repo string, opts PushOptions) (*GitOperationResult, error) {
 	payload := struct {
-		Repo string `json:"repo,omitempty"`
-	}{Repo: repo}
-	return c.gitOperation(ctx, "/api/v1/git/push-preflight", payload)
+		Repo           string `json:"repo,omitempty"`
+		Remote         string `json:"remote,omitempty"`
+		ExpectedBranch string `json:"expected_branch,omitempty"`
+	}{
+		Repo:           repo,
+		Remote:         opts.Remote,
+		ExpectedBranch: opts.ExpectedBranch,
+	}
+	return c.gitOperationWithClient(ctx, "/api/v1/git/push-preflight", payload, c.gitPushPreflightClient())
+}
+
+func (c *Client) gitPushPreflightClient() *http.Client {
+	client := *c.httpClient
+	client.Timeout = gitPushPreflightTimeout
+	return &client
 }
 
 // GitReplaceRemoteContribution replaces the bound contribution branch when
@@ -97,6 +159,52 @@ func (c *Client) GitUseRemoteContribution(ctx context.Context, expectedRemoteHea
 		Repo:               repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/contribution/use", payload)
+}
+
+// GitContributionHistoryExplanation observes the selected branch and heads
+// without fetching, rewriting, or publishing any Git refs.
+func (c *Client) GitContributionHistoryExplanation(
+	ctx context.Context, branch, expectedLocalHead, expectedRemoteHead, repo string,
+) (*ContributionHistoryExplanationResult, error) {
+	payload := struct {
+		Branch             string `json:"branch"`
+		ExpectedLocalHead  string `json:"expected_local_head"`
+		ExpectedRemoteHead string `json:"expected_remote_head"`
+		Repo               string `json:"repo,omitempty"`
+	}{
+		Branch:             branch,
+		ExpectedLocalHead:  expectedLocalHead,
+		ExpectedRemoteHead: expectedRemoteHead,
+		Repo:               repo,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/api/v1/git/contribution/history-explanation", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	responseBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	var result ContributionHistoryExplanationResult
+	if err := json.Unmarshal(responseBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response (status %d, body: %s): %w",
+			resp.StatusCode, truncateBody(responseBody), err)
+	}
+	if resp.StatusCode >= 400 {
+		return &result, fmt.Errorf("git contribution history explanation failed with status %d", resp.StatusCode)
+	}
+	return &result, nil
 }
 
 // GitRebase rebases the worktree branch onto the specified base branch.
@@ -188,7 +296,7 @@ func (c *Client) GitStage(ctx context.Context, paths []string, repo string) (*Gi
 }
 
 // GitUnstage unstages files from the index.
-// If paths is empty, unstages all changes (git reset HEAD).
+// If paths is empty, unstages all changes (git reset --).
 // repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
 func (c *Client) GitUnstage(ctx context.Context, paths []string, repo string) (*GitOperationResult, error) {
 	payload := struct {
@@ -300,6 +408,15 @@ func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string
 
 // gitOperation is a helper that performs a git operation via HTTP POST.
 func (c *Client) gitOperation(ctx context.Context, path string, payload interface{}) (*GitOperationResult, error) {
+	return c.gitOperationWithClient(ctx, path, payload, c.httpClient)
+}
+
+func (c *Client) gitOperationWithClient(
+	ctx context.Context,
+	path string,
+	payload interface{},
+	httpClient *http.Client,
+) (*GitOperationResult, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -311,7 +428,7 @@ func (c *Client) gitOperation(ctx context.Context, path string, payload interfac
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
@@ -531,6 +648,13 @@ func (c *Client) GetCumulativeDiff(ctx context.Context, baseCommit, targetBranch
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
 	Success             bool                   `json:"success"`
+	StatusState         string                 `json:"status_state,omitempty"`
+	FilesComplete       bool                   `json:"files_complete"`
+	DetailState         string                 `json:"detail_state,omitempty"`
+	ErrorCode           string                 `json:"error_code,omitempty"`
+	TrackerID           string                 `json:"tracker_id,omitempty"`
+	TrackerEpoch        uint64                 `json:"tracker_epoch,omitempty"`
+	SnapshotRevision    uint64                 `json:"snapshot_revision,omitempty"`
 	RepositoryName      string                 `json:"repository_name,omitempty"`
 	IsSubmodule         bool                   `json:"is_submodule,omitempty"`
 	Branch              string                 `json:"branch"`
@@ -595,9 +719,8 @@ func (c *Client) GetGitStatus(ctx context.Context) (*GitStatusResult, error) {
 	return &result, nil
 }
 
-// GetGitStatusFresh gets a fresh git status, bypassing the workspace tracker's cache.
-// Use this when the caller knows the working tree changed since the last poll
-// (e.g. at agent turn completion).
+// GetGitStatusFresh starts or joins a fresh basic status observation and
+// publishes the accepted result to the workspace tracker's cache.
 func (c *Client) GetGitStatusFresh(ctx context.Context) (*GitStatusResult, error) {
 	var result GitStatusResult
 	status, err := c.fetchJSONResult(ctx, "/api/v1/git/status?fresh=true", &result)
@@ -606,6 +729,23 @@ func (c *Client) GetGitStatusFresh(ctx context.Context) (*GitStatusResult, error
 	}
 	if status >= 400 {
 		return &result, fmt.Errorf("git status fresh failed with status %d: %s", status, result.Error)
+	}
+	return &result, nil
+}
+
+// GetGitStatusWithDetails returns a fresh snapshot after file diffs and
+// secondary Git statistics settle under the caller's deadline.
+func (c *Client) GetGitStatusWithDetails(ctx context.Context) (*GitStatusResult, error) {
+	var result GitStatusResult
+	status, err := c.fetchJSONResult(ctx, "/api/v1/git/status?fresh=true&details=wait", &result)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return &result, fmt.Errorf("git status details failed with status %d: %s", status, result.Error)
+	}
+	if !result.Success || (result.DetailState != "" && result.DetailState != gitStatusDetailsReady) {
+		return &result, fmt.Errorf("git status details unavailable: %s", result.ErrorCode)
 	}
 	return &result, nil
 }
@@ -627,24 +767,29 @@ type MultiRepoGitStatusResult struct {
 }
 
 // GetGitStatusMultiFresh returns one status entry per repo (multi-repo) or a
-// single untagged entry (single-repo) with the workspace tracker's cache
-// bypassed — each repo re-runs `git status --porcelain` against the worktree.
-// Used by the session-subscribe handler in the main backend so a new observer
-// always sees a validated snapshot rather than a possibly-stale cached one.
-//
-// The fresh path is read-only with respect to the cache: it returns the live
-// query but does not write the result back into the tracker's currentStatus.
-// That's intentional — the poll loop owns the cache, and writing here would
-// race with concurrent polls. Already-subscribed observers continue to see
-// the cached stream until the poll loop catches up.
+// single untagged entry (single-repo), starting or joining a fresh basic
+// observation that is published to the tracker's cache and stream.
 func (c *Client) GetGitStatusMultiFresh(ctx context.Context) (*MultiRepoGitStatusResult, error) {
+	return c.getGitStatusMulti(ctx, "/api/v1/git/status/multi?fresh=true", "git status multi")
+}
+
+// GetGitStatusMultiRefresh runs one supported foreground refresh mode.
+func (c *Client) GetGitStatusMultiRefresh(ctx context.Context, mode string) (*MultiRepoGitStatusResult, error) {
+	path := "/api/v1/git/status/multi?mode=" + url.QueryEscape(mode)
+	if mode != "fresh" && mode != "recover" && mode != "replay" {
+		return nil, fmt.Errorf("unsupported git status refresh mode %q", mode)
+	}
+	return c.getGitStatusMulti(ctx, path, "git status multi "+mode)
+}
+
+func (c *Client) getGitStatusMulti(ctx context.Context, path, operation string) (*MultiRepoGitStatusResult, error) {
 	var result MultiRepoGitStatusResult
-	status, err := c.fetchJSONResult(ctx, "/api/v1/git/status/multi?fresh=true", &result)
+	status, err := c.fetchJSONResult(ctx, path, &result)
 	if err != nil {
 		return nil, err
 	}
 	if status >= 400 {
-		return &result, fmt.Errorf("git status multi failed with status %d: %s", status, result.Error)
+		return &result, fmt.Errorf("%s failed with status %d: %s", operation, status, result.Error)
 	}
 	return &result, nil
 }

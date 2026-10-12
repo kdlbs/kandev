@@ -73,6 +73,7 @@ func runDev(ctx context.Context, opts Options, build BuildInfo) int {
 	}
 	if err := waitForReadyFn(ctx, cfg.ports.BackendURL, backend); err != nil {
 		supervisor.shutdown("backend readiness failure")
+		dumpLogs()
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}

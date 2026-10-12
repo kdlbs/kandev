@@ -70,7 +70,7 @@ func TestHandleAgentCompleted_RecordsFinalAgentMessageAsOutputSummary(t *testing
 	createTestAgent(t, svc, "ws-1", "worker-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "worker-1")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-1", service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, "run-output-init",
 	); err != nil {
@@ -127,7 +127,7 @@ func TestHandleAgentCompleted_TruncatesOutputSummaryAt500Chars(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "worker-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "worker-1")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-1", service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, "run-output-truncate",
 	); err != nil {
@@ -175,7 +175,7 @@ func TestHandleAgentCompleted_NoAgentMessageStaysBestEffort(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "worker-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "worker-1")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-1", service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, "run-output-none",
 	); err != nil {
@@ -216,7 +216,7 @@ func TestHandleTasklessAgentCompleted_RecordsOutputSummaryAndKeepsContinuationSu
 
 	createTestAgent(t, svc, "ws-1", "worker-taskless")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-taskless", service.RunReasonTaskAssigned, "{}", "run-output-taskless",
 	); err != nil {
 		t.Fatalf("queue run: %v", err)
@@ -268,7 +268,7 @@ func TestHandleAgentCompleted_LastAgentMessageWinsOverLaterUserMessage(t *testin
 	createTestAgent(t, svc, "ws-1", "worker-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "worker-1")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-1", service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, "run-output-ordering",
 	); err != nil {
@@ -318,7 +318,7 @@ func TestHandleAgentCompleted_SecondRunOnReusedSessionStaysEmpty(t *testing.T) {
 	// Run 1: queue, claim, produce an agent message, complete. The
 	// session (sess-1) is reused for run 2 below, mirroring how office
 	// task-bound sessions persist across turns.
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-1", service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, "run-output-reuse-1",
 	); err != nil {
@@ -359,7 +359,7 @@ func TestHandleAgentCompleted_SecondRunOnReusedSessionStaysEmpty(t *testing.T) {
 	// Run 2: reuses sess-1 but produces no new agent message before
 	// completing (e.g. a turn that only made tool calls, or was cut
 	// short). No new task_session_messages row is inserted here.
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-1", service.RunReasonTaskComment,
 		`{"task_id":"`+taskID+`"}`, "run-output-reuse-2",
 	); err != nil {
@@ -390,7 +390,7 @@ func TestHandleAgentCompleted_DoesNotClearExistingSummaryWithoutMessage(t *testi
 	ctx := context.Background()
 	createTestAgent(t, svc, "ws-1", "worker-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "worker-1")
-	if err := svc.QueueRun(ctx, "worker-1", service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, "worker-1", service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, "run-output-preserve"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestHandleAgentCompleted_UsesTurnScopedMessageForSharedSession(t *testing.T
 	ctx := context.Background()
 	createTestAgent(t, svc, "ws-1", "worker-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "worker-1")
-	if err := svc.QueueRun(ctx, "worker-1", service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, "worker-1", service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, "run-output-turn"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}

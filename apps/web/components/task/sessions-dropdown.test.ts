@@ -11,6 +11,7 @@ const lifecycleMocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({
   deleteTask: lifecycleMocks.deleteTask,
+  deleteTaskAfterUserAction: lifecycleMocks.deleteTask,
 }));
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: lifecycleMocks.getWebSocketClient,
@@ -60,6 +61,29 @@ describe("sessionStatusTooltip", () => {
   it("does not show background-running for a terminal session with a stale background substate", () => {
     expect(
       sessionStatusTooltip("COMPLETED", { permission: false, clarification: false }, "background"),
+    ).toBe("Complete");
+  });
+
+  it("labels a parked-on-background-work session as background running (AC-51/52)", () => {
+    expect(
+      sessionStatusTooltip(
+        "WAITING_FOR_INPUT",
+        { permission: false, clarification: false },
+        null,
+        true,
+      ),
+    ).toBe("Background running");
+  });
+
+  it("lets pending permission win over the parked reading", () => {
+    expect(
+      sessionStatusTooltip("RUNNING", { permission: true, clarification: false }, null, true),
+    ).toBe("Permission requested");
+  });
+
+  it("does not show background-running for a terminal session with a stale parked reading", () => {
+    expect(
+      sessionStatusTooltip("COMPLETED", { permission: false, clarification: false }, null, true),
     ).toBe("Complete");
   });
 });

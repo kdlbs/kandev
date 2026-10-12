@@ -279,7 +279,7 @@ function ChatInput({
           <TooltipTrigger asChild>
             <Button
               size="icon"
-              className="h-9 w-9 cursor-pointer shrink-0"
+              className="cursor-pointer shrink-0"
               disabled={disabled || !message.trim()}
               onClick={onSend}
             >

@@ -40,6 +40,8 @@ type PortForwardingVisibilityProviderProps = {
 
 const PortForwardingVisibilityContext = createContext<PortForwardingVisibility | null>(null);
 
+export const PortForwardingVisibilityContextProvider = PortForwardingVisibilityContext.Provider;
+
 export function useOptionalPortForwardingVisibility(): PortForwardingVisibility | undefined {
   return useContext(PortForwardingVisibilityContext) ?? undefined;
 }

@@ -39,14 +39,32 @@ function toolActivity(id: string): Message {
 }
 
 function richOutputCall(): Message {
-  const toolName = "mcp__kandev__show_rich_output_kandev";
+  const toolName = "kandev: show_rich_output_kandev";
   return message(
     "rich",
     "tool_call",
     {
       title: toolName,
       status: "complete",
-      normalized: { kind: "generic", generic: { name: "other" } },
+      normalized: {
+        kind: "generic",
+        generic: {
+          name: "other",
+          input: {
+            kind: "other",
+            raw_input: {
+              providerIdentifier: "kandev",
+              toolName: "show_rich_output_kandev",
+              args: {
+                version: 1,
+                title: "Build health",
+                blocks: [{ type: "metrics", items: [{ label: "Passed", value: "38" }] }],
+              },
+            },
+          },
+          output: { success: true },
+        },
+      },
     },
     toolName,
   );

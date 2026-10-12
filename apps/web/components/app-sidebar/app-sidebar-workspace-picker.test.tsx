@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { StartupPage } from "@/lib/types/http-user-settings";
+import {
+  clearNavigationBlockerForTests,
+  setNavigationBlocker,
+} from "@/lib/routing/navigation-guard";
 
 // The sidebar write path scopes names with the API-origin port; pin it so the
 // captured write assertions are deterministic.
@@ -44,6 +49,7 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 
 const storeState = {
   features: { office: false },
+  userSettings: { startupPage: "task_overview" as StartupPage },
   workspaces: {
     items: [
       { id: "w1", name: "Default Workspace", office_workflow_id: "" },
@@ -66,9 +72,12 @@ let cookieDescriptor: PropertyDescriptor | undefined;
 function resetWorkspaceSelectTest() {
   navigationMock.push = vi.fn();
   storeState.features.office = false;
+  storeState.userSettings.startupPage = "task_overview";
   storeState.workspaces.activeId = "w1";
-  storeState.setActiveWorkspace = vi.fn();
   storeState.resetKanbanWorkspaceContext = vi.fn();
+  storeState.setActiveWorkspace = vi.fn(() => {
+    storeState.resetKanbanWorkspaceContext();
+  });
   cookieWrites = [];
   cookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, "cookie");
   Object.defineProperty(document, "cookie", {
@@ -81,6 +90,7 @@ function resetWorkspaceSelectTest() {
 }
 
 function cleanupWorkspaceSelectTest() {
+  clearNavigationBlockerForTests();
   if (cookieDescriptor) {
     Object.defineProperty(document, "cookie", cookieDescriptor);
   }
@@ -97,6 +107,7 @@ describe("AppSidebarWorkspacePicker — Add workspace routing", () => {
   beforeEach(() => {
     navigationMock.push = vi.fn();
     storeState.features.office = false;
+    storeState.userSettings.startupPage = "task_overview";
     storeState.workspaces.activeId = "w1";
     storeState.setActiveWorkspace = vi.fn();
   });
@@ -170,6 +181,24 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(navigationMock.push).not.toHaveBeenCalled();
   });
 
+  it("waits for the navigation guard before changing the active workspace", () => {
+    let proceed: (() => void) | undefined;
+    const unregister = setNavigationBlocker((intent) => {
+      proceed = intent.proceed;
+    });
+    render(<AppSidebarWorkspacePicker />);
+
+    fireEvent.click(screen.getByTestId(OFFICE_WORKSPACE_ITEM));
+
+    expect(storeState.setActiveWorkspace).not.toHaveBeenCalled();
+    expect(navigationMock.push).not.toHaveBeenCalled();
+    expect(cookieWrites).toEqual([]);
+
+    proceed?.();
+    expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w2");
+    unregister();
+  });
+
   it("clears stale kanban context and routes to another kanban workspace with office disabled", () => {
     storeState.features.office = false;
     render(<AppSidebarWorkspacePicker />);
@@ -177,11 +206,28 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     fireEvent.click(screen.getByTestId(ALTERNATE_KANBAN_WORKSPACE_ITEM));
 
     expect(storeState.resetKanbanWorkspaceContext).toHaveBeenCalledOnce();
-    expect(storeState.resetKanbanWorkspaceContext.mock.invocationCallOrder[0]).toBeLessThan(
-      storeState.setActiveWorkspace.mock.invocationCallOrder[0],
-    );
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w3");
     expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w3");
+  });
+
+  // Contract coverage for the saved Home default on workspace selection.
+  it("uses the Threads default in the selected workspace", () => {
+    storeState.userSettings.startupPage = "threads";
+    render(<AppSidebarWorkspacePicker />);
+
+    fireEvent.click(screen.getByTestId(ALTERNATE_KANBAN_WORKSPACE_ITEM));
+
+    expect(navigationMock.push).toHaveBeenCalledWith("/threads?workspace=w3");
+  });
+
+  it("keeps Office priority over the Threads default", () => {
+    storeState.features.office = true;
+    storeState.userSettings.startupPage = "threads";
+    render(<AppSidebarWorkspacePicker />);
+
+    fireEvent.click(screen.getByTestId(OFFICE_WORKSPACE_ITEM));
+
+    expect(navigationMock.push).toHaveBeenCalledWith("/office?workspaceId=w2");
   });
 
   it("calls onActionComplete when selecting a different workspace", () => {

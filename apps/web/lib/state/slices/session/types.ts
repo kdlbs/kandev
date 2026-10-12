@@ -3,12 +3,21 @@ import type {
   TaskPendingAction,
   TaskPendingActionRevision,
   TaskSession,
+  WorkspaceRecoveryProjection,
   Turn,
   TaskPlan,
+  TaskPlanCommentSnapshot,
   TaskPlanRevision,
   TaskWalkthrough,
 } from "@/lib/types/http";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import type { ObservedPrompts } from "@/lib/session-last-prompt";
+
+export type ActiveTurnWindowObservation = {
+  activeTurnId: string | null;
+  reconcileEpoch: number;
+  updatedAt?: string;
+};
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -33,11 +42,16 @@ export type PromptsState = MessagesState & {
   generationBySession: Record<string, number>;
   /** Incremented whenever an authoritative prompt refresh begins. */
   refreshGenerationBySession: Record<string, number>;
+  /** Only the transcript's own completed projection read establishes authority. */
+  authoritativeBySession: Record<string, true>;
+  observedBySession: Record<string, ObservedPrompts>;
+  deletedIdsBySession: Record<string, Record<string, true>>;
 };
-
 export type TurnsState = {
   bySession: Record<string, Turn[]>;
   activeBySession: Record<string, string | null>; // sessionId -> active turnId
+  /** Message IDs whose matching turn rows were read with the same message window. */
+  windowCoverageBySession?: Record<string, { messageIds: string[]; activeTurnObserved: boolean }>;
   /**
    * Sessions whose FULL persisted turn history has entered the store (SSR
    * hydration or a complete REST fetch). Distinct from `bySession` presence:
@@ -68,6 +82,18 @@ export type TaskSessionsState = {
   items: Record<string, TaskSession>;
   /** Monotonic client event generation used to order live activity against REST refreshes. */
   activityEpochBySession?: Record<string, number>;
+  /** Monotonic cursor generation used to keep older REST snapshots from regressing read state. */
+  readCursorEpochBySession?: Record<string, number>;
+  /** Per-session generation used to keep recovery notifications ahead of stale hydration. */
+  workspaceRecoveryEpochBySession?: Record<string, number>;
+  /** Latest event projection for sessions that have not hydrated yet. */
+  workspaceRecoveryByEnvironment?: Record<string, WorkspaceRecoveryProjection>;
+};
+
+export type TaskSessionHydrationEpoch = {
+  activity: number;
+  readCursor: number;
+  workspaceRecovery?: number;
 };
 
 export type TaskSessionsByTaskState = {
@@ -90,6 +116,8 @@ export type SessionAgentctlStatus = {
   status: "starting" | "ready" | "error";
   errorMessage?: string;
   agentExecutionId?: string;
+  /** Startup identity retained when live session state implies readiness. */
+  startingExecutionId?: string;
   updatedAt?: string;
 };
 
@@ -125,11 +153,30 @@ export type ActiveModelState = {
  * null. Reducers enforce a 2-slot cap and reject duplicates. */
 export type ComparePair = [string | null, string | null];
 
+export type PlanCommentMigrationStatus =
+  | "idle"
+  | "running"
+  | "retrying"
+  | "complete"
+  | "waiting_for_plan"
+  | "failed";
+
+export type PlanCommentMigrationState = {
+  status: PlanCommentMigrationStatus;
+  pendingCount: number;
+  failure: "transient" | "conflict" | "rejected" | null;
+};
+
 export type TaskPlansState = {
   byTaskId: Record<string, TaskPlan | null>;
   loadingByTaskId: Record<string, boolean>;
   loadedByTaskId: Record<string, boolean>;
   savingByTaskId: Record<string, boolean>;
+  commentsByTaskId: Record<string, TaskPlanCommentSnapshot | undefined>;
+  commentsLoadingByTaskId: Record<string, boolean>;
+  commentsLoadedByTaskId: Record<string, boolean>;
+  commentsErrorByTaskId: Record<string, string | undefined>;
+  commentsMigrationByTaskId: Record<string, PlanCommentMigrationState | undefined>;
   revisionsByTaskId: Record<string, TaskPlanRevision[]>;
   revisionsLoadingByTaskId: Record<string, boolean>;
   revisionsLoadedByTaskId: Record<string, boolean>;
@@ -153,6 +200,7 @@ export type WalkthroughsState = {
 
 export type QueuedMessageMetadata = Record<string, unknown> & {
   entity_references?: EntityReference[];
+  queue_admission_ids?: string[];
   workflow_message?: boolean;
   workflow_auto_start?: boolean;
   workflow_step_id?: string;
@@ -192,17 +240,42 @@ export type QueueMeta = {
   max: number;
   /** Backend-owned queue motion policy. Missing server state defaults to on. */
   autoRun: boolean;
-  /** Mirrors the server's message queue merge_enabled setting; hides the
-   * "Merge with above" affordance without a separate settings fetch. */
+  /** Mirrors the server's manual merge setting. */
   mergeEnabled: boolean;
+  taskId?: string;
+  sessionIncarnationId?: string;
+  statusEpoch?: string;
+  statusGeneration?: number;
+  retiredStatusEpochs?: string[];
+  autoMergeAvailable?: boolean;
+  autoMergeEnabled?: boolean;
+  autoMergeSource?: "global" | "session";
+  autoMergeRevision?: number;
+};
+
+export type QueueMetaUpdateOptions = {
+  establishStatusEpoch?: boolean;
 };
 
 export type QueueStatus = {
   entries: QueuedMessage[];
   count: number;
   max: number;
+  task_id?: string;
+  session_id?: string;
+  session_incarnation_id?: string;
+  status_epoch?: string;
+  status_generation?: number;
   merge_enabled: boolean;
   auto_run?: boolean;
+  auto_merge_available?: boolean;
+  auto_merge_enabled?: boolean;
+  auto_merge_source?: "global" | "session";
+  auto_merge_revision?: number;
+};
+export type QueueOperationToken = {
+  sessionIncarnationId: string;
+  generation: number;
 };
 
 export type QueueState = {
@@ -210,7 +283,8 @@ export type QueueState = {
   bySessionId: Record<string, QueuedMessage[]>;
   /** Per-session capacity snapshot from the latest server response. */
   metaBySessionId: Record<string, QueueMeta>;
-  isLoading: Record<string, boolean>;
+  activeOperationBySessionId: Record<string, QueueOperationToken>;
+  nextOperationGeneration: number;
 };
 
 export type SessionSliceState = {
@@ -290,12 +364,30 @@ export type SessionSliceActions = {
     messages: Message[],
     meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
+  installAuthoritativePromptMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta: { hasMore: boolean; oldestCursor: string | null },
+  ) => void;
   setPromptMessagesLoading: (sessionId: string, loading: boolean) => void;
   setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
   /** Merges a complete REST snapshot and reconciles its marker atomically. */
-  mergeTurnsSnapshot: (sessionId: string, turns: Turn[], hydrationEpoch: number) => void;
+  mergeTurnsSnapshot: (
+    sessionId: string,
+    turns: Turn[],
+    hydrationEpoch: number,
+    options?: { replace?: boolean },
+  ) => void;
+  /** Merges a bounded message-window turn snapshot without claiming full history. */
+  mergeTurnsWindow: (
+    sessionId: string,
+    turns: Turn[],
+    coverage: { message_ids: string[]; active_turn_id: string | null },
+    hydrationEpoch: number,
+    observationAtRequestStart?: ActiveTurnWindowObservation,
+  ) => void;
   completeTurn: (
     sessionId: string,
     turnId: string,
@@ -325,7 +417,10 @@ export type SessionSliceActions = {
    * boundary on arrival.
    */
   reconcileWorkspaceSourcesAdopted: (sessionIds: string[], boundaryTimestamp?: string) => void;
-  setTaskSession: (session: TaskSession) => void;
+  setTaskSession: (
+    session: TaskSession,
+    hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,
+  ) => void;
   /**
    * Narrowly updates only a session's Slack-style read cursor
    * (last_read_message_id) — never the full session object. Used for the
@@ -341,11 +436,15 @@ export type SessionSliceActions = {
     revision?: TaskPendingActionRevision,
     taskId?: string,
   ) => void;
+  setWorkspaceRecoveryProjection: (
+    sessionIds: string[],
+    projection: WorkspaceRecoveryProjection,
+  ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (
     taskId: string,
     sessions: TaskSession[],
-    activityEpochsAtRequestStart: Readonly<Record<string, number>>,
+    hydrationEpochsAtRequestStart: Readonly<Record<string, TaskSessionHydrationEpoch>>,
   ) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
@@ -356,10 +455,15 @@ export type SessionSliceActions = {
   setPendingModel: (sessionId: string, modelId: string) => void;
   clearPendingModel: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
+  clearActiveModel: (sessionId: string) => void;
   // Task plan actions
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
+  setTaskPlanComments: (taskId: string, snapshot: TaskPlanCommentSnapshot) => void;
+  setTaskPlanCommentsLoading: (taskId: string, loading: boolean) => void;
+  setTaskPlanCommentsError: (taskId: string, error?: string) => void;
+  setTaskPlanCommentMigrationState: (taskId: string, state: PlanCommentMigrationState) => void;
   clearTaskPlan: (taskId: string) => void;
   markTaskPlanSeen: (taskId: string) => void;
   // Revision actions
@@ -376,9 +480,18 @@ export type SessionSliceActions = {
   setWalkthroughActiveStep: (taskId: string, stepIndex: number) => void;
   markWalkthroughSeen: (taskId: string) => void;
   // Queue actions
-  setQueueEntries: (sessionId: string, entries: QueuedMessage[], meta: QueueMeta) => void;
+  setQueueEntries: (
+    sessionId: string,
+    entries: QueuedMessage[],
+    meta: QueueMeta,
+    options?: QueueMetaUpdateOptions,
+  ) => void;
   removeQueueEntry: (sessionId: string, entryId: string) => void;
-  setQueueLoading: (sessionId: string, loading: boolean) => void;
+  beginQueueOperation: (
+    sessionId: string,
+    sessionIncarnationId: string,
+  ) => QueueOperationToken | null;
+  finishQueueOperation: (sessionId: string, token: QueueOperationToken) => void;
   clearQueueStatus: (sessionId: string) => void;
 };
 

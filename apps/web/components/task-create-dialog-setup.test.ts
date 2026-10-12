@@ -2,6 +2,7 @@ import { renderHook } from "@testing-library/react";
 import type { FormEvent } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskCreateDialogProps } from "./task-create-dialog";
+import type { RepositoryBranchesState } from "@/lib/state/slices/workspace/types";
 
 const mocks = vi.hoisted(() => ({
   agentGeneratedTaskTitles: false,
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     | "none-compatible",
   shortcutHandler: null as ((event: unknown) => void) | null,
   submitDeps: {} as Record<string, unknown>,
+  workflowAgentOverridesBlockedReason: undefined as string | undefined,
 }));
 
 vi.mock("@/lib/keyboard/constants", () => ({ SHORTCUTS: { SUBMIT: "submit" } }));
@@ -68,6 +70,16 @@ vi.mock("@/components/task-create-dialog-submit", () => ({
 vi.mock("@/components/task-create-dialog-workflow-context", () => ({
   useResolvedTaskCreateWorkflowContext: (props: TaskCreateDialogProps) => props,
 }));
+vi.mock("@/components/task-create-dialog-workflow-agent-override-validation", () => ({
+  buildWorkflowAgentOverrideValidation: () => ({
+    rows: [],
+    options: [],
+    loading: false,
+    error: false,
+    invalid: Boolean(mocks.workflowAgentOverridesBlockedReason),
+    blockedReason: mocks.workflowAgentOverridesBlockedReason,
+  }),
+}));
 vi.mock("@/components/task-create-dialog-state", () => ({
   computeIsTaskStarted: () => false,
   useDialogFormState: () => ({
@@ -108,7 +120,8 @@ vi.mock("@/components/task-create-dialog-state", () => ({
     workflows: [],
     agentProfiles: [],
     executors: [],
-    snapshots: [],
+    snapshots: {},
+    workspaceSnapshotRead: {},
     repositories: [],
     repositoriesLoading: false,
     refreshRepositories: vi.fn(),
@@ -146,7 +159,7 @@ vi.mock("@/components/task-create-dialog-state", () => ({
   useSessionRepoName: () => null,
 }));
 
-import { useTaskCreateDialogSetup } from "./task-create-dialog-setup";
+import { hasUnavailableSavedBase, useTaskCreateDialogSetup } from "./task-create-dialog-setup";
 
 const props: TaskCreateDialogProps = {
   open: true,
@@ -164,6 +177,7 @@ describe("useTaskCreateDialogSetup auto-title mode", () => {
     mocks.agentCompatState = "compatible";
     mocks.shortcutHandler = null;
     mocks.submit.mockReset();
+    mocks.workflowAgentOverridesBlockedReason = undefined;
   });
 
   it.each([
@@ -206,4 +220,45 @@ describe("compatibility submit guard", () => {
       expect(mocks.submit).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("workflow override keyboard submit guard", () => {
+  it.each(["replacement profile is unavailable", "workflow agents could not be loaded"])(
+    "blocks create submission when validation fails: %s",
+    (blockedReason) => {
+      mocks.workflowAgentOverridesBlockedReason = blockedReason;
+      const { result } = renderHook(() => useTaskCreateDialogSetup({ ...props, mode: "create" }));
+      const formEvent = { preventDefault: vi.fn() } as unknown as FormEvent;
+      const shortcutEvent = { preventDefault: vi.fn() } as unknown as FormEvent;
+
+      result.current.guardedHandleSubmit(formEvent);
+      mocks.shortcutHandler?.(shortcutEvent);
+
+      expect(formEvent.preventDefault).toHaveBeenCalledTimes(1);
+      expect(shortcutEvent.preventDefault).toHaveBeenCalledTimes(1);
+      expect(mocks.submit).not.toHaveBeenCalled();
+    },
+  );
+});
+
+it("validates saved bases against qualified branch option values", () => {
+  const repositoryBranches = {
+    itemsByRepositoryId: {
+      "repo-1": [{ name: "main", type: "remote", remote: "origin" }],
+    },
+    loadedByRepositoryId: { "repo-1": true },
+  } as unknown as RepositoryBranchesState;
+
+  expect(
+    hasUnavailableSavedBase(
+      [{ key: "r0", repositoryId: "repo-1", branch: "", baseBranch: "main" }],
+      repositoryBranches,
+    ),
+  ).toBe(true);
+  expect(
+    hasUnavailableSavedBase(
+      [{ key: "r0", repositoryId: "repo-1", branch: "", baseBranch: "origin/main" }],
+      repositoryBranches,
+    ),
+  ).toBe(false);
 });

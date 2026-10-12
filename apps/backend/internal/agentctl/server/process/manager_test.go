@@ -23,6 +23,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestStartWithGenerationReturnsNoGenerationWhenJournalIsUnavailable(t *testing.T) {
+	journalErr := errors.New("journal unavailable")
+	manager := &Manager{
+		cfg:                &config.InstanceConfig{DurableJournalPath: "unavailable"},
+		deliveryJournalErr: journalErr,
+	}
+	manager.status.Store(StatusStopped)
+
+	generation, err := manager.StartWithGeneration(context.Background())
+
+	assert.Zero(t, generation)
+	require.ErrorIs(t, err, journalErr)
+}
+
 func TestManagerRefreshWorkspaceNormalizesTriggerForEveryTracker(t *testing.T) {
 	log := newTestLogger(t)
 	rootDir, cleanupRoot := setupTestRepo(t)
@@ -125,7 +139,7 @@ func TestManagerReadStderrDeliversCleanedLinesToOptionalConsumer(t *testing.T) {
 		logger:         newTestLogger(t),
 	}
 	m.wg.Add(1)
-	m.readStderr(make(chan struct{}))
+	m.readStderr(make(chan stderrReadResult, 1))
 
 	got := []string{<-consumer.lines, <-consumer.lines}
 	want := []string{"quota", "plain"}
@@ -183,10 +197,11 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start process: %v", err)
 	}
+	generation := m.beginManagedStartupGeneration()
 	if err := stderrWriter.Close(); err != nil {
 		t.Fatalf("close parent stderr pipe: %v", err)
 	}
-	stderrDone := make(chan struct{})
+	stderrDone := make(chan stderrReadResult, 1)
 	m.wg.Add(2)
 	go m.readStderr(stderrDone)
 	m.waitForExit(stderrDone)
@@ -199,6 +214,10 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	data := event.Data
 	if data == nil {
 		t.Fatal("event data is nil")
+	}
+	evidence, ok := data["startup_evidence"].(*types.ManagedStartupEvidence)
+	if !ok || evidence.ProcessGeneration != generation || evidence.ExitDisposition != types.ManagedStartupExitOrdinary || !evidence.CollectionComplete {
+		t.Fatalf("startup evidence = %#v, want complete ordinary exit evidence for generation %d", data["startup_evidence"], generation)
 	}
 	recent, ok := data["recent_stderr"].([]string)
 	if !ok || !slices.Equal(recent, []string{"OpenCode provider failure"}) {
@@ -488,6 +507,7 @@ func TestBuildAdapterConfigForwardsNotificationQueueCapacity(t *testing.T) {
 			AgentEnv:                  []string{"PATH=/usr/bin"},
 			Protocol:                  agent.ProtocolACP,
 			NotificationQueueCapacity: 4096,
+			PromptCancelJoinTimeout:   12 * time.Second,
 		},
 		logger: newTestLogger(t),
 	}
@@ -499,6 +519,9 @@ func TestBuildAdapterConfigForwardsNotificationQueueCapacity(t *testing.T) {
 
 	if got := m.adapterCfg.NotificationQueueCapacity; got != 4096 {
 		t.Fatalf("adapter notification queue capacity = %d, want 4096", got)
+	}
+	if got := m.adapterCfg.PromptCancelJoinTimeout; got != 12*time.Second {
+		t.Fatalf("adapter prompt cancel join timeout = %s, want 12s", got)
 	}
 }
 

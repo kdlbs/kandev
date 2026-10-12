@@ -91,6 +91,18 @@ test.describe("Mobile kanban — task priority", () => {
       where: (payload) => payload.task_id === task.id && payload.priority === "low",
     });
     await kanban.openTaskActionsMenu(task.id);
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible').last();
+    const menuLabels = (await menu.locator(":scope > [role='menuitem']").allTextContents()).map(
+      (text) => text.replace(/\s+/g, " ").trim(),
+    );
+    expect(menuLabels).toEqual(["Priority", "Edit", "Link", "Move to", "Archive", "Delete"]);
+    await expect(menu.locator(":scope > [data-slot='dropdown-menu-separator']")).toHaveCount(4);
+    const deleteItem = menu.getByRole("menuitem", { name: "Delete", exact: true });
+    await deleteItem.scrollIntoViewIfNeeded();
+    const deleteBox = await deleteItem.boundingBox();
+    expect(deleteBox).not.toBeNull();
+    expect(Math.round(deleteBox!.height)).toBeGreaterThanOrEqual(44);
+    await expect(deleteItem).toBeInViewport();
     await expect(kanban.contextPriority()).toBeVisible();
     await kanban.openPrioritySubmenu();
     await expect(kanban.contextPriorityCurrent("critical")).toBeVisible();

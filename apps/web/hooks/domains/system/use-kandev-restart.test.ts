@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   fetchSystemInfo: vi.fn(),
@@ -26,6 +26,10 @@ beforeEach(() => {
   mocks.requestRestart.mockReset();
   mocks.registerBackendReloadOwner.mockReset();
   mocks.releaseBackendReloadOwner.mockReset();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("useKandevRestart", () => {
@@ -62,6 +66,28 @@ describe("useKandevRestart", () => {
 
     await waitFor(() => expect(result.current.phase).toBe("restarting"));
     expect(result.current.isRestarting).toBe(true);
+  });
+
+  it("keeps waiting when startup takes longer than three minutes", async () => {
+    vi.useFakeTimers();
+    mocks.fetchSystemInfo
+      .mockResolvedValueOnce({ boot_id: "boot-1" })
+      .mockRejectedValue(new Error("connection refused"));
+    mocks.requestRestart.mockResolvedValue({ accepted: true, message: "Restarting" });
+
+    const { result } = renderHook(() => useKandevRestart());
+
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.phase).toBe("restarting");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(180_001);
+    });
+
+    expect(result.current.phase).toBe("restarting");
+    expect(result.current.errorMessage).toBeNull();
   });
 
   it("reports an error when the restart request fails", async () => {

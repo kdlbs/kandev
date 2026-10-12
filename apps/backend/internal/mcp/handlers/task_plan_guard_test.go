@@ -51,14 +51,9 @@ func TestPlanTruncationWarningUnknownRevisionDoesNotClaimPreservation(t *testing
 	}
 }
 
-// TestMCPPlanTruncationGuard_WarnsAndPreservesHistory pins the defect this
-// card fixes: a write that drops the majority of a substantial plan today
-// returns plain success with no signal that anything shrank (WO-38, task
-// 809498b3, measured two incidents dropping 76-77% of a 40k+ char plan).
-//
-// This asserts against a response shape (plan_write_warning,
-// prior_revision_number) that does not exist yet, so it fails first.
-func TestMCPPlanTruncationGuard_WarnsAndPreservesHistory(t *testing.T) {
+// TestMCPPlanTruncationGuard_RejectsUnacknowledgedReduction verifies that a
+// suspicious replacement is rejected before it can alter HEAD or history.
+func TestMCPPlanTruncationGuard_RejectsUnacknowledgedReduction(t *testing.T) {
 	h := newMCPPlanTestHandlers(t)
 	ctx := context.Background()
 
@@ -75,56 +70,45 @@ func TestMCPPlanTruncationGuard_WarnsAndPreservesHistory(t *testing.T) {
 		t.Fatalf("handleCreateTaskPlan: %v", err)
 	}
 	created := decodeMCPPlanPayload(t, createOut)
-	if warning, ok := created["plan_write_warning"]; ok {
-		t.Errorf("unexpected warning on initial create (no prior plan to truncate): %v", warning)
+	version, _ := created["version"].(string)
+	if version == "" {
+		t.Fatal("initial create omitted write version")
 	}
 
 	updateOut, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
 		mustMarshalPlanPayload(t, map[string]any{
-			"task_id": mcpPlanTaskID,
-			"content": small,
+			"task_id": mcpPlanTaskID, "content": small, "expected_version": version,
 		})))
 	if err != nil {
 		t.Fatalf("handleUpdateTaskPlan: %v", err)
 	}
-	updated := decodeMCPPlanPayload(t, updateOut)
-	if updated["content"] != small {
-		t.Errorf("content = %v, want the new (truncated) content", updated["content"])
+	if updateOut.Type != ws.MessageTypeError {
+		t.Fatalf("type = %q, want an error", updateOut.Type)
+	}
+	var rejection ws.ErrorPayload
+	if err := json.Unmarshal(updateOut.Payload, &rejection); err != nil {
+		t.Fatalf("decode rejection: %v", err)
+	}
+	if rejection.Details["reason"] != "plan_truncation_rejected" || rejection.Details["write_applied"] != false {
+		t.Fatalf("rejection details = %#v, want truncation/no-write", rejection.Details)
+	}
+	if !strings.Contains(rejection.Message, "not changed") {
+		t.Fatalf("rejection message = %q, want explicit no-write guidance", rejection.Message)
 	}
 
-	warning, _ := updated["plan_write_warning"].(string)
-	if warning == "" {
-		t.Fatal("expected a truncation warning naming the character drop, got none")
-	}
-	if !strings.Contains(warning, "40000") || !strings.Contains(warning, "10000") {
-		t.Errorf("warning does not name the character drop (40000 -> 10000): %q", warning)
-	}
-	if !strings.Contains(strings.ToLower(warning), "entire") && !strings.Contains(strings.ToLower(warning), "whole document") {
-		t.Errorf("warning does not explain the write replaced the whole document: %q", warning)
-	}
-
-	priorRev, ok := updated["prior_revision_number"].(float64)
-	if !ok || int(priorRev) != 1 {
-		t.Errorf("prior_revision_number = %v, want 1", updated["prior_revision_number"])
-	}
-
-	// The truncating write must NOT coalesce: revision 1 must survive as its
-	// own row with the full pre-truncation content, not be overwritten
-	// in-place by mergeRevisionInTx.
 	revisions, err := h.planService.ListRevisions(ctx, mcpPlanTaskID)
 	if err != nil {
 		t.Fatalf("ListRevisions: %v", err)
 	}
-	if len(revisions) != 2 {
-		t.Fatalf("expected 2 separate revisions (no coalesce), got %d", len(revisions))
+	if len(revisions) != 1 {
+		t.Fatalf("expected one revision after rejected write, got %d", len(revisions))
 	}
-	rev1 := revisionWithNumber(t, revisions, 1)
-	fullRev1, err := h.planService.GetRevision(ctx, rev1.ID)
+	fullRev1, err := h.planService.GetRevision(ctx, revisions[0].ID)
 	if err != nil {
 		t.Fatalf("GetRevision(rev1): %v", err)
 	}
 	if fullRev1.Content != large {
-		t.Errorf("revision 1 content was mutated by the truncating write; got len=%d, want len=%d",
+		t.Errorf("revision content was mutated by the rejected write; got len=%d, want len=%d",
 			len(fullRev1.Content), len(large))
 	}
 }
@@ -137,7 +121,7 @@ func TestMCPPlanTruncationGuard_SmallDropsAreQuiet(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("small plan under the floor", func(t *testing.T) {
-		_, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
+		createOut, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
 			mustMarshalPlanPayload(t, map[string]any{
 				"task_id": mcpPlanTaskID,
 				"content": "a short plan",
@@ -145,10 +129,10 @@ func TestMCPPlanTruncationGuard_SmallDropsAreQuiet(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleCreateTaskPlan: %v", err)
 		}
+		version := decodeMCPPlanPayload(t, createOut)["version"]
 		out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
 			mustMarshalPlanPayload(t, map[string]any{
-				"task_id": mcpPlanTaskID,
-				"content": "x",
+				"task_id": mcpPlanTaskID, "content": "x", "expected_version": version,
 			})))
 		if err != nil {
 			t.Fatalf("handleUpdateTaskPlan: %v", err)
@@ -162,7 +146,7 @@ func TestMCPPlanTruncationGuard_SmallDropsAreQuiet(t *testing.T) {
 	t.Run("legitimate prune retains more than half", func(t *testing.T) {
 		large := strings.Repeat("x", 40000)
 		retained := strings.Repeat("y", 25000) // 62.5% retained, above the 50% line
-		_, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
+		createOut, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
 			mustMarshalPlanPayload(t, map[string]any{
 				"task_id": mcpPlanlessID,
 				"content": large,
@@ -170,10 +154,10 @@ func TestMCPPlanTruncationGuard_SmallDropsAreQuiet(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleCreateTaskPlan: %v", err)
 		}
+		version := decodeMCPPlanPayload(t, createOut)["version"]
 		out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
 			mustMarshalPlanPayload(t, map[string]any{
-				"task_id": mcpPlanlessID,
-				"content": retained,
+				"task_id": mcpPlanlessID, "content": retained, "expected_version": version,
 			})))
 		if err != nil {
 			t.Fatalf("handleUpdateTaskPlan: %v", err)
@@ -203,7 +187,7 @@ func TestMCPPlanTruncationGuard_NonASCIIUsesCharacterCount(t *testing.T) {
 	// cross the 50% line, but the character ratio must.
 	small := strings.Repeat("好", 800)
 
-	_, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
+	createOut, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
 		mustMarshalPlanPayload(t, map[string]any{
 			"task_id": mcpPlanTaskID,
 			"content": large,
@@ -211,23 +195,24 @@ func TestMCPPlanTruncationGuard_NonASCIIUsesCharacterCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleCreateTaskPlan: %v", err)
 	}
+	version := decodeMCPPlanPayload(t, createOut)["version"]
 
 	out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
 		mustMarshalPlanPayload(t, map[string]any{
-			"task_id": mcpPlanTaskID,
-			"content": small,
+			"task_id": mcpPlanTaskID, "content": small, "expected_version": version,
 		})))
 	if err != nil {
 		t.Fatalf("handleUpdateTaskPlan: %v", err)
 	}
-	updated := decodeMCPPlanPayload(t, out)
-
-	warning, _ := updated["plan_write_warning"].(string)
-	if warning == "" {
-		t.Fatal("expected a truncation warning for an 80 percent character drop disguised as a 60 percent byte retain, got none")
+	if out.Type != ws.MessageTypeError {
+		t.Fatalf("type = %q, want a truncation rejection", out.Type)
 	}
-	if !strings.Contains(warning, "4000") || !strings.Contains(warning, "800") {
-		t.Errorf("warning does not name the character counts (4000 -> 800): %q", warning)
+	var rejection ws.ErrorPayload
+	if err := json.Unmarshal(out.Payload, &rejection); err != nil {
+		t.Fatalf("decode rejection: %v", err)
+	}
+	if rejection.Details["reason"] != "plan_truncation_rejected" {
+		t.Fatalf("reason = %v, want plan_truncation_rejected", rejection.Details["reason"])
 	}
 }
 
@@ -235,14 +220,14 @@ func TestMCPPlanTruncationGuard_NonASCIIUsesCharacterCount(t *testing.T) {
 // scope extension in handleCreateTaskPlan: CreatePlan upserts, so a create
 // call over an existing large plan is the same destructive write as update,
 // through a different door, and must be guarded identically.
-func TestMCPPlanTruncationGuard_CreateOverExistingPlanWarns(t *testing.T) {
+func TestMCPPlanTruncationGuard_CreateOverExistingPlanRejects(t *testing.T) {
 	h := newMCPPlanTestHandlers(t)
 	ctx := context.Background()
 
 	large := strings.Repeat("x", 40000)
 	small := strings.Repeat("y", 10000)
 
-	_, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
+	createOut, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
 		mustMarshalPlanPayload(t, map[string]any{
 			"task_id": mcpPlanlessID,
 			"content": large,
@@ -250,20 +235,17 @@ func TestMCPPlanTruncationGuard_CreateOverExistingPlanWarns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleCreateTaskPlan (initial): %v", err)
 	}
+	version := decodeMCPPlanPayload(t, createOut)["version"]
 
 	out, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
 		mustMarshalPlanPayload(t, map[string]any{
-			"task_id": mcpPlanlessID,
-			"content": small,
+			"task_id": mcpPlanlessID, "content": small, "expected_version": version,
 		})))
 	if err != nil {
 		t.Fatalf("handleCreateTaskPlan (overwrite): %v", err)
 	}
-	updated := decodeMCPPlanPayload(t, out)
-
-	warning, _ := updated["plan_write_warning"].(string)
-	if warning == "" {
-		t.Fatal("expected a truncation warning when create_task_plan_kandev overwrites an existing large plan, got none")
+	if out.Type != ws.MessageTypeError {
+		t.Fatalf("type = %q, want a truncation rejection", out.Type)
 	}
 }
 
@@ -347,21 +329,17 @@ func newMCPPlanTestHandlersWithFailingRevisionLookup(t *testing.T) (*Handlers, *
 	return &Handlers{planService: service.NewPlanService(wrapped, eventBus, log), logger: log}, wrapped
 }
 
-// TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber pins
-// Review round 2 Finding 3: revision numbering starts at 1
-// (NextTaskPlanRevisionNumber), so "plan revision 0" can never be a real
-// revision. When the latest-revision lookup fails on a truncating write, the
-// plan service must still force a new revision and still warn — coalescing
-// here would overwrite the only surviving copy of the pre-truncation content
-// — but the rendered warning must not claim the content lives in revision 0.
-func TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber(t *testing.T) {
+// TestMCPPlanTruncationGuard_RevisionLookupFailureRejects verifies that an
+// intentional reduction cannot proceed when the predecessor cannot be proven
+// to exist in revision history.
+func TestMCPPlanTruncationGuard_RevisionLookupFailureRejects(t *testing.T) {
 	h, _ := newMCPPlanTestHandlersWithFailingRevisionLookup(t)
 	ctx := context.Background()
 
 	large := strings.Repeat("x", 40000)
 	small := strings.Repeat("y", 10000)
 
-	_, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
+	createOut, err := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
 		mustMarshalPlanPayload(t, map[string]any{
 			"task_id": mcpPlanTaskID,
 			"content": large,
@@ -369,35 +347,28 @@ func TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber(t *test
 	if err != nil {
 		t.Fatalf("handleCreateTaskPlan: %v", err)
 	}
+	version := decodeMCPPlanPayload(t, createOut)["version"]
 
 	out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
 		mustMarshalPlanPayload(t, map[string]any{
-			"task_id": mcpPlanTaskID,
-			"content": small,
+			"task_id": mcpPlanTaskID, "content": small, "expected_version": version, "allow_truncation": true,
 		})))
 	if err != nil {
 		t.Fatalf("handleUpdateTaskPlan: %v", err)
 	}
-	updated := decodeMCPPlanPayload(t, out)
-
-	warning, _ := updated["plan_write_warning"].(string)
-	if warning == "" {
-		t.Fatal("expected a truncation warning even when the revision lookup fails, got none")
+	if out.Type != ws.MessageTypeError {
+		t.Fatalf("type = %q, want a history rejection", out.Type)
 	}
-	if strings.Contains(warning, "revision 0") {
-		t.Errorf("warning names a nonexistent revision 0 (revision numbering starts at 1): %q", warning)
+	var rejection ws.ErrorPayload
+	if err := json.Unmarshal(out.Payload, &rejection); err != nil {
+		t.Fatalf("decode rejection: %v", err)
 	}
-	if !strings.Contains(warning, "40000") || !strings.Contains(warning, "10000") {
-		t.Errorf("warning does not name the character drop (40000 -> 10000): %q", warning)
-	}
-
-	if _, ok := updated["prior_revision_number"]; ok {
-		t.Errorf("prior_revision_number should be omitted when the revision number is unknown, got %v",
-			updated["prior_revision_number"])
+	if rejection.Details["reason"] != "plan_history_unavailable" || rejection.Details["write_applied"] != false {
+		t.Fatalf("rejection details = %#v, want history-unavailable/no-write", rejection.Details)
 	}
 }
 
-func TestMCPPlanTruncationGuard_PlanLookupFailurePreservesHistory(t *testing.T) {
+func TestMCPPlanTruncationGuard_PlanLookupFailureRejects(t *testing.T) {
 	h, repo := newMCPPlanTestHandlersWithFailingRevisionLookup(t)
 	ctx := context.Background()
 
@@ -417,23 +388,28 @@ func TestMCPPlanTruncationGuard_PlanLookupFailurePreservesHistory(t *testing.T) 
 
 	out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
 		mustMarshalPlanPayload(t, map[string]any{
-			"task_id": mcpPlanTaskID,
-			"content": small,
+			"task_id": mcpPlanTaskID, "content": small, "expected_version": "unknown",
 		})))
 	if err != nil {
 		t.Fatalf("handleUpdateTaskPlan: %v", err)
 	}
-	updated := decodeMCPPlanPayload(t, out)
-	if warning, ok := updated["plan_write_warning"]; ok {
-		t.Errorf("unexpected warning when the guard could not read the prior plan: %v", warning)
+	if out.Type != ws.MessageTypeError {
+		t.Fatalf("type = %q, want a head-read rejection", out.Type)
+	}
+	var rejection ws.ErrorPayload
+	if err := json.Unmarshal(out.Payload, &rejection); err != nil {
+		t.Fatalf("decode rejection: %v", err)
+	}
+	if rejection.Details["reason"] != "plan_head_unavailable" || rejection.Details["write_applied"] != false {
+		t.Fatalf("rejection details = %#v, want head-unavailable/no-write", rejection.Details)
 	}
 
 	revisions, err := repo.Repository.ListTaskPlanRevisions(ctx, mcpPlanTaskID, 0)
 	if err != nil {
 		t.Fatalf("ListTaskPlanRevisions: %v", err)
 	}
-	if len(revisions) != 2 {
-		t.Fatalf("expected 2 revisions after a guarded read failure, got %d", len(revisions))
+	if len(revisions) != 1 {
+		t.Fatalf("expected one revision after a guarded read failure, got %d", len(revisions))
 	}
 	rev1 := revisionWithNumber(t, revisions, 1)
 	fullRev1, err := repo.GetTaskPlanRevision(ctx, rev1.ID)

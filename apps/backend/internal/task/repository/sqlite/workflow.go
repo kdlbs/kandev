@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // AddTaskToWorkflow adds a task to a workflow with placement. Wrapped in a
@@ -67,7 +68,7 @@ func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, 
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	r.dispatchStepEntry(ctx, taskID, workflowID, workflowStepID, formatEntryID(transitionID))
+	r.dispatchStepEntry(ctx, taskID, workflowID, workflowStepID, formatEntryID(transitionID), 0)
 	return nil
 }
 
@@ -120,6 +121,34 @@ func (r *Repository) RemoveTaskFromWorkflow(ctx context.Context, taskID, workflo
 func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	r.prepareWorkflow(workflow)
 	return r.insertWorkflow(ctx, r.db, workflow)
+}
+
+func (r *Repository) CreateWorkflowIfWorkspaceUnchanged(ctx context.Context, workflow *models.Workflow, expected time.Time) error {
+	r.prepareWorkflow(workflow)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO workflows (
+			id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id,
+			sort_order, hidden, style, source, source_path, created_at, updated_at
+		)
+		SELECT ?, ?, ?, ?, ?, ?, ?,
+			(SELECT COALESCE(MAX(sort_order), -1) + 1 FROM workflows WHERE workspace_id = ?),
+			?, ?, ?, ?, ?, ?
+		WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ? AND updated_at = ?)
+	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt,
+		workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.WorkspaceID,
+		dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source),
+		workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt, workflow.WorkspaceID, expected)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return repoerrors.ErrTaskVersionConflict
+	}
+	return nil
 }
 
 func (r *Repository) prepareWorkflow(workflow *models.Workflow) {
@@ -242,7 +271,7 @@ func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workfl
 		FROM workflows WHERE id = ?
 	`, workflowSelectColumns)), id))
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("workflow not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", repoerrors.ErrWorkflowNotFound, id)
 	}
 	if err != nil {
 		return nil, err
@@ -267,33 +296,78 @@ func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workfl
 	return nil
 }
 
+func (r *Repository) UpdateWorkflowIfUnchanged(ctx context.Context, workflow *models.Workflow, expected time.Time) error {
+	workflow.UpdatedAt = time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE workflows SET name = ?, description = ?, prompt = ?, agent_profile_id = ?, workflow_template_id = ?, hidden = ?, style = ?, source = ?, source_path = ?, updated_at = ?
+		WHERE id = ? AND updated_at = ?
+	`), workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID,
+		dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source),
+		workflow.SourcePath, workflow.UpdatedAt, workflow.ID, expected)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return repoerrors.ErrTaskVersionConflict
+	}
+	return nil
+}
+
 // DeleteWorkflowsByWorkspace deletes all workflows for a workspace except the excluded IDs (E2E cleanup).
 // Relies on CASCADE foreign keys to remove workflow_steps.
 func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID string, excludeIDs []string) (int64, error) {
-	if len(excludeIDs) == 0 {
-		result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflows WHERE workspace_id = ?`), workspaceID)
-		if err != nil {
-			return 0, err
-		}
-		rows, _ := result.RowsAffected()
-		return rows, nil
-	}
-
-	query, args, err := sqlx.In(`DELETE FROM workflows WHERE workspace_id = ? AND id NOT IN (?)`, workspaceID, excludeIDs)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	defer func() { _ = tx.Rollback() }()
+
+	var query string
+	var args []interface{}
+	if len(excludeIDs) == 0 {
+		query = `DELETE FROM workflows WHERE workspace_id = ?`
+		args = []interface{}{workspaceID}
+	} else {
+		query, args, err = sqlx.In(`DELETE FROM workflows WHERE workspace_id = ? AND id NOT IN (?)`, workspaceID, excludeIDs)
+		if err != nil {
+			return 0, err
+		}
+	}
+	cleanupQuery := `
+		DELETE FROM task_workflow_session_bindings
+		WHERE workflow_id IN (SELECT id FROM workflows WHERE ` + query[len("DELETE FROM workflows WHERE "):] + `)
+	`
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(cleanupQuery), args...); err != nil {
+		return 0, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return 0, err
 	}
 	rows, _ := result.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
 	return rows, nil
 }
 
 // DeleteWorkflow deletes a workflow by ID
 func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflows WHERE id = ?`), id)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM task_workflow_session_bindings WHERE workflow_id = ?
+	`), id); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflows WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -302,7 +376,7 @@ func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("workflow not found: %s", id)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ListWorkflows returns workflows for the given workspace, excluding hidden by default.
@@ -358,6 +432,68 @@ func (r *Repository) ReorderWorkflows(ctx context.Context, workspaceID string, w
 		rows, _ := result.RowsAffected()
 		if rows == 0 {
 			return fmt.Errorf("workflow not found in workspace: %s", id)
+		}
+	}
+	return tx.Commit()
+}
+
+// ReorderWorkflowsIfUnchanged applies a complete manual-workflow reorder only
+// while the workspace and all listed workflows retain their observed versions.
+func (r *Repository) ReorderWorkflowsIfUnchanged(
+	ctx context.Context, workspaceID string, workflowIDs []string, expectedWorkspace time.Time, expectedByID map[string]time.Time,
+) error {
+	if len(workflowIDs) == 0 || len(workflowIDs) != len(expectedByID) {
+		return repoerrors.ErrTaskVersionConflict
+	}
+	seen := make(map[string]struct{}, len(workflowIDs))
+	for _, id := range workflowIDs {
+		if _, duplicate := seen[id]; duplicate {
+			return repoerrors.ErrTaskVersionConflict
+		}
+		if _, ok := expectedByID[id]; !ok {
+			return repoerrors.ErrTaskVersionConflict
+		}
+		seen[id] = struct{}{}
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var workspaceVersion time.Time
+	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT updated_at FROM workspaces WHERE id = ?`), workspaceID).Scan(&workspaceVersion); err != nil {
+		return repoerrors.ErrTaskVersionConflict
+	}
+	if !workspaceVersion.Equal(expectedWorkspace) {
+		return repoerrors.ErrTaskVersionConflict
+	}
+	var total int
+	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT COUNT(*) FROM workflows WHERE workspace_id = ?`), workspaceID).Scan(&total); err != nil {
+		return err
+	}
+	if total != len(workflowIDs) {
+		return repoerrors.ErrTaskVersionConflict
+	}
+
+	now := time.Now().UTC()
+	for position, id := range workflowIDs {
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE workflows SET sort_order = ?, updated_at = ?
+			WHERE id = ? AND workspace_id = ? AND updated_at = ? AND hidden = FALSE
+				AND (source = '' OR source = 'manual')
+				AND EXISTS (SELECT 1 FROM workspaces WHERE id = ? AND updated_at = ?)
+		`), position, now, id, workspaceID, expectedByID[id], workspaceID, expectedWorkspace)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return repoerrors.ErrTaskVersionConflict
 		}
 	}
 	return tx.Commit()

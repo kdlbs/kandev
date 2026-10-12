@@ -291,17 +291,15 @@ to `AC-OFFICE-REVIEW-SEATS-002.6`: no seat, unfillable signal, task parked -
 the defect this capability removes would survive on Postgres while every
 SQLite test passed.
 
-Swapping `rowid` for `id` does not fix it: `id` is a text identifier with no
-ordering meaning, so ordering by it is a random pick, which
-`AC-OFFICE-REVIEW-SEATS-002.10` forbids, and the table carries no timestamp to
-order by instead.
+Swapping `rowid` for `id` alone does not fix it: `id` has no chronology.
+The timestamp comes first. `id` breaks ties.
 
 **Design position: the repair is in scope, and it is a column.** The
-migration *Persistence* already requires also adds a creation timestamp; the
-third tier orders by it descending, `agent_profile_id` ascending as tiebreak -
-identical on both engines. Pre-existing rows backfill to one constant, tied
-and resolved by the tiebreak. Scoping the repair out was rejected: it leaves
-this capability's only CEO-less path broken on one supported engine.
+migration *Persistence* already requires a creation timestamp. The third tier
+orders by it descending, then `id` ascending on both engines. SQLite legacy
+epoch rows receive synthetic timestamps from their `rowid` order. Postgres
+legacy rows keep the epoch and resolve by `id`. Scoping it out leaves the only
+CEO-less path broken on Postgres.
 
 ## Failure and recovery
 
@@ -434,9 +432,10 @@ One migration does two things to the seat table: it adds a **creation
 timestamp column**, and it adds a unique index on the seat natural key
 `(step_id, task_id, role, agent_profile_id)`, preceded by a dedupe of any
 existing rows that violate it. The column is what *Casting resolution* orders
-the runner resolver's third tier by; pre-existing rows backfill to a single
-constant, and the dedupe runs after the backfill so its survivor rule is
-unaffected by it.
+the runner resolver's third tier by. SQLite legacy epoch rows receive
+synthetic timestamps from their `rowid` order before dedupe. Postgres legacy
+rows keep the epoch and use the `id` tiebreak. Dedupe runs after backfill, so
+its survivor rule is unaffected by timestamp assignment.
 
 This path runs on **both SQLite and Postgres**, so ADR-0027 applies in full and
 is not optional here:

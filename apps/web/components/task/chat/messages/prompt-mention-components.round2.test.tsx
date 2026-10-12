@@ -1,5 +1,35 @@
-import { describe, expect, it } from "vitest";
-import { splitMarkdownPromptMentionSegments } from "./prompt-mention-components";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
+import { PromptMentionChip, splitMarkdownPromptMentionSegments } from "./prompt-mention-components";
+
+const PROMPT = {
+  id: "prompt-1",
+  name: "daily",
+  content: "Review the daily report",
+  builtin: false,
+  created_at: "2026-09-12T00:00:00Z",
+  updated_at: "2026-09-12T00:00:00Z",
+};
+const INITIAL_PROMPT_STATE = {
+  prompts: { items: [PROMPT], loaded: true, loading: false },
+};
+const EMPTY_PROMPT_STATE = {
+  prompts: { items: [], loaded: true, loading: false },
+};
+const PROMPT_MENTION_TEST_ID = "custom-prompt-mention";
+const PROMPT_MENTION_LABEL_TEST_ID = "custom-prompt-mention-label";
+
+const touchState = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock("@/hooks/use-compact-task-chrome", () => ({
+  useTouchDrawer: () => touchState.enabled,
+}));
+
+afterEach(() => {
+  cleanup();
+  touchState.enabled = false;
+});
 
 const promptNames = ["daily"];
 
@@ -90,5 +120,66 @@ describe("splitMarkdownPromptMentionSegments round-two boundaries", () => {
     expect(splitMarkdownPromptMentionSegments(content, promptNames)).toEqual([
       { kind: "text", value: content },
     ]);
+  });
+});
+
+describe("PromptMentionChip presentation", () => {
+  it("keeps the default read-only chip presentation unchanged", () => {
+    render(
+      <StateProvider initialState={INITIAL_PROMPT_STATE}>
+        <PromptMentionChip name={PROMPT.name} value="@daily" />
+      </StateProvider>,
+    );
+
+    const chip = screen.getByTestId(PROMPT_MENTION_TEST_ID);
+    expect(chip.className).toContain("border-emerald-300/35");
+    expect(chip.className).toContain("bg-emerald-400/20");
+    expect(chip.className).toContain("px-1.5");
+    expect(chip.className).not.toContain("h-11");
+    expect(chip.className).not.toContain("min-w-11");
+  });
+
+  it("keeps the default touch preview target at its established size", () => {
+    touchState.enabled = true;
+    render(
+      <StateProvider initialState={INITIAL_PROMPT_STATE}>
+        <PromptMentionChip name={PROMPT.name} value="@daily" />
+      </StateProvider>,
+    );
+
+    const chip = screen.getByTestId(PROMPT_MENTION_TEST_ID);
+    expect(chip.tagName).toBe("BUTTON");
+    expect(chip.className).toContain("h-11");
+    expect(chip.className).toContain("min-w-11");
+  });
+
+  it("uses the compact editable presentation only when opted in", () => {
+    render(
+      <StateProvider initialState={INITIAL_PROMPT_STATE}>
+        <PromptMentionChip name={PROMPT.name} value="@daily" presentation="editable" />
+      </StateProvider>,
+    );
+
+    const chip = screen.getByTestId(PROMPT_MENTION_TEST_ID);
+    expect(chip.className).not.toContain("border-emerald-300/35");
+    expect(chip.className).not.toContain("bg-emerald-400/20");
+    const label = screen.getByTestId(PROMPT_MENTION_LABEL_TEST_ID);
+    expect(label.className).toContain("min-w-0");
+    expect(label.className).toContain("truncate");
+  });
+
+  it("keeps the editable fallback label in a truncation box", () => {
+    const name = "missing-prompt-with-a-long-name";
+    render(
+      <StateProvider initialState={EMPTY_PROMPT_STATE}>
+        <PromptMentionChip name={name} value={`@${name}`} presentation="editable" />
+      </StateProvider>,
+    );
+
+    const chip = screen.getByTestId(PROMPT_MENTION_TEST_ID);
+    const label = screen.getByTestId(PROMPT_MENTION_LABEL_TEST_ID);
+    expect(chip.getAttribute("title")).toBe(`Custom prompt: ${name}`);
+    expect(label.className).toContain("min-w-0");
+    expect(label.className).toContain("truncate");
   });
 });

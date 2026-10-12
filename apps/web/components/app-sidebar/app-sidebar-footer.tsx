@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "@/components/routing/app-link";
 import { useTranslation } from "react-i18next";
 import { useRouter, usePathname } from "@/lib/routing/client-router";
 import {
@@ -11,13 +12,13 @@ import {
 } from "@tabler/icons-react";
 import { useStaticDestinations } from "@/hooks/use-app-destinations";
 import type { DestinationIcon } from "@/lib/navigation/types";
-import { MAX_INLINE_PLUGIN_FOOTER_ITEMS } from "@/lib/navigation/plugin-footer-budget";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
@@ -32,36 +33,46 @@ import { workspaceHomeHref } from "./app-sidebar-workspace-navigation";
 import { isSettingsRoute } from "./app-sidebar-route";
 import { useConnectionIssueCopy } from "../app-status-bar/connection-status-item";
 import type { ConnectionIssueSeverity } from "@/lib/types/connection";
+import { SIDEBAR_ITEM_ACTIVE } from "./app-sidebar-constants";
 
 type AppSidebarFooterProps = {
   collapsed: boolean;
   onToggleSettingsMode: () => void;
+  layoutManaged?: boolean;
 };
 
 type FooterIconButtonProps = {
   icon: DestinationIcon;
   label: string;
   collapsed: boolean;
+  href?: string;
   onClick?: () => void;
-  badge?: boolean;
   testId?: string;
   /** Toggle state: rotates the icon a half-turn (spins back out when cleared). */
   active?: boolean;
+  current?: boolean;
+  showLabel?: boolean;
 };
 
 function FooterIconButton({
   icon: Icon,
   label,
   collapsed,
+  href,
   onClick,
-  badge,
   testId,
   active,
+  current,
+  showLabel = false,
 }: FooterIconButtonProps) {
   const buttonProps = {
     variant: "ghost" as const,
     size: "icon" as const,
-    className: "h-7 w-7 cursor-pointer relative",
+    className: cn(
+      "h-7 cursor-pointer relative [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11",
+      showLabel ? "min-w-0 flex-1 justify-start gap-2 px-2" : "w-7",
+      current && SIDEBAR_ITEM_ACTIVE,
+    ),
   };
 
   const content = (
@@ -72,13 +83,27 @@ function FooterIconButton({
           active && "rotate-180 text-foreground",
         )}
       />
-      {badge && (
-        <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-primary border border-background" />
-      )}
     </>
   );
 
-  const trigger = (
+  const triggerContent = (
+    <>
+      {content}
+      {showLabel && <span className="truncate text-left">{label}</span>}
+    </>
+  );
+  const trigger = href ? (
+    <Button asChild {...buttonProps}>
+      <Link
+        href={href}
+        aria-label={label}
+        aria-current={current ? "page" : undefined}
+        data-testid={testId}
+      >
+        {triggerContent}
+      </Link>
+    </Button>
+  ) : (
     <Button
       type="button"
       onClick={onClick}
@@ -87,7 +112,7 @@ function FooterIconButton({
       aria-pressed={active}
       data-testid={testId}
     >
-      {content}
+      {triggerContent}
     </Button>
   );
 
@@ -159,7 +184,7 @@ function SidebarFooterDialogs({
   improveOpen: boolean;
   onImproveOpenChange: (open: boolean) => void;
   workspaceId: string | null;
-  onTaskCreated: (task: { id: string }) => void;
+  onTaskCreated: (task: { id: string }, meta?: { autoFocus?: boolean }) => void;
   releaseNotes: ReturnType<typeof useReleaseNotes>;
 }) {
   return (
@@ -182,66 +207,20 @@ function SidebarFooterDialogs({
   );
 }
 
-/**
- * Re-exported so existing unit-test imports from this module keep working —
- * the value itself lives in `plugin-footer-budget.ts` (see that module's
- * doc comment) so Playwright specs, which run outside the React tree, can
- * import it too without pulling in this file's JSX/React dependencies.
- */
-export { MAX_INLINE_PLUGIN_FOOTER_ITEMS };
-
-type InsightDestinations = ReturnType<typeof useStaticDestinations>;
-
-/**
- * Splits the resolved `insights` destinations into the inline run and the
- * overflow run. First-party entries (today, only `stats`) are never counted
- * against the budget and always render inline; the budget applies to
- * `source === "plugin"` entries only, partitioning them in place without
- * reordering — concatenating `inline` and `overflow` reproduces the original
- * order.
- */
-function partitionInsightDestinations(destinations: InsightDestinations): {
-  inline: InsightDestinations;
-  overflow: InsightDestinations;
-} {
-  const inline: InsightDestinations = [];
-  const overflow: InsightDestinations = [];
-  let pluginCount = 0;
-
-  for (const destination of destinations) {
-    if (destination.source !== "plugin") {
-      inline.push(destination);
-      continue;
-    }
-    if (pluginCount < MAX_INLINE_PLUGIN_FOOTER_ITEMS) {
-      inline.push(destination);
-    } else {
-      overflow.push(destination);
-    }
-    pluginCount += 1;
-  }
-
-  return { inline, overflow };
-}
-
-/**
- * Overflow trigger for plugin `insights` destinations past the inline
- * budget. Reuses `FooterIconButton`'s icon-button treatment (size, tooltip,
- * hover) wrapped as a `@kandev/ui/dropdown-menu` trigger. Each menu item
- * carries the same `data-testid`/accessible-name derivation as the inline
- * button it would otherwise be — see spec.md#Rendered-identity.
- */
-function InsightOverflowMenu({
+function SidebarFooterMenu({
   destinations,
   collapsed,
-  router,
+  releaseNotes,
+  onImprove,
 }: {
-  destinations: InsightDestinations;
+  destinations: ReturnType<typeof useStaticDestinations>;
   collapsed: boolean;
-  router: ReturnType<typeof useRouter>;
+  releaseNotes: ReturnType<typeof useReleaseNotes>;
+  onImprove: () => void;
 }) {
   const { t } = useTranslation();
-  const label = t("sidebar:morePluginItems");
+  const router = useRouter();
+  const label = t("common:showMoreActions");
 
   return (
     <Tooltip>
@@ -252,60 +231,63 @@ function InsightOverflowMenu({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-7 w-7 cursor-pointer"
+              className="relative cursor-pointer"
               aria-label={label}
-              data-testid="sidebar-plugin-overflow-button"
+              data-testid="sidebar-footer-more-button"
             >
-              <IconDots className="h-3.5 w-3.5" />
+              <IconDots className="size-4" aria-hidden="true" />
+              {releaseNotes.showTopbarButton && releaseNotes.hasUnseen && (
+                <span
+                  className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-primary"
+                  aria-hidden="true"
+                />
+              )}
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <DropdownMenuContent>
+        <DropdownMenuContent
+          side="top"
+          align={collapsed ? "start" : "end"}
+          className="w-60"
+          data-testid="sidebar-footer-menu"
+        >
           {destinations.map((destination) => (
             <DropdownMenuItem
               key={destination.id}
-              className="cursor-pointer"
+              className="cursor-pointer [@media(pointer:coarse)]:min-h-11"
               data-testid={`sidebar-${destination.id}-button`}
               onClick={() => router.push(destination.href)}
             >
-              <destination.icon className="h-4 w-4 mr-2" />
-              {destination.label}
+              <destination.icon className="size-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">{destination.label}</span>
             </DropdownMenuItem>
           ))}
+          {destinations.length > 0 && <DropdownMenuSeparator />}
+          <DropdownMenuItem
+            onClick={onImprove}
+            className="cursor-pointer [@media(pointer:coarse)]:min-h-11"
+            data-testid="sidebar-improve-kandev-button"
+          >
+            <IconStethoscope className="size-4" aria-hidden="true" />
+            {t("sidebar:improveKandev")}
+          </DropdownMenuItem>
+          {releaseNotes.hasNotes && (
+            <DropdownMenuItem
+              onClick={releaseNotes.openDialog}
+              className="cursor-pointer [@media(pointer:coarse)]:min-h-11"
+              data-testid="sidebar-release-notes-button"
+            >
+              <IconSparkles className="size-4" aria-hidden="true" />
+              {t("sidebar:whatsNew")}
+              {releaseNotes.hasUnseen && (
+                <span className="ml-auto size-1.5 rounded-full bg-primary" aria-hidden="true" />
+              )}
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
       <TooltipContent side={collapsed ? "right" : "top"}>{label}</TooltipContent>
     </Tooltip>
-  );
-}
-
-function InsightFooterButtons({
-  destinations,
-  collapsed,
-  router,
-}: {
-  destinations: InsightDestinations;
-  collapsed: boolean;
-  router: ReturnType<typeof useRouter>;
-}) {
-  const { inline, overflow } = partitionInsightDestinations(destinations);
-
-  return (
-    <>
-      {inline.map((destination) => (
-        <FooterIconButton
-          key={destination.id}
-          icon={destination.icon}
-          label={destination.label}
-          collapsed={collapsed}
-          onClick={() => router.push(destination.href)}
-          testId={`sidebar-${destination.id}-button`}
-        />
-      ))}
-      {overflow.length > 0 && (
-        <InsightOverflowMenu destinations={overflow} collapsed={collapsed} router={router} />
-      )}
-    </>
   );
 }
 
@@ -330,9 +312,10 @@ function useSettingsGearToggle(
   settingsMode: boolean,
   activeWorkspace: Parameters<typeof workspaceHomeHref>[0],
   onToggleSettingsMode: () => void,
+  pathname: string,
 ) {
   const router = useRouter();
-  const pathname = usePathname();
+  const startupPage = useAppStore((s) => s.userSettings.startupPage);
 
   return () => {
     const onSettingsRoute = isSettingsRoute(pathname);
@@ -341,23 +324,40 @@ function useSettingsGearToggle(
       return;
     }
     if (settingsMode && onSettingsRoute) {
-      router.push(workspaceHomeHref(activeWorkspace), { onNavigated: onToggleSettingsMode });
+      router.push(workspaceHomeHref(activeWorkspace, startupPage), {
+        onNavigated: onToggleSettingsMode,
+      });
       return;
     }
     onToggleSettingsMode();
   };
 }
 
-export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebarFooterProps) {
+export function AppSidebarFooter({
+  collapsed,
+  onToggleSettingsMode,
+  layoutManaged = false,
+}: AppSidebarFooterProps) {
   const { t } = useTranslation();
   const router = useRouter();
   const workspaces = useAppStore((s) => s.workspaces);
   const workspaceId = workspaces.activeId;
   const activeWorkspace = workspaces.items.find((workspace) => workspace.id === workspaceId);
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
-  const toggleSettings = useSettingsGearToggle(settingsMode, activeWorkspace, onToggleSettingsMode);
+  const pathname = usePathname();
+  const toggleSettings = useSettingsGearToggle(
+    settingsMode,
+    activeWorkspace,
+    onToggleSettingsMode,
+    pathname,
+  );
   const appStatusBarEnabled = useAppStore((s) => s.userSettings.appStatusBarEnabled);
-  const insightDestinations = useStaticDestinations("sidebar", "insights");
+  const allInsightDestinations = useStaticDestinations("sidebar", "insights");
+  const statsDestination = allInsightDestinations.find((destination) => destination.id === "stats");
+  const insightDestinations = allInsightDestinations.filter(
+    (destination) =>
+      destination.id !== "stats" && (!layoutManaged || destination.source !== "plugin"),
+  );
   const releaseNotes = useReleaseNotes();
   const improveOpen = useAppStore((s) => s.appSidebar.improveDialogOpen);
   const setImproveOpen = useAppStore((s) => s.setImproveDialogOpen);
@@ -367,12 +367,15 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
 
   return (
     <div
+      data-testid="sidebar-footer"
       className={cn(
-        "flex items-center border-t border-border shrink-0",
-        collapsed ? "flex-col gap-1 justify-center px-1 py-1.5" : "px-2 py-1.5 gap-1 flex-wrap",
+        "flex items-center gap-1 border-t border-border shrink-0",
+        collapsed ? "flex-col justify-center px-1 py-1.5" : "px-2 py-2",
       )}
     >
+      {showCurrentUser && <CurrentUserChip collapsed={collapsed} />}
       <FooterIconButton
+        showLabel={!collapsed}
         icon={IconSettings}
         label={settingsMode ? t("sidebar:closeSettings") : t("common:settings")}
         collapsed={collapsed}
@@ -380,38 +383,33 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
         active={settingsMode}
         testId="sidebar-settings-gear"
       />
-      <InsightFooterButtons
-        destinations={insightDestinations}
-        collapsed={collapsed}
-        router={router}
-      />
-      <FooterIconButton
-        icon={IconStethoscope}
-        label={t("sidebar:improveKandev")}
-        collapsed={collapsed}
-        onClick={() => setImproveOpen(true)}
-        testId="sidebar-improve-kandev-button"
-      />
-      {releaseNotes.showTopbarButton && (
+      {statsDestination && (
         <FooterIconButton
-          icon={IconSparkles}
-          label={t("sidebar:whatsNew")}
+          icon={statsDestination.icon}
+          label={statsDestination.label}
           collapsed={collapsed}
-          onClick={releaseNotes.openDialog}
-          badge={releaseNotes.hasUnseen}
-          testId="sidebar-release-notes-button"
+          href={statsDestination.href}
+          current={
+            pathname === statsDestination.href || pathname.startsWith(`${statsDestination.href}/`)
+          }
+          testId="sidebar-stats-button"
         />
       )}
-      <ThemeToggle />
+      <ThemeToggle className="size-7 [@media(pointer:coarse)]:size-11" />
+      <SidebarFooterMenu
+        destinations={insightDestinations}
+        collapsed={collapsed}
+        releaseNotes={releaseNotes}
+        onImprove={() => setImproveOpen(true)}
+      />
       <SidebarConnectionFallback collapsed={collapsed} appStatusBarEnabled={appStatusBarEnabled} />
-      {showCurrentUser && (
-        <CurrentUserChip collapsed={collapsed} className={cn(!collapsed && "ml-auto")} />
-      )}
       <SidebarFooterDialogs
         improveOpen={improveOpen}
         onImproveOpenChange={setImproveOpen}
         workspaceId={workspaceId ?? null}
-        onTaskCreated={(task) => router.push(linkToTask(task.id))}
+        onTaskCreated={(task, meta) => {
+          if (meta?.autoFocus !== false) router.push(linkToTask(task.id));
+        }}
         releaseNotes={releaseNotes}
       />
     </div>

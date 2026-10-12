@@ -3,15 +3,9 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import type { PaginationState } from "@tanstack/react-table";
-import {
-  archiveTask,
-  deleteTask,
-  listTasksByWorkspace,
-  unarchiveTask,
-  updateUserSettings,
-} from "@/lib/api";
+import { deleteTask, listTasksByWorkspace, unarchiveTask, updateUserSettings } from "@/lib/api";
 import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
-import type { Task, Workspace, Workflow, Repository } from "@/lib/types/http";
+import type { Task, Workspace, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
 // Module-level `t` is only used at invocation time in callbacks and helpers.
 import { t } from "@/lib/i18n";
@@ -20,12 +14,13 @@ import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
-import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useTaskListFacets } from "@/hooks/use-task-list-facets";
 import { useTaskListFacetSelection } from "@/hooks/use-task-list-facet-selection";
+import { useTasksListStepRefresh } from "@/hooks/use-task-list-workflow-steps";
+import { useTaskActions } from "@/hooks/use-task-actions";
 import { linkToTask } from "@/lib/links";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { isTaskDeleteDirtyWorktreeError } from "@/lib/api/task-delete-errors";
@@ -44,7 +39,6 @@ import {
 interface TasksPageClientProps {
   workspaces: Workspace[];
   initialWorkspaceId?: string;
-  initialWorkflows: Workflow[];
   initialRepositories: Repository[];
   initialTasks: Task[];
   initialTotal: number;
@@ -165,12 +159,13 @@ function errorDescription(err: unknown): string {
 
 function useTaskMutations(fetchTasks: () => void) {
   const { toast } = useToast();
+  const { archiveTaskById } = useTaskActions();
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
 
   const handleArchive = useCallback(
     async (taskId: string, opts?: { cascade?: boolean }) => {
       try {
-        await archiveTask(taskId, opts);
+        await archiveTaskById(taskId, opts);
         toast({
           title: t("tasks:taskArchived"),
           description: t("tasks:taskArchivedDescription"),
@@ -184,7 +179,7 @@ function useTaskMutations(fetchTasks: () => void) {
         });
       }
     },
-    [fetchTasks, toast],
+    [archiveTaskById, fetchTasks, toast],
   );
 
   const handleUnarchive = useCallback(
@@ -231,7 +226,6 @@ function useTaskMutations(fetchTasks: () => void) {
 }
 
 function useTasksPageViewState({
-  initialWorkflows,
   initialRepositories,
   initialTasks,
   initialTotal,
@@ -239,7 +233,6 @@ function useTasksPageViewState({
   initialGroup,
   storeRepositories,
 }: {
-  initialWorkflows: Workflow[];
   initialRepositories: Repository[];
   initialTasks: Task[];
   initialTotal: number;
@@ -247,7 +240,6 @@ function useTasksPageViewState({
   initialGroup: TasksListGroup;
   storeRepositories: Repository[];
 }) {
-  const [workflows, setWorkflows] = useState(initialWorkflows);
   const repositories = storeRepositories.length > 0 ? storeRepositories : initialRepositories;
   const [tasks, setTasks] = useState(initialTasks);
   const [total, setTotal] = useState(initialTotal);
@@ -257,12 +249,7 @@ function useTasksPageViewState({
   const [showArchived, setShowArchived] = useState(false);
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 25 });
 
-  useEffect(() => {
-    setWorkflows(initialWorkflows);
-  }, [initialWorkflows]);
-
   return {
-    workflows,
     repositories,
     tasks,
     setTasks,
@@ -365,7 +352,6 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     selectedRepositoryId,
   } = useKanbanDisplaySettings();
   const viewState = useTasksPageViewState({
-    initialWorkflows: props.initialWorkflows,
     initialRepositories: props.initialRepositories,
     initialTasks: props.initialTasks,
     initialTotal: props.initialTotal,
@@ -546,7 +532,6 @@ export function TasksPageClient(props: TasksPageClientProps) {
   useWorkflowSnapshot(s.activeWorkflowId);
   useWorkspacePRs(s.activeWorkspaceId);
   useWorkspaceMRs(s.activeWorkspaceId);
-  useForegroundRefresh(() => s.fetchTasks(true), Boolean(s.activeWorkspaceId), s.activeWorkspaceId);
   const { handleSortChange, handleGroupChange } = useTasksListPreferenceSync({
     tasksListSort: s.tasksListSort,
     setTasksListSort: s.setTasksListSort,
@@ -564,6 +549,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
     onCoreSortChange: handleSortChange,
     onCoreGroupChange: handleGroupChange,
   });
+  const stepMetadata = useTasksListStepRefresh(s, displayedTasks, group);
 
   useTasksPageClientEffects({ setMobileSearchOpen, setView });
 
@@ -588,10 +574,11 @@ export function TasksPageClient(props: TasksPageClientProps) {
       isMobile={isMobile}
       isMobileSearchOpen={isMobileSearchOpen}
       tasks={displayedTasks}
-      workflows={s.workflows}
+      workflows={stepMetadata.workflows}
       repositories={s.repositories}
       facetOptions={facetOptions}
       facetValues={facetValues}
+      workflowStepPreviews={stepMetadata.previews}
       total={s.total}
       pageCount={s.pageCount}
       pagination={s.pagination}
@@ -609,7 +596,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
       onArchive={s.handleArchive}
       onUnarchive={s.handleUnarchive}
       onDelete={s.handleDelete}
-      onRefresh={() => s.fetchTasks()}
+      onRefresh={stepMetadata.refresh}
       mobileActions={
         isMobile && s.activeWorkspaceId ? (
           <MobileTasksActions

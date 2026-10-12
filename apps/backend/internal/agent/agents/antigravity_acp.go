@@ -178,7 +178,7 @@ func (a *AntigravityACP) RemoteAuth() *RemoteAuth {
 	return &RemoteAuth{
 		Methods: []RemoteAuthMethod{
 			{
-				Type: "files",
+				Type: remoteAuthMethodTypeFiles,
 				SourceFiles: map[string][]string{
 					"darwin": files,
 					"linux":  files,

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { IconLoader } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,14 +15,16 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { useSubtaskCount } from "@/hooks/use-subtask-count";
-import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import {
-  getCleanupSummary,
-  getBulkCleanupSummary,
-  hasWorktreeExecutor,
-} from "./task-cleanup-summary";
+  useTaskDeletePreflight,
+  type TaskDeletePreflightStatus,
+} from "@/hooks/use-task-delete-preflight";
+import { useTaskInFlight } from "@/hooks/use-task-in-flight";
+import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
 import { TaskCleanupConsequences } from "./task-cleanup-consequences";
 import { StillWorkingWarning } from "./task-still-working-warning";
+import { useAppStore } from "@/components/state-provider";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import {
   TASK_CONFIRM_ACTION_CLASS,
   TASK_CONFIRM_BODY_CLASS,
@@ -31,6 +34,15 @@ import {
   stopDialogPropagation,
 } from "./task-confirm-dialog-shared";
 import { useTranslation } from "react-i18next";
+import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
+
+function useStoreSharesParentWorkspace(taskId: string | undefined, isBulkOperation?: boolean) {
+  return useAppStore((state) => {
+    if (isBulkOperation || !taskId) return undefined;
+    const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+    return task ? task.workspaceMode === "inherit_parent" : undefined;
+  });
+}
 
 type TaskDeleteConfirmDialogProps = {
   open: boolean;
@@ -46,10 +58,18 @@ type TaskDeleteConfirmDialogProps = {
   executorType?: string | null;
   /** Executor types of the tasks being deleted (bulk). */
   executorTypes?: Array<string | null | undefined>;
-  /** Require discard consent when the task's retained worktree state is unknown. */
-  requireDiscardConsent?: boolean;
-  onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
+  /** Whether the single task borrows its workspace from its parent. */
+  sharesParentWorkspace?: boolean;
+  onConfirm: (opts: {
+    cascade: boolean;
+    discardWorktreeChanges: boolean;
+    confirmationId: string;
+  }) => void;
   confirmTestId?: string;
+  /** Overrides default focus restoration when the original trigger may disappear. */
+  onCloseAutoFocus?: (event: Event) => void;
+  /** Returns focus on close; omitted callers keep Radix's default restoration. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 };
 
 type DiscardWorktreeChangesOptionProps = {
@@ -118,7 +138,12 @@ type TaskDeleteActionProps = {
   confirmTestId?: string;
   cascade: boolean;
   discardWorktreeChanges: boolean;
-  onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
+  confirmationId: string;
+  onConfirm: (opts: {
+    cascade: boolean;
+    discardWorktreeChanges: boolean;
+    confirmationId: string;
+  }) => void;
   onClose: () => void;
 };
 
@@ -128,6 +153,7 @@ function TaskDeleteAction({
   confirmTestId,
   cascade,
   discardWorktreeChanges,
+  confirmationId,
   onConfirm,
   onClose,
 }: TaskDeleteActionProps) {
@@ -140,7 +166,7 @@ function TaskDeleteAction({
       data-testid={confirmTestId}
       onClick={() => {
         if (isDeleting) return;
-        onConfirm({ cascade, discardWorktreeChanges });
+        onConfirm({ cascade, discardWorktreeChanges, confirmationId });
         onClose();
       }}
     >
@@ -169,26 +195,50 @@ function useTaskDeleteDialogState(onOpenChange: (open: boolean) => void) {
   };
 }
 
-function hasPotentialWorktree(
-  isBulkOperation: boolean | undefined,
-  executorType: string | null | undefined,
-  executorTypes: Array<string | null | undefined> | undefined,
-) {
-  if (isBulkOperation) {
-    return (
-      executorTypes == null ||
-      executorTypes.some((type) => type == null || hasWorktreeExecutor(type))
-    );
-  }
-  return executorType == null || hasWorktreeExecutor(executorType);
+function useResetDiscardWorktreeChanges(resetKey: string, reset: (checked: boolean) => void) {
+  useEffect(() => {
+    reset(false);
+  }, [resetKey, reset]);
 }
 
-function shouldRequireDiscardConsent(
-  explicit: boolean,
-  hasWorktree: boolean,
-  subtaskCount: number,
-) {
-  return explicit || hasWorktree || subtaskCount > 0;
+function PreflightStatusBanner({
+  status,
+  onRetry,
+}: {
+  status: TaskDeletePreflightStatus;
+  onRetry: () => void;
+}) {
+  const { t } = useTranslation();
+  if (status === "loading" || status === "idle") {
+    return (
+      <p
+        role="status"
+        data-testid="delete-preflight-loading"
+        className="text-sm text-muted-foreground"
+      >
+        {t("task:deletePreflightChecking")}
+      </p>
+    );
+  }
+  if (status !== "error") return null;
+  return (
+    <div
+      role="alert"
+      data-testid="delete-preflight-error"
+      className="flex flex-wrap items-center gap-2 text-sm text-destructive"
+    >
+      <span>{t("task:deletePreflightError")}</span>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className={TASK_CONFIRM_ACTION_CLASS}
+        onClick={onRetry}
+      >
+        {t("task:retryDeletePreflight")}
+      </Button>
+    </div>
+  );
 }
 
 function TaskDeleteDialogOptions({
@@ -196,6 +246,8 @@ function TaskDeleteDialogOptions({
   isBulkOperation,
   safeCount,
   storeInFlight,
+  preflightStatus,
+  onRetryPreflight,
   requiresDiscardConsent,
   discardWorktreeChanges,
   setDiscardWorktreeChanges,
@@ -208,6 +260,8 @@ function TaskDeleteDialogOptions({
   isBulkOperation?: boolean;
   safeCount: number;
   storeInFlight: boolean;
+  preflightStatus: TaskDeletePreflightStatus;
+  onRetryPreflight: () => void;
   requiresDiscardConsent: boolean;
   discardWorktreeChanges: boolean;
   setDiscardWorktreeChanges: (checked: boolean) => void;
@@ -221,6 +275,7 @@ function TaskDeleteDialogOptions({
       {(isInFlight || storeInFlight) && (
         <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />
       )}
+      <PreflightStatusBanner status={preflightStatus} onRetry={onRetryPreflight} />
       <DiscardWorktreeChangesOption
         enabled={requiresDiscardConsent}
         checked={discardWorktreeChanges}
@@ -239,6 +294,7 @@ function TaskDeleteDialogOptions({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- The confirmation dialog keeps preview, cleanup, and submit state in one guarded flow.
 export function TaskDeleteConfirmDialog({
   open,
   onOpenChange,
@@ -251,9 +307,11 @@ export function TaskDeleteConfirmDialog({
   isInFlight,
   executorType,
   executorTypes,
-  requireDiscardConsent = false,
+  sharesParentWorkspace,
   onConfirm,
   confirmTestId,
+  onCloseAutoFocus,
+  focusReturnRef,
 }: TaskDeleteConfirmDialogProps) {
   const { t } = useTranslation();
   const safeCount = count ?? 0;
@@ -263,9 +321,12 @@ export function TaskDeleteConfirmDialog({
   const description = isBulkOperation
     ? t("task:deleteTasksConfirm", { count: safeCount })
     : t("task:deleteTaskConfirm", { taskTitle });
+  const storeSharesParentWorkspace = useStoreSharesParentWorkspace(taskId, isBulkOperation);
   const cleanup = isBulkOperation
     ? getBulkCleanupSummary(executorTypes ?? [])
-    : getCleanupSummary(executorType);
+    : getCleanupSummary(executorType, {
+        sharesParentWorkspace: storeSharesParentWorkspace ?? sharesParentWorkspace,
+      });
 
   const {
     cascade,
@@ -276,15 +337,27 @@ export function TaskDeleteConfirmDialog({
   } = useTaskDeleteDialogState(onOpenChange);
   const subtaskCount = useSubtaskCount(open, taskId, taskIds);
   const storeInFlight = useTaskInFlight(taskId, taskIds, open);
-  const requiresDiscardConsent = shouldRequireDiscardConsent(
-    requireDiscardConsent,
-    hasPotentialWorktree(isBulkOperation, executorType, executorTypes),
-    subtaskCount,
-  );
+  const preflight = useTaskDeletePreflight(open, taskId, taskIds, cascade, discardWorktreeChanges);
+  const requiresDiscardConsent =
+    preflight.status === "resolved" && preflight.requiresDiscardConsent;
+  const preflightReady = preflight.status === "resolved";
+
+  useResetDiscardWorktreeChanges(preflight.scopeKey, setDiscardWorktreeChanges);
+
+  const deleteDisabled =
+    isDeleting ||
+    !preflightReady ||
+    !preflight.confirmationId ||
+    (requiresDiscardConsent && !discardWorktreeChanges);
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
-      <AlertDialogContent size="lg" className={TASK_CONFIRM_CLASS} onClick={stopDialogPropagation}>
+      <AlertDialogContent
+        size="lg"
+        className={TASK_CONFIRM_CLASS}
+        onClick={stopDialogPropagation}
+        onCloseAutoFocus={onCloseAutoFocus ?? createFocusReturnHandler(focusReturnRef)}
+      >
         <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
           <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
         </AlertDialogHeader>
@@ -300,6 +373,8 @@ export function TaskDeleteConfirmDialog({
             isBulkOperation={isBulkOperation}
             safeCount={safeCount}
             storeInFlight={storeInFlight}
+            preflightStatus={preflight.status}
+            onRetryPreflight={preflight.retry}
             requiresDiscardConsent={requiresDiscardConsent}
             discardWorktreeChanges={discardWorktreeChanges}
             setDiscardWorktreeChanges={setDiscardWorktreeChanges}
@@ -314,11 +389,12 @@ export function TaskDeleteConfirmDialog({
             {t("common:cancel")}
           </AlertDialogCancel>
           <TaskDeleteAction
-            disabled={isDeleting || (requiresDiscardConsent && !discardWorktreeChanges)}
+            disabled={deleteDisabled}
             isDeleting={isDeleting}
             confirmTestId={confirmTestId}
             cascade={cascade}
             discardWorktreeChanges={discardWorktreeChanges}
+            confirmationId={preflight.confirmationId}
             onConfirm={onConfirm}
             onClose={() => handleOpenChange(false)}
           />

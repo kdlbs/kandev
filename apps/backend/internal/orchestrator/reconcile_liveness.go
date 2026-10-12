@@ -25,6 +25,22 @@ type rowLivenessProber interface {
 	RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness
 }
 
+// standaloneLivenessScoper is the optional capability the orchestrator uses to
+// take one adopted-server enumeration and reuse it across every row of a
+// single reconciliation pass (design 02 "Persistence": "it has two kinds of
+// caller, and only one of them is a pass"). Satisfied by the lifecycle
+// adapter alongside rowLivenessProber. A caller outside a pass (e.g. the idle
+// reclaim path) must keep using rowLivenessProber's context-free RowLiveness,
+// which always takes its own fresh enumeration.
+//
+// Kept as its own narrow optional interface rather than widening
+// rowLivenessProber's RowLiveness method, so the 17 existing test doubles
+// built around that single-row, context-free signature don't have to change.
+type standaloneLivenessScoper interface {
+	NewStandaloneLivenessScope(ctx context.Context) interface{}
+	RowLivenessScoped(row *models.ExecutorRunning, scope interface{}) models.ProcessLiveness
+}
+
 // agentRunningProber preserves runtime probe errors so reclaim can fail
 // closed. The legacy boolean method remains the fallback for test doubles and
 // adapters that do not expose the richer probe yet.
@@ -152,6 +168,32 @@ func (s *Service) rowLiveness(row *models.ExecutorRunning) models.ProcessLivenes
 	return prober.RowLiveness(row)
 }
 
+// newStandaloneLivenessScope takes one adopted-server enumeration for reuse
+// across every row of a single reconciliation pass, when s.agentManager
+// implements standaloneLivenessScoper. Returns nil otherwise (unit tests,
+// degraded startup, or a caller that doesn't support scoped enumeration);
+// rowLivenessScoped treats a nil scope as "fall back to the unscoped probe".
+func (s *Service) newStandaloneLivenessScope(ctx context.Context) interface{} {
+	scoper, ok := s.agentManager.(standaloneLivenessScoper)
+	if !ok || scoper == nil {
+		return nil
+	}
+	return scoper.NewStandaloneLivenessScope(ctx)
+}
+
+// rowLivenessScoped classifies row's liveness reusing scope (from
+// newStandaloneLivenessScope) when s.agentManager supports it, falling back
+// to the ordinary context-free rowLiveness otherwise -- so a caller can
+// unconditionally pass whatever newStandaloneLivenessScope returned, even a
+// nil one from a prober that doesn't implement the scoped capability.
+func (s *Service) rowLivenessScoped(row *models.ExecutorRunning, scope interface{}) models.ProcessLiveness {
+	scoper, ok := s.agentManager.(standaloneLivenessScoper)
+	if !ok || scoper == nil {
+		return s.rowLiveness(row)
+	}
+	return scoper.RowLivenessScoped(row, scope)
+}
+
 // pruneOrRepairExecutorRow enforces the resume-safety deletion invariant
 // (#1597 resume-safety invariant) at a reconciliation cleanup site: a row backing
 // a resumable session, or holding a resume_token, is repaired in place (never
@@ -226,10 +268,11 @@ func (s *Service) probeAgentRunning(ctx context.Context, sessionID string) (bool
 type idleReclaimDisposition string
 
 const (
-	idleReclaimDispositionReclaimed    idleReclaimDisposition = "reclaimed"
-	idleReclaimDispositionSkippedState idleReclaimDisposition = "skipped_state"
-	idleReclaimDispositionSkippedLive  idleReclaimDisposition = "skipped_live_runtime"
-	idleReclaimDispositionSkippedTurn  idleReclaimDisposition = "skipped_active_turn"
+	idleReclaimDispositionReclaimed      idleReclaimDisposition = "reclaimed"
+	idleReclaimDispositionSkippedState   idleReclaimDisposition = "skipped_state"
+	idleReclaimDispositionSkippedLive    idleReclaimDisposition = "skipped_live_runtime"
+	idleReclaimDispositionSkippedTurn    idleReclaimDisposition = "skipped_active_turn"
+	idleReclaimDispositionSkippedNoToken idleReclaimDisposition = "skipped_no_resume_token"
 )
 
 // classifyIdleReclaim is the single decision matrix for the idle-session
@@ -245,7 +288,11 @@ const (
 // Cancelled are deliberately excluded — those have separate cancellation
 // cleanup paths (handleTerminalSessionOnStartup and the cancel pipelines)
 // that already reconcile executor rows.
-func classifyIdleReclaim(sessionState models.TaskSessionState, agentRunning bool, hasActiveTurn bool) idleReclaimDisposition {
+func classifyIdleReclaim(
+	sessionState models.TaskSessionState,
+	agentRunning, hasActiveTurn, hasResumeToken bool,
+	rowStatus string,
+) idleReclaimDisposition {
 	switch sessionState {
 	case models.TaskSessionStateWaitingForInput,
 		models.TaskSessionStateIdle,
@@ -258,6 +305,13 @@ func classifyIdleReclaim(sessionState models.TaskSessionState, agentRunning bool
 	}
 	if hasActiveTurn {
 		return idleReclaimDispositionSkippedTurn
+	}
+	// WaitingForInput and Idle rows without a resume token are reclaimed only
+	// while their status is running; lifecycle cleanup deletes any other
+	// tokenless row and the session could not be resumed.
+	if !hasResumeToken && rowStatus != models.ExecutorRunningStatusRunning &&
+		models.IsResumableSessionState(sessionState) {
+		return idleReclaimDispositionSkippedNoToken
 	}
 	return idleReclaimDispositionReclaimed
 }
@@ -286,6 +340,9 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 	}
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
+	if s.lspLeases != nil && s.lspLeases.HasActiveLSPLease(sessionID) {
+		return nil
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		if isTaskSessionNotFound(err) {
@@ -302,6 +359,10 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 		return fmt.Errorf("load executor row for idle reclaim: %w", err)
 	}
 	agentRunning, probeErr := s.probeAgentRunning(ctx, sessionID)
+	if errors.Is(probeErr, runtimeapi.ErrRuntimeLeaseRetired) && s.rowLiveness(running) == models.ProcessLivenessDead {
+		probeErr = nil
+		agentRunning = false
+	}
 	if probeErr != nil {
 		s.logger.Warn("idle reclaim skipped; agent liveness probe failed",
 			zap.String("session_id", sessionID),
@@ -309,14 +370,8 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 		return nil
 	}
 	hasActiveTurn := s.sessionHasActiveTurn(ctx, sessionID)
-	decision := classifyIdleReclaim(session.State, agentRunning, hasActiveTurn)
+	decision := classifyIdleReclaim(session.State, agentRunning, hasActiveTurn, running.ResumeToken != "", running.Status)
 	if decision != idleReclaimDispositionReclaimed {
-		s.logger.Debug("idle reclaim skipped",
-			zap.String("session_id", sessionID),
-			zap.String("disposition", string(decision)),
-			zap.String("session_state", string(session.State)),
-			zap.Bool("agent_running", agentRunning),
-			zap.Bool("has_active_turn", hasActiveTurn))
 		return nil
 	}
 	var cleanupErr error

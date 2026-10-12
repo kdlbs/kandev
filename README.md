@@ -21,6 +21,18 @@ Run it locally or self-host it on your own infrastructure. Use the [mobile remot
 
 Open source, multi-provider, no telemetry, not tied to any cloud.
 
+## Distribution
+
+Kandev is distributed as a native Go binary for each supported platform. The
+compiled web frontend is embedded in that binary. The binary serves the web UI
+and API, so the application server does not need Node.js, a separate web
+server, or a frontend build at runtime.
+
+Homebrew, Scoop, release archives, and the desktop app run this native binary
+directly. The npm/npx package adds a small Node.js platform selector, so Node.js
+is required to launch Kandev through npm/npx but not by the application server.
+Release bundles also include `agentctl` helpers for task environments.
+
 ## Vision
 
 > **Humans stay in control.** Define tasks, build agentic workflows with gates, review every change, decide what ships.
@@ -71,17 +83,18 @@ We're working on **Office mode**, a feature-flagged autonomy layer for persisten
 
 Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull issues into the kanban, link tasks to PRs, and surface review activity inline. Bitbucket support is available through the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket).
 
-## Supported ACP Agents
+## Supported Agent CLIs
 
 | Agent | Package / command |
 |:-------:|:----------:|
 | **Claude Code** | `@agentclientprotocol/claude-agent-acp` |
 | **Codex** | `@agentclientprotocol/codex-acp` |
+| **Codex app server** | `@openai/codex` *(experimental; enable in System > Feature Toggles)* |
 | **GitHub Copilot** | `@github/copilot` |
 | **Gemini CLI** | `@google/gemini-cli` |
 | **Amp** | `amp-acp` |
 | **Auggie** | `@augmentcode/auggie` |
-| **OpenCode** | `opencode-ai` |
+| **OpenCode** | v2: `@opencode/cli`; existing v1: `opencode-ai` |
 | **Cursor** | `cursor-agent` *(requires Cursor Pro)* |
 | **Devin** | `devin` *(install Devin CLI from Devin Desktop or standalone installer)* |
 | **Qwen** | `@qwen-code/qwen-code` |
@@ -98,14 +111,18 @@ Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull
 | **Hermes** | `hermes` *(install with the official Hermes installer)* |
 | **Antigravity** | `agy_acp_server.par` / `.exe` *(no automated install; download from the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp), extract both archive entries into one directory, and put that directory on PATH)* |
 
-> All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/public/add-agent-cli.md) for a step-by-step guide.
+> Most structured agent integrations communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Codex app-server is a separate experimental native integration. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/public/add-agent-cli.md) for a step-by-step guide.
 
-Kandev does not pin the managed npm runtimes for Claude, Codex, OpenCode,
-Copilot, or Gemini. Normal launches can reuse npm's best-effort execution
-cache. To deliberately fetch an upstream release, use **Update agent** in
-**Settings > Agents**; Kandev updates the host runtime and refreshes its
+Managed npm runtimes have reviewed defaults. To fetch a selected upstream
+release, use **Update agent** in **Settings > Agents**. Kandev refreshes its
 advertised models and modes for future sessions without restarting active
-sessions. See [Agents and Profiles](docs/public/agents-and-profiles.md#update-a-managed-agent-runtime).
+sessions. Background notices cover enabled, available registered runtimes, with optional automatic
+updates for supported managed installations and manual guidance for external CLIs.
+See [Agents and Profiles](docs/public/agents-and-profiles.md#update-a-managed-agent-runtime).
+
+Fresh OpenCode installs use managed v2 (`@opencode/cli`). Existing v1
+selections remain on `opencode-ai` until you choose the explicit migration
+action. Kandev leaves a separately installed `opencode` CLI unchanged.
 
 ### Bring your own TUI agents
 
@@ -117,6 +134,7 @@ Kandev can run any agent CLI as a TUI inside a terminal, even when it does not s
 |:--------:|-------------|
 | **Local Process** | Runs the agent as a local process on the host machine |
 | **Docker** | Runs the agent in an isolated Docker container |
+| **Kubernetes** | Runs each task session in an administrator-configured Pod with managed, existing, or disposable workspace storage |
 | **SSH** | Runs the agent on a remote server over SSH |
 | **Sprites** | Runs the agent in a remote cloud environment via [sprites.dev](https://sprites.dev) |
 
@@ -224,8 +242,7 @@ graph LR
     end
 ```
 
-We also want to add support for this remote runtime:
-- **K8s operator** - run agents in a Kubernetes cluster, with auto-scaling and resource management.
+See the [Kubernetes guide](docs/public/k8s.md) for executor configuration and lifecycle. The executor uses ordinary Pods and does not require an operator.
 
 <details>
 <summary><strong>Development</strong></summary>
@@ -236,7 +253,7 @@ We also want to add support for this remote runtime:
 apps/
 ├── backend/    # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
 ├── web/        # Vite/React frontend (SPA, Zustand, real-time subscriptions)
-├── cli/        # CLI tool (npx kandev launcher)
+├── cli/        # npm shim for the native Go runtime
 ├── desktop/    # Tauri desktop shell
 └── packages/   # Shared UI components & types
 ```

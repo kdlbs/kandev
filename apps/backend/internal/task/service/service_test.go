@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/testutil"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -33,6 +34,16 @@ type MockEventBus struct {
 	mu              sync.Mutex
 	publishedEvents []*bus.Event
 	closed          bool
+	// publishErrors, when non-nil, makes Publish fail for the listed
+	// subjects, for tests of publish-failure retry semantics.
+	publishErrors map[string]error
+}
+
+// These read/cascade fakes reject a field mutation outside their test scope.
+type unsupportedTaskFieldUpdater struct{}
+
+func (unsupportedTaskFieldUpdater) UpdateTaskFieldsWithParentAdmission(context.Context, string, models.TaskFieldUpdate, repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	return nil, errors.New("field updates are not supported by this test repository")
 }
 
 type recordingTaskClarificationCanceller struct {
@@ -53,6 +64,28 @@ func (c *recordingTaskClarificationCanceller) ExpireSessionAndNotify(
 	return 1, c.err
 }
 
+type parkedProjectionCancelCall struct {
+	taskID      string
+	sessionID   string
+	newState    models.TaskSessionState
+	hasDeadline bool
+}
+
+type recordingParkedProjectionCanceller struct {
+	calls []parkedProjectionCancelCall
+}
+
+func (c *recordingParkedProjectionCanceller) ClearParkedProjectionOnSessionTerminated(
+	ctx context.Context,
+	taskID, sessionID string,
+	newState models.TaskSessionState,
+) {
+	_, hasDeadline := ctx.Deadline()
+	c.calls = append(c.calls, parkedProjectionCancelCall{
+		taskID: taskID, sessionID: sessionID, newState: newState, hasDeadline: hasDeadline,
+	})
+}
+
 func NewMockEventBus() *MockEventBus {
 	return &MockEventBus{
 		publishedEvents: make([]*bus.Event, 0),
@@ -62,6 +95,9 @@ func NewMockEventBus() *MockEventBus {
 func (m *MockEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err, inject := m.publishErrors[subject]; inject {
+		return err
+	}
 	m.publishedEvents = append(m.publishedEvents, event)
 	return nil
 }
@@ -153,48 +189,47 @@ func (*testWorkflowStepGetter) GetNextStepByPosition(context.Context, string, in
 // testUnits exposes each test's unit service so a seed can build a tree.
 var testUnits = map[string]*orgunit.Service{}
 
+var serviceTestSQLiteTemplate = testutil.NewSQLiteTemplate(func(database *sqlx.DB) error {
+	if _, err := sqliterepo.NewWithDB(database, database, nil); err != nil {
+		return err
+	}
+	if _, err := worktree.NewSQLiteStore(database, database); err != nil {
+		return err
+	}
+	// Match production startup order, including Office's task constraints.
+	if _, err := officesqlite.NewWithDB(database, database, nil); err != nil {
+		return err
+	}
+	if _, err := workflowrepo.NewWithDB(database, database, nil); err != nil {
+		return err
+	}
+	_, err := orgunit.NewStore(db.NewPool(database, database))
+	return err
+})
+
 func createTestServiceWithSessionsRepo(
 	t *testing.T,
 	wrapSessions func(*sqliterepo.Repository) repository.SessionRepository,
 ) (*Service, *MockEventBus, *sqliterepo.Repository) {
 	t.Helper()
-	tmpDir := t.TempDir()
-	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
-	if err != nil {
-		t.Fatalf("failed to open test database: %v", err)
-	}
-	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
-	if err != nil {
-		t.Fatalf("failed to create test repository: %v", err)
-	}
-	if _, err := worktree.NewSQLiteStore(sqlxDB, sqlxDB); err != nil {
-		t.Fatalf("failed to init worktree store: %v", err)
-	}
-	// Apply office migrations on top of the task schema. The office
-	// package adds CHECK constraints (notably tasks.priority) and
-	// enables foreign_keys=ON. Running both migrations here mirrors
-	// production startup so service-layer tests catch cross-package
-	// constraint regressions automatically.
-	if _, err := officesqlite.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
-		t.Fatalf("failed to apply office migrations: %v", err)
-	}
-	if _, err := workflowrepo.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
-		t.Fatalf("failed to initialize workflow repository: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := sqlxDB.Close(); err != nil {
-			t.Errorf("failed to close sqlite db: %v", err)
-		}
-		if err := cleanup(); err != nil {
-			t.Errorf("failed to close repo: %v", err)
-		}
-	})
+	return createTestServiceWithTaskAndSessionRepos(t, func(repo *sqliterepo.Repository) repository.TaskRepository {
+		return repo
+	}, wrapSessions)
+}
+
+func createTestServiceWithTaskAndSessionRepos(
+	t *testing.T,
+	wrapTasks func(*sqliterepo.Repository) repository.TaskRepository,
+	wrapSessions func(*sqliterepo.Repository) repository.SessionRepository,
+) (*Service, *MockEventBus, *sqliterepo.Repository) {
+	t.Helper()
+	sqlxDB, _ := serviceTestSQLiteTemplate.Open(t)
+	repo := sqliterepo.NewWithInitializedDB(sqlxDB, sqlxDB, nil)
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := NewService(Repos{
 		Workspaces:        repo,
-		Tasks:             repo,
+		Tasks:             wrapTasks(repo),
 		TaskRepos:         repo,
 		Workflows:         repo,
 		Messages:          repo,
@@ -211,7 +246,11 @@ func createTestServiceWithSessionsRepo(
 		Reviews:           repo,
 		ResourceCleanups:  repo,
 		Usage:             repo,
+		BackgroundWork:    repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
+	svc.SetProjectRepositorySourceReader(projectRepositorySourceReaderFunc(func(context.Context, string) (ProjectRepositorySources, error) {
+		return ProjectRepositorySources{WorkspaceID: "ws-1"}, nil
+	}))
 	svc.SetWorkspaceBootstrapper(repo)
 	// Reach comes from the unit tree, so the service tests wire the real one
 	// rather than a stub: a resolver the wiring never calls protects nothing.
@@ -1731,7 +1770,7 @@ func TestService_DeleteTaskPreservesExecutorRunningWhenStopFails(t *testing.T) {
 	}
 }
 
-func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(t *testing.T) {
+func TestService_DeleteTaskDefersResourceCleanupOnPartialStopFailure(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	stopper := newRecordingTaskExecutionStopper()
@@ -1800,21 +1839,21 @@ func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(
 		t.Fatalf("unexpected StopExecution calls: %#v", calls)
 	}
 	waitForCleanupDone(t, svc)
-	if _, err := os.Stat(filepath.Join(quickChatDir, "session-ok")); !os.IsNotExist(err) {
-		t.Fatalf("successful session quick-chat directory should be removed, got %v", err)
+	if _, err := os.Stat(filepath.Join(quickChatDir, "session-ok")); err != nil {
+		t.Fatalf("successful session quick-chat directory should remain until retry, got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(quickChatDir, "session-failed")); err != nil {
 		t.Fatalf("failed session quick-chat directory should remain: %v", err)
 	}
 	cleanedIDs := cleanup.cleanedIDs()
-	if len(cleanedIDs) != 1 || cleanedIDs[0] != "wt-ok" {
-		t.Fatalf("expected only successful session worktree cleanup, got %#v", cleanedIDs)
+	if len(cleanedIDs) != 0 {
+		t.Fatalf("worktrees should remain until source capture can retry, got %#v", cleanedIDs)
 	}
 	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-failed"); err != nil {
 		t.Fatalf("failed session executor row should remain retryable: %v", err)
 	}
-	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-ok"); err == nil {
-		t.Fatal("successful session executor row should be removed")
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-ok"); err != nil {
+		t.Fatalf("successful session executor row should remain retryable until cleanup completes: %v", err)
 	}
 }
 
@@ -2094,6 +2133,57 @@ func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *tes
 	}
 }
 
+// TestService_ArchiveTaskClearsParkedProjectionForCancelledSessions is the
+// regression test for the archive-side parked-projection leak: ArchiveTask
+// cancels active sessions through a bulk repository update that never passes
+// through the orchestrator's per-session state-transition chokepoint, so
+// nothing stopped that session's parked sampling loop or cleared its
+// tracking. Without a wired ParkedProjectionCanceller, an archived task whose
+// session was parked would keep publishing parked_on_background_work forever.
+func TestService_ArchiveTaskClearsParkedProjectionForCancelledSessions(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Title: "Test", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-parked", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput,
+		AgentProfileID: "agent-1", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	parked := &recordingParkedProjectionCanceller{}
+	svc.SetParkedProjectionCanceller(parked)
+	if err := svc.ArchiveTask(ctx, "task-1"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+
+	if len(parked.calls) != 1 {
+		t.Fatalf("parked projection cancel calls = %v, want exactly one", parked.calls)
+	}
+	call := parked.calls[0]
+	if call.taskID != "task-1" || call.sessionID != "session-parked" {
+		t.Errorf("call = %+v, want task-1/session-parked", call)
+	}
+	if call.newState != models.TaskSessionStateCancelled {
+		t.Errorf("newState = %q, want CANCELLED", call.newState)
+	}
+	if !call.hasDeadline {
+		t.Error("expected a bounded context for the parked-projection cancel call")
+	}
+}
+
 // TestService_PublishSessionsCancelledCoversSessionsMissingFromSnapshot is a
 // defensive-coverage test: CancelActiveTaskSessionsByTaskID re-evaluates
 // active sessions atomically and returns full session rows directly, so a
@@ -2343,6 +2433,22 @@ func TestService_ArchiveTaskRetriesTransientSessionCancellationFailure(t *testin
 	}
 	if session.State != models.TaskSessionStateCancelled {
 		t.Errorf("session state = %q, want CANCELLED", session.State)
+	}
+}
+
+func TestFinalizeCancelledSessionsStopsRetryAtDeadline(t *testing.T) {
+	flaky := &flakyCancelSessionRepository{failuresLeft: 3}
+	svc, _, _ := createTestServiceWithSessionsRepo(t, func(repo *sqliterepo.Repository) repository.SessionRepository {
+		flaky.Repository = repo
+		return flaky
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	svc.finalizeCancelledSessions(ctx, "task-deadline", nil, time.Now().Add(20*time.Millisecond), models.SessionArchiveCancelReason)
+
+	if got := flaky.callCount(); got != 1 {
+		t.Fatalf("CancelActiveTaskSessionsByTaskID call count = %d, want 1 after deadline", got)
 	}
 }
 
@@ -2723,6 +2829,23 @@ func (c *recordingWorktreeCleanup) GetAllByTaskID(_ context.Context, taskID stri
 	return c.worktrees, nil
 }
 
+func (c *recordingWorktreeCleanup) CaptureArchiveSourceManifests(
+	_ context.Context, worktrees []*worktree.Worktree,
+) (map[string]worktree.ArchiveSourceManifest, error) {
+	manifests := make(map[string]worktree.ArchiveSourceManifest, len(worktrees))
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		manifests[wt.ID] = worktree.ArchiveSourceManifest{
+			TaskID: wt.TaskID, TaskEnvironmentID: wt.TaskEnvironmentID,
+			WorktreeID: wt.ID, RepositoryID: wt.RepositoryID,
+			HeadOID: "test-head", IndexStateSHA256: "test-index", PathPresent: true,
+		}
+	}
+	return manifests, nil
+}
+
 func (c *recordingWorktreeCleanup) CleanupWorktrees(_ context.Context, worktrees []*worktree.Worktree) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -2957,6 +3080,13 @@ func TestService_DeleteWorkflow(t *testing.T) {
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Test Workflow"}
 	_ = repo.CreateWorkflow(ctx, workflow)
+	automation := &models.Task{
+		ID: "automation-run-delete", WorkspaceID: "ws-1", WorkflowID: workflow.ID,
+		IsEphemeral: true, Origin: models.TaskOriginAutomationRun, Title: "Automation run",
+	}
+	if err := repo.CreateTask(ctx, automation); err != nil {
+		t.Fatalf("create automation task: %v", err)
+	}
 
 	err := svc.DeleteWorkflow(ctx, "wf-123")
 	if err != nil {
@@ -2967,6 +3097,14 @@ func TestService_DeleteWorkflow(t *testing.T) {
 	if err == nil {
 		t.Error("expected workflow to be deleted")
 	}
+	archived, err := repo.GetTask(ctx, automation.ID)
+	if err != nil {
+		t.Fatalf("get automation task after workflow deletion: %v", err)
+	}
+	if archived.ArchivedAt == nil {
+		t.Fatal("automation-origin task was omitted from workflow deletion cascade")
+	}
+
 }
 
 func TestService_ListWorkflows(t *testing.T) {

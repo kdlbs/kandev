@@ -122,3 +122,9 @@ func (s *Store) Set(ctx context.Context, ip, hostname string, resolvedAt time.Ti
 		ON CONFLICT(ip) DO UPDATE SET hostname = excluded.hostname, resolved_at = excluded.resolved_at`), ip, hostname, FormatTimestamp(resolvedAt))
 	return err
 }
+
+// Delete removes one cached hostname entry.
+func (s *Store) Delete(ctx context.Context, ip string) error {
+	_, err := s.writer.ExecContext(ctx, s.writer.Rebind(`DELETE FROM auth_hostname_cache WHERE ip = ?`), ip)
+	return err
+}

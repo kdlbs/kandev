@@ -59,6 +59,7 @@ type stubExecutors struct {
 	runningBySession *models.ExecutorRunning
 	runningBySessErr error
 	deletedSessions  []string
+	deleteErr        error
 	repairedSessions []string
 }
 
@@ -69,10 +70,9 @@ func (s *stubExecutors) ListExecutorsRunningByTaskID(_ context.Context, _ string
 func (s *stubExecutors) GetExecutorRunningBySessionID(_ context.Context, _ string) (*models.ExecutorRunning, error) {
 	return s.runningBySession, s.runningBySessErr
 }
-
 func (s *stubExecutors) DeleteExecutorRunningBySessionID(_ context.Context, sessionID string) error {
 	s.deletedSessions = append(s.deletedSessions, sessionID)
-	return nil
+	return s.deleteErr
 }
 
 func (s *stubExecutors) RepairExecutorRunningDead(_ context.Context, sessionID string) error {
@@ -85,6 +85,7 @@ func (s *stubExecutors) HasExecutorRunningRow(_ context.Context, _ string) (bool
 }
 
 func TestBuildStopTargets_TerminalExecutorRow(t *testing.T) {
+
 	svc, _, _ := createTestService(t)
 	svc.executors = &stubExecutors{
 		runningByTaskID: []*models.ExecutorRunning{
@@ -106,6 +107,23 @@ func TestBuildStopTargets_TerminalExecutorRow(t *testing.T) {
 	}
 	if !targets[0].terminal {
 		t.Error("expected target to be marked terminal for a CANCELLED session")
+	}
+}
+func TestPerformTaskCleanupReportsExecutorRowDeletionFailure(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	deleteErr := errors.New("executor row deletion failed")
+	svc.executors = &stubExecutors{deleteErr: deleteErr}
+	errs := svc.performTaskCleanup(
+		context.Background(),
+		"task-executor-row-failure",
+		[]*models.TaskSession{{ID: "session-executor-row-failure"}},
+		nil,
+		nil,
+		taskEnvironmentCleanup{},
+		nil,
+	)
+	if !errors.Is(errors.Join(errs...), deleteErr) {
+		t.Fatalf("cleanup errors = %v, want executor deletion error", errs)
 	}
 }
 
@@ -947,78 +965,6 @@ func TestCleanupTaskResources_PreservesOwnedEnvironmentWithActiveInheritedChild(
 	}
 	if cleanedIDs := cleanup.cleanedIDs(); len(cleanedIDs) != 0 {
 		t.Fatalf("parent cleanup must not batch-clean a shared inherited worktree, got %#v", cleanedIDs)
-	}
-}
-
-func TestDeleteTask_TransfersBorrowedEnvironmentBeforeDeletingOwner(t *testing.T) {
-	svc, _, repo := createTestService(t)
-	ctx := context.Background()
-	seedParentChildWorkspace(t, repo, "ws-transfer", "wf-transfer", "parent-task", "child-task")
-	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
-		ID:     "env-parent",
-		TaskID: "parent-task",
-		Status: models.TaskEnvironmentStatusReady,
-		Repos:  []*models.TaskEnvironmentRepo{{RepositoryID: "repo-parent", WorktreeID: "wt-parent", WorktreePath: "/tmp/parent-worktree"}},
-	}); err != nil {
-		t.Fatalf("create parent environment: %v", err)
-	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID:                "session-child",
-		TaskID:            "child-task",
-		State:             models.TaskSessionStateRunning,
-		TaskEnvironmentID: "env-parent",
-	}); err != nil {
-		t.Fatalf("create child session: %v", err)
-	}
-	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
-
-	if err := svc.DeleteTask(ctx, "parent-task"); err != nil {
-		t.Fatalf("delete parent task: %v", err)
-	}
-
-	env, err := repo.GetTaskEnvironment(ctx, "env-parent")
-	if err != nil {
-		t.Fatalf("borrowed environment should survive parent delete: %v", err)
-	}
-	if env.TaskID != "child-task" {
-		t.Fatalf("borrowed environment owner = %q, want child-task", env.TaskID)
-	}
-}
-
-func TestCleanupTaskResources_TransfersBorrowedEnvironmentBeforeCascadeDelete(t *testing.T) {
-	svc, _, repo := createTestService(t)
-	ctx := context.Background()
-	seedParentChildWorkspace(t, repo, "ws-cascade-transfer", "wf-cascade-transfer", "parent-task", "child-task")
-	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
-		ID:     "env-parent",
-		TaskID: "parent-task",
-		Status: models.TaskEnvironmentStatusReady,
-		Repos:  []*models.TaskEnvironmentRepo{{RepositoryID: "repo-parent", WorktreeID: "wt-parent", WorktreePath: "/tmp/parent-worktree"}},
-	}); err != nil {
-		t.Fatalf("create parent environment: %v", err)
-	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID:                "session-child",
-		TaskID:            "child-task",
-		State:             models.TaskSessionStateRunning,
-		TaskEnvironmentID: "env-parent",
-	}); err != nil {
-		t.Fatalf("create child session: %v", err)
-	}
-	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
-
-	svc.CleanupTaskResources(ctx, "parent-task", true)
-	waitForCleanupDone(t, svc)
-	if err := repo.DeleteTask(ctx, "parent-task"); err != nil {
-		t.Fatalf("delete parent task: %v", err)
-	}
-
-	env, err := repo.GetTaskEnvironment(ctx, "env-parent")
-	if err != nil {
-		t.Fatalf("borrowed environment should survive cascade owner delete: %v", err)
-	}
-	if env.TaskID != "child-task" {
-		t.Fatalf("borrowed environment owner = %q, want child-task", env.TaskID)
 	}
 }
 

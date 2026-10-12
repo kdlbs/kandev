@@ -133,6 +133,7 @@ func runToListItem(r *models.Run) RunListItem {
 		ID:                   r.ID,
 		AgentProfileID:       r.AgentProfileID,
 		Reason:               r.Reason,
+		CausationID:          r.CausationID,
 		Payload:              r.Payload,
 		Status:               string(r.Status),
 		CoalescedCount:       r.CoalescedCount,

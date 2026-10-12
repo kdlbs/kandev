@@ -18,6 +18,13 @@ repos:
         language: system
         pass_filenames: true
 
+      - id: docs-catalog
+        name: Documentation catalog validation
+        entry: python3 scripts/list-docs.py validate
+        language: system
+        files: ^docs/(decisions|specs)/.*\.md$|^scripts/(list-docs|spec_metadata|lint-spec-files)\.py$|^scripts/(list-docs|lint-spec-files)\.test\.py$
+        pass_filenames: false
+
       - id: architecture-lint
         name: Architecture lint and compatibility expiry
         entry: python3 scripts/lint-architecture.py --all
@@ -42,11 +49,12 @@ repos:
         pass_filenames: true
 
       - id: go-lint
-        name: Go lint (PR changed code)
-        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; base=$(scripts/resolve-go-lint-base --comparison-base) || exit $?; cd apps/backend && golangci-lint run ./... --new-from-rev="$base" --timeout=5m'
+        name: Go lint (changed packages)
+        entry: bash scripts/lint-go-changed
         language: system
         files: ^apps/backend/.*\.go$
-        pass_filenames: false
+        pass_filenames: true
+        require_serial: true
 
   # Web app (TypeScript/React) hooks
   - repo: local

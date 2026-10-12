@@ -74,24 +74,29 @@ func openIsolatedPostgresMultiConnForClaimRace(t *testing.T, dsn string, maxConn
 	return db
 }
 
-// TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision is
-// SR21's proof obligation: RecordStepDecision locks on decisionLockNamespace
-// while EnsureRoleSeat/AddTaskParticipant lock on participantsLockNamespace —
-// two different advisory-lock namespaces that never contend with each other
-// on Postgres. Before this fix, AddTaskParticipant's claim UPDATE had no
-// decision guard, so a decision committing between the "is this seat
-// undecided" read and the claim's UPDATE could be silently reattributed:
-// the seat's agent_profile_id would end up naming the claiming agent even
-// though the decision on file was recorded by the original auto-cast agent.
-// The fix makes the claim's UPDATE conditional on
-// `NOT EXISTS (SELECT 1 FROM workflow_step_decisions WHERE participant_id = ?)`
-// and falls through to inserting a fresh seat when that affects zero rows
-// (see claimAutoSeat in participants.go).
+// TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision
+// establishes that a role-carrying RecordStepDecision and a concurrent
+// AddTaskParticipant serialize on the seat exclusion they share: both acquire
+// ParticipantRoleSeatLockKey for the same (task, role) and hold it for the
+// whole transaction. It asserts that the pair completes in either acquisition
+// order without deadlocking — which is a real question, because the decision
+// path takes decisionLockNamespace first and then the seat lock, while the
+// registration path takes only the seat lock — and that whichever order the
+// two land in, no decision is left attributed to an agent that did not record
+// it.
 //
-// This only proves anything under genuine cross-connection concurrency:
-// SQLite's SetMaxOpenConns(1) serializes every transaction for free and
-// would pass whether or not the guard exists. Skips unless
-// KANDEV_TEST_POSTGRES_DSN is set.
+// It does NOT establish that claimAutoSeat's NOT EXISTS condition is
+// load-bearing, and cannot: the shared exclusion is what prevents a
+// role-carrying decision from committing between findClaimableAutoSeat and
+// claimAutoSeat, so this test would very likely pass with that condition
+// deleted. The condition still matters, on the path this test does not reach:
+// recordStepDecisionTx skips the seat exclusion when the decision carries no
+// role. That window is covered deterministically by
+// participant_claim_decision_guard_test.go.
+//
+// The serialization this test exercises is only observable under genuine
+// cross-connection concurrency: SQLite's SetMaxOpenConns(1) serializes every
+// transaction for free. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
 func TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision(t *testing.T) {
 	const iterations = 15
 	dsn := testutil.PostgresDSNFromEnv(t)

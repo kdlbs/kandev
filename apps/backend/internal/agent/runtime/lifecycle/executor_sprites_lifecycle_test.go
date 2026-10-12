@@ -108,6 +108,7 @@ func TestSpritesStopInstancePreservesSandboxOnSessionStop(t *testing.T) {
 		"stopped via API",
 		"agent crashed",
 		"user requested",
+		StopReasonIdleSuspension,
 	}
 
 	for _, reason := range preserveReasons {
@@ -138,6 +139,7 @@ func TestShouldRunExecutorCleanupIncludesCascadeTerminalReasons(t *testing.T) {
 		StopReasonCascadeDelete,
 		StopReasonTaskTreeArchived,
 		StopReasonTaskTreeDeleted,
+		StopReasonLaunchRollback,
 	} {
 		t.Run(reason, func(t *testing.T) {
 			if !shouldRunExecutorCleanup(reason) {

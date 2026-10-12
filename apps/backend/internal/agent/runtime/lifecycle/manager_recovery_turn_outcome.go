@@ -1,0 +1,263 @@
+package lifecycle
+
+import (
+	"context"
+
+	"go.uber.org/zap"
+
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/events"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
+
+// turnOutcomeApplier is the optional capability satisfied by
+// *StandaloneExecutor: only standalone-backed instances have agentctl turn-
+// outcome retention (AC-EXECUTORS-SURVIVAL-004) -- this capability covers the
+// WORKTREE and LOCAL executor types only, both standalone-runtime. A backend
+// that doesn't implement it (Docker, Sprites, SSH, Kubernetes) is out of
+// scope, and recovery treats that exactly like "nothing retained."
+type turnOutcomeApplier interface {
+	fetchTurnOutcomeForEpoch(ctx context.Context, instanceID string, runtimeEpoch uint64) (*agentctl.TurnOutcome, error)
+	ackTurnOutcomeForEpoch(ctx context.Context, instanceID string, turnID int64, runtimeEpoch uint64) error
+}
+
+// recoveredTurnOutcomeResult is the outcome of retrieveRecoveredTurnOutcome:
+// exactly one of the three cases AC-EXECUTORS-SURVIVAL-004.5 distinguishes.
+type recoveredTurnOutcomeResult int
+
+const (
+	// recoveredTurnOutcomeNone: the read succeeded and nothing was retained,
+	// or the backend does not support turn-outcome retention at all. Publish
+	// the session as running.
+	recoveredTurnOutcomeNone recoveredTurnOutcomeResult = iota
+	// recoveredTurnOutcomeApplied: an outcome was retrieved and must be applied.
+	recoveredTurnOutcomeApplied
+	// recoveredTurnOutcomeReadFailed: the read failed and its retries are
+	// exhausted. AC-EXECUTORS-SURVIVAL-004.5 forbids publishing running here;
+	// the instance goes to the not-re-tracked path instead.
+	recoveredTurnOutcomeReadFailed
+)
+
+// retrieveRecoveredTurnOutcome implements AC-EXECUTORS-SURVIVAL-004.2's read
+// step for one recovered instance, bounded by the same per-read timeout and
+// retry count as AC-EXECUTORS-SURVIVAL-002.13 (AC-EXECUTORS-SURVIVAL-004.5).
+func (m *Manager) retrieveRecoveredTurnOutcome(ctx context.Context, ri *ExecutorInstance) (*agentctl.TurnOutcome, recoveredTurnOutcomeResult) {
+	backend, err := m.executorRegistry.GetBackend(ri.RuntimeName)
+	if err != nil {
+		return nil, recoveredTurnOutcomeNone
+	}
+	applier, ok := backend.(turnOutcomeApplier)
+	if !ok {
+		return nil, recoveredTurnOutcomeNone
+	}
+	runtimeEpoch := runtimeEpochFromClient(ri.Client)
+	if ri.Client != nil && !ri.Client.RuntimeCurrent() {
+		return nil, recoveredTurnOutcomeReadFailed
+	}
+	outcome, err := applier.fetchTurnOutcomeForEpoch(ctx, ri.StandaloneInstanceID, runtimeEpoch)
+	if err != nil {
+		m.logger.Warn("failed to retrieve recovered instance's turn outcome after exhausting retries",
+			zap.String("instance_id", ri.InstanceID),
+			zap.String("session_id", ri.SessionID),
+			zap.Error(err))
+		return nil, recoveredTurnOutcomeReadFailed
+	}
+	if outcome == nil {
+		return nil, recoveredTurnOutcomeNone
+	}
+	return outcome, recoveredTurnOutcomeApplied
+}
+
+// applyRecoveredTurnOutcome implements AC-EXECUTORS-SURVIVAL-004.2's apply
+// step. It seeds the execution's prompt-completion generation guard from the
+// retained event's own PromptGeneration -- recreated from zero by recovery,
+// per design 03's "Turn outcome across the detached gap" -- so the existing
+// completion-claim path in handleAgentEvent (via claimPromptCompletion)
+// processes this event exactly as it would have had a backend been attached
+// when the turn ended, publishing whatever state that produces. It records
+// the applied control-server turn identifier before processing so a live
+// redelivery of the same event (agentctl's parked send finally unblocked by
+// this stream reconnecting) is recognized and dropped
+// (AC-EXECUTORS-SURVIVAL-004.4, see AgentExecution.isRecoveryDuplicateEvent).
+//
+// The acknowledgement is sent only after handleAgentEvent returns
+// (AC-EXECUTORS-SURVIVAL-004.6): on the default in-memory event bus, Publish
+// delivers to subscribers synchronously before returning, so the
+// orchestrator's session-state and task-state writes are both complete by
+// then; on a NATS-backed bus this ordering is best-effort, the same
+// documented precedent internal/orchestrator/event_handlers_streaming.go's
+// markReadyTurn comment relies on for durable-TurnID-based ordering. A failed
+// or best-effort-late acknowledgement is not retried here: the outcome stays
+// retained and a later backend re-applies it idempotently
+// (AC-EXECUTORS-SURVIVAL-004.6's "applying to a turn that already reached
+// that outcome... changes nothing").
+func (m *Manager) applyRecoveredTurnOutcome(
+	ctx context.Context, execution *AgentExecution, ri *ExecutorInstance, outcome *agentctl.TurnOutcome,
+) {
+	if !m.runtimeExecutionCurrent(execution) || (ri.Client != nil && !ri.Client.RuntimeCurrent()) {
+		m.logger.Debug("skipping recovered turn outcome from a retired local runtime generation",
+			zap.String("instance_id", ri.InstanceID),
+			zap.String("session_id", execution.SessionID),
+			zap.Uint64("runtime_epoch", execution.runtimeEpoch))
+		return
+	}
+	_ = m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		current.promptGeneration = outcome.Event.PromptGeneration
+	})
+	execution.markRecoveryTurnOutcomeApplied(outcome.TurnID)
+
+	m.handleAgentEvent(execution, outcome.Event)
+
+	backend, err := m.executorRegistry.GetBackend(ri.RuntimeName)
+	if err != nil {
+		return
+	}
+	applier, ok := backend.(turnOutcomeApplier)
+	if !ok {
+		return
+	}
+	if !m.runtimeExecutionCurrent(execution) || (ri.Client != nil && !ri.Client.RuntimeCurrent()) {
+		return
+	}
+	if err := applier.ackTurnOutcomeForEpoch(ctx, ri.StandaloneInstanceID, outcome.TurnID, execution.runtimeEpoch); err != nil {
+		m.logger.Warn("failed to acknowledge applied turn outcome; a later backend will re-apply it idempotently",
+			zap.String("instance_id", ri.InstanceID),
+			zap.Int64("turn_id", outcome.TurnID),
+			zap.Error(err))
+	}
+}
+
+// publishRecoveredExecutionRunning implements AC-EXECUTORS-SURVIVAL-004.5's
+// "nothing retained" case: publish the session as running exactly as an
+// ordinary launch's first activity would.
+func (m *Manager) publishRecoveredExecutionRunning(ctx context.Context, execution *AgentExecution) {
+	if !m.runtimeExecutionCurrent(execution) {
+		return
+	}
+	// Nothing was retained, so any turn still in flight across the restart
+	// carries a PromptGeneration this freshly reconstructed execution object
+	// has never seen (its own counter was recreated from zero). Let the first
+	// live completion adopt it instead of being rejected as superseded --
+	// see recoveredPromptGenerationPending.
+	execution.recoveredPromptGenerationPending.Store(true)
+	m.eventPublisher.PublishAgentEvent(ctx, events.AgentRunning, execution)
+}
+
+// durableRecoveryHasPendingWork reports whether adoption still owns a prompt
+// or has retained events that must be replayed before the execution can be
+// ready for another prompt. An adopted durable session with no such evidence
+// is already idle, even though reconstructed executions start in Running.
+func durableRecoveryHasPendingWork(execution *AgentExecution) bool {
+	if execution == nil {
+		return false
+	}
+	if execution.deliverySubmissionIDSnapshot() != "" {
+		return true
+	}
+	descriptor := execution.DeliveryDescriptor
+	return descriptor != nil && descriptor.Stream != nil && execution.DeliveryReplayCursor < descriptor.Stream.HighWater
+}
+
+// publishRecoveredExecutionReady settles an adopted durable execution whose
+// captured stream is already projected and whose peer has no active prompt.
+func (m *Manager) publishRecoveredExecutionReady(ctx context.Context, execution *AgentExecution) {
+	if !m.runtimeExecutionCurrent(execution) {
+		return
+	}
+	if execution == nil {
+		return
+	}
+	execution.recoveredPromptGenerationPending.Store(false)
+	if err := m.markReadyEventWithContext(ctx, execution.ID, events.AgentReady, false); err != nil {
+		m.logger.Error("failed to mark idle recovered execution as ready",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.Error(err))
+	}
+}
+
+func (m *Manager) prepareRecoveredAvailability(
+	ctx context.Context,
+	execution *AgentExecution,
+) (*AgentEventPayload, error) {
+	if execution == nil || !m.runtimeExecutionCurrent(execution) {
+		return nil, nil
+	}
+	var payload AgentEventPayload
+	prepared := false
+	if err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		if current != execution {
+			return
+		}
+		if current.Status != v1.AgentStatusReady {
+			current.Status = v1.AgentStatusReady
+		}
+		current.recoveredPromptGenerationPending.Store(false)
+		payload = newAgentEventPayload(current)
+		payload.Status = string(v1.AgentStatusReady)
+		payload.RecoveredAvailabilityOnly = true
+		prepared = true
+	}); err != nil {
+		return nil, err
+	}
+	if !prepared {
+		return nil, nil
+	}
+	payload.AttemptID = ResumeAttemptIDFromContext(ctx)
+	m.persistExecutorRunning(context.WithoutCancel(ctx), execution)
+	return &payload, nil
+}
+
+func (m *Manager) publishRecoveredAvailabilityIfCurrent(
+	ctx context.Context,
+	execution *AgentExecution,
+	payload *AgentEventPayload,
+) {
+	if !m.recoveredAvailabilityContextAllowed(ctx) ||
+		!m.recoveredAvailabilityMatchesExecution(execution, payload) ||
+		m.pendingRemoteRecoveryForSession(execution.SessionID) != nil {
+		return
+	}
+	if err := m.recoveryGuard.CheckLaunchAllowed(execution.SessionID); err != nil {
+		return
+	}
+	current, exists := m.executionStore.GetBySessionID(execution.SessionID)
+	if !exists || current != execution {
+		return
+	}
+	if !m.recoveredAvailabilityReadyAtSnapshot(execution, payload) {
+		return
+	}
+	if !m.recoveredAvailabilityContextAllowed(ctx) {
+		return
+	}
+	if err := m.eventPublisher.publishAgentEventPayload(ctx, events.AgentBootReady, *payload); err != nil {
+		m.logger.Error("failed to publish recovered remote availability",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.Error(err))
+	}
+}
+
+func (m *Manager) recoveredAvailabilityContextAllowed(ctx context.Context) bool {
+	return ctx != nil && ctx.Err() == nil && !m.recoveredAvailabilityPublicationStopped()
+}
+
+func (m *Manager) recoveredAvailabilityMatchesExecution(execution *AgentExecution, payload *AgentEventPayload) bool {
+	return execution != nil && payload != nil && payload.SessionID == execution.SessionID &&
+		payload.AgentExecutionID == execution.ID && m.runtimeExecutionCurrent(execution)
+}
+
+func (m *Manager) recoveredAvailabilityReadyAtSnapshot(
+	execution *AgentExecution,
+	payload *AgentEventPayload,
+) bool {
+	readyAtSnapshot := false
+	if err := m.executionStore.WithRLock(execution.ID, func(current *AgentExecution) {
+		readyAtSnapshot = current == execution && current.Status == v1.AgentStatusReady &&
+			current.promptGeneration == payload.PromptGeneration
+	}); err != nil {
+		return false
+	}
+	return readyAtSnapshot
+}

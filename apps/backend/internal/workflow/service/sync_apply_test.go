@@ -382,6 +382,37 @@ func TestApplySyncedWorkflows_PreservesCancelTriggersTurnComplete(t *testing.T) 
 	assert.False(t, steps[0].CancelTriggersTurnComplete)
 }
 
+func TestApplySyncedWorkflows_PreservesCompleteTaskOnEnterFalse(t *testing.T) {
+	svc, _, _ := setupSyncService(t)
+	ctx := context.Background()
+	first := models.WorkflowPortable{
+		Name: "Completion Flow",
+		Steps: []models.StepPortable{
+			{Name: "Work", Position: 0, IsStartStep: true, CompleteTaskOnEnter: false},
+			{Name: "Done", Position: 1, CompleteTaskOnEnter: true},
+		},
+	}
+	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{{Path: "flows/completion.yml", Export: exportOf(first)}})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Completion Flow"}, result.Created)
+
+	steps, err := svc.ListStepsByWorkflow(ctx, "imported-Completion Flow")
+	require.NoError(t, err)
+	require.Len(t, steps, 2)
+	assert.False(t, steps[0].CompleteTaskOnEnter)
+	assert.True(t, steps[1].CompleteTaskOnEnter)
+
+	updated := first
+	updated.Steps = append([]models.StepPortable(nil), first.Steps...)
+	updated.Steps[1].CompleteTaskOnEnter = false
+	result, err = svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{{Path: "flows/completion.yml", Export: exportOf(updated)}})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Completion Flow"}, result.Updated)
+	steps, err = svc.ListStepsByWorkflow(ctx, "imported-Completion Flow")
+	require.NoError(t, err)
+	assert.False(t, steps[1].CompleteTaskOnEnter)
+}
+
 func TestApplySyncedWorkflows_SecondApplyIsNoOp(t *testing.T) {
 	svc, _, _ := setupSyncService(t)
 	ctx := context.Background()

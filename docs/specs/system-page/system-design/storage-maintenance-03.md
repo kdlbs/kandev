@@ -20,7 +20,17 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
 | --- | --- |
 | `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001` | [Migrated source detail](#migrated-source-detail) |
 
+## Current Go-cache policy
+
+The [Go cache reclamation package](../../../plans/go-cache-reclamation/plan.md)
+replaces new managed-cache quarantine scenarios. Historical quarantine and `active_quarantine`
+rotation scenarios are legacy compatibility coverage. Adopted-path safety and non-Go scenarios
+remain current regression coverage.
+
 ## Migrated source detail
+
+The [temporary storage visibility and cleanup design](storage-temporary-folders.md) supersedes the
+temporary-storage passages below where its implemented policy differs.
 
 ## Scenarios
 
@@ -63,10 +73,14 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
   candidate, or unused-image subset bytes again.
 - **GIVEN** one top-level analysis measurement is unavailable, **WHEN** Storage analysis renders its
   total, **THEN** it sums the available measurements and identifies the result as partial.
-- **GIVEN** archived or deleted tasks retain ready environment or active worktree rows for recovery,
-  **WHEN** storage analysis or cleanup classifies their old directories, **THEN** those historical
-  rows do not protect the directories from normal orphan grace and quarantine rules unless a live
-  session of an unarchived task still borrows the environment.
+- **GIVEN** an archived task has an active worktree row, **WHEN** storage
+  analysis or cleanup classifies its task root, **THEN** the recorded physical
+  checkout protects that root from orphan quarantine; a deleted worktree row
+  retained only for branch recovery does not protect an absent checkout.
+- **GIVEN** a previously quarantined task root contains a checkout still owned
+  by an active worktree row, **WHEN** eligible or forced permanent deletion is
+  requested, **THEN** the entry remains restorable and the action reports it as
+  protected; an incomplete inventory fails closed.
 - **GIVEN** the worktree inventory query fails, **WHEN** workspace cleanup runs, **THEN** no task
   directory moves and the run reports the inventory error.
 - **GIVEN** a multi-repository task has one active descendant worktree, **WHEN** workspace cleanup
@@ -132,13 +146,19 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
   it is neither counted as owned nor modified.
 - **GIVEN** a stale registered artifact and no current activity blocker, **WHEN** the user confirms
   **Clean stale artifacts**, **THEN** the request uses `resources: ["temporary_artifacts"]`, the root
-  moves by same-filesystem rename into quarantine, and the result appears in Quarantine.
-- **GIVEN** the user selects unscoped **Run now** or scheduled maintenance, **WHEN** a stale
-  registered temporary artifact exists, **THEN** the artifact remains in place because this provider
-  is explicit-only.
-- **GIVEN** a registered artifact has a missing/mismatched marker, a symlinked root, a path escape,
-  or a cross-device quarantine destination, **WHEN** analysis or cleanup runs, **THEN** Kandev
-  reports the safety warning and leaves the original path unchanged.
+  moves into quarantine by validated same-filesystem rename or the safe cross-filesystem staging
+  path, and the result appears in Quarantine.
+- **GIVEN** the temporary-artifact policy is disabled, **WHEN** the user selects unscoped **Run now**
+  or scheduled maintenance, **THEN** a stale registered temporary artifact remains in place.
+- **GIVEN** the temporary-artifact policy is enabled, **WHEN** unscoped **Run now** or scheduled
+  maintenance runs, **THEN** an eligible stale registered artifact uses the same validated
+  quarantine path as explicit cleanup.
+- **GIVEN** a registered artifact has a missing/mismatched marker, a symlinked root, or a path escape,
+  **WHEN** analysis or cleanup runs, **THEN** Kandev reports the safety warning and leaves the
+  original path unchanged.
+- **GIVEN** a registered artifact has a cross-device quarantine destination, **WHEN** cleanup runs,
+  **THEN** Kandev stages and verifies a copy under quarantine, publishes it atomically, and removes
+  the original only after source identity revalidation; any failure leaves the original unchanged.
 - **GIVEN** a quarantined temporary artifact's original path is free, **WHEN** the user selects
   **Restore**, **THEN** Kandev restores it through the existing quarantine flow before retention
   expiry; unrelated quarantine entries are not purged by the resource-specific run.
@@ -187,7 +207,7 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
 - A Kandev-owned general-purpose sweeper for the operating system's shared temporary directory.
 - Cleaning unregistered `kandev-*` roots from another installation or from standalone preview, CI,
   E2E, or `dev-isolated` harnesses.
-- A persisted temporary-artifact threshold or scheduled cleanup toggle in the first release.
+- A persisted temporary-artifact age threshold or a general shared temporary cleanup policy.
 - Guaranteed compatibility with tools that require a fixed, globally unique name in shared temp;
   those tools need a scoped path override when a real collision is observed.
 

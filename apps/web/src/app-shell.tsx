@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
+import { MobileTaskNavigationProvider } from "@/components/navigation/mobile-task-navigation-provider";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { AppStatusSurfaceProvider } from "@/components/app-status-bar/app-status-surface-provider";
 import { CommandPanel } from "@/components/command-panel";
@@ -16,10 +17,13 @@ import { SessionFailureToastBridge } from "@/components/session-failure-toast-br
 import { TaskDeletedToastBridge } from "@/components/task-deleted-toast-bridge";
 import { UpdateAvailableToastBridge } from "@/components/update-available-toast-bridge";
 import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
+import { WorkspaceCopilotHost } from "@/app/coordinator/copilot/workspace-copilot-host";
+import { CoordinatorCopilotResetBridge } from "@/components/coordinator-copilot-reset-bridge";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { WorkspaceScopeProvider } from "@/components/workspace-scope-provider";
 import { WebSocketConnector } from "@/components/ws-connector";
+import { NeedsYouInboxBridge } from "@/components/needs-you-inbox/needs-you-inbox-bridge";
 import { useWindowControlsOverlay } from "@/hooks/use-window-controls-overlay";
 import { useTaskColorMigration } from "@/hooks/use-task-color-migration";
 import { CommandRegistryProvider } from "@/lib/commands/command-registry";
@@ -74,10 +78,12 @@ export function AppShell({ children }: AppShellProps) {
               <TaskDeletedToastBridge />
               <UpdateAvailableToastBridge />
               <SidebarViewsSyncBridge />
+              <CoordinatorCopilotResetBridge />
               <LogBufferBridge />
               <CommandRegistryProvider>
                 <DesktopCommandHost />
                 <WebSocketConnector />
+                <NeedsYouInboxBridge />
                 <GlobalCommands />
                 <CommandPanel />
                 <RecentTaskSwitcher />
@@ -91,11 +97,18 @@ export function AppShell({ children }: AppShellProps) {
                         className="flex h-dvh min-h-0 w-full overflow-hidden"
                         data-testid="app-shell"
                         data-window-controls-overlay={titlebar.visible ? "visible" : "hidden"}
+                        data-macos-tauri-overlay={titlebar.macTauriOverlay ? "true" : undefined}
                         style={shellStyle}
                       >
                         <AppSidebar />
                         <AppStatusSurfaceProvider>
-                          <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
+                          <MobileTaskNavigationProvider>
+                            <WorkspaceCopilotHost>
+                              <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+                                {children}
+                              </main>
+                            </WorkspaceCopilotHost>
+                          </MobileTaskNavigationProvider>
                         </AppStatusSurfaceProvider>
                       </div>
                     </WorkspaceScopeProvider>

@@ -79,10 +79,26 @@ func setupTestRepo(t *testing.T) (string, func()) {
 	runGit(t, localDir, "commit", "-m", "Initial commit")
 
 	// Add remote and push
-	runGit(t, localDir, "remote", "add", "origin", remoteDir)
+	runGit(t, localDir, "remote", "add", "origin", localGitRemotePath(remoteDir))
 	runGit(t, localDir, "push", "-u", "origin", "main")
 
 	return localDir, cleanup
+}
+
+// localGitRemotePath keeps temporary repository paths in the form that Git
+// recognizes as local paths on every platform. A raw Windows path such as
+// C:\\Temp\\remote.git can be parsed as an SSH-style host named "C", which
+// leaves a test waiting for network input. Forward slashes keep the drive
+// prefix unambiguous without changing the path returned by Git to callers.
+func localGitRemotePath(path string) string {
+	return filepath.ToSlash(path)
+}
+
+func TestLocalGitRemotePathUsesForwardSlashes(t *testing.T) {
+	remotePath := filepath.Join(t.TempDir(), "remote.git")
+	if got := localGitRemotePath(remotePath); strings.ContainsRune(got, '\\') {
+		t.Fatalf("localGitRemotePath(%q) = %q, want forward slashes", remotePath, got)
+	}
 }
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -142,6 +158,7 @@ func TestRunGit_DisablesCommitSigning(t *testing.T) {
 	runGit(t, repoDir, "init", "--initial-branch=main")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
 	runGit(t, repoDir, "config", "user.name", "Test User")
+	runGit(t, repoDir, "config", "core.hooksPath", os.DevNull)
 	runGit(t, repoDir, "config", "commit.gpgsign", "true")
 	runGit(t, repoDir, "config", "gpg.format", "ssh")
 	runGit(t, repoDir, "config", "user.signingkey", "~/.ssh/id_ed25519.pub")
@@ -317,6 +334,7 @@ func TestGetGitStatus_ReportsUpstreamHeadForHistoryStates(t *testing.T) {
 	providerDir := filepath.Join(providerRoot, "provider")
 	runGit(t, providerDir, "config", "user.email", "provider@test.com")
 	runGit(t, providerDir, "config", "user.name", "Provider User")
+	runGit(t, providerDir, "config", "core.hooksPath", os.DevNull)
 	runGit(t, providerDir, "checkout", "-b", "feature/pr", "origin/feature/pr")
 	writeFile(t, providerDir, "provider.txt", "provider")
 	runGit(t, providerDir, "add", ".")
@@ -470,7 +488,7 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 	writeFile(t, localDir, "README.md", "# Test Repo")
 	runGit(t, localDir, "add", ".")
 	runGit(t, localDir, "commit", "-m", "Initial commit (X)")
-	runGit(t, localDir, "remote", "add", "origin", remoteDir)
+	runGit(t, localDir, "remote", "add", "origin", localGitRemotePath(remoteDir))
 	runGit(t, localDir, "push", "-u", "origin", "main")
 
 	// Record the starting point (commit X)
@@ -478,7 +496,7 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 	startingSHA = startingSHA[:len(startingSHA)-1]
 
 	// Clone to upstream clone and make commits there (simulating main evolving)
-	runGit(t, upstreamClone, "clone", remoteDir, ".")
+	runGit(t, upstreamClone, "clone", localGitRemotePath(remoteDir), ".")
 	runGit(t, upstreamClone, "config", "user.email", "upstream@test.com")
 	runGit(t, upstreamClone, "config", "user.name", "Upstream User")
 	runGit(t, upstreamClone, "config", "core.hooksPath", "/dev/null") // Disable hooks in test repo
@@ -1039,7 +1057,7 @@ func TestApplyFileDiff_RegularFile(t *testing.T) {
 	// Build a unified diff that changes line2 -> modified
 	diff := "--- test.txt\n+++ test.txt\n@@ -1,3 +1,3 @@\n line1\n-line2\n+modified\n line3\n"
 
-	hash, resolution, err := wt.ApplyFileDiff(context.Background(), "test.txt", diff, "", nil)
+	hash, resolution, err := wt.ApplyFileDiff(context.Background(), "test.txt", "test.txt", diff, "", nil)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff failed: %v", err)
 	}
@@ -1094,7 +1112,7 @@ func TestApplyFileDiff_Symlink(t *testing.T) {
 	// Build a diff targeting the symlink path
 	diff := "--- LINK.md\n+++ LINK.md\n@@ -1,3 +1,3 @@\n line1\n-line2\n+patched\n line3\n"
 
-	hash, resolution, err := wt.ApplyFileDiff(context.Background(), "LINK.md", diff, "", nil)
+	hash, resolution, err := wt.ApplyFileDiff(context.Background(), "LINK.md", "LINK.md", diff, "", nil)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff through symlink failed: %v", err)
 	}
@@ -1155,7 +1173,7 @@ func TestApplyFileDiff_ConflictDetection(t *testing.T) {
 
 	diff := "--- conflict.txt\n+++ conflict.txt\n@@ -1 +1 @@\n-original\n+patched\n"
 
-	_, _, err := wt.ApplyFileDiff(context.Background(), "conflict.txt", diff, origHash, nil)
+	_, _, err := wt.ApplyFileDiff(context.Background(), "conflict.txt", "conflict.txt", diff, origHash, nil)
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
@@ -1225,7 +1243,7 @@ func TestApplyFileDiff_ConflictWithDesiredContent(t *testing.T) {
 	diff := "--- file.txt\n+++ file.txt\n@@ -1 +1 @@\n-original\n+user-version\n"
 	desiredContent := "user-desired-content\n"
 
-	newHash, resolution, err := wt.ApplyFileDiff(context.Background(), "file.txt", diff, origHash, &desiredContent)
+	newHash, resolution, err := wt.ApplyFileDiff(context.Background(), "file.txt", "file.txt", diff, origHash, &desiredContent)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff with desiredContent should not fail: %v", err)
 	}
@@ -1264,7 +1282,7 @@ func TestApplyFileDiff_ConflictWithoutDesiredContent(t *testing.T) {
 	diff := "--- file.txt\n+++ file.txt\n@@ -1 +1 @@\n-original\n+user-version\n"
 
 	// Without desiredContent, conflict should still fail
-	_, _, err := wt.ApplyFileDiff(context.Background(), "file.txt", diff, origHash, nil)
+	_, _, err := wt.ApplyFileDiff(context.Background(), "file.txt", "file.txt", diff, origHash, nil)
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
@@ -1304,7 +1322,7 @@ func TestApplyFileDiff_SymlinkConflictWithDesiredContent(t *testing.T) {
 	diff := "--- LINK.md\n+++ LINK.md\n@@ -1 +1 @@\n-original\n+user-version\n"
 	desiredContent := "user-content\n"
 
-	newHash, resolution, err := wt.ApplyFileDiff(context.Background(), "LINK.md", diff, origHash, &desiredContent)
+	newHash, resolution, err := wt.ApplyFileDiff(context.Background(), "LINK.md", "LINK.md", diff, origHash, &desiredContent)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff with desiredContent through symlink should not fail: %v", err)
 	}

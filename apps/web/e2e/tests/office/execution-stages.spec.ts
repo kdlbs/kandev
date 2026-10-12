@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/office-fixture";
+import { test, expect, moveTaskToTerminalStep } from "../../fixtures/office-fixture";
 
 // Placeholder: set execution policy on a task.
 // The backend does not expose this via HTTP yet — SetTaskExecutionPolicy is
@@ -23,6 +23,11 @@ test.describe("Execution stages — status updates", () => {
     const task = await apiClient.createTask(officeSeed.workspaceId, "Status Done Task", {
       workflow_id: officeSeed.workflowId,
     });
+    // The office approval gate redirects a "done" write to in_review unless
+    // the task is already on its workflow's terminal step; park it there so
+    // this test exercises the (unrelated) execution-policy fallback it's
+    // named for, rather than the step-position gate.
+    await moveTaskToTerminalStep(apiClient, officeSeed.workflowId, task.id);
 
     const result = await officeApi.updateTaskStatus(task.id, "done", "Work complete");
     expect(result).toMatchObject({ ok: true });
@@ -68,6 +73,10 @@ test.describe("Execution stages — status updates", () => {
     const task = await apiClient.createTask(officeSeed.workspaceId, "Status Comment Task", {
       workflow_id: officeSeed.workflowId,
     });
+    // See "update task status to done without execution policy succeeds"
+    // above: the approval gate requires the terminal workflow step for a
+    // "done" write to persist rather than redirect to in_review.
+    await moveTaskToTerminalStep(apiClient, officeSeed.workflowId, task.id);
     const commentText = "Status updated in E2E test";
 
     await officeApi.updateTaskStatus(task.id, "done", commentText);

@@ -66,6 +66,30 @@ func TestCanonicalInventoryMatches_AcceptsLegacyUnscopedRowWhenNoScopedRowsExist
 	}
 }
 
+func TestCanonicalInventoryMatches_ScopedLocalBranchSuppressesLegacyFallback(t *testing.T) {
+	spec := RepoSpec{RepositoryID: "repo-1", BranchIdentitySlug: "main"}
+	rows := []*models.TaskEnvironmentRepo{
+		{RepositoryID: "repo-1", BranchSlug: "main", WorktreeID: ""},
+		{RepositoryID: "repo-1", BranchSlug: "", WorktreeID: "worktree-legacy"},
+	}
+
+	if got := canonicalInventoryMatches(spec, rows, false); got != 1 {
+		t.Fatalf("canonicalInventoryMatches() = %d, want 1 (scoped row must suppress legacy fallback)", got)
+	}
+}
+
+func TestCanonicalInventoryMatches_ScopedRowOnOtherRepoDoesNotSuppressFallbackForThisRepo(t *testing.T) {
+	spec := RepoSpec{RepositoryID: "repo-1", BranchIdentitySlug: "main"}
+	rows := []*models.TaskEnvironmentRepo{
+		{RepositoryID: "repo-1", BranchSlug: "", WorktreeID: "worktree-legacy"},
+		{RepositoryID: "repo-2", BranchSlug: "main", WorktreeID: "worktree-scoped"},
+	}
+
+	if got := canonicalInventoryMatches(spec, rows, true); got != 1 {
+		t.Fatalf("canonicalInventoryMatches() = %d, want 1 (other repo's scoped row must not suppress repo-1 fallback)", got)
+	}
+}
+
 func TestReuseExistingEnvironment_WorktreeReuseKeepsTaskDirName(t *testing.T) {
 	repo := newMockRepository()
 	e := newTestExecutor(t, &mockAgentManager{}, repo)
@@ -174,8 +198,8 @@ func TestWorkspaceReuseAllowedRequiresMatchingExecutorType(t *testing.T) {
 	if !workspaceReuseAllowed(env, string(models.ExecutorTypeLocal), true, true) {
 		t.Fatal("workspace reuse should remain enabled for the owning executor type")
 	}
-	if workspaceReuseAllowed(&models.TaskEnvironment{}, string(models.ExecutorTypeWorktree), true, true) {
-		t.Fatal("legacy environments without a physical worktree should not be reused by worktree launches")
+	if !workspaceReuseAllowed(&models.TaskEnvironment{Status: models.TaskEnvironmentStatusReady}, string(models.ExecutorTypeWorktree), true, true) {
+		t.Fatal("empty Worktree inventory should remain attach-only until the guarded validator refuses or repairs it")
 	}
 	if !workspaceReuseAllowed(&models.TaskEnvironment{
 		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "legacy-worktree", Status: "active"}},
@@ -184,12 +208,22 @@ func TestWorkspaceReuseAllowedRequiresMatchingExecutorType(t *testing.T) {
 	}
 }
 
+func TestWorkspaceReuseAllowedDoesNotAttachFailedEmptyWorktreeEnvironment(t *testing.T) {
+	env := &models.TaskEnvironment{
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusFailed,
+	}
+
+	if workspaceReuseAllowed(env, string(models.ExecutorTypeWorktree), true, true) {
+		t.Fatal("failed empty worktree environment authorized attach-only reuse")
+	}
+}
+
 func TestWorkspaceReuseAllowedRequiresInventoryForRepoBackedExecutors(t *testing.T) {
 	for _, executorType := range []string{
 		string(models.ExecutorTypeLocal),
 		string(models.ExecutorTypeLocalDocker),
 		string(models.ExecutorTypeSSH),
-		string(models.ExecutorTypeWorktree),
 	} {
 		t.Run(executorType, func(t *testing.T) {
 			env := &models.TaskEnvironment{ExecutorType: executorType}
@@ -640,7 +674,7 @@ func TestReuseExistingEnvironment_RuntimeMetadata_CarriesPersistentSecrets(t *te
 		},
 	}
 	e := &Executor{logger: log, repo: repo}
-	req := &LaunchAgentRequest{TaskID: "task-1"}
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "session-old"}
 
 	e.reuseExistingEnvironment(context.Background(), req, &models.TaskEnvironment{
 		ID: "env-1",
@@ -686,7 +720,7 @@ func TestReuseExistingEnvironment_RuntimeMetadata_FallsBackToMatchingContainer(t
 		},
 	}
 	e := &Executor{logger: log, repo: repo}
-	req := &LaunchAgentRequest{TaskID: "task-1"}
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "session-old"}
 
 	e.reuseExistingEnvironment(context.Background(), req, &models.TaskEnvironment{
 		ID:          "env-1",
@@ -1001,6 +1035,24 @@ func TestReuseExistingEnvironment_FreshRepoRecoveryDropsContainerHandle(t *testi
 	}
 }
 
+// TestPreparedWorkspaceInventoryRequestRequiresReuseForPersistedRuntime
+// keeps the prepared-workspace fast path behind the same inventory admission
+// guard as every other persisted runtime. A runtime row can survive an
+// incomplete materialization by its owning session.
+func TestPreparedWorkspaceInventoryRequestRequiresReuseForPersistedRuntime(t *testing.T) {
+	repo := newMockRepository()
+	repo.executors["executor-1"] = &models.Executor{ID: "executor-1", Type: models.ExecutorTypeWorktree}
+	repo.taskRepositories["task-repository"] = &models.TaskRepository{ID: "task-repository", TaskID: "task", RepositoryID: "repository"}
+	executor := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session", TaskEnvironmentID: "environment"}
+	env := &models.TaskEnvironment{ID: "environment", Status: models.TaskEnvironmentStatusReady, MaterializationSessionID: session.ID}
+
+	req := executor.preparedWorkspaceInventoryRequest(context.Background(), &v1.Task{ID: "task", WorkspaceID: "workspace"}, session, "executor-1", nil, env)
+	if !req.WorkspaceReuseRequired {
+		t.Fatal("prepared runtime disabled workspace inventory admission")
+	}
+}
+
 // TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys pins the guard
 // that prevents a SECOND session on the same task from inheriting the FIRST
 // session's session-scoped runtime resources — agentctl PID/port, remote
@@ -1014,8 +1066,9 @@ func TestReuseExistingEnvironment_FreshRepoRecoveryDropsContainerHandle(t *testi
 // remote task dir, workdir root, proxy jump) MUST still propagate so the
 // second session connects to the same host and reuses the task dir.
 func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
-	req := &LaunchAgentRequest{TaskID: "task-1"}
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-2", ExecutorType: string(models.ExecutorTypeSSH)}
 	running := &models.ExecutorRunning{
+		SessionID:        "sess-1",
 		AgentExecutionID: "exec-prev",
 		Metadata: map[string]interface{}{
 			// Connection config — should propagate.
@@ -1040,8 +1093,8 @@ func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
 
 	applyExecutorRunningMetadata(req, running)
 
-	if req.PreviousExecutionID != "exec-prev" {
-		t.Errorf("PreviousExecutionID = %q, want exec-prev", req.PreviousExecutionID)
+	if req.PreviousExecutionID != "" {
+		t.Errorf("PreviousExecutionID = %q, want empty for sibling session", req.PreviousExecutionID)
 	}
 	if req.Metadata == nil {
 		t.Fatal("req.Metadata is nil; expected propagated keys")
@@ -1068,6 +1121,8 @@ func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
 		lifecycle.MetadataKeySSHRemoteAgentctlPID,
 		lifecycle.MetadataKeySSHLocalForwardPort,
 		lifecycle.MetadataKeySSHRemoteAgentctlURL,
+		lifecycle.MetadataKeySSHRuntimeAPILocalURL,
+		lifecycle.MetadataKeySSHRuntimeAPIRemotePort,
 		lifecycle.MetadataKeyOfficeAgentProfileID,
 	}
 	for _, k := range sessionScoped {
@@ -1103,7 +1158,7 @@ func TestApplyExecutorRunningMetadata_DoesNotResumeSiblingKubernetesSession(t *t
 	}
 }
 
-func TestApplyExecutorRunningMetadata_KubernetesResumeRequiresExactSessionAuthority(t *testing.T) {
+func TestApplyExecutorRunningMetadata_ResumeRequiresExactSessionAuthority(t *testing.T) {
 	tests := []struct {
 		name           string
 		requestType    string
@@ -1141,9 +1196,17 @@ func TestApplyExecutorRunningMetadata_KubernetesResumeRequiresExactSessionAuthor
 			runningSession: "session-1",
 		},
 		{
-			name: "legacy runtime keeps cross-session environment reuse", requestType: string(models.ExecutorTypeLocal),
+			name: "non-Kubernetes sibling session starts fresh", requestType: string(models.ExecutorTypeLocal),
 			requestSession: "session-new", runtime: agentruntime.RuntimeStandalone,
-			runningSession: "session-old", wantPrevious: "execution-old",
+			runningSession: "session-old",
+		},
+		{
+			name: "non-Kubernetes missing request session starts fresh", requestType: string(models.ExecutorTypeLocal),
+			runtime: agentruntime.RuntimeStandalone, runningSession: "session-old",
+		},
+		{
+			name: "non-Kubernetes missing recorded session starts fresh", requestType: string(models.ExecutorTypeLocal),
+			requestSession: "session-new", runtime: agentruntime.RuntimeStandalone,
 		},
 	}
 

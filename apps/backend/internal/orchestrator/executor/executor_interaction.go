@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -124,28 +125,202 @@ func (e *Executor) StopSessionDetailed(
 // stopWithSession preserves the legacy error-only contract. It intentionally
 // keeps session persistence best-effort and schedules teardown whenever a live
 // execution was found; existing UI and cleanup callers rely on that behavior.
+//
+// Stop ownership is registered before the CANCELLED write, not after: a
+// concurrent StartAgentProcess failure classifies CANCELLED as terminal and
+// claims forced cleanup for itself only when no owner is registered yet. If
+// the state write were visible first, that failure could win the claim and
+// issue its own teardown while this call also schedules one.
 func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSession, reason string, force bool) error {
-	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
+	sessionLock := e.getSessionLock(session.ID)
+	sessionLock.Lock()
+	defer sessionLock.Unlock()
+
+	executionID, err := e.resolveExecutionIDForStop(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+
+	return e.stopWithSessionExecution(ctx, session, executionID, reason, force, true)
+}
+
+// stopWithSessionExecution records stop ownership and schedules teardown for
+// the supplied execution. When cancelSession is true, it also transitions the
+// current session to CANCELLED. Callers must hold the session lock when they
+// need to coordinate this decision with resume or launch.
+func (e *Executor) stopWithSessionExecution(
+	ctx context.Context,
+	session *models.TaskSession,
+	executionID, reason string,
+	force, cancelSession bool,
+) error {
+	e.logStop(session, executionID, reason, force)
+	e.registerStopOwner(session.ID, executionID, force)
+	if cancelSession {
+		// A session already in a terminal state carries its own outcome (for
+		// example, a launch failure's error_message). transitionSessionState
+		// re-reads the current row, so a terminal race cannot be clobbered.
+		if _, _, err := e.transitionSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); err != nil {
+			e.logger.Error("failed to update agent session status",
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+		}
+	}
+	e.scheduleStop(ctx, session.ID, executionID, reason, force)
+	return nil
+}
+
+// resolveExecutionIDForStop looks up the live execution for sessionID,
+// applying the same not-found classification stopWithSession has always
+// used. Shared by stopWithSession and the registry-recovered paths in
+// StopByTaskID — it takes a bare session ID rather than a loaded row because
+// the registry-only path may not have one (see stopRegistryRecoveredByID).
+func (e *Executor) resolveExecutionIDForStop(ctx context.Context, sessionID string) (string, error) {
+	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {
 		if err != nil {
 			if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
-				return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
+				return "", fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
 			}
-			return fmt.Errorf("%w: lookup execution for session %q: %w", ErrExecutionNotFound, session.ID, err)
+			return "", fmt.Errorf("%w: lookup execution for session %q: %w", ErrExecutionNotFound, sessionID, err)
 		}
-		return ErrExecutionNotFound
+		return "", ErrExecutionNotFound
+	}
+	return executionID, nil
+}
+
+// registerStopOwner records advisory stop ownership ahead of a terminal
+// session mutation this call is about to make. Callers with no interleaved
+// mutation (stopRegistryRecoveredSession) may register and schedule together
+// via registerAndScheduleStop instead.
+func (e *Executor) registerStopOwner(sessionID, executionID string, force bool) {
+	if e.onExecutionStopOwnerRegistration != nil {
+		e.onExecutionStopOwnerRegistration(sessionID, executionID, force)
+	}
+}
+
+// registryRecoveredSession keeps the database row paired with the exact
+// execution captured from the registry snapshot.
+type registryRecoveredSession struct {
+	session   *models.TaskSession
+	reference lifecycle.ExecutionReference
+}
+
+// stopRegistryRecoveredSession stops the execution captured for a registry
+// only session. The per-session lock serializes the state and identity check
+// with resume. If the session is still active and still owns the captured
+// execution, use the normal cancellation transition. If a replacement owns
+// the session, schedule only the captured execution and leave the replacement
+// untouched.
+func (e *Executor) stopRegistryRecoveredSession(
+	ctx context.Context,
+	recovered registryRecoveredSession,
+	reason string,
+	force bool,
+) error {
+	session := recovered.session
+	reference := recovered.reference
+	if session == nil || session.ID == "" || reference.SessionID != session.ID || reference.ExecutionID == "" {
+		return fmt.Errorf("invalid registry recovery reference for task session")
 	}
 
-	e.logStop(session, executionID, reason, force)
-	if e.onExecutionStopOwnerRegistration != nil {
-		e.onExecutionStopOwnerRegistration(session.ID, executionID, force)
-	}
-	if dbErr := e.updateSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
-		e.logger.Error("failed to update agent session status",
+	sessionLock := e.getSessionLock(reference.SessionID)
+	sessionLock.Lock()
+	defer sessionLock.Unlock()
+
+	current := session
+	if refreshed, err := e.repo.GetTaskSession(ctx, session.ID); err == nil && refreshed != nil {
+		current = refreshed
+	} else if err != nil {
+		e.logger.Warn("failed to refresh registry-recovered session before stop; preserving captured execution",
+			zap.String("task_id", session.TaskID),
 			zap.String("session_id", session.ID),
-			zap.Error(dbErr))
+			zap.Error(err))
 	}
-	e.scheduleStop(ctx, session.ID, executionID, reason, force)
+
+	return e.stopCapturedExecution(ctx, session.TaskID, current, reference, reason, force)
+}
+
+// stopRegistryRecoveredByID stops the execution captured for a registry-only
+// session whose row could not be loaded during recovery. It never resolves a
+// replacement through the session index. A best-effort re-read can still
+// cancel the session when the row becomes available and owns the captured
+// execution; otherwise teardown is scheduled by the captured identity alone.
+func (e *Executor) stopRegistryRecoveredByID(
+	ctx context.Context,
+	taskID string,
+	reference lifecycle.ExecutionReference,
+	reason string,
+	force bool,
+) error {
+	if reference.SessionID == "" || reference.ExecutionID == "" {
+		return fmt.Errorf("invalid registry recovery reference for task %q", taskID)
+	}
+
+	sessionLock := e.getSessionLock(reference.SessionID)
+	sessionLock.Lock()
+	defer sessionLock.Unlock()
+
+	if session, err := e.repo.GetTaskSession(ctx, reference.SessionID); err == nil && session != nil {
+		return e.stopCapturedExecution(ctx, taskID, session, reference, reason, force)
+	} else if err != nil {
+		e.logger.Warn("failed to refresh registry-only session before stop; preserving captured execution",
+			zap.String("task_id", taskID),
+			zap.String("session_id", reference.SessionID),
+			zap.Error(err))
+	}
+
+	e.logger.Info("stopping registry-recovered execution with unloadable session row",
+		zap.String("task_id", taskID),
+		zap.String("session_id", reference.SessionID),
+		zap.String("agent_execution_id", reference.ExecutionID),
+		zap.String("reason", reason),
+		zap.Bool("force", force))
+	e.registerStopOwner(reference.SessionID, reference.ExecutionID, force)
+	e.scheduleStop(ctx, reference.SessionID, reference.ExecutionID, reason, force)
+	return nil
+}
+
+// stopCapturedExecution decides whether the captured execution still owns an
+// active session. The current execution lookup is used only for this equality
+// check; the stop target remains reference.ExecutionID in every branch.
+func (e *Executor) stopCapturedExecution(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	reference lifecycle.ExecutionReference,
+	reason string,
+	force bool,
+) error {
+	if session == nil || session.ID != reference.SessionID {
+		return fmt.Errorf("registry recovery session does not match captured session %q", reference.SessionID)
+	}
+	if session.TaskID != taskID {
+		e.logger.Warn("registry recovery session task does not match captured task; preserving captured execution",
+			zap.String("task_id", taskID),
+			zap.String("session_id", reference.SessionID),
+			zap.String("session_task_id", session.TaskID),
+			zap.String("agent_execution_id", reference.ExecutionID))
+		e.registerStopOwner(reference.SessionID, reference.ExecutionID, force)
+		e.scheduleStop(ctx, reference.SessionID, reference.ExecutionID, reason, force)
+		return nil
+	}
+	currentExecutionID, err := e.agentManager.GetExecutionIDForSession(ctx, reference.SessionID)
+	if err == nil && currentExecutionID == reference.ExecutionID && models.IsTaskLookupActiveSessionState(session.State) {
+		return e.stopWithSessionExecution(ctx, session, reference.ExecutionID, reason, force, true)
+	}
+
+	e.logger.Info("stopping registry-recovered execution",
+		zap.String("task_id", session.TaskID),
+		zap.String("session_id", reference.SessionID),
+		zap.String("agent_execution_id", reference.ExecutionID),
+		zap.String("current_agent_execution_id", currentExecutionID),
+		zap.String("session_state", string(session.State)),
+		zap.String("reason", reason),
+		zap.Bool("force", force),
+		zap.Error(err))
+	e.registerStopOwner(reference.SessionID, reference.ExecutionID, force)
+	e.scheduleStop(ctx, reference.SessionID, reference.ExecutionID, reason, force)
 	return nil
 }
 
@@ -169,6 +344,9 @@ func (e *Executor) stopSession(
 	}
 
 	e.logStop(session, executionID, reason, force)
+	if e.onExecutionStopOwnerRegistration != nil {
+		e.onExecutionStopOwnerRegistration(session.ID, executionID, force)
+	}
 
 	changed, finalState, stateErr := e.transitionSessionState(
 		ctx,
@@ -231,18 +409,23 @@ func (e *Executor) StopExecution(ctx context.Context, executionID string, reason
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 	if err := e.agentManager.StopAgentWithReason(ctx, executionID, reason, force); err != nil {
+		if errors.Is(err, lifecycle.ErrExecutionNotFound) || errors.Is(err, runtimeapi.ErrNotFound) {
+			return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
+		}
 		e.logger.Warn("failed to stop agent by execution id",
 			zap.String("agent_execution_id", executionID),
 			zap.Error(err))
-		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
-			return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
-		}
 		return fmt.Errorf("%w: stop execution %q: %w", ErrExecutionNotFound, executionID, err)
 	}
 	return nil
 }
 
-// StopByTaskID stops all active executions for a task
+// StopByTaskID stops all active executions for a task. It resolves what to
+// stop from the union of the database's active-session query and the
+// in-memory execution registry, so a session that is terminal in the
+// database but still holds a registered execution (an orphan left by a
+// failed teardown attempt) is reachable too — see
+// docs/specs/tasks/system-design/task-stop-reachability.md.
 func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason string, force bool) error {
 	// Get all active sessions for this task from database
 	sessions, err := e.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
@@ -253,7 +436,9 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 		return ErrExecutionNotFound
 	}
 
-	if len(sessions) == 0 {
+	recovered, unloadable, recoverErr := e.recoverRegistryOnlySessions(ctx, taskID, sessions)
+
+	if len(sessions) == 0 && len(recovered) == 0 && len(unloadable) == 0 {
 		return ErrExecutionNotFound
 	}
 
@@ -270,12 +455,96 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 			stoppedCount++
 		}
 	}
+	for _, recoveredSession := range recovered {
+		if err := e.stopRegistryRecoveredSession(ctx, recoveredSession, reason, force); err != nil {
+			e.logger.Warn("failed to stop registry-recovered session",
+				zap.String("task_id", taskID),
+				zap.String("session_id", recoveredSession.reference.SessionID),
+				zap.Error(err))
+			lastErr = err
+		} else {
+			stoppedCount++
+		}
+	}
+	for _, reference := range unloadable {
+		if err := e.stopRegistryRecoveredByID(ctx, taskID, reference, reason, force); err != nil {
+			e.logger.Warn("failed to stop registry-recovered execution with unloadable session row",
+				zap.String("task_id", taskID),
+				zap.String("session_id", reference.SessionID),
+				zap.Error(err))
+			lastErr = err
+		} else {
+			stoppedCount++
+		}
+	}
+
+	// A registry-only orphan whose row failed to load is still targeted by its
+	// captured execution ID (stopRegistryRecoveredByID), so recoverErr no
+	// longer means that execution was unreachable — only that its terminal
+	// state could not be confirmed or corrected from here. Distinguish a
+	// caller that already saw at least one execution stop (soft: log and
+	// continue) from one where nothing could be reached at all (hard
+	// failure), same as before this recovery path existed.
+	if recoverErr != nil {
+		if stoppedCount > 0 {
+			return fmt.Errorf("%w: task %q: %w", ErrOrphanRecoveryIncomplete, taskID, recoverErr)
+		}
+		return fmt.Errorf("task %q has a registered execution but its session could not be loaded: %w", taskID, recoverErr)
+	}
 
 	if stoppedCount == 0 && lastErr != nil {
 		return lastErr
 	}
 
 	return nil
+}
+
+// recoverRegistryOnlySessions loads the session rows for executions the
+// registry still holds for taskID but that the active-session query did not
+// return. Each loaded row stays paired with the exact execution reference
+// captured from the registry. A row that cannot be loaded is still returned by
+// that reference, rather than dropped, so teardown can be scheduled without a
+// later session-index lookup. Only the last load error is kept; one surfaced
+// failure is enough to stop the caller from reporting a false all-clear, and a
+// caller that wants to retry re-derives the full set on the next call.
+func (e *Executor) recoverRegistryOnlySessions(
+	ctx context.Context, taskID string, activeSessions []*models.TaskSession,
+) (recovered []registryRecoveredSession, unloadable []lifecycle.ExecutionReference, loadErr error) {
+	registeredExecutions := e.agentManager.ListExecutionsForTask(taskID)
+	if len(registeredExecutions) == 0 {
+		return nil, nil, nil
+	}
+
+	alreadyActive := make(map[string]struct{}, len(activeSessions))
+	for _, session := range activeSessions {
+		alreadyActive[session.ID] = struct{}{}
+	}
+
+	for _, reference := range registeredExecutions {
+		if reference.SessionID == "" || reference.ExecutionID == "" {
+			loadErr = fmt.Errorf("registry returned incomplete execution reference for task %q", taskID)
+			continue
+		}
+		if _, ok := alreadyActive[reference.SessionID]; ok {
+			continue
+		}
+		session, err := e.repo.GetTaskSession(ctx, reference.SessionID)
+		if err != nil || session == nil {
+			e.logger.Warn("failed to load registry-recovered session row for task stop; stopping by captured execution ID",
+				zap.String("task_id", taskID),
+				zap.String("session_id", reference.SessionID),
+				zap.Error(err))
+			if err != nil {
+				loadErr = err
+			}
+			unloadable = append(unloadable, reference)
+			continue
+		}
+		recovered = append(recovered, registryRecoveredSession{
+			session: session, reference: reference,
+		})
+	}
+	return recovered, unloadable, loadErr
 }
 
 // stopReasonPassthrough is the StopReason returned by Executor.Prompt when a
@@ -285,6 +554,7 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 const stopReasonPassthrough = "passthrough_dispatched"
 
 var ErrPromptDispatchCallbackUnsupported = errors.New("agent manager does not support prompt dispatch callback")
+var ErrPromptAdmissionCallbackUnsupported = errors.New("agent manager does not support prompt admission callback")
 
 // ErrSteerNotDispatched reports that no active prompt generation accepted a
 // steer. The orchestrator must route this outcome through ordinary admission.
@@ -305,24 +575,102 @@ var ErrSteerAttachmentMaterialization = lifecycle.ErrSteerAttachmentMaterializat
 // a thin nil-callback delegation for tests and any future caller that has no
 // dispatch callback to provide.
 func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
-	return e.PromptWithDispatchCallback(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, preloadedSession...)
+	return e.PromptWithDispatchCallbackAndSubmissionID(
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, "", preloadedSession...,
+	)
 }
 
 // PromptWithDispatchCallback invokes onDispatched after agentctl accepts the
 // prompt but before waiting for the turn to complete.
 func (e *Executor) PromptWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
-	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, false, preloadedSession...)
+	return e.promptWithAdmissionCallbackAndSubmissionID(
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, "", false,
+		preloadedSession...,
+	)
+}
+
+// PromptWithAdmissionCallback lets the task service revalidate its dispatch
+// reservation after runtime preparation and before provider admission.
+func (e *Executor) PromptWithAdmissionCallback(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+	preloadedSession ...*models.TaskSession,
+) (*PromptResult, error) {
+	return e.promptWithAdmissionCallbackAndSubmissionID(
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, "", false,
+		preloadedSession...,
+	)
+}
+
+// PromptWithAdmissionCallbackAndSubmissionID combines queue admission fencing
+// with the queue-owned identity of a durable delivery submission.
+func (e *Executor) PromptWithAdmissionCallbackAndSubmissionID(
+	ctx context.Context,
+	taskID, sessionID string,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+	submissionID string,
+	preloadedSession ...*models.TaskSession,
+) (*PromptResult, error) {
+	return e.promptWithAdmissionCallbackAndSubmissionID(
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, submissionID, false,
+		preloadedSession...,
+	)
+}
+
+// PromptWithDispatchCallbackAndSubmissionID carries a queue-owned submission
+// identity through the executor without changing ordinary prompt callers.
+func (e *Executor) PromptWithDispatchCallbackAndSubmissionID(
+	ctx context.Context,
+	taskID, sessionID string,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+	submissionID string,
+	preloadedSession ...*models.TaskSession,
+) (*PromptResult, error) {
+	return e.promptWithAdmissionCallbackAndSubmissionID(
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, submissionID, false,
+		preloadedSession...,
+	)
 }
 
 // SteerWithDispatchCallback delivers a steer into a still-generating turn. It
 // always uses the dispatch-callback path: steering is a dispatch-and-continue
 // action, so the caller keeps admission serialized until agentctl accepts it.
 func (e *Executor) SteerWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
-	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, true, preloadedSession...)
+	return e.promptWithAdmissionCallbackAndSubmissionID(
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, "", true,
+		preloadedSession...,
+	)
 }
 
 type promptAgentWithDispatchCallback interface {
 	PromptAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*PromptResult, error)
+}
+
+type promptAgentWithAdmissionCallback interface {
+	PromptAgentWithAdmissionCallback(context.Context, string, string, []v1.MessageAttachment, bool, func() error, func()) (*PromptResult, error)
+}
+
+type promptAgentWithAdmissionCallbackAndSubmissionID interface {
+	PromptAgentWithAdmissionCallbackAndSubmissionID(context.Context, string, string, []v1.MessageAttachment, bool, func() error, func(), string) (*PromptResult, error)
+}
+
+type promptAgentWithDispatchCallbackAndSubmissionID interface {
+	PromptAgentWithDispatchCallbackAndSubmissionID(context.Context, string, string, []v1.MessageAttachment, bool, func(), string) (*PromptResult, error)
+}
+
+type promptAgentWithSubmissionID interface {
+	PromptAgentWithSubmissionID(context.Context, string, string, []v1.MessageAttachment, bool, string) (*PromptResult, error)
 }
 
 // steerAgentWithDispatchCallback is the optional capability an agent manager
@@ -341,9 +689,47 @@ func (e *Executor) dispatchToAgent(
 	executionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
+	beforeAdmission func() error,
 	onDispatched func(),
 	steer bool,
+	submissionID string,
 ) (*PromptResult, error) {
+	if beforeAdmission != nil && submissionID != "" {
+		if steer {
+			return nil, ErrPromptAdmissionCallbackUnsupported
+		}
+		notifier, ok := e.agentManager.(promptAgentWithAdmissionCallbackAndSubmissionID)
+		if !ok {
+			return nil, ErrPromptAdmissionCallbackUnsupported
+		}
+		return notifier.PromptAgentWithAdmissionCallbackAndSubmissionID(
+			ctx, executionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, submissionID,
+		)
+	}
+	if beforeAdmission != nil {
+		if steer {
+			return nil, ErrPromptAdmissionCallbackUnsupported
+		}
+		notifier, ok := e.agentManager.(promptAgentWithAdmissionCallback)
+		if !ok {
+			return nil, ErrPromptAdmissionCallbackUnsupported
+		}
+		return notifier.PromptAgentWithAdmissionCallback(
+			ctx, executionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched,
+		)
+	}
+	if submissionID != "" {
+		if steer {
+			return nil, ErrPromptDispatchCallbackUnsupported
+		}
+		notifier, ok := e.agentManager.(promptAgentWithDispatchCallbackAndSubmissionID)
+		if !ok {
+			return nil, ErrPromptDispatchCallbackUnsupported
+		}
+		return notifier.PromptAgentWithDispatchCallbackAndSubmissionID(
+			ctx, executionID, prompt, attachments, dispatchOnly, onDispatched, submissionID,
+		)
+	}
 	if steer {
 		steerer, ok := e.agentManager.(steerAgentWithDispatchCallback)
 		if !ok {
@@ -358,10 +744,28 @@ func (e *Executor) dispatchToAgent(
 		}
 		return notifier.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
 	}
+	if submissionID != "" {
+		if notifier, ok := e.agentManager.(promptAgentWithSubmissionID); ok {
+			return notifier.PromptAgentWithSubmissionID(
+				ctx, executionID, prompt, attachments, dispatchOnly, submissionID,
+			)
+		}
+		return nil, ErrPromptDispatchCallbackUnsupported
+	}
 	return e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
 }
 
-func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), steer bool, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
+func (e *Executor) promptWithAdmissionCallbackAndSubmissionID(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+	submissionID string,
+	steer bool,
+	preloadedSession ...*models.TaskSession,
+) (*PromptResult, error) {
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -377,6 +781,9 @@ func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt 
 	}
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {
+		return nil, ErrExecutionNotFound
+	}
+	if session.AgentExecutionID != "" && executionID != session.AgentExecutionID {
 		return nil, ErrExecutionNotFound
 	}
 
@@ -395,14 +802,16 @@ func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt 
 	// dispatchOnly is intentionally not forwarded: PTY writes are inherently
 	// fire-and-forget, so the flag has no analogue in passthrough mode.
 	if e.agentManager.IsPassthroughSession(ctx, sessionID) {
-		result, err := e.promptPassthrough(ctx, taskID, session, prompt, attachments)
+		result, err := e.promptPassthrough(ctx, taskID, session, prompt, attachments, beforeAdmission)
 		if err == nil && onDispatched != nil {
 			onDispatched()
 		}
 		return result, err
 	}
 
-	result, err := e.dispatchToAgent(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched, steer)
+	result, err := e.dispatchToAgent(
+		ctx, executionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, steer, submissionID,
+	)
 	if err != nil {
 		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
 			return nil, ErrExecutionNotFound
@@ -425,7 +834,7 @@ func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt 
 // as an error so Service.handlePromptError can revert session state and surface
 // the failure to the user. A MarkPassthroughRunning failure is non-fatal — the
 // data is already in the PTY; only the AgentRunning event is missed.
-func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
+func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment, beforeAdmission func() error) (*PromptResult, error) {
 	sessionID := session.ID
 	promptWithAttachments, err := e.buildPassthroughPromptWithAttachments(ctx, session, prompt, attachments)
 	if err != nil {
@@ -433,6 +842,11 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session
 	}
 	if strings.TrimSpace(promptWithAttachments) == "" {
 		return nil, fmt.Errorf("passthrough prompt cannot be empty")
+	}
+	if beforeAdmission != nil {
+		if err := beforeAdmission(); err != nil {
+			return nil, err
+		}
 	}
 	pt, err := e.agentManager.ResolvePassthroughConfig(ctx, sessionID)
 	if err != nil {
@@ -452,14 +866,28 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session
 			zap.Error(err))
 	}
 	for _, chunk := range agents.PlanPassthroughStdinChunks(promptWithAttachments, pt) {
-		if chunk.DelayBefore > 0 {
-			time.Sleep(chunk.DelayBefore)
+		if err := waitPassthroughChunkDelay(ctx, chunk.DelayBefore); err != nil {
+			return nil, err
 		}
 		if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, chunk.Data); err != nil {
 			return nil, fmt.Errorf("failed to write to passthrough stdin: %w", err)
 		}
 	}
 	return &PromptResult{StopReason: stopReasonPassthrough}, nil
+}
+
+func waitPassthroughChunkDelay(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment) (string, error) {
@@ -617,18 +1045,72 @@ func workspaceFromTaskEnvironment(env *models.TaskEnvironment) string {
 // the agent doesn't support in-place switching, it falls back to stopping and
 // restarting the agent with the new model.
 func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel, prompt string) (*PromptResult, error) {
+	return e.switchModel(ctx, taskID, sessionID, newModel, prompt, nil, nil, nil, nil)
+}
+
+// SwitchModelWithDispatchCallbacks is the model-switch variant used by a
+// resume-owned prompt. The fallback startup sends its initial prompt from a
+// lifecycle goroutine, so the caller must receive the actual acceptance or
+// pre-acceptance failure instead of treating StartAgentProcess as acceptance.
+func (e *Executor) SwitchModelWithDispatchCallbacks(
+	ctx context.Context,
+	taskID, sessionID, newModel, prompt string,
+	onDispatched func(executionID string),
+	onFailure func(),
+) (*PromptResult, error) {
+	return e.switchModel(ctx, taskID, sessionID, newModel, prompt, nil, onDispatched, onFailure, nil)
+}
+
+// SwitchModelWithAdmissionCallbacks adds a final admission callback for the
+// asynchronous initial prompt sent by a model-switch restart.
+func (e *Executor) SwitchModelWithAdmissionCallbacks(
+	ctx context.Context,
+	taskID, sessionID, newModel, prompt string,
+	beforeAdmission func(executionID string) error,
+	onDispatched func(executionID string),
+	onFailure func(),
+	onInPlaceSwitchFallback func(),
+) (*PromptResult, error) {
+	return e.switchModel(
+		ctx, taskID, sessionID, newModel, prompt,
+		beforeAdmission, onDispatched, onFailure, onInPlaceSwitchFallback,
+	)
+}
+
+func (e *Executor) switchModel(
+	ctx context.Context,
+	taskID, sessionID, newModel, prompt string,
+	beforeAdmission func(executionID string) error,
+	onDispatched func(executionID string),
+	onFailure func(),
+	onInPlaceSwitchFallback func(),
+) (*PromptResult, error) {
 	e.logger.Info("switching model for session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("new_model", newModel))
 
-	// Try in-place model switch first.
+	// Try in-place model switch first. A queued prompt's admission gate fences
+	// the mutable ACP setting and its persisted snapshot with the same
+	// cancellation identity used by the later provider prompt admission.
+	if beforeAdmission != nil {
+		executionID, err := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
+		if err != nil || executionID == "" {
+			return nil, ErrExecutionNotFound
+		}
+		if err := beforeAdmission(executionID); err != nil {
+			return nil, err
+		}
+	}
 	if err := e.agentManager.SetSessionModelBySessionID(ctx, sessionID, newModel); err == nil {
 		e.logger.Info("model switched in-place via ACP model selection",
 			zap.String("session_id", sessionID),
 			zap.String("new_model", newModel))
 		e.persistInPlaceModelSwitch(ctx, sessionID, newModel)
 		return &PromptResult{StopReason: "model_switched_in_place"}, nil
+	}
+	if onInPlaceSwitchFallback != nil {
+		onInPlaceSwitchFallback()
 	}
 
 	e.logger.Debug("in-place model switch not available, falling back to agent restart",
@@ -654,8 +1136,22 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		return nil, err
 	}
 
-	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
-	if err := e.stopPreparedModelSwitchAgent(ctx, executionID); err != nil {
+	selectedEnv, err := e.resolveEnvironmentForAdmission(ctx, task.ID, req.TaskEnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	recoveryAdmission, err := e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, req.ExecutorType, false, 0, true)
+	if err != nil {
+		return nil, err
+	}
+	launchCtx := ctx
+	if recoveryAdmission != nil {
+		launchCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
+	}
+	defer func() { _ = releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission) }()
+
+	req.Env = e.applyPreferredShellEnv(launchCtx, req.ExecutorType, req.Env)
+	if err := e.stopPreparedModelSwitchAgent(launchCtx, executionID); err != nil {
 		return nil, err
 	}
 
@@ -668,7 +1164,10 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		zap.Bool("use_worktree", req.UseWorktree),
 		zap.String("repository_path", req.RepositoryPath))
 
-	if err := e.launchModelSwitchAgent(ctx, task.ID, sessionID, newModel, session, req, existingRunning); err != nil {
+	if err := e.launchModelSwitchAgent(
+		launchCtx, task.ID, sessionID, newModel, session, req, existingRunning,
+		beforeAdmission, onDispatched, onFailure,
+	); err != nil {
 		return nil, err
 	}
 
@@ -837,7 +1336,16 @@ func (e *Executor) stopPreparedModelSwitchAgent(
 }
 
 // launchModelSwitchAgent launches the new agent, persists state, and starts the process.
-func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID, newModel string, session *models.TaskSession, req *LaunchAgentRequest, existingRunning *models.ExecutorRunning) error {
+func (e *Executor) launchModelSwitchAgent(
+	ctx context.Context,
+	taskID, sessionID, newModel string,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	existingRunning *models.ExecutorRunning,
+	beforeAdmission func(executionID string) error,
+	onDispatched func(executionID string),
+	onFailure func(),
+) error {
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
 	if err != nil {
 		e.logger.Error("failed to launch agent with new model",
@@ -845,6 +1353,12 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return fmt.Errorf("failed to launch agent with new model: %w", err)
+	}
+	if err := e.registerModelSwitchInitialPromptCallbacks(
+		resp.AgentExecutionID, beforeAdmission, onDispatched, onFailure,
+	); err != nil {
+		e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
+		return err
 	}
 
 	if err := e.persistModelSwitchState(ctx, taskID, sessionID, session, newModel); err != nil {
@@ -875,6 +1389,88 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 		zap.String("agent_execution_id", resp.AgentExecutionID))
 
 	return nil
+}
+
+func (e *Executor) registerModelSwitchInitialPromptCallbacks(
+	executionID string,
+	beforeAdmission func(executionID string) error,
+	onDispatched func(executionID string),
+	onFailure func(),
+) error {
+	if beforeAdmission != nil {
+		return e.registerInitialPromptAdmissionCallbacks(executionID, beforeAdmission, onDispatched, onFailure)
+	}
+	if onDispatched == nil && onFailure == nil {
+		return nil
+	}
+	return e.registerInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
+}
+
+func (e *Executor) registerInitialPromptAdmissionCallbacks(
+	executionID string,
+	beforeAdmission func(executionID string) error,
+	onDispatched func(executionID string),
+	onFailure func(),
+) error {
+	registrar, ok := e.agentManager.(interface {
+		RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+	})
+	if !ok {
+		return errors.New("agent manager cannot register initial prompt admission callbacks")
+	}
+	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
+		executionID,
+		func() error { return beforeAdmission(executionID) },
+		func() {
+			if onDispatched != nil {
+				onDispatched(executionID)
+			}
+		},
+		onFailure,
+	); err != nil {
+		return fmt.Errorf("failed to register initial prompt admission callbacks: %w", err)
+	}
+	return nil
+}
+
+func (e *Executor) registerInitialPromptDispatchCallbacks(
+	executionID string,
+	onDispatched func(executionID string),
+	onFailure func(),
+) error {
+	if onDispatched == nil && onFailure == nil {
+		return nil
+	}
+	registrar, ok := e.agentManager.(interface {
+		RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
+	})
+	if !ok {
+		return errors.New("agent manager cannot register initial prompt dispatch callbacks")
+	}
+	if err := registrar.RegisterInitialPromptDispatchCallbacks(
+		executionID,
+		func() {
+			if onDispatched != nil {
+				onDispatched(executionID)
+			}
+		},
+		onFailure,
+	); err != nil {
+		return fmt.Errorf("failed to register initial prompt dispatch callbacks: %w", err)
+	}
+	return nil
+}
+
+func (e *Executor) registerInitialPromptCallbacks(
+	executionID string,
+	beforeAdmission func(executionID string) error,
+	onDispatched func(executionID string),
+	onFailure func(),
+) error {
+	if beforeAdmission != nil {
+		return e.registerInitialPromptAdmissionCallbacks(executionID, beforeAdmission, onDispatched, onFailure)
+	}
+	return e.registerInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
 }
 
 // buildSwitchModelRequest constructs a LaunchAgentRequest for a model switch, applying
@@ -931,6 +1527,7 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 	for _, repoInfo := range allRepos {
 		if repoInfo.RepositoryID == session.RepositoryID {
 			req.ComparisonTarget = repoInfo.ComparisonTarget
+			req.QualifiedPRBase = repoInfo.QualifiedPRBase
 			break
 		}
 	}

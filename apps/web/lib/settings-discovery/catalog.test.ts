@@ -18,6 +18,7 @@ const STORAGE_DISCOVERY_IDS = [
 const STABLE_CONTROL_IDS = [
   "appearance-color-theme",
   "appearance-rich-output-motion",
+  "appearance-chat-motion",
   "appearance-startup-page",
   "appearance-display-language",
   "terminal-preferred-shell",
@@ -50,6 +51,16 @@ const translate = (key: string) =>
   )[key] ?? key;
 
 describe("settings discovery catalog invariants", () => {
+  it("places sidebar customization under the Layouts page", () => {
+    const sidebar = SETTINGS_DISCOVERY_DEFINITIONS.find((entry) => entry.id === "layouts-sidebar");
+
+    expect(sidebar).toMatchObject({
+      kind: "section",
+      parentId: "preferences-layouts",
+      href: "/settings/preferences/layouts?tab=sidebar",
+    });
+  });
+
   it("uses unique ids, valid parents, and targets for every control", () => {
     const ids = new Set(SETTINGS_DISCOVERY_DEFINITIONS.map((entry) => entry.id));
     const targets = SETTINGS_DISCOVERY_DEFINITIONS.flatMap((entry) =>
@@ -197,8 +208,12 @@ describe("resolveSettingsDiscovery dynamic entries", () => {
       ],
       executors: [
         {
-          type: "docker",
+          type: "local_docker",
           profiles: [{ id: "executor / one", name: "Docker Local" }],
+        },
+        {
+          type: "ssh",
+          profiles: [{ id: "ssh profile / two", name: "SSH Remote" }],
         },
       ],
     });
@@ -211,6 +226,9 @@ describe("resolveSettingsDiscovery dynamic entries", () => {
     );
     expect(resolved.find((entry) => entry.id === "executor-profile:executor / one")?.href).toBe(
       "/settings/executors/executor%20%2F%20one",
+    );
+    expect(resolved.find((entry) => entry.id === "executor-profile:ssh profile / two")?.href).toBe(
+      "/settings/executors/ssh%20profile%20%2F%20two",
     );
     expect(resolved.find((entry) => entry.id === "workspace:workspace / one:name")?.href).toBe(
       "/settings/workspaces/workspace%20%2F%20one#setting-workspace-workspace%20%2F%20one-name",
@@ -245,6 +263,49 @@ describe("resolveSettingsDiscovery dynamic entries", () => {
     expect(workspace?.breadcrumb).toEqual(["Workspaces"]);
     expect(repository?.label).toBe("Repositories");
     expect(repository?.breadcrumb).toEqual(["Workspaces", "Personal value"]);
+  });
+});
+
+// Split from the block above to stay inside the per-function line limit: this
+// half is only about the flag-gated Coordinators discovery entry.
+describe("resolveSettingsDiscovery coordinators entry (D1)", () => {
+  const WORKSPACE = { id: "workspace-coord-1", name: "Coordinator Workspace" };
+
+  it("omits the per-workspace Coordinators entry when the flag is off", () => {
+    const resolved = resolveSettingsDiscovery({
+      t,
+      showAccount: false,
+      showUsers: false,
+      showOrganizations: false,
+      workspaces: [WORKSPACE],
+      agents: [],
+      executors: [],
+      coordinatorEnabled: false,
+    });
+
+    expect(resolved.some((entry) => entry.id === "workspace:workspace-coord-1:coordinators")).toBe(
+      false,
+    );
+  });
+
+  it("adds a per-workspace Coordinators entry when the flag is on", () => {
+    const resolved = resolveSettingsDiscovery({
+      t,
+      showAccount: false,
+      showUsers: false,
+      showOrganizations: false,
+      workspaces: [WORKSPACE],
+      agents: [],
+      executors: [],
+      coordinatorEnabled: true,
+    });
+    const coordinators = resolved.find(
+      (entry) => entry.id === "workspace:workspace-coord-1:coordinators",
+    );
+
+    expect(coordinators?.label).toBe("Coordinators");
+    expect(coordinators?.href).toBe("/settings/workspaces/workspace-coord-1/coordinators");
+    expect(coordinators?.breadcrumb).toEqual(["Workspaces", "Coordinator Workspace"]);
   });
 });
 

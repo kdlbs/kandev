@@ -6,6 +6,7 @@ import { IconCheck, IconChevronDown, IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { prioritizeSelectedOption, selectorOptionClassName } from "@/lib/utils/selector-options";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import {
   Command,
   CommandEmpty,
@@ -43,6 +44,7 @@ interface ComboboxProps {
   value: string;
   onValueChange: (value: string) => void;
   ariaLabel?: string;
+  ariaDescribedBy?: string;
   dropdownLabel?: string;
   placeholder?: string;
   searchPlaceholder?: string;
@@ -70,6 +72,8 @@ interface ComboboxProps {
   triggerId?: string;
   /** Ref for consumers that anchor a local confirmation to this trigger. */
   triggerRef?: Ref<HTMLButtonElement>;
+  /** Notifies consumers when the popover opens or closes. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 function TriggerLabel({
@@ -163,6 +167,7 @@ function ComboboxTrigger({
   options,
   value,
   ariaLabel,
+  ariaDescribedBy,
   open,
   disabled,
   touchTarget,
@@ -177,6 +182,7 @@ function ComboboxTrigger({
   options: ComboboxOption[];
   value: string;
   ariaLabel?: string;
+  ariaDescribedBy?: string;
   open: boolean;
   disabled: boolean;
   touchTarget: boolean;
@@ -196,11 +202,13 @@ function ComboboxTrigger({
         variant="ghost"
         role="combobox"
         aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
         aria-expanded={open}
         className={cn(
+          controlSizingClassName("standard"),
           "w-full justify-between",
           !disabled && "cursor-pointer",
-          touchTarget && "min-h-12",
+          touchTarget && "max-md:min-h-12 [@media(pointer:coarse)]:min-h-12",
           triggerClassName,
         )}
         disabled={disabled}
@@ -222,12 +230,56 @@ function ComboboxTrigger({
     </PopoverTrigger>
   );
 }
+function handleComboboxOpenChange(
+  next: boolean,
+  value: string,
+  setOpen: (open: boolean) => void,
+  setHighlighted: (value: string) => void,
+  onOpenChange?: (open: boolean) => void,
+) {
+  setOpen(next);
+  if (next) setHighlighted(value);
+  onOpenChange?.(next);
+}
+
+function selectComboboxOption({
+  selectedValue,
+  currentValue,
+  onValueChange,
+  setOpen,
+  onOpenChange,
+}: {
+  selectedValue: string;
+  currentValue: string;
+  onValueChange: (value: string) => void;
+  setOpen: (open: boolean) => void;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const nextValue = selectedValue === currentValue ? "" : selectedValue;
+  onValueChange(nextValue);
+  setOpen(false);
+  onOpenChange?.(false);
+}
+
+function ComboboxHeader({
+  dropdownLabel,
+  headerAction,
+}: Pick<ComboboxProps, "dropdownLabel" | "headerAction">) {
+  if (!dropdownLabel && !headerAction) return null;
+  return (
+    <div className="text-muted-foreground flex items-center justify-between gap-2 border-b px-2 py-1 text-xs">
+      <span>{dropdownLabel}</span>
+      {headerAction}
+    </div>
+  );
+}
 
 export const Combobox = memo(function Combobox({
   options,
   value,
   onValueChange,
   ariaLabel,
+  ariaDescribedBy,
   dropdownLabel,
   placeholder = t("common:selectOption"),
   searchPlaceholder = t("common:searchPlaceholder"),
@@ -248,6 +300,7 @@ export const Combobox = memo(function Combobox({
   touchTarget = false,
   triggerId,
   triggerRef,
+  onOpenChange,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const portalContainer = useTaskCreateDialogPopoverContainer();
@@ -257,15 +310,15 @@ export const Combobox = memo(function Combobox({
   return (
     <Popover
       open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) setHighlighted(value);
-      }}
+      onOpenChange={(next) =>
+        handleComboboxOpenChange(next, value, setOpen, setHighlighted, onOpenChange)
+      }
     >
       <ComboboxTrigger
         options={options}
         value={value}
         ariaLabel={ariaLabel}
+        ariaDescribedBy={ariaDescribedBy}
         open={open}
         disabled={disabled}
         touchTarget={touchTarget}
@@ -294,23 +347,28 @@ export const Combobox = memo(function Combobox({
           filter={filter}
           data-testid={dropdownTestId}
         >
-          {dropdownLabel || headerAction ? (
-            <div className="text-muted-foreground flex items-center justify-between gap-2 px-2 py-1 text-xs border-b">
-              <span>{dropdownLabel}</span>
-              {headerAction}
-            </div>
-          ) : null}
-          {showSearch && <CommandInput placeholder={searchPlaceholder} className="h-9" />}
+          <ComboboxHeader dropdownLabel={dropdownLabel} headerAction={headerAction} />
+          {showSearch && (
+            <CommandInput
+              placeholder={searchPlaceholder}
+              className={controlSizingClassName("standard")}
+            />
+          )}
           <CommandList>
             <CommandEmpty>{emptyMessage}</CommandEmpty>
             <OptionsList
               options={options}
               value={value}
               touchTarget={touchTarget}
-              onSelect={(v) => {
-                onValueChange(v === value ? "" : v);
-                setOpen(false);
-              }}
+              onSelect={(v) =>
+                selectComboboxOption({
+                  selectedValue: v,
+                  currentValue: value,
+                  onValueChange,
+                  setOpen,
+                  onOpenChange,
+                })
+              }
             />
           </CommandList>
         </Command>

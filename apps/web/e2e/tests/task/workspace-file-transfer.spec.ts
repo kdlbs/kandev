@@ -1,13 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { test, expect } from "../../fixtures/test-base";
+import { expect, resetSeedRepositoryCheckout, test, type SeedData } from "../../fixtures/test-base";
+import { SessionPage } from "../../pages/session-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import { waitForHttp } from "../../helpers/causal-waits";
-import {
-  GitHelper,
-  makeGitEnv,
-  openTaskSession,
-  createStandardProfile,
-} from "../../helpers/git-helper";
+import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
+import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 
 /**
  * End-to-end coverage for workspace file transfer.
@@ -30,18 +29,28 @@ async function openFilesPanel(
   taskTitle: string,
 ) {
   const profile = await createStandardProfile(apiClient, profileName);
-  await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
+  const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
     description: "/e2e:simple-message",
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
   });
-  const session = await openTaskSession(testPage, taskTitle);
+  expect(task.session_id).toBeTruthy();
+  await waitForSessionDone(apiClient, task.id, task.session_id!, "File transfer fixture settled");
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  await waitForSessionGitHydration(testPage, task.session_id!);
   await session.clickTab("Files");
   return session;
 }
 
-function seedRepo(backend: { tmpDir: string }, files: Record<string, string | Buffer>) {
+function seedRepo(
+  backend: { tmpDir: string },
+  seedData: SeedData,
+  files: Record<string, string | Buffer>,
+) {
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
   const git = new GitHelper(
     path.join(backend.tmpDir, "repos", "e2e-repo"),
     makeGitEnv(backend.tmpDir),
@@ -58,7 +67,7 @@ test.describe("Workspace file transfer", () => {
     seedData,
     backend,
   }) => {
-    seedRepo(backend, { "existing.ts": "seed" });
+    seedRepo(backend, seedData, { "existing.ts": "seed" });
 
     const session = await openFilesPanel(
       testPage,
@@ -88,7 +97,7 @@ test.describe("Workspace file transfer", () => {
     seedData,
     backend,
   }) => {
-    seedRepo(backend, { "taken.txt": "original" });
+    seedRepo(backend, seedData, { "taken.txt": "original" });
 
     const session = await openFilesPanel(
       testPage,
@@ -110,7 +119,15 @@ test.describe("Workspace file transfer", () => {
     // The dialog appears before anything is written.
     const dialog = testPage.getByRole("dialog");
     await expect(dialog).toBeVisible();
+    await waitForFiniteAnimations(dialog);
     await expect(dialog.getByText("taken.txt")).toBeVisible();
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+    const conflictChoices = dialog.getByRole("group").getByRole("button");
+    await expect(conflictChoices).toHaveCount(6);
+    // @covers AC-UI-CONTROL-SIZING-001.2
+    for (let index = 0; index < 6; index += 1) {
+      await expectControlHeight(conflictChoices.nth(index), 24);
+    }
 
     const uploaded = waitForHttp(testPage, "POST", UPLOAD_ROUTE, {
       predicate: (response) => response.status() === 201,
@@ -129,7 +146,7 @@ test.describe("Workspace file transfer", () => {
     seedData,
     backend,
   }) => {
-    seedRepo(backend, { "taken.txt": "original" });
+    seedRepo(backend, seedData, { "taken.txt": "original" });
 
     const session = await openFilesPanel(
       testPage,
@@ -171,7 +188,7 @@ test.describe("Workspace file transfer", () => {
     seedData,
     backend,
   }) => {
-    seedRepo(backend, { "existing.ts": "seed" });
+    seedRepo(backend, seedData, { "existing.ts": "seed" });
 
     const session = await openFilesPanel(
       testPage,
@@ -202,7 +219,7 @@ test.describe("Workspace file transfer", () => {
     seedData,
     backend,
   }) => {
-    seedRepo(backend, {
+    seedRepo(backend, seedData, {
       "archive.zip": Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x01, 0x02, 0xff, 0xfe]),
     });
 

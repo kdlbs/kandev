@@ -76,6 +76,7 @@ function toDraftStep(
     profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
       definition.profile_session_end_policy,
     ),
+    complete_task_on_enter: definition.complete_task_on_enter ?? false,
     auto_advance_requires_signal: definition.auto_advance_requires_signal,
     cancel_triggers_turn_complete: definition.cancel_triggers_turn_complete,
     wip_limit: definition.wip_limit,

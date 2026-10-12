@@ -166,6 +166,11 @@ test.describe("Workflow settings", () => {
     });
     await testPage.getByRole("option", { name: /Mock Smart/ }).click({ force: true });
     await expect(settings).toContainText("Mock Smart", { timeout: 15_000 });
+    // The shared picker stays open when dependent options are available. Close
+    // it explicitly so the next interaction starts from a deterministic state.
+    if ((await settings.getAttribute("aria-expanded")) === "true") {
+      await testPage.keyboard.press("Escape");
+    }
     await expect(settings).toHaveAttribute("aria-expanded", "false");
     await settings.click();
     const effortTrigger = testPage.getByTestId("config-option-trigger-effort");

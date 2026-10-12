@@ -71,7 +71,7 @@ func backendEnvForConfig(ports portConfig, logLevel, consoleLogLevel string, deb
 			env = upsertEnv(env, key, value)
 		}
 	}
-	return env
+	return withLocalAgentPath(env)
 }
 
 func stripAppliedProfileEnvironment(env []string) []string {

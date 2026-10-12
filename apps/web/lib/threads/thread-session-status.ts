@@ -52,6 +52,15 @@ const STATUS = {
   created: { kind: "created", labelKey: "threads:statusNotStarted", hasAttention: false },
 } satisfies Record<ThreadSessionStatusKind, ThreadStatus>;
 
+// The Inbox Failed tab has no session to resolve status from -- every row is
+// defined by the task's own terminal failed state (AC-UI-INBOX-FAILED-001.6,
+// .20). Exporting the existing `failed` entry lets that tab reach it
+// directly instead of fabricating a stand-in session for
+// resolveThreadSessionStatus, which would reintroduce the
+// pending_action-first precedence AC-UI-INBOX-FAILED-001.20a excludes. This
+// is a wider export of an existing entry, not a new or duplicated one.
+export const FAILED_TASK_STATUS: ThreadStatus = STATUS.failed;
+
 const REVIEW_READY: ThreadStatus = {
   kind: "review-ready",
   labelKey: "threads:statusReadyForReview",

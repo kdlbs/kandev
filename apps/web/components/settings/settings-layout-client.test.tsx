@@ -215,7 +215,7 @@ describe("SettingsLayoutClient breadcrumbs", () => {
     expect(link.className).toContain("md:hidden");
     const desktopText = screen
       .getAllByText("Settings")
-      .find((el) => el.tagName === "SPAN" && el.className.includes("md:inline"));
+      .find((el) => el.parentElement?.className.includes("md:inline"));
     expect(desktopText).toBeTruthy();
   });
 

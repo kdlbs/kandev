@@ -33,10 +33,11 @@ enable. Each is additive.
 
 ### Other non-goals
 
-- **Detecting whether an unsettled create is still alive.** No lease, heartbeat,
-  or owner token. This is the deliberate boundary of the feature.
-- **Repairing, resuming, adopting, or garbage-collecting unsettled tasks.**
-- **Any timeout or expiry on an unsettled task.**
+- **Caller-visible liveness or ownership.** Preparing creation has an internal
+  lease/handle, but Found responses expose neither and do not claim work is dead.
+- **Caller-driven repair, resume, adoption, reclamation, or garbage collection.**
+  Only the mandatory internal Runtime may recover the durable manifest.
+- **Caller-selected timeout or expiry for an unsettled task.**
 - **A tombstone for deleted identities.** See *Idempotency is scoped to the
   task's lifetime*.
 - **An MCP lookup tool.** MCP gets an idempotent create-if-absent, not a probe;
@@ -46,12 +47,8 @@ enable. Each is additive.
 - **System-generated external IDs.**
 - **Idempotency for anything other than task creation.** `spawn_session_kandev`
   is not covered.
-- **Restructuring the create handlers** so identity resolution precedes
-  handler-level validation. The consequence — payload and server-state drift can
-  fail a retry before dedupe — is documented, not engineered around.
 - **Retiring the existing integration dedupe tables.**
 - **Replacing the office `runs.idempotency_key` mechanism.**
-- **The office runtime `create_task` HTTP action.**
 - **Request-payload fingerprinting.**
 - **Cross-workspace uniqueness or a global namespace.**
 - **A UI surface** for entering, displaying, or releasing external IDs.
@@ -79,4 +76,14 @@ back here if a change is needed.
 
 
 
-- **AC-TASKS-EXTERNAL-ID-BOUNDARIES-001.1:** When a caller relies on creation idempotency, the system shall apply only the guarantees listed in scope and shall not infer crash repair or liveness.
+- **AC-TASKS-EXTERNAL-ID-BOUNDARIES-001.1:** A caller relying on creation
+  idempotency shall not infer liveness, ownership, or authority to repair,
+  complete, abort, reclaim, expire, or automatically release an unsettled task.
+- **AC-TASKS-EXTERNAL-ID-BOUNDARIES-001.2:** Handles, CreationPlan step state/
+  evidence, and recovery leases shall remain absent from REST, MCP, Office
+  runtime, and authenticated agentctl responses and usable only by the Created
+  coordinator or mandatory Runtime.
+- **AC-TASKS-EXTERNAL-ID-BOUNDARIES-001.3:** Deferred WebSocket/plugin
+  external-ID create support and integration/runs dedupe replacement shall
+  remain outside this package; lookup-first REST, MCP, Office runtime, and
+  authenticated agentctl handling plus aggregate release are in scope.

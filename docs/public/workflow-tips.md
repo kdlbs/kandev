@@ -20,6 +20,12 @@ Workflow prompts run with the selected executor's filesystem, credentials, and n
 3. Add automatic starts only when the executor, profile, and prompt are ready.
 4. Keep a human **Review** or **Do nothing** gate before risky changes ship.
 
+## One-time move options
+
+The workflow stepper and next-step controls keep a fast **Move here** path for ordinary transitions. Choose **Move with options** when one hand-off needs fresh context, extra one-time instructions, or should skip the destination step's saved prompt. These options are consumed by that transition only; the destination step's saved prompt and reset policy remain unchanged for later entries.
+
+Instructions are appended after the normal destination prompt, or replace it when you skip the step prompt. A move from an active agent is deferred until the current turn settles, so the reset, skip-prompt, and instructions stay together. On touch devices, the options form opens in a bottom Drawer. Pull-request draft/readiness remains a PR automation concern rather than a generic workflow move option.
+
 ## Built-in Kanban templates
 
 The template prompts are product behavior, not merely sample text. Review them before using a template in a repository with strict Git, test, or deployment rules. Kandev currently presents these five Kanban templates.
@@ -34,6 +40,13 @@ The template prompts are product behavior, not merely sample text. Review them b
 - A user message in **Review** moves the task back to **In Progress**. A message in **Done** also reopens it in **In Progress**.
 
 Choose this for short implementation work with a simple run-and-review loop.
+
+## Reorder workflow steps
+
+Saving a changed step order preserves each step's saved prompt, profile, and
+completion settings, including settings saved concurrently by another caller.
+If the reorder fails, the previous order is preserved. This guarantee applies
+to the reorder operation; saving multiple workflow settings uses separate writes.
 
 ## Duplicate a workflow
 
@@ -135,8 +148,22 @@ Workflow-level settings include the name and default agent profile. Each step ca
 | Auto-archive | Archives eligible tasks after the configured number of hours. `0` disables it; the background sweep runs every five minutes and uses task `updated_at`, so timing is approximate. |
 | Wait for agent completion signal | With an `on_turn_complete` transition, waits for the agent to call `step_complete_kandev`. A halt without the signal leaves the task on the current step; retry or reconnect the agent, or move the task through the normal workflow UI. Without this setting, a normal turn end counts as completion. Default is off. |
 | Run completion actions when a turn is cancelled | Also runs the step's `on_turn_complete` actions after an explicit user cancellation settles. A pending clarification, silent interruption, parent/task stop, provider failure, crash, or runtime teardown does not qualify. If the destination has `on_enter: auto_start_agent`, another agent turn can begin immediately. Default is off for custom steps; the built-in Kanban workflow enables it on Backlog and In Progress for newly created workflows; existing workflows are not backfilled. |
+| Complete task on entry | On the final step only, marks the task complete when it enters that step. The setting is saved per step, so moving a step changes which saved value is active. A value on a non-final step is retained but inactive. Default is off. |
 | WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A manual move into a full target succeeds and queues in that target. |
 | Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
+
+### Recover from a context reset failure
+
+When **Reset agent context** starts a fresh ACP session, Kandev restores the
+selected model, permission mode, and provider options before the next automatic
+prompt. If the provider rejects a setting, reset fails, or the request times
+out, Kandev leaves the session waiting for input and does not send that prompt.
+The conversation shows a previous-agent-error notice with the reset cause.
+
+To recover, delete the affected conversation from its session actions, then
+create a new session. The task workspace and files remain available. See
+[Sessions and Review](sessions-and-review.md) for the session actions and mobile
+session picker.
 
 The Kanban column shows the admitted count and limit, followed by a **Queued**
 section when overflow exists. The task sidebar shows a queue icon for each
@@ -150,7 +177,20 @@ a new session when none is available. **Start a new session** always creates a
 fresh conversation. The source step's **Complete the session** setting closes
 the conversation, while **Park the session** stops the agent and keeps the
 conversation available for reuse or manual follow-up. These settings default
-to reuse on start and complete on end.
+to reuse on start and park on end. An explicitly selected completion policy is
+preserved.
+
+### Continue a completed conversation
+
+Opening or reloading a completed task does not start its agent. If the task has a completed conversation, select **Resume** to continue that same conversation. The previous messages and provider context remain available, and the task keeps its completed state and workflow step. Select **New Agent** when you want a separate conversation. A follow-up does not run the completed step's workflow actions again.
+
+### Open a completed workspace
+
+Kandev restores a retained workspace when you open a completed task. This action restores Files, Changes, and supported workspace terminals. It does not resume the agent. It does not send a prompt.
+
+If workspace restoration fails, the affected panel shows **Workspace unavailable**. Select **Retry** to restore workspace access. Select **Technical details** to view bounded diagnostic information. The chat remains available while the workspace is unavailable.
+
+Select **Resume** in the completed conversation when you want the agent to continue. Workspace restoration and **Resume** are separate actions.
 
 Pull candidates are selected by board position, then priority, queue time, creation time, and ID. A candidate that cannot be moved is skipped. Pulling runs for every limited step; a feeder is only needed for overflow created outside the destination step.
 
@@ -159,6 +199,16 @@ Pull candidates are selected by board position, then priority, queue time, creat
 Workflow and step prompt fields use the inline prompt editor. Type `@` after whitespace to select a saved prompt. In a step prompt, type `{{` to select `{{task_prompt}}` and other tokens supported by that step. The completion menu inserts the reference into the draft; it does not save the workflow. Use **Save changes** when the prompt is ready.
 
 The workflow-level prompt supports saved-prompt references but does not expand step-only variables. `{{task_prompt}}` is available in a step prompt because it is replaced with the task description when that step runs.
+
+Both step prompts and the workflow-level prompt also accept these single-brace placeholders. Type them directly; the completion menu does not offer them.
+
+| Placeholder | Replaced with |
+|-------------|---------------|
+| `{task_id}` | The task's ID. |
+| `{task_title}` | The task's title. Useful when task descriptions are short. |
+| `{step_entry_number}` | How many times the task has entered the current step, starting at 1. |
+
+Each placeholder is replaced everywhere it appears in the prompt you write. Text that arrives through `{{task_prompt}}` is never scanned, so a task description that happens to contain one of these tokens is sent unchanged.
 
 ## Events and actions
 
@@ -170,7 +220,7 @@ The standard Kanban editor exposes these events:
 | Event | When it runs | Editor actions |
 |-------|--------------|----------------|
 | `on_enter` | A task enters a step through normal step-entry processing. | Enable plan mode, auto-start agent, reset context. |
-| `on_turn_start` | A user sends a message. The transition happens before that message is delivered. | Move next, previous, or to a selected step. |
+| `on_turn_start` | A user sends a message, including the first non-empty prompt when a task is created with an explicit workflow step. The transition happens before that message is delivered. Prompts started automatically when a task enters a step do not run this event. | Move next, previous, or to a selected step. |
 | `on_turn_complete` | A normal agent turn finishes when its signal requirements are satisfied. An explicit user cancellation qualifies when the step enables its cancellation policy, even if the completion signal is absent. A pending clarification always blocks completion. | Move next, previous, or to a selected step; disable plan mode. |
 | `on_exit` | A task leaves a step. | Disable plan mode. |
 
@@ -208,6 +258,7 @@ A step's Prompt field accepts `@name` references to [saved prompts](developer-to
 
 - The reference is resolved when the step prompt runs, not when it is saved. Editing the saved prompt's content later automatically changes what every step referencing it sends next time: there is nothing to update on the step itself.
 - The `@name` mention stays visible in the prompt/chat. Kandev attaches the referenced prompt's content as hidden context for the agent; it is not shown as part of the visible conversation.
+- Workflow entries keep that hidden context when they start a new profile session, reset the agent context, or recover with a fresh runtime. The saved message and agent prompt retain the same definition once for that entry.
 - `{{task_prompt}}` is only interpolated in the step prompt field itself. If a referenced saved prompt's content contains `{{task_prompt}}`, it is **not** expanded; it is sent to the agent as literal text.
 
 The same `@name` syntax and resolution apply to a GitHub Review Watch's prompt field. See [Integrations](integrations.md#configure-and-use-the-workspace).
@@ -231,7 +282,8 @@ A task may contain several repositories, but a workflow step is not bound to one
 - **Agent does not start:** verify the effective workflow/step agent profile, its health, executor profile, repository access, and the `auto_start_agent` entry action.
 - **Task stays after a turn:** check for an absent transition, a pending clarification, the explicit-completion toggle, a queued WIP card waiting for capacity, or an invalid target left by an older definition.
 - **Task stays after a cancel:** check for a pending clarification, the cancelled-turn completion policy, an absent or blocked transition, a queued WIP card, or an invalid target left by an older definition.
-- **Task cannot be dragged:** the destination may disallow manual moves, be at its WIP limit, or the task may have a starting/running session.
+- **Moving tasks on a phone:** open the task card menu and choose **Move to**. Swiping a card scrolls the column; phone cards do not support drag-to-move or drag reordering.
+- **Task cannot be dragged on desktop or tablet:** the destination may disallow manual moves, be at its WIP limit, or the task may have a starting/running session.
 - **Auto-archive looks late:** the sweep cadence is five minutes and task updates extend the age check.
 - **Synced workflow is read-only:** edit its repository definition and run Sync now, or remove the sync configuration to release all synced workflows as editable manual workflows.
 

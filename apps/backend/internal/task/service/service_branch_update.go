@@ -47,6 +47,19 @@ var ErrTaskRepositoryNotFound = errors.New("task repository not found")
 //
 // Returns the updated TaskRepository on success.
 func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error) {
+	return s.updateRepositoryBaseBranch(ctx, req, true)
+}
+
+// UpdateRepositoryBaseBranchFromSystem applies a branch update produced by a
+// provider sync or runtime recovery. It must not turn the update into a user
+// override or replace an existing manual selection.
+func (s *Service) UpdateRepositoryBaseBranchFromSystem(ctx context.Context, req UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error) {
+	return s.updateRepositoryBaseBranch(ctx, req, false)
+}
+
+func (s *Service) updateRepositoryBaseBranch(
+	ctx context.Context, req UpdateRepositoryBaseBranchRequest, manualSelection bool,
+) (*models.TaskRepository, error) {
 	baseBranch, err := validateUpdateRepositoryBaseBranchRequest(req)
 	if err != nil {
 		return nil, err
@@ -61,10 +74,13 @@ func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepo
 	if err != nil {
 		return nil, err
 	}
+	previousBaseBranch := taskRepo.BaseBranch
+	_, hadComparisonTarget, targetErr := models.LoadComparisonTarget(taskRepo.Metadata)
 	updatedTaskRepo, changed, err := s.taskRepos.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 		ctx,
 		taskRepo.ID,
 		baseBranch,
+		manualSelection,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update task repository: %w", err)
@@ -73,6 +89,9 @@ func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepo
 		return updatedTaskRepo, nil
 	}
 	taskRepo = updatedTaskRepo
+	if targetErr == nil && previousBaseBranch == baseBranch && !hadComparisonTarget {
+		return taskRepo, nil
+	}
 
 	// Detach from the caller's ctx for post-commit fan-out: the DB row is
 	// already persisted, so if the HTTP / WS request gets cancelled mid-
@@ -212,6 +231,10 @@ func (s *Service) collectTaskBaseBranches(ctx context.Context, taskID string) (m
 	if err != nil {
 		return nil, err
 	}
+	executorType, err := s.workspaceSourceExecutorType(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve executor type for task base branches: %w", err)
+	}
 	// Plans are computed over *every* row, including rows without a base
 	// branch: BuildBranchIdentityPlans groups by repository and picks which
 	// member of a group keeps the flat legacy path. Filtering first would
@@ -238,13 +261,21 @@ func (s *Service) collectTaskBaseBranches(ctx context.Context, taskID string) (m
 		if tr.BaseBranch == "" {
 			continue
 		}
-		out[baseBranchTrackerKey(repos[i].Name, plans[i].PathSlug)] = tr.BaseBranch
+		key, err := taskRepositoryWorkspaceTrackerKey(executorType, i, repos[i], tr, plans[i].PathSlug)
+		if err != nil {
+			repositoryName := ""
+			if repos[i] != nil {
+				repositoryName = repos[i].Name
+			}
+			return nil, fmt.Errorf("resolve base-branch workspace for repository %q: %w", repositoryName, err)
+		}
+		out[key] = tr.BaseBranch
 	}
 	// Single-repo legacy fallback: when only one row, duplicate under the
 	// empty key so the root WorkspaceTracker (repositoryName == "") picks it
 	// up too — matches the synthesis lifecycle.collectBaseBranches performs
 	// from req.RepoSpecs().
-	if len(taskRepos) == 1 && taskRepos[0].BaseBranch != "" {
+	if len(taskRepos) == 1 && taskRepos[0].BaseBranch != "" && executorType != string(models.ExecutorTypePluginRemote) {
 		if _, ok := out[""]; !ok {
 			out[""] = taskRepos[0].BaseBranch
 		}
@@ -253,6 +284,25 @@ func (s *Service) collectTaskBaseBranches(ctx context.Context, taskID string) (m
 		return nil, nil
 	}
 	return out, nil
+}
+
+func taskRepositoryWorkspaceTrackerKey(
+	executorType string,
+	index int,
+	repository *models.Repository,
+	taskRepository *models.TaskRepository,
+	pathSlug string,
+) (string, error) {
+	if models.IsRemoteExecutorType(models.ExecutorType(executorType)) {
+		if executorType != string(models.ExecutorTypePluginRemote) && index == 0 {
+			return "", nil
+		}
+		return WorkspaceSourceRuntimeEntryName(executorType, repository, taskRepository)
+	}
+	if repository == nil {
+		return "", fmt.Errorf("repository is missing")
+	}
+	return baseBranchTrackerKey(repository.Name, pathSlug), nil
 }
 
 // resolveBaseBranchRepositories resolves the Repository entity for each row,

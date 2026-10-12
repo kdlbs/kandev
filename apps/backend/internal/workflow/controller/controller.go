@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -123,23 +125,55 @@ func (c *Controller) CreateStepsFromTemplate(ctx context.Context, req CreateStep
 
 // CreateStepRequest is the request for creating a single workflow step.
 type CreateStepRequest struct {
-	WorkflowID                 string             `json:"workflow_id"`
-	Name                       string             `json:"name"`
-	Position                   int                `json:"position"`
-	Color                      string             `json:"color"`
-	StageType                  *models.StageType  `json:"stage_type,omitempty"`
-	Prompt                     string             `json:"prompt,omitempty"`
-	AgentProfileID             *string            `json:"agent_profile_id,omitempty"`
-	Events                     *models.StepEvents `json:"events,omitempty"`
-	AllowManualMove            bool               `json:"allow_manual_move"`
-	IsStartStep                *bool              `json:"is_start_step,omitempty"`
-	ShowInCommandPanel         *bool              `json:"show_in_command_panel,omitempty"`
-	AutoAdvanceRequiresSignal  *bool              `json:"auto_advance_requires_signal,omitempty"`
-	CancelTriggersTurnComplete *bool              `json:"cancel_triggers_turn_complete,omitempty"`
-	ProfileSessionStartPolicy  *string            `json:"profile_session_start_policy,omitempty"`
-	ProfileSessionEndPolicy    *string            `json:"profile_session_end_policy,omitempty"`
-	WIPLimit                   *int               `json:"wip_limit,omitempty"`
-	PullFromStepID             *string            `json:"pull_from_step_id,omitempty"`
+	WorkflowID                  string             `json:"workflow_id"`
+	Name                        string             `json:"name"`
+	Position                    int                `json:"position"`
+	Color                       string             `json:"color"`
+	StageType                   *models.StageType  `json:"stage_type,omitempty"`
+	Prompt                      string             `json:"prompt,omitempty"`
+	AgentProfileID              *string            `json:"agent_profile_id,omitempty"`
+	Events                      *models.StepEvents `json:"events,omitempty"`
+	AllowManualMove             bool               `json:"allow_manual_move"`
+	IsStartStep                 *bool              `json:"is_start_step,omitempty"`
+	ShowInCommandPanel          *bool              `json:"show_in_command_panel,omitempty"`
+	AutoAdvanceRequiresSignal   *bool              `json:"auto_advance_requires_signal,omitempty"`
+	CancelTriggersTurnComplete  *bool              `json:"cancel_triggers_turn_complete,omitempty"`
+	CompleteTaskOnEnter         *bool              `json:"complete_task_on_enter,omitempty"`
+	ProfileSessionStartPolicy   *string            `json:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy     *string            `json:"profile_session_end_policy,omitempty"`
+	DisableUnclassifiedFallback *bool              `json:"disable_unclassified_fallback,omitempty"`
+	SessionTarget               SessionTargetPatch `json:"session_target,omitempty"`
+	WIPLimit                    *int               `json:"wip_limit,omitempty"`
+	PullFromStepID              *string            `json:"pull_from_step_id,omitempty"`
+}
+
+func rejectNullStepBooleanFields(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for _, field := range []string{"complete_task_on_enter", "disable_unclassified_fallback"} {
+		if raw, ok := fields[field]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("%s must be a boolean", field)
+		}
+	}
+	return nil
+}
+
+// UnmarshalJSON keeps omission distinct from an explicit null. The REST
+// boundary uses nil to mean the documented default for create and no-op for
+// update, so null must be rejected instead of silently taking either path.
+func (r *CreateStepRequest) UnmarshalJSON(data []byte) error {
+	if err := rejectNullStepBooleanFields(data); err != nil {
+		return err
+	}
+	type requestAlias CreateStepRequest
+	var decoded requestAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = CreateStepRequest(decoded)
+	return nil
 }
 
 // CreateStep creates a new workflow step.
@@ -183,11 +217,20 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	if req.ProfileSessionEndPolicy != nil {
 		step.ProfileSessionEndPolicy = taskmodels.NormalizeWorkflowProfileSessionEndPolicy(*req.ProfileSessionEndPolicy)
 	}
+	if req.SessionTarget.Set {
+		step.SessionTarget = models.CloneWorkflowSessionTarget(req.SessionTarget.Target)
+	}
 	if req.AutoAdvanceRequiresSignal != nil {
 		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
 	}
 	if req.CancelTriggersTurnComplete != nil {
 		step.CancelTriggersTurnComplete = *req.CancelTriggersTurnComplete
+	}
+	if req.CompleteTaskOnEnter != nil {
+		step.CompleteTaskOnEnter = *req.CompleteTaskOnEnter
+	}
+	if req.DisableUnclassifiedFallback != nil {
+		step.DisableUnclassifiedFallback = *req.DisableUnclassifiedFallback
 	}
 	if req.WIPLimit != nil {
 		if *req.WIPLimit < 0 {
@@ -198,7 +241,7 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	if req.PullFromStepID != nil {
 		step.PullFromStepID = strings.TrimSpace(*req.PullFromStepID)
 	}
-	if err := c.validateStepReferences(ctx, step); err != nil {
+	if err := c.ValidateStepReferences(ctx, step); err != nil {
 		return nil, err
 	}
 	demotedStartSteps, err := c.svc.CreateStepWithStartStepUpdates(ctx, step)
@@ -210,24 +253,41 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 
 // UpdateStepRequest is the request for updating a workflow step.
 type UpdateStepRequest struct {
-	ID                         string             `json:"id"`
-	Name                       *string            `json:"name,omitempty"`
-	Position                   *int               `json:"position,omitempty"`
-	Color                      *string            `json:"color,omitempty"`
-	StageType                  *models.StageType  `json:"stage_type,omitempty"`
-	Prompt                     *string            `json:"prompt,omitempty"`
-	Events                     *models.StepEvents `json:"events,omitempty"`
-	AllowManualMove            *bool              `json:"allow_manual_move,omitempty"`
-	IsStartStep                *bool              `json:"is_start_step,omitempty"`
-	ShowInCommandPanel         *bool              `json:"show_in_command_panel,omitempty"`
-	AutoArchiveAfterHours      *int               `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID             *string            `json:"agent_profile_id,omitempty"`
-	AutoAdvanceRequiresSignal  *bool              `json:"auto_advance_requires_signal,omitempty"`
-	CancelTriggersTurnComplete *bool              `json:"cancel_triggers_turn_complete,omitempty"`
-	ProfileSessionStartPolicy  *string            `json:"profile_session_start_policy,omitempty"`
-	ProfileSessionEndPolicy    *string            `json:"profile_session_end_policy,omitempty"`
-	WIPLimit                   *int               `json:"wip_limit,omitempty"`
-	PullFromStepID             *string            `json:"pull_from_step_id,omitempty"`
+	ID                          string             `json:"id"`
+	Name                        *string            `json:"name,omitempty"`
+	Position                    *int               `json:"position,omitempty"`
+	Color                       *string            `json:"color,omitempty"`
+	StageType                   *models.StageType  `json:"stage_type,omitempty"`
+	Prompt                      *string            `json:"prompt,omitempty"`
+	Events                      *models.StepEvents `json:"events,omitempty"`
+	AllowManualMove             *bool              `json:"allow_manual_move,omitempty"`
+	IsStartStep                 *bool              `json:"is_start_step,omitempty"`
+	ShowInCommandPanel          *bool              `json:"show_in_command_panel,omitempty"`
+	AutoArchiveAfterHours       *int               `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID              *string            `json:"agent_profile_id,omitempty"`
+	AutoAdvanceRequiresSignal   *bool              `json:"auto_advance_requires_signal,omitempty"`
+	CancelTriggersTurnComplete  *bool              `json:"cancel_triggers_turn_complete,omitempty"`
+	CompleteTaskOnEnter         *bool              `json:"complete_task_on_enter,omitempty"`
+	ProfileSessionStartPolicy   *string            `json:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy     *string            `json:"profile_session_end_policy,omitempty"`
+	DisableUnclassifiedFallback *bool              `json:"disable_unclassified_fallback,omitempty"`
+	SessionTarget               SessionTargetPatch `json:"session_target,omitempty"`
+	WIPLimit                    *int               `json:"wip_limit,omitempty"`
+	PullFromStepID              *string            `json:"pull_from_step_id,omitempty"`
+}
+
+// UnmarshalJSON rejects null while preserving omission semantics for updates.
+func (r *UpdateStepRequest) UnmarshalJSON(data []byte) error {
+	if err := rejectNullStepBooleanFields(data); err != nil {
+		return err
+	}
+	type requestAlias UpdateStepRequest
+	var decoded requestAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = UpdateStepRequest(decoded)
+	return nil
 }
 
 // UpdateStep updates an existing workflow step.
@@ -281,11 +341,20 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	if req.ProfileSessionEndPolicy != nil {
 		step.ProfileSessionEndPolicy = taskmodels.NormalizeWorkflowProfileSessionEndPolicy(*req.ProfileSessionEndPolicy)
 	}
+	if req.SessionTarget.Set {
+		step.SessionTarget = models.CloneWorkflowSessionTarget(req.SessionTarget.Target)
+	}
 	if req.AutoAdvanceRequiresSignal != nil {
 		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
 	}
 	if req.CancelTriggersTurnComplete != nil {
 		step.CancelTriggersTurnComplete = *req.CancelTriggersTurnComplete
+	}
+	if req.CompleteTaskOnEnter != nil {
+		step.CompleteTaskOnEnter = *req.CompleteTaskOnEnter
+	}
+	if req.DisableUnclassifiedFallback != nil {
+		step.DisableUnclassifiedFallback = *req.DisableUnclassifiedFallback
 	}
 	if req.WIPLimit != nil {
 		if *req.WIPLimit < 0 {
@@ -296,10 +365,10 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	if req.PullFromStepID != nil {
 		step.PullFromStepID = strings.TrimSpace(*req.PullFromStepID)
 	}
-	if err := c.validateStepReferences(ctx, step); err != nil {
+	if err := c.ValidateStepReferences(ctx, step); err != nil {
 		return nil, err
 	}
-	demotedStartSteps, err := c.svc.UpdateStepWithStartStepUpdates(ctx, step)
+	demotedStartSteps, err := c.svc.UpdateStepWithStartStepIntent(ctx, step, req.IsStartStep)
 	if err != nil {
 		return nil, err
 	}
@@ -316,6 +385,12 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 // the reason, because there is nothing to hide from them and the editor has to
 // be able to explain it.
 func (c *Controller) validateStepReferences(ctx context.Context, step *models.WorkflowStep) error {
+	if err := c.validateSessionTarget(ctx, step); err != nil {
+		return err
+	}
+	if err := c.validateIncomingSessionTargets(ctx, step.WorkflowID, step, nil); err != nil {
+		return err
+	}
 	if err := c.validatePullFromStep(ctx, step); err != nil {
 		return err
 	}
@@ -329,6 +404,126 @@ func (c *Controller) validateStepReferences(ctx context.Context, step *models.Wo
 		if err := c.svc.AuthorizeTask(ctx, taskID); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// ValidateStepReferences applies the same reference checks used by native
+// workflow CRUD before another trusted adapter writes a step.
+func (c *Controller) ValidateStepReferences(ctx context.Context, step *models.WorkflowStep) error {
+	return c.validateStepReferences(ctx, step)
+}
+
+// ValidateStepOrder checks whether the requested positions preserve every
+// workflow session-target invariant.
+func (c *Controller) ValidateStepOrder(ctx context.Context, workflowID string, stepIDs []string) error {
+	positions := make(map[string]int, len(stepIDs))
+	for position, stepID := range stepIDs {
+		positions[stepID] = position
+	}
+	return c.validateIncomingSessionTargets(ctx, workflowID, nil, positions)
+}
+
+func (c *Controller) validateSessionTarget(ctx context.Context, step *models.WorkflowStep) error {
+	if err := models.ValidateWorkflowSessionTarget(step.SessionTarget); err != nil {
+		return fmt.Errorf("session_target is invalid: %w", err)
+	}
+	if step.SessionTarget == nil {
+		return nil
+	}
+	if step.AgentProfileID != "" {
+		return fmt.Errorf("session_target cannot be combined with agent_profile_id")
+	}
+	if step.SessionTarget.Kind == models.WorkflowSessionTargetInitial {
+		return nil
+	}
+	if step.ID != "" && step.SessionTarget.StepID == step.ID {
+		return fmt.Errorf("session_target cannot reference the same step")
+	}
+	if err := c.svc.AuthorizeStep(ctx, step.SessionTarget.StepID); err != nil {
+		return fmt.Errorf("session_target is invalid: %w", err)
+	}
+	target, err := c.svc.GetStep(ctx, step.SessionTarget.StepID)
+	if err != nil {
+		return fmt.Errorf("session_target is invalid: %w", err)
+	}
+	if target.WorkflowID != step.WorkflowID {
+		return fmt.Errorf("session_target must reference a step in the same workflow")
+	}
+	if target.Position >= step.Position {
+		return fmt.Errorf("session_target must reference an earlier step")
+	}
+	if target.AgentProfileID == "" {
+		return fmt.Errorf("session_target must reference a step with an agent profile")
+	}
+	if target.SessionTarget != nil {
+		return fmt.Errorf("session_target cannot reference a step with another session target")
+	}
+	return nil
+}
+
+// validateIncomingSessionTargets validates references pointing at the step
+// being written, not only the target carried by that step. This prevents a
+// profile removal or position edit from silently invalidating dependent
+// destinations.
+func (c *Controller) validateIncomingSessionTargets(
+	ctx context.Context,
+	workflowID string,
+	replacement *models.WorkflowStep,
+	positions map[string]int,
+) error {
+	steps, err := c.svc.ListStepsByWorkflow(ctx, workflowID)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]*models.WorkflowStep, len(steps)+1)
+	for _, existing := range steps {
+		if existing != nil {
+			byID[existing.ID] = existing
+		}
+	}
+	if replacement != nil {
+		byID[replacement.ID] = replacement
+	}
+	for _, current := range byID {
+		if current == nil || current.SessionTarget == nil || current.SessionTarget.Kind != models.WorkflowSessionTargetStep {
+			continue
+		}
+		if err := validateIncomingSessionTarget(workflowID, current, byID, positions); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateIncomingSessionTarget(
+	workflowID string,
+	current *models.WorkflowStep,
+	byID map[string]*models.WorkflowStep,
+	positions map[string]int,
+) error {
+	source, ok := byID[current.SessionTarget.StepID]
+	if !ok || source == nil {
+		return fmt.Errorf("session_target source step %q was not found", current.SessionTarget.StepID)
+	}
+	currentPosition := current.Position
+	sourcePosition := source.Position
+	if positions != nil {
+		if value, found := positions[current.ID]; found {
+			currentPosition = value
+		}
+		if value, found := positions[source.ID]; found {
+			sourcePosition = value
+		}
+	}
+	if source.WorkflowID != workflowID || source.WorkflowID != current.WorkflowID {
+		return fmt.Errorf("session_target must reference a step in the same workflow")
+	}
+	if sourcePosition >= currentPosition {
+		return fmt.Errorf("session_target source step %q must remain earlier than %q", source.ID, current.ID)
+	}
+	if source.AgentProfileID == "" || source.SessionTarget != nil {
+		return fmt.Errorf("session_target source step %q must keep a direct agent profile", source.ID)
 	}
 	return nil
 }
@@ -434,6 +629,17 @@ func (c *Controller) DeleteStep(ctx context.Context, id string) error {
 	if err := c.svc.EnsureWorkflowMutable(ctx, step.WorkflowID); err != nil {
 		return err
 	}
+	steps, err := c.svc.ListStepsByWorkflow(ctx, step.WorkflowID)
+	if err != nil {
+		return err
+	}
+	for _, dependent := range steps {
+		if dependent != nil && dependent.SessionTarget != nil &&
+			dependent.SessionTarget.Kind == models.WorkflowSessionTargetStep &&
+			dependent.SessionTarget.StepID == id {
+			return fmt.Errorf("workflow step %q is the session target of %q", id, dependent.ID)
+		}
+	}
 	return c.svc.DeleteStep(ctx, id)
 }
 
@@ -451,6 +657,9 @@ func (c *Controller) ReorderSteps(ctx context.Context, req ReorderStepsRequest) 
 		return err
 	}
 	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
+		return err
+	}
+	if err := c.ValidateStepOrder(ctx, req.WorkflowID, req.StepIDs); err != nil {
 		return err
 	}
 	return c.svc.ReorderSteps(ctx, req.WorkflowID, req.StepIDs)
@@ -478,8 +687,9 @@ func (c *Controller) ListHistoryBySession(ctx context.Context, req ListHistoryRe
 
 // ImportWorkflowsRequest carries import data.
 type ImportWorkflowsRequest struct {
-	WorkspaceID string                 `json:"workspace_id"`
-	Data        *models.WorkflowExport `json:"data"`
+	WorkspaceID         string                         `json:"workspace_id"`
+	Data                *models.WorkflowExport         `json:"data"`
+	StepProfileBindings []service.ImportProfileBinding `json:"step_profile_bindings,omitempty"`
 }
 
 // ExportWorkflow exports a single workflow.
@@ -497,5 +707,14 @@ func (c *Controller) ExportWorkflows(ctx context.Context, workspaceID string, wo
 
 // ImportWorkflows imports workflows into a workspace.
 func (c *Controller) ImportWorkflows(ctx context.Context, req ImportWorkflowsRequest) (*service.ImportResult, error) {
+	if req.StepProfileBindings != nil {
+		return c.svc.ImportWorkflowsWithBindings(ctx, req.WorkspaceID, req.Data, req.StepProfileBindings)
+	}
 	return c.svc.ImportWorkflows(ctx, req.WorkspaceID, req.Data)
+}
+
+// PreviewImportWorkflows validates a portable document and returns the
+// profile choices required before the browser can persist it.
+func (c *Controller) PreviewImportWorkflows(ctx context.Context, workspaceID string, data *models.WorkflowExport) (*service.ImportProfilePreview, error) {
+	return c.svc.PreviewImportWorkflows(ctx, workspaceID, data)
 }

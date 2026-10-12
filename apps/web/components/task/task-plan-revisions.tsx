@@ -18,6 +18,7 @@ import { PlanRevisionDiffDialog } from "./task-plan-diff-dialog";
 import { RevertConfirmDialog } from "./task-plan-revert-confirm-dialog";
 import { TaskPlanRevisionRow } from "./task-plan-revision-row";
 import { useTranslation } from "react-i18next";
+import { MobileRevisionRestoreConfirmation } from "./task-plan-revision-restore-actions";
 import type { TFunction } from "i18next";
 
 type ComparePair = [string | null, string | null];
@@ -48,12 +49,14 @@ type TaskPlanRevisionsProps = {
 const USER_DISPLAY_NAME_KEY = "common:you";
 
 export function TaskPlanRevisions(props: TaskPlanRevisionsProps) {
-  const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const [open, setOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<TaskPlanRevision | null>(null);
   const [rowConfirmTarget, setRowConfirmTarget] = useState<TaskPlanRevision | null>(null);
   const [diffOpen, setDiffOpen] = useState(false);
+  const [mobileTarget, setMobileTarget] = useState<TaskPlanRevision | null>(null);
+  const pendingMobileTarget = useRef<TaskPlanRevision | null>(null);
+  const historyTriggerRef = useRef<HTMLButtonElement>(null);
   const agentName = useActiveAgentBackendName();
   const triggerOpenChange = useTriggerOnFirstOpen(setOpen, props.onOpen);
   const handleOpenChange = useCallback(
@@ -65,26 +68,7 @@ export function TaskPlanRevisions(props: TaskPlanRevisionsProps) {
   );
   const closePopover = useCallback(() => handleOpenChange(false), [handleOpenChange]);
 
-  const handleRevert = useCallback(
-    async (revision: TaskPlanRevision) => {
-      try {
-        const result = await props.onRevert(revision.id);
-        if (result) {
-          toast.success(t("task:planRestoredToV", { revisionnumber: revision.revision_number }));
-          closePopover();
-          props.setPreviewRevision(null);
-          setDiffOpen(false);
-        } else {
-          // `revertTo` (the hook impl) swallows errors and returns null, so
-          // surface the failure instead of closing silently.
-          toast.error(t("task:failedToRestorePlan"));
-        }
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : t("task:failedToRestorePlan"));
-      }
-    },
-    [closePopover, props.onRevert, props.setPreviewRevision, t],
-  );
+  const handleRevert = useRevisionRestore(props, closePopover, setDiffOpen);
 
   const previewRevision = useMemo(
     () => props.revisions.find((r) => r.id === props.previewRevisionId) ?? null,
@@ -98,19 +82,48 @@ export function TaskPlanRevisions(props: TaskPlanRevisionsProps) {
     [props.revisions, props.comparePair],
   );
   const headRevision = props.revisions[0] ?? null;
+  useEffect(() => {
+    if (
+      mobileTarget &&
+      (mobileTarget.task_id !== props.taskId ||
+        !props.revisions.slice(1).some((revision) => revision.id === mobileTarget.id))
+    ) {
+      setMobileTarget(null);
+    }
+  }, [mobileTarget, props.taskId, props.revisions]);
 
   return (
     <>
       <RevisionsPopover
+        historyTriggerRef={historyTriggerRef}
+        onCloseAutoFocus={(event) => {
+          const target = pendingMobileTarget.current;
+          pendingMobileTarget.current = null;
+          if (!target || target.task_id !== props.taskId) return;
+          event.preventDefault();
+          setMobileTarget(target);
+        }}
         open={open}
         onOpenChange={handleOpenChange}
         agentName={agentName}
         rowConfirmTarget={rowConfirmTarget}
         isFinePointer={isFinePointer}
-        onRowRevertRequest={setRowConfirmTarget}
+        onRowRevertRequest={(revision) => {
+          if (!isMobile) return setRowConfirmTarget(revision);
+          pendingMobileTarget.current = revision;
+          closePopover();
+        }}
         onRowRevertCancel={() => setRowConfirmTarget(null)}
         onRowRevert={handleRevert}
         {...props}
+      />
+      <MobileRevisionRestoreConfirmation
+        taskId={props.taskId}
+        target={mobileTarget}
+        anchorRef={historyTriggerRef}
+        isSaving={props.isSaving}
+        onClose={() => setMobileTarget(null)}
+        onRevert={handleRevert}
       />
       <RevisionsDialogStack
         revisions={props.revisions}
@@ -132,6 +145,33 @@ export function TaskPlanRevisions(props: TaskPlanRevisionsProps) {
   );
 }
 
+function useRevisionRestore(
+  props: Pick<TaskPlanRevisionsProps, "onRevert" | "setPreviewRevision">,
+  closePopover: () => void,
+  setDiffOpen: (open: boolean) => void,
+) {
+  const { t } = useTranslation();
+  return useCallback(
+    async (revision: TaskPlanRevision) => {
+      try {
+        const result = await props.onRevert(revision.id);
+        if (result) {
+          toast.success(t("task:planRestoredToV", { revisionnumber: revision.revision_number }));
+          closePopover();
+          props.setPreviewRevision(null);
+          setDiffOpen(false);
+        } else {
+          // The persistence hook reports a failed restore as null.
+          toast.error(t("task:failedToRestorePlan"));
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("task:failedToRestorePlan"));
+      }
+    },
+    [closePopover, props.onRevert, props.setPreviewRevision, setDiffOpen, t],
+  );
+}
+
 /** Lazy-load revisions on the first popover open; subsequent opens reuse the
  * cached list. Wraps the open setter so callers don't need a ref of their own. */
 function useTriggerOnFirstOpen(setOpen: (v: boolean) => void, onOpen: () => void) {
@@ -149,6 +189,8 @@ function useTriggerOnFirstOpen(setOpen: (v: boolean) => void, onOpen: () => void
 }
 
 function RevisionsPopover({
+  historyTriggerRef,
+  onCloseAutoFocus,
   open,
   onOpenChange,
   agentName,
@@ -163,6 +205,8 @@ function RevisionsPopover({
   setPreviewRevision,
   disabled = false,
 }: TaskPlanRevisionsProps & {
+  historyTriggerRef: React.RefObject<HTMLButtonElement | null>;
+  onCloseAutoFocus: (event: Event) => void;
   open: boolean;
   onOpenChange: (next: boolean) => void;
   agentName: string | null;
@@ -178,9 +222,10 @@ function RevisionsPopover({
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <Button
+          ref={historyTriggerRef}
           size="icon"
           variant="ghost"
-          className="h-7 w-7 cursor-pointer"
+          className="h-11 w-11 md:h-7 md:w-7 cursor-pointer"
           disabled={disabled || !hasRevisions}
           data-testid="plan-rewind-button"
           title={t("task:viewPlanHistory")}
@@ -189,6 +234,7 @@ function RevisionsPopover({
         </Button>
       </PopoverTrigger>
       <PopoverContent
+        onCloseAutoFocus={onCloseAutoFocus}
         align="end"
         // Override the popover's default `gap-4` between flex children — it
         // was rendering as visible empty space above the top-most row.

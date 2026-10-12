@@ -5,11 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"go.uber.org/zap"
 
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 )
+
+type managedDirectoryCreator interface {
+	CreateManagedDirectory(path string, mode os.FileMode) error
+}
 
 // restoreCleanedGroups walks the workspace groups affected by an
 // unarchive cascade and, for each one currently in cleanup_status=cleaned,
@@ -29,26 +34,39 @@ import (
 //     paths and base branches to be valid on disk — work that the
 //     normal launch already handles correctly.
 //   - remote_environment: same as repo kinds — restorable, deferred.
-func (s *HandoffService) restoreCleanedGroups(ctx context.Context, groupIDs []string) {
+func (s *HandoffService) restoreCleanedGroups(ctx context.Context, groupIDs []string) error {
 	if s.wsGroups == nil {
-		return
+		return nil
 	}
+	var errs []error
 	for _, gid := range groupIDs {
 		g, err := s.wsGroups.GetWorkspaceGroup(ctx, gid)
-		if err != nil || g == nil {
+		if err != nil {
+			errs = append(errs, fmt.Errorf("load workspace group %s: %w", gid, err))
 			continue
 		}
+		if g == nil {
+			errs = append(errs, fmt.Errorf("workspace group %s not found", gid))
+			continue
+		}
+		mu := s.workspaceGroupLock.lockFor(gid)
+		mu.Lock()
 		if g.CleanupStatus != orchmodels.WorkspaceCleanupStatusCleaned {
+			mu.Unlock()
 			continue
 		}
 		if err := s.restoreCleanedGroup(ctx, g); err != nil {
 			s.logf().Error("restore cleaned group",
 				zap.String("group_id", g.ID), zap.Error(err))
-			_ = s.wsGroups.UpdateWorkspaceGroupRestoreStatus(ctx, g.ID,
+			statusErr := s.wsGroups.UpdateWorkspaceGroupRestoreStatus(ctx, g.ID,
 				orchmodels.WorkspaceRestoreStatusFailed, err.Error())
-			continue
+			errs = append(errs, errors.Join(
+				fmt.Errorf("restore workspace group %s: %w", gid, err), statusErr))
 		}
+		mu.Unlock()
 	}
+
+	return errors.Join(errs...)
 }
 
 func (s *HandoffService) restoreCleanedGroup(ctx context.Context, g *orchmodels.WorkspaceGroup) error {
@@ -69,15 +87,37 @@ func (s *HandoffService) restoreCleanedGroup(ctx context.Context, g *orchmodels.
 }
 
 // restorePlainFolder mkdirs the materialized path with 0o755 permissions.
-// The managed-root guard runs in the cleaner — for restore we trust the
-// path that came out of the prior MarkWorkspaceMaterialized call;
-// rejecting paths that previously passed the guard would block valid
-// restores. Failures bubble up to mark restore_failed.
-func (s *HandoffService) restorePlainFolder(ctx context.Context, g *orchmodels.WorkspaceGroup, _ restoreConfig) error {
+// The same managed-root validator used by cleanup runs before mkdir, and the
+// persisted restore path must agree with the workspace-group row.
+func (s *HandoffService) restorePlainFolder(ctx context.Context, g *orchmodels.WorkspaceGroup, rc restoreConfig) error {
 	if g.MaterializedPath == "" {
 		return errors.New("plain folder restore: materialized_path is empty")
 	}
-	if err := os.MkdirAll(g.MaterializedPath, 0o755); err != nil {
+	if rc.Path == "" {
+		return errors.New("plain folder restore: restore path is empty")
+	}
+	materializedPath, err := filepath.Abs(filepath.Clean(g.MaterializedPath))
+	if err != nil {
+		return fmt.Errorf("plain folder restore: materialized path: %w", err)
+	}
+	restorePath, err := filepath.Abs(filepath.Clean(rc.Path))
+	if err != nil {
+		return fmt.Errorf("plain folder restore: restore path: %w", err)
+	}
+	if materializedPath != restorePath {
+		return fmt.Errorf("plain folder restore: restore path %q does not match materialized path %q", rc.Path, g.MaterializedPath)
+	}
+	if s.cleaner == nil {
+		return errors.New("plain folder restore: managed-root validator is not configured")
+	}
+	if err := s.cleaner.ValidateManagedRoot(g.MaterializedPath); err != nil {
+		return err
+	}
+	if creator, ok := s.cleaner.(managedDirectoryCreator); ok {
+		if err := creator.CreateManagedDirectory(g.MaterializedPath, 0o755); err != nil {
+			return err
+		}
+	} else if err := os.MkdirAll(g.MaterializedPath, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", g.MaterializedPath, err)
 	}
 	if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, g.ID,

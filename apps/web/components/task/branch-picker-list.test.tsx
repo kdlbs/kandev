@@ -25,8 +25,8 @@ describe("BranchPickerList", () => {
     const options = screen.getAllByRole("option");
     expect(options.map((option) => option.textContent?.trim())).toEqual([
       "main",
-      "feature/local",
       "develop",
+      "feature/local",
     ]);
     expect(options[0].getAttribute("aria-selected")).toBe("true");
     expect(options[0].className).toContain("bg-card");
@@ -73,5 +73,24 @@ describe("BranchPickerList", () => {
 
     expect(screen.queryByTestId("recovery-branch-option-feature/local-only")).toBeNull();
     expect(screen.getByTestId("recovery-branch-option-main")).toBeTruthy();
+  });
+
+  it("puts the default branch first when the current branch is unavailable", () => {
+    render(
+      <BranchPickerList
+        branches={[
+          { name: "feature/local-rebase", type: "remote", remote: "origin" },
+          { name: "main", type: "remote", remote: "origin" },
+        ]}
+        isLoadingBranches={false}
+        currentBase="missing-base"
+        onSelect={() => {}}
+        remoteOnly
+      />,
+    );
+
+    expect(screen.getAllByRole("option")[0]?.getAttribute("data-testid")).toBe(
+      "base-branch-picker-option-main",
+    );
   });
 });

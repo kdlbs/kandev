@@ -99,3 +99,8 @@ git diff --check
 - Changes to the Git-status API or WebSocket payload.
 - Changes to `origin`, upstream tracking, or push routing.
 - New UI controls for Git credentials or transport selection.
+
+## Shared execution follow-up (2026-09-13)
+
+The [noninteractive Git execution package](../noninteractive-git-execution/plan.md) owns final runner enforcement, helper cleanup, and authentication-failure recovery coverage.
+That package is complete. Existing results above remain historical evidence for this package's original implementation; its follow-up validation is recorded in the linked package.

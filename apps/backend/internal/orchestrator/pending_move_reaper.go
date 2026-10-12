@@ -117,7 +117,8 @@ func (s *Service) pendingMoveReapReason(
 	if record.Move.IsStaleAt(now, messagequeue.PendingMoveTTL) {
 		return "ttl_expired", true
 	}
-	if _, err := s.repo.GetTaskSession(ctx, record.SessionID); err != nil {
+	session, err := s.repo.GetTaskSession(ctx, record.SessionID)
+	if err != nil {
 		if isTaskSessionNotFound(err) {
 			return "session_missing", true
 		}
@@ -125,6 +126,13 @@ func (s *Service) pendingMoveReapReason(
 			zap.String("session_id", record.SessionID),
 			zap.Error(err))
 		return "", false
+	}
+	if record.Move.TaskID != "" && record.Move.TaskID != session.TaskID {
+		return "task_identity_changed", true
+	}
+	if record.Move.SessionIncarnationID != "" &&
+		record.Move.SessionIncarnationID != session.QueueIncarnationID {
+		return "session_incarnation_changed", true
 	}
 	return "", false
 }
@@ -205,6 +213,39 @@ func (s *Service) handlePendingMoveAtAgentReady(
 			return false
 		}
 
+		identityChanged := move.TaskID != taskID ||
+			move.SessionIncarnationID == "" ||
+			move.SessionIncarnationID != session.QueueIncarnationID
+		if identityChanged {
+			moveID := normalizedPendingMoveID(sessionID, move)
+			handoffEntryID, listed := s.pendingMoveHandoffPromptID(
+				ctx, sessionID, move.TaskID, moveID,
+			)
+			if !listed {
+				settleSession()
+				return true
+			}
+			record := messagequeue.PendingMoveRecord{SessionID: sessionID, Move: *move}
+			removed, err := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, handoffEntryID)
+			if err != nil {
+				s.logger.Warn("failed to discard identity-mismatched pending move",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+				settleSession()
+				return true
+			}
+			if !removed {
+				continue
+			}
+			s.logger.Warn("discarding pending move for replaced session identity",
+				pendingMoveLogFields(sessionID, move, moveID)...)
+			s.pendingMoveHandoffPromptRemoved(
+				ctx, sessionID, move.TaskID, moveID, handoffEntryID,
+			)
+			return false
+		}
+
 		stale, retryPending := s.discardStalePendingMove(ctx, taskID, sessionID, move)
 		if retryPending {
 			settleSession()
@@ -214,23 +255,10 @@ func (s *Service) handlePendingMoveAtAgentReady(
 			return false
 		}
 
-		record := messagequeue.PendingMoveRecord{SessionID: sessionID, Move: *move}
-		removed, err := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, "")
-		if err != nil {
-			s.logger.Warn("failed to claim pending move; row preserved for retry",
-				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-			settleSession()
-			return true
-		}
-		if !removed {
-			// A replacement raced the read. Re-read once so the successor can be
-			// applied by this completed turn instead of waiting for an unrelated
-			// ready event. The bounded loop preserves the row if races continue.
-			continue
-		}
 		// The turn is already complete. Settle the session before applying the
-		// move so early validation or storage failures inside applyPendingMove
-		// cannot leave it RUNNING with no active turn.
+		// move so validation or storage failures cannot leave it RUNNING with no
+		// active turn. applyPendingMove atomically consumes the exact pending row
+		// with the task transition; failures leave the row armed for retry.
 		settleSession()
 		s.applyPendingMove(ctx, taskID, sessionID, session, move)
 		return true

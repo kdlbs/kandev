@@ -3,6 +3,7 @@ status: draft
 system: plugins
 requirements:
   - REQ-PLUGINS-MARKETPLACE-001
+  - REQ-PLUGINS-MARKETPLACE-002
 created: 2026-07-18
 owners:
   - jcfs
@@ -13,11 +14,53 @@ owners:
 
 This design preserves the technical source detail for `REQ-PLUGINS-MARKETPLACE-001` during migration.
 
+The [canvas distribution design](../../canvases/system-design/marketplace-sharing.md)
+extends this catalog with validated static canvas packages, registry preview URLs,
+and workspace installation. Its canvas path does not use the managed-binary
+installer described here. Native plugin behavior remains owned by this document.
+
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
 | `REQ-PLUGINS-MARKETPLACE-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-PLUGINS-MARKETPLACE-002` | [Curated release propagation](#curated-release-propagation) |
+| `REQ-PLUGINS-MARKETPLACE-003` | [Registry preview images](#registry-preview-images) |
+
+## Registry preview images
+
+Extend registry pointers and generated catalog entries with an optional ordered
+`previews` list of `{url, alt}` objects. This is registry-owned presentation
+metadata for both `kind: plugin` and `kind: canvas`. Omitted kind means plugin.
+Plugin screenshots are optional; canvas listing admission requires at least one.
+The same contract applies to official and custom source documents.
+
+Allow up to eight entries. Each URL must be an absolute HTTPS URL without
+credentials or a fragment, at most 2048 characters; each alternative description
+has 1-300 characters after trimming. Reject malformed URLs and executable or
+inline-data schemes. URLs should return directly displayable PNG, JPEG, or WebP
+images; a pinned commit/release URL is recommended, not required. Preview
+availability and content are not evidence of package authenticity or permissions.
+
+The index builder copies validated registry URLs and their order to `index.json`.
+Do not download/re-encode media, extract screenshots from packages, or mirror
+assets into Pages. A registry can change images without changing package version.
+Custom source readers validate the same fields; invalid canvas listings are
+omitted with a source diagnostic while valid entries remain usable.
+
+Use one gallery component for plugin and canvas details: first image as cover,
+explicit previous/next and thumbnail controls, alt text, position, one-image
+mode, and a contained image-failure fallback. Load images without referrers;
+never embed HTML/iframes or run package code. A remote image failure does not
+block an otherwise valid package install. Plugins without screenshots keep
+their existing row and install action; screenshots add a View details action
+without adding a mandatory native-plugin installation step. Phone details use
+the same focused surface and touch controls as canvas details.
+
+The proposed complete registry schema is a design artifact at
+[`registry-entry.schema.json`](../../../plans/canvas-marketplace/registry-entry.schema.json).
+The [canvas distribution plan](../../../plans/canvas-marketplace/plan.md)
+Tasks 04-05 implement shared registry validation and gallery rendering.
 
 ## Migrated source detail
 
@@ -110,6 +153,31 @@ source list, enriches it, emits a static JSON API, and serves it from GitHub Pag
   count) and publishes it to **GitHub Pages**. A scheduled run refreshes star counts.
 - kandev fetches `index.json` — the official one plus any operator-added source URLs
   pointing at the same-shaped document.
+
+### Curated release propagation
+
+The official repository owns a three-hour, off-boundary poll. It reads repository identities only
+from the checked-out `plugins.yaml`, compares their latest exact package releases with the published
+official index, and calls the reusable index workflow only when a curated candidate changed. The
+detector has read-only contents permission; plugin repositories receive no Kandev credential and
+cannot provide a repository selector or deployment payload. See
+`ADR-2026-08-30-central-curated-plugin-release-polling`.
+
+The builder downloads the exact `<id>-<version>.tar.gz`, verifies the archive through the same
+`pkgtar` checksum/manifest authority used by installation, checks manifest identity and version, and
+publishes the computed package SHA-256. An optional release-level `checksums.txt` is compared when
+present. If one latest release fails, the builder retains only that still-curated repository's prior
+record and reports the failure; other valid releases may advance. A provider-wide failure or missing
+trusted prior aborts before Pages upload, leaving the published site unchanged.
+
+The verifier command stays in the backend Go module so it can import the shared
+`internal/plugins/pkgtar` package. GitHub Actions and E2E fixtures build this command; the running
+Kandev backend does not invoke it.
+
+The release poll, source-triggered builds, manual rebuilds, and the daily 06:00 UTC fallback share
+the static `plugin-registry-pages` concurrency group. Active deployment finishes and pending work
+coalesces. The three-hour poll targets a four-hour propagation SLO under normal GitHub Actions
+scheduling; GitHub schedules may be delayed or dropped, so this is not a deterministic guarantee.
 
 The per-repo publishing convention and the two Actions are an operational contract,
 not a user-facing API; their normative shape is the `schema.json` and the

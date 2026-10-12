@@ -59,6 +59,9 @@ func (s *Service) reconcileComparisonTarget(
 	}
 
 	matched := matches[0]
+	if !allowReplacement && models.HasManualBaseBranchOverride(matched.Metadata) {
+		return &models.ComparisonTargetReconciliation{Status: models.ComparisonTargetNoMatch}, nil
+	}
 	attachedIdentity, ok := s.taskRepositoryComparisonIdentity(ctx, matched)
 	if !ok {
 		return &models.ComparisonTargetReconciliation{Status: models.ComparisonTargetNoMatch}, nil
@@ -70,7 +73,7 @@ func (s *Service) reconcileComparisonTarget(
 	if hasCurrent && !allowReplacement && !current.ChangeIdentityEqual(target) {
 		return &models.ComparisonTargetReconciliation{Status: models.ComparisonTargetNoMatch}, nil
 	}
-	return s.persistMatchedComparisonTarget(ctx, taskID, matched, attachedIdentity, target)
+	return s.persistMatchedComparisonTarget(ctx, taskID, matched, attachedIdentity, target, allowReplacement)
 }
 
 func (s *Service) persistMatchedComparisonTarget(
@@ -79,9 +82,10 @@ func (s *Service) persistMatchedComparisonTarget(
 	matched *models.TaskRepository,
 	attachedIdentity models.ComparisonTargetRepository,
 	target models.ComparisonTarget,
+	clearManualOverride bool,
 ) (*models.ComparisonTargetReconciliation, error) {
 	if target.IsSameRepository(attachedIdentity) {
-		_, changed, err := s.taskRepos.UpdateTaskRepositoryComparisonTarget(ctx, matched.ID, nil, nil)
+		_, changed, err := s.taskRepos.UpdateTaskRepositoryComparisonTarget(ctx, matched.ID, nil, nil, clearManualOverride)
 		if err != nil {
 			return nil, fmt.Errorf("clear same-repository comparison target: %w", err)
 		}
@@ -93,7 +97,7 @@ func (s *Service) persistMatchedComparisonTarget(
 			TaskRepositoryID: matched.ID,
 		}, nil
 	}
-	_, changed, err := s.taskRepos.UpdateTaskRepositoryComparisonTarget(ctx, matched.ID, &target, nil)
+	_, changed, err := s.taskRepos.UpdateTaskRepositoryComparisonTarget(ctx, matched.ID, &target, nil, clearManualOverride)
 	if err != nil {
 		return nil, fmt.Errorf("persist comparison target: %w", err)
 	}

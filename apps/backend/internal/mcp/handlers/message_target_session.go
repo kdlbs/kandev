@@ -98,6 +98,13 @@ func (h *Handlers) resolveMessageTargetSession(
 		// business rewriting as a side effect.
 		return primary, true, nil
 	}
+	completed, completedErr := h.newestCompletedSession(ctx, taskID)
+	if completedErr != nil {
+		return nil, false, wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to list completed sessions for task: "+completedErr.Error())
+	}
+	if completed != nil {
+		return completed, true, nil
+	}
 	return nil, false, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
 		"target task exists but has no active session — use spawn_session_kandev to start one")
 }
@@ -112,6 +119,23 @@ func (h *Handlers) newestLiveSession(ctx context.Context, taskID string) (*model
 	}
 	for _, session := range sessions {
 		if session != nil && !isTerminalMessageTargetState(session.State) {
+			return session, nil
+		}
+	}
+	return nil, nil
+}
+
+// newestCompletedSession returns the most recently started completed session
+// on a task. It is used only when the task has no primary and no live session;
+// a completed primary remains a dedicated terminal target so FAILED/CANCELLED
+// dispatch behavior is not changed.
+func (h *Handlers) newestCompletedSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	sessions, err := h.taskSvc.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		if session != nil && session.State == models.TaskSessionStateCompleted {
 			return session, nil
 		}
 	}

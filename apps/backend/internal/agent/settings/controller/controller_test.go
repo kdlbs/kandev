@@ -174,6 +174,7 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 }
 
 func TestController_PreviewAgentCommandUsesActiveManagedRuntimeVersion(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	agent := agents.NewOpenCodeACP()
 	controller := newTestController(map[string]agents.Agent{agent.ID(): agent})
 	selectionStore := newRecoverySelectionStore()
@@ -679,7 +680,7 @@ func TestController_PreviewAgentCommand_CopilotKeepsManagedPackage(t *testing.T)
 		t.Fatalf("PreviewAgentCommand() error = %v", err)
 	}
 	managed := agents.NewCopilotACP()
-	want := []string{"npx", "--yes", "--prefer-offline", managed.ManagedNPMRuntime().PackageSpec(""), "--acp"}
+	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", managed.ManagedNPMRuntime().PackageSpec(""), "--acp"}
 	if got := res.Command; !slices.Equal(got, want) {
 		t.Errorf("preview with copilot on PATH = %v, want %v", got, want)
 	}

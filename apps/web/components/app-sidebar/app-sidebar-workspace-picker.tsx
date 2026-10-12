@@ -15,6 +15,7 @@ import {
 } from "@/components/workspaces/workspace-picker-content";
 import { workspaceHomeHref } from "./app-sidebar-workspace-navigation";
 import { useSelectWorkspace } from "@/hooks/use-select-workspace";
+import { requestNavigation } from "@/lib/routing/navigation-guard";
 
 /**
  * Compact, secondary workspace switcher inlined after the Kandev brand in the
@@ -108,8 +109,8 @@ export function AppSidebarWorkspacePicker({
   const router = useRouter();
   const officeEnabled = useFeature("office");
   const workspaces = useAppStore((s) => s.workspaces);
+  const startupPage = useAppStore((s) => s.userSettings.startupPage);
   const selectWorkspace = useSelectWorkspace();
-  const resetKanbanWorkspaceContext = useAppStore((s) => s.resetKanbanWorkspaceContext);
   const { open, setOpen } = useMenuOpenState(controlledOpen, onOpenChange);
 
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
@@ -120,34 +121,27 @@ export function AppSidebarWorkspacePicker({
   const handleSelect = useCallback(
     (workspace: WorkspaceItem) => {
       const { id } = workspace;
-      if (id === activeId) {
-        if (officeEnabled && workspaceType(workspace) === "kanban") {
-          selectWorkspace(workspace);
-          router.push(workspaceHomeHref(workspace));
+      requestNavigation(() => {
+        if (id === activeId) {
+          if (officeEnabled && workspaceType(workspace) === "kanban") {
+            selectWorkspace(workspace);
+            router.push(workspaceHomeHref(workspace, startupPage));
+          }
+          setOpen(false);
+          onActionComplete?.();
+          return;
+        }
+        selectWorkspace(workspace);
+        if (workspaceType(workspace) === "kanban") {
+          router.push(workspaceHomeHref(workspace, startupPage));
+        } else if (officeEnabled) {
+          router.push(`/office?workspaceId=${id}`);
         }
         setOpen(false);
         onActionComplete?.();
-        return;
-      }
-      resetKanbanWorkspaceContext();
-      selectWorkspace(workspace);
-      if (workspaceType(workspace) === "kanban") {
-        router.push(workspaceHomeHref(workspace));
-      } else if (officeEnabled) {
-        router.push(`/office?workspaceId=${id}`);
-      }
-      setOpen(false);
-      onActionComplete?.();
+      });
     },
-    [
-      activeId,
-      router,
-      selectWorkspace,
-      resetKanbanWorkspaceContext,
-      officeEnabled,
-      onActionComplete,
-      setOpen,
-    ],
+    [activeId, startupPage, router, selectWorkspace, officeEnabled, onActionComplete, setOpen],
   );
   const handleNavigate = useCallback(
     (href: string) => {

@@ -1,5 +1,23 @@
 export type WebSocketRequestErrorDetails = Record<string, unknown>;
 
+/** Error returned when a WebSocket request does not receive a response in time. */
+export class WebSocketRequestTimeoutError extends Error {
+  readonly action: string;
+  readonly kind = "timeout" as const;
+
+  constructor(action: string) {
+    super(`WebSocket request timed out: ${action}`);
+    this.name = "WebSocketRequestTimeoutError";
+    this.action = action;
+  }
+}
+
+export function isWebSocketRequestTimeoutError(
+  error: unknown,
+): error is WebSocketRequestTimeoutError {
+  return error instanceof WebSocketRequestTimeoutError;
+}
+
 /** Error returned when the backend rejects a request with a typed payload. */
 export class WebSocketRequestError extends Error {
   readonly code?: string;

@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/plugins"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -18,6 +21,21 @@ type SessionDataProvider func(ctx context.Context, sessionID string) ([]*ws.Mess
 // by a detail surface. It is separate from SessionDataProvider so a refresh
 // does not replay unrelated session state, models, commands, or control data.
 type SessionGitDataProvider func(ctx context.Context, sessionID string) ([]*ws.Message, error)
+
+// SessionGitRefreshProvider returns the accepted status projection for a
+// correlated foreground refresh. Snapshots contain the same notification
+// messages broadcast to subscribed consumers.
+type SessionGitRefreshProvider func(ctx context.Context, sessionID, mode string) (SessionGitRefreshResult, error)
+
+type SessionGitRefreshResult struct {
+	Success           bool          `json:"success"`
+	SessionID         string        `json:"session_id"`
+	TaskEnvironmentID string        `json:"task_environment_id,omitempty"`
+	Mode              string        `json:"mode"`
+	StatusState       string        `json:"status_state"`
+	ErrorCode         string        `json:"error_code,omitempty"`
+	Snapshots         []*ws.Message `json:"snapshots"`
+}
 
 // Hub manages all WebSocket client connections
 type Hub struct {
@@ -52,7 +70,19 @@ type Hub struct {
 	// Optional provider for session data on subscription (e.g., git status)
 	sessionDataProvider       SessionDataProvider
 	sessionGitDataProvider    SessionGitDataProvider
+	sessionGitRefreshProvider SessionGitRefreshProvider
 	userSubscriptionListeners []func(userID string)
+	pluginConversationService *plugins.Service
+	conversationSourceReader  ConversationSourceReader
+	conversationEpoch         string
+	// sessionLaunchWarnings keeps the latest launch warning long enough for a
+	// client that subscribes after the event was published to receive it.
+	sessionLaunchWarnings map[string][]byte
+
+	// clientDisconnectListener releases connection-bound resources after a
+	// client is removed from the hub. It runs asynchronously so durable cleanup
+	// cannot block the hub event loop.
+	clientDisconnectListener func(connectionID string)
 
 	// sessionMode tracks per-session focus state and fires listeners when
 	// effective mode (paused/slow/fast) transitions. See hub_session_mode.go.
@@ -89,8 +119,29 @@ func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 		broadcast:                make(chan *ws.Message, 256),
 		dispatcher:               dispatcher,
 		sessionMode:              newSessionModeTracker(),
+		sessionLaunchWarnings:    make(map[string][]byte),
 		logger:                   log.WithFields(zap.String("component", "ws_hub")),
+		conversationEpoch:        uuid.NewString(),
 	}
+}
+
+func (h *Hub) SetPluginConversationService(service *plugins.Service) {
+	h.mu.Lock()
+	h.pluginConversationService = service
+	h.mu.Unlock()
+}
+
+// SetConversationSourceReader wires the authorized task source used to
+// establish the initial revision for Host-only conversation subscriptions.
+func (h *Hub) SetConversationSourceReader(reader ConversationSourceReader) {
+	h.mu.Lock()
+	h.conversationSourceReader = reader
+	h.mu.Unlock()
+}
+
+type ConversationSourceReader interface {
+	GetTaskSession(context.Context, string) (*models.TaskSession, error)
+	ReadConversationRevision(context.Context, string) (models.ConversationRevision, error)
 }
 
 type SystemMetricsInterestTracker interface {
@@ -109,6 +160,9 @@ func (h *Hub) Run(ctx context.Context) {
 	h.mu.Lock()
 	h.dispatchCtx = ctx
 	h.mu.Unlock()
+	checksDone := make(chan struct{})
+	go func() { defer close(checksDone); h.runConversationChecks(ctx) }()
+	defer func() { <-checksDone }()
 
 	for {
 		select {
@@ -137,7 +191,9 @@ func (h *Hub) Run(ctx context.Context) {
 func (h *Hub) closeAllClients() {
 	h.mu.Lock()
 	metricClientIDs := make([]string, 0, len(h.systemMetricsSubscribers))
+	disconnectedIDs := make([]string, 0, len(h.clients))
 	for client := range h.clients {
+		disconnectedIDs = append(disconnectedIDs, client.ID)
 		if client.systemMetricsSubscribed {
 			metricClientIDs = append(metricClientIDs, client.ID)
 			client.systemMetricsSubscribed = false
@@ -146,8 +202,10 @@ func (h *Hub) closeAllClients() {
 		delete(h.clients, client)
 	}
 	tracker := h.metricsInterestTracker
+	listener := h.clientDisconnectListener
 	h.taskSubscribers = make(map[string]map[*Client]bool)
 	h.sessionSubscribers = make(map[string]map[*Client]bool)
+	h.sessionLaunchWarnings = make(map[string][]byte)
 	h.runSubscribers = make(map[string]map[*Client]bool)
 	h.systemMetricsSubscribers = make(map[*Client]bool)
 	h.sessionMode.focusByClient = make(map[string]map[*Client]bool)
@@ -156,6 +214,12 @@ func (h *Hub) closeAllClients() {
 	for _, clientID := range metricClientIDs {
 		if tracker != nil {
 			tracker.MetricsUnsubscribe(clientID)
+		}
+	}
+
+	if listener != nil {
+		for _, clientID := range disconnectedIDs {
+			go listener(clientID)
 		}
 	}
 
@@ -205,10 +269,15 @@ func (h *Hub) removeClient(client *Client) {
 		metricClientID = client.ID
 		tracker = h.metricsInterestTracker
 	}
+	listener := h.clientDisconnectListener
 	h.mu.Unlock()
 
 	if tracker != nil && metricClientID != "" {
 		tracker.MetricsUnsubscribe(metricClientID)
+	}
+
+	if listener != nil {
+		go listener(client.ID)
 	}
 
 	for _, sessionID := range dedupStrings(affectedSessions) {
@@ -216,6 +285,14 @@ func (h *Hub) removeClient(client *Client) {
 	}
 
 	h.logger.Debug("Client unregistered", zap.String("client_id", client.ID))
+}
+
+// SetClientDisconnectListener registers a callback for connection teardown.
+// The callback runs once for each client that was present in the hub.
+func (h *Hub) SetClientDisconnectListener(listener func(connectionID string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clientDisconnectListener = listener
 }
 
 func (h *Hub) SetSystemMetricsInterestTracker(tracker SystemMetricsInterestTracker) {
@@ -329,6 +406,34 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
 		return
 	}
 	h.broadcastToOwner(owner, msg)
+}
+
+// BroadcastToWorkspaceExcludingWorkspaceReaders delivers a source-only
+// notification to readers that cannot read the destination workspace.
+func (h *Hub) BroadcastToWorkspaceExcludingWorkspaceReaders(sourceWorkspaceID, destinationWorkspaceID string, msg *ws.Message) {
+	readers := h.authPolicy.WorkspaceReaders
+	if readers == nil || sourceWorkspaceID == "" || destinationWorkspaceID == "" {
+		return
+	}
+	sourceReaders, err := readers(h.DispatchContext(), sourceWorkspaceID)
+	if err != nil {
+		return
+	}
+	destinationReaders, err := readers(h.DispatchContext(), destinationWorkspaceID)
+	if err != nil {
+		return
+	}
+	destination := make(map[string]struct{}, len(destinationReaders))
+	for _, userID := range destinationReaders {
+		destination[userID] = struct{}{}
+	}
+	sourceOnly := make([]string, 0, len(sourceReaders))
+	for _, userID := range sourceReaders {
+		if _, ok := destination[userID]; !ok {
+			sourceOnly = append(sourceOnly, userID)
+		}
+	}
+	h.broadcastToUsers(sourceOnly, msg)
 }
 
 // broadcastToUsers delivers to exactly the given user IDs. An empty set
@@ -628,6 +733,9 @@ func (h *Hub) SubscribeToSession(client *Client, sessionID string) bool {
 		zap.String("session_id", sessionID))
 
 	h.recomputeSessionMode(sessionID)
+	if !wasSubscribed {
+		h.replaySessionLaunchWarning(client, sessionID)
+	}
 	return !wasSubscribed
 }
 
@@ -838,6 +946,12 @@ func (h *Hub) SetSessionGitDataProvider(provider SessionGitDataProvider) {
 	h.sessionGitDataProvider = provider
 }
 
+// SetSessionGitRefreshProvider installs the mode-aware foreground status
+// provider used by session.git.refresh.
+func (h *Hub) SetSessionGitRefreshProvider(provider SessionGitRefreshProvider) {
+	h.sessionGitRefreshProvider = provider
+}
+
 // GetSessionData retrieves session data (e.g., git status) if a provider is set
 func (h *Hub) GetSessionData(ctx context.Context, sessionID string) ([]*ws.Message, error) {
 	if h.sessionDataProvider == nil {
@@ -854,4 +968,33 @@ func (h *Hub) GetSessionGitData(ctx context.Context, sessionID string) ([]*ws.Me
 		return h.sessionGitDataProvider(ctx, sessionID)
 	}
 	return h.GetSessionData(ctx, sessionID)
+}
+
+// GetSessionGitRefreshData retrieves one correlated foreground result. Older
+// providers remain usable by wrapping their git notifications in a response.
+func (h *Hub) GetSessionGitRefreshData(ctx context.Context, sessionID, mode string) (SessionGitRefreshResult, error) {
+	if h.sessionGitRefreshProvider != nil {
+		return h.sessionGitRefreshProvider(ctx, sessionID, mode)
+	}
+	data, err := h.GetSessionGitData(ctx, sessionID)
+	if err != nil {
+		return SessionGitRefreshResult{}, err
+	}
+	snapshots := make([]*ws.Message, 0, len(data))
+	for _, message := range data {
+		if message != nil && message.Action == ws.ActionSessionGitEvent {
+			snapshots = append(snapshots, message)
+		}
+	}
+	state := "unavailable"
+	if len(snapshots) > 0 {
+		state = "ready"
+	}
+	return SessionGitRefreshResult{
+		Success:     len(snapshots) > 0,
+		SessionID:   sessionID,
+		Mode:        mode,
+		StatusState: state,
+		Snapshots:   snapshots,
+	}, nil
 }

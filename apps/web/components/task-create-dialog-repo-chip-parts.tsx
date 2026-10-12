@@ -1,8 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { IconCode, IconFolderPlus, IconGitBranch, IconInfoCircle } from "@tabler/icons-react";
+import {
+  IconCode,
+  IconFolderPlus,
+  IconGitBranch,
+  IconHome,
+  IconInfoCircle,
+  IconSettings,
+} from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import { Button } from "@kandev/ui/button";
 import {
   Drawer,
   DrawerContent,
@@ -15,7 +23,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Pill, type PillAction, type PillOption } from "@/components/task-create-dialog-pill";
 import type { Branch, RepositoryBranchPolicy } from "@/lib/types/http";
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
-import { computeBranchPlaceholder } from "@/components/branch-picker-options";
+import { branchOptionValue, computeBranchPlaceholder } from "@/components/branch-picker-options";
 import {
   computeBranchDisabledReason,
   computeBranchPrefix,
@@ -81,10 +89,9 @@ function branchPolicyToOption(
   branches: Branch[],
   policyDisabledReason?: string,
 ): PillOption {
-  const baseBranchAvailable = branches.some((branch) => {
-    if (branch.name === policy.base_branch) return true;
-    return branch.type === "remote" && `${branch.remote}/${branch.name}` === policy.base_branch;
-  });
+  const baseBranchAvailable = branches.some(
+    (branch) => branchOptionValue(branch) === policy.base_branch,
+  );
   const unavailableReason =
     policyDisabledReason ?? (baseBranchAvailable ? undefined : t("task:branchPolicyUnavailable"));
   const summary = t("workspaces:branchPolicySummary", {
@@ -128,6 +135,7 @@ function branchPolicyToOption(
 
 export function useRepoChipBranchPicker({
   row,
+  branchValue = row.branch,
   branchPolicies,
   branches,
   branchOptions,
@@ -139,6 +147,7 @@ export function useRepoChipBranchPicker({
   onPolicySelected,
 }: {
   row: TaskRepoRow;
+  branchValue?: string;
   branchPolicies: RepositoryBranchPolicy[];
   branches: Branch[];
   branchOptions: PillOption[];
@@ -151,7 +160,7 @@ export function useRepoChipBranchPicker({
 }) {
   const { t } = useTranslation();
   const hasRepo = !!(row.repositoryId || row.localPath);
-  const branchValue = preferredDefaultBranchLoading ? "" : row.branch;
+  const visibleBranchValue = preferredDefaultBranchLoading ? "" : branchValue;
   const selectedPolicy = branchPolicies.find((policy) => policy.id === row.branchPolicyId);
   const policyOptions = useMemo(
     () =>
@@ -162,13 +171,13 @@ export function useRepoChipBranchPicker({
     () => [...policyOptions, ...branchOptions],
     [branchOptions, policyOptions],
   );
-  const selectedBranchValue = selectedPolicy ? `policy:${selectedPolicy.id}` : branchValue;
+  const selectedBranchValue = selectedPolicy ? "policy:" + selectedPolicy.id : visibleBranchValue;
   const selectedBranchLabel = selectedPolicy
     ? t("task:branchPolicySelected", {
         name: selectedPolicy.name,
         base: selectedPolicy.base_branch,
       })
-    : branchValue;
+    : visibleBranchValue;
   const handleBranchSelect = (value: string) => {
     if (value.startsWith("policy:")) {
       const policy = branchPolicies.find((candidate) => `policy:${candidate.id}` === value);
@@ -202,6 +211,17 @@ function buildCreateRepositoryAction(onSelect?: () => void): PillAction | undefi
   return {
     label: t("task:createNewRepository"),
     icon: <IconFolderPlus className="h-3.5 w-3.5" />,
+    testId: "create-local-repository-button",
+    onSelect,
+  };
+}
+
+function buildDiscoverySettingsAction(onSelect?: () => void): PillAction | undefined {
+  if (!onSelect) return undefined;
+  return {
+    label: t("workspaces:chooseFoldersToDiscoverRepositories"),
+    icon: <IconSettings className="h-3.5 w-3.5" />,
+    testId: "repository-discovery-settings-button",
     onSelect,
   };
 }
@@ -213,9 +233,12 @@ export function RepoChipRepositoryPill({
   repoOptions,
   onRepositoryChange,
   onCreateRepository,
+  onOpenDiscoverySettings,
+  onAddHomeAndOpenDiscovery,
   onRefreshRepositories,
   repositoriesRefreshing,
   popoverHeader,
+  ariaDescribedBy,
 }: {
   repoLabel: string;
   repoTooltip: string;
@@ -223,11 +246,41 @@ export function RepoChipRepositoryPill({
   repoOptions: PillOption[];
   onRepositoryChange: (value: string) => void;
   onCreateRepository?: () => void;
+  onOpenDiscoverySettings?: () => void;
+  onAddHomeAndOpenDiscovery?: () => void;
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
   popoverHeader?: React.ReactNode;
+  ariaDescribedBy?: string;
 }) {
   const { t } = useTranslation();
+  const createAction = buildCreateRepositoryAction(onCreateRepository);
+  const discoveryAction = buildDiscoverySettingsAction(onOpenDiscoverySettings);
+  const actions = [createAction, discoveryAction].filter(Boolean) as PillAction[];
+
+  const emptyMessage =
+    repoOptions.length === 0 && onAddHomeAndOpenDiscovery ? (
+      <div className="flex flex-col items-center justify-center gap-2 py-4 px-3 text-center">
+        <p className="text-xs text-muted-foreground">
+          {t("workspaces:noRepositoriesScanHomeHint")}
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-8 max-md:min-h-11 max-md:h-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:h-11 gap-1.5 text-xs cursor-pointer"
+          data-testid="scan-home-folder-hint-button"
+          onClick={() => {
+            onAddHomeAndOpenDiscovery();
+          }}
+        >
+          <IconHome className="h-3.5 w-3.5 text-muted-foreground" />
+          <span>{t("workspaces:scanHomeFolderAction")}</span>
+        </Button>
+      </div>
+    ) : (
+      t("task:noRepositories")
+    );
+
   return (
     <Pill
       icon={<IconCode className="h-3 w-3 shrink-0 text-muted-foreground" />}
@@ -237,14 +290,15 @@ export function RepoChipRepositoryPill({
       options={repoOptions}
       onSelect={onRepositoryChange}
       searchPlaceholder={t("task:searchRepositories")}
-      emptyMessage={t("task:noRepositories")}
+      emptyMessage={emptyMessage}
       testId="repo-chip-trigger"
       tooltip={repoTooltip}
-      action={buildCreateRepositoryAction(onCreateRepository)}
+      actions={actions.length > 0 ? actions : undefined}
       onRefresh={onRefreshRepositories}
       refreshing={repositoriesRefreshing}
       refreshLabel="repositories"
       popoverHeader={popoverHeader}
+      ariaDescribedBy={ariaDescribedBy}
       flat
     />
   );
@@ -256,12 +310,14 @@ export function RepoChipBranchPill({
   branchLocked,
   branchesLoading,
   refreshBranches,
+  ariaDescribedBy,
 }: {
   branchPicker: RepoChipBranchPicker;
   branchIntent?: BranchIntent;
   branchLocked?: boolean;
   branchesLoading: boolean;
   refreshBranches?: () => void;
+  ariaDescribedBy?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -292,7 +348,64 @@ export function RepoChipBranchPill({
       onRefresh={refreshBranches}
       refreshing={branchesLoading}
       filter={scoreBranch}
+      ariaDescribedBy={ariaDescribedBy}
       flat
     />
   );
+}
+
+export function RepoChipBaseBranchPill({
+  options,
+  value,
+  defaultBranch,
+  hasRepo,
+  branchesLoading,
+  onSelect,
+  refreshBranches,
+  ariaDescribedBy,
+}: {
+  options: PillOption[];
+  value: string;
+  defaultBranch: string;
+  hasRepo: boolean;
+  branchesLoading: boolean;
+  onSelect: (value: string) => void;
+  refreshBranches?: () => void;
+  ariaDescribedBy?: string;
+}) {
+  const { t } = useTranslation();
+  const defaultLabel = defaultBranch || t("common:repositoryDefaultBranchOption");
+  const valueLabel = value || t("workspaces:repositorySetsTaskDefault", { branch: defaultLabel });
+  const disabledReason = baseBranchDisabledReason(hasRepo, branchesLoading, t);
+  return (
+    <Pill
+      icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
+      value={valueLabel}
+      selectedValue={value}
+      placeholder={valueLabel}
+      options={options}
+      onSelect={onSelect}
+      disabled={!hasRepo || branchesLoading || options.length === 0}
+      disabledReason={disabledReason}
+      searchPlaceholder={t("task:searchBranches")}
+      emptyMessage={t("task:noBranches")}
+      testId="repo-chip-base-branch"
+      tooltip={t("workspaces:repositorySetsBaseBranchLabel")}
+      onRefresh={refreshBranches}
+      refreshing={branchesLoading}
+      filter={scoreBranch}
+      ariaDescribedBy={ariaDescribedBy}
+      flat
+    />
+  );
+}
+
+function baseBranchDisabledReason(
+  hasRepo: boolean,
+  branchesLoading: boolean,
+  translate: (key: string) => string,
+): string {
+  if (!hasRepo) return translate("task:selectRepositoryFirst");
+  if (branchesLoading) return translate("task:loadingBranches2");
+  return translate("task:noBranches");
 }

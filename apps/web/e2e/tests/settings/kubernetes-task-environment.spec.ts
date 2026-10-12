@@ -28,6 +28,19 @@ async function expectStatusFailure(icon: Locator, page: Page) {
   await trigger.hover();
   const tooltip = openTooltip(page);
   await expect(tooltip.getByTestId("remote-executor-status-summary")).toBeVisible();
+  const panel = page.locator('[data-slot="tooltip-content"]:not([data-state="closed"])');
+  const panelBox = await panel.boundingBox();
+  const triggerBox = await trigger.boundingBox();
+  expect(panelBox).not.toBeNull();
+  expect(triggerBox).not.toBeNull();
+  expect(panelBox!.x).toBeGreaterThanOrEqual(0);
+  expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  expect(
+    Math.min(
+      Math.abs(panelBox!.y + panelBox!.height - triggerBox!.y),
+      Math.abs(triggerBox!.y + triggerBox!.height - panelBox!.y),
+    ),
+  ).toBeLessThan(30);
   await expect(tooltip.getByTestId("remote-executor-status-identity")).toHaveText(INITIAL_POD_NAME);
   await expect(tooltip.getByTestId("remote-executor-status-error")).toContainText("Unauthorized");
 }
@@ -39,6 +52,19 @@ async function expectStatusHealthy(icon: Locator, page: Page) {
   await trigger.hover();
   const tooltip = openTooltip(page);
   await expect(tooltip.getByTestId("remote-executor-status-summary")).toBeVisible();
+  const panel = page.locator('[data-slot="tooltip-content"]:not([data-state="closed"])');
+  const panelBox = await panel.boundingBox();
+  const triggerBox = await trigger.boundingBox();
+  expect(panelBox).not.toBeNull();
+  expect(triggerBox).not.toBeNull();
+  expect(panelBox!.x).toBeGreaterThanOrEqual(0);
+  expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  expect(
+    Math.min(
+      Math.abs(panelBox!.y + panelBox!.height - triggerBox!.y),
+      Math.abs(triggerBox!.y + triggerBox!.height - panelBox!.y),
+    ),
+  ).toBeLessThan(30);
   await expect(tooltip.getByTestId("remote-executor-status-identity")).toHaveText(INITIAL_POD_NAME);
   await expect(tooltip.getByTestId("remote-executor-status-state")).toContainText("running");
   await expect(tooltip.getByTestId("remote-executor-status-restarts")).toContainText("3");
@@ -146,6 +172,7 @@ test("Kubernetes task icons hydrate eagerly and publish the structured Pod summa
       },
     );
 
+    await testPage.clock.install();
     const kanban = new KanbanPage(testPage);
     let readsBeforeRender = sessionReads;
     await kanban.goto();
@@ -154,7 +181,8 @@ test("Kubernetes task icons hydrate eagerly and publish the structured Pod summa
     await expectStatusFailure(kanbanIcon, testPage);
     statusUnauthorized = false;
     readsBeforeRender = sessionReads;
-    await testPage.reload();
+    await testPage.mouse.move(0, 0);
+    await testPage.clock.fastForward(90_001);
     await expectEagerStatusRead(() => sessionReads, readsBeforeRender);
     await expectStatusHealthy(
       kanban.taskCard(task.id).getByTestId("executor-status-kubernetes-icon"),
@@ -175,8 +203,8 @@ test("Kubernetes task icons hydrate eagerly and publish the structured Pod summa
     );
     statusUnauthorized = false;
     readsBeforeRender = sessionReads;
-    await testPage.reload();
-    await session.waitForLoad(30_000);
+    await testPage.mouse.move(0, 0);
+    await testPage.clock.fastForward(90_001);
     await expectEagerStatusRead(() => sessionReads, readsBeforeRender);
     await expectStatusHealthy(
       session.sidebar

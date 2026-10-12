@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -41,6 +42,12 @@ func newCanvasService(t *testing.T) (*Service, *plugininstances.Store, *db.Pool)
 	if err != nil {
 		t.Fatalf("new canvas repository: %v", err)
 	}
+	if _, err := pool.Writer().Exec(`CREATE TABLE workspaces (id TEXT PRIMARY KEY, owner_id TEXT DEFAULT '')`); err != nil {
+		t.Fatalf("create workspace fixture: %v", err)
+	}
+	if _, err := pool.Writer().Exec(`INSERT INTO workspaces (id, owner_id) VALUES ('workspace-1', 'owner-1')`); err != nil {
+		t.Fatalf("insert workspace fixture: %v", err)
+	}
 	return NewService(repo, instanceStore), instanceStore, pool
 }
 
@@ -74,6 +81,55 @@ func TestGetExposesPendingFirstRelease(t *testing.T) {
 	}
 	if got.ActiveReleaseID != "" {
 		t.Fatalf("active release ID = %q, want empty", got.ActiveReleaseID)
+	}
+}
+
+func TestRenameOnlyChangesTitleAndEmitsUpdate(t *testing.T) {
+	service, _, _ := newCanvasService(t)
+	created := createCanvas(t, service, CreateCanvasRequest{WorkspaceID: "workspace-1", TaskID: "task-1", Title: "Before"})
+	var event LifecycleEvent
+	service.SetEventPublisher(func(_ context.Context, value LifecycleEvent) { event = value })
+	updated, err := service.Rename(context.Background(), created.ID, "  After  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != "After" || updated.ID != created.ID || updated.PluginInstanceID != created.PluginInstanceID || updated.TaskID != created.TaskID {
+		t.Fatalf("unexpected rename projection: %+v", updated)
+	}
+	if event.Type != EventUpdated || event.Title != "After" || event.WorkspaceID != created.WorkspaceID {
+		t.Fatalf("unexpected update event: %+v", event)
+	}
+	if _, err := service.Rename(context.Background(), created.ID, "  "); !errors.Is(err, ErrInvalidCanvas) {
+		t.Fatalf("blank rename = %v", err)
+	}
+	if _, err := service.Rename(context.Background(), created.ID, strings.Repeat("x", MaxTitleLength+1)); !errors.Is(err, ErrInvalidCanvas) {
+		t.Fatalf("long rename = %v", err)
+	}
+	if err := service.Remove(context.Background(), created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Rename(context.Background(), created.ID, "Restored"); !errors.Is(err, ErrCanvasNotFound) {
+		t.Fatalf("removed rename = %v", err)
+	}
+}
+
+func TestRemoveDeletesCreationAuthority(t *testing.T) {
+	service, _, _ := newCanvasService(t)
+	created := createCanvas(t, service, CreateCanvasRequest{
+		WorkspaceID:        "workspace-1",
+		TaskID:             "task-1",
+		Title:              "Authority cleanup",
+		CreatedBySessionID: "session-1",
+		OwnerUserID:        "owner-1",
+	})
+	if _, err := service.repo.GetCreationAuthority(context.Background(), created.ID); err != nil {
+		t.Fatalf("get creation authority before remove: %v", err)
+	}
+	if err := service.Remove(context.Background(), created.ID); err != nil {
+		t.Fatalf("remove canvas: %v", err)
+	}
+	if _, err := service.repo.GetCreationAuthority(context.Background(), created.ID); !errors.Is(err, ErrCreationAuthorityNotFound) {
+		t.Fatalf("get creation authority after remove = %v, want ErrCreationAuthorityNotFound", err)
 	}
 }
 

@@ -1,12 +1,12 @@
 ---
 id: plugins-isolated-web-app-contributions-design
-title: Isolated plugin web-application contributions system design
+title: Plugin web-application contributions system design
 status: draft
 system: plugins
 owners:
   - kandev
 created: 2026-08-26
-last_updated: 2026-08-30
+last_updated: 2026-09-21
 requirements:
   - REQ-PLUGINS-ISOLATED-WEB-APPS-001
   - REQ-PLUGINS-ISOLATED-WEB-APPS-002
@@ -19,19 +19,30 @@ requirements:
   - REQ-PLUGINS-ISOLATED-WEB-APPS-009
   - REQ-PLUGINS-ISOLATED-WEB-APPS-010
   - REQ-PLUGINS-ISOLATED-WEB-APPS-011
+  - REQ-PLUGINS-ISOLATED-WEB-APPS-012
+  - REQ-PLUGINS-ISOLATED-WEB-APPS-013
 ---
 
-# Isolated plugin web-application contributions system design
+# Plugin web-application contributions system design
 
 ## Purpose and boundaries
 
-The Plugins system adds an isolated `web_app` contribution beside the trusted
-native frontend bundle. A web application uses packaged static files in a
-sandboxed iframe. It does not run in the Kandev SPA process.
+The Plugins system provides packaged `web_app` documents beside native bundles.
+The target runtime uses trusted same-origin iframes, not opaque-origin isolation.
+It does not import package code into the SPA module registry.
+
+The [same-origin decision](../../../decisions/2026-09-19-trusted-same-origin-canvases.md)
+amends the browser trust boundary. Implementation is complete under the
+[same-origin delivery plan](../../../plans/canvas-same-origin-auth/plan.md).
 
 This design owns plugin instances, immutable releases, capability grants,
 runtime tokens, web data access, shared instance state, and live browser
 events. The Canvases system owns canvas scope changes and user workflows.
+
+The [canvas distribution design](../../canvases/system-design/marketplace-sharing.md)
+adds a static distribution profile and an inert retained project-source subtree.
+Preview images belong to registry listings. The profile reuses this runtime boundary;
+native plugin package installation does not become a canvas import path.
 
 This design implements
 [ADR-2026-08-26-plugin-backed-web-app-canvases](../../../decisions/2026-08-26-plugin-backed-web-app-canvases.md).
@@ -53,6 +64,8 @@ It extends the data boundary from
 | `REQ-PLUGINS-ISOLATED-WEB-APPS-009` | Diagnostics and observability                    |
 | `REQ-PLUGINS-ISOLATED-WEB-APPS-010` | Artifact storage, Protocol compatibility         |
 | `REQ-PLUGINS-ISOLATED-WEB-APPS-011` | Host appearance protocol                         |
+| `REQ-PLUGINS-ISOLATED-WEB-APPS-012` | Runtime startup protocol                         |
+| `REQ-PLUGINS-ISOLATED-WEB-APPS-013` | Same-origin transport and trust                   |
 
 ## Existing plugin contracts
 
@@ -92,7 +105,8 @@ wildcards, query strings, or fragments. Later specifications can add other
 host placements.
 
 The host owns the displayed navigation label, icon, scope, route, and actions.
-The iframe owns only its document rectangle.
+The supported canvas UI occupies its document rectangle. Trusted same-origin
+code can also access the parent document; geometry is not a security boundary.
 
 A package can contain these contribution combinations:
 
@@ -223,6 +237,12 @@ If the release needs a new grant, the service records it as pending. The active
 release stays unchanged. A user can approve the permissions and activate the
 pending release in one transaction.
 
+The canvas service can supply recorded initial creation authority through
+[its creation transaction](../../canvases/system-design/local-creation-authority.md).
+The instance store validates and inserts the exact grants in that transaction.
+The generic plugin publication and import paths cannot infer this exception
+from a package manifest, source-user field, or instance ownership.
+
 The initial retention rule keeps the active release and one prior valid
 release for each local canvas instance. A pending release is also retained
 until approval, replacement, or removal.
@@ -260,29 +280,32 @@ Add one host component for web applications. The component requests a runtime
 URL for an authorized instance, release, placement, and user. The backend
 returns a short-lived capability URL.
 
-The component renders an iframe with these rules:
+`WebAppFrame` and `BuildContentSecurityPolicy` both declare
+`sandbox="allow-scripts allow-forms allow-same-origin"`. Both must change in
+one implementation slice. Either opaque policy would otherwise retain the failure.
+The runtime keeps its served origin, including top-level capability navigation.
+Form submissions remain denied by `form-action 'none'`.
 
-- `sandbox` permits scripts and forms.
-- The sandbox omits `allow-same-origin`, top navigation, and popups.
-- The iframe does not receive Kandev cookies or authorization headers.
-- The host does not inject a JavaScript object or use a privileged message
-  bridge. It can send the presentation-only appearance envelope below.
-- The host chrome contains status, navigation, permissions, releases, and
-  lifecycle actions.
+The host injects no native API or credential value. Appearance and startup
+messages stay bounded. Host chrome remains outside the frame for presentation;
+trusted frame code can access that chrome through normal same-origin DOM APIs.
 
-The runtime response also applies the sandbox through the CSP `sandbox`
-directive. This directive protects a capability URL that a person opens as a
-top-level document. The response permits only `allow-scripts` and
-`allow-forms`. It does not permit `allow-same-origin`, and `form-action
-'none'` denies form submissions to external origins.
+The desktop shell adds a narrow `frame-src` rule for the loopback backend.
+`BuildContentSecurityPolicy` always prepends the literal CSP source `'self'`
+to `frame-ancestors`, then appends normalized explicit launcher and Tauri
+origins. Keep `normalizeFrameAncestors` restricted to exact origins; the host
+adds the keyword separately. Never derive ancestors from inbound Host, Origin,
+Referer, or forwarded headers, and never use wildcard hosts or ports.
 
-The desktop shell adds a narrow `frame-src` rule for the loopback backend. The
-runtime `frame-ancestors` policy permits the configured web host,
-`tauri://localhost`, and `http://tauri.localhost`. It denies other parents.
-Desktop packaging tests cover both Tauri origin forms and direct browser use.
-
-The iframe can use `prefers-color-scheme` and responsive CSS as fallbacks. The
-host appearance protocol supplies the exact active Kandev semantic colors.
+Relative capability URLs keep the browser UI and runtime on the same public
+origin, including TLS termination at a reverse proxy. Each DNS alias works
+independently without a configured list. An alias does not authorize framing a
+different alias. Cross-origin frontend/runtime hosting requires an explicitly
+trusted origin; this repair adds no new operator configuration for that topology.
+Preserve the current exact development ports and Tauri exceptions. Framing
+permission and browser same-origin identity remain separate decisions.
+Browser coverage must use real runtime responses through two custom HTTPS hosts
+and an unrelated-parent negative case, not just assert the header text.
 
 ## Host appearance protocol
 
@@ -318,13 +341,12 @@ a bounded serialized CSS color from a fixed key allowlist. The envelope
 contains no identity, capability, data, storage, navigation, or action field.
 
 After the iframe load event, the host sends the initial envelope to that
-iframe's `contentWindow`. The loading cover remains for one animation frame so
-the application can apply the values before it becomes visible. The host sends
-another envelope when the resolved Kandev theme changes. It does not reload the
-iframe.
+iframe's `contentWindow`. Reveal additionally requires the current startup
+acknowledgement described below and one animation frame for appearance. The
+host sends another envelope when the resolved theme changes without reload.
 
-The opaque iframe has no stable origin, so the host targets its exact window
-with `targetOrigin: "*"`. The application listener accepts only messages whose
+The existing appearance sender targets the exact frame window with
+`targetOrigin: "*"` to retain support for web and distinct-origin desktop hosts. The application listener accepts only messages whose
 source is `window.parent` and whose type, version, mode, keys, and value bounds
 match the contract. This source check prevents a sibling frame from setting
 appearance values. The wildcard does not grant authority because the payload
@@ -334,6 +356,54 @@ The bundled scaffold maps the token keys to documented CSS custom properties.
 It includes safe light and dark fallbacks. An application can ignore this
 message, but it does not receive another theme API or a privileged reply
 channel.
+
+## Runtime startup protocol
+
+The plugin runtime owns a bounded startup monitor, not authored application
+code or an optional scaffold. During entry-HTML serving, insert a host-owned
+bootstrap before authored scripts using the existing Go HTML tokenizer
+dependency. Preserve the doctype, encoding, entry-relative paths, and original
+markup bytes around the insertion. Support valid HTML with an omitted head.
+Bound processing by the entry-file limit; fail safely if insertion cannot be
+performed. Non-entry assets stay byte-identical. Stored files, digests, and
+edit source never change. Compute Content-Length from the served representation.
+
+Serve the bootstrap from a reserved capability-relative
+`_kandev/host-runtime.js` route before versioned protocol dispatch. Validate the
+capability and apply normal runtime headers. Package files cannot shadow it.
+The bootstrap installs capture-phase script/asset error and unhandled-rejection
+listeners before authored code. It waits for document load, then fetches
+`./_kandev/v1/context` using the existing capability path and
+`credentials: "same-origin"`. Never use `omit` for this host-owned request. It reports only safe
+startup result codes. A handled application data error can still render inside
+a successfully started frame; Ready is not proof of application correctness or
+business-operation success.
+
+`WebAppFrame` creates a fresh bounded attempt nonce for every mount/runtime URL.
+After load it sends `kandev.web_app.startup_probe` version 1 with that nonce to
+the exact frame window. The bootstrap accepts only `window.parent` and echoes
+the nonce with `kandev.web_app.startup_result`, version 1, and result `ready` or
+`failed` after the startup outcome is known. It retains one pending probe and
+one outcome; no repeating message or polling loop is required. Failure codes
+are a closed vocabulary (`document_error`, `context_unavailable`). Arbitrary
+error text and request URLs are never forwarded.
+
+The parent checks exact message shape, version, nonce, and
+`event.source === iframe.contentWindow`. Origin alone is not sufficient
+authority. Same-origin code is trusted and can access host state directly.
+Replies from a previous mount, sibling window, wrong nonce, or unsupported
+version are ignored. The reply changes presentation
+only. No domain APIs, grants, navigation, or credentials cross this channel.
+Top-level capability navigation has no host probe and remains sandboxed.
+
+The 15-second startup deadline begins when the iframe is mounted. It is separate
+from the 15-minute capability lifetime. No acknowledgement, including CSP-blocked
+navigation, causes unavailable status and frame teardown. Retry obtains a fresh
+descriptor and nonce through existing host actions. Late replies cannot clear
+failure; listeners and timers are cancelled on teardown. Authority changes still
+unmount the frame immediately. Renewal mounts a new attempt; live theme changes
+do not restart startup. Existing retained releases receive the bootstrap at
+serve time and need no author edits or republish.
 
 ## Runtime token
 
@@ -364,9 +434,11 @@ fresh HTTP metadata and runtime-binding load. This is the revocation boundary
 for direct external requests. Kandev runtime and protocol requests still run
 the binding validator on every request.
 
-The runtime route accepts the capability without an ambient session cookie.
-The route sets explicit CORS responses for the sandboxed opaque origin. It
-does not accept the token from a general authorization header or query field.
+The runtime route accepts the capability independently of ambient session cookies.
+A reverse proxy can require its own cookie before forwarding the request.
+Kandev does not accept a runtime token from a general header or query field.
+Legacy opaque-origin CORS responses remain restricted; no credentialed `null`
+origin or wildcard CORS permission is added.
 
 ## Browser data protocol
 
@@ -481,14 +553,16 @@ add another handler type without changing the browser protocol.
 
 The runtime document response uses this minimum header policy:
 
-- `Content-Security-Policy` includes `sandbox allow-scripts allow-forms`,
+- `Content-Security-Policy` includes
+  `sandbox allow-scripts allow-forms allow-same-origin`,
   `default-src 'none'`, `form-action 'none'`, `base-uri 'none'`, and
   `object-src 'none'`
-- `frame-ancestors` contains only normalized Kandev web and Tauri host origins
+- `frame-ancestors` contains the host-owned `'self'` keyword and normalized
+  explicit Kandev launcher and Tauri origins
 - `X-Content-Type-Options` is `nosniff`
 - `Referrer-Policy` is `no-referrer`
-- `Cross-Origin-Resource-Policy` is `cross-origin` because the document has an
-  opaque origin and Tauri is a separate origin
+- `Cross-Origin-Resource-Policy` remains `cross-origin` for distinct-origin
+  Tauri hosts
 - capability-bearing HTML and API responses use `Cache-Control: no-store`
 
 The response uses a restrictive resource policy:
@@ -508,16 +582,52 @@ The response uses a restrictive resource policy:
 The implementation must build the policy from normalized grants. It must not
 copy manifest text into a response header.
 
-The runtime strips plugin-supplied framing, cookie, authentication, service
-worker, and cross-origin policy headers. Service workers are unavailable under
-the opaque origin and runtime path.
+Runtime headers remain host-owned. They do not grant broader service-worker
+scope. Same-origin code can access origin storage and the parent document;
+service-worker unavailability must not be claimed as an isolation guarantee.
+Authors use instance state for shared values and memory for temporary values.
+They must not modify host internals or depend on shared browser-storage keys.
+These are authoring rules, not enforced browser boundaries.
 
-The host must treat all iframe content, titles, errors, downloads, and links as
-untrusted. The iframe cannot cover host controls or navigate the top frame.
+## Same-origin transport and trust
 
-The authoring guide states that an opaque-origin application cannot use
-`localStorage`, `sessionStorage`, IndexedDB, or service workers. The application
-uses instance state for durable shared values and memory for temporary values.
+This change applies to the shared `ui.web_apps` runtime, including local,
+imported, and installed-plugin canvases. It adds no manifest option, profile
+switch, database migration, or separate iframe transport.
+
+The startup bootstrap uses `credentials: "same-origin"`. Standard relative
+`fetch`, XHR, asset loads, and EventSource requests use their same-origin
+browser behavior. No global fetch shim rewrites authored requests. Retained
+packages that explicitly omit credentials need an author edit and republish.
+Cross-origin credential delivery, including separate-origin desktop hosts,
+is not enabled globally. Capability-only local operation remains supported.
+
+The proxy must preserve the public Host for writes that carry Origin.
+`corsMiddleware` already accepts matching-host origins through `AllowedOrigin`.
+Do not trust arbitrary forwarded headers or broaden the general CORS policy.
+The HTTPS test proxy must preserve browser cookies and public Host; it must not
+supply missing cookies from its Node client or mock successful protocol replies.
+
+The proxy cookie only passes the outer gate. `Runtime.Serve` still validates
+its token and binding before assets, data, state, actions, and events. Cookies
+must not change the bound actor, release, scope, or grant generation. Invalid
+capabilities and denied writes still fail through existing backend services.
+Direct first-party API requests use the ordinary user authorization boundary;
+canvas grants do not constrain them. Revoking a runtime token cannot undo DOM
+changes, shared storage, or callbacks already installed in the parent page.
+
+Keep `script-src`, network grants, form policy, and exact frame ancestors.
+These govern the served document, not trusted code acting through its parent.
+Proxy HTML injection remains incompatible with the startup monitor and CSP.
+Operators must exclude runtime responses from Cloudflare RUM and other
+injected scripts that violate policy. Do not allow remote analytics scripts
+or suppress document errors to conceal this problem.
+
+See [response preservation](runtime-response-preservation.md).
+
+UI behavior stays unchanged. Test Ready, data, a permitted write, and an event through a real local
+cookie gate. Test missing cookies, reauthentication and Retry, invalid tokens,
+and unchanged package bytes. Record desktop and phone results separately.
 
 ## Compatibility
 
@@ -576,41 +686,29 @@ backend or package errors.
 
 ## Observability
 
-Add counters and duration metrics for:
-
-- package validation and activation result
-- runtime capability issue and rejection result
-- data resource and operation result
-- state operation and conflict result
-- event connection, replay, and resync result
-- content-policy and network denial result
-- artifact bytes admitted, retained, rejected, unavailable, and removed
-
-Logs can contain plugin ID, instance ID, release ID, web-application key,
-resource type, operation, safe result, and duration. Logs omit source, content,
-state values, bodies, payloads, runtime capabilities, and user credentials.
+Record bounded result counters and durations for validation, activation, runtime
+access, data/state operations, events, policy denials, and artifact storage.
+Logs may identify plugin, instance, release, operation, result, and duration.
+Never log source, bodies, state values, event payloads, tokens, or credentials.
 
 ## Test strategy
 
-- Manifest tests cover web-application declarations and combinations.
-- Package tests cover traversal, links, duplicate paths, limits, and digest
-  stability.
-- Repository tests cover instances, releases, grants, state revisions, and
-  migration replay on SQLite and PostgreSQL.
-- Service tests cover release activation and grant intersection.
-- HTTP tests cover capability binding, stale tokens, CORS, limits, and stable
-  errors.
-- Security tests cover sandbox flags, content policy, form-action denial,
-  remote script denial, cookie absence, nested asset resolution, authority
-  revocation after load, and top-navigation denial.
-- Host data contract tests compare browser and gRPC projections.
-- Event tests cover scope filtering, reconnect replay, generation changes, and
-  resync.
-- Frontend component tests cover host state and iframe lifecycle.
-- Appearance tests cover initial delivery, source validation, token bounds,
-  live changes, and computed colors in direct, Dockview, and phone hosts.
+- Validate manifests, package combinations, traversal, links, duplicates, limits,
+  digests, activation, grant intersection, and SQLite/PostgreSQL migrations.
+- Exercise runtime bindings, stale tokens, CORS, safe errors, shared state,
+  pagination, and browser/gRPC projection parity.
+- Verify both sandbox declarations, cookie delivery, form and remote-script
+  denial, nested assets, exact ancestors, and capability revocation.
+- Verify scoped events, replay, generation changes, and resync.
+- Cover failed documents/assets/context, absent and stale acknowledgements,
+  sibling replies, timeout cleanup, retries, renewal, and unchanged artifacts.
+- Verify initial and live appearance in direct, Dockview, and phone hosts.
+- Execute the cookie-proxy and authentication tests in the
+  [same-origin delivery plan](../../../plans/canvas-same-origin-auth/plan.md).
 
 ## Related decisions
+
+- [Trusted same-origin canvases](../../../decisions/2026-09-19-trusted-same-origin-canvases.md)
 
 - [Plugin-backed web-app canvases](../../../decisions/2026-08-26-plugin-backed-web-app-canvases.md)
 - [Plugin Host data API](../../../decisions/0043-plugin-host-data-api.md)

@@ -11,7 +11,7 @@ test.describe("Custom TUI MCP strategy selector", () => {
     await testPage.goto("/settings/agents");
     await testPage.getByTestId("new-agent-button").click();
 
-    const dialog = testPage.getByRole("dialog", { name: "Add TUI Agent" });
+    const dialog = testPage.getByRole("dialog", { name: "Add custom agent" });
     await expect(dialog).toBeVisible();
 
     const trigger = dialog.getByTestId("mcp-strategy-select");

@@ -21,15 +21,16 @@ List the concepts, behavior, data, and contracts that this system owns.
 
 List adjacent concepts that another system owns. Link to that system.
 
-## Specification map
+## Find specifications
 
-### Requirements
+Use the catalog command to list this system's current documents:
 
-- [Capability](requirements/capability.md)
+    python3 scripts/list-docs.py specs --system <system-slug> --format markdown
+    python3 scripts/list-docs.py specs --system <system-slug> --kind requirement --format paths
+    python3 scripts/list-docs.py specs --system <system-slug> --kind system-design --format paths
 
-### System design
-
-- [Capability](system-design/capability.md)
+Do not copy the command output into this README. Keep this file focused on the
+system boundary, migration record, and related systems.
 
 ## Related systems
 

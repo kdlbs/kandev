@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -174,6 +175,9 @@ func TestMigration_LegacyDB_PreservesAllColumns(t *testing.T) {
 	if !profile.CLIPassthrough {
 		t.Error("cli_passthrough: got false, want true")
 	}
+	if profile.ProviderKind != "" || profile.ProviderBaseURL != "" || profile.ProviderAPIKeySecretID != "" {
+		t.Errorf("provider fields should default empty after legacy migration: %+v", profile)
+	}
 
 	// Update the profile to set mode (new column).
 	profile.Mode = "plan"
@@ -214,6 +218,127 @@ func TestMigration_LegacyDB_PreservesEnvVarsColumn(t *testing.T) {
 	}
 	if len(profile.EnvVars) != 1 || profile.EnvVars[0].Key != "FOO" || profile.EnvVars[0].Value != "bar" {
 		t.Fatalf("env_vars not preserved: %+v", profile.EnvVars)
+	}
+}
+
+// TestMigration_LegacyDB_PreservesRequireExactModel verifies that a database
+// which already has the additive field keeps it while the model CHECK table
+// recreation runs. This protects upgrades that stop during the migration
+// sequence and are opened again by a newer binary.
+func TestMigration_LegacyDB_PreservesRequireExactModel(t *testing.T) {
+	db := newLegacyDB(t)
+	ctx := context.Background()
+	if _, err := db.Exec(`ALTER TABLE agent_profiles ADD COLUMN require_exact_model INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatalf("add require_exact_model to legacy schema: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO agents (id, name, created_at, updated_at) VALUES ('a1', 'test-agent', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, require_exact_model, created_at, updated_at)
+		VALUES ('p1', 'a1', 'Strict', 'Test', 'model-1', 1, datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("seed strict profile: %v", err)
+	}
+
+	repo, err := newSQLiteRepository(db, db, nil, false)
+	if err != nil {
+		t.Fatalf("newSQLiteRepository: %v", err)
+	}
+	profile, err := repo.GetAgentProfile(ctx, "p1")
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if !profile.RequireExactModel {
+		t.Fatal("require_exact_model was cleared during legacy table recreation")
+	}
+}
+
+func TestMigration_LegacyDB_DefaultsProfileMCPSelection(t *testing.T) {
+	db := newLegacyDB(t)
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO agents (id, name, created_at, updated_at) VALUES ('a1', 'cursor-acp', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, created_at, updated_at)
+		VALUES ('p1', 'a1', 'Cursor', 'Cursor', 'model-1', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("seed legacy profile: %v", err)
+	}
+
+	repo, err := newSQLiteRepository(db, db, nil, false)
+	if err != nil {
+		t.Fatalf("newSQLiteRepository: %v", err)
+	}
+
+	columns := make(map[string]struct{})
+	rows, err := db.Query(`PRAGMA table_info(agent_profiles)`)
+	if err != nil {
+		t.Fatalf("read profile schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := rows.Close(); err != nil {
+			t.Errorf("close profile schema rows: %v", err)
+		}
+	})
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, kind string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &kind, &notnull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan profile column: %v", err)
+		}
+		columns[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate profile schema: %v", err)
+	}
+	for _, name := range []string{"mcp_selection_mode", "mcp_selected_servers"} {
+		if _, ok := columns[name]; !ok {
+			t.Errorf("agent_profiles is missing %s after migration", name)
+		}
+	}
+
+	profile, err := repo.GetAgentProfile(ctx, "p1")
+	if err != nil {
+		t.Fatalf("read migrated profile: %v", err)
+	}
+	if profile.MCPSelectionMode != "inherit" {
+		t.Errorf("mcp_selection_mode = %q, want inherit", profile.MCPSelectionMode)
+	}
+	if profile.MCPSelectedServers == nil || len(profile.MCPSelectedServers) != 0 {
+		t.Errorf("mcp_selected_servers = %#v, want empty", profile.MCPSelectedServers)
+	}
+}
+
+func TestMigration_LegacyDB_RebuildPreservesProfileMCPSelection(t *testing.T) {
+	db := newLegacyDB(t)
+	ctx := context.Background()
+	if _, err := db.Exec(`ALTER TABLE agent_profiles ADD COLUMN mcp_selection_mode TEXT NOT NULL DEFAULT 'inherit'`); err != nil {
+		t.Fatalf("add selection mode to legacy schema: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE agent_profiles ADD COLUMN mcp_selected_servers TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		t.Fatalf("add selected servers to legacy schema: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO agents (id, name, created_at, updated_at) VALUES ('a1', 'cursor-acp', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, mcp_selection_mode, mcp_selected_servers, created_at, updated_at)
+		VALUES ('p1', 'a1', 'Cursor', 'Cursor', 'model-1', 'selected', '["plugin-atlassian-atlassian","github"]', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("seed selected profile: %v", err)
+	}
+
+	repo, err := newSQLiteRepository(db, db, nil, false)
+	if err != nil {
+		t.Fatalf("newSQLiteRepository: %v", err)
+	}
+	profile, err := repo.GetAgentProfile(ctx, "p1")
+	if err != nil {
+		t.Fatalf("read migrated profile: %v", err)
+	}
+	if profile.MCPSelectionMode != "selected" {
+		t.Errorf("mcp_selection_mode = %q, want selected", profile.MCPSelectionMode)
+	}
+	want := []string{"plugin-atlassian-atlassian", "github"}
+	if !reflect.DeepEqual(profile.MCPSelectedServers, want) {
+		t.Errorf("mcp_selected_servers = %#v, want %#v", profile.MCPSelectedServers, want)
 	}
 }
 
@@ -291,4 +416,30 @@ func TestMigration_Idempotent(t *testing.T) {
 		t.Fatalf("second init (idempotent): %v", err)
 	}
 	_ = repo2
+}
+
+func TestMigration_LegacyCheckRebuildPreservesProfileSortOrder(t *testing.T) {
+	db := newLegacyDB(t)
+	if _, err := db.Exec(`ALTER TABLE agent_profiles ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO agents (id, name, created_at, updated_at) VALUES ('a1', 'legacy-order', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, created_at, updated_at, sort_order)
+		VALUES ('p1', 'a1', 'legacy', 'Legacy', 'model', CURRENT_TIMESTAMP, datetime('now'), 7)`); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := newSQLiteRepository(db, db, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order int
+	if err := db.Get(&order, `SELECT sort_order FROM agent_profiles WHERE id = 'p1'`); err != nil {
+		t.Fatal(err)
+	}
+	if order != 7 {
+		t.Fatalf("sort_order after table recreation = %d, want 7", order)
+	}
+	_ = repo
 }

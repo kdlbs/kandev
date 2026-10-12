@@ -100,6 +100,7 @@ func (f *atomicityFixture) createWithContext(
 	overrides map[string]interface{},
 ) *ws.Message {
 	t.Helper()
+	ctx = mcpTestExternalContext(ctx)
 	payload := map[string]interface{}{
 		"workspace_id":     f.workspaceID,
 		"workflow_id":      f.workflowID,

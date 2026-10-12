@@ -67,11 +67,11 @@ func TestCanvasCoreBundle_ContainsOneReadContract(t *testing.T) {
 	files, ok := core["files"].([]map[string]string)
 	require.True(t, ok)
 	require.Len(t, files, len(canvasskill.CoreInventory()))
-	require.Equal(t, "2", canvasskill.Version)
+	require.Equal(t, "3", canvasskill.Version)
 }
 
 func TestCanvasCreateResponseCarriesCurrentAuthoringVersion(t *testing.T) {
-	item := &canvas.Canvas{ID: "canvas-1", Title: "Canvas", WorkspaceID: "workspace-1"}
+	item := &canvas.Canvas{ID: "canvas-1", Title: "Canvas", WorkspaceID: "workspace-1", TaskID: "task-1", CreatedBySessionID: "session-1"}
 	response := canvasCreateResponse(item, canvasSourceRoot(item.ID), "owner-1", []canvasScaffoldFile{{
 		Path: "manifest.yaml", Content: []byte("id: canvas-1\n"),
 	}})
@@ -79,7 +79,14 @@ func TestCanvasCreateResponseCarriesCurrentAuthoringVersion(t *testing.T) {
 	skill, ok := response["skill"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, canvasskill.Version, skill["version"])
-	require.Equal(t, "2", skill["version"])
+	require.Equal(t, "3", skill["version"])
+	policy, ok := response["initial_permission_policy"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, canvas.CreationAuthorityPolicyVersion, policy["version"])
+	require.Equal(t, true, policy["eligible"])
+	require.Equal(t, canvas.ScopeTask, policy["scope"])
+	require.Equal(t, []string{"api_read", "api_write", "events", "state", "network"}, policy["supported_permission_kinds"])
+	require.Equal(t, true, policy["exact_https_origins"])
 }
 
 func TestCanvasCreateResponseShapeIsExecutorPortable(t *testing.T) {

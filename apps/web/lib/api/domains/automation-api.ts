@@ -153,8 +153,10 @@ export async function deleteTrigger(id: string): Promise<{ deleted: boolean }> {
   return requireClient().request<{ deleted: boolean }>("automation.trigger.delete", { id });
 }
 
-export async function listTriggerTypes(): Promise<TriggerTypeInfo[]> {
-  return requireClient().request<TriggerTypeInfo[]>("automation.trigger_types", {});
+export async function listTriggerTypes(workspaceId?: string): Promise<TriggerTypeInfo[]> {
+  return requireClient().request<TriggerTypeInfo[]>("automation.trigger_types", {
+    workspace_id: workspaceId,
+  });
 }
 
 export async function deleteAutomationRun(
@@ -184,5 +186,36 @@ export async function stopAutomationRun(
   return requireClient().request<{ run_id: string; status: string }>("automation.run.stop", {
     automation_id: automationId,
     run_id: runId,
+  });
+}
+
+export type PluginWebhookBinding = {
+  binding: { id: string; trigger_id: string };
+  path: string;
+  secret?: string;
+};
+export type PluginWebhookReceipt = {
+  task_id?: string;
+  id: string;
+  state: string;
+  reason: string;
+  run_id?: string;
+  created_at: number;
+};
+export function managePluginWebhook(
+  automationId: string,
+  triggerId: string,
+  operation: "get" | "configure" | "reveal" | "rotate" | "delete",
+) {
+  return requireClient().request<PluginWebhookBinding | null>("automation.webhook_binding", {
+    automation_id: automationId,
+    trigger_id: triggerId,
+    operation,
+  });
+}
+export function listPluginWebhookReceipts(automationId: string) {
+  return requireClient().request<PluginWebhookReceipt[]>("automation.webhook_binding", {
+    automation_id: automationId,
+    operation: "receipts",
   });
 }

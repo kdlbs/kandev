@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { MCPStrategySelect, useMCPStrategies } from "@/components/settings/mcp-strategy-select";
 import { updateCustomTUIAgentMCPStrategy } from "@/lib/api/domains/settings-api";
@@ -31,27 +31,46 @@ type CustomTUIMcpCardProps = {
 export function CustomTUIMcpCard({ agent }: CustomTUIMcpCardProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
-  const savedAgents = useAppStore((state) => state.settingsAgents.items);
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
+  const store = useAppStoreApi();
   // Gated: this card is rendered once per agent on the index, and hooks run
   // before the early return below, so an unconditional fetch would issue one
   // identical request per built-in agent as well.
-  const isCustomTUIAgent = Boolean(agent?.tui_config);
+  // An ACP custom agent receives kandev's resolved MCP servers in session/new,
+  // so there is no wrapped-CLI config file for a strategy to write. Offering
+  // the picker would present a choice the backend rejects.
+  const isCustomTUIAgent = Boolean(agent?.tui_config) && agent?.tui_config?.protocol !== "acp";
   const strategies = useMCPStrategies(isCustomTUIAgent);
   const [saving, setSaving] = useState(false);
 
-  if (!agent?.tui_config) return null;
+  if (!isCustomTUIAgent || !agent?.tui_config) return null;
 
   const handleChange = async (strategy: string) => {
     setSaving(true);
     try {
       const updated = await updateCustomTUIAgentMCPStrategy(agent.id, strategy);
-      // Write through the store rather than waiting on the WS echo so the
-      // control reflects the save immediately. Profiles are preserved: this
-      // endpoint only changes agent-level settings.
-      setSettingsAgents(
-        savedAgents.map((item) =>
-          item.id === updated.id ? { ...item, ...updated, profiles: item.profiles } : item,
+      const state = store.getState();
+      const current = state.settingsAgents.items.find((item) => item.id === agent.id);
+      if (
+        updated.id !== agent.id ||
+        !updated.tui_config ||
+        !current?.tui_config ||
+        current.tui_config.protocol === "acp"
+      )
+        return;
+      // The acknowledgement owns strategy and support only; current membership,
+      // profiles and other settings retain their independent updates.
+      state.setSettingsAgents(
+        state.settingsAgents.items.map((item) =>
+          item.id === agent.id
+            ? {
+                ...item,
+                supports_mcp: updated.supports_mcp,
+                tui_config: {
+                  ...current.tui_config!,
+                  mcp_strategy: updated.tui_config!.mcp_strategy,
+                },
+              }
+            : item,
         ),
       );
     } catch (error) {

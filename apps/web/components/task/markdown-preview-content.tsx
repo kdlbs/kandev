@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import {
   createContext,
   createElement,
@@ -16,12 +18,13 @@ import {
 import { createPortal } from "react-dom";
 import ReactMarkdown, { type ExtraProps, type Components } from "react-markdown";
 import rehypeRaw from "rehype-raw";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import rehypeSanitize from "rehype-sanitize";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconCode, IconMessagePlus } from "@tabler/icons-react";
 import {
   MarkdownTaskContext,
+  rehypePlugins,
   remarkPlugins,
   markdownComponents,
 } from "@/components/shared/markdown-components";
@@ -38,6 +41,8 @@ import {
   type SourceLineRange,
 } from "@/lib/markdown/source-line-ranges";
 import { commentsBeginInRange, commentsOverlapRange } from "@/lib/markdown/preview-comments";
+import { markdownMathSanitizeSchema } from "@/lib/markdown/math-sanitize-schema";
+import { MATH_SOURCE_CLASS, rehypeMathSource } from "@/lib/markdown/rehype-math-source";
 import type { DiffComment } from "@/lib/state/slices/comments";
 import {
   ExternalVcsFileLink,
@@ -47,6 +52,7 @@ import { useTranslation } from "react-i18next";
 
 interface MarkdownPreviewToolbarProps {
   path: string;
+  isSymlink?: boolean;
   worktreePath?: string;
   commentCount: number;
   commentsEnabled: boolean;
@@ -61,6 +67,7 @@ interface MarkdownPreviewToolbarProps {
 
 function MarkdownPreviewToolbar({
   path,
+  isSymlink,
   worktreePath,
   commentCount,
   commentsEnabled,
@@ -77,8 +84,9 @@ function MarkdownPreviewToolbar({
   return (
     <PanelHeaderBarSplit
       left={
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-mono">{toRelativePath(path, worktreePath)}</span>
+        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <span className="truncate font-mono">{toRelativePath(path, worktreePath)}</span>
+          <SymlinkIndicator isSymlink={isSymlink} showLabel />
           <span className="text-xs text-muted-foreground/60">{t("task:preview")}</span>
         </div>
       }
@@ -109,7 +117,7 @@ function MarkdownPreviewToolbar({
                 size="sm"
                 variant="ghost"
                 onClick={onTogglePreview}
-                className="h-11 w-11 p-0 cursor-pointer text-foreground sm:h-8 sm:w-8"
+                className="h-6 w-6 p-0 cursor-pointer text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
                 data-testid="markdown-preview-toggle"
               >
                 <IconCode className="h-4 w-4" />
@@ -125,6 +133,7 @@ function MarkdownPreviewToolbar({
 
 interface MarkdownPreviewContentProps {
   path: string;
+  isSymlink?: boolean;
   content: string;
   worktreePath?: string;
   sessionId?: string;
@@ -278,8 +287,31 @@ function sourceComponent(tag: keyof HTMLElementTagNameMap) {
   };
 }
 
+function MarkdownPreviewDiv({
+  node,
+  elementRef,
+  className,
+  children,
+  ...rest
+}: MarkdownSourceBlockProps) {
+  if (className?.split(/\s+/u).includes(MATH_SOURCE_CLASS)) {
+    return (
+      <SourceBlock tag="div" node={node} className={className} elementRef={elementRef} {...rest}>
+        {children}
+      </SourceBlock>
+    );
+  }
+
+  return (
+    <div {...rest} className={className}>
+      {children}
+    </div>
+  );
+}
+
 const markdownPreviewComponents: Components = {
   ...markdownComponents,
+  div: (props) => <MarkdownPreviewDiv {...(props as MarkdownSourceBlockProps)} />,
   p: sourceComponent("p"),
   h1: sourceComponent("h1"),
   h2: sourceComponent("h2"),
@@ -366,7 +398,12 @@ export function MarkdownPreviewRenderer({
     <MarkdownTaskContext.Provider value={taskId ?? null}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, defaultSchema]]}
+        rehypePlugins={[
+          rehypeRaw,
+          [rehypeSanitize, markdownMathSanitizeSchema],
+          rehypeMathSource,
+          ...rehypePlugins,
+        ]}
         components={markdownPreviewComponents}
       >
         {content}
@@ -377,6 +414,7 @@ export function MarkdownPreviewRenderer({
 
 export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   path,
+  isSymlink,
   content,
   worktreePath,
   sessionId,
@@ -398,6 +436,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
     sessionId,
     taskId,
     repositoryId,
+    repositoryName,
     enabled: commentsEnabled,
     rootRef,
   });
@@ -429,6 +468,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   return (
     <div className="relative flex h-full flex-col" data-testid="markdown-preview">
       <MarkdownPreviewToolbar
+        isSymlink={isSymlink}
         path={path}
         worktreePath={worktreePath}
         commentCount={commentState.comments.length}

@@ -1,7 +1,17 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { SidebarFilterPopover } from "./sidebar-filter-popover";
+
+const responsive = vi.hoisted(() => ({
+  usesDesktopWorkbench: true,
+  isFinePointer: true,
+  isMobile: false,
+}));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => responsive,
+}));
 
 const VIEW: SidebarView = {
   id: "view-all",
@@ -9,6 +19,7 @@ const VIEW: SidebarView = {
   filters: [],
   sort: { key: "state", direction: "asc" },
   group: "repository",
+  groupIndent: true,
   collapsedGroups: [],
   taskRow: {
     detailsEnabled: true,
@@ -18,11 +29,24 @@ const VIEW: SidebarView = {
   },
 };
 
+const SECOND_VIEW: SidebarView = {
+  ...VIEW,
+  id: "view-review",
+  name: "Needs review",
+};
+
 const state = {
   sidebarViews: {
     views: [VIEW],
     activeViewId: VIEW.id,
     draft: null,
+  },
+  sidebarViewsByWorkspace: {
+    ws: {
+      views: [VIEW],
+      activeViewId: VIEW.id,
+      draft: null,
+    },
   },
   updateSidebarDraft: vi.fn(),
   saveSidebarDraftAs: vi.fn(),
@@ -30,13 +54,20 @@ const state = {
   discardSidebarDraft: vi.fn(),
   deleteSidebarView: vi.fn(),
   renameSidebarView: vi.fn(),
-  workspaces: { activeId: null },
+  workspaces: { activeId: "ws" },
   kanbanMulti: { snapshots: {} },
   workflows: { items: [] },
+  repositories: {
+    itemsByWorkspaceId: {},
+    loadingByWorkspaceId: {},
+    loadedByWorkspaceId: {},
+  },
   agentProfiles: { items: [] },
   executors: { items: [] },
   userSettings: { sidebarTaskColorAutomation: { enabled: false, rules: [] } },
   setUserSettings: vi.fn(),
+  setRepositories: vi.fn(),
+  setRepositoriesLoading: vi.fn(),
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -44,12 +75,78 @@ vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({ getState: () => state }),
 }));
 
+beforeEach(() => {
+  state.sidebarViewsByWorkspace.ws = state.sidebarViews;
+});
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  state.sidebarViews.views = [VIEW];
+  state.sidebarViews.activeViewId = VIEW.id;
+  state.sidebarViewsByWorkspace.ws = state.sidebarViews;
+  responsive.usesDesktopWorkbench = true;
+  responsive.isFinePointer = true;
+  responsive.isMobile = false;
 });
 
 describe("SidebarFilterPopover task-row editor", () => {
+  it("waits for named confirmation before deleting the active view", async () => {
+    state.sidebarViews.views = [VIEW, SECOND_VIEW];
+    render(
+      <SidebarFilterPopover
+        trigger={<button type="button">Open</button>}
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("view-delete-button"));
+
+    expect(state.deleteSidebarView).not.toHaveBeenCalled();
+    const confirmation = await screen.findByRole("dialog", { name: "Delete All tasks?" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(confirmation.isConnected).toBe(false);
+    expect(state.deleteSidebarView).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("view-delete-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete All tasks" }));
+
+    await waitFor(() => expect(state.deleteSidebarView).toHaveBeenCalledWith(VIEW.id));
+    expect(state.deleteSidebarView).toHaveBeenCalledOnce();
+  });
+
+  it("keeps deletion touch-reachable in a phone drawer with a fine pointer", async () => {
+    responsive.isMobile = true;
+    responsive.usesDesktopWorkbench = false;
+    responsive.isFinePointer = true;
+    state.sidebarViews.views = [VIEW, SECOND_VIEW];
+    render(
+      <SidebarFilterPopover
+        trigger={<button type="button">Open</button>}
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    const deleteButton = screen.getByTestId("view-delete-button");
+    const drawer = screen.getByTestId("sidebar-filter-drawer");
+    const dialogId = drawer.id;
+    expect(deleteButton.className).toContain("min-h-11");
+    fireEvent.click(deleteButton);
+
+    expect(state.deleteSidebarView).not.toHaveBeenCalled();
+    expect(await screen.findByRole("group", { name: "Delete All tasks?" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Delete All tasks?" }).id).toBe(dialogId);
+    expect(document.querySelectorAll('[data-slot="drawer-content"]')).toHaveLength(1);
+    expect(deleteButton.isConnected).toBe(true);
+    fireEvent.click(within(drawer).getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(document.activeElement).toBe(deleteButton));
+    expect(state.deleteSidebarView).not.toHaveBeenCalled();
+  });
+});
+
+describe("SidebarFilterPopover editor state", () => {
   it("keeps view settings collapsed until the user opens them", () => {
     render(
       <SidebarFilterPopover
@@ -63,15 +160,57 @@ describe("SidebarFilterPopover task-row editor", () => {
     expect(screen.queryByTestId("task-row-details-toggle")).toBeNull();
     expect(screen.queryByTestId("sort-key-select")).toBeNull();
     expect(screen.queryByTestId("group-key-select")).toBeNull();
-    expect(screen.getByText("Status, Sort direction asc", { exact: true })).toBeTruthy();
+    expect(screen.getByText("Status: Ascending", { exact: true })).toBeTruthy();
 
     fireEvent.click(screen.getByTestId("sidebar-sort-settings-toggle"));
     expect(screen.getByTestId("sort-key-select")).toBeTruthy();
     fireEvent.click(screen.getByTestId("sidebar-group-settings-toggle"));
     expect(screen.getByTestId("group-key-select")).toBeTruthy();
+    const indentToggle = screen.getByRole("switch", { name: "Indent grouped tasks" });
+    expect(indentToggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(indentToggle);
+    expect(state.updateSidebarDraft).toHaveBeenCalledWith({ groupIndent: false });
+    fireEvent.click(screen.getByTestId("sidebar-group-settings-toggle"));
+    expect(screen.queryByRole("switch", { name: "Indent grouped tasks" })).toBeNull();
 
     fireEvent.click(screen.getByTestId("task-row-settings-toggle"));
     expect(screen.getByTestId("task-row-details-toggle")).toBeTruthy();
+    expect(state.updateSidebarDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("remounts reorder gestures when the active view changes with the same sort values", () => {
+    const sort = {
+      key: "running" as const,
+      direction: "desc" as const,
+      thenBy: [
+        { key: "lastActivityAt" as const, direction: "desc" as const },
+        { key: "createdAt" as const, direction: "desc" as const },
+      ],
+    };
+    state.sidebarViews.views = [
+      { ...VIEW, sort },
+      { ...SECOND_VIEW, sort },
+    ];
+    state.sidebarViews.activeViewId = VIEW.id;
+    const props = {
+      trigger: <button type="button">Open</button>,
+      open: true,
+      onOpenChange: vi.fn(),
+    };
+    const { rerender } = render(<SidebarFilterPopover {...props} />);
+    fireEvent.click(screen.getByTestId("sidebar-sort-settings-toggle"));
+    const originalHandle = screen.getByTestId("sort-rule-handle-0");
+    originalHandle.focus();
+    fireEvent.keyDown(originalHandle, { key: " " });
+    fireEvent.keyDown(originalHandle, { key: "ArrowDown" });
+
+    state.sidebarViews.activeViewId = SECOND_VIEW.id;
+    rerender(<SidebarFilterPopover {...props} />);
+
+    const replacementHandle = screen.getByTestId("sort-rule-handle-0");
+    expect(originalHandle.isConnected).toBe(false);
+    expect(replacementHandle).not.toBe(originalHandle);
+    fireEvent.keyDown(originalHandle, { key: " " });
     expect(state.updateSidebarDraft).not.toHaveBeenCalled();
   });
 
@@ -94,7 +233,9 @@ describe("SidebarFilterPopover task-row editor", () => {
       "border-t",
     );
   });
+});
 
+describe("SidebarFilterPopover option details", () => {
   it("removes the popover primitive's default section gap", () => {
     render(
       <SidebarFilterPopover

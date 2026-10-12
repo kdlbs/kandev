@@ -4,7 +4,7 @@ system: system-page
 requirements:
   - REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001
 created: 2026-07-14
-updated: 2026-08-12
+updated: 2026-10-02
 owners:
   - cfl
 ---
@@ -19,6 +19,12 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
 | Requirement | Design section |
 | --- | --- |
 | `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001` | [Migrated source detail](#migrated-source-detail) |
+
+## Current Go-cache policy
+
+The current [Go cache reclamation design](go-cache-reclamation.md) owns the busy-cleanup setting
+and direct deletion. Existing settings and historical quarantine records retain their prior
+compatibility rules.
 
 ## Migrated source detail
 
@@ -198,11 +204,12 @@ registered temporary-artifact provider is available. API responses never expose 
 values.
 
 The existing `POST /storage/run` resource selection accepts `temporary_artifacts` in addition to the
-existing provider names. It is an explicit-only selection: an empty `resources` list and scheduled
-maintenance invoke the provider's no-op path and never move temporary roots. The temporary-artifact
-summary contains `total_bytes`, `active_bytes`, `protected_bytes`, `stale_bytes`, `total_count`,
-`active_count`, `protected_count`, `stale_count`, `skipped_count`, `available`, and an optional
-`warnings` array.
+existing provider names. An explicit selection always invokes cleanup independently of the saved
+option. An empty `resources` list and scheduled maintenance invoke the provider's no-op path when
+the option is disabled; when it is enabled, they use the same eligibility and quarantine path. The
+temporary-artifact summary contains `total_bytes`, `active_bytes`, `protected_bytes`, `stale_bytes`,
+`total_count`, `active_count`, `protected_count`, `stale_count`, `skipped_count`, `available`, and an
+optional `warnings` array.
 
 `GET /storage/settings` is the lightweight policy-read contract. It reads persisted settings and
 capabilities without requesting an overview snapshot or invoking filesystem, Go-cache, quarantine,
@@ -306,8 +313,8 @@ quarantined -> restored
 ```text
 active    -> closed                 producer releases the lease normally
           -> abandoned              restart/reconciliation finds no live lease
-closed    -> quarantined             explicit temporary_artifacts cleanup
-abandoned -> quarantined             explicit cleanup after the stale interval
+closed    -> quarantined             enabled scheduled/full or explicit cleanup
+abandoned -> quarantined             enabled scheduled/full or explicit cleanup after the stale interval
 quarantined -> restored|deleted|failed
 failed      -> quarantined|deleted
 ```
@@ -341,6 +348,9 @@ distinct `DELETE ALL NOW` confirmation because it removes the configured restore
   entry untouched and reports `workspace_recovery.status=failed`.
 - An invalid or unreadable settings object falls back to disabled scheduling, reports a health
   warning, and does not run destructive maintenance.
+- Managed-cache launch preparation uses the optional
+  [lifecycle integration](managed-go-cache-launch-fallback.md).
+  This fallback does not change the maintenance failure rules.
 - A managed Go-cache cleanup failure leaves either the original cache or its quarantined rename
   intact; it never recursively deletes outside the configured owned path.
 - An active Go-cache quarantine generation defers another rotation without failing maintenance.
@@ -350,8 +360,10 @@ distinct `DELETE ALL NOW` confirmation because it removes the configured restore
 - A temporary-artifact registry read, marker read, lease/heartbeat check, or ownership/path
   validation failure keeps that root in place and records a skipped warning. There is no fallback to
   prefix, mtime, or process-name classification.
-- A temporary-artifact rename failure, including a cross-device rename, leaves the original root
-  untouched. The provider never copies and then deletes a root as a quarantine fallback.
+- A temporary-artifact rename failure leaves the original root untouched. For a cross-device rename,
+  the provider copies only verified directories and regular files into a temporary quarantine sibling,
+  syncs and atomically publishes that copy, then removes the original only after another identity
+  validation. Copy, publication, or validation failures preserve the original root.
 - A backend crash after a temporary-artifact rename but before the lifecycle or quarantine state
   update is reconciled from the durable row, matching marker, and trash path. An unmatched path is
   retained rather than guessed into a quarantine entry.

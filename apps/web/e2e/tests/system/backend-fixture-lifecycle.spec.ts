@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "@playwright/test";
 
-import { runOwnedBackendFixture, waitForHealth } from "../../fixtures/backend";
+import { observeLogFile, runOwnedBackendFixture, waitForHealth } from "../../fixtures/backend";
 import { stopSSHServer, type SSHServerHandle } from "../../helpers/ssh";
 
 test.describe("backend fixture lifecycle", () => {
@@ -68,7 +68,11 @@ test.describe("backend fixture lifecycle", () => {
 
   test("stops the registered process before cleanup after a health failure", async () => {
     const events: string[] = [];
-    const child = new EventEmitter() as unknown as ChildProcess;
+    const child = Object.assign(new EventEmitter(), {
+      waitForLogFile: async () => {
+        events.push("logs");
+      },
+    }) as unknown as ChildProcess;
 
     await assert.rejects(
       runOwnedBackendFixture(
@@ -92,7 +96,44 @@ test.describe("backend fixture lifecycle", () => {
       /health failed/,
     );
 
-    assert.deepEqual(events, ["run", "stop", "remove"]);
+    assert.deepEqual(events, ["run", "stop", "logs", "remove"]);
+  });
+
+  test("holds an early log error until the stream closes before removing the root", async () => {
+    const events: string[] = [];
+    const stream = new EventEmitter();
+    const logError = new Error("log stream failed");
+    const waitForLogFile = observeLogFile(stream);
+    stream.once("close", () => events.push("close"));
+    const child = Object.assign(new EventEmitter(), { waitForLogFile }) as unknown as ChildProcess;
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => unhandledRejections.push(reason);
+
+    process.on("unhandledRejection", onUnhandledRejection);
+    try {
+      await assert.rejects(
+        runOwnedBackendFixture(
+          "/tmp/exact-owned-root",
+          async (registerProcess) => {
+            registerProcess(child);
+            stream.emit("error", logError);
+          },
+          {
+            stopProcess: async () => {
+              events.push("stop");
+              stream.emit("close");
+            },
+            removeTempRoot: () => events.push("remove"),
+          },
+        ),
+        (error) => error === logError,
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.deepEqual(unhandledRejections, []);
+      assert.deepEqual(events, ["stop", "close", "remove"]);
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
   });
 
   test("surfaces cleanup failure alongside the fixture failure", async () => {

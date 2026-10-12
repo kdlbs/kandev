@@ -14,16 +14,13 @@ import {
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AgentLogo } from "@/components/agent-logo";
-import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
-import type { AvailableAgent, ToolStatus } from "@/lib/types/http";
+import { AgentSetupFields } from "@/components/onboarding/agent-setup-fields";
+import type { AgentSetting, OnboardingAgentDraft } from "@/components/onboarding/agent-settings";
+import type { AvailableAgent, CapabilityStatus, ToolStatus } from "@/lib/types/http";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { Trans, useTranslation } from "react-i18next";
 
-export type AgentSetting = {
-  profileId: string;
-  formData: ProfileFormData;
-  dirty: boolean;
-};
+export type { AgentSetting, OnboardingAgentDraft };
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -73,6 +70,7 @@ function StatusPill({ status, error }: { status: string; error?: string }) {
           {t("common:notInstalled")}
         </span>
       );
+    case "unsupported":
     case "failed": {
       const pill = (
         <span className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
@@ -111,27 +109,56 @@ function StatusPill({ status, error }: { status: string; error?: string }) {
   }
 }
 
+function useAgentProfileStatus(profileId?: string) {
+  const [profileStatus, setProfileStatus] = useState<{
+    profileId?: string;
+    status?: CapabilityStatus;
+    error: string | null;
+  } | null>(null);
+  const onStatusChange = useCallback(
+    (status: CapabilityStatus | undefined, error: string | null) => {
+      setProfileStatus({ profileId, status, error });
+    },
+    [profileId],
+  );
+  return {
+    profileStatus: profileStatus?.profileId === profileId ? profileStatus : null,
+    onStatusChange,
+  };
+}
+
 function InstalledAgentRow({
   agent,
   settings,
   isOpen,
   onToggle,
   onUpdateSetting,
+  onModelResolutionChange,
 }: {
   agent: AvailableAgent;
   settings: AgentSetting | undefined;
   isOpen: boolean;
   onToggle: (open: boolean) => void;
-  onUpdateSetting: (agentName: string, formPatch: Partial<ProfileFormData>) => void;
+  onUpdateSetting: (agentName: string, patch: Partial<OnboardingAgentDraft>) => void;
+  onModelResolutionChange?: (profileId: string, pending: boolean) => void;
 }) {
-  const currentModel = settings?.formData.model || agent.model_config.default_model;
+  const [hasOpened, setHasOpened] = useState(isOpen);
+  const { profileStatus, onStatusChange } = useAgentProfileStatus(settings?.profileId);
+  const currentModel = settings?.draft.model || agent.model_config.default_model;
   const modelName =
     agent.model_config.available_models.find((m) => m.id === currentModel)?.name ?? currentModel;
-  const status = agent.model_config.status ?? "ok";
+  const status = profileStatus?.status ?? agent.model_config.status ?? "ok";
+  const error = profileStatus ? (profileStatus.error ?? undefined) : agent.model_config.error;
   const showModelPill = status === "ok" && !!modelName;
 
   return (
-    <Collapsible open={isOpen} onOpenChange={onToggle}>
+    <Collapsible
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (open) setHasOpened(true);
+        onToggle(open);
+      }}
+    >
       <CollapsibleTrigger asChild>
         <button
           type="button"
@@ -146,27 +173,25 @@ function InstalledAgentRow({
               {modelName}
             </span>
           )}
-          <StatusPill status={status} error={agent.model_config.error} />
+          <StatusPill status={status} error={error} />
           <IconChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
         </button>
       </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="border border-t-0 rounded-b-lg px-3 pb-3 pt-2">
-          {settings && (
-            <ProfileFormFields
-              variant="compact"
-              hideNameField
-              hideCustomCLIFlags
-              profile={settings.formData}
-              onChange={(patch) => onUpdateSetting(agent.name, patch)}
-              modelConfig={agent.model_config}
-              permissionSettings={agent.permission_settings ?? {}}
-              passthroughConfig={agent.passthrough_config ?? null}
-              agentName={agent.name}
-            />
-          )}
-        </div>
-      </CollapsibleContent>
+      {hasOpened && (
+        <CollapsibleContent forceMount hidden={!isOpen}>
+          <div className="border border-t-0 rounded-b-lg px-3 pb-3 pt-2">
+            {settings && (
+              <AgentSetupFields
+                agent={agent}
+                setting={settings}
+                onChange={(patch) => onUpdateSetting(agent.name, patch)}
+                onStatusChange={onStatusChange}
+                onModelResolutionChange={onModelResolutionChange}
+              />
+            )}
+          </div>
+        </CollapsibleContent>
+      )}
     </Collapsible>
   );
 }
@@ -251,12 +276,14 @@ export function StepAgents({
   agentSettings,
   loading,
   onUpdateSetting,
+  onModelResolutionChange,
 }: {
   availableAgents: AvailableAgent[];
   tools: ToolStatus[];
   agentSettings: Record<string, AgentSetting>;
   loading: boolean;
-  onUpdateSetting: (agentName: string, formPatch: Partial<ProfileFormData>) => void;
+  onUpdateSetting: (agentName: string, patch: Partial<OnboardingAgentDraft>) => void;
+  onModelResolutionChange?: (profileId: string, pending: boolean) => void;
 }) {
   const { t } = useTranslation();
   const [openAgent, setOpenAgent] = useState<string | null>(null);
@@ -276,7 +303,7 @@ export function StepAgents({
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-2 max-h-[320px] overflow-y-auto">
+      <div className="grid grid-cols-1 gap-2">
         {installedAgents.map((agent) => (
           <InstalledAgentRow
             key={agent.name}
@@ -285,6 +312,7 @@ export function StepAgents({
             isOpen={openAgent === agent.name}
             onToggle={(isOpen) => setOpenAgent(isOpen ? agent.name : null)}
             onUpdateSetting={onUpdateSetting}
+            onModelResolutionChange={onModelResolutionChange}
           />
         ))}
         <NotInstalledItems

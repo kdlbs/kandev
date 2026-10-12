@@ -77,6 +77,7 @@ export function MentionMenu({
 
   return (
     <PopupMenu
+      testId="mention-menu"
       isOpen={isOpen}
       position={position ?? null}
       clientRect={clientRect}

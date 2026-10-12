@@ -105,6 +105,9 @@ export function InstallAgentCard({
    *  write; the card still renders so they can see what is available. */
   onInstall?: (name: string) => void;
 }) {
+  const { t } = useTranslation();
+  const description =
+    agent.name === "minimax-acp" ? t("agents:minimaxDescription") : agent.description;
   const status: InstallStatus = job?.status ?? "idle";
   const failed = status === "failed";
   const showLog = Boolean(job?.output) && (status === "queued" || status === "running" || failed);
@@ -116,9 +119,7 @@ export function InstallAgentCard({
           <AgentLogo agentName={agent.name} size={20} className="shrink-0" />
           <h4 className="font-medium">{agent.display_name}</h4>
         </div>
-        {agent.description && (
-          <p className="text-xs text-muted-foreground line-clamp-2">{agent.description}</p>
-        )}
+        {description && <p className="text-xs text-muted-foreground line-clamp-2">{description}</p>}
         {scriptSlot}
         <InstallAction agent={agent} status={status} onInstall={onInstall} />
         {showLog && (

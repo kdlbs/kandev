@@ -524,7 +524,7 @@ export const i18nGuardFiles = [
   // Deliberately left in English, each an identifier the user must read or type
   // verbatim, all interpolated as values so the pseudo-locale cannot turn them
   // into dead pointers: the `{prompt}` and `{{model}}` substitution tokens, the
-  // `--my-flag` / `greywall --` / `/init` / `superclaude` examples, the
+  // `--my-flag` / `greywall --` / `/init` / `superagent` examples, the
   // `mcpServers` JSON key, the MCP server product names (`Playwright MCP`,
   // `Chrome DevTools MCP`, `Context7 MCP`, `GitHub MCP`) and the Kandev MCP tool
   // list, and the whole of the assembled command preview. Wire values stay wire
@@ -1570,7 +1570,6 @@ export const i18nGuardFiles = [
   "components/kanban/kanban-header-mobile.tsx",
   "components/kanban/kanban-header.tsx",
   "components/kanban/mobile-column-tabs.tsx",
-  "components/kanban/mobile-drop-targets.tsx",
   "components/kanban/mobile-fab.tsx",
   "components/kanban/mobile-menu-sheet.tsx",
   // Extracted out of mobile-menu-sheet.tsx to stay under the 600-line limit.

@@ -545,8 +545,9 @@ func TestSSHReclaimRetryReRunsTheProbe(t *testing.T) {
 
 	taskID, env := newReclaimTask(t, taskSvc, "Retrying task")
 	snapshot := taskResourceCleanupSnapshot{
-		TaskEnvironment: env,
-		SSHTaskDirs:     []sshReclaimTarget{enabledReclaimTarget()},
+		TaskEnvironment:               env,
+		SSHTaskDirs:                   []sshReclaimTarget{enabledReclaimTarget()},
+		ArchiveSourceManifestCaptured: true,
 	}
 	job := newReclaimJob(t, repo, taskID, models.TaskResourceCleanupTriggerDelete, snapshot)
 

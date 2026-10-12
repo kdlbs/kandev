@@ -41,7 +41,7 @@ movement, in-flight send, failure, recovery, and executor-unavailable states.
 The submission gate includes these states:
 
 - the editor gate
-- session startup, unless an interactive clarification owns submission
+- session startup without queue eligibility or an interactive clarification
 - an attachment upload that is not complete
 
 The environment-prepare reason remains attached to the submission gate. The
@@ -50,6 +50,12 @@ editor.
 
 The shared toolbar continues to receive the submission gate. As a result, the
 send button and plugin `submittable` value remain safe during startup.
+
+The draft [resume prompt queue design](../../tasks/system-design/resume-prompt-queue.md)
+extends this gate to permit startup submission for queue-capable sessions.
+That task-owned design governs admission and dispatch, including their failure
+behavior. The startup block and sequence below apply when neither queue
+admission nor clarification submission is available.
 
 ## Control flow
 
@@ -89,12 +95,13 @@ test is not necessary because no mobile-specific interaction changes.
 
 ## Test strategy
 
-- A hook test proves that startup permits editing and blocks submission.
+- A hook test proves that startup permits editing and blocks unavailable submission.
 - The hook test keeps the clarification exception and environment-prepare
   reason under coverage.
 - A session-start E2E test uses delayed workspace preparation to keep a real
   session in STARTING. It proves that the editor stays editable, the send
-  action stays disabled, and the draft survives until readiness.
+  action stays disabled without queue eligibility, and the draft survives until readiness.
+  Queue-capable startup coverage follows the task-owned resume prompt queue design.
 - A manual session-recovery E2E test verifies that the recovery card clears and
   the resumed composer remains usable after the prompt-ready response.
 

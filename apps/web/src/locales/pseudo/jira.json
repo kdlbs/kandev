@@ -223,5 +223,9 @@
   "watcherUpdated": "Ŵàţćĥēŕ ũƥďàţēď",
   "workflow": "Ŵōŕķƒĺōŵ",
   "workflowStep": "Ŵōŕķƒĺōŵ Śţēƥ",
-  "yourJiraSessionExpiredOrNeeds": "Ŷōũŕ Ĵĩŕà śēśśĩōń ēxƥĩŕēď ōŕ ńēēďś śţēƥ-ũƥ àũţĥēńţĩćàţĩōń. Ŕēćōńńēćţ ţō vĩēŵ ţĥĩś ţĩćķēţ."
+  "yourJiraSessionExpiredOrNeeds": "Ŷōũŕ Ĵĩŕà śēśśĩōń ēxƥĩŕēď ōŕ ńēēďś śţēƥ-ũƥ àũţĥēńţĩćàţĩōń. Ŕēćōńńēćţ ţō vĩēŵ ţĥĩś ţĩćķēţ.",
+  "clearViewAsDefault": "Ćĺēàŕ {{name}} àś ďēƒàũĺţ vĩēŵ",
+  "defaultViewDeleteFailed": "Ćōũĺď ńōţ ďēĺēţē ţĥē śàvēď Ĵĩŕà vĩēŵ. Ţŕŷ àĝàĩń.",
+  "defaultViewSaveFailed": "Ćōũĺď ńōţ śàvē ţĥē ďēƒàũĺţ Ĵĩŕà vĩēŵ. Ţŕŷ àĝàĩń.",
+  "setViewAsDefault": "Śēţ {{name}} àś ďēƒàũĺţ vĩēŵ"
 }

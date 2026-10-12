@@ -30,6 +30,12 @@ import {
   type RemoteContributionResolutionTarget,
 } from "@/components/task/use-remote-contribution-resolution";
 import { openExternalLink } from "@/lib/desktop/external-links";
+import { usePanelActions } from "@/hooks/use-panel-actions";
+import {
+  contributionHistoryExplanationKey,
+  type ContributionHistoryExplanationTarget,
+} from "@/hooks/domains/session/use-contribution-history-explanation";
+import { requestContributionComparison } from "@/components/task/remote-contribution-comparison";
 import { VcsSplitButtonContent } from "./vcs-split-button-parts";
 import { DEFAULT_BASE_BRANCH } from "./vcs-constants";
 
@@ -225,7 +231,7 @@ function useGitActions(git: ReturnType<typeof useSessionGit>, baseBranch?: strin
 function useVcsContributionResolution(
   sessionId: string | null,
   relation: ReturnType<typeof useRemoteContributionRelation>["relation"],
-  repositoryName: string | undefined,
+  repositoryScope: string,
   selectedPR: TaskPR | null,
   refreshProviderEvidence: ReturnType<
     typeof useRemoteContributionRelation
@@ -239,11 +245,11 @@ function useVcsContributionResolution(
     () =>
       buildRemoteContributionResolutionTarget(
         relation,
-        repositoryName,
+        repositoryScope,
         selectedPR,
         remoteRepositoryLabel,
       ),
-    [relation, repositoryName, selectedPR, remoteRepositoryLabel],
+    [relation, repositoryScope, selectedPR, remoteRepositoryLabel],
   );
   return { resolution, confirmResolution, resolutionTarget };
 }
@@ -254,7 +260,7 @@ function useVcsContributionState(sessionId: string | null) {
   const resolutionState = useVcsContributionResolution(
     sessionId,
     contribution.relation,
-    contribution.repositoryName,
+    contribution.repositoryScope,
     contribution.selectedPR,
     contribution.refreshProviderEvidence,
   );
@@ -265,6 +271,34 @@ type VcsResolutionActions = Pick<
   ReturnType<typeof useVcsContributionState>["resolution"],
   "requestReplace" | "requestUse"
 >;
+
+function requestContributionComparisonForRepo(
+  repo: string | undefined,
+  resolutionTarget: RemoteContributionResolutionTarget | null,
+  contributionHistoryTarget: ContributionHistoryExplanationTarget | null,
+  addChanges: () => void,
+): void {
+  const repositoryScope = repo ?? "";
+  if (!resolutionTarget || resolutionTarget.repo !== repositoryScope) return;
+  const key = contributionHistoryExplanationKey(contributionHistoryTarget);
+  if (!key) return;
+  requestContributionComparison(key);
+  addChanges();
+}
+
+function buildContributionComparisonCallback(
+  resolutionTarget: RemoteContributionResolutionTarget | null,
+  contributionHistoryTarget: ContributionHistoryExplanationTarget | null,
+  addChanges: () => void,
+) {
+  return (repo?: string) =>
+    requestContributionComparisonForRepo(
+      repo,
+      resolutionTarget,
+      contributionHistoryTarget,
+      addChanges,
+    );
+}
 
 export function buildVcsSplitCallbacks({
   openCommitDialog,
@@ -277,6 +311,7 @@ export function buildVcsSplitCallbacks({
   resolutionTarget,
   selectedPR,
   openExternalLinkFn,
+  onCompareContribution,
 }: {
   openCommitDialog: (repo?: string) => void;
   openPRDialog: (repo?: string) => void;
@@ -288,6 +323,7 @@ export function buildVcsSplitCallbacks({
   resolutionTarget: RemoteContributionResolutionTarget | null;
   selectedPR: Pick<TaskPR, "pr_url"> | null;
   openExternalLinkFn?: typeof openExternalLink;
+  onCompareContribution?: (repo?: string) => void;
 }) {
   const openLink = openExternalLinkFn ?? openExternalLink;
   return {
@@ -298,18 +334,28 @@ export function buildVcsSplitCallbacks({
     onRebase: handleRebase,
     onMerge: handleMerge,
     onReplaceContribution: (repo?: string) => {
-      if (resolutionTarget && resolutionTarget.repo === repo) {
+      const repositoryScope = repo ?? "";
+      if (resolutionTarget && resolutionTarget.repo === repositoryScope) {
         resolution.requestReplace(resolutionTarget);
       }
     },
     onUseContribution: (repo?: string) => {
-      if (resolutionTarget && resolutionTarget.repo === repo) {
+      const repositoryScope = repo ?? "";
+      if (resolutionTarget && resolutionTarget.repo === repositoryScope) {
         resolution.requestUse(resolutionTarget);
       }
     },
     onViewContribution: (repo?: string) => {
-      if (resolutionTarget?.repo !== repo || !selectedPR?.pr_url) return;
+      const repositoryScope = repo ?? "";
+      if (!resolutionTarget || resolutionTarget.repo !== repositoryScope || !selectedPR?.pr_url) {
+        return;
+      }
       void openLink(selectedPR.pr_url).catch(() => undefined);
+    },
+    onCompareContribution: (repo?: string) => {
+      const repositoryScope = repo ?? "";
+      if (!resolutionTarget || resolutionTarget.repo !== repositoryScope) return;
+      onCompareContribution?.(repositoryScope);
     },
   };
 }
@@ -327,6 +373,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
     relation,
     repositoryName,
     selectedPR,
+    contributionHistoryTarget,
     remoteActionPolicy,
     resolution,
     confirmResolution,
@@ -335,13 +382,12 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const hasOpenPR = useHasOpenChangeRequest(selectedPR?.state);
   const { handlePull, handlePush, handleRebase, handleMerge } = useGitActions(git, baseBranch);
   const repoDisplayName = useRepoDisplayName(sessionId);
+  const { addChanges } = usePanelActions();
 
-  const remoteBranch = git.remoteBranch;
-  const hasUpstream = Boolean(remoteBranch);
+  const hasUpstream = Boolean(git.remoteBranch);
   const uncommittedFileCount = git.allFiles.length;
   const aheadCount = remoteActionPolicy.pushDisabled ? 0 : git.pushAhead;
-  const behindCount = git.behind;
-  const pullCount = git.pullBehind;
+  const { behind: behindCount, pullBehind: pullCount } = git;
   const isDisabled = git.isLoading || !sessionId;
   const showContributionResolution = relation.action === "diverged_replace";
   const pushDisabledReasonKey = remoteContributionActionReasonKey(relation, "push");
@@ -365,6 +411,11 @@ const VcsSplitButton = memo(function VcsSplitButton({
     handleRebase,
   });
   const showDivergencePills = primaryAction !== "commit";
+  const onCompareContribution = buildContributionComparisonCallback(
+    resolutionTarget,
+    contributionHistoryTarget,
+    addChanges,
+  );
   const callbacks = buildVcsSplitCallbacks({
     openCommitDialog,
     openPRDialog,
@@ -375,6 +426,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
     resolution,
     resolutionTarget,
     selectedPR,
+    onCompareContribution,
   });
 
   return (

@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // approvalHandlerFixture wires the minimal stack needed to exercise the
@@ -32,6 +33,16 @@ type approvalHandlerFixture struct {
 }
 
 func newApprovalHandlerFixture(t *testing.T) *approvalHandlerFixture {
+	t.Helper()
+	return newApprovalHandlerFixtureWithQueuer(t, &silentRunQueuer{})
+}
+
+// newApprovalHandlerFixtureWithQueuer is newApprovalHandlerFixture with an
+// injectable RunQueuer, for tests that need to assert on queued-run
+// arguments (e.g. the resolved actor) rather than ignore them.
+func newApprovalHandlerFixtureWithQueuer(
+	t *testing.T, queuer approvals.RunQueuer,
+) *approvalHandlerFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	db, err := sqlx.Open("sqlite3", ":memory:")
@@ -52,7 +63,7 @@ func newApprovalHandlerFixture(t *testing.T) *approvalHandlerFixture {
 	agentsSvc.SetAuth(agents.NewAgentAuth("test-key"))
 
 	apprSvc := approvals.NewApprovalService(repo, log,
-		&silentActivityLogger{}, &silentRunQueuer{})
+		&silentActivityLogger{}, queuer)
 
 	r := gin.New()
 	r.Use(agents.AgentAuthMiddleware(agentsSvc))
@@ -72,7 +83,11 @@ func (s *silentActivityLogger) LogActivityWithRun(_ context.Context, _, _, _, _,
 
 type silentRunQueuer struct{}
 
-func (s *silentRunQueuer) QueueRun(_ context.Context, _, _, _, _ string) error { return nil }
+func (s *silentRunQueuer) QueueRunWithActor(
+	_ context.Context, _, _, _, _ string, _ models.ActorKind, _ string, _ string,
+) (runsservice.QueueOutcome, error) {
+	return runsservice.QueueOutcomeQueued, nil
+}
 
 // seedApprovalAgent creates an agent_profiles row with the given role
 // and permissions, returning the persisted instance.
@@ -221,5 +236,91 @@ func TestDecideApproval_DecidedByDerivedFromJWT(t *testing.T) {
 	// Sanity check: the spoofed value never lands in the row.
 	if persisted.DecidedBy == "spoofed-id" {
 		t.Error("spoofed decided_by from request body landed in persisted approval")
+	}
+}
+
+// TestDecideApproval_AgentCallerQueuesRunAsActorKindAgent covers
+// AC-OFFICE-RUN-CAUSATION-001.15 end-to-end from the HTTP layer: a decision
+// made by an authenticated agent caller (JWT-verified, per resolveDecider)
+// must reach QueueRunWithActor as ActorKindAgent with that agent's real id,
+// not a hardcoded system actor.
+func TestDecideApproval_AgentCallerQueuesRunAsActorKindAgent(t *testing.T) {
+	queuer := &capturingRunQueuer{}
+	f := newApprovalHandlerFixtureWithQueuer(t, queuer)
+	ceo := seedApprovalAgent(t, f.agentsSvc, "ceo-1", "ws-1",
+		models.AgentRoleCEO, shared.DefaultPermissions(shared.AgentRoleCEO))
+	approval := seedPendingApproval(t, f.repo, "appr-1", "ws-1", "other-agent")
+
+	token, err := f.agentsSvc.MintRuntimeJWT(ceo.ID, "task-1", ceo.WorkspaceID, "", "sess-1", "")
+	if err != nil {
+		t.Fatalf("mint jwt: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, decideReq(approval.ID, token, `{"status":"approved"}`))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !queuer.called {
+		t.Fatal("QueueRunWithActor was not called")
+	}
+	if queuer.actorKind != models.ActorKindAgent {
+		t.Errorf("actorKind = %q, want %q", queuer.actorKind, models.ActorKindAgent)
+	}
+	if queuer.actorID != ceo.ID {
+		t.Errorf("actorID = %q, want %q", queuer.actorID, ceo.ID)
+	}
+}
+
+// TestDecideApproval_UnauthenticatedCallerQueuesRunAsActorKindSystem pins
+// AC-OFFICE-RUN-CAUSATION-001.16: an absent or unrecognized actor shall
+// never be read as `user`. A request with no agent JWT (the dashboard's
+// current auth-less path) is unverified — it must reach QueueRunWithActor
+// as ActorKindSystem, never ActorKindUser, so it cannot manufacture
+// HumanRooted=true and bypass the causation-depth/self-trigger/budget
+// gates that key off it.
+func TestDecideApproval_UnauthenticatedCallerQueuesRunAsActorKindSystem(t *testing.T) {
+	queuer := &capturingRunQueuer{}
+	f := newApprovalHandlerFixtureWithQueuer(t, queuer)
+	approval := seedPendingApproval(t, f.repo, "appr-1", "ws-1", "other-agent")
+
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, decideReq(approval.ID, "", `{"status":"approved"}`))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !queuer.called {
+		t.Fatal("QueueRunWithActor was not called")
+	}
+	if queuer.actorKind != models.ActorKindSystem {
+		t.Errorf("actorKind = %q, want %q (unverified caller must never be human-rooted)", queuer.actorKind, models.ActorKindSystem)
+	}
+	if queuer.actorID != "ui" {
+		t.Errorf("actorID = %q, want ui", queuer.actorID)
+	}
+}
+
+// TestDecideApproval_UnauthenticatedCallerWithSpoofedDecidedByStaysActorKindSystem
+// covers the exploit path the finding names directly: an unauthenticated
+// caller supplying an arbitrary decided_by must still resolve to
+// ActorKindSystem, not gain ActorKindUser (and therefore HumanRooted=true)
+// by spoofing a plausible-looking identity in the request body.
+func TestDecideApproval_UnauthenticatedCallerWithSpoofedDecidedByStaysActorKindSystem(t *testing.T) {
+	queuer := &capturingRunQueuer{}
+	f := newApprovalHandlerFixtureWithQueuer(t, queuer)
+	approval := seedPendingApproval(t, f.repo, "appr-1", "ws-1", "other-agent")
+
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, decideReq(approval.ID, "", `{"status":"approved","decided_by":"anything"}`))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !queuer.called {
+		t.Fatal("QueueRunWithActor was not called")
+	}
+	if queuer.actorKind != models.ActorKindSystem {
+		t.Errorf("actorKind = %q, want %q (spoofed decided_by must not drive actor kind)", queuer.actorKind, models.ActorKindSystem)
 	}
 }

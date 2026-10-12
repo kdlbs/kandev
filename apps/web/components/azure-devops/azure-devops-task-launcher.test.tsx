@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Repository, Workflow, WorkflowStep } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
+  autoFocus: true,
   associate: vi.fn(),
   associateWorkItem: vi.fn(),
   cache: vi.fn(),
@@ -46,11 +47,14 @@ vi.mock("@/components/task-create-dialog", () => ({
     onSuccess,
   }: {
     initialValues?: { description?: string };
-    onSuccess?: (task: { id: string }) => void;
+    onSuccess?: (task: { id: string }, mode: "create", meta: { autoFocus: boolean }) => void;
   }) => (
     <>
       <p data-testid="task-description">{initialValues?.description}</p>
-      <button type="button" onClick={() => onSuccess?.({ id: "task-1" })}>
+      <button
+        type="button"
+        onClick={() => onSuccess?.({ id: "task-1" }, "create", { autoFocus: mocks.autoFocus })}
+      >
         Create task
       </button>
     </>
@@ -129,6 +133,7 @@ function renderLauncher() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.autoFocus = true;
 });
 
 afterEach(cleanup);
@@ -142,7 +147,7 @@ it("updates the cache and store after associating the created task", async () =>
 
   await waitFor(() => expect(mocks.cache).toHaveBeenCalledWith(workspaceId, "task-1", linked));
   expect(mocks.setTaskPullRequest).toHaveBeenCalledWith("task-1", linked);
-  expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
+  expect(mocks.push).toHaveBeenCalledWith("/t/task-1");
 });
 
 it("reports a pull request association failure", async () => {
@@ -153,7 +158,7 @@ it("reports a pull request association failure", async () => {
 
   await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Azure association failed"));
   expect(mocks.close).toHaveBeenCalled();
-  expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
+  expect(mocks.push).toHaveBeenCalledWith("/t/task-1");
 });
 
 it("associates and caches a created task for a work item", async () => {
@@ -287,4 +292,14 @@ it("reports a missing work-item project after creating the task", async () => {
     ),
   );
   expect(mocks.associateWorkItem).not.toHaveBeenCalled();
+});
+
+it("links a background task without navigating", async () => {
+  mocks.autoFocus = false;
+  mocks.associate.mockResolvedValue({});
+  renderLauncher();
+  fireEvent.click(screen.getByRole("button", { name: createTaskButtonName }));
+  await waitFor(() => expect(mocks.close).toHaveBeenCalled());
+  expect(mocks.associate).toHaveBeenCalled();
+  expect(mocks.push).not.toHaveBeenCalled();
 });

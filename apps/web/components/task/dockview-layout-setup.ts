@@ -19,6 +19,7 @@ import {
 } from "@/lib/local-storage";
 import { resolveResponsiveRightWidth } from "@/lib/state/layout-manager/right-width";
 import { setSashDragging as setPinnedEnforcementSashDragging } from "@/lib/state/dockview-pinned-enforce";
+import { withHiddenRightPaneMetadata } from "@/lib/state/dockview-right-pane";
 import { getDockviewElement, measureDockviewGridWidth } from "@/lib/state/dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
@@ -119,8 +120,10 @@ function restoreColumnToTarget(
 /** Keep right-column constraints tied to Dockview's measured container, not
  * `window.innerWidth`. The app sidebar sits outside Dockview, so the browser
  * viewport can materially overstate the space available to chat + files. */
-function applyRightConstraints(api: DockviewReadyEvent["api"]): number {
-  const measuredWidth = measureDockviewGridWidth(api);
+function applyRightConstraints(
+  api: DockviewReadyEvent["api"],
+  measuredWidth: number | undefined,
+): number {
   const sv = getRootSplitview(api);
   const sidebarWidth = sv?.length >= 3 ? sv.getViewSize(0) : 0;
   const maximumWidth = computeRightMaxPx(measuredWidth, sidebarWidth);
@@ -151,9 +154,9 @@ function enforcePinnedTargets(api: DockviewReadyEvent["api"], allowDuringRestore
   enforcing = true;
   try {
     if (rightVisible) {
-      const maximumWidth = applyRightConstraints(api);
-      const sidebarWidth = store.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
       const measuredWidth = measureDockviewGridWidth(api);
+      const sidebarWidth = store.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
+      const maximumWidth = applyRightConstraints(api, measuredWidth);
       const manualRightWidth = getManualRightWidth(store.currentLayoutEnvId);
       const target =
         manualRightWidth ??
@@ -173,7 +176,7 @@ function setLooseConstraints(api: DockviewReadyEvent["api"]): void {
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
 
   if (hasPinnedRightColumn(api)) {
-    applyRightConstraints(api);
+    applyRightConstraints(api, measureDockviewGridWidth(api));
   }
 }
 
@@ -364,7 +367,11 @@ export function setupGroupTracking(api: DockviewReadyEvent["api"]): () => void {
     useDockviewStore.setState({ activeGroupId: group?.id ?? null });
   });
   useDockviewStore.setState({ activeGroupId: api.activeGroup?.id ?? null });
-  const d2 = api.onDidLayoutChange(() => trackPinnedWidths(api));
+  const d2 = api.onDidLayoutChange(() => {
+    trackPinnedWidths(api);
+    const store = useDockviewStore.getState();
+    if (!store.isRestoringLayout) store.refreshRightPaneState();
+  });
   trackPinnedWidths(api);
   return () => {
     d1.dispose();
@@ -392,7 +399,7 @@ export function setupLayoutPersistence(
       const envId = envIdRef.current;
       localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
       if (envId) {
-        setEnvLayout(envId, json);
+        setEnvLayout(envId, withHiddenRightPaneMetadata(json, live.hiddenRightPane));
         setEnvLayoutProfile(envId, live.activeLayoutProfile);
       }
       if (isDebug()) {

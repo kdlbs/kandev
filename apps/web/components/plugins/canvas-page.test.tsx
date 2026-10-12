@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CanvasPage } from "./canvas-page";
+import { WEB_APP_STARTUP_RESULT_TYPE, WEB_APP_STARTUP_VERSION } from "./web-app-startup";
 
 const responsive = { isMobile: false };
 
@@ -30,12 +31,32 @@ describe("CanvasPage", () => {
     expect(page.className).toContain("min-w-0");
     expect(page.className).toContain("overflow-hidden");
 
-    const frame = screen.getByTitle("Task board");
+    const frame = screen.getByTitle("Task board") as HTMLIFrameElement;
     expect(frame.getAttribute("src")).toContain("/api/v1/plugins/web-apps/runtime/");
     expect(screen.getByRole("status").closest("iframe")).toBeNull();
 
+    const postMessage = vi.fn();
+    Object.defineProperty(frame, "contentWindow", {
+      configurable: true,
+      value: { postMessage },
+    });
     fireEvent.load(frame);
-    expect(onLoad).toHaveBeenCalledOnce();
+    const probe = postMessage.mock.calls.find(
+      ([value]) => value?.type === "kandev.web_app.startup_probe",
+    )?.[0];
+    expect(probe).toBeDefined();
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: {
+          type: WEB_APP_STARTUP_RESULT_TYPE,
+          version: WEB_APP_STARTUP_VERSION,
+          nonce: probe.nonce,
+          result: "ready",
+        },
+        source: frame.contentWindow,
+      }),
+    );
+    await waitFor(() => expect(onLoad).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   });
 

@@ -9,6 +9,7 @@ import { formatNumber } from "@/lib/i18n/formats";
 import type { MarketplaceEntry } from "@/lib/types/plugins";
 import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 import { PluginRepoLink } from "./plugin-repo-link";
+import { MarketplacePreviewGallery } from "./marketplace-preview-gallery";
 
 // Id of the built-in official source (marketplace.officialSourceID). Entries
 // from any other source get a source badge; the official one does not.
@@ -60,6 +61,8 @@ export function MarketplaceEntryRow({
           canManage={canManage}
         />
       </div>
+
+      {entry.previews?.length ? <MarketplacePreviewGallery previews={entry.previews} /> : null}
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1">

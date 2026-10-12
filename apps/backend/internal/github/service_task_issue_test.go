@@ -71,7 +71,7 @@ func (f *fakeTaskIssueStore) GetRepository(_ context.Context, repositoryID strin
 	return nil, errors.New("repository not found")
 }
 
-func (f *fakeTaskIssueStore) UpdateTaskMetadata(ctx context.Context, taskID string, metadata map[string]interface{}) (*taskmodels.Task, error) {
+func (f *fakeTaskIssueStore) UpdateTaskGitHubIssue(ctx context.Context, taskID string, link *taskmodels.TaskGitHubIssueLink) (*taskmodels.Task, error) {
 	if f.taskErr != nil {
 		return nil, f.taskErr
 	}
@@ -83,6 +83,20 @@ func (f *fakeTaskIssueStore) UpdateTaskMetadata(ctx context.Context, taskID stri
 	}
 	if f.updateErr != nil {
 		return nil, f.updateErr
+	}
+	metadata := make(map[string]interface{})
+	for key, value := range f.task.Metadata {
+		metadata[key] = value
+	}
+	for _, key := range []string{taskMetaIssueURL, taskMetaIssueNumber, taskMetaIssueOwner, taskMetaIssueRepo, taskMetaIssueLinked} {
+		delete(metadata, key)
+	}
+	if link != nil {
+		metadata[taskMetaIssueURL] = link.URL
+		metadata[taskMetaIssueNumber] = link.Number
+		metadata[taskMetaIssueOwner] = link.Owner
+		metadata[taskMetaIssueRepo] = link.Repo
+		metadata[taskMetaIssueLinked] = true
 	}
 	f.updated = metadata
 	f.task.Metadata = metadata

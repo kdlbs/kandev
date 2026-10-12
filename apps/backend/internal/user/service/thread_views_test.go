@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -140,3 +141,33 @@ func validThreadView(id string) models.ThreadView {
 }
 
 func stringPtr(value string) *string { return &value }
+
+// @covers AC-UI-THREADS-SAVED-VIEWS-005.3
+func TestApplyThreadPresentationRejectsUnknownLayout(t *testing.T) {
+	for _, target := range []string{"view", "draft"} {
+		t.Run(target, func(t *testing.T) {
+			settings := &models.UserSettings{ThreadViews: []models.ThreadView{validThreadView("view-one")}, ThreadActiveViewID: "view-one"}
+			body := `"task_scope":{"mode":"all","task_ids":[]},"layout":"masonry","auto_hide_composer":true`
+			var err error
+			if target == "view" {
+				var views []models.ThreadView
+				if err := json.Unmarshal([]byte(`[{"id":"view-one","name":"Replacement",`+body+`}]`), &views); err != nil {
+					t.Fatal(err)
+				}
+				err = applyThreadViews(settings, &UpdateUserSettingsRequest{ThreadViews: &views})
+			} else {
+				var draft *models.ThreadViewDraft
+				if err := json.Unmarshal([]byte(`{"base_view_id":"view-one",`+body+`}`), &draft); err != nil {
+					t.Fatal(err)
+				}
+				err = applyThreadViewState(settings, &UpdateUserSettingsRequest{ThreadViewDraft: &draft})
+			}
+			if err == nil || !strings.Contains(err.Error(), "layout") {
+				t.Fatalf("error = %v, want unsupported layout", err)
+			}
+			if settings.ThreadViews[0].Name != "view-one" || settings.ThreadViewDraft != nil {
+				t.Fatal("rejected presentation mutated settings")
+			}
+		})
+	}
+}

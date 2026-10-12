@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -36,6 +37,17 @@ import (
 const (
 	windowsOS  = "windows"
 	pathEnvKey = "PATH"
+
+	defaultUnownedPeriod      = 10 * time.Minute
+	defaultDetachedEventLimit = 100
+
+	// diagnosticLogFileName is the fixed name of agentctl's own detached
+	// diagnostic log file (AC-EXECUTORS-SURVIVAL-001.3). It lives under
+	// HomeDir/logs alongside the backend's own "backend-logs.log" and the
+	// per-session ACP debug logs under logs/acp/ -- a distinct file, so two
+	// processes never rotate the same file or share one set of rollover
+	// journals.
+	diagnosticLogFileName = "agentctl-diagnostic.log"
 )
 
 // Config is the agentctl configuration.
@@ -67,9 +79,12 @@ type Config struct {
 	// Empty means authentication is disabled (e.g. dev/test without nonce).
 	AuthToken string
 
-	// ListenHostOverride forces HTTP listeners to a specific host. It is used by
-	// SSH launches, whose controller and instance traffic stays inside explicit
-	// loopback SSH forwards even though bootstrap authentication is enabled.
+	// ListenHostOverride forces HTTP listeners to a specific host
+	// (AGENTCTL_LISTEN_HOST) even though bootstrap authentication is enabled.
+	// Launches that know the only address the backend dials set it: the local
+	// standalone launcher passes agent.standaloneHost, and SSH and Kubernetes
+	// launches pass 127.0.0.1 because the backend reaches them only through a
+	// forward.
 	ListenHostOverride string
 
 	// BootstrapNonce is a one-time-use nonce for the handshake protocol.
@@ -77,6 +92,20 @@ type Config struct {
 	// at startup and exposes POST /auth/handshake for the backend to retrieve it.
 	// The nonce is burned after a single successful handshake.
 	BootstrapNonce string
+
+	// bootstrapNonceConfigured records whether AGENTCTL_BOOTSTRAP_NONCE was set
+	// at startup. Unlike BootstrapNonce, it stays true after the nonce is
+	// burned, so handshake-failure diagnostics can tell "bootstrap nonce mode
+	// was never on" apart from "the configured nonce was already consumed" —
+	// both otherwise look identical once BootstrapNonce reads empty.
+	bootstrapNonceConfigured bool
+
+	// bootstrapNonceFingerprint is the diagnostic fingerprint (see
+	// commonconfig.NonceFingerprint) of whichever nonce was configured at
+	// startup. Survives the nonce being burned so a later rejected handshake
+	// can still be attributed to a mismatch against this value, an
+	// already-burned nonce, or bootstrap mode never having been configured.
+	bootstrapNonceFingerprint string
 
 	// IdleTimeout is the duration after which an instance with no in-flight
 	// requests and no recent HTTP activity is reaped by the instance
@@ -94,8 +123,55 @@ type Config struct {
 	// queue capacity for every instance created by this server.
 	NotificationQueueCapacity int
 
+	// PromptCancelJoinTimeout overrides ACP cancellation acknowledgement only for the E2E profile.
+	PromptCancelJoinTimeout time.Duration
+
 	// OTLPEndpoint is the resolved endpoint used by agentctl transport tracing.
 	OTLPEndpoint string
+
+	// UnownedPeriod is how long this control server tolerates having no
+	// owning backend before it stops its instances and exits. Sourced from
+	// KANDEV_ACP_UNOWNED_PERIOD (default 10m). Only meaningful when the
+	// agent-survival capability is active; unused otherwise.
+	UnownedPeriod time.Duration
+
+	// DetachedEventLimit bounds the per-instance retained-event count while
+	// this control server has no owning backend attached. Sourced from
+	// KANDEV_ACP_DETACHED_EVENT_LIMIT (default 100). Only meaningful when the
+	// agent-survival capability is active; unused otherwise.
+	DetachedEventLimit int
+
+	// HomeDir is the resolved Kandev root directory this agentctl process was
+	// started for. It is installation identity: the adopting backend compares
+	// it against its own resolved home before ever authenticating, per design
+	// 01's "Ownership identity and credential". Reported on GET /identity.
+	HomeDir string
+
+	// ServerIdentity is an opaque value generated once per process launch,
+	// echoed on GET /identity and compared by the adopting backend, never
+	// logged. It answers "is this the process a previous launch started",
+	// distinct from AuthToken which answers "is the caller authorized".
+	ServerIdentity string
+
+	// DiagnosticLogPath is the durable file agentctl's own diagnostic
+	// output is written to while it may be running detached from any
+	// backend (AC-EXECUTORS-SURVIVAL-001.3). Derived from HomeDir with a
+	// fixed filename -- the sink adds no configuration key and no
+	// environment variable of its own. Empty only when HomeDir itself
+	// could not be resolved. Echoed on GET /identity so an adopting or
+	// freshly-spawning backend records it into the control-server record
+	// without independently re-deriving the same path formula.
+	DiagnosticLogPath string
+
+	// AgentSurvivalEnabled is whether the agent-survival capability is
+	// engaged for this launch, copied directly from the managed startup
+	// contract (never "unresolved" the way UnownedPeriod/DetachedEventLimit
+	// can be -- a managed launch always states it, and false is the
+	// legitimate "disabled" answer). An unmanaged/direct launch (Load(),
+	// no startup contract) always resolves this to false. Gates
+	// StartUnownedReaper, the detached diagnostic log sink switch, and the
+	// launcher-side kill-path removal (Layer 5.9).
+	AgentSurvivalEnabled bool
 
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
@@ -166,6 +242,10 @@ type InstanceConfig struct {
 	// Port is the HTTP server port for this instance
 	Port int
 
+	// MCPHost is the address injected MCP clients use to reach this instance.
+	// It is derived from the listener bind host and is never sent over the API.
+	MCPHost string `json:"-"`
+
 	// Protocol for agent communication
 	Protocol agent.Protocol
 
@@ -187,11 +267,6 @@ type InstanceConfig struct {
 	// AutoApprovePermissions auto-approves permission requests
 	AutoApprovePermissions bool
 
-	// ApprovalPolicy controls when the agent requests approval.
-	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
-	// Defaults to "on-request" if empty.
-	ApprovalPolicy string
-
 	// ShellEnabled enables auto-shell feature
 	ShellEnabled bool
 
@@ -208,12 +283,24 @@ type InstanceConfig struct {
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
 
+	// InjectedKandevMCP records that this instance configuration was created
+	// with the host-owned Kandev MCP server injected into McpServers.
+	InjectedKandevMCP bool `json:"-"`
+
 	// ProcessBufferMaxBytes caps per-process output buffer size
 	ProcessBufferMaxBytes int64
 
 	// NotificationQueueCapacity is the ACP inbound notification queue size
 	// inherited from the server startup contract.
 	NotificationQueueCapacity int
+
+	// PromptCancelJoinTimeout is inherited from the server startup configuration.
+	PromptCancelJoinTimeout time.Duration
+
+	// DetachedEventLimit bounds the per-instance retained-event count
+	// (AC-EXECUTORS-SURVIVAL-001.6), inherited from the server startup
+	// contract. It sizes the process manager's updates channel buffer.
+	DetachedEventLimit int
 
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
@@ -271,6 +358,10 @@ type InstanceConfig struct {
 	// process environment entirely (not just set to empty).
 	StripEnv []string
 
+	// ProviderGatewayAuth authenticates the ACP agent against an
+	// OpenAI-compatible gateway right after initialize.
+	ProviderGatewayAuth *acpprovider.GatewayAuth
+
 	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
 	// stats. The empty key "" applies to the root / single-repo tracker.
 	// process.Manager reads this at construction and stamps each
@@ -291,6 +382,21 @@ type InstanceConfig struct {
 	// WorkspaceSourceRoots are canonical durable source roots permitted for
 	// linked workspace file operations.
 	WorkspaceSourceRoots []string
+
+	// DurableJournalPath is an optional owner-scoped bbolt path on retained
+	// executor storage. Empty means the instance uses legacy delivery.
+	DurableJournalPath string
+
+	// DeliveryStreamID is the generation-scoped durable event stream identity.
+	// It remains stable when agentctl is replaced within the same generation.
+	DeliveryStreamID string
+
+	// DeliveryIncarnationID identifies the owning Kandev session incarnation.
+	DeliveryIncarnationID string
+
+	// DeliveryHarnessGeneration identifies the native conversation generation
+	// that owns this agentctl instance.
+	DeliveryHarnessGeneration uint64
 
 	// CreateReadyMillis is written once by instance.Manager.CreateInstance
 	// with the elapsed milliseconds from CreateInstance's entry (including
@@ -336,16 +442,51 @@ func StartupConfigFromEnv() (commonconfig.AgentctlStartupConfig, bool, error) {
 	return startup, true, nil
 }
 
+func directE2EPromptCancelJoinTimeout() time.Duration {
+	if !isProfileTruthy(os.Getenv("KANDEV_E2E_MOCK")) {
+		return 0
+	}
+	return getEnvDuration("KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT", 0)
+}
+
+func isProfileTruthy(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	idleTimeout := getEnvDuration("KANDEV_ACP_IDLE_TIMEOUT", time.Hour)
 	idleReaperInterval := getEnvDuration("KANDEV_ACP_IDLE_REAPER_INTERVAL", time.Minute)
 	notificationQueueCapacity := getEnvInt("KANDEV_ACP_NOTIF_QUEUE", 131072)
+	promptCancelJoinTimeout := directE2EPromptCancelJoinTimeout()
 	otlpEndpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	unownedPeriod := getEnvDuration("KANDEV_ACP_UNOWNED_PERIOD", defaultUnownedPeriod)
+	detachedEventLimit := getEnvInt("KANDEV_ACP_DETACHED_EVENT_LIMIT", defaultDetachedEventLimit)
+	homeDir := resolveHomeDir()
+	agentSurvivalEnabled := false
 	if startup != nil {
 		idleTimeout = startup.IdleTimeout
 		idleReaperInterval = startup.IdleReaperInterval
 		notificationQueueCapacity = startup.NotificationQueueCapacity
 		otlpEndpoint = startup.OTLPEndpoint
+		promptCancelJoinTimeout = startup.PromptCancelJoinTimeout
+		// Zero means the caller did not resolve these (an older backend, or
+		// one built before agent survival existed) — keep the env/built-in
+		// value already computed above rather than adopting zero.
+		if startup.UnownedPeriod != 0 {
+			unownedPeriod = startup.UnownedPeriod
+		}
+		if startup.DetachedEventLimit != 0 {
+			detachedEventLimit = startup.DetachedEventLimit
+		}
+		// Unlike the two tunables above, false is a meaningful resolved
+		// answer here (every managed launch states it), so it is copied
+		// unconditionally rather than guarded by a zero-value check.
+		agentSurvivalEnabled = startup.AgentSurvivalEnabled
 	}
 
 	cfg := &Config{
@@ -372,7 +513,14 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		IdleTimeout:               idleTimeout,
 		IdleReaperInterval:        idleReaperInterval,
 		NotificationQueueCapacity: notificationQueueCapacity,
+		PromptCancelJoinTimeout:   promptCancelJoinTimeout,
 		OTLPEndpoint:              otlpEndpoint,
+		UnownedPeriod:             unownedPeriod,
+		DetachedEventLimit:        detachedEventLimit,
+		HomeDir:                   homeDir,
+		ServerIdentity:            generateSelfToken(),
+		DiagnosticLogPath:         resolveDiagnosticLogPath(homeDir),
+		AgentSurvivalEnabled:      agentSurvivalEnabled,
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend
@@ -380,9 +528,29 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	if nonce := os.Getenv("AGENTCTL_BOOTSTRAP_NONCE"); nonce != "" {
 		cfg.BootstrapNonce = nonce
 		cfg.AuthToken = generateSelfToken()
+		cfg.bootstrapNonceConfigured = true
+		cfg.bootstrapNonceFingerprint = commonconfig.NonceFingerprint(nonce)
 	}
 
 	return cfg
+}
+
+// BootstrapNonceConfigured reports whether AGENTCTL_BOOTSTRAP_NONCE was set at
+// startup, independent of whether the nonce has since been burned by a
+// successful handshake.
+func (c *Config) BootstrapNonceConfigured() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bootstrapNonceConfigured
+}
+
+// BootstrapNonceFingerprint returns the diagnostic fingerprint of the nonce
+// configured at startup, or empty if bootstrap nonce mode was never
+// configured. Unlike BootstrapNonce, it survives the nonce being burned.
+func (c *Config) BootstrapNonceFingerprint() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bootstrapNonceFingerprint
 }
 
 // ListenHost returns the interface agentctl should bind its HTTP listeners to.
@@ -406,6 +574,11 @@ func (c *Config) ListenHost() string {
 	return ""
 }
 
+// MCPReachableHost returns an agent-facing host for the current listener.
+func (c *Config) MCPReachableHost() string {
+	return MCPReachableHost(c.ListenHost())
+}
+
 // ConsumeNonce atomically validates and burns the bootstrap nonce.
 // Returns the auth token if the nonce matches, empty string otherwise.
 // The nonce is invalidated after a single successful call (one-shot).
@@ -425,6 +598,37 @@ func (c *Config) ConsumeNonce(nonce string) string {
 	return c.AuthToken
 }
 
+// resolveHomeDir determines the Kandev root directory this agentctl process
+// was started for, honoring KANDEV_HOME_DIR (already the Kandev root) ahead
+// of $HOME so dev/e2e isolation and Docker/K8s roots resolve consistently.
+// This duplicates adapter/transport/shared.resolveACPLogDir's precedence
+// rather than importing it: config is a leaf package with no dependency on
+// adapter/transport/shared, and pulling that dependency in for one four-line
+// primitive would invert the layering.
+func resolveHomeDir() string {
+	if home := os.Getenv("KANDEV_HOME_DIR"); home != "" {
+		return home
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".kandev")
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return ""
+}
+
+// resolveDiagnosticLogPath derives agentctl's own detached diagnostic log
+// path from the resolved home directory (AC-EXECUTORS-SURVIVAL-001.3): a
+// fixed filename under HomeDir/logs, not an operator-configurable value.
+// Empty when homeDir itself could not be resolved.
+func resolveDiagnosticLogPath(homeDir string) string {
+	if homeDir == "" {
+		return ""
+	}
+	return filepath.Join(homeDir, "logs", diagnosticLogFileName)
+}
+
 // generateSelfToken creates a cryptographically random 32-byte hex-encoded token.
 func generateSelfToken() string {
 	b := make([]byte, 32)
@@ -440,6 +644,7 @@ func generateSelfToken() string {
 func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *InstanceConfig {
 	cfg := &InstanceConfig{
 		Port:                      port,
+		MCPHost:                   c.MCPReachableHost(),
 		Protocol:                  c.Defaults.Protocol,
 		AgentCommand:              c.Defaults.AgentCommand,
 		WorkDir:                   c.Defaults.WorkDir,
@@ -450,6 +655,8 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		LogFormat:                 c.LogFormat,
 		ProcessBufferMaxBytes:     c.Defaults.ProcessBufferMaxBytes,
 		NotificationQueueCapacity: c.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
+		DetachedEventLimit:        c.DetachedEventLimit,
 		VscodeCommand:             c.VscodeCommand,
 		McpMode:                   "task",
 		AuthToken:                 c.AuthToken,
@@ -463,7 +670,8 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 	// The MCP server uses the agent stream WebSocket connection (bidirectional)
 	// to forward tool calls to the backend.
 	if port > 0 {
-		cfg.McpServers = injectKandevMcpServer(cfg.McpServers, port)
+		cfg.McpServers = injectKandevMcpServerAtHost(cfg.McpServers, port, cfg.MCPHost)
+		cfg.InjectedKandevMCP = true
 	}
 
 	// Parse agent command into args
@@ -526,7 +734,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 		cfg.McpProviders = mcpproviders.Normalize(overrides.McpProviders)
 	}
 	if overrides.McpProfile != nil {
-		profileContext := *overrides.McpProfile
+		profileContext := mcpprofile.Normalize(*overrides.McpProfile)
 		cfg.McpProfile = &profileContext
 	}
 	if overrides.NamespacesMCPToolsByServer {
@@ -537,6 +745,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	}
 	if len(overrides.StripEnv) > 0 {
 		cfg.StripEnv = overrides.StripEnv
+	}
+	if overrides.ProviderGatewayAuth != nil {
+		cfg.ProviderGatewayAuth = overrides.ProviderGatewayAuth
 	}
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
@@ -553,6 +764,18 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.WorkspaceSourceRoots != nil {
 		cfg.WorkspaceSourceRoots = append([]string(nil), overrides.WorkspaceSourceRoots...)
 	}
+	if overrides.DurableJournalPath != "" {
+		cfg.DurableJournalPath = overrides.DurableJournalPath
+	}
+	if overrides.DeliveryStreamID != "" {
+		cfg.DeliveryStreamID = overrides.DeliveryStreamID
+	}
+	if overrides.DeliveryIncarnationID != "" {
+		cfg.DeliveryIncarnationID = overrides.DeliveryIncarnationID
+	}
+	if overrides.DeliveryHarnessGeneration > 0 {
+		cfg.DeliveryHarnessGeneration = overrides.DeliveryHarnessGeneration
+	}
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -567,9 +790,6 @@ func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.AutoApprovePermissions != nil {
 		cfg.AutoApprovePermissions = *overrides.AutoApprovePermissions
 	}
-	if overrides.ApprovalPolicy != "" {
-		cfg.ApprovalPolicy = overrides.ApprovalPolicy
-	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
@@ -581,7 +801,6 @@ type InstanceOverrides struct {
 	AutoStart                  *bool
 	Env                        []string
 	AutoApprovePermissions     *bool
-	ApprovalPolicy             string
 	AgentType                  string
 	McpServers                 []McpServerConfig
 	SessionID                  string
@@ -595,11 +814,16 @@ type InstanceOverrides struct {
 	NamespacesMCPToolsByServer bool
 	RequiresProcessKill        bool
 	StripEnv                   []string
+	ProviderGatewayAuth        *acpprovider.GatewayAuth
 	BaseBranches               map[string]string
 	ComparisonTargets          map[string]models.ComparisonTarget
 	RemoteContributions        map[string]models.RemoteContribution
 	ContributionDestinations   map[string]models.ContributionDestination
 	WorkspaceSourceRoots       []string
+	DurableJournalPath         string
+	DeliveryStreamID           string
+	DeliveryIncarnationID      string
+	DeliveryHarnessGeneration  uint64
 }
 
 func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {
@@ -700,8 +924,11 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		return nil, fmt.Errorf("compose indexed Git config: %w", err)
 	}
 	if envMap[githubauth.CredentialBrokerURLEnv] != "" {
-		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv], runtime.GOOS == windowsOS)
-		configureGitHubCLIStartupEnv(envMap)
+		ActivateManagedGitTools(
+			envMap,
+			envMap[githubauth.CredentialCLIShimDirEnv],
+			envMap[githubauth.CredentialCLIBashEnvEnv],
+		)
 	}
 
 	// Convert back to slice
@@ -710,6 +937,39 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		result = append(result, k+"="+v)
 	}
 	return result, nil
+}
+
+// ActivateManagedGitTools adds the installed GitHub CLI shims to an agent's
+// executable path and wraps its Bash startup hook while preserving the parent.
+func ActivateManagedGitTools(env map[string]string, shimDir, startupEnv string) {
+	if shimDir != "" {
+		env[githubauth.CredentialCLIShimDirEnv] = shimDir
+		prependPathEntry(env, shimDir, runtime.GOOS == windowsOS)
+	}
+	if startupEnv == "" {
+		return
+	}
+	env[githubauth.CredentialCLIBashEnvEnv] = startupEnv
+	configureGitHubCLIStartupEnv(env)
+}
+
+// DeactivateManagedGitTools removes only PATH and Bash entries owned by the
+// installed managed tools. An unrelated replacement hook remains untouched.
+func DeactivateManagedGitTools(env map[string]string, shimDir, startupEnv string) {
+	if shimDir != "" && env[githubauth.CredentialCLIShimDirEnv] == shimDir {
+		removePathEntry(env, shimDir, runtime.GOOS == windowsOS)
+	}
+	if runtime.GOOS == windowsOS || startupEnv == "" || env[githubauth.CredentialCLIBashEnvEnv] != startupEnv {
+		return
+	}
+	if !samePathEntry(env["BASH_ENV"], startupEnv, false) {
+		return
+	}
+	if parentEnv := env[githubauth.CredentialParentBashEnv]; parentEnv != "" {
+		env["BASH_ENV"] = parentEnv
+	} else {
+		delete(env, "BASH_ENV")
+	}
 }
 
 func configureGitHubCLIStartupEnv(env map[string]string) {
@@ -799,11 +1059,34 @@ func prependPathEntry(env map[string]string, entry string, caseInsensitive bool)
 	filtered := make([]string, 0, len(parts)+1)
 	filtered = append(filtered, entry)
 	for _, part := range parts {
-		if filepath.Clean(part) != cleanEntry {
+		if !samePathEntry(part, cleanEntry, caseInsensitive) {
 			filtered = append(filtered, part)
 		}
 	}
 	env[key] = strings.Join(filtered, string(os.PathListSeparator))
+}
+
+func removePathEntry(env map[string]string, entry string, caseInsensitive bool) {
+	key := searchPathKey(env, caseInsensitive)
+	if _, exists := env[key]; !exists {
+		return
+	}
+	parts := filepath.SplitList(env[key])
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if !samePathEntry(part, entry, caseInsensitive) {
+			filtered = append(filtered, part)
+		}
+	}
+	env[key] = strings.Join(filtered, string(os.PathListSeparator))
+}
+
+func samePathEntry(left, right string, caseInsensitive bool) bool {
+	left, right = filepath.Clean(left), filepath.Clean(right)
+	if caseInsensitive {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 // searchPathKey returns the key env already carries the executable search path
@@ -925,16 +1208,19 @@ const kandevMcpServerName = "kandev"
 // the "first surviving entry wins" dedup keeps the HTTP entry (modern streamable MCP);
 // SSE remains as a fallback for SSE-only agents.
 func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfig {
-	portStr := strconv.Itoa(port)
+	return injectKandevMcpServerAtHost(servers, port, "localhost")
+}
+
+func injectKandevMcpServerAtHost(servers []McpServerConfig, port int, host string) []McpServerConfig {
 	kandevMcpSse := McpServerConfig{
 		Name: kandevMcpServerName,
 		Type: "sse",
-		URL:  "http://localhost:" + portStr + "/sse",
+		URL:  MCPServerURL(host, port, "/sse"),
 	}
 	kandevMcpHttp := McpServerConfig{
 		Name: kandevMcpServerName,
 		Type: "http",
-		URL:  "http://localhost:" + portStr + "/mcp",
+		URL:  MCPServerURL(host, port, "/mcp"),
 	}
 
 	// Filter out any existing kandev server and prepend the local ones

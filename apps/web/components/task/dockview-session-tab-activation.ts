@@ -7,6 +7,7 @@ export type SessionPanelActivationArgs = {
   currentTaskId: string | null;
   currentSessionId: string;
   currentActivePanelId: string | null;
+  workflowFocusRequested?: boolean;
 };
 
 export function shouldPreserveActivePanel(
@@ -47,8 +48,10 @@ export function shouldActivateSessionPanel(args: SessionPanelActivationArgs): bo
     currentTaskId,
     currentSessionId,
     currentActivePanelId,
+    workflowFocusRequested = false,
   } = args;
   const sessionPanelId = `session:${currentSessionId}`;
+  if (workflowFocusRequested) return true;
   if (!sessionPanelExistedBefore) {
     return (
       !currentActivePanelId ||

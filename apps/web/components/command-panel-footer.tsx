@@ -3,13 +3,8 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import {
-  Command,
-  CommandDialog,
-  CommandEmpty,
-  CommandInput,
-  CommandList,
-} from "@kandev/ui/command";
+import { Command, CommandEmpty, CommandInput, CommandList } from "@kandev/ui/command";
+import { CommandPanelDialog } from "./command-panel-dialog";
 import { Kbd, KbdGroup } from "@kandev/ui/kbd";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
 import type { Task } from "@/lib/types/http";
@@ -33,6 +28,7 @@ import {
   CommandsListContent,
   FileSearchContent,
   MODE_COMMANDS,
+  MODE_COMMAND_CHILDREN,
   MODE_SEARCH_CONTENT,
   MODE_SEARCH_FILES,
   MODE_SEARCH_TASKS,
@@ -42,6 +38,7 @@ import {
 
 export {
   MODE_COMMANDS,
+  MODE_COMMAND_CHILDREN,
   MODE_SEARCH_CONTENT,
   MODE_SEARCH_FILES,
   MODE_SEARCH_TASKS,
@@ -72,7 +69,7 @@ function getEnterLabel(t: TFunction, mode: CommandPanelMode) {
 }
 
 function getModeLabel(t: TFunction, mode: CommandPanelMode, inputCommand: CommandItemType | null) {
-  if (mode === "input") return inputCommand?.label;
+  if (mode === "input" || mode === MODE_COMMAND_CHILDREN) return inputCommand?.label;
   if (mode === MODE_SEARCH_TASKS) return t("common:tasks");
   if (mode === MODE_SEARCH_FILES) return t("common:files");
   if (mode === MODE_SEARCH_CONTENT) return t("common:contents");
@@ -110,13 +107,14 @@ function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
       <KbdGroup>
         {/* A key name, not copy — it labels the physical key. */}
         <Kbd>esc</Kbd>
-        <span>{t("common:close")}</span>
+        <span>{t(mode === MODE_COMMAND_CHILDREN ? "common:back" : "common:close")}</span>
       </KbdGroup>
     </div>
   );
 }
 
 export type CommandPanelViewProps = {
+  onEscapeKeyDown?: (event: KeyboardEvent) => void;
   open: boolean;
   setOpen: (open: boolean) => void;
   mode: CommandPanelMode;
@@ -185,8 +183,8 @@ function CommandPanelInputHeader({
       {!isTopLevelMode && (
         <button
           onClick={goBack}
-          tabIndex={-1}
-          className="shrink-0 pl-2 flex min-h-10 cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          aria-label={t("common:back")}
+          className="shrink-0 pl-2 flex min-h-10 [@media(pointer:coarse)]:min-h-11 cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           <span>←</span>
           <span>{modeLabel}</span>
@@ -242,7 +240,7 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
   return (
     <CommandList>
       {confirmationCommand && <CommandPanelConfirmation command={confirmationCommand} />}
-      {mode === MODE_COMMANDS && (
+      {(mode === MODE_COMMANDS || mode === MODE_COMMAND_CHILDREN) && (
         <CommandsListContent
           commands={visibleCommands}
           grouped={visibleGroups}
@@ -322,9 +320,10 @@ export function CommandPanelView(props: CommandPanelViewProps) {
   };
 
   return (
-    <CommandDialog
+    <CommandPanelDialog
       open={open}
       onOpenChange={handleOpenChange}
+      contentProps={{ onEscapeKeyDown: props.onEscapeKeyDown }}
       overlayClassName="supports-backdrop-filter:backdrop-blur-none!"
     >
       <Command
@@ -348,9 +347,14 @@ export function CommandPanelView(props: CommandPanelViewProps) {
         onValueChange={setSelectedValue}
       >
         <CommandPanelInputHeader {...renderedProps} />
+        {mode === MODE_COMMAND_CHILDREN && props.inputCommand?.context && (
+          <div className="truncate border-b px-3 py-1 text-xs text-muted-foreground">
+            {props.inputCommand.context}
+          </div>
+        )}
         <CommandPanelResultList {...renderedProps} />
         <CommandPanelFooter mode={renderedProps.mode} />
       </Command>
-    </CommandDialog>
+    </CommandPanelDialog>
   );
 }

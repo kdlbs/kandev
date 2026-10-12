@@ -12,11 +12,14 @@ Use this as the routing map for Kandev's local skills. Prefer the repo's existin
 ```text
 Task arrives
 |
-|-- Need to clarify intent first? ----------> /interview-me
+|-- Standalone interview or stress test? --> /interview-me
+|-- Feature/fix planning assumptions? -----> /interview-me (question only material unknowns)
+|-- Large initiative with dependent unknowns? -> /interview-me decision-mapping reference
 |-- Create/change/fix/publish Kandev plugin? -> /create-kandev-plugin plus /fix or /tdd as needed
 |-- New feature or behavior-changing fix? --> /spec-driven-development
 |-- Bug regression? ------------------------> /fix -> requirement/design check -> fix plan/work orders -> /tdd
 |-- Running/debugging Kandev locally? ------> /debug
+|-- Inspecting native Codex app-server protocol? -> /codex-app-server-debug
 |-- Need focused context setup? ------------> /context-engineering
 |-- Code change with test coverage? --------> /tdd
 |-- Browser/E2E coverage? ------------------> /e2e
@@ -30,6 +33,7 @@ Task arrives
 |-- Add/roll out/promote/graduate/remove a runtime feature flag or release toggle? -> /runtime-feature-flags
 |-- Validate implementation? ----------------> /tdd plus exact task-defined tests/E2E
 |-- Need local QA/review/simplification? ----> only on explicit user request or PR finding
+|-- End-of-session retrospective? ---------> /retro (explicit request only)
 |-- Improve skills/agents/commands? --------> /harness-improvement
 |-- Record decisions/specification changes? -> /record
 |-- Public docs impact? --------------------> /docs-maintainer -> /diagram-design when a visual helps

@@ -6,9 +6,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/githubauth"
 )
 
@@ -90,6 +93,44 @@ func TestSSHExecutorGetRemoteStatus(t *testing.T) {
 			t.Fatalf("State = %q, want %q", status.State, sshStatusAgentctlDown)
 		}
 	})
+
+	t.Run("transport lost during the probe reports disconnected, not agentctl-down", func(t *testing.T) {
+		// AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.7: GetRemoteStatus reads the
+		// transport-lost marker and the client handle in one critical section,
+		// then releases the mutex before probing. A teardown racing in after
+		// that read (marker still false, client still open at read time) but
+		// before the probe completes must still surface as `disconnected`,
+		// not `agentctl-down` — a failed probe alone can't tell the two apart.
+		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		var state *sshSessionState
+		server := newFakeSSHServer(t, func(string, string) sshExecResult {
+			// Simulate a concurrent watchdog-driven teardown landing exactly
+			// between GetRemoteStatus's marker read and this probe: flip the
+			// marker under the same mutex the real teardown uses, then fail
+			// the probe the way a torn-down client would.
+			exec.mu.Lock()
+			state.transportLost = true
+			exec.mu.Unlock()
+			return sshFail("no such process")
+		})
+		state = &sshSessionState{
+			target: &SSHTarget{Host: "build.example"},
+			client: server.dial(t),
+			pid:    4242,
+		}
+		exec.sessions["i"] = state
+
+		status, err := exec.GetRemoteStatus(context.Background(), &ExecutorInstance{InstanceID: "i"})
+		if err != nil {
+			t.Fatalf("GetRemoteStatus: %v", err)
+		}
+		if status.State != sshStatusDisconnected {
+			t.Fatalf("State = %q, want %q", status.State, sshStatusDisconnected)
+		}
+		if status.ErrorMessage != sshTransportLostMessage {
+			t.Fatalf("ErrorMessage = %q", status.ErrorMessage)
+		}
+	})
 }
 
 func TestSSHShouldStopRemoteAgentctl(t *testing.T) {
@@ -146,8 +187,8 @@ func TestSSHExecutorStopInstanceIsSafeWithoutTrackedState(t *testing.T) {
 	if err := exec.StopInstance(context.Background(), nil, false); err != nil {
 		t.Fatalf("StopInstance(nil): %v", err)
 	}
-	if err := exec.StopInstance(context.Background(), &ExecutorInstance{InstanceID: "gone"}, false); err != nil {
-		t.Fatalf("StopInstance(untracked): %v", err)
+	if err := exec.StopInstance(context.Background(), &ExecutorInstance{InstanceID: "gone"}, false); err == nil {
+		t.Fatal("StopInstance(untracked) succeeded without persisted metadata")
 	}
 }
 
@@ -219,6 +260,7 @@ func TestSSHExecutorResumeRemoteInstance(t *testing.T) {
 	})
 
 	t.Run("re-attaches to a live remote agentctl", func(t *testing.T) {
+		withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
 		harness := newSSHLaunchHarness(t, "4242")
 		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
 		t.Cleanup(func() { _ = exec.Close() })
@@ -255,6 +297,9 @@ func TestSSHExecutorResumeRemoteInstance(t *testing.T) {
 			t.Fatalf("metadata forward port = %v, want the new local port %d",
 				forwardPort, state.forwarder.LocalPort())
 		}
+		if state.watchdog == nil {
+			t.Fatal("ResumeRemoteInstance must start a transport-liveness watchdog for the session (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.1)")
+		}
 	})
 
 	// @covers AC-EXECUTORS-SSH-EXECUTOR-001.9
@@ -289,6 +334,7 @@ func TestSSHExecutorResumeRemoteInstance(t *testing.T) {
 		for _, key := range []string{
 			MetadataKeySSHRemoteSessionDir,
 			MetadataKeySSHRemoteAgentctlPort,
+			MetadataKeySSHRemoteControlPort,
 			MetadataKeySSHRemoteAgentctlPID,
 			MetadataKeySSHLocalForwardPort,
 			MetadataKeySSHRemoteAgentctlURL,
@@ -404,7 +450,7 @@ func TestSSHExecutorResetManagedBrokerResume(t *testing.T) {
 			t.Fatal("the stale session must be dropped")
 		}
 		for _, key := range []string{
-			MetadataKeySSHRemoteSessionDir, MetadataKeySSHRemoteAgentctlPort,
+			MetadataKeySSHRemoteSessionDir, MetadataKeySSHRemoteAgentctlPort, MetadataKeySSHRemoteControlPort,
 			MetadataKeySSHRemoteAgentctlPID, MetadataKeySSHLocalForwardPort,
 			MetadataKeySSHRemoteAgentctlURL,
 		} {
@@ -522,20 +568,25 @@ func TestSSHTaskDirName(t *testing.T) {
 
 func TestClearSSHResumeRuntimeMetadata(t *testing.T) {
 	metadata := map[string]interface{}{
-		MetadataKeySSHRemoteSessionDir:   "/remote/session",
-		MetadataKeySSHRemoteAgentctlPort: "41234",
-		MetadataKeySSHRemoteAgentctlPID:  "4242",
-		MetadataKeySSHLocalForwardPort:   "5000",
-		MetadataKeySSHRemoteAgentctlURL:  "http://127.0.0.1:5000",
-		MetadataKeySSHRemoteTaskDir:      "/remote/task",
-		MetadataKeySSHHost:               "build.example",
+		MetadataKeySSHRemoteSessionDir:     "/remote/session",
+		MetadataKeySSHRemoteAgentctlPort:   "41234",
+		MetadataKeySSHRemoteAgentctlPID:    "4242",
+		MetadataKeySSHLocalForwardPort:     "5000",
+		MetadataKeySSHRemoteAgentctlURL:    "http://127.0.0.1:5000",
+		MetadataKeySSHRuntimeAPILocalURL:   "http://127.0.0.1:3456/api/v1",
+		MetadataKeySSHRuntimeAPIRemotePort: "45678",
+		MetadataKeySSHRemoteTaskDir:        "/remote/task",
+		MetadataKeySSHHost:                 "build.example",
 	}
 	clearSSHResumeRuntimeMetadata(metadata)
-	if len(metadata) != 2 {
-		t.Fatalf("remaining metadata = %+v, want only the durable keys", metadata)
+	if len(metadata) != 3 {
+		t.Fatalf("remaining metadata = %+v, want durable keys plus the local API URL", metadata)
 	}
 	if metadata[MetadataKeySSHRemoteTaskDir] != "/remote/task" || metadata[MetadataKeySSHHost] != "build.example" {
 		t.Fatalf("durable metadata was cleared: %+v", metadata)
+	}
+	if metadata[MetadataKeySSHRuntimeAPILocalURL] != "http://127.0.0.1:3456/api/v1" {
+		t.Fatalf("local API URL was cleared: %+v", metadata)
 	}
 	clearSSHResumeRuntimeMetadata(nil) // must not panic
 }
@@ -624,6 +675,46 @@ func TestSSHExecutorPreflightAgentBinary(t *testing.T) {
 }
 
 func TestSSHExecutorProbeNativeBinary(t *testing.T) {
+	t.Run("preflight verifies selected managed command despite unrelated native CLI", func(t *testing.T) {
+		server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
+			if strings.Contains(command, "npx") {
+				return sshOut("/usr/bin/npx\n")
+			}
+			return sshOut("/usr/bin/opencode\n")
+		})
+		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		req := &ExecutorCreateRequest{
+			AgentConfig:           agents.NewOpenCodeACP(),
+			ManagedRuntimeFamily:  managedruntime.OpenCodeFamilyV2,
+			ManagedRuntimeSource:  managedruntime.OpenCodeSourceManaged,
+			ManagedRuntimeVersion: "2.0.18",
+		}
+		if err := exec.preflightAgentBinary(context.Background(), server.dial(t), req, SSHRemotePlatform{}); err != nil {
+			t.Fatalf("preflightAgentBinary: %v", err)
+		}
+		commands := server.commands()
+		if len(commands) != 1 || !strings.Contains(commands[0], "npx") {
+			t.Fatalf("managed preflight commands = %v, want the selected npx command only", commands)
+		}
+	})
+
+	t.Run("managed OpenCode selection skips unrelated native executable", func(t *testing.T) {
+		server := newFakeSSHServer(t, func(string, string) sshExecResult { return sshOut("/usr/bin/opencode\n") })
+		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		req := &ExecutorCreateRequest{
+			AgentConfig:           agents.NewOpenCodeACP(),
+			ManagedRuntimeFamily:  managedruntime.OpenCodeFamilyV2,
+			ManagedRuntimeSource:  managedruntime.OpenCodeSourceManaged,
+			ManagedRuntimeVersion: "2.0.18",
+		}
+		if exec.probeNativeBinary(context.Background(), server.dial(t), "bash", req, "step") {
+			t.Fatal("a managed OpenCode selection must not prefer a remote native binary")
+		}
+		if len(server.commands()) != 0 {
+			t.Fatalf("managed OpenCode should go directly to its selected npx command, got probes %v", server.commands())
+		}
+	})
+
 	t.Run("agent without a native binary is skipped", func(t *testing.T) {
 		server := newFakeSSHServer(t, nil)
 		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())

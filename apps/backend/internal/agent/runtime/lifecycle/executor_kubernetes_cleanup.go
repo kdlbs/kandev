@@ -22,6 +22,12 @@ func (r *KubernetesExecutor) StopInstance(ctx context.Context, instance *Executo
 	if instance == nil {
 		return nil
 	}
+	if err := r.resolveTaskKubernetesStopOwnership(ctx, instance); err != nil {
+		return err
+	}
+	if getMetadataBool(instance.Metadata, metadataKubernetesTaskOwned) {
+		return r.stopSharedKubernetesInstance(ctx, instance)
+	}
 	unlock := r.lockInstance(instance.InstanceID)
 	defer unlock()
 
@@ -283,6 +289,7 @@ func kubernetesCleanupInventory(
 	req := &ExecutorCreateRequest{
 		TaskID:              instance.TaskID,
 		SessionID:           instance.SessionID,
+		TaskEnvironmentID:   getMetadataString(instance.Metadata, MetadataKeyKubernetesResourceEnvironmentID),
 		PreviousExecutionID: getMetadataString(metadata, MetadataKeyKubernetesResourceInstanceID),
 		Metadata:            metadata,
 	}

@@ -1,6 +1,6 @@
 # ADR-2026-08-24-unified-fork-approval-label: Use One Maintainer Approval Label for Contributor PR Automation
 
-**Status:** accepted
+**Status:** superseded by 2026-09-07-isolate-fork-preview-builds
 **Date:** 2026-08-24
 **Area:** infra, workflow, security
 
@@ -42,11 +42,11 @@ context, and does not check out or execute contributor code in its
 secret-bearing worktree. Publication and pull request linking keep their
 existing separate jobs and minimum permissions.
 
-Reuse the existing privileged fork preview path for `safe-to-review`. That path
-checks out the contributor head and runs `go run ./cmd/preview deploy` with
-`SPRITES_API_TOKEN` and `GITHUB_TOKEN`. Applying `safe-to-review` is an
-explicit maintainer decision that accepts this trust boundary for the selected
-contributor and current pull request.
+At the time of this decision, reuse the privileged fork preview path for
+`safe-to-review`. That path checked out the contributor head and ran
+`go run ./cmd/preview deploy` with `SPRITES_API_TOKEN` and `GITHUB_TOKEN`.
+The later isolation decision in
+`2026-09-07-isolate-fork-preview-builds.md` supersedes this preview boundary.
 
 Keep approval labels durable until a maintainer removes them. Keep
 `generate-pr-walkthrough` as a same-repository operational rerun label, not as
@@ -58,9 +58,9 @@ a contributor trust label.
 - Allowlisted contributors keep automatic access through the existing direct
   allowlist gates and receive one visible approval label.
 - A contributor push keeps the approval active until a maintainer removes it.
-- A labeled contributor pull request can run privileged preview code. The
-  repository allowlist and maintainer label process must remain restricted to
-  contributors the maintainers trust.
+- At the time, a labeled contributor pull request could run privileged preview
+  code. The repository allowlist and maintainer label process had to remain
+  restricted to contributors the maintainers trusted.
 - PR walkthrough generation gains fork support without allowing contributor
   files to replace its executable workflow assets.
 - Existing `safe-to-test` labels become inert after rollout and require a
@@ -77,9 +77,10 @@ a contributor trust label.
 - Use only the label written by the allowlist bridge. Rejected because
   `GITHUB_TOKEN` label writes do not provide a reliable downstream workflow
   trigger.
-- Redesign preview isolation before enabling the unified label. Rejected for
-  this change because the user selected the existing privileged preview path;
-  a preview isolation redesign remains a separate security initiative.
+- Redesign preview isolation before enabling the unified label. Deferred at the
+  time because the user selected the existing privileged preview path. The
+  later isolation decision is recorded in
+  `2026-09-07-isolate-fork-preview-builds.md`.
 - Keep fork walkthroughs disabled. Rejected because the walkthrough is the
   requested explanation of contributor changes and can preserve a stronger
   trusted-input boundary than the existing privileged preview job.

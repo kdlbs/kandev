@@ -19,6 +19,12 @@ This design preserves the technical source detail for `REQ-OFFICE-RUNTIME-001` d
 | --- | --- |
 | `REQ-OFFICE-RUNTIME-001` | [Migrated source detail](#migrated-source-detail) |
 
+## Related decisions
+
+[Keep MCP availability separate from runtime permissions](../../../decisions/2026-09-07-separate-runtime-permissions-and-advisory-actions.md)
+defines the boundary between enforced runtime permissions and seat-derived
+prompt metadata.
+
 ## Migrated source detail
 
 > **Amendment (2026-08-17):** The provider-classification and automatic
@@ -59,9 +65,20 @@ A follow-up spec can introduce per-adapter classification once we have real usag
 
 ### Retry policy
 
-- No automatic retry. Every adapter error is terminal for the wakeup that produced it.
-- The wakeup row is stamped with `status = failed` and `error_message`. No follow-up wakeup is queued from the failure path.
-- Re-runs only happen via explicit user action: **Resume session** in chat, **Mark fixed** on an inbox entry, or task reassignment to a different agent.
+- No automatic retry, except the bounded legacy-path transient retry below. Every other adapter error is terminal for the wakeup that produced it.
+- The wakeup row is stamped with `status = failed` and `error_message`. No follow-up wakeup is queued from the failure path, other than the classified-transient retry's own `scheduled_retry_at`.
+- Re-runs only happen via explicit user action — **Resume session** in chat, **Mark fixed** on an inbox entry, or task reassignment to a different agent — except the automatic bounded retry below.
+- A terminal failure still stamps `office_agent_runtime.last_run_finished_at` — `HandleAgentFailure` calls the same `Service.stampRunFinished` helper the completed/stopped paths use. Cooldown is a run-pacing mechanism, not a success tracker: a below-threshold failing agent is paced by `cooldown_sec` on its next heartbeat-driven fire exactly as it would be after a success, so a flapping provider or a misconfigured agent cannot retry back-to-back with zero pacing and burn cost/tokens before hitting auto-pause. This applies uniformly across every task assigned to the agent, not just the one that just failed - `cooldown_sec` gates the agent's next heartbeat-triggered fire, regardless of which task last failed. It does not gate task assignment or manual resume: those go through the runs scheduler's `ClaimNextRun`/`ProcessRunGuard` path, which does not consult `last_run_finished_at`. The consecutive-failure counter and auto-pause threshold (below) are the separate, existing mechanism for stopping a chronically broken agent altogether; cooldown only paces the failures that happen before that threshold is reached. The legacy-path transient retry below deliberately skips this stamp while it is retrying: it is not a success-tracking event, and pacing is already bounded by its own fixed 5s/10s schedule rather than the heartbeat cadence `cooldown_sec` governs.
+
+### Legacy post-start transient retry
+
+AC-OFFICE-RUNTIME-001.11 carves a narrow exception out of the "every error is terminal" policy above, closing Beta gap AC-4.2: a post-start failure on the legacy (`HandleAgentFailure`) path — the one `tryPostStartFallback`'s routing-tier retry (see the amendment note above) does not reach, because no routing dispatcher is wired or the run has no `ResolvedProviderID` — is retried instead of counted toward auto-pause, but only when it classifies **transient** by the same shared predicate the routing tier uses (`(*routingerr.Error).ShouldShortRetry`: `ClassTransient && AutoRetryable && FallbackAllowed`), reused rather than reimplemented.
+
+Mechanism: `HandleAgentFailure` classifies the failure (preferring the structured `ProviderError.Message` over the bare error string, since a bare adapter string like `"Overloaded"` or a raw 429 rarely classifies on its own) **before** calling `MarkRunFailed` at all, not after. Classification passes the underlying agent id (for example `"claude-acp"`) as the provider id, substituting `ProviderError.ProviderID` only when the agent id itself has no provider rules and the provider id does — the same resolution `classifyKanbanFailure` uses, mirrored rather than reimplemented, because provider rules are keyed by agent id and a raw stderr rate-limit string only matches its provider's rule set when the right id is threaded through. `ProviderError.ResetAt` is not used on this path: unlike the routing tier's short-retry delay, the fixed 5s/10s backoff below does not shorten for an imminent reset window. On a classified-transient hit, bounded by `run.RetryCount < 2` and the same 24h `retryMaxAge` staleness rule the pre-launch tier uses, it releases the task checkout, clears the agent's working flag, and calls `ScheduleRetryIfClaimed` at a fixed 5s then 10s delay — a requeue write guarded to `status = 'claimed'`, mirroring `MarkRunFailed`'s own guard, so it only succeeds while the run is still the row this handler read. On success it returns early so `MarkRunFailed`, `recordTerminalShape`, `stampRunFinished`, `IncrementAgentConsecutiveFailures`, `publishRunFailed`, and `autoPauseAgent` never run for that attempt — the run goes `claimed -> queued` directly and never visits `status = 'failed'`. If the guarded requeue writes zero rows, a concurrent writer (a task-tree cancel, workspace pause, or participant eviction — each guarded to `status IN ('queued','claimed')`) already moved the run off `claimed` first; the handler falls through to `MarkRunFailed`, whose identical guard no-ops the same way, leaving the concurrent writer's terminal state untouched (Review round 6, R6-1: classifying before any write closes the `claimed -> failed -> queued` window a cancel's guard could not see into). `RetryCount` is shared with the pre-launch tier rather than a new column, so a run that already burned pre-launch retries gets no post-start retry — under-retrying rather than ever exceeding the combined budget. `ScheduleRetryIfClaimed` also clears `session_id` and `error_message`: the row may already carry the session id and error text of the failed attempt, and a relaunch must resolve the session the new attempt actually gets and not still be flagged with an error once it finishes successfully.
+
+The retry additionally checks the run's **scheduled arrival**, not just its current age: `time.Since(run.RequestedAt) + delay > staleRunThreshold` (2h, `scheduler_staleness.go`), where `delay` is the same 5s/10s backoff this attempt is about to schedule — and refuses to schedule when that would already be true, falling through to terminal accounting instead. This is a second, tighter gate than the 24h `retryMaxAge` above: `evaluateRunStaleness` cancels any claimed run with `RetryCount > 0` once it is older than `staleRunThreshold`, and scheduling this retry always leaves `RetryCount > 0`. The run cannot be claimed before `ScheduleRetry`'s `retry_at` elapses, so testing the age the run has *now* rather than the age it will have on arrival lets a run age into the cancellation window during its own backoff, silently converting a scheduled retry into an `execution_too_old` cancellation instead of counting the failure (no `consecutive_failures` increment, no `agent_run_failed` inbox row). An Office agent session running past 2h is routine, not an edge case, so this band is reachable in practice. A narrower residual remains even with the delay folded in: the run is claimed at the first scheduler tick *after* `scheduled_retry_at`, not exactly at it, so a tick-width window (bounded by the scheduler's poll interval) can still let `evaluateRunStaleness` cancel a retry whose scheduled arrival landed just inside the threshold. This residual is deliberately not closed — it is orders of magnitude narrower than the backoff-width gap it replaces and would require coupling this gate to the scheduler's poll cadence.
+
+This retry re-drives the whole run from the top only when the lifecycle event carries the exact run identity and current-invocation evidence: a non-empty execution ID, a non-zero prompt generation, known evidence, and no observed output or effect. A missing or mismatched run or session identity, unknown evidence, output, effect, or a provider diagnostic that does not match the terminal failure falls through to terminal accounting. This keeps the Office path aligned with the shared provider-recovery contract while preserving the existing 5s and 10s retry policy.
 
 ### Inbox surfacing
 
@@ -84,9 +101,8 @@ For `agent_run_failed`:
 3. Re-queue a wakeup for that (task, agent) with reason `manual_resume_after_failure`.
 
 For `agent_paused_after_failures`:
-1. Insert into `inbox_dismissals`.
-2. Clear the agent's `pause_reason`, reset `consecutive_failures` to zero. (Counter reset is the user saying "I fixed the cause; start over".)
-3. Re-queue wakeups for every (task, agent) listed on the entry with reason `manual_resume_after_failure`.
+See [part 2](runtime-02.md#migrated-source-detail) for the compare-and-set clear,
+dismissal ordering, and retry scenario detail.
 
 There is no separate "Dismiss without retry" affordance. If the user wants to silence the inbox without re-running the task, they reassign the task to a different agent - that's the explicit recovery path described below.
 
@@ -206,7 +222,7 @@ Mounted by `runtime.RegisterRoutes` (`internal/office/runtime/handler.go`). Ever
 | GET | `/runtime/skills` | `list_skills` | – |
 | DELETE | `/runtime/skills/:id` | `delete_skills` | – |
 
-Capability-denied (`ErrCapabilityDenied`), task-out-of-scope (`ErrTaskOutOfScope`), and workspace-out-of-scope (`ErrWorkspaceOutOfScope`) errors return `403 Forbidden` and append a `runtime.denied` event to `office_run_events`. Successful actions append `runtime.action`. Missing dependencies surface as `500` with `ErrRuntimeDependencyMissing`.
+Capability-denied (`ErrCapabilityDenied`), task-out-of-scope (`ErrTaskOutOfScope`), and workspace-out-of-scope (`ErrWorkspaceOutOfScope`) errors return `403 Forbidden` and append a `runtime.denied` event to `office_run_events`. Successful actions append `runtime.action`. Missing dependencies and other operational errors return `500 Internal Server Error` with the stable `internal runtime error` message. The server log keeps the original error cause.
 
 ### Recovery actions (UI-facing, dashboard handler)
 
@@ -255,7 +271,7 @@ Recovery and runtime-action authorization splits across three actors: human user
 - **Mark fixed (inbox dismiss + retry)** and **Resume session**: any workspace user. There is no agent-role gating on these affordances; they are explicit human-driven recovery actions surfaced in the inbox and per-task chat.
 - **Reassignment** (`PATCH /tasks/:id` with new `assignee_agent_instance_id`): workspace user. Agent JWTs cannot reassign tasks via the runtime action surface in v1; there is no `CapabilityReassignTask`.
 - **Manual unpause** (clearing `pause_reason` from the agent detail page): workspace admin / CEO role only, enforced by `isAdminRole` in `internal/office/agents/handler.go`.
-- **Runtime action surface capabilities**: derived from `agent_instances.role` / `permissions` via `runtime.FromAgent`. The agent JWT carries the serialized `Capabilities` snapshot taken at run-claim time; subsequent permission revocations on the agent profile do not affect a JWT already in flight (it expires after `DefaultTokenDuration = 4h`).
+- **Runtime action surface capabilities**: derived from `agent_instances.role` / `permissions` via `runtime.FromAgent`. The agent JWT carries the serialized `Capabilities` snapshot taken at run-claim time; subsequent permission revocations on the agent profile do not affect a JWT already in flight (it expires after `DefaultTokenDuration = 4h`). The seat-derived `record_step_decision` CLI affordance is not a runtime capability. `runtime.ContextBuilder.Build` stores it in `RunContext.AvailableActions` when the agent holds the current workflow participant seat. The scheduler uses this advisory action to inject `kandev-step-decision` and add the command to the prompt, but does not add it to JWT capability claims. The task-bound runtime decision handler derives task, session, and agent identity from the signed run context and performs live authorization through `DashboardService.RecordAgentDecision` and `ResolveParticipantRole`.
 - **Task scope**: `RunContext.CanMutateTask(taskID)` returns true only when `taskID == runCtx.TaskID` or `taskID` (or wildcard `*`) appears in `Capabilities.AllowedTaskIDs`. Out-of-scope mutations return `ErrTaskOutOfScope`.
 - **Workspace scope**: every action that touches another entity (target agent, target skill, target task) is rejected with `ErrWorkspaceOutOfScope` when the target's `workspace_id` does not match the run's.
 - **Memory namespaces**: `CanAccessMemory` enforces workspace match plus, for `kind=agent`, that the namespace ID matches `runCtx.AgentID`. Agents cannot read or write another agent's memory.
@@ -265,7 +281,7 @@ Recovery and runtime-action authorization splits across three actors: human user
 
 - **Adapter error event published**: session -> `FAILED`, wakeup -> `failed`, agent process and agentctl torn down, `executors_running` preserved, `consecutive_failures++`, inbox entry created or upgraded to `agent_paused_after_failures` on threshold.
 - **Provider returns malformed response**: treated as terminal like any other adapter error. Raw payload preserved in the chat error entry and wakeup `error_message`.
-- **Transient network failure**: treated as terminal in v1. User clicks Resume / Mark fixed to retry. Future classifier may auto-retry.
+- **Transient network failure**: on the legacy post-start path, classified-transient failures auto-retry up to 2 times (5s/10s) per [Legacy post-start transient retry](#legacy-post-start-transient-retry) before falling back to terminal; any other transient failure (pre-launch, or already exhausted its retry budget) is terminal and the user clicks Resume / Mark fixed to retry.
 - **Auto-paused agent's wakeup fires**: scheduler refuses to claim it; behaviour identical to a manually-paused agent.
 - **Reassignment during failure**: cancels the (task, old agent) wakeup via the existing staleness check; auto-dismisses `agent_run_failed` for (task, old agent). Does not unpause the old agent.
 
@@ -282,6 +298,7 @@ Recovery and runtime-action authorization splits across three actors: human user
 - **Capability snapshot on the run** (`runs.capabilities`, `runs.input_snapshot`): durable, written by `ContextBuilder.BuildAndPersist`. A re-issued JWT after restart uses the same capability set so the run keeps the permissions it was granted at claim time.
 - **Agent JWT signing key**: process-local. Defaults to a random 32-byte key when the `KANDEV_AGENT_JWT_KEY` config is empty, in which case all in-flight JWTs are invalidated on restart and agents must mint fresh tokens on the next prompt cycle. Configurable for stable cross-restart JWTs.
 - **`affected_tasks` snapshot on `agent_paused_after_failures`**: NOT recomputed when listed tasks are reassigned away. The snapshot is intentionally point-in-time so the user resolves the pause entry as a whole.
-- **`scheduled_retry` runs**: not produced in v1. Every adapter error is terminal; the wakeup is stamped `failed` with no follow-up scheduled. The `scheduled_retry` status is reserved for a future classifier.
+- **`office_agent_runtime.last_run_finished_at`**: durable. Stamped on every terminal run outcome for the agent, including failure - not just completion/stop - so the heartbeat cooldown gate paces the agent's next fire regardless of why the previous run ended. See [`office/agents.md`](../requirements/agents.md#persistence-guarantees) persistence guarantees for the gate itself.
+- **`scheduled_retry` runs**: not produced by the general v1 classification policy — every other adapter error is terminal, stamped `failed` with no follow-up scheduled. The one exception is [Legacy post-start transient retry](#legacy-post-start-transient-retry): the run is requeued (`status = queued`, `scheduled_retry_at` set, `session_id` and `error_message` cleared) via a `status = 'claimed'`-guarded write, rather than marked `failed` at all, so a successful retry never reaches this status literally named `scheduled_retry`. A fuller per-adapter classifier producing that status remains future work.
 
 See also: [Dynamic Agent Routing](../../agents/requirements/dynamic-agent-routing.md) for provider routing and [`office/scheduler.md`](../requirements/scheduler.md) for wakeup queue semantics and the staleness check that cancels superseded wakeups.

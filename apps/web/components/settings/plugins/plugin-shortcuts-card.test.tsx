@@ -387,3 +387,12 @@ describe("PluginShortcutsCard reset", () => {
     });
   });
 });
+
+it("names conflicts with host integration navigation without moving plugin actions", () => {
+  updateStoreUserSettings({
+    keyboardShortcuts: { "integration:github": { key: "u", modifiers: { ctrlOrCmd: true } } },
+  });
+  renderCard(plugin());
+  expect(screen.getByTitle("Same shortcut as: Open GitHub")).toBeTruthy();
+  expect(screen.queryByTestId("shortcut-recorder-integration:github")).toBeNull();
+});

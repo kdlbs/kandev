@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -41,7 +42,7 @@ func routinesList(args []string) int {
 	}
 	wsID := os.Getenv("KANDEV_WORKSPACE_ID")
 	path := fmt.Sprintf("/api/v1/office/workspaces/%s/routines", wsID)
-	return getWithParams(path, "KANDEV_WORKSPACE_ID", wsID, nil)
+	return getWithParams(path, "KANDEV_WORKSPACE_ID", wsID, url.Values{})
 }
 
 // routinesCreate provisions a routine + cron trigger in two

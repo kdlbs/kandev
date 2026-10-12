@@ -33,6 +33,8 @@ function makeView(id: string, name = id): ThreadView {
     filters: [],
     sort: { key: "attention", direction: "asc" },
     maxColumns: null,
+    layout: "columns",
+    autoHideComposer: false,
   };
 }
 
@@ -55,7 +57,57 @@ beforeEach(() => {
   } as Awaited<ReturnType<typeof updateUserSettings>>);
 });
 
+describe("Threads view draft protection", () => {
+  it.each(["one", "two"])("preserves the active draft when selecting %s", (viewId) => {
+    const store = makeStore();
+    const draft: ThreadViewDraft = {
+      ...makeView("one"),
+      baseViewId: "one",
+      layout: "grid",
+      autoHideComposer: true,
+      maxColumns: 7,
+      sort: { key: "priority", direction: "desc" },
+      filters: [{ id: "title", dimension: "titleMatch", op: "matches", value: "Release" }],
+    };
+    seed(store, [makeView("one"), makeView("two")], draft);
+
+    store.getState().setThreadActiveView(viewId);
+
+    expect(store.getState().threadViews.activeViewId).toBe("one");
+    expect(store.getState().threadViews.draft).toEqual(draft);
+    expect(updateUserSettings).not.toHaveBeenCalled();
+  });
+});
+
 describe("Threads saved-view actions", () => {
+  // @covers AC-UI-THREADS-SAVED-VIEWS-005.2, AC-UI-THREADS-SAVED-VIEWS-005.7
+  it("retains presentation through query edits, Save, Duplicate, Save as, and Discard", async () => {
+    const store = makeStore();
+    seed(store, [makeView("one")]);
+    store.getState().updateThreadViewDraft({ layout: "grid", autoHideComposer: true });
+    store.getState().updateThreadViewDraft({ maxColumns: 7 });
+    expect(store.getState().threadViews.draft).toMatchObject({
+      layout: "grid",
+      autoHideComposer: true,
+      maxColumns: 7,
+    });
+    store.getState().saveThreadViewDraftOverwrite();
+    store.getState().duplicateThreadView("one", "Copy");
+    store.getState().updateThreadViewDraft({ sort: { key: "priority", direction: "desc" } });
+    store.getState().saveThreadViewDraftAs("Priority grid");
+    const saved = store.getState().threadViews.views.at(-1);
+    expect(saved).toMatchObject({
+      layout: "grid",
+      autoHideComposer: true,
+      maxColumns: 7,
+      sort: { key: "priority", direction: "desc" },
+    });
+    store.getState().updateThreadViewDraft({ layout: "columns", autoHideComposer: false });
+    store.getState().discardThreadViewDraft();
+    expect(store.getState().threadViews.views.at(-1)).toEqual(saved);
+    expect(store.getState().threadViews.orderResetGeneration).toBe(0);
+    await waitFor(() => expect(store.getState().threadViews.syncPending).toBe(false));
+  });
   it("keeps saved view state independent and persists a selected view", () => {
     const store = makeStore();
     const views = [makeView("one"), makeView("two")];
@@ -97,6 +149,57 @@ describe("Threads saved-view actions", () => {
       expect.objectContaining({
         taskScope: { mode: "selected", taskIds: ["task-a"] },
         maxColumns: 3,
+      }),
+    );
+  });
+});
+
+describe("Threads saved-view presentation recovery", () => {
+  // @covers AC-UI-THREADS-SAVED-VIEWS-005.2
+  it("retries the latest rapid edit after both queued writes fail", async () => {
+    const store = makeStore();
+    const original = makeView("one");
+    seed(store, [original]);
+    vi.mocked(updateUserSettings)
+      .mockRejectedValueOnce(new ApiError(WRITE_ERROR, 500, {}))
+      .mockRejectedValueOnce(new ApiError(WRITE_ERROR, 500, {}));
+    store.getState().updateThreadViewDraft({ layout: "grid", maxColumns: 7 });
+    store.getState().updateThreadViewDraft({ autoHideComposer: true });
+    await waitFor(() => expect(store.getState().threadViews.syncPending).toBe(false));
+    expect(store.getState().threadViews.draft).toBeNull();
+    expect(store.getState().threadViews.views).toEqual([original]);
+    store.getState().retryThreadViewSync();
+    await waitFor(() => expect(store.getState().threadViews.syncPending).toBe(false));
+    expect(store.getState().threadViews.draft).toMatchObject({
+      layout: "grid",
+      autoHideComposer: true,
+      maxColumns: 7,
+    });
+    expect(store.getState().threadViews.orderResetGeneration).toBe(0);
+  });
+  // @covers AC-UI-THREADS-SAVED-VIEWS-005.2
+  it("rolls back and retries a presentation draft without losing query state", async () => {
+    const store = makeStore();
+    const original = makeView("one");
+    seed(store, [original]);
+    vi.mocked(updateUserSettings).mockRejectedValueOnce(new ApiError(WRITE_ERROR, 500, {}));
+    store.getState().updateThreadViewDraft({ layout: "grid", autoHideComposer: true });
+    await waitFor(() => expect(store.getState().threadViews.syncError).toBe(WRITE_ERROR));
+    expect(store.getState().threadViews.draft).toBeNull();
+    expect(store.getState().threadViews.views).toEqual([original]);
+    store.getState().retryThreadViewSync();
+    await waitFor(() => expect(store.getState().threadViews.syncPending).toBe(false));
+    expect(store.getState().threadViews.draft).toMatchObject({
+      layout: "grid",
+      autoHideComposer: true,
+      taskScope: original.taskScope,
+      filters: original.filters,
+      sort: original.sort,
+      maxColumns: original.maxColumns,
+    });
+    expect(updateUserSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        thread_view_draft: expect.objectContaining({ layout: "grid", auto_hide_composer: true }),
       }),
     );
   });

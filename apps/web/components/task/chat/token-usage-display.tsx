@@ -10,6 +10,7 @@ import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-gu
 
 type TokenUsageDisplayProps = {
   sessionId: string | null;
+  detailActive?: boolean;
   className?: string;
 };
 
@@ -129,7 +130,10 @@ function ContextWindowRing({ usagePercent }: { usagePercent: number }) {
         strokeLinecap="round"
         strokeDasharray={circumference}
         strokeDashoffset={strokeDashoffset}
-        className={cn(getCircleColor(usagePercent), "transition-all duration-300 ease-out")}
+        className={cn(
+          getCircleColor(usagePercent),
+          "transition-[stroke-dashoffset] duration-300 ease-out",
+        )}
       />
     </svg>
   );
@@ -254,11 +258,12 @@ function ContextCompactionCount({ count }: { count: number }) {
 
 export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   sessionId,
+  detailActive = true,
   className,
 }: TokenUsageDisplayProps) {
   const { t } = useTranslation();
   const tooltip = usePinnableTooltip();
-  const contextWindow = useSessionContextWindow(sessionId);
+  const contextWindow = useSessionContextWindow(sessionId, detailActive);
 
   if (!contextWindow) return null;
 

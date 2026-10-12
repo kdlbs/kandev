@@ -84,6 +84,12 @@ team-oriented work. It is feature-flagged, disabled in the production profile,
 and remains separate from the supported regular Kanban contract. See [feature
 status](../../public/feature-status.md).
 
+The [workspace coordinator](../coordinator/README.md) is a separate, core
+page for regular Kanban workspaces, not part of Office. It lists what needs a
+person and why, explains the board in an attended chat, and proposes tasks that
+a person approves. It is behind `features.coordinator`, disabled in the
+production profile, and in progress.
+
 ## Open product questions
 
 - Which product capabilities should receive explicit adoption and reliability

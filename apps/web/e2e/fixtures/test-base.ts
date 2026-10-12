@@ -1,12 +1,15 @@
-import { type Page } from "@playwright/test";
+import { devices, type Page } from "@playwright/test";
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { backendFixture, type BackendContext } from "./backend";
+import { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
+export { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
 import { ApiClient } from "../helpers/api-client";
 import { dwell } from "../helpers/causal-waits";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
+import { restoreSidebarLayout } from "../helpers/sidebar-layout";
 import type { WorkflowStep } from "../../lib/types/http";
 
 const DEFAULT_SIDEBAR_VIEW = {
@@ -18,6 +21,15 @@ const DEFAULT_SIDEBAR_VIEW = {
   collapsed_groups: [],
 };
 
+const DEFAULT_THREAD_VIEW = {
+  id: "view-all-threads",
+  name: "All threads",
+  task_scope: { mode: "all", task_ids: [] },
+  filters: [],
+  sort: { key: "attention", direction: "asc" },
+  max_columns: 5,
+};
+
 const AGENT_PROFILE_READY_TIMEOUT_MS = 30_000;
 const AGENT_PROFILE_READY_POLL_MS = 250;
 
@@ -25,7 +37,7 @@ function isFetchTransportError(error: unknown): boolean {
   return error instanceof TypeError && /fetch failed|network error/i.test(error.message);
 }
 
-async function runWithBackendRecovery<T>(
+export async function runWithBackendRecovery<T>(
   backend: BackendContext,
   operation: () => Promise<T>,
 ): Promise<T> {
@@ -79,6 +91,8 @@ export type SeedData = {
   repositoryPath: string;
   /** Offline bare origin for tests that must exercise remote-ref failures. */
   repositoryRemoteURL: string;
+  /** Immutable initial commit used to restore the shared worker checkout. */
+  repositoryBaselineOID: string;
   agentProfileId: string;
   /** Executor profile ID for the worktree executor — use to create tasks with git worktree isolation. */
   worktreeExecutorProfileId: string;
@@ -259,6 +273,12 @@ export const test = backendFixture.extend<
       );
       execSync("git add walkthrough_base.txt", { cwd: repoDir, env: gitEnv });
       execSync('git commit -m "init"', { cwd: repoDir, env: gitEnv });
+      const repositoryBaselineOID = execSync("git rev-parse HEAD", {
+        cwd: repoDir,
+        env: gitEnv,
+      })
+        .toString()
+        .trim();
       execSync(`git remote add origin "file://${remoteDir}"`, { cwd: repoDir, env: gitEnv });
       execSync("git push origin main", { cwd: repoDir, env: gitEnv });
       const repo = await apiClient.createRepository(workspace.id, repoDir);
@@ -315,6 +335,7 @@ export const test = backendFixture.extend<
         repositoryId: repo.id,
         repositoryPath: repoDir,
         repositoryRemoteURL: `file://${remoteDir}`,
+        repositoryBaselineOID,
         agentProfileId,
         worktreeExecutorProfileId,
       });
@@ -326,7 +347,7 @@ export const test = backendFixture.extend<
   // Resets user settings to the E2E workspace/workflow before each test so that
   // SSR always resolves to the correct workspace regardless of what commitSettings
   // may have written during previous tests.
-  testPage: async ({ browser, backend, apiClient, seedData }, use) => {
+  testPage: async ({ browser, backend, apiClient, seedData }, use, testInfo) => {
     await backend.ensureReady();
     // A suite-level test may restart the worker backend after the worker-scoped
     // seed fixture ran. Health only proves that the listener is serving; it does
@@ -342,20 +363,37 @@ export const test = backendFixture.extend<
       // previous tests in this worker. Keep the seeded workflow and the seed
       // agent profile so the worker-scoped seedData fixture remains valid.
       await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+      // Refresh tracking refs after reset has stopped the previous tasks.
+      restoreSeedRepositoryOrigin(seedData);
       await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
       await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
+      await restoreSidebarLayout(apiClient, seedData.workspaceId, undefined);
 
+      const { settings } = await apiClient.getUserSettings();
       await apiClient.saveUserSettings({
+        // Each test owns its sidebar layout, including collapsed navigation.
+        sidebar_layout_state: {
+          workspace_id: seedData.workspaceId,
+          expected_revision:
+            settings.sidebar_layouts_by_workspace?.[seedData.workspaceId]?.revision ?? 0,
+        },
         workspace_id: seedData.workspaceId,
         workflow_filter_id: seedData.workflowId,
         keyboard_shortcuts: {},
+        message_time_display: "relative",
         enable_preview_on_click: false,
         confirm_task_archive: true,
         agent_generated_task_titles: false,
         mcp_task_agent_profile_default: "current_task",
-        sidebar_views: [DEFAULT_SIDEBAR_VIEW],
-        sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
-        sidebar_draft: null,
+        sidebar_view_state: {
+          workspace_id: seedData.workspaceId,
+          views: [DEFAULT_SIDEBAR_VIEW],
+          active_view_id: DEFAULT_SIDEBAR_VIEW.id,
+          draft: null,
+        },
+        thread_views: [DEFAULT_THREAD_VIEW],
+        thread_active_view_id: DEFAULT_THREAD_VIEW.id,
+        thread_view_draft: null,
         saved_layouts: [],
         lsp_auto_start_languages: [],
         lsp_auto_install_languages: [],
@@ -384,11 +422,16 @@ export const test = backendFixture.extend<
         show_scroll_to_last_prompt: true,
         show_scroll_to_start: false,
         show_transcript_auto_scroll_control: true,
+        // Reset the Kanban priority filter. Priority-filter tests persist their
+        // selection, and a stale selection can hide default-priority tasks in
+        // unrelated tests that run later in the same worker.
+        kanban_priority_filter_tokens: [],
         tasks_list_sort: "updated_desc",
         tasks_list_group: "state",
       });
     });
     const context = await browser.newContext({
+      ...(testInfo.project.name === "mobile-chrome" ? devices["Pixel 5"] : {}),
       baseURL: backend.frontendUrl,
     });
     const page = await context.newPage();
@@ -480,50 +523,33 @@ export const test = backendFixture.extend<
       // GitLab reset removes origin from the shared seed checkout. Restore the
       // fixture's offline origin before the test so pull-enabled worktree
       // preparation starts from the same valid repository state every time.
-      restoreSeedRepositoryOrigin(seedData);
+      restoreSeedRepositoryOrigin(seedData, { refreshTrackingRefs: false });
       try {
         await use();
       } finally {
         await apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined);
-        restoreSeedRepositoryOrigin(seedData);
+        restoreSeedRepositoryOrigin(seedData, { refreshTrackingRefs: false });
       }
     },
     { auto: true },
   ],
 });
 
-/**
- * Restores the fixture's offline origin after a GitLab E2E cleanup removes it.
- * Refresh the remote-tracking refs because branch recovery must offer remote
- * branches, not only the local branch that remains checked out.
- */
-export function restoreSeedRepositoryOrigin(seedData: SeedData) {
-  const baseArgs = ["-C", seedData.repositoryPath, "remote"];
-  try {
-    execFileSync("git", [...baseArgs, "set-url", "origin", seedData.repositoryRemoteURL], {
-      stdio: "ignore",
-    });
-  } catch {
-    execFileSync("git", [...baseArgs, "add", "origin", seedData.repositoryRemoteURL], {
-      stdio: "ignore",
-    });
-  }
-  execFileSync("git", ["-C", seedData.repositoryPath, "fetch", "--no-tags", "origin"], {
-    stdio: "ignore",
-  });
-}
-
-/** Restores the shared seed checkout to its clean main branch. */
+/** Restores the shared seed checkout to the immutable fixture baseline. */
 export function resetSeedRepositoryCheckout(seedData: SeedData, tmpDir: string) {
   const env = makeGitEnv(tmpDir);
   execFileSync("git", ["-C", seedData.repositoryPath, "checkout", "-f", "main"], {
     env,
     stdio: "ignore",
   });
-  execFileSync("git", ["-C", seedData.repositoryPath, "reset", "--hard", "main"], {
-    env,
-    stdio: "ignore",
-  });
+  execFileSync(
+    "git",
+    ["-C", seedData.repositoryPath, "reset", "--hard", seedData.repositoryBaselineOID],
+    {
+      env,
+      stdio: "ignore",
+    },
+  );
   execFileSync("git", ["-C", seedData.repositoryPath, "clean", "-fd"], {
     env,
     stdio: "ignore",
@@ -595,14 +621,21 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
+      message_time_display: "relative",
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
       confirm_task_archive: true,
       agent_generated_task_titles: false,
       mcp_task_agent_profile_default: "current_task",
-      sidebar_views: [DEFAULT_SIDEBAR_VIEW],
-      sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views: [DEFAULT_SIDEBAR_VIEW],
+        active_view_id: DEFAULT_SIDEBAR_VIEW.id,
+        draft: null,
+      },
+      thread_views: [DEFAULT_THREAD_VIEW],
+      thread_active_view_id: DEFAULT_THREAD_VIEW.id,
+      thread_view_draft: null,
       saved_layouts: [],
       // Status-surface specs opt in from their local beforeEach hooks; unrelated
       // tests start from the portable setting's default-off state.
@@ -619,6 +652,10 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       show_scroll_to_last_prompt: true,
       show_scroll_to_start: false,
       show_transcript_auto_scroll_control: true,
+      // Reset the Kanban priority filter. Priority-filter tests persist their
+      // selection, and a stale selection can hide default-priority tasks in
+      // unrelated tests that run later in the same worker.
+      kanban_priority_filter_tokens: [],
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",

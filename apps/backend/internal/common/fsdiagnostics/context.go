@@ -13,7 +13,11 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultWarningInterval = 30 * time.Second
+const (
+	defaultWarningInterval = 30 * time.Second
+	runtimeDesktop         = "desktop"
+	runtimeServer          = "server"
+)
 
 // Context identifies one filesystem operation in a structured log entry.
 // Empty identity fields are omitted because some operations run before a
@@ -78,9 +82,9 @@ func CanonicalPath(path string) string {
 // labels used by diagnostics.
 func RuntimeMode(desktop bool) string {
 	if desktop {
-		return "desktop"
+		return runtimeDesktop
 	}
-	return "server"
+	return runtimeServer
 }
 
 // IsAccessDenied reports the deterministic permission class used by the

@@ -291,7 +291,7 @@ func TestPostgresSessionCommitsDedupeAndActivationMigration(t *testing.T) {
 		t.Fatalf("pre-migration commit rows = %d, want 3", got)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrations: %v", err)
 	}
 
@@ -329,7 +329,7 @@ func TestPostgresSessionCommitsDedupeAndActivationMigration(t *testing.T) {
 	// Replay: must not error, must not duplicate the index, and must not
 	// move the activation marker (legacy rows must stay pinned to the
 	// original activation instant, not silently drift on every boot).
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrations twice: %v", err)
 	}
 	if got := readCommitCaptureActivatedAt(t, repo); got != activatedAt {

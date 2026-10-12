@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
+import { Button } from "@kandev/ui/button";
 import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -316,7 +317,8 @@ function useKanbanBoardSetup(
     setWorkflows,
   } = useKanbanBoardStore();
 
-  const { refresh } = useAllWorkflowSnapshots(workspaceState.activeId);
+  const [workflowSnapshotScope, setWorkflowSnapshotScope] = useState<string[]>([]);
+  const { refresh } = useAllWorkflowSnapshots(workspaceState.activeId, workflowSnapshotScope);
   useWorkspacePRs(workspaceState.activeId);
   useWorkspaceMRs(workspaceState.activeId);
 
@@ -393,6 +395,7 @@ function useKanbanBoardSetup(
     effectiveWorkflowId,
     effectiveSteps,
     refresh,
+    setWorkflowSnapshotScope,
   };
 }
 
@@ -451,6 +454,12 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         setMoveError={s.setMoveError}
         handleGoToTask={s.handleGoToTask}
       />
+      {s.isMobile && (
+        <MobileSelectionToggle
+          active={s.multiSelect.isMultiSelectMode}
+          onToggle={s.multiSelect.toggleMultiSelect}
+        />
+      )}
       <KanbanSwimlanes
         viewMode={s.kanbanViewMode || ""}
         workflowFilter={s.workflowsState.activeId}
@@ -474,12 +483,14 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         onWorkflowChange={s.handleWorkflowChange}
         isMobile={s.isMobile}
         onRefresh={s.refresh}
+        onSnapshotDemandChange={s.setWorkflowSnapshotScope}
       />
       <TaskMultiSelectToolbar
         selectedIds={s.multiSelect.selectedIds}
         steps={s.multiSelectSteps}
         isProcessing={s.multiSelect.isProcessing}
         canMove={!s.isMixedWorkflowSelection}
+        getEligibleSelectedIds={s.multiSelect.getEligibleSelectedIds}
         onClearSelection={s.multiSelect.clearSelection}
         onBulkDelete={s.multiSelect.bulkDelete}
         onBulkArchive={s.multiSelect.bulkArchive}
@@ -553,6 +564,9 @@ function KanbanBoardDialogs({
                 state: editingTask.state as BackendTask["state"],
                 repositoryId: editingTask.repositoryId,
                 repositories: editingTask.repositories,
+                primaryExecutorProfileId: editingTask.primaryExecutorProfileId ?? undefined,
+                runnerEditable: editingTask.runnerEditable,
+                runnerIneligibleReason: editingTask.runnerIneligibleReason,
               }
             : null
         }
@@ -607,5 +621,22 @@ function ApprovalWarningDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+function MobileSelectionToggle({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="px-2 py-1">
+      <Button
+        variant="outline"
+        className="cursor-pointer"
+        aria-pressed={active}
+        onClick={onToggle}
+        data-testid="mobile-select-tasks"
+      >
+        {t(active ? "kanban:cancelTaskSelection" : "kanban:selectTasks")}
+      </Button>
+    </div>
   );
 }

@@ -1,0 +1,18 @@
+{
+  "tabLabel": "Falhadas",
+  "openTask": "Abrir tarefa",
+  "reasonUnknown": "Não foi registado nenhum motivo de falha.",
+  "unknownFailureTime": "Hora da falha desconhecida",
+  "originAgentCreated": "Criada por um agente",
+  "originRoutine": "Criada por uma rotina",
+  "originOnboarding": "Criada durante a integração",
+  "originAutomationRun": "Execução de automação",
+  "originAutomationTask": "Criada por automação",
+  "originGeneric": "Automatizada",
+  "emptyTitle": "Nada falhou em {{workspace}}.",
+  "emptyTitleUnnamedWorkspace": "Nada falhou neste espaço de trabalho.",
+  "emptyDescription": "As tarefas falhadas aparecem aqui para triagem. Nunca são contadas no total da barra lateral.",
+  "errorTitle": "Não foi possível carregar as tarefas falhadas",
+  "errorDescription": "Ocorreu um erro ao carregar as tarefas que falharam neste espaço de trabalho. Isto será repetido automaticamente.",
+  "truncatedNotice": "A mostrar as primeiras tarefas falhadas. Há mais à espera."
+}

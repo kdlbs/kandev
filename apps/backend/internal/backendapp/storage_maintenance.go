@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,21 +17,28 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/system/jobs"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/databasestore"
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
 	"github.com/kandev/kandev/internal/system/storage/filescan"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
+	"github.com/kandev/kandev/internal/system/storage/tempstore"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 	"go.uber.org/zap"
 )
 
-const workspaceDependenciesProviderName = "workspace_dependencies"
+const (
+	workspaceDependenciesProviderName   = "workspace_dependencies"
+	archivedManagedBranchesProviderName = "archived_managed_branches"
+)
 
 type storageComposition struct {
 	handler           *storagepkg.Handler
@@ -39,7 +47,46 @@ type storageComposition struct {
 	tempArtifacts     *tempartifacts.Registry
 }
 
-func provideStorageComposition(
+type storageDependencies struct {
+	settings         *storagepkg.SettingsStore
+	store            *storagepkg.Store
+	tempArtifacts    *tempartifacts.Registry
+	coordinator      *activity.Coordinator
+	goCache          *gocache.Provider
+	goCacheMutations *storagepkg.MutationGate
+	workspaceFactory workspaceFactory
+	cachedOverview   *storagepkg.OverviewCache
+	quarantine       *workspaceQuarantineController
+	providers        []storagepkg.CleanupProvider
+	systemTemporary  *tempstore.Provider
+}
+
+// provideStorageStore constructs the storage system's persistence store and
+// closes stores.services's required-store sweep. storage is stores.
+// services's last admission chronologically (after services.go,
+// orchestrator.go, and main.go's delivery), so this is where the sweep step
+// closes. Callers must run this before sessions.recovery's BeginStep: steps
+// must never overlap, and BeginStep unconditionally ends whatever step is
+// currently active, which would silently truncate the sweep.
+func provideStorageStore(
+	ctx context.Context,
+	pool *db.Pool,
+	requiredTracker *requiredstores.Tracker,
+) (*storagepkg.Store, error) {
+	store, err := storagepkg.NewStore(pool)
+	if requiredTracker != nil {
+		if recordErr := recordRequiredStore(ctx, requiredTracker, "storage", err); recordErr != nil {
+			return nil, fmt.Errorf("initialize storage store: %w", recordErr)
+		}
+		startup.EndStep(ctx, startup.StepStoresServices)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("initialize storage store: %w", err)
+	}
+	return store, nil
+}
+
+func provideStorageCompositionWithDependencies(
 	cfg *config.Config,
 	pool *db.Pool,
 	tracker *jobs.Tracker,
@@ -49,19 +96,94 @@ func provideStorageComposition(
 	taskSvc *taskservice.Service,
 	log *logger.Logger,
 	logError func(string, error),
+	store *storagepkg.Store,
+	providedSettings *systemsettings.Store,
 ) (*storageComposition, error) {
-	rawSettings, err := systemsettings.NewStore(pool)
+	dependencies, err := prepareStorageDependencies(
+		cfg, pool, store, eventBus, lifecycleMgr, worktreeMgr, taskSvc, log, logError, providedSettings,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := attachPromptAttachmentStorage(taskSvc, cfg, lifecycleMgr, log, &dependencies.providers); err != nil {
+		return nil, err
+	}
+	runner := storagepkg.NewRunner(storagepkg.RunnerConfig{
+		Activity: dependencies.coordinator, Store: dependencies.store,
+		Providers: dependencies.providers, Overview: dependencies.cachedOverview,
+	})
+	scheduler := storagepkg.NewScheduler(dependencies.settings, runner, storagepkg.SchedulerOptions{})
+	runtime := storagepkg.NewRuntime(storagepkg.RuntimeConfig{
+		Scheduler: scheduler, Settings: dependencies.settings, Worker: taskSvc,
+		Reconciler: &workspaceReconciler{settings: dependencies.settings, factory: dependencies.workspaceFactory},
+	})
+	operations := storagepkg.NewOperations(storagepkg.OperationsConfig{
+		Settings: dependencies.settings, Store: dependencies.store, Jobs: tracker,
+		Activity: dependencies.coordinator, Providers: dependencies.providers,
+		Overview: dependencies.cachedOverview, GoCache: dependencies.goCache,
+		GoCacheMutations: dependencies.goCacheMutations,
+		Quarantine:       dependencies.quarantine,
+	})
+	handler := storagepkg.NewHandler(storagepkg.HandlerConfig{
+		Settings: dependencies.settings, Runs: dependencies.store,
+		Quarantine: dependencies.store, Overview: dependencies.cachedOverview,
+		DiskCapacity: func(ctx context.Context, path string) (storagepkg.DiskCapacity, error) {
+			capacity, err := systemmetrics.DiskUsage(ctx, path)
+			if err != nil {
+				return storagepkg.DiskCapacity{}, err
+			}
+			return storagepkg.DiskCapacity{
+				TotalBytes: capacity.TotalBytes, UsedBytes: capacity.UsedBytes,
+				AvailableBytes: capacity.AvailableBytes, UsedPercent: capacity.UsedPercent,
+			}, nil
+		},
+		DiskRoots: func(ctx context.Context) ([]storagepkg.DiskRootCandidate, error) {
+			roots, err := dependencies.systemTemporary.CapacityRoots(ctx)
+			if err != nil {
+				return nil, err
+			}
+			candidates := make([]storagepkg.DiskRootCandidate, 0, len(roots))
+			for _, root := range roots {
+				candidates = append(candidates, storagepkg.DiskRootCandidate{
+					RequestedPath: root.RequestedPath, Path: root.Path, Aliases: root.Aliases,
+				})
+			}
+			return candidates, nil
+		},
+		DiskIdentity: func(_ context.Context, path string) (string, error) {
+			return systemmetrics.FilesystemIdentity(path)
+		},
+		DiskPath:  cfg.ResolvedHomeDir(),
+		Mutations: operations, OnSettingsChanged: runtime.ApplySettings, LogError: logError,
+	})
+	return &storageComposition{
+		handler: handler, runtime: runtime, workspaceRestorer: dependencies.quarantine,
+		tempArtifacts: dependencies.tempArtifacts,
+	}, nil
+}
+
+func prepareStorageDependencies(
+	cfg *config.Config,
+	pool *db.Pool,
+	store *storagepkg.Store,
+	eventBus bus.EventBus,
+	lifecycleMgr *lifecycle.Manager,
+	worktreeMgr *worktree.Manager,
+	taskSvc *taskservice.Service,
+	log *logger.Logger,
+	logError func(string, error),
+	providedSettings *systemsettings.Store,
+) (*storageDependencies, error) {
+	rawSettings := providedSettings
+	var err error
+	if rawSettings == nil {
+		rawSettings, err = systemsettings.NewStore(pool)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("initialize storage settings: %w", err)
 	}
 	settings := storagepkg.NewSettingsStore(rawSettings)
-	store, err := storagepkg.NewStore(pool)
-	if err != nil {
-		return nil, fmt.Errorf("initialize storage store: %w", err)
-	}
-	tempArtifacts := tempartifacts.NewRegistry(tempartifacts.Config{
-		Store: store, TempRoot: os.TempDir(),
-	})
+	tempArtifacts := tempartifacts.NewRegistry(tempartifacts.Config{Store: store, TempRoot: os.TempDir()})
 	if err := tempArtifacts.Reconcile(context.Background()); err != nil {
 		logError("reconcile temporary artifact registry", err)
 	}
@@ -69,35 +191,156 @@ func provideStorageComposition(
 	tempProvider := tempartifacts.NewProvider(tempartifacts.ProviderConfig{
 		Registry: tempArtifacts, Store: store, HomeDir: cfg.ResolvedHomeDir(),
 		TrashDir: filepath.Join(cfg.ResolvedHomeDir(), "trash"),
-		Scanner:  scanner,
+		Scanner:  scanner, Settings: settings,
 	})
+	systemTemporary := tempstore.New(systemTemporaryConfig(scanner, tempArtifacts))
 	if err := tempProvider.Reconcile(context.Background()); err != nil {
 		logError("reconcile temporary artifact quarantine", err)
 	}
 	coordinator := activity.NewCoordinator(activity.Options{})
 	taskSvc.SetTaskResourceCleanupActivityGate(&taskCleanupActivityGate{coordinator: coordinator})
+	goCacheMutations := storagepkg.NewMutationGate()
 	goCache := gocache.New(gocache.Config{
 		HomeDir: cfg.ResolvedHomeDir(), TrashDir: filepath.Join(cfg.ResolvedHomeDir(), "trash"),
-		Settings: settings, Store: store, Scanner: scanner,
+		Settings: settings, Mutations: goCacheMutations, Scanner: scanner,
+	})
+	database := databasestore.New(databasestore.Config{
+		Driver:        cfg.Database.Driver,
+		DatabasePath:  storageDatabasePath(cfg),
+		Scanner:       scanner,
+		ExistingRoots: storageExistingMeasurementRoots(cfg.ResolvedHomeDir()),
 	})
 	lifecycleMgr.SetActivityCoordinator(coordinator)
 	lifecycleMgr.SetManagedGoCacheEnvironmentProvider(goCache)
 	if worktreeMgr != nil {
 		worktreeMgr.SetScriptEnvironmentProvider(goCache)
 	}
-
 	inventory := &storageInventory{reader: pool.Reader(), worktrees: worktreeMgr, lifecycle: lifecycleMgr}
 	workspaceFactory := newWorkspaceFactory(cfg, store, inventory, worktreeMgr, scanner)
 	dockerClient := &lazyStorageDocker{provider: lifecycleMgr.DockerClientProvider(), activity: coordinator}
-	dockerProvider := dockerstore.NewProvider(
-		dockerClient, &containerInventory{reader: pool.Reader()}, settings,
-	)
+	dockerProvider := dockerstore.NewProvider(dockerClient, &containerInventory{reader: pool.Reader()}, settings)
 	overview := &storageOverview{
 		settings: settings, quarantine: store, workspaceFactory: workspaceFactory, goCache: goCache,
 		docker: dockerProvider, dockerClient: dockerClient, dockerHost: cfg.Docker.Host,
-		homeDir: cfg.ResolvedHomeDir(), tempArtifacts: tempProvider,
+		homeDir: cfg.ResolvedHomeDir(), tempArtifacts: tempProvider, database: database,
+		systemTemporary: systemTemporary,
 	}
-	cachedOverview := storagepkg.NewOverviewCacheWithOptions(overview, storagepkg.OverviewCacheOptions{
+	cachedOverview := newStorageOverviewCache(overview, eventBus, log, logError)
+	quarantine := &workspaceQuarantineController{
+		settings: settings, store: store, factory: workspaceFactory, homeDir: cfg.ResolvedHomeDir(),
+		activity: coordinator, temporary: tempProvider, goCacheMutations: goCacheMutations,
+	}
+	return &storageDependencies{
+		settings: settings, store: store, tempArtifacts: tempArtifacts,
+		coordinator: coordinator, goCache: goCache, goCacheMutations: goCacheMutations,
+		workspaceFactory: workspaceFactory,
+		cachedOverview:   cachedOverview,
+		quarantine:       quarantine,
+		systemTemporary:  systemTemporary,
+		providers:        storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, worktreeMgr, tempProvider),
+	}, nil
+}
+
+func systemTemporaryConfig(
+	scanner *filescan.Limiter,
+	registry *tempartifacts.Registry,
+) tempstore.Config {
+	config := tempstore.Config{Scanner: scanner}
+	config.ClassifyOwnership = func(ctx context.Context, paths []string) map[string]tempstore.EntryOwnership {
+		return classifyTemporaryArtifactOwnership(ctx, registry, paths)
+	}
+	if root := os.Getenv("KANDEV_E2E_SYSTEM_TEMP_ROOT"); root != "" {
+		// The browser fixture supplies a disposable root so E2E analysis never
+		// reads the host's shared temporary directory.
+		config.EffectiveRoot = root
+		config.UnixRoot = root
+	}
+	return config
+}
+
+func classifyTemporaryArtifactOwnership(
+	ctx context.Context,
+	registry *tempartifacts.Registry,
+	paths []string,
+) map[string]tempstore.EntryOwnership {
+	ownership := make(map[string]tempstore.EntryOwnership, len(paths))
+	for _, path := range paths {
+		ownership[path] = tempstore.EntryOwnershipUnknown
+	}
+	if registry == nil || len(paths) == 0 {
+		return ownership
+	}
+	artifacts, err := registry.List(ctx)
+	if err != nil {
+		return ownership
+	}
+	byPath, duplicates := indexTemporaryArtifactPaths(artifacts)
+	for _, requested := range paths {
+		ownership[requested] = classifyTemporaryArtifactPath(registry, requested, byPath, duplicates)
+	}
+	return ownership
+}
+
+func indexTemporaryArtifactPaths(
+	artifacts []storagepkg.TemporaryArtifact,
+) (map[string]storagepkg.TemporaryArtifact, map[string]struct{}) {
+	byPath := make(map[string]storagepkg.TemporaryArtifact, len(artifacts))
+	duplicates := make(map[string]struct{})
+	for _, artifact := range artifacts {
+		if !filepath.IsAbs(artifact.Path) {
+			continue
+		}
+		addTemporaryArtifactPath(byPath, duplicates, artifact.Path, artifact)
+		if canonical, err := filepath.EvalSymlinks(artifact.Path); err == nil && filepath.IsAbs(canonical) {
+			addTemporaryArtifactPath(byPath, duplicates, canonical, artifact)
+		}
+	}
+	return byPath, duplicates
+}
+
+func addTemporaryArtifactPath(
+	byPath map[string]storagepkg.TemporaryArtifact,
+	duplicates map[string]struct{},
+	path string,
+	artifact storagepkg.TemporaryArtifact,
+) {
+	path = filepath.Clean(path)
+	if existing, exists := byPath[path]; exists {
+		if existing.ID != artifact.ID {
+			duplicates[path] = struct{}{}
+		}
+		return
+	}
+	byPath[path] = artifact
+}
+
+func classifyTemporaryArtifactPath(
+	registry *tempartifacts.Registry,
+	requested string,
+	byPath map[string]storagepkg.TemporaryArtifact,
+	duplicates map[string]struct{},
+) tempstore.EntryOwnership {
+	if !filepath.IsAbs(requested) {
+		return tempstore.EntryOwnershipUnknown
+	}
+	path := filepath.Clean(requested)
+	artifact, registered := byPath[path]
+	if !registered {
+		return tempstore.EntryOwnershipUntracked
+	}
+	if _, ambiguous := duplicates[path]; ambiguous || registry.ValidateMarker(path, artifact) != nil {
+		return tempstore.EntryOwnershipUnknown
+	}
+	return tempstore.EntryOwnershipRegisteredKandev
+}
+
+func newStorageOverviewCache(
+	overview *storageOverview,
+	eventBus bus.EventBus,
+	log *logger.Logger,
+	logError func(string, error),
+) *storagepkg.OverviewCache {
+	return storagepkg.NewOverviewCacheWithOptions(overview, storagepkg.OverviewCacheOptions{
 		Publisher: func(update storagepkg.StorageAnalysisUpdated) {
 			if eventBus == nil {
 				return
@@ -113,17 +356,21 @@ func provideStorageComposition(
 			logStorageAnalysisCompletion(log, completion)
 		},
 	})
-	quarantine := &workspaceQuarantineController{
-		settings: settings, store: store, factory: workspaceFactory, homeDir: cfg.ResolvedHomeDir(),
-		activity: coordinator, temporary: tempProvider,
-	}
-	providers := storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, tempProvider)
+}
+
+func attachPromptAttachmentStorage(
+	taskSvc *taskservice.Service,
+	cfg *config.Config,
+	lifecycleMgr *lifecycle.Manager,
+	log *logger.Logger,
+	providers *[]storagepkg.CleanupProvider,
+) error {
 	if taskSvc.AttachmentService() == nil && taskSvc.AttachmentRepository() != nil {
-		attachmentSvc, attachmentErr := taskservice.NewAttachmentService(
+		attachmentSvc, err := taskservice.NewAttachmentService(
 			taskSvc.AttachmentRepository(), cfg.ResolvedHomeDir(), taskSvc.AuthorizeWorkspaceAccess, log,
 		)
-		if attachmentErr != nil {
-			return nil, fmt.Errorf("initialize prompt attachment storage: %w", attachmentErr)
+		if err != nil {
+			return fmt.Errorf("initialize prompt attachment storage: %w", err)
 		}
 		taskSvc.SetAttachmentService(attachmentSvc)
 	}
@@ -131,38 +378,9 @@ func provideStorageComposition(
 		if lifecycleMgr != nil {
 			lifecycleMgr.SetAttachmentReader(attachmentSvc)
 		}
-		providers = append(providers, attachmentCleanupProvider{service: attachmentSvc})
+		*providers = append(*providers, attachmentCleanupProvider{service: attachmentSvc})
 	}
-	runner := storagepkg.NewRunner(storagepkg.RunnerConfig{
-		Activity: coordinator, Store: store, Providers: providers, Overview: cachedOverview,
-	})
-	scheduler := storagepkg.NewScheduler(settings, runner, storagepkg.SchedulerOptions{})
-	runtime := storagepkg.NewRuntime(storagepkg.RuntimeConfig{
-		Scheduler: scheduler, Settings: settings, Worker: taskSvc,
-		Reconciler: &workspaceReconciler{settings: settings, factory: workspaceFactory},
-	})
-	operations := storagepkg.NewOperations(storagepkg.OperationsConfig{
-		Settings: settings, Store: store, Jobs: tracker, Activity: coordinator,
-		Providers: providers, Overview: cachedOverview, GoCache: goCache, Quarantine: quarantine,
-	})
-	handler := storagepkg.NewHandler(storagepkg.HandlerConfig{
-		Settings: settings, Runs: store, Quarantine: store, Overview: cachedOverview,
-		DiskCapacity: func(ctx context.Context, path string) (storagepkg.DiskCapacity, error) {
-			capacity, err := systemmetrics.DiskUsage(ctx, path)
-			if err != nil {
-				return storagepkg.DiskCapacity{}, err
-			}
-			return storagepkg.DiskCapacity{
-				TotalBytes: capacity.TotalBytes, UsedBytes: capacity.UsedBytes,
-				AvailableBytes: capacity.AvailableBytes, UsedPercent: capacity.UsedPercent,
-			}, nil
-		},
-		DiskPath:  cfg.ResolvedHomeDir(),
-		Mutations: operations, OnSettingsChanged: runtime.ApplySettings, LogError: logError,
-	})
-	return &storageComposition{
-		handler: handler, runtime: runtime, workspaceRestorer: quarantine, tempArtifacts: tempArtifacts,
-	}, nil
+	return nil
 }
 
 type taskCleanupActivityGate struct {
@@ -171,6 +389,26 @@ type taskCleanupActivityGate struct {
 
 type attachmentCleanupProvider struct {
 	service *taskservice.AttachmentService
+}
+
+type archivedBranchMaintainer interface {
+	MaintainArchivedBranches(context.Context, int) (worktree.BranchCleanupReceipt, error)
+}
+
+type archivedManagedBranchesCleanupProvider struct {
+	maintainer archivedBranchMaintainer
+}
+
+func (p archivedManagedBranchesCleanupProvider) Name() string {
+	return archivedManagedBranchesProviderName
+}
+
+func (p archivedManagedBranchesCleanupProvider) Cleanup(ctx context.Context) (map[string]any, error) {
+	if p.maintainer == nil {
+		return nil, nil
+	}
+	receipt, err := p.maintainer.MaintainArchivedBranches(ctx, worktree.ArchivedBranchMaintenanceBatchLimit)
+	return toMap(receipt), err
 }
 
 func (p attachmentCleanupProvider) Name() string { return "prompt_attachments" }
@@ -217,9 +455,11 @@ type storageOverview struct {
 	workspaceFactory workspaceFactory
 	workspaceAnalyze func(context.Context, storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error)
 	goCache          *gocache.Provider
+	database         *databasestore.Provider
 	goCacheAnalyze   func(context.Context) (gocache.Analysis, error)
 	docker           *dockerstore.Provider
 	tempArtifacts    *tempartifacts.Provider
+	systemTemporary  *tempstore.Provider
 	dockerClient     *lazyStorageDocker
 	dockerHost       string
 	homeDir          string
@@ -244,6 +484,10 @@ func (o *storageOverview) summary(
 	if err != nil {
 		return storagepkg.Summary{}, err
 	}
+	var databaseExistingRoots []string
+	if o.goCache != nil {
+		databaseExistingRoots, _ = o.goCache.MeasurementRoots(settings)
+	}
 	reporter := newStorageProgressReporter(notify)
 	var (
 		workspaceSummary  workspaces.Analysis
@@ -255,9 +499,15 @@ func (o *storageOverview) summary(
 		dockerSummary     dockerstore.Analysis
 		tempSummary       tempartifacts.Analysis
 		tempErr           error
+		databaseSummary   databasestore.Measurement
+		databaseErr       error
+		backupSummary     databasestore.Measurement
+		backupErr         error
+		systemTempSummary tempstore.Analysis
+		systemTempErr     error
 	)
 	var measurements sync.WaitGroup
-	measurements.Add(4)
+	measurements.Add(6)
 	workspaceAnalyze := o.workspaceAnalyze
 	if workspaceAnalyze == nil {
 		workspaceAnalyze = func(ctx context.Context, settings storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error) {
@@ -292,6 +542,18 @@ func (o *storageOverview) summary(
 		dockerSummary = o.docker.Analyze(ctx)
 		reporter.complete(storagepkg.StorageSourceDocker, dockerSummaryMap(dockerSummary), nil)
 	}()
+	go func() {
+		defer measurements.Done()
+		reporter.start(storagepkg.StorageSourceDatabase)
+		databaseSummary, databaseErr = o.analyzeDatabase(ctx, reporter, databaseExistingRoots)
+		reporter.complete(storagepkg.StorageSourceDatabase, databaseSummary, databaseErr)
+	}()
+	go func() {
+		defer measurements.Done()
+		reporter.start(storagepkg.StorageSourceDatabaseBackups)
+		backupSummary, backupErr = o.analyzeDatabaseBackups(ctx, reporter, databaseExistingRoots)
+		reporter.complete(storagepkg.StorageSourceDatabaseBackups, backupSummary, backupErr)
+	}()
 	if o.tempArtifacts != nil {
 		measurements.Add(1)
 		go func() {
@@ -307,6 +569,25 @@ func (o *storageOverview) summary(
 		reporter.start(storagepkg.StorageSourceTemporaryArtifacts)
 		reporter.complete(storagepkg.StorageSourceTemporaryArtifacts, tempSummary, nil)
 	}
+	if o.systemTemporary != nil {
+		measurements.Add(1)
+		go func() {
+			defer measurements.Done()
+			reporter.start(storagepkg.StorageSourceSystemTemporary)
+			systemTempSummary, systemTempErr = o.analyzeSystemTemporary(ctx, reporter)
+			reporter.complete(
+				storagepkg.StorageSourceSystemTemporary,
+				summaryValue(systemTempSummary, systemTempErr), systemTempErr,
+			)
+		}()
+	} else {
+		systemTempSummary = tempstore.Analysis{
+			Status: tempstore.StatusNotApplicable, IncludedInTotal: false,
+			Roots: []tempstore.RootMeasurement{}, Reason: "system temporary provider unavailable",
+		}
+		reporter.start(storagepkg.StorageSourceSystemTemporary)
+		reporter.complete(storagepkg.StorageSourceSystemTemporary, systemTempSummary, nil)
+	}
 	measurements.Wait()
 	if err := ctx.Err(); err != nil {
 		return storagepkg.Summary{}, err
@@ -314,6 +595,8 @@ func (o *storageOverview) summary(
 	return summaryFromMeasurements(
 		workspaceSummary, workspaceErr, goCacheSummary, goCacheErr,
 		quarantineSummary, quarantineErr, tempSummary, tempErr, dockerSummary,
+		databaseSummary, databaseErr, backupSummary, backupErr,
+		systemTempSummary, systemTempErr,
 	), nil
 }
 
@@ -327,13 +610,77 @@ func summaryFromMeasurements(
 	tempSummary tempartifacts.Analysis,
 	tempErr error,
 	dockerSummary dockerstore.Analysis,
+	databaseSummary databasestore.Measurement,
+	databaseErr error,
+	backupSummary databasestore.Measurement,
+	backupErr error,
+	systemTempSummary tempstore.Analysis,
+	systemTempErr error,
 ) storagepkg.Summary {
 	return storagepkg.Summary{
 		Workspaces:         summaryValue(workspaceSummary, workspaceErr),
 		GoCache:            summaryValue(goCacheSummary, goCacheErr),
 		Quarantine:         summaryValue(quarantineSummary, quarantineErr),
 		TemporaryArtifacts: summaryValue(tempSummary, tempErr),
+		SystemTemporary:    summaryValue(systemTempSummary, systemTempErr),
 		Docker:             dockerSummaryMap(dockerSummary),
+		Database:           databaseMeasurementValue(databaseSummary, databaseErr),
+		DatabaseBackups:    databaseMeasurementValue(backupSummary, backupErr),
+	}
+}
+
+func (o *storageOverview) analyzeDatabase(
+	ctx context.Context,
+	reporter *storageProgressReporter,
+	existingRoots []string,
+) (databasestore.Measurement, error) {
+	if o.database == nil {
+		return databasestore.Measurement{
+			Status: databasestore.StatusNotApplicable,
+			Reason: databasestore.ReasonUnsupportedDriver,
+		}, nil
+	}
+	return o.database.AnalyzeDatabase(
+		ctx, reporter.filesystem(storagepkg.StorageSourceDatabase), existingRoots...,
+	)
+}
+
+func (o *storageOverview) analyzeDatabaseBackups(
+	ctx context.Context,
+	reporter *storageProgressReporter,
+	existingRoots []string,
+) (databasestore.Measurement, error) {
+	if o.database == nil {
+		return databasestore.Measurement{
+			Status: databasestore.StatusNotApplicable,
+			Reason: databasestore.ReasonUnsupportedDriver,
+		}, nil
+	}
+	return o.database.AnalyzeBackups(
+		ctx, reporter.filesystem(storagepkg.StorageSourceDatabaseBackups), existingRoots...,
+	)
+}
+
+func databaseMeasurementValue(measurement databasestore.Measurement, err error) any {
+	if measurement.Status != "" {
+		return measurement
+	}
+	return summaryValue(measurement, err)
+}
+
+func storageDatabasePath(cfg *config.Config) string {
+	if cfg != nil && strings.TrimSpace(cfg.Database.Path) != "" {
+		return cfg.Database.Path
+	}
+	if cfg == nil {
+		return ""
+	}
+	return filepath.Join(cfg.ResolvedDataDir(), "kandev.db")
+}
+
+func storageExistingMeasurementRoots(homeDir string) []string {
+	return []string{
+		filepath.Join(homeDir, "tasks"),
 	}
 }
 
@@ -349,10 +696,15 @@ type temporaryArtifactsProgressAnalyzer interface {
 	AnalyzeWithProgress(context.Context, func(filescan.Progress)) (tempartifacts.Analysis, error)
 }
 
+type systemTemporaryProgressAnalyzer interface {
+	AnalyzeWithProgress(context.Context, func(filescan.Progress)) (tempstore.Analysis, error)
+}
+
 var (
 	_ workspaceProgressAnalyzer          = (*workspaces.Provider)(nil)
 	_ goCacheProgressAnalyzer            = (*gocache.Provider)(nil)
 	_ temporaryArtifactsProgressAnalyzer = (*tempartifacts.Provider)(nil)
+	_ systemTemporaryProgressAnalyzer    = (*tempstore.Provider)(nil)
 )
 
 func (o *storageOverview) analyzeWorkspaces(
@@ -385,6 +737,15 @@ func (o *storageOverview) analyzeTemporaryArtifacts(
 ) (tempartifacts.Analysis, error) {
 	return o.tempArtifacts.AnalyzeWithProgress(
 		ctx, reporter.filesystem(storagepkg.StorageSourceTemporaryArtifacts),
+	)
+}
+
+func (o *storageOverview) analyzeSystemTemporary(
+	ctx context.Context,
+	reporter *storageProgressReporter,
+) (tempstore.Analysis, error) {
+	return o.systemTemporary.AnalyzeWithProgress(
+		ctx, reporter.filesystem(storagepkg.StorageSourceSystemTemporary),
 	)
 }
 
@@ -600,6 +961,22 @@ func (p goCacheCleanupProvider) CleanupExplicit(ctx context.Context) (map[string
 	return toMap(result), err
 }
 
+func (p goCacheCleanupProvider) CleanupWithSettings(
+	ctx context.Context,
+	settings storagepkg.StorageMaintenanceSettings,
+) (map[string]any, error) {
+	result, err := p.provider.CleanupWithSettings(ctx, settings)
+	return toMap(result), err
+}
+
+func (p goCacheCleanupProvider) CleanupExplicitWithSettings(
+	ctx context.Context,
+	settings storagepkg.StorageMaintenanceSettings,
+) (map[string]any, error) {
+	result, err := p.provider.CleanupExplicitWithSettings(ctx, settings)
+	return toMap(result), err
+}
+
 func (p namedCleanupProvider) Name() string { return p.name }
 func (p namedCleanupProvider) Cleanup(ctx context.Context) (map[string]any, error) {
 	return p.cleanup(ctx)
@@ -611,10 +988,12 @@ func storageCleanupProviders(
 	goCache *gocache.Provider,
 	docker *dockerstore.Provider,
 	quarantine quarantinePurger,
+	archivedBranches archivedBranchMaintainer,
 	temporary ...storagepkg.CleanupProvider,
 ) []storagepkg.CleanupProvider {
 	providers := []storagepkg.CleanupProvider{
 		quarantineCleanupProvider{purger: quarantine},
+		archivedManagedBranchesCleanupProvider{maintainer: archivedBranches},
 		workspaceCleanupAdapter(settings, workspaceFactory),
 		workspaceDependencyCleanupAdapter(settings, workspaceFactory),
 		goCacheCleanupProvider{provider: goCache},

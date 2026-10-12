@@ -9,7 +9,7 @@ import (
 // HasActiveStepDecision reports whether an active (non-superseded) row exists
 // in workflow_step_decisions for the given task, step, and decider. It backs
 // the review/approval completion check that flags a reviewer or approver
-// turn that ended without recording a verdict via record_step_decision_kandev.
+// turn that ended without recording a workflow-step verdict.
 func (r *Repository) HasActiveStepDecision(ctx context.Context, taskID, stepID, deciderID string) (bool, error) {
 	var exists int
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`

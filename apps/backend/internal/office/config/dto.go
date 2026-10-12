@@ -1,6 +1,21 @@
 // Package config provides config sync, import, and export for the office domain.
 package config
 
+// ExportFile is one server-serialized file in a workspace configuration
+// export. The path is the exact archive entry name used by ZIP downloads.
+type ExportFile struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// ExportManifest is the immutable server view used by the export preview and
+// selected-file download. Revision changes whenever any file path or content
+// changes.
+type ExportManifest struct {
+	Revision string       `json:"revision"`
+	Files    []ExportFile `json:"files"`
+}
+
 // ConfigBundle represents a portable workspace configuration.
 type ConfigBundle struct {
 	Settings SettingsConfig  `json:"settings" yaml:"settings"`

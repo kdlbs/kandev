@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,6 +18,48 @@ type reentrantPassthroughAgentManager struct {
 
 	markPassthroughRunningFunc    func(string)
 	preparePassthroughRunningFunc func(string) (func(), error)
+}
+
+func TestNotifyQueuedUserPromptUsesPassthroughFastPath(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	baseManager := &mockAgentManager{isPassthrough: true}
+	agentManager := &reentrantPassthroughAgentManager{mockAgentManager: baseManager}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	agentManager.preparePassthroughRunningFunc = func(sessionID string) (func(), error) {
+		return func() {
+			svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: sessionID})
+		}, nil
+	}
+	workerDone := make(chan struct{})
+	svc.onQueuedMessageExecutionComplete = func() { close(workerDone) }
+	_, err = svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "s1", "t1", "plan feedback", "", messagequeue.QueuedByUser, true, nil,
+		map[string]interface{}{
+			plancomments.MetadataClientQueueID:              "client-queue-fast-path",
+			plancomments.MetadataRequestFingerprint:         "fingerprint-fast-path",
+			messagequeue.MetadataDurableTranscriptMessageID: "message-fast-path",
+			metaKeyUserMessageRecorded:                      true,
+		},
+	)
+	require.NoError(t, err)
+
+	svc.NotifyQueuedUserPrompt(ctx, "t1", "s1")
+	select {
+	case <-workerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for passthrough fast-path delivery")
+	}
+
+	require.Len(t, baseManager.passthroughStdinCalls, 1)
+	require.Empty(t, baseManager.capturedPromptCalls)
+	require.Zero(t, svc.messageQueue.GetStatus(ctx, "s1").Count)
 }
 
 func (m *reentrantPassthroughAgentManager) MarkPassthroughRunning(sessionID string) error {
@@ -82,6 +126,33 @@ func TestHandleAgentReady_PassthroughQueuedMessageSynchronousRunningEvent(t *tes
 	require.Equal(t, models.TaskSessionStateRunning, updatedSession.State)
 }
 
+func TestHandleAgentReady_PassthroughQueuedMessageDeliveredOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	agentManager := &mockAgentManager{isPassthrough: true}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	svc.messageQueue.SetAutoMergeEnabled(false)
+
+	first, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "peer report", "", "test", false, nil)
+	require.NoError(t, err)
+	second, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "next report", "", "test", false, nil)
+	require.NoError(t, err)
+
+	for range 3 {
+		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+	}
+
+	require.Len(t, agentManager.passthroughStdinCalls, 2, "each queued message must be delivered exactly once")
+	require.Equal(t, "peer report\r", agentManager.passthroughStdinCalls[0].Data)
+	require.Equal(t, "next report\r", agentManager.passthroughStdinCalls[1].Data)
+	for _, id := range []string{first.ID, second.ID} {
+		_, err = svc.messageQueue.FindEntryByID(ctx, id)
+		require.ErrorIs(t, err, messagequeue.ErrEntryNotFound)
+	}
+}
+
 func TestHandleAgentReady_PassthroughQueuedMessagePublishesAfterWriteFailure(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -124,5 +195,46 @@ func TestHandleAgentReady_PassthroughQueuedMessagePublishesAfterWriteFailure(t *
 	require.Equal(t, 1, runningEventCalls, "the running event must still publish after the PTY write fails")
 	require.Empty(t, baseManager.markPassthroughCalls)
 	require.Len(t, baseManager.passthroughStdinCalls, 1)
-	require.Zero(t, svc.messageQueue.GetStatus(ctx, "s1").Count)
+	status := svc.messageQueue.GetStatus(ctx, "s1")
+	require.Len(t, status.Entries, 1, "failed PTY delivery must restore the queued prompt")
+	require.Equal(t, "queued prompt", status.Entries[0].Content)
+	require.Equal(t, 1, status.Count)
+}
+
+func TestHandleAgentReady_PassthroughPlanCommentWriteFailureDoesNotRetryAfterAttempt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateRunning
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	agentManager := &mockAgentManager{
+		isPassthrough:       true,
+		passthroughStdinErr: errors.New("pty write failed"),
+	}
+	svc := createTestServiceWithAgent(
+		repo, newMockStepGetter(), newMockTaskRepo(), agentManager,
+	)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	_, err = svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "s1", "t1", "plan feedback", "", messagequeue.QueuedByUser, true, nil,
+		map[string]interface{}{
+			plancomments.MetadataClientQueueID:      "client-queue-passthrough",
+			plancomments.MetadataRequestFingerprint: "fingerprint-passthrough",
+		},
+	)
+	require.NoError(t, err)
+
+	svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+	require.Len(t, messages.userMessages, 1)
+	require.Equal(t, 0, svc.messageQueue.GetStatus(ctx, "s1").Count)
+	require.Len(t, agentManager.passthroughStdinCalls, 1)
+
+	svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+	require.Len(t, messages.userMessages, 1)
+	require.Equal(t, 0, svc.messageQueue.GetStatus(ctx, "s1").Count)
+	require.Len(t, agentManager.passthroughStdinCalls, 1)
 }

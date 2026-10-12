@@ -117,7 +117,7 @@ async function expectRevisionCount(session: SessionPage, count: number, timeout 
 function mcpWrite(content: string): string {
   // JSON-string-escape content: handles backslashes, quotes, and control chars.
   const escaped = JSON.stringify(content).slice(1, -1);
-  return `e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"${escaped}"})`;
+  return `e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"${escaped}","expected_version":"{plan_version}"})`;
 }
 
 /** Build a mock-agent script that chains plan writes with inter-write delays. */

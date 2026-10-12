@@ -102,6 +102,13 @@ func TestMockAgent_Runtime_CanRecover(t *testing.T) {
 	}
 }
 
+func TestMockAgent_Runtime_NativeSessionResume(t *testing.T) {
+	a := NewMockAgent()
+	if !a.Runtime().SessionConfig.NativeSessionResume {
+		t.Error("expected mock ACP agent to use native session/load resume")
+	}
+}
+
 func TestMockAgent_Runtime_ProtocolACP(t *testing.T) {
 	a := NewMockAgent()
 	rt := a.Runtime()

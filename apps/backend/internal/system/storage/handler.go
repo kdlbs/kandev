@@ -2,9 +2,11 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -12,6 +14,10 @@ import (
 type SettingsManager interface {
 	GetSettings(context.Context) (StorageMaintenanceSettings, error)
 	SaveSettingsWithConfirmations(context.Context, StorageMaintenanceSettings, SaveConfirmations) (StorageMaintenanceSettings, error)
+}
+
+type SettingsPatcher interface {
+	PatchSettingsWithConfirmations(context.Context, map[string]json.RawMessage, SaveConfirmations) (StorageMaintenanceSettings, error)
 }
 
 type RunLister interface {
@@ -45,7 +51,10 @@ type Summary struct {
 	GoCache            any `json:"go_cache"`
 	Quarantine         any `json:"quarantine"`
 	TemporaryArtifacts any `json:"temporary_artifacts"`
+	SystemTemporary    any `json:"system_temporary"`
 	Docker             any `json:"docker"`
+	Database           any `json:"database"`
+	DatabaseBackups    any `json:"database_backups"`
 }
 
 type DiskCapacity struct {
@@ -58,11 +67,42 @@ type DiskCapacity struct {
 	Warning        string  `json:"warning,omitempty"`
 }
 
+type DiskCapacityResponse struct {
+	DiskCapacity
+	ObservedAt            time.Time               `json:"observed_at"`
+	TemporaryRoots        []TemporaryDiskCapacity `json:"temporary_roots"`
+	TemporaryRootsWarning string                  `json:"temporary_roots_warning,omitempty"`
+}
+
+type TemporaryDiskCapacity struct {
+	RequestedPath  string    `json:"requested_path"`
+	Path           string    `json:"path"`
+	Aliases        []string  `json:"aliases,omitempty"`
+	TotalBytes     uint64    `json:"total_bytes"`
+	UsedBytes      uint64    `json:"used_bytes"`
+	AvailableBytes uint64    `json:"available_bytes"`
+	UsedPercent    float64   `json:"used_percent"`
+	Available      bool      `json:"available"`
+	Warning        string    `json:"warning,omitempty"`
+	ObservedAt     time.Time `json:"observed_at"`
+	SharedWithHome *bool     `json:"shared_with_home"`
+}
+
+type DiskRootCandidate struct {
+	RequestedPath string
+	Path          string
+	Aliases       []string
+}
+
 type DiskCapacityReader func(context.Context, string) (DiskCapacity, error)
 
 func (r DiskCapacityReader) ReadDiskCapacity(ctx context.Context, path string) (DiskCapacity, error) {
 	return r(ctx, path)
 }
+
+type DiskRootsReader func(context.Context) ([]DiskRootCandidate, error)
+
+type DiskIdentityReader func(context.Context, string) (string, error)
 
 type QuarantineSummary struct {
 	Count     int   `json:"count" db:"count"`
@@ -92,17 +132,54 @@ type HandlerConfig struct {
 	Overview          OverviewReader
 	DiskCapacity      DiskCapacityReader
 	DiskPath          string
+	DiskRoots         DiskRootsReader
+	DiskIdentity      DiskIdentityReader
+	Now               func() time.Time
 	Mutations         Mutations
 	OnSettingsChanged func(StorageMaintenanceSettings)
 	LogError          func(string, error)
 }
 
 type Handler struct {
-	config HandlerConfig
+	config           HandlerConfig
+	diskProbeTimeout time.Duration
 }
 
 func NewHandler(config HandlerConfig) *Handler {
-	return &Handler{config: config}
+	return &Handler{config: config, diskProbeTimeout: defaultDiskProbeTimeout}
+}
+
+func (h *Handler) GetSettings(ctx context.Context) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	return h.config.Settings.GetSettings(ctx)
+}
+
+func (h *Handler) SaveSettingsWithConfirmations(ctx context.Context, settings StorageMaintenanceSettings, confirmations SaveConfirmations) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	updated, err := h.config.Settings.SaveSettingsWithConfirmations(ctx, settings, confirmations)
+	if err == nil && h.config.OnSettingsChanged != nil {
+		h.config.OnSettingsChanged(updated)
+	}
+	return updated, err
+}
+
+func (h *Handler) PatchSettingsWithConfirmations(ctx context.Context, changes map[string]json.RawMessage, confirmations SaveConfirmations) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	patcher, ok := h.config.Settings.(SettingsPatcher)
+	if !ok {
+		return StorageMaintenanceSettings{}, errors.New("atomic storage settings patch is unavailable")
+	}
+	updated, err := patcher.PatchSettingsWithConfirmations(ctx, changes, confirmations)
+	if err == nil && h.config.OnSettingsChanged != nil {
+		h.config.OnSettingsChanged(updated)
+	}
+	return updated, err
 }
 
 func (h *Handler) logError(message string, err error) {
@@ -132,22 +209,137 @@ func RegisterRoutes(read, admin *gin.RouterGroup, handler *Handler) {
 }
 
 func (h *Handler) getStorageDisk(c *gin.Context) {
-	result := DiskCapacity{Path: h.config.DiskPath}
+	result := DiskCapacityResponse{
+		DiskCapacity: DiskCapacity{Path: h.config.DiskPath}, TemporaryRoots: []TemporaryDiskCapacity{},
+	}
 	if h.config.DiskCapacity == nil {
 		result.Warning = "disk usage unavailable"
-		c.JSON(http.StatusOK, result)
-		return
+	} else {
+		capacity, err := h.readDiskCapacity(c.Request.Context(), h.config.DiskPath)
+		if err != nil {
+			h.logError("failed to read storage disk capacity", err)
+			result.Warning = "disk usage unavailable"
+		} else {
+			result.DiskCapacity = capacity
+			result.Path = h.config.DiskPath
+			result.Available = true
+		}
 	}
-	capacity, err := h.config.DiskCapacity.ReadDiskCapacity(c.Request.Context(), h.config.DiskPath)
-	if err != nil {
-		h.logError("failed to read storage disk capacity", err)
-		result.Warning = "disk usage unavailable"
-		c.JSON(http.StatusOK, result)
-		return
+	result.ObservedAt = h.observedAt()
+	homeIdentity, _ := h.diskIdentity(c.Request.Context(), h.config.DiskPath)
+	if h.config.DiskRoots != nil {
+		candidates, err := boundedDiskProbe(c.Request.Context(), h.probeTimeout(), h.config.DiskRoots)
+		if err != nil {
+			h.logError("failed to resolve temporary storage roots", err)
+			result.TemporaryRootsWarning = "temporary storage paths unavailable"
+		} else {
+			result.TemporaryRoots = h.readTemporaryDiskRoots(c.Request.Context(), candidates, homeIdentity)
+		}
 	}
-	capacity.Path = h.config.DiskPath
-	capacity.Available = true
-	c.JSON(http.StatusOK, capacity)
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) observedAt() time.Time {
+	if h.config.Now != nil {
+		return h.config.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+const (
+	defaultDiskProbeTimeout = 2500 * time.Millisecond
+	maxTemporaryDiskRoots   = 2
+)
+
+func (h *Handler) readDiskCapacity(ctx context.Context, path string) (DiskCapacity, error) {
+	return boundedDiskProbe(ctx, h.probeTimeout(), func(probeCtx context.Context) (DiskCapacity, error) {
+		return h.config.DiskCapacity.ReadDiskCapacity(probeCtx, path)
+	})
+}
+
+func (h *Handler) probeTimeout() time.Duration {
+	if h != nil && h.diskProbeTimeout > 0 {
+		return h.diskProbeTimeout
+	}
+	return defaultDiskProbeTimeout
+}
+
+func (h *Handler) diskIdentity(ctx context.Context, path string) (string, error) {
+	if h.config.DiskIdentity == nil || path == "" {
+		return "", errors.New("filesystem identity is unavailable")
+	}
+	return boundedDiskProbe(ctx, h.probeTimeout(), func(probeCtx context.Context) (string, error) {
+		return h.config.DiskIdentity(probeCtx, path)
+	})
+}
+
+func (h *Handler) readTemporaryDiskRoots(
+	ctx context.Context,
+	candidates []DiskRootCandidate,
+	homeIdentity string,
+) []TemporaryDiskCapacity {
+	roots := make([]TemporaryDiskCapacity, 0, min(len(candidates), maxTemporaryDiskRoots))
+	identities := make([]string, 0, cap(roots))
+	for _, candidate := range candidates[:min(len(candidates), maxTemporaryDiskRoots)] {
+		path := candidate.Path
+		if path == "" {
+			path = candidate.RequestedPath
+		}
+		root := TemporaryDiskCapacity{
+			RequestedPath: candidate.RequestedPath,
+			Path:          path,
+			Aliases:       append([]string(nil), candidate.Aliases...),
+		}
+		if h.config.DiskCapacity == nil {
+			root.Warning = "disk usage unavailable"
+		} else {
+			capacity, err := h.readDiskCapacity(ctx, path)
+			if err != nil {
+				h.logError("failed to read temporary storage disk capacity", err)
+				root.Warning = "disk usage unavailable"
+			} else {
+				root.TotalBytes = capacity.TotalBytes
+				root.UsedBytes = capacity.UsedBytes
+				root.AvailableBytes = capacity.AvailableBytes
+				root.UsedPercent = capacity.UsedPercent
+				root.Available = true
+			}
+		}
+		root.ObservedAt = h.observedAt()
+		identity, identityErr := h.diskIdentity(ctx, path)
+		if identityErr == nil && identity != "" {
+			if homeIdentity != "" {
+				shared := identity == homeIdentity
+				root.SharedWithHome = &shared
+			}
+			if existing := rootWithIdentity(roots, identities, identity); existing >= 0 {
+				roots[existing].Aliases = append(roots[existing].Aliases, candidate.RequestedPath)
+				roots[existing].Aliases = append(roots[existing].Aliases, candidate.Aliases...)
+				if !roots[existing].Available && root.Available {
+					roots[existing].TotalBytes = root.TotalBytes
+					roots[existing].UsedBytes = root.UsedBytes
+					roots[existing].AvailableBytes = root.AvailableBytes
+					roots[existing].UsedPercent = root.UsedPercent
+					roots[existing].Available = true
+					roots[existing].Warning = ""
+					roots[existing].ObservedAt = root.ObservedAt
+				}
+				continue
+			}
+		}
+		roots = append(roots, root)
+		identities = append(identities, identity)
+	}
+	return roots
+}
+
+func rootWithIdentity(roots []TemporaryDiskCapacity, identities []string, identity string) int {
+	for index, current := range identities {
+		if current != "" && current == identity && index < len(roots) {
+			return index
+		}
+	}
+	return -1
 }
 
 func (h *Handler) listRuns(c *gin.Context) {

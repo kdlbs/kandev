@@ -332,7 +332,180 @@ func TestViewerCannotReachWriteOnlyMutators(t *testing.T) {
 	}
 }
 
+func TestViewerCannotCreateOrReplayCallerOwnedMessage(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTeamWorkspace(t, repo, true)
+	seedUnitViewer(t, "user-carla")
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "session-team-message", TaskID: "task-team", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create task session: %v", err)
+	}
+	request := &CreateMessageRequest{
+		TaskSessionID: "session-team-message", TaskID: "task-team", Content: "private prompt",
+	}
+	if _, err := svc.CreateMessageIdempotent(
+		context.Background(), "caller-owned-message", request,
+	); err != nil {
+		t.Fatalf("seed caller-owned message: %v", err)
+	}
+
+	viewer := ctxAsRole("user-carla", authn.RoleMember)
+	if _, err := svc.CreateMessageIdempotent(
+		viewer, "caller-owned-message", request,
+	); !IsForbidden(err) {
+		t.Fatalf("viewer replay = %v, want ErrForbidden", err)
+	}
+	if _, err := svc.CreateMessageIdempotent(
+		viewer, "new-caller-owned-message", request,
+	); !IsForbidden(err) {
+		t.Fatalf("viewer create = %v, want ErrForbidden", err)
+	}
+}
+
+func TestCallerOwnedMessageReplayCannotCrossWorkspaceScope(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTeamWorkspace(t, repo, false)
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "session-private-message", TaskID: "task-team", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create private task session: %v", err)
+	}
+	privateRequest := &CreateMessageRequest{
+		TaskSessionID: "session-private-message", TaskID: "task-team", Content: "private prompt",
+	}
+	if _, err := svc.CreateMessageIdempotent(
+		context.Background(), "private-caller-owned-message", privateRequest,
+	); err != nil {
+		t.Fatalf("seed private caller-owned message: %v", err)
+	}
+
+	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{
+		ID: "ws-bruno", Name: "Bruno", OwnerID: "user-bruno",
+	}); err != nil {
+		t.Fatalf("create caller workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(context.Background(), &models.Workflow{
+		ID: "wf-bruno", WorkspaceID: "ws-bruno", Name: "Bruno board",
+	}); err != nil {
+		t.Fatalf("create caller workflow: %v", err)
+	}
+	if err := repo.CreateTask(context.Background(), &models.Task{
+		ID: "task-bruno", WorkspaceID: "ws-bruno", WorkflowID: "wf-bruno",
+		WorkflowStepID: "step-1", Title: "Bruno task", State: v1.TaskStateCreated,
+		Priority: "medium",
+	}); err != nil {
+		t.Fatalf("create caller task: %v", err)
+	}
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "session-bruno-message", TaskID: "task-bruno", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create caller task session: %v", err)
+	}
+
+	_, err := svc.CreateMessageIdempotent(
+		ctxAsRole("user-bruno", authn.RoleMember),
+		"private-caller-owned-message",
+		&CreateMessageRequest{
+			TaskSessionID: "session-bruno-message", TaskID: "task-bruno", Content: "my prompt",
+		},
+	)
+	if !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("cross-workspace replay error = %v, want task not found", err)
+	}
+}
+
+func TestCallerOwnedMessageUsesAuthenticatedAuthor(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTeamWorkspace(t, repo, false)
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "session-authenticated-author", TaskID: "task-team", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create task session: %v", err)
+	}
+
+	message, err := svc.CreateMessageIdempotent(
+		ctxAsRole("user-ana", authn.RoleMember),
+		"authenticated-author-message",
+		&CreateMessageRequest{
+			TaskSessionID: "session-authenticated-author", TaskID: "task-team",
+			Content: "prompt", AuthorID: "spoofed-user",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create caller-owned message: %v", err)
+	}
+	if message.AuthorID != "user-ana" {
+		t.Fatalf("message author = %q, want authenticated caller", message.AuthorID)
+	}
+}
+
 // A lookup failure must never read as "granted".
+// A coordinator conversation task's message.add requires workspace.manage,
+// not the ordinary session.prompt every other task accepts
+// (docs/specs/coordinator/system-design/copilot.md#attended-only,
+// AC-COORDINATOR-COPILOT-002.3): a workspace.read/session.prompt-only
+// collaborator is refused and starts no turn, while a workspace.manage owner
+// succeeds.
+func TestCoordinatorConversationMessageRequiresWorkspaceManage(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTeamWorkspace(t, repo, true)
+	if err := repo.CreateTask(context.Background(), &models.Task{
+		ID: "task-coordinator-convo", WorkspaceID: "ws-team", Title: "Coordinator: Nova",
+		IsEphemeral: true, Origin: models.TaskOriginCoordinator, State: v1.TaskStateCreated, Priority: "medium",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "session-coordinator-convo", TaskID: "task-coordinator-convo", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create task session: %v", err)
+	}
+	request := &CreateMessageRequest{
+		TaskSessionID: "session-coordinator-convo", TaskID: "task-coordinator-convo",
+		Content: "why is this here",
+	}
+
+	collaborator := ctxAsRole("user-bruno", authn.RoleMember)
+	if _, err := svc.CreateMessageIdempotent(collaborator, "coordinator-convo-message-1", request); !IsForbidden(err) {
+		t.Fatalf("collaborator (workspace.read + session.prompt) = %v, want ErrForbidden", err)
+	}
+
+	owner := ctxAsRole("user-ana", authn.RoleMember)
+	if _, err := svc.CreateMessageIdempotent(owner, "coordinator-convo-message-2", request); err != nil {
+		t.Fatalf("owner (workspace.manage) CreateMessageIdempotent = %v, want success", err)
+	}
+}
+
+// session.launch is a separate transport from message.add, and must enforce
+// the same attended-only restriction: a coordinator conversation task's turn
+// can only be started by a manager (workspace.manage), never by a
+// session.prompt-only collaborator (docs/specs/coordinator/system-design/
+// copilot.md#attended-only, AC-COORDINATOR-COPILOT-002.3).
+// AuthorizeTaskPromptScope is the chokepoint backendapp wires into the
+// orchestrator's task-prompt checker for session.launch, so this proves the
+// scope upgrade independently of the message.add transport.
+func TestCoordinatorConversationLaunchRequiresWorkspaceManage(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTeamWorkspace(t, repo, true)
+	if err := repo.CreateTask(context.Background(), &models.Task{
+		ID: "task-coordinator-launch", WorkspaceID: "ws-team", Title: "Coordinator: Nova",
+		IsEphemeral: true, Origin: models.TaskOriginCoordinator, State: v1.TaskStateCreated, Priority: "medium",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	collaborator := ctxAsRole("user-bruno", authn.RoleMember)
+	if err := svc.AuthorizeTaskPromptScope(collaborator, "task-coordinator-launch"); !IsForbidden(err) {
+		t.Fatalf("collaborator (workspace.read + session.prompt) AuthorizeTaskPromptScope = %v, want ErrForbidden", err)
+	}
+
+	owner := ctxAsRole("user-ana", authn.RoleMember)
+	if err := svc.AuthorizeTaskPromptScope(owner, "task-coordinator-launch"); err != nil {
+		t.Fatalf("owner (workspace.manage) AuthorizeTaskPromptScope = %v, want success", err)
+	}
+}
+
 func TestAuthorizationFailsClosedOnLookupError(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedTeamWorkspace(t, repo, false)

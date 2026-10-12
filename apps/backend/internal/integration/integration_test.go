@@ -21,6 +21,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/auth/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -38,13 +40,15 @@ import (
 
 // TestServer holds the test server and its dependencies
 type TestServer struct {
-	Server     *httptest.Server
-	Gateway    *gateways.Gateway
-	TaskRepo   *sqliterepo.Repository
-	TaskSvc    *taskservice.Service
-	EventBus   bus.EventBus
-	Logger     *logger.Logger
-	cancelFunc context.CancelFunc
+	Server             *httptest.Server
+	Gateway            *gateways.Gateway
+	TaskRepo           *sqliterepo.Repository
+	TaskSvc            *taskservice.Service
+	EventBus           bus.EventBus
+	Logger             *logger.Logger
+	mcpCallerTaskID    string
+	mcpCallerSessionID string
+	cancelFunc         context.CancelFunc
 }
 
 // testWorkspacePolicyAttacher keeps this integration harness focused on the
@@ -54,6 +58,18 @@ type testWorkspacePolicyAttacher struct{}
 
 func (testWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Context, string, string, taskservice.WorkspacePolicy) error {
 	return nil
+}
+
+type testWorktreeCleanup struct{}
+
+func (testWorktreeCleanup) OnTaskDeleted(context.Context, string) error { return nil }
+
+func (testWorktreeCleanup) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
+	return nil, nil
+}
+
+func (testWorktreeCleanup) InspectDirtyWorktrees(context.Context, []*worktree.Worktree) ([]worktree.DirtyWorktree, error) {
+	return nil, nil
 }
 
 // NewTestServer creates a new test server with all components initialized
@@ -110,6 +126,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	taskSvc.SetWorkflowStepGetter(workflowSvc)
 	taskSvc.SetWorkspaceBootstrapper(taskRepo)
 	taskSvc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
+	taskSvc.SetWorktreeCleanup(testWorktreeCleanup{})
 
 	// Create WebSocket gateway
 	gateway := gateways.NewGateway(log)
@@ -120,6 +137,11 @@ func NewTestServer(t *testing.T) *TestServer {
 	// Create router
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	testIdentity := httpmw.SyntheticIdentity()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, testIdentity)
+		c.Next()
+	})
 	gateway.SetupRoutes(router)
 
 	// Register handlers (HTTP + WS)

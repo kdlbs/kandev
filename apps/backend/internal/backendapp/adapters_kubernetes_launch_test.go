@@ -41,7 +41,7 @@ func (b *capturingKubernetesBackend) CreateInstance(
 func (b *capturingKubernetesBackend) StopInstance(context.Context, *lifecycle.ExecutorInstance, bool) error {
 	return nil
 }
-func (b *capturingKubernetesBackend) RecoverInstances(context.Context) ([]*lifecycle.ExecutorInstance, error) {
+func (b *capturingKubernetesBackend) RecoverInstances(context.Context, []*models.ExecutorRunning) ([]*lifecycle.ExecutorInstance, error) {
 	return nil, nil
 }
 func (b *capturingKubernetesBackend) GetInteractiveRunner() *process.InteractiveRunner { return nil }
@@ -61,6 +61,10 @@ func (kubernetesLaunchProfileResolver) ResolveProfile(
 }
 
 type kubernetesLaunchProfileReader struct{}
+
+func (kubernetesLaunchProfileReader) GetTask(context.Context, string) (*models.Task, error) {
+	return &models.Task{ID: "task-1"}, nil
+}
 
 func (kubernetesLaunchProfileReader) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
 	return &models.TaskSession{ID: "session-1", TaskID: "task-1", ExecutorProfileID: "profile-k8s"}, nil

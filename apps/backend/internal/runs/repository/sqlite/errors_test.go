@@ -116,7 +116,8 @@ func TestWriteMethodsPropagateDatabaseErrors(t *testing.T) {
 			return repo.UpdateRunOutputSummary(ctx, run.ID, "o", "f")
 		},
 		"FinishRun": func() error {
-			return repo.FinishRun(ctx, run.ID, "finished", nil)
+			_, err := repo.FinishRun(ctx, run.ID, "finished", nil)
+			return err
 		},
 		"ClaimRun": func() error {
 			_, err := repo.ClaimRun(ctx, "a1")
@@ -146,10 +147,12 @@ func TestWriteMethodsPropagateDatabaseErrors(t *testing.T) {
 			return err
 		},
 		"CancelRun": func() error {
-			return repo.CancelRun(ctx, run.ID, "reason")
+			_, err := repo.CancelRun(ctx, run.ID, "reason")
+			return err
 		},
 		"BulkCancelRuns": func() error {
-			return repo.BulkCancelRuns(ctx, []string{run.ID}, "reason")
+			_, err := repo.BulkCancelRuns(ctx, []string{run.ID}, "reason")
+			return err
 		},
 		"AppendRunEvent": func() error {
 			_, err := repo.AppendRunEvent(ctx, run.ID, "run.progress", "info", "{}")

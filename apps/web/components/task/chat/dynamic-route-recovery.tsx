@@ -9,6 +9,7 @@ import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { WebSocketRequestError } from "@/lib/ws/client";
+import { useComposerActivity } from "./composer-disclosure";
 
 const ROUTE_REASON_KEYS: Record<string, string> = {
   candidate_order: "dynamicRouteReasonCandidateOrder",
@@ -151,7 +152,7 @@ function DynamicRouteRecoveryActions({
       <Button
         type="button"
         variant="outline"
-        className="min-h-11 min-w-11 gap-1.5"
+        className="gap-1.5"
         disabled={pendingAction !== null}
         onClick={() => onAction("retry")}
         data-testid="dynamic-route-retry"
@@ -162,7 +163,7 @@ function DynamicRouteRecoveryActions({
       <Button
         type="button"
         variant="default"
-        className="min-h-11 min-w-11 gap-1.5"
+        className="gap-1.5"
         disabled={pendingAction !== null}
         onClick={() => onAction("skip")}
         data-testid="dynamic-route-try-next"
@@ -174,7 +175,6 @@ function DynamicRouteRecoveryActions({
         <Button
           type="button"
           variant="outline"
-          className="min-h-11 min-w-11"
           disabled={pendingAction !== null}
           onClick={() => onAction("cancel_wait")}
           data-testid="dynamic-route-cancel-wait"
@@ -185,7 +185,6 @@ function DynamicRouteRecoveryActions({
       <Button
         type="button"
         variant="destructive"
-        className="min-h-11 min-w-11"
         disabled={pendingAction !== null}
         onClick={() => onAction("stop")}
         data-testid="dynamic-route-stop"
@@ -213,14 +212,15 @@ export function DynamicRouteRecovery({ session }: { session: TaskSession | null 
     [session, updateSession],
   );
 
-  if (
-    !session ||
-    !session.route_state ||
-    !["waiting", "waiting_for_reset", "retry_wait", "retrying", "action_required"].includes(
-      session.route_state,
-    ) ||
-    session.route_generation === undefined
-  ) {
+  const visible =
+    Boolean(
+      session?.route_state &&
+      ["waiting", "waiting_for_reset", "retry_wait", "retrying", "action_required"].includes(
+        session.route_state,
+      ),
+    ) && session?.route_generation !== undefined;
+  useComposerActivity({ required: visible });
+  if (!visible || !session) {
     return null;
   }
   const pendingWait =

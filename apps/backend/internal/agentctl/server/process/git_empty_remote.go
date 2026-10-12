@@ -19,6 +19,7 @@ const (
 
 type emptyRemotePublication struct {
 	active    bool
+	published bool
 	output    string
 	errorCode string
 	err       error
@@ -135,7 +136,7 @@ func (g *GitOperator) publishEmptyRemoteBase(
 			err:       fmt.Errorf("empty-remote base was published but its local marker could not be retired: %s", g.sanitizePRFailure(retireErr.Error())),
 		}
 	}
-	return emptyRemotePublication{active: true, output: g.sanitizeGitPushOutput(output)}
+	return emptyRemotePublication{active: true, published: true, output: g.sanitizeGitPushOutput(output)}
 }
 
 func (g *GitOperator) validatePublishedEmptyRemoteBase(

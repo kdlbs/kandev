@@ -166,10 +166,16 @@ func FormatOfficeContext(taskID, sessionID string) string {
 	return FormatOfficeContextWithOptions(taskID, sessionID, false)
 }
 
+const stepCompleteRecoveryInstruction = "If it reports that the workflow step changed, retries in this turn cannot recover. " +
+	"End the turn and have the user resume the session for the current step, then complete it in the new turn. " +
+	"already_signaled means the signal was accepted. " +
+	"Do not move the task solely to bypass a stale-turn error.\n"
+
 const officeStepCompleteInstruction = "This workflow step requires an explicit completion signal. " +
 	"Call step_complete_kandev as the LAST action after every requirement is satisfied. " +
 	"Do not call it before a question or during partial progress. " +
-	"If the tool is not visible, use the client's tool search or discovery with the canonical name.\n"
+	"If the tool is not visible, use the client's tool search or discovery with the canonical name.\n" +
+	stepCompleteRecoveryInstruction
 
 // FormatOfficeContextWithOptions formats the Office context for the current
 // workflow step. The imperative completion instruction is present only when
@@ -217,6 +223,8 @@ func PlanMode() string { return prompts.Get("plan-mode") }
 func KandevContext() string {
 	return Resolve("kandev-context", map[string]string{
 		"coordinator_task_control_section": coordinatorTaskControlSection,
+		"canvas_guidance_section":          "",
+		"rich_output_section":              richOutputSection,
 		"task_title_section":               "",
 		"autopilot_section":                "",
 		"question_tool_section":            userQuestionSection,
@@ -233,6 +241,13 @@ const autopilotSection = `AUTOPILOT MODE:
 This task runs in autopilot mode. Continue independently and make reasonable decisions without asking the operator. Ask for help only when a decision is critical, unsafe, or cannot be inferred from the task context. If a direct parent exists, use the available parent-question tool for that critical question. The question tool ends the current turn, so do not make another tool call or continue working after you ask it. If there is no parent, do not ask a question; choose the safest reversible path and report the limitation in your final response.
 `
 
+const canvasGuidanceSection = `CANVAS AUTHORING:
+Use these tools only when the user explicitly asks for a Kandev canvas: create_canvas_kandev, read_canvas_authoring_skill_kandev, and publish_canvas_kandev. Create it in Kandev before writing app files. Read the skill once, edit only in its returned source directory, then publish through MCP. Report publication status, including failures. Local files or a successful build do not publish a canvas.
+`
+
+const richOutputSection = `- show_rich_output_kandev: For a chart, graph, plot, file preview, KPI, or metrics request with data, call this now. Do not implement it as ASCII, SVG, HTML, or another app. Otherwise use prose or a small Markdown table. Get the schema and examples from tool discovery. Paths are workspace-relative; Kandev owns layout, axes, legends, and tooltips. Label series with units.
+`
+
 // stepCompleteSection is the description + instruction block for the
 // step_complete_kandev MCP tool. Only injected when the current workflow step
 // has `auto_advance_requires_signal = true` (ADR 0015). Agents on legacy
@@ -247,7 +262,8 @@ This task runs in autopilot mode. Continue independently and make reasonable dec
 const stepCompleteSection = "- step_complete_kandev: Signal that every requirement for the CURRENT workflow step is satisfied. " +
 	"Call it as the LAST action, never before a question or during partial progress. " +
 	"If it is not visible, use the client's tool search/discovery with the canonical name; some clients display mcp__kandev__step_complete_kandev. " +
-	"Required param: summary.\n"
+	"Required param: summary.\n" +
+	stepCompleteRecoveryInstruction
 
 // coordinatorTaskControlSection documents task-mode-only parent/child controls.
 // Restricted MCP modes omit the section because neither message_task_kandev nor
@@ -292,6 +308,7 @@ type KandevContextOptions struct {
 	RequiresCompletionSignal       bool
 	IncludeCoordinatorTaskControls bool
 	IncludeTaskTitleTool           bool
+	IncludeCanvasGuidance          bool
 	Autopilot                      bool
 	IncludeUserQuestionTool        bool
 	IncludeParentQuestionTool      bool
@@ -335,12 +352,18 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	if options.Autopilot {
 		autopilot = autopilotSection
 	}
+	canvasGuidance := ""
+	if options.IncludeCanvasGuidance {
+		canvasGuidance = canvasGuidanceSection
+	}
 	return Resolve("kandev-context", map[string]string{
 		"task_id":                          taskID,
 		"session_id":                       sessionID,
 		"step_complete_section":            section,
 		"task_title_section":               taskTitle,
 		"coordinator_task_control_section": coordinatorControls,
+		"canvas_guidance_section":          canvasGuidance,
+		"rich_output_section":              richOutputSection,
 		"autopilot_section":                autopilot,
 		"question_tool_section":            questionTool,
 	})
@@ -502,4 +525,15 @@ func InterpolatePlaceholders(template string, taskID string) string {
 	result := template
 	result = strings.ReplaceAll(result, "{task_id}", taskID)
 	return result
+}
+
+// InterpolateStepEntryNumber replaces every occurrence of the exact literal
+// {step_entry_number} with entryNumber in base 10. entryNumber is a lower
+// bound on the true entry count: entries before task_step_transitions' first
+// row (2026-08-16) were never recorded and cannot be counted, so a task whose
+// history predates the ledger will under-count. Callers compute entryNumber
+// themselves (this function is pure, taking no context or database handle)
+// and are expected to have already floored it at 1.
+func InterpolateStepEntryNumber(template string, entryNumber int) string {
+	return strings.ReplaceAll(template, "{step_entry_number}", strconv.Itoa(entryNumber))
 }

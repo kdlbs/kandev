@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("FileBrowserToolbar workspace actions", () => {
-  it("keeps Open workspace folder available while Add sources explains why it is unavailable", () => {
+  it("keeps Open workspace folder available while Add sources explains why it is unavailable", async () => {
     const onAddSources = vi.fn();
     const onOpenFolder = vi.fn();
 
@@ -50,7 +50,8 @@ describe("FileBrowserToolbar workspace actions", () => {
     expect(addSources.className).toContain("min-h-11");
     expect(screen.getByText("Wait for the active agent turn to finish")).toBeTruthy();
     fireEvent.click(screen.getByRole("menuitem", { name: "Open workspace folder" }));
-    expect(onOpenFolder).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onOpenFolder).toHaveBeenCalledOnce());
+    expect(onOpenFolder).toHaveBeenCalledWith(trigger);
     expect(onAddSources).not.toHaveBeenCalled();
   });
 

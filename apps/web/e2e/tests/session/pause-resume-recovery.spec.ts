@@ -55,7 +55,6 @@ async function seedTaskAndWaitForIdle(
 
 test.describe("Pause → resume recovery", () => {
   // Cancel/resume timing can be sensitive under CI load.
-  test.describe.configure({ retries: 1 });
 
   test("pausing a running turn lets a newly typed message resume the same session", async ({
     testPage,

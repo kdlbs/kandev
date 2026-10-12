@@ -32,6 +32,11 @@ func (m *Manager) stopPersistedKubernetesExecution(
 	reason string,
 	force bool,
 ) (bool, error) {
+	// Recoverable teardown only releases a tracked execution. Its retained
+	// inventory must not turn a duplicate stop into destructive remote cleanup.
+	if reason == StopReasonRecoverableAgentFailure {
+		return false, nil
+	}
 	if !force && !shouldRunExecutorCleanup(reason) {
 		return false, nil
 	}
@@ -46,7 +51,19 @@ func (m *Manager) stopPersistedKubernetesExecution(
 	if row == nil || row.Runtime != agentruntime.RuntimeKubernetes {
 		return false, nil
 	}
+	return m.stopPersistedKubernetesRecord(ctx, row, reason, force)
+}
 
+func (m *Manager) stopPersistedKubernetesRecord(
+	ctx context.Context,
+	row *models.ExecutorRunning,
+	reason string,
+	force bool,
+) (bool, error) {
+	store, ok := m.runningWriter.(persistedKubernetesCleanupStore)
+	if !ok {
+		return true, errors.New("persisted Kubernetes executor inventory is unavailable")
+	}
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {
 		return true, err
@@ -110,7 +127,7 @@ func resolvePersistedKubernetesCleanupMetadata(
 	if err != nil {
 		return nil, err
 	}
-	req := &ExecutorCreateRequest{TaskID: row.TaskID, SessionID: row.SessionID, Metadata: metadata}
+	req := &ExecutorCreateRequest{TaskID: row.TaskID, SessionID: row.SessionID, TaskEnvironmentID: getMetadataString(metadata, MetadataKeyKubernetesResourceEnvironmentID), Metadata: metadata}
 	if _, _, err := kubernetesRecordedCleanupInventory(req, currentConfig, true); err != nil {
 		return nil, fmt.Errorf("validate persisted Kubernetes runtime inventory: %w", err)
 	}

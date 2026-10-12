@@ -144,6 +144,7 @@ func TestPromptAdmissionRejectsSupersededClarificationTurn(t *testing.T) {
 		false,
 		nil,
 		false,
+		launchOriginAutomatic,
 		promptTaskOptions{expectedCurrentTurnID: "turn-clarification"},
 	)
 	if err == nil {

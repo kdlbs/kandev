@@ -57,6 +57,9 @@ func (r *Repository) initPhase2Schema() error {
 		ALTER TABLE workflow_step_participants
 		ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 	`)
+	if err := r.backfillParticipantsCreatedAtFromRowid(); err != nil {
+		return fmt.Errorf("failed to backfill workflow_step_participants.created_at: %w", err)
+	}
 	// provenance predates this column on any database that already had this
 	// table; the ADD COLUMN default backfills existing rows to "manual" so a
 	// pre-existing seat is never treated as claimable (AddTaskParticipant
@@ -126,6 +129,29 @@ func (r *Repository) initPhase2Schema() error {
 	}
 
 	return nil
+}
+
+// backfillParticipantsCreatedAtFromRowid maps every workflow_step_participants
+// row still at the ADD COLUMN default ('1970-01-01 00:00:00', see the
+// created_at migration above) onto its rowid insertion order, one second
+// apart. Before this column existed, RunnerProjection's task-scoped fallback
+// (office/repository/sqlite/base.go) ordered by rowid DESC to pick the most
+// recently assigned runner; without this backfill every legacy row ties on
+// created_at and the tiebreak (wsp.id ASC) picks an arbitrary UUID instead.
+// Idempotent: once backfilled a row's created_at no longer matches the
+// default, so re-running finds nothing to update. Postgres has no rowid and
+// needs no backfill — no legacy rows can exist there, since every query
+// inlining RunnerProjection errored outright before this fix.
+func (r *Repository) backfillParticipantsCreatedAtFromRowid() error {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return nil
+	}
+	_, err := r.db.Exec(`
+		UPDATE workflow_step_participants
+		SET created_at = datetime('1970-01-01 00:00:00', '+' || rowid || ' seconds')
+		WHERE created_at = '1970-01-01 00:00:00'
+	`)
+	return err
 }
 
 // dedupeActiveStepDecisionsBeforeUniqueIndex supersedes every active
@@ -608,7 +634,7 @@ func (r *Repository) ResolveCurrentRunner(
 	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT agent_profile_id FROM workflow_step_participants
 		WHERE task_id = ? AND role = 'runner'
-		ORDER BY created_at DESC, agent_profile_id ASC
+		ORDER BY created_at DESC, id ASC
 		LIMIT 1
 	`), taskID).Scan(&agentID)
 	if err == nil {
@@ -784,6 +810,11 @@ const participantsLockNamespace = "workflow-participant-role-seat:"
 // not-yet-committed decision insert does not block the claim. The two
 // writers previously locked on disjoint namespaces (participantsLockNamespace
 // vs decisionLockNamespace) and never actually contended.
+//
+// The exclusion is acquired only when the decision carries a role, so it does
+// not cover every decision the store accepts. A roleless decision still
+// commits without it, and claimAutoSeat's NOT EXISTS condition is what defends
+// the seat on that path.
 //
 // Keyed on task and role only, deliberately narrower than the namespace,
 // task, workflow and role EnsureRoleSeat locked on before this change.

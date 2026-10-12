@@ -1,4 +1,4 @@
-import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
+import { ApiError, fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
 import type {
   ListWorkspacesResponse,
   ListRepositoriesResponse,
@@ -12,6 +12,7 @@ import type {
   Repository,
   TaskSession,
 } from "@/lib/types/http";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 
 // Workspace operations
 export async function createWorkspace(
@@ -48,6 +49,21 @@ export async function listRepositories(
 // Collection routes are workspace-scoped and item routes are flat, mirroring the
 // repository routes above.
 
+type RepositorySetMembersPayload =
+  | {
+      repositoryIds: string[];
+      repositories?: never;
+    }
+  | {
+      repositories: Array<{ repositoryId: string; baseBranch?: string }>;
+      repositoryIds?: never;
+    };
+
+type CreateRepositorySetPayload = {
+  name: string;
+  description?: string;
+} & RepositorySetMembersPayload;
+
 export async function listRepositorySets(workspaceId: string, options?: ApiRequestOptions) {
   return fetchJson<ListRepositorySetsResponse>(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/repository-sets`,
@@ -57,7 +73,7 @@ export async function listRepositorySets(workspaceId: string, options?: ApiReque
 
 export async function createRepositorySet(
   workspaceId: string,
-  payload: { name: string; description?: string; repositoryIds: string[] },
+  payload: CreateRepositorySetPayload,
   options?: ApiRequestOptions,
 ) {
   return fetchJson<RepositorySet>(
@@ -66,11 +82,7 @@ export async function createRepositorySet(
       ...options,
       init: {
         method: "POST",
-        body: JSON.stringify({
-          name: payload.name,
-          description: payload.description ?? "",
-          repository_ids: payload.repositoryIds,
-        }),
+        body: JSON.stringify(repositorySetRequestBody(payload)),
         ...(options?.init ?? {}),
       },
     },
@@ -84,17 +96,43 @@ export async function createRepositorySet(
  */
 export async function updateRepositorySet(
   setId: string,
-  payload: { name?: string; description?: string; repositoryIds?: string[] },
+  payload: {
+    name?: string;
+    description?: string;
+    repositoryIds?: string[];
+    repositories?: Array<{ repositoryId: string; baseBranch?: string }>;
+  },
   options?: ApiRequestOptions,
 ) {
   const body: Record<string, unknown> = {};
   if (payload.name !== undefined) body.name = payload.name;
   if (payload.description !== undefined) body.description = payload.description;
   if (payload.repositoryIds !== undefined) body.repository_ids = payload.repositoryIds;
+  if (payload.repositories !== undefined) {
+    body.repositories = payload.repositories.map((member) => ({
+      repository_id: member.repositoryId,
+      base_branch: member.baseBranch ?? "",
+    }));
+  }
   return fetchJson<RepositorySet>(`/api/v1/repository-sets/${encodeURIComponent(setId)}`, {
     ...options,
     init: { method: "PATCH", body: JSON.stringify(body), ...(options?.init ?? {}) },
   });
+}
+
+function repositorySetRequestBody(payload: CreateRepositorySetPayload) {
+  return {
+    name: payload.name,
+    description: payload.description ?? "",
+    ...(payload.repositories
+      ? {
+          repositories: payload.repositories.map((member) => ({
+            repository_id: member.repositoryId,
+            base_branch: member.baseBranch ?? "",
+          })),
+        }
+      : { repository_ids: payload.repositoryIds ?? [] }),
+  };
 }
 
 export async function deleteRepositorySet(setId: string, options?: ApiRequestOptions) {
@@ -264,6 +302,7 @@ type StartQuickChatCommon = {
   agent_profile_id?: string;
   executor_id?: string;
   prompt?: string;
+  attachments?: MessageAttachment[];
   auto_title?: boolean;
 };
 
@@ -292,6 +331,29 @@ export type QuickChatRepositoryInput = {
   repository_id: string;
   base_branch: string;
 };
+
+export type QuickChatStartErrorBody = {
+  error?: string;
+  task_id?: string;
+  session_id?: string;
+};
+
+export function getQuickChatRetainedSessionFromError(
+  error: unknown,
+): { taskId: string; sessionId: string } | null {
+  if (error instanceof ApiError && error.body && typeof error.body === "object") {
+    const body = error.body as QuickChatStartErrorBody;
+    if (
+      typeof body.task_id === "string" &&
+      body.task_id &&
+      typeof body.session_id === "string" &&
+      body.session_id
+    ) {
+      return { taskId: body.task_id, sessionId: body.session_id };
+    }
+  }
+  return null;
+}
 
 export type StartQuickChatResponse = {
   task_id: string;
@@ -322,6 +384,8 @@ export type QuickChatSessionResponse = {
 export type ListQuickChatSessionsResponse = {
   sessions: QuickChatSessionResponse[];
   task_sessions: TaskSession[];
+  config_chat_restart_pending?: boolean;
+  config_chat_retiring_session_id?: string;
 };
 
 /**
@@ -343,6 +407,7 @@ export type StartConfigChatRequest = {
   agent_profile_id?: string;
   executor_id?: string;
   prompt?: string;
+  attachments?: MessageAttachment[];
 };
 
 export type StartConfigChatResponse = {
@@ -360,4 +425,29 @@ export async function startConfigChat(
     ...options,
     init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
+}
+
+export type ConfigChatRestartFailure = {
+  code: string;
+  stage: "validate" | "stop" | "delete" | "create" | "start";
+  old_deleted: boolean;
+  replacement?: StartConfigChatResponse;
+};
+
+export async function restartConfigChat(
+  workspaceId: string,
+  payload: { task_id: string; session_id: string },
+  confirmationId: string,
+) {
+  return fetchJson<StartConfigChatResponse>(
+    `/api/v1/workspaces/${workspaceId}/config-chat/restart`,
+    {
+      cache: "no-store",
+      init: {
+        method: "POST",
+        body: JSON.stringify(payload),
+        headers: { "X-Kandev-Task-Delete-Confirmation": confirmationId },
+      },
+    },
+  );
 }

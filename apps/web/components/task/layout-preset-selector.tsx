@@ -50,6 +50,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { SavedLayout } from "@/lib/types/http";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { resolveLayoutApplySessionIds } from "./layout-preset-selector-session-ids";
 import { SavedLayoutDeleteConfirmation } from "./saved-layout-delete-confirmation";
@@ -236,7 +237,7 @@ function SavedLayoutItems({
           <SavedLayoutLabel layout={layout} />
         </DropdownMenuItem>
         <DropdownMenuItem
-          className="min-h-11 min-w-11 shrink-0 cursor-pointer justify-center px-2 text-destructive/60 focus:text-destructive sm:min-h-7 sm:min-w-7"
+          className="min-h-11 min-w-11 shrink-0 cursor-pointer justify-center px-2 text-destructive/60 focus:text-destructive md:min-h-7 md:min-w-7"
           aria-label={t("task:delete2", { name: layout.name })}
           data-testid="layout-saved-delete"
           data-layout-id={layout.id}
@@ -292,6 +293,7 @@ function BuiltInPresetItems({ onApply }: { onApply: (presetId: BuiltInLayoutProf
 
 function useApplySavedLayout() {
   const applyCustomLayout = useDockviewStore((s) => s.applyCustomLayout);
+  const currentLayoutEnvId = useDockviewStore((s) => s.currentLayoutEnvId);
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const appStore = useAppStoreApi();
@@ -315,10 +317,18 @@ function useApplySavedLayout() {
           layout: layout.layout,
           createdAt: layout.created_at,
         },
-        { activeSessionId, sessionIds },
+        { activeSessionId, sessionIds, envId: currentLayoutEnvId },
       );
     },
-    [activeSessionId, activeTaskId, appStore, applyCustomLayout, loadSessions, taskSessionsLoaded],
+    [
+      activeSessionId,
+      activeTaskId,
+      appStore,
+      applyCustomLayout,
+      currentLayoutEnvId,
+      loadSessions,
+      taskSessionsLoaded,
+    ],
   );
 }
 
@@ -341,6 +351,8 @@ function useApplyBuiltInLayout(
 }
 
 type PresetDropdownProps = {
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  onCloseAutoFocus: (event: Event) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   deleteMenuRef: RefObject<HTMLDivElement | null>;
@@ -360,6 +372,8 @@ type PresetDropdownProps = {
 };
 
 function PresetDropdown({
+  triggerRef,
+  onCloseAutoFocus,
   open,
   onOpenChange,
   deleteMenuRef,
@@ -384,6 +398,7 @@ function PresetDropdown({
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <Button
+              ref={triggerRef}
               size="sm"
               variant="outline"
               className="cursor-pointer px-2"
@@ -397,6 +412,7 @@ function PresetDropdown({
         <TooltipContent side="bottom">{t("task:layoutPresets")}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
+        onCloseAutoFocus={onCloseAutoFocus}
         ref={deleteMenuRef}
         align="end"
         className="w-60"
@@ -490,12 +506,15 @@ function usePresetDropdownVisibility(onClose: () => void) {
 
 export function LayoutPresetSelector() {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [deleteCandidate, setDeleteCandidate] = useState<SavedLayout | null>(null);
   const cancelDelete = useCallback(() => setDeleteCandidate(null), []);
+  useConfirmationBoundary(deleteCandidate !== null, deleteCandidate?.id ?? "", cancelDelete);
   const deleteAnchorRef = useRef<HTMLElement>(null);
   const deleteMenuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const pendingTarget = useRef<SavedLayout | null>(null);
   const resetLayout = useDockviewStore((s) => s.resetLayout);
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
   const handleApplyCustom = useApplySavedLayout();
@@ -503,10 +522,18 @@ export function LayoutPresetSelector() {
   const { saveLayout, deleteLayout } = useSavedLayoutMutations();
   const { dropdownOpen, tooltipOpen, handleDropdownOpenChange, handleTooltipOpenChange } =
     usePresetDropdownVisibility(cancelDelete);
-  const beginDelete = useCallback((layout: SavedLayout, anchor: HTMLElement) => {
-    deleteAnchorRef.current = anchor;
-    setDeleteCandidate(layout);
-  }, []);
+  const beginDelete = useCallback(
+    (layout: SavedLayout, anchor: HTMLElement) => {
+      if (isMobile) {
+        pendingTarget.current = layout;
+        handleDropdownOpenChange(false);
+        return;
+      }
+      deleteAnchorRef.current = anchor;
+      setDeleteCandidate(layout);
+    },
+    [isMobile, handleDropdownOpenChange],
+  );
 
   const closeDelete = useCallback(() => {
     setDeleteCandidate(null);
@@ -528,14 +555,22 @@ export function LayoutPresetSelector() {
   return (
     <>
       <PresetDropdown
+        triggerRef={triggerRef}
+        onCloseAutoFocus={(event) => {
+          const target = pendingTarget.current;
+          pendingTarget.current = null;
+          if (!target) return;
+          event.preventDefault();
+          if (savedLayouts.some((layout) => layout.id === target.id)) setDeleteCandidate(target);
+        }}
         open={dropdownOpen}
         onOpenChange={handleDropdownOpenChange}
         deleteMenuRef={deleteMenuRef}
-        tooltipOpen={tooltipOpen}
+        tooltipOpen={!isMobile && tooltipOpen}
         onTooltipOpenChange={handleTooltipOpenChange}
         resetLayout={resetLayout}
         savedLayouts={savedLayouts}
-        isFinePointer={isFinePointer}
+        isFinePointer={isMobile || isFinePointer}
         onApplyCustom={handleApplyCustom}
         onApplyBuiltIn={handleApplyBuiltIn}
         confirmingDeleteId={deleteCandidate?.id ?? null}
@@ -552,8 +587,8 @@ export function LayoutPresetSelector() {
       />
       <SavedLayoutDeleteConfirmation
         layout={deleteCandidate}
-        open={isFinePointer && deleteCandidate !== null}
-        anchorRef={deleteAnchorRef}
+        open={(isMobile || isFinePointer) && deleteCandidate !== null}
+        anchorRef={isMobile ? triggerRef : deleteAnchorRef}
         focusBoundaryRef={deleteMenuRef}
         onOpenChange={(open) => {
           if (!open) cancelDelete();

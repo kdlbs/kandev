@@ -11,10 +11,12 @@ import {
   openFieldEditor,
   parseUpdatedAt,
   recordRefetchCandidate,
+  recordWriteSettled,
   recordWriteSuccess,
   seedInitialCanonical,
   shouldRestoreAfterFailedWrite,
   subscribeField,
+  TASK_SCOPE,
 } from "./office-task-content-sync";
 
 const TASK = "task-1";
@@ -421,6 +423,54 @@ describe("shouldRestoreAfterFailedWrite (AC-9, AC-44, AC-53, R5-F6)", () => {
 
     expect(shouldRestoreAfterFailedWrite(TASK, "title", earlySeq)).toBe(true); // the later write already resolved
     endWrite(TASK, "title", earlySeq);
+  });
+});
+
+describe('"task" scope — generic whole-task mutation guard', () => {
+  it("suppresses restore for a stale failure once a later-sequenced task-scope write has succeeded", () => {
+    const failingSeq = nextTaskSequence(TASK);
+    beginWrite(TASK, TASK_SCOPE, failingSeq);
+    const laterSeq = nextTaskSequence(TASK);
+    beginWrite(TASK, TASK_SCOPE, laterSeq);
+    recordWriteSettled(TASK, TASK_SCOPE, laterSeq);
+    endWrite(TASK, TASK_SCOPE, laterSeq);
+
+    expect(shouldRestoreAfterFailedWrite(TASK, TASK_SCOPE, failingSeq)).toBe(false);
+  });
+
+  it("suppresses restore for a stale failure while a later-sequenced task-scope write is still pending", () => {
+    const failingSeq = nextTaskSequence(TASK);
+    beginWrite(TASK, TASK_SCOPE, failingSeq);
+    const laterSeq = nextTaskSequence(TASK);
+    beginWrite(TASK, TASK_SCOPE, laterSeq);
+
+    expect(shouldRestoreAfterFailedWrite(TASK, TASK_SCOPE, failingSeq)).toBe(false);
+  });
+
+  it("restores when it is the only or the last-standing task-scope write", () => {
+    const seq = nextTaskSequence(TASK);
+    beginWrite(TASK, TASK_SCOPE, seq);
+    expect(shouldRestoreAfterFailedWrite(TASK, TASK_SCOPE, seq)).toBe(true);
+  });
+
+  it("keeps the 'task' scope and a field scope independent: a task-scope write does not guard or suppress a title write", () => {
+    seedInitialCanonical(TASK, "title", "original", T10);
+
+    const taskSeq = nextTaskSequence(TASK);
+    beginWrite(TASK, TASK_SCOPE, taskSeq);
+
+    // The title field is untouched by the concurrent task-scope write: it is
+    // not guarded, its canonical value is unaffected, and a title write's own
+    // restore decision ignores the task-scope write entirely.
+    expect(isFieldGuarded(TASK, "title")).toBe(false);
+    expect(getCanonicalValue(TASK, "title")).toBe("original");
+
+    const titleSeq = nextTaskSequence(TASK);
+    beginWrite(TASK, "title", titleSeq);
+    expect(shouldRestoreAfterFailedWrite(TASK, "title", titleSeq)).toBe(true);
+
+    endWrite(TASK, TASK_SCOPE, taskSeq);
+    endWrite(TASK, "title", titleSeq);
   });
 });
 

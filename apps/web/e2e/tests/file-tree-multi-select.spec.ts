@@ -1,4 +1,4 @@
-import { test, expect } from "../fixtures/test-base";
+import { expect, resetSeedRepositoryCheckout, test } from "../fixtures/test-base";
 import path from "node:path";
 import {
   GitHelper,
@@ -29,6 +29,13 @@ async function setupFileTreeTest(
 }
 
 test.describe("File Tree Multi-Select", () => {
+  test.beforeEach(({ backend, seedData }) => {
+    // Each test commits directly to the shared seed checkout. Restore the
+    // immutable fixture baseline before the next test so prior commits cannot
+    // change which rows the file tree exposes.
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+  });
+
   // --- Selection Basics ---
 
   test("ctrl-click selects a file without opening it", async ({
@@ -319,7 +326,12 @@ test.describe("File Tree Multi-Select", () => {
     });
 
     await deleteItem.click();
-    await expect(testPage.getByTestId("file-delete-confirm-popover")).toBeVisible();
+    const isFinePointer = await testPage.evaluate(() => matchMedia("(pointer: fine)").matches);
+    if (isFinePointer) {
+      await expect(testPage.getByTestId("file-delete-confirm-popover")).toBeVisible();
+    } else {
+      await expect(testPage.getByTestId("file-delete-confirm")).toBeVisible();
+    }
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
     await prCapture.screenshot("desktop-file-delete-confirmation", {
       caption: "Desktop file context menu with one-file delete confirmation",

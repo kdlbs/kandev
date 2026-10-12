@@ -31,12 +31,14 @@ const TID_SEND_COMMENTS = "passthrough-send-comments";
 
 // --- Mutable state for per-test overrides ---
 let mockSessionState: string | null = null;
+let mockPendingClarification: object | null = null;
+let mockPendingAction: "clarification" | "permission" | null = null;
 let mockKeyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }> =
   {};
 const responsiveMock = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "desktop",
 }));
-let mockPendingByFile: Record<string, import("@/lib/state/slices/comments").DiffComment[]> = {};
+let mockPendingByFile: Record<string, import("@/lib/state/slices/comments").ReviewComment[]> = {};
 let mockPlanModeEnabled = false;
 let mockImplementPlanHandler: ((fresh: boolean) => void) | undefined;
 let mockIsFinePointer = true;
@@ -68,13 +70,23 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       taskSessions: {
         items: mockSessionState
-          ? { [SESSION_ID]: { id: SESSION_ID, state: mockSessionState } }
+          ? {
+              [SESSION_ID]: {
+                id: SESSION_ID,
+                state: mockSessionState,
+                pending_action: mockPendingAction,
+              },
+            }
           : {},
       },
       quickChat: { sessions: [] },
       kanban: { workflowId: null, tasks: [] },
       kanbanMulti: { snapshots: {} },
       workflows: { items: [] },
+      office: { tasks: { items: [] } },
+      availableAgents: { items: [], loaded: true, loading: false },
+      setAvailableAgents: vi.fn(),
+      setAvailableAgentsLoading: vi.fn(),
       userSettings: { keyboardShortcuts: mockKeyboardShortcuts, chatSubmitKey: "enter" },
     }),
   useAppStoreApi: () => ({
@@ -96,8 +108,8 @@ vi.mock("@/hooks/domains/kanban/use-plan-actions", () => ({
   }),
 }));
 
-vi.mock("@/hooks/domains/comments/use-diff-comments", () => ({
-  usePendingDiffCommentsByFile: () => mockPendingByFile,
+vi.mock("@/hooks/domains/comments/use-review-comments", () => ({
+  usePendingReviewCommentsByFile: () => mockPendingByFile,
 }));
 
 vi.mock("@/lib/state/slices/comments/comments-store", () => ({
@@ -189,6 +201,7 @@ vi.mock("./chat/use-chat-panel-state", () => ({
     taskId: TASK_ID,
     task: { id: TASK_ID, title: "Task title" },
     taskDescription: "Task description",
+    session: { state: mockSessionState, pending_action: mockPendingAction },
     isCompleted: mockSessionState === "COMPLETED",
     planModeEnabled: mockPlanModeEnabled,
     planModeAvailable: true,
@@ -209,6 +222,7 @@ vi.mock("./chat/use-chat-panel-state", () => ({
     pendingPRFeedback: [],
     walkthroughComments: [],
     messageComments: [],
+    pendingClarification: mockPendingClarification,
     handleClearMessageComments: vi.fn(),
     pendingCommentsByFile: mockPendingByFile,
   }),
@@ -299,6 +313,8 @@ async function openComposer() {
 
 function resetMocks() {
   mockSessionState = null;
+  mockPendingClarification = null;
+  mockPendingAction = null;
   mockKeyboardShortcuts = {};
   responsiveMock.breakpoint = "desktop";
   mockPendingByFile = {};
@@ -358,6 +374,21 @@ describe("PassthroughToolbar – default state", () => {
     const row = screen.getByTestId("passthrough-status-row");
     expect(row.className).toContain("flex-wrap");
     expect(row.lastElementChild?.className).toContain("flex-wrap");
+  });
+
+  it("hides proceed while a clarification barrier is pending", () => {
+    mockSessionState = "WAITING_FOR_INPUT";
+    mockPendingAction = "clarification";
+    mockNextStep = { proceedStepName: "Review", proceed: vi.fn(), isMoving: false };
+
+    const view = renderToolbar();
+
+    expect(screen.queryByTestId(TID_PROCEED)).toBeNull();
+
+    mockPendingAction = null;
+    view.rerender(<PassthroughToolbar sessionId={SESSION_ID} taskId={TASK_ID} />);
+
+    expect(screen.getByTestId(TID_PROCEED)).toBeTruthy();
   });
 });
 
@@ -432,6 +463,7 @@ describe("PassthroughToolbar – touch-scroll activation", () => {
 // Composer open / close
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line max-lines-per-function -- composer dismissal cases share one toolbar harness.
 describe("PassthroughToolbar – composer toggle", () => {
   it("clicking Chat toggle opens and closes the composer", async () => {
     renderToolbar();
@@ -472,6 +504,24 @@ describe("PassthroughToolbar – composer toggle", () => {
       expect.arrayContaining([expect.objectContaining({ kind: "file", label: "foo.ts" })]),
     );
     expect(props.contextFiles).toEqual([{ path: SRC_FILE, name: "foo.ts" }]);
+  });
+
+  it("keeps the passthrough cancel callback as composer dismissal only", async () => {
+    mockSessionState = "RUNNING";
+    renderToolbar();
+    await openComposer();
+
+    const props = latestChatInputProps();
+    expect(props.showCancelAgent).toBe(false);
+
+    (props.onCancel as () => void)();
+    await waitFor(() => expect(screen.queryByTestId(TID_COMPOSER)).toBeNull());
+    expect(mockSessionState).toBe("RUNNING");
+    expect(mockWsRequestFn).not.toHaveBeenCalledWith(
+      "agent.cancel",
+      expect.objectContaining({ session_id: SESSION_ID }),
+      expect.any(Number),
+    );
   });
 
   it("uses the passthrough-specific focus shortcut instead of the global slash shortcut", async () => {
@@ -787,4 +837,14 @@ describe("PassthroughToolbar – proceed button", () => {
     fireEvent.click(btn);
     await waitFor(() => expect(proceedFn).toHaveBeenCalledTimes(1));
   });
+});
+
+it("opens whole-file feedback in its named repository", () => {
+  mockPendingByFile = {
+    file: [{ ...makeDiffComment("whole"), source: "review-file", repositoryName: "api" }],
+  };
+  renderToolbar();
+  fireEvent.click(screen.getByTestId(TID_TOGGLE_COMMENTS));
+  fireEvent.click(screen.getByTestId(TID_COMMENT_FILE_REF));
+  expect(mockOpenFile).toHaveBeenCalledWith(SRC_FILE, "api");
 });

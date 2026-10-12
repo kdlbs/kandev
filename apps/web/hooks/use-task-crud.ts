@@ -3,8 +3,8 @@
 import { useCallback, useState } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskActions, type TaskActionOptions } from "@/hooks/use-task-actions";
+import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import type { Task } from "@/components/kanban-card";
-import type { KanbanState } from "@/lib/state/slices";
 
 /**
  * Custom hook that extracts task CRUD operations from the Kanban component.
@@ -19,6 +19,8 @@ export function useTaskCRUD() {
   const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
   const { deleteTaskById, archiveTaskById } = useTaskActions();
   const store = useAppStoreApi();
+  const notifySuccess = useTaskRemovalSuccessNotifier();
+  const { runTaskRemoval } = useTaskRemoval({ store, notifySuccess });
 
   const handleCreate = useCallback(() => {
     setEditingTask(null);
@@ -34,44 +36,32 @@ export function useTaskCRUD() {
     async (task: Task, opts?: TaskActionOptions) => {
       setDeletingTaskId(task.id);
       try {
-        await deleteTaskById(task.id, opts);
-
-        // Update UI AFTER successful delete
-        store.getState().hydrate({
-          kanban: {
-            ...store.getState().kanban,
-            tasks: store
-              .getState()
-              .kanban.tasks.filter((item: KanbanState["tasks"][number]) => item.id !== task.id),
-          },
-        });
+        await runTaskRemoval(
+          "delete",
+          { taskId: task.id, mutate: () => deleteTaskById(task.id, opts) },
+          { cascade: opts?.cascade },
+        );
       } finally {
         setDeletingTaskId(null);
       }
     },
-    [deleteTaskById, store],
+    [deleteTaskById, runTaskRemoval],
   );
 
   const handleArchive = useCallback(
     async (task: Task, opts?: TaskActionOptions) => {
       setArchivingTaskId(task.id);
       try {
-        await archiveTaskById(task.id, opts);
-
-        // Update UI AFTER successful archive - remove from kanban view
-        store.getState().hydrate({
-          kanban: {
-            ...store.getState().kanban,
-            tasks: store
-              .getState()
-              .kanban.tasks.filter((item: KanbanState["tasks"][number]) => item.id !== task.id),
-          },
-        });
+        await runTaskRemoval(
+          "archive",
+          { taskId: task.id, mutate: () => archiveTaskById(task.id, opts) },
+          { cascade: opts?.cascade },
+        );
       } finally {
         setArchivingTaskId(null);
       }
     },
-    [archiveTaskById, store],
+    [archiveTaskById, runTaskRemoval],
   );
 
   const handleDialogOpenChange = useCallback((open: boolean) => {

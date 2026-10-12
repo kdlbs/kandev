@@ -1,8 +1,28 @@
 "use client";
 
-import { useRef, useState, type RefObject } from "react";
+import { useRef, useState, type RefObject, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { IconCopy, IconDotsVertical, IconTrash } from "@tabler/icons-react";
+import { IconCopy, IconDotsVertical, IconGripVertical, IconTrash } from "@tabler/icons-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  pointerWithin,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { profileDragAccessibility } from "@/lib/settings/profile-drag-accessibility";
+import { reorderIds } from "@/lib/settings/agent-profile-order";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -21,11 +41,13 @@ import { deleteAgentProfileAction } from "@/app/actions/agents";
 import { useProfileDuplicate } from "@/hooks/domains/settings/use-profile-duplicate";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { useRouter } from "@/lib/routing/client-router";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { classifyAgentProfileFallback } from "@/lib/agent-profile-fallback";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 import { RecordDot } from "@/components/settings/record-dot";
 import { DisabledBadge } from "@/components/settings/record-badges";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 function profileHref(agentName: string, profileId: string): string {
   return `/settings/agents/${encodeURIComponent(agentName)}/profiles/${encodeURIComponent(profileId)}`;
@@ -39,22 +61,102 @@ function profileHref(agentName: string, profileId: string): string {
 export function AgentProfilesSubList({
   savedAgent,
   agentName,
+  canManage,
+  onReorder,
 }: {
   savedAgent: Agent | undefined;
   agentName: string;
+  canManage: boolean;
+  onReorder: (agentId: string, profileIds: string[]) => void;
 }) {
+  const { t } = useTranslation();
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   if (!savedAgent || savedAgent.profiles.length === 0) return null;
-
+  const rows = savedAgent.profiles.map((profile) => (
+    <ProfileRow key={profile.id} agent={savedAgent} profile={profile} />
+  ));
   return (
     <div
       className="border-t border-border/70 bg-background p-3"
       data-testid={`agent-profiles-${agentName}`}
     >
-      <div className="grid gap-2">
-        {savedAgent.profiles.map((profile) => (
-          <ProfileRow key={profile.id} agent={savedAgent} profile={profile} />
-        ))}
-      </div>
+      {canManage && savedAgent.profiles.length > 1 ? (
+        <DndContext
+          accessibility={profileDragAccessibility(savedAgent.profiles, t)}
+          sensors={sensors}
+          collisionDetection={(args) =>
+            args.pointerCoordinates ? pointerWithin(args) : closestCenter(args)
+          }
+          onDragEnd={(event: DragEndEvent) => {
+            if (!event.over || event.active.id === event.over.id) return;
+            onReorder(
+              savedAgent.id,
+              reorderIds(
+                savedAgent.profiles.map((profile) => profile.id),
+                String(event.active.id),
+                String(event.over.id),
+              ),
+            );
+          }}
+        >
+          <SortableContext
+            items={savedAgent.profiles.map((profile) => profile.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <div className="grid gap-2">
+              {savedAgent.profiles.map((profile) => (
+                <SortableProfileRow key={profile.id} agent={savedAgent} profile={profile} />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      ) : (
+        <div className="grid gap-2">{rows}</div>
+      )}
+    </div>
+  );
+}
+function SortableProfileRow({ agent, profile }: { agent: Agent; profile: AgentProfile }) {
+  const { t } = useTranslation();
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: profile.id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={isDragging ? "z-20 opacity-70" : undefined}
+    >
+      <ProfileRow
+        agent={agent}
+        profile={profile}
+        dragHandle={
+          <button
+            ref={setActivatorNodeRef}
+            type="button"
+            className={controlSizingClassName(
+              "icon",
+              "relative z-10 flex shrink-0 cursor-pointer touch-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted",
+            )}
+            data-testid="agent-profile-drag-handle"
+            {...attributes}
+            {...listeners}
+            aria-label={t("agents:dragProfile", { name: profile.name })}
+            aria-roledescription={t("agents:profileSortable")}
+          >
+            <IconGripVertical className="h-4 w-4" aria-hidden="true" />
+          </button>
+        }
+      />
     </div>
   );
 }
@@ -70,32 +172,56 @@ function ProfileRowActions({
   deleteAnchorRef,
   onDuplicate,
   onConfirmDelete,
+  duplicateDisabled,
 }: {
   profile: AgentProfile;
   deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onDuplicate: () => void;
   onConfirmDelete: () => void;
+  duplicateDisabled: boolean;
 }) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
+  const pendingDelete = useRef(false);
+  const [open, setOpen] = useState(false);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger
+        asChild
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
         <Button
           ref={deleteAnchorRef}
           variant="ghost"
-          size="sm"
-          className="cursor-pointer min-h-11 min-w-11"
+          size="icon"
+          className={settingsActionClassName("cursor-pointer")}
           aria-label={t("agents:profileActions")}
           data-testid={`profile-actions-menu-${profile.id}`}
         >
           <IconDotsVertical className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent
+        align="end"
+        onCloseAutoFocus={(event) => {
+          if (!pendingDelete.current) return;
+          pendingDelete.current = false;
+          event.preventDefault();
+          onConfirmDelete();
+        }}
+      >
         {profile.kind !== "dynamic" && (
           <DropdownMenuItem
             className="cursor-pointer"
             data-testid={`duplicate-profile-${profile.id}`}
+            disabled={duplicateDisabled}
             onSelect={onDuplicate}
           >
             <IconCopy className="h-4 w-4 mr-2" />
@@ -105,7 +231,10 @@ function ProfileRowActions({
         <DropdownMenuItem
           className="cursor-pointer text-destructive focus:text-destructive"
           data-testid={`delete-profile-${profile.id}`}
-          onSelect={onConfirmDelete}
+          onSelect={() => {
+            if (isMobile) pendingDelete.current = true;
+            else onConfirmDelete();
+          }}
         >
           <IconTrash className="h-4 w-4 mr-2" />
           {t("agents:delete")}
@@ -120,11 +249,13 @@ function ProfileRowInlineActions({
   deleteAnchorRef,
   onDuplicate,
   onConfirmDelete,
+  duplicateDisabled,
 }: {
   profile: AgentProfile;
   deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onDuplicate: () => void;
   onConfirmDelete: () => void;
+  duplicateDisabled: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -137,6 +268,7 @@ function ProfileRowInlineActions({
             size="icon"
             className="cursor-pointer"
             data-testid={`duplicate-profile-inline-${profile.id}`}
+            disabled={duplicateDisabled}
             onClick={onDuplicate}
             aria-label={t("agents:duplicate")}
           >
@@ -167,6 +299,8 @@ function ProfileRowInlineActions({
 }
 
 type ProfileRowDeleteConfirmationProps = {
+  profileId: string;
+  profileName: string;
   open: boolean;
   isFinePointer: boolean;
   anchorRef: RefObject<HTMLButtonElement | null>;
@@ -178,6 +312,8 @@ type ProfileRowDeleteConfirmationProps = {
 type ProfileRowDeleteConfirmationBaseProps = Omit<ProfileRowDeleteConfirmationProps, "placement">;
 
 function ProfileRowDeleteConfirmation({
+  profileId,
+  profileName,
   open,
   isFinePointer,
   anchorRef,
@@ -186,11 +322,14 @@ function ProfileRowDeleteConfirmation({
   onConfirm,
   placement,
 }: ProfileRowDeleteConfirmationProps) {
-  if (placement === "inline" && (isFinePointer || !open)) return null;
-  if (placement === "popover" && !isFinePointer) return null;
+  const { isMobile } = useResponsiveBreakpoint();
+  if (placement === "inline" && (isMobile || isFinePointer || !open)) return null;
+  if (placement === "popover" && !isMobile && !isFinePointer) return null;
 
   const confirmation = (
     <AgentProfileDeleteConfirmation
+      profileId={profileId}
+      profileName={profileName}
       open={open}
       isFinePointer={isFinePointer}
       anchorRef={anchorRef}
@@ -217,6 +356,8 @@ type ProfileRowCardProps = {
   onDuplicate: () => void;
   onConfirmDelete: () => void;
   confirmationProps: ProfileRowDeleteConfirmationBaseProps;
+  duplicateDisabled: boolean;
+  dragHandle?: ReactNode;
 };
 
 function ProfileRowCard({
@@ -230,7 +371,20 @@ function ProfileRowCard({
   onDuplicate,
   onConfirmDelete,
   confirmationProps,
+  duplicateDisabled,
+  dragHandle,
 }: ProfileRowCardProps) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const { t } = useTranslation();
+  const fallbackState = classifyAgentProfileFallback(profile);
+  let fallbackLabel = t("agents:fallbackNone");
+  if (fallbackState.kind === "exact") {
+    fallbackLabel = t("agents:fallbackExact");
+  } else if (fallbackState.kind === "next") {
+    fallbackLabel = t("agents:fallbackNext");
+  } else if (fallbackState.kind === "model") {
+    fallbackLabel = t("agents:fallbackModel", { model: fallbackState.model });
+  }
   return (
     <Card
       // Same surface treatment as the workspace section tiles.
@@ -251,22 +405,28 @@ function ProfileRowCard({
             <span className="truncate text-sm font-medium">{profile.name}</span>
             {profile.enabled === false && <DisabledBadge />}
           </div>
-          {(profile.model || profile.mode) && (
-            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-3.5">
-              {profile.model && <Badge variant="outline">{profile.model}</Badge>}
-              {profile.mode && <Badge variant="secondary">{profile.mode}</Badge>}
-            </div>
-          )}
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-3.5">
+            {profile.model && <Badge variant="outline">{profile.model}</Badge>}
+            <Badge
+              className="h-auto min-h-5 max-w-full min-w-0 overflow-visible whitespace-pre-wrap break-all text-left"
+              variant="secondary"
+            >
+              {fallbackLabel}
+            </Badge>
+            {profile.mode && <Badge variant="secondary">{profile.mode}</Badge>}
+          </div>
         </div>
         <div className="relative z-10 flex shrink-0 items-center gap-1">
+          {dragHandle}
           {canManage &&
-            !(confirmOpen && !isFinePointer) &&
+            (isMobile || !(confirmOpen && !isFinePointer)) &&
             (isFullDesktop ? (
               <ProfileRowInlineActions
                 profile={profile}
                 deleteAnchorRef={deleteAnchorRef}
                 onDuplicate={onDuplicate}
                 onConfirmDelete={onConfirmDelete}
+                duplicateDisabled={duplicateDisabled}
               />
             ) : (
               <ProfileRowActions
@@ -274,6 +434,7 @@ function ProfileRowCard({
                 deleteAnchorRef={deleteAnchorRef}
                 onDuplicate={onDuplicate}
                 onConfirmDelete={onConfirmDelete}
+                duplicateDisabled={duplicateDisabled}
               />
             ))}
         </div>
@@ -285,7 +446,15 @@ function ProfileRowCard({
 }
 
 /** One saved profile as a fully clickable row — shared by the Agents index and the agent page. */
-export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentProfile }) {
+export function ProfileRow({
+  agent,
+  profile,
+  dragHandle,
+}: {
+  agent: Agent;
+  profile: AgentProfile;
+  dragHandle?: ReactNode;
+}) {
   const canManage = useIsAdmin();
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -293,10 +462,12 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
   const { isFinePointer, isFullDesktop } = useResponsiveBreakpoint();
   const handleDuplicate = useProfileDuplicate();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  useConfirmationBoundary(confirmOpen, profile.id, setConfirmOpen);
   const deleteAnchorRef = useRef<HTMLButtonElement>(null);
   const store = useAppStoreApi();
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const nativeCodexAvailable = useAppStore((state) => state.features?.codexAppServer ?? false);
   const href = profileHref(agent.name, profile.id);
   const closeDeleteConfirmation = () => {
     setConfirmOpen(false);
@@ -314,13 +485,11 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
         profiles: item.profiles.filter((p) => p.id !== profile.id),
       }));
       setSettingsAgents(nextAgents);
-      // `agentProfiles` is the flattened picker list over the same data. Every
-      // other writer updates the pair together, and its only refetch is a
-      // one-shot guarded by `agentsLoaded`, so skipping it here left the
-      // deleted profile selectable until a reload.
+      // Deletion preserves selector order and profiles absent from the Settings list.
       setAgentProfiles(
-        nextAgents.flatMap((item) => item.profiles.map((p) => toAgentProfileOption(item, p))),
+        store.getState().agentProfiles.items.filter((item) => item.id !== profile.id),
       );
+      store.getState().bumpAgentProfilesVersion();
       return;
     }
     // Conflicts (active sessions, watchers, routing tiers) carry a guided
@@ -342,6 +511,8 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
     closeDeleteConfirmation();
   };
   const confirmationProps = {
+    profileId: profile.id,
+    profileName: profile.name,
     open: confirmOpen,
     isFinePointer,
     anchorRef: deleteAnchorRef,
@@ -361,6 +532,8 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
       onDuplicate={() => void handleDuplicate(agent, profile)}
       onConfirmDelete={() => setConfirmOpen(true)}
       confirmationProps={confirmationProps}
+      duplicateDisabled={agent.name === "codex-app-server" && !nativeCodexAvailable}
+      dragHandle={dragHandle}
     />
   );
 }

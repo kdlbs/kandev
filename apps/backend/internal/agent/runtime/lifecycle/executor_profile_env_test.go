@@ -11,21 +11,35 @@ import (
 )
 
 type fakeExecutorProfileReader struct {
-	session     *models.TaskSession
-	sessionErr  error
-	env         *models.TaskEnvironment
-	envErr      error
-	profiles    map[string]*models.ExecutorProfile
-	profileErr  error
-	profileArgs []string
+	task          *models.Task
+	taskErr       error
+	session       *models.TaskSession
+	sessionErr    error
+	cleanupActive bool
+	cleanupErr    error
+	env           *models.TaskEnvironment
+	envErr        error
+	profiles      map[string]*models.ExecutorProfile
+	profileErr    error
+	profileArgs   []string
+}
+
+func (f *fakeExecutorProfileReader) GetTask(_ context.Context, id string) (*models.Task, error) {
+	if f.taskErr != nil {
+		return nil, f.taskErr
+	}
+	if f.task != nil {
+		return f.task, nil
+	}
+	return &models.Task{ID: id}, nil
 }
 
 func (f *fakeExecutorProfileReader) GetTaskSession(_ context.Context, _ string) (*models.TaskSession, error) {
 	return f.session, f.sessionErr
 }
 
-func (*fakeExecutorProfileReader) HasActiveTaskResourceCleanupJob(context.Context, string) (bool, error) {
-	return false, nil
+func (f *fakeExecutorProfileReader) HasActiveTaskResourceCleanupJob(context.Context, string) (bool, error) {
+	return f.cleanupActive, f.cleanupErr
 }
 
 func (f *fakeExecutorProfileReader) GetTaskEnvironment(_ context.Context, _ string) (*models.TaskEnvironment, error) {

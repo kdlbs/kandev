@@ -14,6 +14,7 @@ import { createXAxisTickFormatter, formatYAxisTick } from "./chart-format";
 import { useRichOutputChartAnimations } from "./chart-motion";
 import { useChartPlotVisibility } from "./chart-visibility";
 import type { RichOutputChartBlock } from "./types";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 const HOST_SERIES_COLORS = [
   "var(--chart-1)",
@@ -23,6 +24,8 @@ const HOST_SERIES_COLORS = [
 ] as const;
 const CHART_MARGIN = { left: 0, right: 8 } as const;
 const BAR_RADIUS: [number, number, number, number] = [3, 3, 0, 0];
+// i18n-exempt: CSS layout classes, not user-facing copy.
+const CHART_PLOT_CLASS_NAME = "h-52 min-h-52 w-full min-w-0 max-w-full";
 
 function seriesKey(index: number): string {
   return `series_${index}`;
@@ -85,7 +88,7 @@ function SeriesLegend({
             key={key}
             type="button"
             aria-pressed={isVisible}
-            className={`flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-[opacity,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.98] ${isVisible ? "opacity-100" : "opacity-50"}`}
+            className={`${controlSizingClassName("standard")} flex cursor-pointer items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-[opacity,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.98] ${isVisible ? "opacity-100" : "opacity-50"}`}
             data-testid={`rich-output-chart-legend-${key}`}
             onClick={() => onToggle(key)}
           >
@@ -126,16 +129,6 @@ function useChartPresentation(block: RichOutputChartBlock) {
     });
   }, []);
 
-  return { formatXAxisTick, formatYAxisValue, hiddenSeries, toggleSeries };
-}
-
-export const ChartBlock = memo(function ChartBlock({ block }: { block: RichOutputChartBlock }) {
-  const { formatXAxisTick, formatYAxisValue, hiddenSeries, toggleSeries } =
-    useChartPresentation(block);
-  const { plotRef, shouldMountPlot } = useChartPlotVisibility();
-  const shouldAnimate = useRichOutputChartAnimations();
-  const data = useMemo(() => chartData(block), [block.labels, block.series]);
-  const config = useMemo(() => chartConfig(block), [block.series]);
   const legend = useMemo(
     () => (
       <ChartLegend
@@ -145,13 +138,23 @@ export const ChartBlock = memo(function ChartBlock({ block }: { block: RichOutpu
     [block, hiddenSeries, toggleSeries],
   );
 
+  return { formatXAxisTick, formatYAxisValue, hiddenSeries, legend };
+}
+
+export const ChartBlock = memo(function ChartBlock({ block }: { block: RichOutputChartBlock }) {
+  const { formatXAxisTick, formatYAxisValue, hiddenSeries, legend } = useChartPresentation(block);
+  const { plotRef, shouldMountPlot } = useChartPlotVisibility();
+  const shouldAnimate = useRichOutputChartAnimations();
+  const data = useMemo(() => chartData(block), [block.labels, block.series]);
+  const config = useMemo(() => chartConfig(block), [block.series]);
+
   return (
     <figure className="min-w-0 space-y-3" data-testid={`rich-output-chart-${block.chart_type}`}>
       <figcaption className="space-y-0.5">
         <h4 className="text-xs font-medium text-foreground">{block.title}</h4>
         <p className="text-[11px] leading-relaxed text-muted-foreground">{block.summary}</p>
       </figcaption>
-      <div ref={plotRef} className="h-52 min-h-52 w-full min-w-0 max-w-full">
+      <div ref={plotRef} data-testid="rich-output-chart-plot" className={CHART_PLOT_CLASS_NAME}>
         {shouldMountPlot && (
           <ChartContainer
             config={config}

@@ -14,6 +14,9 @@ Chat users can reference a saved prompt by its `@name`. The agent must receive
 the current saved definition, including on the first request in an eager Quick
 Chat session.
 
+Initial task prompts have the same expansion outcome when no workflow step is
+supplied. This includes prompts supplied by an agent that creates another task.
+
 The task system owns this contract because it persists each accepted message
 and sends the same message to the session agent. The UI owns mention selection
 and display, but it does not own saved-prompt authority.
@@ -60,10 +63,28 @@ the agent follows the instructions that I selected.
 - **AC-TASKS-SAVED-PROMPT-DELIVERY-001.8:** A passthrough session shall keep the
   current literal terminal behavior and shall not receive hidden prompt
   expansions.
+- **AC-TASKS-SAVED-PROMPT-DELIVERY-001.9:** When a structured session starts
+  with a known saved-prompt reference and no workflow step is supplied, the
+  agent shall receive the visible reference and one hidden saved definition.
+  This applies to new launches and the first prompt of a prepared session,
+  including task prompts supplied by another agent and Quick Chat prompts.
+- **AC-TASKS-SAVED-PROMPT-DELIVERY-001.10:** When workflow configuration is
+  unavailable and a structured launch proceeds, known saved-prompt references
+  in its prompt shall still expand.
+- **AC-TASKS-SAVED-PROMPT-DELIVERY-001.11:** When a direct message already has
+  an accepted saved definition, launch preparation without a workflow step
+  shall preserve that definition exactly once, even if the saved prompt changes.
+
+- **AC-TASKS-SAVED-PROMPT-DELIVERY-001.12:** When a structured workflow entry
+  contains known saved-prompt references, the agent shall receive their definitions in one hidden expansion block.
+  This applies to reused sessions, new profile sessions, return moves, implicit profile-switch launches, and context resets.
+- **AC-TASKS-SAVED-PROMPT-DELIVERY-001.13:** When workflow dispatch requires a replacement session or a fresh runtime, the saved-prompt expansion shall remain available.
+  The stored message and dispatched prompt shall contain the same saved definitions without duplicate expansion blocks.
+- **AC-TASKS-SAVED-PROMPT-DELIVERY-001.14:** Only callers with `org.config.manage` shall create, update, or delete shared saved prompts. Org members shall retain read and reference-use access to saved prompts.
 
 ## Out of scope
 
-- Changes to saved-prompt creation, editing, naming, or storage.
+- Changes to saved-prompt content validation, naming, or storage.
 - Changes to mention ranking, suggestion geometry, or Quick Chat layout.
 - Saved-prompt expansion for queued-message editing or queue merging.
 - Saved-prompt expansion in terminal and passthrough sessions.

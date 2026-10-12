@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Store integration coverage shares one mocked Dockview fixture. */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DockviewApi } from "dockview-react";
 
@@ -16,6 +17,11 @@ vi.mock("@/lib/local-storage", () => ({
 
 vi.mock("@/lib/layout/panel-portal-manager", () => ({
   panelPortalManager: { releaseByEnv: vi.fn(), reconcile: vi.fn() },
+}));
+
+vi.mock("@/lib/env-hidden-sessions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/env-hidden-sessions")>()),
+  getEnvHiddenSessions: vi.fn(() => []),
 }));
 
 vi.mock("./dockview-scroll-preserve", () => ({
@@ -80,10 +86,10 @@ vi.mock("./layout-manager", async (importOriginal) => {
 });
 
 import { removeEnvMaximizeState, setEnvLayout } from "@/lib/local-storage";
+import { getEnvHiddenSessions } from "@/lib/env-hidden-sessions";
 import { persistEnvLayoutNow, useDockviewStore } from "./dockview-store";
 import {
   applyLayout,
-  defaultLayout,
   fromDockviewApi,
   getPresetLayout,
   resolveNamedIntent,
@@ -179,6 +185,7 @@ describe("persistEnvLayoutNow", () => {
 // previously held isRestoringLayout=true for the whole rAF and never wrote.
 function resetStoreForIntegration() {
   vi.clearAllMocks();
+  vi.mocked(fromDockviewApi).mockReset().mockReturnValue({ columns: [] });
   useDockviewStore.setState({
     api: null,
     currentLayoutEnvId: null,
@@ -188,6 +195,7 @@ function resetStoreForIntegration() {
     pinnedWidths: new Map(),
     userDefaultLayout: null,
     userDefaultLayoutProfile: { kind: "built-in", id: "default" },
+    defaultPreset: "default",
   });
 }
 
@@ -462,95 +470,6 @@ describe("buildDefaultLayout — effective default widths", () => {
   });
 });
 
-describe("toggleRightPanels — center fallback", () => {
-  beforeEach(resetStoreForIntegration);
-
-  it("keeps a center fallback PR Details tab when hiding right panels", async () => {
-    const api = makeStoreApi();
-    vi.mocked(fromDockviewApi).mockReturnValue({
-      columns: [
-        {
-          id: "center",
-          groups: [
-            {
-              id: "group-center",
-              panels: [
-                { id: "chat", component: "chat", title: "Agent" },
-                { id: "pr-detail", component: "pr-detail", title: "PR Details" },
-              ],
-            },
-          ],
-        },
-        {
-          id: "right",
-          pinned: true,
-          groups: [
-            {
-              id: "group-right-top",
-              panels: [{ id: "files", component: "files", title: "Files" }],
-            },
-          ],
-        },
-      ],
-    });
-    useDockviewStore.setState({ api, rightPanelsVisible: true, defaultPreset: "default" });
-
-    useDockviewStore.getState().toggleRightPanels();
-
-    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
-    expect(appliedState?.columns.map((column) => column.id)).toEqual(["center"]);
-    expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
-      "chat",
-      "pr-detail",
-    ]);
-    await flushRaf();
-  });
-
-  it("keeps a center fallback PR Details tab when showing right panels", async () => {
-    const api = makeStoreApi();
-    vi.mocked(fromDockviewApi).mockReturnValue({
-      columns: [
-        {
-          id: "center",
-          groups: [
-            {
-              id: "group-center",
-              panels: [
-                { id: "chat", component: "chat", title: "Agent" },
-                { id: "pr-detail", component: "pr-detail", title: "PR Details" },
-              ],
-            },
-          ],
-        },
-      ],
-    });
-    vi.mocked(defaultLayout).mockReturnValue({
-      columns: [
-        {
-          id: "right",
-          pinned: true,
-          groups: [
-            {
-              id: "group-right-top",
-              panels: [{ id: "files", component: "files", title: "Files" }],
-            },
-          ],
-        },
-      ],
-    });
-    useDockviewStore.setState({ api, rightPanelsVisible: false, defaultPreset: "default" });
-
-    useDockviewStore.getState().toggleRightPanels();
-
-    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
-    expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
-      "chat",
-      "pr-detail",
-    ]);
-    await flushRaf();
-  });
-});
-
 describe("toggleRightPanels", () => {
   beforeEach(resetStoreForIntegration);
 
@@ -618,6 +537,54 @@ describe("applyCustomLayout — session panel normalization", () => {
       SIBLING_SESSION_PANEL_ID,
     ]);
     expect(appliedState?.columns[0]?.groups[0]?.activePanel).toBe(NEW_SESSION_PANEL_ID);
+  });
+
+  it("does not materialize a hidden sibling from a reusable custom layout", async () => {
+    const api = makeStoreApi();
+    vi.mocked(getEnvHiddenSessions).mockReturnValueOnce([SIBLING_SESSION_ID]);
+    useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
+
+    (
+      useDockviewStore.getState().applyCustomLayout as (
+        layout: ApplyCustomLayoutArg,
+        opts: { activeSessionId: string; sessionIds: string[]; envId: string },
+      ) => void
+    )(staleSessionLayout() as unknown as ApplyCustomLayoutArg, {
+      activeSessionId: NEW_SESSION_ID,
+      sessionIds: [SIBLING_SESSION_ID, NEW_SESSION_ID],
+      envId: CUSTOM_ENV_ID,
+    });
+
+    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
+    expect(appliedState?.columns[0]?.groups[0]?.panels.map((item) => item.id)).toEqual([
+      NEW_SESSION_PANEL_ID,
+    ]);
+    expect(appliedState?.columns[0]?.groups[0]?.activePanel).toBe(NEW_SESSION_PANEL_ID);
+    await flushRaf();
+  });
+
+  it("uses the visible sibling when the active session is hidden", async () => {
+    const api = makeStoreApi();
+    vi.mocked(getEnvHiddenSessions).mockReturnValueOnce([NEW_SESSION_ID]);
+    useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
+
+    (
+      useDockviewStore.getState().applyCustomLayout as (
+        layout: ApplyCustomLayoutArg,
+        opts: { activeSessionId: string; sessionIds: string[]; envId: string },
+      ) => void
+    )(staleSessionLayout() as unknown as ApplyCustomLayoutArg, {
+      activeSessionId: NEW_SESSION_ID,
+      sessionIds: [SIBLING_SESSION_ID, NEW_SESSION_ID],
+      envId: CUSTOM_ENV_ID,
+    });
+
+    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
+    expect(appliedState?.columns[0]?.groups[0]?.panels.map((item) => item.id)).toEqual([
+      SIBLING_SESSION_PANEL_ID,
+    ]);
+    expect(appliedState?.columns[0]?.groups[0]?.activePanel).toBe(SIBLING_SESSION_PANEL_ID);
+    await flushRaf();
   });
 
   it("derives right panel visibility from the materialized custom layout", async () => {
@@ -699,15 +666,110 @@ describe("applyCustomLayout — persistence at call site", () => {
     // Force the old-format path by passing a layout without `columns`, and
     // make fromJSON throw so the API may be in a partial state. Persisting
     // that partial snapshot would propagate corruption to the next load.
+    // The payload is shape-healthy so the throw, not the sanitizer, is what
+    // rejects it.
     (api.fromJSON as ReturnType<typeof vi.fn>).mockImplementation(() => {
       throw new Error("dockview fromJSON failed");
     });
     useDockviewStore.setState({ api, currentLayoutEnvId: "env-legacy" });
 
-    const legacyLayout = { id: "legacy", name: "legacy", layout: { grid: {} } };
+    const legacyLayout = {
+      id: "legacy",
+      name: "legacy",
+      layout: {
+        grid: {
+          root: {
+            type: "leaf",
+            size: 800,
+            data: { id: "g-center", views: ["chat"], activeView: "chat" },
+          },
+          width: 1600,
+          height: 800,
+        },
+        panels: { chat: { id: "chat", contentComponent: "chat" } },
+      },
+    };
     useDockviewStore.getState().applyCustomLayout(legacyLayout as unknown as ApplyCustomLayoutArg);
     await flushRaf();
 
+    expect(api.fromJSON).toHaveBeenCalled();
     expect(setEnvLayout).not.toHaveBeenCalled();
+  });
+});
+
+describe("applyCustomLayout — retired panel compatibility", () => {
+  // A literal, not a registry lookup: the retired panel has no registry entry.
+  const RETIRED_PANEL = {
+    id: "prompt-history",
+    component: "prompt-history",
+    title: "Prompt History",
+  };
+
+  beforeEach(resetStoreForIntegration);
+
+  it("drops the retired panel from a columns-format profile and applies the rest", () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
+    const layout = {
+      id: "custom-retired",
+      name: "custom",
+      layout: {
+        columns: [
+          {
+            id: "center",
+            groups: [
+              {
+                id: "group-center",
+                activePanel: "chat",
+                panels: [
+                  { id: "chat", component: "chat", title: "Agent" },
+                  { id: "todos", component: "todos", title: "Todos" },
+                  RETIRED_PANEL,
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    useDockviewStore.getState().applyCustomLayout(layout as unknown as ApplyCustomLayoutArg);
+
+    const applied = vi.mocked(applyLayout).mock.calls[0][1];
+    expect(
+      applied.columns.flatMap((column) =>
+        column.groups.flatMap((group) => group.panels.map((item) => item.id)),
+      ),
+    ).toEqual(["chat", "todos"]);
+  });
+
+  it("drops the retired panel from a legacy serialized profile before fromJSON", () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
+    const layout = {
+      id: "legacy-retired",
+      name: "legacy",
+      layout: {
+        grid: {
+          root: {
+            type: "leaf",
+            size: 800,
+            data: { id: "g-center", views: ["chat", RETIRED_PANEL.id], activeView: "chat" },
+          },
+          width: 1600,
+          height: 800,
+        },
+        panels: {
+          chat: { id: "chat", contentComponent: "chat" },
+          [RETIRED_PANEL.id]: { id: RETIRED_PANEL.id, contentComponent: RETIRED_PANEL.component },
+        },
+      },
+    };
+
+    useDockviewStore.getState().applyCustomLayout(layout as unknown as ApplyCustomLayoutArg);
+
+    const applied = (api.fromJSON as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(Object.keys(applied.panels)).toEqual(["chat"]);
+    expect(applied.grid.root.data.views).toEqual(["chat"]);
   });
 });

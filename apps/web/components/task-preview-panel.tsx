@@ -1,13 +1,26 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { IconArrowsMaximize, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { cn } from "@kandev/ui/lib/utils";
 import { useAppStore } from "@/components/state-provider";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { Task } from "./kanban-card";
 import { PreviewSessionTabs } from "./task/preview-session-tabs";
 import { TaskMoveErrorBanner } from "./task/task-move-error-banner";
-import { MinimalWorkflowStepper, type WorkflowStepperStep } from "./task/workflow-step-disclosure";
+import {
+  MinimalWorkflowStepper,
+  type DisclosureMove,
+  type WorkflowStepperStep,
+} from "./task/workflow-step-disclosure";
+import type { WorkflowStepProgress } from "@/hooks/domains/kanban/use-workflow-step-progress";
+import { TaskActionsMenuTrigger } from "./task/task-actions-menu-trigger";
+import { TaskActionsMenuDialogs } from "./task/task-actions-menu-dialogs";
+import { CopyTaskUrlButton } from "./task/copy-task-url-button";
+import { useTaskActionsMenu, type TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
+import { useTaskCRUD } from "@/hooks/use-task-crud";
 import { useTranslation } from "react-i18next";
 
 interface TaskPreviewPanelProps {
@@ -22,9 +35,92 @@ interface TaskPreviewPanelProps {
   taskWorkflowId?: string | null;
   isArchived?: boolean;
   movingToStepId?: string | null;
-  onMoveStep?: (stepId: string) => Promise<boolean>;
+  progressByStepId?: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId?: Readonly<Record<string, string>>;
+  onMoveStep?: DisclosureMove;
   onDisclosureOpenChange?: (open: boolean) => void;
   moveError?: unknown;
+  /** Lets the enclosing surface skip its own Escape-close while this menu is open. */
+  onActionsMenuOpenChange?: (open: boolean) => void;
+}
+
+function buildBoardRow(task: Task | null): TaskActionsMenuBoardRow | null {
+  if (!task) return null;
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    workflowStepId: task.workflowStepId,
+    state: task.state,
+    priority: task.priority,
+    repositoryId: task.repositoryId,
+    repositories: task.repositories,
+    parentTaskId: task.parentTaskId,
+    primaryExecutorType: task.primaryExecutorType,
+    workspaceMode: task.workspaceMode,
+  };
+}
+
+/**
+ * Menu open state lives here (not inside the Radix primitive alone) so a
+ * subject-identity change can force it closed without retargeting
+ * (AC-TASKS-TASK-ACTIONS-MENU-004.5a), and so the panel's own Escape handler
+ * can tell whether an open menu already owns the keypress
+ * (AC-TASKS-TASK-ACTIONS-MENU-001.11).
+ */
+function useActionsMenuOpenState(
+  taskId: string | null,
+  onActionsMenuOpenChange?: (open: boolean) => void,
+) {
+  const [open, setOpenState] = useState(false);
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    onActionsMenuOpenChange?.(next);
+  };
+
+  const prevTaskIdRef = useRef(taskId);
+  useEffect(() => {
+    if (prevTaskIdRef.current !== taskId) {
+      prevTaskIdRef.current = taskId;
+      setOpen(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
+
+  return { open, setOpen };
+}
+
+function usePreviewActionsMenu(
+  task: Task | null,
+  taskId: string | null,
+  taskTitle: string,
+  workspaceId: string | null,
+  onClose: () => void,
+) {
+  const taskCRUD = useTaskCRUD();
+  const boardRow = buildBoardRow(task);
+  const isArchiving = task ? taskCRUD.archivingTaskId === task.id : false;
+  const isDeleting = task ? taskCRUD.deletingTaskId === task.id : false;
+
+  const menu = useTaskActionsMenu({
+    taskId,
+    taskTitle,
+    workspaceId,
+    // The board excludes archived tasks, so the preview panel never holds one.
+    isArchived: false,
+    boardRow,
+    isArchiving,
+    isDeleting,
+    // `useTaskCRUD` only prunes `kanban.tasks`, so a task also present in
+    // `kanbanMulti.snapshots` (multi-workflow board view) would otherwise
+    // keep resolving via that snapshot until a WS lifecycle event catches
+    // up, leaving the preview open on an archived/deleted task. Close it
+    // directly on HTTP success instead of depending on cache completeness.
+    onArchive: (opts) => (task ? taskCRUD.handleArchive(task, opts).then(onClose) : undefined),
+    onDelete: (opts) => (task ? taskCRUD.handleDelete(task, opts).then(onClose) : undefined),
+  });
+
+  return { menu, boardRow, isArchiving, isDeleting };
 }
 
 interface PreviewPanelHeaderProps {
@@ -36,8 +132,14 @@ interface PreviewPanelHeaderProps {
   taskWorkflowId: string | null;
   isArchived: boolean;
   movingToStepId: string | null;
-  onMoveStep?: (stepId: string) => Promise<boolean>;
+  progressByStepId?: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId?: Readonly<Record<string, string>>;
+  onMoveStep?: DisclosureMove;
   onDisclosureOpenChange?: (open: boolean) => void;
+  menuEntries: ReturnType<typeof useTaskActionsMenu>["entries"];
+  triggerRef: ReturnType<typeof useTaskActionsMenu>["triggerRef"];
+  actionsMenuOpen: boolean;
+  setActionsMenuOpen: (open: boolean) => void;
 }
 
 function PreviewPanelHeader({
@@ -49,10 +151,17 @@ function PreviewPanelHeader({
   taskWorkflowId,
   isArchived,
   movingToStepId,
+  progressByStepId,
+  agentLabelsByProfileId,
   onMoveStep,
   onDisclosureOpenChange,
+  menuEntries,
+  triggerRef,
+  actionsMenuOpen,
+  setActionsMenuOpen,
 }: PreviewPanelHeaderProps) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   const currentIndex = workflowSteps.findIndex((step) => step.id === currentStepId);
   const handleMoveStep = task && workflowSteps.length > 0 ? onMoveStep : undefined;
   return (
@@ -72,7 +181,19 @@ function PreviewPanelHeader({
             // a <button> normally sizes to its content regardless of `display`,
             // so without an explicit width it overflows this shrink-capped
             // wrapper instead of shrinking to it (defeating truncation).
-            className="min-w-0 max-w-[50%] shrink [&>button]:w-full"
+            //
+            // The floor is an explicit pixel value, not `min-w-min`: the step
+            // name span's `white-space: nowrap` (from `truncate`) makes its
+            // own min-content size its full, unbroken text width, so
+            // `min-width: min-content` on an ancestor also picks up that
+            // full width instead of just the marker and count. These
+            // literals must match PREVIEW_HEADER_INDICATOR in
+            // lib/settings/constants.ts (Tailwind's scanner needs literal
+            // class text, not an interpolated constant).
+            className={cn(
+              "max-w-[50%] shrink [&>button]:w-full",
+              isFinePointer ? "min-w-[68px]" : "min-w-[88px]",
+            )}
           >
             <MinimalWorkflowStepper
               sortedSteps={workflowSteps}
@@ -81,6 +202,8 @@ function PreviewPanelHeader({
               workflowId={taskWorkflowId}
               isArchived={isArchived}
               movingToStepId={movingToStepId}
+              progressByStepId={progressByStepId}
+              agentLabelsByProfileId={agentLabelsByProfileId}
               onMove={handleMoveStep}
               onDisclosureOpenChange={onDisclosureOpenChange}
             />
@@ -88,6 +211,16 @@ function PreviewPanelHeader({
         )}
       </div>
       <div className="flex items-center gap-1">
+        {task && (
+          <TaskActionsMenuTrigger
+            entries={menuEntries}
+            testId="task-preview-actions-menu"
+            triggerRef={triggerRef}
+            open={actionsMenuOpen}
+            onOpenChange={setActionsMenuOpen}
+          />
+        )}
+        {task && <CopyTaskUrlButton key={task.id} taskId={task.id} />}
         {onMaximize && task && (
           <Button
             variant="ghost"
@@ -100,7 +233,7 @@ function PreviewPanelHeader({
             <span className="sr-only">{t("common:openFullPage")}</span>
           </Button>
         )}
-        <Button variant="ghost" size="icon" className="h-8 w-8 cursor-pointer" onClick={onClose}>
+        <Button variant="ghost" size="icon" className="cursor-pointer" onClick={onClose}>
           <IconX className="h-4 w-4" />
           <span className="sr-only">{t("task:closePreview")}</span>
         </Button>
@@ -121,12 +254,30 @@ export function TaskPreviewPanel({
   taskWorkflowId = null,
   isArchived = false,
   movingToStepId = null,
+  progressByStepId,
+  agentLabelsByProfileId,
   onMoveStep,
   onDisclosureOpenChange,
   moveError = null,
+  onActionsMenuOpenChange,
 }: TaskPreviewPanelProps) {
   const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const workspaceId = activeWorkspaceId ?? null;
+  const taskId = task?.id ?? null;
+  const taskTitle = task?.title ?? "";
+  const { open: actionsMenuOpen, setOpen: setActionsMenuOpen } = useActionsMenuOpenState(
+    taskId,
+    onActionsMenuOpenChange,
+  );
+  const { menu, boardRow, isArchiving, isDeleting } = usePreviewActionsMenu(
+    task,
+    taskId,
+    taskTitle,
+    workspaceId,
+    onClose,
+  );
+
   return (
     <div
       data-testid="task-preview-panel"
@@ -141,8 +292,14 @@ export function TaskPreviewPanel({
         taskWorkflowId={taskWorkflowId}
         isArchived={isArchived}
         movingToStepId={movingToStepId}
+        progressByStepId={progressByStepId}
+        agentLabelsByProfileId={agentLabelsByProfileId}
         onMoveStep={onMoveStep}
         onDisclosureOpenChange={onDisclosureOpenChange}
+        menuEntries={menu.entries}
+        triggerRef={menu.triggerRef}
+        actionsMenuOpen={actionsMenuOpen}
+        setActionsMenuOpen={setActionsMenuOpen}
       />
 
       {moveError !== null && <TaskMoveErrorBanner error={moveError} />}
@@ -153,8 +310,9 @@ export function TaskPreviewPanel({
           <PreviewSessionTabs
             taskId={task.id}
             sessionId={sessionId}
+            isArchived={isArchived}
             ensureSession={ensureSession}
-            workspaceId={activeWorkspaceId ?? null}
+            workspaceId={workspaceId}
             onSessionChange={onSessionChange}
           />
         ) : (
@@ -163,6 +321,15 @@ export function TaskPreviewPanel({
           </div>
         )}
       </div>
+      <TaskActionsMenuDialogs
+        taskId={taskId}
+        taskTitle={taskTitle}
+        workspaceId={workspaceId}
+        boardRow={boardRow}
+        isArchiving={isArchiving}
+        isDeleting={isDeleting}
+        menu={menu}
+      />
     </div>
   );
 }

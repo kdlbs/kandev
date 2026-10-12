@@ -10,13 +10,8 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
-// A panicking dispatch does not take the process down. Routes R2-R5 never
-// reach the event bus's own recover-and-log wrapper, and this dispatch now
-// runs synchronously (after the session guard is released, not on a
-// goroutine of its own), so nothing above it on the call stack recovers a
-// panicking callback unless dispatchKanbanAgentErrorTriggerRecovered does.
-// The panic is injected through a registered callback's Execute, the only
-// available seam — not a stub engine.
+// A panicking callback is recovered by the asynchronous recovery worker.
+// Inject through the registered callback to exercise the real dispatch boundary.
 func TestDispatchKanbanAgentErrorTrigger_RecoversFromPanickingCallback(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -48,6 +43,7 @@ func TestDispatchKanbanAgentErrorTrigger_RecoversFromPanickingCallback(t *testin
 		t.Fatal("handleAgentFailed did not return after a panicking callback: the panic escaped recovery")
 	}
 
+	waitForFailureRecovery(t, svc)
 	errs := filterLogs(logs, msgAgentErrorDispatchPanicked)
 	if len(errs) != 1 {
 		t.Fatalf("got %d %q ERROR record(s), want 1 (all: %+v)", len(errs), msgAgentErrorDispatchPanicked, logs.All())

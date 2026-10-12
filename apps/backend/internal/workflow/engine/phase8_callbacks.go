@@ -34,11 +34,12 @@ func (c CreateChildTaskCallback) Execute(ctx context.Context, in ActionInput) (A
 		return ActionResult{}, fmt.Errorf("create_child_task: title is required")
 	}
 	spec := ChildTaskSpec{
-		Title:          cfg.Title,
-		Description:    cfg.Description,
-		WorkflowID:     cfg.WorkflowID,
-		StepID:         cfg.StepID,
-		AgentProfileID: cfg.AgentProfileID,
+		Title:                 cfg.Title,
+		Description:           cfg.Description,
+		WorkflowID:            cfg.WorkflowID,
+		StepID:                cfg.StepID,
+		AgentProfileID:        cfg.AgentProfileID,
+		CausingAgentProfileID: in.State.AgentProfileID,
 	}
 	// The new child task's genesis ledger row must attribute the trigger's
 	// session when one exists — create_child_task typically fires from a

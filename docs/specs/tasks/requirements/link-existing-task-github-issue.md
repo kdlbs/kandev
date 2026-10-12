@@ -21,6 +21,44 @@ This document is the migrated task-system source for the capability. The source 
 
 - **AC-TASKS-LINK-EXISTING-TASK-GITHUB-ISSUE-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
 
+The following criteria make the existing GitHub issue-only preservation scenarios
+explicit. They do not change ordinary metadata replacement or issue-watch intake.
+
+- **AC-TASKS-LINK-EXISTING-TASK-GITHUB-ISSUE-001.2:** A successful GitHub issue link,
+  relink, or unlink shall preserve current unrelated task metadata and omitted task
+  fields when another accepted ordinary metadata merge, scalar edit, title edit, or
+  participating server-owned metadata write overlaps it, including independent
+  service instances and database connections. Disjoint intents shall survive either
+  commit order. Ordinary metadata replacement and intentional full-snapshot writes
+  retain their own directional exclusions under the
+  [task field update contract](task-field-updates.md).
+- **AC-TASKS-LINK-EXISTING-TASK-GITHUB-ISSUE-001.3:** Link or relink shall install
+  `issue_url`, `issue_number`, `issue_owner`, `issue_repo`, and `github_issue_linked`
+  together for the selected issue. Explicit unlink shall remove all five keys,
+  including links using the legacy issue-watch repository shape, while retaining
+  unrelated watch data. Competing issue-only operations shall leave the whole link
+  selected by the later successful commit, or no link after a later unlink; they
+  shall never leave keys from different issue intents mixed together.
+- **AC-TASKS-LINK-EXISTING-TASK-GITHUB-ISSUE-001.4:** An issue-only mutation shall
+  preserve current unrelated values, including large numbers, explicit null,
+  nested values, generated-title ownership, server-owned lifecycle and handoff
+  records, and materialized workspace identity. It shall not change sessions,
+  associations, task state or workflow placement, or manufacture workflow entry,
+  transition, runner, or launch effects. The existing scalar and ordinary metadata
+  value contracts remain unchanged.
+- **AC-TASKS-LINK-EXISTING-TASK-GITHUB-ISSUE-001.5:** Existing task/workspace access,
+  provider credentials, repository validation, issue-fetch failures, cancellation
+  boundaries, and typed missing-task errors shall retain their behavior. A failed
+  issue mutation shall leave its row and timestamp unchanged and emit no success
+  evidence. Successful mutations shall use normal `task.updated` publication and
+  existing response/event observation semantics, which may observe a later commit
+  and provide no new revision, total event order, or exact mutation receipt.
+
+## Design and delivery references
+
+- [GitHub issue mutation design](../system-design/link-existing-task-github-issue.md)
+- [Metadata preservation delivery plan](../../../plans/preserve-github-issue-metadata/plan.md)
+
 ## Migrated source detail
 
 ## Why

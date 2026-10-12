@@ -20,7 +20,7 @@ test.describe("Mobile task creation from hidden workflow context", () => {
     });
 
     await testPage.goto(`/t/${sourceTask.id}`);
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const taskDrawer = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(taskDrawer).toBeVisible();
     await taskDrawer.getByRole("button", { name: "New", exact: true }).tap();

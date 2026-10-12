@@ -89,26 +89,28 @@ test.describe("Mobile archive task redirect", () => {
     });
     const documentRequestsBeforeArchive = documentRequests.length;
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const parentRow = drawer.getByTestId("sidebar-task-item").filter({ hasText: parentTitle });
     await expect(parentRow).toBeVisible({ timeout: 15_000 });
     await parentRow.getByRole("button", { name: "Task actions" }).tap();
     await testPage.getByRole("menuitem", { name: "Archive", exact: true }).tap();
 
-    const archiveDialog = testPage.getByRole("alertdialog");
+    const archiveDialog = testPage.getByRole("dialog", { name: "Archive task?", exact: true });
     await expect(archiveDialog).toBeVisible();
     await archiveDialog.getByTestId("archive-cascade-checkbox").tap();
     await archiveDialog.getByRole("button", { name: "Archive", exact: true }).tap();
 
-    await expect(testPage).toHaveURL(new RegExp(`/t/${unrelated.id}$`), { timeout: 20_000 });
+    await expect
+      .poll(() => new URL(testPage.url()).pathname, { timeout: 20_000 })
+      .toBe(`/t/${unrelated.id}`);
     await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
     await expect(session.chat.getByText("mobile cascade unrelated response").last()).toBeVisible({
       timeout: 30_000,
     });
     expect(documentRequests).toHaveLength(documentRequestsBeforeArchive);
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const postArchiveDrawer = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(
       postArchiveDrawer.getByTestId("sidebar-task-item").filter({ hasText: parentTitle }),
@@ -122,7 +124,9 @@ test.describe("Mobile archive task redirect", () => {
 
     await postArchiveDrawer.getByTestId("sidebar-task-item").filter({ hasText: laterTitle }).tap();
     await expect(postArchiveDrawer).toBeHidden();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${later.id}$`), { timeout: 20_000 });
+    await expect
+      .poll(() => new URL(testPage.url()).pathname, { timeout: 20_000 })
+      .toBe(`/t/${later.id}`);
     await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
     await expect(session.chat.getByText("mobile cascade later response").last()).toBeVisible({
       timeout: 30_000,

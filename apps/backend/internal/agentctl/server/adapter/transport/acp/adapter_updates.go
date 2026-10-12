@@ -3,15 +3,27 @@ package acp
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
 
-const acpUserRole = "user"
+const (
+	acpUserRole                         = "user"
+	availableCommandKindSkill           = "skill"
+	codexPlanCommandName                = "plan"
+	codexSetConfigOptionActionKind      = "setConfigOption"
+	codexCollaborationModeConfigID      = "collaboration_mode"
+	codexPlanModeValue                  = "plan"
+	codexDefaultModeValue               = "default"
+	codexPlanModePresentation           = "state"
+	normalizedSetConfigOptionActionKind = "set_config_option"
+)
 
 // notifWork is the item type carried on notifQueue. notif is populated for a
 // real SDK notification (the common case); sync identifies a barrier and may
@@ -163,6 +175,9 @@ func (a *Adapter) handleACPUpdate(
 		}
 	}
 
+	a.observeContinuationSafety(n, promptGeneration)
+	a.observeCapacityContinuation(n, promptGeneration)
+
 	// Marshal once for both debug logging and tracing.
 	rawData, _ := json.Marshal(n)
 	if len(rawData) > 0 {
@@ -176,6 +191,29 @@ func (a *Adapter) handleACPUpdate(
 	var event, leadingEvent *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
+		if a.observesResponseAttemptReset(promptGeneration, event) {
+			leadingEvent = &AgentEvent{
+				Type:             streams.EventTypeResponseAttemptReset,
+				SessionID:        sessionID,
+				PromptGeneration: promptGeneration,
+			}
+		}
+		if event != nil && event.Type == streams.EventTypeSessionModels && n.Update.ConfigOptionUpdate != nil {
+			if _, hasModeOption := modeConfigOption(event.ConfigOptions); hasModeOption {
+				a.mu.RLock()
+				availableModes := append([]streams.SessionModeInfo(nil), a.availableModes...)
+				activeSession := a.sessionID == sessionID && !a.closed
+				a.mu.RUnlock()
+				if activeSession {
+					leadingEvent = &AgentEvent{
+						Type:           streams.EventTypeSessionMode,
+						SessionID:      sessionID,
+						CurrentModeID:  currentModeFromConfig(event.ConfigOptions),
+						AvailableModes: availableModes,
+					}
+				}
+			}
+		}
 		if event != nil && (a.observeCodexProviderEvidence(promptGeneration, event) ||
 			a.observeCursorRetriableEvidence(promptGeneration, event)) {
 			// Suppress provider control/evidence chunks. The adapter emits one
@@ -204,6 +242,7 @@ func (a *Adapter) handleACPUpdate(
 			}
 		}
 	}
+	a.stampSessionSettingsReports(sessionID, leadingEvent, event)
 	if leadingEvent != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, leadingEvent)
 		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
@@ -239,6 +278,40 @@ func (a *Adapter) handleACPUpdate(
 	}
 }
 
+func (a *Adapter) stampSessionSettingsReports(sessionID string, events ...*AgentEvent) {
+	needsStamp := false
+	for _, event := range events {
+		if event != nil && (event.Type == streams.EventTypeSessionMode || event.Type == streams.EventTypeSessionModels) {
+			needsStamp = true
+			break
+		}
+	}
+	if !needsStamp {
+		return
+	}
+	a.mu.Lock()
+	if a.sessionID == sessionID && !a.closed {
+		a.sessionSettingsGeneration++
+		for _, event := range events {
+			if event == nil || (event.Type != streams.EventTypeSessionMode && event.Type != streams.EventTypeSessionModels) {
+				continue
+			}
+			event.SessionSettingsPolicy = providerRestoredPolicy(a.sessionSettingsPolicy)
+			event.SessionSettingsGeneration = a.sessionSettingsGeneration
+		}
+	}
+	a.mu.Unlock()
+}
+
+func (a *Adapter) observesResponseAttemptReset(promptGeneration uint64, event *AgentEvent) bool {
+	if event == nil || event.Type != streams.EventTypeSessionInfo || promptGeneration == 0 ||
+		!a.dialect.resetsResponseAttempt(event.SessionMeta) {
+		return false
+	}
+	turn := a.currentPromptTurn()
+	return turn != nil && turn.promptGeneration == promptGeneration
+}
+
 func (a *Adapter) observeCursorRetriableEvidence(promptGeneration uint64, event *AgentEvent) bool {
 	if a.agentID != acpcompat.CursorAgentID || event == nil || promptGeneration == 0 {
 		return false
@@ -249,7 +322,12 @@ func (a *Adapter) observeCursorRetriableEvidence(promptGeneration uint64, event 
 	}
 	if event.Type == streams.EventTypeMessageChunk && event.Role != acpUserRole &&
 		isCursorRetriableStreamReset(event.Text) {
-		turn.setCursorRetriable()
+		sanitized := streams.SanitizeProviderMessage(event.Text)
+		if sanitized == "" {
+			sanitized = "Error: RetriableError: Provider error"
+		}
+		complete := streams.IsCompleteProviderDiagnostic(event.Text)
+		turn.setCursorRetriable(sanitized, complete)
 		return true
 	}
 	if cursorProviderProgress(event) {
@@ -279,6 +357,27 @@ func (a *Adapter) observeCodexProviderEvidence(promptGeneration uint64, event *A
 	if turn == nil || turn.promptGeneration != promptGeneration {
 		return false
 	}
+	if event.Type == streams.EventTypeMessageChunk && event.ProviderDiagnosticCandidate {
+		classified := routingerr.Classify(routingerr.Input{
+			Phase:      routingerr.PhasePromptSend,
+			ProviderID: codexAgentID,
+			Stderr:     event.Text,
+		})
+		if classified.Code == routingerr.CodeQuotaLimited &&
+			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed {
+			message := streams.SanitizeProviderMessage(event.Text)
+			if message != "" {
+				providerError := streams.ProviderError{
+					Source:     streams.ProviderErrorSourceCodexACP,
+					ProviderID: codexAgentID,
+					Message:    message,
+					OccurredAt: time.Now().UTC(),
+					ResetAt:    classified.ResetHint,
+				}
+				turn.observeCodexUsageLimit(providerError)
+			}
+		}
+	}
 	systemError := event.Type == streams.EventTypeSessionInfo && codexSystemErrorMeta(event.SessionMeta)
 	capacity := event.Type == streams.EventTypeMessageChunk && codexModelCapacityMessage(event.Text)
 	if !systemError && !capacity {
@@ -289,10 +388,20 @@ func (a *Adapter) observeCodexProviderEvidence(promptGeneration uint64, event *A
 	return capacity && (systemError || wasSystemError)
 }
 
-// emitDialectContextWindow derives and enqueues an agent-specific context
-// sample while holding the same lock that protects the active session/model.
-// This keeps a model switch from interleaving between size selection and event
-// delivery.
+// emitDialectContextWindow derives an agent-specific context sample while
+// holding the same lock that protects the active session/model -- this keeps
+// a model switch from interleaving between size selection and event
+// delivery -- then delivers it after releasing that lock.
+//
+// This is a COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): delivery uses the
+// existing sendUpdate helper, which blocks rather than drops when updatesCh is
+// full and is cancelable via lifetimeCtx/closedCh on adapter shutdown -- it
+// was already built for exactly this purpose (see its doc comment) and is
+// already used by sibling sites in this package (e.g. SetMode), so no new
+// primitive is needed here. sendUpdate must not be called while a.mu is held:
+// Close() acquires a.mu as its first act before cancelling lifetimeCtx, so
+// parking under the lock (the old sendUpdateLocked behavior this replaces)
+// would deadlock Close against this very send.
 func (a *Adapter) emitDialectContextWindow(sessionID string, meta map[string]any) *AgentEvent {
 	a.mu.Lock()
 	if a.closed || sessionID != a.sessionID {
@@ -313,15 +422,9 @@ func (a *Adapter) emitDialectContextWindow(sessionID string, meta map[string]any
 		ContextWindowRemaining: remaining,
 		ContextEfficiency:      float64(sample.used) / float64(sample.size) * 100,
 	}
-	sent := a.sendUpdateLocked(event)
-	if sent {
-		a.contextSamples[sessionID] = sample
-	}
+	a.contextSamples[sessionID] = sample
 	a.mu.Unlock()
-	if !sent {
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
-		return nil
-	}
+	a.sendUpdate(event)
 	return &event
 }
 
@@ -382,6 +485,9 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		return a.convertAvailableCommands(sessionID, u.AvailableCommandsUpdate)
 
 	case u.CurrentModeUpdate != nil:
+		if !a.noteCurrentMode(sessionID, string(u.CurrentModeUpdate.CurrentModeId)) {
+			return nil
+		}
 		return &AgentEvent{
 			Type:          streams.EventTypeSessionMode,
 			SessionID:     sessionID,
@@ -396,9 +502,19 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			// session/new. Include the cached available models so the event
 			// doesn't overwrite the model list set during session init.
 			a.mu.Lock()
+			if a.sessionID != sessionID || a.closed {
+				a.mu.Unlock()
+				return nil
+			}
 			cachedModels := a.availableModels
 			a.availableConfigOptions = configOptions
+			if modes, found := sessionModesFromConfig(configOptions); found {
+				a.availableModes = modes
+			}
 			a.mu.Unlock()
+			if currentMode := currentModeFromConfig(configOptions); currentMode != "" {
+				a.noteCurrentMode(sessionID, currentMode)
+			}
 			return &AgentEvent{
 				Type:           streams.EventTypeSessionModels,
 				SessionID:      sessionID,
@@ -633,6 +749,13 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 			}
 		}
 		event.Text = text
+		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: text})
+		// Only an assistant chunk may carry the diagnostic-candidate marker: the
+		// downstream clearing rule only reads an unmarked assistant/thought
+		// chunk, so a marked user chunk would never be cleared by the ordinary-
+		// output path.
+		event.ProviderDiagnosticCandidate = role == "assistant" &&
+			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
 		return event
 	}
 
@@ -693,6 +816,7 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 			Name:        cmd.Name,
 			Description: acpcompat.NormalizeCommandDescription(a.agentID, cmd.Description),
 		}
+		ac.Kind, ac.Action = normalizeAvailableCommandMetadata(a.agentID, cmd)
 		if cmd.Input != nil && cmd.Input.Unstructured != nil {
 			ac.InputHint = cmd.Input.Unstructured.Hint
 		}
@@ -703,4 +827,37 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 		SessionID:         sessionID,
 		AvailableCommands: commands,
 	}
+}
+
+func normalizeAvailableCommandMetadata(agentID string, cmd acp.AvailableCommand) (string, *streams.AvailableCommandAction) {
+	if agentID != codexAgentID {
+		return "", nil
+	}
+	if strings.HasPrefix(cmd.Name, "$") && len(cmd.Name) > 1 {
+		return availableCommandKindSkill, nil
+	}
+	if cmd.Name != codexPlanCommandName {
+		return "", nil
+	}
+	metadata, ok := cmd.Meta["commandAction"].(map[string]any)
+	if !ok {
+		return "", nil
+	}
+	if !isCodexPlanCommandAction(metadata) {
+		return "", nil
+	}
+	return "", &streams.AvailableCommandAction{
+		Kind:       normalizedSetConfigOptionActionKind,
+		ConfigID:   codexCollaborationModeConfigID,
+		Value:      codexPlanModeValue,
+		ResetValue: codexDefaultModeValue,
+	}
+}
+
+func isCodexPlanCommandAction(metadata map[string]any) bool {
+	return metadata["kind"] == codexSetConfigOptionActionKind &&
+		metadata["configId"] == codexCollaborationModeConfigID &&
+		metadata["value"] == codexPlanModeValue &&
+		metadata["resetValue"] == codexDefaultModeValue &&
+		metadata["presentation"] == codexPlanModePresentation
 }

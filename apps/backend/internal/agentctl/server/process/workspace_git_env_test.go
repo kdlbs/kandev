@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 func TestManagerTrackerGitEnvironmentUsesInstanceEnvironment(t *testing.T) {
@@ -44,8 +46,10 @@ func TestManagerTrackerGitEnvironmentUsesInstanceEnvironment(t *testing.T) {
 		"GIT_CONFIG_VALUE_0":             "Authorization: Bearer instance-token",
 		"GIT_TERMINAL_PROMPT":            "0",
 		"GCM_INTERACTIVE":                "Never",
-		"GIT_ASKPASS":                    "echo",
-		"SSH_ASKPASS":                    "/bin/false",
+		"GCM_GUI_PROMPT":                 "0",
+		"GIT_ASKPASS":                    "exit 1",
+		"SSH_ASKPASS":                    "exit 1",
+		"SSH_ASKPASS_REQUIRE":            "never",
 		"GIT_SSH_COMMAND":                "ssh -oBatchMode=yes",
 	}
 	for key, wantValue := range want {
@@ -58,6 +62,55 @@ func TestManagerTrackerGitEnvironmentUsesInstanceEnvironment(t *testing.T) {
 	}
 	if env["GIT_SSH_COMMAND"] == "ambient-ssh" {
 		t.Fatal("ambient SSH command unexpectedly reached tracker")
+	}
+}
+
+func TestManagerHostGHBridgeGitEnvironment(t *testing.T) {
+	ghPath := filepath.Join(t.TempDir(), "host tools", "gh")
+	if err := os.MkdirAll(filepath.Dir(ghPath), 0o700); err != nil {
+		t.Fatalf("create fake gh directory: %v", err)
+	}
+	const ghScript = `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "git-credential" ]; then
+  cat >/dev/null
+  printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"
+  exit 0
+fi
+exit 2
+`
+	if err := os.WriteFile(ghPath, []byte(ghScript), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	instanceEnv := []string{
+		"GH_TOKEN=late-profile-token",
+		"HOME=" + filepath.Join(t.TempDir(), "home"),
+		"PATH=/usr/bin:/bin",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_COUNT=3",
+		"GIT_CONFIG_KEY_0=notes.augment.mergeStrategy",
+		"GIT_CONFIG_VALUE_0=union",
+		"GIT_CONFIG_KEY_1=core.hooksPath",
+		"GIT_CONFIG_VALUE_1=/Users/cfl12/.locstat/git/hooks",
+		"GIT_CONFIG_KEY_2=credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_2=!" + "'" + ghPath + "' auth git-credential",
+	}
+	mgr := NewManager(&config.InstanceConfig{WorkDir: t.TempDir(), AgentEnv: instanceEnv}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+
+	cmd := mgr.GetWorkspaceTracker().gitCommand(context.Background(), false, "credential", "fill")
+	env := environmentMap(cmd.Env)
+	if env["GIT_CONFIG_COUNT"] != "3" || env["GIT_CONFIG_KEY_0"] != "notes.augment.mergeStrategy" ||
+		env["GIT_CONFIG_VALUE_0"] != "union" || env["GIT_CONFIG_KEY_1"] != "core.hooksPath" ||
+		env["GIT_CONFIG_VALUE_1"] != "/Users/cfl12/.locstat/git/hooks" {
+		t.Fatalf("tracker Git environment changed inherited entries: %#v", env)
+	}
+	cmd.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=acme/widgets\n\n")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("tracker git credential fill failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "password=late-profile-token") {
+		t.Fatalf("credential output = %q, want late profile token", output)
 	}
 }
 
@@ -84,14 +137,14 @@ func TestForceGitSSHBatchModeSupportsDirectOpenSSHOnly(t *testing.T) {
 	tests := map[string]string{
 		"ssh -i /instance/key -oBatchMode=no": "ssh -oBatchMode=yes -i /instance/key -oBatchMode=no",
 		`'path with spaces/ssh' -i key`:       `'path with spaces/ssh' -oBatchMode=yes -i key`,
-		`env FOO=bar ssh -i key`:              defaultGitSSHCommand,
-		`FOO=bar ssh -i key`:                  defaultGitSSHCommand,
-		`exec ssh -i key`:                     defaultGitSSHCommand,
-		`plink -i key`:                        defaultGitSSHCommand,
+		`env FOO=bar ssh -i key`:              "ssh -oBatchMode=yes",
+		`FOO=bar ssh -i key`:                  "ssh -oBatchMode=yes",
+		`exec ssh -i key`:                     "ssh -oBatchMode=yes",
+		`plink -i key`:                        "ssh -oBatchMode=yes",
 	}
 	for command, want := range tests {
-		if got := forceGitSSHBatchMode(command); got != want {
-			t.Errorf("forceGitSSHBatchMode(%q) = %q, want %q", command, got, want)
+		if got := subproc.ForceGitSSHBatchMode(command); got != want {
+			t.Errorf("ForceGitSSHBatchMode(%q) = %q, want %q", command, got, want)
 		}
 	}
 }

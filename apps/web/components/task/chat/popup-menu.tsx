@@ -1,54 +1,9 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
-
-const MENU_HEIGHT = 280;
-const MENU_WIDTH = 420;
-const MENU_HEADER_HEIGHT = 32;
-
-type PopupViewport = {
-  offsetLeft: number;
-  offsetTop: number;
-  width: number;
-  height: number;
-};
-
-export function computePopupMenuStyle(args: {
-  position: { x: number; y: number };
-  placement: "above" | "below";
-  viewport: PopupViewport;
-}): React.CSSProperties {
-  const margin = 8;
-  const viewportRight = args.viewport.offsetLeft + args.viewport.width;
-  const viewportBottom = args.viewport.offsetTop + args.viewport.height;
-  const width = Math.max(0, Math.min(MENU_WIDTH, args.viewport.width - margin * 2));
-  const minLeft = args.viewport.offsetLeft + margin;
-  const maxLeft = Math.max(minLeft, viewportRight - width - margin);
-  const left = Math.min(Math.max(minLeft, args.position.x), maxLeft);
-  const minVerticalEdge = args.viewport.offsetTop + margin;
-  const maxVerticalEdge = Math.max(minVerticalEdge, viewportBottom - margin);
-  const requestedVerticalEdge =
-    args.placement === "above" ? args.position.y - margin : args.position.y + margin;
-  const verticalEdge = Math.min(Math.max(minVerticalEdge, requestedVerticalEdge), maxVerticalEdge);
-  const availableHeight =
-    args.placement === "above"
-      ? Math.max(0, verticalEdge - args.viewport.offsetTop - margin)
-      : Math.max(0, viewportBottom - verticalEdge - margin);
-  const maxHeight = Math.min(MENU_HEIGHT, availableHeight);
-  return {
-    position: "fixed",
-    left,
-    top: verticalEdge,
-    width,
-    maxWidth: width,
-    maxHeight,
-    zIndex: 60,
-    pointerEvents: "auto",
-    transform: args.placement === "above" ? "translateY(-100%)" : undefined,
-  };
-}
+import { POPUP_MENU_SIZE, positionPopupMenu } from "./popup-menu-position";
 
 export type PopupMenuProps = {
   isOpen: boolean;
@@ -80,7 +35,7 @@ export function PopupMenu({
 }: PopupMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  const [, setViewportRevision] = useState(0);
+  const hasAnchor = isOpen && Boolean(position || clientRectFn?.());
 
   // Close on click outside
   useEffect(() => {
@@ -96,31 +51,18 @@ export function PopupMenu({
     return () => document.removeEventListener("pointerdown", handlePointerOutside);
   }, [isOpen, onClose]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const update = () => setViewportRevision((revision) => revision + 1);
-    const viewport = window.visualViewport;
-    window.addEventListener("resize", update);
-    viewport?.addEventListener("resize", update);
-    viewport?.addEventListener("scroll", update);
-    return () => {
-      window.removeEventListener("resize", update);
-      viewport?.removeEventListener("resize", update);
-      viewport?.removeEventListener("scroll", update);
-    };
-  }, [isOpen]);
+  // A virtual caret can move between result renders without an element resize.
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!hasAnchor || !menu) return;
+    return positionPopupMenu(
+      menu,
+      () => (position ? new DOMRect(position.x, position.y) : (clientRectFn?.() ?? null)),
+      placement,
+    );
+  }, [hasAnchor, position, clientRectFn, placement, children, hasItems, emptyState]);
 
-  // Resolve position from clientRect function or direct position
-  const resolvedPosition = (() => {
-    if (position) return position;
-    if (clientRectFn) {
-      const rect = clientRectFn();
-      if (rect) return { x: rect.left, y: placement === "below" ? rect.bottom : rect.top };
-    }
-    return null;
-  })();
-
-  if (!isOpen || !resolvedPosition) {
+  if (!hasAnchor) {
     return null;
   }
 
@@ -129,33 +71,21 @@ export function PopupMenu({
   // pointer-events: auto restores click-handling on the popup itself when
   // Radix Dialog has set pointer-events: none on <body> for modal isolation;
   // without this, the popup is visible but unclickable inside a dialog.
-  const visualViewport = window.visualViewport;
-  const menuStyle = computePopupMenuStyle({
-    position: resolvedPosition,
-    placement,
-    viewport: visualViewport
-      ? {
-          offsetLeft: visualViewport.offsetLeft,
-          offsetTop: visualViewport.offsetTop,
-          width: visualViewport.width,
-          height: visualViewport.height,
-        }
-      : { offsetLeft: 0, offsetTop: 0, width: window.innerWidth, height: window.innerHeight },
-  });
-  const contentMaxHeight =
-    typeof menuStyle.maxHeight === "number"
-      ? Math.max(0, menuStyle.maxHeight - MENU_HEADER_HEIGHT)
-      : MENU_HEIGHT - MENU_HEADER_HEIGHT;
-
   const menu = (
     <div
       ref={menuRef}
       data-testid={testId}
-      style={menuStyle}
-      className="overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10"
+      style={{
+        ...POPUP_MENU_SIZE,
+        position: "fixed",
+        visibility: "hidden",
+        zIndex: 60,
+        pointerEvents: "auto",
+      }}
+      className="flex flex-col overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10"
     >
       {/* Header */}
-      <div className="border-b border-border/50 px-2 py-1.5">
+      <div className="shrink-0 border-b border-border/50 px-2 py-1.5">
         <span id={titleId} className="text-xs font-medium text-muted-foreground">
           {title}
         </span>
@@ -165,8 +95,7 @@ export function PopupMenu({
       <div
         role="listbox"
         aria-labelledby={titleId}
-        className="overflow-y-auto py-1 scrollbar-thin"
-        style={{ maxHeight: contentMaxHeight }}
+        className="min-h-0 overflow-y-auto py-1 scrollbar-thin"
       >
         {hasItems ? children : emptyState}
       </div>
@@ -182,6 +111,9 @@ export type PopupMenuItemProps = {
   icon: ReactNode;
   label: string;
   description?: string;
+  badges?: ReactNode;
+  hint?: string;
+  accessibleLabel?: string;
   isSelected: boolean;
   onClick: () => void;
   onMouseEnter: () => void;
@@ -192,6 +124,9 @@ export function PopupMenuItem({
   icon,
   label,
   description,
+  badges,
+  hint,
+  accessibleLabel,
   isSelected,
   onClick,
   onMouseEnter,
@@ -203,6 +138,7 @@ export function PopupMenuItem({
       type="button"
       role="option"
       aria-selected={isSelected}
+      aria-label={accessibleLabel}
       className={cn(
         "mx-1 flex min-h-11 w-full cursor-pointer select-none items-center gap-3 rounded-[6px] px-2 py-1.5 text-left text-xs",
         "hover:bg-muted/50",
@@ -216,11 +152,19 @@ export function PopupMenuItem({
       <div className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground">
         {icon}
       </div>
-      <div className="flex min-w-0 flex-1 items-baseline gap-2">
-        <span className="max-w-[45%] shrink-0 truncate font-medium">{label}</span>
-        {description && (
-          <span className="min-w-0 truncate whitespace-nowrap text-[11px] text-muted-foreground">
-            {description}
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="max-w-[45%] shrink-0 truncate font-medium">{label}</span>
+          {badges}
+          {description && (
+            <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[11px] text-muted-foreground">
+              {description}
+            </span>
+          )}
+        </div>
+        {hint && (
+          <span className="min-w-0 truncate text-[10px] leading-tight text-muted-foreground">
+            {hint}
           </span>
         )}
       </div>

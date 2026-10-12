@@ -199,30 +199,23 @@ func TestTaskReviewFinding_UpdateStatus(t *testing.T) {
 		t.Fatalf("CreateTaskReviewFindings: %v", err)
 	}
 
-	now := f.CreatedAt
-	if err := repo.UpdateTaskReviewFindingStatus(ctx, f.ID, models.ReviewFindingResolved, &now); err != nil {
-		t.Fatalf("UpdateTaskReviewFindingStatus: %v", err)
-	}
-	got, err := repo.GetTaskReviewFinding(ctx, f.ID)
+	got, err := repo.TransitionTaskReviewFindingStatus(ctx, f.ID, models.ReviewFindingResolved)
 	if err != nil {
-		t.Fatalf("GetTaskReviewFinding: %v", err)
+		t.Fatalf("TransitionTaskReviewFindingStatus: %v", err)
 	}
 	if got.Status != models.ReviewFindingResolved || got.ResolvedAt == nil {
 		t.Fatalf("expected resolved with resolved_at, got %+v", got)
 	}
 
-	if err := repo.UpdateTaskReviewFindingStatus(ctx, f.ID, models.ReviewFindingOpen, nil); err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	got, err = repo.GetTaskReviewFinding(ctx, f.ID)
+	got, err = repo.TransitionTaskReviewFindingStatus(ctx, f.ID, models.ReviewFindingOpen)
 	if err != nil {
-		t.Fatalf("GetTaskReviewFinding after reopen: %v", err)
+		t.Fatalf("reopen: %v", err)
 	}
 	if got.Status != models.ReviewFindingOpen || got.ResolvedAt != nil {
 		t.Fatalf("expected reopen to clear resolved_at, got %+v", got)
 	}
 
-	err = repo.UpdateTaskReviewFindingStatus(ctx, "missing", models.ReviewFindingOpen, nil)
+	_, err = repo.TransitionTaskReviewFindingStatus(ctx, "missing", models.ReviewFindingOpen)
 	if !errors.Is(err, models.ErrTaskReviewFindingNotFound) {
 		t.Fatalf("expected ErrTaskReviewFindingNotFound, got %v", err)
 	}

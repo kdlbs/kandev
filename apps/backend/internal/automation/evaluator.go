@@ -162,7 +162,7 @@ func (e *GitHubEvaluator) firePRTrigger(ctx context.Context, t *AutomationTrigge
 		"state":                  pr.State,
 	})
 
-	if _, err := e.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPR, data, dedupKey); err != nil {
+	if _, err := e.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPR, data, DedupKey(dedupKey)); err != nil {
 		e.logger.Error("failed to fire PR trigger",
 			zap.String("trigger_id", t.ID), zap.Error(err))
 	}

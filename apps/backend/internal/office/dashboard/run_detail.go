@@ -29,6 +29,14 @@ type RunDetailRepo interface {
 	ListRouteAttempts(ctx context.Context, runID string) ([]models.RouteAttempt, error)
 }
 
+type runSessionReader interface {
+	GetRunSession(ctx context.Context, id string) (*models.RunSession, error)
+}
+
+type runSessionHistoryReader interface {
+	ListRunSessions(ctx context.Context, runID string) ([]models.RunSession, error)
+}
+
 // ErrRunNotFound is returned when GetRunDetail can't find the run id.
 var ErrRunNotFound = errors.New("run not found")
 
@@ -140,7 +148,11 @@ func sessionIDFromPayload(payload string) string {
 
 // buildRunSummaryDTO converts a Run row into the list-summary DTO.
 func buildRunSummaryDTO(run *models.Run) AgentRunSummaryDTO {
-	commentID, routineID := runLinkIDsFromPayload(run.Payload)
+	commentID, payloadRoutineID := runLinkIDsFromPayload(run.Payload)
+	routineID := run.RoutineID
+	if routineID == "" {
+		routineID = payloadRoutineID
+	}
 	dto := AgentRunSummaryDTO{
 		ID:           run.ID,
 		IDShort:      shortID(run.ID),
@@ -251,8 +263,9 @@ func GetRunDetail(
 		}
 	}
 
-	invocation := buildInvocation(ctx, repo, run)
-	sessionDTO := RunSessionDTO{SessionID: sessionIDFromPayload(run.Payload)}
+	invocation, agentName := buildInvocation(ctx, repo, run)
+	_, sessionID := currentRunSession(ctx, repo, run)
+	sessionDTO := RunSessionDTO{SessionID: sessionID}
 	runtimeDTO, err := buildRuntimeDTO(ctx, repo, run)
 	if err != nil {
 		return nil, err
@@ -262,6 +275,7 @@ func GetRunDetail(
 		ID:           run.ID,
 		IDShort:      shortID(run.ID),
 		AgentID:      run.AgentProfileID,
+		AgentName:    agentName,
 		Reason:       run.Reason,
 		Status:       string(run.Status),
 		ErrorMessage: run.ErrorMessage,
@@ -333,6 +347,12 @@ func buildRunRouting(
 	if run.RoutingBlockedStatus != nil {
 		out.BlockedStatus = string(*run.RoutingBlockedStatus)
 	}
+	if run.SessionRecoveryBlockID != nil {
+		out.SessionRecoveryBlockID = *run.SessionRecoveryBlockID
+	}
+	if run.SessionRecoveryReason != nil {
+		out.SessionRecoveryReason = *run.SessionRecoveryReason
+	}
 	if run.EarliestRetryAt != nil && !run.EarliestRetryAt.IsZero() {
 		s := run.EarliestRetryAt.UTC().Format(time.RFC3339)
 		out.EarliestRetryAt = &s
@@ -354,6 +374,12 @@ func runHasRoutingSnapshot(run *models.Run) bool {
 		return true
 	}
 	if run.RoutingBlockedStatus != nil && *run.RoutingBlockedStatus != "" {
+		return true
+	}
+	if run.SessionRecoveryBlockID != nil && *run.SessionRecoveryBlockID != "" {
+		return true
+	}
+	if run.SessionRecoveryReason != nil && *run.SessionRecoveryReason != "" {
 		return true
 	}
 	return false
@@ -382,6 +408,9 @@ func buildRuntimeDTO(ctx context.Context, repo RunDetailRepo, run *models.Run) (
 	for _, snap := range snapshots {
 		skills = append(skills, RunSkillDTO{
 			SkillID:          snap.SkillID,
+			DisplayName:      snap.DisplayName,
+			Slug:             snap.Slug,
+			LabelSource:      snap.LabelSource,
 			Version:          snap.Version,
 			ContentHash:      snap.ContentHash,
 			MaterializedPath: snap.MaterializedPath,
@@ -436,27 +465,60 @@ func mergeTaskIDs(touched []string, primary string) []string {
 	return out
 }
 
-// buildInvocation populates the invocation panel best-effort from
-// the agent instance + run payload. The agent profile carries the
-// adapter family and model; the working directory is workspace-
-// relative for now (orchestrator logs will fill in the rest in a
-// later wave). Missing fields stay empty so the frontend can hide
-// them gracefully.
+// buildInvocation uses the persisted launch snapshot. It never infers an
+// adapter from the database row id: provider-routing and run-owned sessions
+// record the concrete invocation that actually launched.
 func buildInvocation(
 	ctx context.Context,
 	repo RunDetailRepo,
 	run *models.Run,
-) RunInvocationDTO {
+) (RunInvocationDTO, string) {
 	dto := RunInvocationDTO{}
+	if run.ResolvedProviderID != nil {
+		dto.Adapter = *run.ResolvedProviderID
+	}
+	if run.ResolvedModel != nil {
+		dto.Model = *run.ResolvedModel
+	}
+	if session, _ := currentRunSession(ctx, repo, run); session != nil {
+		if session.Adapter != "" {
+			dto.Adapter = session.Adapter
+		}
+		if session.Model != "" {
+			dto.Model = session.Model
+		}
+	}
 	agent, err := repo.GetAgentInstance(ctx, run.AgentProfileID)
 	if err != nil || agent == nil {
-		return dto
+		return dto, ""
 	}
-	// Wave G: AgentInstance.ID == agent_profiles.id under the unified model.
-	dto.Adapter = agent.ID
-	// Model lives on the agent profile, not the agent instance —
-	// surfacing it requires plumbing the profile reader through.
-	// Wave 2.E will fold the adapter+model lookup in; for v1 we
-	// surface what we have.
-	return dto
+	return dto, agent.Name
+}
+
+// currentRunSession prefers the newest durable attempt. A retry reuses the
+// logical run ID but receives a new run-session row, so the run's first
+// session_id projection must not overwrite the newer invocation snapshot.
+func currentRunSession(
+	ctx context.Context,
+	repo RunDetailRepo,
+	run *models.Run,
+) (*models.RunSession, string) {
+	fallbackID := run.SessionID
+	if fallbackID == "" {
+		fallbackID = sessionIDFromPayload(run.Payload)
+	}
+	if reader, ok := repo.(runSessionHistoryReader); ok {
+		if sessions, err := reader.ListRunSessions(ctx, run.ID); err == nil && len(sessions) > 0 {
+			latest := sessions[len(sessions)-1]
+			if latest.ID != "" {
+				return &latest, latest.ID
+			}
+		}
+	}
+	if reader, ok := repo.(runSessionReader); ok && fallbackID != "" {
+		if session, err := reader.GetRunSession(ctx, fallbackID); err == nil && session != nil {
+			return session, session.ID
+		}
+	}
+	return nil, fallbackID
 }

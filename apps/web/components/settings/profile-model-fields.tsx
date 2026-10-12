@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
 import { ModeCombobox } from "@/components/settings/mode-combobox";
 import {
@@ -15,12 +16,13 @@ import {
 import {
   profileAutoFallbackIsDirty,
   profileFallbackModelIsDirty,
+  profileRequireExactModelIsDirty,
 } from "@/components/settings/profile-capability-helpers";
 import {
   FallbackOptionHelp,
   ModelFallbackSettingsShell,
 } from "@/components/settings/model-fallback-settings-shell";
-import type { ModelConfig, ModeEntry, ModelEntry } from "@/lib/types/http";
+import type { ModelConfig, ModeEntry, ModelEntry, ModelDiscovery } from "@/lib/types/http";
 import type { PermissionKey } from "@/lib/agent-permissions";
 import type { CLIFlag } from "@/lib/types/http";
 import {
@@ -35,12 +37,59 @@ export type ProfileFormData = {
   fallback_model?: string;
   /** Legacy automatic-fallback opt-in; hides the fallback_model field. */
   auto_fallback?: boolean;
+  require_exact_model?: boolean;
   mode: string;
   config_options?: Record<string, string>;
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
   command_prefix?: string;
+  env_vars?: { key: string; value?: string; secret_id?: string }[];
+  provider_kind?: string;
+  cursor_mcp_auth_enabled?: boolean;
+  cursor_plugins_mcp_enabled?: boolean;
 } & Record<PermissionKey, boolean>;
+
+// A configured model that is no longer advertised ("gone") stays visible in
+// the list so the user sees what was configured instead of it silently
+// vanishing. For an agent type that allows a custom model ID, it stays
+// selectable with its own identifier; otherwise it is greyed out and
+// unselectable, as before.
+function goneModelOption(
+  modelId: string,
+  allowCustomModel: boolean,
+  goneModelLabel: string,
+): ModelSelectorOption {
+  if (allowCustomModel) return { id: modelId, name: modelId };
+  return { id: modelId, name: modelId, disabled: true, disabledReason: goneModelLabel };
+}
+
+function CustomProviderModelInput({
+  profile,
+  onChange,
+  ariaLabel,
+  placeholder,
+  disabled,
+}: {
+  profile: ProfileFormData;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+  ariaLabel: string;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <Input
+        data-testid="profile-model-input"
+        value={profile.model}
+        onChange={(event) => onChange({ model: event.target.value })}
+        placeholder={placeholder ?? t("settings:selectAModel")}
+        aria-label={ariaLabel}
+        disabled={disabled}
+      />
+    </div>
+  );
+}
 
 export function ModelPicker({
   profile,
@@ -54,6 +103,7 @@ export function ModelPicker({
   disabled,
   configOptionsLoading,
   keepOpenOnModelChange,
+  discovery,
 }: {
   profile: ProfileFormData;
   models: ModelEntry[];
@@ -66,30 +116,49 @@ export function ModelPicker({
   disabled?: boolean;
   configOptionsLoading?: boolean;
   keepOpenOnModelChange?: boolean;
+  /** Present only for host-CLI agent types; enables the custom model entry. */
+  discovery?: ModelDiscovery;
 }) {
   const { t } = useTranslation();
+  if (profile.provider_kind === "openai_compatible") {
+    return (
+      <CustomProviderModelInput
+        profile={profile}
+        onChange={onChange}
+        ariaLabel={ariaLabel}
+        placeholder={placeholder}
+        disabled={disabled}
+      />
+    );
+  }
   const modelConfig = configOptions.find(isModelConfigOption);
-  const modelOptions: ModelSelectorOption[] = modelConfig
-    ? configOptionToModelOptions(modelConfig)
-    : models.map((model) => ({
-        id: model.id,
-        name: model.name,
-        description: model.description || (model.id !== model.name ? model.id : undefined),
-        usageMultiplier:
-          typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
-      }));
+  // The config_options model list drops the ACP `_meta`, so the usage
+  // multiplier (e.g. Copilot's "15x") only survives on `models`. Look it up by
+  // id to enrich the config-option-derived options.
+  const usageByModelId = new Map(
+    models
+      .filter((model) => typeof model.meta?.copilotUsage === "string")
+      .map((model) => [model.id, model.meta!.copilotUsage as string]),
+  );
+  const modelOptions: ModelSelectorOption[] =
+    modelConfig && !discovery
+      ? configOptionToModelOptions(modelConfig).map((option) => ({
+          ...option,
+          usageMultiplier: option.usageMultiplier ?? usageByModelId.get(option.id),
+        }))
+      : models.map((model) => ({
+          id: model.id,
+          name: model.name,
+          description: model.description || (model.id !== model.name ? model.id : undefined),
+          source: model.source,
+          usageMultiplier:
+            typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
+        }));
   const currentModel = profile.model || modelConfig?.currentValue || currentModelId || null;
-  // A configured model that is no longer advertised ("gone") stays visible
-  // in the list, greyed out and unselectable, so the user sees what was
-  // configured instead of it silently vanishing.
+  const allowCustomModel = Boolean(discovery?.allows_custom_model);
   const modelIsGone = Boolean(profile.model && !modelOptions.some((m) => m.id === profile.model));
   if (modelIsGone) {
-    modelOptions.unshift({
-      id: profile.model!,
-      name: profile.model!,
-      disabled: true,
-      disabledReason: goneModelLabel,
-    });
+    modelOptions.unshift(goneModelOption(profile.model, allowCustomModel, goneModelLabel));
   }
   const selectedConfigOptions = configOptions.map((option) => ({
     ...option,
@@ -98,23 +167,28 @@ export function ModelPicker({
       : profile.config_options?.[option.id] || option.currentValue,
   }));
 
+  const modelIsUnavailable = modelIsGone && !allowCustomModel;
+
   return (
-    <ModelConfigSelector
-      modelOptions={modelOptions}
-      currentModel={currentModel}
-      configOptions={selectedConfigOptions}
-      onModelChange={(value) => onChange({ model: value })}
-      onConfigChange={(configId, value) =>
-        onChange({ config_options: { ...(profile.config_options ?? {}), [configId]: value } })
-      }
-      placeholder={placeholder ?? t("settings:selectAModel")}
-      ariaLabel={ariaLabel}
-      popoverAlign="start"
-      disabled={disabled}
-      configOptionsLoading={configOptionsLoading}
-      keepOpenOnModelChange={keepOpenOnModelChange}
-      triggerClassName={modelIsGone ? "text-destructive" : undefined}
-    />
+    <div className="space-y-1.5">
+      <ModelConfigSelector
+        modelOptions={modelOptions}
+        currentModel={currentModel}
+        configOptions={selectedConfigOptions}
+        onModelChange={(value) => onChange({ model: value })}
+        onConfigChange={(configId, value) =>
+          onChange({ config_options: { ...(profile.config_options ?? {}), [configId]: value } })
+        }
+        placeholder={placeholder ?? t("settings:selectAModel")}
+        ariaLabel={ariaLabel}
+        popoverAlign="start"
+        disabled={disabled}
+        configOptionsLoading={configOptionsLoading}
+        keepOpenOnModelChange={keepOpenOnModelChange}
+        triggerClassName={modelIsUnavailable ? "text-destructive" : undefined}
+        allowCustomModel={allowCustomModel}
+      />
+    </div>
   );
 }
 
@@ -123,11 +197,13 @@ export function ModePicker({
   modes,
   currentModeId,
   onChange,
+  disabled,
 }: {
   profile: ProfileFormData;
   modes: ModeEntry[];
   currentModeId: string | undefined;
   onChange: (patch: Partial<ProfileFormData>) => void;
+  disabled?: boolean;
 }) {
   return (
     <ModeCombobox
@@ -135,6 +211,7 @@ export function ModePicker({
       onChange={(value) => onChange({ mode: value })}
       modes={modes}
       currentModeId={currentModeId}
+      disabled={disabled}
     />
   );
 }
@@ -252,13 +329,15 @@ function FallbackModelPicker({
 // fallback model: the toggle switches between the two. Selecting a fallback
 // model is only meaningful when auto-fallback is off, because auto-fallback
 // already allows the provider to switch to any advertised model — the
-// configured fallback would be redundant. The strict mode (both off) is the
-// only automatic model switch allowed when auto-fallback is off.
+// configured fallback would be redundant. Strict mode disables both fallback
+// controls while preserving their saved values. Compatible mode keeps the
+// legacy explicit/automatic/default order.
 export function ModelFallbackSection({
   profile,
   models,
   configOptions,
   baselineProfile,
+  disabled = false,
   labelCls,
   gapCls,
   onChange,
@@ -267,19 +346,43 @@ export function ModelFallbackSection({
   models: ModelEntry[];
   configOptions: SelectConfigOption[];
   baselineProfile?: ProfileFormData;
+  disabled?: boolean;
   labelCls?: string;
   gapCls: string;
   onChange: (patch: Partial<ProfileFormData>) => void;
 }) {
   const { t } = useTranslation();
   const autoFallback = profile.auto_fallback ?? false;
+  const requireExactModel = profile.require_exact_model ?? false;
   const isDirty =
     profileAutoFallbackIsDirty(profile, baselineProfile) ||
-    profileFallbackModelIsDirty(profile, baselineProfile);
+    profileFallbackModelIsDirty(profile, baselineProfile) ||
+    profileRequireExactModelIsDirty(profile, baselineProfile);
 
   return (
     <ModelFallbackSettingsShell
       autoFallback={autoFallback}
+      requireExactModel={requireExactModel}
+      strictOption={
+        <div className={gapCls}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-1">
+              <SettingsFieldLabel className={labelCls}>
+                {t("settings:requireExactModel")}
+              </SettingsFieldLabel>
+              <FallbackOptionHelp kind="strict" />
+            </div>
+            <Switch
+              checked={requireExactModel}
+              onCheckedChange={(checked) => onChange({ require_exact_model: checked })}
+              aria-label={t("settings:requireExactModel")}
+            />
+          </div>
+          <SettingsFieldDescription>
+            {t("settings:requireExactModelHelper")}
+          </SettingsFieldDescription>
+        </div>
+      }
       fallbackModel={profile.fallback_model ?? ""}
       isDirty={isDirty}
       automaticOption={
@@ -299,6 +402,7 @@ export function ModelFallbackSection({
             <Switch
               checked={autoFallback}
               onCheckedChange={(checked) => onChange({ auto_fallback: checked })}
+              disabled={requireExactModel}
               aria-label={t("settings:autoFallback")}
             />
           </div>
@@ -313,7 +417,7 @@ export function ModelFallbackSection({
           baselineProfile={baselineProfile}
           labelCls={labelCls}
           gapCls={gapCls}
-          disabled={autoFallback}
+          disabled={disabled || autoFallback || requireExactModel}
           onChange={onChange}
         />
       }

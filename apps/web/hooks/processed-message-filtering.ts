@@ -9,6 +9,7 @@ import {
   isPendingClarificationMessage,
   type PendingClarificationScope,
 } from "@/lib/utils/pending-clarification";
+import { isDismissedGitPushErrorMessage } from "@/lib/utils/git-push-error-message";
 
 const VISIBLE_MESSAGE_TYPES: Set<string> = new Set([
   "message",
@@ -91,23 +92,70 @@ function isRecoveryMessage(message: Message): boolean {
   return metadata?.recovery_actions === true;
 }
 
+function recoveryMessageStamp(message: Message): string | null {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  for (const key of ["recovery_stamp", "error_stamp", "failure_stamp"]) {
+    const value = metadata?.[key];
+    if (typeof value === "string" && value !== "") return value;
+  }
+  return null;
+}
+
 function deduplicateRecoveryMessages(messages: Message[]): Message[] {
-  let lastRecoveryIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index--) {
-    if (isRecoveryMessage(messages[index])) {
-      lastRecoveryIndex = index;
-      break;
+  const seenStamps = new Set<string>();
+  return messages.filter((message) => {
+    if (!isRecoveryMessage(message)) return true;
+    const stamp = recoveryMessageStamp(message);
+    if (!stamp || seenStamps.has(stamp)) return !stamp;
+    seenStamps.add(stamp);
+    return true;
+  });
+}
+
+function agentPlanCorrelationKey(message: Message): string | null {
+  if (message.type !== "agent_plan") return null;
+  const metadata = message.metadata as { tool_call_id?: unknown } | undefined;
+  const toolCallId = metadata?.tool_call_id;
+  return typeof toolCallId === "string" && toolCallId.startsWith("agent-plan:") ? toolCallId : null;
+}
+
+function collapseCorrelatedAgentPlans(messages: Message[]): Message[] {
+  const latestIndexByCorrelation = new Map<string, number>();
+  for (const [index, message] of messages.entries()) {
+    const correlation = agentPlanCorrelationKey(message);
+    if (correlation) latestIndexByCorrelation.set(correlation, index);
+  }
+  if (latestIndexByCorrelation.size === 0) return messages;
+  return messages.filter((message, index) => {
+    const correlation = agentPlanCorrelationKey(message);
+    return !correlation || latestIndexByCorrelation.get(correlation) === index;
+  });
+}
+
+function collapseLegacyAgentPlanPrefixes(messages: Message[]): Message[] {
+  const collapsed: Message[] = [];
+  for (const message of messages) {
+    const previous = collapsed[collapsed.length - 1];
+    const isLegacyPrefix =
+      previous?.type === "agent_plan" &&
+      message.type === "agent_plan" &&
+      !agentPlanCorrelationKey(previous) &&
+      !agentPlanCorrelationKey(message) &&
+      Boolean(previous.turn_id) &&
+      previous.turn_id === message.turn_id &&
+      previous.content !== message.content &&
+      message.content.startsWith(previous.content);
+    if (isLegacyPrefix) {
+      collapsed[collapsed.length - 1] = message;
+    } else {
+      collapsed.push(message);
     }
   }
-  if (lastRecoveryIndex === -1) return messages;
-  const hasLaterActivity = messages
-    .slice(lastRecoveryIndex + 1)
-    .some((message) => message.type === "message" || message.type === "content");
-  return messages.filter((message, index) => {
-    if (!isRecoveryMessage(message)) return true;
-    if (hasLaterActivity) return false;
-    return index === lastRecoveryIndex;
-  });
+  return collapsed;
+}
+
+function collapseAgentPlanSnapshots(messages: Message[]): Message[] {
+  return collapseLegacyAgentPlanPrefixes(collapseCorrelatedAgentPlans(messages));
 }
 
 export function isAgentBootResumeMessage(message: Message): boolean {
@@ -132,6 +180,28 @@ export function isSuccessfulScriptExecutionMetadata(
   return (
     metadata?.status === "exited" && (metadata.exit_code === 0 || metadata.exit_code === undefined)
   );
+}
+
+const SELECTION_FAILURE_CODES = new Set([
+  "model_unavailable",
+  "model_selection_failed",
+  "permission_mode_failed",
+  "permission_mode_unconfirmed",
+  "permission_mode_mismatch",
+]);
+
+export function isSelectionFailureRecoveryMetadata(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const metadata = value as Record<string, unknown>;
+  const causes = Array.isArray(metadata.causes) ? metadata.causes : [];
+  return [metadata.failure_code, metadata.code, ...causes.map(selectionCauseCode)].some(
+    (code) => typeof code === "string" && SELECTION_FAILURE_CODES.has(code),
+  );
+}
+
+function selectionCauseCode(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return (value as Record<string, unknown>).code;
 }
 
 /** True when a script_execution row reports an agent that finished booting
@@ -176,7 +246,14 @@ export function hasFailedAgentBootAfter(
 export function hasSuccessfulAgentBootAfter(
   messages: Message[] | undefined,
   afterCreatedAt: string | undefined,
+  errorStamp?: string,
+  requireExactStamp = false,
+  sessionMetadata?: Record<string, unknown> | null,
 ): boolean {
+  if (errorStamp) {
+    return hasSessionRecoveryResolutionAfter(sessionMetadata, afterCreatedAt, errorStamp);
+  }
+  if (requireExactStamp) return false;
   const failedAt = Date.parse(afterCreatedAt ?? "");
   if (Number.isNaN(failedAt) || !messages?.length) return false;
   return messages.some((message) => {
@@ -190,12 +267,57 @@ export function hasSuccessfulAgentBootAfter(
 export function hasSessionRecoveryResolutionAfter(
   metadata: Record<string, unknown> | null | undefined,
   afterCreatedAt: string | undefined,
+  errorStamp?: string,
+  messages?: readonly {
+    type?: string;
+    metadata?: Record<string, unknown> | null;
+  }[],
+  requireExactStamp = false,
 ): boolean {
+  const failedAt = Date.parse(afterCreatedAt ?? "");
+  if (Number.isNaN(failedAt)) return false;
+  if (errorStamp) {
+    const entries = Array.isArray(metadata?.recovery_resolutions)
+      ? metadata.recovery_resolutions.slice(-16)
+      : [];
+    return entries.some((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+      const resolution = entry as Record<string, unknown>;
+      const resolvedStamp = resolution.error_stamp;
+      const resolvedAt = Date.parse(
+        typeof resolution.resolved_at === "string" ? resolution.resolved_at : "",
+      );
+      return (
+        isSafeRecoveryStamp(resolvedStamp) &&
+        resolvedStamp === errorStamp &&
+        isHostResumeAttemptID(resolution.attempt_id) &&
+        !Number.isNaN(resolvedAt) &&
+        resolvedAt > failedAt
+      );
+    });
+  }
+  if (requireExactStamp) return false;
   const resolvedAt = Date.parse(
     typeof metadata?.recovery_resolved_at === "string" ? metadata.recovery_resolved_at : "",
   );
-  const failedAt = Date.parse(afterCreatedAt ?? "");
   return !Number.isNaN(resolvedAt) && !Number.isNaN(failedAt) && resolvedAt > failedAt;
+}
+
+function isSafeRecoveryStamp(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 256 &&
+    value.trim() === value &&
+    !/[\u0000-\u001f\u007f]/u.test(value)
+  );
+}
+
+function isHostResumeAttemptID(value: unknown): value is string {
+  const match = typeof value === "string" ? /^resume-(0|[1-9][0-9]{0,19})$/u.exec(value) : null;
+  if (!match) return false;
+  const sequence = match[1];
+  return sequence.length < 20 || sequence <= "18446744073709551615";
 }
 
 export function isSetupScriptMessage(message: Message): boolean {
@@ -260,11 +382,65 @@ export function collapseTodoSnapshotsPerTurn(messages: Message[]): Message[] {
   });
 }
 
+const EMPTY_TURN_SUPERSEDING_TYPES: Set<MessageType> = new Set([
+  "tool_call",
+  "tool_edit",
+  "tool_read",
+  "tool_search",
+  "tool_execute",
+  "agent_plan",
+  "todo",
+  "permission_request",
+  "clarification_request",
+]);
+
+/** Mirrors the backend's turnHadAgentOutput allowlist (service_turns.go): agent-authored
+ *  output that counts as real, user-visible turn content. Lifecycle "status" /
+ *  "script_execution" / "thinking" rows never count. */
+function isRealAgentOutput(message: Message): boolean {
+  if (message.author_type !== "agent") return false;
+  if (!message.type || message.type === "message" || message.type === "content") {
+    return message.content.trim() !== "";
+  }
+  return EMPTY_TURN_SUPERSEDING_TYPES.has(message.type);
+}
+
+function isEmptyTurnNotice(message: Message): boolean {
+  return (message.metadata as { empty_turn?: boolean } | undefined)?.empty_turn === true;
+}
+
+/** Drops an empty-turn notice once its turn has since received real agent output —
+ *  the notice is emitted once at turn-completion time and nothing else retracts it,
+ *  so a late-arriving reply (e.g. a subagent race) would otherwise render alongside
+ *  its own "no output" contradiction. `outputSourceMessages` defaults to `messages`
+ *  for standalone use, but the visibility pipeline passes the pre-filter array: a
+ *  superseding permission_request or clarification_request can already be hidden by
+ *  `filterVisibleMessages` (approved/denied/cancelled, or not the active one) by the
+ *  time it would otherwise reach this step. */
+export function dropSupersededEmptyTurnNotices(
+  messages: Message[],
+  outputSourceMessages: Message[] = messages,
+): Message[] {
+  const turnsWithOutput = new Set<string>();
+  for (const message of outputSourceMessages) {
+    if (message.turn_id && isRealAgentOutput(message)) {
+      turnsWithOutput.add(message.turn_id);
+    }
+  }
+  if (turnsWithOutput.size === 0) return messages;
+  return messages.filter((message) => {
+    if (!isEmptyTurnNotice(message)) return true;
+    return !(message.turn_id && turnsWithOutput.has(message.turn_id));
+  });
+}
+
 function findActiveClarification(
   messages: Message[],
   scope?: PendingClarificationScope,
 ): Message | undefined {
-  return findPendingClarification(messages, scope) ?? undefined;
+  const pending = findPendingClarification(messages, scope);
+  const metadata = pending?.metadata as ClarificationRequestMetadata | undefined;
+  return metadata?.agent_disconnected === true ? undefined : (pending ?? undefined);
 }
 
 function isClarificationVisible(
@@ -290,6 +466,7 @@ export function filterVisibleMessages(
 ): Message[] {
   const activeClarification = findActiveClarification(messages, scope);
   const filtered = messages.filter((message) => {
+    if (isDismissedGitPushErrorMessage(message)) return false;
     if (subagentChildIds.has(message.id) || isSetupScriptMessage(message)) return false;
     if (message.type === "clarification_request") {
       return isClarificationVisible(message, activeClarification);
@@ -304,7 +481,12 @@ export function filterVisibleMessages(
     if (message.type === "permission_request") return isPermissionVisible(message, toolCallIds);
     return false;
   });
-  return collapseTodoSnapshotsPerTurn(
-    deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered)),
+  return collapseAgentPlanSnapshots(
+    collapseTodoSnapshotsPerTurn(
+      dropSupersededEmptyTurnNotices(
+        deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered)),
+        messages,
+      ),
+    ),
   );
 }

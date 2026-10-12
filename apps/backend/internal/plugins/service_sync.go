@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
@@ -198,11 +199,12 @@ func (s *Service) registerSideload(id, version string) error {
 	}
 
 	rec := &store.Record{
-		Manifest:    *m,
-		Status:      StatusDisabled,
-		InstallPath: versionDir,
-		Signed:      false,
-		InstalledAt: time.Now().UTC(),
+		Manifest:       *m,
+		Status:         StatusDisabled,
+		InstallationID: uuid.NewString(),
+		InstallPath:    versionDir,
+		Signed:         false,
+		InstalledAt:    time.Now().UTC(),
 	}
 	if err := s.store.Save(rec); err != nil {
 		return fmt.Errorf("persist sideloaded record: %w", err)

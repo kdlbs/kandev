@@ -1,0 +1,7 @@
+goos: linux
+goarch: amd64
+pkg: github.com/kandev/kandev/internal/task/repository/sqlite
+cpu: AMD Ryzen 5 7640HS w/ Radeon 760M Graphics
+BenchmarkConversationSourceStorage/messages_10000-11         	       1	3540695383 ns/op	  23363584 db-bytes	  14845498 startup-ns
+PASS
+ok  	github.com/kandev/kandev/internal/task/repository/sqlite	3.637s

@@ -192,22 +192,45 @@ same-origin frontend code and belong to the privileged plugin boundary.
 
 The isolated web-app boundary has these rules:
 
-- The iframe allows packaged scripts and forms. It does not allow same-origin
-  access, top-level navigation, or popups.
-- The browser gives the app an opaque origin. The app cannot use Kandev cookies,
-  host authentication headers, the host DOM, or an injected JavaScript API.
-- The app uses relative `./_kandev/v1` protocol paths. The app receives only
-  the Kandev data, events, state, and actions that the host grants.
+- The iframe allows packaged scripts and forms, but it does not allow top-level
+  navigation or popups.
+- The iframe is same-origin with Kandev. Canvas source is trusted with the
+  viewing user's ordinary user-session authority, including same-origin
+  cookies, browser storage, and host DOM access.
+- The app uses relative `./_kandev/v1` protocol paths. For these protocol
+  requests, the app receives only the Kandev data, events, state, and actions
+  that the capability binding grants.
+  Cookies do not replace the capability URL or per-operation permission checks.
 - Kandev calculates effective access from the package declaration, instance
   grant, trusted task or workspace scope, and current caller authorization.
+- A new owner-created task canvas can use a recorded, single-use creation
+  authority for its first valid release. The authority can add only supported
+  task-scoped data, event, state, and exact HTTPS-origin grants. Imported
+  packages, later permission increases, and consumed or revoked authority use
+  normal human review.
 - External network access uses exact HTTPS origins approved by a user. A
   wildcard, origin path, query string, credential, or remote script is not
   accepted.
 - Forms cannot submit to an external origin. The runtime policy sets
   `form-action 'none'`.
+- A reverse proxy must preserve same-origin cookies for runtime requests and
+  must not redirect runtime HTML or inject remote scripts into it. Cloudflare
+  Web Analytics and similar HTML injection must be excluded on the runtime
+  path because the runtime CSP allows only packaged scripts.
 - Kandev applies a response Content Security Policy to the entry and asset
-  routes. It also applies `no-store`, `nosniff`, `no-referrer`, and
-  cross-origin resource protections.
+  routes. The policy allows the response's exact same origin to frame the
+  runtime. This supports a custom Kandev DNS name, IP address, port, or HTTPS
+  deployment without a hostname allowlist. Unrelated and nested foreign
+  ancestors remain blocked. Local launcher and Tauri origins are exact
+  exceptions. Kandev does not trust `Host` or forwarded host headers when it
+  builds this policy. The response also applies `no-store`, `nosniff`,
+  `no-referrer`, and cross-origin resource protections.
+- The entry response includes a reserved host bootstrap before packaged scripts.
+  It captures early document errors, checks context access after document load,
+  and sends only a versioned ready or safe failure result to the exact parent
+  frame window. The host uses a fresh nonce and 15-second deadline for each
+  mount, ignores stale or sibling-frame messages, and exposes retry controls
+  outside the failed frame.
 - Runtime requests use a short-lived capability token. The host binds the
   token to the user, instance, release, app key, placement, scope, and grant
   generation, then checks those values on every request.
@@ -219,16 +242,20 @@ matching iframe. It loads a replacement only after a fresh metadata and
 runtime-binding check. Kandev runtime and protocol requests continue to
 revalidate on every request.
 
-Opaque origin storage is not a durable app store. `localStorage`,
-`sessionStorage`, IndexedDB, and service workers are unavailable. Use the
-canvas state protocol for small app-specific shared values and memory for
-temporary values. Do not copy task or workflow data into app state as a second
-source of truth.
+Browser storage is available to trusted same-origin canvas code according to
+normal browser and site storage policy. Treat it as user-session storage, not
+as the durable app store. Use the canvas state protocol for small app-specific
+shared values and memory for temporary values. Do not copy task or workflow
+data into app state as a second source of truth.
 
 The host renders canvas controls outside the iframe. Keep the backend and its
 HTTP, WebSocket, and MCP routes behind the deployment boundary described at
 the top of this page. See [Agent-authored Canvases](canvases.md) for creation,
 promotion, Quick Chat editing, release review, and recovery.
+
+Release review uses authorized task and session lookups for readable source
+labels. If those records are deleted or inaccessible, the UI shows an
+unavailable label and never substitutes the internal identifier.
 
 ## Operational checklist
 

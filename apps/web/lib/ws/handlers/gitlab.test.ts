@@ -8,18 +8,21 @@ const WORKSPACE_A = "workspace-a";
 
 function makeStore(activeWorkspaceId: string | null, options?: TaskMRAutomationOptions) {
   const setTaskMR = vi.fn();
+  const removeTaskMR = vi.fn();
   const setTaskMRAutomationOptions = vi.fn();
   const markTaskMRAutomationExternalUpdate = vi.fn();
   const state = {
     workspaces: { activeId: activeWorkspaceId },
     taskMRAutomation: { byTaskId: options ? { [options.task_id]: options } : {} },
     setTaskMR,
+    removeTaskMR,
     setTaskMRAutomationOptions,
     markTaskMRAutomationExternalUpdate,
   } as unknown as AppState;
   return {
     store: { getState: () => state } as StoreApi<AppState>,
     setTaskMR,
+    removeTaskMR,
     setTaskMRAutomationOptions,
     markTaskMRAutomationExternalUpdate,
   };
@@ -66,6 +69,36 @@ describe("GitLab WebSocket handlers", () => {
     handler({ type: "notification", action: "gitlab.task_mr.updated", payload: mr });
 
     expect(setTaskMR).toHaveBeenCalledWith(WORKSPACE_A, "task-1", mr);
+  });
+
+  it("removes a task MR for the active workspace", () => {
+    const { store, removeTaskMR } = makeStore(WORKSPACE_A);
+    const handler = (registerGitLabHandlers(store) as Record<string, (message: never) => void>)[
+      "gitlab.task_mr.deleted"
+    ]!;
+
+    handler({
+      type: "notification",
+      action: "gitlab.task_mr.deleted",
+      payload: { workspace_id: WORKSPACE_A, task_id: "task-1", association_id: "mr-1" },
+    } as never);
+
+    expect(removeTaskMR).toHaveBeenCalledWith(WORKSPACE_A, "mr-1");
+  });
+
+  it("ignores task MR deletion from another workspace", () => {
+    const { store, removeTaskMR } = makeStore("workspace-b");
+    const handler = (registerGitLabHandlers(store) as Record<string, (message: never) => void>)[
+      "gitlab.task_mr.deleted"
+    ]!;
+
+    handler({
+      type: "notification",
+      action: "gitlab.task_mr.deleted",
+      payload: { workspace_id: WORKSPACE_A, task_id: "task-1", association_id: "mr-1" },
+    } as never);
+
+    expect(removeTaskMR).not.toHaveBeenCalled();
   });
 
   it("ignores task MRs from another workspace", () => {

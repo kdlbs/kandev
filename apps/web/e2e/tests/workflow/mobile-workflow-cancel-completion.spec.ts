@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { expectCancelToSettlePromptly } from "../../helpers/cancellation";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForActiveSessionCancellationPendingOrSettled } from "../../helpers/session-store";
 import { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
@@ -127,11 +128,15 @@ test.describe("mobile: cancelled turn completion", () => {
       .toBe(workflow.workingStepId);
     await expect(session.cancelAgentButton()).toBeVisible({ timeout: 30_000 });
     await expect(
-      session.activeChat().getByText("mobile cancelable turn started", { exact: false }),
+      session
+        .activeChat()
+        .getByTestId("agent-message-highlight")
+        .filter({ hasText: "mobile cancelable turn started" }),
     ).toBeVisible({ timeout: 15_000 });
 
     expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(1);
     await tapCancelButton(session);
+    await waitForActiveSessionCancellationPendingOrSettled(testPage);
     await expectCancelToSettlePromptly(session);
     await expect
       .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id, {

@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
@@ -16,6 +17,7 @@ import (
 // sent to a different candidate.
 type DownstreamLaunch struct {
 	ExecutionProfileID string
+	AttemptID          string
 	Decision           RouteDecision
 	Prompt             string
 	PriorACPSession    string
@@ -208,6 +210,34 @@ func (c *Conductor) RouteAfterFailure(
 	)
 }
 
+// RouteAfterUnclassifiedFailure applies the narrow opt-in policy using
+// caller-supplied evidence from a trusted task/runtime boundary.
+func (c *Conductor) RouteAfterUnclassifiedFailure(
+	ctx context.Context,
+	sessionID, logicalProfileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+	failure *routingerr.Error,
+	evidence UnclassifiedFailureEvidence,
+) (RouteDecision, error) {
+	if c.engine == nil || c.profiles == nil {
+		return RouteDecision{}, errors.New("dynamic conductor is not configured")
+	}
+	if resolver, ok := c.profiles.(interface {
+		RouteAfterUnclassifiedFailure(context.Context, string, string, string, int64, *routingerr.Error, UnclassifiedFailureEvidence) (RouteDecision, error)
+	}); ok {
+		return resolver.RouteAfterUnclassifiedFailure(
+			ctx, sessionID, logicalProfileID, currentExecutionProfileID, expectedGeneration, failure, evidence,
+		)
+	}
+	profile, err := c.profiles.LoadDynamicProfile(ctx, logicalProfileID)
+	if err != nil {
+		return RouteDecision{}, err
+	}
+	return c.engine.ApplyUnclassifiedFailureContext(
+		ctx, sessionID, profile, expectedGeneration, currentExecutionProfileID, failure, evidence,
+	)
+}
+
 // BuildContinuation creates the bounded provider-neutral handoff package used
 // by a successor launch. Callers that already classified a failed turn build
 // it before advancing the route, then persist it against the successor
@@ -239,6 +269,7 @@ func (c *Conductor) launchWithFallback(
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		execution, err := c.downstream.Launch(ctx, DownstreamLaunch{
 			ExecutionProfileID: current.ExecutionProfileID,
+			AttemptID:          uuid.NewString(),
 			Decision:           current,
 			Prompt:             ContinuationPrompt(request.Prompt, currentContinuation),
 			PriorACPSession:    priorACPSession(request.PriorACPSession, decision, current),
@@ -432,15 +463,20 @@ const continuationFieldLimit = 4000
 // predecessor left off, not where it began. ToolSummary and FailureReason can
 // carry raw tool output or provider-controlled error text respectively, so
 // both are sanitized before crossing to a different provider or reaching
-// durable storage.
+// durable storage. TaskDescription, PlanSummary, and RepositorySummary are
+// user/agent-authored carrier text rather than diagnostics: a credential
+// pasted into any of them must not cross to a different provider either, but
+// the full Sanitize rule set would mangle legitimate long identifiers (commit
+// SHAs, UUIDs) these fields routinely contain, so they use the narrower
+// credential-only tier instead.
 func BuildBoundedContinuation(input ContinuationInput) Continuation {
 	return Continuation{
-		TaskDescription:   bounded(input.TaskDescription),
+		TaskDescription:   bounded(routingerr.SanitizeCredentials(input.TaskDescription)),
 		WorkflowStep:      bounded(input.WorkflowStep),
 		Conversation:      boundedConversation(input.UserMessages, input.Conversation),
 		ToolSummary:       sanitizedHead(input.ToolSummary),
-		RepositorySummary: bounded(input.RepositorySummary),
-		PlanSummary:       bounded(input.PlanSummary),
+		RepositorySummary: bounded(routingerr.SanitizeCredentials(input.RepositorySummary)),
+		PlanSummary:       bounded(routingerr.SanitizeCredentials(input.PlanSummary)),
 		FailureReason:     bounded(routingerr.Sanitize(input.FailureReason)),
 	}
 }
@@ -451,8 +487,8 @@ func BuildBoundedContinuation(input ContinuationInput) Continuation {
 // every user message; splitting the limit guarantees both survive.
 const conversationUserBudget = continuationFieldLimit / 2
 
-// maxRedactionInputBytes bounds how much of a raw field Redact scans
-// directly. A task's message history is unpaginated, so a large session
+// maxRedactionInputBytes bounds how much of a raw field SanitizeFullUnbounded
+// scans directly. A task's message history is unpaginated, so a large session
 // (repeated tool output, long command logs) would otherwise force all
 // redaction rules across an unbounded input to emit a few kept bytes. 64x
 // continuationFieldLimit comfortably covers ordinary sessions while
@@ -470,21 +506,21 @@ const redactionLookbackBytes = 64 * 1024
 
 // sanitizedTail returns up to budget bytes of the newest content in raw,
 // with credentials redacted. For input at or under maxRedactionInputBytes,
-// Redact sees the complete input before any cut, so an anchored rule (e.g.
-// "Authorization:") always sees its full literal prefix and value together
-// and cannot be bisected by a budget window. For larger input, the window's
-// leading edge is snapped back to the nearest preceding line boundary
-// (within redactionLookbackBytes) before Redact runs, so an anchored rule
-// starting on an earlier line is not split by the window itself. The scan
-// stays bounded by maxRedactionInputBytes+redactionLookbackBytes regardless
-// of how large raw is — unlike a full-input fallback, its cost cannot grow
-// with session size.
+// SanitizeFullUnbounded sees the complete input before any cut, so an
+// anchored rule (e.g. "Authorization:") always sees its full literal prefix
+// and value together and cannot be bisected by a budget window. For larger
+// input, the window's leading edge is snapped back to the nearest preceding
+// line boundary (within redactionLookbackBytes) before SanitizeFullUnbounded
+// runs, so an anchored rule starting on an earlier line is not split by the
+// window itself. The scan stays bounded by
+// maxRedactionInputBytes+redactionLookbackBytes regardless of how large raw
+// is — unlike a full-input fallback, its cost cannot grow with session size.
 func sanitizedTail(raw string, budget int) string {
 	if len(raw) <= maxRedactionInputBytes {
-		return boundedTailN(routingerr.Redact(raw), budget)
+		return boundedTailN(routingerr.SanitizeFullUnbounded(raw), budget)
 	}
 	start := windowStartWithLookback(raw, len(raw)-maxRedactionInputBytes)
-	return boundedTailN(routingerr.Redact(raw[start:]), budget)
+	return boundedTailN(routingerr.SanitizeFullUnbounded(raw[start:]), budget)
 }
 
 // sanitizedHead mirrors sanitizedTail for ToolSummary, whose final cut
@@ -493,10 +529,10 @@ func sanitizedTail(raw string, budget int) string {
 // ending later is not split by the window itself.
 func sanitizedHead(raw string) string {
 	if len(raw) <= maxRedactionInputBytes {
-		return bounded(routingerr.Redact(raw))
+		return bounded(routingerr.SanitizeFullUnbounded(raw))
 	}
 	end := windowEndWithLookahead(raw, maxRedactionInputBytes)
-	return bounded(routingerr.Redact(raw[:end]))
+	return bounded(routingerr.SanitizeFullUnbounded(raw[:end]))
 }
 
 // windowStartWithLookback extends the tail window's leading edge back by a
@@ -656,11 +692,13 @@ func boundedConversation(userMessages []string, conversation string) string {
 	}
 }
 
-// ContinuationPrompt renders a bounded, provider-neutral handoff. The
-// original prompt remains first so providers that do not understand the
-// optional package still receive the user's request.
+// ContinuationPrompt renders a provider-neutral handoff. The original prompt
+// remains first, credential-redacted but otherwise verbatim and unbounded,
+// so providers that do not understand the optional package still receive
+// the user's request whole; the continuation package appended after it is
+// bounded.
 func ContinuationPrompt(prompt string, continuation Continuation) string {
-	prompt = strings.TrimSpace(routingerr.Sanitize(prompt))
+	prompt = strings.TrimSpace(routingerr.SanitizeCredentialsUnbounded(prompt))
 	continuation = sanitizeContinuation(continuation)
 	fields := make([]string, 0, 7)
 	if continuation.TaskDescription != "" {

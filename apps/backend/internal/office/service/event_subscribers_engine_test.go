@@ -2,10 +2,13 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -150,6 +153,76 @@ func TestEngineDispatcher_SkipsAlreadyDispatchedCommentEvent(t *testing.T) {
 	}
 }
 
+func TestCommentRetryDispatchPreservesCapturedWorkflowEntry(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	svc.SetWorkflowEngineDispatcher(nil)
+	insertTestTask(t, svc, "task-comment-retry-entry", "ws-1")
+	comment := &models.TaskComment{
+		ID:         "comment-retry-entry",
+		TaskID:     "task-comment-retry-entry",
+		AuthorType: "user",
+		AuthorID:   "user-1",
+		Body:       "please decide",
+	}
+	if err := svc.CreateComment(context.Background(), comment); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+
+	disp := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(disp)
+	ctx := context.Background()
+	event := bus.NewEvent(events.OfficeCommentCreated, "dashboard", map[string]string{
+		"task_id":                     comment.TaskID,
+		"comment_id":                  comment.ID,
+		"author_type":                 "user",
+		"author_id":                   "user-1",
+		"workflow_step_id":            "step-review",
+		"workflow_step_transition_id": "42",
+	})
+	if err := eb.Publish(ctx, events.OfficeCommentCreated, event); err != nil {
+		t.Fatalf("publish comment retry: %v", err)
+	}
+	calls := disp.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("dispatcher calls = %d, want 1", len(calls))
+	}
+	payload, ok := calls[0].payload.(engine.OnCommentPayload)
+	if !ok {
+		t.Fatalf("payload type = %T, want engine.OnCommentPayload", calls[0].payload)
+	}
+	if payload.RetryWorkflowStepID != "step-review" || payload.RetryWorkflowStepTransitionID != 42 {
+		t.Fatalf("retry entry = (%q, %d), want (step-review, 42)", payload.RetryWorkflowStepID, payload.RetryWorkflowStepTransitionID)
+	}
+
+	partial := bus.NewEvent(events.OfficeCommentCreated, "dashboard", map[string]string{
+		"task_id":                     comment.TaskID,
+		"comment_id":                  comment.ID,
+		"author_type":                 "user",
+		"author_id":                   "user-1",
+		"workflow_step_id":            "step-review",
+		"workflow_step_transition_id": "",
+	})
+	if err := eb.Publish(ctx, events.OfficeCommentCreated, partial); err != nil {
+		t.Fatalf("publish partial comment retry: %v", err)
+	}
+	if calls := disp.Calls(); len(calls) != 1 {
+		t.Fatalf("dispatcher calls after partial retry identity = %d, want 1", len(calls))
+	}
+	suppressed := bus.NewEvent(events.OfficeCommentCreated, "dashboard", map[string]string{
+		"task_id":                 comment.TaskID,
+		"comment_id":              comment.ID,
+		"author_type":             "user",
+		"author_id":               "user-1",
+		"engine_retry_suppressed": "true",
+	})
+	if err := eb.Publish(ctx, events.OfficeCommentCreated, suppressed); err != nil {
+		t.Fatalf("publish retry-suppressed comment: %v", err)
+	}
+	if calls := disp.Calls(); len(calls) != 1 {
+		t.Fatalf("dispatcher calls after retry suppression = %d, want 1", len(calls))
+	}
+}
+
 func TestEngineDispatcher_SkipsDoneStepSelfComment(t *testing.T) {
 	svc, _ := newTestServiceWithBus(t)
 
@@ -283,6 +356,34 @@ func (fallbackHandledRoutingDispatcher) MarkRunSuccessHealth(
 ) {
 }
 
+type blockingPostStartFallbackDispatcher struct {
+	t        *testing.T
+	svc      *service.Service
+	requeued chan struct{}
+	release  chan struct{}
+}
+
+func (d *blockingPostStartFallbackDispatcher) DispatchWithRouting(
+	context.Context, *models.Run, *models.AgentInstance, service.LaunchContext,
+) (bool, bool, error) {
+	return false, false, nil
+}
+
+func (d *blockingPostStartFallbackDispatcher) HandlePostStartFailure(
+	_ context.Context, run *models.Run, _ *models.AgentInstance, _ string, _ *streams.ProviderError,
+) (bool, error) {
+	d.svc.ExecSQL(d.t, `UPDATE runs SET status = 'queued', session_id = '',
+		claimed_at = NULL, finished_at = NULL WHERE id = ?`, run.ID)
+	close(d.requeued)
+	<-d.release
+	return true, nil
+}
+
+func (d *blockingPostStartFallbackDispatcher) MarkRunSuccessHealth(
+	context.Context, *models.Run, *models.AgentInstance,
+) {
+}
+
 // queueTaskAssignedRunForAgentFailedTests queues + claims a run for taskID
 // so an AgentFailed event resolves it via resolveLifecycleRun's
 // task+agent fallback (GetClaimedRunByTaskAndAgent).
@@ -291,7 +392,7 @@ func queueTaskAssignedRunForAgentFailedTests(
 ) *models.Run {
 	t.Helper()
 	ctx := context.Background()
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, agentID, service.RunReasonTaskAssigned, `{"task_id":"`+taskID+`"}`, "",
 	); err != nil {
 		t.Fatalf("queue run: %v", err)
@@ -438,6 +539,78 @@ func TestEngineDispatcher_AgentFailed_PostStartFallbackHandled_SkipsDispatch(t *
 		"after a handled post-start fallback")
 }
 
+func TestAgentFailed_PostStartFallback_DelayedCleanupDoesNotIdleRelaunch(t *testing.T) {
+	ctx := context.Background()
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	svc.SetSyncHandlers(true)
+	eb := bus.NewMemoryEventBus(logger.Default())
+	if err := svc.RegisterEventSubscribers(eb); err != nil {
+		t.Fatalf("register subscribers: %v", err)
+	}
+
+	createTestAgent(t, svc, "ws-1", "worker-reroute")
+	project := &models.Project{
+		WorkspaceID:    "ws-1",
+		Name:           "Project worker-reroute",
+		ExecutorConfig: `{"type":"local_pc"}`,
+	}
+	if err := svc.CreateProject(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, project_id, title, created_at, updated_at)
+		VALUES ('task-reroute', 'ws-1', ?, 'Reroute task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		project.ID)
+	run := queueTaskAssignedRunForAgentFailedTests(t, svc, "worker-reroute", "task-reroute")
+	svc.ExecSQL(t, `UPDATE runs SET resolved_provider_id = 'test-provider' WHERE id = ?`, run.ID)
+	svc.ExecSQL(t, `UPDATE agent_profiles SET status = 'working', working_run_id = ? WHERE id = ?`,
+		run.ID, "worker-reroute")
+
+	dispatcher := &blockingPostStartFallbackDispatcher{
+		t:        t,
+		svc:      svc,
+		requeued: make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+	svc.SetRoutingDispatcher(dispatcher)
+	event := bus.NewEvent(events.AgentFailed, "test", map[string]string{
+		"task_id":          "task-reroute",
+		"run_id":           run.ID,
+		"session_id":       "session-reroute",
+		"agent_profile_id": "worker-reroute",
+		"error_message":    "provider unavailable",
+	})
+	publishDone := make(chan error, 1)
+	go func() { publishDone <- eb.Publish(ctx, events.AgentFailed, event) }()
+
+	select {
+	case <-dispatcher.requeued:
+	case <-time.After(5 * time.Second):
+		t.Fatal("post-start fallback did not requeue the run")
+	}
+
+	relaunched, err := svc.ClaimNextRun(ctx)
+	if err != nil {
+		t.Fatalf("claim relaunched run: %v", err)
+	}
+	if relaunched == nil || relaunched.ID != run.ID {
+		t.Fatalf("relaunched run = %v, want run %q", relaunched, run.ID)
+	}
+	service.ProcessRunForTest(svc, ctx, relaunched)
+	if mock.callCount() != 1 {
+		t.Fatalf("StartTask calls = %d, want 1 for the relaunch", mock.callCount())
+	}
+	assertAgentStatus(t, svc, ctx, "worker-reroute", models.AgentStatusWorking,
+		"after the same run relaunches")
+
+	close(dispatcher.release)
+	if err := <-publishDone; err != nil {
+		t.Fatalf("publish agent failed: %v", err)
+	}
+	assertAgentStatus(t, svc, ctx, "worker-reroute", models.AgentStatusWorking,
+		"after the old failure cleanup completes")
+}
+
 // TestEngineDispatcher_PathBEscalation_DoesNotFireAgentErrorTrigger pins
 // that the pre-launch retry-exhaustion escalation path (HandleRunFailure
 // -> escalateFailure -> queueCEOAgentError, "Path B" in the WO-05 task
@@ -462,7 +635,7 @@ func TestEngineDispatcher_PathBEscalation_DoesNotFireAgentErrorTrigger(t *testin
 	}
 	createTestAgent(t, svc, "ws-1", "worker-pathb")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-pathb", service.RunReasonTaskAssigned, `{"task_id":"t1"}`, "",
 	); err != nil {
 		t.Fatalf("queue: %v", err)
@@ -472,6 +645,7 @@ func TestEngineDispatcher_PathBEscalation_DoesNotFireAgentErrorTrigger(t *testin
 		t.Fatalf("claim: %v (run=%v)", err, run)
 	}
 	run.RetryCount = service.MaxRetryCount
+	run.SessionID = "sess-pathb"
 
 	if err := svc.HandleRunFailure(ctx, run, errForTest("boom")); err != nil {
 		t.Fatalf("handle run failure: %v", err)
@@ -493,5 +667,12 @@ func TestEngineDispatcher_PathBEscalation_DoesNotFireAgentErrorTrigger(t *testin
 	}
 	if next.Reason != service.RunReasonAgentError {
 		t.Errorf("reason = %q, want agent_error", next.Reason)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(next.Payload), &payload); err != nil {
+		t.Fatalf("decode CEO payload: %v", err)
+	}
+	if payload["failed_session_id"] != run.SessionID {
+		t.Errorf("failed_session_id = %q, want %q", payload["failed_session_id"], run.SessionID)
 	}
 }

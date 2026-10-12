@@ -3,15 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSystemSlice, defaultSystemState } from "./system-slice";
 import type { SystemSlice } from "./types";
-import type {
-  SystemInfo,
-  DiskUsageResponse,
-  DatabaseStats,
-  SnapshotInfo,
-  UpdatesResponse,
-  SystemJob,
-  StorageOverviewResponse,
-} from "@/lib/types/system";
+import type { UpdatesResponse, SystemJob, StorageOverviewResponse } from "@/lib/types/system";
 
 const TS = "2026-05-18T00:00:00Z";
 
@@ -21,51 +13,6 @@ function makeStore() {
     immer((...a) => ({ ...(createSystemSlice as any)(...a) })),
   );
 }
-
-const INFO: SystemInfo = {
-  version: "1.2.3",
-  commit: "abc1234",
-  build_time: "2026-01-01T00:00:00Z",
-  go_version: "go1.24",
-  os: "darwin",
-  arch: "arm64",
-  boot_id: "boot-1",
-  started_at: "2026-01-01T00:00:00Z",
-};
-
-const DISK_USAGE: DiskUsageResponse = {
-  data: {
-    data_dir: 100,
-    worktrees: 200,
-    repos: 300,
-    sessions: 400,
-    tasks: 500,
-    quick_chat: 600,
-    backups: 700,
-    total: 2800,
-    warnings: [],
-    computed_at: TS,
-  },
-  computing: false,
-  home_dir: "/data/kandev",
-};
-
-const DB_STATS: DatabaseStats = {
-  driver: "sqlite",
-  path: "/data/kandev.db",
-  backup_directory: "/data/backups",
-  size_bytes: 12345,
-  wal_size_bytes: 678,
-  schema_version: "1.0.0",
-  last_backup_at: "2026-05-17T00:00:00Z",
-};
-
-const SNAPSHOT: SnapshotInfo = {
-  name: "manual-1.db",
-  size_bytes: 1024,
-  mtime: "2026-05-17T00:00:00Z",
-  kind: "manual",
-};
 
 const UPDATES: UpdatesResponse = {
   current: "1.2.3",
@@ -95,7 +42,7 @@ const ANALYSIS = {
   refresh_due_at: "2026-05-18T00:15:00Z",
   stale: false,
   error: null,
-  progress: { completed_sources: 5, total_sources: 5, sources: {} },
+  progress: { completed_sources: 8, total_sources: 8, sources: {} },
   partial_summary: null,
 } as const;
 
@@ -111,7 +58,12 @@ describe("system storage slice", () => {
         quarantine_retention_hours: 168,
         workspaces: { enabled: true, dependency_cleanup_enabled: false },
         kandev_containers: { enabled: true },
-        go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
+        go_cache: {
+          enabled: false,
+          max_bytes: 16106127360,
+          adopted_path: "",
+          allow_cleanup_while_busy: false,
+        },
         docker: {
           dedicated_daemon_acknowledged: false,
           build_cache_enabled: false,
@@ -159,6 +111,7 @@ describe("system storage slice", () => {
       overview,
       analysisRevision: 0,
       disk: null,
+      diskIdentity: null,
       runs: [],
       quarantine: [],
     });
@@ -170,44 +123,35 @@ describe("system slice", () => {
     const store = makeStore();
     const s = store.getState();
     expect(s.system).toEqual(defaultSystemState.system);
-    expect(s.system.info).toBeNull();
-    expect(s.system.diskUsage).toBeNull();
-    expect(s.system.database).toBeNull();
-    expect(s.system.backups).toEqual({ items: [], loaded: false });
+    expect("diskUsage" in s.system).toBe(false);
+    expect("database" in s.system).toBe(false);
+    expect("backups" in s.system).toBe(false);
     expect(s.system.updates).toBeNull();
     expect(s.system.jobs).toEqual({});
   });
 
-  it("setSystemInfo stores the payload", () => {
+  it("setSystemRetention stores the status", () => {
     const store = makeStore();
-    store.getState().setSystemInfo(INFO);
-    expect(store.getState().system.info).toEqual(INFO);
-  });
-
-  it("setSystemDiskUsage replaces the cached response", () => {
-    const store = makeStore();
-    store.getState().setSystemDiskUsage(DISK_USAGE);
-    expect(store.getState().system.diskUsage).toEqual(DISK_USAGE);
-
-    const computing: DiskUsageResponse = { data: null, computing: true, home_dir: "/data/kandev" };
-    store.getState().setSystemDiskUsage(computing);
-    expect(store.getState().system.diskUsage).toEqual(computing);
-  });
-
-  it("setSystemDatabase stores the stats", () => {
-    const store = makeStore();
-    store.getState().setSystemDatabase(DB_STATS);
-    expect(store.getState().system.database).toEqual(DB_STATS);
-  });
-
-  it("setSystemBackups marks the list as loaded", () => {
-    const store = makeStore();
-    store.getState().setSystemBackups([SNAPSHOT]);
-    expect(store.getState().system.backups).toEqual({ items: [SNAPSHOT], loaded: true });
-
-    // Empty list also flips loaded to true.
-    store.getState().setSystemBackups([]);
-    expect(store.getState().system.backups).toEqual({ items: [], loaded: true });
+    expect(store.getState().system.retention).toBeNull();
+    const status = {
+      settings: {
+        enabled: true,
+        sweep_interval_hours: 6,
+        batch_limit: 5000,
+        routine_runs: { window_days: 30, floor_per_owner: 50, warn_rows: 25000 },
+        runs: { window_days: 30, floor_per_owner: 50, warn_rows: 25000 },
+        run_events: { warn_rows: 250000 },
+      },
+      last_sweep: null,
+      skip_count: 0,
+      retained_counts: {
+        office_routine_runs: { state: "not_computed" as const, retained_count: 0, as_of: "" },
+        runs: { state: "not_computed" as const, retained_count: 0, as_of: "" },
+        run_events: { state: "not_computed" as const, retained_count: 0, as_of: "" },
+      },
+    };
+    store.getState().setSystemRetention(status);
+    expect(store.getState().system.retention).toEqual(status);
   });
 
   it("setSystemUpdates stores the response", () => {

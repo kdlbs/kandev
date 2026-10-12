@@ -38,7 +38,7 @@ func TestHandleCreateTask_ExternalIDGoldenPath(t *testing.T) {
 	require.NoError(t, err)
 	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
 
-	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":     workspaces[0].ID,
 		"workflow_id":      workflows[0].ID,
 		"title":            "Task",
@@ -78,7 +78,7 @@ func TestHandleCreateTask_FoundSettledIsDataLossGuarded(t *testing.T) {
 	remote := &recordingRemoteContributionService{resolution: testRemoteContributionResolution()}
 	h.SetRemoteContributionService(remote)
 
-	first, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	first, err := h.handleCreateTask(mcpTestExternalContext(ctx), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":     workspaces[0].ID,
 		"workflow_id":      workflows[0].ID,
 		"title":            "Original",
@@ -95,7 +95,7 @@ func TestHandleCreateTask_FoundSettledIsDataLossGuarded(t *testing.T) {
 	require.NoError(t, json.Unmarshal(first.Payload, &firstResult))
 	firstID := firstResult["id"].(string)
 
-	retry, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	retry, err := h.handleCreateTask(mcpTestExternalContext(ctx), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":     workspaces[0].ID,
 		"workflow_id":      workflows[0].ID,
 		"title":            "Changed title",
@@ -162,7 +162,7 @@ func TestHandleCreateTask_FoundUnsettledSkipsAutoStart(t *testing.T) {
 	}
 	require.NoError(t, repo.CreateTask(ctx, inflight))
 
-	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":     workspaces[0].ID,
 		"workflow_id":      workflows[0].ID,
 		"title":            "Task",
@@ -209,7 +209,7 @@ func TestHandleCreateTask_FoundSettledSkipsAutoStart(t *testing.T) {
 	launcher := newMockSessionLauncher()
 	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, launcher, nil, testLogger(t))
 
-	first, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	first, err := h.handleCreateTask(mcpTestExternalContext(ctx), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":     workspaces[0].ID,
 		"workflow_id":      workflows[0].ID,
 		"title":            "Original",
@@ -229,7 +229,7 @@ func TestHandleCreateTask_FoundSettledSkipsAutoStart(t *testing.T) {
 
 	assertSessionLauncherNotCalled(t, launcher) // sanity: the seeding create itself didn't launch
 
-	retry, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	retry, err := h.handleCreateTask(mcpTestExternalContext(ctx), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":     workspaces[0].ID,
 		"workflow_id":      workflows[0].ID,
 		"title":            "Task",

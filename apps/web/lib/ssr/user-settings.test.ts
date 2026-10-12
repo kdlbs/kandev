@@ -1,3 +1,5 @@
+import { mapLatestUserSettingsResponse } from "./user-settings";
+import type { UserSettingsResponse } from "@/lib/types/http-user-settings";
 /* eslint-disable max-lines -- User-settings hydration cases share one contract test file. */
 
 import { describe, it, expect } from "vitest";
@@ -8,6 +10,7 @@ import {
   mapUserSettingsResponse,
   parseChangesPanelLayout,
   parseLastSeenDisplay,
+  parseMessageTimeDisplay,
   parseLspStatusLocation,
   parseStartupPage,
   parseSystemMetricsDisplay,
@@ -18,6 +21,53 @@ import type { SidebarTaskColorAutomation } from "@/lib/types/http-user-settings"
 
 const UPDATED_AT = "2026-01-01T00:00:00Z";
 const DEFAULT_USER_ID = "default-user";
+
+// @covers AC-UI-NAV-HIERARCHY-004.2, AC-UI-NAV-HIERARCHY-004.6
+it("ignores older preference responses after a newer settings event", () => {
+  const current = { ...createDefaultUserSettings(), revision: 8, sidebarFastActionsEnabled: true };
+  expect(
+    mapLatestUserSettingsResponse(
+      { settings: { revision: 7, sidebar_fast_actions_enabled: false } } as UserSettingsResponse,
+      current,
+    ),
+  ).toBe(current);
+});
+
+it("hydrates sidebar presentation defaults and preserves partial updates", () => {
+  const fresh = createDefaultUserSettings();
+  expect(fresh).toMatchObject({ sidebarFastActionsEnabled: false, sidebarNewTaskStyle: "simple" });
+  const legacy = mapUserSettingsData(
+    Object.assign(
+      {},
+      { sidebar_fast_actions_enabled: true, sidebar_new_task_style: "compact" as const },
+    ),
+    fresh,
+  );
+  expect(legacy).toMatchObject({ sidebarFastActionsEnabled: true, sidebarNewTaskStyle: "compact" });
+  expect(mapUserSettingsData({ app_status_bar_enabled: true }, legacy)).toMatchObject({
+    sidebarFastActionsEnabled: true,
+    sidebarNewTaskStyle: "compact",
+  });
+  expect(
+    mapUserSettingsData(Object.assign({}, { sidebar_fast_actions_enabled: false }), legacy),
+  ).toMatchObject({ sidebarFastActionsEnabled: false, sidebarNewTaskStyle: "compact" });
+});
+
+// @covers AC-UI-LIST-STEP-GROUPING-001.5
+it("hydrates legacy state grouping as workflow step without changing sort", () => {
+  const mapped = mapUserSettingsResponse({
+    settings: {
+      user_id: DEFAULT_USER_ID,
+      workspace_id: toWorkspaceId(""),
+      repository_ids: [],
+      tasks_list_group: "state",
+      tasks_list_sort: "title_desc",
+      updated_at: UPDATED_AT,
+    },
+  });
+  expect(mapped.tasksListGroup).toBe("workflow_step");
+  expect(mapped.tasksListSort).toBe("title_desc");
+});
 
 describe("user settings revision ordering", () => {
   it("orders atomic revisions and hydrates the current revision", () => {
@@ -51,13 +101,39 @@ describe("user settings revision ordering", () => {
 
     expect(result.revision).toBeNull();
   });
+
+  it("hydrates workspace sidebar layouts without dropping their revisions", () => {
+    const result = buildCoreFields({
+      sidebar_layouts_by_workspace: {
+        "workspace-a": {
+          version: 1,
+          revision: 3,
+          nodes: [],
+        },
+      },
+    } as never) as Record<string, unknown>;
+
+    expect(result.sidebarLayoutsByWorkspace).toEqual({
+      "workspace-a": { version: 1, revision: 3, nodes: [] },
+    });
+  });
 });
 
 describe("startup page user settings", () => {
   it("normalizes startup page preferences", () => {
+    expect(parseStartupPage("threads")).toBe("threads");
     expect(parseStartupPage("last_task")).toBe("last_task");
     expect(parseStartupPage(undefined)).toBe("task_overview");
     expect(parseStartupPage("future_value")).toBe("task_overview");
+  });
+
+  // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.3
+  it("maps Threads and preserves it when a later settings patch omits startup page", () => {
+    const current = mapUserSettingsData({ startup_page: "threads" });
+    expect(current.startupPage).toBe("threads");
+    expect(mapUserSettingsData({ tasks_list_show_details: true }, current).startupPage).toBe(
+      "threads",
+    );
   });
 
   it("defaults startup page and maps the last-task choice", () => {
@@ -87,6 +163,8 @@ describe("Threads saved-view hydration", () => {
       taskScope: { mode: "all", taskIds: [] },
       sort: { key: "attention", direction: "asc" },
       maxColumns: 5,
+      layout: "columns",
+      autoHideComposer: false,
     });
     expect(settings.threadActiveViewId).toBe("view-all-threads");
   });
@@ -104,6 +182,8 @@ describe("Threads saved-view hydration", () => {
             filters: [],
             sort: { key: "priority", direction: "desc" },
             max_columns: 3,
+            layout: "grid",
+            auto_hide_composer: true,
           },
         ],
       },
@@ -114,8 +194,11 @@ describe("Threads saved-view hydration", () => {
       taskScope: { mode: "selected", taskIds: ["task-a"] },
       sort: { key: "priority", direction: "desc" },
       maxColumns: 3,
+      layout: "grid",
+      autoHideComposer: true,
     });
     expect(result.threadActiveViewId).toBe("current");
+    expect(buildCoreFields({}, { ...current, ...result }).threadViews).toEqual(result.threadViews);
   });
 });
 
@@ -149,6 +232,20 @@ describe("agent-generated task title defaults", () => {
     expect(buildCoreFields({ agent_generated_task_titles: false }).agentGeneratedTaskTitles).toBe(
       false,
     );
+  });
+});
+
+describe("agent tab close behavior defaults", () => {
+  it("defaults unknown and missing values to delete_session", () => {
+    expect(buildCoreFields({}).agentTabCloseBehavior).toBe("delete_session");
+    expect(buildCoreFields({ agent_tab_close_behavior: "hide_panel" }).agentTabCloseBehavior).toBe(
+      "hide_panel",
+    );
+    expect(
+      buildCoreFields({ agent_tab_close_behavior: "unknown" } as unknown as Parameters<
+        typeof buildCoreFields
+      >[0]).agentTabCloseBehavior,
+    ).toBe("delete_session");
   });
 });
 
@@ -546,6 +643,7 @@ describe("mapUserSettingsResponse", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "workflow",
+      groupIndent: true,
       taskRow: {
         detailsEnabled: true,
         detailOrder: ["relative_time", "repository", "pull_request_number"],
@@ -701,6 +799,26 @@ describe("last seen display hydration", () => {
   });
 });
 
+describe("message time display hydration", () => {
+  it("defaults to relative and normalizes unknown values", () => {
+    expect(createDefaultUserSettings().messageTimeDisplay).toBe("relative");
+    expect(parseMessageTimeDisplay("absolute_short")).toBe("absolute_short");
+    expect(parseMessageTimeDisplay("absolute_long")).toBe("absolute_long");
+    expect(parseMessageTimeDisplay("future")).toBe("relative");
+  });
+
+  it("maps saved values and preserves the current value when omitted", () => {
+    const current = {
+      ...createDefaultUserSettings(),
+      messageTimeDisplay: "absolute_long" as const,
+    };
+    expect(
+      mapUserSettingsData({ message_time_display: "absolute_short" }, current).messageTimeDisplay,
+    ).toBe("absolute_short");
+    expect(mapUserSettingsData({}, current).messageTimeDisplay).toBe("absolute_long");
+  });
+});
+
 describe("auto-hide empty steps preference hydration", () => {
   it("hydrates the canonical workflow-scoped key", () => {
     const mapped = mapUserSettingsData(
@@ -739,5 +857,35 @@ describe("prevent auto-start on open preference", () => {
     expect(
       buildCoreFields({ prevent_auto_start_agent_on_open: false }).preventAutoStartAgentOnOpen,
     ).toBe(false);
+  });
+});
+
+it("maps hover settings and retains false/zero through omitted updates", () => {
+  expect(createDefaultUserSettings()).toMatchObject({
+    sidebarHoverEnabled: true,
+    sidebarHoverDelayMs: 500,
+  });
+  const current = mapUserSettingsData({ sidebar_hover_enabled: false, sidebar_hover_delay_ms: 0 });
+  expect(current).toMatchObject({ sidebarHoverEnabled: false, sidebarHoverDelayMs: 0 });
+  expect(buildCoreFields({}, current)).toMatchObject({
+    sidebarHoverEnabled: false,
+    sidebarHoverDelayMs: 0,
+  });
+  expect(
+    mapUserSettingsData({ sidebar_hover_enabled: true, sidebar_hover_delay_ms: 1200 }),
+  ).toMatchObject({ sidebarHoverEnabled: true, sidebarHoverDelayMs: 1200 });
+});
+
+// @covers AC-TASKS-CREATION-AUTO-FOCUS-001.1, AC-TASKS-CREATION-AUTO-FOCUS-001.4
+describe("task creation auto-focus preference", () => {
+  it("defaults on and preserves explicit false across partial hydration", () => {
+    expect(createDefaultUserSettings()).toHaveProperty("autoFocusNewTasks", true);
+    expect(buildCoreFields({ auto_focus_new_tasks: false })).toHaveProperty(
+      "autoFocusNewTasks",
+      false,
+    );
+    expect(
+      buildCoreFields({}, { ...createDefaultUserSettings(), autoFocusNewTasks: false }),
+    ).toHaveProperty("autoFocusNewTasks", false);
   });
 });

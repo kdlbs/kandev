@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { encodedBytes, _resetForTesting, MAX_ENTRY_BYTES } from "./buffer";
+import { encodedBytes, _resetForTesting, MAX_ENTRY_BYTES, type LogEntry } from "./buffer";
 import {
+  beginBrowserLogCapture,
   _resetRuntimeForTesting,
   browserLogMetadata,
   snapshotBrowserLogs,
@@ -9,15 +10,18 @@ import {
 
 const storeMocks = vi.hoisted(() => ({
   append: vi.fn(),
-  snapshot: vi.fn(),
+  beginCaptureBoundary: vi.fn(),
+  readPage: vi.fn(),
 }));
 const TEST_SOURCE = "test";
 const TEST_SCOPE = "default-user";
+const RECEIPT_MESSAGE = "receipt-entry";
 
 vi.mock("./indexeddb-store", () => ({
   IndexedDBLogStore: class {
     append = storeMocks.append;
-    snapshot = storeMocks.snapshot;
+    beginCaptureBoundary = storeMocks.beginCaptureBoundary;
+    readPage = storeMocks.readPage;
   },
 }));
 
@@ -25,7 +29,12 @@ beforeEach(() => {
   _resetForTesting();
   _resetRuntimeForTesting();
   storeMocks.append.mockReset();
-  storeMocks.snapshot.mockReset().mockResolvedValue([]);
+  storeMocks.beginCaptureBoundary.mockReset().mockResolvedValue(0);
+  storeMocks.readPage.mockReset().mockResolvedValue({
+    entries: [],
+    nextCursor: null,
+    done: true,
+  });
 });
 
 describe("browser logger scheduling", () => {
@@ -296,9 +305,158 @@ describe("browser logger runtime", () => {
       releaseFirstAppend?.();
 
       await snapshot;
-      expect(storeMocks.append).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(storeMocks.append).toHaveBeenCalledTimes(2));
       expect(maximumActiveAppends).toBe(1);
     } finally {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("browser logger capture", () => {
+  it("establishes the receipt boundary before flushing the receipt prefix", async () => {
+    const order: string[] = [];
+    storeMocks.beginCaptureBoundary.mockImplementation(async () => {
+      order.push("boundary");
+      return 17;
+    });
+    storeMocks.append.mockImplementation(async () => {
+      order.push("append");
+      return [18];
+    });
+
+    stageLogEntry({
+      timestamp: new Date().toISOString(),
+      level: "info",
+      source: TEST_SOURCE,
+      message: RECEIPT_MESSAGE,
+    });
+
+    const capture = await beginBrowserLogCapture(TEST_SCOPE);
+    await capture.readPage?.(256, null);
+
+    expect(storeMocks.beginCaptureBoundary).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["boundary", "append"]);
+    expect(storeMocks.readPage).toHaveBeenCalledWith(TEST_SCOPE, 256, null, 17, new Set([18]));
+  });
+
+  it("keeps the persisted capture boundary fixed for every page", async () => {
+    storeMocks.beginCaptureBoundary.mockResolvedValue(17);
+
+    const capture = await beginBrowserLogCapture(TEST_SCOPE);
+    await capture.readPage?.(256, null);
+
+    expect(storeMocks.beginCaptureBoundary).toHaveBeenCalledTimes(1);
+    expect(storeMocks.readPage).toHaveBeenCalledWith(TEST_SCOPE, 256, null, 17, new Set());
+  });
+
+  it("uses the receipt memory snapshot when the boundary cannot be proven", async () => {
+    storeMocks.beginCaptureBoundary.mockRejectedValueOnce(new Error("boundary unavailable"));
+    stageLogEntry({
+      timestamp: new Date().toISOString(),
+      level: "info",
+      source: TEST_SOURCE,
+      message: RECEIPT_MESSAGE,
+    });
+
+    const capture = await beginBrowserLogCapture(TEST_SCOPE);
+
+    expect(capture.storageMode).toBe("memory");
+    expect(capture.flushTimeout).toBe(false);
+    expect(capture.memoryEntries.map(({ entry }) => entry.message)).toEqual([RECEIPT_MESSAGE]);
+    expect(browserLogMetadata()).toMatchObject({ storage_mode: "indexeddb" });
+  });
+});
+
+describe("browser logger capture flush", () => {
+  it("keeps a capture flush at the receipt watermark", async () => {
+    vi.useFakeTimers();
+    let releaseFirstAppend: (() => void) | undefined;
+    const firstAppend = new Promise<void>((resolve) => {
+      releaseFirstAppend = resolve;
+    });
+    let appendCalls = 0;
+    storeMocks.append.mockImplementation(async () => {
+      appendCalls += 1;
+      if (appendCalls === 1) await firstAppend;
+    });
+
+    try {
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: TEST_SOURCE,
+        message: "at-receipt",
+      });
+      const snapshot = snapshotBrowserLogs(TEST_SCOPE);
+      await Promise.resolve();
+      expect(storeMocks.append).toHaveBeenCalledTimes(1);
+
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: TEST_SOURCE,
+        message: "after-receipt",
+      });
+      releaseFirstAppend?.();
+
+      await snapshot;
+      expect(storeMocks.append).toHaveBeenCalledTimes(1);
+      expect(storeMocks.append.mock.calls[0]?.[0]).toEqual([
+        expect.objectContaining({
+          entry: expect.objectContaining({ message: "at-receipt" }),
+        }),
+      ]);
+    } finally {
+      releaseFirstAppend?.();
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses the receipt memory snapshot after the one-second flush timeout", async () => {
+    vi.useFakeTimers();
+    let releaseFirstAppend: (() => void) | undefined;
+    const firstAppend = new Promise<void>((resolve) => {
+      releaseFirstAppend = resolve;
+    });
+    storeMocks.append.mockImplementation(() => firstAppend);
+    let result: LogEntry[] | undefined;
+
+    try {
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: TEST_SOURCE,
+        message: RECEIPT_MESSAGE,
+      });
+      const snapshot = snapshotBrowserLogs(TEST_SCOPE).then((entries) => {
+        result = entries;
+      });
+      await Promise.resolve();
+      expect(storeMocks.append).toHaveBeenCalledTimes(1);
+
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: TEST_SOURCE,
+        message: "later-entry",
+      });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(result).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await Promise.resolve();
+      expect(result?.map((entry) => entry.message)).toEqual([RECEIPT_MESSAGE]);
+      expect(browserLogMetadata()).toMatchObject({ storage_mode: "indexeddb" });
+
+      releaseFirstAppend?.();
+      await snapshot;
+      await vi.waitFor(() => expect(storeMocks.append).toHaveBeenCalledTimes(2));
+    } finally {
+      releaseFirstAppend?.();
       vi.runOnlyPendingTimers();
       vi.useRealTimers();
     }

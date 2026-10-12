@@ -32,6 +32,7 @@ export * from "./menubar";
 export * from "./navigation-menu";
 export * from "./pagination";
 export * from "./pannel-session";
+export * from "./persistent-motion-visibility";
 export * from "./popover";
 export * from "./progress";
 export * from "./radio-group";

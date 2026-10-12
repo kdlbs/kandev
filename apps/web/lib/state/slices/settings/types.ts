@@ -1,3 +1,4 @@
+import type { SidebarWorkspaceStateApi } from "@/lib/types/http-user-settings";
 import type {
   Agent,
   AgentProfile,
@@ -13,15 +14,19 @@ import type {
   ToolStatus,
   LspStatusLocation,
   LastSeenDisplay,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
+import type { SidebarLayoutApi } from "@/lib/types/http-user-settings";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
+import type { KanbanSort } from "@/lib/kanban/kanban-sort";
+import type { TaskPriority } from "@/lib/types/http";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
 import type { AgentProfileKind } from "@/lib/types/agent-profile";
 import type {
@@ -30,6 +35,8 @@ import type {
 } from "@/lib/agent-profile-recent-use";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { TaskColor } from "@/lib/task-colors";
+import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
+import type { AgentUpdateJob } from "@/lib/api";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -38,6 +45,15 @@ export type {
 
 export type ExecutorsState = {
   items: Executor[];
+};
+
+/**
+ * SSH reachability records keyed by executor id. Populated by a per-card
+ * fetch (task 06's SSHReachabilityCard) and kept live via the
+ * executor.reachability.changed WS event.
+ */
+export type SSHReachabilityStoreState = {
+  byExecutorId: Record<string, SSHReachabilityRecord>;
 };
 
 export type SettingsAgentsState = {
@@ -64,16 +80,22 @@ export type AgentProfileOption = {
   agent_name: string;
   kind?: AgentProfileKind;
   cli_passthrough: boolean;
+  /** Whether the profile's agent supports sessionless inference. */
+  inference_capable?: boolean;
   /** Configured start model (ACP model ID). Empty = agent default. */
   model?: string;
   /** Optional explicit fallback model; ignored when auto_fallback is on. */
   fallback_model?: string;
   /** Legacy automatic-fallback opt-in. */
   auto_fallback?: boolean;
+  /** Explicit exact-model policy opt-in. */
+  require_exact_model?: boolean;
   workspace_id?: string;
   /** Persisted profile revision (RFC3339 updated_at), used to prefer newer
    * WS-delivered options over a stale in-flight response. */
   updatedAt?: string;
+  /** Creation instant for the selector baseline, independent of Settings order. */
+  createdAt?: string;
   /**
    * False hides the profile from task/session creation pickers. Existing
    * sessions keep their labels and the profile stays editable in settings.
@@ -268,14 +290,19 @@ export function refreshSettingsAgentsCapabilities(
 
 /** Single source of truth for mapping an API Agent+Profile to a store AgentProfileOption. */
 export function toAgentProfileOption(
-  agent: Pick<Agent, "id" | "name" | "capability_status" | "capability_error">,
+  agent: Pick<
+    Agent,
+    "id" | "name" | "capability_status" | "capability_error" | "inference_capable"
+  >,
   profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name" | "workspaceId"> & {
     updatedAt?: string;
+    createdAt?: string;
     kind?: AgentProfileKind;
     cliPassthrough?: boolean;
     model?: string;
     fallbackModel?: string;
     autoFallback?: boolean;
+    requireExactModel?: boolean;
     enabled?: boolean;
   },
 ): AgentProfileOption {
@@ -286,20 +313,31 @@ export function toAgentProfileOption(
     agent_name: agent.name,
     kind: profile.kind,
     cli_passthrough: profile.cliPassthrough ?? false,
+    inference_capable: agent.inference_capable,
     model: profile.model ?? undefined,
     fallback_model: profile.fallbackModel ?? undefined,
     auto_fallback: profile.autoFallback ?? undefined,
+    require_exact_model: profile.requireExactModel ?? undefined,
     workspace_id: profile.workspaceId,
     updatedAt: profile.updatedAt,
+    createdAt: profile.createdAt,
     enabled: profile.enabled ?? true,
     capability_status: agent.capability_status,
     capability_error: agent.capability_error,
   };
 }
 
+export type ProfileOrderSync = {
+  revision: number;
+  order: string[] | null;
+  inFlight: string[] | null;
+  queued: string[] | null;
+};
+
 export type AgentProfilesState = {
   items: AgentProfileOption[];
   version: number;
+  orderByAgent: Record<string, ProfileOrderSync>;
 };
 
 export type InstallJobStatus = "queued" | "running" | "succeeded" | "failed";
@@ -324,32 +362,12 @@ export type InstallJobsState = {
   byAgent: Record<string, InstallJob>;
 };
 
-export type AgentUpdateJobStatus =
-  | "queued"
-  | "resolving"
-  | "updating"
-  | "refreshing"
-  | "succeeded"
-  | "failed";
-
-export type AgentUpdateJob = {
-  job_id: string;
-  agent_name: string;
-  status: AgentUpdateJobStatus;
-  current_version?: string;
-  target_version?: string;
-  output?: string;
-  error?: string;
-  refresh_error?: string;
-  started_at: string;
-  finished_at?: string;
-};
-
 export type AgentUpdateJobsState = {
   byAgent: Record<string, AgentUpdateJob>;
 };
 
 export type EditorsState = {
+  folderOpeningAvailable?: boolean;
   items: EditorOption[];
   loaded: boolean;
   loading: boolean;
@@ -380,6 +398,10 @@ export type NotificationProvidersState = {
   appriseAvailable: boolean;
   loaded: boolean;
   loading: boolean;
+};
+
+export type NotificationProvidersUpdate = Omit<NotificationProvidersState, "appriseAvailable"> & {
+  appriseAvailable?: boolean;
 };
 
 export type SettingsDataState = {
@@ -415,6 +437,8 @@ export type UserSettingsState = {
   preventAutoStartAgentOnOpen: boolean;
   unreadDivider: boolean;
   agentGeneratedTaskTitles: boolean;
+  autoFocusNewTasks: boolean;
+  agentTabCloseBehavior: "delete_session" | "hide_panel";
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
   showAnchoredPromptBar: boolean;
   showScrollToLastPrompt: boolean;
@@ -430,6 +454,8 @@ export type UserSettingsState = {
   lspStatusLocation: LspStatusLocation;
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
+  sidebarViewsByWorkspace: Record<string, SidebarWorkspaceStateApi>;
+  sidebarLayoutsByWorkspace: Record<string, SidebarLayoutApi>;
   sidebarActiveViewId: string | null;
   sidebarDraft: SidebarViewDraft | null;
   threadViews: ThreadView[];
@@ -453,13 +479,20 @@ export type UserSettingsState = {
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
   lastSeenDisplay: LastSeenDisplay;
+  messageTimeDisplay: MessageTimeDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
+  sidebarFastActionsEnabled: boolean;
+  sidebarNewTaskStyle: "simple" | "compact";
+  sidebarHoverEnabled: boolean;
+  sidebarHoverDelayMs: number;
   resolveSessionHostnames: boolean;
   appStatusBarOrder: AppStatusBarOrderState;
   quickChatTabOrderByWorkspace: Record<string, string[]>;
   hiddenWorkflowStepIds: Record<string, string[]>;
   workflowIdsWithAutoHideEmptySteps: string[];
+  kanbanSort: KanbanSort;
+  kanbanPriorityFilterTokens: TaskPriority[];
   loaded: boolean;
 };
 
@@ -478,6 +511,11 @@ export type TaskCreateLastUsedState = {
 };
 
 export type SettingsSliceState = {
+  agentRuntimeUpdates: {
+    byAgent: Record<string, import("@/lib/api/domains/agent-update-api").AgentUpdateStatus>;
+    checkedAt: number;
+    loading: boolean;
+  };
   executors: ExecutorsState;
   settingsAgents: SettingsAgentsState;
   agentDiscovery: AgentDiscoveryState;
@@ -494,9 +532,15 @@ export type SettingsSliceState = {
   sleepInhibition: SleepInhibitionStoreState;
   userSettings: UserSettingsState;
   agentProfileRecentUse: AgentProfileRecentUseState;
+  sshReachability: SSHReachabilityStoreState;
 };
 
 export type SettingsSliceActions = {
+  setAgentRuntimeUpdateStatuses: (
+    statuses: import("@/lib/api/domains/agent-update-api").AgentUpdateStatus[],
+    checkedAt: number,
+  ) => void;
+  setAgentRuntimeUpdateLoading: (loading: boolean) => void;
   setExecutors: (executors: ExecutorsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
@@ -506,6 +550,17 @@ export type SettingsSliceActions = {
     tools?: AvailableAgentsState["tools"],
   ) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
+  applyAgentListSnapshot: (
+    agents: SettingsAgentsState["items"],
+    expectedProfileVersion: number,
+  ) => boolean;
+  acceptAgentProfileOrder: (agentId: string, profileIds: string[], revision: number) => boolean;
+  setAgentProfileOrder: (agentId: string, profileIds: string[]) => void;
+  setAgentProfileOrderIntent: (
+    agentId: string,
+    inFlight: string[] | null,
+    queued: string[] | null,
+  ) => void;
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
   setInstallJobs: (jobs: InstallJob[]) => void;
   upsertInstallJob: (job: InstallJob) => void;
@@ -515,7 +570,7 @@ export type SettingsSliceActions = {
   upsertAgentUpdateJob: (job: AgentUpdateJob) => void;
   appendAgentUpdateOutput: (agentName: string, jobId: string, chunk: string) => void;
   clearAgentUpdateJob: (agentName: string) => void;
-  setEditors: (editors: EditorsState["items"]) => void;
+  setEditors: (editors: EditorsState["items"], folderOpeningAvailable?: boolean) => void;
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;
   setPromptsLoading: (loading: boolean) => void;
@@ -528,7 +583,8 @@ export type SettingsSliceActions = {
   setSpritesInstances: (instances: SpritesInstance[]) => void;
   setSpritesLoading: (loading: boolean) => void;
   removeSpritesInstance: (name: string) => void;
-  setNotificationProviders: (state: NotificationProvidersState) => void;
+  setNotificationProviders: (state: NotificationProvidersUpdate) => void;
+  setAppriseAvailable: (available: boolean) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setSleepInhibition: (response: SleepInhibitionResponse) => void;
@@ -541,6 +597,16 @@ export type SettingsSliceActions = {
     record: AgentProfileRecentUseRecord,
   ) => void;
   bumpAgentProfilesVersion: () => void;
+  /**
+   * Applies a reachability record (a fetch response or a pushed
+   * executor.reachability.changed event). Reconciles on updated_at, never
+   * checked_at: a connection-configuration reset clears checked_at (null)
+   * while still advancing updated_at, so comparing on checked_at would make
+   * the reset compare as older than the record it just invalidated and get
+   * discarded. A null updated_at (the synthesized never-probed placeholder)
+   * always loses to a record that has one.
+   */
+  setSSHReachability: (record: SSHReachabilityRecord) => void;
 };
 
 export type SettingsSlice = SettingsSliceState & SettingsSliceActions;

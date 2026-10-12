@@ -2,6 +2,118 @@ package securityutil
 
 import "testing"
 
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.14
+func TestIsKnownSafeGitFlagAllowsIgnoreSubmodulesNone(t *testing.T) {
+	if !IsKnownSafeGitFlag("--ignore-submodules=none") {
+		t.Fatal("the gitlink visibility comparison flag must be allowed")
+	}
+}
+
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.14
+func TestIsKnownSafeGitFlagAllowsIgnoreSubmodulesDirty(t *testing.T) {
+	if !IsKnownSafeGitFlag("--ignore-submodules=dirty") {
+		t.Fatal("the pointer-only cumulative comparison flag must be allowed")
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsIgnoreSubmodulesVariants(t *testing.T) {
+	for _, flag := range []string{
+		"--ignore-submodules", "--ignore-submodule", "--ignore-submod", "--ignore-submodules=",
+		"--ignore-submodules=all", "--ignore-submodules=untracked",
+		"--ignore-submodules=other", "--ignore-submodules=none-extra", "--ignore-submodules=none=all",
+		" --ignore-submodules=none", "--ignore-submodules=none ", "--ignore-submodules=none\t",
+		"--ignore-submodules=none\n", "--ignore-submodules=none\x00",
+		"--ignore-submodules=dirty-extra", "--ignore-submodules=dirty=none",
+		" --ignore-submodules=dirty", "--ignore-submodules=dirty ", "--ignore-submodules=dirty\t",
+		"--ignore-submodules=dirty\n", "--ignore-submodules=dirty\x00",
+	} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("unsupported gitlink visibility flag %q admitted", flag)
+		}
+	}
+}
+
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.12
+func TestIsKnownSafeGitFlagAllowsSubmoduleShort(t *testing.T) {
+	if !IsKnownSafeGitFlag("--submodule=short") {
+		t.Fatal("the short gitlink comparison flag must be allowed")
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsSubmoduleVariants(t *testing.T) {
+	for _, flag := range []string{
+		"--submodule", "--submod", "--submodule=", "--submodule=log", "--submodule=diff",
+		"--submodule=other", "--submodule=short-extra", "--submodules=short",
+		" --submodule=short", "--submodule=short ", "--submodule=short\t", "--submodule=short\n",
+	} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("unsupported submodule flag %q admitted", flag)
+		}
+	}
+}
+
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.47
+func TestIsKnownSafeGitFlagDiscardStatus(t *testing.T) {
+	for _, flag := range []string{"-z", "--untracked-files=no"} {
+		if !IsKnownSafeGitFlag(flag) {
+			t.Errorf("required Discard status flag %q rejected", flag)
+		}
+	}
+	for _, flag := range []string{"-zz", "--untracked-files=all", "--untracked-files=no-extra"} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("unsupported Discard status variant %q admitted", flag)
+		}
+	}
+}
+
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.10
+func TestIsKnownSafeGitFlagAllowsNoTextconv(t *testing.T) {
+	if !IsKnownSafeGitFlag("--no-textconv") {
+		t.Fatal("the actual-byte comparison flag must be allowed")
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsNoTextconvVariants(t *testing.T) {
+	for _, flag := range []string{
+		"--no-textcon", "--no-textconv=true", "--no-textconv=", "--no-textconv-more",
+		"--no-textconvs", "--no-textconv ", " --no-textconv", "--no-textconv\t",
+	} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("IsKnownSafeGitFlag(%q) = true, want false", flag)
+		}
+	}
+}
+
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.8
+func TestIsKnownSafeGitFlagAllowsNoExtDiff(t *testing.T) {
+	if !IsKnownSafeGitFlag("--no-ext-diff") {
+		t.Fatal("the built-in cumulative patch flag must be allowed")
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsNoExtDiffVariants(t *testing.T) {
+	for _, flag := range []string{"--no-ext-dif", "--no-ext-diff=true", "--no-ext-diff=", "--no-ext-diff-more", "--no-ext-diffs", "--no-ext-diff ", " --no-ext-diff"} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("IsKnownSafeGitFlag(%q) = true, want false", flag)
+		}
+	}
+}
+
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.6
+func TestIsKnownSafeGitFlagAllowsNoColor(t *testing.T) {
+	if !IsKnownSafeGitFlag("--no-color") {
+		t.Fatal("the plain comparison output flag must be allowed")
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsNoColorVariants(t *testing.T) {
+	for _, flag := range []string{"--no-col", "--no-color=always", "--no-color=never", "--no-color=", "--no-color-moved", "--no-colors", "--no-color "} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("IsKnownSafeGitFlag(%q) = true, want false", flag)
+		}
+	}
+}
+
 // TestIsKnownSafeGitFlagAllowsDiffPrefixFlags pins the output-formatting flags
 // GetCumulativeDiff and ShowCommit pass to force stable a/ and b/ path
 // prefixes regardless of a user's diff.noprefix config. They only affect diff
@@ -118,5 +230,39 @@ func TestIsKnownSafeGitFlagRejectsRebaseAndAbortVariants(t *testing.T) {
 		if IsKnownSafeGitFlag(flag) {
 			t.Fatalf("IsKnownSafeGitFlag(%q) = true, want false — only the exact flags are allowed", flag)
 		}
+	}
+}
+
+func TestIsValidExpectedBranchName(t *testing.T) {
+	for _, tc := range []struct {
+		branch string
+		want   bool
+	}{
+		{branch: "main", want: true},
+		{branch: "feature/work", want: true},
+		{branch: "release/v1.2.3", want: true},
+		{branch: "", want: false},
+		{branch: "HEAD", want: false},
+		{branch: "ORIG_HEAD", want: false},
+		{branch: "FETCH_HEAD", want: false},
+		{branch: "MERGE_HEAD", want: false},
+		{branch: "main/", want: false},
+		{branch: "a//b", want: false},
+		{branch: "a..b", want: false},
+		{branch: "main.lock", want: false},
+		{branch: "-flag", want: false},
+		{branch: "has space", want: false},
+		// A local branch may legally carry this name, and it is validated as
+		// itself rather than as the "main" IsValidBaseBranchRef would strip to.
+		{branch: "origin/main", want: true},
+		// Distinguishes this validator from IsValidBaseBranchRef, which strips
+		// the prefix and then rejects the leading dash of the remainder.
+		{branch: "origin/-dash", want: true},
+	} {
+		t.Run(tc.branch, func(t *testing.T) {
+			if got := IsValidExpectedBranchName(tc.branch); got != tc.want {
+				t.Errorf("IsValidExpectedBranchName(%q) = %v, want %v", tc.branch, got, tc.want)
+			}
+		})
 	}
 }

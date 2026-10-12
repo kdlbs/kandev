@@ -114,29 +114,37 @@ func (r *Repository) ListTasksBlockedBy(ctx context.Context, blockerTaskID strin
 	return ids, nil
 }
 
-// ListBlockersForTasks returns a map of task ID → list of blocker IDs for a set of tasks.
-// Uses IN query over the given task IDs.
+// ListBlockersForTasks returns a map of task ID → list of blocker IDs for a set
+// of tasks, ordered by edge creation time ascending and tiebroken by blocker
+// task id ascending, so depends_on has a total, repeatable order. Input is
+// chunked at sqliteMaxHostParams so the IN clause stays legal past the
+// database's bind-parameter ceiling; every paginated flow caps at 200 task
+// ids, well under the chunk size, so chunking only engages on the unpaginated
+// preview flow.
 func (r *Repository) ListBlockersForTasks(ctx context.Context, taskIDs []string) (map[string][]string, error) {
+	result := make(map[string][]string, len(taskIDs))
 	if len(taskIDs) == 0 {
-		return map[string][]string{}, nil
+		return result, nil
 	}
-	query, args, err := sqlx.In(
-		`SELECT task_id, blocker_task_id FROM task_blockers WHERE task_id IN (?)`, taskIDs)
-	if err != nil {
-		return nil, err
-	}
-	query = r.ro.Rebind(query)
 	type row struct {
 		TaskID        string `db:"task_id"`
 		BlockerTaskID string `db:"blocker_task_id"`
 	}
-	var rows []row
-	if err := r.ro.SelectContext(ctx, &rows, query, args...); err != nil {
-		return nil, err
-	}
-	result := make(map[string][]string, len(taskIDs))
-	for _, rw := range rows {
-		result[rw.TaskID] = append(result[rw.TaskID], rw.BlockerTaskID)
+	for _, chunk := range chunkTaskIDs(taskIDs) {
+		query, args, err := sqlx.In(
+			`SELECT task_id, blocker_task_id FROM task_blockers
+			 WHERE task_id IN (?) ORDER BY created_at, blocker_task_id`, chunk)
+		if err != nil {
+			return nil, err
+		}
+		query = r.ro.Rebind(query)
+		var rows []row
+		if err := r.ro.SelectContext(ctx, &rows, query, args...); err != nil {
+			return nil, err
+		}
+		for _, rw := range rows {
+			result[rw.TaskID] = append(result[rw.TaskID], rw.BlockerTaskID)
+		}
 	}
 	return result, nil
 }
@@ -145,28 +153,31 @@ func (r *Repository) ListBlockersForTasks(ctx context.Context, taskIDs []string)
 // blocked by it, for a set of blocker task IDs. This is the batched reverse of
 // ListBlockersForTasks and backs the "blocks" direction of the dependency
 // payload; a per-task query would add one round trip per card to a board read.
+// Chunked at sqliteMaxHostParams for the same reason as ListBlockersForTasks.
 func (r *Repository) ListDependentsForTasks(ctx context.Context, blockerTaskIDs []string) (map[string][]string, error) {
+	result := make(map[string][]string, len(blockerTaskIDs))
 	if len(blockerTaskIDs) == 0 {
-		return map[string][]string{}, nil
+		return result, nil
 	}
-	query, args, err := sqlx.In(
-		`SELECT task_id, blocker_task_id FROM task_blockers WHERE blocker_task_id IN (?) ORDER BY created_at, task_id`,
-		blockerTaskIDs)
-	if err != nil {
-		return nil, err
-	}
-	query = r.ro.Rebind(query)
 	type row struct {
 		TaskID        string `db:"task_id"`
 		BlockerTaskID string `db:"blocker_task_id"`
 	}
-	var rows []row
-	if err := r.ro.SelectContext(ctx, &rows, query, args...); err != nil {
-		return nil, err
-	}
-	result := make(map[string][]string, len(blockerTaskIDs))
-	for _, rw := range rows {
-		result[rw.BlockerTaskID] = append(result[rw.BlockerTaskID], rw.TaskID)
+	for _, chunk := range chunkTaskIDs(blockerTaskIDs) {
+		query, args, err := sqlx.In(
+			`SELECT task_id, blocker_task_id FROM task_blockers WHERE blocker_task_id IN (?) ORDER BY created_at, task_id`,
+			chunk)
+		if err != nil {
+			return nil, err
+		}
+		query = r.ro.Rebind(query)
+		var rows []row
+		if err := r.ro.SelectContext(ctx, &rows, query, args...); err != nil {
+			return nil, err
+		}
+		for _, rw := range rows {
+			result[rw.BlockerTaskID] = append(result[rw.BlockerTaskID], rw.TaskID)
+		}
 	}
 	return result, nil
 }
@@ -197,6 +208,15 @@ func (r *Repository) DeleteTaskBlockersForTask(ctx context.Context, taskID strin
 	return err
 }
 
+// Task lifecycle state values as stored in the shared `tasks` table,
+// shared by every office-repo reader of terminal task state
+// (IsTaskInTerminalStep, GetTaskTerminalStatus).
+const (
+	taskStateCompleted = "COMPLETED"
+	taskStateFailed    = "FAILED"
+	taskStateCancelled = "CANCELLED"
+)
+
 func (r *Repository) IsTaskInTerminalStep(ctx context.Context, taskID string) (bool, error) {
 	var state string
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
@@ -204,7 +224,7 @@ func (r *Repository) IsTaskInTerminalStep(ctx context.Context, taskID string) (b
 	if err != nil {
 		return false, err
 	}
-	return state == "COMPLETED" || state == "CANCELLED", nil
+	return state == taskStateCompleted || state == taskStateFailed || state == taskStateCancelled, nil
 }
 
 // GetTaskAssignee returns the agent currently driving a task. Resolves
@@ -284,54 +304,102 @@ func (r *Repository) ListChildStates(ctx context.Context, parentID string) ([]Ch
 	return rows, nil
 }
 
+// ListWaveMembers returns id+state for the parent's wave members, ordered
+// by id: direct children that are not archived, not ephemeral, and not
+// automation-origin. This is the predicate
+// task/repository/sqlite.ListChildCompletionRows already applies
+// (andNotAutomationOrigin) — the one predicate all four
+// task_children_completed producers can share (docs/specs/office/
+// system-design/parent-wake-wave-identity.md, "Which children count").
+// Unlike ListChildStates, this excludes ephemeral and automation-origin
+// children as well as archived ones, so its result set is a subset of
+// ListChildStates' for the same parent.
+func (r *Repository) ListWaveMembers(ctx context.Context, parentID string) ([]ChildState, error) {
+	var rows []ChildState
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT id, COALESCE(state, '') AS state FROM tasks
+		WHERE parent_id = ? AND archived_at IS NULL AND is_ephemeral = 0
+		  AND COALESCE(origin, '') != 'automation_run'
+		ORDER BY id
+	`), parentID)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []ChildState{}
+	}
+	return rows, nil
+}
+
 // ChildSummary holds summary data for a completed child task.
 type ChildSummary struct {
-	TaskID                 string `db:"id" json:"id"`
-	Identifier             string `db:"identifier" json:"identifier"`
-	Title                  string `db:"title" json:"title"`
-	State                  string `db:"state" json:"state"`
-	AssigneeAgentProfileID string `db:"assignee_agent_profile_id" json:"assignee_agent_profile_id"`
-	LastComment            string `db:"last_comment" json:"last_comment,omitempty"`
+	TaskID      string `db:"id" json:"id"`
+	Identifier  string `db:"identifier" json:"identifier"`
+	Title       string `db:"title" json:"title"`
+	State       string `db:"state" json:"state"`
+	LastComment string `db:"last_comment" json:"last_comment,omitempty"`
 }
 
 // maxChildSummaries is the maximum number of child summaries returned.
 const maxChildSummaries = 20
 
-// maxCommentChars is the maximum length of a last-comment summary.
+// maxCommentChars is the display limit for a last-comment summary, counted in
+// Unicode code points. The query reads one code point beyond it so a caller can
+// tell a body that was cut from one that happens to end exactly at the limit.
 const maxCommentChars = 500
 
-// GetChildSummaries returns summary data for all children of a parent task.
-// Each child includes its last comment (truncated to 500 chars). Returns at
-// most 20 rows and a truncated flag indicating whether more exist.
-func (r *Repository) GetChildSummaries(ctx context.Context, parentID string) ([]ChildSummary, bool, error) {
-	// Count total children first to determine truncation.
-	var total int
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
-		`SELECT COUNT(*) FROM tasks WHERE parent_id = ?`), parentID).Scan(&total)
-	if err != nil {
-		return nil, false, err
-	}
+// childSummaryRow carries the per-parent live-child count alongside each row.
+// The count rides on the rows rather than being a second statement so both come
+// from one snapshot: a child archived between two statements would otherwise
+// leave a total above the cap while the capped select already covered every
+// live child.
+type childSummaryRow struct {
+	ChildSummary
+	LiveChildCount int `db:"live_child_count"`
+}
 
-	var summaries []ChildSummary
-	err = r.ro.SelectContext(ctx, &summaries, r.ro.Rebind(`
+// GetChildSummaries returns summary data for a parent's live direct children,
+// ordered by creation time then id, at most maxChildSummaries rows, with a flag
+// reporting whether live children were left out.
+//
+// Membership is not filtered by state: a child that left a terminal state is
+// still the parent's child and is reported with the state it now holds.
+// Archived children are excluded from both the rows and the count. A parent id
+// with no tasks row yields no rows, because parent_id carries no foreign key
+// and child rows outlive a deleted parent.
+func (r *Repository) GetChildSummaries(ctx context.Context, parentID string) ([]ChildSummary, bool, error) {
+	var rows []childSummaryRow
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
 		SELECT
 			t.id,
 			COALESCE(t.identifier, '') AS identifier,
 			COALESCE(t.title, '') AS title,
 			COALESCE(t.state, '') AS state,
-			`+RunnerProjection("t")+` AS assignee_agent_profile_id,
 			COALESCE((
 				SELECT SUBSTR(c.body, 1, ?) FROM task_comments c
-				WHERE c.task_id = t.id ORDER BY c.created_at DESC LIMIT 1
-			), '') AS last_comment
+				WHERE c.task_id = t.id
+				ORDER BY c.created_at DESC, c.id DESC LIMIT 1
+			), '') AS last_comment,
+			(
+				SELECT COUNT(*) FROM tasks lc
+				WHERE lc.parent_id = ? AND lc.archived_at IS NULL
+			) AS live_child_count
 		FROM tasks t
 		WHERE t.parent_id = ?
-		ORDER BY t.created_at
+			AND t.archived_at IS NULL
+			AND EXISTS (SELECT 1 FROM tasks p WHERE p.id = ?)
+		ORDER BY t.created_at ASC, t.id ASC
 		LIMIT ?
-	`), maxCommentChars, parentID, maxChildSummaries)
+	`), maxCommentChars+1, parentID, parentID, parentID, maxChildSummaries)
 	if err != nil {
 		return nil, false, err
 	}
 
-	return summaries, total > maxChildSummaries, nil
+	summaries := make([]ChildSummary, 0, len(rows))
+	for _, row := range rows {
+		summaries = append(summaries, row.ChildSummary)
+	}
+	// No rows means nothing to truncate, including when the parent is gone.
+	truncated := len(rows) > 0 && rows[0].LiveChildCount > maxChildSummaries
+	return summaries, truncated, nil
 }

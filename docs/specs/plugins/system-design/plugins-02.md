@@ -66,6 +66,12 @@ each referenced workspace, task, or repository. It derives a task's workspace
 server-side. `access` defaults to `authenticated`. `admin` requires
 `min_kandev_version: "0.91.1"` or later; validation rejects older/missing
 minimums. Non-admins are rejected before envelope parsing or plugin invocation.
+The same centralized minimum-version policy applies when
+`capabilities.api_read` includes `messages`, for both Go `Messages().List` and
+the browser facade, including development and E2E installs. The policy is
+shared by manifest, archive, install, and boot/load validators; missing,
+malformed, or lower versions reject, while equal or higher versions pass.
+It preserves the `admin` action rule above.
 Verified context is separate from untrusted JSON; calls are bounded/cancellable and
 response headers allowlisted. Public `/webhooks/` callbacks cannot serve browser
 actions. A task action may select one attached persisted repository; other IDs are
@@ -197,6 +203,7 @@ service Host {
   rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
   rpc InvokeUtilityAgent(InvokeUtilityAgentRequest) returns (InvokeUtilityAgentResponse);
+  rpc InvokeUtilityAgentWithOptions(InvokeUtilityAgentWithOptionsRequest) returns (InvokeUtilityAgentResponse);
 }
 ```
 
@@ -210,21 +217,17 @@ service Host {
 - `EmitEvent(event_name, payload)` publishes `plugin.<plugin_id>.<event_name>` on the
   internal event bus for delivery to subscribers (replaces the old
   `POST /api/plugins/{plugin_id}/events/emit` HTTP endpoint).
-- `InvokeUtilityAgent(prompt)` runs a one-shot, non-interactive completion using
-  the utility agent selected in the plugin's `utility_agent` config field and
-  returns its text. Plugins declaring `capabilities.agent_invoke: true` must
-  declare that field in `config_schema` with `type: string` and
-  `format: utility-agent`; Settings > Plugins then renders a picker containing
-  the configured built-in and custom utility agents. The picker displays the
-  agent name and persists its stable ID. It reuses kandev's
-  sessionless host-utility inference tier (ADR 0002) — no task, session, or
-  workspace — so a plugin can delegate a lightweight LLM step without holding a
-  provider API key. Returns gRPC `FailedPrecondition` when no utility agent is
-  configured, selected agent was deleted, or it is disabled. See
-  [ADR 0048](../../../decisions/0048-plugin-host-utility-agent-invoke.md). The plugin does not select
-  an execution profile directly; the selected utility agent resolves its effective profile and
-  complete launch/permission policy according to
-  [Profile-backed Utility Agents](../../agents/requirements/utility-agent-profiles.md).
+- `InvokeUtilityAgent(prompt)` runs a one-shot, non-interactive completion
+  using the platform default profile from Settings > Utility Agents.
+  `InvokeUtilityAgentWithOptions(prompt, profile_id)` uses the supplied
+  eligible profile when the ID is non-empty. An invalid explicit profile
+  returns `FailedPrecondition` without fallback. Plugin configuration is
+  caller-owned and is never read by the host for execution selection. Both
+  methods reuse the sessionless host-utility inference tier from ADR 0002.
+  The revised SDK uses the options method for every call, including default
+  calls, and returns `Unimplemented` from an older host without retrying the
+  prompt-only method. Existing prompt-only wire callers use the platform
+  default on a revised host. See [explicit plugin utility selection](../../../decisions/2026-09-14-explicit-plugin-utility-selection.md).
 
 Every Host RPC is capability-gated: `GetState`/`SetState`/`DeleteState`/`ListState`
 check `capabilities.state`, `RevealSecret` checks `capabilities.secrets`,

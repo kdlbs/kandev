@@ -1,10 +1,16 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
+import type { RefObject } from "react";
 
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 
 type TerminalCloseInlineConfirmationProps = {
+  open?: boolean;
+  terminalId: string;
+  terminalLabel: string;
+  focusReturnRef?: RefObject<HTMLElement | null>;
   density?: "compact" | "touch";
   testId?: string;
   onCancel: () => void;
@@ -13,6 +19,10 @@ type TerminalCloseInlineConfirmationProps = {
 };
 
 export function TerminalCloseInlineConfirmation({
+  open = true,
+  terminalId,
+  terminalLabel,
+  focusReturnRef,
   density = "compact",
   testId = "terminal-menu-close-confirmation",
   onCancel,
@@ -21,7 +31,7 @@ export function TerminalCloseInlineConfirmation({
 }: TerminalCloseInlineConfirmationProps) {
   const { t } = useTranslation();
 
-  return (
+  const inline = (
     <InlineConfirmActions
       density={density}
       testId={testId}
@@ -31,6 +41,24 @@ export function TerminalCloseInlineConfirmation({
       onCancel={onCancel}
       onClose={onClose}
       onConfirm={onConfirm}
+    />
+  );
+  return (
+    <MobileActionConfirmation
+      open={open}
+      targetKey={terminalId}
+      title={t("task:closeTerminal")}
+      subject={terminalLabel}
+      testId={testId}
+      cancelLabel={t("common:cancel")}
+      confirmLabel={t("task:closeTerminal2")}
+      onOpenChange={(next) => {
+        if (!next) onCancel();
+      }}
+      onClose={onClose}
+      onConfirm={onConfirm}
+      focusReturnRef={focusReturnRef}
+      fallback={inline}
     />
   );
 }

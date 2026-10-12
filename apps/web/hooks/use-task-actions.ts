@@ -1,23 +1,29 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { archiveTask, deleteTask, moveTask, updateTask } from "@/lib/api";
-import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
+import type { DeleteTaskParams, WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 import { isTaskDeleteDirtyWorktreeError } from "@/lib/api/task-delete-errors";
-import { replaceTaskUrl } from "@/lib/links";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
-import { useTaskRemoval } from "@/hooks/use-task-removal";
+import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import { useTranslation } from "react-i18next";
 
-type MovePayload = { workflow_id: string; workflow_step_id: string; position: number };
+type MovePayload = {
+  workflow_id: string;
+  workflow_step_id: string;
+  position?: number;
+  entry_options?: WorkflowMoveEntryOptions;
+};
 
 export type TaskActionOptions = {
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
+  confirmationId?: string;
 };
 
 export function useTaskActions() {
-  const { toast } = useToast();
+  const { toast, dismissToast } = useToast();
   const { t } = useTranslation();
+  const archiveProgressRef = useRef({ count: 0, toastId: null as string | null });
 
   const moveTaskById = useCallback(async (taskId: string, payload: MovePayload) => {
     return moveTask(taskId, payload);
@@ -41,9 +47,29 @@ export function useTaskActions() {
     [t, toast],
   );
 
-  const archiveTaskById = useCallback(async (taskId: string, opts?: TaskActionOptions) => {
-    return archiveTask(taskId, opts);
-  }, []);
+  const archiveTaskById = useCallback(
+    async (taskId: string, opts?: TaskActionOptions) => {
+      const progress = archiveProgressRef.current;
+      progress.count += 1;
+      if (progress.count === 1) {
+        progress.toastId = toast({
+          title: t("tasks:archivingInProgress"),
+          variant: "loading",
+        });
+      }
+
+      try {
+        return await archiveTask(taskId, opts);
+      } finally {
+        progress.count -= 1;
+        if (progress.count === 0 && progress.toastId) {
+          dismissToast(progress.toastId);
+          progress.toastId = null;
+        }
+      }
+    },
+    [dismissToast, t, toast],
+  );
 
   const renameTaskById = useCallback(async (taskId: string, title: string) => {
     return updateTask(taskId, { title });
@@ -53,56 +79,61 @@ export function useTaskActions() {
 }
 
 /**
- * Archives a task and switches to the next available task.
- * Shared between the PR merged banner and the sidebar archive action.
+ * Runs a one-shot task action (archive or delete) and switches to the next
+ * available task, restoring the previous active task if the action rejects
+ * after an optimistic switch. Shared shape behind `useArchiveAndSwitchTask`
+ * and `useDeleteAndSwitchTask`.
  */
-export function useArchiveAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
+function useSwitchAfterTaskAction(
+  action: "archive" | "delete",
+  runAction: (taskId: string, opts?: TaskActionOptions) => Promise<unknown>,
+  opts?: { useLayoutSwitch?: boolean; stayOnListing?: boolean },
+) {
   const store = useAppStoreApi();
-  const { archiveTaskById } = useTaskActions();
-  const { removeTaskFromBoard } = useTaskRemoval({
+  const notifySuccess = useTaskRemovalSuccessNotifier();
+  const { runTaskRemoval } = useTaskRemoval({
     store,
     useLayoutSwitch: opts?.useLayoutSwitch,
+    stayOnListing: opts?.stayOnListing,
+    notifySuccess,
   });
 
   return useCallback(
-    async (taskId: string, opts?: TaskActionOptions) => {
-      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-        store.getState().tasks;
-      const removalOptions = opts?.cascade ? { excludeTaskTree: true } : {};
-
-      const initialSwitch = await removeTaskFromBoard(taskId, {
-        wasActiveTaskId,
-        wasActiveSessionId,
-        switchOnly: true,
-        ...removalOptions,
-      });
-
-      try {
-        await archiveTaskById(taskId, opts);
-        await removeTaskFromBoard(taskId, {
-          wasActiveTaskId,
-          wasActiveSessionId,
-          ...removalOptions,
-          ...(initialSwitch.excludedTaskIds
-            ? { excludedTaskIds: initialSwitch.excludedTaskIds }
-            : {}),
-        });
-      } catch (error) {
-        if (
-          wasActiveTaskId &&
-          initialSwitch.switchedTaskId !== null &&
-          store.getState().tasks.activeTaskId === initialSwitch.switchedTaskId
-        ) {
-          if (wasActiveSessionId) {
-            store.getState().setActiveSession(wasActiveTaskId, wasActiveSessionId);
-          } else {
-            store.getState().setActiveTask(wasActiveTaskId);
-          }
-          replaceTaskUrl(wasActiveTaskId);
-        }
-        throw error;
-      }
-    },
-    [archiveTaskById, removeTaskFromBoard, store],
+    (taskId: string, actionOpts?: TaskActionOptions) =>
+      runTaskRemoval(
+        action,
+        {
+          taskId,
+          mutate: async () => {
+            await runAction(taskId, actionOpts);
+          },
+        },
+        { cascade: actionOpts?.cascade },
+      ).then(() => undefined),
+    [action, runAction, runTaskRemoval],
   );
+}
+
+/**
+ * Archives a task and switches to the next available task.
+ * Shared between the PR merged banner and the sidebar archive action.
+ */
+export function useArchiveAndSwitchTask(opts?: {
+  useLayoutSwitch?: boolean;
+  stayOnListing?: boolean;
+}) {
+  const { archiveTaskById } = useTaskActions();
+  return useSwitchAfterTaskAction("archive", archiveTaskById, opts);
+}
+
+/**
+ * Deletes a task and switches to the next available task, mirroring
+ * `useArchiveAndSwitchTask`'s outcome for the task detail surface.
+ */
+export function useDeleteAndSwitchTask(opts?: {
+  useLayoutSwitch?: boolean;
+  stayOnListing?: boolean;
+}) {
+  const { deleteTaskById } = useTaskActions();
+  return useSwitchAfterTaskAction("delete", deleteTaskById, opts);
 }

@@ -74,7 +74,7 @@ export function KeybarButton({
       onClick={onTap}
       style={{ touchAction: "manipulation" }}
       className={cn(
-        "h-8 min-w-10 shrink-0 px-2 font-mono text-sm cursor-pointer",
+        "h-11 min-w-11 shrink-0 px-2 font-mono text-sm cursor-pointer",
         active && "ring-2 ring-primary/60",
         sticky && "ring-primary",
       )}

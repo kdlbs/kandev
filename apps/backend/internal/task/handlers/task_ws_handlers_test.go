@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -53,12 +54,13 @@ func (successfulWSLaunchOrchestrator) EnsureSession(context.Context, string, ...
 type wsTaskRepo struct {
 	mockRepository
 
-	updated       []*models.Task
-	deleted       []string
-	archived      []string
-	stateUpdates  []string
-	sessionsCalls []string
-	created       []*models.Task
+	updated        []*models.Task
+	deleted        []string
+	cascadeDeleted []string
+	archived       []string
+	stateUpdates   []string
+	sessionsCalls  []string
+	created        []*models.Task
 }
 
 func (r *wsTaskRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
@@ -80,14 +82,35 @@ func (r *wsTaskRepo) UpdateTask(_ context.Context, task *models.Task) error {
 	return nil
 }
 
+func (r *wsTaskRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
+}
+
 func (r *wsTaskRepo) DeleteTask(_ context.Context, id string) error {
 	r.deleted = append(r.deleted, id)
+	return nil
+}
+
+func (r *wsTaskRepo) DeleteTaskWithVacatedStep(_ context.Context, id string) (string, error) {
+	r.cascadeDeleted = append(r.cascadeDeleted, id)
+	return "", nil
+}
+
+func (r *wsTaskRepo) ListStructuralChildrenLimited(_ context.Context, _ string, _ int) ([]*models.Task, error) {
+	return nil, nil
+}
+
+func (r *wsTaskRepo) ReparentDirectChildrenInWorkspace(_ context.Context, _, _, _ string) error {
 	return nil
 }
 
 func (r *wsTaskRepo) ArchiveTask(_ context.Context, id string) error {
 	r.archived = append(r.archived, id)
 	return nil
+}
+func (r *wsTaskRepo) ArchiveTaskIfActiveWithVacatedStep(_ context.Context, id, _ string) (string, bool, error) {
+	r.archived = append(r.archived, id)
+	return "", true, nil
 }
 
 func (r *wsTaskRepo) UpdateTaskState(_ context.Context, id string, _ v1.TaskState) error {
@@ -192,33 +215,37 @@ func TestWSTaskReadsDenyForeignTask(t *testing.T) {
 // separately rather than endorsed here.
 func TestWSTaskMutationsDenyForeignTask(t *testing.T) {
 	for name, tc := range map[string]struct {
-		call    func(*TaskHandlers, context.Context) (*ws.Message, error)
-		writes  func(*wsTaskRepo) int
-		wantMsg string
+		call     func(*TaskHandlers, context.Context) (*ws.Message, error)
+		writes   func(*wsTaskRepo) int
+		wantMsg  string
+		wantCode string
 	}{
 		"update": {
 			call: func(h *TaskHandlers, ctx context.Context) (*ws.Message, error) {
 				return h.wsUpdateTask(ctx, wsWorkflowRequest(t, ws.ActionTaskUpdate,
 					map[string]any{"id": "task-b", "title": "Hijacked"}))
 			},
-			writes:  func(r *wsTaskRepo) int { return len(r.updated) },
-			wantMsg: "Failed to update task",
+			writes:   func(r *wsTaskRepo) int { return len(r.updated) },
+			wantMsg:  "Failed to update task",
+			wantCode: string(ws.ErrorCodeInternalError),
 		},
 		"delete": {
 			call: func(h *TaskHandlers, ctx context.Context) (*ws.Message, error) {
 				return h.wsDeleteTask(ctx, wsWorkflowRequest(t, ws.ActionTaskDelete,
 					map[string]any{"id": "task-b"}))
 			},
-			writes:  func(r *wsTaskRepo) int { return len(r.deleted) },
-			wantMsg: "failed to delete task",
+			writes:   func(r *wsTaskRepo) int { return len(r.deleted) },
+			wantMsg:  "Task not found",
+			wantCode: string(ws.ErrorCodeNotFound),
 		},
 		"archive": {
 			call: func(h *TaskHandlers, ctx context.Context) (*ws.Message, error) {
 				return h.wsArchiveTask(ctx, wsWorkflowRequest(t, ws.ActionTaskArchive,
 					map[string]any{"id": "task-b"}))
 			},
-			writes:  func(r *wsTaskRepo) int { return len(r.archived) },
-			wantMsg: "failed to archive task",
+			writes:   func(r *wsTaskRepo) int { return len(r.archived) },
+			wantMsg:  "Task not found",
+			wantCode: string(ws.ErrorCodeNotFound),
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -229,9 +256,84 @@ func TestWSTaskMutationsDenyForeignTask(t *testing.T) {
 
 			require.NoError(t, err)
 			payload := wsWorkflowError(t, resp)
-			require.Equal(t, string(ws.ErrorCodeInternalError), payload.Code)
+			require.Equal(t, tc.wantCode, payload.Code)
 			require.Equal(t, tc.wantMsg, payload.Message)
 			require.Zero(t, tc.writes(repo), "a denied mutation must not reach the repository")
+		})
+	}
+}
+
+func TestWSDeleteTaskUsesHandoffCascadeWhenWired(t *testing.T) {
+	repo := &wsTaskRepo{}
+	h := newWSTaskHandlers(t, repo)
+	h.handoffSvc = service.NewHandoffService(repo, nil, nil, nil, nil, h.logger)
+	h.service.SetWorktreeCleanup(authzDeleteCleanup{})
+	ctx := asUser("user-b")
+	preview, err := h.service.TaskDeletePreflight(ctx, []string{"task-b"}, false, false)
+	require.NoError(t, err)
+
+	resp, err := h.wsDeleteTask(ctx, wsWorkflowRequest(t, ws.ActionTaskDelete,
+		map[string]any{"id": "task-b", "confirmation_id": preview.ConfirmationID}))
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Equal(t, []string{"task-b"}, repo.cascadeDeleted)
+	require.Empty(t, repo.deleted, "wired handoff deletion must not use the legacy service path")
+
+	replay, err := h.wsDeleteTask(ctx, wsWorkflowRequest(t, ws.ActionTaskDelete,
+		map[string]any{"id": "task-b", "confirmation_id": preview.ConfirmationID}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, replay.Type)
+	require.Equal(t, ws.ErrorCodeConflict, wsWorkflowError(t, replay).Code)
+	require.Equal(t, []string{"task-b"}, repo.cascadeDeleted, "single-use confirmation must block replay")
+}
+
+func TestWSDeleteTaskRequiresCurrentConfirmation(t *testing.T) {
+	repo := &wsTaskRepo{}
+	h := newWSTaskHandlers(t, repo)
+
+	resp, err := h.wsDeleteTask(asUser("user-b"), wsWorkflowRequest(t, ws.ActionTaskDelete,
+		map[string]any{"id": "task-b"}))
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	require.Equal(t, ws.ErrorCodeValidation, wsWorkflowError(t, resp).Code)
+	require.Contains(t, wsWorkflowError(t, resp).Message, "preview is required")
+	require.Empty(t, repo.deleted)
+	require.Empty(t, repo.cascadeDeleted)
+}
+
+func TestWSLifecycleReturnsPendingAfterPostCommitHousekeepingFailure(t *testing.T) {
+	for name, tc := range map[string]struct {
+		action string
+		call   func(*TaskHandlers, context.Context, *ws.Message) (*ws.Message, error)
+	}{
+		"delete":  {action: ws.ActionTaskDelete, call: (*TaskHandlers).wsDeleteTask},
+		"archive": {action: ws.ActionTaskArchive, call: (*TaskHandlers).wsArchiveTask},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &wsTaskRepo{}
+			h := newWSTaskHandlers(t, repo)
+			handoff := service.NewHandoffService(repo, nil, nil, nil, nil, h.logger)
+			handoff.SetTaskResourceCleaner(&postCommitCleanupFailure{err: fmt.Errorf("cleanup unavailable")})
+			h.SetHandoffService(handoff)
+			ctx := asUser("user-b")
+			requestPayload := map[string]any{"id": "task-b"}
+			if tc.action == ws.ActionTaskDelete {
+				h.service.SetWorktreeCleanup(authzDeleteCleanup{})
+				preview, previewErr := h.service.TaskDeletePreflight(ctx, []string{"task-b"}, false, false)
+				require.NoError(t, previewErr)
+				requestPayload["confirmation_id"] = preview.ConfirmationID
+			}
+
+			resp, err := tc.call(h, ctx, wsWorkflowRequest(t, tc.action, requestPayload))
+			require.NoError(t, err)
+			require.Equal(t, ws.MessageTypeResponse, resp.Type)
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+			require.Equal(t, false, payload["success"])
+			require.Equal(t, true, payload["pending"])
+			require.Equal(t, "task-b", payload["task_id"])
 		})
 	}
 }
@@ -533,4 +635,16 @@ func TestWSCreateTaskDoesNotWaitForRecentUsePersistence(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("successful task.create waited for best-effort recent-use persistence")
 	}
+}
+
+func TestWSCreateTaskExecutorProfileWithoutAgent(t *testing.T) {
+	repo := &wsTaskRepo{}
+	h := newWSTaskHandlers(t, repo)
+	resp, err := h.wsCreateTask(context.Background(), wsWorkflowRequest(t, ws.ActionTaskCreate, map[string]any{
+		"workspace_id": "ws-b", "workflow_id": "wf-b", "title": "Deferred task", "executor_profile_id": "executor-profile",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type, "body: %s", resp.Payload)
+	require.Len(t, repo.created, 1)
+	assert.Equal(t, "executor-profile", repo.created[0].Metadata[models.MetaKeyExecutorProfileID])
 }

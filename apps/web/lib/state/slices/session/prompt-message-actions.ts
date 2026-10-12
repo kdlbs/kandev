@@ -2,10 +2,11 @@ import type { StateCreator } from "zustand";
 import type { Message } from "@/lib/types/http";
 import type { SessionSlice, SessionSliceState } from "./types";
 import {
-  compareMessageTimestamps,
-  isIncomingMessageAtLeastAsFresh,
-  messageTimestampNanoseconds,
-} from "./message-timestamp";
+  comparePromptOrder,
+  isValidPromptMessage,
+  type ObservedPrompts,
+} from "@/lib/session-last-prompt";
+import { isIncomingMessageAtLeastAsFresh } from "./message-timestamp";
 
 type ImmerSet = Parameters<
   StateCreator<SessionSlice, [["zustand/immer", never]], [], SessionSlice>
@@ -54,46 +55,73 @@ function bumpPromptRevision(state: SessionSliceState, sessionId: string) {
   revisions[sessionId] = (revisions[sessionId] ?? 0) + 1;
 }
 
-/** Returns whether a row is a valid user prompt with a parseable timestamp. */
-function isValidPrompt(message: Message) {
-  return message.author_type === "user" && messageTimestampNanoseconds(message.created_at) !== null;
-}
-
-/** Orders prompt IDs for stable ties on identical timestamps. */
-function comparePromptIDs(left: Message, right: Message) {
-  if (left.id < right.id) return -1;
-  if (left.id > right.id) return 1;
-  return 0;
-}
-
 /** Filters invalid rows and sorts prompts by creation order. */
 function sortPromptMessages(messages: Message[]) {
-  return messages.filter(isValidPrompt).sort((left, right) => {
-    const timeDelta = compareMessageTimestamps(left.created_at, right.created_at);
-    return timeDelta !== null && timeDelta !== 0 ? timeDelta : comparePromptIDs(left, right);
-  });
+  return messages
+    .filter(isValidPromptMessage)
+    .sort((left, right) => comparePromptOrder(left, right) ?? 0);
 }
 
-/** Reports whether an incoming prompt update is at least as fresh as cached data. */
-function isIncomingPromptAtLeastAsFresh(existing: Message, incoming: Message) {
-  return isIncomingMessageAtLeastAsFresh(existing, incoming);
+function acceptedPromptRows(state: SessionSliceState, sessionId: string, messages: Message[]) {
+  const deleted = state.messagePrompts.deletedIdsBySession[sessionId];
+  return messages.filter(
+    (message) =>
+      message.session_id === sessionId && isValidPromptMessage(message) && !deleted?.[message.id],
+  );
+}
+
+function observePrompt(record: ObservedPrompts, message: Message) {
+  record.ids[message.id] = true;
+  if (!record.newestKey || comparePromptOrder(message, record.newestKey)! > 0) {
+    record.newestKey = { id: message.id, created_at: message.created_at };
+  }
+}
+
+/** Live creation is observed separately from snapshot and pagination fan-out. */
+export function observeLivePrompt(state: SessionSliceState, message: Message) {
+  if (
+    !isValidPromptMessage(message) ||
+    state.messagePrompts.deletedIdsBySession[message.session_id]?.[message.id]
+  )
+    return;
+  const record = (state.messagePrompts.observedBySession[message.session_id] ??= {
+    ids: {},
+    newestKey: null,
+  });
+  observePrompt(record, message);
+}
+
+function repairPromptCursor(state: SessionSliceState, sessionId: string, pageSize: number) {
+  const meta = state.messagePrompts.metaBySession[sessionId];
+  const rows = state.messagePrompts.bySession[sessionId];
+  if (pageSize === 0) return;
+  if (rows.length === 0) {
+    meta.oldestCursor = null;
+    meta.hasMore = false;
+  } else if (meta.oldestCursor && !rows.some((row) => row.id === meta.oldestCursor)) {
+    meta.oldestCursor = rows[0].id;
+  }
 }
 
 /** Merges a prompt update without regressing its immutable creation order. */
 function mergePromptMessage(existing: Message, incoming: Message) {
-  return isIncomingPromptAtLeastAsFresh(existing, incoming)
-    ? {
-        ...existing,
-        ...incoming,
-        created_at: existing.created_at,
-        prompt_index: incoming.prompt_index ?? existing.prompt_index,
-      }
-    : existing;
+  if (!isIncomingMessageAtLeastAsFresh(existing, incoming)) {
+    return incoming.prompt_index !== undefined && existing.prompt_index === undefined
+      ? { ...existing, prompt_index: incoming.prompt_index }
+      : existing;
+  }
+  return {
+    ...existing,
+    ...incoming,
+    created_at: existing.created_at,
+    prompt_index: incoming.prompt_index ?? existing.prompt_index,
+  };
 }
 
 /** Inserts or refreshes one prompt in the independent prompt cache. */
 function upsertPromptMessage(state: SessionSliceState, message: Message) {
-  if (!isValidPrompt(message)) return;
+  if (!isValidPromptMessage(message)) return;
+  if (state.messagePrompts.deletedIdsBySession[message.session_id]?.[message.id]) return;
   const sessionId = message.session_id;
   const prompts = state.messagePrompts.bySession[sessionId] ?? [];
   bumpPromptRevision(state, sessionId);
@@ -106,14 +134,15 @@ function upsertPromptMessage(state: SessionSliceState, message: Message) {
 
 /** Applies a live user-message update to the prompt cache when present. */
 export function updatePromptMessage(state: SessionSliceState, message: Message) {
-  if (!isValidPrompt(message)) return;
+  if (!isValidPromptMessage(message)) return;
+  if (state.messagePrompts.deletedIdsBySession[message.session_id]?.[message.id]) return;
   bumpPromptRevision(state, message.session_id);
-  const prompts = state.messagePrompts.bySession[message.session_id];
-  if (!prompts) return;
+  const prompts = state.messagePrompts.bySession[message.session_id] ?? [];
   const index = prompts.findIndex((entry) => entry.id === message.id);
-  if (index === -1) return;
-  prompts[index] = mergePromptMessage(prompts[index], message);
+  if (index === -1) prompts.push(message);
+  else prompts[index] = mergePromptMessage(prompts[index], message);
   state.messagePrompts.bySession[message.session_id] = sortPromptMessages(prompts);
+  ensurePromptMeta(state.messagePrompts.metaBySession, message.session_id);
 }
 
 /** Fans transcript message events into the prompt cache. */
@@ -121,12 +150,15 @@ export function fanOutTranscriptPrompts(state: SessionSliceState, messages: Mess
   for (const message of messages) upsertPromptMessage(state, message);
 }
 
-/** Removes a prompt and repairs the cached oldest cursor. */
+/** Removes a prompt and repairs its cursor without discarding unloaded history. */
 export function removePromptMessage(
   state: SessionSliceState,
   sessionId: string,
   messageId: string,
 ) {
+  (state.messagePrompts.deletedIdsBySession[sessionId] ??= {})[messageId] = true;
+  const observed = state.messagePrompts.observedBySession[sessionId];
+  if (observed) delete observed.ids[messageId];
   bumpPromptRevision(state, sessionId);
   const prompts = state.messagePrompts.bySession[sessionId];
   if (!prompts) return;
@@ -136,6 +168,9 @@ export function removePromptMessage(
   const meta = state.messagePrompts.metaBySession[sessionId];
   if (meta?.oldestCursor === messageId) {
     meta.oldestCursor = nextPrompts[0]?.id ?? null;
+  }
+  if (nextPrompts.length === 0 && meta && !meta.hasMore) {
+    meta.oldestCursor = null;
   }
 }
 
@@ -151,15 +186,21 @@ export function buildPromptMessageActions(set: ImmerSet) {
         const existingByID = new Map(
           (draft.messagePrompts.bySession[sessionId] ?? []).map((message) => [message.id, message]),
         );
+        const accepted = acceptedPromptRows(draft, sessionId, messages);
         draft.messagePrompts.bySession[sessionId] = sortPromptMessages(
-          messages.map((message) =>
-            existingByID.get(message.id)
-              ? mergePromptMessage(existingByID.get(message.id)!, message)
-              : message,
-          ),
+          accepted.map((message) => {
+            const current = existingByID.get(message.id);
+            return current ? mergePromptMessage(current, message) : message;
+          }),
         );
         ensurePromptMeta(draft.messagePrompts.metaBySession, sessionId);
-        if (meta) applyPromptMeta(draft.messagePrompts.metaBySession, sessionId, meta);
+        if (meta) {
+          applyPromptMeta(draft.messagePrompts.metaBySession, sessionId, {
+            ...meta,
+            historyInitialized: true,
+          });
+        }
+        repairPromptCursor(draft, sessionId, messages.length);
       }),
     prependPromptMessages: (
       sessionId: string,
@@ -169,14 +210,47 @@ export function buildPromptMessageActions(set: ImmerSet) {
       set((draft) => {
         const existing = draft.messagePrompts.bySession[sessionId] ?? [];
         const byID = new Map(existing.map((message) => [message.id, message]));
-        for (const message of messages) {
-          if (!isValidPrompt(message)) continue;
+        const accepted = acceptedPromptRows(draft, sessionId, messages);
+        for (const message of accepted) {
           const current = byID.get(message.id);
           byID.set(message.id, current ? mergePromptMessage(current, message) : message);
         }
         draft.messagePrompts.bySession[sessionId] = sortPromptMessages([...byID.values()]);
         ensurePromptMeta(draft.messagePrompts.metaBySession, sessionId);
         if (meta) applyPromptMeta(draft.messagePrompts.metaBySession, sessionId, meta);
+        repairPromptCursor(draft, sessionId, messages.length);
+      }),
+    installAuthoritativePromptMessages: (
+      sessionId: string,
+      messages: Message[],
+      meta: { hasMore: boolean; oldestCursor: string | null },
+    ) =>
+      set((draft) => {
+        const byID = new Map(
+          (draft.messagePrompts.bySession[sessionId] ?? []).map((message) => [message.id, message]),
+        );
+        const accepted = acceptedPromptRows(draft, sessionId, messages);
+        for (const message of accepted) {
+          const current = byID.get(message.id);
+          byID.set(message.id, current ? mergePromptMessage(current, message) : message);
+        }
+        draft.messagePrompts.bySession[sessionId] = sortPromptMessages([...byID.values()]);
+        const cursorWasDeleted =
+          meta.oldestCursor !== null &&
+          draft.messagePrompts.deletedIdsBySession[sessionId]?.[meta.oldestCursor];
+        if (!draft.messagePrompts.metaBySession[sessionId]?.historyInitialized) {
+          applyPromptMeta(draft.messagePrompts.metaBySession, sessionId, {
+            ...meta,
+            oldestCursor: cursorWasDeleted ? null : meta.oldestCursor,
+            historyInitialized: true,
+          });
+        }
+        draft.messagePrompts.authoritativeBySession[sessionId] = true;
+        const observed = (draft.messagePrompts.observedBySession[sessionId] ??= {
+          ids: {},
+          newestKey: null,
+        });
+        for (const message of accepted) observePrompt(observed, byID.get(message.id)!);
       }),
     setPromptMessagesLoading: (sessionId: string, loading: boolean) =>
       set((draft) => {

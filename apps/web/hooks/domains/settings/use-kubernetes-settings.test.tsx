@@ -194,6 +194,21 @@ describe("Kubernetes diagnostic and session hooks", () => {
     await expect(result.current.refresh()).resolves.toEqual(rows);
   });
 
+  it("clears stale session rows when a refresh fails", async () => {
+    const rows = [{ session_id: "session-1", task_id: "task-1", restarts: 0 }];
+    const failure = new Error("status unavailable");
+    listKubernetesSessions.mockResolvedValueOnce(rows).mockRejectedValueOnce(failure);
+    const { result } = renderHook(() => useKubernetesSessions(EXECUTOR_ID));
+
+    await waitFor(() => expect(result.current.sessions).toEqual(rows));
+    await act(async () => {
+      await expect(result.current.refresh()).rejects.toBe(failure);
+    });
+
+    expect(result.current.sessions).toEqual([]);
+    expect(result.current.error).toBe(failure);
+  });
+
   it("does not request Kubernetes sessions when the hook is disabled", async () => {
     const { result } = renderHook(() => useKubernetesSessions("docker-1", false));
 

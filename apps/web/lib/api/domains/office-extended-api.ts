@@ -56,8 +56,7 @@ export function exportConfig(workspaceId: string, options?: ApiRequestOptions) {
   );
 }
 
-export const exportConfigZipUrl = (workspaceId: string) =>
-  `${BASE}/workspaces/${workspaceId}/config/export/zip`;
+export * from "./office-config-export";
 
 export function previewImport(
   workspaceId: string,

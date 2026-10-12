@@ -20,13 +20,23 @@ Mobile users need the same task controls as desktop without relying on long pres
 #### Acceptance criteria
 
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.1:** Task action controls are visible and touch-reachable on mobile.
-- **AC-UI-MOBILE-TASK-NAVIGATION-001.2:** Mobile task actions preserve desktop capabilities, including same-workflow **Move to**, cross-workflow **Send to workflow**, linking, pinning, renaming, coloring, archiving, and deleting when those actions are available on desktop.
+- **AC-UI-MOBILE-TASK-NAVIGATION-001.2:** Mobile task actions preserve desktop capabilities, including same-workflow **Move to**, cross-workflow **Change workflow...**, linking, pinning, renaming, coloring, archiving, and deleting when those actions are available on desktop.
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.3:** Context and dropdown action menus below 640px stay within the viewport, use bottom-sheet presentation, contain their own vertical overflow, respect the bottom safe area, and provide touch targets at least 44px high.
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.4:** Mobile Kanban renders one focused workflow and one focused step at a time when the user has several workflows.
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.5:** Workflow is a primary mobile Kanban navigation dimension, not a setting hidden in the secondary display menu. The current workflow and step are always visible together in the board navigation control, including when only one workflow exists.
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.6:** Opening the board navigation control exposes available workflows and the focused workflow's steps in one bottom drawer. Choosing a workflow makes it the active workflow for the board, task creation, and multi-select actions through the existing saved workflow selection; previous/next step buttons and horizontal swipe remain equivalent transient step shortcuts.
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.7:** The task list is the primary vertical scroller. The document and workflow container do not require horizontal scrolling.
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.8:** Search and live workflow/task updates choose a deterministic visible fallback if the focused workflow disappears.
+- **AC-UI-MOBILE-TASK-NAVIGATION-001.9:** When a dropdown or context action menu opens as a bottom sheet below 640px, its background shall be dimmed and lightly blurred using the same treatment as the existing mobile navigation drawers. The menu text and controls shall remain sharp. Browsers without background-blur support shall retain the dimming.
+- **AC-UI-MOBILE-TASK-NAVIGATION-001.10:** When a user enters or leaves a submenu, the menu hierarchy shall retain one backdrop without adding another darkening or blur layer for each submenu. An enclosing drawer shall retain its own existing backdrop and remain usable after the menu closes.
+- **AC-UI-MOBILE-TASK-NAVIGATION-001.11:** When the root menu closes, its backdrop shall fade with the sheet's exit motion and leave no visible layer afterward. Unmounting or leaving the bottom-sheet viewport range shall remove the backdrop immediately. Outside-tap dismissal, Escape, focus return, action selection, and any existing non-modal interaction shall retain their current behavior.
+- **AC-UI-MOBILE-TASK-NAVIGATION-001.12:** The backdrop treatment shall apply consistently to task and non-task dropdown/context bottom sheets, including workspace selection, session options, file actions, and topbar overflow. At widths of 640px and above, those menus shall retain their existing anchored presentation without a new menu backdrop.
+
+## Menu backdrop design
+
+The shared backdrop contract in criteria 001.9 through 001.12 extends the
+existing bottom-sheet presentation in criterion 001.3. Its technical source is
+[Mobile Menu Backdrops](../system-design/mobile-menu-backdrops.md).
 
 ## Migrated source detail
 
@@ -43,7 +53,7 @@ Mobile users need the same task controls as desktop without relying on long pres
 ## What
 
 - Task action controls are visible and touch-reachable on mobile.
-- Mobile task actions preserve desktop capabilities, including same-workflow **Move to**, cross-workflow **Send to workflow**, linking, pinning, renaming, coloring, archiving, and deleting when those actions are available on desktop.
+- Mobile task actions preserve desktop capabilities, including same-workflow **Move to**, cross-workflow **Change workflow...**, linking, pinning, renaming, coloring, archiving, and deleting when those actions are available on desktop.
 - Context and dropdown action menus below 640px stay within the viewport, use bottom-sheet presentation, contain their own vertical overflow, respect the bottom safe area, and provide touch targets at least 44px high.
 - Mobile Kanban renders one focused workflow and one focused step at a time when the user has several workflows.
 - Workflow is a primary mobile Kanban navigation dimension, not a setting hidden in the secondary display menu. The current workflow and step are always visible together in the board navigation control, including when only one workflow exists.
@@ -64,7 +74,7 @@ Mobile users need the same task controls as desktop without relying on long pres
 
 - **GIVEN** a mobile task switcher with a task in a workflow containing multiple steps, **WHEN** the user opens Task actions, **THEN** Move to is visible and selecting another step moves the task there.
 - **GIVEN** a mobile action menu with more items than fit on screen, **WHEN** it opens, **THEN** it is inset within the viewport and scrolls internally with touch-sized rows.
-- **GIVEN** a nested mobile action such as Move to, Link, or Send to workflow, **WHEN** the user opens it, **THEN** its choices remain within the same bottom-sheet area and are selectable without horizontal overflow.
+- **GIVEN** a mobile task action menu, **WHEN** the user chooses Move to or Link, **THEN** its choices remain in the same safe-area-aware sheet and are selectable without horizontal overflow. Choosing Change workflow... replaces the menu with the separate full-height form; its choices remain selectable without horizontal overflow and its fixed actions clear the safe area.
 - **GIVEN** tasks in several workflows, **WHEN** mobile Kanban opens, **THEN** exactly one workflow board is mounted and the visible board control names both its workflow and active step.
 - **GIVEN** a workflow with several steps, **WHEN** the user opens the board drawer, **THEN** workflow choices and the active workflow's step choices are reachable in that same surface.
 - **GIVEN** several workflows, **WHEN** the user chooses one from the board drawer, **THEN** that workflow becomes the visible and active workflow for subsequent task creation and board actions.
@@ -90,9 +100,12 @@ Mobile users need the same task controls as desktop without relying on long pres
 - Changing backend task-move contracts, workflow ordering, or task permissions.
 - Unlocking or changing a started task's prompt.
 - Changing repository selection during task creation, workspace-source attachment, file browsing, or desktop and tablet task interaction.
+- Changing the backdrop of ordinary dialogs, full-height mobile Quick Chat,
+  non-menu popovers, or existing Drawer and Sheet surfaces.
 
 ## Implementation plans
 
 - [Mobile task navigation refinement](../../../plans/mobile-task-navigation-refinement/plan.md)
 - [SPA blank-screen resilience](../../../plans/spa-blank-screen-resilience/plan.md)
 - [Mobile repository switcher removal](../../../plans/mobile-repository-switcher-removal/plan.md)
+- [Mobile menu backdrops](../../../plans/mobile-menu-backdrops/plan.md)

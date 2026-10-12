@@ -3,7 +3,7 @@ import type { WorkspaceSlice, WorkspaceSliceState } from "./types";
 import type { RepositoryBranchPolicy, RepositorySet } from "@/lib/types/http";
 
 export const defaultWorkspaceState: WorkspaceSliceState = {
-  workspaces: { items: [], activeId: null },
+  workspaces: { items: [], activeId: null, activeIdRevision: 0 },
   repositories: { itemsByWorkspaceId: {}, loadingByWorkspaceId: {}, loadedByWorkspaceId: {} },
   repositorySets: {
     itemsByWorkspaceId: {},
@@ -42,8 +42,13 @@ export const createWorkspaceSlice: StateCreator<
     if (get().workspaces.activeId === workspaceId) {
       return;
     }
+    // Workspace selection is the canonical boundary for all workspace-scoped
+    // reads. The action is optional on isolated workspace-slice stores used by
+    // tests; the composed app store always provides it from the kanban slice.
+    (get() as WorkspaceSliceWithKanbanReset).resetKanbanWorkspaceContext?.();
     set((draft) => {
       draft.workspaces.activeId = workspaceId;
+      draft.workspaces.activeIdRevision = (draft.workspaces.activeIdRevision ?? 0) + 1;
     });
   },
   setWorkspaces: (workspaces) =>
@@ -121,6 +126,10 @@ export const createWorkspaceSlice: StateCreator<
   ...createRepositorySetActions(set),
   ...createRepositoryBranchPolicyActions(set),
 });
+
+type WorkspaceSliceWithKanbanReset = WorkspaceSlice & {
+  resetKanbanWorkspaceContext?: () => void;
+};
 
 /**
  * The repository-set actions, split out so the slice factory stays under the

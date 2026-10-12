@@ -23,15 +23,20 @@ function stepFromPayload(step: any) {
     prompt: step.prompt,
     is_start_step: step.is_start_step,
     agent_profile_id: step.agent_profile_id,
+    session_target: step.session_target ?? null,
     profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
       step.profile_session_start_policy,
     ),
     profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
       step.profile_session_end_policy,
     ),
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     wip_limit: step.wip_limit,
     pull_from_step_id: step.pull_from_step_id ?? null,
     stage_type: step.stage_type,
+    complete_task_on_enter: step.complete_task_on_enter,
+    auto_advance_requires_signal: step.auto_advance_requires_signal,
+    cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
   };
 }
 

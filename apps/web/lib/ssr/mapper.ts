@@ -1,6 +1,6 @@
 import type { AppState, KanbanState } from "@/lib/state/store";
 import { primaryTaskRepository } from "@/lib/types/http";
-import type { WorkflowSnapshot, Message, Task } from "@/lib/types/http";
+import type { WorkflowSnapshot, WorkflowStep, Message, Task } from "@/lib/types/http";
 import { pickAssignee, pickPendingAction, workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 import {
   isPRReviewFromMetadata,
@@ -21,6 +21,38 @@ function snapshotTaskWorkspaceId(
 // from its long list of `??` fallbacks) doesn't need to absorb one more.
 function resolveAutoStartFailed(task: WorkflowSnapshot["tasks"][number]): boolean {
   return task.auto_start_failed ?? false;
+}
+
+function resolveWorkspaceOrphaned(task: WorkflowSnapshot["tasks"][number]): boolean {
+  return task.workspace_orphaned ?? false;
+}
+
+export function workflowStepToState(
+  step: WorkflowSnapshot["steps"][number] | (WorkflowStep & { order_revision?: number }),
+) {
+  return {
+    id: step.id,
+    title: step.name,
+    color: step.color ?? "bg-neutral-400",
+    position: step.position,
+    events: step.events,
+    allow_manual_move: step.allow_manual_move,
+    auto_advance_requires_signal: step.auto_advance_requires_signal,
+    prompt: step.prompt,
+    is_start_step: step.is_start_step,
+    show_in_command_panel: step.show_in_command_panel,
+    agent_profile_id: step.agent_profile_id,
+    session_target: step.session_target ?? null,
+    profile_session_start_policy: step.profile_session_start_policy,
+    profile_session_end_policy: step.profile_session_end_policy,
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
+    complete_task_on_enter: step.complete_task_on_enter,
+    cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
+    wip_limit: step.wip_limit,
+    pull_from_step_id: step.pull_from_step_id ?? null,
+    stage_type: step.stage_type,
+    order_revision: step.order_revision,
+  };
 }
 
 function primaryExecutorFields(task: Task) {
@@ -70,6 +102,8 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         workspaceId: snapshotTaskWorkspaceId(task, snapshot.workflow.workspace_id),
         workflowId: snapshot.workflow.id,
         workflowStepId,
+        identifier: task.identifier,
+        workflowAgentOverrides: task.workflow_agent_overrides,
         title: task.title,
         description: task.description ?? undefined,
         autopilot: task.autopilot ?? false,
@@ -109,6 +143,10 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         taskPendingAction: pickPendingAction(task.task_pending_action),
         foregroundActivity: task.foreground_activity ?? undefined,
         autoStartFailed: resolveAutoStartFailed(task),
+        parkedOnBackgroundWork: task.parked_on_background_work,
+        parkedRevision: task.parked_revision,
+        parkedEpoch: task.parked_epoch,
+        workspaceOrphaned: resolveWorkspaceOrphaned(task),
         activeSubagentCount: task.active_subagent_count ?? undefined,
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
@@ -129,22 +167,15 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
     kanban: {
       workflowId: snapshot.workflow.id,
       isLoading: false,
-      steps: snapshot.steps.map((step) => ({
-        id: step.id,
-        title: step.name,
-        color: step.color ?? "bg-neutral-400",
-        position: step.position,
-        events: step.events,
-        allow_manual_move: step.allow_manual_move,
-        prompt: step.prompt,
-        is_start_step: step.is_start_step,
-        show_in_command_panel: step.show_in_command_panel,
-        agent_profile_id: step.agent_profile_id,
-        wip_limit: step.wip_limit,
-        pull_from_step_id: step.pull_from_step_id ?? null,
-        stage_type: step.stage_type,
-      })),
+      steps: snapshot.steps.map(workflowStepToState),
       tasks,
+      taskCoverage: snapshot.task_coverage
+        ? {
+            ...snapshot.task_coverage,
+            complete:
+              snapshot.task_coverage.complete && tasks.length === snapshot.task_coverage.total,
+          }
+        : undefined,
     },
   };
 }

@@ -272,7 +272,9 @@ describe("ChangeRequestDetail actions and states", () => {
     });
 
     const approve = screen.getByRole("button", { name: "Approve" });
-    expect(approve.classList.contains("min-h-11")).toBe(true);
+    expect(approve.classList.contains("h-7")).toBe(true);
+    expect(approve.classList.contains("max-md:h-11")).toBe(true);
+    expect(approve.classList.contains("[@media(pointer:coarse)]:h-11")).toBe(true);
     fireEvent.click(approve);
     expect(onAction).toHaveBeenCalledWith({ actionId: "approve" });
 
@@ -350,6 +352,9 @@ describe("ChangeRequestDetail actions and states", () => {
       </TooltipProvider>,
     );
     expect(screen.getByRole("alert").textContent).toContain("Provider unavailable");
-    expect(screen.getByRole("button", { name: "Retry" }).classList.contains("min-h-11")).toBe(true);
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry.classList.contains("h-7")).toBe(true);
+    expect(retry.classList.contains("max-md:h-11")).toBe(true);
+    expect(retry.classList.contains("[@media(pointer:coarse)]:h-11")).toBe(true);
   });
 });

@@ -75,7 +75,7 @@ test.describe("New session dialog", () => {
     }
   });
 
-  test("completed sessions replace the composer with a New Agent action", async ({
+  test("completed sessions show Resume and New Agent actions", async ({
     testPage,
     apiClient,
     seedData,
@@ -117,7 +117,8 @@ test.describe("New session dialog", () => {
     await expect(session.completedSessionNewAgentButton()).toHaveText("New Agent");
     await expect(session.activeChat().locator(".tiptap.ProseMirror")).not.toBeVisible();
     await expect(session.submitButton()).not.toBeVisible();
-    await expect(session.recoveryResumeButton()).not.toBeVisible();
+    await expect(session.recoveryResumeButton()).toBeVisible();
+    await expect(session.recoveryResumeButton()).toHaveText("Resume");
     await expect(session.recoveryFreshButton()).not.toBeVisible();
 
     await session.completedSessionNewAgentButton().click();
@@ -165,14 +166,9 @@ test.describe("New session dialog", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("New Session Dialog Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // 3. Open the API-created task directly; Kanban card virtualization is not
+    // part of the new-session dialog flow under test.
+    await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -219,14 +215,9 @@ test.describe("New session dialog", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Second Session Tab Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // 3. Open the API-created task directly; Kanban card virtualization is
+    // unrelated to the new-session dialog flow.
+    await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -417,13 +408,7 @@ test.describe("New session dialog", () => {
     expect(envBefore).not.toBeNull();
 
     // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Env Reuse Dialog Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -488,37 +473,47 @@ test.describe("New session dialog", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    const { settings: priorSettings } = await apiClient.getUserSettings();
+    const otherWorkflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Unrelated dialog workflow",
+      "simple",
+    );
+    try {
+      await apiClient.saveUserSettings({ workflow_filter_id: otherWorkflow.id });
 
-    const card = kanban.taskCardByTitle("Cancel Dialog Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+      // 3. Navigate to the task
+      await testPage.goto(`/t/${task.id}`);
+      await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+        timeout: 15_000,
+      });
 
-    // 4. Open and cancel the dialog
-    await session.openNewSessionDialog();
-    await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
+      // 4. Open and cancel the dialog
+      await session.openNewSessionDialog();
+      await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
 
-    // Type something to verify it doesn't accidentally submit
-    await session.newSessionPromptInput().fill("should not create");
+      // Type something to verify it doesn't accidentally submit
+      await session.newSessionPromptInput().fill("should not create");
 
-    // Click cancel
-    const cancelBtn = session.newSessionDialog().getByRole("button", { name: "Cancel" });
-    await cancelBtn.click();
+      // Click cancel
+      const cancelBtn = session.newSessionDialog().getByRole("button", { name: "Cancel" });
+      await cancelBtn.click();
 
-    // 5. Verify dialog closed and no new session was created
-    await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 5_000 });
+      // 5. Verify dialog closed and no new session was created
+      await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 5_000 });
 
-    const { sessions } = await apiClient.listTaskSessions(task.id);
-    expect(sessions).toHaveLength(1);
+      const { sessions } = await apiClient.listTaskSessions(task.id);
+      expect(sessions).toHaveLength(1);
+    } finally {
+      await apiClient.saveUserSettings({
+        workflow_filter_id: priorSettings.workflow_filter_id ?? "",
+      });
+      await apiClient.deleteWorkflow(otherWorkflow.id);
+    }
   });
 
   test("+ dropdown lists sessions with status and primary indicators", async ({
@@ -554,7 +549,7 @@ test.describe("New session dialog", () => {
 
     // 3. Navigate to the task
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    await kanban.goto(seedData.workflowId);
 
     const card = kanban.taskCardByTitle("Session List Task");
     await expect(card).toBeVisible({ timeout: 10_000 });

@@ -20,6 +20,7 @@ func TestConfigurationCatalogIsComplete(t *testing.T) {
 		"tasks.preparationTimeout",
 		"credentials.file",
 		"limits.ghMaxConcurrent",
+		"limits.lspMaxConnections",
 		"messageQueue.maxPerSession",
 		"agentctl.notificationQueueCapacity",
 		"launcher.noBrowser",
@@ -28,11 +29,31 @@ func TestConfigurationCatalogIsComplete(t *testing.T) {
 			t.Errorf("catalog is missing %q", key)
 		}
 	}
+	entry, ok := CatalogEntryForKey("limits.lspMaxConnections")
+	if !ok || !strings.Contains(entry.Description, "including leases detached from a browser") {
+		t.Fatalf("LSP capacity description = %q, want detached leases included", entry.Description)
+	}
 }
 
 func TestConfigurationCatalogMatchesAuditedEnvironmentInventory(t *testing.T) {
 	if err := validateCatalogAgainstAuditedInventory(ConfigurationCatalog(), ConfigurationExclusions(), auditedStartupEnvironmentInventory()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRetiredOfficeSessionIdentityEnvironmentIsNotCataloged(t *testing.T) {
+	const envVar = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+	for _, entry := range ConfigurationCatalog() {
+		for _, candidate := range entry.EnvVars {
+			if candidate == envVar {
+				t.Fatalf("retired environment variable %q remains in configuration catalog", envVar)
+			}
+		}
+	}
+	for _, exclusion := range ConfigurationExclusions() {
+		if exclusion.EnvVar == envVar {
+			t.Fatalf("retired environment variable %q remains in configuration exclusions", envVar)
+		}
 	}
 }
 
@@ -90,7 +111,6 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "DOCKER_HOST", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_APIVERSION", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_TLSVERIFY", class: "catalog"},
-		{envVar: "KANDEV_DOCKER_DEFAULTNETWORK", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_VOLUMEBASEPATH", class: "catalog"},
 		{envVar: "KANDEV_AGENT_STANDALONE_HOST", class: "catalog"},
 		{envVar: "AGENTCTL_PORT", class: "catalog"},
@@ -113,8 +133,24 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_DEBUG_PPROF_ENABLED", class: "catalog"},
 		{envVar: "KANDEV_OFFICE_JWTSIGNINGKEY", class: "catalog"},
 		{envVar: "KANDEV_OFFICE_SCHEDULER_TICK_MS", class: "catalog"},
+		{envVar: "KANDEV_OFFICE_MAX_CONCURRENT_INSTANCE", class: "catalog"},
+		{envVar: "KANDEV_OFFICE_MAX_CONCURRENT_WORKSPACE", class: "catalog"},
+		{envVar: "KANDEV_OFFICE_WORKSPACE_BUDGET_PER_HOUR", class: "catalog"},
+		{envVar: "KANDEV_OFFICE_ROUTINE_BUDGET_PER_HOUR", class: "catalog"},
+		{envVar: "KANDEV_OFFICE_PROMOTION_AGE_MINUTES", class: "catalog"},
+		{envVar: "KANDEV_OFFICE_MAX_CAUSATION_DEPTH", class: "catalog"},
+		{envVar: "KANDEV_OFFICE_SELF_TRIGGER_ALLOWANCE", class: "catalog"},
+		{envVar: "KANDEV_OFFICE_SELF_TRIGGER_TOTAL_ALLOWANCE", class: "catalog"},
+		{envVar: "KANDEV_OFFICE_GATE_FAILURE_THRESHOLD", class: "catalog"},
 		{envVar: "KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL", class: "catalog"},
 		{envVar: "KANDEV_TASK_PREPARATION_TIMEOUT", class: "catalog"},
+		{envVar: "KANDEV_TASK_STALL_DETECTION_THRESHOLD", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_PAYLOAD_GRACE", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_REPLAY_AGE", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_REPLAY_EVENTS", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_INTERVAL", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_BATCH_ROWS", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_BATCH_BYTES", class: "catalog"},
 		{envVar: "KANDEV_CREDENTIALS_FILE", class: "catalog"},
 		{envVar: "KANDEV_GH_MAX_CONCURRENT", class: "catalog"},
 		{envVar: "KANDEV_GIT_MAX_CONCURRENT", class: "catalog"},
@@ -123,11 +159,17 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_ACP_IDLE_TIMEOUT", class: "catalog"},
 		{envVar: "KANDEV_ACP_IDLE_REAPER_INTERVAL", class: "catalog"},
 		{envVar: "KANDEV_ACP_NOTIF_QUEUE", class: "catalog"},
+		{envVar: "KANDEV_ACP_RECOVERY_DEADLINE", class: "catalog"},
+		{envVar: "KANDEV_ACP_RECOVERY_READ_TIMEOUT", class: "catalog"},
+		{envVar: "KANDEV_ACP_RECOVERY_READ_RETRIES", class: "catalog"},
+		{envVar: "KANDEV_ACP_UNOWNED_PERIOD", class: "catalog"},
+		{envVar: "KANDEV_ACP_DETACHED_EVENT_LIMIT", class: "catalog"},
 		{envVar: "KANDEV_PLAN_COALESCE_WINDOW_MS", class: "catalog"},
 		{envVar: "OTEL_EXPORTER_OTLP_ENDPOINT", class: "catalog"},
 		{envVar: "KANDEV_WEB_PORT", class: "catalog"},
 		{envVar: "KANDEV_HEALTH_TIMEOUT_MS", class: "catalog"},
 		{envVar: "KANDEV_NO_BROWSER", class: "catalog"},
+		{envVar: "KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS", class: "catalog"},
 		{envVar: InternalConfigFileEnv, class: "exclusion"},
 		{envVar: InternalConfigHomeFileEnv, class: "exclusion"},
 		{envVar: InternalAgentctlStartupConfigEnv, class: "exclusion"},
@@ -152,7 +194,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_FEATURES_CANVASES", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING", class: "exclusion"},
-		{envVar: "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY", class: "exclusion"},
+		{envVar: "KANDEV_FEATURES_AGENT_SURVIVAL", class: "exclusion"},
 		{envVar: "KANDEV_DEBUG_AGENT_MESSAGES", class: "exclusion"},
 		{envVar: "KANDEV_DEBUG_ACP_MAX_FILES", class: "exclusion"},
 		{envVar: "KANDEV_DEBUG_ACP_RETENTION_HOURS", class: "exclusion"},
@@ -160,6 +202,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_MCP_LOG_FILE", class: "exclusion"},
 		{envVar: "KANDEV_DEBUG_LOG_DIR", class: "exclusion"},
 		{envVar: "AGENTCTL_AUTO_APPROVE_PERMISSIONS", class: "exclusion"},
+		{envVar: "KANDEV_MAX_CONCURRENT_SESSIONS", class: "exclusion"},
 	}
 }
 
@@ -230,6 +273,10 @@ func TestAgentctlStartupConfigRoundTripsAndRejectsInvalidValues(t *testing.T) {
 		IdleReaperInterval:        3 * time.Minute,
 		NotificationQueueCapacity: 4096,
 		OTLPEndpoint:              "http://collector:4318",
+		UnownedPeriod:             10 * time.Minute,
+		DetachedEventLimit:        100,
+		AgentSurvivalEnabled:      true,
+		PromptCancelJoinTimeout:   12 * time.Second,
 	}
 	raw, err := EncodeAgentctlStartupConfig(want)
 	if err != nil {
@@ -247,5 +294,79 @@ func TestAgentctlStartupConfigRoundTripsAndRejectsInvalidValues(t *testing.T) {
 	invalid.NotificationQueueCapacity = 1
 	if _, err := EncodeAgentctlStartupConfig(invalid); err == nil {
 		t.Fatal("EncodeAgentctlStartupConfig accepted an invalid queue capacity")
+	}
+
+	invalidUnownedPeriod := want
+	invalidUnownedPeriod.UnownedPeriod = -time.Minute
+	if _, err := EncodeAgentctlStartupConfig(invalidUnownedPeriod); err == nil {
+		t.Fatal("EncodeAgentctlStartupConfig accepted a negative unowned period")
+	}
+
+	// Zero is accepted for both fields: an agent-survival-unaware caller (or
+	// an older backend build) omits them, and agentctl substitutes its own
+	// built-in default rather than treating an absent value as invalid.
+	unset := want
+	unset.UnownedPeriod = 0
+	unset.DetachedEventLimit = 0
+	unset.PromptCancelJoinTimeout = 0
+	if _, err := EncodeAgentctlStartupConfig(unset); err != nil {
+		t.Fatalf("EncodeAgentctlStartupConfig rejected zero-valued optional values: %v", err)
+	}
+
+	invalidCancelJoinTimeout := want
+	invalidCancelJoinTimeout.PromptCancelJoinTimeout = -time.Second
+	if _, err := EncodeAgentctlStartupConfig(invalidCancelJoinTimeout); err == nil {
+		t.Fatal("EncodeAgentctlStartupConfig accepted a negative prompt cancel join timeout")
+	}
+
+	invalidDetachedEventLimit := want
+	invalidDetachedEventLimit.DetachedEventLimit = 10001
+	if _, err := EncodeAgentctlStartupConfig(invalidDetachedEventLimit); err == nil {
+		t.Fatal("EncodeAgentctlStartupConfig accepted an out-of-range detached event limit")
+	}
+}
+
+// TestManagedAgentctlStartupConfigReflectsAgentSurvivalFlag pins that the
+// resolved child contract carries the current value of the
+// features.agentSurvival runtime flag (Config.Features.AgentSurvival) for
+// this launch, mirroring the always-on UnownedPeriod/DetachedEventLimit
+// passthrough rather than being gated on either of those being non-zero.
+func TestManagedAgentctlStartupConfigReflectsAgentSurvivalFlag(t *testing.T) {
+	cfg := &Config{}
+	cfg.Agentctl.NotificationQueueCapacity = 4096
+	cfg.Agentctl.IdleReaperInterval = time.Minute
+
+	cfg.Features.AgentSurvival = false
+	if got := cfg.ManagedAgentctlStartupConfig(); got.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = true, want false when the runtime flag is off")
+	}
+
+	cfg.Features.AgentSurvival = true
+	if got := cfg.ManagedAgentctlStartupConfig(); !got.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = false, want true when the runtime flag is on")
+	}
+}
+
+func TestManagedAgentctlStartupConfigResolvesTruthyE2ECancelJoinTimeout(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "yes")
+	t.Setenv("KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT", "12s")
+	cfg := &Config{}
+	cfg.Agentctl.NotificationQueueCapacity = 4096
+	cfg.Agentctl.IdleReaperInterval = time.Minute
+
+	if got := cfg.ManagedAgentctlStartupConfig().PromptCancelJoinTimeout; got != 12*time.Second {
+		t.Fatalf("prompt cancel join timeout = %s, want 12s", got)
+	}
+}
+
+func TestManagedAgentctlStartupConfigOmitsCancelJoinTimeoutOutsideE2E(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "false")
+	t.Setenv("KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT", "12s")
+	cfg := &Config{}
+	cfg.Agentctl.NotificationQueueCapacity = 4096
+	cfg.Agentctl.IdleReaperInterval = time.Minute
+
+	if got := cfg.ManagedAgentctlStartupConfig().PromptCancelJoinTimeout; got != 0 {
+		t.Fatalf("prompt cancel join timeout = %s, want zero outside E2E", got)
 	}
 }

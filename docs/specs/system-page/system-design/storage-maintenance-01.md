@@ -4,7 +4,7 @@ system: system-page
 requirements:
   - REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001
 created: 2026-07-14
-updated: 2026-08-12
+updated: 2026-10-05
 owners:
   - cfl
 ---
@@ -16,9 +16,19 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
 
 ## Requirement mapping
 
+The proposed database and backup additions are specified in
+[Database storage analysis](storage-database-footprint.md). Its draft extension
+adds two measurements to the existing category list when implemented.
+
 | Requirement | Design section |
 | --- | --- |
 | `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001` | [Migrated source detail](#migrated-source-detail) |
+
+## Current Go-cache policy
+
+The current [Go cache reclamation design](go-cache-reclamation.md) replaces new Go-cache
+quarantine and global-idle cleanup. Historical quarantine records and other resources retain the
+rules in the source detail below.
 
 ## Migrated source detail
 
@@ -107,9 +117,10 @@ mtime as sufficient evidence.
   are closed or abandoned, have no recent owner lease/heartbeat, and are older than a fixed 24-hour
   stale interval. The action uses an explicit `temporary_artifacts` selection through the existing
   activity gate and a reversible confirmation.
-- Temporary-artifact cleanup is manual-only in the first release. Scheduled maintenance and an
-  unscoped full **Run now** never delete this resource, and `storage_maintenance` gains no temp
-  toggle. A future scheduled opt-in requires a separate operational decision.
+- Temporary-artifact cleanup is disabled by default. When the saved temporary-artifact policy is
+  enabled, scheduled maintenance and an unscoped full **Run now** also consider this provider.
+  Explicit `temporary_artifacts` cleanup remains available independently of the option. The
+  provider still moves eligible roots to quarantine and never claims shared or legacy files.
 - Manual **Analyze** is read-only, does not require the idle gate, and never changes files,
   containers, images, caches, or database rows.
 - Each cleanup resource has its own enablement and threshold. The initial defaults are:
@@ -163,13 +174,20 @@ Retention override:
   configured orphan grace period.
 - The authoritative inventory covers both task layouts:
   `tasks/<semantic-task-dir>/<repo>` and `tasks/<workspace-id>/<task-id>`.
-- Ready environment rows and active worktree rows protect files while their owning task exists and
-  is not archived. A ready environment owned by an archived or deleted task remains protected while
-  a live session of an unarchived task borrows it. Other rows retained for archived-task branch
-  recovery are historical metadata, not live workspace references.
+- Ready environment rows protect files while their owning task exists and is
+  not archived. An active physical worktree row protects its path regardless
+  of the owner's archive marker; its checkout can still contain local work.
+  A ready environment owned by an archived or deleted task also remains
+  protected while a live session of an unarchived task borrows it. Deleted
+  worktree rows retained for branch recovery are historical metadata, not
+  live workspace references. See the
+  [task-owned reclamation decision](../../../decisions/2026-09-24-archived-worktree-reclamation.md).
 - New task roots contain a Kandev ownership marker with the task ID, workspace ID, task directory
-  name, layout version, and creation time. Legacy unmarked directories remain eligible only when
-  the authoritative inventory and grace-period checks positively classify them as unreferenced.
+  name, layout version, and creation time. The current
+  [workspace discovery design](workspace-storage-discovery.md) defines the implemented recognition
+  boundary for marked, legacy, and unclassified directories, including permission-denied paths with
+  no positive layout evidence. Recognized legacy roots still require authoritative inventory and
+  grace-period checks before quarantine.
 - Candidate task directories are atomically moved, on the same filesystem, to
   `~/.kandev/trash/tasks/`; they are not immediately deleted. Quarantine entries record their
   original path, size, task/workspace identity when known, and permanent-deletion deadline.
@@ -178,7 +196,9 @@ Retention override:
 - The default orphan grace period is seven days and the default quarantine retention is seven
   additional days. Both are configurable in whole hours and apply to scheduled and manual runs.
 - Quarantine never deletes a Git branch. Permanent deletion removes the quarantined files and
-  prunes stale Git worktree registration only after the retention deadline.
+  prunes stale Git worktree registration only after the retention deadline
+  and a fresh inventory proves that no active worktree row owns a descendant.
+  The force-clear action bypasses retention only, not this ownership check.
 - Scheduled and full manual maintenance include a quarantine provider that permanently deletes
   entries whose deadlines have elapsed. A resource-specific manual run, such as **Clean Go cache**,
   does not purge unrelated quarantine entries.
@@ -202,7 +222,7 @@ Retention override:
 
 ### Go build cache
 
-- Enabling managed Go cache changes new host-local task executions to use
+- Successful preparation of an enabled managed Go cache changes new host-local task executions to use
   `<KANDEV_HOME_DIR>/cache/go-build` through an injected absolute `GOCACHE` value. Kandev setup,
   cleanup, shell, agent, test, and build processes for that execution observe the same value.
 - Containerized and remote executors keep an executor-local cache. Kandev does not inject a host
@@ -277,8 +297,10 @@ Decision: [ADR-2026-08-08-owned-temp-artifact-cleanup](../../../decisions/2026-0
   as ownership.
 - Explicit cleanup atomically renames an eligible root on the same filesystem into
   `<KANDEV_HOME_DIR>/trash/temporary-artifacts/` and records a `temporary_artifact` quarantine entry.
-  A cross-device rename has no copy/delete fallback. Restore is allowed while the original path is
-  free; permanent deletion follows the existing quarantine retention and path-safety rules.
+  When the destination is on another filesystem, Kandev stages and verifies a copy under quarantine,
+  publishes it atomically, and removes the original only after revalidating its identity. Restore is
+  allowed while the original path is free; permanent deletion follows the existing quarantine
+  retention and path-safety rules.
 - Existing unmarked `/tmp/kandev-agent/*` directories and arbitrary shared temp files remain host
   policy data even when their names resemble a registered prefix.
 

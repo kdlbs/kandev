@@ -32,6 +32,7 @@ const RESPONSE: FileContentResponse = {
   path: PATH,
   content: "v1",
   is_binary: false,
+  resolved_path: "target.ts",
 } as FileContentResponse;
 
 const FAKE_CLIENT = {} as NonNullable<
@@ -53,6 +54,7 @@ describe("buildFileEditorState", () => {
     // drop it and the backend stats the bare task root → "file not found".
     const state = await buildFileEditorState(PATH, RESPONSE, REPO);
     expect(state.repo).toBe(REPO);
+    expect(state.resolvedPath).toBe("target.ts");
   });
 
   it("leaves repo undefined for single-repo tasks", async () => {

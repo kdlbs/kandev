@@ -66,6 +66,16 @@ test.describe.serial("Data & Logs and Storage member gating (mobile)", () => {
       timeout: 15_000,
     });
     await expect(page.getByTestId("system-backups-admin-only")).toBeVisible();
+    await expect(page.getByTestId("tool-payload-retention-card")).toBeVisible();
+    for (const id of [
+      "tool-payload-enabled",
+      "tool-payload-age",
+      "tool-payload-unit",
+      "tool-payload-analyze",
+      "tool-payload-run",
+    ]) {
+      await expect(page.getByTestId(id)).toBeDisabled();
+    }
     await expect(page.getByTestId("system-backups-create")).toHaveCount(0);
     await expect(page.getByTestId("system-backups-download")).toHaveCount(0);
     await expect(page.getByTestId("system-backups-restore")).toHaveCount(0);
@@ -125,6 +135,8 @@ test.describe.serial("Data & Logs and Storage member gating (mobile)", () => {
       expect(box!.height).toBeGreaterThanOrEqual(44);
     }
     await expect(page.getByTestId("system-backups-admin-only")).toHaveCount(0);
+    await expect(page.getByTestId("tool-payload-analyze")).toBeEnabled();
+    await expect(page.getByTestId("tool-payload-enabled")).toBeEnabled();
     await page.goto(STORAGE_ROUTE);
     await expect(page.getByTestId("storage-analyze")).toBeEnabled();
 

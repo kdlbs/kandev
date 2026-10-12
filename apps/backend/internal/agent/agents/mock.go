@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	_ "embed"
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/usage"
@@ -17,9 +18,11 @@ var mockLogoLight []byte
 var mockLogoDark []byte
 
 var (
-	_ Agent            = (*MockAgent)(nil)
-	_ PassthroughAgent = (*MockAgent)(nil)
-	_ InferenceAgent   = (*MockAgent)(nil)
+	_ Agent                         = (*MockAgent)(nil)
+	_ PassthroughAgent              = (*MockAgent)(nil)
+	_ InferenceAgent                = (*MockAgent)(nil)
+	_ HostCLIAgent                  = (*MockAgent)(nil)
+	_ OpenAICompatibleProviderAgent = (*MockAgent)(nil)
 )
 
 const (
@@ -130,7 +133,24 @@ func (a *MockAgent) Logo(v LogoVariant) []byte {
 
 func (a *MockAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	// Mock agent is always "available" when enabled (forced by settings controller).
-	return &DiscoveryResult{Available: true, SupportsMCP: a.supportsMCP}, nil
+	// The matched path is the configured binary so host CLI detection can run
+	// `mock-agent --version` exactly like a real vendor CLI.
+	return &DiscoveryResult{Available: true, SupportsMCP: a.supportsMCP, MatchedPath: a.binaryPath}, nil
+}
+
+// HostCLI exposes the mock binary as a vendor CLI so E2E tests can exercise
+// version detection and app-server model discovery without a real vendor tool.
+func (a *MockAgent) HostCLI() hostcli.Spec {
+	executable := mockAgentDefaultID
+	if a.binaryPath != "" {
+		executable = a.binaryPath
+	}
+	return hostcli.Spec{
+		DisplayName: "Mock Agent",
+		Executable:  executable,
+		VersionArgs: []string{"--version"},
+		ModelSource: hostcli.ModelSourceCodexAppServer,
+	}
 }
 
 func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
@@ -173,9 +193,10 @@ func (a *MockAgent) Runtime() *RuntimeConfig {
 		ProjectSkillDir: DefaultProjectSkillDir,
 		UserSkillDir:    ".mock-agent/skills",
 		SessionConfig: SessionConfig{
-			CanRecover:         &canRecover,
-			SessionDirTemplate: "{home}/.mock-agent",
-			SessionDirTarget:   "/root/.mock-agent",
+			NativeSessionResume: true,
+			CanRecover:          &canRecover,
+			SessionDirTemplate:  "{home}/.mock-agent",
+			SessionDirTarget:    "/root/.mock-agent",
 		},
 	}
 }
@@ -189,8 +210,8 @@ func (a *MockAgent) RemoteAuth() *RemoteAuth {
 	}
 	return &RemoteAuth{Methods: []RemoteAuthMethod{
 		{
-			Type:  "files",
-			Label: "Copy auth files",
+			Type:  remoteAuthMethodTypeFiles,
+			Label: remoteAuthLabelCopyFiles,
 			SourceFiles: map[string][]string{
 				"darwin": {".codex/auth.json"},
 				"linux":  {".codex/auth.json"},
@@ -257,5 +278,16 @@ func (a *MockAgent) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
 		Command:   NewCommand(binary),
+	}
+}
+
+// OpenAICompatibleProvider lets a mock-agent profile exercise the
+// OpenAI-compatible provider primitive end to end in tests and e2e. It reuses
+// the same ACP gateway auth method shape as codex-acp.
+func (a *MockAgent) OpenAICompatibleProvider() *OpenAICompatibleProviderSpec {
+	return &OpenAICompatibleProviderSpec{
+		AuthMethodID: "gateway",
+		ProviderName: "Kandev",
+		KeyEnvVar:    "OPENAI_API_KEY",
 	}
 }

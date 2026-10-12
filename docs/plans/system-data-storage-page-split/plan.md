@@ -123,3 +123,8 @@ The focused remediation test passed.
   be recaptured after the route split.
 - Discovery parent changes can break exact-target navigation if hrefs and
   parent identities do not change together.
+
+## Follow-up presentation package
+
+The [settings storage tabs package](../settings-storage-tabs/plan.md) owns the planned header tabs and maintenance presentation changes.
+This package retains its historical implementation results. The follow-up owns new route, copy, and regression verification.

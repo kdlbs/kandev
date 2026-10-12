@@ -7,6 +7,7 @@ import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 
 export type ViewContentProps = {
+  compactHeight?: boolean;
   workflowId: string;
   steps: WorkflowStep[];
   moveTargetSteps: WorkflowStep[];
@@ -14,7 +15,7 @@ export type ViewContentProps = {
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
-  onDeleteTask: (task: Task) => void;
+  onDeleteTask: (task: Task, opts?: { cascade?: boolean }) => void;
   onArchiveTask?: (task: Task) => void;
   onMoveError?: (error: MoveTaskError) => void;
   deletingTaskId?: string | null;
@@ -29,7 +30,7 @@ export type ViewContentProps = {
 
 export type MobileWorkflowNavigation = {
   activeWorkflowId: string;
-  workflows: Array<{ id: string; name: string; taskCount: number }>;
+  workflows: Array<{ id: string; name: string; taskCount: number | null }>;
   onWorkflowChange: (workflowId: string) => void;
 };
 
@@ -57,7 +58,7 @@ export const VIEW_REGISTRY: ViewRegistryEntry[] = [
     storedValue: "graph2",
     labelKey: "kanban:pipeline",
     icon: IconTimeline,
-    component: SwimlaneGraph2Content as ComponentType<ViewContentProps>,
+    component: SwimlaneGraph2Content,
     enabled: true,
   },
 ];

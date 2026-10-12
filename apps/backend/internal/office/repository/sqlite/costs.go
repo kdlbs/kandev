@@ -95,13 +95,14 @@ func (r *Repository) CreateCostEvent(ctx context.Context, event *models.CostEven
 	return err
 }
 
-// ListCostEvents returns cost events filtered by workspace (via task join), ordered by time.
+// ListCostEvents returns cost events filtered by their task or run-session workspace, ordered by time.
 func (r *Repository) ListCostEvents(ctx context.Context, workspaceID string) ([]*models.CostEvent, error) {
 	var events []*models.CostEvent
 	err := r.ro.SelectContext(ctx, &events, r.ro.Rebind(`
 		SELECT e.* FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
-		WHERE t.workspace_id = ?
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		ORDER BY e.occurred_at DESC
 	`), workspaceID)
 	if err != nil {
@@ -124,9 +125,10 @@ func (r *Repository) GetCostsByAgent(ctx context.Context, workspaceID string) ([
 			SUM(e.cost_subcents) AS total_subcents,
 			COUNT(*) AS count
 		FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
 		LEFT JOIN agent_profiles ap ON ap.id = e.agent_profile_id
-		WHERE t.workspace_id = ?
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		GROUP BY e.agent_profile_id
 	`), workspaceID)
 	if err != nil {
@@ -156,9 +158,10 @@ func (r *Repository) GetCostsByProject(ctx context.Context, workspaceID string) 
 			SUM(e.cost_subcents) AS total_subcents,
 			COUNT(*) AS count
 		FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
 		LEFT JOIN office_projects op ON op.id = t.project_id
-		WHERE t.workspace_id = ?
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		GROUP BY COALESCE(t.project_id, '')
 	`), workspaceID)
 	if err != nil {
@@ -192,8 +195,9 @@ func (r *Repository) GetCostsByModel(ctx context.Context, workspaceID string) ([
 			SUM(e.cost_subcents) AS total_subcents,
 			COUNT(*) AS count
 		FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
-		WHERE t.workspace_id = ?
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		GROUP BY e.provider, e.model
 	`), workspaceID)
 	if err != nil {
@@ -226,8 +230,9 @@ func (r *Repository) GetCostsByProvider(ctx context.Context, workspaceID string)
 			SUM(e.cost_subcents) AS total_subcents,
 			COUNT(*) AS count
 		FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
-		WHERE t.workspace_id = ?
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		GROUP BY COALESCE(NULLIF(e.provider, ''), 'unknown')
 	`), workspaceID)
 	if err != nil {
@@ -246,8 +251,9 @@ func (r *Repository) SumCosts(ctx context.Context, workspaceID string) (int64, e
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT COALESCE(SUM(e.cost_subcents), 0)
 		FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
-		WHERE t.workspace_id = ?
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 	`), workspaceID).Scan(&total)
 	return total, err
 }
@@ -263,8 +269,9 @@ func (r *Repository) SumCostsSince(ctx context.Context, workspaceID string, sinc
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT COALESCE(SUM(e.cost_subcents), 0)
 		FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
-		WHERE t.workspace_id = ? AND e.occurred_at >= ?
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ? AND e.occurred_at >= ?
 	`), workspaceID, since.UTC()).Scan(&total)
 	return total, err
 }

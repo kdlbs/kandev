@@ -12,9 +12,11 @@ package engine
 
 // OnCommentPayload accompanies TriggerOnComment.
 type OnCommentPayload struct {
-	CommentID string
-	AuthorID  string
-	Body      string
+	CommentID                     string
+	AuthorID                      string
+	Body                          string
+	RetryWorkflowStepID           string
+	RetryWorkflowStepTransitionID int64
 }
 
 // OnBlockerResolvedPayload accompanies TriggerOnBlockerResolved.
@@ -35,8 +37,16 @@ type ChildSummary struct {
 }
 
 // OnChildrenCompletedPayload accompanies TriggerOnChildrenCompleted.
+//
+// WaveKey and WaveString are the completion-wave identity
+// (parent-wake-wave-identity) the dispatching producer derived from its own
+// terminality-confirming wave-member read, before the trigger was raised.
+// Empty means the dispatcher could not derive one — QueueRunCallback
+// then queues without a wave identity, same as before this field existed.
 type OnChildrenCompletedPayload struct {
 	ChildSummaries []ChildSummary
+	WaveKey        string
+	WaveString     string
 }
 
 // OnApprovalResolvedPayload accompanies TriggerOnApprovalResolved.

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import globalSetup, { assertBackendArtifactsFresh, isContainerRun } from "./global-setup";
+import { assertBackendArtifactsFresh, isContainerRun, runGlobalSetup } from "./global-setup";
 
 let backendDir: string;
 let binPath: string;
@@ -66,6 +66,28 @@ function writeBuildIdentity(sourceRevision: string, artifacts: string[]): string
 }
 
 describe("assertBackendBinaryFresh", () => {
+  it("checks test-only sources compiled into a fixture artifact", () => {
+    const fixtureSource = path.join(backendDir, "internal", "task", "capacity_test.go");
+    fs.writeFileSync(fixtureSource, "package task\n");
+    touch(path.join(backendDir, "internal", "task", "service.go"), new Date("2025-01-01"));
+    touch(binPath, new Date("2026-01-01"));
+    touch(fixtureSource, new Date("2026-01-02"));
+
+    expect(() =>
+      assertBackendArtifactsFresh(
+        backendDir,
+        [
+          {
+            path: binPath,
+            rebuildTarget: "build-e2e-delivery-fixture",
+            sourceFiles: [fixtureSource],
+          },
+        ],
+        {},
+      ),
+    ).toThrow(/capacity_test\.go.*build-e2e-delivery-fixture/s);
+  });
+
   it("passes when the binary is newer than every backend source file", () => {
     touch(
       path.join(backendDir, "internal", "task", "service.go"),
@@ -178,6 +200,20 @@ describe("assertBackendBinaryFresh", () => {
     fs.mkdirSync(generated, { recursive: true });
     fs.writeFileSync(path.join(generated, "index.html"), "<html></html>");
     touch(path.join(generated, "index.html"), new Date("2026-06-01T00:00:00Z"));
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
+  });
+
+  it("ignores generated plugin fixture UI rebuilt after the backend binary", () => {
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2025-01-01T00:00:00Z"),
+    );
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+    const generated = path.join(backendDir, "cmd", "plugin-fixture", "fixture-package", "ui");
+    fs.mkdirSync(generated, { recursive: true });
+    fs.writeFileSync(path.join(generated, "bundle.js"), "generated");
+    touch(path.join(generated, "bundle.js"), new Date("2026-06-01T00:00:00Z"));
 
     expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
   });
@@ -345,7 +381,7 @@ describe("globalSetup", () => {
     vi.stubEnv("KANDEV_E2E_SKIP_FRESHNESS", "1");
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
-    (globalSetup as () => void)();
+    runGlobalSetup({ verifyPluginFixtureIdentity: false });
 
     expect(existsSync).toHaveBeenCalledWith(customBackend);
     expect(existsSync).not.toHaveBeenCalledWith(path.join(backendDirForTest(), "bin", "kandev"));
@@ -358,7 +394,9 @@ describe("globalSetup", () => {
       .spyOn(fs, "existsSync")
       .mockImplementation((artifactPath) => artifactPath !== customBackend);
 
-    expect(() => (globalSetup as () => void)()).toThrow(/KANDEV_E2E_BIN file does not exist/);
+    expect(() => runGlobalSetup({ verifyPluginFixtureIdentity: false })).toThrow(
+      /KANDEV_E2E_BIN file does not exist/,
+    );
     expect(existsSync).toHaveBeenCalledWith(customBackend);
   });
 
@@ -376,7 +414,7 @@ describe("globalSetup", () => {
     vi.stubEnv(marker, value);
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
-    (globalSetup as () => void)();
+    runGlobalSetup({ verifyPluginFixtureIdentity: false });
 
     expect(existsSync).toHaveBeenCalledWith(
       path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),
@@ -393,7 +431,7 @@ describe("globalSetup", () => {
     process.argv = [...originalArgv, "--project=containers"];
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
-    (globalSetup as () => void)();
+    runGlobalSetup({ verifyPluginFixtureIdentity: false });
 
     expect(existsSync).toHaveBeenCalledWith(
       path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),
@@ -410,7 +448,7 @@ describe("globalSetup", () => {
     process.argv = [...originalArgv, "--project=kubernetes-compat"];
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
-    (globalSetup as () => void)();
+    runGlobalSetup({ verifyPluginFixtureIdentity: false });
 
     expect(existsSync).toHaveBeenCalledWith(
       path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),
@@ -426,7 +464,7 @@ describe("globalSetup", () => {
     vi.stubEnv("KANDEV_E2E_DOCKER", "");
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
-    (globalSetup as () => void)();
+    runGlobalSetup({ verifyPluginFixtureIdentity: false });
 
     expect(existsSync).not.toHaveBeenCalledWith(
       path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),

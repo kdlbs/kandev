@@ -35,6 +35,14 @@ export type KubernetesSession = {
   workspace_kind?: string;
   created_at?: string;
   failure_reason?: string;
+  session_state?: string;
+  retention_state?: string;
+  main_container_requests?: KubernetesResourceRequests;
+};
+
+export type KubernetesResourceRequests = {
+  cpu?: string;
+  memory?: string;
 };
 
 export type KubernetesSessionImpact = {

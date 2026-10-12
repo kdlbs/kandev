@@ -3,14 +3,25 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/workflow/models"
 )
+
+func TestGetMissingWorkflowStepReturnsTypedNotFound(t *testing.T) {
+	repo := setupTestRepo(t)
+	_, err := repo.GetStep(context.Background(), "missing-step")
+	if !errors.Is(err, models.ErrWorkflowStepNotFound) {
+		t.Fatalf("GetStep error = %v, want ErrWorkflowStepNotFound", err)
+	}
+}
 
 func setupTestRepo(t *testing.T) *Repository {
 	repo, _ := setupTestRepoWithDB(t)
@@ -64,6 +75,72 @@ func setupTestRepoWithDB(t *testing.T) (*Repository, *sqlx.DB) {
 	return repo, sqlxDB
 }
 
+func TestExactWorkflowStepWritesFenceStoredVersions(t *testing.T) {
+	repo, database := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	var workflowVersion time.Time
+	if err := database.QueryRowContext(ctx, `SELECT updated_at FROM workflows WHERE id = ?`, "wf-test").Scan(&workflowVersion); err != nil {
+		t.Fatal(err)
+	}
+	staleWorkflowVersion := workflowVersion.Add(-time.Hour)
+	if _, err := repo.CreateStepWithDemotedStartStepsIfWorkflowUnchanged(ctx, &models.WorkflowStep{
+		ID: "stale-create-step", WorkflowID: "wf-test", Name: "Stale", Position: 0, IsStartStep: true,
+	}, staleWorkflowVersion); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("stale step creation error = %v, want version conflict", err)
+	}
+	var staleCount int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM workflow_steps WHERE id = ?`, "stale-create-step").Scan(&staleCount); err != nil {
+		t.Fatal(err)
+	}
+	if staleCount != 0 {
+		t.Fatal("stale step creation inserted a row")
+	}
+
+	stepA := &models.WorkflowStep{ID: "exact-step-a", WorkflowID: "wf-test", Name: "A", Position: 0}
+	stepB := &models.WorkflowStep{ID: "exact-step-b", WorkflowID: "wf-test", Name: "B", Position: 1}
+	if err := repo.CreateStep(ctx, stepA); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateStep(ctx, stepB); err != nil {
+		t.Fatal(err)
+	}
+	staleStepVersion := stepB.UpdatedAt
+	newerStepVersion := staleStepVersion.Add(time.Hour)
+	if _, err := database.ExecContext(ctx, `UPDATE workflow_steps SET updated_at = ? WHERE id = ?`, newerStepVersion, stepB.ID); err != nil {
+		t.Fatal(err)
+	}
+	stepB.Name = "Rejected stale update"
+	if _, err := repo.UpdateStepWithDemotedStartStepsIfUnchanged(ctx, stepB, workflowVersion, staleStepVersion); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("stale step update error = %v, want version conflict", err)
+	}
+	orderedBefore, err := repo.ListStepsByWorkflow(ctx, "wf-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepIDs := make([]string, 0, len(orderedBefore))
+	expectedByID := make(map[string]time.Time, len(orderedBefore))
+	for _, step := range orderedBefore {
+		stepIDs = append(stepIDs, step.ID)
+		expectedByID[step.ID] = step.UpdatedAt
+	}
+	expectedByID[stepB.ID] = staleStepVersion
+	if err := repo.ReorderStepsIfUnchanged(ctx, "wf-test", stepIDs, workflowVersion, expectedByID); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("stale step reorder error = %v, want version conflict", err)
+	}
+	ordered, err := repo.ListStepsByWorkflow(ctx, "wf-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ordered) != len(orderedBefore) {
+		t.Fatalf("failed exact reorder changed step count: got %d, want %d", len(ordered), len(orderedBefore))
+	}
+	for index := range orderedBefore {
+		if ordered[index].ID != orderedBefore[index].ID || ordered[index].Position != orderedBefore[index].Position {
+			t.Fatalf("failed exact reorder changed step positions: before=%+v after=%+v", orderedBefore, ordered)
+		}
+	}
+}
+
 func TestStepAgentProfileID_CreateAndGet(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
@@ -89,6 +166,67 @@ func TestStepAgentProfileID_CreateAndGet(t *testing.T) {
 	}
 	if retrieved.AgentProfileID != "agent-profile-abc" {
 		t.Errorf("expected agent_profile_id 'agent-profile-abc', got %q", retrieved.AgentProfileID)
+	}
+}
+
+// TestGetStepAndListStepsByWorkflow_IncludeOrderRevision covers the
+// Build-phase fix for missing order_revision on HTTP hydration: GetStep and
+// ListStepsByWorkflow must surface the step's current order_revision so the
+// frontend can seed its last-known revision before accepting a
+// task.reordered WS event. The reorder endpoint bumps order_revision from
+// the task repository package (a different package, same table), so this
+// test simulates that bump directly against the column rather than
+// depending on that package.
+func TestGetStepAndListStepsByWorkflow_IncludeOrderRevision(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	step := &models.WorkflowStep{
+		WorkflowID: "wf-test",
+		Name:       "Test Step",
+		Position:   0,
+		Color:      "#000000",
+	}
+	if err := repo.CreateStep(ctx, step); err != nil {
+		t.Fatalf("failed to create step: %v", err)
+	}
+
+	fresh, err := repo.GetStep(ctx, step.ID)
+	if err != nil {
+		t.Fatalf("GetStep: %v", err)
+	}
+	if fresh.OrderRevision != 0 {
+		t.Fatalf("OrderRevision = %d, want 0 for a freshly created step", fresh.OrderRevision)
+	}
+
+	if _, err := repo.db.Exec(`UPDATE workflow_steps SET order_revision = 3 WHERE id = ?`, step.ID); err != nil {
+		t.Fatalf("bump order_revision: %v", err)
+	}
+
+	bumped, err := repo.GetStep(ctx, step.ID)
+	if err != nil {
+		t.Fatalf("GetStep after bump: %v", err)
+	}
+	if bumped.OrderRevision != 3 {
+		t.Fatalf("OrderRevision = %d, want 3", bumped.OrderRevision)
+	}
+
+	// "wf-test" also carries the default-template steps seedDefaultWorkflowSteps
+	// creates for any workflow with none, so find this test's step by ID
+	// rather than assuming it is the only row.
+	listed, err := repo.ListStepsByWorkflow(ctx, "wf-test")
+	if err != nil {
+		t.Fatalf("ListStepsByWorkflow: %v", err)
+	}
+	var found *models.WorkflowStep
+	for _, s := range listed {
+		if s.ID == step.ID {
+			found = s
+			break
+		}
+	}
+	if found == nil || found.OrderRevision != 3 {
+		t.Fatalf("ListStepsByWorkflow step %s = %+v, want OrderRevision 3", step.ID, found)
 	}
 }
 

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 
@@ -10,14 +11,24 @@ import (
 
 // MachineState captures runtime workflow state for a task session.
 type MachineState struct {
-	TaskID          string
-	SessionID       string
-	WorkflowID      string
-	CurrentStepID   string
-	SessionState    string
-	TaskDescription string
-	IsPassthrough   bool
-	Data            map[string]any
+	TaskID        string
+	SessionID     string
+	WorkflowID    string
+	CurrentStepID string
+	// WorkflowStepTransitionID is the immutable ledger identity for the
+	// current visit to CurrentStepID. It distinguishes a later return to the
+	// same step from the earlier visit that produced a retryable event.
+	WorkflowStepTransitionID int64
+	SessionState             string
+	TaskDescription          string
+	IsPassthrough            bool
+	Data                     map[string]any
+	// AgentProfileID is the session's agent profile, when a session
+	// exists. Actions that create a child task or queue a run
+	// (create_child_task, queue_run) forward it as the causing agent so
+	// a carrier lookup can be scoped to the agent actually executing
+	// this turn, not just the task.
+	AgentProfileID string
 }
 
 // ActionInput is provided to action callbacks.
@@ -128,6 +139,13 @@ type HandleResult struct {
 	// abandoning is an expected outcome of concurrent re-evaluation, not a
 	// failure.
 	TransitionAbandoned bool
+
+	// OperationMarkDeferred is true when the engine deliberately skipped
+	// marking HandleInput.OperationID applied because EvaluateOnly deferred
+	// this transition's commit to the caller. The caller then owns the
+	// marker and must invoke TransitionStore.MarkOperationApplied itself,
+	// once and only once its own commit succeeds.
+	OperationMarkDeferred bool
 }
 
 // Option configures an Engine at construction time. Use With* helpers below.
@@ -184,6 +202,14 @@ func WithAgentProfileResolver(resolver AgentProfileResolver) Option {
 	return func(e *Engine) { e.agentProfiles = resolver }
 }
 
+// WithMarkerBearingStepEntryExecutor wires DispatchStepEntry's marker-bearing
+// action hook (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3). Without it, a
+// marker-bearing on_enter action executes directly and unprotected — the
+// pre-convergence behaviour, safe only for deployments that never wire it.
+func WithMarkerBearingStepEntryExecutor(executor MarkerBearingStepEntryExecutor) Option {
+	return func(e *Engine) { e.markerExecutor = executor }
+}
+
 // Engine evaluates step actions and applies transitions.
 type Engine struct {
 	store     TransitionStore
@@ -202,6 +228,10 @@ type Engine struct {
 	// logger is nil-safe (AC-24): *logger.Logger methods are not nil-safe
 	// themselves, so every use is guarded by an explicit nil check.
 	logger *logger.Logger
+	// markerExecutor is DispatchStepEntry's optional marker-bearing action
+	// hook (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3) — nil-safe like every other
+	// Phase 2/8 dependency.
+	markerExecutor MarkerBearingStepEntryExecutor
 }
 
 // TaskCreatorAdapter exposes the wired TaskCreator (or nil if unset).
@@ -260,7 +290,17 @@ func (e *Engine) handleTrigger(ctx context.Context, in HandleInput, filter func(
 		return HandleResult{Idempotent: true}, nil
 	}
 
-	state, step, err := e.loadExecutionContext(ctx, in)
+	state, err := e.loadExecutionState(ctx, in)
+	if err != nil {
+		return HandleResult{}, err
+	}
+	if commentRetryIsStale(in, state) {
+		if err := e.markOperationAppliedForInput(ctx, in); err != nil {
+			return HandleResult{}, err
+		}
+		return HandleResult{}, nil
+	}
+	step, err := e.store.LoadStep(ctx, state.WorkflowID, state.CurrentStepID)
 	if err != nil {
 		return HandleResult{}, err
 	}
@@ -277,7 +317,23 @@ func (e *Engine) handleTrigger(ctx context.Context, in HandleInput, filter func(
 
 	result, err := e.processActions(ctx, in, state, step, actions, filter)
 	if err != nil {
+		if in.Trigger == TriggerOnComment && errors.Is(err, ErrCommentFanOutIncomplete) {
+			err = &CommentFanOutIncompleteError{
+				WorkflowStepID:           state.CurrentStepID,
+				WorkflowStepTransitionID: state.WorkflowStepTransitionID,
+				Err:                      err,
+			}
+		}
 		return HandleResult{}, err
+	}
+
+	// A deferred transition is work this call evaluated but did not commit
+	// (processActions skips ApplyTransition under EvaluateOnly). Marking the
+	// operation applied here would claim a commit the caller still owes, so
+	// ownership of the marker passes to the caller instead.
+	if in.EvaluateOnly && result.Transitioned {
+		result.OperationMarkDeferred = in.OperationID != ""
+		return result, nil
 	}
 
 	return result, e.markOperationAppliedForInput(ctx, in)
@@ -358,7 +414,7 @@ func (e *Engine) markOperationAppliedForInput(ctx context.Context, in HandleInpu
 	return e.markOperationApplied(ctx, in.OperationID)
 }
 
-func (e *Engine) loadExecutionContext(ctx context.Context, in HandleInput) (MachineState, StepSpec, error) {
+func (e *Engine) loadExecutionState(ctx context.Context, in HandleInput) (MachineState, error) {
 	var state MachineState
 	if in.PreloadedState != nil {
 		state = *in.PreloadedState
@@ -366,14 +422,22 @@ func (e *Engine) loadExecutionContext(ctx context.Context, in HandleInput) (Mach
 		var err error
 		state, err = e.store.LoadState(ctx, in.TaskID, in.SessionID)
 		if err != nil {
-			return MachineState{}, StepSpec{}, err
+			return MachineState{}, err
 		}
 	}
-	step, err := e.store.LoadStep(ctx, state.WorkflowID, state.CurrentStepID)
-	if err != nil {
-		return MachineState{}, StepSpec{}, err
+	return state, nil
+}
+
+func commentRetryIsStale(in HandleInput, state MachineState) bool {
+	if in.Trigger != TriggerOnComment {
+		return false
 	}
-	return state, step, nil
+	comment, ok := commentPayload(in.Payload)
+	if !ok || comment.RetryWorkflowStepID == "" {
+		return false
+	}
+	return state.CurrentStepID != comment.RetryWorkflowStepID ||
+		state.WorkflowStepTransitionID != comment.RetryWorkflowStepTransitionID
 }
 
 func (e *Engine) evaluateActions(

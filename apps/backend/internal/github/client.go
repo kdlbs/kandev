@@ -127,6 +127,13 @@ type Client interface {
 	// ListCheckRuns lists CI check runs for a given git ref (branch or SHA).
 	ListCheckRuns(ctx context.Context, owner, repo, ref string) ([]CheckRun, error)
 
+	// ListWorkflowRuns lists Actions runs associated with the supplied head
+	// SHA. Implementations must paginate the provider response.
+	ListWorkflowRuns(ctx context.Context, owner, repo, headSHA string) ([]WorkflowRun, error)
+
+	// ListWorkflowRunJobs lists jobs from one specific workflow-run attempt.
+	ListWorkflowRunJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]WorkflowJob, error)
+
 	// GetPRFeedback fetches aggregated feedback (reviews, comments, checks) for a PR.
 	GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error)
 

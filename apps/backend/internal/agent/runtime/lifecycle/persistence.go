@@ -28,9 +28,8 @@ import (
 // refactor, executors_running is the single source of truth and the lifecycle
 // manager owns its lifecycle.
 type ExecutorRunningWriter interface {
-	// UpsertExecutorRunning inserts or updates the row. Caller passes a fully
-	// populated *models.ExecutorRunning; the underlying SQL preserves nothing
-	// from the prior row (idempotent re-creation on every successful Add).
+	// UpsertExecutorRunning inserts or updates the row. Idle-suspension provenance
+	// changes only through its compare-and-set methods, not lifecycle snapshots.
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 
 	// DeleteExecutorRunningBySessionID removes the row when an execution is
@@ -45,6 +44,13 @@ type ExecutorRunningWriter interface {
 	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
 }
 
+type idleSuspensionInventory interface {
+	GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error)
+	ClaimExecutorRunningIdleSuspension(context.Context, string, string, time.Time, string, time.Time) (bool, error)
+	ValidateExecutorRunningIdleSuspensionPolicy(context.Context, string, string, string, time.Time) (bool, error)
+	CompareAndSetExecutorRunningIdleSuspension(context.Context, string, string, time.Time, string, string) error
+}
+
 // SetExecutorRunningWriter wires the writer used to persist row state in
 // lockstep with executionStore.Add / Remove. Must be called during DI before
 // any Launch / createExecution can run, otherwise the in-memory store will
@@ -53,6 +59,7 @@ type ExecutorRunningWriter interface {
 // Optional only for tests that don't exercise the persistence path.
 func (m *Manager) SetExecutorRunningWriter(w ExecutorRunningWriter) {
 	m.runningWriter = w
+	m.wireKubernetesEnvironmentStore()
 }
 
 // buildRunningFromExecution maps an in-memory execution into the persistence
@@ -73,9 +80,21 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 	}
 
 	metadata := execution.MetadataSnapshot()
+	if execution.OfficeAgentProfileID != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
+	}
+	if execution.OriginalWorkspacePath != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[MetadataKeyOriginalWorkspacePath] = execution.OriginalWorkspacePath
+	}
 	running := &models.ExecutorRunning{
-		ID:                 execution.SessionID,
-		SessionID:          execution.SessionID,
+		ID:                 executionInventorySessionID(execution),
+		SessionID:          executionInventorySessionID(execution),
 		TaskID:             execution.TaskID,
 		ExecutorID:         strings.TrimSpace(getMetadataString(metadata, "executor_id")),
 		ExecutionProfileID: execution.AgentProfileID,
@@ -99,7 +118,16 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		}
 		running.Metadata[MetadataKeyOfficeAgentProfileID] = officeProfileID
 	}
+	if execution.Owner.Kind == ExecutionOwnerRun {
+		if running.Metadata == nil {
+			running.Metadata = make(map[string]interface{})
+		}
+		running.Metadata[runExecutionOwnerMetadataKey] = execution.Owner
+		running.Resumable = false
+		running.WorktreePath = execution.WorkspacePath
+	}
 	if prior != nil {
+		running.IdleSuspensionState = prior.IdleSuspensionState
 		if strings.TrimSpace(prior.ExecutorID) != "" {
 			running.ExecutorID = prior.ExecutorID
 		}
@@ -115,6 +143,11 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 			running.Metadata = make(map[string]interface{})
 		}
 		for k, v := range prior.Metadata {
+			if k == metadataKeyPassthroughMCPClaims {
+				// Current execution metadata owns claim state. Copying an absent
+				// claim from a prior row would restore ownership after revocation.
+				continue
+			}
 			if _, ok := running.Metadata[k]; !ok {
 				running.Metadata[k] = v
 			}
@@ -162,6 +195,9 @@ func (m *Manager) resolveLocalPID(execution *AgentExecution) int {
 		return 0
 	}
 	if execution.RuntimeName == agentruntime.RuntimeStandalone {
+		if execution.standaloneHostPID > 0 {
+			return execution.standaloneHostPID
+		}
 		return int(m.standaloneHostPID.Load())
 	}
 	return 0
@@ -249,6 +285,28 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 	_ = m.persistExecutorRunningResult(ctx, execution)
 }
 
+// buildRunningForPersistence reads a tracked execution while the execution
+// store's read lock is held. Status transitions use that store lock, so taking
+// the same lock here prevents persistence from racing with an asynchronous
+// readiness failure. Callers that are persisting an execution before it is
+// tracked still use the mapper directly.
+func (m *Manager) buildRunningForPersistence(
+	execution *AgentExecution,
+	prior *models.ExecutorRunning,
+) *models.ExecutorRunning {
+	if execution == nil || m.executionStore == nil {
+		return buildRunningFromExecution(execution, prior)
+	}
+
+	var running *models.ExecutorRunning
+	if err := m.executionStore.WithRLock(execution.ID, func(tracked *AgentExecution) {
+		running = buildRunningFromExecution(tracked, prior)
+	}); err == nil {
+		return running
+	}
+	return buildRunningFromExecution(execution, prior)
+}
+
 func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *AgentExecution) error {
 	if m.runningWriter == nil {
 		// Permitted in tests that don't exercise persistence; logged so a
@@ -273,7 +331,7 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 	// its current columns and the next transition (or reconciliation) re-persists.
 	var prior *models.ExecutorRunning
 	if reader, ok := m.runningWriter.(executorRunningReader); ok {
-		existing, err := reader.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+		existing, err := reader.GetExecutorRunningBySessionID(ctx, executionInventorySessionID(execution))
 		switch {
 		case err == nil:
 			prior = existing
@@ -291,7 +349,7 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 		execution.AgentProfileID = prior.ExecutionProfileID
 	}
 
-	running := buildRunningFromExecution(execution, prior)
+	running := m.buildRunningForPersistence(execution, prior)
 	// Attach the host-local liveness handle for local/standalone rows. Kept out
 	// of buildRunningFromExecution (a pure mapper) because the PID lives on the
 	// manager, wired from the agentctl launcher at DI. resolveLocalPID returns 0
@@ -454,6 +512,69 @@ func (m *Manager) deleteExecutorRunningRow(ctx context.Context, sessionID, expec
 // fresh state (acceptable for first-time inserts).
 type executorRunningReader interface {
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+}
+
+// executorRunningLister is the optional read-side used to enumerate the
+// startup recovery inventory: every live (non-terminal) executors_running row
+// on the standalone control server (worktree/local executors). A writer that
+// doesn't implement it has no recovery candidates to offer.
+type executorRunningLister interface {
+	ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error)
+}
+
+type pluginExecutorRunningLister interface {
+	ListExecutorsRunningPluginRemote(ctx context.Context) ([]*models.ExecutorRunning, error)
+}
+
+type executorRunningInventoryLister interface {
+	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
+}
+
+// ListLiveStandaloneExecutorsRunning returns the startup recovery inventory:
+// every live standalone executors_running row, read at startup step 3 before
+// any control-server contact, so the recovery guard can be taken against it
+// (discovery H). Best-effort: a writer that doesn't support listing yields no
+// candidates rather than an error, matching this file's other optional
+// capabilities.
+func (m *Manager) ListLiveStandaloneExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	lister, ok := m.runningWriter.(executorRunningLister)
+	if !ok {
+		return nil, nil
+	}
+	return lister.ListExecutorsRunningLiveStandalone(ctx)
+}
+
+// ListLivePluginExecutorsRunning includes stopped inventory so callers can
+// distinguish a retained environment from an empty session record.
+func (m *Manager) ListLivePluginExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	lister, ok := m.runningWriter.(pluginExecutorRunningLister)
+	if !ok {
+		return nil, nil
+	}
+	return lister.ListExecutorsRunningPluginRemote(ctx)
+}
+
+// ListLiveRemoteExecutorsRunning returns supported remote runtime rows from a
+// single persisted inventory snapshot. Plugin rows keep their separate
+// lister because it intentionally includes terminal rows for plugin cleanup.
+func (m *Manager) ListLiveRemoteExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	lister, ok := m.runningWriter.(executorRunningInventoryLister)
+	if !ok {
+		return nil, nil
+	}
+	rows, err := lister.ListExecutorsRunning(ctx)
+	if err != nil {
+		return nil, err
+	}
+	remote := make([]*models.ExecutorRunning, 0, len(rows))
+	for _, row := range rows {
+		if row == nil || remoteRecoveryOwnerUnsupported(row) || !isRemoteRecoveryRuntime(row.Runtime) || row.Runtime == agentruntime.RuntimePluginRemote ||
+			row.SessionID == "" || row.AgentExecutionID == "" || isTerminalExecutorRunningStatus(row.Status) {
+			continue
+		}
+		remote = append(remote, cloneRemoteRecoveryRecord(row))
+	}
+	return remote, nil
 }
 
 type executorRunningCASWriter interface {

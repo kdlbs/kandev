@@ -171,6 +171,7 @@ type RunListItem struct {
 	ID                   string  `json:"id"`
 	AgentProfileID       string  `json:"agent_profile_id"`
 	Reason               string  `json:"reason"`
+	CausationID          string  `json:"causation_id,omitempty"`
 	Payload              string  `json:"payload"`
 	Status               string  `json:"status"`
 	CoalescedCount       int     `json:"coalesced_count"`
@@ -202,8 +203,8 @@ type AgentRunSummaryDTO struct {
 	// CommentID is set for runs triggered by a task comment so the
 	// frontend can deeplink the row to the originating comment.
 	CommentID string `json:"comment_id,omitempty"`
-	// RoutineID is set for runs triggered by a routine cron fire so
-	// the frontend can deeplink the row to the routine.
+	// RoutineID identifies the routine that triggered the run so the
+	// frontend can deeplink the row to the routine.
 	RoutineID   string `json:"routine_id,omitempty"`
 	RequestedAt string `json:"requested_at"`
 	ClaimedAt   string `json:"claimed_at,omitempty"`
@@ -277,6 +278,7 @@ type RunDetailResponse struct {
 	ID           string            `json:"id"`
 	IDShort      string            `json:"id_short"`
 	AgentID      string            `json:"agent_id"`
+	AgentName    string            `json:"agent_name,omitempty"`
 	Reason       string            `json:"reason"`
 	Status       string            `json:"status"`
 	CancelReason *string           `json:"cancel_reason,omitempty"`
@@ -329,6 +331,9 @@ type RunRuntimeDTO struct {
 
 type RunSkillDTO struct {
 	SkillID          string `json:"skill_id"`
+	DisplayName      string `json:"display_name,omitempty"`
+	Slug             string `json:"slug,omitempty"`
+	LabelSource      string `json:"label_source,omitempty"`
 	Version          string `json:"version"`
 	ContentHash      string `json:"content_hash"`
 	MaterializedPath string `json:"materialized_path"`

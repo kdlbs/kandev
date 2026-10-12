@@ -172,20 +172,29 @@ test.describe("Linear settings", () => {
     // Pin the workspace so the UI save and the API-side health probe below
     // target the same config row.
     await settings.gotoWorkspace(seedData.workspaceId);
+    await apiClient.mockLinearSetAuthResult({ ok: false, error: "rate limited" });
     await settings.secretInput.fill("lin_api_xxx");
     await settings.saveButton.click();
-    // Wait for the post-save probe to land BEFORE forcing the failure: the
-    // probe goroutine could otherwise overwrite our forced lastOk=false back
-    // to true a few ms after the mockLinearSetAuthHealth call.
-    await apiClient.waitForIntegrationAuthHealthy("linear", {
-      workspaceId: seedData.workspaceId,
-    });
-
-    await apiClient.mockLinearSetAuthHealth({
-      workspaceId: seedData.workspaceId,
-      ok: false,
-      error: "rate limited",
-    });
+    await expect
+      .poll(
+        async () => {
+          const response = await apiClient.rawRequest(
+            "GET",
+            `/api/v1/linear/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+          );
+          // The endpoint returns 204 until the config row exists, including
+          // briefly after the save request has returned.
+          if (!response.ok || response.status === 204) return null;
+          const config = (await response.json()) as {
+            hasSecret?: boolean;
+            lastOk?: boolean;
+            lastError?: string;
+          };
+          return config;
+        },
+        { timeout: 30_000 },
+      )
+      .toMatchObject({ hasSecret: true, lastOk: false, lastError: "rate limited" });
     await testPage.reload();
     await settings.statusBanner.waitFor();
     await expect(settings.statusBanner).toHaveAttribute("data-state", "failed");

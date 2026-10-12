@@ -1,5 +1,6 @@
 "use client";
 
+import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { useCallback, useState } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
@@ -17,23 +18,33 @@ import { ComposerAgentStartHint } from "./composer-agent-start-hint";
 import {
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
-  formatPlanCommentsAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
   formatAgentMessageCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-executor-environment-availability";
 import { useToast } from "@/components/toast-provider";
-import { isMessageSendError } from "@/lib/chat/message-send-error";
-import type { DiffComment } from "@/lib/diff/types";
-import type { AgentMessageComment } from "@/lib/state/slices/comments";
+import { isMessageSendError, MessageSendError } from "@/lib/chat/message-send-error";
+import { QueueAdmissionError, QueueFullError } from "@/lib/api/domains/queue-api";
+import type { ReviewComment, AgentMessageComment } from "@/lib/state/slices/comments";
 import type { ChatPanelState } from "./use-chat-panel-state";
 import { useComposerProps } from "./use-composer-props";
 import { cn } from "@/lib/utils";
-import { resolveComposerWorkspaceId } from "./composer-workspace";
+import { useComposerWorkspace } from "@/hooks/domains/task/use-composer-workspace";
 import { t } from "@/lib/i18n";
-import { ChatStatusBar, resolveStatusRowTaskId } from "./chat-status-bar";
+import { ChatStatusBar, ComposerCIStatus, resolveStatusRowTaskId } from "./chat-status-bar";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
+import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
+import { toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
+import { toTaskPreviewFeedbackRefs } from "@/lib/preview-feedback-refs";
+import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
+import { PreviewFeedbackCollectionSurface } from "@/components/task/inspector/preview-feedback-collection";
+import {
+  ComposerCollapseButton,
+  ComposerDisclosureRegion,
+  useComposerActivity,
+  useComposerDisclosureContext,
+} from "./composer-disclosure";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -41,21 +52,21 @@ const PLAN_CONTEXT_PATH = "plan:context";
  * Prepends any pending review/walkthrough/PR-feedback/plan/message comments
  * to the composer text as Markdown, in a fixed stacking order, before send.
  */
-export function buildSubmitMessage({
-  message,
-  reviewComments,
-  pendingPRFeedback,
-  planComments,
-  walkthroughComments = [],
-  messageComments = [],
-}: {
+export function buildSubmitMessage(args: {
   message: string;
-  reviewComments?: DiffComment[];
+  reviewComments?: ReviewComment[];
   pendingPRFeedback: import("@/lib/state/slices/comments").PRFeedbackComment[];
   planComments: import("@/lib/state/slices/comments").PlanComment[];
   walkthroughComments?: import("@/lib/state/slices/comments").WalkthroughComment[];
   messageComments?: AgentMessageComment[];
 }): string {
+  const {
+    message,
+    reviewComments,
+    pendingPRFeedback,
+    walkthroughComments = [],
+    messageComments = [],
+  } = args;
   let finalMessage = message;
   if (reviewComments && reviewComments.length > 0) {
     finalMessage = formatReviewCommentsAsMarkdown(reviewComments) + (message || "");
@@ -65,10 +76,6 @@ export function buildSubmitMessage({
   }
   if (pendingPRFeedback.length > 0) {
     finalMessage = formatPRFeedbackAsMarkdown(pendingPRFeedback) + finalMessage;
-  }
-  if (planComments.length > 0) {
-    const planMarkdown = formatPlanCommentsAsMarkdown(planComments);
-    finalMessage = finalMessage ? `${planMarkdown}${finalMessage}` : planMarkdown;
   }
   if (messageComments.length > 0) {
     const messageCommentsMarkdown = formatAgentMessageCommentsAsMarkdown(messageComments);
@@ -124,11 +131,33 @@ function pickInputPlaceholder(a: PlaceholderArgs): string {
 /** Shows an error toast for a failed message send, distinguishing a known
  *  send error from an ambiguous connection drop/timeout. */
 function showMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>["toast"]) {
-  console.error("Failed to send message:", error);
+  console.error("Failed to send message:", sanitizeSessionErrorDetails(error));
+  if (error instanceof QueueFullError) {
+    toast({
+      title: t("task:messageNotSent"),
+      description: t("task:queueAdmissionFull"),
+      variant: "error",
+    });
+    return;
+  }
+  if (error instanceof QueueAdmissionError) {
+    const copy = {
+      validation: t("task:queueAdmissionValidation"),
+      "identity-conflict": t("task:queueAdmissionIdentityConflict"),
+      "session-unavailable": t("task:queueAdmissionSessionUnavailable"),
+      unavailable: t("task:queueAdmissionUnavailable"),
+    }[error.code];
+    toast({
+      title: t("task:messageNotSent"),
+      description: copy,
+      variant: "error",
+    });
+    return;
+  }
   if (isMessageSendError(error)) {
     toast({
       title: t("task:messageNotSent"),
-      description: error.message,
+      description: sanitizeSessionErrorDetails(error, 240),
       variant: "error",
     });
     return;
@@ -149,6 +178,7 @@ function usePanelMessageHandler(panelState: ChatPanelState) {
     pendingClarification,
     activeDocument,
     planComments,
+    previewFeedback,
     contextFiles,
     prompts,
   } = panelState;
@@ -161,72 +191,142 @@ function usePanelMessageHandler(panelState: ChatPanelState) {
     hasPendingClarification: !!pendingClarification,
     activeDocument,
     planComments,
+    previewFeedback,
     contextFiles,
     prompts,
   });
 }
+
+function completeChatSubmission(
+  payload: ChatSubmitPayload,
+  panelState: ChatPanelState,
+  submittedContext: { sessionId: string | null; files: ChatPanelState["contextFiles"] },
+) {
+  const {
+    pendingPRFeedback,
+    walkthroughComments,
+    messageComments,
+    markCommentsSent,
+    handleClearPRFeedback,
+    handleClearWalkthroughComments,
+    consumeSubmittedEphemeral,
+    addContextFile,
+    planModeEnabled,
+  } = panelState;
+  if (payload.reviewComments?.length) markCommentsSent(payload.reviewComments.map((c) => c.id));
+  if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
+  if (pendingPRFeedback.length > 0) handleClearPRFeedback();
+  if (walkthroughComments.length > 0) handleClearWalkthroughComments();
+  if (!submittedContext.sessionId) return true;
+  consumeSubmittedEphemeral(submittedContext.sessionId, submittedContext.files);
+  if (planModeEnabled) {
+    addContextFile(submittedContext.sessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
+  }
+  return true;
+}
+
+async function submitChatPayload({
+  payload,
+  panelState,
+  onSend,
+  storeApi,
+  handleSendMessage,
+  transformOutgoing,
+}: {
+  payload: ChatSubmitPayload;
+  panelState: ChatPanelState;
+  onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
+  storeApi: ReturnType<typeof useAppStoreApi>;
+  handleSendMessage: (payload: ChatSubmitPayload) => Promise<void | boolean>;
+  transformOutgoing?: (message: string) => string;
+}) {
+  const submittedContext = {
+    sessionId: panelState.resolvedSessionId,
+    files: panelState.contextFiles.filter((file) => file.pinned !== true),
+  };
+  const {
+    planComments,
+    previewFeedback,
+    pendingPRFeedback,
+    walkthroughComments,
+    messageComments,
+    pendingClarification,
+  } = panelState;
+  const message = transformOutgoing ? transformOutgoing(payload.message) : payload.message;
+  const finalMessage = buildSubmitMessage({
+    message,
+    reviewComments: payload.reviewComments,
+    pendingPRFeedback,
+    planComments,
+    walkthroughComments,
+    messageComments,
+  });
+  const planCommentRefs = toTaskPlanCommentRefs(planComments);
+  const previewFeedbackRefs = toTaskPreviewFeedbackRefs(previewFeedback ?? []);
+  const outbound = {
+    ...payload,
+    message: finalMessage,
+    ...(planCommentRefs.length > 0 ? { planCommentRefs } : {}),
+    ...(previewFeedbackRefs.length > 0 ? { previewFeedbackRefs } : {}),
+  };
+  let submissionResult: void | boolean;
+  if (onSend && !pendingClarification) {
+    const taskContext = payload.inlineTaskMentions?.length
+      ? buildTaskMentionsContext(payload.inlineTaskMentions, storeApi.getState())
+      : "";
+    submissionResult = await onSend({ ...outbound, message: finalMessage + taskContext });
+  } else {
+    submissionResult = await handleSendMessage(outbound);
+  }
+  if (submissionResult === false) return false;
+  return completeChatSubmission(payload, panelState, submittedContext);
+}
+
+export type SubmitHandlerOptions = {
+  /** Applied to the composer message once per submit, before
+   *  {@link buildSubmitMessage}, on both the `onSend` and direct send paths.
+   *  Never changes the composer text; if it throws, the existing catch shows
+   *  the send-error toast and nothing is sent. */
+  transformOutgoing?: (message: string) => string;
+};
+
 /** Builds the composer's submit handler, tracking in-flight sends and
  *  routing errors to a toast. */
 export function useSubmitHandler(
   panelState: ChatPanelState,
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult,
+  options: SubmitHandlerOptions = {},
 ) {
   const [isSending, setIsSending] = useState(false);
   const storeApi = useAppStoreApi();
   const { toast } = useToast();
-  const {
-    resolvedSessionId,
-    planComments,
-    pendingPRFeedback,
-    walkthroughComments,
-    messageComments,
-    markCommentsSent,
-    clearSessionPlanComments,
-    handleClearPRFeedback,
-    handleClearWalkthroughComments,
-    clearEphemeral,
-    addContextFile,
-    planModeEnabled,
-    pendingClarification,
-  } = panelState;
   const { handleSendMessage } = usePanelMessageHandler(panelState);
+  const { transformOutgoing } = options;
 
   const handleSubmit = useCallback(
+    // eslint-disable-next-line complexity -- submission owns the shared cleanup and failure-preservation branches.
     async (payload: ChatSubmitPayload) => {
-      if (isSending) return;
+      if (isSending) return false;
+      if (panelState.planCommentMigration?.isBlocking) {
+        showMessageSendToast(
+          new MessageSendError(
+            "plan-comment-migration-pending",
+            t("task:planCommentMigrationPending"),
+          ),
+          toast,
+        );
+        return false;
+      }
       setIsSending(true);
       try {
-        const finalMessage = buildSubmitMessage({
-          message: payload.message,
-          reviewComments: payload.reviewComments,
-          pendingPRFeedback,
-          planComments,
-          walkthroughComments,
-          messageComments,
+        return await submitChatPayload({
+          payload,
+          panelState,
+          onSend,
+          storeApi,
+          handleSendMessage,
+          transformOutgoing,
         });
-        const outbound = { ...payload, message: finalMessage };
-        if (onSend && !pendingClarification) {
-          // Expand task mentions because onSend bypasses useMessageHandler.buildFinalMessage.
-          const taskCtx = payload.inlineTaskMentions?.length
-            ? buildTaskMentionsContext(payload.inlineTaskMentions, storeApi.getState())
-            : "";
-          await onSend({ ...outbound, message: finalMessage + taskCtx });
-        } else {
-          await handleSendMessage(outbound);
-        }
-        if (payload.reviewComments && payload.reviewComments.length > 0)
-          markCommentsSent(payload.reviewComments.map((c) => c.id));
-        if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
-        if (pendingPRFeedback.length > 0) handleClearPRFeedback();
-        if (walkthroughComments.length > 0) handleClearWalkthroughComments();
-        if (planComments.length > 0) clearSessionPlanComments();
-        if (resolvedSessionId) {
-          clearEphemeral(resolvedSessionId);
-          // Re-add plan context if plan mode is still active (clearEphemeral removes unpinned files)
-          if (planModeEnabled) {
-            addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
-          }
-        }
       } catch (error) {
         showMessageSendToast(error, toast);
         return false;
@@ -237,22 +337,12 @@ export function useSubmitHandler(
     [
       isSending,
       onSend,
-      pendingClarification,
       storeApi,
       handleSendMessage,
-      markCommentsSent,
-      planComments,
-      clearSessionPlanComments,
-      walkthroughComments,
-      messageComments,
-      handleClearWalkthroughComments,
-      pendingPRFeedback,
-      handleClearPRFeedback,
-      resolvedSessionId,
-      clearEphemeral,
-      planModeEnabled,
-      addContextFile,
       toast,
+      panelState,
+      panelState.planCommentMigration,
+      transformOutgoing,
     ],
   );
 
@@ -312,6 +402,8 @@ type ChatInputAreaProps = {
   onRequestChangesTooltipDismiss?: () => void;
   panelState: ChatPanelState;
   isSending: boolean;
+  /** The task-owned launch card renders recovery for the failed start. */
+  launchErrorOwned?: boolean;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
   /** Hide ACP/session-specific controls (model picker, mode, MCP, reset context,
@@ -328,6 +420,9 @@ type ChatInputAreaProps = {
    * user prompt. Omitted callers (e.g. quick chat) render no button. */
   showScrollToLastPrompt?: boolean;
   onScrollToLastPrompt?: () => void;
+  /** Explicitly reveals the newest transcript content without changing follow preference. */
+  showJumpToLatest?: boolean;
+  onJumpToLatest?: () => void;
   /** Direction the last prompt actually sits in, driving the scroll
    * button's icon. Ignored while `showScrollToLastPrompt` is falsy. */
   lastPromptScrollDirection?: "up" | "down";
@@ -355,21 +450,6 @@ function useExecutorUnavailable(taskId: string | null, sessionId: string | null)
     unavailable: availability.unavailable,
     reason: availability.status?.label,
   };
-}
-
-/** Resolves the workspace ID the composer should attribute a new message to. */
-function useComposerWorkspaceId(sessionId: string | null, taskId: string | null) {
-  return useAppStore((state) =>
-    resolveComposerWorkspaceId({
-      sessionId,
-      taskId,
-      quickChatSessions: state.quickChat.sessions,
-      activeWorkflowId: state.kanban.workflowId,
-      activeTasks: state.kanban.tasks,
-      snapshots: Object.values(state.kanbanMulti.snapshots),
-      workflows: state.workflows.items,
-    }),
-  );
 }
 
 /** Derives the composer's plan actions, executor-availability state, and placeholder text. */
@@ -401,38 +481,113 @@ function useChatInputDerived(
   return { planActions, executor, placeholder };
 }
 
+export function shouldShowPreviewFeedbackFallback(args: {
+  taskId: string | null;
+  resolvedSessionId: string | null;
+  itemCount: number;
+  isFailed: boolean;
+  isCompleted: boolean;
+  executorUnavailable: boolean;
+  launchErrorOwned?: boolean;
+}) {
+  if (!args.taskId || args.itemCount === 0) return false;
+  return (
+    !args.resolvedSessionId ||
+    shouldHideChatInputForLaunchError({
+      isFailed: args.isFailed,
+      launchErrorOwned: args.launchErrorOwned,
+    }) ||
+    shouldRenderStoppedSessionBanner({
+      isFailed: args.isFailed,
+      isCompleted: args.isCompleted,
+      executorUnavailable: args.executorUnavailable,
+      launchErrorOwned: args.launchErrorOwned,
+    })
+  );
+}
+
+function PreviewFeedbackFallbackSurface({
+  panelState,
+  taskId,
+  executorUnavailable,
+  launchErrorOwned,
+}: {
+  panelState: ChatPanelState;
+  taskId: string | null;
+  executorUnavailable: boolean;
+  launchErrorOwned?: boolean;
+}) {
+  const [fallbackOpen, setFallbackOpen] = useState(false);
+  const collection = panelState.previewFeedbackState;
+  const showTrigger = shouldShowPreviewFeedbackFallback({
+    taskId,
+    resolvedSessionId: panelState.resolvedSessionId,
+    itemCount: panelState.previewFeedback?.length ?? 0,
+    isFailed: panelState.isFailed,
+    isCompleted: panelState.isCompleted,
+    executorUnavailable,
+    launchErrorOwned,
+  });
+  if (!collection || !taskId || (panelState.previewFeedback?.length ?? 0) === 0) return null;
+  return (
+    <PreviewFeedbackCollectionSurface
+      taskId={taskId}
+      collection={collection}
+      open={panelState.previewFeedbackOpen ?? fallbackOpen}
+      onOpenChange={panelState.setPreviewFeedbackOpen ?? setFallbackOpen}
+      showTrigger={showTrigger}
+    />
+  );
+}
+
+function ComposerStatusNotices({
+  panelState,
+  showAgentStartHint,
+  executorUnavailable,
+}: {
+  panelState: ChatPanelState;
+  showAgentStartHint: boolean;
+  executorUnavailable: boolean;
+}) {
+  return (
+    <>
+      <DynamicRouteRecovery session={panelState.session} />
+      <ComposerAgentStartHint
+        show={showAgentStartHint}
+        needsRecovery={panelState.needsRecovery}
+        executorUnavailable={executorUnavailable}
+        hasPendingClarification={panelState.hasPendingClarification}
+      />
+      <PlanCommentMigrationNotice {...panelState.planCommentMigration} />
+    </>
+  );
+}
+
 /**
  * The chat composer: input box, submit/cancel handling, plan-mode toggle,
  * clarification banner, and the {@link ChatStatusBar} above it.
  */
-export function ChatInputArea({
-  chatInputRef,
-  clarificationKey,
-  onClarificationResolved,
-  handleSubmit,
-  handleCancelTurn,
-  showRequestChangesTooltip,
-  onRequestChangesTooltipDismiss,
-  panelState,
-  isSending,
-  hideSessionsDropdown,
-  minimalToolbar,
-  hideAgentControls,
-  hidePlanMode,
-  placeholderOverride,
-  surfaceClassName,
-  showScrollToLastPrompt,
-  onScrollToLastPrompt,
-  lastPromptScrollDirection,
-  showScrollToStart,
-  onScrollToStart,
-  statusTaskId = null,
-  showAgentStartHint = false,
-}: ChatInputAreaProps) {
+export function ChatInputArea(props: ChatInputAreaProps) {
+  const {
+    chatInputRef,
+    clarificationKey,
+    panelState,
+    placeholderOverride,
+    surfaceClassName,
+    showScrollToLastPrompt,
+    onScrollToLastPrompt,
+    showJumpToLatest,
+    onJumpToLatest,
+    lastPromptScrollDirection,
+    showScrollToStart,
+    onScrollToStart,
+    statusTaskId = null,
+    showAgentStartHint = false,
+  } = props;
   const { resolvedSessionId, taskId, isAgentBusy } = panelState;
-  const statusRowTaskId = resolveStatusRowTaskId(taskId, statusTaskId);
-  const composerWorkspaceId = useComposerWorkspaceId(resolvedSessionId, taskId);
-  const sessionState = panelState.session?.state ?? null;
+  const disclosure = useComposerDisclosureContext();
+  useComposerActivity({ required: Boolean(panelState.session?.pending_action) });
+  const composerWorkspace = useComposerWorkspace(resolvedSessionId, taskId);
   const { planActions, executor, placeholder } = useChatInputDerived(
     panelState,
     chatInputRef,
@@ -440,58 +595,75 @@ export function ChatInputArea({
   );
   const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
   const composerProps = useComposerProps({
-    panelState,
-    composerWorkspaceId,
+    ...props,
+    composerWorkspaceId: composerWorkspace.workspaceId,
+    workspaceResolutionFailed: composerWorkspace.status === "failed",
+    onRetryWorkspaceResolution: composerWorkspace.retry,
     isMoving,
     implementPlanHandler,
     executor,
     placeholder,
-    handleSubmit,
-    handleCancelTurn,
-    isSending,
-    showRequestChangesTooltip,
-    onRequestChangesTooltipDismiss,
-    onClarificationResolved,
-    hideSessionsDropdown,
-    minimalToolbar,
-    hideAgentControls,
-    hidePlanMode,
   });
   return (
     <div
       data-testid="chat-input-area"
-      className={cn("bg-card flex-shrink-0 px-2 pb-2 pt-1", surfaceClassName)}
+      data-input-mode={panelState.inputMode}
+      className={cn(
+        "bg-card flex-shrink-0",
+        !disclosure?.enabled && "px-2 pb-2 pt-1",
+        surfaceClassName,
+      )}
     >
-      <DynamicRouteRecovery session={panelState.session} />
-      <ComposerAgentStartHint
-        show={showAgentStartHint}
-        needsRecovery={panelState.needsRecovery}
+      {disclosure?.enabled && (
+        <ComposerCIStatus
+          taskId={resolveStatusRowTaskId(taskId, statusTaskId)}
+          sessionId={resolvedSessionId}
+          standalone
+        />
+      )}
+      <ComposerDisclosureRegion className={disclosure?.enabled ? "px-2 pb-2 pt-1" : undefined}>
+        <ComposerStatusNotices
+          panelState={panelState}
+          showAgentStartHint={showAgentStartHint}
+          executorUnavailable={executor.unavailable}
+        />
+        <QueueAffordance
+          sessionId={resolvedSessionId}
+          detailActive={panelState.detailActive}
+          renderStatusBar={(queueChip) => (
+            <ChatStatusBar
+              todoItems={panelState.todoItems}
+              taskId={resolveStatusRowTaskId(taskId, statusTaskId)}
+              sessionId={resolvedSessionId}
+              detailActive={panelState.detailActive}
+              sessionState={panelState.session?.state ?? null}
+              previewTarget={planActions.proceedPreviewTarget}
+              nextStepName={proceedStepName}
+              onProceed={proceed}
+              isAgentBusy={isAgentBusy}
+              hasPendingClarification={panelState.hasPendingClarification}
+              isMoving={isMoving}
+              queueChip={queueChip}
+              showScrollToLastPrompt={showScrollToLastPrompt}
+              onScrollToLastPrompt={onScrollToLastPrompt}
+              showJumpToLatest={showJumpToLatest}
+              onJumpToLatest={onJumpToLatest}
+              lastPromptScrollDirection={lastPromptScrollDirection}
+              showScrollToStart={showScrollToStart}
+              onScrollToStart={onScrollToStart}
+            />
+          )}
+        >
+          <ChatInputContainer ref={chatInputRef} key={clarificationKey} {...composerProps} />
+        </QueueAffordance>
+        <ComposerCollapseButton />
+      </ComposerDisclosureRegion>
+      <PreviewFeedbackFallbackSurface
+        panelState={panelState}
+        taskId={taskId}
         executorUnavailable={executor.unavailable}
-        hasPendingClarification={Boolean(panelState.pendingClarification)}
+        launchErrorOwned={props.launchErrorOwned}
       />
-      <QueueAffordance
-        sessionId={resolvedSessionId}
-        renderStatusBar={(queueChip) => (
-          <ChatStatusBar
-            todoItems={panelState.todoItems}
-            taskId={statusRowTaskId}
-            sessionId={resolvedSessionId}
-            sessionState={sessionState}
-            nextStepName={proceedStepName}
-            onProceed={proceed}
-            isAgentBusy={isAgentBusy}
-            isMoving={isMoving}
-            queueChip={queueChip}
-            showScrollToLastPrompt={showScrollToLastPrompt}
-            onScrollToLastPrompt={onScrollToLastPrompt}
-            lastPromptScrollDirection={lastPromptScrollDirection}
-            showScrollToStart={showScrollToStart}
-            onScrollToStart={onScrollToStart}
-          />
-        )}
-      >
-        <ChatInputContainer ref={chatInputRef} key={clarificationKey} {...composerProps} />
-      </QueueAffordance>
     </div>
   );
 }

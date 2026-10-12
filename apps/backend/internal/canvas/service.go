@@ -96,15 +96,16 @@ func (s *Service) createLocked(ctx context.Context, request CreateCanvasRequest)
 		scopeKind = ScopeTask
 	}
 	metadata := CanvasMetadata{
-		ID:                 canvasID,
-		PluginInstanceID:   instanceID,
-		WorkspaceID:        request.WorkspaceID,
-		TaskID:             request.TaskID,
-		OriginTaskID:       request.OriginTaskID,
-		Title:              request.Title,
-		CreatedBySessionID: request.CreatedBySessionID,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                  canvasID,
+		PluginInstanceID:    instanceID,
+		WorkspaceID:         request.WorkspaceID,
+		TaskID:              request.TaskID,
+		OriginTaskID:        request.OriginTaskID,
+		Title:               request.Title,
+		CreatedBySessionID:  request.CreatedBySessionID,
+		CreationOwnerUserID: request.OwnerUserID,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	instance := plugininstances.Instance{
 		ID:          instanceID,
@@ -170,6 +171,40 @@ func (s *Service) Get(ctx context.Context, id string) (*Canvas, error) {
 // GetCanvas is the descriptive alias used by API adapters.
 func (s *Service) GetCanvas(ctx context.Context, id string) (*Canvas, error) {
 	return s.Get(ctx, id)
+}
+
+// Rename updates the instance title without changing its release or runtime.
+func (s *Service) Rename(ctx context.Context, id, title string) (*Canvas, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	title = strings.TrimSpace(title)
+	if title == "" || len([]rune(title)) > MaxTitleLength {
+		return nil, ErrInvalidCanvas
+	}
+	s.mu.Lock()
+	_, instance, err := s.load(ctx, id)
+	if err == nil && instance.Status == StatusRemoved {
+		err = ErrCanvasNotFound
+	}
+	if err == nil {
+		err = s.repo.Rename(ctx, id, title, s.nowUTC())
+	}
+	var updated Canvas
+	if err == nil {
+		metadata, current, loadErr := s.load(ctx, id)
+		err = loadErr
+		if err == nil {
+			updated, err = s.buildCanvas(ctx, metadata, current)
+		}
+	}
+	publisher := s.publisher
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	publishEvent(ctx, publisher, lifecycleEvent(EventUpdated, updated))
+	return &updated, nil
 }
 
 // ListTaskCanvases lists task-scoped canvases. Removed canvases are never
@@ -378,6 +413,9 @@ func (s *Service) removeLocked(ctx context.Context, id string) (LifecycleEvent, 
 
 func (s *Service) removeAuthority(ctx context.Context, metadata CanvasMetadata, instance plugininstances.Instance) error {
 	if instance.Status == StatusRemoved {
+		if err := s.repo.DeleteInstallReceipt(ctx, metadata.ID); err != nil {
+			return err
+		}
 		err := s.repo.Delete(ctx, metadata.ID)
 		if errors.Is(err, ErrCanvasNotFound) {
 			return nil
@@ -390,10 +428,16 @@ func (s *Service) removeAuthority(ctx context.Context, metadata CanvasMetadata, 
 			if err := transactional.RemoveInstanceTx(ctx, tx, instance.ID); err != nil {
 				return err
 			}
+			if err := s.repo.DeleteInstallReceiptTx(ctx, tx, metadata.ID); err != nil {
+				return err
+			}
 			return s.repo.DeleteTx(ctx, tx, metadata.ID)
 		})
 	}
 	if err := s.instances.RemoveInstance(ctx, instance.ID); err != nil {
+		return err
+	}
+	if err := s.repo.DeleteInstallReceipt(ctx, metadata.ID); err != nil {
 		return err
 	}
 	return s.repo.Delete(ctx, metadata.ID)
@@ -577,6 +621,9 @@ func (s *Service) removeMetadataLocked(ctx context.Context, metadata CanvasMetad
 				return LifecycleEvent{}, err
 			}
 		}
+		if err := s.repo.DeleteInstallReceipt(ctx, metadata.ID); err != nil {
+			return LifecycleEvent{}, err
+		}
 		if err := s.repo.Delete(ctx, metadata.ID); err != nil && !errors.Is(err, ErrCanvasNotFound) {
 			return LifecycleEvent{}, err
 		}
@@ -690,7 +737,7 @@ func (s *Service) buildCanvas(ctx context.Context, metadata CanvasMetadata, inst
 		return Canvas{}, err
 	}
 	if instance.ActiveReleaseID == "" {
-		return s.addPendingRelease(ctx, &canvas, instance.ID, instance.ScopeKind, grants)
+		return s.addPendingRelease(ctx, &canvas, instance.ID, instance.EffectiveDataScopeKind(), grants)
 	}
 	release, err := s.instances.GetRelease(ctx, instance.ActiveReleaseID)
 	if errors.Is(err, plugininstances.ErrNotFound) {
@@ -708,7 +755,7 @@ func (s *Service) buildCanvas(ctx context.Context, metadata CanvasMetadata, inst
 	canvas.ActiveReleaseStatus = release.ValidationStatus
 	canvas.ActiveReleaseError = release.ValidationError
 	canvas.EffectiveGrants = effectiveGrantProjection(instance, ReleasePermissionSummary(release), grants)
-	canvas.ActiveRelease = releaseMetadata(release, instance.ScopeKind, grants)
+	canvas.ActiveRelease = releaseMetadata(release, instance.EffectiveDataScopeKind(), grants)
 	return canvas, nil
 }
 
@@ -772,6 +819,7 @@ func normalizeCreateRequest(request CreateCanvasRequest) (CreateCanvasRequest, e
 	request.TaskID = strings.TrimSpace(request.TaskID)
 	request.OriginTaskID = strings.TrimSpace(request.OriginTaskID)
 	request.CreatedBySessionID = strings.TrimSpace(request.CreatedBySessionID)
+	request.OwnerUserID = strings.TrimSpace(request.OwnerUserID)
 	request.PluginID = strings.TrimSpace(request.PluginID)
 	request.Title = strings.TrimSpace(request.Title)
 	if request.PluginID == "" {
@@ -818,6 +866,7 @@ func canvasFromMetadataInstance(metadata CanvasMetadata, instance plugininstance
 		TaskID:             metadata.TaskID,
 		OriginTaskID:       metadata.OriginTaskID,
 		ScopeKind:          instance.ScopeKind,
+		DataScopeKind:      instance.EffectiveDataScopeKind(),
 		Title:              metadata.Title,
 		CreatedBySessionID: metadata.CreatedBySessionID,
 		PromotedByUserID:   metadata.PromotedByUserID,
@@ -841,11 +890,14 @@ func isWorkspaceCanvas(metadata CanvasMetadata, instance plugininstances.Instanc
 func lifecycleEvent(eventType string, canvas Canvas) LifecycleEvent {
 	return LifecycleEvent{
 		Type:                eventType,
+		Title:               canvas.Title,
+		UpdatedAt:           canvas.UpdatedAt,
 		CanvasID:            canvas.ID,
 		PluginInstanceID:    canvas.PluginInstanceID,
 		WorkspaceID:         canvas.WorkspaceID,
 		TaskID:              canvas.TaskID,
 		ScopeKind:           canvas.ScopeKind,
+		DataScopeKind:       canvas.DataScopeKind,
 		Status:              canvas.Status,
 		ActiveReleaseID:     canvas.ActiveReleaseID,
 		ActiveReleaseStatus: canvas.ActiveReleaseStatus,

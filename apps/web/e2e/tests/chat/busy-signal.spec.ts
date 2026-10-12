@@ -89,6 +89,9 @@ test.describe("Coarse RUNNING busy signal", () => {
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({
       timeout: 20_000,
     });
+
+    // Do not leave a live background turn for the next test to inherit.
+    await session.waitForChatIdle({ timeout: 60_000 });
   });
 
   test("foreground generation continues to queue input", async ({
@@ -177,7 +180,9 @@ test.describe.serial("Claude background prompt handoff experiment", () => {
     await waitForActiveSessionForegroundActivity(testPage, "background");
 
     await session.sendMessage("/slow 2s");
-    await expect(testPage.getByText("/slow 2s")).toBeVisible({ timeout: 15_000 });
+    await expect(
+      session.activeChat().getByTestId("user-message-bubble").filter({ hasText: "/slow 2s" }),
+    ).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
     await waitForActiveSessionForegroundActivity(testPage, "generating");
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
@@ -211,7 +216,9 @@ test.describe.serial("Claude background prompt handoff experiment", () => {
     await waitForActiveSessionForegroundActivity(testPage, "background");
 
     await session.sendMessage("/slow 2s");
-    await expect(testPage.getByText("/slow 2s")).toBeVisible({ timeout: 15_000 });
+    await expect(
+      session.activeChat().getByTestId("user-message-bubble").filter({ hasText: "/slow 2s" }),
+    ).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
   });
 });

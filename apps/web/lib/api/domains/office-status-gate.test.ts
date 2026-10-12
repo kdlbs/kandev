@@ -64,4 +64,22 @@ describe("updateTaskStatusOrTranslateGate", () => {
     expect(err).toBeInstanceOf(ApprovalGateError);
     expect((err as ApprovalGateError).redirectedStatus).toBe("blocked");
   });
+
+  it("uses the workflow-step message for a position gate", async () => {
+    updateTaskMock.mockRejectedValueOnce(
+      new ApiError("workflow step pending", 409, {
+        error: "workflow step pending",
+        reason: "workflow_step",
+        pending_approvers: [],
+        status: "in_review",
+      }),
+    );
+
+    const err = await updateTaskStatusOrTranslateGate("t-1", "done").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApprovalGateError);
+    expect((err as ApprovalGateError).message).toBe(
+      "Cannot mark done: move the task to the final workflow step first",
+    );
+    expect((err as ApprovalGateError).redirectedStatus).toBe("in_review");
+  });
 });

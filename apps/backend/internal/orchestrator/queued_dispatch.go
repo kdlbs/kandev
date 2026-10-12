@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 
@@ -14,6 +15,7 @@ type queuedDispatchPhase uint32
 const (
 	queuedDispatchPending queuedDispatchPhase = iota + 1
 	queuedDispatchAccepted
+	queuedDispatchAwaitingAdmission
 	queuedDispatchLive
 	queuedDispatchSupersededByNewDispatch
 	queuedDispatchSupersededBySendNow
@@ -22,13 +24,9 @@ const (
 type queuedDispatchReservation struct {
 	sessionID string
 	entryID   string
+	identity  messagequeue.QueueSessionIdentity
 	source    *messagequeue.QueuedMessage
 	phase     atomic.Uint32
-	// liveEligible is set only for Send Now reservations. It allows the
-	// prompt-claim path to move that reservation to live while it still owns
-	// the session guard; ordinary FIFO handoffs remain in accepted until their
-	// turn settles.
-	liveEligible atomic.Bool
 	// successorTurn is the replacement turn this dispatch opened. A late
 	// complete of the cancelled predecessor must not close that turn or
 	// drop this reservation; only the successor's own ready-path settlement
@@ -36,10 +34,15 @@ type queuedDispatchReservation struct {
 	successorTurn atomic.Value
 }
 
-func newQueuedDispatchReservation(sessionID, entryID string, source *messagequeue.QueuedMessage) *queuedDispatchReservation {
+func newQueuedDispatchReservation(
+	sessionID, entryID string,
+	identity messagequeue.QueueSessionIdentity,
+	source *messagequeue.QueuedMessage,
+) *queuedDispatchReservation {
 	reservation := &queuedDispatchReservation{
 		sessionID: sessionID,
 		entryID:   entryID,
+		identity:  identity,
 		source:    source,
 	}
 	reservation.phase.Store(uint32(queuedDispatchPending))
@@ -84,7 +87,7 @@ func (s *Service) markQueuedDispatchInFlightWithSourceLocked(
 	if sessionID == "" || entryID == "" {
 		return nil
 	}
-	reservation := newQueuedDispatchReservation(sessionID, entryID, source)
+	reservation := newQueuedDispatchReservation(sessionID, entryID, messagequeue.QueueSessionIdentity{}, source)
 	if previous, ok := s.dispatchingQueued.Load(sessionID); ok {
 		if previousReservation, ok := previous.(*queuedDispatchReservation); ok {
 			previousReservation.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
@@ -97,6 +100,37 @@ func (s *Service) markQueuedDispatchInFlightWithSourceLocked(
 	s.acceptedQueuedDispatch.Delete(sessionID)
 	s.dispatchingQueued.Store(sessionID, reservation)
 	return reservation
+}
+
+func (s *Service) markQueuedDispatchInFlightWithIdentityLocked(
+	identity messagequeue.QueueSessionIdentity,
+	entryID string,
+	source *messagequeue.QueuedMessage,
+) *queuedDispatchReservation {
+	if identity.TaskID == "" || identity.SessionID == "" ||
+		identity.SessionIncarnationID == "" || entryID == "" {
+		return nil
+	}
+	reservation := newQueuedDispatchReservation(identity.SessionID, entryID, identity, source)
+	if previous, ok := s.dispatchingQueued.Load(identity.SessionID); ok {
+		if previousReservation, ok := previous.(*queuedDispatchReservation); ok {
+			previousReservation.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
+		}
+	}
+	s.acceptedQueuedDispatch.Delete(identity.SessionID)
+	s.dispatchingQueued.Store(identity.SessionID, reservation)
+	return reservation
+}
+
+func (reservation *queuedDispatchReservation) matchesSessionIdentity(
+	taskID, sessionID, incarnationID string,
+) bool {
+	if reservation == nil || reservation.identity.SessionIncarnationID == "" {
+		return true
+	}
+	return reservation.identity.TaskID == taskID &&
+		reservation.identity.SessionID == sessionID &&
+		reservation.identity.SessionIncarnationID == incarnationID
 }
 
 func (s *Service) pendingQueuedDispatch(sessionID string) *queuedDispatchReservation {
@@ -147,7 +181,7 @@ func (s *Service) claimQueuedDispatchForExecution(
 		return true, errQueuedDispatchSupersededBySendNow
 	case queuedDispatchSupersededByNewDispatch:
 		return true, errQueuedDispatchSuperseded
-	case queuedDispatchAccepted, queuedDispatchLive:
+	case queuedDispatchAccepted, queuedDispatchAwaitingAdmission, queuedDispatchLive:
 		return true, nil
 	}
 
@@ -239,10 +273,18 @@ func (s *Service) supersedeQueuedDispatchForSendNow(
 
 func (s *Service) isQueuedDispatchAccepted(sessionID string) bool {
 	accepted := s.acceptedQueuedDispatchForSession(sessionID)
-	return accepted != nil && accepted.currentPhase() == queuedDispatchAccepted
+	if accepted == nil {
+		return false
+	}
+	switch accepted.currentPhase() {
+	case queuedDispatchAccepted, queuedDispatchAwaitingAdmission:
+		return true
+	default:
+		return false
+	}
 }
 
-// markAcceptedDispatchLive moves a Send Now successor out of the handoff
+// markAcceptedDispatchLive moves a queued successor out of the handoff
 // conflict window once it owns execution. Stream-complete still protects the
 // bound successor turn; a later Send Now may cancel that live turn.
 func (s *Service) markAcceptedDispatchLive(sessionID string, reservation *queuedDispatchReservation) {
@@ -256,7 +298,7 @@ func (s *Service) markAcceptedDispatchLive(sessionID string, reservation *queued
 	s.markAcceptedDispatchLiveLocked(sessionID, reservation)
 }
 
-// markAcceptedDispatchLiveLocked moves a Send Now successor out of the
+// markAcceptedDispatchLiveLocked moves a queued successor out of the
 // handoff conflict window while the caller owns sessionID's cancellation
 // guard. This keeps the phase transition serialized with prompt ownership.
 func (s *Service) markAcceptedDispatchLiveLocked(sessionID string, reservation *queuedDispatchReservation) {
@@ -268,9 +310,48 @@ func (s *Service) markAcceptedDispatchLiveLocked(sessionID string, reservation *
 		return
 	}
 	switch accepted.currentPhase() {
-	case queuedDispatchAccepted, queuedDispatchLive:
+	case queuedDispatchAccepted, queuedDispatchAwaitingAdmission, queuedDispatchLive:
 		accepted.phase.Store(uint32(queuedDispatchLive))
 	}
+}
+
+// retainQueuedDispatchForInitialAdmissionLocked keeps the accepted marker
+// alive when a model-switch worker returns before its asynchronous initial
+// prompt reaches provider admission.
+func (s *Service) retainQueuedDispatchForInitialAdmissionLocked(
+	sessionID, entryID string,
+) *queuedDispatchReservation {
+	reservation := s.queuedDispatchReservationForEntry(sessionID, entryID)
+	if reservation == nil || s.acceptedQueuedDispatchForSession(sessionID) != reservation ||
+		reservation.currentPhase() != queuedDispatchAccepted {
+		return nil
+	}
+	reservation.phase.Store(uint32(queuedDispatchAwaitingAdmission))
+	return reservation
+}
+
+func (s *Service) acceptRetainedQueuedDispatchLocked(
+	sessionID string,
+	reservation *queuedDispatchReservation,
+) {
+	accepted := s.acceptedQueuedDispatchForSession(sessionID)
+	if accepted == nil || accepted != reservation ||
+		accepted.currentPhase() != queuedDispatchAwaitingAdmission {
+		return
+	}
+	accepted.phase.Store(uint32(queuedDispatchLive))
+}
+
+func (s *Service) discardQueuedDispatchAwaitingAdmission(
+	sessionID string,
+	reservation *queuedDispatchReservation,
+) {
+	if reservation == nil || s.acceptedQueuedDispatchForSession(sessionID) != reservation ||
+		reservation.currentPhase() != queuedDispatchAwaitingAdmission {
+		return
+	}
+	reservation.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
+	s.acceptedQueuedDispatch.CompareAndDelete(sessionID, reservation)
 }
 
 // clearQueuedDispatchInFlightIfCurrent clears either phase only for the exact
@@ -289,9 +370,28 @@ func (s *Service) clearQueuedDispatchInFlightIfCurrent(
 		s.dispatchingQueued.CompareAndDelete(sessionID, reservation)
 	}
 	if accepted := s.acceptedQueuedDispatchForSession(sessionID); accepted == reservation {
+		if accepted.currentPhase() == queuedDispatchAwaitingAdmission {
+			return
+		}
 		accepted.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
 		s.acceptedQueuedDispatch.CompareAndDelete(sessionID, reservation)
 	}
+}
+
+func (s *Service) markQueuedDispatchDrainPending(sessionID string) {
+	if sessionID != "" {
+		s.queuedDispatchDrainPending.Store(sessionID, struct{}{})
+	}
+}
+
+func (s *Service) drainQueuedDispatchIfPending(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	if _, pending := s.queuedDispatchDrainPending.LoadAndDelete(sessionID); !pending {
+		return
+	}
+	s.drainQueuedMessageForPromptableSession(context.Background(), sessionID)
 }
 
 // releaseQueuedDispatchPendingIfCurrent is used by the fast prompt-claim

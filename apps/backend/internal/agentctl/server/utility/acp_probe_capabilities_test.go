@@ -85,7 +85,7 @@ func probeHandshakeMeta(t *testing.T, agentID string) map[string]any {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if _, err := e.probeACPSessionWithContext(ctx, c2aW, a2cR, t.TempDir(), agentID, "", "", nil); err != nil {
+	if _, err := e.probeACPSessionWithContext(ctx, c2aW, a2cR, t.TempDir(), agentID, "", "", nil, nil); err != nil {
 		t.Fatalf("probeACPSessionWithContext(%q): %v", agentID, err)
 	}
 	return fake.captured().ClientCapabilities.Meta
@@ -126,7 +126,7 @@ func TestExecuteACPSession_AdvertisesParameterizedModelPickerToCursor(t *testing
 	defer cancel()
 
 	if _, err := e.executeACPSession(ctx, c2aW, a2cR, t.TempDir(),
-		acpcompat.CursorAgentID, "hello", "", nil, "", nil, nil); err != nil {
+		acpcompat.CursorAgentID, "hello", "", nil, "", nil, nil, nil); err != nil {
 		t.Fatalf("executeACPSession: %v", err)
 	}
 
@@ -167,7 +167,7 @@ func TestProbeACPSessionWithContextRejectsProviderWithoutModelSelection(t *testi
 	defer cancel()
 
 	_, err := e.probeACPSessionWithContext(
-		ctx, c2aW, a2cR, t.TempDir(), "provider-without-models", "model", "", nil,
+		ctx, c2aW, a2cR, t.TempDir(), "provider-without-models", "model", "", nil, nil,
 	)
 	if err == nil || !strings.Contains(err.Error(), "provider does not support model selection") {
 		t.Fatalf("error = %v, want unsupported model selection", err)
@@ -199,7 +199,7 @@ func TestProbeACPSessionWithContextErrorsWhenConfigOptionYieldsNoSnapshot(t *tes
 	defer cancel()
 
 	_, err := e.probeACPSessionWithContext(
-		ctx, c2aW, a2cR, t.TempDir(), "provider-without-config-response", "model", "", nil,
+		ctx, c2aW, a2cR, t.TempDir(), "provider-without-config-response", "model", "", nil, nil,
 	)
 	if err == nil || !strings.Contains(err.Error(), "returned no configuration options") {
 		t.Fatalf("error = %v, want missing configuration snapshot", err)
@@ -224,7 +224,7 @@ func TestProbeACPSessionWithModel_UsesReturnedConfigOptions(t *testing.T) {
 	defer cancel()
 
 	resp, err := e.probeACPSessionWithContext(
-		ctx, c2aW, a2cR, t.TempDir(), "opencode-acp", "model-with-effort", "", nil,
+		ctx, c2aW, a2cR, t.TempDir(), "opencode-acp", "model-with-effort", "", nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("probeACPSessionWithContext(): %v", err)
@@ -260,7 +260,7 @@ func TestProbeACPSessionWithModel_UsesConfigUpdateNotification(t *testing.T) {
 	defer cancel()
 
 	resp, err := e.probeACPSessionWithContext(
-		ctx, c2aW, a2cR, t.TempDir(), "opencode-acp", "legacy-model-with-effort", "", nil,
+		ctx, c2aW, a2cR, t.TempDir(), "opencode-acp", "legacy-model-with-effort", "", nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("probeACPSessionWithContext(): %v (calls: %v)", err, fake.recordedCalls())
@@ -304,6 +304,7 @@ func TestProbeACPSessionWithContextReturnsSnapshotAfterRequestedOptions(t *testi
 		"model-with-effort",
 		"build",
 		map[string]string{"reasoning_effort": "low"},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("probeACPSessionWithContext(): %v", err)
@@ -346,6 +347,7 @@ func TestProbeACPSessionWithContextAppliesModeBeforeModelAndOptions(t *testing.T
 		"model-with-effort",
 		"smart",
 		map[string]string{"reasoning_effort": "low"},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("probeACPSessionWithContext(): %v (calls: %v)", err, fake.recordedCalls())
@@ -391,6 +393,7 @@ func TestProbeACPSessionWithContextRequiresSnapshotAfterFinalConfigMutation(t *t
 		"model-with-options",
 		"",
 		map[string]string{"first": "one", "second": "two"},
+		nil,
 	)
 	if err == nil || !strings.Contains(err.Error(), "model config selection returned no configuration options") {
 		t.Fatalf("error = %v, want missing final configuration snapshot", err)

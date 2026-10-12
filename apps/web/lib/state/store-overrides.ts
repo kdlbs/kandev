@@ -4,13 +4,17 @@ import type { DefaultState } from "./default-state";
 // after all slice spreads so that caller-supplied initialState wins over slice defaults.
 // Note: collapsedSubtaskParents is intentionally omitted — createUISlice hydrates it
 // from sessionStorage and we want that to win.
+// eslint-disable-next-line max-lines-per-function -- this explicit projection documents the state merge boundary
 export function buildStateOverrides(m: DefaultState) {
   return {
     kanban: m.kanban,
     kanbanMulti: m.kanbanMulti,
     workflows: m.workflows,
     workspaceContextGeneration: m.workspaceContextGeneration,
+    workspaceContextRead: m.workspaceContextRead,
     tasks: m.tasks,
+    workflowSessionFocus: m.workflowSessionFocus,
+    taskRemoval: m.taskRemoval,
     workspaces: m.workspaces,
     repositories: m.repositories,
     repositoryBranches: m.repositoryBranches,
@@ -43,16 +47,19 @@ export function buildStateOverrides(m: DefaultState) {
     shell: m.shell,
     processes: m.processes,
     gitStatus: m.gitStatus,
+    gitCheckoutGeneration: m.gitCheckoutGeneration,
     contextWindow: m.contextWindow,
     agents: m.agents,
     sessionMode: m.sessionMode,
     userShells: m.userShells,
     prepareProgress: m.prepareProgress,
+    launchWarning: m.launchWarning,
     sessionTodos: m.sessionTodos,
     agentCapabilities: m.agentCapabilities,
     sessionModels: m.sessionModels,
     sessionMcpStatus: m.sessionMcpStatus,
     promptUsage: m.promptUsage,
+    usageInvalidation: m.usageInvalidation,
     sessionPollMode: m.sessionPollMode,
     githubStatus: m.githubStatus,
     githubAppRegistrations: m.githubAppRegistrations,
@@ -82,6 +89,7 @@ export function buildStateOverrides(m: DefaultState) {
     sessionHostnamesEpoch: m.sessionHostnamesEpoch,
     automations: m.automations,
     automationRuns: m.automationRuns,
+    coordinators: m.coordinators,
     system: m.system,
     agentRuntime: m.agentRuntime,
     previewPanel: m.previewPanel,
@@ -98,6 +106,7 @@ export function buildStateOverrides(m: DefaultState) {
     sessionFailureNotification: m.sessionFailureNotification,
     bottomTerminal: m.bottomTerminal,
     sidebarViews: m.sidebarViews,
+    sidebarViewsByWorkspace: m.sidebarViewsByWorkspace,
     threadViews: m.threadViews,
     sidebarTaskPrefs: m.sidebarTaskPrefs,
   };

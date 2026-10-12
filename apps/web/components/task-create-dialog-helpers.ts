@@ -10,6 +10,7 @@ import type {
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
+import { branchOptionValue } from "@/components/branch-picker-options";
 import { createDebugLogger } from "@/lib/debug/log";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { linkToTask } from "@/lib/links";
@@ -84,13 +85,7 @@ export function autoSelectBranch(
 }
 
 function isBranchSelectable(branchList: Branch[], value: string | null | undefined) {
-  return Boolean(value && branchList.some((branch) => branchDisplayName(branch) === value));
-}
-
-function branchDisplayName(branch: Branch) {
-  return branch.type === "remote" && branch.remote
-    ? `${branch.remote}/${branch.name}`
-    : branch.name;
+  return Boolean(value && branchList.some((branch) => branchOptionValue(branch) === value));
 }
 
 export function computePassthroughProfile(
@@ -122,6 +117,52 @@ export function computeIsTaskStarted(
   return editingTask.state !== "TODO" && editingTask.state !== "CREATED";
 }
 
+/**
+ * Whether the executor-profile selector should be offered for editing.
+ * Create mode always offers it — there is no task yet for a mutability
+ * verdict to apply to. Edit mode defers entirely to the projected
+ * `runner_editable`, never to workflow state; an absent projection fails
+ * closed.
+ */
+export function computeRunnerEditable(
+  isEditMode: boolean,
+  editingTask?: { runnerEditable?: boolean } | null,
+): boolean {
+  if (!isEditMode) return true;
+  return editingTask?.runnerEditable ?? false;
+}
+
+/**
+ * Machine-readable reason to present when {@link computeRunnerEditable}
+ * returns false. Falls back to the same retriable class the backend uses
+ * when a projection could not be evaluated.
+ */
+export function computeRunnerIneligibleReason(
+  editingTask?: { runnerIneligibleReason?: string } | null,
+): string {
+  return editingTask?.runnerIneligibleReason ?? "evaluation_unavailable";
+}
+
+/**
+ * Maps a projected `runner_ineligible_reason`, or the matching
+ * `details.error_code` on a rejected `task.runner` switch, to the i18n key
+ * presented to the user. Closed vocabulary; a code this dialog doesn't
+ * recognize (a future reason it predates) falls back to the same retriable
+ * copy as an evaluation failure rather than an empty message or a raw code.
+ */
+export const RUNNER_INELIGIBLE_REASON_KEYS: Record<string, string> = {
+  task_archived: "task:runnerReasonTaskArchived",
+  no_repository: "task:runnerReasonNoRepository",
+  multiple_repositories: "task:runnerReasonMultipleRepositories",
+  session_exists: "task:runnerReasonSessionExists",
+  environment_exists: "task:runnerReasonEnvironmentExists",
+  executor_running: "task:runnerReasonExecutorRunning",
+  workspace_folder_attached: "task:runnerReasonWorkspaceFolderAttached",
+  workspace_path_set: "task:runnerReasonWorkspacePathSet",
+  workspace_group_member: "task:runnerReasonWorkspaceGroupMember",
+  workspace_binding_not_independent: "task:runnerReasonWorkspaceBindingNotIndependent",
+};
+
 export function shouldShowTaskTitleField(
   isCreateMode: boolean,
   isEditMode: boolean,
@@ -131,6 +172,7 @@ export function shouldShowTaskTitleField(
 }
 
 export type ActivatePlanModeArgs = {
+  autoFocus?: boolean;
   sessionId: string;
   taskId: string;
   setActiveDocument: AppState["setActiveDocument"];
@@ -139,6 +181,7 @@ export type ActivatePlanModeArgs = {
 };
 
 export function activatePlanMode({
+  autoFocus = true,
   sessionId,
   taskId,
   setActiveDocument,
@@ -148,7 +191,7 @@ export function activatePlanMode({
   setActiveDocument(sessionId, { type: "plan", taskId });
   setPlanMode(sessionId, true);
   useContextFilesStore.getState().addFile(sessionId, { path: "plan:context", name: "Plan" });
-  router.push(linkToTask(taskId, INTENT_PLAN));
+  if (autoFocus) router.push(linkToTask(taskId, INTENT_PLAN));
 }
 
 export type BuildCreatePayloadArgs = {
@@ -170,31 +213,81 @@ export type BuildCreatePayloadArgs = {
   /** Task IDs this task must wait for. */
   blockedBy?: string[];
   priority?: TaskPriority;
+  /** Task-only replacements for fixed workflow step agent profiles. */
+  workflowAgentOverrides?: Record<string, string>;
 };
+
+function optionalString(value?: string): string | undefined {
+  return value || undefined;
+}
+
+function nonEmptyArray<T>(value?: T[]): T[] | undefined {
+  return value && value.length > 0 ? value : undefined;
+}
+
+function nonEmptyRecord<T extends Record<string, string>>(value?: T): T | undefined {
+  return value && Object.keys(value).length > 0 ? value : undefined;
+}
+
+type CreateTaskTitleFields =
+  | { title: string; auto_title?: false }
+  | { title?: never; auto_title: true };
+
+function buildCreateTaskTitle(args: BuildCreatePayloadArgs): CreateTaskTitleFields {
+  if (args.autoTitle) return { auto_title: true };
+  return { title: args.trimmedTitle };
+}
+
+type CreateTaskStateFields = {
+  state: "IN_PROGRESS" | "CREATED";
+  start_agent?: boolean;
+  prepare_session?: boolean;
+};
+
+function buildCreateTaskState(withAgent: boolean): CreateTaskStateFields {
+  if (withAgent) return { state: "IN_PROGRESS", start_agent: true };
+  return { state: "CREATED", prepare_session: true };
+}
+
+type OptionalCreateTaskFields = {
+  agent_profile_id?: string;
+  executor_id?: string;
+  executor_profile_id?: string;
+  plan_mode?: boolean;
+  attachments?: MessageAttachment[];
+  parent_id?: string;
+  workspace_path?: string;
+  autopilot?: boolean;
+};
+
+function buildOptionalCreateTaskFields(args: BuildCreatePayloadArgs): OptionalCreateTaskFields {
+  return {
+    agent_profile_id: optionalString(args.agentProfileId),
+    executor_id: optionalString(args.executorId),
+    executor_profile_id: optionalString(args.executorProfileId),
+    plan_mode: args.planMode || undefined,
+    attachments: args.attachments,
+    parent_id: optionalString(args.parentId),
+    workspace_path: optionalString(args.workspacePath),
+    autopilot: args.autopilot || undefined,
+  };
+}
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
   return {
     workspace_id: args.workspaceId,
     workflow_id: args.effectiveWorkflowId,
-    ...(args.autoTitle ? { auto_title: true } : { title: args.trimmedTitle }),
+    ...buildCreateTaskTitle(args),
     description: args.trimmedDescription,
     repositories: args.repositoriesPayload,
-    state: args.withAgent ? "IN_PROGRESS" : "CREATED",
-    start_agent: args.withAgent ? true : undefined,
-    prepare_session: args.withAgent ? undefined : true,
-    agent_profile_id: args.agentProfileId || undefined,
-    executor_id: args.executorId || undefined,
-    executor_profile_id: args.executorProfileId || undefined,
-    plan_mode: args.planMode || undefined,
-    attachments: args.attachments,
-    parent_id: args.parentId || undefined,
-    workspace_path: args.workspacePath || undefined,
-    autopilot: args.autopilot || undefined,
+    ...buildCreateTaskState(args.withAgent),
+    ...buildOptionalCreateTaskFields(args),
     priority: args.priority ?? "medium",
+    workflow_agent_overrides: nonEmptyRecord(args.workflowAgentOverrides),
     // Dependencies declared at creation time. With edges present the backend
     // records the requested agent start as a start-when-unblocked intent rather
     // than launching now, so a chain runs in order instead of all at once.
-    blocked_by: args.blockedBy && args.blockedBy.length > 0 ? args.blockedBy : undefined,
+    blocked_by: nonEmptyArray(args.blockedBy),
   };
 }
 
@@ -336,6 +429,10 @@ export function buildRepositoriesPayload(opts: {
       const branches = splitLocalExecutorBranches({
         rowBranch: row.branch,
         defaultBranch,
+        // Fresh-branch mode uses row.branch as the fork base. A saved set base
+        // is checkout metadata for the ordinary local-executor flow and must
+        // not override the branch the user picked to fork from.
+        baseBranch: opts.freshBranch ? undefined : row.baseBranch,
         isLocalExecutor,
       });
       if (row.repositoryId) {
@@ -387,8 +484,10 @@ function buildRemoteRepoPayloadRow(
 ): CreateTaskRepositoryPayload {
   const url = row.url.trim();
   const metadata = remoteRepoPRMetadata(row, url, prInfoByUrl);
-  if (metadata) return buildRemoteRepoPRPayload(row, url, metadata);
-  return buildPlainRemoteRepoPayload(row, url);
+  const payload = metadata
+    ? buildRemoteRepoPRPayload(row, url, metadata)
+    : buildPlainRemoteRepoPayload(row, url);
+  return row.checkoutOptions ? { ...payload, checkout_options: row.checkoutOptions } : payload;
 }
 
 function remoteRepoPRMetadata(
@@ -492,6 +591,7 @@ function resolveRowDefaultBranch(
 function splitLocalExecutorBranches(args: {
   rowBranch?: string;
   defaultBranch?: string;
+  baseBranch?: string;
   isLocalExecutor: boolean;
 }): { base_branch: string | undefined; checkout_branch: string | undefined } {
   // Without a known default_branch we can't anchor base_branch to the
@@ -501,11 +601,19 @@ function splitLocalExecutorBranches(args: {
   // unset default_branch is no worse off than before, and the backend's
   // resolveRepoInput probe will populate it on the next CreateRepository
   // call. Wait for that probe rather than synthesizing a guess here.
-  if (!args.isLocalExecutor || !args.defaultBranch) {
-    return { base_branch: args.rowBranch || undefined, checkout_branch: undefined };
+  if (!args.isLocalExecutor) {
+    return {
+      base_branch: args.baseBranch || args.rowBranch || undefined,
+      checkout_branch: undefined,
+    };
   }
-  const base = args.defaultBranch;
-  const checkout =
-    args.rowBranch && args.rowBranch !== args.defaultBranch ? args.rowBranch : undefined;
-  return { base_branch: base, checkout_branch: checkout };
+  if (!args.defaultBranch) {
+    return {
+      base_branch: args.baseBranch || args.rowBranch || undefined,
+      checkout_branch: args.baseBranch ? args.rowBranch || undefined : undefined,
+    };
+  }
+  const base = args.baseBranch || args.defaultBranch;
+  const checkout = args.rowBranch && args.rowBranch !== base ? args.rowBranch : undefined;
+  return { base_branch: args.baseBranch || base, checkout_branch: checkout };
 }

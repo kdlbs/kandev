@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarRightCollapse } from "@tabler/icons-react";
+import { IconLayoutSidebarLeftCollapse } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useLayoutStore } from "@/lib/state/layout-store";
@@ -15,7 +15,6 @@ export function DocumentControls({ activeSessionId }: DocumentControlsProps) {
   const { t } = useTranslation();
   const toggleColumn = useLayoutStore((state) => state.toggleColumn);
   const showColumn = useLayoutStore((state) => state.showColumn);
-  const toggleRightPanel = useLayoutStore((state) => state.toggleRightPanel);
   const layoutBySession = useLayoutStore((state) => state.columnsBySessionId);
 
   const layoutState = useMemo(() => {
@@ -28,7 +27,6 @@ export function DocumentControls({ activeSessionId }: DocumentControlsProps) {
   }
 
   const leftHidden = !layoutState.left;
-  const rightHidden = !layoutState.right;
 
   return (
     <div className="inline-flex items-center rounded-md border border-border/70 bg-background">
@@ -59,35 +57,6 @@ export function DocumentControls({ activeSessionId }: DocumentControlsProps) {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{t("task:hideSidebar")}</TooltipContent>
-        </Tooltip>
-      )}
-      {rightHidden ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              className="cursor-pointer rounded-none"
-              onClick={() => toggleRightPanel(activeSessionId)}
-            >
-              <IconLayoutSidebarRightCollapse className="h-3 w-3" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("task:showRightPanel")}</TooltipContent>
-        </Tooltip>
-      ) : (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              className="cursor-pointer rounded-none"
-              onClick={() => toggleRightPanel(activeSessionId)}
-            >
-              <IconLayoutSidebarRightCollapse className="h-3 w-3" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("task:hideRightPanel")}</TooltipContent>
         </Tooltip>
       )}
     </div>

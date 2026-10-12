@@ -11,6 +11,7 @@ import type {
   TaskPriority,
   TaskState,
   TaskSessionState,
+  WorkflowAgentOverrides,
 } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
@@ -31,7 +32,9 @@ export type TaskLike = {
   workspace_id?: string;
   workflow_id?: string;
   workflow_step_id?: string;
+  workflow_agent_overrides?: WorkflowAgentOverrides;
   title?: string;
+  identifier?: string;
   description?: string | null;
   autopilot?: boolean;
   position?: number;
@@ -66,7 +69,13 @@ export type TaskLike = {
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   auto_start_failed?: boolean;
+  /** True when this task inherits an archived parent's workspace and can no
+   *  longer materialize or start. */
+  workspace_orphaned?: boolean;
   foreground_activity?: ForegroundActivity | null;
+  parked_on_background_work?: boolean;
+  parked_revision?: number;
+  parked_epoch?: number;
   active_subagent_count?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
@@ -78,6 +87,7 @@ export type TaskLike = {
   primary_agent_profile_id?: string | null;
   labels?: string | string[] | null;
   is_remote_executor?: boolean;
+  is_from_office?: boolean;
   parent_id?: string | null;
   assignee_user_id?: string;
   updated_at?: string;
@@ -94,6 +104,8 @@ export type TaskLike = {
   archived_at?: string | null;
   status_summary?: TaskStatusSummary | null;
   status_summary_invalidated?: boolean;
+  runner_editable?: boolean;
+  runner_ineligible_reason?: string;
 };
 
 export type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";
@@ -179,6 +191,19 @@ function primaryExecutorProjection(source: TaskLike) {
 }
 
 /**
+ * Unlike {@link primaryExecutorProjection}, an omitted value here maps to the
+ * fail-closed default rather than `undefined` — this projection must never be
+ * gap-filled from a cached task on merge (a permission-shaped flag going
+ * stale-open is worse than it going stale-closed).
+ */
+function runnerMutabilityProjection(source: TaskLike) {
+  return {
+    runnerEditable: source.runner_editable ?? false,
+    runnerIneligibleReason: source.runner_ineligible_reason ?? "evaluation_unavailable",
+  };
+}
+
+/**
  * Build a canonical {@link KanbanTask} from either an HTTP DTO or a WebSocket
  * payload. Both paths share this helper so a single publisher change can never
  * leave them out of sync again (cf. sidebar filter regressions where the HTTP
@@ -254,7 +279,9 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     workspaceId: source.workspace_id,
     workflowId: source.workflow_id,
     workflowStepId: source.workflow_step_id ?? "",
+    workflowAgentOverrides: source.workflow_agent_overrides,
     title: source.title ?? "",
+    identifier: source.identifier ?? undefined,
     description: source.description ?? undefined,
     autopilot: source.autopilot,
     priority: source.priority,
@@ -270,15 +297,21 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     taskPendingAction: pickPendingAction(source.task_pending_action),
     interrupted: source.interrupted,
     autoStartFailed: source.auto_start_failed,
+    workspaceOrphaned: source.workspace_orphaned,
     foregroundActivity: pickForegroundActivity(source.foreground_activity),
+    parkedOnBackgroundWork: source.parked_on_background_work,
+    parkedRevision: source.parked_revision,
+    parkedEpoch: source.parked_epoch,
     activeSubagentCount: source.active_subagent_count ?? undefined,
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,
     ...primaryExecutorProjection(source),
+    ...runnerMutabilityProjection(source),
     primaryAgentProfileId: source.primary_agent_profile_id ?? undefined,
     primaryAgentName: source.primary_agent_name ?? undefined,
     labels: pickLabels(source),
     assigneeUserId: pickAssignee(source.assignee_user_id),
+    isFromOffice: source.is_from_office,
     parentTaskId: source.parent_id ?? undefined,
     workspaceMode: workspaceModeFromMetadata(source.metadata),
     updatedAt: source.updated_at,

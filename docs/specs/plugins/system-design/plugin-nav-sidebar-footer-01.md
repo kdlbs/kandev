@@ -19,6 +19,16 @@ This design preserves the technical source detail for `REQ-PLUGINS-PLUGIN-NAV-SI
 | --- | --- |
 | `REQ-PLUGINS-PLUGIN-NAV-SIDEBAR-FOOTER-001` | [Migrated source detail](#migrated-source-detail) |
 
+## Current presentation amendment (2026-09-28)
+
+The [navigation hierarchy footer](../../ui/system-design/navigation-hierarchy.md#footer)
+supersedes this migrated source's desktop inline budget, wrapping icon row,
+Stats-inline exception, overflow trigger identity, and associated geometry tests.
+Every desktop insight destination now appears in the shared utilities menu;
+`sidebar-footer-more-button` opens it. Destination identity, registration order,
+visibility, routing, ownership, and uncapped labelled phone placement remain
+unchanged. The migrated detail below records the earlier presentation.
+
 ## Migrated source detail
 
 ## Amendment log
@@ -33,8 +43,8 @@ that replaces the original.
 
 Status returns to `draft` because the amended contract is not implemented. The
 already-merged-into-the-branch first version is implemented; the amendment is not. The
-status returns to `shipped` when PR #2562 merges carrying this contract, and
-`docs/specs/INDEX.md` tracks the same value.
+status returns to `shipped` when PR #2562 merges carrying this contract. The catalog
+command reads the current status from this document's frontmatter.
 
 **Amendment 1, spec-review round 1 corrections (2026-08-12).** The amended contract went
 through an adversarial spec review (cross-vendor and cross-model legs) and came back
@@ -109,9 +119,10 @@ feature were specific to one (private, unreleased) Insights plugin rather than a
 any plugin can request. The new slug matches the plugin-facing value `"sidebar-footer"`
 exactly, so the spec slug, the public token and the authoring docs all use one word. Moved
 with it: `docs/plans/plugin-nav-insights-section/` → `docs/plans/plugin-nav-sidebar-footer/`
-(plan plus three task files) and the `docs/specs/INDEX.md` row. The internal section is
-still named `insights` in `apps/web/lib/navigation/types.ts` and this document still calls
-it that; only the plugin-facing and document-facing names changed.
+(plan plus three task files). The catalog command discovers this document from its path
+and frontmatter. The internal section is still named `insights` in
+`apps/web/lib/navigation/types.ts` and this document still calls it that; only the
+plugin-facing and document-facing names changed.
 
 ## Why
 

@@ -16,7 +16,7 @@ vi.mock("@/lib/api/domains/kubernetes-api", () => ({
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ request: mocks.wsRequest }),
+  getWebSocketClient: () => ({ request: mocks.wsRequest, getStatus: () => "connected" }),
 }));
 
 beforeEach(() => {

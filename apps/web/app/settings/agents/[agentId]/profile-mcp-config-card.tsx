@@ -1,6 +1,9 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
+import { IconAlertTriangle } from "@tabler/icons-react";
+import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
+import { Button } from "@kandev/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
@@ -328,6 +331,16 @@ type McpEnableToggleProps = {
   setMcpEnabled: (enabled: boolean) => void;
 };
 
+function resolveMcpInvalidReason(
+  canManage: boolean,
+  mcpConflict: boolean,
+  currentError: string | null,
+) {
+  if (!canManage) return translate("agents:adminOnly");
+  if (mcpConflict) return translate("agents:profileExternalChangeInvalidReason");
+  return currentError ?? undefined;
+}
+
 function McpEnableToggle({
   currentEnabled,
   isDirty,
@@ -398,6 +411,7 @@ export function ProfileMcpConfigCard({
     mcpBaselineEnabled,
     mcpBaselineServers,
     mcpError,
+    mcpConflict,
     setMcpEnabled,
     handleMcpServersChange,
     handleSaveMcp,
@@ -422,8 +436,8 @@ export function ProfileMcpConfigCard({
     }),
     isDirty: supportsMcp && state.isEditableProfile && state.currentDirty,
     // Same org.config.manage gate as the agent form this card saves beside.
-    canSave: canManage && !state.currentError,
-    invalidReason: canManage ? (state.currentError ?? undefined) : t("agents:adminOnly"),
+    canSave: canManage && !state.currentError && !mcpConflict,
+    invalidReason: resolveMcpInvalidReason(canManage, mcpConflict, state.currentError),
     save: handleSaveMcp,
     discard: resetMcpDraft,
   });
@@ -436,6 +450,24 @@ export function ProfileMcpConfigCard({
         <CardTitle>{t("agents:mcpConfiguration")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {mcpConflict ? (
+          <Alert variant="destructive" data-testid="mcp-external-change-alert">
+            <IconAlertTriangle className="h-4 w-4" />
+            <AlertTitle>{t("agents:profileExternalChangeTitle")}</AlertTitle>
+            <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>{t("agents:profileExternalChangeDescription")}</span>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11 shrink-0"
+                onClick={resetMcpDraft}
+                data-testid="mcp-external-change-discard"
+              >
+                {t("agents:profileExternalChangeDiscard")}
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
         <McpProfileHint isDraft={state.isDraft} isEditableProfile={state.isEditableProfile} />
         <McpEnableToggle
           currentEnabled={state.currentEnabled}

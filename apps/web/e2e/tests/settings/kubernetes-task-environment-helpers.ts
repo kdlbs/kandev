@@ -15,6 +15,11 @@ export function seedKubernetesTaskEnvironment(
   const sqlite = new DatabaseSync(database);
   let transactionOpen = false;
   try {
+    // The backend may still be committing the session or environment row when
+    // this fixture attaches its synthetic Kubernetes environment. Wait for
+    // that short write window instead of making the E2E outcome depend on
+    // which writer wins the SQLite lock first.
+    sqlite.exec("PRAGMA busy_timeout = 10000");
     sqlite.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
     sqlite

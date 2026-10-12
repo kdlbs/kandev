@@ -193,5 +193,8 @@
   "untitledPullRequest": "未命名的 pull request",
   "updatedAgo": "{{elapsed}}前更新",
   "updatedJustNow": "剛剛更新",
-  "viewPullRequestExternally": "在外部查看 pull request #{{number}}"
+  "viewPullRequestExternally": "在外部查看 pull request #{{number}}",
+  "resultCount_one": "共 <count>{{count}}</count> 項結果",
+  "resultCount_other": "共 <count>{{count}}</count> 項結果",
+  "loadingResults": "正在載入結果…"
 }

@@ -37,14 +37,24 @@ design in the system that owns the behavior.
 Each requirement has one owning system. Another system can reference the
 requirement but must not copy it.
 
-Each system has a `README.md`. This file defines the system boundary and links
-to its requirements and system designs. Use `glossary.md` only when the system
-has terms that need precise definitions.
+Each system has a `README.md`. This file defines the system boundary, migration
+record, and related systems. Use `glossary.md` only when the system has terms
+that need precise definitions.
 
-The system index sets `migration: in_progress` while legacy files remain. Set
-it to `complete` only after the index names the new authoritative documents and
-all editable legacy sources become links or archives. The linter enforces the
-strict system layout after migration is complete.
+Use the catalog command to find the documents that a system owns:
+
+    python3 scripts/list-docs.py specs --system <system-slug> --format markdown
+    python3 scripts/list-docs.py specs --system <system-slug> --kind requirement --format paths
+    python3 scripts/list-docs.py specs --system <system-slug> --kind system-design --format paths
+
+The command derives its results from paths and frontmatter. Do not copy its
+results into a system README.
+
+The system README sets `migration: in_progress` while legacy files remain. Set
+it to `complete` only after the new authoritative documents exist and all
+editable legacy sources become links or archives. The catalog command discovers
+the files, and the linter enforces the strict system layout after migration is
+complete.
 
 A system does not need both artifact directories. A low-level system can have
 system designs without product requirements. Do not create empty placeholder
@@ -93,8 +103,8 @@ and React components. Do not create a second UI requirement or design for those
 same controls.
 
 Create separate cross-system artifacts only when each system owns an independent
-contract with a different lifecycle. Link the contracts in both system indexes.
-Do not repeat acceptance criteria or technical sections.
+contract with a different lifecycle. Link the contracts in both documents. Do
+not repeat acceptance criteria or technical sections.
 
 ## File names
 
@@ -114,7 +124,7 @@ capability.
 The specification linter reads the default limits from `docs/specs/spec-lint.json`.
 The default limits are:
 
-- System index: 16 KiB.
+- System README: 16 KiB.
 - Product or guide document: 16 KiB.
 - Requirement document: 20 KiB.
 - System-design document: 32 KiB.

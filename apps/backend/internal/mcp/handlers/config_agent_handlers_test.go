@@ -15,6 +15,8 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -68,6 +70,26 @@ func TestHandleCreateAgentProfile_PersistsAutoApprove(t *testing.T) {
 	stored, err := repo.GetAgentProfile(ctx, created.ID)
 	require.NoError(t, err)
 	require.True(t, stored.AutoApprove)
+}
+
+func TestHandleCreateAgentProfile_RejectsUnknownSettings(t *testing.T) {
+	h, repo, _ := newAgentSettingsHandlers(t)
+	ctx := context.Background()
+	agent := &settingsmodels.Agent{Name: "codex-acp"}
+	require.NoError(t, repo.CreateAgent(ctx, agent))
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateAgentProfile, map[string]interface{}{
+		"agent_id": agent.ID,
+		"name":     "Unknown setting",
+		"settings": map[string]interface{}{"typo_model": "gpt-5"},
+	})
+	resp, err := h.handleCreateAgentProfile(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeBadRequest)
+
+	profiles, err := repo.ListAgentProfiles(ctx, agent.ID)
+	require.NoError(t, err)
+	require.Empty(t, profiles)
 }
 
 func TestHandleUpdateAgentProfile_AppliesExplicitAutoApprove(t *testing.T) {
@@ -194,4 +216,66 @@ func TestHandleDeleteAgentProfile_InUseStaysAValidationError(t *testing.T) {
 	resp, err := h.handleDeleteAgentProfile(ctx, msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+// A profile event published by the MCP config handlers must carry the owning
+// agent's sessionless inference capability, matching the HTTP settings
+// publisher, so capability-scoped pickers can classify profiles that arrive
+// before settings-agent hydration.
+func TestPublishAgentProfileEvent_IncludesInferenceCapability(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	eventBus := bus.NewMemoryEventBus(log)
+
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	repo, cleanup, err := settingsstore.Provide(db, db, log)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cleanup() })
+
+	agentRegistry := registry.NewRegistry(log)
+	agentRegistry.LoadDefaults()
+	ctrl := agentsettingscontroller.NewController(repo, nil, agentRegistry, nil, log)
+	h := &Handlers{logger: log, agentSettingsCtrl: ctrl, eventBus: eventBus}
+
+	agent := &settingsmodels.Agent{Name: "opencode-acp"}
+	require.NoError(t, repo.CreateAgent(context.Background(), agent))
+
+	type profileEvent struct {
+		Profile          settingsdto.AgentProfileDTO `json:"profile"`
+		InferenceCapable bool                        `json:"inference_capable"`
+	}
+	received := make(chan profileEvent, 1)
+	_, subErr := eventBus.Subscribe(events.AgentProfileCreated, func(ctx context.Context, event *bus.Event) error {
+		data, marshalErr := json.Marshal(event.Data)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		var decoded profileEvent
+		if decodeErr := json.Unmarshal(data, &decoded); decodeErr != nil {
+			return decodeErr
+		}
+		received <- decoded
+		return nil
+	})
+	require.NoError(t, subErr)
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateAgentProfile, map[string]interface{}{
+		"agent_id": agent.ID,
+		"name":     "Capability",
+		"model":    "gpt-5",
+	})
+	resp, err := h.handleCreateAgentProfile(context.Background(), msg)
+	require.NoError(t, err)
+	created := decodeAgentProfileResponse(t, resp)
+
+	select {
+	case got := <-received:
+		require.Equal(t, created.ID, got.Profile.ID)
+		_, inference := agentRegistry.GetInferenceAgent(agent.Name)
+		require.Equal(t, inference, got.InferenceCapable)
+	default:
+		t.Fatalf("no agent_profile.created event was published")
+	}
 }

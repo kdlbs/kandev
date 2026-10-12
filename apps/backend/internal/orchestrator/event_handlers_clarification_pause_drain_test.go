@@ -108,6 +108,9 @@ func TestPauseForClarificationInput_SameTurnBarrierUnchanged(t *testing.T) {
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createEngineService(t, repo, stepGetter, agentMgr)
 	svc.turnService = &repoBackedTurnService{repo: repo}
+	svc.SetClarificationCanceller(
+		clarification.NewCanceller(clarification.NewStore(time.Minute), repo, nil, testLogger()),
+	)
 
 	// Manually call handleAgentReady without ever going through
 	// PauseForClarificationInput — the same-turn barrier must hold.
@@ -116,6 +119,13 @@ func TestPauseForClarificationInput_SameTurnBarrierUnchanged(t *testing.T) {
 	task, err := repo.GetTask(ctx, "t1")
 	if err != nil {
 		t.Fatalf("get task: %v", err)
+	}
+	clarificationMessage, err := repo.GetMessage(ctx, "clarification-s1")
+	if err != nil {
+		t.Fatalf("get clarification: %v", err)
+	}
+	if detached, _ := clarificationMessage.Metadata["agent_disconnected"].(bool); !detached {
+		t.Fatalf("clarification metadata = %#v, want agent_disconnected=true", clarificationMessage.Metadata)
 	}
 	if task.WorkflowStepID != "step1" {
 		t.Fatalf("same-turn barrier broken: workflow step = %q, want step1", task.WorkflowStepID)

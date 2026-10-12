@@ -83,6 +83,7 @@ func (m *Manager) configureTracker(tracker *WorkspaceTracker, repositoryName str
 	}
 	tracker.SetGitEnvironment(m.trackerGitEnvironment())
 	tracker.SetAllowedSourceRoots(roots)
+	tracker.SetRecoveryArtifactExclusions(m.currentWorkspaceFileExclusions())
 	if !tracker.IsSubmodule() {
 		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), repositoryName))
 	}
@@ -127,7 +128,7 @@ func (m *Manager) reconcileWorkspaceTrackerGraph(
 		root = oldRoot
 		rootReused = true
 		syncTrackerConfiguration(root, desiredRoot, roots)
-		m.prepareTrackerComparisonTarget(root)
+		m.prepareTrackerComparisonTarget(root, false)
 		desiredRoot.Stop()
 	}
 	if !rootReused {
@@ -141,7 +142,7 @@ func (m *Manager) reconcileWorkspaceTrackerGraph(
 		identity := repositoryTrackerIdentity(desired.RepositoryName(), desired.workDir)
 		if existing := oldByIdentity[identity]; existing != nil {
 			syncTrackerConfiguration(existing, desired, roots)
-			m.prepareTrackerComparisonTarget(existing)
+			m.prepareTrackerComparisonTarget(existing, false)
 			desired.Stop()
 			retained = append(retained, existing)
 			used[existing] = struct{}{}
@@ -412,7 +413,7 @@ func listGitlinkPaths(ctx context.Context, workDir, ref string) ([]string, error
 }
 
 func gitlinkCommitAt(ctx context.Context, workDir, ref, relativePath string) (string, error) {
-	if !sha1HexPattern.MatchString(ref) || !safeGitRelativePath(relativePath) {
+	if !gitObjectIDPattern.MatchString(ref) || !safeGitRelativePath(relativePath) {
 		return "", fmt.Errorf("invalid gitlink lookup")
 	}
 	output, err := runGitLifecycleOutput(ctx, workDir, "ls-tree", "-z", ref, "--", relativePath)
@@ -425,7 +426,7 @@ func gitlinkCommitAt(ctx context.Context, workDir, ref, relativePath string) (st
 			continue
 		}
 		fields := strings.Fields(header)
-		if len(fields) == 3 && sha1HexPattern.MatchString(fields[2]) {
+		if len(fields) == 3 && gitObjectIDPattern.MatchString(fields[2]) {
 			return fields[2], nil
 		}
 	}

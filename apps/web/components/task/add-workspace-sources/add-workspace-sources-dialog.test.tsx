@@ -14,18 +14,23 @@ const {
   discoverRepositoriesAction,
   getRepositoryDiscoveryAction,
   refreshRepositoryDiscoveryAction,
+  addDesktopDiscoveryRootAction,
   refreshRepositories,
 } = vi.hoisted(() => {
-  const discover = vi.fn().mockResolvedValue({ repositories: [] });
+  const discover = vi.fn().mockResolvedValue({ repositories: [], desktop_runtime: true });
   return {
     attachTaskWorkspaceSources: vi.fn(),
     discoverRepositoriesAction: discover,
     getRepositoryDiscoveryAction: discover,
     refreshRepositoryDiscoveryAction: discover,
+    addDesktopDiscoveryRootAction: vi.fn().mockResolvedValue({}),
     refreshRepositories: vi.fn().mockResolvedValue(undefined),
   };
 });
 
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile }),
 }));
@@ -52,6 +57,7 @@ vi.mock("@/app/actions/workspaces", () => ({
   discoverRepositoriesAction,
   getRepositoryDiscoveryAction,
   refreshRepositoryDiscoveryAction,
+  addDesktopDiscoveryRootAction,
 }));
 
 async function finishClose(surface: HTMLElement, isDrawer: boolean) {
@@ -65,6 +71,11 @@ function openRepositoryMenu() {
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
   fireEvent.click(trigger);
   return trigger;
+}
+
+async function selectRepositoryMenuItem(label: string) {
+  fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+  await waitFor(() => expect(screen.queryByRole("menuitem", { name: label })).toBeNull());
 }
 
 function Harness(props: { makeTurnActive?: boolean; executorType?: string | null }) {
@@ -194,10 +205,32 @@ describe("AddWorkspaceSourcesDialog repository discovery", () => {
     fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
     expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
     openRepositoryMenu();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Workspace repository" }));
+    await selectRepositoryMenuItem("Workspace repository");
     fireEvent.click(screen.getByTestId("repo-chip-trigger"));
+    expect(screen.getByTestId("repository-discovery-settings-button")).toBeTruthy();
+    expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
 
+    fireEvent.click(screen.getByTestId("repository-discovery-settings-button"));
     expect(screen.getByTestId("repository-discovery-controls")).toBeTruthy();
+  });
+});
+
+describe("AddWorkspaceSourcesDialog touch activation", () => {
+  it("opens the repository menu after touch release without selecting a source", async () => {
+    isMobile = true;
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    const trigger = screen.getByRole("button", { name: "Add repository" });
+    const workspaceRepository = { name: "Workspace repository" };
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: "touch" });
+    expect(screen.queryByRole("menuitem", workspaceRepository)).toBeNull();
+    fireEvent.pointerUp(trigger, { button: 0, pointerType: "touch" });
+    expect(screen.queryByRole("menuitem", workspaceRepository)).toBeNull();
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("menuitem", workspaceRepository)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove source" })).toBeNull();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Local Git repository" }));
+    expect(screen.getByRole("button", { name: "Remove source" })).toBeTruthy();
   });
 });
 
@@ -336,12 +369,12 @@ describe("AddWorkspaceSourcesDialog saved repository picker", () => {
     fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
     await waitFor(() => expect(discoverRepositoriesAction).toHaveBeenCalledWith("workspace-1"));
     openRepositoryMenu();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Workspace repository" }));
+    await selectRepositoryMenuItem("Workspace repository");
     fireEvent.click(screen.getByTestId("repo-chip-trigger"));
 
     expect(await screen.findByText("discovered-project")).toBeTruthy();
-    expect(screen.getByText("on disk")).toBeTruthy();
-    expect(screen.getByTestId("create-local-repository-button")).toBeTruthy();
+    expect(await screen.findByText("on disk")).toBeTruthy();
+    expect(await screen.findByTestId("create-local-repository-button")).toBeTruthy();
     fireEvent.click(screen.getByTestId("repo-refresh-button"));
     await waitFor(() => expect(refreshRepositories).toHaveBeenCalledOnce());
   });

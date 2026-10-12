@@ -1,8 +1,6 @@
-import { classifyTask, type TaskBucket } from "@/components/task/task-classify";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import { getExecutorLabel } from "@/lib/executor-icons";
 import { t } from "@/lib/i18n";
-import { formatTaskStateLabel } from "@/lib/ui/state-labels";
 import type {
   FilterClause,
   FilterDimension,
@@ -11,13 +9,32 @@ import type {
   GroupKey,
   SidebarView,
   SortKey,
+  SortRule,
   SortSpec,
 } from "@/lib/state/slices/ui/sidebar-view-types";
+import {
+  getStateBucket,
+  getTaskStateGroup,
+  resolveEffectiveStateMap,
+  STATE_BUCKET_ORDER,
+  STATE_GROUP_ORDER,
+  type EffectiveTaskTreeState,
+} from "./effective-task-tree-state";
+import {
+  compareActivityTimestamps,
+  resolveTaskTreeActivity,
+  taskActivitySortValue,
+} from "./task-tree-activity";
+import { resolveTaskTreeRunning } from "./task-tree-running";
+import { sidebarSortRules } from "./sidebar-sort-chain";
+import { sidebarSortHasKey } from "./sidebar-sort-chain";
 
 export type SidebarGroup = {
   key: string;
   label: string;
   tasks: TaskSwitcherItem[];
+  matchingCount?: number;
+  isContinuation?: boolean;
 };
 
 export type GroupedSidebarList = {
@@ -39,16 +56,6 @@ export type SidebarTaskPrefs = {
 };
 
 type DimensionExtractor = (task: TaskSwitcherItem) => FilterValue | undefined;
-
-const STATE_BUCKET_ORDER: Record<TaskBucket, number> = {
-  review: 0,
-  in_progress: 1,
-  backlog: 2,
-};
-
-function getStateBucket(task: TaskSwitcherItem): TaskBucket {
-  return classifyTask(task.sessionState, task.state);
-}
 
 const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
   archived: (t) => t.isArchived === true,
@@ -126,11 +133,7 @@ export function applyFilters(
 
 type SortComparator = (a: TaskSwitcherItem, b: TaskSwitcherItem) => number;
 
-function lastActivitySortValue(task: TaskSwitcherItem): string {
-  return task.lastActivityAt ?? task.updatedAt ?? task.createdAt ?? "";
-}
-
-const SORT_COMPARATORS: Record<Exclude<SortKey, "custom">, SortComparator> = {
+const SORT_COMPARATORS: Record<Exclude<SortKey, "custom" | "running" | "color">, SortComparator> = {
   state: (a, b) => {
     const bucket = STATE_BUCKET_ORDER[getStateBucket(a)] - STATE_BUCKET_ORDER[getStateBucket(b)];
     if (bucket !== 0) return bucket;
@@ -138,7 +141,8 @@ const SORT_COMPARATORS: Record<Exclude<SortKey, "custom">, SortComparator> = {
     return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
   },
   updatedAt: (a, b) => (a.updatedAt ?? "").localeCompare(b.updatedAt ?? ""),
-  lastActivityAt: (a, b) => lastActivitySortValue(a).localeCompare(lastActivitySortValue(b)),
+  lastActivityAt: (a, b) =>
+    compareActivityTimestamps(taskActivitySortValue(a), taskActivitySortValue(b)),
   createdAt: (a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""),
   title: (a, b) => (a.title ?? "").localeCompare(b.title ?? ""),
 };
@@ -157,42 +161,113 @@ function customComparator(orderedTaskIds: string[]): SortComparator {
   };
 }
 
+type SortEvaluation = {
+  customOrder: SortComparator;
+  rules: SortRule[];
+  resolvedStates?: ReadonlyMap<string, EffectiveTaskTreeState>;
+  latestActivityByTaskId?: ReadonlyMap<string, string>;
+  runningByTaskId?: ReadonlyMap<string, boolean>;
+};
+
+function compareSortState(
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+  evaluation: SortEvaluation,
+): number {
+  const left = evaluation.resolvedStates?.get(a.id)?.bucket ?? getStateBucket(a);
+  const right = evaluation.resolvedStates?.get(b.id)?.bucket ?? getStateBucket(b);
+  const stateOrder = STATE_BUCKET_ORDER[left] - STATE_BUCKET_ORDER[right];
+  if (stateOrder !== 0 || evaluation.rules.length > 1) return stateOrder;
+  return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
+}
+
+function compareSortActivity(
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+  evaluation: SortEvaluation,
+): number {
+  const left = evaluation.latestActivityByTaskId?.get(a.id) ?? taskActivitySortValue(a);
+  const right = evaluation.latestActivityByTaskId?.get(b.id) ?? taskActivitySortValue(b);
+  return compareActivityTimestamps(left, right);
+}
+
+function compareSortRunning(
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+  evaluation: SortEvaluation,
+): number {
+  const left = evaluation.runningByTaskId?.get(a.id) ?? a.sessionState === "RUNNING";
+  const right = evaluation.runningByTaskId?.get(b.id) ?? b.sessionState === "RUNNING";
+  return Number(left) - Number(right);
+}
+
+function compareSortColor(
+  color: string | undefined,
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+): number {
+  return Number(a.effectiveColorToken === color) - Number(b.effectiveColorToken === color);
+}
+
+function compareSortRule(
+  rule: SortRule,
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+  evaluation: SortEvaluation,
+): number {
+  switch (rule.key) {
+    case "custom":
+      return evaluation.customOrder(a, b);
+    case "state":
+      return compareSortState(a, b, evaluation);
+    case "lastActivityAt":
+      return compareSortActivity(a, b, evaluation);
+    case "running":
+      return compareSortRunning(a, b, evaluation);
+    case "color":
+      return compareSortColor(rule.color, a, b);
+    default:
+      return SORT_COMPARATORS[rule.key](a, b);
+  }
+}
+
 export function applySort(
   tasks: TaskSwitcherItem[],
   spec: SortSpec,
   orderedTaskIds: string[] = [],
   subTasksByParentId?: Map<string, TaskSwitcherItem[]>,
+  effectiveStateByTaskId?: ReadonlyMap<string, EffectiveTaskTreeState>,
 ): TaskSwitcherItem[] {
-  let cmp: SortComparator;
-  if (spec.key === "state" && subTasksByParentId) {
-    const effectiveOrder = new Map<string, number>();
-    for (const t of tasks) {
-      let order = STATE_BUCKET_ORDER[getStateBucket(t)];
-      const subs = subTasksByParentId.get(t.id);
-      if (subs) {
-        for (const sub of subs) {
-          order = Math.min(order, STATE_BUCKET_ORDER[getStateBucket(sub)]);
-        }
-      }
-      effectiveOrder.set(t.id, order);
-    }
-    cmp = (a, b) => {
-      const bucket = effectiveOrder.get(a.id)! - effectiveOrder.get(b.id)!;
-      if (bucket !== 0) return bucket;
-      return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
-    };
-  } else {
-    cmp = spec.key === "custom" ? customComparator(orderedTaskIds) : SORT_COMPARATORS[spec.key];
-  }
-  // "Custom" is a manual order — reversing it on direction=desc would flip
-  // the user's drag, which has no intuitive meaning. The picker hides the
-  // direction toggle for custom; this guard keeps the data layer consistent
-  // even if a stored view ends up with desc direction.
-  const sign = spec.key !== "custom" && spec.direction === "desc" ? -1 : 1;
+  const rules = sidebarSortRules(spec);
+  const needsState = rules.some((rule) => rule.key === "state");
+  const needsActivity = rules.some((rule) => rule.key === "lastActivityAt");
+  const needsRunning = rules.some((rule) => rule.key === "running");
+  const resolvedStates =
+    needsState && subTasksByParentId
+      ? (effectiveStateByTaskId ?? resolveEffectiveStateMap(tasks, subTasksByParentId))
+      : undefined;
+  const latestActivityByTaskId =
+    needsActivity && subTasksByParentId
+      ? resolveTaskTreeActivity(tasks, subTasksByParentId)
+      : undefined;
+  const runningByTaskId =
+    needsRunning && subTasksByParentId
+      ? resolveTaskTreeRunning(tasks, subTasksByParentId)
+      : undefined;
+  const evaluation: SortEvaluation = {
+    customOrder: customComparator(orderedTaskIds),
+    rules,
+    resolvedStates,
+    latestActivityByTaskId,
+    runningByTaskId,
+  };
   const withIndex = tasks.map((t, i) => ({ t, i }));
   withIndex.sort((a, b) => {
-    const primary = cmp(a.t, b.t) * sign;
-    if (primary !== 0) return primary;
+    for (const rule of rules) {
+      const direction = rule.key !== "custom" && rule.direction === "desc" ? -1 : 1;
+      const result = compareSortRule(rule, a.t, b.t, evaluation) * direction;
+      if (result !== 0) return result;
+    }
     return a.i - b.i;
   });
   return withIndex.map((x) => x.t);
@@ -206,30 +281,14 @@ export function applySort(
  * deps for the same reason.
  *
  * Only `label` is copy. The group `key`s below (`__multi__`, the
- * `__repo_combination__:<json>` keys, `__unassigned__`, `__all__`,
- * `__not_started__`) are identity: they are compared in
- * `mergeSingleRepoUnassigned` / `sortRepoGroups`, index `STATE_GROUP_ORDER`, and
- * are persisted in the view's `collapsedGroups`. They are never translated.
+ * `__repo_combination__:<json>` keys, `__unassigned__`, `__all__`) are identity:
+ * they are compared in `mergeSingleRepoUnassigned` / `sortRepoGroups` and are
+ * persisted in the view's `collapsedGroups`. They are never translated.
  */
 const UNASSIGNED_LABEL_KEY = "sidebar:groupUnassigned";
 const MULTI_REPO_LABEL_KEY = "sidebar:groupMultiRepo";
 const ALL_GROUP_LABEL_KEY = "sidebar:groupAll";
-const NOT_STARTED_STATE_GROUP_KEY = "__not_started__";
 const REPOSITORY_COMBINATION_PREFIX = "__repo_combination__:";
-
-const STATE_GROUP_ORDER: Record<string, number> = {
-  [NOT_STARTED_STATE_GROUP_KEY]: 0,
-  CREATED: 1,
-  SCHEDULING: 2,
-  TODO: 3,
-  IN_PROGRESS: 4,
-  WAITING_FOR_INPUT: 5,
-  REVIEW: 6,
-  BLOCKED: 7,
-  FAILED: 8,
-  COMPLETED: 9,
-  CANCELLED: 10,
-};
 
 type GroupExtractor = (task: TaskSwitcherItem) => { key: string; label: string };
 
@@ -251,57 +310,6 @@ function hasMultipleRepositoryLinks(task: TaskSwitcherItem): boolean {
 
 function repositoryCombinationKey(repositories: string[]): string {
   return `${REPOSITORY_COMBINATION_PREFIX}${JSON.stringify(repositories)}`;
-}
-
-function getTaskStateGroup(task: TaskSwitcherItem): { key: string; label: string } {
-  if (!task.state)
-    return { key: NOT_STARTED_STATE_GROUP_KEY, label: formatTaskStateLabel(undefined) };
-  return { key: task.state, label: formatTaskStateLabel(task.state) };
-}
-
-/**
- * Computes the effective state group for a parent task, considering its direct
- * subtasks. The task (or its "best" subtask) with the highest-priority bucket
- * (lowest STATE_BUCKET_ORDER) determines the group. This makes a parent with an
- * active subtask bubble up to the same section as genuinely-running top-level
- * tasks.
- *
- * Tie-break: when multiple candidates share the same bucket, prefer the one
- * with the lowest STATE_GROUP_ORDER (i.e. the earlier/more-active lifecycle
- * state). This is consistent with the existing top-level sort where review
- * (which includes COMPLETED/FAILED/CANCELLED) sorts above in_progress.
- */
-function getEffectiveStateGroup(
-  task: TaskSwitcherItem,
-  subMap: Map<string, TaskSwitcherItem[]>,
-): { key: string; label: string } {
-  let bestTask = task;
-  let bestBucketOrder = STATE_BUCKET_ORDER[getStateBucket(task)];
-  let bestStateOrder = STATE_GROUP_ORDER[task.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99;
-
-  const subs = subMap.get(task.id);
-  if (subs) {
-    for (const sub of subs) {
-      // Subtasks without an explicit persisted state can't provide a meaningful
-      // group heading (getTaskStateGroup would return "not started"), so skip
-      // them entirely. The parent still bubbles in applySort via bucket numbers.
-      if (!sub.state) continue;
-      const subBucketOrder = STATE_BUCKET_ORDER[getStateBucket(sub)];
-      if (subBucketOrder < bestBucketOrder) {
-        bestTask = sub;
-        bestBucketOrder = subBucketOrder;
-        bestStateOrder = STATE_GROUP_ORDER[sub.state] ?? 99;
-      } else if (subBucketOrder === bestBucketOrder) {
-        const subStateOrder = STATE_GROUP_ORDER[sub.state] ?? 99;
-        if (subStateOrder < bestStateOrder) {
-          bestTask = sub;
-          bestStateOrder = subStateOrder;
-        }
-      }
-    }
-  }
-
-  return getTaskStateGroup(bestTask);
 }
 
 const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
@@ -367,6 +375,7 @@ export function applyGroup(
   tasks: TaskSwitcherItem[],
   groupKey: GroupKey,
   effectiveStateSubMap?: Map<string, TaskSwitcherItem[]>,
+  effectiveStateByTaskId?: ReadonlyMap<string, EffectiveTaskTreeState>,
 ): GroupedSidebarList {
   const { rootTasks, subTasksByParentId } = separateSubtasks(tasks);
 
@@ -379,12 +388,16 @@ export function applyGroup(
   }
 
   const extract = groupExtractors[groupKey];
+  const resolvedStates =
+    groupKey === "state" && effectiveStateSubMap
+      ? (effectiveStateByTaskId ?? resolveEffectiveStateMap(tasks, effectiveStateSubMap))
+      : undefined;
   const buckets = new Map<string, SidebarGroup>();
   for (const task of rootTasks) {
-    const { key, label } =
-      groupKey === "state" && effectiveStateSubMap
-        ? getEffectiveStateGroup(task, effectiveStateSubMap)
-        : extract(task);
+    const resolved = resolvedStates?.get(task.id);
+    const { key, label } = resolved
+      ? { key: resolved.groupKey, label: resolved.label }
+      : extract(task);
     let group = buckets.get(key);
     if (!group) {
       group = { key, label, tasks: [] };
@@ -492,6 +505,22 @@ export function mergeGroupOrder(current: string[], groupTaskIds: string[]): stri
   return [...remaining.slice(0, firstIdx), ...groupTaskIds, ...remaining.slice(firstIdx)];
 }
 
+/** Replace the order slots occupied by visible siblings and retain off-page slots. */
+export function mergeVisibleOrder(current: string[], visibleTaskIds: string[]): string[] {
+  const visibleSet = new Set(visibleTaskIds);
+  const positions = current.flatMap((id, index) => (visibleSet.has(id) ? [index] : []));
+  if (positions.length === 0) return [...current, ...visibleTaskIds];
+  const result = [...current];
+  const placedCount = Math.min(positions.length, visibleTaskIds.length);
+  for (let index = 0; index < placedCount; index++) {
+    result[positions[index]] = visibleTaskIds[index];
+  }
+  if (visibleTaskIds.length > placedCount) {
+    result.splice(positions[placedCount - 1] + 1, 0, ...visibleTaskIds.slice(placedCount));
+  }
+  return result;
+}
+
 function buildIndex(ids: string[]): Map<string, number> {
   const m = new Map<string, number>();
   for (let i = 0; i < ids.length; i++) m.set(ids[i], i);
@@ -503,7 +532,7 @@ function buildIndex(ids: string[]): Map<string, number> {
  * subtasks come first in their stored order; unlisted ones keep their incoming
  * order (which reflects the active sort) afterwards.
  */
-function applySubtaskOrder(
+export function applySubtaskOrder(
   subtasks: TaskSwitcherItem[],
   orderedSubtaskIds: string[],
 ): TaskSwitcherItem[] {
@@ -618,8 +647,18 @@ export function applyView(
 ): GroupedSidebarList {
   const filtered = applyFilters(tasks, view.filters);
   const { subTasksByParentId } = separateSubtasks(filtered);
-  const sorted = applySort(filtered, view.sort, prefs?.orderedTaskIds, subTasksByParentId);
-  const grouped = applyGroup(sorted, view.group, subTasksByParentId);
+  const effectiveStateByTaskId =
+    sidebarSortHasKey(view.sort, "state") || view.group === "state"
+      ? resolveEffectiveStateMap(filtered, subTasksByParentId)
+      : undefined;
+  const sorted = applySort(
+    filtered,
+    view.sort,
+    prefs?.orderedTaskIds,
+    subTasksByParentId,
+    effectiveStateByTaskId,
+  );
+  const grouped = applyGroup(sorted, view.group, subTasksByParentId, effectiveStateByTaskId);
   const subOrderMap = prefs?.subtaskOrderByParentId;
   if (subOrderMap) {
     for (const [parentId, orderedIds] of Object.entries(subOrderMap)) {

@@ -5,6 +5,38 @@ import { GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 
+type E2EGitLabMRStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      taskMRs: {
+        byWorkspaceId: Record<string, Record<string, Array<{ state: string }>>>;
+      };
+    };
+  };
+};
+
+async function waitForTaskMRHydration(
+  page: import("@playwright/test").Page,
+  taskId: string,
+  expectedMrCount: number,
+) {
+  await page.waitForFunction(
+    ({ taskId, expectedMrCount }) => {
+      const workspaces = (window as E2EGitLabMRStoreWindow).__KANDEV_E2E_STORE__?.getState().taskMRs
+        .byWorkspaceId;
+      return Object.values(workspaces ?? {}).some((byTask) => {
+        const openMRs = byTask[taskId]?.filter((mr) => mr.state === "open");
+        return (openMRs?.length ?? 0) >= expectedMrCount;
+      });
+    },
+    { taskId, expectedMrCount },
+    {
+      timeout: 30_000,
+      message: `linked GitLab MRs did not hydrate for task ${taskId}`,
+    },
+  );
+}
+
 /**
  * Seeds one open MR with a successful pipeline and 0/1 approvals
  * (-> awaiting_approval per the chip's state machine). Deliberately does NOT
@@ -70,14 +102,11 @@ async function openTask(
 ) {
   await testPage.goto(`/t/${taskId}`);
   await session.waitForLoad();
-  // The shell hydrates the workspace MR map once per document. A link created
-  // immediately before navigation can miss that first snapshot even though
-  // the task details already show the association. Re-drive document
-  // hydration until the linked-MR chip observes the persisted map; one fixed
-  // reload can race the same snapshot again under CI load.
+  const expectedMrCount = options.expectedMrCount ?? 1;
   await expect(async () => {
     await testPage.reload();
     await session.waitForLoad();
+    await waitForTaskMRHydration(testPage, taskId, expectedMrCount);
     const chip = session.mrStatusChip();
     await expect(chip).toBeVisible({ timeout: 5_000 });
     if (options.expectedMrCount !== undefined) {
@@ -85,7 +114,7 @@ async function openTask(
         timeout: 5_000,
       });
     }
-  }).toPass({ timeout: 30_000 });
+  }).toPass({ timeout: 60_000, intervals: [250, 500, 1_000] });
 }
 
 test.describe("GitLab MR status chip", () => {
@@ -289,6 +318,25 @@ test.describe("GitLab MR status chip", () => {
     expect(options.mr_options?.find((o) => o.mr_iid === ARMED_IID)?.auto_fix_enabled).toBe(true);
     expect(options.mr_options?.find((o) => o.mr_iid === IDLE_IID)?.auto_fix_enabled).toBe(false);
 
+    // The link endpoint commits each association independently. Verify that
+    // both rows are durable before the page performs its one-per-document
+    // workspace MR snapshot, so the UI assertion cannot observe the first
+    // commit while the second is still being written.
+    await expect
+      .poll(
+        async () => {
+          const response = await apiClient.rawRequest(
+            "GET",
+            `/api/v1/gitlab/tasks/${encodeURIComponent(task.id)}/mrs`,
+          );
+          if (!response.ok) return -1;
+          const body = (await response.json()) as { task_mrs?: unknown[] };
+          return body.task_mrs?.length ?? 0;
+        },
+        { timeout: 15_000, message: "both linked GitLab MRs should be persisted" },
+      )
+      .toBe(2);
+
     const session = new SessionPage(testPage);
     await openTask(testPage, session, task.id, { expectedMrCount: 2 });
 
@@ -405,6 +453,8 @@ function mrSeed(iid: number, title: string) {
     body: "",
     draft: false,
     merge_status: "can_be_merged",
+    // Pending approval keeps enabled auto-merge armed without merging the fixture.
+    detailed_merge_status: "not_approved",
     has_conflicts: false,
     additions: 1,
     deletions: 1,

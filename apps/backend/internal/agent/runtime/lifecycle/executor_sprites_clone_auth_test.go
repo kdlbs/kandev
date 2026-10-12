@@ -125,7 +125,7 @@ func TestSpriteCreateInstanceRequestCarriesRefreshedEnvironment(t *testing.T) {
 		},
 	}
 
-	got := spriteCreateInstanceRequest(req)
+	got := agentctlInstanceRequest(req, spritesWorkspacePath)
 	if got.Env[envKeyGitHubCredentialLease] != "new-lease-after-restart" {
 		t.Fatalf("lease = %q, want refreshed lease", got.Env[envKeyGitHubCredentialLease])
 	}
@@ -138,6 +138,29 @@ func TestSpriteCreateInstanceRequestCarriesRefreshedEnvironment(t *testing.T) {
 	req.Env[envKeyGitHubCredentialLease] = "mutated"
 	if got.Env[envKeyGitHubCredentialLease] != "new-lease-after-restart" {
 		t.Fatal("CreateInstanceRequest env aliases the mutable launch request")
+	}
+}
+
+func TestSpriteCreateInstanceRequestStripsForkPRCredentials(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		Metadata:   map[string]interface{}{metadataCheckoutRef: "refs/pull/3527/head"},
+		Env: map[string]string{
+			"GITHUB_TOKEN":   "secret",
+			"GH_TOKEN":       "secret-2",
+			"OPENAI_API_KEY": "keep",
+		},
+	}
+
+	got := agentctlInstanceRequest(req, spritesWorkspacePath)
+	if _, ok := got.Env["GITHUB_TOKEN"]; ok {
+		t.Fatalf("fork PR agent env leaked GITHUB_TOKEN: %v", got.Env)
+	}
+	if _, ok := got.Env["GH_TOKEN"]; ok {
+		t.Fatalf("fork PR agent env leaked GH_TOKEN: %v", got.Env)
+	}
+	if got.Env["OPENAI_API_KEY"] != "keep" {
+		t.Fatalf("non-GitHub env was dropped: %v", got.Env)
 	}
 }
 

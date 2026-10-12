@@ -67,6 +67,17 @@ they improve lookup. Move procedures and rationale to linked how-to or
 explanation pages. Delete repeated explanations; one page should own each
 detailed contract.
 
+### Review long pages
+
+Treat a draft or substantial rewrite over about 3,000 words as a structure
+review trigger, not a word limit. Before adding more detail, check that the page
+serves one main audience, content type, and reader goal. Remove repeated
+explanations, move secondary detail to its owning page or a disclosure, and
+keep the common path near the top. If the page needs to remain long, add a short
+grouped topic index so readers can jump to the section they need. Keep required
+steps, supported behavior, limits, security warnings, and recovery requirements;
+do not remove them only to reduce the word count.
+
 ## Update an existing page
 
 Edit the Markdown source and verify every command, setting, label, default, platform claim, and screenshot against current source or tests. Preserve the filename when possible: it is the public slug.

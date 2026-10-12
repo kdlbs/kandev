@@ -217,7 +217,11 @@ func readArchiveRegularFile(reader *tar.Reader, header *tar.Header, files map[st
 	if _, exists := files[name]; exists {
 		return "", nil, 0, fmt.Errorf("%w: %s", ErrDuplicatePath, name)
 	}
-	if !supportedFile(name) {
+	if strings.HasPrefix(name, "distribution/source/") {
+		if err := ValidateDistributionSourcePath(name); err != nil {
+			return "", nil, 0, err
+		}
+	} else if !supportedFile(name) {
 		return "", nil, 0, fmt.Errorf("%w: %s", ErrUnsupportedFile, name)
 	}
 	if header.Size < 0 || header.Size > limits.MaxFileBytes {

@@ -71,11 +71,13 @@ test.describe("mobile PR watcher missing branch", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    const chat = session.activeChat();
-    const recovery = chat.getByTestId("task-launch-error-entry");
+    const sharedError = testPage.getByTestId("task-shared-error");
+    await expect(sharedError).toBeVisible({ timeout: 30_000 });
+    await sharedError.getByTestId("task-shared-error-details").tap();
+    const recovery = testPage.getByTestId("task-launch-error-entry");
 
     await expect(recovery).toHaveCount(1, { timeout: 30_000 });
-    await expect(recovery).toContainText("The selected base branch is not available.");
+    await expect(recovery).toContainText("The workspace could not be prepared for this launch.");
     await expect(recovery).not.toContainText(prBranch);
     const actionButtons = recovery.locator("button[data-testid^='task-launch-']");
     await expect(actionButtons).not.toHaveCount(0);

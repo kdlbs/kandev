@@ -24,6 +24,8 @@ import type {
   TimelineEvent,
 } from "@/app/office/tasks/[id]/types";
 import { useTranslation } from "react-i18next";
+import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
+import { TaskSharedError } from "@/components/task/task-shared-error";
 
 // TAB_TRIGGER_BASE adds a 1px ring to the active tab on top of
 // shadcn's default bg/text active styling, so the selected tab is
@@ -137,44 +139,54 @@ export function ChatActivityTabs({
   );
 
   return (
-    <Tabs defaultValue="chat" className="mt-6">
-      <TabsList>
-        <TabsTrigger value="chat" className={TAB_TRIGGER_BASE}>
-          {t("task:chat")}
-        </TabsTrigger>
-        <TabsTrigger value="activity" className={TAB_TRIGGER_BASE}>
-          {t("task:activity")}
-        </TabsTrigger>
+    <TaskLaunchErrorProvider
+      value={{
+        taskId: task.id,
+        workspaceId: task.workspaceId,
+        statusSummary: task.statusSummary,
+        repositories: task.repositories,
+      }}
+    >
+      <TaskSharedError />
+      <Tabs defaultValue="chat" className="mt-6">
+        <TabsList>
+          <TabsTrigger value="chat" className={TAB_TRIGGER_BASE}>
+            {t("task:chat")}
+          </TabsTrigger>
+          <TabsTrigger value="activity" className={TAB_TRIGGER_BASE}>
+            {t("task:activity")}
+          </TabsTrigger>
+          {officeGroups.map((g) => (
+            <AgentTabTrigger key={g.id} group={g} />
+          ))}
+        </TabsList>
+        <TabsContent value="chat">
+          <ApprovalActionBar task={task} />
+          <TaskChat
+            taskId={task.id}
+            workspaceId={task.workspaceId}
+            statusSummary={task.statusSummary}
+            repositories={task.repositories}
+            comments={comments}
+            timeline={timeline}
+            sessions={sessions}
+            decisions={task.decisions}
+            reviewers={task.reviewers}
+            approvers={task.approvers}
+            scrollParent={scrollParent}
+            readOnly={readOnly}
+            onCommentsChanged={onCommentsChanged}
+            taskTitle={task.title}
+            taskDescription={task.description}
+          />
+        </TabsContent>
+        <TabsContent value="activity">
+          <TaskActivity taskId={task.id} entries={activity} />
+        </TabsContent>
         {officeGroups.map((g) => (
-          <AgentTabTrigger key={g.id} group={g} />
+          <AgentTabContent key={g.id} taskId={task.id} group={g} />
         ))}
-      </TabsList>
-      <TabsContent value="chat">
-        <ApprovalActionBar task={task} />
-        <TaskChat
-          taskId={task.id}
-          workspaceId={task.workspaceId}
-          statusSummary={task.statusSummary}
-          repositories={task.repositories}
-          comments={comments}
-          timeline={timeline}
-          sessions={sessions}
-          decisions={task.decisions}
-          reviewers={task.reviewers}
-          approvers={task.approvers}
-          scrollParent={scrollParent}
-          readOnly={readOnly}
-          onCommentsChanged={onCommentsChanged}
-          taskTitle={task.title}
-          taskDescription={task.description}
-        />
-      </TabsContent>
-      <TabsContent value="activity">
-        <TaskActivity taskId={task.id} entries={activity} />
-      </TabsContent>
-      {officeGroups.map((g) => (
-        <AgentTabContent key={g.id} taskId={task.id} group={g} />
-      ))}
-    </Tabs>
+      </Tabs>
+    </TaskLaunchErrorProvider>
   );
 }

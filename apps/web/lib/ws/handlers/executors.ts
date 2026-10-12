@@ -42,5 +42,8 @@ export function registerExecutorsHandlers(store: StoreApi<AppState>): WsHandlers
         },
       }));
     },
+    "executor.reachability.changed": (message) => {
+      store.getState().setSSHReachability(message.payload);
+    },
   };
 }

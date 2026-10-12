@@ -5,6 +5,7 @@ type Listener = () => void;
 
 export type CanvasLifecycleAction =
   | "canvas.created"
+  | "canvas.updated"
   | "canvas.release.activated"
   | "canvas.release.permission_required"
   | "canvas.promoted"

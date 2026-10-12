@@ -21,7 +21,7 @@ type exportDocument struct {
 
 // exportAutomation is a single automation's exported form. Key order is pinned by
 // AC-40: name, description, enabled, max_concurrent_runs, continuation_policy,
-// task_mode, repository_mode, task_title_template, prompt,
+// task_mode, managed_destination, repository_mode, task_title_template, prompt,
 // agent_profile, executor_profile, workflow, repositories, triggers.
 //
 // Prompt and every trigger's Config are *yaml.Node rather than string/json.RawMessage
@@ -29,20 +29,26 @@ type exportDocument struct {
 // cannot express: Prompt per the prompt-fidelity rules (AC-15/16/17/46/47/49), Config
 // per the per-JSON-type node table (AC-8, AC-41).
 type exportAutomation struct {
-	Name               string                 `yaml:"name"`
-	Description        string                 `yaml:"description,omitempty"`
-	Enabled            bool                   `yaml:"enabled"`
-	MaxConcurrentRuns  int                    `yaml:"max_concurrent_runs"`
-	ContinuationPolicy ContinuationPolicy     `yaml:"continuation_policy"`
-	TaskMode           TaskMode               `yaml:"task_mode"`
-	RepositoryMode     RepositoryMode         `yaml:"repository_mode"`
-	TaskTitleTemplate  string                 `yaml:"task_title_template,omitempty"`
-	Prompt             *yaml.Node             `yaml:"prompt,omitempty"`
-	AgentProfile       *exportAgentProfile    `yaml:"agent_profile,omitempty"`
-	ExecutorProfile    *exportExecutorProfile `yaml:"executor_profile,omitempty"`
-	Workflow           *exportWorkflow        `yaml:"workflow,omitempty"`
-	Repositories       []string               `yaml:"repositories,omitempty"`
-	Triggers           []exportTrigger        `yaml:"triggers"`
+	Name               string                                `yaml:"name"`
+	Description        string                                `yaml:"description,omitempty"`
+	Enabled            bool                                  `yaml:"enabled"`
+	MaxConcurrentRuns  int                                   `yaml:"max_concurrent_runs"`
+	ContinuationPolicy ContinuationPolicy                    `yaml:"continuation_policy"`
+	TaskMode           TaskMode                              `yaml:"task_mode"`
+	ManagedDestination *exportManagedConversationDestination `yaml:"managed_destination,omitempty"`
+	RepositoryMode     RepositoryMode                        `yaml:"repository_mode"`
+	TaskTitleTemplate  string                                `yaml:"task_title_template,omitempty"`
+	Prompt             *yaml.Node                            `yaml:"prompt,omitempty"`
+	AgentProfile       *exportAgentProfile                   `yaml:"agent_profile,omitempty"`
+	ExecutorProfile    *exportExecutorProfile                `yaml:"executor_profile,omitempty"`
+	Workflow           *exportWorkflow                       `yaml:"workflow,omitempty"`
+	Repositories       []string                              `yaml:"repositories,omitempty"`
+	Triggers           []exportTrigger                       `yaml:"triggers"`
+}
+
+type exportManagedConversationDestination struct {
+	PluginID    string `yaml:"plugin_id"`
+	InstanceKey string `yaml:"instance_key"`
 }
 
 // exportAgentProfile is the portable {agent_name, model, mode} descriptor resolved

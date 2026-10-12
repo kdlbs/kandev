@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createRemoteExecutorStatusResource,
+  remoteExecutorStatusScope,
   type RemoteExecutorStatusData,
   type RemoteExecutorStatusRequest,
 } from "./remote-executor-status-resource";
@@ -115,5 +116,161 @@ describe("remote executor status resource", () => {
 
     await resource.load({ ...REQUEST, taskId: "task-0", sessionId: "session-0" });
     expect(requester).toHaveBeenCalledTimes(130);
+  });
+});
+
+// @covers AC-EXECUTORS-TASK-STATUS-001.1 and AC-EXECUTORS-TASK-STATUS-001.2
+describe("mounted status refresh", () => {
+  it("refreshes shared consumers without interaction and stops after the last unsubscribe", async () => {
+    vi.useFakeTimers();
+    const requester = vi
+      .fn()
+      .mockResolvedValueOnce(healthyStatus("old"))
+      .mockResolvedValue(healthyStatus("new"));
+    const resource = createRemoteExecutorStatusResource(requester);
+    const scope = remoteExecutorStatusScope(REQUEST);
+    const first = resource.subscribe(scope, () => undefined);
+    const second = resource.subscribe(scope, () => undefined);
+    try {
+      await resource.load(REQUEST);
+      first();
+      await vi.advanceTimersByTimeAsync(90_000);
+      expect(resource.getSnapshot(scope).status?.remote_name).toBe("new");
+      expect(requester).toHaveBeenCalledTimes(2);
+      second();
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(requester).toHaveBeenCalledTimes(2);
+    } finally {
+      first();
+      second();
+    }
+  });
+
+  it("retries unavailable transport and failed reads automatically", async () => {
+    vi.useFakeTimers();
+    const requester = vi
+      .fn()
+      .mockReturnValueOnce(null)
+      .mockRejectedValueOnce(new Error("secret"))
+      .mockResolvedValue(healthyStatus("recovered"));
+    const resource = createRemoteExecutorStatusResource(requester);
+    const scope = remoteExecutorStatusScope(REQUEST);
+    const stop = resource.subscribe(scope, () => undefined);
+    try {
+      await resource.load(REQUEST);
+      await vi.advanceTimersByTimeAsync(90_000);
+      expect(resource.getSnapshot(scope).status?.remote_status_error).toBe(
+        "Remote executor status is unavailable.",
+      );
+      await vi.advanceTimersByTimeAsync(90_000);
+      expect(resource.getSnapshot(scope).status?.remote_name).toBe("recovered");
+    } finally {
+      stop();
+    }
+  });
+
+  it("pauses hidden documents and refreshes expired scopes on return", async () => {
+    vi.useFakeTimers();
+    const requester = vi.fn().mockResolvedValue(healthyStatus("pod"));
+    const resource = createRemoteExecutorStatusResource(requester);
+    const stop = resource.subscribe(remoteExecutorStatusScope(REQUEST), () => undefined);
+    const visibility = vi.spyOn(document, "visibilityState", "get");
+    try {
+      await resource.load(REQUEST);
+      visibility.mockReturnValue("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(requester).toHaveBeenCalledTimes(1);
+      visibility.mockReturnValue("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(requester).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+      visibility.mockRestore();
+    }
+  });
+});
+
+describe("refresh lifecycle cleanup", () => {
+  it("joins an in-flight refresh and resets the schedule after settlement", async () => {
+    vi.useFakeTimers();
+    let resolve!: (value: RemoteExecutorStatusData) => void;
+    const requester = vi
+      .fn()
+      .mockResolvedValueOnce(healthyStatus("initial"))
+      .mockImplementationOnce(
+        () =>
+          new Promise<RemoteExecutorStatusData>((done) => {
+            resolve = done;
+          }),
+      )
+      .mockResolvedValue(healthyStatus("latest"));
+    const resource = createRemoteExecutorStatusResource(requester);
+    const scope = remoteExecutorStatusScope(REQUEST);
+    const stop = resource.subscribe(scope, () => undefined);
+    try {
+      await resource.load(REQUEST);
+      await vi.advanceTimersByTimeAsync(90_000);
+      const pending = resource.load(REQUEST, true);
+      expect(requester).toHaveBeenCalledTimes(2);
+      expect(resource.getSnapshot(scope).status?.remote_name).toBe("initial");
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(requester).toHaveBeenCalledTimes(2);
+      resolve(healthyStatus("updated"));
+      await pending;
+      await vi.advanceTimersByTimeAsync(89_999);
+      expect(requester).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(resource.getSnapshot(scope).status?.remote_name).toBe("latest");
+    } finally {
+      stop();
+    }
+  });
+
+  it("preserves fresh results on visibility return and detaches its listener on cleanup", async () => {
+    vi.useFakeTimers();
+    const requester = vi.fn().mockResolvedValue(healthyStatus("pod"));
+    const resource = createRemoteExecutorStatusResource(requester);
+    const stop = resource.subscribe(remoteExecutorStatusScope(REQUEST), () => undefined);
+    const visibility = vi.spyOn(document, "visibilityState", "get");
+    const removed = vi.spyOn(document, "removeEventListener");
+    try {
+      await resource.load(REQUEST);
+      visibility.mockReturnValue("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(30_000);
+      visibility.mockReturnValue("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(requester).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(requester).toHaveBeenCalledTimes(2);
+      stop();
+      expect(removed).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+    } finally {
+      stop();
+      visibility.mockRestore();
+      removed.mockRestore();
+    }
+  });
+
+  it("does not restart polling when an abandoned read settles", async () => {
+    vi.useFakeTimers();
+    let resolve!: (value: RemoteExecutorStatusData) => void;
+    const requester = vi.fn(
+      () =>
+        new Promise<RemoteExecutorStatusData>((done) => {
+          resolve = done;
+        }),
+    );
+    const resource = createRemoteExecutorStatusResource(requester);
+    const stop = resource.subscribe(remoteExecutorStatusScope(REQUEST), () => undefined);
+    const pending = resource.load(REQUEST);
+    stop();
+    resolve(healthyStatus("old scope"));
+    await pending;
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(requester).toHaveBeenCalledTimes(1);
   });
 });

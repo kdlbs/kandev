@@ -20,6 +20,8 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type archiveBeforeLifecycleQueueRepo struct {
@@ -61,6 +63,30 @@ type autoFixStateFailureThenStoreService struct {
 type autoMergeFailureThenReviewRequestService struct {
 	*storeBackedLifecycleGitHubService
 	pr *github.TaskPR
+}
+
+type catalogAwareGitHubService struct {
+	*mockGitHubService
+}
+
+func (s *catalogAwareGitHubService) BindTaskCIAutoFixAttemptTurn(context.Context, github.TaskCIAutoFixAttemptBinding) error {
+	return nil
+}
+
+func (s *catalogAwareGitHubService) ReportTaskCIAutoFixOutcome(context.Context, github.TaskCIAutoFixOutcomeReport) error {
+	return nil
+}
+
+func (s *catalogAwareGitHubService) ReconcileTaskCIAutoFixTurnCompletion(context.Context, string, string, string) error {
+	return nil
+}
+
+func (s *catalogAwareGitHubService) ReconcileTaskCIAutoFixQueuedDispatchFailure(context.Context, github.TaskCIAutoFixAttemptBinding) error {
+	return nil
+}
+
+func (s *catalogAwareGitHubService) ReconcileTaskCIAutoFixProviderProgress(context.Context, github.TaskCIAutoFixProviderProgress) error {
+	return nil
 }
 
 func (s *autoFixStateFailureThenStoreService) GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskCIPRAutomationState, error) {
@@ -156,6 +182,13 @@ func TestCIAutomationReadyToMerge(t *testing.T) {
 		{name: "pending review", mutate: func(pr *github.TaskPR) { pr.PendingReviewCount = 1 }, want: false},
 		{name: "not enough approvals", mutate: func(pr *github.TaskPR) { pr.ReviewCount = 0 }, want: false},
 		{name: "unresolved threads", mutate: func(pr *github.TaskPR) { pr.UnresolvedReviewThreads = 1 }, want: false},
+		{name: "workflow attention", mutate: func(pr *github.TaskPR) {
+			pr.WorkflowAttention = &github.WorkflowAttention{
+				State:   github.WorkflowAttentionApprovalRequired,
+				HeadSHA: "head-sha",
+			}
+			pr.HeadSHA = "head-sha"
+		}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -209,6 +242,64 @@ func TestCIAutomationFeedbackDelta(t *testing.T) {
 	}
 }
 
+func TestCIAutomationCancelledChecksDoNotConsumeRound(t *testing.T) {
+	feedback := &github.PRFeedback{Checks: []github.CheckRun{{
+		Name: "deploy-fork", Status: "completed", Conclusion: "cancelled",
+		HTMLURL: "https://ci/deploy", Output: "workflow superseded",
+	}}}
+	previous := ciAutomationCheckpoint{FailedChecks: []ciAutomationCheckSnapshot{{
+		Name: "deploy-fork", Conclusion: "cancelled", HTMLURL: "https://ci/deploy",
+		Output: "workflow superseded",
+	}}}
+	if ciAutomationCheckConclusionNeedsFix("cancelled") {
+		t.Fatal("cancelled check is still repair evidence")
+	}
+	if delta := ciAutomationBuildDelta(feedback, previous); !ciAutomationCheckpointEmpty(delta) {
+		t.Fatalf("cancellation produced a repair delta: %+v", delta)
+	}
+
+	current := ciAutomationCurrentCheckpoint(feedback)
+	if len(current.FailedChecks) != 0 {
+		t.Fatalf("current checkpoint retained cancellation as failure: %+v", current)
+	}
+	previousJSON, previousSignature := encodeCIAutomationCheckpoint(previous)
+	currentJSON, currentSignature := encodeCIAutomationCheckpoint(current)
+	state := &github.TaskCIPRAutomationState{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		LastFixCheckpointJSON: previousJSON, LastFixSignature: previousSignature,
+		AutoFixRoundCount: 3,
+	}
+	ghSvc := &mockGitHubService{ciPRState: state}
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	svc.SetGitHubService(ghSvc)
+	pr := &github.TaskPR{TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42, State: "open"}
+	if blocked := svc.handleTaskPRCIAutoFixEmptyDelta(context.Background(), pr, state, previous, currentSignature, currentJSON); blocked {
+		t.Fatal("cancellation-only refresh blocked on an unchanged dispatched prompt")
+	}
+	if len(ghSvc.fixCheckpointRefresh) != 1 {
+		t.Fatalf("checkpoint refresh calls = %d, want one prompt-free prune", len(ghSvc.fixCheckpointRefresh))
+	}
+	if state.AutoFixRoundCount != 3 || len(ghSvc.fixAttempts) != 0 {
+		t.Fatalf("cancellation changed repair rounds: state=%+v attempts=%+v", state, ghSvc.fixAttempts)
+	}
+	if strings.Contains(ghSvc.fixCheckpointRefresh[0].CheckpointJSON, "cancelled") {
+		t.Fatalf("pruned checkpoint retained cancellation: %s", ghSvc.fixCheckpointRefresh[0].CheckpointJSON)
+	}
+}
+
+func TestCIAutomationCancellationOnlyNotReadyToMerge(t *testing.T) {
+	ready := github.TaskPR{
+		State: "open", ChecksState: "success", ReviewState: "approved", MergeableState: "clean",
+	}
+	if !ciAutomationReadyToMerge(&ready) {
+		t.Fatal("positive control: clean successful PR should be ready")
+	}
+	ready.ChecksState = ""
+	if ciAutomationReadyToMerge(&ready) {
+		t.Fatal("cancellation-only empty check state established merge readiness")
+	}
+}
+
 func TestCIAutomationPromptOmitsSnapshotWithoutPlaceholder(t *testing.T) {
 	delta := ciAutomationCheckpoint{
 		FailedChecks: []ciAutomationCheckSnapshot{{Name: "unit", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
@@ -253,15 +344,15 @@ func TestCIAutomationProviderGenerationIncludesHeadAndCheckExecution(t *testing.
 
 func TestCIAutomationOutcomeProtocolVisibility(t *testing.T) {
 	structured := ciAutomationAppendOutcomeProtocol("repair the PR", false)
-	if !strings.Contains(structured, "report_pr_auto_fix_outcome_kandev") {
+	if !strings.Contains(structured, "report_change_request_auto_fix_outcome_kandev") {
 		t.Fatal("structured prompt omitted the outcome tool instructions")
 	}
-	if visible := sysprompt.StripSystemContent(structured); strings.Contains(visible, "report_pr_auto_fix_outcome_kandev") {
+	if visible := sysprompt.StripSystemContent(structured); strings.Contains(visible, "report_change_request_auto_fix_outcome_kandev") {
 		t.Fatalf("structured outcome instructions leaked into visible chat: %s", visible)
 	}
 
 	passthrough := ciAutomationAppendOutcomeProtocol("repair the PR", true)
-	if !strings.Contains(passthrough, "report_pr_auto_fix_outcome_kandev") {
+	if !strings.Contains(passthrough, "report_change_request_auto_fix_outcome_kandev") {
 		t.Fatal("passthrough prompt omitted the outcome tool instructions")
 	}
 }
@@ -409,8 +500,8 @@ func TestCIAutomationFeedbackDeltaIncludesKnownFailingConclusions(t *testing.T) 
 	}
 
 	delta := ciAutomationBuildDelta(feedback, ciAutomationCheckpoint{})
-	if len(delta.FailedChecks) != 4 {
-		t.Fatalf("failed checks = %d, want 4: %+v", len(delta.FailedChecks), delta.FailedChecks)
+	if len(delta.FailedChecks) != 3 {
+		t.Fatalf("repairable failed checks = %d, want 3 (excluding cancellation): %+v", len(delta.FailedChecks), delta.FailedChecks)
 	}
 }
 
@@ -2576,7 +2667,7 @@ func TestDispatchCIAutomationPromptForPRQueuesWhenRunningUserMessageCannotBeReco
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	svc.messageQueue = messagequeue.NewServiceMemory(testLogger())
+	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	messageCreator := &mockMessageCreator{userMessageErr: errors.New("message db unavailable")}
 	svc.messageCreator = messageCreator
 	session, err := repo.GetTaskSession(ctx, "session-1")
@@ -3309,7 +3400,7 @@ func TestHandleTaskCIOptionsUpdatedRecordsPartialSyncFailureOnlyForUnsyncedPRs(t
 	}
 }
 
-func TestStartTaskPRCIAutomationSkipsDuplicateInFlightPR(t *testing.T) {
+func TestStartTaskPRCIAutomationCoalescesDuplicateInFlightPR(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
@@ -3331,8 +3422,9 @@ func TestStartTaskPRCIAutomationSkipsDuplicateInFlightPR(t *testing.T) {
 
 	close(block)
 	waitForCIAutomationIdle(t, svc, "task-1|repo-1|42", 200*time.Millisecond)
-	svc.startTaskPRCIAutomation(ctx, pr)
 	waitForCIOptionsCalls(t, ghSvc, 2, 200*time.Millisecond)
+	svc.startTaskPRCIAutomation(ctx, pr)
+	waitForCIOptionsCalls(t, ghSvc, 3, 200*time.Millisecond)
 }
 
 func waitForCIOptionsCalls(t *testing.T, ghSvc *mockGitHubService, want int, timeout time.Duration) {
@@ -3452,6 +3544,41 @@ func TestHandleTaskPRCIAutoFixDirectDispatchPersistsWideMetadataEndToEnd(t *test
 	if gotMeta["pr_number"] != 42 || gotMeta["owner"] != "acme" || gotMeta["repo"] != "widget" {
 		t.Fatalf("expected PR identity from the driven PR, got %+v", gotMeta)
 	}
+}
+
+func TestHandleTaskPRCIAutoFixRecordsMissingCatalogBeforeDispatch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	require.NoError(t, err)
+	session.Metadata = map[string]interface{}{}
+	require.NoError(t, repo.UpdateTaskSessionWithMetadata(ctx, session, session.Metadata))
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &catalogAwareGitHubService{mockGitHubService: &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		prFeedback: &github.PRFeedback{
+			Comments: []github.PRComment{{ID: 99, Body: "plain PR comment should trigger auto-fix"}},
+		},
+	}}
+	svc.SetGitHubService(ghSvc)
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID: "task-1", WorkspaceID: "ws1", RepositoryID: "repo-1",
+		Owner: "acme", Repo: "widget", PRNumber: 42, State: "open",
+		ChecksState: "success", LastSyncedAt: &now,
+	}
+
+	require.NoError(t, svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false))
+	require.Len(t, ghSvc.ciErrors, 1)
+	require.NotNil(t, ghSvc.ciErrors[0].LastError)
+	assert.Contains(t, *ghSvc.ciErrors[0].LastError, "MCP tool catalog is unavailable")
+	assert.Empty(t, ghSvc.fixAttempts)
+	assert.Equal(t, 0, ghSvc.mergeCalls)
 }
 
 func ptrString(value string) *string {

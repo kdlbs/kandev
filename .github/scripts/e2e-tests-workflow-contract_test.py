@@ -13,6 +13,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO_ROOT / ".github" / "docker" / "ci-base" / "Dockerfile"
 IMAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci-base-image.yml"
 E2E_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "e2e-tests.yml"
+DOWNLOAD_ARTIFACT_RETRY_ACTION = (
+    REPO_ROOT / ".github" / "actions" / "download-artifact-retry" / "action.yml"
+)
+BACKEND_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "backend-tests.yml"
+FRONTEND_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "frontend-tests.yml"
 LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 IMAGE_DIGEST_RESOLVER = REPO_ROOT / ".github" / "scripts" / "resolve-image-digest.sh"
 VALID_IMAGE_INDEX = (
@@ -154,6 +159,18 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("type=gha,scope=runtime", workflow)
         self.assertIn("desktop-latest", workflow)
 
+    def test_container_jobs_use_the_baked_corepack_cache(self) -> None:
+        dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+        self.assertIn("COREPACK_HOME=/root/.cache/node/corepack", dockerfile)
+        for workflow_path in (E2E_WORKFLOW, BACKEND_WORKFLOW, FRONTEND_WORKFLOW):
+            workflow = workflow_path.read_text(encoding="utf-8")
+            self.assertIn(
+                "COREPACK_HOME: /root/.cache/node/corepack",
+                workflow,
+                workflow_path.name,
+            )
+
     def test_desktop_job_uses_image_without_live_bootstrap_downloads(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
         desktop_job = job_block(workflow, "desktop-e2e", "e2e-report")
@@ -162,6 +179,8 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("options: --ipc=host", desktop_job)
         self.assertIn("git config --global --add safe.directory", desktop_job)
         self.assertIn("path: ~/.local/share/pnpm/store", desktop_job)
+        self.assertIn("actions/setup-go@", desktop_job)
+        self.assertIn("go-version-file: apps/backend/go.mod", desktop_job)
         self.assertIn("pnpm install --frozen-lockfile", desktop_job)
         self.assertIn("pnpm --filter @kandev/desktop e2e", desktop_job)
 
@@ -187,10 +206,10 @@ cat "${FAKE_DOCKER_MANIFEST}"
         normal_job = job_block(workflow, "e2e", "playwright_image")
 
         self.assertIn(
-            "# 35 min covers the serial count-fallback tail and setup overhead",
+            "# 45 min covers the serial count-fallback tail and setup overhead",
             normal_job,
         )
-        self.assertIn("timeout-minutes: 35", normal_job)
+        self.assertIn("timeout-minutes: 45", normal_job)
         self.assertNotIn("timeout-minutes: 25", normal_job)
 
     # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.1
@@ -204,29 +223,14 @@ cat "${FAKE_DOCKER_MANIFEST}"
     def test_external_runner_tiers_are_toggleable_for_eligible_jobs(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
 
-        light_jobs = {
-            "changes": ("build", "changes_runner"),
-            "e2e-gate": (None, "e2e_gate_runner"),
-        }
-
-        for job, (next_job, output_name) in light_jobs.items():
-            if next_job is None:
-                job_text = workflow.partition("  e2e-gate:\n")[2]
-            else:
-                job_text = job_block(workflow, job, next_job)
-            expected = (
-                "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan)."
-                f"{output_name} }}}}"
-            )
-            self.assertIn(
-                expected,
-                job_text,
-                f"{job} must select its configured tier",
-            )
+        changes = job_block(workflow, "changes", "build")
+        self.assertIn("runs-on: ubuntu-latest", changes)
+        self.assertNotIn("    needs:", changes)
+        self.assertNotIn("  e2e-gate:\n", workflow)
         e2e_job = job_block(workflow, "e2e", "playwright_image")
         self.assertIn("runs-on: ${{ matrix.runner }}", e2e_job)
         self.assertIn(
-            "matrix: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_matrix }}",
+            "matrix: ${{ fromJSON(needs.changes.outputs.plan).e2e_matrix }}",
             e2e_job,
         )
 
@@ -267,6 +271,38 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn('artifact.name === "e2e-timing-profile"', workflow)
         self.assertIn("!artifact.expired", workflow)
 
+    def test_e2e_artifact_downloads_retry_transient_service_failures(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+        self.assertTrue(DOWNLOAD_ARTIFACT_RETRY_ACTION.exists())
+        self.assertNotIn("uses: actions/download-artifact@", workflow)
+        self.assertGreaterEqual(
+            workflow.count("uses: ./.github/actions/download-artifact-retry"),
+            12,
+        )
+
+        action = DOWNLOAD_ARTIFACT_RETRY_ACTION.read_text(encoding="utf-8")
+        self.assertEqual(action.count("uses: actions/download-artifact@"), 3)
+        self.assertEqual(action.count("continue-on-error: true"), 3)
+        self.assertIn('default: "false"', action)
+        for input_name in (
+            "name",
+            "path",
+            "pattern",
+            "merge-multiple",
+            "repository",
+            "run-id",
+            "github-token",
+        ):
+            self.assertEqual(
+                action.count(f"{input_name}: ${{{{ inputs.{input_name} }}}}"),
+                3,
+                input_name,
+            )
+        self.assertIn("sleep 10", action)
+        self.assertIn("sleep 30", action)
+        self.assertIn('rm -rf -- "$DOWNLOAD_PATH"', action)
+        self.assertIn("exit 1", action)
+
     # @covers AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.1
     # @covers AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.2
     def test_container_job_reuses_verified_browser_cache_with_fallback(self) -> None:
@@ -296,7 +332,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
             "digest: ${{ steps.resolve.outputs.digest }}",
             resolver_job,
         )
-        gate_job = workflow.partition("  e2e-gate:\n")[2]
+        gate_job = workflow.partition("  e2e-report:\n")[2]
         self.assertIn("PLAYWRIGHT_IMAGE_RESULT", gate_job)
         self.assertIn('"playwright-image:${PLAYWRIGHT_IMAGE_RESULT}"', gate_job)
         self.assertIn(

@@ -16,6 +16,7 @@ import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { ProjectRepositoryPicker } from "./project-repository-picker";
 import { RepoChip } from "./repo-chip";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 const COLOR_OPTIONS = [
   "#ef4444",
@@ -345,14 +346,14 @@ export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateP
           <Button
             variant="ghost"
             onClick={() => onOpenChange(false)}
-            className="min-h-11 w-full cursor-pointer sm:min-h-9 sm:w-auto"
+            className={controlSizingClassName("standard", "w-full cursor-pointer sm:w-auto")}
           >
             {t("common:cancel")}
           </Button>
           <Button
             onClick={handleCreate}
             disabled={!form.name.trim() || submitting}
-            className="min-h-11 w-full cursor-pointer sm:min-h-9 sm:w-auto"
+            className={controlSizingClassName("standard", "w-full cursor-pointer sm:w-auto")}
           >
             {submitting ? t("office:creating") : t("office:createProject")}
           </Button>

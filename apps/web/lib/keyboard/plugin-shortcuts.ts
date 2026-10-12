@@ -11,6 +11,7 @@
  * core shortcuts already use).
  */
 import type { PluginRecord } from "@/lib/types/plugins";
+import type { IntegrationShortcutEntry } from "./integration-shortcuts";
 import type { KeyboardShortcut } from "./constants";
 import { parseCombo } from "./parse-combo";
 import {
@@ -28,6 +29,7 @@ export function pluginShortcutId(pluginId: string, keybindingId: string): string
 
 /** One configurable shortcut entry, from either the core static list or a plugin manifest. */
 export type ShortcutEntry =
+  | IntegrationShortcutEntry
   | { source: "core"; id: ConfigurableShortcutId; label: string; default: KeyboardShortcut }
   | {
       source: "plugin";

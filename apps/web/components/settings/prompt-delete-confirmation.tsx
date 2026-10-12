@@ -5,8 +5,10 @@ import { Trans, useTranslation } from "react-i18next";
 
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 
 type PromptDeleteConfirmationProps = {
+  promptId: string;
   promptName: string;
   open: boolean;
   isFinePointer: boolean;
@@ -28,6 +30,7 @@ function PromptDeleteDescription({ promptName }: { promptName: string }) {
 }
 
 export function PromptDeleteConfirmation({
+  promptId,
   promptName,
   open,
   isFinePointer,
@@ -53,26 +56,22 @@ export function PromptDeleteConfirmation({
     anchorRef.current?.focus();
   }, [anchorRef, isFinePointer, open]);
 
-  if (!isFinePointer) {
-    return open ? (
-      <InlineConfirmActions
-        density="touch"
-        testId="prompt-delete-inline-confirmation"
-        ariaLabel={promptDeleteLabel}
-        description={description}
-        cancelLabel={cancelLabel}
-        confirmLabel={promptDeleteLabel}
-        confirmAriaLabel={promptDeleteLabel}
-        confirmTestId="prompt-delete-confirm"
-        confirmDisabled={isBusy}
-        onCancel={handleCancel}
-        onClose={onClose}
-        onConfirm={onConfirm}
-      />
-    ) : null;
-  }
-
-  return (
+  const fallback = !isFinePointer ? (
+    <InlineConfirmActions
+      density="touch"
+      testId="prompt-delete-inline-confirmation"
+      ariaLabel={promptDeleteLabel}
+      description={description}
+      cancelLabel={cancelLabel}
+      confirmLabel={promptDeleteLabel}
+      confirmAriaLabel={promptDeleteLabel}
+      confirmTestId="prompt-delete-confirm"
+      confirmDisabled={isBusy}
+      onCancel={handleCancel}
+      onClose={onClose}
+      onConfirm={onConfirm}
+    />
+  ) : (
     <ActionConfirmPopover
       open={open}
       anchorRef={anchorRef}
@@ -89,6 +88,28 @@ export function PromptDeleteConfirmation({
       }}
       onCancel={handleCancel}
       onConfirm={onConfirm}
+    />
+  );
+  return (
+    <MobileActionConfirmation
+      open={open}
+      targetKey={promptId}
+      title={promptDeleteLabel}
+      subject={`@${promptName}`}
+      description={description}
+      cancelLabel={cancelLabel}
+      confirmLabel={promptDeleteLabel}
+      confirmAriaLabel={promptDeleteLabel}
+      confirmTestId="prompt-delete-confirm"
+      confirmDisabled={isBusy}
+      focusReturnRef={anchorRef}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
+      }}
+      onCancel={onCancel}
+      onClose={onClose}
+      onConfirm={onConfirm}
+      fallback={fallback}
     />
   );
 }

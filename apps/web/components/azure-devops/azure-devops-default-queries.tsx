@@ -21,6 +21,11 @@ import {
   DEFAULT_AZURE_PULL_REQUEST_QUERIES,
   DEFAULT_AZURE_WORK_ITEM_QUERIES,
 } from "./azure-devops-workspace-defaults";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
 
 /**
  * Wire discriminant for the two query kinds. These used to be the English
@@ -93,7 +98,7 @@ function QueryGroupSelect({
   return (
     <Select value={value === "created" ? "created" : "inbox"} onValueChange={onChange}>
       <SelectTrigger
-        className="h-11 w-full cursor-pointer sm:h-8"
+        className={settingsControlClassName("w-full cursor-pointer")}
         aria-label={t("azuredevops:queryGroupAria", {
           kind: t(KIND_TITLE_KEYS[kind]),
           index: index + 1,
@@ -156,7 +161,7 @@ function RemoveQueryButton({
       type="button"
       variant="ghost"
       size="icon"
-      className="h-11 w-full cursor-pointer text-destructive sm:h-8 sm:w-8"
+      className={controlSizingClassName("icon", "cursor-pointer text-destructive")}
       aria-label={t("azuredevops:removeQueryAria", {
         kind: t(KIND_LOWER_KEYS[kind]),
         index: index + 1,
@@ -186,7 +191,7 @@ function WorkItemQueryRow({
     >
       <QueryField label={t("azuredevops:label")}>
         <Input
-          className="h-11 w-full sm:h-8"
+          className={settingsControlClassName("w-full")}
           value={preset.label}
           aria-label={t("azuredevops:queryLabelAria", { kind, index: index + 1 })}
           data-settings-dirty={preset.label !== baseline?.label}
@@ -196,7 +201,7 @@ function WorkItemQueryRow({
       {/* WIQL is the Azure DevOps query language, not copy. */}
       <QueryField label="WIQL" className="col-span-2 row-start-2 sm:col-span-1 sm:row-auto">
         <Input
-          className="h-11 w-full font-mono text-xs sm:h-8"
+          className={settingsControlClassName("w-full font-mono text-xs")}
           value={stringFilter(preset, "wiql")}
           aria-label={t("azuredevops:queryWiqlAria", { kind, index: index + 1 })}
           data-settings-dirty={
@@ -210,7 +215,7 @@ function WorkItemQueryRow({
           type="number"
           min={1}
           max={200}
-          className="h-11 w-full sm:h-8"
+          className={settingsControlClassName("w-full")}
           value={numberFilter(preset, "top", 50)}
           aria-label={t("azuredevops:queryTopAria", { kind, index: index + 1 })}
           onChange={(event) => onPatchFilters({ top: Number(event.target.value) || 1 })}
@@ -249,7 +254,7 @@ function PullRequestQueryRow({
     >
       <QueryField label={t("azuredevops:label")}>
         <Input
-          className="h-11 w-full sm:h-8"
+          className={settingsControlClassName("w-full")}
           value={preset.label}
           aria-label={t("azuredevops:queryLabelAria", { kind, index: index + 1 })}
           data-settings-dirty={preset.label !== baseline?.label}
@@ -262,7 +267,7 @@ function PullRequestQueryRow({
           onValueChange={(status) => onPatchFilters({ status })}
         >
           <SelectTrigger
-            className="h-11 w-full cursor-pointer sm:h-8"
+            className={settingsControlClassName("w-full cursor-pointer")}
             aria-label={t("azuredevops:queryStatusAria", { kind, index: index + 1 })}
           >
             <SelectValue />
@@ -279,7 +284,7 @@ function PullRequestQueryRow({
       </QueryField>
       <QueryField label={t("azuredevops:creator")} className="col-span-2 sm:col-span-1">
         <Input
-          className="h-11 w-full sm:h-8"
+          className={settingsControlClassName("w-full")}
           value={stringFilter(preset, "creator")}
           aria-label={t("azuredevops:queryCreatorAria", { kind, index: index + 1 })}
           placeholder={identityPlaceholder}
@@ -288,7 +293,7 @@ function PullRequestQueryRow({
       </QueryField>
       <QueryField label={t("azuredevops:reviewer")} className="col-span-2 sm:col-span-1">
         <Input
-          className="h-11 w-full sm:h-8"
+          className={settingsControlClassName("w-full")}
           value={stringFilter(preset, "reviewer")}
           aria-label={t("azuredevops:queryReviewerAria", { kind, index: index + 1 })}
           placeholder={identityPlaceholder}
@@ -343,9 +348,8 @@ function QueryEditor({
       ))}
       <Button
         type="button"
-        size="sm"
         variant="outline"
-        className="h-11 w-full cursor-pointer sm:h-8 sm:w-auto"
+        className={settingsActionClassName("w-full cursor-pointer sm:w-auto")}
         onClick={() => onChange([...queries, newQuery(kind)])}
       >
         <IconPlus className="h-4 w-4" />{" "}
@@ -477,9 +481,8 @@ export function AzureDevOpsDefaultQueriesSection({ workspaceId }: { workspaceId:
       action={
         <Button
           type="button"
-          size="sm"
           variant="outline"
-          className="h-11 w-full cursor-pointer sm:h-8 sm:w-auto"
+          className={settingsActionClassName("w-full cursor-pointer sm:w-auto")}
           disabled={drafts.loading}
           onClick={drafts.reset}
         >

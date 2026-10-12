@@ -151,19 +151,6 @@ function isMissingCompatibleProfile(
   return !hasCompatibleProfiles;
 }
 
-function useHandoffAutoSummarize(
-  handoff: HandoffPreset | undefined,
-  contextValue: string,
-  onContextChange: (value: string) => void,
-) {
-  const started = useRef(false);
-  useEffect(() => {
-    if (!handoff || started.current) return;
-    started.current = true;
-    void onContextChange(contextValue);
-  }, [handoff, contextValue, onContextChange]);
-}
-
 export function useSessionPromptController(
   promptRef: RefObject<TaskFormInputsHandle | null>,
   taskId: string,
@@ -396,7 +383,6 @@ function NewSessionForm({
     setContextValue,
     setHasPrompt,
   });
-  useHandoffAutoSummarize(handoff, handoffInitial?.contextValue ?? "blank", handleContextChange);
 
   const handleSubmit = useSessionLaunchSubmit({
     promptRef,

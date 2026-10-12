@@ -451,6 +451,7 @@ export function WorkflowCard(props: WorkflowCardProps) {
   return (
     <SettingsCard
       isDirty={s.hasUnsavedChanges || props.isOrderDirty}
+      discoveryTargetId={`workflow-card-${workflow.id}`}
       data-testid={`workflow-card-${workflow.id}`}
     >
       <CardContent className="pt-6">

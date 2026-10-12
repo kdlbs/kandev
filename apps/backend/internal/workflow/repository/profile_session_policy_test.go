@@ -9,8 +9,16 @@ import (
 )
 
 func TestWorkflowStepProfileSessionPoliciesRoundTripAndDefaults(t *testing.T) {
-	repo := setupTestRepo(t)
+	repo, db := setupTestRepoWithDB(t)
 	ctx := context.Background()
+
+	var endPolicyDefault string
+	if err := db.QueryRow(`SELECT dflt_value FROM pragma_table_info('workflow_steps') WHERE name = 'profile_session_end_policy'`).Scan(&endPolicyDefault); err != nil {
+		t.Fatalf("inspect session end policy default: %v", err)
+	}
+	if endPolicyDefault != "'park'" {
+		t.Fatalf("profile_session_end_policy schema default = %q, want 'park'", endPolicyDefault)
+	}
 
 	for index, policies := range []struct {
 		start taskmodels.WorkflowProfileSessionStartPolicy
@@ -50,15 +58,15 @@ func TestWorkflowStepProfileSessionPoliciesRoundTripAndDefaults(t *testing.T) {
 	if err := repo.CreateStep(ctx, unknown); err != nil {
 		t.Fatalf("create unknown: %v", err)
 	}
-	if unknown.ProfileSessionStartPolicy != taskmodels.WorkflowProfileSessionStartPolicyReuse || unknown.ProfileSessionEndPolicy != taskmodels.WorkflowProfileSessionEndPolicyComplete {
-		t.Fatalf("created policies = %q/%q, want normalized reuse/complete", unknown.ProfileSessionStartPolicy, unknown.ProfileSessionEndPolicy)
+	if unknown.ProfileSessionStartPolicy != taskmodels.WorkflowProfileSessionStartPolicyReuse || unknown.ProfileSessionEndPolicy != taskmodels.WorkflowProfileSessionEndPolicyPark {
+		t.Fatalf("created policies = %q/%q, want normalized reuse/park", unknown.ProfileSessionStartPolicy, unknown.ProfileSessionEndPolicy)
 	}
 	got, err := repo.GetStep(ctx, unknown.ID)
 	if err != nil {
 		t.Fatalf("get unknown: %v", err)
 	}
-	if got.ProfileSessionStartPolicy != taskmodels.WorkflowProfileSessionStartPolicyReuse || got.ProfileSessionEndPolicy != taskmodels.WorkflowProfileSessionEndPolicyComplete {
-		t.Fatalf("unknown policies = %q/%q, want reuse/complete", got.ProfileSessionStartPolicy, got.ProfileSessionEndPolicy)
+	if got.ProfileSessionStartPolicy != taskmodels.WorkflowProfileSessionStartPolicyReuse || got.ProfileSessionEndPolicy != taskmodels.WorkflowProfileSessionEndPolicyPark {
+		t.Fatalf("unknown policies = %q/%q, want reuse/park", got.ProfileSessionStartPolicy, got.ProfileSessionEndPolicy)
 	}
 
 	got.ProfileSessionStartPolicy = taskmodels.WorkflowProfileSessionStartPolicy(" unsupported update ")
@@ -66,8 +74,8 @@ func TestWorkflowStepProfileSessionPoliciesRoundTripAndDefaults(t *testing.T) {
 	if err := repo.UpdateStep(ctx, got); err != nil {
 		t.Fatalf("normalize updated policies: %v", err)
 	}
-	if got.ProfileSessionStartPolicy != taskmodels.WorkflowProfileSessionStartPolicyReuse || got.ProfileSessionEndPolicy != taskmodels.WorkflowProfileSessionEndPolicyComplete {
-		t.Fatalf("updated caller policies = %q/%q, want reuse/complete", got.ProfileSessionStartPolicy, got.ProfileSessionEndPolicy)
+	if got.ProfileSessionStartPolicy != taskmodels.WorkflowProfileSessionStartPolicyReuse || got.ProfileSessionEndPolicy != taskmodels.WorkflowProfileSessionEndPolicyPark {
+		t.Fatalf("updated caller policies = %q/%q, want reuse/park", got.ProfileSessionStartPolicy, got.ProfileSessionEndPolicy)
 	}
 
 	got.ProfileSessionStartPolicy = taskmodels.WorkflowProfileSessionStartPolicyNew

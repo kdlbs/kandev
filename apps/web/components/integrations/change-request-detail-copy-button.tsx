@@ -46,9 +46,9 @@ export function ChangeRequestDetailCopyButton({
       <TooltipTrigger asChild>
         <Button
           type="button"
-          size="sm"
+          size="icon"
           variant="ghost"
-          className="h-6 w-6 min-h-11 min-w-11 cursor-pointer p-0 text-muted-foreground hover:text-foreground [@media(min-width:640px)_and_(pointer:fine)]:min-h-0 [@media(min-width:640px)_and_(pointer:fine)]:min-w-0"
+          className="cursor-pointer p-0 text-muted-foreground hover:text-foreground"
           onClick={() => {
             void copyToClipboard(url).then((success) => {
               if (success) setCopied(true);

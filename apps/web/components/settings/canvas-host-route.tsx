@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { PageShell } from "@/components/page-shell";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRouter } from "@/lib/routing/client-router";
+import { linkToTask } from "@/lib/links";
 import {
   canvasHref,
   getCanvas,
@@ -15,14 +15,15 @@ import {
 } from "@/lib/api/domains/canvas-api";
 import { canvasErrorMessage } from "@/lib/api/domains/canvas-error-copy";
 import { useCanvasLifecycleRevision } from "@/lib/canvas-lifecycle";
-import { useCanvasHostCanvases } from "./canvas-host-picker";
+import { useAppStore } from "@/components/state-provider";
 import {
-  CanvasDesktopActions,
-  CanvasHostBody,
-  CanvasHostDialogs,
-  MobileCanvasActions,
-  type CanvasHostState,
-} from "./canvas-host-components";
+  canvasPresentationUserId,
+  recordCanvasPresentation,
+} from "@/lib/canvas-presentation-storage";
+import type { WebAppStartupFailureReason } from "@/components/plugins/web-app-startup";
+import { useCanvasHostCanvases } from "./canvas-host-picker";
+import { type CanvasHostState } from "./canvas-host-components";
+import { CanvasHostRouteView } from "./canvas-host-route-view";
 
 function stateForCanvas(canvas: Canvas): CanvasHostState {
   if (canvas.status === "archived") return "archived";
@@ -111,10 +112,11 @@ function applyCanvasRuntime(
 ) {
   if (runtime.runtime_url) {
     setRuntimeUrl(runtime.runtime_url);
-    setState("ready");
+    setState("loading_runtime");
     scheduleRuntimeRenewal(runtime.expires_in_seconds);
   } else {
     clearRuntimeRenewal();
+    setRuntimeUrl(null);
     setState("unavailable");
   }
 }
@@ -258,6 +260,7 @@ function useCanvasHostRequests(canvasId: string, options: CanvasHostRequestOptio
     const requestId = ++requestRef.current;
     renewingRef.current = true;
     clearRuntimeRenewal();
+    setRuntimeUrl(null);
     setState("loading_runtime");
     setError(null);
     requestCanvasHostRuntime({
@@ -317,6 +320,24 @@ function useCanvasHost(canvasId: string) {
     scheduleRuntimeRenewal,
   });
 
+  const markRuntimeReady = useCallback(() => {
+    setState((current) => (current === "loading_runtime" ? "ready" : current));
+  }, []);
+
+  const [runtimeFailureReason, setRuntimeFailureReason] =
+    useState<WebAppStartupFailureReason | null>(null);
+
+  const markRuntimeUnavailable = useCallback(
+    (reason: WebAppStartupFailureReason) => {
+      clearRuntimeRenewal();
+      setRuntimeUrl(null);
+      setError(null);
+      setRuntimeFailureReason(reason);
+      setState("runtime_failed");
+    },
+    [clearRuntimeRenewal],
+  );
+
   useEffect(() => {
     renewRuntimeRef.current = renewRuntime;
     return () => {
@@ -342,43 +363,99 @@ function useCanvasHost(canvasId: string) {
     runtimeUrl,
     state,
     error,
+    runtimeFailureReason,
     lifecycleRevision,
     load,
+    refresh,
     renewRuntime,
+    markRuntimeReady,
+    markRuntimeUnavailable,
     setHostError: setError,
   };
 }
 
-export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
+type CanvasHostEditOptions = {
+  canvas: Canvas | null;
+  router: ReturnType<typeof useRouter>;
+  setEditing: (editing: boolean) => void;
+  setMenuOpen: (open: boolean) => void;
+  onError: (reason: unknown) => void;
+};
+
+async function editCanvasFromHost(options: CanvasHostEditOptions): Promise<void> {
+  const { canvas, router, setEditing, setMenuOpen, onError } = options;
+  if (!canvas) return;
+  setEditing(true);
+  try {
+    const response = await startCanvasEdit(canvas.id);
+    if (response.task_id) {
+      router.push(linkToTask(response.task_id, { sessionId: response.session_id ?? undefined }));
+    }
+  } catch (reason: unknown) {
+    onError(reason);
+  } finally {
+    setEditing(false);
+    setMenuOpen(false);
+  }
+}
+
+function useRecordCanvasPresentation(canvas: Canvas | null, userId: string | null) {
+  useEffect(() => {
+    if (!canvas || canvas.scope_kind !== "task" || !canvas.task_id || !userId) return;
+    recordCanvasPresentation(
+      {
+        userId,
+        workspaceId: canvas.workspace_id,
+        taskId: canvas.task_id,
+        canvasId: canvas.id,
+      },
+      "manual",
+    );
+  }, [canvas, userId]);
+}
+
+export function CanvasHostRoute({
+  canvasId,
+  embedded = false,
+}: {
+  canvasId: string;
+  embedded?: boolean;
+}) {
   const { t } = useTranslation();
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
-  const { canvas, runtimeUrl, state, error, load, renewRuntime, setHostError } =
-    useCanvasHost(canvasId);
+  const presentationUserId = useAppStore((state) => canvasPresentationUserId(state.auth));
+  const {
+    canvas,
+    runtimeUrl,
+    state,
+    error,
+    runtimeFailureReason,
+    load,
+    refresh,
+    markRuntimeReady,
+    markRuntimeUnavailable,
+    setHostError,
+  } = useCanvasHost(canvasId);
   const hostCanvases = useCanvasHostCanvases(canvas);
   const [menuOpen, setMenuOpen] = useState(false);
   const [promotionOpen, setPromotionOpen] = useState(false);
+  const [workspaceDataOpen, setWorkspaceDataOpen] = useState(false);
   const [releasesOpen, setReleasesOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const [editing, setEditing] = useState(false);
 
-  const edit = async () => {
-    if (!canvas) return;
-    setEditing(true);
-    try {
-      const response = await startCanvasEdit(canvas.id);
-      if (response.task_id) {
-        const query = response.session_id
-          ? `?sessionId=${encodeURIComponent(response.session_id)}`
-          : "";
-        router.push(`/t/${encodeURIComponent(response.task_id)}${query}`);
-      }
-    } catch (reason: unknown) {
-      setHostError(canvasErrorMessage(reason, t, "canvases:actionFailed"));
-    } finally {
-      setEditing(false);
-      setMenuOpen(false);
-    }
-  };
+  useRecordCanvasPresentation(canvas, presentationUserId);
+
+  const edit = () =>
+    editCanvasFromHost({
+      canvas,
+      router,
+      setEditing,
+      setMenuOpen,
+      onError: (reason) => setHostError(canvasErrorMessage(reason, t, "canvases:actionFailed")),
+    });
 
   const selectCanvas = useCallback(
     (nextCanvas: Canvas) => {
@@ -388,59 +465,48 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
     [canvasId, router],
   );
 
-  const title = canvas?.title || t("canvases:canvas");
-  const desktopActions = canvas ? (
-    <CanvasDesktopActions
+  return (
+    <CanvasHostRouteView
+      canvasId={canvasId}
+      embedded={embedded}
+      isMobile={isMobile}
       canvas={canvas}
+      hostCanvases={hostCanvases}
+      runtimeUrl={runtimeUrl}
+      state={state}
+      error={error}
+      runtimeFailureReason={runtimeFailureReason}
+      menuOpen={menuOpen}
+      promotionOpen={promotionOpen}
+      workspaceDataOpen={workspaceDataOpen}
+      releasesOpen={releasesOpen}
+      shareOpen={shareOpen}
+      renameOpen={renameOpen}
       editing={editing}
+      setMenuOpen={setMenuOpen}
+      setPromotionOpen={setPromotionOpen}
+      setWorkspaceDataOpen={setWorkspaceDataOpen}
+      setReleasesOpen={setReleasesOpen}
+      setShareOpen={setShareOpen}
+      setRenameOpen={setRenameOpen}
       onEdit={() => void edit()}
       onPromote={() => setPromotionOpen(true)}
+      onEnableWorkspaceData={() => {
+        setMenuOpen(false);
+        setWorkspaceDataOpen(true);
+      }}
       onReleases={() => setReleasesOpen(true)}
+      onShare={() => setShareOpen(true)}
+      onRename={() => {
+        setMenuOpen(false);
+        setRenameOpen(true);
+      }}
+      onSelectCanvas={selectCanvas}
+      onRuntimeReady={markRuntimeReady}
+      onRuntimeError={markRuntimeUnavailable}
+      onRetry={load}
+      onPromotionCompleted={() => router.push(canvas ? canvasHref(canvas.id) : "/")}
+      onChanged={refresh}
     />
-  ) : null;
-
-  return (
-    <PageShell
-      title={title}
-      backHref="/"
-      backLabel={t("sidebar:home")}
-      scroll="none"
-      actions={!isMobile ? desktopActions : undefined}
-      contentTestId="canvas-route-content"
-      showNavTrigger
-    >
-      <CanvasHostBody
-        canvasId={canvasId}
-        title={title}
-        state={state}
-        isMobile={isMobile}
-        menuOpen={menuOpen}
-        runtimeUrl={runtimeUrl}
-        error={error}
-        onOpenActions={() => setMenuOpen(true)}
-        onRuntimeError={() => void renewRuntime()}
-        onRetry={load}
-      />
-      <MobileCanvasActions
-        canvas={canvas}
-        open={menuOpen}
-        onOpenChange={setMenuOpen}
-        onEdit={() => void edit()}
-        onPromote={() => setPromotionOpen(true)}
-        onReleases={() => setReleasesOpen(true)}
-        editing={editing}
-        canvases={hostCanvases}
-        onSelectCanvas={selectCanvas}
-      />
-      <CanvasHostDialogs
-        canvas={canvas}
-        promotionOpen={promotionOpen}
-        onPromotionOpenChange={setPromotionOpen}
-        releasesOpen={releasesOpen}
-        onReleasesOpenChange={setReleasesOpen}
-        onPromotionCompleted={() => router.push(canvas ? canvasHref(canvas.id) : "/")}
-        onChanged={load}
-      />
-    </PageShell>
   );
 }

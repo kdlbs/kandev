@@ -1,18 +1,19 @@
 "use client";
 
+import { groupCommentsByFile } from "@/lib/state/slices/comments/group-review";
 import { useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { IconChevronDown, IconChevronRight, IconMessage } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import { formatLineRange } from "@/lib/diff";
 import { useTranslation } from "react-i18next";
 
 interface ReviewCommentsAttachmentProps {
   /** Review comments from the message */
-  comments: DiffComment[];
+  comments: ReviewComment[];
   /** Additional class name */
   className?: string;
 }
@@ -29,16 +30,8 @@ export function ReviewCommentsAttachment({ comments, className }: ReviewComments
     return null;
   }
 
-  // Group comments by file
-  const byFile: Record<string, DiffComment[]> = {};
-  for (const comment of comments) {
-    if (!byFile[comment.filePath]) {
-      byFile[comment.filePath] = [];
-    }
-    byFile[comment.filePath].push(comment);
-  }
-
-  const fileCount = Object.keys(byFile).length;
+  const groups = groupCommentsByFile(comments);
+  const fileCount = groups.length;
   const totalComments = comments.length;
 
   return (
@@ -72,13 +65,11 @@ export function ReviewCommentsAttachment({ comments, className }: ReviewComments
         {/* Expanded content */}
         <CollapsibleContent>
           <div className="border-t border-border/50 px-3 py-2">
-            {Object.entries(byFile).map(([filePath, fileComments]) => (
-              <div key={filePath} className="mb-3 last:mb-0">
+            {groups.map(({ key, filePath, comments: fileComments }) => (
+              <div key={key} className="mb-3 last:mb-0">
                 {/* File header */}
                 <div className="mb-1.5 flex items-center gap-1.5 text-xs">
-                  <span className="font-medium text-muted-foreground">
-                    {filePath.split("/").pop()}
-                  </span>
+                  <span className="font-medium text-muted-foreground">{filePath}</span>
                   <span className="text-muted-foreground/60">({fileComments.length})</span>
                 </div>
 
@@ -92,19 +83,23 @@ export function ReviewCommentsAttachment({ comments, className }: ReviewComments
                       {/* Line info */}
                       <div className="mb-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
                         <span className="font-medium">
-                          {formatLineRange(comment.startLine, comment.endLine)}
+                          {comment.source === "review-file"
+                            ? t("review:fileComment")
+                            : formatLineRange(comment.startLine, comment.endLine)}
                         </span>
-                        <span>
-                          (
-                          {comment.side === "additions"
-                            ? t("task:diffSideNew")
-                            : t("task:diffSideOld")}
-                          )
-                        </span>
+                        {comment.source === "diff" && (
+                          <span>
+                            (
+                            {comment.side === "additions"
+                              ? t("task:diffSideNew")
+                              : t("task:diffSideOld")}
+                            )
+                          </span>
+                        )}
                       </div>
 
                       {/* Code preview */}
-                      {comment.codeContent && (
+                      {comment.source === "diff" && comment.codeContent && (
                         <pre className="mb-1.5 overflow-x-auto rounded bg-muted p-1.5 text-[10px] leading-tight">
                           <code>{comment.codeContent}</code>
                         </pre>

@@ -110,6 +110,7 @@ describe("SessionMobileBottomNav plugin panels", () => {
     render(
       <SessionMobileBottomNav
         activePanel="chat"
+        taskId="task-1"
         onPanelChange={onPanelChange}
         showStatus={false}
         onOpenStatus={vi.fn()}
@@ -142,6 +143,7 @@ describe("SessionMobileBottomNav plugin panels", () => {
     render(
       <SessionMobileBottomNav
         activePanel="plugin:plugin-a:notes"
+        taskId="task-1"
         onPanelChange={vi.fn()}
         showStatus={false}
         onOpenStatus={vi.fn()}
@@ -151,41 +153,34 @@ describe("SessionMobileBottomNav plugin panels", () => {
     expect(screen.getByRole("button", { name: "Panels" }).className).toContain("text-primary");
   });
 
-  it("keeps the grouped Panels action active for Prompt history", () => {
-    render(
-      <SessionMobileBottomNav
-        activePanel="prompt-history"
-        onPanelChange={vi.fn()}
-        showPromptHistory
-        showStatus={false}
-        onOpenStatus={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByRole("button", { name: "Panels" }).className).toContain("text-primary");
-  });
-});
-
-describe("SessionMobileBottomNav panel picker", () => {
-  it("offers Prompt history through the grouped Panels action", () => {
-    const onPanelChange = vi.fn();
+  it("does not evaluate task-panel visibility without a task", () => {
+    function Notes() {
+      return null;
+    }
+    const visible = vi.fn(() => true);
+    pluginRegistry.forPlugin(PLUGIN_A).registerTaskPanel({
+      id: "notes",
+      title: "Notes",
+      Component: Notes,
+      mobileEnabled: true,
+      visible,
+    });
 
     render(
       <SessionMobileBottomNav
         activePanel="chat"
-        onPanelChange={onPanelChange}
-        showPromptHistory
+        onPanelChange={vi.fn()}
         showStatus={false}
         onOpenStatus={vi.fn()}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Panels" }));
-    fireEvent.click(screen.getByTestId("mobile-prompt-history-option"));
-
-    expect(onPanelChange).toHaveBeenCalledWith("prompt-history");
+    expect(visible).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Panels" })).toBeNull();
   });
+});
 
+describe("SessionMobileBottomNav panel picker", () => {
   it("offers applicable task canvases in the native picker", () => {
     const onOpenCanvas = vi.fn();
     const taskCanvas: Canvas = {

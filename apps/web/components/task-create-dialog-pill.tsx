@@ -1,20 +1,13 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { IconCheck } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { prioritizeSelectedOption, selectorOptionClassName } from "@/lib/utils/selector-options";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@kandev/ui/command";
+import { Command, CommandInput } from "@kandev/ui/command";
 import { BranchRefreshButton } from "@/components/branch-refresh-button";
+import { PillCommandList } from "@/components/task-create-dialog-pill-command-list";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 import { usePillTooltipSuppression } from "@/hooks/use-pill-tooltip-suppression";
 import { useTooltipMountGate } from "@/hooks/use-tooltip-mount-gate";
@@ -35,6 +28,7 @@ export type PillAction = {
   label: string;
   icon?: React.ReactNode;
   onSelect: () => void;
+  testId?: string;
 };
 
 /**
@@ -43,7 +37,6 @@ export type PillAction = {
  * correct. Contextual controls can use `popoverHeader`, which renders outside
  * `Command`; mixed searchable content still needs a custom `Popover`.
  */
-
 type PillProps = {
   icon: React.ReactNode;
   value: string;
@@ -56,19 +49,20 @@ type PillProps = {
   /** When provided alongside `disabled`, surfaces a tooltip explaining why. */
   disabledReason?: string;
   searchPlaceholder: string;
-  emptyMessage: string;
+  emptyMessage: React.ReactNode;
   testId?: string;
+  triggerClassName?: string;
+  ariaLabel?: string;
+  ariaDescribedBy?: string;
+  dropdownTestId?: string;
+  onOpenChange?: (open: boolean) => void;
   /** Optional refresh action rendered next to the search input. */
   onRefresh?: () => void;
   /** Show the refresh icon as spinning + disabled while a refresh is in flight. */
   refreshing?: boolean;
   /** Accessible label used for the optional refresh action. */
   refreshLabel?: string;
-  /**
-   * Render without its own border/bg so the pill blends into a wrapping
-   * grouped container (used by RepoChip to draw one rectangle around
-   * repo + branch + remove).
-   */
+  /** Render without its own border/bg for a grouped repo chip. */
   flat?: boolean;
   /** Optional cmdk scorer override. Branch pickers pass `scoreBranch`. */
   filter?: (value: string, search: string, keywords?: string[]) => number;
@@ -83,6 +77,8 @@ type PillProps = {
   prefix?: string;
   /** Optional icon action rendered beside the search input. */
   action?: PillAction;
+  /** Optional multiple icon actions rendered beside the search input. */
+  actions?: PillAction[];
   /** Optional contextual controls rendered above the searchable list. */
   popoverHeader?: React.ReactNode;
 };
@@ -91,90 +87,6 @@ type PillProps = {
 function pillActiveClass(flat: boolean): string {
   if (flat) return "hover:bg-muted/60 cursor-pointer";
   return "hover:bg-muted hover:border-border cursor-pointer";
-}
-
-function PillCommandList({
-  options,
-  value,
-  onSelect,
-  onPointerSelect,
-  setOpen,
-  emptyMessage,
-}: {
-  options: PillOption[];
-  value: string;
-  onSelect: (value: string) => void;
-  onPointerSelect: (pointerType: string) => void;
-  setOpen: (open: boolean) => void;
-  emptyMessage: string;
-}) {
-  const groups = new Map<string, { label?: string; options: PillOption[] }>();
-  for (const option of options) {
-    const key = option.group ?? "";
-    const group = groups.get(key) ?? { label: option.groupLabel, options: [] };
-    group.options.push(option);
-    groups.set(key, group);
-  }
-  const groupOrder = new Map([
-    ["policies", 0],
-    ["branches", 1],
-  ]);
-  const orderedGroups = Array.from(groups.entries()).sort(
-    ([firstKey], [secondKey]) =>
-      (groupOrder.get(firstKey) ?? Number.MAX_SAFE_INTEGER) -
-      (groupOrder.get(secondKey) ?? Number.MAX_SAFE_INTEGER),
-  );
-
-  return (
-    <CommandList>
-      <CommandEmpty>{emptyMessage}</CommandEmpty>
-      {orderedGroups.map(([key, group]) => (
-        <CommandGroup key={key || "ungrouped"} heading={group.label}>
-          {prioritizeSelectedOption(group.options, value, (option) => option.value).map(
-            (option) => {
-              const selected = option.value === value;
-              const item = (
-                <CommandItem
-                  key={option.renderAccessory ? undefined : option.value}
-                  value={option.value}
-                  keywords={[option.label, ...(option.keywords ?? [])]}
-                  disabled={option.disabled}
-                  onPointerDown={(event) => onPointerSelect(event.pointerType)}
-                  onSelect={() => {
-                    onSelect(option.value);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    selectorOptionClassName(selected),
-                    option.renderAccessory && "pr-14",
-                  )}
-                >
-                  <div className="min-w-0 flex-1">
-                    {option.renderLabel ? option.renderLabel() : option.label}
-                  </div>
-                  <IconCheck
-                    className={cn(
-                      "absolute right-2 h-4 w-4",
-                      selected ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                </CommandItem>
-              );
-              if (!option.renderAccessory) return item;
-              return (
-                <div key={option.value} className="relative">
-                  {item}
-                  <div className="absolute inset-y-0 right-7 z-10 flex items-center">
-                    {option.renderAccessory()}
-                  </div>
-                </div>
-              );
-            },
-          )}
-        </CommandGroup>
-      ))}
-    </CommandList>
-  );
 }
 
 /**
@@ -215,22 +127,6 @@ function DisabledPillTooltip({
   );
 }
 
-function renderDisabledPillTooltip(
-  tooltipOpenState: boolean,
-  onOpenChange: (open: boolean) => void,
-  triggerButton: React.ReactNode,
-  disabledReason: string,
-): React.ReactElement {
-  return (
-    <DisabledPillTooltip
-      open={tooltipOpenState}
-      onOpenChange={onOpenChange}
-      triggerButton={triggerButton}
-      disabledReason={disabledReason}
-    />
-  );
-}
-
 function PillPopoverContent({
   filter,
   searchPlaceholder,
@@ -245,7 +141,9 @@ function PillPopoverContent({
   emptyMessage,
   portalContainer,
   action,
+  actions,
   popoverHeader,
+  dropdownTestId,
 }: {
   filter?: PillProps["filter"];
   searchPlaceholder: string;
@@ -257,16 +155,20 @@ function PillPopoverContent({
   onSelect: (value: string) => void;
   onPointerSelect: (pointerType: string) => void;
   setOpen: (open: boolean) => void;
-  emptyMessage: string;
+  emptyMessage: React.ReactNode;
   portalContainer: HTMLElement | null;
   action?: PillAction;
+  actions?: PillAction[];
   popoverHeader?: React.ReactNode;
+  dropdownTestId?: string;
 }) {
+  const renderedActions = actions ?? (action ? [action] : []);
   return (
     <PopoverContent
       className="w-[min(480px,calc(100vw-2rem))] p-0"
       align="start"
       portalContainer={portalContainer}
+      data-testid={dropdownTestId}
     >
       {popoverHeader}
       <Command filter={filter}>
@@ -280,28 +182,28 @@ function PillPopoverContent({
               refreshing={refreshing}
               label={refreshLabel}
               testId={refreshLabel === "repositories" ? "repo-refresh-button" : undefined}
-              touchTarget={refreshLabel === "repositories"}
+              touchTarget
             />
           ) : null}
-          {action ? (
-            <Tooltip>
+          {renderedActions.map((act, index) => (
+            <Tooltip key={act.label || index}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  aria-label={action.label}
-                  data-testid="create-local-repository-button"
+                  aria-label={act.label}
+                  data-testid={act.testId ?? "create-local-repository-button"}
                   onClick={() => {
-                    action.onSelect();
+                    act.onSelect();
                     setOpen(false);
                   }}
-                  className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
+                  className={`${controlSizingClassName("icon")} max-md:min-h-12 max-md:min-w-12 [@media(pointer:coarse)]:min-h-12 [@media(pointer:coarse)]:min-w-12 inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer`}
                 >
-                  {action.icon}
+                  {act.icon}
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{action.label}</TooltipContent>
+              <TooltipContent>{act.label}</TooltipContent>
             </Tooltip>
-          ) : null}
+          ))}
         </div>
         <PillCommandList
           options={options}
@@ -332,7 +234,9 @@ function PillPopover({
   emptyMessage,
   portalContainer,
   action,
+  actions,
   popoverHeader,
+  dropdownTestId,
 }: {
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -346,10 +250,12 @@ function PillPopover({
   value: string;
   onSelect: (value: string) => void;
   onPointerSelect: (pointerType: string) => void;
-  emptyMessage: string;
+  emptyMessage: React.ReactNode;
   portalContainer: HTMLElement | null;
   action?: PillAction;
+  actions?: PillAction[];
   popoverHeader?: React.ReactNode;
+  dropdownTestId?: string;
 }) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -368,7 +274,9 @@ function PillPopover({
         emptyMessage={emptyMessage}
         portalContainer={portalContainer}
         action={action}
+        actions={actions}
         popoverHeader={popoverHeader}
+        dropdownTestId={dropdownTestId}
       />
     </Popover>
   );
@@ -387,10 +295,12 @@ type PillPopoverShellProps = {
   value: string;
   onSelect: (value: string) => void;
   onPointerSelect: (pointerType: string) => void;
-  emptyMessage: string;
+  emptyMessage: React.ReactNode;
   portalContainer: HTMLElement | null;
   action?: PillAction;
+  actions?: PillAction[];
   popoverHeader?: React.ReactNode;
+  dropdownTestId?: string;
   tooltip?: string;
   tooltipOpenState: boolean;
   suppressTooltip: boolean;
@@ -415,7 +325,9 @@ function renderPillPopover({
   emptyMessage,
   portalContainer,
   action,
+  actions,
   popoverHeader,
+  dropdownTestId,
   tooltip,
   tooltipOpenState,
   suppressTooltip,
@@ -443,7 +355,9 @@ function renderPillPopover({
       emptyMessage={emptyMessage}
       portalContainer={portalContainer}
       action={action}
+      actions={actions}
       popoverHeader={popoverHeader}
+      dropdownTestId={dropdownTestId}
     />
   );
 
@@ -467,11 +381,26 @@ function renderPillTriggerButton({
   flat,
   hasValue,
   testId,
+  triggerClassName,
+  ariaLabel,
+  ariaDescribedBy,
   prefix,
   onPointerEnter,
   onPointerLeave,
   onBlur,
-}: Pick<PillProps, "icon" | "value" | "placeholder" | "disabled" | "flat" | "testId" | "prefix"> & {
+}: Pick<
+  PillProps,
+  | "icon"
+  | "value"
+  | "placeholder"
+  | "disabled"
+  | "flat"
+  | "testId"
+  | "triggerClassName"
+  | "ariaLabel"
+  | "ariaDescribedBy"
+  | "prefix"
+> & {
   hasValue: boolean;
   onPointerEnter?: React.PointerEventHandler<HTMLButtonElement>;
   onPointerLeave?: React.PointerEventHandler<HTMLButtonElement>;
@@ -482,8 +411,10 @@ function renderPillTriggerButton({
     <button
       type="button"
       disabled={disabled}
+      aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
       data-testid={testId}
-      className={pillTriggerClass(Boolean(disabled), Boolean(flat), hasValue)}
+      className={cn(pillTriggerClass(Boolean(disabled), Boolean(flat), hasValue), triggerClassName)}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
       onBlur={onBlur}
@@ -501,6 +432,7 @@ function usePillOpenHandlers(
   setOpenState: React.Dispatch<React.SetStateAction<boolean>>,
   closeTooltip: () => void,
   suppressTooltipUntilLeave: (releaseOnExit?: boolean) => void,
+  onOpenChange?: (open: boolean) => void,
 ) {
   const selectionPointerTypeRef = useRef("");
   const suppressForSelection = useCallback(() => {
@@ -511,17 +443,65 @@ function usePillOpenHandlers(
       if (next) {
         closeTooltip();
         selectionPointerTypeRef.current = "";
-      } else {
-        suppressForSelection();
-      }
+      } else suppressForSelection();
       setOpenState(next);
+      onOpenChange?.(next);
     },
-    [closeTooltip, setOpenState, suppressForSelection],
+    [closeTooltip, onOpenChange, setOpenState, suppressForSelection],
   );
   const recordPointerSelection = useCallback((pointerType: string) => {
     selectionPointerTypeRef.current = pointerType;
   }, []);
   return { setOpen, suppressForSelection, recordPointerSelection };
+}
+
+function useTooltipOpenChange(
+  suppressTooltipRef: { current: boolean },
+  handleTooltipOpenChange: (open: boolean) => void,
+) {
+  return useCallback(
+    (next: boolean) => {
+      if (next && suppressTooltipRef.current) return;
+      handleTooltipOpenChange(next);
+    },
+    [handleTooltipOpenChange],
+  );
+}
+
+function usePillState(onOpenChange?: (open: boolean) => void) {
+  const [open, setOpenState] = useState(false);
+  const { tooltipOpenState, handleTooltipOpenChange, closeTooltip } = useTooltipMountGate();
+  const portalContainer = useTaskCreateDialogPopoverContainer();
+  const {
+    suppressTooltip,
+    suppressTooltipRef,
+    suppressTooltipUntilLeave,
+    handlePointerEnter,
+    handlePointerLeave,
+    handleBlur,
+  } = usePillTooltipSuppression(open);
+  const { setOpen, suppressForSelection, recordPointerSelection } = usePillOpenHandlers(
+    setOpenState,
+    closeTooltip,
+    suppressTooltipUntilLeave,
+    onOpenChange,
+  );
+  const handleTooltipChange = useTooltipOpenChange(suppressTooltipRef, handleTooltipOpenChange);
+
+  return {
+    open,
+    setOpen,
+    portalContainer,
+    tooltipOpenState,
+    suppressTooltip,
+    suppressTooltipRef,
+    handlePointerEnter,
+    handlePointerLeave,
+    handleBlur,
+    suppressForSelection,
+    recordPointerSelection,
+    handleTooltipChange,
+  };
 }
 
 /**
@@ -545,35 +525,19 @@ export function Pill({
   refreshing,
   refreshLabel,
   flat = false,
+  triggerClassName,
+  ariaLabel,
+  ariaDescribedBy,
+  dropdownTestId,
+  onOpenChange,
   filter,
   tooltip,
   prefix,
   action,
+  actions,
   popoverHeader,
 }: PillProps) {
-  const [open, setOpenState] = useState(false);
-  const { tooltipOpenState, handleTooltipOpenChange, closeTooltip } = useTooltipMountGate();
-  const portalContainer = useTaskCreateDialogPopoverContainer();
-  const {
-    suppressTooltip,
-    suppressTooltipRef,
-    suppressTooltipUntilLeave,
-    handlePointerEnter,
-    handlePointerLeave,
-    handleBlur,
-  } = usePillTooltipSuppression(open);
-  const { setOpen, suppressForSelection, recordPointerSelection } = usePillOpenHandlers(
-    setOpenState,
-    closeTooltip,
-    suppressTooltipUntilLeave,
-  );
-  const handlePillTooltipOpenChange = useCallback(
-    (next: boolean) => {
-      if (next && suppressTooltipRef.current) return;
-      handleTooltipOpenChange(next);
-    },
-    [handleTooltipOpenChange],
-  );
+  const state = usePillState(onOpenChange);
   const triggerButton = renderPillTriggerButton({
     icon,
     value,
@@ -582,24 +546,29 @@ export function Pill({
     flat,
     hasValue: Boolean(value),
     testId,
+    triggerClassName,
+    ariaLabel,
+    ariaDescribedBy,
     prefix,
-    onPointerEnter: tooltip ? handlePointerEnter : undefined,
-    onPointerLeave: tooltip ? handlePointerLeave : undefined,
-    onBlur: tooltip ? handleBlur : undefined,
+    onPointerEnter: tooltip ? state.handlePointerEnter : undefined,
+    onPointerLeave: tooltip ? state.handlePointerLeave : undefined,
+    onBlur: tooltip ? state.handleBlur : undefined,
   });
   // Disabled buttons swallow events, so the wrapper owns tooltip focus.
-  if (disabled && disabledReason && !open) {
-    return renderDisabledPillTooltip(
-      tooltipOpenState,
-      handleTooltipOpenChange,
-      triggerButton,
-      disabledReason,
+  if (disabled && disabledReason && !state.open) {
+    return (
+      <DisabledPillTooltip
+        open={state.tooltipOpenState}
+        onOpenChange={state.handleTooltipChange}
+        triggerButton={triggerButton}
+        disabledReason={disabledReason}
+      />
     );
   }
 
   return renderPillPopover({
-    open,
-    setOpen,
+    open: state.open,
+    setOpen: state.setOpen,
     triggerButton: tooltip ? (
       <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
     ) : (
@@ -612,17 +581,19 @@ export function Pill({
     refreshLabel,
     options,
     value: selectedValue ?? value,
-    onPointerSelect: recordPointerSelection,
+    onPointerSelect: state.recordPointerSelection,
     onSelect,
     emptyMessage,
-    portalContainer,
+    portalContainer: state.portalContainer,
     action,
+    actions,
     popoverHeader,
+    dropdownTestId,
     tooltip,
-    tooltipOpenState,
-    suppressTooltip,
-    suppressTooltipRef,
-    handlePillTooltipOpenChange,
-    suppressForSelection,
+    tooltipOpenState: state.tooltipOpenState,
+    suppressTooltip: state.suppressTooltip,
+    suppressTooltipRef: state.suppressTooltipRef,
+    handlePillTooltipOpenChange: state.handleTooltipChange,
+    suppressForSelection: state.suppressForSelection,
   });
 }

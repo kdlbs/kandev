@@ -12,9 +12,12 @@ function projectFileChange(
   return {
     ...file,
     status: facet.status,
+    is_symlink: facet.is_symlink,
     staged: layer === "staged",
     additions: facet.additions,
     deletions: facet.deletions,
+    diff_state: facet.diff_state,
+    display_stale: facet.display_stale,
     old_path: facet.old_path,
     diff: facet.diff,
     diff_skip_reason: facet.diff_skip_reason,

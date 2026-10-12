@@ -44,6 +44,7 @@ func TestListSessionsUsesRecordedNamespaceAfterExecutorNamespaceChange(t *testin
 		SessionID: "session-1", TaskID: "task-1", PodName: "pod-1",
 		PodPhase: "Running", ContainerState: "running", Restarts: 2,
 		WorkspaceKind: "empty_dir", CreatedAt: createdAt.Format(time.RFC3339),
+		SessionState: "RUNNING", RetentionState: "active",
 	}}, rows)
 	require.Len(t, clientset.Actions(), 1)
 	getAction, ok := clientset.Actions()[0].(k8stesting.GetAction)

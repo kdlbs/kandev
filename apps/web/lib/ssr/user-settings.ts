@@ -4,6 +4,8 @@ import {
   parseTasksListGroup,
   parseTasksListSort,
 } from "@/lib/tasks/tasks-list-options";
+import { DEFAULT_KANBAN_SORT, parseKanbanSort } from "@/lib/kanban/kanban-sort";
+import { parseKanbanPriorityFilterTokens } from "@/lib/kanban/priority-filter-tokens";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import { fromApiThreadDraft, fromApiThreadView } from "@/lib/state/slices/ui/thread-view-wire";
@@ -19,6 +21,7 @@ import { parseSidebarTaskColors } from "@/lib/task-colors";
 import type {
   LspStatusLocation,
   LastSeenDisplay,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http-user-settings";
@@ -49,6 +52,8 @@ export function createDefaultUserSettings(): UserSettingsState {
     preventAutoStartAgentOnOpen: false,
     unreadDivider: false,
     agentGeneratedTaskTitles: true,
+    autoFocusNewTasks: true,
+    agentTabCloseBehavior: "delete_session",
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,
@@ -64,6 +69,8 @@ export function createDefaultUserSettings(): UserSettingsState {
     lspStatusLocation: "toolbar",
     savedLayouts: [],
     sidebarViews: [],
+    sidebarViewsByWorkspace: {},
+    sidebarLayoutsByWorkspace: {},
     sidebarActiveViewId: null,
     sidebarDraft: null,
     threadViews: [DEFAULT_THREAD_VIEW],
@@ -94,13 +101,20 @@ export function createDefaultUserSettings(): UserSettingsState {
     terminalFontSize: null,
     changesPanelLayout: "tree",
     lastSeenDisplay: "absolute",
+    messageTimeDisplay: "relative",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
+    sidebarFastActionsEnabled: false,
+    sidebarNewTaskStyle: "simple",
+    sidebarHoverEnabled: true,
+    sidebarHoverDelayMs: 500,
     resolveSessionHostnames: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     quickChatTabOrderByWorkspace: {},
     hiddenWorkflowStepIds: {},
     workflowIdsWithAutoHideEmptySteps: [],
+    kanbanSort: DEFAULT_KANBAN_SORT,
+    kanbanPriorityFilterTokens: [],
     loaded: false,
   };
 }
@@ -120,6 +134,17 @@ export function parseLastSeenDisplay(value: string | undefined): LastSeenDisplay
   return value === "relative" ? "relative" : "absolute";
 }
 
+/** Parses the transcript message-time display, defaulting to relative. */
+export function parseMessageTimeDisplay(value: string | undefined): MessageTimeDisplay {
+  return value === "absolute_short" || value === "absolute_long" ? value : "relative";
+}
+
+export function parseAgentTabCloseBehavior(
+  value: string | undefined,
+): "delete_session" | "hide_panel" {
+  return value === "hide_panel" ? "hide_panel" : "delete_session";
+}
+
 /** Parses the MCP task agent profile default, defaulting to "current_task". */
 export function parseMCPTaskAgentProfileDefault(
   value: string | undefined,
@@ -129,7 +154,7 @@ export function parseMCPTaskAgentProfileDefault(
 
 /** Parses the startup page preference, defaulting to "task_overview". */
 export function parseStartupPage(value: string | undefined): StartupPage {
-  return value === "last_task" ? "last_task" : "task_overview";
+  return value === "last_task" || value === "threads" ? value : "task_overview";
 }
 
 /** Parses the LSP status location, defaulting to "toolbar". */
@@ -268,6 +293,12 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
       s.prevent_auto_start_agent_on_open ?? current.preventAutoStartAgentOnOpen,
     unreadDivider: s.unread_divider ?? current.unreadDivider,
     agentGeneratedTaskTitles: s.agent_generated_task_titles ?? current.agentGeneratedTaskTitles,
+    autoFocusNewTasks: s.auto_focus_new_tasks ?? current.autoFocusNewTasks,
+    agentTabCloseBehavior: mapDefined(
+      s.agent_tab_close_behavior,
+      current.agentTabCloseBehavior,
+      parseAgentTabCloseBehavior,
+    ),
     mcpTaskAgentProfileDefault: mapDefined(
       s.mcp_task_agent_profile_default,
       current.mcpTaskAgentProfileDefault,
@@ -295,6 +326,11 @@ function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) 
       current.releaseNotesLastSeenVersion,
     ),
     lastSeenDisplay: mapDefined(s.last_seen_display, current.lastSeenDisplay, parseLastSeenDisplay),
+    messageTimeDisplay: mapDefined(
+      s.message_time_display,
+      current.messageTimeDisplay,
+      parseMessageTimeDisplay,
+    ),
   };
 }
 
@@ -309,6 +345,8 @@ export function buildCoreFields(
     ...buildBehaviorFields(s, current),
     ...buildAppearanceFields(s, current),
     savedLayouts: s.saved_layouts ?? current.savedLayouts,
+    sidebarViewsByWorkspace: s.sidebar_views_by_workspace ?? current.sidebarViewsByWorkspace,
+    sidebarLayoutsByWorkspace: s.sidebar_layouts_by_workspace ?? current.sidebarLayoutsByWorkspace,
     sidebarViews: mapDefined(s.sidebar_views, current.sidebarViews, (views) =>
       views.map(fromApiSidebarView),
     ) as SidebarView[],
@@ -371,12 +409,22 @@ export function buildCoreFields(
       parseAppStatusBarOrder,
     ),
     appStatusBarEnabled: s.app_status_bar_enabled ?? current.appStatusBarEnabled,
+    sidebarFastActionsEnabled: s.sidebar_fast_actions_enabled ?? current.sidebarFastActionsEnabled,
+    sidebarNewTaskStyle: s.sidebar_new_task_style ?? current.sidebarNewTaskStyle,
+    sidebarHoverEnabled: s.sidebar_hover_enabled ?? current.sidebarHoverEnabled,
+    sidebarHoverDelayMs: s.sidebar_hover_delay_ms ?? current.sidebarHoverDelayMs,
     quickChatTabOrderByWorkspace:
       s.quick_chat_tab_order_by_workspace ?? current.quickChatTabOrderByWorkspace,
     resolveSessionHostnames: s.resolve_session_hostnames ?? current.resolveSessionHostnames,
     hiddenWorkflowStepIds: s.kanban_hidden_step_ids ?? current.hiddenWorkflowStepIds,
     workflowIdsWithAutoHideEmptySteps:
       s.workflow_ids_with_auto_hide_empty_steps ?? current.workflowIdsWithAutoHideEmptySteps,
+    kanbanSort: mapDefined(s.kanban_sort, current.kanbanSort, parseKanbanSort),
+    kanbanPriorityFilterTokens: mapDefined(
+      s.kanban_priority_filter_tokens,
+      current.kanbanPriorityFilterTokens,
+      parseKanbanPriorityFilterTokens,
+    ),
     ...buildTerminalFields(s, current),
     ...buildSystemMetricsDisplayFields(s, current),
   };
@@ -429,4 +477,13 @@ export function mapUserSettingsResponse(
     revision: s.revision ?? null,
     shellOptions,
   };
+}
+
+/** An older HTTP response must not replace a newer settings event. */
+export function mapLatestUserSettingsResponse(
+  response: UserSettingsResponse,
+  current: UserSettingsState,
+): UserSettingsState {
+  if ((response.settings.revision ?? 0) < (current.revision ?? 0)) return current;
+  return mapUserSettingsResponse(response, current);
 }

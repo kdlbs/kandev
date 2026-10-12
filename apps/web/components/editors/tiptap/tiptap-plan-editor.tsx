@@ -69,6 +69,7 @@ type TipTapPlanEditorProps = {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  readOnly?: boolean;
   onSelectionChange?: (selection: TextSelection | null) => void;
   comments?: CommentForEditor[];
   onCommentClick?: (id: string, position: { x: number; y: number }) => void;
@@ -352,6 +353,7 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
   const onCommentDeletedRef = useRef(onCommentDeleted);
   const onEditorReadyRef = useRef(onEditorReady);
   const serializedMarkdownRef = useRef<string | null>(null);
+  const reportedProjectionOrphansRef = useRef(new Set<string>());
   const [isReady, setIsReady] = useState(false);
 
   const slash = useSlashMenu();
@@ -361,22 +363,20 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
 
   useEffect(() => {
     onChangeRef.current = onChange;
-  }, [onChange]);
-  useEffect(() => {
     onSelectionChangeRef.current = onSelectionChange;
-  }, [onSelectionChange]);
-  useEffect(() => {
     onCommentClickRef.current = onCommentClick;
-  }, [onCommentClick]);
-  useEffect(() => {
     onCommentDeletedRef.current = onCommentDeleted;
-  }, [onCommentDeleted]);
-  useEffect(() => {
     onEditorReadyRef.current = onEditorReady;
-  }, [onEditorReady]);
+  }, [onChange, onCommentClick, onCommentDeleted, onEditorReady, onSelectionChange]);
 
   const stableOrphanHandler = useCallback((ids: string[]) => {
-    onCommentDeletedRef.current?.(ids);
+    const fresh = ids.filter((id) => !reportedProjectionOrphansRef.current.has(id));
+    if (fresh.length === 0) return;
+    for (const id of fresh) reportedProjectionOrphansRef.current.add(id);
+    onCommentDeletedRef.current?.(fresh);
+  }, []);
+  const clearProjectedOrphans = useCallback((ids: string[]) => {
+    for (const id of ids) reportedProjectionOrphansRef.current.delete(id);
   }, []);
 
   /* eslint-disable react-hooks/refs -- stableOrphanHandler reads ref for deferred access, not during render */
@@ -396,6 +396,7 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
   const editor = useEditor(
     {
       immediatelyRender: false,
+      editable: !props.readOnly,
       extensions,
       content: value,
       editorProps: {
@@ -425,6 +426,10 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
     [tableResizeEnabled],
   );
 
+  useLayoutEffect(() => {
+    editor?.setEditable(!props.readOnly, false);
+  }, [editor, props.readOnly]);
+
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
@@ -432,11 +437,14 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
   useEffect(() => {
     if (!editor || !isReady) return;
     try {
-      rehydrateCommentMarks(editor, comments);
+      // A backend comment can temporarily be absent from an unsaved local
+      // plan projection. Rehydration must never interpret that as deletion;
+      // only an actual editor mark removal invokes stableOrphanHandler.
+      rehydrateCommentMarks(editor, comments, undefined, clearProjectedOrphans);
     } catch {
       /* editor may be transitional */
     }
-  }, [comments, editor, isReady]);
+  }, [clearProjectedOrphans, comments, editor, isReady, stableOrphanHandler]);
 
   return { editor, editorRef, onSelectionChangeRef, onCommentClickRef, isReady, slash };
 }
@@ -494,7 +502,7 @@ export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
         data-testid="plan-editor-scroll-container"
         className={cn("h-full min-h-0 overflow-y-auto overscroll-contain")}
       />
-      {editor && isReady && (
+      {editor && isReady && !props.readOnly && (
         <>
           <PlanBubbleMenu
             editor={editor}
@@ -506,11 +514,13 @@ export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
           <PlanDragHandle editor={editor} />
         </>
       )}
-      <PlanSlashMenu
-        menuState={slash.menuState}
-        selectedIndex={slash.selectedIndex}
-        setSelectedIndex={slash.setSelectedIndex}
-      />
+      {!props.readOnly && (
+        <PlanSlashMenu
+          menuState={slash.menuState}
+          selectedIndex={slash.selectedIndex}
+          setSelectedIndex={slash.setSelectedIndex}
+        />
+      )}
       {!isReady && (
         <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm bg-background/80">
           {t("editors:loadingEditor")}

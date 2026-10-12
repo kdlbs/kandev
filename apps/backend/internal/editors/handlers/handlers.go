@@ -22,7 +22,7 @@ func serviceErrorStatus(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, service.ErrEditorConfigInvalid):
 		return http.StatusBadRequest
-	case errors.Is(err, service.ErrEditorUnavailable):
+	case errors.Is(err, service.ErrEditorUnavailable), errors.Is(err, service.ErrFolderUnavailable):
 		return http.StatusConflict
 	default:
 		return http.StatusInternalServerError

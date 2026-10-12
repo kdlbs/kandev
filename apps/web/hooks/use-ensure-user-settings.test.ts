@@ -26,13 +26,11 @@ type MockState = {
 };
 
 let mockState: MockState;
+const mockStore = { getState: () => mockState, setState: vi.fn() };
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: MockState) => unknown) => selector(mockState),
-  useAppStoreApi: () => ({
-    getState: () => mockState,
-    setState: vi.fn(),
-  }),
+  useAppStoreApi: () => mockStore,
 }));
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
@@ -43,10 +41,7 @@ vi.mock("@/components/task-create-dialog-handlers", () => ({
   readQueuedTaskCreateLastUsedState: () => mockReadQueuedTaskCreateLastUsedState(),
 }));
 
-import {
-  __resetEnsureUserSettingsForTests,
-  useEnsureUserSettings,
-} from "./use-ensure-user-settings";
+import { useEnsureUserSettings } from "./use-ensure-user-settings";
 
 /** Builds a full default user-settings state marked as not loaded. */
 function makeUnloadedSettings(): UserSettingsState {
@@ -58,7 +53,7 @@ function makeUnloadedSettings(): UserSettingsState {
     startupPage: "task_overview",
     repositoryIds: [],
     tasksListSort: "updated_desc",
-    tasksListGroup: "state",
+    tasksListGroup: "workflow_step",
     tasksListShowDetails: false,
     preferredShell: null,
     shellOptions: [],
@@ -70,6 +65,8 @@ function makeUnloadedSettings(): UserSettingsState {
     preventAutoStartAgentOnOpen: false,
     unreadDivider: true,
     agentGeneratedTaskTitles: false,
+    autoFocusNewTasks: true,
+    agentTabCloseBehavior: "delete_session",
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,
@@ -81,6 +78,8 @@ function makeUnloadedSettings(): UserSettingsState {
     releaseNotesLastSeenVersion: null,
     savedLayouts: [],
     sidebarViews: [],
+    sidebarViewsByWorkspace: {},
+    sidebarLayoutsByWorkspace: {},
     sidebarActiveViewId: null,
     sidebarDraft: null,
     threadViews: [],
@@ -110,7 +109,12 @@ function makeUnloadedSettings(): UserSettingsState {
     terminalFontSize: null,
     changesPanelLayout: "tree",
     lastSeenDisplay: "absolute",
+    messageTimeDisplay: "relative",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
+    sidebarFastActionsEnabled: false,
+    sidebarNewTaskStyle: "simple",
+    sidebarHoverEnabled: true,
+    sidebarHoverDelayMs: 500,
     appStatusBarEnabled: false,
     resolveSessionHostnames: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
@@ -121,6 +125,8 @@ function makeUnloadedSettings(): UserSettingsState {
     lspStatusLocation: "toolbar",
     hiddenWorkflowStepIds: {},
     workflowIdsWithAutoHideEmptySteps: [],
+    kanbanSort: "created_desc",
+    kanbanPriorityFilterTokens: [],
     loaded: false,
   };
 }
@@ -136,7 +142,6 @@ function userSettingsResponse(taskCreateLastUsed = {}) {
 }
 
 beforeEach(() => {
-  __resetEnsureUserSettingsForTests();
   vi.clearAllMocks();
   mockState = {
     userSettings: makeUnloadedSettings(),
@@ -153,7 +158,9 @@ describe("useEnsureUserSettings", () => {
     renderHook(() => useEnsureUserSettings(true));
 
     await waitFor(() => expect(mockSetUserSettings).toHaveBeenCalled());
-    expect(mockFetchUserSettings).toHaveBeenCalledWith({ cache: "no-store" });
+    expect(mockFetchUserSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ cache: "no-store" }),
+    );
     expect(mockSetUserSettings.mock.calls[0]![0].loaded).toBe(true);
     expect(mockSetUserSettings.mock.calls[0]![0].taskCreateLastUsed).toMatchObject({
       repositoryId: "repo-1",

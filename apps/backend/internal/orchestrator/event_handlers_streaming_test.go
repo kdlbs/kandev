@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -31,6 +32,7 @@ type recordingEventBus struct {
 type recordedEvent struct {
 	subject string
 	event   *bus.Event
+	ctx     context.Context
 }
 
 // taskServiceStateRepository exercises runtime task-state reconciliation
@@ -193,6 +195,39 @@ type concurrentBaselineRepo struct {
 	bothLoaded chan struct{}
 }
 
+type pausedSessionSettingsSnapshotRepo struct {
+	repoStore
+	mu                        sync.Mutex
+	snapshotWrites            int
+	firstSnapshotWrite        chan struct{}
+	secondSnapshotWrite       chan struct{}
+	releaseFirstSnapshotWrite chan struct{}
+}
+
+func (r *pausedSessionSettingsSnapshotRepo) SetSessionMetadataKey(
+	ctx context.Context,
+	sessionID string,
+	key string,
+	value interface{},
+) error {
+	if key == models.SessionMetaKeyACPModelState {
+		r.mu.Lock()
+		r.snapshotWrites++
+		write := r.snapshotWrites
+		switch write {
+		case 1:
+			close(r.firstSnapshotWrite)
+		case 2:
+			close(r.secondSnapshotWrite)
+		}
+		r.mu.Unlock()
+		if write == 1 {
+			<-r.releaseFirstSnapshotWrite
+		}
+	}
+	return r.repoStore.SetSessionMetadataKey(ctx, sessionID, key, value)
+}
+
 func (r *concurrentBaselineRepo) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
 	session, err := r.repoStore.GetTaskSession(ctx, id)
 	if err != nil {
@@ -271,6 +306,42 @@ func (m *serviceBackedMessageCreator) CreateSessionMessage(
 	return err
 }
 
+func (m *serviceBackedMessageCreator) CreateSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, sessionID, messageType, turnID string,
+	metadata map[string]interface{},
+	requestsInput bool,
+) error {
+	_, err := m.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+		RequestsInput: requestsInput,
+	})
+	return err
+}
+
+func (m *serviceBackedMessageCreator) CreateLifecycleSessionMessage(
+	ctx context.Context,
+	taskID, content, sessionID, messageType string,
+	metadata map[string]interface{},
+) error {
+	_, err := m.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		CompletedTurn: true,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+	})
+	return err
+}
+
 func (m *serviceBackedMessageCreator) UpdateToolCallMessage(
 	ctx context.Context,
 	taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string,
@@ -288,6 +359,15 @@ func (m *serviceBackedMessageCreator) UpdateToolCallMessage(
 		taskID,
 		turnID,
 		msgType,
+	)
+}
+
+func (m *serviceBackedMessageCreator) UpsertAgentPlanMessage(
+	ctx context.Context,
+	taskID, sourceToolCallID, agentSessionID, content, turnID string,
+) error {
+	return m.svc.UpsertAgentPlanMessage(
+		ctx, taskID, sourceToolCallID, agentSessionID, content, turnID,
 	)
 }
 
@@ -341,8 +421,8 @@ func (r failSetSessionMetadataRepo) SetSessionMetadataKey(
 	return errors.New("set session metadata failed")
 }
 
-func (b *recordingEventBus) Publish(_ context.Context, subject string, event *bus.Event) error {
-	b.events = append(b.events, recordedEvent{subject: subject, event: event})
+func (b *recordingEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	b.events = append(b.events, recordedEvent{subject: subject, event: event, ctx: ctx})
 	return nil
 }
 func (b *recordingEventBus) Subscribe(string, bus.EventHandler) (bus.Subscription, error) {
@@ -356,6 +436,28 @@ func (b *recordingEventBus) Request(context.Context, string, *bus.Event, time.Du
 }
 func (b *recordingEventBus) Close()            {}
 func (b *recordingEventBus) IsConnected() bool { return true }
+
+// @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.1
+func TestHandleAgentPlanEventUsesCorrelatedMessageUpdate(t *testing.T) {
+	messages := &mockMessageCreator{}
+	service := &Service{messageCreator: messages, logger: testLogger()}
+	service.activeTurns.Store("session-plan", "turn-plan")
+
+	service.handleAgentPlanEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task-plan",
+		SessionID: "session-plan",
+		Data: &lifecycle.AgentStreamEventData{
+			ToolCallID:  "call-plan",
+			PlanContent: "# Plan\n\n1. Read",
+		},
+	})
+
+	require.Zero(t, messages.sessionMessageAttempts)
+	require.Zero(t, messages.toolUpdateWrites)
+	require.Equal(t, 1, messages.agentPlanUpserts)
+	require.Equal(t, "call-plan", messages.lastAgentPlanToolCallID)
+	require.Equal(t, "# Plan\n\n1. Read", messages.lastAgentPlanContent)
+}
 
 func TestUpdateTaskSessionStatePublishesPersistedUpdatedAt(t *testing.T) {
 	ctx := context.Background()
@@ -452,6 +554,7 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 		ctx,
 		"t1",
 		"s1",
+		nil,
 		models.TaskSessionStateCancelled,
 		"coordinator stop",
 		nil,
@@ -464,6 +567,71 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
 	require.Equal(t, []string{"s1"}, canceller.expiredSessions)
 	require.Equal(t, []bool{true}, canceller.expireContextDeadline)
+}
+
+func TestRollbackResumeFailureIfCurrentAttemptPublishesTransition(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "resume-rollback-task", "resume-rollback-session", "step1")
+	session, err := repo.GetTaskSession(ctx, "resume-rollback-session")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateStarting
+	session.ErrorMessage = "old error"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, session.ID, map[string]interface{}{
+		models.SessionMetaKeyAgentStartAttemptID:   "attempt-current",
+		models.SessionMetaKeyGitCredentialSnapshot: map[string]interface{}{"source": "current"},
+		"retained": "value",
+	}))
+
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+	changed, err := svc.rollbackResumeFailureIfCurrentAttempt(ctx, executor.ResumeFailureRollbackRequest{
+		TaskID: "resume-rollback-task", SessionID: "resume-rollback-session",
+		AttemptID: "attempt-current", ExpectedState: models.TaskSessionStateStarting,
+		NextState: models.TaskSessionStateFailed, ErrorMessage: "resume failed",
+		CredentialSnapshot: &executor.ResumeCredentialSnapshotRestore{
+			Value: map[string]interface{}{"source": "previous"}, Present: true,
+		},
+	})
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	stored, err := repo.GetTaskSession(ctx, "resume-rollback-session")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateFailed, stored.State)
+	require.Equal(t, "resume failed", stored.ErrorMessage)
+	require.Equal(t, map[string]interface{}{"source": "previous"}, stored.Metadata[models.SessionMetaKeyGitCredentialSnapshot])
+	require.Equal(t, "attempt-current", stored.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+	require.Equal(t, "value", stored.Metadata["retained"])
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
+}
+
+func TestTransitionTaskSessionStateRejectsUnexpectedSourceState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+	expectedState := models.TaskSessionStateStarting
+
+	changed, finalState, err := svc.transitionTaskSessionState(
+		ctx,
+		"t1",
+		"s1",
+		&expectedState,
+		models.TaskSessionStateFailed,
+		"resume failed",
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, models.TaskSessionStateRunning, finalState)
+	require.Empty(t, eb.events)
 }
 
 func TestTransitionTaskSessionStatePublishesMetadataWrittenByHook(t *testing.T) {
@@ -484,6 +652,7 @@ func TestTransitionTaskSessionStatePublishesMetadataWrittenByHook(t *testing.T) 
 		ctx,
 		"t1",
 		"s1",
+		nil,
 		models.TaskSessionStateFailed,
 		errorValue.Message,
 		func() {
@@ -519,6 +688,7 @@ func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {
 		ctx,
 		"t1",
 		"s1",
+		nil,
 		models.TaskSessionStateCancelled,
 		"coordinator stop",
 		nil,
@@ -846,6 +1016,30 @@ func TestPersistTurnPromptMetadata(t *testing.T) {
 	require.Equal(t, float64(123), usage["provider_reported_cost_subcents"])
 	require.Equal(t, true, usage["output_tokens_present"])
 	require.Equal(t, true, usage["estimated"])
+}
+
+func TestPersistNativeCodexTurnIDBindsProviderTurnToActiveKandevTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.AgentProfileSnapshot = map[string]interface{}{"agent_id": "codex-app-server"}
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.config.CodexAppServerEnabled = true
+	svc.turnService = &repoTurnService{repo: repo}
+	turn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+
+	svc.persistNativeCodexTurnID(ctx, &lifecycle.AgentStreamEventPayload{
+		SessionID: "s1",
+		Data:      &lifecycle.AgentStreamEventData{Type: streams.EventTypeTurnStarted, OperationID: "native-turn-1"},
+	})
+
+	stored, err := repo.GetTurn(ctx, turn.ID)
+	require.NoError(t, err)
+	require.Equal(t, "native-turn-1", stored.Metadata[models.TurnMetaKeyCodexNativeTurnID])
 }
 
 // TestToolEventsWakeSessionAndTaskTogether locks in the fix for the
@@ -1749,6 +1943,61 @@ func TestUsageEventIDFor(t *testing.T) {
 		"promptGeneration==0 must not derive a stable id")
 }
 
+func TestPublishNativeUsageObservationUsesStableProviderIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-native-usage", "session-native-usage", "")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+	cacheWrite := int64(7)
+	observation := &streams.NativeUsageObservation{
+		SchemaVersion: 1, Source: "response", ProviderThreadID: "native-root",
+		ProviderTurnID: "native-turn", ProviderResponseID: "response-1", Scope: "direct",
+		Completeness: "exact", Model: "gpt-5-codex", ReportedCacheWriteTokens: &cacheWrite,
+		PriceSuppressed: true,
+	}
+	frame := &lifecycle.AgentStreamEventPayload{
+		TaskID: "task-native-usage", SessionID: "session-native-usage", ExecutionID: "execution-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: streams.EventTypeUsageObservation, TurnID: "turn-kandev-1",
+			Usage: &streams.PromptUsage{InputTokens: 10, OutputTokens: 5}, UsageObservation: observation,
+		},
+	}
+	svc.publishNativeUsageObservation(ctx, frame)
+	svc.publishNativeUsageObservation(ctx, frame)
+	if len(eb.events) != 2 {
+		t.Fatalf("published events = %d, want 2", len(eb.events))
+	}
+	first := eb.events[0].event.Data.(lifecycle.SessionPromptUsageEventPayload)
+	second := eb.events[1].event.Data.(lifecycle.SessionPromptUsageEventPayload)
+	if first.UsageEventID == "" || first.UsageEventID != second.UsageEventID {
+		t.Fatalf("usage event IDs = %q and %q, want stable non-empty ID", first.UsageEventID, second.UsageEventID)
+	}
+	if first.TurnID != "turn-kandev-1" || first.Model != "gpt-5-codex" || first.UsageObservation != observation || !first.Usage.PriceSuppressed {
+		t.Fatalf("published native usage payload = %#v", first)
+	}
+	if eb.events[0].subject != events.BuildSessionPromptUsageSubject("session-native-usage") {
+		t.Fatalf("subject = %q", eb.events[0].subject)
+	}
+
+	child := *observation
+	child.ProviderThreadID = "native-child"
+	child.ProviderResponseID = "response-child"
+	child.Scope = "child"
+	child.Model = ""
+	childFrame := *frame
+	childData := *frame.Data
+	childData.UsageObservation = &child
+	childData.CurrentModelID = "must-not-infer"
+	childFrame.Data = &childData
+	svc.publishNativeUsageObservation(ctx, &childFrame)
+	third := eb.events[2].event.Data.(lifecycle.SessionPromptUsageEventPayload)
+	if third.Model != "" || third.UsageEventID == first.UsageEventID {
+		t.Fatalf("child usage attribution model/id = %q/%q, want no inferred parent model and distinct identity", third.Model, third.UsageEventID)
+	}
+}
+
 // TestPublishPromptUsage_RepublishedCompletionReusesUsageEventID is the
 // integration-level regression test for F2: a random UsageEventID minted on
 // every publish can only dedup literal redelivery of the identical
@@ -2592,6 +2841,30 @@ func TestSetSessionRunning_PublishesTaskStateBeforeRunningSession(t *testing.T) 
 	require.Equal(t, events.TaskSessionStateChanged, eventBus.events[1].subject)
 }
 
+func TestSetSessionRunning_PreservesWaitingForLiveClarification(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"s1",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	))
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.setSessionRunningForExecution(ctx, "t1", "s1", "exec-1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	require.Empty(t, taskRepo.stateWrites,
+		"a stream event must not move the task while its clarification remains live")
+}
+
 func TestSetSessionRunning_WritesOnTransition(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -2683,10 +2956,10 @@ func seedInterruptedMarker(t *testing.T, repo *sqliterepo.Repository, taskID str
 	}
 }
 
-func TestSessionStartClearsInterruptedMarker(t *testing.T) {
+func TestSessionStartKeepsInterruptedMarkerUntilRecovery(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("state hook transition to STARTING clears and republishes", func(t *testing.T) {
+	t.Run("state hook transition to STARTING keeps the marker", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		seedInterruptedMarker(t, repo, "t1")
@@ -2704,12 +2977,12 @@ func TestSessionStartClearsInterruptedMarker(t *testing.T) {
 		task, err := repo.GetTask(ctx, "t1")
 		require.NoError(t, err)
 		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
-		require.False(t, marked, "marker must be cleared when the session enters STARTING")
-		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
-			"task.updated must be republished after clearing the marker")
+		require.True(t, marked, "marker must survive the STARTING transition")
+		require.Empty(t, publisher.updatedTaskIDs,
+			"STARTING must not publish a marker-clearing task.updated")
 	})
 
-	t.Run("launch path via setSessionStarting clears and republishes", func(t *testing.T) {
+	t.Run("launch path via setSessionStarting keeps the marker", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		seedInterruptedMarker(t, repo, "t1")
@@ -2729,9 +3002,151 @@ func TestSessionStartClearsInterruptedMarker(t *testing.T) {
 		task, err := repo.GetTask(ctx, "t1")
 		require.NoError(t, err)
 		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
-		require.False(t, marked, "marker must be cleared on the launch path")
+		require.True(t, marked, "the launch attempt must not clear the marker")
+		require.Empty(t, publisher.updatedTaskIDs,
+			"the launch attempt must not publish a marker-clearing task.updated")
+	})
+
+	t.Run("confirmed boot recovery clears and republishes", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedInterruptedMarker(t, repo, "t1")
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		marker, ok := task.Metadata[models.MetaKeyInterruptedAt].(string)
+		require.True(t, ok)
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, interruptedMarkerSnapshot{value: marker, captured: true}, true))
+
+		task, err = repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+		require.False(t, marked, "successful boot recovery must clear the marker")
 		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
-			"task.updated must be republished after clearing the marker")
+			"successful boot recovery must publish the marker-clearing task.updated")
+	})
+
+	t.Run("stale recovery preserves a newer interruption marker", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "old-marker"))
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, interruptedMarkerSnapshot{value: "old-marker", captured: true}, true))
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
+		require.Empty(t, publisher.updatedTaskIDs,
+			"a stale recovery callback must not publish a marker-clearing update")
+	})
+
+	t.Run("recovery callback with no marker snapshot fails closed", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		// A recovery attempt can finish after its task snapshot failed to load.
+		// An uncaptured snapshot must remain a guarded no-op.
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, interruptedMarkerSnapshot{}, true))
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
+		require.Empty(t, publisher.updatedTaskIDs)
+	})
+
+	t.Run("finished recovery attempt with absent marker preserves a newer marker", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		registry := newResumeAttemptRegistry()
+		svc.resumeAttemptsMu.Lock()
+		svc.resumeAttempts = registry
+		svc.resumeAttemptsMu.Unlock()
+		attempt, owner := registry.begin(ctx, "t1", "s1")
+		require.True(t, owner)
+		attempt.setInterruptedMarkerSnapshot("", true)
+		attempt.finish(registry)
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		snapshot, known := svc.interruptedMarkerSnapshotForResumeAttempt("s1", attempt.identity())
+		require.True(t, known)
+		require.True(t, snapshot.captured)
+		require.Empty(t, snapshot.value)
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, snapshot, known))
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
+	})
+
+	t.Run("finished recovery attempt with failed marker read preserves a newer marker", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		registry := newResumeAttemptRegistry()
+		svc.resumeAttemptsMu.Lock()
+		svc.resumeAttempts = registry
+		svc.resumeAttemptsMu.Unlock()
+		attempt, owner := registry.begin(ctx, "t1", "s1")
+		require.True(t, owner)
+		// Leave the snapshot uncaptured to model a failed GetTask read.
+		attempt.finish(registry)
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		snapshot, known := svc.interruptedMarkerSnapshotForResumeAttempt("s1", attempt.identity())
+		require.True(t, known)
+		require.False(t, snapshot.captured)
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, snapshot, known))
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
+	})
+
+	t.Run("finished recovery attempt retains its immutable marker snapshot", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "old-marker"))
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		registry := newResumeAttemptRegistry()
+		svc.resumeAttemptsMu.Lock()
+		svc.resumeAttempts = registry
+		svc.resumeAttemptsMu.Unlock()
+		attempt, owner := registry.begin(ctx, "t1", "s1")
+		require.True(t, owner)
+		attempt.setInterruptedMarkerSnapshot("old-marker", true)
+		attempt.finish(registry)
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		marker := svc.interruptedMarkerForResumeAttempt("s1", attempt.identity())
+		require.Equal(t, "old-marker", marker)
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, interruptedMarkerSnapshot{value: marker, captured: true}, true))
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
 	})
 
 	t.Run("no marker means no republish", func(t *testing.T) {
@@ -2818,9 +3233,8 @@ func TestAutoStartFailureDoesNotMarkTaskWithActiveSession(t *testing.T) {
 	require.False(t, marked, "a late failure must not mark a task with active work")
 }
 
-// Nothing else ever retires a stored agent failure, so without this clear every
-// path that re-derives task status from session metadata resurrects it and the
-// error icon never goes away.
+// A recovered failure remains available for transcript history, while this
+// transition retires it from the live session-error projection.
 func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
 	ctx := context.Background()
 
@@ -2845,11 +3259,12 @@ func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
 	newService := func(repo *sqliterepo.Repository) (*Service, *recordingEventBus) {
 		eb := &recordingEventBus{}
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.taskLaunchRecoveryRepo = repo
 		svc.eventBus = eb
 		return svc, eb
 	}
 
-	t.Run("clears the record and publishes it inactive", func(t *testing.T) {
+	t.Run("retires the record and publishes it inactive", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		seedError(t, repo)
@@ -2861,13 +3276,15 @@ func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
 
 		stored, err := repo.GetTaskSession(ctx, "s1")
 		require.NoError(t, err)
-		_, ok := models.LoadLastAgentError(stored.Metadata)
-		require.False(t, ok, "a recovered failure must not keep driving the error icon")
+		storedError, ok := models.LoadLastAgentError(stored.Metadata)
+		require.True(t, ok, "a recovered failure remains available as history")
+		require.True(t, storedError.IsDismissed(), "a recovered failure must not remain active")
 
 		// The session-state publish that follows reads session_metadata straight
 		// off this object, so a stale copy would re-arm the icon immediately.
-		_, ok = models.LoadLastAgentError(session.Metadata)
-		require.False(t, ok, "the in-memory copy must be cleared too")
+		memoryError, ok := models.LoadLastAgentError(session.Metadata)
+		require.True(t, ok)
+		require.True(t, memoryError.IsDismissed(), "the in-memory copy must be retired too")
 
 		published := errorEvents(eb)
 		require.Len(t, published, 1, "clients need one event to drop the icon")
@@ -2875,6 +3292,7 @@ func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, false, data["active"])
 		require.Equal(t, "s1", data["session_id"])
+		require.Equal(t, models.ErrorScopeSession, data["scope"])
 	})
 
 	t.Run("stays silent when the session has no stored error", func(t *testing.T) {
@@ -2889,6 +3307,218 @@ func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
 		require.Empty(t, errorEvents(eb),
 			"every later completion must stay silent so turns do not churn the row")
 	})
+
+	t.Run("does not retire a successor failure from a stale snapshot", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetSessionMetadataKey(
+			ctx, "s1", models.SessionMetaKeyLastAgentError,
+			models.LastAgentError{
+				Message:    "old failure",
+				OccurredAt: time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC),
+				StampValue: "old-stamp",
+			},
+		))
+		svc, eb := newService(repo)
+
+		snapshot, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		require.NoError(t, repo.SetSessionMetadataKey(
+			ctx, "s1", models.SessionMetaKeyLastAgentError,
+			models.LastAgentError{
+				Message:    "successor failure",
+				OccurredAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC),
+				StampValue: "successor-stamp",
+			},
+		))
+
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", snapshot, interruptedMarkerSnapshot{}, false))
+
+		stored, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		storedError, ok := models.LoadLastAgentError(stored.Metadata)
+		require.True(t, ok)
+		require.Equal(t, "successor-stamp", storedError.Stamp())
+		require.False(t, storedError.IsDismissed())
+		snapshotError, ok := models.LoadLastAgentError(snapshot.Metadata)
+		require.True(t, ok)
+		require.Equal(t, "old-stamp", snapshotError.Stamp())
+		require.False(t, snapshotError.IsDismissed())
+		require.Empty(t, errorEvents(eb), "a stale retirement must not hide the successor")
+	})
+}
+
+func TestTransitionBootstrapFailurePersistsSessionHistory(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "bootstrap-history-task", "bootstrap-history-session", "step1")
+	session, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateStarting
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	seedExecutorRunning(t, repo, "bootstrap-history-session", "bootstrap-history-task", "exec-1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.taskLaunchRecoveryRepo = repo
+	svc.messageCreator = newServiceBackedMessageCreator(repo)
+	startupFailure := &lifecycle.BootstrapFailure{
+		Operation: models.AgentErrorCauseOperationResume,
+		Code:      models.AgentErrorCauseCodePermissionDenied,
+		Detail:    "The saved session could not be loaded.",
+		Cause:     errors.New("provider timeout with private token=secret"),
+	}
+	// The ordinary non-auth startup path returns false so the executor owns the
+	// terminal admission. The transition below is that accepted boundary.
+	require.False(t, svc.handleAgentStartFailed(
+		ctx,
+		"bootstrap-history-task",
+		"bootstrap-history-session",
+		"exec-1",
+		startupFailure,
+		false,
+	))
+	failure := models.LastAgentError{
+		Message:          "The agent could not start.",
+		OccurredAt:       time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC),
+		Scope:            models.ErrorScopeSession,
+		AgentExecutionID: "exec-1",
+		ExecutionID:      "exec-1",
+		Phase:            models.LaunchErrorPhaseBootstrap,
+		AttemptID:        "attempt-1",
+		Code:             models.LaunchErrorCategoryGenericLaunchFailure,
+		Details:          "operation=agent_bootstrap; cause=the provider did not respond",
+		StampValue:       "bootstrap-failure-1",
+	}
+
+	changed, state, err := svc.transitionBootstrapFailure(
+		ctx,
+		"bootstrap-history-task",
+		"bootstrap-history-session",
+		"exec-1",
+		models.TaskSessionStateStarting,
+		"",
+		"",
+		failure,
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, models.TaskSessionStateFailed, state)
+
+	messages, err := repo.ListMessages(ctx, "bootstrap-history-session")
+	require.NoError(t, err)
+	require.Len(t, messages, 1, "accepted bootstrap failure must create one transcript entry")
+	require.Equal(t, models.MessageTypeStatus, messages[0].Type)
+	require.Equal(t, "bootstrap-failure-1", messages[0].Metadata["error_stamp"])
+	require.Equal(t, true, messages[0].Metadata["recovery_actions"])
+	require.Equal(t, failure.Details, messages[0].Metadata["error_output"])
+	require.Equal(t, "Agent startup failed: The agent could not start.", messages[0].Content)
+
+	reloaded, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
+	require.NoError(t, err)
+	retainedBeforeRecovery, ok := models.LoadLastAgentError(reloaded.Metadata)
+	require.True(t, ok)
+	resolvedAt := svc.markRecoveryResolvedForAttempt(
+		ctx,
+		reloaded.ID,
+		reloaded,
+		"resume-1",
+		retainedBeforeRecovery.Stamp(),
+		interruptedMarkerSnapshot{},
+		false,
+	)
+	require.NotNil(t, resolvedAt)
+
+	afterRecovery, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
+	require.NoError(t, err)
+	retainedError, ok := models.LoadLastAgentError(afterRecovery.Metadata)
+	require.True(t, ok)
+	require.True(t, retainedError.IsDismissed())
+	retainedMessages, err := repo.ListMessages(ctx, "bootstrap-history-session")
+	require.NoError(t, err)
+	require.Len(t, retainedMessages, 1, "recovery retirement must retain the chronological entry")
+}
+
+type failOnceBootstrapMessageCreator struct {
+	*serviceBackedMessageCreator
+	err error
+}
+
+func (m *failOnceBootstrapMessageCreator) CreateSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, sessionID, messageType, turnID string,
+	metadata map[string]interface{}, requestsInput bool,
+) error {
+	if m.err != nil {
+		err := m.err
+		m.err = nil
+		return err
+	}
+	return m.serviceBackedMessageCreator.CreateSessionMessageIdempotent(
+		ctx,
+		messageID,
+		taskID,
+		content,
+		sessionID,
+		messageType,
+		turnID,
+		metadata,
+		requestsInput,
+	)
+}
+
+func TestTransitionBootstrapFailureReturnsRepairableHistoryError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "bootstrap-repair-task", "bootstrap-repair-session", "step1")
+	session, err := repo.GetTaskSession(ctx, "bootstrap-repair-session")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateStarting
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	seedExecutorRunning(t, repo, "bootstrap-repair-session", "bootstrap-repair-task", "exec-repair")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	creator := &failOnceBootstrapMessageCreator{
+		serviceBackedMessageCreator: newServiceBackedMessageCreator(repo),
+		err:                         errors.New("transcript temporarily unavailable"),
+	}
+	svc.messageCreator = creator
+	failure := models.LastAgentError{
+		Message:          "The agent could not start.",
+		OccurredAt:       time.Date(2026, 9, 14, 11, 0, 0, 0, time.UTC),
+		Scope:            models.ErrorScopeSession,
+		AgentExecutionID: "exec-repair",
+		ExecutionID:      "exec-repair",
+		Phase:            models.LaunchErrorPhaseBootstrap,
+		AttemptID:        "exec-repair",
+		Code:             models.LaunchErrorCategoryGenericLaunchFailure,
+		Details:          "operation=agent_bootstrap; cause=provider unavailable",
+		StampValue:       "bootstrap-repair-failure",
+	}
+
+	changed, state, err := svc.transitionBootstrapFailure(
+		ctx,
+		"bootstrap-repair-task",
+		"bootstrap-repair-session",
+		"exec-repair",
+		models.TaskSessionStateStarting,
+		"",
+		"",
+		failure,
+	)
+	require.Error(t, err)
+	require.True(t, changed, "the state admission succeeded even though history needed repair")
+	require.Equal(t, models.TaskSessionStateFailed, state)
+	messages, err := repo.ListMessages(ctx, "bootstrap-repair-session")
+	require.NoError(t, err)
+	require.Empty(t, messages)
+
+	require.NoError(t, svc.persistBootstrapFailureMessage(
+		ctx, "bootstrap-repair-task", "bootstrap-repair-session", "exec-repair", failure,
+	))
+	messages, err = repo.ListMessages(ctx, "bootstrap-repair-session")
+	require.NoError(t, err)
+	require.Len(t, messages, 1, "the bounded repair must restore the accepted failure entry")
+	require.Equal(t, "bootstrap-repair-failure", messages[0].Metadata["error_stamp"])
 }
 
 func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
@@ -3418,6 +4048,650 @@ func TestPersistSessionModel(t *testing.T) {
 	require.Equal(t, "gpt-5.4", preserved.AgentProfileSnapshot["model"])
 }
 
+func TestProviderRestoredSessionReportsPreserveSavedSelections(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.AgentProfileSnapshot = map[string]interface{}{
+		"agent_id": "auggie",
+		"model":    "saved-model",
+		"mode":     "saved-mode",
+		"config_options": map[string]string{
+			"reasoning_effort": "saved-effort",
+		},
+	}
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeySessionMode, "saved-mode"))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyRuntimeConfig, models.SessionRuntimeConfig{
+		Model: "saved-model", Mode: "saved-mode", ConfigOptions: map[string]string{"reasoning_effort": "saved-effort"},
+	}))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyRuntimeConfigOverrides, models.SessionRuntimeConfig{
+		Model: "saved-model", Mode: "saved-mode", ConfigOptions: map[string]string{"reasoning_effort": "saved-effort"},
+	}))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPConfigBaseline, map[string]string{
+		"model": "saved-model", "reasoning_effort": "saved-effort",
+	}))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyOriginalEffectiveConfig, models.SessionOriginalEffectiveConfiguration{
+		Model: "saved-model", ConfigOptions: map[string]string{"reasoning_effort": "saved-effort"},
+	}))
+
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+	recoveryPayload := func(data *lifecycle.AgentStreamEventData) *lifecycle.AgentStreamEventPayload {
+		data.SessionSettingsPolicy = streams.SessionSettingsPolicyProviderRestored
+		return &lifecycle.AgentStreamEventPayload{
+			Type: "agent/event", AttemptID: "resume-1", ExecutionID: "execution-recovery-1",
+			TaskID: "t1", SessionID: "s1",
+			Data: data,
+		}
+	}
+	providerMode := recoveryPayload(&lifecycle.AgentStreamEventData{
+		CurrentModeID:             "provider-mode",
+		SessionSettingsGeneration: 1,
+		AvailableModes:            []streams.SessionModeInfo{{ID: "provider-mode", Name: "Provider mode"}},
+	})
+	providerModels := recoveryPayload(&lifecycle.AgentStreamEventData{
+		CurrentModelID:            "provider-model",
+		SessionSettingsGeneration: 2,
+		SessionModels:             []streams.SessionModelInfo{{ModelID: "provider-model", Name: "Provider model"}},
+		ConfigOptions: []streams.ConfigOption{
+			{ID: "model", Category: "model", CurrentValue: "provider-model"},
+			{ID: "reasoning_effort", Category: "reasoning", CurrentValue: "provider-effort"},
+		},
+		Data: map[string]any{"config_options_settled": true},
+	})
+	// First process the host-stamped initial load reports. They update effective
+	// ACP state while the configured and session override layers remain intact.
+	svc.handleSessionModeEvent(ctx, providerMode)
+	svc.handleSessionModelsEvent(ctx, providerModels)
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, "saved-model", updated.AgentProfileSnapshot["model"])
+	require.Equal(t, "saved-mode", updated.Metadata[models.SessionMetaKeySessionMode])
+	runtimeConfig, ok := models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, models.SessionRuntimeConfig{
+		Model: "saved-model", Mode: "saved-mode", ConfigOptions: map[string]string{"reasoning_effort": "saved-effort"},
+	}, runtimeConfig)
+
+	// Lifecycle startup can republish the provider-derived snapshot without an
+	// ACP source generation. It must preserve the last source generation so the
+	// provider's next real selector event remains admissible.
+	lifecycleReport := recoveryPayload(&lifecycle.AgentStreamEventData{
+		CurrentModelID: "provider-model",
+		SessionModels:  []streams.SessionModelInfo{{ModelID: "provider-model", Name: "Provider model"}},
+		Data:           map[string]any{"config_options_settled": true},
+	})
+	svc.handleSessionModelsEvent(ctx, lifecycleReport)
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	effective, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, uint64(2), effective.CurrentModelGeneration, "an unsequenced lifecycle snapshot must not consume an ACP source generation")
+
+	// A later explicit selector outcome remains an ordinary persisted change.
+	explicitMode := &lifecycle.AgentStreamEventPayload{
+		TaskID: "t1", SessionID: "s1", AttemptID: "resume-1",
+		Data: &lifecycle.AgentStreamEventData{CurrentModeID: "explicit-mode", SessionSettingsGeneration: 3},
+	}
+	explicitModels := &lifecycle.AgentStreamEventPayload{
+		TaskID: "t1", SessionID: "s1", AttemptID: "resume-1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID:            "explicit-model",
+			SessionSettingsGeneration: 4,
+			SessionModels:             []streams.SessionModelInfo{{ModelID: "explicit-model", Name: "Explicit model"}},
+			ConfigOptions: []streams.ConfigOption{
+				{ID: "model", Category: "model", CurrentValue: "explicit-model"},
+				{ID: "reasoning_effort", Category: "reasoning", CurrentValue: "explicit-effort"},
+			},
+		},
+	}
+	svc.handleSessionModeEvent(ctx, explicitMode)
+	svc.handleSessionModelsEvent(ctx, explicitModels)
+	// Notifications from the initial load can arrive after its request returns.
+	// Their source marker keeps this delayed delivery from replacing a newer
+	// saved choice.
+	svc.handleSessionModeEvent(ctx, providerMode)
+	svc.handleSessionModelsEvent(ctx, providerModels)
+
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, "explicit-model", updated.AgentProfileSnapshot["model"], "a delayed provider observation must not replace the later saved model selection")
+	require.Equal(t, "explicit-mode", updated.Metadata[models.SessionMetaKeySessionMode], "a delayed provider observation must not replace the later saved mode selection")
+	config, ok := models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, models.SessionRuntimeConfig{
+		Model: "explicit-model", Mode: "explicit-mode", ConfigOptions: map[string]string{"model": "explicit-model", "reasoning_effort": "explicit-effort"},
+	}, config, "delayed provider observations must not rewrite runtime settings used by a later launch")
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, models.SessionRuntimeConfig{
+		Model: "saved-model", Mode: "saved-mode", ConfigOptions: map[string]string{"reasoning_effort": "saved-effort"},
+	}, overrides)
+	effective, ok = lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "explicit-model", effective.CurrentModelID, "a delayed load report must not regress the effective selector snapshot")
+	require.Equal(t, "explicit-effort", effective.ConfigOptions[1].CurrentValue)
+	require.Len(t, eb.events, 5, "stale settings reports must not be broadcast after a newer selector outcome")
+	require.Equal(t, "explicit-mode", eb.events[3].event.Data.(lifecycle.SessionModeEventPayload).CurrentModeID)
+	require.Equal(t, "explicit-model", eb.events[4].event.Data.(lifecycle.SessionModelsEventPayload).CurrentModelID)
+	for _, index := range []int{0, 1, 2, 3, 4} {
+		if index == 0 || index == 3 {
+			require.Equal(t, streams.SessionSettingsPolicyProviderRestored, eb.events[index].event.Data.(lifecycle.SessionModeEventPayload).SessionSettingsPolicy)
+			continue
+		}
+		require.Equal(t, streams.SessionSettingsPolicyProviderRestored, eb.events[index].event.Data.(lifecycle.SessionModelsEventPayload).SessionSettingsPolicy)
+	}
+
+	// A later ordinary execution owns a strict projection, even though the
+	// preceding attempt used provider-restored settings.
+	ordinaryMode := &lifecycle.AgentStreamEventPayload{
+		TaskID: "t1", SessionID: "s1", AttemptID: "ordinary-next",
+		Data: &lifecycle.AgentStreamEventData{CurrentModeID: "ordinary-mode", SessionSettingsGeneration: 1},
+	}
+	ordinaryModels := &lifecycle.AgentStreamEventPayload{
+		TaskID: "t1", SessionID: "s1", AttemptID: "ordinary-next",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID:            "ordinary-model",
+			SessionSettingsGeneration: 2,
+			SessionModels:             []streams.SessionModelInfo{{ModelID: "ordinary-model", Name: "Ordinary model"}},
+		},
+	}
+	svc.handleSessionModeEvent(ctx, ordinaryMode)
+	svc.handleSessionModelsEvent(ctx, ordinaryModels)
+	require.Len(t, eb.events, 7)
+	require.Equal(t, streams.SessionSettingsPolicyStrict, eb.events[5].event.Data.(lifecycle.SessionModeEventPayload).SessionSettingsPolicy)
+	require.Equal(t, streams.SessionSettingsPolicyStrict, eb.events[6].event.Data.(lifecycle.SessionModelsEventPayload).SessionSettingsPolicy)
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	effective, ok = lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "ordinary-next", effective.SettingsAttemptID)
+	require.Empty(t, effective.SettingsPolicy, "strict is the default projection, not stored recovery provenance")
+}
+
+func TestConcurrentSessionSettingsEventsPreserveIndependentSnapshotUpdates(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedSession(t, baseRepo, "t1", "s1", "step1")
+	require.NoError(t, baseRepo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState,
+		lifecycle.SessionModelsSnapshot{
+			SettingsAttemptID:         "attempt-1",
+			SettingsPolicy:            streams.SessionSettingsPolicyProviderRestored,
+			SettingsSourceExecutionID: "execution-1",
+			SettingsSourceGeneration:  3,
+			CurrentModelID:            "previous-model",
+			CurrentModeID:             "previous-mode",
+			CurrentModelGeneration:    1,
+			CurrentModeGeneration:     1,
+		},
+	))
+
+	repo := &pausedSessionSettingsSnapshotRepo{
+		repoStore:                 baseRepo,
+		firstSnapshotWrite:        make(chan struct{}),
+		secondSnapshotWrite:       make(chan struct{}),
+		releaseFirstSnapshotWrite: make(chan struct{}),
+	}
+	eventBus := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eventBus}
+	modeDone := make(chan struct{})
+	var modelsDone chan struct{}
+	var releaseFirst sync.Once
+	releaseSnapshotWrite := func() {
+		releaseFirst.Do(func() { close(repo.releaseFirstSnapshotWrite) })
+	}
+	t.Cleanup(func() {
+		releaseSnapshotWrite()
+		for _, done := range []<-chan struct{}{modeDone, modelsDone} {
+			if done == nil {
+				continue
+			}
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Error("settings event remained blocked after releasing the controlled snapshot write")
+			}
+		}
+	})
+	modePayload := &lifecycle.AgentStreamEventPayload{
+		Type: "agent/event", AttemptID: "attempt-1", ExecutionID: "execution-1", SessionSettingsSourceGeneration: 3,
+		TaskID: "t1", SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			SessionSettingsPolicy:     streams.SessionSettingsPolicyProviderRestored,
+			SessionSettingsGeneration: 2,
+			CurrentModeID:             "provider-mode",
+			AvailableModes:            []streams.SessionModeInfo{{ID: "provider-mode", Name: "Provider mode"}},
+		},
+	}
+	modelsPayload := &lifecycle.AgentStreamEventPayload{
+		Type: "agent/event", AttemptID: "attempt-1", ExecutionID: "execution-1", SessionSettingsSourceGeneration: 3,
+		TaskID: "t1", SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			SessionSettingsPolicy:     streams.SessionSettingsPolicyProviderRestored,
+			SessionSettingsGeneration: 2,
+			CurrentModelID:            "provider-model",
+			SessionModels:             []streams.SessionModelInfo{{ModelID: "provider-model", Name: "Provider model"}},
+			Data:                      map[string]any{"config_options_settled": true},
+		},
+	}
+
+	go func() {
+		svc.handleSessionModeEvent(ctx, modePayload)
+		close(modeDone)
+	}()
+	select {
+	case <-repo.firstSnapshotWrite:
+	case <-time.After(5 * time.Second):
+		t.Fatal("mode snapshot write did not reach the controlled interleaving")
+	}
+	if lock := svc.sessionSettingsSnapshotLock("s1"); lock.TryLock() {
+		lock.Unlock()
+		t.Fatal("mode event did not hold the session settings guard at its snapshot write")
+	}
+
+	modelsStarted := make(chan struct{})
+	modelsDone = make(chan struct{})
+	go func() {
+		close(modelsStarted)
+		svc.handleSessionModelsEvent(ctx, modelsPayload)
+		close(modelsDone)
+	}()
+	<-modelsStarted
+
+	// Without serialization the model event commits from the same old snapshot
+	// while the mode write is paused, then the mode write overwrites its update.
+	// With the per-session guard, it waits until the mode commit completes.
+	select {
+	case <-repo.secondSnapshotWrite:
+		select {
+		case <-modelsDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("model event did not finish during the forced snapshot interleaving")
+		}
+	case <-time.After(time.Second):
+	}
+	releaseSnapshotWrite()
+	for name, done := range map[string]<-chan struct{}{"mode": modeDone, "models": modelsDone} {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s event did not finish", name)
+		}
+	}
+
+	updated, err := baseRepo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "provider-model", snapshot.CurrentModelID)
+	require.Equal(t, "provider-mode", snapshot.CurrentModeID)
+	require.Equal(t, uint64(2), snapshot.CurrentModelGeneration)
+	require.Equal(t, uint64(2), snapshot.CurrentModeGeneration)
+	require.Equal(t, streams.SessionSettingsPolicyProviderRestored, snapshot.SettingsPolicy)
+	require.Equal(t, "execution-1", snapshot.SettingsSourceExecutionID)
+	require.Equal(t, uint64(3), snapshot.SettingsSourceGeneration)
+	require.Len(t, eventBus.events, 2)
+	staleModel := *modelsPayload
+	staleData := *modelsPayload.Data
+	staleData.SessionSettingsGeneration = 1
+	staleData.CurrentModelID = "stale-model"
+	staleModel.Data = &staleData
+	svc.handleSessionModelsEvent(ctx, &staleModel)
+	require.Len(t, eventBus.events, 2, "a stale same-attempt selector report must not be broadcast")
+}
+
+func TestProviderRestoredSnapshotIsAttemptScopedAndPartialUpdatesPreserveMode(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.AgentProfileSnapshot = map[string]interface{}{"agent_id": "auggie", "model": "saved-model", "mode": "saved-mode"}
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		CurrentModelID:         "previous-effective-model",
+		CurrentModeID:          "previous-effective-mode",
+		SettingsAttemptID:      "resume-old",
+		CurrentModelGeneration: 8,
+		CurrentModeGeneration:  7,
+		Models:                 []streams.SessionModelInfo{{ModelID: "previous-effective-model", Name: "Previous model"}},
+		ConfigOptions:          []streams.ConfigOption{{ID: "reasoning_effort", Category: "reasoning", CurrentValue: "previous-effort"}},
+		ConfigOptionsSettled:   true,
+	}))
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: &recordingEventBus{}}
+	providerEvent := func(generation uint64, data *lifecycle.AgentStreamEventData) *lifecycle.AgentStreamEventPayload {
+		data.SessionSettingsPolicy = streams.SessionSettingsPolicyProviderRestored
+		data.SessionSettingsGeneration = generation
+		return &lifecycle.AgentStreamEventPayload{
+			Type: "agent/event", AttemptID: "resume-new", ExecutionID: "execution-recovery-new",
+			TaskID: "t1", SessionID: "s1", Data: data,
+		}
+	}
+	// A new recovery attempt that reports unknown effective settings clears the
+	// prior execution's projection without reading the saved requested values.
+	svc.handleSessionModeEvent(ctx, providerEvent(1, &lifecycle.AgentStreamEventData{}))
+	svc.handleSessionModelsEvent(ctx, providerEvent(2, &lifecycle.AgentStreamEventData{}))
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "resume-new", snapshot.SettingsAttemptID)
+	require.Empty(t, snapshot.CurrentModelID)
+	require.Empty(t, snapshot.CurrentModeID)
+	require.Empty(t, snapshot.Models)
+	require.Empty(t, snapshot.ConfigOptions)
+	require.False(t, snapshot.ConfigOptionsSettled)
+	require.Equal(t, streams.SessionSettingsPolicyProviderRestored, snapshot.SettingsPolicy)
+	require.Equal(t, "saved-model", updated.AgentProfileSnapshot["model"])
+	require.Equal(t, "saved-mode", updated.AgentProfileSnapshot["mode"])
+
+	// A later model-only report in that same attempt must retain the effective
+	// mode learned independently from the provider.
+	svc.handleSessionModeEvent(ctx, providerEvent(3, &lifecycle.AgentStreamEventData{CurrentModeID: "effective-mode"}))
+	svc.handleSessionModelsEvent(ctx, providerEvent(4, &lifecycle.AgentStreamEventData{
+		CurrentModelID: "effective-model", SessionModels: []streams.SessionModelInfo{{ModelID: "effective-model", Name: "Effective model"}},
+	}))
+	svc.handleSessionModelsEvent(ctx, providerEvent(5, &lifecycle.AgentStreamEventData{
+		CurrentModelID: "refreshed-model", SessionModels: []streams.SessionModelInfo{{ModelID: "refreshed-model", Name: "Refreshed model"}},
+	}))
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok = lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "refreshed-model", snapshot.CurrentModelID)
+	require.Equal(t, "effective-mode", snapshot.CurrentModeID)
+	require.Equal(t, uint64(3), snapshot.CurrentModeGeneration)
+}
+
+func TestStrictModelEventWithoutAttemptDoesNotInheritPreviousRecoveryPolicy(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		CurrentModelID:       "provider-model",
+		CurrentModeID:        "provider-mode",
+		SettingsAttemptID:    "recovery-old",
+		SettingsPolicy:       streams.SessionSettingsPolicyProviderRestored,
+		Models:               []streams.SessionModelInfo{{ModelID: "provider-model", Name: "Provider model"}},
+		ConfigOptionsSettled: true,
+	}))
+	eventBus := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eventBus}
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		Type: "agent/event", TaskID: "t1", SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "ordinary-model",
+			SessionModels:  []streams.SessionModelInfo{{ModelID: "ordinary-model", Name: "Ordinary model"}},
+		},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "ordinary-model", snapshot.CurrentModelID)
+	require.Empty(t, snapshot.CurrentModeID, "a new strict launch must not inherit the previous provider mode")
+	require.Empty(t, snapshot.SettingsAttemptID, "the previous recovery attempt does not own this launch")
+	require.Empty(t, snapshot.SettingsPolicy, "ordinary strict behavior is represented by the zero value")
+	require.Len(t, eventBus.events, 1)
+	require.Equal(t, streams.SessionSettingsPolicyStrict,
+		eventBus.events[0].event.Data.(lifecycle.SessionModelsEventPayload).SessionSettingsPolicy)
+}
+
+func TestStrictModeEventWithoutAttemptDoesNotInheritPreviousRecoverySnapshot(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		CurrentModelID:         "provider-model",
+		CurrentModeID:          "provider-mode",
+		SettingsAttemptID:      "recovery-old",
+		SettingsPolicy:         streams.SessionSettingsPolicyProviderRestored,
+		CurrentModelGeneration: 8,
+		CurrentModeGeneration:  7,
+		Models:                 []streams.SessionModelInfo{{ModelID: "provider-model", Name: "Provider model"}},
+		ConfigOptionsSettled:   true,
+	}))
+	eventBus := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eventBus}
+
+	svc.handleSessionModeEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		Type: "agent/event", TaskID: "t1", SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{CurrentModeID: "strict-mode"},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "strict-mode", snapshot.CurrentModeID)
+	require.Empty(t, snapshot.CurrentModelID, "a mode-only report must not retain a model from the prior recovery attempt")
+	require.Empty(t, snapshot.SettingsAttemptID, "the old recovery attempt does not own this strict report")
+	require.Empty(t, snapshot.SettingsPolicy, "the old provider-restored policy does not apply to this strict report")
+	require.Empty(t, snapshot.Models)
+	require.Empty(t, snapshot.ConfigOptions)
+	require.False(t, snapshot.ConfigOptionsSettled)
+	require.Zero(t, snapshot.CurrentModeGeneration)
+	require.Zero(t, snapshot.CurrentModelGeneration)
+	require.Len(t, eventBus.events, 1)
+	require.Equal(t, streams.SessionSettingsPolicyStrict,
+		eventBus.events[0].event.Data.(lifecycle.SessionModeEventPayload).SessionSettingsPolicy)
+}
+
+func TestProcessRestartModeReportWithNewACPSessionUsesFreshGeneration(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		SettingsAttemptID:         "resume-1",
+		SettingsPolicy:            streams.SessionSettingsPolicyProviderRestored,
+		SettingsSourceExecutionID: "execution-1",
+		SettingsSourceGeneration:  1,
+		CurrentModeID:             "before-restart",
+		CurrentModeGeneration:     7,
+		CurrentModelID:            "saved-model",
+		CurrentModelGeneration:    8,
+	}))
+	eventBus := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eventBus}
+
+	// Process restart creates a new ACP session and a fresh adapter whose first
+	// settings notification starts at generation 1. The lifecycle execution
+	// still belongs to the same explicit recovery attempt.
+	svc.handleSessionModeEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		Type: "agent/event", AttemptID: "resume-1", ExecutionID: "execution-1", SessionSettingsSourceGeneration: 2,
+		TaskID: "t1", SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			ACPSessionID:              "new-acp-session",
+			SessionSettingsPolicy:     streams.SessionSettingsPolicyProviderRestored,
+			SessionSettingsGeneration: 1,
+			CurrentModeID:             "after-restart",
+		},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "after-restart", snapshot.CurrentModeID,
+		"the first mode report from a replacement ACP session must not be rejected by the previous adapter's generation")
+	require.Equal(t, "execution-1", snapshot.SettingsSourceExecutionID)
+	require.Equal(t, uint64(2), snapshot.SettingsSourceGeneration)
+	require.Empty(t, snapshot.CurrentModelID, "a newer source epoch must not carry the previous adapter's model projection")
+	require.Zero(t, snapshot.CurrentModelGeneration)
+	require.Len(t, eventBus.events, 1, "the current replacement session report must be published")
+
+	// A delayed report from the previous source epoch cannot replace the current
+	// projection even when its adapter-local generation is larger.
+	stale := &lifecycle.AgentStreamEventPayload{
+		Type: "agent/event", AttemptID: "resume-1", ExecutionID: "execution-1", SessionSettingsSourceGeneration: 1,
+		TaskID: "t1", SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			SessionSettingsGeneration: 99,
+			CurrentModeID:             "stale-before-restart",
+		},
+	}
+	svc.handleSessionModeEvent(ctx, stale)
+	legacyDelayed := &lifecycle.AgentStreamEventPayload{
+		Type: "agent/event", AttemptID: "resume-1", ExecutionID: "execution-1",
+		TaskID: "t1", SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{CurrentModeID: "unfenced-legacy-report"},
+	}
+	svc.handleSessionModeEvent(ctx, legacyDelayed)
+	require.Len(t, eventBus.events, 1, "older and epoch-less reports must not publish over a known source epoch")
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok = lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "after-restart", snapshot.CurrentModeID)
+}
+
+func TestSettingsSnapshotTracksCurrentExecutionAndMergesPartialReports(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "s1", SessionID: "s1", TaskID: "t1", AgentExecutionID: "execution-new",
+		Status: models.ExecutorRunningStatusReady,
+	}))
+	current, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, "execution-new", current.AgentExecutionID, "the current execution owner comes from the executors_running join")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		SettingsAttemptID:         "resume-old",
+		SettingsPolicy:            streams.SessionSettingsPolicyProviderRestored,
+		SettingsSourceExecutionID: "execution-old",
+		SettingsSourceGeneration:  9,
+		CurrentModelID:            "old-model",
+		CurrentModeID:             "old-mode",
+		CurrentModelGeneration:    20,
+		CurrentModeGeneration:     19,
+		Models:                    []streams.SessionModelInfo{{ModelID: "old-model", Name: "Old model"}},
+	}))
+	eventBus := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eventBus}
+	newModels := &lifecycle.AgentStreamEventPayload{
+		Type: "agent/event", AttemptID: "resume-new", ExecutionID: "execution-new", SessionSettingsSourceGeneration: 1,
+		TaskID: "t1", SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			SessionSettingsPolicy:     streams.SessionSettingsPolicyProviderRestored,
+			SessionSettingsGeneration: 1,
+			CurrentModelID:            "new-model",
+			SessionModels:             []streams.SessionModelInfo{{ModelID: "new-model", Name: "New model"}},
+			Data:                      map[string]any{"config_options_settled": true},
+		},
+	}
+	svc.handleSessionModelsEvent(ctx, newModels)
+	newMode := &lifecycle.AgentStreamEventPayload{
+		Type: "agent/event", AttemptID: "resume-new", ExecutionID: "execution-new", SessionSettingsSourceGeneration: 1,
+		TaskID: "t1", SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			SessionSettingsPolicy:     streams.SessionSettingsPolicyProviderRestored,
+			SessionSettingsGeneration: 2,
+			CurrentModeID:             "new-mode",
+		},
+	}
+	svc.handleSessionModeEvent(ctx, newMode)
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "execution-new", snapshot.SettingsSourceExecutionID)
+	require.Equal(t, uint64(1), snapshot.SettingsSourceGeneration)
+	require.Equal(t, "resume-new", snapshot.SettingsAttemptID)
+	require.Equal(t, "new-model", snapshot.CurrentModelID)
+	require.Equal(t, "new-mode", snapshot.CurrentModeID)
+	require.Equal(t, uint64(1), snapshot.CurrentModelGeneration)
+	require.Equal(t, uint64(2), snapshot.CurrentModeGeneration)
+	require.Len(t, eventBus.events, 2)
+
+	// A delayed callback from the old execution is rejected using the current
+	// executors_running owner even though that execution's local generations are
+	// numerically higher.
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		Type: "agent/event", AttemptID: "resume-old", ExecutionID: "execution-old", SessionSettingsSourceGeneration: 9,
+		TaskID: "t1", SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			SessionSettingsPolicy:     streams.SessionSettingsPolicyProviderRestored,
+			SessionSettingsGeneration: 21,
+			CurrentModelID:            "late-old-model",
+			SessionModels:             []streams.SessionModelInfo{{ModelID: "late-old-model", Name: "Late old model"}},
+			Data:                      map[string]any{"config_options_settled": true},
+		},
+	})
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok = lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "new-model", snapshot.CurrentModelID)
+	require.Equal(t, "new-mode", snapshot.CurrentModeID)
+	require.Len(t, eventBus.events, 2)
+}
+
+func TestSessionSettingsSameSourceFencesEmptyAttemptGeneration(t *testing.T) {
+	for _, mode := range []bool{true, false} {
+		name := "models"
+		if mode {
+			name = "mode"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
+			seed := lifecycle.SessionModelsSnapshot{
+				SettingsSourceExecutionID: "execution-1",
+				SettingsSourceGeneration:  5,
+				CurrentModelID:            "current-model",
+				CurrentModeID:             "current-mode",
+				CurrentModelGeneration:    9,
+				CurrentModeGeneration:     9,
+			}
+			require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState, seed))
+			eventBus := &recordingEventBus{}
+			svc := &Service{logger: testLogger(), repo: repo, eventBus: eventBus}
+			publish := func(generation uint64, value string) {
+				payload := &lifecycle.AgentStreamEventPayload{
+					Type: "agent/event", ExecutionID: "execution-1", SessionSettingsSourceGeneration: 5,
+					TaskID: "t1", SessionID: "s1",
+					Data: &lifecycle.AgentStreamEventData{
+						SessionSettingsGeneration: generation,
+						CurrentModeID:             value,
+						CurrentModelID:            value,
+						SessionModels:             []streams.SessionModelInfo{{ModelID: value, Name: value}},
+						Data:                      map[string]any{"config_options_settled": true},
+					},
+				}
+				if mode {
+					svc.handleSessionModeEvent(ctx, payload)
+				} else {
+					svc.handleSessionModelsEvent(ctx, payload)
+				}
+			}
+
+			publish(8, "stale-value")
+			require.Empty(t, eventBus.events, "ordinary reports with an empty AttemptID still use source-scoped adapter generations")
+			publish(10, "current-value")
+			require.Len(t, eventBus.events, 1)
+			updated, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			snapshot, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+			require.True(t, ok)
+			if mode {
+				require.Equal(t, "current-value", snapshot.CurrentModeID)
+				require.Equal(t, "current-model", snapshot.CurrentModelID, "mode-only reports retain an independent model projection")
+			} else {
+				require.Equal(t, "current-value", snapshot.CurrentModelID)
+				require.Equal(t, "current-mode", snapshot.CurrentModeID, "model-only reports retain an independent mode projection")
+			}
+		})
+	}
+}
+
 func TestPersistSessionModelDoesNotRestoreStaleActiveStateAfterCancellation(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -3580,6 +4854,61 @@ func TestHandleSessionModelsEventDefersUnsettledStartupState(t *testing.T) {
 	require.Equal(t, "gpt-5.6-luna", runtimeConfig.Model)
 }
 
+func TestHandleProviderRestoredModelsEventPublishesUnsettledStartupModel(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateStarting, ""))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		SettingsAttemptID: "resume-1",
+		SettingsPolicy:    streams.SessionSettingsPolicyProviderRestored,
+	}))
+
+	eventBus := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eventBus}
+	publish := func(generation uint64, modelID string, modelOptions []streams.SessionModelInfo, settled bool) {
+		svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			Type: "agent/event", AttemptID: "resume-1", ExecutionID: "execution-resume-1",
+			TaskID: "t1", SessionID: "s1",
+			Data: &lifecycle.AgentStreamEventData{
+				CurrentModelID:            modelID,
+				SessionModels:             modelOptions,
+				SessionSettingsGeneration: generation,
+				SessionSettingsPolicy:     streams.SessionSettingsPolicyProviderRestored,
+				Data:                      map[string]any{"config_options_settled": settled},
+			},
+		})
+	}
+
+	// The initial lifecycle snapshot has no model. The subsequent provider load
+	// report is authoritative even though this recovery attempt has not settled
+	// profile config options.
+	publish(1, "", nil, true)
+	modelsReported := []streams.SessionModelInfo{
+		{ModelID: "gemini-3-7-flash", Name: "Gemini 3.7 Flash"},
+		{ModelID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro"},
+		{ModelID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash"},
+		{ModelID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash"},
+		{ModelID: "gemini-2.0-flash-lite", Name: "Gemini 2.0 Flash Lite"},
+		{ModelID: "gemini-1.5-pro", Name: "Gemini 1.5 Pro"},
+		{ModelID: "gemini-1.5-flash", Name: "Gemini 1.5 Flash"},
+		{ModelID: "gemini-1.5-flash-8b", Name: "Gemini 1.5 Flash 8B"},
+	}
+	publish(2, "gemini-3-7-flash", modelsReported, false)
+
+	require.Len(t, eventBus.events, 2, "the provider-restored model report must not be deferred until config settlement")
+	lastPublished := eventBus.events[1].event.Data.(lifecycle.SessionModelsEventPayload)
+	require.Equal(t, "gemini-3-7-flash", lastPublished.CurrentModelID)
+	require.Len(t, lastPublished.Models, 8)
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "gemini-3-7-flash", snapshot.CurrentModelID)
+	require.Len(t, snapshot.Models, 8)
+	require.Equal(t, streams.SessionSettingsPolicyProviderRestored, snapshot.SettingsPolicy)
+}
+
 func TestHandleSessionModelsEventPublishesPersistedConfigBaselineAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -3612,6 +4941,41 @@ func TestHandleSessionModelsEventPublishesPersistedConfigBaselineAfterRestart(t 
 		"model":            "gpt-5.6-sol",
 		"reasoning_effort": "high",
 	}, payload["config_baseline"])
+}
+
+func TestHandleSessionModelsEventPublishesProviderUpdateIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateRunning, ""))
+	eventBus := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eventBus}
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		AgentID:     "a1",
+		ExecutionID: "execution-live",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-sol",
+			SessionModels:  []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6 Sol"}},
+			ConfigOptions: []streams.ConfigOption{{
+				ID: "collaboration_mode", CurrentValue: "plan",
+			}},
+			Data: map[string]any{"config_options_source": "provider_update"},
+		},
+	})
+
+	require.Len(t, eventBus.events, 1)
+	serialized, err := json.Marshal(eventBus.events[0].event.Data)
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(serialized, &payload))
+	require.Equal(t, "provider_update", payload["config_options_source"])
+	require.Equal(t, "execution-live", payload["agent_execution_id"])
+	if _, present := payload["config_options_settled"]; present {
+		t.Fatal("provider update should retain the post-startup wire shape without config_options_settled")
+	}
 }
 
 func TestHandleSessionModelsEventCapturesSettledConfigBaselineOnce(t *testing.T) {

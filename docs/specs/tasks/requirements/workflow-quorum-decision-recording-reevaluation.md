@@ -32,19 +32,25 @@ Recording a verdict causes the current step's guarded transitions to be evaluate
 
 - **AC-TASKS-QUORUM-REEVALUATION-001.1:** WHEN a decision is recorded through any surface, THE SYSTEM SHALL
   re-evaluate the current step's `on_turn_complete` guarded transitions before
-  returning to the caller, using the task's active session as defined in AC-TASKS-QUORUM-REEVALUATION-001.4
-  — including on the human HTTP path, which has no calling session of its own.
+  returning to the caller, using the re-evaluation session selected by
+  AC-TASKS-QUORUM-REEVALUATION-001.4.
 - **AC-TASKS-QUORUM-REEVALUATION-001.2:** WHEN that re-evaluation finds a satisfied guard, THE SYSTEM SHALL
   apply the transition, and the recording call SHALL still report success.
 - **AC-TASKS-QUORUM-REEVALUATION-001.3:** WHEN that re-evaluation fails or errors, THE SYSTEM SHALL keep the
   recorded decision, report the recording as successful, and surface the
   re-evaluation failure through the observability required by AC-TASKS-QUORUM-DIAGNOSTICS-001.2.
-- **AC-TASKS-QUORUM-REEVALUATION-001.4:** THE SYSTEM SHALL resolve the re-evaluation session as
-  `GetActiveTaskSessionByTaskID` already defines it
-  (`task/repository/sqlite/session.go`): the task's most recently started
-  session whose state is one of `CREATED`, `STARTING`, `RUNNING`, or
-  `WAITING_FOR_INPUT`, ordered by `started_at` descending, limit one. A task is
-  "unresolvable" for this purpose exactly when that query returns no row.
+- **AC-TASKS-QUORUM-REEVALUATION-001.4:** THE SYSTEM SHALL resolve the
+  re-evaluation session as follows:
+  - When the decision supplies a validated calling session, THE SYSTEM SHALL use
+    that calling session.
+  - When the decision supplies no calling session, THE SYSTEM SHALL use
+    `GetActiveTaskSessionByTaskID` as defined in
+    `task/repository/sqlite/session.go`: the task's most recently started session
+    whose state is one of `CREATED`, `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT`,
+    ordered by `started_at` descending, limit one.
+
+  A task is "unresolvable" for this purpose exactly when the selected lookup
+  returns no row.
 - **AC-TASKS-QUORUM-REEVALUATION-001.5:** WHEN no session is resolvable under AC-TASKS-QUORUM-REEVALUATION-001.4, THE SYSTEM SHALL record
   the decision and skip re-evaluation without erroring, matching the existing
   blank-session behavior in `Engine.RecordParticipantDecision`, and SHALL report

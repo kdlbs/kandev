@@ -3,6 +3,7 @@ status: current
 system: agents
 requirements:
   - REQ-AGENTS-MCP-BRIDGE-RELIABILITY-001
+  - REQ-AGENTS-MCP-BRIDGE-RELIABILITY-002
 created: 2026-09-04
 owners:
   - Kandev
@@ -25,24 +26,36 @@ operation keeps its own context and deadline.
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-AGENTS-MCP-BRIDGE-RELIABILITY-001` | [Current dispatcher binding](#current-dispatcher-binding), [Request ownership](#request-ownership), [Failure behavior](#failure-behavior), [Observability](#observability) |
+| `REQ-AGENTS-MCP-BRIDGE-RELIABILITY-002` | [Empty response classification](#empty-response-classification), [Failure behavior](#failure-behavior), [Observability](#observability), [Testing strategy](#testing-strategy) |
 
-## Confirmed fault
+## Startup dependency ordering
 
-`provideAgentRuntime` calls `lifecycle.Manager.Start` before route registration
-calls `SetMCPHandler`. Startup recovery starts reconnect work during this gap.
+The dynamic dispatcher proxy prevents a stream from retaining an obsolete nil
+handler, but does not make a request arriving before registration succeed.
+AC-AGENTS-MCP-BRIDGE-RELIABILITY-001.8 requires backend composition to finish
+the MCP dependency graph before activating consumers.
 
-`StreamManager.connectUpdatesStream` passes the current `mcpHandler` value to
-`Client.StreamUpdates`. The read loop keeps that interface value for the life
-of the stream. A stream that starts during the gap therefore keeps a `nil`
-handler after startup finishes.
+`backendapp` separates construction and route/dispatcher wiring from runtime
+activation. Construct the gateway, Office dependencies, system/storage services,
+and router without starting launch-capable workers. Complete
+`registerMCPAndDebugRoutes`, its scope/principal setters, and all dependent
+handlers before calling `lifecycle.Manager.Start`, `orchestrator.Service.Start`,
+or starting automation and global run scheduling. The orchestrator event watcher
+must still subscribe before lifecycle recovery publishes retained outcomes.
+Plugin task-launch callbacks are exposed only after the same wiring barrier.
 
-The read loop silently ignores a request when its handler is `nil`. Agentctl
-then waits on `ChannelBackendClient.pending` until the calling MCP client ends
-the request.
+The existing bootstrap listener continues serving health and unsuccessful
+readiness while this composition runs. Building the application router does not
+publish it. Required-store admission remains before `sessions.recovery`, and
+schema-version recording and router publication remain behind successful
+recovery and final persistence checks. See Platform's
+[startup lifecycle](../../platform/system-design/startup-lifecycle.md).
 
-Two other bridge states can lose a response. The buffered request channel can
-accept a request without a stream consumer. A stream can also close after its
-writer removes a request from the channel.
+Use the same dispatcher for recovered streams, new task streams, and external
+tool routes; do not create a partial early tool registry or a blocking proxy
+that can deadlock synchronous startup. Keep unavailable-handler error handling
+for genuinely unwired callers. Cancellation or construction failure starts no
+dependent launch worker and drains only resources already constructed.
 
 ## Components and responsibilities
 
@@ -127,6 +140,27 @@ This design does not add a common response deadline. Such a deadline can stop
 valid clarification waits and long launch operations. Transport ownership and
 caller contexts provide the required termination signals.
 
+## Empty response classification
+
+`ChannelBackendClient` and `DispatcherBackendClient` classify a response after
+the transport has returned a non-nil message without an error.
+
+Both clients apply this order:
+
+1. An error response returns the existing backend error.
+2. A nil result sink returns success without payload decoding.
+3. A zero-byte payload returns the shared `ErrEmptyBackendPayload` error.
+4. A non-empty payload passes to JSON decoding, which returns any existing error.
+
+The clients use an action-specific wrapped error for the empty-payload case.
+The channel client logs the configured session ID and elapsed duration. The
+dispatcher client logs only fields that exist at its in-process boundary.
+
+The rule detects an empty response envelope. It does not identify the cause of
+the missing payload, validate a response schema, or classify valid `null` data.
+Valid `{}`, `[]`, `null`, and other non-empty JSON values keep their current
+behavior.
+
 ## Observability
 
 The backend records one request-received event at `Info`. The event includes
@@ -153,6 +187,18 @@ Unit tests cover these cases:
 - A stream disconnect releases only requests owned by that stream.
 - Successful responses, context cancellation, reset, close, and clarification
   waits keep their current behavior.
+- Both clients return an error for a zero-byte success payload when a result
+  sink exists, and they preserve the nil-sink, error-response, valid JSON, and
+  decode-error cases described in [Empty response classification](#empty-response-classification).
 
 Race-enabled tests cover concurrent dispatcher updates, request completion,
 stream replacement, reset, and close.
+
+Backend composition tests dispatch `mcp.list_plugin_tools` from the first
+recovery and first launch callbacks, verify execution scope, and assert that a
+wiring failure or cancellation prevents both callbacks. Exercise the actual
+production startup seam, not only an independently ordered callback helper.
+
+## Implementation plans
+
+- [Startup log corrections](../../../plans/startup-log-corrections/plan.md)

@@ -1,6 +1,7 @@
 import type {
   GitHubStatus,
   GitHubAppRegistrationCatalog,
+  GitHubPRDiscoveryHealthUpdate,
   GitHubRateLimitUpdate,
   TaskPR,
   TaskIssueLink,
@@ -20,6 +21,7 @@ export type GitHubStatusEntry = {
 
 export type GitHubStatusState = {
   byWorkspaceId: Record<string, GitHubStatusEntry>;
+  pendingPRDiscoveryHealthByWorkspaceId: Record<string, GitHubPRDiscoveryHealthUpdate>;
 };
 
 export type GitHubAppRegistrationsEntry = {
@@ -90,7 +92,7 @@ export type PRFeedbackCacheEntry = {
 };
 
 export type PRFeedbackCacheState = {
-  /** Keyed by `${owner}/${repo}#${pr_number}` so multi-PR tasks coexist. */
+  /** Keyed by the auth/workspace/provider/PR identity tuple. */
   byKey: Record<string, PRFeedbackCacheEntry>;
 };
 
@@ -148,6 +150,7 @@ export type GitHubSliceActions = {
   setActionPresets: (workspaceId: string, presets: GitHubActionPresets) => void;
   setActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
   applyGitHubRateLimitUpdate: (update: GitHubRateLimitUpdate) => void;
+  applyGitHubPRDiscoveryHealthUpdate: (update: GitHubPRDiscoveryHealthUpdate) => void;
   setPRFeedbackCacheEntry: (key: string, feedback: PRFeedback) => void;
   removePRFeedbackCacheEntry: (key: string) => void;
   setTaskCIAutomationOptions: (taskId: string, options: TaskCIAutomationOptions) => void;

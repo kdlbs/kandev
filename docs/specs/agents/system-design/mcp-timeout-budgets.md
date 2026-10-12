@@ -43,12 +43,16 @@ and the blocking behavior of Kandev's own MCP handlers.
 
 ## Data and contracts
 
-The Claude Code CLI reads two independent environment values.
+The Claude Code CLI reads three independent environment values. Two are
+Kandev-managed defaults; the third, `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`, is
+read by the CLI but not currently set by Kandev (see
+[Idle watchdog](#idle-watchdog) below).
 
 | Key | Meaning in the CLI | Kandev managed default |
 | --- | --- | --- |
 | `MCP_TIMEOUT` | MCP connect deadline, and the deadline of the CLI's first-turn wait on the `subscriptions/listen` stream. CLI default is 30000 ms, clamped to at most 2147483647. | `30000` |
-| `MCP_TOOL_TIMEOUT` | Per-call tool budget and the per-request fetch deadline floor, clamped to `[60000, 2147483647]`. | `7200000` |
+| `MCP_TOOL_TIMEOUT` | Per-call tool budget, clamped to `[1000, 2147483647]` by the idle watchdog's `toolTimeoutMs` helper (see [Idle watchdog](#idle-watchdog)); separately floors the per-request fetch deadline at `[60000, 2147483647]` (see below). | `7200000` |
+| `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` | Per-tool-call idle watchdog: aborts a call if no bytes (response or `notifications/progress`) arrive for this long. A separate mechanism from `MCP_TOOL_TIMEOUT`, but capped by the effective tool-call timeout (see [Idle watchdog](#idle-watchdog)). | Not set by Kandev. |
 
 Verified against the shipped CLI (version 2.1.258):
 
@@ -77,6 +81,86 @@ contract is to bound its cost, not to work around it.
 intended bound at the declaration site, keeps AC-002 testable, and does not
 depend on the CLI keeping 30000 as its own default.
 
+### Idle watchdog
+
+`MCP_TOOL_TIMEOUT` bounds total call duration; it does not bound silence.
+Separately, the CLI runs a per-tool-call idle watchdog. This section and its
+experiments were verified against a different binary than the CLI version
+above: `node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude`,
+bundled by `@agentclientprotocol/claude-agent-acp@0.75.1` as
+`claude-agent-sdk@0.3.257`, not `~/.local/share/claude/versions/*`. These exact
+versions identify the binary used for the experiments, not a current default.
+Current managed defaults are listed in the [managed runtime
+catalogue](../../../../apps/backend/internal/agent/agents/managed_npm_runtime_versions.json).
+An operator selection can launch a different version (see
+`apps/backend/internal/agent/agents/ACP_BRIDGE_VERSIONS.md`). The watchdog
+function is rewritten below with descriptive names from that binary's minified
+source. The logic and constants are unchanged. The minified identifiers are not:
+
+```js
+function idleTimeoutMs(server) {
+  const transport = server?.type ?? "stdio";
+  if (new Set(["sse-ide", "ws-ide", "sdk"]).has(transport)) return 0; // disabled
+  const idle = process.env.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT
+    ?? (transport === "stdio" ? 1800000 : 300000);
+  if (idle <= 0) return 0;
+  const perServerTimeout = server?.timeout >= 1000 ? server.timeout : 0;
+  // toolTimeoutMs(server) = clamp(
+  //   server?.timeout >= 1000 ? server.timeout : (MCP_TOOL_TIMEOUT ?? 1e8),
+  //   1000, 2147483647)
+  return Math.min(Math.max(idle, perServerTimeout, 1000), toolTimeoutMs(server));
+}
+```
+
+Kandev injects its MCP server as `type: "http"` (with an `"sse"` fallback;
+see `apps/backend/internal/agentctl/server/api/agent.go`), which is neither
+`stdio` nor in the disabled set, so the idle default is **300000 ms (300s)**.
+The outer `Math.min` in the formula above means `MCP_TOOL_TIMEOUT` can only
+lower that default, never raise it: at Kandev's managed `MCP_TOOL_TIMEOUT=7200000`
+the clamp is a no-op and the effective idle deadline stays 300000 ms. But
+`toolTimeoutMs`'s own floor is 1000 ms, not 60000, so an agent-profile or
+executor-profile override of `MCP_TOOL_TIMEOUT` (see
+[Failure and recovery](#failure-and-recovery)) can shrink the idle deadline far
+below 300000 ms — e.g. `MCP_TOOL_TIMEOUT=10000` yields a 10s idle deadline. A
+tool call that goes past its idle deadline without emitting a response or a
+`notifications/progress` frame is aborted by the CLI with "sent no response or
+progress for <n>s; aborting". Kandev's managed default keeps the 20s keepalive
+comfortably inside the deadline, but an override under roughly 20000 ms
+drives the idle deadline below the keepalive interval and would abort a
+blocking `ask_user_question_kandev` call outright: this is a real edge in the
+supported override path, not just a record-accuracy nit.
+
+`ask_user_question_kandev` (`apps/backend/internal/mcp/handlers/handlers.go`)
+is the only Kandev MCP tool that blocks on a person, so it is the only one
+this watchdog can plausibly hit. It survives because
+`apps/backend/internal/mcp/server/handlers.go` streams a
+`notifications/progress` frame every `askQuestionKeepAliveInterval` (20s),
+comfortably inside that 300000 ms default.
+
+Four throwaway experiments against that binary (`claude -p --mcp-config
+--allowedTools`, a minimal streamable-HTTP MCP server whose tool never
+returns) confirmed the formula and ruled out the obvious alternative fix:
+
+| Config | Server-observed lifetime | Outcome |
+| --- | --- | --- |
+| `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=10000` (10s), silent | ~35s | aborted at the overridden idle deadline, not at 300s — confirms the CLI reads this env var |
+| Default env, `MCP_TOOL_TIMEOUT=7200000`, silent (no progress) | 304.0s | aborted: "sent no response or progress for 300s; aborting" |
+| `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=7200000`, `MCP_TOOL_TIMEOUT=7200000`, silent | 358.1s (reproduced twice) | `The operation timed out.` — a second, lower client-side ceiling the env var does not lift |
+| Default env, SSE + `notifications/progress` every 20s | 535.1s, still alive | ended only by the harness's own external kill |
+
+The first row's ~35s lifetime is longer than its 10s idle timeout because it
+includes the ~25s `subscriptions/listen` first-turn wait (`MCP_TIMEOUT -
+5000 = 25000ms`) that precedes the idle timer starting on the actual tool
+call: 25s preamble + 10s idle ≈ 35s.
+
+Setting `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` alongside `MCP_TOOL_TIMEOUT` is
+**not** a viable fix on its own: it raises the idle deadline from 300s to
+only ~358s, not to two hours, because of the second ceiling above. The progress
+keepalive is what actually delivers the two-hour budget, and it already
+ships. There is no per-server `timeout` field on the ACP wire
+(`types.McpServer`, `jsonrpc.McpServer`) to raise the idle deadline from
+Kandev's side either.
+
 ## Control flow
 
 1. `ClaudeACP.Runtime` returns `Env` containing both keys.
@@ -95,7 +179,11 @@ With any MCP server configured, the CLI delays its first turn by
 paid once per launch; at the previous value of 7200000 it was 1h 59m 55s. The
 degraded outcome is a bounded delay before the first token, after which the
 session proceeds normally with all tools available. A blocking Kandev MCP tool
-call is unaffected because it is governed by `MCP_TOOL_TIMEOUT`.
+call is not, by itself, governed by `MCP_TOOL_TIMEOUT`: the CLI's idle
+watchdog (see [Idle watchdog](#idle-watchdog)) would abort it at 300s under
+Kandev's managed `MCP_TOOL_TIMEOUT=7200000`. It survives because the server
+streams a
+`notifications/progress` keepalive well inside that window.
 
 `MCP_TIMEOUT` remains the connect deadline, so it cannot be reduced to an
 arbitrarily small value purely to shrink the first-turn wait without also

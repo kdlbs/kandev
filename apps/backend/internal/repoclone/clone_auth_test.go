@@ -98,6 +98,30 @@ func TestEnsureWorkspaceClonedWithBasicAuthKeepsCredentialScopedToGitChild(t *te
 	}
 }
 
+func TestCloneDeadlineAfterAdmission(t *testing.T) {
+	binDir := t.TempDir()
+	fakeGit := filepath.Join(binDir, "git")
+	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nsleep 10\n"), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", logger.Default())
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := cloner.clone(ctx, "https://example.test/acme/widgets.git", filepath.Join(t.TempDir(), "widgets"), nil)
+	if err == nil {
+		t.Fatal("clone() error = nil, want deadline failure")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("clone() returned before the caller context expired")
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("clone() took %s after cancellation", elapsed)
+	}
+}
+
 func TestAuthenticatedCloneDoesNotLeavePromisorCheckout(t *testing.T) {
 	binDir := t.TempDir()
 	capturePath := filepath.Join(t.TempDir(), "git-args")
@@ -174,7 +198,7 @@ helper=${GIT_CONFIG_VALUE_1#!}
 		t.Fatal(err)
 	}
 	if got := string(args); !strings.Contains(got, "fetch\n--prune\n--force\n--no-tags\norigin\n") ||
-		!strings.Contains(got, "pull/42/head:refs/remotes/origin/pr/42\n") || strings.Contains(got, "--all") {
+		!strings.Contains(got, "pull/42/head:refs/kandev/pull/42/head\n") || strings.Contains(got, "--all") {
 		t.Fatalf("refresh args = %q", got)
 	}
 	scope, err := os.ReadFile(capturePath + ".scope")

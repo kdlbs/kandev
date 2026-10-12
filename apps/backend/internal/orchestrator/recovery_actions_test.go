@@ -6,8 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/require"
 )
 
 // thinkingBlocks400 is the resume-corrupted signature surfaced by the
@@ -22,6 +25,18 @@ func actionByTestID(actions []map[string]interface{}, testID string) map[string]
 		}
 	}
 	return nil
+}
+
+func TestBuildRecoveryActions_LocalizedTooltips(t *testing.T) {
+	for _, corrupted := range []bool{false, true} {
+		actions := buildRecoveryActions("t1", "s1", true, false, corrupted)
+		resumeKey := "sessionRecoveryResumeDescription"
+		if corrupted {
+			resumeKey = "sessionRecoveryCorruptedDescription"
+		}
+		require.Equal(t, resumeKey, actionByTestID(actions, recoveryResumeButtonTestID)["tooltip_key"])
+		require.Equal(t, "sessionRecoveryFreshDescription", actionByTestID(actions, recoveryFreshButtonTestID)["tooltip_key"])
+	}
 }
 
 func TestBuildRecoveryActions_NormalOrdering(t *testing.T) {
@@ -77,18 +92,28 @@ func TestCreateRecoveryStatusMessage_ManagedRuntimeNpmUsesOneRetryAction(t *test
 	mc := &mockMessageCreator{}
 	svc.messageCreator = mc
 
-	svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
 		TaskID:         "t-npm",
 		SessionID:      "s-npm",
 		ErrorMessage:   "managed npm runtime failed to prepare",
 		FailureCode:    "managed_runtime_npm_resolution",
 		FailureDetails: "npm error code ETARGET\nnpm error notarget No matching version found",
-	})
+	}, ""))
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:         "t-npm",
+		SessionID:      "s-npm",
+		ErrorMessage:   "managed npm runtime failed to prepare",
+		FailureCode:    "managed_runtime_npm_resolution",
+		FailureDetails: "npm error code ETARGET\nnpm error notarget No matching version found",
+	}, ""))
 
 	if len(mc.sessionMessages) != 1 {
 		t.Fatalf("expected one recovery message, got %d", len(mc.sessionMessages))
 	}
 	meta := mc.sessionMessages[0].metadata
+	if meta["scope"] != models.ErrorScopeSession || meta["error_stamp"] == "" {
+		t.Fatalf("recovery identity = %#v", meta)
+	}
 	if meta["failure_kind"] != "managed_runtime_npm_resolution" {
 		t.Fatalf("failure_kind = %#v", meta["failure_kind"])
 	}
@@ -111,6 +136,103 @@ func TestCreateRecoveryStatusMessage_ManagedRuntimeNpmUsesOneRetryAction(t *test
 	}
 }
 
+func TestCreateRecoveryStatusMessage_ManagedRuntimeStartupKeepsTypedReasonAndAttempts(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-startup", "s-startup", "step1")
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:                 "t-startup",
+		SessionID:              "s-startup",
+		ErrorMessage:           "managed runtime startup failed",
+		FailureCode:            "managed_runtime_startup",
+		FailureDetails:         "reason=early_exit attempts=2",
+		StartupFailureReason:   "early_exit",
+		StartupFailureAttempts: 2,
+	}, ""))
+
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("recovery messages = %d, want one", len(mc.sessionMessages))
+	}
+	metadata := mc.sessionMessages[0].metadata
+	if metadata["startup_reason"] != "early_exit" || metadata["startup_attempts"] != 2 {
+		t.Fatalf("startup metadata = %#v, want typed reason and attempts", metadata)
+	}
+	if metadata["failure_kind"] != "managed_runtime_startup" {
+		t.Fatalf("failure_kind = %#v", metadata["failure_kind"])
+	}
+	actions, ok := metadata["actions"].([]map[string]interface{})
+	if !ok || len(actions) != 1 || actions[0]["test_id"] != "managed-runtime-npm-retry-button" {
+		t.Fatalf("recovery actions = %#v, want one runtime retry", metadata["actions"])
+	}
+}
+
+func TestCreateRecoveryStatusMessage_AuthFailureKeepsStartupAttempts(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-auth-startup", "s-auth-startup", "step1")
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:                 "t-auth-startup",
+		SessionID:              "s-auth-startup",
+		ErrorMessage:           "Authentication required: please log in",
+		FailureCode:            string(routingerr.CodeAuthRequired),
+		FailureDetails:         "reason=retry_initialize_failed attempts=2\nfinal_diagnostic=Authentication required: please log in",
+		StartupFailureReason:   "retry_initialize_failed",
+		StartupFailureAttempts: 2,
+	}, ""))
+
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("recovery messages = %d, want one", len(mc.sessionMessages))
+	}
+	metadata := mc.sessionMessages[0].metadata
+	if metadata["is_auth_error"] != true || metadata["startup_reason"] != "retry_initialize_failed" || metadata["startup_attempts"] != 2 {
+		t.Fatalf("authentication recovery metadata = %#v, want auth classification and startup attempts", metadata)
+	}
+}
+
+func TestCreateRecoveryStatusMessage_ManagedRuntimePolicyUsesOneRetryAction(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-policy", "s-policy", "step1")
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:         "t-policy",
+		SessionID:      "s-policy",
+		ErrorMessage:   "managed npm runtime failed to prepare",
+		FailureCode:    "managed_runtime_npm_policy",
+		FailureDetails: "npm error code ETARGET\nnpm error notarget No matching version found with a date before <release-date>",
+	}, ""))
+
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("expected one recovery message, got %d", len(mc.sessionMessages))
+	}
+	meta := mc.sessionMessages[0].metadata
+	if meta["failure_kind"] != "managed_runtime_npm_policy" {
+		t.Fatalf("failure_kind = %#v, want policy code", meta["failure_kind"])
+	}
+	if meta["error_output"] != "npm error code ETARGET\nnpm error notarget No matching version found with a date before <release-date>" {
+		t.Fatalf("error_output = %#v, want sanitized policy details", meta["error_output"])
+	}
+	actions, ok := meta["actions"].([]map[string]interface{})
+	if !ok || len(actions) != 1 || actions[0]["test_id"] != "managed-runtime-npm-retry-button" {
+		t.Fatalf("actions = %#v, want one runtime retry", meta["actions"])
+	}
+	payload := actions[0]["params"].(map[string]interface{})["payload"].(map[string]interface{})
+	if payload["action"] != "runtime_retry" {
+		t.Fatalf("action payload = %#v, want runtime_retry", payload)
+	}
+}
+
 func TestCreateRecoveryStatusMessage_ResumeCorrupted(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -120,11 +242,11 @@ func TestCreateRecoveryStatusMessage_ResumeCorrupted(t *testing.T) {
 	mc := &mockMessageCreator{}
 	svc.messageCreator = mc
 
-	svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
 		TaskID:       "t1",
 		SessionID:    "s1",
 		ErrorMessage: thinkingBlocks400,
-	})
+	}, ""))
 
 	if len(mc.sessionMessages) != 1 {
 		t.Fatalf("expected 1 session message, got %d", len(mc.sessionMessages))
@@ -138,7 +260,7 @@ func TestCreateRecoveryStatusMessage_ResumeCorrupted(t *testing.T) {
 	}
 }
 
-func TestCreateRecoveryStatusMessage_TransientExhaustionUsesSafeReason(t *testing.T) {
+func TestCreateRecoveryStatusMessage_TransientManualRecoveryUsesSafeReason(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t-capacity", "s-capacity", "step1")
@@ -147,23 +269,25 @@ func TestCreateRecoveryStatusMessage_TransientExhaustionUsesSafeReason(t *testin
 	mc := &mockMessageCreator{}
 	svc.messageCreator = mc
 
-	svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
 		TaskID:       "t-capacity",
 		SessionID:    "s-capacity",
 		AgentID:      "codex-acp",
 		ErrorMessage: "Selected model is at capacity. Please try a different model.",
-	})
+	}, ""))
 
 	if len(mc.sessionMessages) != 1 {
 		t.Fatalf("expected 1 session message, got %d", len(mc.sessionMessages))
 	}
 	content := mc.sessionMessages[0].content
-	if !strings.Contains(content, "model remained at capacity") {
+	if !strings.Contains(content, "Model at capacity") {
 		t.Fatalf("content = %q, want provider-neutral capacity reason", content)
 	}
 	if strings.Contains(content, "Please try a different model") {
 		t.Fatalf("content copied raw provider evidence: %q", content)
 	}
+	require.NotContains(t, content, "after several retries")
+	require.Equal(t, "provider_interrupted", mc.sessionMessages[0].metadata["failure_kind"])
 }
 
 func TestCreateRecoveryStatusMessage_OpenCodeQuotaCarriesSafeMetadata(t *testing.T) {
@@ -177,7 +301,7 @@ func TestCreateRecoveryStatusMessage_OpenCodeQuotaCarriesSafeMetadata(t *testing
 	resetAt := time.Date(2026, 8, 2, 19, 34, 44, 0, time.UTC)
 	const wantURL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"
 
-	svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
 		TaskID:       "t-quota",
 		SessionID:    "s-quota",
 		AgentID:      "opencode-acp",
@@ -191,7 +315,7 @@ func TestCreateRecoveryStatusMessage_OpenCodeQuotaCarriesSafeMetadata(t *testing
 			OccurredAt:     time.Date(2026, 8, 2, 15, 15, 44, 0, time.UTC),
 			ResetAt:        &resetAt,
 		},
-	})
+	}, ""))
 
 	if len(mc.sessionMessages) != 1 {
 		t.Fatalf("expected 1 session message, got %d", len(mc.sessionMessages))
@@ -226,7 +350,7 @@ func TestCreateRecoveryStatusMessage_GenericFailureCarriesRemediationURL(t *test
 
 	// A structured ACP-sourced diagnostic is not quota-classified, but the
 	// validated link still reaches the generic recoverable card.
-	svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
 		TaskID:       "t-generic",
 		SessionID:    "s-generic",
 		AgentID:      "opencode-acp",
@@ -237,7 +361,7 @@ func TestCreateRecoveryStatusMessage_GenericFailureCarriesRemediationURL(t *test
 			RemediationURL: wantURL,
 			OccurredAt:     time.Date(2026, 8, 2, 15, 15, 44, 0, time.UTC),
 		},
-	})
+	}, ""))
 
 	if len(mc.sessionMessages) != 1 {
 		t.Fatalf("expected 1 session message, got %d", len(mc.sessionMessages))
@@ -251,6 +375,64 @@ func TestCreateRecoveryStatusMessage_GenericFailureCarriesRemediationURL(t *test
 	}
 	if _, ok := meta["error_output"]; ok {
 		t.Fatalf("error_output unexpectedly set for non-quota diagnostic: %#v", meta["error_output"])
+	}
+}
+
+func TestCreateRecoveryStatusMessage_PostStartFailureSurfacesSanitizedDetail(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-detail", "s-detail", "step1")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	// A post-start recoverable failure (e.g. the model provider rejecting a
+	// dispatched prompt) is not a bootstrap, managed-runtime-npm, or quota
+	// classification, but its sanitized detail should still reach the collapsed
+	// disclosure so the user sees why the turn failed.
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:         "t-detail",
+		SessionID:      "s-detail",
+		ErrorMessage:   "Internal error: HTTP error: 400 Bad Request",
+		FailureDetails: "Tool schema rejected. Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456",
+	}, ""))
+
+	require.Len(t, mc.sessionMessages, 1)
+	meta := mc.sessionMessages[0].metadata
+	out, ok := meta["error_output"].(string)
+	if !ok || out == "" {
+		t.Fatalf("error_output = %#v, want the sanitized failure detail", meta["error_output"])
+	}
+	require.Contains(t, out, "Tool schema rejected")
+	// The credential in the raw detail must not survive into the disclosure.
+	require.NotContains(t, out, "abcdefghijklmnopqrstuvwxyz")
+	// A generic post-start failure carries no specialized classification.
+	if meta["failure_kind"] != nil {
+		t.Fatalf("failure_kind = %#v, want unset for generic post-start failure", meta["failure_kind"])
+	}
+}
+
+func TestCreateRecoveryStatusMessage_PostStartFailureOmitsEmptyDetail(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-empty", "s-empty", "step1")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	// No usable failure detail: the disclosure is omitted and the generic
+	// recovery card is shown.
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:       "t-empty",
+		SessionID:    "s-empty",
+		ErrorMessage: "Internal error: HTTP error: 400 Bad Request",
+	}, ""))
+
+	require.Len(t, mc.sessionMessages, 1)
+	if out, ok := mc.sessionMessages[0].metadata["error_output"]; ok {
+		t.Fatalf("error_output unexpectedly set when no failure detail: %#v", out)
 	}
 }
 
@@ -279,12 +461,12 @@ func TestProviderRemediationURLRejectsInvalidDiagnostics(t *testing.T) {
 		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+			require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
 				TaskID:        "t-none",
 				SessionID:     "s-none",
 				ErrorMessage:  "provider failed",
 				ProviderError: tt.providerErr,
-			})
+			}, ""))
 			if len(mc.sessionMessages) == 0 {
 				t.Fatal("expected a session message")
 			}
@@ -292,6 +474,7 @@ func TestProviderRemediationURLRejectsInvalidDiagnostics(t *testing.T) {
 				t.Fatalf("remediation_url = %#v, want absent", url)
 			}
 			mc.sessionMessages = nil
+			mc.idempotentSessionMessages = nil
 		})
 	}
 }

@@ -1,6 +1,22 @@
-export function linkToTask(taskId: string, layout?: string): string {
-  const base = `/t/${taskId}`;
-  return layout ? `${base}?layout=${encodeURIComponent(layout)}` : base;
+export type TaskLinkOptions = {
+  layout?: string;
+  sessionId?: string;
+  searchParams?: URLSearchParams;
+};
+
+export function linkToTask(taskId: string, layout?: string): string;
+export function linkToTask(taskId: string, options?: TaskLinkOptions): string;
+export function linkToTask(taskId: string, layoutOrOptions?: string | TaskLinkOptions): string {
+  const base = `/t/${encodeURIComponent(taskId)}`;
+  const options =
+    typeof layoutOrOptions === "string" ? { layout: layoutOrOptions } : (layoutOrOptions ?? {});
+  const searchParams = new URLSearchParams(options.searchParams);
+
+  if (options.layout !== undefined) searchParams.set("layout", options.layout);
+  if (options.sessionId !== undefined) searchParams.set("sessionId", options.sessionId);
+
+  const query = searchParams.toString();
+  return query ? `${base}?${query}` : base;
 }
 
 export function linkToTaskOverview({
@@ -43,9 +59,9 @@ export function isTaskDetailPath(pathname: string, taskId: string): boolean {
 }
 
 /** Replace the browser URL to reflect the active task (no navigation). */
-export function replaceTaskUrl(taskId: string): void {
+export function replaceTaskUrl(taskId: string, sessionId?: string): void {
   if (typeof window === "undefined") return;
-  window.history.replaceState({}, "", linkToTask(taskId));
+  window.history.replaceState({}, "", linkToTask(taskId, { sessionId }));
 }
 
 export function linkToTasks(workspaceId?: string): string {

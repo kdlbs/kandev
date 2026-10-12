@@ -1,4 +1,5 @@
 export type FileCategory = "text" | "image" | "binary";
+export type FilePreviewKind = "markdown" | "html" | "none";
 
 const IMAGE_EXTENSIONS = new Set([
   "png",
@@ -97,8 +98,15 @@ export function getFileCategory(path: string): FileCategory {
 }
 
 export function isMarkdownFile(path: string): boolean {
+  return getFilePreviewKind(path) === "markdown";
+}
+
+export function getFilePreviewKind(path: string, isBinary = false): FilePreviewKind {
+  if (isBinary) return "none";
   const ext = getExtension(path);
-  return ext === "md" || ext === "mdx";
+  if (ext === "md" || ext === "mdx") return "markdown";
+  if (ext === "html" || ext === "htm") return "html";
+  return "none";
 }
 
 /** Return the MIME type for a known image extension, or a fallback. */

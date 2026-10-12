@@ -153,6 +153,14 @@ func newReviewLoopFixture(t *testing.T) *reviewLoopFixture {
 	svc.SetEngineParticipantStore(participants)
 	svc.SetEngineDecisionStore(decisions)
 
+	// clear_decisions and queue_run_for_each_participant execute exclusively
+	// through the ledger dispatcher since the step-entry dispatch
+	// convergence (docs/specs/office/system-design/step-entry-dispatch-convergence.md),
+	// so this fixture must wire Repository.dispatchStepEntry's production
+	// seam — mirroring backendapp's engineStepEntryDispatcherAdapter — for
+	// these AC-D3/AC-D4/AC-C2/AC-F1 tests to exercise anything at all.
+	repo.SetStepEntryDispatcher(&testStepEntryDispatcher{eng: svc.WorkflowEngine()})
+
 	taskRepo := svc.taskRepo.(*mockTaskRepo)
 	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 
@@ -217,10 +225,14 @@ func TestProcessOnEnter_QueueRunForEachParticipant_SingleReviewerEntry_QueuesExa
 }
 
 // TestProcessOnEnter_QueueRunForEachParticipant_SecondEntryAfterRejection_QueuesAnotherRun
-// covers AC-D4: after a rejection round sends the task back to Work and it
-// re-enters Review, the step-entry CAS marker for the *new* entry has never
-// been claimed, so a further run is queued — the at-most-once guarantee is
-// per step-entry, not a blanket suppression of repeat dispatch.
+// covers AC-D4 and AC-OFFICE-STEP-ENTRY-DISPATCH-008.2: after a rejection
+// round sends the task back to Work and it re-enters Review, the step-entry
+// CAS marker for the *new* entry has never been claimed, so a further run is
+// queued — the at-most-once guarantee is per step-entry, not a blanket
+// suppression of repeat dispatch. Call count alone would pass even if both
+// runs carried the same idempotency key (they would collide and the queue
+// would silently coalesce them in production), so AC-008.2 requires the two
+// runs' keys to differ, not just to both exist.
 func TestProcessOnEnter_QueueRunForEachParticipant_SecondEntryAfterRejection_QueuesAnotherRun(t *testing.T) {
 	ctx := context.Background()
 	f := newReviewLoopFixture(t)
@@ -251,6 +263,15 @@ func TestProcessOnEnter_QueueRunForEachParticipant_SecondEntryAfterRejection_Que
 	if got := f.runQueue.callCount(); got != 2 {
 		t.Fatalf("queued run count after second Review entry = %d, want 2 (AC-D4: not suppressed)", got)
 	}
+
+	firstKey := f.runQueue.calls[0].IdempotencyKey
+	secondKey := f.runQueue.calls[1].IdempotencyKey
+	if firstKey == "" || secondKey == "" {
+		t.Fatalf("expected non-empty idempotency keys, got %q and %q", firstKey, secondKey)
+	}
+	if firstKey == secondKey {
+		t.Fatalf("AC-008.2: two distinct step entries must produce different idempotency keys, both got %q", firstKey)
+	}
 }
 
 // failingDecisionStore wraps fakeDecisionStore but always fails
@@ -273,7 +294,14 @@ func (f *failingDecisionStore) ClearStepDecisions(_ context.Context, _, _ string
 // clear_decisions (the exact order the Office Default workflow uses) — a
 // stale decision from a previous round combined with a fresh participant
 // fan-out could otherwise satisfy wait_for_quorum without every
-// current-round reviewer actually voting.
+// current-round reviewer actually voting. Since the step-entry dispatch
+// convergence (docs/specs/office/system-design/step-entry-dispatch-convergence.md),
+// both actions are ledger-owned and execute exclusively through
+// Engine.DispatchStepEntry / (*Service).ExecuteMarkerBearingStepEntryAction,
+// so the abort-on-failure log now comes from
+// dispatchEngineOwnedOnEnterAction's "DispatchStepEntry: marker-bearing
+// on_enter action failed" line rather than the retired
+// processOnEnter/dispatchOnEnterActions message.
 func TestProcessOnEnter_ClearDecisionsFailure_BlocksSubsequentOnEnterActions(t *testing.T) {
 	ctx := context.Background()
 	f := newReviewLoopFixture(t)
@@ -296,7 +324,7 @@ func TestProcessOnEnter_ClearDecisionsFailure_BlocksSubsequentOnEnterActions(t *
 
 	var acC2Errors []observer.LoggedEntry
 	for _, e := range logs.All() {
-		if e.Message == "processOnEnter: clear_decisions failed, aborting remaining on_enter actions for step entry" {
+		if e.Message == "DispatchStepEntry: marker-bearing on_enter action failed" {
 			acC2Errors = append(acC2Errors, e)
 		}
 	}
@@ -304,8 +332,8 @@ func TestProcessOnEnter_ClearDecisionsFailure_BlocksSubsequentOnEnterActions(t *
 		t.Fatalf("got %d AC-C2 ERROR log(s), want exactly 1 (all entries: %+v)", len(acC2Errors), logs.All())
 	}
 	fields := acC2Errors[0].ContextMap()
-	if fields["workflow_id"] != "wf1" {
-		t.Errorf("AC-C2 error workflow_id = %v, want %q", fields["workflow_id"], "wf1")
+	if fields["action_kind"] != "clear_decisions" {
+		t.Errorf("AC-C2 error action_kind = %v, want %q", fields["action_kind"], "clear_decisions")
 	}
 	if fields["step_id"] != f.nameToID["Review"] {
 		t.Errorf("AC-C2 error step_id = %v, want %q", fields["step_id"], f.nameToID["Review"])
@@ -313,16 +341,27 @@ func TestProcessOnEnter_ClearDecisionsFailure_BlocksSubsequentOnEnterActions(t *
 	if fields["task_id"] != "t1" {
 		t.Errorf("AC-C2 error task_id = %v, want %q", fields["task_id"], "t1")
 	}
-	if cause, _ := fields["cause"].(string); cause == "" {
-		t.Errorf("AC-C2 error missing cause field: %+v", fields)
+	if errStr, _ := fields["error"].(string); errStr == "" {
+		t.Errorf("AC-C2 error missing error field: %+v", fields)
 	}
 }
 
-// TestProcessOnEnter_ClearDecisionsFailure_DoesNotLaunchEarlierAutoStart
-// covers AC-C2 when auto_start_agent appears before clear_decisions. The
-// auto-start action keeps its fixed final execution position, so a failed
-// clear must abort the launch as well as later engine-owned actions.
-func TestProcessOnEnter_ClearDecisionsFailure_DoesNotLaunchEarlierAutoStart(t *testing.T) {
+// TestProcessOnEnter_ClearDecisionsFailure_DoesNotBlockEarlierAutoStart
+// covers AC-C2 when auto_start_agent appears before clear_decisions in the
+// same step's on_enter declaration. Before the step-entry dispatch
+// convergence, both actions ran through the same processOnEnter sequence
+// and a failed clear aborted a not-yet-executed auto-start too. Since the
+// convergence, clear_decisions is ledger-owned (dispatched synchronously
+// from Repository.dispatchStepEntry, inside the transition-commit path) and
+// auto_start_agent is marker-owned (dispatched later, independently, from
+// processOnEnter/dispatchOnEnterActions on on_turn_complete) — two different
+// dispatchers with no barrier between them. The system design's "Out of
+// scope: Ordering between actions owned by different dispatchers" section
+// states this explicitly: declared order is only guaranteed within one
+// owner's actions, never across owners, and "no shipped workflow mixes
+// owners in one entry sequence" — so this cross-owner ordering is no longer
+// a guarantee this test can assert.
+func TestProcessOnEnter_ClearDecisionsFailure_DoesNotBlockEarlierAutoStart(t *testing.T) {
 	ctx := context.Background()
 	f := newReviewLoopFixture(t)
 	f.svc.SetEngineDecisionStore(&failingDecisionStore{})
@@ -345,7 +384,7 @@ func TestProcessOnEnter_ClearDecisionsFailure_DoesNotLaunchEarlierAutoStart(t *t
 	f.agentMgr.mu.Lock()
 	promptCount := len(f.agentMgr.capturedPrompts)
 	f.agentMgr.mu.Unlock()
-	if promptCount != 0 {
-		t.Fatalf("auto-start prompt count after clear_decisions failure = %d, want 0", promptCount)
+	if promptCount != 1 {
+		t.Fatalf("auto-start prompt count after clear_decisions failure = %d, want 1 (marker-owned auto_start_agent is dispatched independently of the ledger-owned clear_decisions failure)", promptCount)
 	}
 }

@@ -16,6 +16,8 @@ type AppSidebarNavItemProps = {
   href?: string;
   badge?: number;
   badgeVariant?: "primary" | "muted";
+  /** Appended after the number, e.g. "+" for a capped/truncated count. */
+  badgeSuffix?: string;
   activity?: QuickChatActivityState;
   onClick?: () => void;
   collapsed: boolean;
@@ -32,6 +34,7 @@ type AppSidebarNavItemProps = {
 };
 
 type TriggerProps = {
+  active: boolean;
   onClick?: () => void;
   disabled: boolean;
   baseClass: string;
@@ -41,7 +44,16 @@ type TriggerProps = {
   testId?: string;
 };
 
-function renderTrigger({ onClick, disabled, baseClass, label, href, inner, testId }: TriggerProps) {
+function renderTrigger({
+  onClick,
+  disabled,
+  baseClass,
+  label,
+  href,
+  inner,
+  testId,
+  active,
+}: TriggerProps) {
   if (onClick) {
     return (
       <button
@@ -65,7 +77,13 @@ function renderTrigger({ onClick, disabled, baseClass, label, href, inner, testI
     );
   }
   return (
-    <Link href={href ?? "#"} className={baseClass} aria-label={label} data-testid={testId}>
+    <Link
+      href={href ?? "#"}
+      className={baseClass}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      data-testid={testId}
+    >
       {inner}
     </Link>
   );
@@ -86,12 +104,21 @@ function sidebarBadgeClass(variant: NonNullable<AppSidebarNavItemProps["badgeVar
   );
 }
 
+// Absent for a zero/absent badge; a truncated count carries `badgeSuffix`
+// (e.g. "+") appended after the number, both on the visible badge and the
+// collapsed-rail tooltip.
+function badgeText(badge: number | undefined, suffix: string | undefined): string | null {
+  if (typeof badge !== "number" || badge <= 0) return null;
+  return `${badge}${suffix ?? ""}`;
+}
+
 export function AppSidebarNavItem({
   icon: Icon,
   label,
   href,
   badge,
   badgeVariant = "primary",
+  badgeSuffix,
   onClick,
   collapsed,
   isActive,
@@ -103,9 +130,10 @@ export function AppSidebarNavItem({
 }: AppSidebarNavItemProps) {
   const pathname = usePathname();
   const active = isActive ?? isPathActive(pathname, href, exactMatch);
+  const badgeLabel = badgeText(badge, badgeSuffix);
 
   const baseClass = cn(
-    "flex items-center rounded-md text-[13px] font-medium transition-colors",
+    "flex items-center rounded-md text-[13px] font-medium transition-colors [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11",
     collapsed ? "h-9 w-9 justify-center mx-auto" : "h-9 px-2.5 gap-2.5 w-full text-left",
     disabled
       ? "cursor-not-allowed text-foreground/40"
@@ -122,15 +150,22 @@ export function AppSidebarNavItem({
       {!collapsed && (
         <>
           <span className="flex-1 truncate sidebar-fade-in">{label}</span>
-          {typeof badge === "number" && badge > 0 && (
-            <Badge className={sidebarBadgeClass(badgeVariant)}>{badge}</Badge>
-          )}
+          {badgeLabel && <Badge className={sidebarBadgeClass(badgeVariant)}>{badgeLabel}</Badge>}
         </>
       )}
     </>
   );
 
-  const buttonOrLink = renderTrigger({ onClick, disabled, baseClass, label, href, inner, testId });
+  const buttonOrLink = renderTrigger({
+    onClick,
+    disabled,
+    baseClass,
+    label,
+    href,
+    inner,
+    testId,
+    active,
+  });
 
   if (!collapsed) return buttonOrLink;
   return (
@@ -138,7 +173,7 @@ export function AppSidebarNavItem({
       <TooltipTrigger asChild>{buttonOrLink}</TooltipTrigger>
       <TooltipContent side="right">
         {label}
-        {typeof badge === "number" && badge > 0 ? ` (${badge})` : ""}
+        {badgeLabel ? ` (${badgeLabel})` : ""}
       </TooltipContent>
     </Tooltip>
   );

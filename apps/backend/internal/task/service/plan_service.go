@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/contract"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -68,6 +69,12 @@ type PlanService struct {
 	// workflowStepGetter resolves the task's current workflow step for the
 	// write-time stamp. Nil is safe: stamped fields stay empty.
 	workflowStepGetter PlanWorkflowStepGetter
+	previewCleaner     interface {
+		DeleteDescriptors(context.Context, []*models.TaskMessageAttachment) error
+	}
+	previewScreenshotValidator interface {
+		ValidatePreviewScreenshot(context.Context, string, string, string, string) error
+	}
 }
 
 // NewPlanService creates a new task plan service. The concrete repository
@@ -99,6 +106,22 @@ func (s *PlanService) SetTaskAuthorizer(fn func(ctx context.Context, taskID stri
 // keeps every existing caller working with the stamp fields left empty.
 func (s *PlanService) SetWorkflowStepGetter(getter PlanWorkflowStepGetter) {
 	s.workflowStepGetter = getter
+}
+
+// SetPreviewAttachmentCleaner removes screenshot bytes after their task-owned
+// feedback claim has been durably released.
+func (s *PlanService) SetPreviewAttachmentCleaner(cleaner interface {
+	DeleteDescriptors(context.Context, []*models.TaskMessageAttachment) error
+}) {
+	s.previewCleaner = cleaner
+}
+
+// SetPreviewScreenshotValidator wires the private-byte validation that runs
+// before a staged screenshot is claimed by task feedback.
+func (s *PlanService) SetPreviewScreenshotValidator(validator interface {
+	ValidatePreviewScreenshot(context.Context, string, string, string, string) error
+}) {
+	s.previewScreenshotValidator = validator
 }
 
 func (s *PlanService) authorize(ctx context.Context, taskID string) error {
@@ -175,6 +198,11 @@ type CreatePlanRequest struct {
 	// is true, so this field is inert on the CreatePlan path regardless of
 	// what a caller sets it to.
 	Mode PlanWriteMode
+	// AgentWrite enables conditional admission for the MCP plan surface. It
+	// is set by the trusted handler, not decoded from browser payloads.
+	AgentWrite      bool
+	ExpectedVersion string
+	AllowTruncation bool
 }
 
 // PlanWriteResult is returned by CreatePlan/UpdatePlan. Plan is always
@@ -230,14 +258,8 @@ const (
 )
 
 func (s *PlanService) readLatestRevision(ctx context.Context, taskID string) (*models.TaskPlanRevision, planRevisionState) {
-	rev, err := s.repo.GetLatestTaskPlanRevision(ctx, taskID)
-	if err != nil {
-		return nil, planRevisionUnknown
-	}
-	if rev == nil {
-		return nil, planRevisionAbsent
-	}
-	return rev, planRevisionFound
+	rev, state, _ := s.readLatestRevisionDetailed(ctx, taskID)
+	return rev, state
 }
 
 // CreatePlan upserts a plan and appends or coalesces a revision.
@@ -247,6 +269,9 @@ func (s *PlanService) CreatePlan(ctx context.Context, req CreatePlanRequest) (Pl
 	}
 	if err := s.validatePlanWrite(ctx, req.TaskID, req.Content); err != nil {
 		return PlanWriteResult{}, err
+	}
+	if req.AgentWrite && req.Content == "" {
+		return PlanWriteResult{}, s.emptyAgentPlanError(req.TaskID)
 	}
 	release := s.locks.acquire(req.TaskID)
 	defer release()
@@ -271,6 +296,9 @@ type UpdatePlanRequest struct {
 	ForceNewRevision   bool
 	EvaluateTruncation bool
 	Mode               PlanWriteMode
+	AgentWrite         bool
+	ExpectedVersion    string
+	AllowTruncation    bool
 }
 
 // UpdatePlan updates an existing plan (errors if missing).
@@ -299,6 +327,9 @@ func (s *PlanService) UpdatePlan(ctx context.Context, req UpdatePlanRequest) (Pl
 		}
 	} else {
 		if req.Mode == PlanWriteModeReplace && req.Content == "" {
+			if req.AgentWrite {
+				return PlanWriteResult{}, s.emptyAgentPlanError(req.TaskID)
+			}
 			return PlanWriteResult{}, ErrContentRequired
 		}
 		if err := s.checkContentSize(ctx, req.TaskID, req.Content); err != nil {
@@ -365,6 +396,13 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 		req.EvaluateTruncation = false
 	}
 
+	latest, latestState, latestErr := s.readLatestRevisionDetailed(readCtx, req.TaskID)
+	var err error
+	req, err = s.guardAgentPlanWrite(req, headPlan, headState, headErr, latest, latestState, latestErr)
+	if err != nil {
+		return planWriteOutcome{}, err
+	}
+
 	req, preserveTitle, preserveCreatedBy := s.resolveHeadFallbacks(ctx, req, headPlan, headState, requireExistingHead)
 
 	title := req.Title
@@ -387,9 +425,9 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 	if headState == planHeadFound {
 		plan.ID = headPlan.ID
 		plan.CreatedAt = headPlan.CreatedAt
+		plan.CommentsRevision = headPlan.CommentsRevision
 	}
 
-	latest, latestState := s.readLatestRevision(readCtx, req.TaskID)
 	rb := s.buildRevision(readCtx, req, headPlan, headState, latest, authorKind, authorName, title)
 
 	if err := s.repo.WritePlanRevision(ctx, plan, rb.rev, rb.coalesceID, preserveTitle, preserveCreatedBy); err != nil {
@@ -656,6 +694,17 @@ func (s *PlanService) GetPlan(ctx context.Context, taskID string) (*models.TaskP
 	return s.repo.GetTaskPlan(ctx, taskID)
 }
 
+// GetPlanSnapshot reads one task-plan row while holding the same per-task
+// lock used by plan writers. The repository query returns title, content, and
+// write version from that row, so agent callers receive one coherent snapshot.
+func (s *PlanService) GetPlanSnapshot(ctx context.Context, taskID string) (*models.TaskPlan, error) {
+	result, err := s.GetPlanRead(ctx, taskID, contract.PlanReadOptions{})
+	if err != nil || result == nil {
+		return nil, err
+	}
+	return result.Plan, nil
+}
+
 type MarkImplementationStartedRequest struct {
 	TaskID    string
 	SessionID string
@@ -840,6 +889,7 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 	if headState == planHeadFound {
 		plan.ID = headPlan.ID
 		plan.CreatedAt = headPlan.CreatedAt
+		plan.CommentsRevision = headPlan.CommentsRevision
 	}
 
 	targetID := target.ID
@@ -890,13 +940,14 @@ func (s *PlanService) publishPlanEvent(ctx context.Context, eventType string, pl
 		return
 	}
 	payload := map[string]interface{}{
-		"id":         plan.ID,
-		"task_id":    plan.TaskID,
-		"title":      plan.Title,
-		"content":    plan.Content,
-		"created_by": plan.CreatedBy,
-		"created_at": plan.CreatedAt,
-		"updated_at": plan.UpdatedAt,
+		"id":                       plan.ID,
+		rvFieldTaskID:              plan.TaskID,
+		wtFieldTitle:               plan.Title,
+		"content":                  plan.Content,
+		"created_by":               plan.CreatedBy,
+		wtFieldCreatedAt:           plan.CreatedAt,
+		sessionEventFieldUpdatedAt: plan.UpdatedAt,
+		"comments_revision":        plan.CommentsRevision,
 	}
 	if plan.ImplementationStartedAt != nil {
 		payload["implementation_started_at"] = *plan.ImplementationStartedAt

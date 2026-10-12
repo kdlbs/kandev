@@ -1,5 +1,6 @@
 import type { StateCreator } from "zustand";
 import type { OfficeSlice, OfficeSliceState } from "./types";
+import type { WorkspacePauseOutcome } from "./pause-types";
 import { normalizeOfficeTask, normalizeTaskStatus } from "@/lib/api/domains/office-task-normalize";
 
 export const defaultTaskFilters = {
@@ -52,6 +53,7 @@ export const defaultOfficeState: OfficeSliceState = {
     runAttempts: { byRunId: {} },
     agentRouting: { byAgentId: {} },
     taskQuorum: { byTaskId: {} },
+    pause: { record: null, status: "unknown", requestSeq: 0, appliedSeq: 0 },
   },
 };
 
@@ -379,6 +381,64 @@ function createRoutingActions(set: SetFn) {
   };
 }
 
+// Implements the workspace kill switch's "Frontend state" input table
+// (docs/specs/office/system-design/workspace-kill-switch-02.md). All four
+// GET/POST outcomes funnel through one guarded apply so the two
+// supersession guards — workspace_id match and tag freshness — cover every
+// outcome including the failure rows (F51), not only the success rows.
+function createPauseActions(set: SetFn) {
+  return {
+    // Every issued GET or POST bumps the one shared counter and takes the
+    // new value as its tag, so requests are ordered by when they were
+    // issued rather than by when their response lands.
+    beginPauseRequest: (): number => {
+      let tag = 0;
+      set((draft) => {
+        draft.office.pause.requestSeq += 1;
+        tag = draft.office.pause.requestSeq;
+      });
+      return tag;
+    },
+    // Mount, and every change of selected workspace: status `unknown`,
+    // clear the record. The caller issues the read separately.
+    resetPauseState: () =>
+      set((draft) => {
+        draft.office.pause.status = "unknown";
+        draft.office.pause.record = null;
+      }),
+    applyPauseResponse: (
+      tag: number,
+      responseWorkspaceId: string,
+      activeWorkspaceId: string | null,
+      outcome: WorkspacePauseOutcome,
+    ): boolean => {
+      let applied = false;
+      set((draft) => {
+        const pause = draft.office.pause;
+        if (responseWorkspaceId !== activeWorkspaceId || tag <= pause.appliedSeq) return;
+        applied = true;
+        pause.appliedSeq = tag;
+        switch (outcome.kind) {
+          case "read-success":
+          case "mutate-success":
+            pause.status = "known";
+            pause.record = outcome.paused ? outcome.record : null;
+            return;
+          case "read-failure":
+            // Status `unknown`; the record is not cleared, so a pause
+            // already read stays on screen (marked stale by the caller).
+            pause.status = "unknown";
+            return;
+          case "mutate-failure":
+            // Status and record unchanged; the caller surfaces the failure.
+            return;
+        }
+      });
+      return applied;
+    },
+  };
+}
+
 export const createOfficeSlice: ImmerSet = (set) => ({
   ...defaultOfficeState,
   ...createAgentActions(set),
@@ -387,4 +447,5 @@ export const createOfficeSlice: ImmerSet = (set) => ({
   ...createTaskActions(set),
   ...createMiscActions(set),
   ...createRoutingActions(set),
+  ...createPauseActions(set),
 });

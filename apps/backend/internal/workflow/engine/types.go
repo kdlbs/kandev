@@ -84,6 +84,16 @@ type Action struct {
 	Kind             ActionKind
 	RequiresApproval bool
 
+	// DeclaredPosition is this action's 0-based index in the step's raw
+	// on_enter declaration, set by compileOnEnter. It differs from a
+	// position derived by counting compiled actions whenever an earlier
+	// declared action does not compile (e.g. configure_session, or
+	// set_session_mode with no target mode) — DispatchStepEntry's
+	// marker-bearing claim must use this value, not a loop index over the
+	// compiled slice, so it agrees with stepentry.BuildPendingAllocation's
+	// position (also counted over the raw declaration).
+	DeclaredPosition int
+
 	// Guard, when non-nil, gates a transition action on a condition that the
 	// engine evaluates before resolving the transition target. Today only
 	// wait_for_quorum is supported. Non-transition actions ignore Guard.
@@ -180,11 +190,16 @@ type QueueRunAction struct {
 type ClearDecisionsAction struct{}
 
 // QueueRunForEachParticipantAction fans out QueueRun against every step
-// participant matching the configured role. Declared but not yet wired.
+// participant matching the configured role.
+//
+// SkipDecided, when true, drops every seat holding a non-superseded decision
+// at the step from the fan-out (REQ-OFFICE-GATE-COMMENT-001). It defaults to
+// false, preserving the step-entry fan-out's "wake everyone" behaviour.
 type QueueRunForEachParticipantAction struct {
-	Role    string
-	Reason  string
-	Payload map[string]any
+	Role        string
+	Reason      string
+	Payload     map[string]any
+	SkipDecided bool
 }
 
 // EnsureParticipantSeatAction declares the role that must hold a
@@ -310,8 +325,9 @@ func CompileStep(step *wfmodels.WorkflowStep) StepSpec {
 
 func compileOnEnter(step *wfmodels.WorkflowStep) []Action {
 	actions := make([]Action, 0, len(step.Events.OnEnter))
-	for _, action := range step.Events.OnEnter {
+	for i, action := range step.Events.OnEnter {
 		if compiled, ok := CompileOnEnterAction(action); ok {
+			compiled.DeclaredPosition = i
 			actions = append(actions, compiled)
 		}
 	}
@@ -502,7 +518,9 @@ func readQueueRunConfig(config map[string]any) *QueueRunAction {
 }
 
 // readQueueRunForEachParticipantConfig reads the role/reason/payload for a
-// queue_run_for_each_participant action.
+// queue_run_for_each_participant action. skip_decided is read only as a
+// boolean; a missing key, false, or any non-boolean value all leave it off
+// (AC-OFFICE-GATE-COMMENT-005.3).
 func readQueueRunForEachParticipantConfig(config map[string]any) *QueueRunForEachParticipantAction {
 	if config == nil {
 		return &QueueRunForEachParticipantAction{}
@@ -510,10 +528,12 @@ func readQueueRunForEachParticipantConfig(config map[string]any) *QueueRunForEac
 	role, _ := config["role"].(string)
 	reason, _ := config["reason"].(string)
 	payload, _ := config["payload"].(map[string]any)
+	skipDecided, _ := config["skip_decided"].(bool)
 	return &QueueRunForEachParticipantAction{
-		Role:    role,
-		Reason:  reason,
-		Payload: payload,
+		Role:        role,
+		Reason:      reason,
+		Payload:     payload,
+		SkipDecided: skipDecided,
 	}
 }
 

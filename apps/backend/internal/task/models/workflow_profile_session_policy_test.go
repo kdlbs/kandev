@@ -29,8 +29,8 @@ func TestNormalizeWorkflowProfileSessionEndPolicy(t *testing.T) {
 		value string
 		want  WorkflowProfileSessionEndPolicy
 	}{
-		{name: "empty defaults to complete", value: "", want: WorkflowProfileSessionEndPolicyComplete},
-		{name: "unknown defaults to complete", value: "retain", want: WorkflowProfileSessionEndPolicyComplete},
+		{name: "empty defaults to park", value: "", want: WorkflowProfileSessionEndPolicyPark},
+		{name: "unknown defaults to park", value: "retain", want: WorkflowProfileSessionEndPolicyPark},
 		{name: "canonical value is preserved", value: "complete", want: WorkflowProfileSessionEndPolicyComplete},
 		{name: "known value is canonicalized", value: " park ", want: WorkflowProfileSessionEndPolicyPark},
 	}

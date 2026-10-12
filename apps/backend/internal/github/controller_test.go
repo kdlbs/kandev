@@ -110,6 +110,12 @@ func (s *stubClient) ListPRComments(context.Context, string, string, int, *time.
 func (s *stubClient) ListCheckRuns(context.Context, string, string, string) ([]CheckRun, error) {
 	return nil, nil
 }
+func (s *stubClient) ListWorkflowRuns(context.Context, string, string, string) ([]WorkflowRun, error) {
+	return nil, nil
+}
+func (s *stubClient) ListWorkflowRunJobs(context.Context, string, string, int64, int) ([]WorkflowJob, error) {
+	return nil, nil
+}
 func (s *stubClient) GetPRFeedback(context.Context, string, string, int) (*PRFeedback, error) {
 	return nil, nil
 }

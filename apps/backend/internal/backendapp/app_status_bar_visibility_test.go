@@ -32,3 +32,14 @@ func TestMapUserSettingsStateIncludesResolveSessionHostnames(t *testing.T) {
 		t.Fatalf("resolveSessionHostnames = %#v, want true", state["resolveSessionHostnames"])
 	}
 }
+
+func TestMapUserSettingsStateIncludesSidebarHoverSettings(t *testing.T) {
+	var response userdto.UserSettingsResponse
+	if err := json.Unmarshal([]byte(`{"settings":{"sidebar_hover_enabled":false,"sidebar_hover_delay_ms":0}}`), &response); err != nil {
+		t.Fatal(err)
+	}
+	state := mapUserSettingsState(response, "workspace-1")
+	if state["sidebarHoverEnabled"] != false || state["sidebarHoverDelayMs"] != 0 {
+		t.Fatalf("hover boot fields: %v, %v", state["sidebarHoverEnabled"], state["sidebarHoverDelayMs"])
+	}
+}

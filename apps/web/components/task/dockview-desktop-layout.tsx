@@ -13,8 +13,10 @@ import {
   resolveRestoredLayoutProfile,
   useDockviewStore,
   performLayoutSwitch,
+  hasRightColumn,
 } from "@/lib/state/dockview-store";
-import { restoreEnvLayout } from "./dockview-layout-restore";
+import type { SessionListRestoreState } from "@/lib/state/dockview-env-switch";
+import { collectPhantomSessionIdsForEnv, restoreEnvLayout } from "./dockview-layout-restore";
 import {
   setupContainerResizeSync,
   setupGroupTracking,
@@ -27,6 +29,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useLspFileOpener } from "@/hooks/use-lsp-file-opener";
 import { useEditorKeybinds } from "@/hooks/use-editor-keybinds";
 import { usePlanPanelAutoOpen } from "@/hooks/use-plan-panel-auto-open";
+import { RENDERABLE_COMPONENT_NAMES } from "@/lib/state/layout-manager/renderable-components";
 
 // Panel components (rendered via portals, not directly by dockview)
 import { LeftHeaderActions, RightHeaderActions } from "./dockview-header-actions";
@@ -65,7 +68,9 @@ import {
   resolveEffectiveDefaultLayout,
   type LayoutProfileIdentity,
 } from "@/lib/layout/layout-profiles";
-import type { LayoutState } from "@/lib/state/layout-manager";
+import { fromDockviewApi, type LayoutState } from "@/lib/state/layout-manager";
+import { getEnvLayout } from "@/lib/local-storage";
+import { getRightPaneToggleState, readHiddenRightPane } from "@/lib/state/dockview-right-pane";
 import { registerDockviewRoot, unregisterDockviewRoot } from "@/lib/state/dockview-measure";
 
 // ---------------------------------------------------------------------------
@@ -128,28 +133,15 @@ function PortalSlot(props: IDockviewPanelProps) {
 // --- COMPONENT MAP ---
 // All panel types use the same PortalSlot wrapper — dockview only manages
 // layout positioning.  Actual rendering happens in PanelPortalHost below.
-const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
-  chat: PortalSlot,
-  "diff-viewer": PortalSlot,
-  "file-editor": PortalSlot,
-  "commit-detail": PortalSlot,
-  changes: PortalSlot,
-  files: PortalSlot,
-  terminal: PortalSlot,
-  browser: PortalSlot,
-  vscode: PortalSlot,
-  plan: PortalSlot,
-  todos: PortalSlot,
-  "prompt-history": PortalSlot,
-  "pr-detail": PortalSlot,
-  "mr-detail": PortalSlot,
-  "review-detail": PortalSlot,
-  "plugin-panel": PortalSlot,
-  canvas: PortalSlot,
-  // Backwards compat aliases for saved layouts
-  "diff-files": PortalSlot,
-  "all-files": PortalSlot,
-};
+// Built from the static renderable-component list so the registered set and
+// the restore/validation predicate cannot diverge.
+const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = Object.fromEntries(
+  RENDERABLE_COMPONENT_NAMES.map((name) => [name, PortalSlot]),
+);
+
+/** Component names this renderer registers; must equal
+ *  `RENDERABLE_COMPONENT_NAMES`. */
+export const DESKTOP_COMPONENT_NAMES: readonly string[] = Object.keys(components);
 
 // --- TAB COMPONENTS ---
 /** Tab header for permanent panels: renders the default dockview tab without
@@ -223,7 +215,7 @@ export const DESKTOP_VALID_COMPONENTS = new Set(Object.keys(components));
  * that launch races can produce), performs a layout switch to the new env;
  * same-env session switches are a no-op.
  */
-function useEnvSwitchCleanup(
+export function useEnvSwitchCleanup(
   effectiveSessionId: string | null,
   effectiveEnvId: string | null,
   activeTaskId: string | null,
@@ -231,6 +223,7 @@ function useEnvSwitchCleanup(
 ) {
   const prevEnvRef = useRef<string | null | undefined>(undefined);
   const prevTaskRef = useRef<string | null | undefined>(undefined);
+  const appStore = useAppStoreApi();
   const currentSessionIdsKey = useAppStore((state) => {
     if (!activeTaskId) return "";
     return (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [])
@@ -276,13 +269,34 @@ function useEnvSwitchCleanup(
     // through the sidebar/dropdown switch helpers. Same-env switches return
     // early above (no-op).
     if (newEnvId) {
-      const currentSessionIds = currentSessionIdsKey ? currentSessionIdsKey.split(",") : [];
+      const state = appStore.getState();
+      const currentSessionIds: string[] = activeTaskId
+        ? (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? []).map((session) =>
+            String(session.id),
+          )
+        : [];
       if (effectiveSessionId && !currentSessionIds.includes(effectiveSessionId)) {
         currentSessionIds.unshift(effectiveSessionId);
       }
-      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId, currentSessionIds, initialLayout);
+      const sessionListRestoreState: SessionListRestoreState = {
+        loaded: activeTaskId
+          ? (state.taskSessionsByTask.loadedByTaskId[activeTaskId] ?? false)
+          : false,
+        knownForeignSessionIds: collectPhantomSessionIdsForEnv(state, newEnvId),
+      };
+      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId, currentSessionIds, {
+        initialLayout,
+        sessionListRestoreState,
+      });
     }
-  }, [effectiveEnvId, effectiveSessionId, activeTaskId, currentSessionIdsKey, initialLayout]);
+  }, [
+    effectiveEnvId,
+    effectiveSessionId,
+    activeTaskId,
+    currentSessionIdsKey,
+    initialLayout,
+    appStore,
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -348,14 +362,23 @@ function setupReadyDockview({ api, appStore, layout, refs }: ReadyDockviewSetup)
   const restored =
     !layout.initialLayout &&
     restoreEnvLayout(api, currentEnvId, appStore, DESKTOP_VALID_COMPONENTS);
+  const hiddenRightPane =
+    restored && currentEnvId ? readHiddenRightPane(getEnvLayout(currentEnvId)) : null;
+  useDockviewStore.setState({ hiddenRightPane });
   if (!restored) {
     layout.buildDefaultLayout(
       api,
       layout.initialLayout ?? (layout.compact ? "compact" : undefined),
     );
   } else {
+    const restoredLayout = fromDockviewApi(api);
+    const preMaximizeLayout = useDockviewStore.getState().preMaximizeLayout;
+    const paneState = getRightPaneToggleState(preMaximizeLayout ?? restoredLayout, hiddenRightPane);
     useDockviewStore.setState({
       activeLayoutProfile: resolveRestoredLayoutProfile(api, currentEnvId),
+      rightPanelsVisible: hasRightColumn(preMaximizeLayout ?? restoredLayout),
+      rightPaneVisible: paneState.visible,
+      rightPaneAvailable: paneState.available,
     });
   }
 

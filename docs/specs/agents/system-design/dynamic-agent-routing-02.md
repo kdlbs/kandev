@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 created: 2026-08-13
-updated: 2026-08-17
+updated: 2026-10-08
 owners:
   - cfl
 ---
@@ -115,8 +115,27 @@ require the current exclusive probe lease.
   the earliest known recovery time and remediation actions.
 - If a route action carries a stale generation, Kandev does not change route
   state and returns the authoritative route snapshot.
-- If an error is unclassified, stale, conflicting, or effect-unsafe, Kandev
-  does not apply its candidate class policy and enters manual recovery.
+- A failure is fenced to the route generation and candidate that produced it.
+  The route records a successor before the predecessor's process is replaced,
+  and a deferred successor launch leaves the predecessor serving the session.
+  The orchestrator therefore drops a failure whose execution ran a concrete
+  profile other than the session's current execution profile, and the engine
+  rejects a failure whose generation or candidate differs from the route state
+  it holds or loads with a stale-generation error before it opens any circuit.
+  Such a failure neither opens the current candidate's circuit nor advances the
+  route. A session without known route state keeps the existing behavior.
+- Lifecycle stream events capture the execution's concrete profile separately
+  from its logical profile or Office identity. The stream-error handler passes
+  that concrete profile to the same failure guard as terminal lifecycle events.
+  Legacy stream events without a concrete profile retain their existing behavior.
+- If an error is unclassified, Kandev enters manual recovery except for the
+  [repeated-failure extension](dynamic-unclassified-fallback.md). Stale,
+  conflicting, and effect-unsafe evidence never authorizes that extension.
+- If an ACP diagnostic is followed by a matching high-confidence terminal
+  provider error before any other output or tool activity, the transcript keeps
+  the diagnostic but the shared recovery evidence treats the attempt as
+  pre-result. A mismatch or later progress remains effect-unsafe and enters
+  manual recovery.
 - If a trusted reset is beyond the configured maximum wait, Kandev does not
   wait for or shorten it. It proceeds to retry or the exhausted outcome.
 - If dynamic routing is disabled after a session is persisted, Kandev keeps its
@@ -202,6 +221,12 @@ require the current exclusive probe lease.
   **WHEN** the candidate keeps returning an effect-safe capacity error,
   **THEN** the route persists 5, 10, and 20 second waits before applying its
   configured skip or stop outcome.
+- **GIVEN** the active candidate emits `Repeated 529 Overloaded errors` as an
+  ACP diagnostic and immediately settles with a matching structured provider
+  error, **WHEN** no assistant output or tool activity follows and the
+  transient policy is exhausted with `skip`, **THEN** the same logical dynamic
+  session advances to the next eligible candidate. **GIVEN** later output,
+  tool activity, or a mismatched terminal error, **THEN** it does not switch.
 - **GIVEN** a hard quota error includes a trusted reset in one minute, **WHEN**
   the policy permits reset waits up to five minutes, **THEN** the route waits
   durably and retries the same candidate after the reset.

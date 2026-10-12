@@ -196,6 +196,7 @@ func (s *Service) shouldSkipTerminalPRAutoStart(
 	errorValue := models.TaskLaunchError{
 		Message:          terminalPRLaunchMessage,
 		OccurredAt:       time.Now().UTC(),
+		Scope:            models.ErrorScopeTask,
 		Code:             models.LaunchErrorCategoryPRAlreadyClosed,
 		RecoveryActions:  terminalPRRecoveryActions(ctx, s.workflowStepGetter, task.WorkflowStepID),
 		TaskRepositoryID: taskPRLaunchErrorRepositoryID(matches),

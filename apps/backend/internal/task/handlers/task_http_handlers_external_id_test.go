@@ -19,6 +19,7 @@ import (
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -94,6 +95,24 @@ func newIdempotentCreateTaskRepo() *idempotentCreateTaskRepo {
 	return &idempotentCreateTaskRepo{tasks: map[string]*models.Task{}}
 }
 
+func (r *idempotentCreateTaskRepo) UpdateTaskFieldsWithParentAdmission(_ context.Context, id string, update models.TaskFieldUpdate, _ repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current := r.tasks[id]
+	if current == nil {
+		return nil, errors.New("task not found")
+	}
+	if update.Description != nil || update.Priority != nil || update.State != nil || update.WorkflowStepID != nil || update.Position != nil || update.ParentID != nil || update.AssigneeUserID != nil || update.Metadata != nil {
+		return nil, errors.New("only title updates are supported by this idempotency test repository")
+	}
+	task := *current
+	if update.Title != nil {
+		task.Title = *update.Title
+	}
+	r.tasks[id] = &task
+	return &models.TaskFieldUpdateResult{Task: &task, PriorState: current.State, PriorWorkflowStepID: current.WorkflowStepID}, nil
+}
+
 func (r *idempotentCreateTaskRepo) CreateTask(_ context.Context, task *models.Task) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -132,6 +151,14 @@ func (r *idempotentCreateTaskRepo) UpdateTask(_ context.Context, task *models.Ta
 	stored := *task
 	r.tasks[task.ID] = &stored
 	return nil
+}
+
+func (r *idempotentCreateTaskRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
+}
+
+func (r *idempotentCreateTaskRepo) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
 }
 
 func (r *idempotentCreateTaskRepo) GetTaskByExternalID(_ context.Context, workspaceID, externalID string) (*models.Task, error) {
@@ -180,6 +207,10 @@ func (r *idempotentCreateTaskRepo) ReleaseTaskExternalID(_ context.Context, work
 			return &copied, nil
 		}
 	}
+	return nil, nil
+}
+
+func (r *idempotentCreateTaskRepo) SwitchTaskRunner(context.Context, models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error) {
 	return nil, nil
 }
 

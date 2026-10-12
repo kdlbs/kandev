@@ -201,6 +201,48 @@ func TestScopePreservesExistingIdentity(t *testing.T) {
 	}
 }
 
+// TestScopeOverridingIdentityReplacesExistingIdentity is
+// ScopeOverridingIdentity's core contract (Review round 4, codex-found): a
+// caller with its own credential (e.g. an HTTP route's own signed token) must
+// be authorized against the task owner's identity, never a different,
+// unrelated identity (a session cookie or PAT) that happens to already be on
+// the request context. This is deliberately the opposite of
+// TestScopePreservesExistingIdentity's assertion, on the same fixture.
+func TestScopeOverridingIdentityReplacesExistingIdentity(t *testing.T) {
+	identities := fakeIdentityLookup{"user-a": {UserID: "user-a", Role: authn.RoleAdmin}}
+	r := newResolver(t, ownedFixture(), identities, true)
+	caller := authn.Identity{UserID: "user-b", Role: authn.RoleMember, TokenID: "pat-1"}
+
+	ctx, err := r.ScopeOverridingIdentity(authn.WithIdentity(context.Background(), caller), "task-1")
+	if err != nil {
+		t.Fatalf("ScopeOverridingIdentity: %v", err)
+	}
+
+	identity := identityOf(t, ctx)
+	if identity.UserID != "user-a" {
+		t.Errorf("UserID = %q, want the task owner user-a, not the pre-existing caller %q", identity.UserID, caller.UserID)
+	}
+	if identity == caller {
+		t.Error("identity must not still be the pre-existing caller identity")
+	}
+}
+
+// TestScopeOverridingIdentityNoOpWhenAuthDisabled mirrors
+// TestScopeNoOpWhenAuthDisabled: the override behavior only matters once
+// per-user auth is enforced.
+func TestScopeOverridingIdentityNoOpWhenAuthDisabled(t *testing.T) {
+	r := newResolver(t, ownedFixture(), fakeIdentityLookup{}, false)
+	caller := authn.Identity{UserID: "user-b", Role: authn.RoleMember}
+
+	ctx, err := r.ScopeOverridingIdentity(authn.WithIdentity(context.Background(), caller), "task-1")
+	if err != nil {
+		t.Fatalf("ScopeOverridingIdentity: %v", err)
+	}
+	if got := identityOf(t, ctx); got != caller {
+		t.Errorf("identity = %+v, want the untouched caller identity %+v while auth is disabled", got, caller)
+	}
+}
+
 // TestScopeFailsClosedOnTaskLookupError is the fail-closed pin: if we cannot
 // tell who owns the stream, denying the dispatch is correct — returning an
 // unscoped context would grant every user's data.

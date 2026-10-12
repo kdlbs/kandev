@@ -126,14 +126,7 @@ func (f *branchFetcher) runFetch(ctx context.Context, repoPath string) BranchRef
 // failures rather than hanging the dropdown.
 func newNonInteractiveGitFetchCmd(ctx context.Context, repoPath string) *exec.Cmd {
 	cmd := subproc.NewGitCommand(ctx, "-C", repoPath, "fetch", "--all", "--prune", "--no-tags")
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GCM_INTERACTIVE=Never",
-		"GIT_ASKPASS=echo",
-		"SSH_ASKPASS=/bin/false",
-		"GIT_SSH_COMMAND=ssh -oBatchMode=yes",
-	)
-	cmd.WaitDelay = 500 * time.Millisecond
+	cmd.Env = os.Environ()
 	return cmd
 }
 

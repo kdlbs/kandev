@@ -249,6 +249,36 @@ func TestWorktreePreparer_MultiRepo_CreatesWorktreePerRepo(t *testing.T) {
 	}
 }
 
+func TestWorktreePreparer_SingleRepoProjectsBranchMetadata(t *testing.T) {
+	repoPath := initBareGitRepo(t, "single-repo-metadata")
+	preparer, _ := newPreparerForTest(t)
+
+	result, err := preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		TaskID:         "task-single-metadata",
+		SessionID:      "session-single-metadata",
+		TaskTitle:      "Single repository metadata",
+		ExecutorType:   executor.NameStandalone,
+		TaskDirName:    "single-repo-metadata_aaa",
+		RepositoryID:   "repo-single-metadata",
+		RepositoryPath: repoPath,
+		RepoName:       "single-repo-metadata",
+		BaseBranch:     "main",
+		IntegrationRef: "main",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success; steps: %+v err: %s", result.Steps, result.ErrorMessage)
+	}
+	if result.WorktreeBranchOwner != worktree.BranchOwnerManaged {
+		t.Fatalf("single-repo branch owner = %q, want %q", result.WorktreeBranchOwner, worktree.BranchOwnerManaged)
+	}
+	if result.WorktreeIntegrationRef != "main" {
+		t.Fatalf("single-repo integration ref = %q, want main", result.WorktreeIntegrationRef)
+	}
+}
+
 func TestWorktreePreparer_MultiRepo_RollbackOnPartialFailure(t *testing.T) {
 	repoA := initBareGitRepo(t, "good")
 	// repoB is intentionally a non-git directory to force the second create to fail.
@@ -391,11 +421,10 @@ func TestWorktreePreparer_MultiRepo_RollbackKeepsReusedWorktrees(t *testing.T) {
 
 	preparer, mgr, store := newPreparerForTestWithStore(t)
 	existingPath := filepath.Join(t.TempDir(), "existing-worktree")
-	if err := os.MkdirAll(existingPath, 0755); err != nil {
-		t.Fatalf("mkdir existing worktree: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(existingPath, ".git"), []byte("gitdir: /tmp/existing.git\n"), 0644); err != nil {
-		t.Fatalf("write existing .git file: %v", err)
+	cmd := exec.Command("git", "worktree", "add", "--detach", existingPath, "HEAD")
+	cmd.Dir = repoExisting
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create existing worktree: %v\n%s", err, output)
 	}
 	if err := store.CreateWorktree(context.Background(), &worktree.Worktree{
 		ID:           "wt-existing",

@@ -17,7 +17,7 @@ checks, and push. Ready PR monitoring and remediation continue through
 > - URL contains `gitlab` (e.g. `gitlab.com`, `gitlab.acme.corp`) → use the **GitLab flow** at the bottom of this file.
 > - For self-managed hosts, the user's repository configuration determines the host.
 >
-> **GitHub tool selection:** The GitHub flow uses `gh` CLI by default. If `gh` is unavailable or fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools).
+> **GitHub tool selection:** The GitHub flow uses `gh` CLI by default. If `gh` is unavailable or fails, including a 401 authentication error, use structured GitHub connector/API tools for PR, check, and review data; authentication failure is unknown state, never clean state.
 > **GitLab tool selection:** The GitLab flow prefers `glab` CLI when available; otherwise it shells `curl` against the REST v4 API using `$GITLAB_TOKEN` (which the agent runtime injects from the user's secrets store).
 > **Azure Repos tool selection:** The Azure flow prefers `az repos pr create` with the Azure DevOps extension. Auth can come from an existing `az login` session or `AZURE_DEVOPS_EXT_PAT`.
 
@@ -59,8 +59,11 @@ explicitly requests task tracking.
 
 4. **Screenshots — capture and validate before publication.** For a UI-visible
    change, capture fresh screenshots for every affected viewport before creating
-   the PR. When the changed surface is structurally absent on another viewport,
-   record that rationale instead of capturing an unrelated screen.
+   the PR. For repository UI, use `/playwright-cli` with an isolated headless
+   session or the managed `apps/web` E2E runner. See step 7 for capture routing
+   and blocker classification. When the changed surface is structurally absent
+   on another viewport, record that rationale instead of capturing an unrelated
+   screen.
    Use synthetic or redacted data, validate the assets, and compress PNGs using
    the recipe in step 7. If capture is impossible, report the concrete blocker
    and stop before PR publication. For non-UI changes, record that screenshots
@@ -107,17 +110,44 @@ explicitly requests task tracking.
 
    Do not fall back to hand-composed `--body` prose. If creation fails, surface the exact stderr, fix the template/body-file problem, and retry with `--body-file`.
 
+   If `gh pr create` fails after the branch is pushed with a credential-lease
+   or repository-scope error, use the REST fallback with the same template body.
+   Build the payload with `jq --rawfile` and submit it with
+   `gh api --method POST repos/<owner>/<repo>/pulls --input <payload-file>`;
+   preserve the validated title, head, base, and body, and never hand-escape
+   Markdown or JSON.
+
+   After creating the PR through `gh pr create` or the REST fallback, fetch it
+   with `gh pr view <number> --json url,state,headRefName,baseRefName,headRefOid`.
+   Verify it is open and its head/base match the intended branch and target
+   before reporting the URL.
+
 6. **If ready (not draft):** For GitHub, do not begin `/pr-fixup` until any
 required screenshot embedding in step 7 is complete.
 
 7. **Screenshots — publish already captured assets.** If the diff touches user-visible UI (typically under `apps/web/`, excluding e2e-only or backend-only edits), publish the affected-viewport assets captured and validated in step 4 through the host-specific flow before treating the PR as complete — do not wait to be asked. Preserve any structural-absence rationale recorded in step 4.
 
    **Capture prerequisite:**
+   - Start repository UI verification with `/playwright-cli` or the managed E2E
+     runner, rather than a connected personal browser or in-app browser tool.
+     The CLI's default profile is isolated; do not use `--extension` or a user's
+     persistent browser profile for disposable repository captures.
    - If `pnpm --dir apps exec playwright-cli list` has no local browser, use the
      managed `apps/web` E2E runner with a disposable capture spec instead of
      treating capture as blocked. Name mobile specs `mobile-*.spec.ts`, write
      assets to ignored `apps/web/.pr-assets`, inspect/compress them, then remove
      the temporary spec and confirm `git status` is clean.
+   - Classify failures against the capability that failed. A connected-browser
+     saved-site denial does not prove that the repository Playwright workflow
+     cannot capture. Honor that tool's denial and any prohibition on alternate
+     routes; do not evade it by changing hosts, ports, profiles, or providers.
+     If alternate execution needs authorization, explain the boundary once and
+     request it. Filesystem sandbox changes can justify retrying a failed local
+     Playwright launch, but do not clear saved browser permissions. Report a
+     capture blocker only with evidence from the authorized capture workflow.
+   - After opening a popover or dialog, assert that the intended surface is
+     visible and await finite active CSS animations (`element.getAnimations().finished`)
+     before capture; do not publish a mid-transition asset.
    - For disposable capture specs, prefer the existing `prCapture` fixture from
      `apps/web/e2e/fixtures/test-base.ts`; it writes the expected filenames and
      manifest for PR assets.
@@ -130,6 +160,9 @@ required screenshot embedding in step 7 is complete.
      entries: `test -s apps/web/.pr-assets/manifest.json`. If it is absent or
      lacks the capture, do not treat the run as successful; rerun with `--host`
      and report the managed-runner gap.
+   - Start each publication attempt with a fresh PR-scoped capture directory.
+     Before publishing, compare the manifest entries with the explicit expected
+     viewport/capture list and reject stale files or unexpected entries.
    - Before inspecting, compressing, or publishing the assets, verify that every
      manifest entry maps to an existing file under `apps/web/.pr-assets`. If any
      entry is missing, treat the capture as incomplete and restore or recapture
@@ -178,23 +211,36 @@ required screenshot embedding in step 7 is complete.
    ```bash
    gh pr edit <PR_NUMBER> --body-file <file>
    ```
-   `gh pr edit` fails on this repo (GraphQL touches the deprecated Projects-classic API). Fall back to REST — build the payload with `jq --rawfile`, never by hand-escaping shell strings:
+   `gh pr edit` can fail on this repo (GraphQL touches the deprecated Projects-classic API), or exit successfully after only printing a Projects-classic deprecation warning without changing the body. Treat the read-back as authoritative; if the intended section is absent, fall back to REST — build the payload with `jq --rawfile`, never by hand-escaping shell strings:
    ```bash
    set -euo pipefail
    PAYLOAD="/tmp/pr-body-<PR_NUMBER>-payload.json"
    jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
    jq empty "$PAYLOAD"
-   gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input "$PAYLOAD"
+   gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input "$PAYLOAD" --silent
    ```
+   For a write-only PATCH, `--silent` prevents `gh` from decoding a response
+   body that the caller does not consume. Redirecting stdout to `/dev/null`
+   does not prevent a truncated or empty JSON response from making `gh` report
+   an error after the mutation succeeds. Read the resource back with a
+   separate GET and verify the intended change.
    **JSON payloads:** Use `jq` (or an equivalent JSON tool) to build and
    validate payloads without interpolating untrusted Markdown into shell
-   syntax. Keep the REST fallback byte-preserving for command substitutions,
+   syntax. When command output is redirected, piped, or consumed by `jq` or
+   another parser, run the command through `rtk proxy` so stdout is
+   byte-preserving; normal RTK filtering can truncate or annotate machine-readable
+   output. Keep the REST fallback byte-preserving for command substitutions,
    `xargs`, and any other consumer that expects unmodified Git or JSON output.
 
    **Preserve the existing PR description:** The PR body is a shared, mutable
    document. Preview automation and other bots may add sections after the PR
    is created, so never PATCH a body reconstructed from the creation-time
    template or a stale `/tmp/pr-body.md`. Before every post-creation update:
+
+   This live-body procedure applies to every post-creation body edit, not only
+   screenshots. For each generated block, use operation-owned markers and
+   verify that its start and end markers occur exactly once before and after
+   the update.
 
    1. Fetch the current body from GitHub and keep that pristine live response
       as the merge base:
@@ -215,7 +261,13 @@ required screenshot embedding in step 7 is complete.
       before PATCH. If it changed, re-fetch and merge again; do not overwrite
       the newer body.
    4. After PATCH, read the body back and verify both the intended change and
-      all previously present sentinel sections are still present.
+      all previously present sentinel sections are still present. For edits to
+      evidence or validation text, compare claims about files, tests, and
+      commands with the latest verification and correct stale counts before
+      reporting the PR. A body mutation can start fresh documentation/check
+      work and invalidates the prior PR snapshot, so refresh `pr-state` and
+      `pr-resolve` and rerun the appropriate `pr-await` wait before treating
+      the PR as complete.
 
    The REST PATCH endpoint replaces the complete body and does not provide a
    convenient description-level compare-and-swap, so this fetch/merge/check

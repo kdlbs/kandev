@@ -10,6 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/system/info"
 )
 
@@ -111,6 +113,94 @@ func TestReadyHandlerBodyShapesByReadiness(t *testing.T) {
 		t.Fatalf("ready body keys = %#v, want exactly status/service/version", readyBody)
 	}
 }
+
+// TestReadyHandlerIncludesStartupSnapshot covers the AC-PLATFORM-STARTUP-
+// PROGRESS-005 requirement that /ready carry the startup snapshot in both
+// its starting 503 and its ready 200 bodies, never 404, whenever a
+// *startup.Reporter is wired into routeParams.
+func TestReadyHandlerIncludesStartupSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	reporter := startup.New(testLogger(t))
+	reporter.Set(startup.RecoveringSessions)
+
+	setReadyForTest(t, false)
+	router := gin.New()
+	router.GET("/ready", readyHandler(routeParams{version: "1.2.3", progress: reporter}))
+
+	startingRec := httptest.NewRecorder()
+	router.ServeHTTP(startingRec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	var startingBody map[string]interface{}
+	if err := json.Unmarshal(startingRec.Body.Bytes(), &startingBody); err != nil {
+		t.Fatalf("decode starting body: %v", err)
+	}
+	startingSnap, ok := startingBody["startup"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("starting body missing \"startup\" snapshot: %#v", startingBody)
+	}
+	if startingSnap["phase"] != string(startup.RecoveringSessions) {
+		t.Fatalf("starting startup.phase = %v, want %v", startingSnap["phase"], startup.RecoveringSessions)
+	}
+
+	setReadyForTest(t, true)
+	readyRec := httptest.NewRecorder()
+	router.ServeHTTP(readyRec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	var readyBody map[string]interface{}
+	if err := json.Unmarshal(readyRec.Body.Bytes(), &readyBody); err != nil {
+		t.Fatalf("decode ready body: %v", err)
+	}
+	readySnap, ok := readyBody["startup"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("ready body missing \"startup\" snapshot: %#v", readyBody)
+	}
+	if readySnap["phase"] != string(startup.RecoveringSessions) {
+		t.Fatalf("ready startup.phase = %v, want %v", readySnap["phase"], startup.RecoveringSessions)
+	}
+}
+
+func TestReadyHandlerReportsPersistenceFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setReadyForTest(t, true)
+	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
+		ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+		Sweep: startup.StepStoresRepositories,
+	}})
+	if err != nil {
+		t.Fatalf("NewTracker: %v", err)
+	}
+	if err := tracker.RecordSuccess("task"); err != nil {
+		t.Fatalf("RecordSuccess: %v", err)
+	}
+	if err := tracker.RecordProbe("task", errTestPersistence); err != nil {
+		t.Fatalf("RecordProbe: %v", err)
+	}
+
+	router := gin.New()
+	router.GET("/ready", readyHandler(routeParams{
+		version:           "1.2.3",
+		persistenceHealth: requiredstores.NewHealth(tracker, nil, nil),
+	}))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("persistence status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode persistence body: %v", err)
+	}
+	if body["reason"] != "persistence" {
+		t.Fatalf("persistence reason = %v, want persistence", body["reason"])
+	}
+	if body["store_ids"].([]interface{})[0] != "task" {
+		t.Fatalf("persistence store_ids = %v, want task", body["store_ids"])
+	}
+}
+
+var errTestPersistence = persistenceTestError("probe failed")
+
+type persistenceTestError string
+
+func (e persistenceTestError) Error() string { return string(e) }
 
 // TestHealthHandlerDesktopTokenHeaderAlwaysSetReadyEndpointNever covers AC-21:
 // the desktop health-token header is a /health-only concern, unaffected by

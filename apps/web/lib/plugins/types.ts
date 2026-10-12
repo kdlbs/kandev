@@ -10,13 +10,31 @@ import type { AppState } from "@/lib/state/store";
 import type * as PluginSDK from "@kandev/plugin-sdk";
 import type { PluginUIApi } from "@kandev/plugin-sdk";
 export type {
+  PluginActionElement,
+  PluginActionEvent,
+  PluginActionEventHandler,
+  PluginActionFocusEvent,
+  PluginActionGroupProps,
+  PluginActionKeyboardEvent,
+  PluginActionMouseEvent,
+  PluginActionPointerEvent,
+  PluginActionProps,
+  PluginActionRef,
   IntegrationSettingsActionProps,
   IntegrationSettingsActionSurface,
+  ChatTopBarSlotProps,
+  PluginComposerCapability,
+  PluginComposerSlotProps,
+  PluginComposerSubmitResult,
+  PluginComposerSurface,
   PluginContextApi,
   PluginHostRepository,
   MainTopBarSlotProps,
   PluginNavSection,
+  PluginTaskCreatedHandler,
+  PluginTaskCreatedIdentity,
   PluginUIApi,
+  RegisterPluginTaskCreatedHandler,
 } from "@kandev/plugin-sdk";
 export type { PluginIcon } from "@kandev/plugin-sdk";
 
@@ -40,10 +58,8 @@ export interface NavItem {
   /**
    * Where the item renders: "main" (default) as a top-level sidebar entry,
    * "integrations" inside the sidebar's Integrations section alongside the
-   * first-party integration links, "sidebar-footer" as an icon button in the
-   * sidebar footer's icon row and as a labelled row in the phone menu's
-   * Utilities group (subject to the footer's inline budget — an over-budget
-   * item is reached through the footer's overflow menu instead), "settings"
+   * first-party integration links, "sidebar-footer" as a labelled item in the
+   * desktop footer's utilities menu and the phone menu's Utilities group, "settings"
    * accepted but rendered on no surface.
    */
   section?: PluginSDK.PluginNavSection;
@@ -117,17 +133,20 @@ export interface IntegrationSettingsRegistration {
  * `slotProps`), "chat-submit-decoration" (a layer *over* the send button's own
  * box, for adornments that belong on the send affordance rather than beside it
  * — receives `ChatSubmitDecorationSlotProps`; the host positions the layer and
- * makes it `pointer-events-none`, see chat-submit-plugin-decoration.tsx), "chat-top-bar" (status in the session top bar, beside the
- * CPU/DB metrics — receives `{ taskId, taskTitle, workspaceId, activeSessionId,
- * sessionIds }`), "main-top-bar" (status/actions in the default app top bar on
+ * makes it `pointer-events-none`, see chat-submit-plugin-decoration.tsx),
+ * "chat-top-bar" (session status/actions — receives `ChatTopBarSlotProps`;
+ * phone contributions live in the shared menu), "main-top-bar"
+ * (status/actions in the default app top bar on
  * the Home / Kanban / Tasks views, beside the CPU/DB metrics and the
  * view/display controls — the app-wide, task-agnostic counterpart to
  * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage,
  * presentation }`). On phones, `presentation` is "mobile": contributions
- * join the horizontally scrollable middle action strip between the fixed
- * Kandev link and menu button. Use the host `ui.Button` icon-button contract
- * there: a 32px box with a 16px SVG icon. Desktop contributions retain their
- * existing sizing.
+ * live in the listing topbar menu with 44px touch targets and 16px SVG icons.
+ * When task controls are present, each plugin's chat-top-bar registrations
+ * replace its main-top-bar registrations in that menu. Listings and archived
+ * tasks retain workspace controls; sidebar workspace actions stay independent.
+ * Slots retain ownership of their controls and disclosure state; arbitrary
+ * interactions do not dismiss the host menu. Desktop sizing stays unchanged.
  * "app-status-bar-left" / "app-status-bar-right" (receives
  * `AppStatusBarSlotProps` as `slotProps`), and
  * "plugin-settings" (inline UI on a plugin's own settings
@@ -267,6 +286,20 @@ export type ReviewProviderRegistration = Parameters<
   PluginSDK.PluginRegistry["registerReviewProvider"]
 >[0];
 
+export type PluginConversationAuthor = PluginSDK.PluginConversationAuthor;
+export type PluginConversationSort = PluginSDK.PluginConversationSort;
+export type PluginConversationMessage = PluginSDK.PluginConversationMessage;
+export type PluginConversationTurn = PluginSDK.PluginConversationTurn;
+export type PluginSessionMessagesQuery = PluginSDK.PluginSessionMessagesQuery;
+export type PluginConversationErrorCode = PluginSDK.PluginConversationErrorCode;
+export type PluginConversationError = PluginSDK.PluginConversationError;
+export type PluginSessionMessagesState = PluginSDK.PluginSessionMessagesState;
+export type PluginSessionTurnsState = PluginSDK.PluginSessionTurnsState;
+export type PluginConversationApi = PluginSDK.PluginConversationApi;
+export type PluginOpenMessageResult = PluginSDK.PluginOpenMessageResult;
+export type PluginTaskPanelConversationCapability = PluginSDK.PluginTaskPanelConversationCapability;
+export type PluginTaskPanelContext = PluginSDK.PluginTaskPanelContext;
+export type PluginSessionKind = PluginSDK.PluginSessionKind;
 /** Presentation context a task panel or kanban menu action renders under. */
 export type PluginPresentation = "desktop" | "mobile";
 
@@ -300,32 +333,6 @@ export type ChatSubmitDecorationSlotProps = {
   planModeEnabled: boolean;
 };
 
-export type PluginComposerSurface = "task-chat" | "quick-chat" | "task-create" | "new-session";
-
-export type PluginComposerSubmitResult =
-  | { status: "submitted" }
-  | { status: "blocked"; reason?: string }
-  | { status: "unavailable" };
-
-export interface PluginComposerCapability {
-  insertText(text: string): { status: "inserted" | "ignored" | "unavailable" };
-  focus(): { status: "focused" | "unavailable" };
-  submit(): Promise<PluginComposerSubmitResult>;
-}
-
-export interface PluginComposerSlotProps {
-  surface: PluginComposerSurface;
-  presentation: PluginPresentation;
-  taskId: string | null;
-  taskTitle?: string;
-  activeSessionId: string | null;
-  sessionIds: string[];
-  disabled: boolean;
-  submittable: boolean;
-  disabledReason?: string;
-  composer: PluginComposerCapability;
-}
-
 /** Props passed to a `TaskPanelRegistration.Component`. */
 export type PluginTaskPanelProps = PluginSDK.PluginTaskPanelProps;
 
@@ -343,10 +350,18 @@ export type PluginTaskMenuContext = PluginSDK.PluginTaskMenuContext;
  * Registration accepted by `PluginRegistry.registerTaskMenuAction`:
  * contributes an item to the kanban card context/dropdown menu. Group
  * "edit" nests the item inside the card's `Edit` submenu; group "primary"
- * renders it as a flat, top-level menu item, positioned between the "Move
- * to"/"Send to workflow" submenus and the "Link" submenu.
+ * renders it as a flat, top-level menu item after the movement group and
+ * before the `Archive`/`Delete` removal group.
+ *
+ * An action that declares `items` becomes a submenu: `label` is its
+ * (unselectable) trigger, the returned children are its entries, and `run`
+ * remains the fallback for a host that predates the field and for a build
+ * whose `items` yields nothing usable.
  */
 export type TaskMenuActionRegistration = PluginSDK.TaskMenuActionRegistration;
+
+/** One child of a `TaskMenuActionRegistration` that declares `items`. */
+export type TaskMenuSubItemRegistration = PluginSDK.TaskMenuSubItemRegistration;
 
 /** Read-only context passed to `TaskFilterRegistration.matches`. */
 export type PluginTaskFilterContext = Parameters<PluginSDK.TaskFilterRegistration["matches"]>[0];

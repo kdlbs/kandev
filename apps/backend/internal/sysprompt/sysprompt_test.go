@@ -45,6 +45,11 @@ func TestConfigContext_ContainsAllTools(t *testing.T) {
 		"update_mcp_config_kandev",
 		"list_shared_prompts_kandev",
 		"get_shared_prompt_kandev",
+		"search_settings_kandev",
+		"describe_setting_kandev",
+		"list_settings_resources_kandev",
+		"get_settings_kandev",
+		"update_settings_kandev",
 		"list_tasks_kandev",
 		"move_task_kandev",
 		"delete_task_kandev",
@@ -64,6 +69,7 @@ func TestConfigContext_ContainsSections(t *testing.T) {
 	assert.Contains(t, ConfigContext(), "EXECUTOR PROFILE TOOLS:")
 	assert.Contains(t, ConfigContext(), "MCP CONFIG TOOLS:")
 	assert.Contains(t, ConfigContext(), "SAVED PROMPT TOOLS:")
+	assert.Contains(t, ConfigContext(), "SETTINGS TOOLS:")
 	assert.Contains(t, ConfigContext(), "TASK TOOLS:")
 	assert.Contains(t, ConfigContext(), "INTERACTION:")
 	assert.Contains(t, ConfigContext(), "EXAMPLE REQUESTS")
@@ -85,6 +91,28 @@ func TestConfigContext_DocumentsWorkflowStepSignalGate(t *testing.T) {
 	assert.Contains(t, ctx, "auto_advance_requires_signal")
 	assert.Contains(t, ctx, "create_workflow_step_kandev")
 	assert.Contains(t, ctx, "update_workflow_step_kandev")
+}
+
+func TestConfigContext_DocumentsSettingsDiscoveryFlow(t *testing.T) {
+	ctx := ConfigContext()
+	sectionStart := strings.Index(ctx, "\nSETTINGS TOOLS:\n")
+	assert.GreaterOrEqual(t, sectionStart, 0)
+	ctx = ctx[sectionStart:]
+	orderedTools := []string{
+		"search_settings_kandev",
+		"describe_setting_kandev",
+		"list_settings_resources_kandev",
+		"get_settings_kandev",
+		"update_settings_kandev",
+	}
+	previous := -1
+	for _, tool := range orderedTools {
+		position := strings.Index(ctx, tool)
+		assert.Greater(t, position, previous, "settings discovery must keep %s after the previous step", tool)
+		previous = position
+	}
+	assert.Contains(t, ctx, "Do not guess resource IDs")
+	assert.Contains(t, ctx, "Describe the setting with describe_setting_kandev before reading or writing it.")
 }
 
 func TestInjectConfigContext_WrapsInSystemTags(t *testing.T) {

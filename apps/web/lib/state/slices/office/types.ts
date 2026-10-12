@@ -112,9 +112,12 @@ export type ActivityEntry = {
   workspaceId: string;
   actorType: "user" | "agent" | "system";
   actorId: string;
+  actorName?: string;
   action: string;
   targetType?: string;
   targetId?: string;
+  targetName?: string;
+  targetIdentifier?: string;
   details?: Record<string, unknown>;
   runId?: string;
   sessionId?: string;
@@ -141,7 +144,7 @@ export type BudgetPolicy = {
   scopeType: "agent" | "project" | "workspace";
   scopeId: string;
   limitSubcents: number;
-  period: "monthly" | "total";
+  period: "daily" | "monthly" | "yearly" | "total";
   alertThresholdPct: number;
   actionOnExceed: "notify_only" | "pause_agent" | "block_new_tasks";
   createdAt: string;
@@ -150,6 +153,25 @@ export type BudgetPolicy = {
 
 export type RoutineStatus = "active" | "paused" | "archived";
 
+// ScheduleState is REQ-OFFICE-ROUTINE-ARMING-001's classification of whether a
+// routine's triggers can currently fire it, independent of `status` (intent).
+export type ScheduleState =
+  | "armed"
+  | "trigger_invalid"
+  | "trigger_unscheduled"
+  | "trigger_disabled"
+  | "event_only"
+  | "unscheduled_manual_only"
+  | "unscheduled_no_trigger"
+  | "unknown";
+
+export type UnarmedReason = "disabled" | "not_schedulable" | "stalled";
+
+export type UnarmedCronTrigger = {
+  triggerId: string;
+  reasons: UnarmedReason[];
+};
+
 export type Routine = {
   id: string;
   workspaceId: string;
@@ -157,7 +179,9 @@ export type Routine = {
   description?: string;
   taskTemplate: Record<string, unknown>;
   assigneeAgentProfileId?: string;
-  status: RoutineStatus;
+  // The server can store any status string; only the three named
+  // RoutineStatus values are selectable from the detail form.
+  status: string;
   concurrencyPolicy: string;
   catchUpPolicy?: string;
   catchUpMax?: number;
@@ -165,6 +189,8 @@ export type Routine = {
   lastRunAt?: string;
   createdAt: string;
   updatedAt: string;
+  scheduleState?: ScheduleState;
+  unarmedCronTriggers?: UnarmedCronTrigger[];
 };
 
 export type RoutineTriggerKind = "cron" | "webhook";
@@ -180,7 +206,8 @@ export type RoutineRunStatus =
 export type RoutineTrigger = {
   id: string;
   routineId: string;
-  kind: RoutineTriggerKind;
+  // The server can store any trigger kind; only "cron" is creatable from the UI today.
+  kind: string;
   cronExpression?: string;
   timezone?: string;
   publicId?: string;
@@ -197,14 +224,66 @@ export type RoutineRun = {
   routineId: string;
   triggerId?: string;
   source: string;
-  status: RoutineRunStatus;
+  // The server can store any run status string.
+  status: string;
   triggerPayload?: string;
   linkedTaskId?: string;
   coalescedIntoRunId?: string;
   dispatchFingerprint?: string;
+  // Gap summary measured for the claim that created this run (absent when no
+  // gap was recorded — never a stored zero). See
+  // docs/specs/office/requirements/routine-catch-up.md AC-002.
+  catchUpMissedTicks?: number;
+  catchUpFirstMissedAt?: string;
+  catchUpTruncated?: boolean;
   startedAt?: string;
   completedAt?: string;
   createdAt: string;
+};
+
+/** Fields the client can supply when creating a routine (POST body, camelCase). */
+export type CreateRoutineInput = {
+  name: string;
+  description?: string;
+  taskTemplate?: Record<string, unknown> | string;
+  assigneeAgentProfileId?: string;
+  concurrencyPolicy?: string;
+  catchUpPolicy?: string;
+  catchUpMax?: number;
+  variables?: Record<string, unknown> | string;
+  /**
+   * Optional trigger created in the same request as the routine, so a
+   * rejected trigger creates no routine at all.
+   */
+  trigger?: CreateTriggerInput;
+};
+
+/**
+ * Fields the client can patch on a routine (PATCH body, camelCase). Absent
+ * keys are omitted from the request and preserve the stored value; empty
+ * strings clear the field, except concurrencyPolicy/catchUpPolicy (omitted
+ * rather than cleared) and status (never sent empty).
+ */
+export type UpdateRoutinePatch = {
+  name?: string;
+  description?: string;
+  taskTemplate?: Record<string, unknown> | string;
+  assigneeAgentProfileId?: string;
+  status?: RoutineStatus | string;
+  concurrencyPolicy?: string;
+  catchUpPolicy?: string;
+  catchUpMax?: number;
+  variables?: Record<string, unknown> | string;
+};
+
+/** Fields the client can supply when creating a trigger (POST body, camelCase). */
+export type CreateTriggerInput = {
+  kind: RoutineTriggerKind;
+  cronExpression?: string;
+  timezone?: string;
+  publicId?: string;
+  signingMode?: string;
+  secret?: string;
 };
 
 export type InboxItemType =
@@ -490,6 +569,18 @@ export type {
   AgentRoutingSliceState,
 } from "./routing-types";
 
+// --- Workspace kill switch (pause) types ---
+//
+// Defined in `./pause-types` (kept out of this file to stay under the
+// 600-line cap), same split as routing-types above.
+
+export type {
+  WorkspacePauseRecord,
+  WorkspacePauseStatus,
+  WorkspacePauseSliceState,
+  WorkspacePauseOutcome,
+} from "./pause-types";
+
 import type {
   AgentRouteData,
   AgentRoutePreview,
@@ -501,6 +592,7 @@ import type {
   RunAttemptsState,
   WorkspaceRouting,
 } from "./routing-types";
+import type { WorkspacePauseOutcome, WorkspacePauseSliceState } from "./pause-types";
 
 // --- Slice state & actions ---
 
@@ -561,6 +653,7 @@ export type OfficeSliceState = {
     runAttempts: RunAttemptsState;
     agentRouting: AgentRoutingSliceState;
     taskQuorum: TaskQuorumSliceState;
+    pause: WorkspacePauseSliceState;
   };
 };
 
@@ -608,6 +701,14 @@ export type OfficeSliceActions = {
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
   setTaskQuorum: (taskId: string, quorum: QuorumResponseDTO) => void;
+  beginPauseRequest: () => number;
+  resetPauseState: () => void;
+  applyPauseResponse: (
+    tag: number,
+    responseWorkspaceId: string,
+    activeWorkspaceId: string | null,
+    outcome: WorkspacePauseOutcome,
+  ) => boolean;
 };
 
 export type OfficeSlice = OfficeSliceState & OfficeSliceActions;

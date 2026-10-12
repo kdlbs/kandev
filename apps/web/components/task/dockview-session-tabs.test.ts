@@ -15,6 +15,7 @@ import {
   makeReorderingAutoSessionApi,
   makeSharedEnvironmentHandoffApi,
 } from "./dockview-session-tabs.test-utils";
+import { hideSessionPanel } from "./dockview-hidden-session-panels";
 
 type FakePanel = {
   id: string;
@@ -70,12 +71,17 @@ function makeApi(panelIds: string[]): { api: DockviewApi; panels: FakePanel[] } 
   return { api, panels };
 }
 
-function makeAutoSessionAppStore(taskId: string | null, sessionIds: string[]) {
+function makeAutoSessionAppStore(
+  taskId: string | null,
+  sessionIds: string[],
+  sessionListLoaded = true,
+) {
   const itemsByTaskId = taskId ? { [taskId]: sessionIds.map((id) => ({ id })) } : {};
+  const loadedByTaskId = taskId ? { [taskId]: sessionListLoaded } : {};
   return {
     getState: () => ({
       tasks: { activeTaskId: taskId },
-      taskSessionsByTask: { itemsByTaskId },
+      taskSessionsByTask: { itemsByTaskId, loadedByTaskId },
     }),
   };
 }
@@ -502,6 +508,18 @@ describe("resolveSessionTabSyncTarget", () => {
     expect(target).toEqual({ taskId: "task-A", sessionId: "s-pending-hydration" });
   });
 
+  it("accepts a compact task-session member before its environment mapping is available", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-compact",
+      activeTaskId: "task-A",
+      activeSessionId: "s-current",
+      taskSessionsById: { "s-compact": makeSession("s-compact", "task-A") },
+      environmentIdBySessionId: {},
+    });
+
+    expect(target).toEqual({ taskId: "task-A", sessionId: "s-compact" });
+  });
+
   /**
    * Regression for a one-frame UI glitch: `removeTaskSession` clears
    * `taskSessions.items[sid]` and `environmentIdBySessionId[sid]` atomically.
@@ -545,6 +563,51 @@ describe("resolveSessionTabSyncTarget", () => {
   });
 });
 
+describe("hidden session panels", () => {
+  it("does not rematerialize an explicitly hidden active session", () => {
+    const sessionId = "session-hidden";
+    const { api } = makeReorderingAutoSessionApi();
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, [sessionId]);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api, currentLayoutEnvId: null, preMaximizeLayout: null }, () => {
+      hideSessionPanel(api, sessionId, AUTO_TASK_ID);
+      runAutoSessionTabEffect(sessionId, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${sessionId}`)).toBeNull();
+  });
+
+  it("selects a visible sibling when reload implicitly selects a hidden primary", () => {
+    const { api } = makeReorderingAutoSessionApi();
+    const setActiveSessionAuto = vi.fn();
+    const baseStore = makeAutoSessionAppStore(AUTO_TASK_ID, ["primary", "visible"]);
+    const appStore = { getState: () => ({ ...baseStore.getState(), setActiveSessionAuto }) };
+    withDockviewState({ api, currentLayoutEnvId: null, preMaximizeLayout: null }, () => {
+      hideSessionPanel(api, "primary", AUTO_TASK_ID);
+      runAutoSessionTabEffect("primary", appStore as never, makeAutoSessionRefs());
+    });
+    expect(setActiveSessionAuto).toHaveBeenCalledWith(AUTO_TASK_ID, "visible");
+    expect(api.getPanel("session:primary")).toBeNull();
+  });
+
+  it("does not add an explicitly hidden sibling session", () => {
+    const activeSessionId = "session-active";
+    const hiddenSiblingId = "session-hidden-sibling";
+    const { api } = makeReorderingAutoSessionApi();
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId, hiddenSiblingId]);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api, currentLayoutEnvId: null, preMaximizeLayout: null }, () => {
+      hideSessionPanel(api, hiddenSiblingId, AUTO_TASK_ID);
+      runAutoSessionTabEffect(activeSessionId, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${activeSessionId}`)).not.toBeNull();
+    expect(api.getPanel(`session:${hiddenSiblingId}`)).toBeNull();
+  });
+});
+
 describe("runAutoSessionTabEffect", () => {
   it("keeps chat active when replacing its placeholder beside a Plan tab", () => {
     const sessionId = "session-current";
@@ -557,6 +620,19 @@ describe("runAutoSessionTabEffect", () => {
     });
 
     expect(activePanelId()).toBe(`session:${sessionId}`);
+  });
+
+  it("keeps restored sibling session panels while the task session list is loading", () => {
+    const { api, panels } = makeApi(["session:A", "session:B"]);
+    const restoredSibling = panelById(panels, "session:B");
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, ["A"], false);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api }, () => {
+      runAutoSessionTabEffect(null, appStore as never, refs as never);
+    });
+
+    expect(restoredSibling?.api.close).not.toHaveBeenCalled();
   });
 
   it("replaces selected Chat without activating Plan while Files owns global focus", () => {

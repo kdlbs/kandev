@@ -36,14 +36,17 @@ const (
 )
 
 type Service struct {
-	repo          store.Repository
-	recentUseRepo store.AgentProfileRecentUseRepository
-	eventBus      bus.EventBus
-	logger        *logger.Logger
-	defaultUser   string
+	sidebarWorkspaceAccess func(context.Context) ([]string, error)
+	repo                   store.Repository
+	recentUseRepo          store.AgentProfileRecentUseRepository
+	eventBus               bus.EventBus
+	logger                 *logger.Logger
+	defaultUser            string
 }
 
 type UpdateUserSettingsRequest struct {
+	SidebarViewState                  *models.SidebarWorkspacePatch
+	SidebarLayoutState                *models.SidebarLayoutPatch
 	WorkspaceID                       *string
 	KanbanViewMode                    *string
 	StartupPage                       *string
@@ -62,6 +65,7 @@ type UpdateUserSettingsRequest struct {
 	PreventAutoStartAgentOnOpen       *bool
 	UnreadDivider                     *bool
 	AgentGeneratedTaskTitles          *bool
+	AutoFocusNewTasks                 *bool
 	MCPTaskAgentProfileDefault        *string
 	ShowAnchoredPromptBar             *bool
 	ShowScrollToLastPrompt            *bool
@@ -87,6 +91,7 @@ type UpdateUserSettingsRequest struct {
 	SidebarTaskColorPatch             *models.SidebarTaskColorPatch
 	TaskCreateLastUsed                *models.TaskCreateLastUsed
 	JiraSavedViews                    **json.RawMessage
+	JiraDefaultViewID                 *string
 	JiraTaskPresets                   **json.RawMessage
 	GitHubSavedPresets                **json.RawMessage
 	GitHubDefaultQueryPresets         **json.RawMessage
@@ -101,13 +106,21 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontSize                  *int
 	ChangesPanelLayout                *string
 	LastSeenDisplay                   *string
+	MessageTimeDisplay                *string
+	AgentTabCloseBehavior             *string
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
+	SidebarFastActionsEnabled         *bool
+	SidebarNewTaskStyle               *string
+	SidebarHoverEnabled               *bool
+	SidebarHoverDelayMs               *int
 	ResolveSessionHostnames           *bool
 	AppStatusBarOrder                 *models.AppStatusBarOrder
 	QuickChatTabOrderByWorkspace      *map[string][]string
 	KanbanHiddenStepIDs               *map[string][]string
 	WorkflowIDsWithAutoHideEmptySteps *[]string
+	KanbanSort                        *string
+	KanbanPriorityFilterTokens        *[]string
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -159,7 +172,7 @@ func (s *Service) GetUserSettings(ctx context.Context) (*models.UserSettings, er
 	if err != nil {
 		return nil, err
 	}
-	return settings, nil
+	return s.getSidebarWorkspaceSettings(ctx, settings)
 }
 
 // PreferredShell returns the user's configured shell.
@@ -193,6 +206,33 @@ func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, 
 // validates each group, persists the result under expected-revision CAS, and
 // publishes the settings update event.
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
+	scopedReq, err := s.scopeLegacySidebarPatch(req)
+	if err != nil {
+		return nil, err
+	}
+	req = scopedReq
+	var sidebarWorkspaceIDs []string
+	if s.sidebarWorkspaceAccess != nil {
+		sidebarWorkspaceIDs, err = s.sidebarWorkspaceAccess(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := s.validateSidebarWorkspacePatch(ctx, req, sidebarWorkspaceIDs); err != nil {
+		return nil, err
+	}
+	if err := s.validateSidebarLayoutPatch(ctx, req, sidebarWorkspaceIDs); err != nil {
+		return nil, err
+	}
+	if s.sidebarWorkspaceAccess != nil {
+		settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.getSidebarWorkspaceSettings(ctx, settings, sidebarWorkspaceIDs); err != nil {
+			return nil, err
+		}
+	}
 	var taskCreatePatch *models.TaskCreateLastUsed
 	if req.TaskCreateLastUsed != nil && !taskCreateLastUsedPatchEmpty(*req.TaskCreateLastUsed) {
 		taskCreatePatch = req.TaskCreateLastUsed
@@ -203,6 +243,15 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		// mutating them in place. In-place mutation would alias before and make
 		// DeepEqual miss the write.
 		before := *settings
+		if err := applySidebarWorkspacePatch(settings, req); err != nil {
+			return false, err
+		}
+		if err := applySidebarLayoutPatch(settings, req); err != nil {
+			if errors.Is(err, ErrUserSettingsConflict) {
+				return false, err
+			}
+			return false, fmt.Errorf("%w: %s", ErrValidation, err)
+		}
 		if err := applyBasicSettings(settings, req); err != nil {
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
@@ -237,11 +286,18 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
 		return !reflect.DeepEqual(*settings, before), nil
-	}, taskCreatePatch)
+	}, taskCreatePatch, &sidebarWorkspaceIDs)
 	if err != nil {
 		return nil, err
 	}
-	return settings, nil
+	projected, err := s.getSidebarWorkspaceSettings(ctx, settings, sidebarWorkspaceIDs)
+	if err == nil {
+		return projected, nil
+	}
+	// The CAS write has already committed. Keep the response successful while
+	// omitting the scoped projection until the next authorized settings read.
+	s.logger.Warn("sidebar workspace response projection failed", zap.Error(err))
+	return withoutSidebarWorkspaceState(settings), nil
 }
 
 // applySidebarTaskColorAutomation replaces the complete personal automatic
@@ -280,6 +336,7 @@ func (s *Service) updateUserSettingsCAS(
 	ctx context.Context,
 	apply func(*models.UserSettings) (bool, error),
 	taskCreatePatch *models.TaskCreateLastUsed,
+	sidebarWorkspaceIDs *[]string,
 ) (*models.UserSettings, error) {
 	userID := s.settingsUserID(ctx)
 	var lastErr error
@@ -299,7 +356,11 @@ func (s *Service) updateUserSettingsCAS(
 		}
 		updated, err := s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, taskCreatePatch, settings.Revision)
 		if err == nil {
-			s.publishUserSettingsEvent(ctx, updated)
+			if sidebarWorkspaceIDs != nil {
+				s.publishUserSettingsEvent(ctx, updated, *sidebarWorkspaceIDs)
+			} else {
+				s.publishUserSettingsEvent(ctx, updated)
+			}
 			return updated, nil
 		}
 		if !errors.Is(err, store.ErrUserSettingsRevisionConflict) {
@@ -345,6 +406,15 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.JiraDefaultViewID != nil {
+		settings.JiraDefaultViewID = strings.TrimSpace(*req.JiraDefaultViewID)
+	}
+	if err := applySidebarPresentationSettings(settings, req); err != nil {
+		return err
+	}
+	if err := applySidebarHoverSettings(settings, req); err != nil {
+		return err
+	}
 	if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
 		return err
 	}
@@ -362,6 +432,12 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	if err := applyLastSeenDisplay(settings, req.LastSeenDisplay); err != nil {
+		return err
+	}
+	if err := applyMessageTimeDisplay(settings, req.MessageTimeDisplay); err != nil {
+		return err
+	}
+	if err := applyAgentTabCloseBehavior(settings, req.AgentTabCloseBehavior); err != nil {
 		return err
 	}
 	applySystemMetricsDisplay(settings, req.SystemMetricsDisplay)
@@ -437,6 +513,21 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 		}
 		settings.WorkflowIDsWithAutoHideEmptySteps = workflowIDs
 	}
+	if err := applyKanbanSort(settings, req.KanbanSort); err != nil {
+		return err
+	}
+	if req.KanbanPriorityFilterTokens != nil {
+		if len(*req.KanbanPriorityFilterTokens) > maxKanbanPriorityFilterTokens {
+			return fmt.Errorf(
+				"kanban_priority_filter_tokens: max %d tokens allowed",
+				maxKanbanPriorityFilterTokens,
+			)
+		}
+		if err := validateKanbanPriorityFilterTokensSize(*req.KanbanPriorityFilterTokens); err != nil {
+			return err
+		}
+		settings.KanbanPriorityFilterTokens = normalizeKanbanPriorityFilterTokens(*req.KanbanPriorityFilterTokens)
+	}
 	return nil
 }
 
@@ -457,6 +548,19 @@ const (
 	// transport-level guard.
 	maxKanbanHiddenStepIDsTotalBytes     = maxUserPreferenceBlobBytes
 	maxWorkflowIDsWithAutoHideEmptySteps = 200
+	// maxKanbanPriorityFilterTokens bounds the request before
+	// normalizeKanbanPriorityFilterTokens allocates a slice and map sized to the
+	// caller-supplied length. The vocabulary holds only 4 valid tokens, so this is a
+	// generous multiple rather than an exact fit — it exists to cap allocation and
+	// iteration cost on a WS payload (no per-field size guard, unlike the 2MB HTTP
+	// body cap), not to bound legitimate selections.
+	maxKanbanPriorityFilterTokens = 64
+	// maxKanbanPriorityFilterTokensTotalBytes bounds total content regardless of
+	// per-token length, the same total-content guard maxKanbanHiddenStepIDsTotalBytes
+	// applies to its sibling field: the count cap alone still admits 64 individually
+	// oversized tokens before normalizeKanbanPriorityFilterTokens trims and looks up
+	// each one.
+	maxKanbanPriorityFilterTokensTotalBytes = 4096
 )
 
 // validateQuickChatTabOrder bounds the client-supplied mixed-tab order before
@@ -545,6 +649,24 @@ func validateKanbanHiddenStepIDs(hidden map[string][]string) error {
 	return nil
 }
 
+// validateKanbanPriorityFilterTokensSize bounds total token content before
+// normalizeKanbanPriorityFilterTokens trims and looks up each one, so an
+// individually oversized member cannot cost CPU and allocation before the
+// count cap alone would have dropped it as invalid.
+func validateKanbanPriorityFilterTokensSize(tokens []string) error {
+	total := 0
+	for _, token := range tokens {
+		total += len(token)
+		if total > maxKanbanPriorityFilterTokensTotalBytes {
+			return fmt.Errorf(
+				"kanban_priority_filter_tokens: max %d bytes allowed",
+				maxKanbanPriorityFilterTokensTotalBytes,
+			)
+		}
+	}
+	return nil
+}
+
 // applyStartupPage validates and applies the startup page enum.
 func applyStartupPage(settings *models.UserSettings, value *string) error {
 	if value == nil {
@@ -552,11 +674,12 @@ func applyStartupPage(settings *models.UserSettings, value *string) error {
 	}
 	v := strings.TrimSpace(*value)
 	switch v {
-	case models.StartupPageTaskOverview, models.StartupPageLastTask:
+	case models.StartupPageTaskOverview, models.StartupPageLastTask, models.StartupPageThreads:
 		settings.StartupPage = v
 		return nil
 	default:
-		return fmt.Errorf("startup_page must be %q or %q", models.StartupPageTaskOverview, models.StartupPageLastTask)
+		return fmt.Errorf("startup_page must be %q, %q, or %q",
+			models.StartupPageTaskOverview, models.StartupPageLastTask, models.StartupPageThreads)
 	}
 }
 
@@ -578,6 +701,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	}
 	if req.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *req.AgentGeneratedTaskTitles
+	}
+	if req.AutoFocusNewTasks != nil {
+		settings.AutoFocusNewTasks = *req.AutoFocusNewTasks
 	}
 	if err := applyMCPTaskAgentProfileDefault(settings, req.MCPTaskAgentProfileDefault); err != nil {
 		return err
@@ -704,9 +830,54 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 		if !models.IsValidTasksListGroup(v) {
 			return fmt.Errorf("tasks_list_group must be one of %s", strings.Join(models.TasksListGroupValues(), ", "))
 		}
-		settings.TasksListGroup = v
+		settings.TasksListGroup = models.NormalizeTasksListGroup(v)
 	}
 	return nil
+}
+
+// applyKanbanSort validates and applies the board sort enum, defaulting an
+// empty value and rejecting the whole request on an invalid one, modeled on
+// applyTasksListPreferences.
+func applyKanbanSort(settings *models.UserSettings, sortValue *string) error {
+	if sortValue == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*sortValue)
+	if v == "" {
+		v = models.KanbanSortDefault
+	}
+	if !models.IsValidKanbanSort(v) {
+		return fmt.Errorf("kanban_sort must be one of %s", strings.Join(models.KanbanSortValues(), ", "))
+	}
+	settings.KanbanSort = v
+	return nil
+}
+
+// normalizeKanbanPriorityFilterTokens drops any member outside the four
+// priority tokens, removes duplicates, and orders the remainder by priority
+// rank. An invalid member is dropped rather than rejecting the whole request,
+// since this field is a subset selection applied inside the same best-effort
+// settings payload as the record's other fields.
+func normalizeKanbanPriorityFilterTokens(tokens []string) []string {
+	valid := make([]string, 0, len(tokens))
+	seen := make(map[string]struct{}, len(tokens))
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if !models.IsValidKanbanPriorityFilterToken(token) {
+			continue
+		}
+		if _, dup := seen[token]; dup {
+			continue
+		}
+		seen[token] = struct{}{}
+		valid = append(valid, token)
+	}
+	sort.SliceStable(valid, func(i, j int) bool {
+		rankI, _ := models.KanbanPriorityFilterTokenRank(valid[i])
+		rankJ, _ := models.KanbanPriorityFilterTokenRank(valid[j])
+		return rankI < rankJ
+	})
+	return valid
 }
 
 // applyTerminalLinkBehavior validates and applies the terminal link behavior
@@ -748,6 +919,29 @@ func applyLastSeenDisplay(settings *models.UserSettings, value *string) error {
 		return errors.New("last_seen_display must be 'absolute' or 'relative'")
 	}
 	settings.LastSeenDisplay = v
+	return nil
+}
+func applyMessageTimeDisplay(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != models.MessageTimeDisplayRelative && v != models.MessageTimeDisplayAbsoluteShort && v != models.MessageTimeDisplayAbsoluteLong {
+		return errors.New("message_time_display must be 'relative', 'absolute_short', or 'absolute_long'")
+	}
+	settings.MessageTimeDisplay = v
+	return nil
+}
+
+func applyAgentTabCloseBehavior(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != models.AgentTabCloseBehaviorDeleteSession && v != models.AgentTabCloseBehaviorHidePanel {
+		return errors.New("agent_tab_close_behavior must be 'delete_session' or 'hide_panel'")
+	}
+	settings.AgentTabCloseBehavior = v
 	return nil
 }
 
@@ -961,10 +1155,34 @@ func validateUserPreferenceBlob(field string, value json.RawMessage) error {
 
 // publishUserSettingsEvent broadcasts the full settings snapshot on the
 // UserSettingsUpdated event bus topic so connected clients stay in sync.
-func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings) {
+func (s *Service) projectSidebarSettingsForEvent(
+	ctx context.Context,
+	settings *models.UserSettings,
+	provided ...[]string,
+) (*models.UserSettings, bool) {
+	if s.sidebarWorkspaceAccess == nil {
+		return settings, true
+	}
+	ids, err := s.resolveSidebarWorkspaceIDs(ctx, provided...)
+	if err != nil {
+		s.logger.Warn("sidebar workspace projection failed", zap.Error(err))
+		return settings, false
+	}
+	return projectSidebarWorkspaces(settings, ids), true
+}
+
+func addSidebarWorkspaceState(data map[string]interface{}, settings *models.UserSettings, include bool) {
+	if include {
+		data["sidebar_views_by_workspace"] = settings.SidebarViewsByWorkspace
+		data["sidebar_layouts_by_workspace"] = settings.SidebarLayoutsByWorkspace
+	}
+}
+
+func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings, provided ...[]string) {
 	if s.eventBus == nil || settings == nil {
 		return
 	}
+	settings, includeSidebarWorkspaceState := s.projectSidebarSettingsForEvent(ctx, settings, provided...)
 	data := map[string]interface{}{
 		"user_id":                                  settings.UserID,
 		"workspace_id":                             settings.WorkspaceID,
@@ -985,6 +1203,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":               settings.ShowScrollToLastPrompt,
@@ -1010,6 +1229,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"sidebar_task_colors":                      models.CloneSidebarTaskColors(settings.SidebarTaskColors),
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
+		"jira_default_view_id":                     settings.JiraDefaultViewID,
 		"jira_task_presets":                        settings.JiraTaskPresets,
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
@@ -1024,15 +1244,36 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"terminal_font_size":                       settings.TerminalFontSize,
 		"changes_panel_layout":                     settings.ChangesPanelLayout,
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
+		"message_time_display":                     models.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"sidebar_fast_actions_enabled":             settings.SidebarFastActionsEnabled,
+		"sidebar_new_task_style":                   settings.SidebarNewTaskStyle,
+		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
+		"sidebar_hover_delay_ms":                   settings.SidebarHoverDelayMs,
 		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
 		"app_status_bar_order":                     settings.AppStatusBarOrder,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
 		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
+		"kanban_sort":                              settings.KanbanSort,
+		"kanban_priority_filter_tokens":            settings.KanbanPriorityFilterTokens,
 		"revision":                                 settings.Revision,
 		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),
 	}
+	s.publishUserSettingsEventData(ctx, data, settings, includeSidebarWorkspaceState)
+}
+
+func (s *Service) publishUserSettingsEventData(
+	ctx context.Context,
+	data map[string]interface{},
+	settings *models.UserSettings,
+	includeSidebarWorkspaceState bool,
+) {
+	addSidebarWorkspaceState(data, settings, includeSidebarWorkspaceState)
+	s.emitUserSettingsEvent(ctx, data)
+}
+
+func (s *Service) emitUserSettingsEvent(ctx context.Context, data map[string]interface{}) {
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))
 	}
@@ -1103,6 +1344,6 @@ func (s *Service) ClearDefaultEditorID(ctx context.Context, editorID string) err
 		}
 		settings.DefaultEditorID = ""
 		return true, nil
-	}, nil)
+	}, nil, nil)
 	return err
 }

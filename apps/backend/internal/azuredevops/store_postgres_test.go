@@ -15,7 +15,8 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	if _, err := database.Exec(`
 		CREATE TABLE tasks (
 			id TEXT PRIMARY KEY,
-			workspace_id TEXT NOT NULL
+			workspace_id TEXT NOT NULL,
+			archived_at TIMESTAMP
 		);
 		INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1')`); err != nil {
 		t.Fatalf("create task prerequisite: %v", err)

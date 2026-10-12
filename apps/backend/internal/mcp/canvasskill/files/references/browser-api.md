@@ -24,6 +24,7 @@ show a retry state for transient reads.
   "web_app_key": "main",
   "placement": "task-canvas",
   "scope_kind": "task",
+  "data_scope_kind": "workspace",
   "workspace_id": "workspace-id",
   "task_id": "task-id",
   "session_id": "session-id",
@@ -34,7 +35,9 @@ show a retry state for transient reads.
 
 Scope identifiers are omitted when they do not apply. `capabilities` contains
 the effective, approved permission keys. It is not a replacement for handling
-permission errors from later requests.
+permission errors from later requests. `scope_kind` describes canvas placement
+and lifecycle. `data_scope_kind` describes the Kandev data boundary. A task
+canvas can have `scope_kind: "task"` and `data_scope_kind: "workspace"`.
 
 ## Data routes
 
@@ -47,18 +50,26 @@ All data responses use JSON. Collection responses use this envelope:
 }
 ```
 
-`next_cursor` is omitted when there is no next page. `limit` must be from 1 to
-the host page limit. A task-scoped canvas is restricted to its task. A
-workspace-scoped canvas is restricted to its workspace.
+`next_cursor` is omitted when there is no next page. `limit` defaults to 50
+and accepts any value from 1 to 200. Unlike the gRPC Host API, this surface
+does not clamp an out-of-range `limit` into that window: a supplied value
+outside 1..200 is rejected outright with HTTP 400 `invalid_request`, and only
+an omitted `limit` falls back to the 50-row default. Task data scope returns
+only the bound task. Workspace data scope returns tasks from the instance's
+trusted workspace, including when the canvas is still placed in one task. A
+`workspace_id` filter must match that workspace; another workspace is denied.
+Follow `page_info.next_cursor` until it is omitted to load every page.
 
 | Method | Route | Permission | Use |
 | --- | --- | --- | --- |
 | GET | `./_kandev/v1/data/tasks` | `api_read:tasks` | List tasks |
 | GET | `./_kandev/v1/data/tasks/{task_id}` | `api_read:tasks` | Read one task |
+| GET | `./_kandev/v1/data/tasks/{task_id}/step-transitions` | `api_read:tasks` | Read recorded task moves |
 | PATCH | `./_kandev/v1/data/tasks/{task_id}` | `api_write:tasks` | Update a task |
 | POST | `./_kandev/v1/data/tasks/{task_id}/messages` | `api_write:messages` | Send a task message |
 | GET | `./_kandev/v1/data/workflows` | `api_read:workflows` | List workflows |
 | GET | `./_kandev/v1/data/workflows/{workflow_id}/steps` | `api_read:workflows` | Read workflow steps |
+| GET | `./_kandev/v1/data/workflows/{workflow_id}/transition-groups` | `api_read:tasks` and `api_read:workflows`; workspace canvas only | Read recorded workflow route counts |
 
 The task-list query accepts `cursor`, `limit`, `include_archived`,
 `workflow_id`, `state`, and `parent_id`. `workflow_id` and `state` can be
@@ -70,14 +81,65 @@ A task object contains these fields: `id`, `workspace_id`, `workflow_id`,
 `is_ephemeral`, `repositories`, `metadata`, `archived_at`, `pull_requests`,
 `workflow_step_id`, `position`, `assignee_agent_profile_id`, `labels`,
 `autopilot`, `wip_admitted`, `queued_for_step_id`, `queued_at`, `project_id`,
-and `external_id`. Repository entries contain `id`, `repository_id`,
-`base_branch`, `position`, and `checkout_branch`.
+`external_id`, `blocked`, `blocked_reason`, `depends_on`, `blocks`,
+`depends_on_truncated`, `blocks_truncated`, and `start_when_unblocked`.
+Repository entries contain `id`, `repository_id`, `base_branch`, `position`,
+and `checkout_branch`.
+
+`depends_on` and `blocks` are read-only dependency-edge lists. Each entry
+contains `id`, `title`, `state`, and, on a `depends_on` entry only, `status`
+(a `blocks` entry never carries `status`, since a task cannot be "pending" or
+"resolved" against a task it blocks). Each list is capped at 512 entries;
+`depends_on_truncated` and `blocks_truncated` report whether more edges exist
+than were returned. `title` and `state` are blanked (empty string) on any
+edge end the caller's canvas scope does not directly admit: a
+workspace-scoped canvas admits an edge end sharing its workspace; a
+repository- or session-scoped canvas admits an edge end only when it is also
+returned as a directly readable task in the same response, never by
+workspace equality alone; a task-scoped canvas admits none, seeing only the
+edge's `id` and, for a `depends_on` entry, its `status`.
+`blocked`, `blocked_reason`, and `start_when_unblocked` summarize the same
+projection at the task level. When an internal read failure keeps the host
+from deriving a verdict for a task a route does return, it substitutes a
+withheld verdict rather than failing that route: `blocked: true`,
+`blocked_reason: "unknown"`, empty `depends_on`/`blocks`, both truncation
+flags `false`, and `start_when_unblocked: false`. Treat that shape as "no
+answer," not as "task is actually blocked." A canvas lacking the read
+capability never sees this verdict: every task route, including the `PATCH`
+route, checks the read capability before returning any task and fails
+outright with `403 plugin_permission_denied` when it is missing, so accessor
+denial and a withheld verdict are never the same response. This is also
+distinct from the fan-out limit described below, which fails the whole page
+with `response_too_large` rather than substituting a withheld verdict onto
+any task.
+
+These seven fields exist on a task object only once the host's manifest
+`min_kandev_version` floor is met; declare that floor for the release your
+canvas expects them from, since an older host omits the fields entirely
+rather than sending empty defaults for them. A host running a `dev` or other
+non-release build always satisfies that floor check regardless of its actual
+age, so a canvas can still receive zero-value dependency fields on such a
+host even when the floor is declared correctly.
 
 A workflow object contains `id`, `workspace_id`, `name`, `description`,
 `sort_order`, `created_at`, and `updated_at`. A workflow-step object contains
 `id`, `workflow_id`, `name`, `position`, `stage_type`, `color`,
 `is_start_step`, `wip_limit`, `agent_profile_id`, and
 `on_enter_action_types`.
+
+The task transition route returns rows newest first, with `id` as a decimal
+string, nullable `from_workflow_id`, `from_workflow_step_id`,
+`to_workflow_id`, and `to_workflow_step_id`, `trigger`, and RFC3339
+`occurred_at`. It omits actor and session identity. The opaque `cursor`
+continues by ledger ID; it is bound to the requested task. Empty history
+means no retained move was recorded, not that the task never moved.
+
+The workflow transition-group route returns `kind` (`within`, `entry`, or
+`exit`), nullable `from_step_id` and `to_step_id`, and `count`. It includes
+archived tasks and removed step IDs, but not deleted tasks. Its opaque cursor
+orders groups by kind and step IDs. Both routes use the collection envelope
+and the 1..200 `limit` rule above. A task canvas cannot request workflow-wide
+groups; promotion to workspace scope is a user action, not a fallback.
 
 ## Writes and workflow movement
 
@@ -166,6 +228,23 @@ Event delivery does not replace HTTP reads. Refetch after an event that can
 change visible data, and stop using the iframe immediately when its host
 reports a lifecycle or authority change.
 
+No event ever carries the dependency projection (`blocked`, `blocked_reason`,
+`depends_on`, `blocks`, the truncation flags, `start_when_unblocked`) in its
+data payload — those fields are refetch-on-signal only. Refetch a cached
+task's dependency fields when: a `task.updated` event names that task or
+either end of one of its edges; a `task.dependencies_resolved` or
+`task.dependency_failed` event names that task; or a `task.state_changed`
+event names any task ID present in that task's cached `depends_on` or
+`blocks` list, since a predecessor or dependent simply advancing state is not
+itself one of the first three signals. A single task read is not a
+transactional snapshot: with no surrounding lock, an edge can change while
+the read is being derived, so one response can show an edge asymmetrically
+(for example, a predecessor
+still listed as pending after it has already resolved). Treat what a
+response returns as the union of independently-read facts, and resolve
+staleness by refetching on the next matching signal rather than by trusting
+any single response as authoritative.
+
 ## Actions and errors
 
 `POST ./_kandev/v1/actions/{key}` accepts a JSON body only when the manifest
@@ -187,6 +266,15 @@ Other stable error codes are:
 | 428 | `plugin_state_precondition_required` |
 | 413 or 500 | `response_too_large` when a host limit is exceeded |
 | 503 | `runtime_unavailable` |
+
+On the task list route, `response_too_large` also covers dependency
+derivation refusing a page: deriving `depends_on`/`blocks` for every task on
+a page reads a bounded number of distinct task IDs across all of that page's
+edges (shared edge ends count once), and a page that would cross that bound
+fails the whole request with `response_too_large` rather than returning a
+partial or withheld-verdict page. Retry with a smaller `limit`. A single-task
+read or write is never subject to this bound, since it can only ever derive
+one task's edges.
 
 All request bodies are bounded. Treat unknown error codes as retryable only
 when the operation is a read and the canvas is still mounted.

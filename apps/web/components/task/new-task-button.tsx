@@ -26,7 +26,7 @@ type NewTaskButtonProps = {
   onSuccess: (
     task: Task,
     mode: "create" | "edit",
-    meta?: { taskSessionId?: string | null },
+    meta?: { taskSessionId?: string | null; autoFocus?: boolean },
   ) => void;
 };
 

@@ -16,6 +16,7 @@ test.describe("quick chat activity indicators", () => {
   }) => {
     const ws = watchWs(testPage);
     await testPage.goto("/");
+    await testPage.getByTestId("app-nav-trigger").tap();
     await testPage.getByTestId("mobile-quick-chat-button").tap();
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     const created = testPage.waitForResponse(
@@ -31,7 +32,7 @@ test.describe("quick chat activity indicators", () => {
       task_id: string;
     };
     const tab = dialog.getByTestId("quick-chat-tab");
-    const button = testPage.getByTestId("mobile-quick-chat-button");
+    const button = testPage.getByTestId("app-nav-trigger");
     const indicator = button.getByTestId("quick-chat-activity-indicator");
 
     await expect(tab).toHaveCount(1);
@@ -55,6 +56,7 @@ test.describe("quick chat activity indicators", () => {
     await expect(indicator).toHaveAttribute("data-state", "finished");
 
     await button.tap();
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
     await expect(indicator).toHaveCount(0);
     await expect(dialog).toBeVisible();
   });
@@ -72,7 +74,7 @@ test.describe("quick chat activity indicators", () => {
     await testPage.goto(`/t/${seeded.task_id}`);
     await new SessionPage(testPage).waitForLoad();
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const entry = sheet.getByTestId("mobile-sheet-quick-chat");
     await expect(entry.getByTestId("quick-chat-activity-indicator")).toHaveCount(0);
@@ -97,7 +99,7 @@ test.describe("quick chat activity indicators", () => {
     await expect(dialog.getByTestId("quick-chat-tab").getByRole("status")).toBeVisible();
     await dialog.getByTestId("quick-chat-close").tap();
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const openEntry = testPage
       .getByRole("dialog", { name: "Tasks" })
       .getByTestId("mobile-sheet-quick-chat");
@@ -108,7 +110,7 @@ test.describe("quick chat activity indicators", () => {
     await testPage.keyboard.press("Escape");
 
     await Promise.all([completed, settled]);
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const finishedEntry = testPage
       .getByRole("dialog", { name: "Tasks" })
       .getByTestId("mobile-sheet-quick-chat");

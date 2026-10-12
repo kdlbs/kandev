@@ -120,7 +120,7 @@ func (h *RepositoryBranchPolicyHandlers) httpList(c *gin.Context) {
 func (h *RepositoryBranchPolicyHandlers) httpCreate(c *gin.Context) {
 	var body repositoryBranchPolicyCreateBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	policy, err := h.service.CreateRepositoryBranchPolicy(c.Request.Context(), &service.CreateRepositoryBranchPolicyRequest{
@@ -137,7 +137,7 @@ func (h *RepositoryBranchPolicyHandlers) httpCreate(c *gin.Context) {
 func (h *RepositoryBranchPolicyHandlers) httpGitflow(c *gin.Context) {
 	var body repositoryBranchPolicyGitflowBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	policies, err := h.service.CreateGitflowRepositoryBranchPolicies(c.Request.Context(), &service.CreateGitflowRepositoryBranchPoliciesRequest{
@@ -162,7 +162,7 @@ func (h *RepositoryBranchPolicyHandlers) httpGet(c *gin.Context) {
 func (h *RepositoryBranchPolicyHandlers) httpUpdate(c *gin.Context) {
 	var body repositoryBranchPolicyUpdateBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	policy, err := h.service.GetRepositoryBranchPolicy(c.Request.Context(), c.Param("id"))

@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 const OWNER = "acme";
 const REPO = "demo";
@@ -21,7 +22,18 @@ async function seedTaskWithPR(
   seedData: SeedData,
   title: string,
   prOverrides: Partial<Parameters<ApiClient["mockGitHubAssociateTaskPR"]>[0]> = {},
+  taskDescription = "/e2e:simple-message",
 ) {
+  // The task-mode MCP catalog is derived from the providers attached to the
+  // task repository before the agent session starts. Keep this fixture's
+  // local checkout paired with the GitHub identity of its linked PR so the
+  // bound auto-fix outcome tool is discoverable during the first turn.
+  await apiClient.updateRepository(seedData.repositoryId, {
+    provider: "github",
+    provider_host: "https://github.com",
+    provider_owner: OWNER,
+    provider_name: REPO,
+  });
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser("test-user");
   const task = await apiClient.createTaskWithAgent(
@@ -29,7 +41,7 @@ async function seedTaskWithPR(
     title,
     seedData.agentProfileId,
     {
-      description: "/e2e:simple-message",
+      description: taskDescription,
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
@@ -444,10 +456,12 @@ test.describe("mobile PR CI automation options", () => {
     const drawer = session.prStatusChipDrawer();
     const retry = drawer.getByRole("button", { name: "Retry" });
     await expect(retry).toBeVisible();
+    await waitForFiniteAnimations(drawer);
     const retryBox = await retry.boundingBox();
     expect(retryBox).not.toBeNull();
-    expect(retryBox!.height).toBeGreaterThanOrEqual(44);
-    expect(retryBox!.width).toBeGreaterThanOrEqual(44);
+    // The settled transform can still introduce subpixel subtraction error.
+    expect(retryBox!.height + 0.001).toBeGreaterThanOrEqual(44);
+    expect(retryBox!.width + 0.001).toBeGreaterThanOrEqual(44);
 
     await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
     await retry.tap();
@@ -477,18 +491,24 @@ test.describe("mobile PR CI automation options", () => {
     test.setTimeout(120_000);
     const queuedHead = "head-queued-mobile";
     const replacementHead = "head-replacement-mobile";
-    const taskId = await seedTaskWithPR(apiClient, seedData, "CI mobile merge queue recovery", {
-      head_sha: queuedHead,
-      checks_state: "success",
-      checks_total: 1,
-      checks_passing: 1,
-      unresolved_review_threads: 0,
-      mergeable_state: "clean",
-      merge_queue_state: "queued",
-      merge_queue_position: 1,
-      merge_queue_entry_id: "entry-mobile-a",
-      merge_queue_entry_head_sha: queuedHead,
-    });
+    const taskId = await seedTaskWithPR(
+      apiClient,
+      seedData,
+      "CI mobile merge queue recovery",
+      {
+        head_sha: queuedHead,
+        checks_state: "success",
+        checks_total: 1,
+        checks_passing: 1,
+        unresolved_review_threads: 0,
+        mergeable_state: "clean",
+        merge_queue_state: "queued",
+        merge_queue_position: 1,
+        merge_queue_entry_id: "entry-mobile-a",
+        merge_queue_entry_head_sha: queuedHead,
+      },
+      'e2e:delay(60000)\ne2e:message("queue recovery fixture still running")',
+    );
     await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
     await interceptTallPRFeedback(testPage);
 

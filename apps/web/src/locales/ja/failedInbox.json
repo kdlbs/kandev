@@ -1,0 +1,18 @@
+{
+  "tabLabel": "失敗",
+  "openTask": "タスクを開く",
+  "reasonUnknown": "失敗理由は記録されていない。",
+  "unknownFailureTime": "失敗時刻不明",
+  "originAgentCreated": "agent が作成",
+  "originRoutine": "routine が作成",
+  "originOnboarding": "オンボーディング中に作成",
+  "originAutomationRun": "自動化実行",
+  "originAutomationTask": "自動化が作成",
+  "originGeneric": "自動化済み",
+  "emptyTitle": "{{workspace}} で失敗はない。",
+  "emptyTitleUnnamedWorkspace": "この workspace で失敗はない。",
+  "emptyDescription": "失敗タスクはトリアージ用にここへ出る。サイドバー合計には入らない。",
+  "errorTitle": "失敗タスクを読み込めない",
+  "errorDescription": "この workspace で失敗したタスクの読み込み中に問題発生。自動で再試行する。",
+  "truncatedNotice": "最初の失敗タスクだけ表示中。続きは待機中。"
+}

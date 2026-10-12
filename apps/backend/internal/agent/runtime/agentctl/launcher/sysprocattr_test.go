@@ -7,8 +7,8 @@ import (
 )
 
 func TestBuildSysProcAttr_IsolatesAgentctlFromTerminalInterrupt(t *testing.T) {
-	attr := buildSysProcAttr()
-	if !attr.Setpgid {
-		t.Error("Setpgid must be true: standalone agentctl should not receive terminal Ctrl+C directly")
+	attr := buildSysProcAttr(false)
+	if !attr.Setsid {
+		t.Error("Setsid must be true: standalone agentctl must own an isolated session for safe cleanup")
 	}
 }

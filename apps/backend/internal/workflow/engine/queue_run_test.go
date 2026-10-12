@@ -673,6 +673,39 @@ func TestQueueRunForEachParticipantCallback_FansOut(t *testing.T) {
 	}
 }
 
+func TestQueueRunForEachParticipantCallback_CarriesCausingAgentProfileID(t *testing.T) {
+	q := &fakeRunQueue{}
+	parts := fakeParticipants{list: []ParticipantInfo{
+		{ID: "p1", Role: "reviewer", AgentProfileID: "rev-A"},
+		{ID: "p2", Role: "reviewer", AgentProfileID: "rev-B"},
+	}}
+	cb := QueueRunForEachParticipantCallback{Adapter: q, Participants: parts}
+	in := ActionInput{
+		Trigger:     TriggerOnEnter,
+		State:       MachineState{TaskID: "task-1", AgentProfileID: "executing-agent"},
+		Step:        StepSpec{ID: "step-1"},
+		OperationID: "op-1",
+		Action: Action{
+			Kind: ActionQueueRunForEachParticipant,
+			QueueRunForEachParticipant: &QueueRunForEachParticipantAction{
+				Role:   "reviewer",
+				Reason: "review_started",
+			},
+		},
+	}
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.calls) != 2 {
+		t.Fatalf("expected 2 fan-out calls, got %d", len(q.calls))
+	}
+	for i, call := range q.calls {
+		if call.CausingAgentProfileID != "executing-agent" {
+			t.Fatalf("call %d causing_agent_profile_id = %q, want %q", i, call.CausingAgentProfileID, "executing-agent")
+		}
+	}
+}
+
 func TestQueueRunForEachParticipantCallback_OnCommentKeepsPerAgentKeys(t *testing.T) {
 	q := &fakeRunQueue{}
 	parts := fakeParticipants{list: []ParticipantInfo{

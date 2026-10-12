@@ -21,14 +21,23 @@ import { useCollapsedAgentBlocks } from "@/hooks/domains/settings/use-collapsed-
 import { AgentLogo } from "@/components/agent-logo";
 import { AgentLoginDialog } from "@/components/settings/agent-login-dialog";
 import { AgentRuntimeUpdateControl } from "@/components/settings/agent-runtime-update-control";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
-import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus, InstallJob } from "@/lib/api";
+import type {
+  AgentUpdateJob,
+  AgentUpdateMode,
+  AgentUpdatePreview,
+  AgentUpdateStatus,
+  InstallJob,
+} from "@/lib/api";
 import type { Agent, AgentDiscovery, RuntimeUpdate } from "@/lib/types/http";
+import { presentHostCLIVersion } from "@/lib/agent-host-cli";
 
 type Props = {
   agent: AgentDiscovery;
   savedAgent: Agent | undefined;
   displayName: string;
+  profileCreationDisabled?: boolean;
   /** Capability status from the host utility probe ("ok", "auth_required", etc.). */
   capabilityStatus?: string;
   runtimeUpdate?: RuntimeUpdate;
@@ -39,11 +48,14 @@ type Props = {
     agentName: string,
     targetVersion?: string,
     useDefault?: boolean,
+    targetFamily?: "v2",
   ) => Promise<AgentUpdatePreview>;
   onUpdate?: (
     agentName: string,
     targetVersion: string,
     useDefault?: boolean,
+    targetFamily?: "v2" | AgentUpdateMode,
+    expectedRuntimeRevision?: number,
   ) => Promise<AgentUpdateJob>;
   /**
    * Called when the auth/shell dialog closes so the page can refresh
@@ -73,6 +85,7 @@ function InstalledAgentIdentity({
   onAuthClick: () => void;
 }) {
   const { t } = useTranslation();
+  const versionPresentation = presentHostCLIVersion(agent);
   return (
     <div className="space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -126,6 +139,22 @@ function InstalledAgentIdentity({
       >
         {agent.matched_path ? t("agents:detectedAt", { path: agent.matched_path }) : ""}
       </p>
+      {versionPresentation && (
+        <p
+          className="text-xs text-muted-foreground line-clamp-2"
+          data-testid={`cli-version-${agent.name}`}
+        >
+          {versionPresentation.kind === "known"
+            ? t("agents:cliVersionLabel", {
+                name: displayName,
+                version: versionPresentation.version,
+              })
+            : t("agents:cliVersionUnknown", {
+                name: displayName,
+                reason: versionPresentation.reason,
+              })}
+        </p>
+      )}
     </div>
   );
 }
@@ -158,7 +187,7 @@ function AgentCollapseControl({
       // permanent grey while expanded — this button uses aria-expanded as a
       // disclosure state, not a select/trigger visual. Keep it transparent at
       // rest and grey only on hover, matching the update trigger beside it.
-      className="h-11 w-11 cursor-pointer active:scale-95 sm:h-7 sm:w-7 aria-expanded:bg-transparent hover:bg-muted!"
+      className="cursor-pointer active:scale-95 aria-expanded:bg-transparent hover:bg-muted!"
       onClick={onToggle}
       data-testid={`collapse-agent-${agentName}`}
       aria-expanded={!isCollapsed}
@@ -204,16 +233,31 @@ function AgentProfileActionButton({
   configured,
   hasAgentRecord,
   agentHref,
+  disabled,
 }: {
   agentName: string;
   configured: boolean;
   hasAgentRecord: boolean;
   agentHref: string;
+  disabled: boolean;
 }) {
   const { t } = useTranslation();
+  if (disabled) {
+    return (
+      <Button
+        type="button"
+        disabled
+        title={t("agents:nativeCodexUnavailable")}
+        className={settingsActionClassName("cursor-not-allowed")}
+        data-testid={`profile-unavailable-${agentName}`}
+      >
+        {t("agents:nativeCodexUnavailableShort")}
+      </Button>
+    );
+  }
   if (configured) {
     return (
-      <Button className="h-11 cursor-pointer md:h-7" asChild>
+      <Button className={settingsActionClassName("cursor-pointer")} asChild>
         <Link href={`${agentHref}?mode=create`} data-testid={`new-profile-${agentName}`}>
           <IconPlus className="mr-2 h-4 w-4" />
           {t("agents:newProfile")}
@@ -224,7 +268,7 @@ function AgentProfileActionButton({
   // Keep the setup action for agents without a usable profile. A saved record
   // needs create mode so its first profile is drafted.
   return (
-    <Button className="h-11 cursor-pointer md:h-7" asChild>
+    <Button className={settingsActionClassName("cursor-pointer")} asChild>
       <Link
         href={hasAgentRecord ? `${agentHref}?mode=create` : agentHref}
         data-testid={`setup-profile-${agentName}`}
@@ -243,20 +287,16 @@ function AgentProfileActionButton({
  * `auth_required`. Clicking the lock opens a PTY login dialog if the agent
  * type has a registered LoginCommand.
  */
-export function InstalledAgentCard({
-  agent,
-  savedAgent,
-  displayName,
-  capabilityStatus,
-  runtimeUpdate,
-  runtimeUpdateStatus,
-  updateJob,
-  installJob,
-  onPreview,
-  onUpdate,
-  onAuthComplete,
-  children,
-}: Props) {
+export function InstalledAgentCard(props: Props) {
+  const {
+    agent,
+    savedAgent,
+    displayName,
+    profileCreationDisabled = false,
+    capabilityStatus,
+    onAuthComplete,
+    children,
+  } = props;
   const { collapsed, setCollapsed } = useCollapsedAgentBlocks();
   const isCollapsed = collapsed(agent.name);
   const configured = Boolean(savedAgent && savedAgent.profiles.length > 0);
@@ -290,7 +330,11 @@ export function InstalledAgentCard({
   };
 
   return (
-    <Card className="min-w-0 gap-0 py-0" data-testid={`agent-group-${agent.name}`}>
+    <Card
+      id={`installed-agent-${agent.name}`}
+      className="min-w-0 scroll-mt-4 gap-0 py-0"
+      data-testid={`agent-group-${agent.name}`}
+    >
       {/* Header section: identity + agent-level actions. */}
       <div
         className="flex min-w-0 flex-wrap items-start justify-between gap-3 px-3 py-2.5"
@@ -309,18 +353,7 @@ export function InstalledAgentCard({
         </div>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {isCollapsed && <CollapsedCountLabel agentName={agent.name} count={profileCount} />}
-          {runtimeUpdate?.supported && onPreview && onUpdate && (
-            <AgentRuntimeUpdateControl
-              agentName={agent.name}
-              displayName={displayName}
-              runtimeUpdate={runtimeUpdate}
-              runtimeUpdateStatus={runtimeUpdateStatus}
-              job={updateJob}
-              installJob={installJob}
-              onPreview={onPreview}
-              onUpdate={onUpdate}
-            />
-          )}
+          <RuntimeVersionControl {...props} />
           <AgentCollapseControl
             agentName={agent.name}
             displayName={displayName}
@@ -332,6 +365,7 @@ export function InstalledAgentCard({
             configured={configured}
             hasAgentRecord={hasAgentRecord}
             agentHref={agentHref}
+            disabled={profileCreationDisabled}
           />
         </div>
       </div>
@@ -350,6 +384,41 @@ export function InstalledAgentCard({
         onAuthComplete={onAuthComplete}
       />
     </Card>
+  );
+}
+
+function RuntimeVersionControl({
+  agent,
+  displayName,
+  runtimeUpdate,
+  runtimeUpdateStatus,
+  updateJob,
+  installJob,
+  onPreview,
+  onUpdate,
+}: Pick<
+  Props,
+  | "agent"
+  | "displayName"
+  | "runtimeUpdate"
+  | "runtimeUpdateStatus"
+  | "updateJob"
+  | "installJob"
+  | "onPreview"
+  | "onUpdate"
+>) {
+  if (!runtimeUpdate?.supported || !onPreview || !onUpdate) return null;
+  return (
+    <AgentRuntimeUpdateControl
+      agentName={agent.name}
+      displayName={displayName}
+      runtimeUpdate={runtimeUpdate}
+      runtimeUpdateStatus={runtimeUpdateStatus}
+      job={updateJob}
+      installJob={installJob}
+      onPreview={onPreview}
+      onUpdate={onUpdate}
+    />
   );
 }
 
@@ -378,7 +447,9 @@ function AuthDialogs({
         agentName={agent.name}
         description={agent.login_command?.description}
         command={agent.login_command?.cmd}
+        variants={agent.login_command?.variants}
         onLoginSuccess={onAuthComplete}
+        refreshModelsOnDone={agent.name === "minimax-acp"}
       />
     );
   }

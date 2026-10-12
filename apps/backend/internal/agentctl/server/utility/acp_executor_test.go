@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
+	"go.uber.org/zap"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -124,6 +126,116 @@ func TestStderrBufferSurvivesConcurrentUse(t *testing.T) {
 
 	if buf.tail() == "" {
 		t.Fatal("tail is empty after concurrent writes")
+	}
+}
+
+// @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.6
+func TestProbeClassifiesTrustedManagedRuntimeETarget(t *testing.T) {
+	if runtime.GOOS == windowsGOOS {
+		t.Skip("test uses a POSIX npx fixture")
+	}
+
+	binDir := t.TempDir()
+	npxPath := filepath.Join(binDir, "npx")
+	fixture := "#!/bin/sh\n" +
+		"printf '%s' \"$4\" > \"$NPM_PREFIX_FILE\"\n" +
+		"printf '%s\\n' 'npm error code ETARGET' " +
+		"'npm error notarget No matching version found for @scope/managed-acp@1.2.3.' >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(npxPath, []byte(fixture), 0o755); err != nil {
+		t.Fatalf("write npx fixture: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	home := t.TempDir()
+	workDir := t.TempDir()
+	prefixFile := filepath.Join(t.TempDir(), "npm-prefix")
+
+	executor := NewACPInferenceExecutor(zap.NewNop())
+	response, err := executor.Probe(context.Background(), &ProbeRequest{
+		AgentID: "managed-acp",
+		InferenceConfig: &InferenceConfigDTO{
+			Command: []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3"},
+			WorkDir: workDir,
+			Env:     map[string]string{"HOME": home, "NPM_PREFIX_FILE": prefixFile},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if response.FailureCode != ProbeFailureManagedRuntimeNPMResolution {
+		t.Fatalf("failure code = %q, want %q", response.FailureCode, ProbeFailureManagedRuntimeNPMResolution)
+	}
+	if strings.Contains(response.Error, "@scope/managed-acp") || strings.Contains(response.Error, "npm error") {
+		t.Fatalf("probe error exposed subprocess diagnostics: %q", response.Error)
+	}
+	actualPrefixBytes, err := os.ReadFile(prefixFile)
+	if err != nil {
+		t.Fatalf("read probe npm prefix: %v", err)
+	}
+	actualPrefix := string(actualPrefixBytes)
+	if !filepath.IsAbs(actualPrefix) || !strings.HasPrefix(filepath.Clean(actualPrefix), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+		t.Fatalf("probe npm prefix = %q, want absolute path under %q", actualPrefix, os.TempDir())
+	}
+	if info, err := os.Stat(actualPrefix); err != nil || !info.IsDir() {
+		t.Fatalf("probe did not prepare managed npm prefix: info=%v err=%v", info, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".kandev", "managed-npm-runtime")); !os.IsNotExist(err) {
+		t.Fatalf("probe created managed npm prefix under agent home, stat error = %v", err)
+	}
+}
+
+func TestManagedRuntimeProbeFailureCodeRejectsUntrustedEvidence(t *testing.T) {
+	matching := "npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3."
+	tests := []struct {
+		name    string
+		command []string
+		stderr  string
+	}{
+		{
+			name:    "unversioned package",
+			command: []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "managed-acp"},
+			stderr:  matching,
+		},
+		{
+			name:    "online command",
+			command: []string{"npx", "--yes", "--prefer-online", "--prefix", "~/.kandev/managed-npm-runtime", "managed-acp@1.2.3"},
+			stderr:  matching,
+		},
+		{
+			name:    "different package",
+			command: []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "managed-acp@1.2.3"},
+			stderr:  "npm error code ETARGET\nnpm error notarget No matching version found for dependency@9.9.9.",
+		},
+		{
+			name:    "different npm error",
+			command: []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "managed-acp@1.2.3"},
+			stderr:  "npm error code ECONNREFUSED",
+		},
+		{
+			name:    "missing isolated prefix",
+			command: []string{"npx", "--yes", "--prefer-offline", "managed-acp@1.2.3"},
+			stderr:  matching,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := managedRuntimeProbeFailureCode(test.command, test.stderr); got != "" {
+				t.Fatalf("failure code = %q, want empty", got)
+			}
+		})
+	}
+}
+
+func TestManagedRuntimeProbeClassifiesReleaseAgePolicyFailure(t *testing.T) {
+	command := []string{
+		"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime",
+		"@agentclientprotocol/claude-agent-acp@0.81.0",
+	}
+	stderr := "npm error code ETARGET\n" +
+		"npm error notarget No matching version found for @agentclientprotocol/claude-agent-acp@0.81.0 with a date before 9/22/2026, 12:28:47 PM."
+	if got, want := managedRuntimeProbeFailureCode(command, stderr), ProbeFailureCode("managed_runtime_npm_policy"); got != want {
+		t.Fatalf("failure code = %q, want %q", got, want)
 	}
 }
 
@@ -243,7 +355,7 @@ func TestResolveProbeCommand_ExecutableSuffix(t *testing.T) {
 			// Only Windows trims, and only ".exe" — any other suffix, and any
 			// suffix at all on Unix, leaves the name unmatched.
 			want := ""
-			if runtime.GOOS == "windows" {
+			if runtime.GOOS == windowsGOOS {
 				want = tc.wantWindows
 			}
 			if got != want {

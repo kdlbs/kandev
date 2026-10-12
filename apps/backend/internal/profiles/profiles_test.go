@@ -92,6 +92,76 @@ func TestCanvasFeatureFlagIsDisabledInEveryProfile(t *testing.T) {
 	}
 }
 
+func TestOfficeSessionIdentityIsAbsentFromEveryProfile(t *testing.T) {
+	for _, profile := range []struct {
+		name     string
+		selector map[string]string
+	}{{
+		name: "prod",
+	}, {
+		name: "dev",
+		selector: map[string]string{
+			"KANDEV_DEBUG_DEV_MODE": "true",
+		},
+	}, {
+		name: "e2e",
+		selector: map[string]string{
+			"KANDEV_E2E_MOCK": "true",
+		},
+	}} {
+		t.Run(profile.name, func(t *testing.T) {
+			clearProfileSelectors(t)
+			clearProfilesYAMLVars(t)
+			for key, value := range profile.selector {
+				t.Setenv(key, value)
+			}
+
+			defaults, err := EnvironmentDefaults()
+			if err != nil {
+				t.Fatalf("EnvironmentDefaults: %v", err)
+			}
+			if _, exists := defaults["KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"]; exists {
+				t.Fatalf("retired KANDEV_FEATURES_OFFICE_SESSION_IDENTITY remains in %s profile", profile.name)
+			}
+		})
+	}
+}
+
+func TestLSPBrowserContinuityIsEnabledInEveryProfile(t *testing.T) {
+	for _, profile := range []struct {
+		name     string
+		selector map[string]string
+	}{{
+		name: "prod",
+	}, {
+		name: "dev",
+		selector: map[string]string{
+			"KANDEV_DEBUG_DEV_MODE": "true",
+		},
+	}, {
+		name: "e2e",
+		selector: map[string]string{
+			"KANDEV_E2E_MOCK": "true",
+		},
+	}} {
+		t.Run(profile.name, func(t *testing.T) {
+			clearProfileSelectors(t)
+			clearProfilesYAMLVars(t)
+			for key, value := range profile.selector {
+				t.Setenv(key, value)
+			}
+
+			defaults, err := EnvironmentDefaults()
+			if err != nil {
+				t.Fatalf("EnvironmentDefaults: %v", err)
+			}
+			if got := defaults["KANDEV_FEATURES_LSP_BROWSER_CONTINUITY"]; got != "true" {
+				t.Fatalf("KANDEV_FEATURES_LSP_BROWSER_CONTINUITY = %q in %s, want true", got, profile.name)
+			}
+		})
+	}
+}
+
 func TestEnvironmentDefaultsSelectsProfileWithoutMutatingEnvironment(t *testing.T) {
 	clearProfileSelectors(t)
 	clearProfilesYAMLVars(t)
@@ -383,4 +453,32 @@ func clearAppliedEnvVars(t *testing.T) {
 		appliedEnvVars.names = previous
 		appliedEnvVars.Unlock()
 	})
+}
+
+func TestEnvironmentDefaults_CoordinatorPhase2PerProfile(t *testing.T) {
+	cases := []struct {
+		name     string
+		selector map[string]string
+		want     string
+	}{
+		{"prod", nil, "false"},
+		{"dev", map[string]string{"KANDEV_DEBUG_DEV_MODE": "true"}, "false"},
+		{"e2e", map[string]string{"KANDEV_E2E_MOCK": "true"}, "true"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearProfileSelectors(t)
+			clearProfilesYAMLVars(t)
+			for k, v := range tc.selector {
+				t.Setenv(k, v)
+			}
+			defaults, err := EnvironmentDefaults()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := defaults["KANDEV_FEATURES_COORDINATOR_PHASE2"]; got != tc.want {
+				t.Fatalf("KANDEV_FEATURES_COORDINATOR_PHASE2 = %q in %s, want %q", got, tc.name, tc.want)
+			}
+		})
+	}
 }

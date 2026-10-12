@@ -11,6 +11,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useSessionGitRefresh } from "@/hooks/domains/session/use-session-git-refresh";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
@@ -35,16 +36,19 @@ import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
-import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
+import type {
+  CommitDetailTarget,
+  CommitFileNavigationRequest,
+  OpenDiffOptions,
+} from "@/lib/state/diff-target-types";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { PluginTaskPanel } from "./plugin-task-panel";
 import { PluginPanelTab } from "./plugin-panel-tab";
-import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
+import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
 
-import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-manager";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
 import { useTranslation } from "react-i18next";
@@ -121,10 +125,10 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   vscode: PortalSlot,
   plan: PortalSlot,
   todos: PortalSlot,
-  "prompt-history": PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   "review-detail": PortalSlot,
+  "background-work": PortalSlot,
   // Generic component every plugin-contributed task panel shares (Approach
   // A1) — panel identity lives in params.pluginId/params.panelKey, resolved
   // by PluginTaskPanel. See lib/state/layout-manager/plugin-panels.ts.
@@ -204,12 +208,12 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     }
     return state.tasks.activeTaskId;
   });
-  const { openFile } = useFileEditors();
+  const isVisible = usePanelActive(panelId);
+  const { openFile } = useFileEditors(isVisible);
   const isPassthrough = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
   );
   useChatSessionTitle(panelId, sessionId, !!paramSessionId);
-  const isVisible = usePanelActive(panelId);
 
   if (isPassthrough) {
     return (
@@ -229,14 +233,14 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
       isVisible={isVisible}
+      detailActive={isVisible}
       panelId={panelId}
     />
   );
 }
 
 /**
- * Force a fresh git-status push whenever the diff panel becomes the active
- * dockview tab.
+ * Force a fresh git-status push whenever the diff panel becomes visible.
  *
  * Background: the diff panel's content is derived from `gitStatus` (the
  * per-file `.diff` string), which only refreshes when a `session.git.event`
@@ -251,28 +255,13 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  * signal, so we ask the backend for a fresh git-status snapshot via the
  * explicit `session.git.refresh` request. Focus itself remains an ACK-only
  * control signal, avoiding replay on ordinary task switching. No-op when the
- * session isn't focused.
+ * session isn't focused. Visibility is used instead of active state because
+ * a right-column group can remain visible while another dockview group owns
+ * global focus.
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
-  useEffect(() => {
-    if (!sessionId) return;
-    const entry = panelPortalManager.get(panelId);
-    if (!entry?.api) return;
-    /** Ask the WebSocket client for a fresh git-status snapshot for the
-     *  session. */
-    const refreshNow = () => {
-      const client = getWebSocketClient();
-      client?.refreshSessionData(sessionId);
-    };
-    // If the panel is already active when this effect first runs,
-    // onDidActiveChange won't fire (no transition) — refresh immediately so the
-    // initial open benefits from the same WS-event-miss recovery.
-    if (entry.api.isActive) refreshNow();
-    const disposable = entry.api.onDidActiveChange((event) => {
-      if (event.isActive) refreshNow();
-    });
-    return () => disposable.dispose();
-  }, [panelId, sessionId]);
+  const isVisible = usePanelActive(panelId);
+  useSessionGitRefresh(sessionId, isVisible);
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
@@ -334,6 +323,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count — use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { commits } = useSessionCommits(activeSessionId);
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
@@ -360,7 +350,8 @@ function ChangesContent({ panelId }: { panelId: string }) {
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(
-    (target: CommitDetailTarget) => addCommitDetailPanel(target),
+    (target: CommitDetailTarget, fileNavigation?: CommitFileNavigationRequest) =>
+      addCommitDetailPanel(target, fileNavigation ? { fileNavigation } : undefined),
     [addCommitDetailPanel],
   );
   const handleOpenDiffAll = useCallback(() => addDiffViewerPanel(), [addDiffViewerPanel]);
@@ -431,7 +422,6 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
-  "prompt-history": () => <PromptHistoryContent />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),
@@ -452,6 +442,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
       presentation="desktop"
     />
   ),
+  "background-work": (panelId, params) => <BackgroundWorkPanel panelId={panelId} params={params} />,
 };
 
 /** Render a dockview panel's portal content by looking up its (alias-resolved)
@@ -465,5 +456,3 @@ export function renderPanel(
   if (renderer) return renderer(panelId, params);
   return <div className="p-4 text-muted-foreground">{t("common:unknownPanel", { component })}</div>;
 }
-
-export const VALID_COMPONENTS = new Set(Object.keys(dockviewComponents));

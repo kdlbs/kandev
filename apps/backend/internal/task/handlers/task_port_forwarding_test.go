@@ -32,10 +32,20 @@ func (r *portForwardingHandlerRepo) GetTask(_ context.Context, _ string) (*model
 	return r.task, nil
 }
 
-func (r *portForwardingHandlerRepo) UpdateTask(_ context.Context, task *models.Task) error {
-	r.updatedTask = task
+func (r *portForwardingHandlerRepo) MergeTaskMetadata(_ context.Context, _ string, overlay map[string]interface{}) error {
+	if r.task.Metadata == nil {
+		r.task.Metadata = make(map[string]interface{})
+	}
+	for key, value := range overlay {
+		r.task.Metadata[key] = value
+	}
+	r.updatedTask = r.task
 	r.updateCalls++
 	return nil
+}
+
+func (r *portForwardingHandlerRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
 }
 
 func newPortForwardingHandler(t *testing.T, repo *portForwardingHandlerRepo) *TaskHandlers {

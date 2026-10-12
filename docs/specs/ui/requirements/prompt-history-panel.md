@@ -1,11 +1,18 @@
 ---
-status: draft
+status: deprecated
 system: ui
 created: 2026-08-13
 owners:
   - clem
 ---
 # Prompt History Panel Requirements
+
+> Deprecated on 2026-09-23 by
+> [Prompt History Leaves Core](../../plugins/requirements/prompt-history-extraction.md),
+> which removes the built-in panel from Kandev and leaves the review surface to
+> the external `kandev-plugin-prompt-history` plugin.
+> This document records the shipped behavior the plugin reproduces; the product
+> contract after removal is the extraction requirement.
 
 ## Overview
 
@@ -35,3 +42,11 @@ Reviewing what was asked of an agent requires scrolling the transcript; past pro
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/prompt-history-panel.md).
+
+## Related plugin prerequisites
+
+The public Host contracts the external plugin uses are owned by
+[Prompt History Plugin Host Prerequisites](../../plugins/requirements/prompt-history-extraction-host.md).
+The extraction itself is owned by
+[Prompt History Leaves Core](../../plugins/requirements/prompt-history-extraction.md),
+which removes the core panel and leaves the review surface to the plugin.

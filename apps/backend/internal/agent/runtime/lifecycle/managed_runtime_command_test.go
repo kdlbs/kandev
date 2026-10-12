@@ -18,6 +18,15 @@ type managedRuntimeSelectionStore struct {
 	err       error
 }
 
+type managedRuntimeOpenCodeStore struct {
+	managedRuntimeSelectionStore
+	openCodeSelection managedruntime.OpenCodeSelection
+}
+
+func (s managedRuntimeOpenCodeStore) GetOpenCodeSelection(context.Context) (managedruntime.OpenCodeSelection, bool, error) {
+	return s.openCodeSelection, true, nil
+}
+
 func (s managedRuntimeSelectionStore) Get(
 	context.Context,
 	string,
@@ -90,6 +99,24 @@ func TestBuildAgentCommandFailsWhenActiveSelectionCannotBeRead(t *testing.T) {
 	}
 }
 
+func TestBuildAgentCommandUsesSelectedOpenCodeFamilyAcrossExecutors(t *testing.T) {
+	manager := &Manager{commandBuilder: NewCommandBuilder(), logger: newTestLogger()}
+	manager.SetManagedRuntimeSelectionStore(managedRuntimeOpenCodeStore{openCodeSelection: managedruntime.OpenCodeSelection{
+		SchemaVersion: 1, Family: managedruntime.OpenCodeFamilyV2, Source: managedruntime.OpenCodeSourceManaged,
+		Package: "@opencode/cli", SelectedVersion: "2.0.18", AppliedDefaultVersion: "2.0.18", Revision: 1,
+	}})
+	openCode := agents.NewOpenCodeACP()
+	for _, executorType := range []models.ExecutorType{models.ExecutorTypeLocal, models.ExecutorTypeLocalDocker, models.ExecutorTypeSSH} {
+		cmds, err := manager.buildAgentCommandWithContext(context.Background(), &LaunchRequest{ExecutorType: string(executorType)}, nil, openCode, true)
+		if err != nil {
+			t.Fatalf("build %s command: %v", executorType, err)
+		}
+		if !strings.Contains(cmds.initial, "@opencode/cli@2.0.18") || !strings.Contains(cmds.initial, "acp --print-logs") || strings.Contains(cmds.initial, "--log-level") {
+			t.Fatalf("%s command = %q, want selected v2 package, version, and flags", executorType, cmds.initial)
+		}
+	}
+}
+
 func TestBuildFreshAgentCommandUsesExactVersionForStandaloneRestart(t *testing.T) {
 	manager := &Manager{commandBuilder: NewCommandBuilder(), logger: newTestLogger()}
 	manager.SetManagedRuntimeSelectionStore(managedRuntimeSelectionStore{
@@ -107,6 +134,26 @@ func TestBuildFreshAgentCommandUsesExactVersionForStandaloneRestart(t *testing.T
 	}
 	if !strings.Contains(commands.initial, "opencode-ai@1.18.5") {
 		t.Fatalf("restart command = %q, want exact selected version", commands.initial)
+	}
+}
+
+// @covers AC-AGENTS-RUNTIME-UPDATES-002.4 and AC-AGENTS-RUNTIME-UPDATES-002.5
+func TestBuildFreshAgentCommandUsesReviewedDefaultAfterSelectionReset(t *testing.T) {
+	manager := &Manager{commandBuilder: NewCommandBuilder(), logger: newTestLogger()}
+	manager.SetManagedRuntimeSelectionStore(managedRuntimeSelectionStore{found: false})
+	agent := agents.NewOpenCodeACP()
+
+	commands, err := manager.buildFreshAgentCommand(
+		context.Background(),
+		&AgentExecution{RuntimeName: agentruntime.RuntimeStandalone},
+		agent,
+	)
+	if err != nil {
+		t.Fatalf("buildFreshAgentCommand: %v", err)
+	}
+	want := agent.ManagedNPMRuntime().DefaultVersionOrPinned()
+	if !strings.Contains(commands.initial, "opencode-ai@"+want) {
+		t.Fatalf("restart command = %q, want reviewed default %q", commands.initial, want)
 	}
 }
 
@@ -151,8 +198,22 @@ func TestRemotePreflightUsesResolvedManagedRuntimeVersion(t *testing.T) {
 		ManagedRuntimeVersion: "1.18.5",
 	}
 	got := buildRemotePreflightAgentCommand(req).Args()
-	want := []string{"npx", "--yes", "--prefer-offline", "opencode-ai@1.18.5", "acp", "--print-logs", "--log-level", "ERROR"}
+	want := []string{"npx", "--yes", managedRuntimePreferOfflineArg, "--prefix", "~/.kandev/managed-npm-runtime", "opencode-ai@1.18.5", "acp", "--print-logs"}
 	if !strings.EqualFold(strings.Join(got, " "), strings.Join(want, " ")) {
+		t.Fatalf("remote preflight command = %#v, want %#v", got, want)
+	}
+}
+
+func TestRemotePreflightUsesResolvedOpenCodeFamily(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		AgentConfig:           agents.NewOpenCodeACP(),
+		ManagedRuntimeVersion: "2.0.18",
+		ManagedRuntimeFamily:  managedruntime.OpenCodeFamilyV2,
+		ManagedRuntimeSource:  managedruntime.OpenCodeSourceManaged,
+	}
+	got := buildRemotePreflightAgentCommand(req).Args()
+	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@opencode/cli@2.0.18", "acp", "--print-logs"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("remote preflight command = %#v, want %#v", got, want)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -37,11 +38,13 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.WorkflowStepCreated, ws.ActionWorkflowStepCreated)
 	b.subscribe(eventBus, events.WorkflowStepUpdated, ws.ActionWorkflowStepUpdated)
 	b.subscribe(eventBus, events.WorkflowStepDeleted, ws.ActionWorkflowStepDeleted)
+	b.subscribe(eventBus, events.PromptsChanged, ws.ActionPromptsChanged)
 	b.subscribe(eventBus, events.AgentProfileCreated, ws.ActionAgentProfileCreated)
 	b.subscribe(eventBus, events.AgentProfileUpdated, ws.ActionAgentProfileUpdated)
 	b.subscribe(eventBus, events.AgentProfileDeleted, ws.ActionAgentProfileDeleted)
 	b.subscribe(eventBus, events.TaskCreated, ws.ActionTaskCreated)
 	b.subscribe(eventBus, events.TaskUpdated, ws.ActionTaskUpdated)
+	b.subscribe(eventBus, events.TaskReordered, ws.ActionTaskReordered)
 	b.subscribe(eventBus, events.SessionWorkspaceSourcesUpdated, ws.ActionSessionWorkspaceSourcesUpdated)
 	b.subscribe(eventBus, events.TaskDeleted, ws.ActionTaskDeleted)
 	b.subscribeLifecycleStateEvents(eventBus)
@@ -50,6 +53,8 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TaskPlanDeleted, ws.ActionTaskPlanDeleted)
 	b.subscribe(eventBus, events.TaskPlanRevisionCreated, ws.ActionTaskPlanRevisionCreated)
 	b.subscribe(eventBus, events.TaskPlanReverted, ws.ActionTaskPlanReverted)
+	b.subscribe(eventBus, events.TaskPlanCommentsChanged, ws.ActionTaskPlanCommentsChanged)
+	b.subscribe(eventBus, events.TaskPreviewFeedbackChanged, ws.ActionTaskPreviewFeedbackChanged)
 	b.subscribe(eventBus, events.TaskWalkthroughCreated, ws.ActionTaskWalkthroughCreated)
 	b.subscribe(eventBus, events.TaskWalkthroughUpdated, ws.ActionTaskWalkthroughUpdated)
 	b.subscribe(eventBus, events.TaskWalkthroughDeleted, ws.ActionTaskWalkthroughDeleted)
@@ -72,6 +77,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.ExecutorCreated, ws.ActionExecutorCreated)
 	b.subscribe(eventBus, events.ExecutorUpdated, ws.ActionExecutorUpdated)
 	b.subscribe(eventBus, events.ExecutorDeleted, ws.ActionExecutorDeleted)
+	b.subscribe(eventBus, events.ExecutorReachabilityChanged, ws.ActionExecutorReachabilityChanged)
 	b.subscribe(eventBus, events.ExecutorProfileCreated, ws.ActionExecutorProfileCreated)
 	b.subscribe(eventBus, events.ExecutorProfileUpdated, ws.ActionExecutorProfileUpdated)
 	b.subscribe(eventBus, events.ExecutorProfileDeleted, ws.ActionExecutorProfileDeleted)
@@ -84,20 +90,22 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TaskSessionCancellationChanged, ws.ActionSessionCancellationChanged)
 	b.subscribe(eventBus, events.SessionPendingActionChanged, ws.ActionSessionPendingActionChanged)
 	b.subscribe(eventBus, events.TaskStatusSummaryUpdated, ws.ActionTaskStatusSummaryUpdated)
-	b.subscribe(eventBus, events.MessageAdded, ws.ActionSessionMessageAdded)
-	b.subscribe(eventBus, events.MessageUpdated, ws.ActionSessionMessageUpdated)
-	b.subscribe(eventBus, events.MessageDeleted, ws.ActionSessionMessageDeleted)
+	b.subscribeOrderedMessageEvents(eventBus)
 	b.subscribe(eventBus, events.AgentctlStarting, ws.ActionSessionAgentctlStarting)
 	b.subscribe(eventBus, events.AgentctlReady, ws.ActionSessionAgentctlReady)
 	b.subscribe(eventBus, events.AgentctlError, ws.ActionSessionAgentctlError)
 	b.subscribe(eventBus, events.TurnStarted, ws.ActionSessionTurnStarted)
 	b.subscribe(eventBus, events.TurnCompleted, ws.ActionSessionTurnCompleted)
+	b.subscribe(eventBus, events.TurnRemoved, ws.ActionSessionTurnRemoved)
+	b.subscribe(eventBus, events.SessionRemoved, ws.ActionSessionRemoved)
 	b.subscribe(eventBus, events.MessageQueueStatusChanged, ws.ActionMessageQueueStatusChanged)
 	b.subscribe(eventBus, events.GitHubTaskPRUpdated, ws.ActionGitHubTaskPRUpdated)
 	b.subscribe(eventBus, events.GitHubTaskPRDeleted, ws.ActionGitHubTaskPRDeleted)
 	b.subscribe(eventBus, events.GitHubTaskCIOptionsUpdated, ws.ActionGitHubTaskCIOptionsUpdated)
 	b.subscribe(eventBus, events.GitHubRateLimitUpdated, ws.ActionGitHubRateLimitUpdated)
+	b.subscribe(eventBus, events.GitHubPRDiscoveryHealthUpdated, ws.ActionGitHubPRDiscoveryHealthUpdated)
 	b.subscribe(eventBus, events.GitLabTaskMRUpdated, ws.ActionGitLabTaskMRUpdated)
+	b.subscribe(eventBus, events.GitLabTaskMRDeleted, ws.ActionGitLabTaskMRDeleted)
 	b.subscribe(eventBus, events.GitLabTaskMROptionsUpdated, ws.ActionGitLabTaskMRAutomationUpdated)
 
 	go func() {
@@ -134,11 +142,29 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 // state notifications remain ordered for clients when the event bus is remote.
 func (b *TaskEventBroadcaster) subscribeLifecycleStateEvents(eventBus bus.EventBus) {
 	b.subscribeWithResolver(eventBus, ">", func(event *bus.Event) string {
-		switch event.Type {
+		switch event.EffectiveSubject() {
 		case events.TaskStateChanged:
 			return ws.ActionTaskStateChanged
 		case events.TaskSessionStateChanged:
 			return ws.ActionSessionStateChanged
+		default:
+			return ""
+		}
+	})
+}
+
+// subscribeOrderedMessageEvents carries every transcript mutation through one
+// NATS callback queue. Separate subject subscriptions can run concurrently and
+// invert a deletion and its replacement before journal or client fan-out.
+func (b *TaskEventBroadcaster) subscribeOrderedMessageEvents(eventBus bus.EventBus) {
+	b.subscribeWithResolver(eventBus, ">", func(event *bus.Event) string {
+		switch event.EffectiveSubject() {
+		case events.MessageAdded:
+			return ws.ActionSessionMessageAdded
+		case events.MessageUpdated:
+			return ws.ActionSessionMessageUpdated
+		case events.MessageDeleted:
+			return ws.ActionSessionMessageDeleted
 		default:
 			return ""
 		}
@@ -185,7 +211,37 @@ func (b *TaskEventBroadcaster) broadcastEvent(ctx context.Context, event *bus.Ev
 		b.logLifecycleBroadcast(action, data, sessionID)
 	}
 
-	return b.routeBroadcast(action, event.Data, sessionID, extractWorkspaceID(event.Data), msg)
+	destinationWorkspaceID := extractWorkspaceID(event.Data)
+	if err := b.routeBroadcast(action, event.Data, sessionID, destinationWorkspaceID, msg); err != nil {
+		return err
+	}
+	return b.broadcastTransferSourceRemoval(event.Data, action, destinationWorkspaceID)
+}
+
+// broadcastTransferSourceRemoval removes a transferred task from source-only
+// boards without sending those readers the destination task payload.
+func (b *TaskEventBroadcaster) broadcastTransferSourceRemoval(data interface{}, action, destinationWorkspaceID string) error {
+	if action != ws.ActionTaskUpdated {
+		return nil
+	}
+	sourceWorkspaceID := extractStringField(data, "source_workspace_id")
+	if sourceWorkspaceID == "" || sourceWorkspaceID == destinationWorkspaceID {
+		return nil
+	}
+	payload := map[string]interface{}{
+		"task_id":      extractStringField(data, "task_id"),
+		"workspace_id": sourceWorkspaceID,
+		"workflow_id":  extractStringField(data, "source_workflow_id"),
+	}
+	if operationID := extractStringField(data, "transfer_operation_id"); operationID != "" {
+		payload["transfer_operation_id"] = operationID
+	}
+	msg, err := ws.NewNotification(ws.ActionTaskDeleted, payload)
+	if err != nil {
+		return err
+	}
+	b.hub.BroadcastToWorkspaceExcludingWorkspaceReaders(sourceWorkspaceID, destinationWorkspaceID, msg)
+	return nil
 }
 
 func (b *TaskEventBroadcaster) logSessionStateMetadata(action, sessionID string, data interface{}) {
@@ -242,6 +298,18 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 	msg *ws.Message,
 ) error {
 	switch action {
+	case ws.ActionTaskPlanCommentsChanged, ws.ActionTaskPreviewFeedbackChanged:
+		taskID := extractStringField(data, "task_id")
+		if snapshot, ok := data.(*models.TaskPlanCommentSnapshot); ok {
+			taskID = snapshot.TaskID
+		}
+		if snapshot, ok := data.(*models.TaskPreviewFeedbackSnapshot); ok {
+			taskID = snapshot.TaskID
+		}
+		if taskID != "" {
+			b.hub.BroadcastToTask(taskID, msg)
+		}
+		return nil
 	case ws.ActionWorkspaceCreated, ws.ActionWorkspaceUpdated, ws.ActionWorkspaceDeleted:
 		// Workspace event payloads are the workspace DTO itself: the
 		// workspace ID lives under "id", not "workspace_id". Without this
@@ -258,13 +326,27 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 			return nil
 		}
 	case ws.ActionSessionStateChanged:
+		if sessionID != "" && extractStringField(data, "new_state") == string(models.TaskSessionStateRunning) {
+			b.hub.clearSessionLaunchWarning(sessionID)
+		}
 		// Broadcast beyond the session subscribers so the sidebar task
 		// switcher can track state changes for all tasks — but scoped to
 		// the owning workspace's user when auth is enabled.
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
-	case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted:
+	case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted,
+		ws.ActionSessionTurnStarted, ws.ActionSessionTurnCompleted, ws.ActionSessionTurnRemoved:
 		if sessionID != "" {
+			b.hub.BroadcastConversationMutation(data)
+			b.hub.BroadcastToSession(sessionID, msg)
+			return nil
+		}
+	case ws.ActionSessionRemoved:
+		if sessionID != "" {
+			b.hub.clearSessionLaunchWarning(sessionID)
+			if _, hasReceipt := conversationReceiptFromData(data); hasReceipt {
+				b.hub.BroadcastConversationMutation(data)
+			}
 			b.hub.BroadcastToSession(sessionID, msg)
 			return nil
 		}
@@ -285,10 +367,14 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		b.hub.BroadcastToWorkspaceOrDrop(workspaceID, msg)
 		return nil
 	case ws.ActionMessageQueueStatusChanged:
-		if sessionID != "" {
-			b.hub.BroadcastToSession(sessionID, msg)
+		// Queue status is session-scoped. An unscoped event cannot be safely
+		// attributed after a session is deleted, so fail closed rather than
+		// falling through to the global broadcast path.
+		if sessionID == "" {
 			return nil
 		}
+		b.hub.BroadcastToSession(sessionID, msg)
+		return nil
 	case ws.ActionExecutorPrepareProgress, ws.ActionExecutorPrepareCompleted:
 		// Broadcast to the owning workspace's clients so prepare
 		// progress/warnings are available when the user navigates to the
@@ -296,7 +382,8 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
 	case ws.ActionGitHubTaskPRUpdated, ws.ActionGitHubTaskPRDeleted,
-		ws.ActionGitHubTaskCIOptionsUpdated, ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
+		ws.ActionGitHubTaskCIOptionsUpdated, ws.ActionGitHubPRDiscoveryHealthUpdated,
+		ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRDeleted, ws.ActionGitLabTaskMRAutomationUpdated:
 		// These payloads carry per-task PR/MR automation and lifecycle state. Fail closed
 		// (drop, don't fall back to a global broadcast) when workspace
 		// resolution came back empty and auth is enforced — an unattributed

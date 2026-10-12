@@ -58,6 +58,33 @@ func TestTaskModelToDTOLeavesArchivedAtNilForALiveTask(t *testing.T) {
 	require.Nil(t, dto.QueuedAt)
 }
 
+// The session-ceiling replay payload carries the launch-scoped environment
+// map, the composed prompt, its attachments and entity references. A plugin
+// or agent-authored canvas is a lower-trust surface than the host itself, so
+// it must never see that payload even though it is free to see that a
+// deferral is pending, of what kind, and why.
+func TestTaskModelToDTORedactsCeilingLaunchPayload(t *testing.T) {
+	task := &taskmodels.Task{
+		ID: "t1",
+		Metadata: map[string]interface{}{
+			taskmodels.MetaKeyDeferredLaunch: map[string]interface{}{
+				taskmodels.CeilingLaunchPayloadKey: map[string]interface{}{
+					"prompt": "do the secret thing",
+				},
+				taskmodels.CeilingReasonCodeKey: "ceiling_reached",
+			},
+		},
+	}
+
+	dto := taskModelToDTO(task)
+
+	deferred, ok := dto.Metadata[taskmodels.MetaKeyDeferredLaunch].(map[string]interface{})
+	require.True(t, ok, "the discriminators must still be visible")
+	require.Equal(t, "ceiling_reached", deferred[taskmodels.CeilingReasonCodeKey])
+	_, leaked := deferred[taskmodels.CeilingLaunchPayloadKey]
+	require.False(t, leaked, "ceiling_launch_payload must be redacted from the plugin host-data path")
+}
+
 // Review and check state ride along because kandev's PR watcher already syncs
 // them; a plugin asking "what can merge" would otherwise re-query the forge
 // once per pull request.

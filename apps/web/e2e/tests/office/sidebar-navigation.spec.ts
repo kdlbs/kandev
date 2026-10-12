@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/office-fixture";
 import { officeTopbarTitle } from "../../helpers/office-topbar";
 import { AppSidebarPage } from "../../pages/app-sidebar-page";
+import type { ApiClient } from "../../helpers/api-client";
 
 test.describe("Sidebar navigation", () => {
   test("sidebar shows CEO agent link", async ({ testPage, officeSeed: _ }) => {
@@ -72,10 +73,19 @@ test.describe("Sidebar navigation", () => {
   });
 });
 
-// The sidebar "Home" item is office-aware: while on any /office/* route it
-// targets the office dashboard (/office), and on a regular Kanban route it
-// targets the board (/). Active-highlight stays exact-match in both modes.
+// Home follows workspace mode, including when Threads is the saved default.
 test.describe("Sidebar Home destination", () => {
+  let baseline: Awaited<ReturnType<ApiClient["getUserSettings"]>>["settings"];
+  test.beforeEach(async ({ testPage, apiClient }) => {
+    void testPage;
+    baseline = (await apiClient.getUserSettings()).settings;
+    await apiClient.saveUserSettings({ startup_page: "threads" });
+  });
+  test.afterEach(async ({ apiClient }) => {
+    if (baseline)
+      await apiClient.saveUserSettings({ startup_page: baseline.startup_page ?? "task_overview" });
+  });
+
   test("Home goes to the office dashboard from an office route", async ({
     testPage,
     officeSeed: _,
@@ -113,6 +123,12 @@ test.describe("Sidebar Home destination", () => {
     await home.click();
     await expect(testPage).toHaveURL(/\/office(\?|$)/);
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/settings/preferences/appearance");
+    await expect(testPage.getByRole("radio", { name: "Threads", exact: true })).toBeChecked();
+    await testPage.getByRole("link", { name: "Kandev home", exact: true }).click();
+    await expect(testPage).toHaveURL(/\/office(\?|$)/);
+    await expect(testPage.getByText("Agents Enabled")).toBeVisible();
   });
 
   test("the kanban board redirects to Office when an office workspace is active", async ({

@@ -15,15 +15,37 @@ import type {
   ProfileEnvVar,
 } from "@/lib/types/http";
 import { arePermissionsDirty, permissionsToProfilePatch } from "@/lib/agent-permissions";
+import { isProviderConfigDirty } from "@/components/settings/agent-profile-dirty";
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
 import { areConfigOptionsEqual } from "@/lib/config-options";
 import { t } from "@/lib/i18n";
 import { toAgentProfilePayload } from "@/lib/api/domains/agent-profile-normalize";
 import type { ProfileFormData } from "@/components/settings/profile-form-fields";
+import type { AgentCreationPublication } from "@/hooks/domains/settings/use-agent-creation-store-sync";
 
 // The JSON key the MCP editor validates against — an identifier, interpolated
 // into the parse error rather than written into the catalog.
 const MCP_SERVERS_KEY = "mcpServers";
+
+const profilePatchFieldMap: Array<[keyof ProfileFormData, keyof AgentProfile]> = [
+  ["name", "name"],
+  ["model", "model"],
+  ["fallback_model", "fallbackModel"],
+  ["auto_fallback", "autoFallback"],
+  ["require_exact_model", "requireExactModel"],
+  ["mode", "mode"],
+  ["config_options", "configOptions"],
+  ["allow_indexing", "allowIndexing"],
+  ["auto_approve", "autoApprove"],
+  ["cli_passthrough", "cliPassthrough"],
+  ["cursor_mcp_auth_enabled", "cursorMcpAuthEnabled"],
+  ["cursor_plugins_mcp_enabled", "cursorPluginsMcpEnabled"],
+  ["mcp_selection_mode", "mcpSelectionMode"],
+  ["mcp_selected_servers", "mcpSelectedServers"],
+  ["cli_flags", "cliFlags"],
+  ["command_prefix", "commandPrefix"],
+  ["provider_kind", "providerKind"],
+];
 
 /**
  * Translates a ProfileFormData patch (snake_case form keys) into a
@@ -34,18 +56,26 @@ const MCP_SERVERS_KEY = "mcpServers";
  */
 export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<AgentProfile> {
   const next: Partial<AgentProfile> = {};
-  if (patch.name !== undefined) next.name = patch.name;
-  if (patch.model !== undefined) next.model = patch.model;
-  if (patch.fallback_model !== undefined) next.fallbackModel = patch.fallback_model;
-  if (patch.auto_fallback !== undefined) next.autoFallback = patch.auto_fallback;
-  if (patch.mode !== undefined) next.mode = patch.mode;
-  if (patch.config_options !== undefined) next.configOptions = patch.config_options;
-  if (patch.allow_indexing !== undefined) next.allowIndexing = patch.allow_indexing;
-  if (patch.auto_approve !== undefined) next.autoApprove = patch.auto_approve;
-  if (patch.cli_passthrough !== undefined) next.cliPassthrough = patch.cli_passthrough;
-  if (patch.cli_flags !== undefined) next.cliFlags = patch.cli_flags;
-  if (patch.command_prefix !== undefined) next.commandPrefix = patch.command_prefix;
+  for (const [formKey, profileKey] of profilePatchFieldMap) {
+    if (patch[formKey] !== undefined) {
+      (next as Record<string, unknown>)[profileKey] = patch[formKey];
+    }
+  }
   return next;
+}
+
+/**
+ * OpenAI-compatible provider fields for a profile save payload. The backend
+ * normalizes them (clears everything when the kind is not
+ * `openai_compatible`), so sending the cleared triple is safe and lets a
+ * switch back to Native persist.
+ */
+function providerPayloadFields(profile: DraftProfile) {
+  return {
+    provider_kind: profile.providerKind ?? "",
+    provider_base_url: profile.providerBaseUrl ?? "",
+    provider_api_key_secret_id: profile.providerApiKeySecretId ?? "",
+  };
 }
 
 function areEnvVarsEqual(a?: ProfileEnvVar[], b?: ProfileEnvVar[]): boolean {
@@ -204,39 +234,102 @@ export type SaveAgentCallbacks = {
   currentAgentModelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   resolveDisplayName: (name: string) => string;
-  upsertAgent: (agent: Agent) => void;
+  upsertAgent: (agent: Agent, creation?: AgentCreationPublication) => Agent | void;
   setDraftAgent: (agent: DraftAgent | ((current: DraftAgent) => DraftAgent)) => void;
   ensureProfiles: EnsureProfilesFn;
   cloneAgent: CloneAgentFn;
   replaceRoute: (path: string) => void;
 };
 
+function buildCreateProfilePayload(profile: DraftProfile) {
+  return {
+    name: profile.name,
+    model: profile.model,
+    kind: profile.kind,
+    fallback_model: profile.fallbackModel ?? "",
+    auto_fallback: profile.autoFallback ?? false,
+    mode: profile.mode,
+    config_options: profile.configOptions ?? {},
+    ...permissionsToProfilePatch(profile),
+    cli_passthrough: profile.cliPassthrough ?? false,
+    cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
+    cursor_plugins_mcp_enabled: profile.cursorPluginsMcpEnabled ?? true,
+    mcp_selection_mode: profile.mcpSelectionMode ?? "inherit",
+    mcp_selected_servers: profile.mcpSelectedServers ?? [],
+    cli_flags: profile.cliFlags ?? [],
+    command_prefix: profile.commandPrefix ?? "",
+    ...providerPayloadFields(profile),
+    env_vars: profile.envVars ?? [],
+    dynamic: dynamicProfilePayload(profile),
+  };
+}
+
+function changedCursorPreferences(profile: DraftProfile, savedProfile: AgentProfile) {
+  const mcpAuth =
+    (profile.cursorMcpAuthEnabled ?? true) === (savedProfile.cursorMcpAuthEnabled ?? true)
+      ? undefined
+      : (profile.cursorMcpAuthEnabled ?? true);
+  const pluginsMcp =
+    (profile.cursorPluginsMcpEnabled ?? true) === (savedProfile.cursorPluginsMcpEnabled ?? true)
+      ? undefined
+      : (profile.cursorPluginsMcpEnabled ?? true);
+  const selectionMode =
+    (profile.mcpSelectionMode ?? "inherit") === (savedProfile.mcpSelectionMode ?? "inherit")
+      ? undefined
+      : (profile.mcpSelectionMode ?? "inherit");
+  const selectedServers = areSelectedServerIdsEqual(
+    profile.mcpSelectedServers,
+    savedProfile.mcpSelectedServers,
+  )
+    ? undefined
+    : (profile.mcpSelectedServers ?? []);
+  return {
+    cursor_mcp_auth_enabled: mcpAuth,
+    cursor_plugins_mcp_enabled: pluginsMcp,
+    mcp_selection_mode: selectionMode,
+    mcp_selected_servers: selectedServers,
+  };
+}
+
+function areSelectedServerIdsEqual(left: string[] = [], right: string[] = []): boolean {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((serverId, index) => serverId === sortedRight[index]);
+}
+
+function buildUpdateProfilePayload(profile: DraftProfile, savedProfile: AgentProfile) {
+  return {
+    name: profile.name,
+    model: profile.model,
+    kind: profile.kind,
+    fallback_model: profile.fallbackModel ?? "",
+    auto_fallback: profile.autoFallback ?? false,
+    mode: profile.mode,
+    config_options: profile.configOptions ?? {},
+    ...permissionsToProfilePatch(profile),
+    cli_passthrough: profile.cliPassthrough ?? false,
+    ...changedCursorPreferences(profile, savedProfile),
+    cli_flags: profile.cliFlags ?? [],
+    command_prefix: profile.commandPrefix ?? "",
+    ...providerPayloadFields(profile),
+    env_vars: profile.envVars ?? [],
+    dynamic: dynamicProfilePayload(profile),
+  };
+}
+
 export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentCallbacks) {
   let created = await createAgentAction({
     name: draftAgent.name,
     workspace_id: draftAgent.workspace_id,
-    profiles: draftAgent.profiles.map((profile) => ({
-      name: profile.name,
-      model: profile.model,
-      kind: profile.kind,
-      fallback_model: profile.fallbackModel ?? "",
-      auto_fallback: profile.autoFallback ?? false,
-      mode: profile.mode,
-      config_options: profile.configOptions ?? {},
-      ...permissionsToProfilePatch(profile),
-      cli_passthrough: profile.cliPassthrough ?? false,
-      cli_flags: profile.cliFlags ?? [],
-      command_prefix: profile.commandPrefix ?? "",
-      env_vars: profile.envVars ?? [],
-      dynamic: dynamicProfilePayload(profile),
-    })),
+    profiles: draftAgent.profiles.map(buildCreateProfilePayload),
   });
 
   try {
     await saveMcpForCreatedProfiles(draftAgent, created, callbacks.onToastError);
   } catch (error) {
     const reconciled = preservePendingMcpDrafts(draftAgent, created);
-    callbacks.upsertAgent(reconciled);
+    callbacks.upsertAgent(reconciled, { profiles: reconciled.profiles, ownerCreated: true });
     const savedDraft = callbacks.ensureProfiles(
       callbacks.cloneAgent(reconciled),
       callbacks.resolveDisplayName(reconciled.name),
@@ -256,7 +349,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       mcp_config_path: draftAgent.mcp_config_path ?? "",
     });
   }
-  callbacks.upsertAgent(created);
+  callbacks.upsertAgent(created, { profiles: created.profiles, ownerCreated: true });
   const savedDraft = callbacks.ensureProfiles(
     callbacks.cloneAgent(created),
     callbacks.resolveDisplayName(created.name),
@@ -282,6 +375,7 @@ async function saveExistingAgentPatch(draftAgent: DraftAgent, savedAgent: Agent)
   if (Object.keys(agentPatch).length > 0) {
     await updateAgentAction(savedAgent.id, agentPatch);
   }
+  return agentPatch;
 }
 
 async function savePersistedProfile(
@@ -295,21 +389,7 @@ async function savePersistedProfile(
     onToastError,
   });
   if (isProfileDirty(profile, savedProfile)) {
-    return updateAgentProfileAction(profile.id, {
-      name: profile.name,
-      model: profile.model,
-      kind: profile.kind,
-      fallback_model: profile.fallbackModel ?? "",
-      auto_fallback: profile.autoFallback ?? false,
-      mode: profile.mode,
-      config_options: profile.configOptions ?? {},
-      ...permissionsToProfilePatch(profile),
-      cli_passthrough: profile.cliPassthrough ?? false,
-      cli_flags: profile.cliFlags ?? [],
-      command_prefix: profile.commandPrefix ?? "",
-      env_vars: profile.envVars ?? [],
-      dynamic: dynamicProfilePayload(profile),
-    });
+    return updateAgentProfileAction(profile.id, buildUpdateProfilePayload(profile, savedProfile));
   }
   const { mcp_config: _pendingMcp, ...persistedProfile } = savedProfile as DraftProfile;
   return persistedProfile;
@@ -320,7 +400,11 @@ async function saveExistingProfiles(
   savedAgent: Agent,
   isCreateMode: boolean,
   onToastError: (error: unknown) => void,
-): Promise<{ profiles: AgentProfile[]; profileIds: Map<string, string> }> {
+): Promise<{
+  profiles: AgentProfile[];
+  persistedProfiles: DraftProfile[];
+  profileIds: Map<string, string>;
+}> {
   const savedProfilesById = new Map(savedAgent.profiles.map((p) => [p.id, p]));
   const nextProfiles: AgentProfile[] = isCreateMode ? [...savedAgent.profiles] : [];
   const profileIds = new Map<string, string>();
@@ -331,21 +415,10 @@ async function saveExistingProfiles(
     for (const profile of draftAgent.profiles) {
       const savedProfile = savedProfilesById.get(profile.id);
       if (!savedProfile) {
-        const createdProfile = await createAgentProfileAction(savedAgent.id, {
-          name: profile.name,
-          model: profile.model,
-          kind: profile.kind,
-          fallback_model: profile.fallbackModel ?? "",
-          auto_fallback: profile.autoFallback ?? false,
-          mode: profile.mode,
-          config_options: profile.configOptions ?? {},
-          ...permissionsToProfilePatch(profile),
-          cli_passthrough: profile.cliPassthrough ?? false,
-          cli_flags: profile.cliFlags ?? [],
-          command_prefix: profile.commandPrefix ?? "",
-          env_vars: profile.envVars ?? [],
-          dynamic: dynamicProfilePayload(profile),
-        });
+        const createdProfile = await createAgentProfileAction(
+          savedAgent.id,
+          buildCreateProfilePayload(profile),
+        );
         profileIds.set(profile.id, createdProfile.id);
         persistedSubmittedIds.add(profile.id);
         persistedProfiles.push(
@@ -366,7 +439,12 @@ async function saveExistingProfiles(
       const persistedProfile = await savePersistedProfile(profile, savedProfile, onToastError);
       persistedSubmittedIds.add(profile.id);
       persistedProfiles.push(persistedProfile);
-      nextProfiles.push(persistedProfile);
+      if (isCreateMode) {
+        const index = nextProfiles.findIndex((item) => item.id === savedProfile.id);
+        nextProfiles[index] = persistedProfile;
+      } else {
+        nextProfiles.push(persistedProfile);
+      }
     }
   } catch (error) {
     if (persistedProfiles.length > 0) {
@@ -379,7 +457,7 @@ async function saveExistingProfiles(
     }
     throw error;
   }
-  return { profiles: nextProfiles, profileIds };
+  return { profiles: nextProfiles, persistedProfiles, profileIds };
 }
 
 class PartialProfileSaveError extends Error {
@@ -398,6 +476,7 @@ function reconcilePartialProfileSave(
   savedAgent: Agent,
   partial: PartialProfileSaveError,
   callbacks: SaveAgentCallbacks,
+  isCreateMode: boolean,
 ) {
   const profilesById = new Map(savedAgent.profiles.map((profile) => [profile.id, profile]));
   for (const profile of partial.persistedProfiles) profilesById.set(profile.id, profile);
@@ -405,7 +484,10 @@ function reconcilePartialProfileSave(
     ...savedAgent,
     profiles: [...profilesById.values()],
   };
-  callbacks.upsertAgent(reconciled);
+  const published = callbacks.upsertAgent(
+    reconciled,
+    isCreateMode ? { profiles: partial.persistedProfiles } : undefined,
+  );
   const submitted = {
     ...draftAgent,
     profiles: draftAgent.profiles.filter((profile) =>
@@ -413,17 +495,18 @@ function reconcilePartialProfileSave(
     ),
   };
   const persistedIds = new Set(partial.persistedProfiles.map((profile) => profile.id));
+  const draftSource = isCreateMode && published ? published : reconciled;
   const savedDraft = callbacks.ensureProfiles(
     {
-      ...callbacks.cloneAgent(reconciled),
-      profiles: reconciled.profiles.filter((profile) => persistedIds.has(profile.id)),
+      ...callbacks.cloneAgent(draftSource),
+      profiles: draftSource.profiles.filter((profile) => persistedIds.has(profile.id)),
     },
     callbacks.resolveDisplayName(reconciled.name),
     callbacks.currentAgentModelConfig.default_model,
     callbacks.permissionSettings,
   );
   callbacks.setDraftAgent((current) =>
-    mergeSavedAgentDraft(current, submitted, savedDraft, partial.profileIds),
+    mergeSavedAgentDraft(current, submitted, savedDraft, partial.profileIds, isCreateMode),
   );
 }
 
@@ -442,7 +525,7 @@ export async function saveExistingAgent(
   isCreateMode: boolean,
   callbacks: SaveAgentCallbacks,
 ) {
-  await saveExistingAgentPatch(draftAgent, savedAgent);
+  const agentPatch = await saveExistingAgentPatch(draftAgent, savedAgent);
 
   let savedProfiles: Awaited<ReturnType<typeof saveExistingProfiles>>;
   try {
@@ -454,7 +537,7 @@ export async function saveExistingAgent(
     );
   } catch (error) {
     if (error instanceof PartialProfileSaveError) {
-      reconcilePartialProfileSave(draftAgent, savedAgent, error, callbacks);
+      reconcilePartialProfileSave(draftAgent, savedAgent, error, callbacks, isCreateMode);
       throw error.original;
     }
     throw error;
@@ -470,7 +553,10 @@ export async function saveExistingAgent(
     mcp_config_path: draftAgent.mcp_config_path ?? "",
     profiles: savedProfiles.profiles,
   };
-  callbacks.upsertAgent(nextAgent);
+  callbacks.upsertAgent(
+    nextAgent,
+    isCreateMode ? { profiles: savedProfiles.persistedProfiles, agentPatch } : undefined,
+  );
   const savedDraft = callbacks.ensureProfiles(
     callbacks.cloneAgent(nextAgent),
     callbacks.resolveDisplayName(nextAgent.name),
@@ -491,6 +577,7 @@ export function mergeSavedAgentDraft(
   submitted: DraftAgent,
   saved: DraftAgent,
   profileIds: ReadonlyMap<string, string> = new Map(),
+  preserveOnlyEditedFields = false,
 ): DraftAgent {
   const currentById = new Map(current.profiles.map((profile) => [profile.id, profile]));
   const submittedBySavedId = new Map(
@@ -502,6 +589,15 @@ export function mergeSavedAgentDraft(
     const currentProfile = currentById.get(submittedProfile.id);
     if (!currentProfile || JSON.stringify(currentProfile) === JSON.stringify(submittedProfile)) {
       return savedProfile;
+    }
+    if (preserveOnlyEditedFields) {
+      const edits = Object.fromEntries(
+        Object.entries(currentProfile).filter(
+          ([key, value]) =>
+            JSON.stringify(value) !== JSON.stringify(submittedProfile[key as keyof DraftProfile]),
+        ),
+      );
+      return { ...savedProfile, ...edits, id: savedProfile.id };
     }
     return { ...savedProfile, ...currentProfile, id: savedProfile.id };
   });
@@ -515,6 +611,7 @@ function isProfileCliConfigDirty(draft: DraftProfile, saved: AgentProfile): bool
     draft.cliPassthrough !== saved.cliPassthrough ||
     !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? []) ||
     (draft.commandPrefix ?? "") !== (saved.commandPrefix ?? "") ||
+    isProviderConfigDirty(draft, saved) ||
     !areEnvVarsEqual(draft.envVars, saved.envVars)
   );
 }
@@ -534,6 +631,10 @@ function isProfileIdentityDirty(draft: DraftProfile, saved: AgentProfile): boole
 function isProfileSettingsDirty(draft: DraftProfile, saved: AgentProfile): boolean {
   return (
     areConfigOptionsEqual(draft.configOptions, saved.configOptions) === false ||
+    (draft.cursorMcpAuthEnabled ?? true) !== (saved.cursorMcpAuthEnabled ?? true) ||
+    (draft.cursorPluginsMcpEnabled ?? true) !== (saved.cursorPluginsMcpEnabled ?? true) ||
+    (draft.mcpSelectionMode ?? "inherit") !== (saved.mcpSelectionMode ?? "inherit") ||
+    !areSelectedServerIdsEqual(draft.mcpSelectedServers, saved.mcpSelectedServers) ||
     arePermissionsDirty(draft, saved)
   );
 }

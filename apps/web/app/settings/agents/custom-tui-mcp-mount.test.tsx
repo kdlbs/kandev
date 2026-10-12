@@ -114,6 +114,23 @@ describe("custom TUI MCP control on the agents index", () => {
     expect(screen.queryByTestId(STRATEGY_SELECT)).toBeNull();
   });
 
+  // An ACP custom agent receives kandev's MCP servers in session/new. Offering
+  // a passthrough config-file strategy would present a choice the backend
+  // rejects, because there is no passthrough command to write a config for.
+  it("renders nothing for a custom agent registered as ACP", () => {
+    renderIndexComposition(
+      tuiAgent({
+        tui_config: {
+          command: "fuelclaude --acp",
+          display_name: "Fuel Claude",
+          wait_for_terminal: true,
+          protocol: "acp",
+        },
+      }),
+    );
+    expect(screen.queryByTestId(STRATEGY_SELECT)).toBeNull();
+  });
+
   it("renders nothing for an agent that has not been saved yet", () => {
     renderIndexComposition(undefined);
     expect(screen.queryByTestId(STRATEGY_SELECT)).toBeNull();

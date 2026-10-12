@@ -30,6 +30,12 @@ func applyThreadViews(settings *models.UserSettings, req *UpdateUserSettingsRequ
 	if err := validateThreadViews(views); err != nil {
 		return err
 	}
+	views = append([]models.ThreadView(nil), views...)
+	for i := range views {
+		if views[i].Layout == "" {
+			views[i].Layout = models.ThreadLayoutColumns
+		}
+	}
 	settings.ThreadViews = views
 	if req.ThreadActiveViewID == nil && !threadViewIDExists(views, settings.ThreadActiveViewID) {
 		return fmt.Errorf("thread_active_view_id %q does not match any saved view", settings.ThreadActiveViewID)
@@ -61,6 +67,9 @@ func applyThreadViewState(settings *models.UserSettings, req *UpdateUserSettings
 		return err
 	}
 	draft.BaseViewID = strings.TrimSpace(draft.BaseViewID)
+	if draft.Layout == "" {
+		draft.Layout = models.ThreadLayoutColumns
+	}
 	settings.ThreadViewDraft = &draft
 	return nil
 }
@@ -82,6 +91,9 @@ func validateThreadViews(views []models.ThreadView) error {
 			return fmt.Errorf("thread_views: duplicate view id %q", view.ID)
 		}
 		seen[view.ID] = struct{}{}
+		if err := validateThreadLayout(view.Layout); err != nil {
+			return fmt.Errorf("thread_views.%s: %w", view.ID, err)
+		}
 		if err := validateThreadViewBody(view.TaskScope, view.Filters, view.MaxColumns, false); err != nil {
 			return fmt.Errorf("thread_views.%s: %w", view.ID, err)
 		}
@@ -93,7 +105,19 @@ func validateThreadViewDraft(draft models.ThreadViewDraft, views []models.Thread
 	if !threadViewIDExists(views, strings.TrimSpace(draft.BaseViewID)) {
 		return fmt.Errorf("thread_view_draft.base_view_id %q does not match any saved view", draft.BaseViewID)
 	}
+	if err := validateThreadLayout(draft.Layout); err != nil {
+		return err
+	}
 	return validateThreadViewBody(draft.TaskScope, draft.Filters, draft.MaxColumns, true)
+}
+
+func validateThreadLayout(layout string) error {
+	switch layout {
+	case "", models.ThreadLayoutColumns, models.ThreadLayoutGrid:
+		return nil
+	default:
+		return fmt.Errorf("unsupported thread layout %q", layout)
+	}
 }
 
 func validateThreadViewBody(

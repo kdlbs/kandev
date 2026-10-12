@@ -23,6 +23,7 @@ var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 // ErrTaskPlanNotFound is returned by Repository task-plan methods when no row
 // matches the supplied task id.
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
+var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
 
 // ErrTaskEnvironmentNotFound is returned when no task environment row matches
 // the supplied id. Callers should classify it with errors.Is.
@@ -37,7 +38,7 @@ var errDetachedWorkspaceTransferNotApplicable = errors.New("detached workspace s
 // ErrNoPrimarySession is returned by GetPrimarySessionByTaskID when the task
 // has no primary session row. Callers should use errors.Is to distinguish this
 // "not found" case from genuine backend/DB errors.
-var ErrNoPrimarySession = errors.New("no primary session")
+var ErrNoPrimarySession = repoerrors.ErrNoPrimarySession
 
 // ErrExternalIDConflict is returned by CreateTask (and its
 // admission/capacity variants) when the insert violates

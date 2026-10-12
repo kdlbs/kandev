@@ -53,17 +53,43 @@ type Config struct {
 	Office                 OfficeConfig                 `mapstructure:"office"`
 	Features               FeaturesConfig               `mapstructure:"features"`
 	GitHubCredentialBroker GitHubCredentialBrokerConfig `mapstructure:"githubCredentialBroker"`
+	Executors              ExecutorsConfig              `mapstructure:"executors"`
 	Source                 ConfigSource                 `mapstructure:"-" json:"-"`
 }
 
 // TasksConfig contains task lifecycle startup limits.
 type TasksConfig struct {
 	PreparationTimeout time.Duration `mapstructure:"preparationTimeout"`
+	// StallDetectionThreshold is the event-silence window after which the
+	// session reconciliation sweep classifies an active session with no live
+	// execution as stalled (issue #3712). The orphaned-session healing grace
+	// window is twice this value.
+	StallDetectionThreshold time.Duration           `mapstructure:"stallDetectionThreshold"`
+	DeliveryRetention       DeliveryRetentionConfig `mapstructure:"deliveryRetention"`
+}
+
+// DeliveryRetentionConfig bounds the backend's redundant durable-delivery evidence.
+type DeliveryRetentionConfig struct {
+	PayloadGrace time.Duration `mapstructure:"payloadGrace"`
+	ReplayAge    time.Duration `mapstructure:"replayAge"`
+	ReplayEvents int           `mapstructure:"replayEvents"`
+	Interval     time.Duration `mapstructure:"interval"`
+	BatchRows    int           `mapstructure:"batchRows"`
+	BatchBytes   int           `mapstructure:"batchBytes"`
 }
 
 // CredentialsConfig contains operator-managed credential file settings.
 type CredentialsConfig struct {
 	File string `mapstructure:"file"`
+}
+
+// ExecutorsConfig contains executor-related startup settings.
+type ExecutorsConfig struct {
+	// SSHReachabilityIntervalSeconds is the raw configured value, not yet
+	// clamped into the reachability package's own 15-3600 bound: 0 disables
+	// the poller, and reachability.ClampInterval owns the rest of the
+	// normalization at construction time.
+	SSHReachabilityIntervalSeconds int `mapstructure:"sshReachabilityIntervalSeconds"`
 }
 
 // LimitsConfig contains process and protocol capacity limits.
@@ -83,6 +109,21 @@ type AgentctlConfig struct {
 	IdleTimeout               time.Duration `mapstructure:"idleTimeout"`
 	IdleReaperInterval        time.Duration `mapstructure:"idleReaperInterval"`
 	NotificationQueueCapacity int           `mapstructure:"notificationQueueCapacity"`
+
+	// RecoveryDeadline is the single global bound covering adoption,
+	// enumeration and reconstruction together during standalone agent
+	// survival re-tracking at backend startup.
+	RecoveryDeadline time.Duration `mapstructure:"recoveryDeadline"`
+	// RecoveryReadTimeout and RecoveryReadRetries bound each read of a
+	// reconstruction value from the adopted control server during re-tracking.
+	RecoveryReadTimeout time.Duration `mapstructure:"recoveryReadTimeout"`
+	RecoveryReadRetries int           `mapstructure:"recoveryReadRetries"`
+	// UnownedPeriod is how long a standalone control server tolerates having
+	// no owning backend before it stops its instances and exits.
+	UnownedPeriod time.Duration `mapstructure:"unownedPeriod"`
+	// DetachedEventLimit bounds the per-instance retained-event count while
+	// a standalone control server has no owning backend attached.
+	DetachedEventLimit int `mapstructure:"detachedEventLimit"`
 }
 
 // PlanningConfig contains planning service timing settings.
@@ -375,6 +416,12 @@ type EventsConfig struct {
 }
 
 // DockerConfig holds Docker client configuration.
+//
+// Every field here configures Kandev as a Docker *client*, driving the daemon
+// it creates task containers on. None of them configures the container Kandev
+// itself runs in: when Kandev runs from the published image, its own network,
+// volumes, and ports come from the `docker run` or Compose invocation that
+// started it, which Kandev never reads.
 type DockerConfig struct {
 	// Enabled controls whether the Docker runtime is available for task execution.
 	// When true and Docker is accessible, tasks can use Docker-based executors.
@@ -383,7 +430,6 @@ type DockerConfig struct {
 	Host           string `mapstructure:"host"`
 	APIVersion     string `mapstructure:"apiVersion"`
 	TLSVerify      bool   `mapstructure:"tlsVerify"`
-	DefaultNetwork string `mapstructure:"defaultNetwork"`
 	VolumeBasePath string `mapstructure:"volumeBasePath"`
 }
 
@@ -415,6 +461,35 @@ type OfficeConfig struct {
 	// deployments should set a stable value (e.g. via KANDEV_OFFICE_JWTSIGNINGKEY).
 	JWTSigningKey   string `mapstructure:"jwtSigningKey"`
 	SchedulerTickMs int    `mapstructure:"schedulerTickMs"`
+
+	// The following back the launch-safety ceilings/budgets
+	// (REQ-OFFICE-LAUNCH-SAFETY-001/003/004/005) and the backpressure
+	// gate-failure escalation threshold (REQ-OFFICE-BACKPRESSURE-003.5).
+	// Every one is boot-time-only, like SchedulerTickMs above: resolved
+	// once at startup and passed into the owning repository/service via
+	// its SetXxx method, not polled or overridable at runtime. A value
+	// below the documented minimum (1, or 1 for PromotionAgeMinutes) is
+	// replaced by that default and the resolved source is reported as
+	// SourceDefault (applyPositiveIntEnv's existing behavior), matching
+	// the "replaced by the default and logged at warn level" language the
+	// acceptance criteria use for an out-of-range operator override.
+	MaxConcurrentInstance  int `mapstructure:"maxConcurrentInstance"`
+	MaxConcurrentWorkspace int `mapstructure:"maxConcurrentWorkspace"`
+	WorkspaceBudgetPerHour int `mapstructure:"workspaceBudgetPerHour"`
+	RoutineBudgetPerHour   int `mapstructure:"routineBudgetPerHour"`
+	// PromotionAgeMinutes is REQ-OFFICE-BACKPRESSURE-002.1's age-based
+	// priority promotion period, in minutes (converted to
+	// runssqlite.ClaimSafetyLimits.PromotionAge, a time.Duration, at the
+	// wiring site — the catalog only carries plain ints).
+	PromotionAgeMinutes  int `mapstructure:"promotionAgeMinutes"`
+	MaxCausationDepth    int `mapstructure:"maxCausationDepth"`
+	SelfTriggerAllowance int `mapstructure:"selfTriggerAllowance"`
+	// SelfTriggerTotalAllowance is the reason-independent sibling of
+	// SelfTriggerAllowance (AC-OFFICE-LAUNCH-SAFETY-004.8): it may be
+	// configured below SelfTriggerAllowance, in which case it is the
+	// binding limit and the per-reason allowance becomes unreachable.
+	SelfTriggerTotalAllowance int `mapstructure:"selfTriggerTotalAllowance"`
+	GateFailureThreshold      int `mapstructure:"gateFailureThreshold"`
 }
 
 // FeaturesConfig is the typed wire/config shape for runtime feature flags.
@@ -429,6 +504,11 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+
+	// LSPBrowserContinuity gates runtime-owned language-server leases that stay
+	// connected across browser attachment loss. Off in every embedded profile.
+	LSPBrowserContinuity bool `mapstructure:"lsp_browser_continuity" json:"lspBrowserContinuity"`
+
 	// Office gates the autonomous-agent feature: backend service construction,
 	// HTTP/WS route registration, and frontend nav/route visibility.
 	Office bool `mapstructure:"office" json:"office"`
@@ -475,13 +555,38 @@ type FeaturesConfig struct {
 	// can regress without notice.
 	ClaudeMidTurnSteering bool `mapstructure:"claude_mid_turn_steering" json:"claudeMidTurnSteering"`
 
-	// OfficeSessionIdentity keys an Office task's session identity on the run's
-	// own agent instead of the task's runner seat, and binds an agent's
-	// decision re-evaluation to its own calling session instead of the task's
-	// most-recently-started session. Off in every embedded profile: enabling it
-	// exposes pre-existing duplicate (task_id, agent_profile_id) rows until the
-	// companion unique-index fix has shipped.
-	OfficeSessionIdentity bool `mapstructure:"office_session_identity" json:"officeSessionIdentity"`
+	// NeedsYouInbox gates the Needs-you Inbox: a workspace-scoped sidebar
+	// destination, independent of Office, listing exactly the answerable
+	// clarification bundles for the active workspace. Off in prod until the
+	// feature is user-ready.
+	NeedsYouInbox bool `mapstructure:"needs_you_inbox" json:"needsYouInbox"`
+
+	// AgentSurvival lets a worktree or local-executor agent session survive a
+	// backend restart by adopting its still-running standalone control server
+	// instead of killing it. Off in every embedded profile, and unavailable on
+	// Windows (survival trades the platform's kill-on-job-close safeguard for
+	// an adoption handshake, which is untested there).
+	AgentSurvival bool `mapstructure:"agent_survival" json:"agentSurvival"`
+
+	// Coordinator gates workspace coordinators: a per-workspace agent
+	// configuration whose copilot conversation proposes ordinary, unstarted
+	// tasks for a human to approve. Off in prod/dev until the feature is
+	// user-ready; on in e2e so tests exercise it.
+	Coordinator bool `mapstructure:"coordinator" json:"coordinator"`
+
+	// CoordinatorPhase2 gates the coordinator control surface (policy,
+	// watches, standing orders, goals, activity log and the new proposal
+	// kinds). It only takes effect together with Coordinator.
+	CoordinatorPhase2 bool `mapstructure:"coordinator_phase2" json:"coordinatorPhase2"`
+
+	// CodexAppServer enables the separate native Codex app-server agent. It is
+	// off in every shipped profile and requires a restart because its protocol
+	// adapter and profile catalogue are composed at startup.
+	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
+
+	// AgentBackgroundWork enables normalized background work tracking,
+	// interactive controls, and subagent observation.
+	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`
 }
 
 // LoggingConfig holds logging configuration.
@@ -526,14 +631,21 @@ type DebugConfig struct {
 // The Standalone runtime (agentctl) always runs as a core service.
 // Docker runtime is available when docker.enabled=true.
 type AgentConfig struct {
-	// StandaloneHost is the host where standalone agentctl is running (default: localhost)
+	// StandaloneHost is the host where standalone agentctl is running (default: 127.0.0.1)
 	StandaloneHost string `mapstructure:"standaloneHost"`
 
 	// StandalonePort is the control port for standalone agentctl (default: 39429)
 	StandalonePort int `mapstructure:"standalonePort"`
 
-	// StandaloneAuthToken is the per-launch auth token retrieved via handshake.
-	// Set at runtime after agentctl starts; not persisted in config files.
+	// StandaloneAuthToken is the single credential that authenticates both
+	// the agentctl *control server* (instance create/list/delete, health,
+	// ownership rotate/confirm) and every per-instance agentctl server it
+	// supervises (/agent/stream, file tree, shell, ...), per design 01
+	// "Single driver" (AC-EXECUTORS-CONTROL-OWNERSHIP-002.6). After adopting
+	// a surviving control server it holds the freshly rotated credential
+	// (AC-EXECUTORS-CONTROL-OWNERSHIP-002); use it for every client built
+	// against this control server or any instance it supervises. Set at
+	// runtime after agentctl starts; not persisted in config files.
 	StandaloneAuthToken string `mapstructure:"-"`
 
 	// StandalonePID is the OS process id of the standalone agentctl control-server
@@ -619,11 +731,20 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docker.host", DefaultDockerHost())
 	v.SetDefault("docker.apiVersion", "") // Empty = auto-negotiate with daemon
 	v.SetDefault("docker.tlsVerify", false)
-	v.SetDefault("docker.defaultNetwork", "kandev-network")
 	v.SetDefault("docker.volumeBasePath", defaultDockerVolumePath())
 
 	// Agent defaults (runtime selection is now per-task based on executor type)
-	v.SetDefault("agent.standaloneHost", "localhost")
+	//
+	// 127.0.0.1 instead of "localhost": localhost resolution can select an IPv6
+	// loopback address before an IPv4 address. The explicit IPv4 loopback avoids
+	// address-resolution variance when host utility health checks run against
+	// agentctl bound IPv4-only and fail with
+	// "dial tcp [::1]:41001: connect: connection refused" whenever agentctl is
+	// bound IPv4-only (e.g. auth-disabled loopback binds), spinning the
+	// "host utility instance unhealthy; recreating" loop. The loopback
+	// address is explicit and unambiguous; operators with a non-loopback
+	// control plane can still override via KANDEV_AGENT_STANDALONE_HOST.
+	v.SetDefault("agent.standaloneHost", "127.0.0.1")
 	v.SetDefault("agent.standalonePort", ports.AgentCtl)
 
 	// Auth defaults. auth.cookieName defaults to empty on purpose: the auth
@@ -778,7 +899,14 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
+	if err := applyDeliveryRetentionEnvironment(&cfg, envSnapshot, sources); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+	if err := applySurvivalRecoveryEnv(&cfg, envSnapshot, sources); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
 	warnings := inspectSecretPermissions(selection, v)
+	warnings = append(warnings, clampOfficeLaunchSafetyConfig(&cfg)...)
 	cfg.Source = buildConfigSource(selection, v, sources, warnings)
 
 	if err := validateStartupSettings(&cfg); err != nil {

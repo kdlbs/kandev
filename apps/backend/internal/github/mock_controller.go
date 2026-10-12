@@ -59,6 +59,8 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/repo-files", c.addRepoFiles)
 	api.POST("/task-prs", c.associateTaskPR)
 	api.POST("/pr-feedback", c.seedPRFeedback)
+	api.POST("/workflow-runs", c.addWorkflowRuns)
+	api.POST("/workflow-jobs", c.addWorkflowRunJobs)
 	api.PUT("/auth-health", c.setAuthHealth)
 	api.PUT("/workspace-connections/:workspaceId", c.setWorkspaceConnection)
 	api.DELETE("/workspace-connections/:workspaceId", c.deleteWorkspaceConnection)
@@ -386,9 +388,19 @@ func (c *MockController) addPRs(ctx *gin.Context) {
 		return
 	}
 	for i := range req.PRs {
+		normalizeMockPRHeadRepository(&req.PRs[i])
 		c.mock.AddPR(&req.PRs[i])
 	}
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.PRs)})
+}
+
+// Mock PR fixtures omit a head repository only for same-repository PRs; fork
+// fixtures must provide their source identity explicitly.
+func normalizeMockPRHeadRepository(pr *PR) {
+	if pr != nil && strings.TrimSpace(pr.HeadRepoOwner) == "" && strings.TrimSpace(pr.HeadRepoName) == "" {
+		pr.HeadRepoOwner = pr.RepoOwner
+		pr.HeadRepoName = pr.RepoName
+	}
 }
 
 func (c *MockController) addIssues(ctx *gin.Context) {
@@ -715,9 +727,12 @@ type associateTaskPRRequest struct {
 	AuthorLogin                           string     `json:"author_login"`
 	State                                 string     `json:"state"`
 	HeadSHA                               string     `json:"head_sha,omitempty"`
+	HeadRepoOwner                         string     `json:"head_repo_owner,omitempty"`
+	HeadRepoName                          string     `json:"head_repo_name,omitempty"`
 	ReviewState                           string     `json:"review_state"`
 	ChecksState                           string     `json:"checks_state"`
 	MergeableState                        string     `json:"mergeable_state"`
+	HasMergeConflicts                     *bool      `json:"has_merge_conflicts,omitempty"`
 	MergeQueueState                       string     `json:"merge_queue_state"`
 	MergeQueuePosition                    *int       `json:"merge_queue_position,omitempty"`
 	MergeQueueEstimatedTimeToMergeSeconds *int       `json:"merge_queue_estimated_time_to_merge_seconds,omitempty"`
@@ -791,6 +806,7 @@ func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR 
 		ReviewState:                           req.ReviewState,
 		ChecksState:                           req.ChecksState,
 		MergeableState:                        req.MergeableState,
+		HasMergeConflicts:                     req.HasMergeConflicts,
 		MergeQueueState:                       req.MergeQueueState,
 		MergeQueuePosition:                    req.MergeQueuePosition,
 		MergeQueueEstimatedTimeToMergeSeconds: req.MergeQueueEstimatedTimeToMergeSeconds,
@@ -836,7 +852,7 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 	if headSHA == "" {
 		headSHA = mockHeadSHA(req.Owner, req.Repo, req.PRNumber)
 	}
-	c.mock.AddPR(&PR{
+	pr := &PR{
 		Number:                                req.PRNumber,
 		Title:                                 req.PRTitle,
 		URL:                                   req.PRURL,
@@ -844,9 +860,13 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 		State:                                 req.State,
 		HeadBranch:                            req.HeadBranch,
 		HeadSHA:                               headSHA,
+		HeadRepoOwner:                         req.HeadRepoOwner,
+		HeadRepoName:                          req.HeadRepoName,
 		BaseBranch:                            req.BaseBranch,
 		AuthorLogin:                           req.AuthorLogin,
 		MergeableState:                        req.MergeableState,
+		HasMergeConflicts:                     req.HasMergeConflicts,
+		HasMergeConflictsObserved:             req.HasMergeConflicts != nil,
 		RepoOwner:                             req.Owner,
 		RepoName:                              req.Repo,
 		Additions:                             req.Additions,
@@ -860,7 +880,9 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 		MergeQueueLastRemovalBeforeSHA:        req.MergeQueueLastRemovalBeforeSHA,
 		CreatedAt:                             now,
 		UpdatedAt:                             now,
-	})
+	}
+	normalizeMockPRHeadRepository(pr)
+	c.mock.AddPR(pr)
 }
 
 // seedPRFeedback registers checks (and optionally reviews / comments) for a
@@ -869,12 +891,18 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 // resolves them via ListCheckRuns.
 func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 	var req struct {
-		Owner    string      `json:"owner"`
-		Repo     string      `json:"repo"`
-		PRNumber int         `json:"pr_number"`
-		Checks   []CheckRun  `json:"checks"`
-		Reviews  []PRReview  `json:"reviews"`
-		Comments []PRComment `json:"comments"`
+		Owner        string        `json:"owner"`
+		Repo         string        `json:"repo"`
+		PRNumber     int           `json:"pr_number"`
+		Checks       []CheckRun    `json:"checks"`
+		Reviews      []PRReview    `json:"reviews"`
+		Comments     []PRComment   `json:"comments"`
+		WorkflowRuns []WorkflowRun `json:"workflow_runs"`
+		WorkflowJobs []struct {
+			RunID      int64         `json:"run_id"`
+			RunAttempt int           `json:"run_attempt"`
+			Jobs       []WorkflowJob `json:"jobs"`
+		} `json:"workflow_jobs"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
@@ -885,10 +913,11 @@ func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 		return
 	}
 	headSHA := mockHeadSHA(req.Owner, req.Repo, req.PRNumber)
-	// If associateTaskPR ran first, an underlying PR row exists with this
-	// HeadSHA. Otherwise synthesize a minimal one so getPRFeedback's GetPR
-	// call doesn't fail.
-	if pr, err := c.mock.GetPR(ctx.Request.Context(), req.Owner, req.Repo, req.PRNumber); err != nil || pr == nil {
+	// Feedback checks are looked up by the provider PR's head SHA. Create a
+	// minimal PR when no provider row exists yet.
+	if existingHeadSHA, found := c.mock.ensurePRHeadSHA(req.Owner, req.Repo, req.PRNumber, headSHA); found {
+		headSHA = existingHeadSHA
+	} else {
 		c.mock.AddPR(&PR{
 			Number:    req.PRNumber,
 			RepoOwner: req.Owner,
@@ -897,8 +926,6 @@ func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 			CreatedAt: time.Now().UTC(),
 			UpdatedAt: time.Now().UTC(),
 		})
-	} else if pr.HeadSHA != "" {
-		headSHA = pr.HeadSHA
 	}
 	// Replace prior seeded checks/reviews/comments so a follow-up call gives
 	// deterministic state; helpful for tests that drive a "then a check
@@ -906,11 +933,76 @@ func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 	c.mock.ReplaceCheckRuns(req.Owner, req.Repo, headSHA, req.Checks)
 	c.mock.ReplaceReviews(req.Owner, req.Repo, req.PRNumber, req.Reviews)
 	c.mock.ReplaceComments(req.Owner, req.Repo, req.PRNumber, req.Comments)
+	for i := range req.WorkflowRuns {
+		if req.WorkflowRuns[i].HeadSHA == "" {
+			req.WorkflowRuns[i].HeadSHA = headSHA
+		}
+	}
+	c.mock.ReplaceWorkflowRuns(req.Owner, req.Repo, headSHA, req.WorkflowRuns)
+	for _, workflowJobs := range req.WorkflowJobs {
+		attempt := workflowJobs.RunAttempt
+		if attempt <= 0 {
+			attempt = 1
+		}
+		c.mock.ReplaceWorkflowRunJobs(req.Owner, req.Repo, workflowJobs.RunID, attempt, workflowJobs.Jobs)
+	}
+	// A feedback seed represents a provider-side mutation. Drop the service
+	// snapshots so the next browser refresh observes the new mock data without
+	// waiting for the production cache TTL.
+	if c.service != nil {
+		c.service.ClearPRCaches()
+	}
 	ctx.JSON(http.StatusOK, gin.H{
 		"checks":   len(req.Checks),
 		"reviews":  len(req.Reviews),
 		"comments": len(req.Comments),
 	})
+}
+
+func (c *MockController) addWorkflowRuns(ctx *gin.Context) {
+	var req struct {
+		Owner   string        `json:"owner"`
+		Repo    string        `json:"repo"`
+		HeadSHA string        `json:"head_sha"`
+		Runs    []WorkflowRun `json:"runs"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.Owner == "" || req.Repo == "" || req.HeadSHA == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner, repo, head_sha are required"})
+		return
+	}
+	for i := range req.Runs {
+		if req.Runs[i].HeadSHA == "" {
+			req.Runs[i].HeadSHA = req.HeadSHA
+		}
+	}
+	c.mock.ReplaceWorkflowRuns(req.Owner, req.Repo, req.HeadSHA, req.Runs)
+	if c.service != nil {
+		c.service.ClearPRCaches()
+	}
+	ctx.JSON(http.StatusOK, gin.H{"runs": len(req.Runs)})
+}
+
+func (c *MockController) addWorkflowRunJobs(ctx *gin.Context) {
+	var req struct {
+		Owner      string        `json:"owner"`
+		Repo       string        `json:"repo"`
+		RunID      int64         `json:"run_id"`
+		RunAttempt int           `json:"run_attempt"`
+		Jobs       []WorkflowJob `json:"jobs"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.Owner == "" || req.Repo == "" || req.RunID == 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner, repo, run_id are required"})
+		return
+	}
+	attempt := req.RunAttempt
+	if attempt <= 0 {
+		attempt = 1
+	}
+	c.mock.ReplaceWorkflowRunJobs(req.Owner, req.Repo, req.RunID, attempt, req.Jobs)
+	if c.service != nil {
+		c.service.ClearPRCaches()
+	}
+	ctx.JSON(http.StatusOK, gin.H{"jobs": len(req.Jobs)})
 }
 
 // setAuthHealth toggles the mock client's authenticated state so e2e tests

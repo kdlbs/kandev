@@ -13,11 +13,6 @@ export function executorConnectionSettingsPath(executor: ExecutorRouteIdentity):
     : `/settings/executor/${encodeURIComponent(executor.id)}`;
 }
 
-export function executorProfileSettingsPath(
-  executor: ExecutorRouteIdentity,
-  profileId: string,
-): string {
-  return executor.type === "k8s"
-    ? `/settings/executors/${encodeURIComponent(profileId)}`
-    : `${executorConnectionSettingsPath(executor)}/profile/${encodeURIComponent(profileId)}`;
+export function executorProfileSettingsPath(profileId: string): string {
+  return `/settings/executors/${encodeURIComponent(profileId)}`;
 }

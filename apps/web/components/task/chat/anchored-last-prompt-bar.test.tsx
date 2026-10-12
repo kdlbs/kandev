@@ -18,6 +18,7 @@ const promptState = vi.hoisted(() => {
   });
 });
 const MENTION_TESTID = "custom-prompt-mention";
+const { triggerFileDownload } = vi.hoisted(() => ({ triggerFileDownload: vi.fn() }));
 vi.mock("@/components/state-provider", async () => {
   const { useSyncExternalStore } = await import("react");
   return {
@@ -39,6 +40,8 @@ vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
   useCustomPrompts: () => ({ prompts: promptState.items, loaded: true, loading: false }),
 }));
 
+vi.mock("@/lib/utils/file-download", () => ({ triggerFileDownload }));
+
 import { AnchoredLastPromptBar } from "./anchored-last-prompt-bar";
 
 const BAR_TESTID = "anchored-last-prompt-bar";
@@ -46,6 +49,7 @@ const EXPAND_TESTID = "anchored-last-prompt-expand";
 const TEXT_TESTID = "anchored-last-prompt-text";
 const CONTENT_TESTID = "anchored-last-prompt-content";
 const SHORT_TEXT = "fix the bug";
+const OVERSIZED_TAIL = "prompt-239";
 const LONG_TEXT =
   "Please refactor the authentication module to support OAuth as well as the existing session cookie flow, and add tests.";
 const originalClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
@@ -105,6 +109,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  triggerFileDownload.mockReset();
   anchoredResizeRecords.length = 0;
   vi.unstubAllGlobals();
   restorePromptMeasurements();
@@ -262,7 +267,54 @@ describe("AnchoredLastPromptBar", () => {
   });
 });
 
+function assertOversizedAnchoredCopies() {
+  setPromptMeasurements(40, 80);
+  const prompt = Array.from({ length: 240 }, (_, index) => `prompt-${index}`).join("\n");
+  const view = renderBar({ promptText: prompt, isVisible: false });
+
+  const bar = screen.getByTestId(BAR_TESTID);
+  const preview = screen.getByTestId(TEXT_TESTID);
+  expect(bar.getAttribute("aria-hidden")).toBe("true");
+  expect(preview.textContent).not.toContain(OVERSIZED_TAIL);
+  expect(preview.querySelectorAll("br").length).toBeLessThanOrEqual(199);
+
+  view.rerender(
+    <TooltipProvider delayDuration={0}>
+      <AnchoredLastPromptBar promptText={prompt} isVisible={true} onScrollUp={vi.fn()} />
+    </TooltipProvider>,
+  );
+  const openPreview = screen.getByTestId(TEXT_TESTID);
+  expect(openPreview.textContent).not.toContain(OVERSIZED_TAIL);
+  expect(screen.getByTestId("bounded-message-preview-download")).toBeTruthy();
+
+  fireEvent.click(screen.getByTestId(EXPAND_TESTID));
+  expect(screen.getByTestId(TEXT_TESTID).getAttribute("data-expanded")).toBe("true");
+  expect(screen.getByTestId(TEXT_TESTID).textContent).not.toContain(OVERSIZED_TAIL);
+  fireEvent.click(screen.getByTestId("bounded-message-preview-download"));
+  expect(triggerFileDownload).toHaveBeenCalledWith({
+    fileName: "kandev-last-prompt.txt",
+    content: prompt,
+    isBinary: false,
+  });
+
+  view.rerender(
+    <TooltipProvider delayDuration={0}>
+      <AnchoredLastPromptBar
+        promptText="replacement prompt"
+        isVisible={true}
+        onScrollUp={vi.fn()}
+      />
+    </TooltipProvider>,
+  );
+  expect(screen.getByTestId(TEXT_TESTID).textContent).toContain("replacement prompt");
+  expect(screen.getByTestId(TEXT_TESTID).textContent).not.toContain(OVERSIZED_TAIL);
+}
+
 describe("AnchoredLastPromptBar expanded content", () => {
+  it("bounds hidden, collapsed, and expanded oversized prompt copies", () => {
+    assertOversizedAnchoredCopies();
+  });
+
   it("renders the pinned copy with the user-message Markdown treatment", () => {
     renderBar({
       promptText: "Use `terraform apply`.\n\n## Steps\n\n- Validate the plan",

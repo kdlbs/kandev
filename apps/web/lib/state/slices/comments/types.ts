@@ -28,17 +28,38 @@ type CommentBase = {
 export type DiffComment = CommentBase & {
   source: "diff";
   filePath: string;
+  /** Explicit scope for new comments; absent on legacy persisted rows. */
+  repositoryName?: string;
   startLine: number;
   endLine: number;
   side: AnnotationSide;
   codeContent: string;
 };
 
+export type ReviewFileComment = CommentBase & {
+  source: "review-file";
+  filePath: string;
+  repositoryName: string;
+  baseRef?: string;
+  isSubmodule?: boolean;
+};
+
+export type ReviewComment = DiffComment | ReviewFileComment;
+
+export function isReviewComment(c: Comment): c is ReviewComment {
+  return c.source === "diff" || c.source === "review-file";
+}
+
 export type PlanComment = CommentBase & {
   source: "plan";
   selectedText: string;
   from?: number;
   to?: number;
+  /** Task-owned server identity. Legacy sessionStorage rows omit these. */
+  taskId?: string;
+  planId?: string;
+  version?: number;
+  updatedAt?: string;
 };
 
 export type FileEditorComment = CommentBase & {
@@ -95,6 +116,7 @@ export type AgentMessageComment = CommentBase & {
 
 export type Comment =
   | DiffComment
+  | ReviewFileComment
   | PlanComment
   | FileEditorComment
   | PRFeedbackComment
@@ -151,6 +173,8 @@ export type CommentsActions = {
   markCommentsSent: (commentIds: string[]) => void;
   clearSessionComments: (sessionId: string) => void;
   hydrateSession: (sessionId: string) => void;
+  /** Remove an acknowledged legacy plan row from memory without rewriting storage. */
+  forgetMigratedPlanComment: (sessionId: string, commentId: string) => void;
   /**
    * Returns diff comments for a file in a session. When repositoryId is
    * provided, results are filtered to that repo only (multi-repo support).

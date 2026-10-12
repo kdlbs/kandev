@@ -28,7 +28,7 @@ export class SidebarFilterPopoverPage {
   constructor(private readonly page: Page) {
     this.bar = page.getByTestId("tasks-view-picker");
     this.viewPicker = page.getByTestId("tasks-view-picker");
-    this.gear = page.getByTestId("sidebar-filter-gear");
+    this.gear = page.getByTestId("app-sidebar-content").getByTestId("sidebar-filter-gear");
   }
 
   get popover(): Locator {
@@ -48,7 +48,11 @@ export class SidebarFilterPopoverPage {
 
   async open(): Promise<void> {
     if (!(await this.popover.isVisible())) {
-      await this.gear.click();
+      const mobileTrigger = this.page
+        .getByRole("dialog", { name: "Tasks" })
+        .getByRole("button", { name: "Sidebar filters" });
+      const trigger = (await this.gear.isVisible()) ? this.gear : mobileTrigger;
+      await trigger.click();
       await expect(this.popover).toBeVisible();
     }
   }
@@ -144,9 +148,7 @@ export class SidebarFilterPopoverPage {
   }
 
   async setClauseBooleanValue(index: number, value: boolean): Promise<void> {
-    const trigger = this.clauseRow(index).getByTestId("filter-value-select");
-    await trigger.click();
-    await this.page.getByRole("option", { name: value ? "true" : "false", exact: true }).click();
+    await this.setClauseOp(index, value ? "Show" : "Hide");
   }
 
   async setClauseTextValue(index: number, value: string): Promise<void> {
@@ -172,9 +174,12 @@ export class SidebarFilterPopoverPage {
     await keyTrigger.click();
     await this.page.getByRole("option", { name: keyLabel, exact: true }).click();
     if (direction) {
-      const toggle = this.popover.getByTestId("sort-direction-toggle");
-      const current = (await toggle.getAttribute("data-direction")) as "asc" | "desc" | null;
-      if (current && current !== direction) await toggle.click();
+      const directionSelect = this.popover.getByTestId("sort-rule-direction-0");
+      const current = await directionSelect.getAttribute("data-direction");
+      if (current !== direction) {
+        await directionSelect.click();
+        await this.page.getByTestId(`sort-rule-direction-option-0-${direction}`).click();
+      }
     }
   }
 
@@ -240,7 +245,23 @@ export class SidebarFilterPopoverPage {
     await this.popover.getByTestId("view-discard-button").click();
   }
 
-  async deleteActiveView(): Promise<void> {
+  get deleteConfirmation(): Locator {
+    return this.page.getByTestId("saved-task-view-delete-confirmation");
+  }
+
+  async beginDeleteActiveView(name: string): Promise<void> {
     await this.popover.getByTestId("view-delete-button").click();
+    await expect(this.deleteConfirmation).toBeVisible();
+    await expect(this.deleteConfirmation).toHaveAccessibleName(`Delete ${name}?`);
+  }
+
+  async cancelDeleteActiveView(): Promise<void> {
+    await this.deleteConfirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(this.deleteConfirmation).toBeHidden();
+  }
+
+  async confirmDeleteActiveView(name: string): Promise<void> {
+    await this.deleteConfirmation.getByRole("button", { name: `Delete ${name}` }).click();
+    await expect(this.deleteConfirmation).toBeHidden();
   }
 }

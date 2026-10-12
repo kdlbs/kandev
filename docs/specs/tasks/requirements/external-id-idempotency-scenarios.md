@@ -73,12 +73,17 @@ Creation idempotency is defined by observable outcomes for first creates, retrie
   **WHEN** a single create with `external_id: ext-3` is rejected by WIP
   admission and the re-read still finds nothing, **THEN** the original capacity
   error surfaces unchanged — the guard must not swallow genuine failures.
-- **GIVEN** a settled task holding `(W, ext-1)`, **WHEN** a client POSTs a create
-  with `external_id: ext-1` and a `repositories` entry naming a repository that
-  no longer exists, **THEN** the outcome depends on where that validation lives:
-  if the handler rejects it pre-service the request fails (documented
-  limitation); if it reaches the service, the existing task is returned. The
-  implementation MUST state which, and a test MUST pin the actual behavior.
+- **GIVEN** settled or unsettled `T` holds `(W, ext-1)`, **WHEN** REST or MCP
+  retries with any invalid or different non-identity payload, **THEN** `T`
+  returns before non-identity validation and the retry has no side effects.
+- **GIVEN** a task `T` holding `(W, ext-release)` whose creation is in
+  `preparing-release`, **WHEN** REST or MCP looks up or retries that identity,
+  **THEN** it returns FoundUnsettled with `creation_complete: false`; lookup and
+  release serialize on the external-ID key, and no handle is exposed.
+- **GIVEN** task `T` holds `(W, ext-parent)` and its parent `P` has been deleted,
+  **WHEN** MCP retries with `parent_id: P`, no `workspace_id`, and any invalid
+  non-identity payload, **THEN** retained parent-to-workspace identity resolves
+  `W` before parent validation and Found returns with no side effects.
 
 ### Unsettled outcome and the unsafe-recovery guard
 
@@ -86,47 +91,69 @@ Creation idempotency is defined by observable outcomes for first creates, retrie
   **WHEN** a client POSTs a create with `external_id: ext-1`, **THEN** the
   response is `200` with `T.id`, `deduplicated: true`, and
   `creation_complete: false`; `T` is unmodified; no new task is created.
-- **GIVEN** the same unsettled task `T`, **WHEN** a client POSTs that create ten
-  more times over any span of time, **THEN** every response is identical and `T`
-  is never deleted, repaired, or duplicated — there is no timeout after which
-  behavior changes.
+- **GIVEN** the same unsettled task `T`, **WHEN** callers repeat create, **THEN**
+  each observation returns FoundUnsettled unless internal Runtime has completed
+  or aborted it; the retry itself never receives a handle, mutates, resumes,
+  deletes, expires, or duplicates `T`.
 - **GIVEN** the same unsettled task `T`, **WHEN** a client GETs the lookup for
   `ext-1`, **THEN** the response is `200` with `creation_complete: false`.
+- **GIVEN** `launch_intent` is armed, or all required non-launch steps are
+  succeeded in `preparing`, **WHEN** Runtime recovers after a crash before
+  Complete phase A, **THEN** it claims `complete_preparing` under the fence and
+  completes both phases exactly once.
+- **GIVEN** the Created owner disappears while creation is preparing, **WHEN**
+  its lease expires, **THEN** only mandatory Runtime may claim the retained
+  manifest and either resume it or Abort a definitive pre-Complete failure.
+- **GIVEN** a required step is `running` when its owner disappears, **WHEN** its
+  lease expires, **THEN** it becomes `unknown`; neither Complete nor Abort runs
+  until exact provider/marker proof resolves succeeded, safe retry, or no-effect
+  permanent failure.
+- **GIVEN** one required step permanently fails after another produced an effect,
+  **WHEN** recovery runs, **THEN** the effect is fenced and compensated or
+  transferred to a durable cleanup job before handle-bound Abort removes live
+  state; no task lifecycle event is emitted.
+- **GIVEN** a request is cancelled while a step is retrying or unknown, **WHEN**
+  the handler returns, **THEN** it performs no direct delete/settle; the retained
+  plan/step lease is recovered by Runtime with the same idempotency key.
+- **GIVEN** any planned required step is not `succeeded` with matching evidence,
+  **WHEN** Complete is attempted, **THEN** it returns conflict and does not enter
+  `completing`.
+- **GIVEN** Complete has durably entered `completing`, **WHEN** its response or
+  process is lost, **THEN** the same handle or Runtime recovery retries Complete
+  to one stored result/event and Abort is rejected.
+- **GIVEN** a Found caller or mismatched operation/token/actor/manifest handle,
+  **WHEN** Complete or Abort is attempted, **THEN** no state/event changes.
 - **GIVEN** a create for `ext-1` still running its required synchronous work,
   **WHEN** a second caller releases `ext-1` and creates again, **THEN** two tasks
   exist for `ext-1`'s entity. This is the documented unsafe path; the test
   exists to pin the consequence, and the MCP tool description and REST docs MUST
   warn against automating it.
-- **GIVEN** an unsettled task `T` holding `(W, ext-1)`, **WHEN** an operator
-  DELETEs the release route and then a client POSTs the create again, **THEN**
-  the release returns `204`, `T` still exists with NULL `external_id`, and the
-  create produces a **new** task with `deduplicated: false`.
+- **GIVEN** unsettled `T` holds `(W, ext-1)`, **WHEN** an operator releases with
+  a fresh operation ID and a client creates again, **THEN** release is `204`, T
+  remains with NULL identity, and the create produces a new task. This unsafe
+  manual sequence is never initiated by retry logic.
 
-### Settlement predicate and zero-row handling
+### Completion and identity-release ordering
 
-- **GIVEN** a create for `ext-1` that has committed its task row and finished its
-  required synchronous work, **WHEN** settlement runs, **THEN** exactly one row
-  is updated and asynchronous dispatch proceeds.
-- **GIVEN** a create for `ext-1` whose identity is **released** by another actor
-  after the row commit but before settlement, **WHEN** settlement runs, **THEN**
-  it affects **zero** rows — the `external_id` predicate no longer matches — no
-  asynchronous work is dispatched, and the response is `200` with
-  `deduplicated: false`, `creation_complete: true`, and **no** `external_id`
-  field, i.e. outcome `CreatedIdentityLost`.
-- **GIVEN** the same released-before-settlement race, **WHEN** the caller
-  inspects the response, **THEN** it distinguishes this from `Created` by the
-  absent `external_id`, and from `Found, unsettled` by `deduplicated: false`;
-  **AND** `creation_complete` is `true`, because this create's synchronous work
-  did finish.
-- **GIVEN** every success outcome across the whole contract, **WHEN** their
-  response tuples are enumerated, **THEN** `creation_complete: false` appears in
-  exactly one — `Found, unsettled` — and always alongside `deduplicated: true`.
-- **GIVEN** a create for `ext-1` whose **task is deleted** by another actor
-  before settlement, **WHEN** settlement runs, **THEN** it affects zero rows, no
-  asynchronous work is dispatched, and the response is the surface's existing
-  not-found error rather than a fabricated success.
-- **GIVEN** any settlement that affects zero rows, **WHEN** the handler
-  continues, **THEN** no agent is launched and no PR association is started.
+- **GIVEN** a Created handle whose manifest is complete, **WHEN** Complete runs,
+  **THEN** it first durably enters non-abortable `completing`, then commits
+  revision one plus exactly one `task.created` and dispatches committed intent.
+- **GIVEN** the completion transaction outcome is unknown, **WHEN** the caller
+  retries the same handle or Runtime takes over, **THEN** one stored task/event
+  result is returned and Abort never runs.
+- **GIVEN** operator release wins before Complete, **WHEN** Complete runs,
+  **THEN** it emits one `task.created` whose immutable payload has no external
+  ID, dispatches committed intent, and returns `CreatedIdentityLost`: `200`,
+  `deduplicated:false`, `creation_complete:true`, external ID absent.
+- **GIVEN** Complete wins before release, **WHEN** release runs, **THEN**
+  `task.created` revision one precedes one next-revision `task.updated` clearing
+  the identity.
+- **GIVEN** every success outcome, **WHEN** tuples are enumerated, **THEN**
+  `creation_complete:false` appears only with FoundUnsettled and
+  `deduplicated:true`.
+- **GIVEN** typed DeleteTask targets a preparing/completing task, **WHEN** it
+  locks the operation, **THEN** it returns conflict with no mutation; only
+  handle-bound pre-Complete Abort may remove unfinished live state.
 
 ### No side effects on a found outcome
 
@@ -136,8 +163,8 @@ Creation idempotency is defined by observable outcomes for first creates, retrie
   agent execution is started.
 - **GIVEN** an **unsettled** task `T` holding `(W, ext-1)` with no session,
   **WHEN** a client POSTs a create with `external_id: ext-1` and
-  `start_agent: true`, **THEN** `T` still has no session and no agent is
-  launched — an unsettled task is reported, never resumed.
+  `start_agent: true`, **THEN** the retry creates no session or launch and gets
+  no handle; only separately scheduled internal Runtime recovery may progress T.
 - **GIVEN** a settled task `T` holding `(W, ext-1)`, **WHEN** a client POSTs a
   create with `external_id: ext-1`, `start_agent: true`, one attachment, and a
   `repositories` entry naming a different repository with `fresh_branch: true`
@@ -232,13 +259,15 @@ Creation idempotency is defined by observable outcomes for first creates, retrie
 - **GIVEN** a settled task `T` holding `(W, ext-1)`, **WHEN** `T` is deleted and
   a client POSTs the create again, **THEN** a new task is created with
   `deduplicated: false` — idempotency is scoped to the task's lifetime.
-- **GIVEN** a settled task `T` holding `(W, ext-1)`, **WHEN** `T` is deleted by
-  an office handoff cascade that calls the repository directly, **THEN** the
-  identity is free and a subsequent create succeeds — no code path can leave a
-  stale identity behind.
-- **GIVEN** a settled task `T` holding `(W, ext-1)`, **WHEN** a client DELETEs
-  the release route, **THEN** the response is `204`, `T` still exists with NULL
-  `external_id` and NULL `external_id_settled_at`, and the lookup returns `404`.
+- **GIVEN** Office deletes settled `T` through the aggregate with typed workspace
+  reason, **WHEN** deletion commits, **THEN** identity is freed with its ordered
+  `task.deleted` and a later create may claim it; no repository bypass exists.
+- **GIVEN** settled `T` and a fresh release operation ID, **WHEN** an authorized
+  client DELETEs the release route, **THEN** response is `204`, T retains one
+  next-revision `task.updated` clearing both ID columns, and lookup is `404`.
+- **GIVEN** that release response is lost, **WHEN** the same operation ID is
+  retried after the identity is free or reused, **THEN** stored `204` returns
+  without inspecting or mutating the current holder.
 - **GIVEN** a task `T` holding `ext-1`, **WHEN** a client PATCHes
   `/api/v1/tasks/T` with an `external_id` field in the body, **THEN** `T`'s
   identity is unchanged.
@@ -278,12 +307,20 @@ Creation idempotency is defined by observable outcomes for first creates, retrie
 
 ### Migration
 
-- **GIVEN** an existing database whose tasks predate this feature, **WHEN** the
-  backend starts, **THEN** both columns exist and are NULL for every
-  pre-existing task, `uniq_tasks_external_id` exists, and creating tasks without
-  an external ID continues to succeed.
+- **GIVEN** a pre-feature database whose `tasks` table has neither ID column,
+  **WHEN** the backend starts, **THEN** versioned nullable-column migration
+  adds both columns with SQLite `BINARY`/PostgreSQL `"C"` ID collation before
+  the canonical partial index; values NULL and readiness closed until attestation.
+  Failure rolls back byte-for-byte.
 - **GIVEN** the same database, **WHEN** the backend starts a second time,
-  **THEN** the migration replays without error.
+  **THEN** schema attestation and migration replay succeed without changing rows.
+- **GIVEN** `ext-1` already exists, **WHEN** `EXT-1` is created in the same
+  workspace on either dialect, **THEN** both rows coexist and exact lookup
+  returns only the byte-matching row.
+- **GIVEN** incompatible column/index collation or a migration failpoint, **WHEN**
+  startup runs, **THEN** migration either commits the fully attested canonical
+  schema or rolls back byte-for-byte; readiness and external-ID reads/writes stay
+  disabled on failure.
 
 ## Requirements
 
@@ -302,6 +339,15 @@ Creation idempotency is defined by observable outcomes for first creates, retrie
 
 
 - **AC-TASKS-EXTERNAL-ID-SCENARIOS-001.1:** When a creation scenario occurs, the system shall return the outcome, task identity, and side-effect behavior described by that scenario.
+- **AC-TASKS-EXTERNAL-ID-SCENARIOS-001.2:** Found outcomes shall win over every
+  non-identity payload/server-state drift scenario while transport,
+  authorization, workspace, and external-ID errors retain stated precedence.
+- **AC-TASKS-EXTERNAL-ID-SCENARIOS-001.3:** Creation handle/step/lease/evidence/
+  unknown/compensation, completing, ambiguous-result, and Runtime scenarios shall
+  produce the stated single event or eligible Abort without caller adoption.
+- **AC-TASKS-EXTERNAL-ID-SCENARIOS-001.4:** Preparing/completed release races and
+  same-operation replay shall preserve the stated task, revision, event, and
+  current-holder outcomes.
 
 
 

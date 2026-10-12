@@ -45,8 +45,14 @@ Creating a sidebar view currently requires changing an existing view before `Sav
 - Rename is optional. Canceling rename, pressing Escape, or closing the popover keeps the already-created view under its automatic name.
 - `Save as…` remains available for deriving a view from unsaved changes; direct creation does not replace or change that workflow.
 - When the active view has unsaved changes, direct creation is disabled and explains that the user must save or discard those changes first. No draft is silently cleared.
-- A user may save at most 50 sidebar views. At 50 views, direct creation is disabled with a clear limit reason; backend validation remains authoritative.
+- A user may save at most 50 sidebar views per workspace. At 50 views, direct creation is disabled with a clear limit reason; backend validation remains authoritative.
 - The filter popover fits narrow viewports without document-level horizontal overflow.
+
+## Workspace scope
+
+[Workspace sidebar task views](workspace-sidebar-task-views.md) owns saved-view
+scope and legacy migration. All collection, active-selection, draft, automatic
+naming, and limit behavior in this document applies per user and workspace.
 
 ## Persistence and failure behavior
 
@@ -57,7 +63,7 @@ Creating a sidebar view currently requires changing an existing view before `Sav
 - The first edit to that canonical view persists its draft without requiring a
   prior create, rename, or save-as action and without surfacing a sidebar-view
   settings error.
-- Replacing `sidebar_views` without an active-view field keeps the persisted
+- Replacing the workspace's saved views without an active-view field keeps the persisted
   active ID referentially valid; an empty replacement resolves to the same
   canonical `All tasks` view.
 - Creation persists the new view and active-view selection immediately through existing backend-owned user settings. A successful create survives reload and is available on the user's other clients.
@@ -74,8 +80,8 @@ See [ADR 0041](../../../decisions/0041-backend-owned-portable-user-settings.md) 
 - **GIVEN** that new user's canonical `All tasks` view, **WHEN** the user changes
   a filter, sort, or group before creating any other view, **THEN** the draft
   persists successfully and no sidebar-view error is shown.
-- **GIVEN** a settings update replaces `sidebar_views` with an empty array and
-  omits `sidebar_active_view_id`, **THEN** the effective settings retain the
+- **GIVEN** a scoped settings update replaces its views with an empty array and
+  omits its active-view field, **THEN** the effective settings retain the
   canonical `All tasks` view and matching active ID.
 - **GIVEN** fewer than 50 saved views and no unsaved draft, **WHEN** the user selects `New view`, **THEN** a canonical default view is appended, activated immediately, and offered for focused rename.
 - **GIVEN** the active saved view has custom filters, sort, grouping, or collapsed groups, **WHEN** the user creates a new view, **THEN** the new view still uses the canonical defaults rather than cloning the active state.

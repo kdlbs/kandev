@@ -111,8 +111,7 @@ export function FilePreviewBlock({ block, sessionId, onOpenFile }: FilePreviewBl
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            className="min-h-11 cursor-pointer gap-1.5 px-2.5 min-[640px]:min-h-9"
+            className="cursor-pointer gap-1.5 px-2.5"
             aria-expanded={expanded}
             aria-controls={previewId}
             onClick={handleToggle}
@@ -129,8 +128,7 @@ export function FilePreviewBlock({ block, sessionId, onOpenFile }: FilePreviewBl
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="min-h-11 cursor-pointer gap-1.5 px-2.5 min-[640px]:min-h-9"
+              className="cursor-pointer gap-1.5 px-2.5"
               onClick={() => onOpenFile(block.path, block.repo)}
               data-testid="rich-output-file-open"
             >

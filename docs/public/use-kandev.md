@@ -48,6 +48,11 @@ kandev
 Scoop installs the native runtime bundle, so Node.js is not required to install or start Kandev. It
 is still needed for the agent CLIs Kandev installs through its own interface.
 
+Stable package-manager and Desktop installs use the standard runtime. Local work starts without a
+remote-helper download. A remote task needs outbound HTTPS to `github.com` and
+`release-assets.githubusercontent.com` the first time it uses a remote platform. See the [CLI guide](cli.md#release-archive)
+for the full offline command-line archive and the [Desktop guide](desktop-app.md) for its network limits.
+
 Stable is the default and is selected by npm's `latest` tag. To test the current prerelease from
 `main` without changing a global installation, launch the package once from the npm-only `nightly`
 tag:
@@ -89,9 +94,13 @@ Kandev creates these records when no prior workspace or executor configuration e
 - A Local Docker executor configured with the platform's default Docker host. The record is created even when no usable Docker daemon is available; task launch still requires one.
 - A disabled Sprites executor entry.
 
-The first-run dialog scans supported agent CLIs, lets you inspect detected profiles, and introduces executors, workflows, and the command panel. **Skip** stores only a browser-local onboarding marker. Advancing/completing also saves any dirty agent-profile edits made in the dialog. Neither path creates another workspace. The dialog warns that default agent profiles can have **Auto Approve** enabled. Inspect every profile before assigning trusted code or credentials.
+When its browser-local completion marker is unset, the first-run dialog opens on screens 768 CSS pixels wide or larger. A phone visit opens the normal page and leaves the marker untouched, so the tour can appear on a later larger-screen visit. The dialog scans supported agent CLIs, lets you choose a starting model, its supported options inside the shared picker, and optional CLI passthrough for detected profiles, and introduces executors, workflows, and the command panel. Its Executors step presents informational cards for Local, Worktree, Local Docker, Sprites.dev, SSH, and Kubernetes. It recommends Worktree for existing Git repositories and summarizes each option's setup needs. Configure full profiles in **Settings > Agents** and **Settings > Executors**, then choose one when starting a task. See [Executors](executors.md) for setup and trust-boundary details. **Skip** stores only a browser-local onboarding marker. Advancing/completing saves only edited model, model-option, and passthrough choices made in the dialog. Neither path creates another workspace. The dialog warns that default agent profiles can have **Auto Approve** enabled. Inspect every profile before assigning trusted code or credentials.
 
 </details>
+
+If model discovery requires authentication, the tour's **Settings** link opens the
+saved agent profile without saving the tour draft or marking it complete. Use the
+profile's authentication controls, then return to the tour.
 
 ## Find a setting
 
@@ -104,6 +113,72 @@ From anywhere, press `Cmd/Ctrl+K` and begin typing a setting name or familiar al
 settings appear only after typing, while **Go to Settings** remains in the command menu at rest.
 Discovery searches setting names and curated aliases, never saved values, secrets, paths, or other
 configuration content.
+
+Workspace managers can enable **Suspend idle ACP agents** in **Settings > Workspaces > Overview**.
+The policy is off by default and keeps a saved timeout of 120 minutes. When enabled, Kandev may
+stop an idle agent process after that timeout while preserving the task, workspace, and conversation.
+Opening the task or sending it a message resumes the same conversation. The agent can be suspended
+again after a new idle interval. The policy applies to ACP agents and uses activity Kandev can
+observe; provider-internal work that is not reported to Kandev may not prevent suspension. It does
+not apply to passthrough terminal sessions or manually stopped sessions.
+
+## Customize the sidebar
+
+Open **Settings > Layout > Sidebar** to customize the optional navigation for the active
+workspace. You can hide or reorder Home, New Task, Inbox, Coordinators, Automations, Canvases,
+Integrations, and available plugin links. Coordinators appears when its workspace feature is
+enabled. Its visibility and position are independent of Automations. Settings retains your saved
+choice while a feature is unavailable and restores it when the feature is enabled again. The
+setting belongs to your account and workspace, so it follows you across clients without changing
+another user's layout.
+
+Create named shortcut sections for destinations, canvases, automations, and plugin links. Fold a
+section to keep its header icons visible, or open the labelled list to use a shortcut. Automation
+icons show running, idle, or paused activity. Tasks stays in its fixed navigation area, and hiding a shortcut does not disable the underlying feature.
+
+On a phone, open the menu and choose **Customize sidebar** to edit the same layout. Use the move controls to
+reorder entries or move a shortcut to another section. The workspace picker stays at the top.
+**New Task**, Home, quick actions, workspace tools, and shortcut sections appear before the task
+list. Coordinators follows its saved position among the workspace tools. If you hide New Task, the
+Tasks heading keeps its create button. Expand **Integrations** to
+see named provider links and integration settings, including when no provider is configured.
+Choose **GitHub**, then **Issues** in its view menu to browse issues.
+**Restore defaults** resets the draft for the
+active workspace; the shared **Save changes** action persists it. If another client saves first, the
+editor keeps your draft and reports the conflict so you can reconcile it.
+
+Tasks is a contextual panel with its own view picker and filters. A primary-color dot marks an
+applied filter, including filters saved in a view. An amber dot marks unsaved view changes.
+Group headings have a leading collapse control, label, and count. Tasks sit
+indented below each heading, with space between groups; subtasks remain nested one
+level deeper. Grouping by state also shows the group's status icon. Plain task rows keep your
+selected metadata and trailing details, with highlights for hover, selection, and keyboard focus.
+New users get a small, centered **New Task** button, with **Quick Chat** and **Terminal** below it.
+Existing users keep the compact New Task row with fast action icons. Choose **New Task button style**
+and **Show fast action icons** in Sidebar settings to change these independently.
+With fast icons enabled, Terminal and Quick Chat sit beside New Task, and the Coordinator list
+action sits in its section header. When fast icons are hidden, the Coordinator list link stays in
+the section body. Canvas settings and eligible integration shortcuts sit before their section
+chevrons. Named settings and provider links remain available when fast icons are hidden.
+
+Right-click a navigation entry or empty navigation space to open **Sidebar settings**.
+Use this menu to show or hide entries, change the button style, or open Sidebar layout settings. Drag entries directly to reorder them. No drag handles appear.
+You can also focus an entry and press **Alt + Up** or **Alt + Down**. These sidebar edits save immediately.
+The settings editor keeps its shared Save and Discard controls.
+
+Drag the divider above Tasks upwards to reduce navigation space. You can hide all navigation
+buttons and leave only the small expansion chevron. Partially hidden entries fade at the bottom.
+Click the small chevron to expand navigation; click it again to restore the compressed height.
+Both the height and expansion state follow your saved workspace layout across reloads and clients.
+On phones, use the Customize drawer's move buttons; it preserves the desktop divider position.
+
+Settings, direct **Stats** access, theme switching, and the three-dot menu share the
+single-row desktop footer, in that order. The three-dot menu contains plugin utilities,
+Improve Kandev, and release notes.
+
+Expand **Automations** and choose **Open automations** below its entries to see the
+full list. This labelled link sits inside the group on desktop and phones, like
+**Integration settings** inside Integrations.
 
 ## Switch workspace
 
@@ -122,10 +197,18 @@ workspace there from the menu sheet instead.
 ## Add a local repository
 
 1. Open **Settings > Workspaces > Default Workspace > Repositories**. If you created or renamed the workspace, choose that workspace instead.
-2. Select **Add Local Repository**.
+2. Select **Add repository > Local repository**.
 3. Choose a discovered repository, or enter an absolute path and select **Validate**. The backend accepts any existing Git repository the Kandev process can access. Configured discovery roots bound automatic scans; they do not restrict an explicit path.
 4. Select **Use Repository**. This opens an unsaved repository card.
 5. Review the repository name, worktree branch template, pull behavior, setup/cleanup/dev scripts, copied files, and custom commands. Then select **Save changes**.
+
+If discovery cannot scan a root, the picker keeps repositories from successful
+roots available and retains its normal **Refresh repositories** action. Failed
+root paths stay in structured backend logs and are not shown in selectors. A
+missing or inaccessible root does not prevent you from validating an absolute
+repository path. On Desktop, a saved root that fails also offers **Reconnect**
+and **Remove**. Kandev does not retry failed roots in the background or create
+missing clone directories.
 
 New local repository records default to:
 
@@ -139,7 +222,7 @@ Scripts execute in agent workspaces and therefore belong to the trust boundary. 
 
 Repositories saved by an older Kandev version may still contain a path spelling with symbolic-link components. If branch operations report that such a saved path resolves to a different location after upgrading, edit and save the repository path again to record its current canonical location. Kandev does not silently accept the new resolution because that would also accept a saved path whose symbolic-link target was changed after registration.
 
-Remote repository and issue/PR URLs are not added from this settings page. Use the **Remote** tab in **New Task** to search configured GitHub, GitLab, and Azure DevOps repositories, or paste a supported provider URL. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
+**Add repository > Remote repository** registers a provider-hosted repository without creating a task. The picker is the same one the **Remote** tab in **New Task** uses: search configured GitHub, GitLab, and Azure DevOps repositories, repositories from a connected plugin provider, or paste a supported provider URL, then choose the default base branch. Kandev validates built-in provider URLs and resolves plugin repositories through the connected provider before saving. A self-managed GitLab picker selection must match the origin configured for that workspace. Optional branch-list lookups do not block a picked repository; pasted plugin URLs must finish provider inspection before registration. A repository the workspace already has is reused rather than duplicated. Issue and PR URLs are still added from **New Task**. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
 
 ## Configure an agent profile
 
@@ -149,9 +232,9 @@ Remote repository and issue/PR URLs are not added from this settings page. Use t
 4. Complete the provider's authentication flow. Some agents expose a dedicated login terminal; others use their own CLI outside Kandev.
 5. Open the agent and its profile. Verify the selected model and mode, permission switches, CLI flags, environment variables, MCP configuration, and CLI-passthrough setting. Save changes.
 
-Detected capabilities come from the installed CLI and can change after an agent upgrade or login. A model or mode shown in documentation is not guaranteed for every account. If no built-in adapter fits, **Add TUI Agent** creates a passthrough integration; passthrough has a different resume, usage, and MCP contract from an ACP-capable agent.
+Detected capabilities come from the installed CLI and can change after an agent upgrade or login. A model or mode shown in documentation is not guaranteed for every account. If no built-in adapter fits, **Add custom agent** registers the CLI as a Terminal or an ACP agent; Terminal passthrough has a different resume, usage, and MCP contract from an ACP-capable agent.
 
-For the first task on an existing repository, keep the seeded **Worktree** executor profile. It creates a separate Git checkout so concurrent Kandev tasks do not edit the same working tree. A worktree is Git isolation, not operating-system isolation. Choose **Local** only when direct edits in the selected checkout are intentional. A repository initialized from **New Task** already has one empty initial commit and no project files, and Kandev selects a direct Local profile for that flow. See [Agents and profiles](agents-and-profiles.md) and [Executors](executors.md) before using Docker, SSH, Sprites, custom scripts, or shared infrastructure.
+For the first task on an existing repository, keep the seeded **Worktree** executor profile. It creates a separate Git checkout so concurrent Kandev tasks do not edit the same working tree. A worktree is Git isolation, not operating-system isolation. Choose **Local** only when direct edits in the selected checkout are intentional. A repository initialized from **New Task** has one empty initial commit and no project files. Creation selects a direct Local profile for a single-row task when one is available and preserves the selected executor for multiple rows. Without a direct Local profile, single-row creation remains disabled. See [Agents and profiles](agents-and-profiles.md) and [Executors](executors.md) before using Docker, SSH, Sprites, custom scripts, or shared infrastructure.
 
 ## Create and start the first task
 
@@ -174,7 +257,7 @@ If another actor initializes the remote first, Kandev stops without replacing th
 The dialog also supports multiple repositories, remote GitHub rows, and a single-repository **Fork a new branch** option when the Local executor is selected. Important boundaries:
 
 - Multi-repository tasks require the Worktree executor in the current task-create path.
-- Creating an empty repository is available only for a single repository row and switches the task to a direct Local profile.
+- Every editable local repository row offers **Refresh repositories** and **Create new repository**, regardless of existing repositories or search results. Creation preserves the executor for multiple rows and selects a direct Local profile for a single row.
 - No-repository tasks cannot use the Worktree executor.
 - The local fork option is off by default and requires explicit consent before Kandev discards dirty source-checkout changes.
 - Agent and executor choices can be disabled when their remote credential requirements are incompatible.
@@ -188,6 +271,8 @@ The dialog also supports multiple repositories, remote GitHub rows, and a single
 5. Inspect commits and branch state. Create or associate a pull request only after provider credentials and the target base branch are correct.
 6. Move the task through the workflow's human review gate. Archive it only after deciding what should happen to its branch, worktree, and external issue or pull request.
 
+Large user messages keep their complete source for storage, agent input, copying, editing, and delivery. Kandev shortens the rendered transcript, raw text, workflow instructions, pinned prompt, and queued-message previews when they exceed the display limit. Select **Download full text** below a shortened preview to save the complete message.
+
 See [Sessions and review](sessions-and-review.md) for the workbench and [Tasks and workflows](tasks-and-workflows.md) for transitions, plans, workflow automation, and the current document and label limitations.
 
 ## Credentials and security boundaries
@@ -196,7 +281,8 @@ See [Sessions and review](sessions-and-review.md) for the workbench and [Tasks a
 - **Auto Approve**, permission-skipping flags, and unrestricted passthrough remove human gates inside the agent CLI. They are security decisions.
 - Local and worktree sessions run on the Kandev host. Worktree separation does not limit process, filesystem, network, or credential access.
 - Containers and remote executors change the boundary, but their mounted files, copied credentials, environment, daemon/socket access, and prepare scripts can reintroduce host or provider access.
-- Managed GitHub task access (the default) uses task/repository-bound broker leases from the workspace automation connection. GitHub App tokens are minted for the redeemed repository; PAT and named-CLI bearer tokens retain all provider-granted scopes once delivered to the trusted agent subprocess. Personal tokens and the App private key never enter executors. Choose **Inherit executor Git credentials** in the workspace GitHub settings only when task Git and `gh` should use host-visible credentials for Local/Worktree or intentionally configured credentials for remote executors.
+- **Managed GitHub task access** may remain the saved policy for historical workspaces. New workspaces default to **Inherit executor Git credentials**. Managed mode uses task/repository-bound broker leases; stored PATs and App private keys stay out of task processes.
+- **Inherit executor Git credentials** uses host-visible credentials for Local and Worktree tasks, or credentials configured in remote executors. See [Choose task Git credentials](integrations.md#choose-task-git-credentials) for the credential paths and entry points.
 - A profile-supplied `GITHUB_TOKEN` or `GH_TOKEN` is an explicit unmanaged override and bypasses workspace broker selection. Ambient backend tokens and the host-active `gh` account are used only by migration-only **Legacy shared** workspace connections.
 - Repository, executor, and task action scripts are executable configuration. Review them like code.
 - Authentication is opt-in. When it is disabled, treat anyone who can reach the backend as an operator. Keep the whole origin on loopback or a trusted network, or put it behind an authenticated TLS proxy.
@@ -228,3 +314,9 @@ Common corrections:
 For backup, update, log, database, and recovery details, see [Operations](operations.md). For release-specific disagreement, record the version from **Settings > System > About** and compare it with the matching GitHub tag.
 
 </details>
+
+## Use task actions by keyboard
+
+With a task open, press `Cmd/Ctrl+K` to find its sidebar actions. **Move to** lets you
+choose a step, add instructions, and submit with `Cmd/Ctrl+Enter`. See
+[task actions and move options](tasks-and-workflows.md#task-actions-from-the-command-palette).

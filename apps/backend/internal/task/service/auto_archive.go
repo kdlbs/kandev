@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/task/archivecascade"
 )
 
 // StartAutoArchiveLoop starts a background goroutine that periodically archives tasks
@@ -26,7 +28,11 @@ func (s *Service) StartAutoArchiveLoop(ctx context.Context) {
 }
 
 func (s *Service) runAutoArchive(ctx context.Context) {
-	tasks, err := s.tasks.ListTasksForAutoArchive(ctx)
+	deadline := archivecascade.ArchiveDeadline(ctx)
+	runCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+
+	tasks, err := s.tasks.ListTasksForAutoArchive(runCtx)
 	if err != nil {
 		s.logger.Error("auto-archive: failed to list candidates", zap.Error(err))
 		return
@@ -36,12 +42,21 @@ func (s *Service) runAutoArchive(ctx context.Context) {
 	}
 
 	s.logger.Info("auto-archive: found candidates", zap.Int("count", len(tasks)))
+	if s.autoArchiveCoordinator == nil {
+		s.logger.Error("auto-archive: lifecycle coordinator is not configured")
+		return
+	}
 	for _, task := range tasks {
-		if err := s.ArchiveTask(ctx, task.ID); err != nil {
+		out, err := s.autoArchiveCoordinator.ArchiveAutoTask(runCtx, task)
+		switch {
+		case err != nil:
 			s.logger.Warn("auto-archive: failed to archive task",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
-		} else {
+		case out != nil && len(out.ArchivedTaskIDs) == 0 && len(out.SkippedTaskIDs) > 0:
+			s.logger.Info("auto-archive: candidate changed before archive",
+				zap.String("task_id", task.ID))
+		default:
 			s.logger.Info("auto-archive: archived task",
 				zap.String("task_id", task.ID),
 				zap.String("title", task.Title))

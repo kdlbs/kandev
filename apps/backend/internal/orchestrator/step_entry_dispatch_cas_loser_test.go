@@ -1,26 +1,33 @@
 package orchestrator
 
 // step_entry_dispatch_cas_loser_test.go covers two MEDIUM/P2 findings from
-// this Build round's Review, both rooted in
+// an earlier Build round's Review, both rooted in
 // dispatchEngineOwnedOnEnterAction's !claimed branch:
 //
 //  1. It unconditionally returned "not failed", so a retry of a step-entry
 //     whose clear_decisions had already recorded a terminal failure would
 //     silently fall through to dispatching queue_run_for_each_participant —
-//     the exact fall-through AC-C2's break exists to close for a fresh
-//     failure, just reachable a second time through the CAS-loser path
-//     instead.
+//     the exact fall-through the AC-002.10 stop rule exists to close for a
+//     fresh failure, just reachable a second time through the CAS-loser
+//     path instead.
 //  2. It also returned "not failed" — indistinguishable from "already
 //     done" — when the existing marker was still in_progress, i.e. a *live*
-//     concurrent dispatch of the same step entry hadn't finished yet.
-//     dispatchOnEnterActions only aborted on failed==true for
-//     clear_decisions specifically, so the loser of that live claim would
-//     skip ahead to queue_run_for_each_participant instead of abandoning
-//     the entry — violating docs/specs/workflow-on-enter-action-dispatch/
-//     spec.md's AC-F1 ("A dispatcher that loses a claim stops. It does not
-//     skip ahead.") and risking the exact hazard AC-F1's rationale names:
-//     enqueueing the fan-out before the winner's clear_decisions delete
-//     (AC-A3) commits.
+//     concurrent dispatch of the same step entry hadn't finished yet. The
+//     loser of that live claim must abandon the entry, not skip ahead to
+//     queue_run_for_each_participant — see
+//     docs/specs/office/system-design/step-entry-dispatch-convergence.md's
+//     AC-OFFICE-STEP-ENTRY-DISPATCH-002.10 ("A dispatcher that loses a
+//     claim stops. It does not skip ahead.") and the hazard its rationale
+//     names: enqueueing the fan-out before the winner's clear_decisions
+//     delete commits.
+//
+// Since the dispatch convergence (step-entry-dispatch-convergence), both
+// clear_decisions and queue_run_for_each_participant execute exclusively
+// through the ledger dispatcher (Engine.DispatchStepEntry via
+// (*Service).ExecuteMarkerBearingStepEntryAction), not through
+// dispatchOnEnterActions — so these tests re-drive a step entry through
+// WorkflowEngine().DispatchStepEntry directly, the same call chain a real
+// redelivered arrival takes.
 //
 // See GetStepEntryMarkerState and its call site in
 // dispatchEngineOwnedOnEnterAction for both.
@@ -64,10 +71,6 @@ func TestProcessOnEnter_ClearDecisionsPriorFailure_BlocksRetryFromDispatchingSub
 	// caused the first clear_decisions attempt to fail were now resolved.
 	f.svc.SetEngineDecisionStore(&fakeDecisionStore{})
 
-	session, err := f.repo.GetTaskSession(ctx, "s1")
-	if err != nil {
-		t.Fatalf("failed to load session: %v", err)
-	}
 	sg, nameToID := buildWorkflowFromJSON(t, reviewLoopWorkflowJSON)
 	reviewStep, ok := sg.steps[nameToID["Review"]]
 	if !ok {
@@ -79,10 +82,7 @@ func TestProcessOnEnter_ClearDecisionsPriorFailure_BlocksRetryFromDispatchingSub
 	// Review transition above (no other entry allocation happens before
 	// it in this fixture).
 	const retryEntryID = int64(1)
-	dispatchResult := f.svc.dispatchOnEnterActions(ctx, "t1", session, reviewStep, retryEntryID, false, false)
-	if dispatchResult.hasAutoStart {
-		t.Errorf("hasAutoStart = true, want false (Review declares no auto_start_agent)")
-	}
+	f.svc.WorkflowEngine().DispatchStepEntry(ctx, "t1", reviewStep.WorkflowID, reviewStep.ID, "retry-entry", retryEntryID)
 
 	if got := f.runQueue.callCount(); got != 0 {
 		t.Fatalf("queued run count after retry = %d, want still 0 (clear_decisions already failed terminally for this entry)", got)
@@ -107,7 +107,7 @@ func (f *blockingDecisionStore) ClearStepDecisions(ctx context.Context, taskID, 
 // drives two genuinely concurrent dispatches of the *same* step entry. The
 // winner is parked mid-flight inside ClearStepDecisions, so its position-0
 // marker is confirmed in_progress (polled, not assumed) before the second,
-// would-be-loser dispatchOnEnterActions call races in on the same entryID.
+// would-be-loser DispatchStepEntry call races in on the same entryID.
 // The loser must abandon the entry — no run queued, no WARNING/ERROR log
 // (AC-F1: losing a claim is a normal outcome) — rather than skip ahead to
 // queue_run_for_each_participant. Once the winner is released, it alone
@@ -165,9 +165,16 @@ func TestProcessOnEnter_ConcurrentDispatchLosesLiveClaim_AbandonsEntryWithoutSki
 
 	// The concurrent, would-be-loser dispatch: same entry, same session,
 	// racing while the winner above is still parked inside clear_decisions.
-	dispatchResult := f.svc.dispatchOnEnterActions(ctx, "t1", session, reviewStep, entryID, false, false)
-	if dispatchResult.hasAutoStart {
-		t.Errorf("hasAutoStart = true, want false (Review declares no auto_start_agent)")
+	// A LoadStep failure would return a non-empty results slice with Err
+	// set instead of the abandon path's empty slice, looking identical to a
+	// correct claim-loss abandon by side effects alone (no run queued, no
+	// warning log) — check the results themselves so this actually verifies
+	// the CAS-loser path rather than only its absence of side effects.
+	loserResults := f.svc.WorkflowEngine().DispatchStepEntry(ctx, "t1", reviewStep.WorkflowID, reviewStep.ID, "loser-entry", entryID)
+	for _, r := range loserResults {
+		if r.Err != nil {
+			t.Errorf("loser DispatchStepEntry returned error: %v", r.Err)
+		}
 	}
 	if got := f.runQueue.callCount(); got != 0 {
 		t.Fatalf("queued run count after losing a live claim = %d, want 0 (AC-F1: loser must not skip ahead to queue_run_for_each_participant)", got)
@@ -202,8 +209,8 @@ func TestProcessOnEnter_ConcurrentDispatchLosesLiveClaim_AbandonsEntryWithoutSki
 // MarkerFailed (a prior clear_decisions error), and the concurrent test's
 // loser sees MarkerInProgress (a live peer). Here every position for the
 // entry has already finished successfully via a normal, uncontested
-// fireOnTurnComplete; a second, later dispatchOnEnterActions call for that
-// same entryID (e.g. a duplicate trigger delivery, or any caller re-driving
+// fireOnTurnComplete; a second, later DispatchStepEntry call for that same
+// entryID (e.g. a duplicate trigger delivery, or any caller re-driving
 // on_enter for a step entry the engine already fully processed) must fall
 // through both positions as already-done and produce no new side effects,
 // per the "MarkerDone: ... Safe, and required, to continue past it" branch
@@ -225,10 +232,6 @@ func TestProcessOnEnter_RedispatchAfterEntryAlreadyDone_IsANoOp(t *testing.T) {
 		t.Fatalf("clear_decisions calls after the original dispatch = %d, want exactly 1", clearCallsAfterOriginal)
 	}
 
-	session, err := f.repo.GetTaskSession(ctx, "s1")
-	if err != nil {
-		t.Fatalf("failed to load session: %v", err)
-	}
 	sg, nameToID := buildWorkflowFromJSON(t, reviewLoopWorkflowJSON)
 	reviewStep, ok := sg.steps[nameToID["Review"]]
 	if !ok {
@@ -238,10 +241,7 @@ func TestProcessOnEnter_RedispatchAfterEntryAlreadyDone_IsANoOp(t *testing.T) {
 	// entryID 1: same fully-completed entry the fireOnTurnComplete call above
 	// just processed; both of its on_enter positions are now MarkerDone.
 	const entryID = int64(1)
-	dispatchResult := f.svc.dispatchOnEnterActions(ctx, "t1", session, reviewStep, entryID, false, false)
-	if dispatchResult.hasAutoStart {
-		t.Errorf("hasAutoStart = true, want false (Review declares no auto_start_agent)")
-	}
+	f.svc.WorkflowEngine().DispatchStepEntry(ctx, "t1", reviewStep.WorkflowID, reviewStep.ID, "redispatch-entry", entryID)
 
 	if got := f.runQueue.callCount(); got != 1 {
 		t.Fatalf("queued run count after redispatching an already-done entry = %d, want still 1 (no re-execution)", got)

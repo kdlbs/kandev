@@ -10,6 +10,7 @@ import type { AutomationTrigger, PlaceholderInfo, TriggerTypeInfo } from "@/lib/
 import { type CreatedWebhookDetails, type FormState } from "./automation-payload";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 import { ConfigSection } from "./config-section";
+import { ManagedConversationDestinationSelector } from "./managed-conversation-destination-selector";
 import { PromptSection } from "./prompt-section";
 import { RequiredFieldLabel } from "./required-field-label";
 import { TriggersSection } from "./triggers-section";
@@ -147,32 +148,41 @@ export function ThenSection({
     "agentProfileId",
     "executorProfileId",
     "repositorySelections",
+    "managedDestination",
   ];
   const isDirty = dirtyFields.some((field) => isAutomationFieldDirty(form, savedForm, field));
   return (
     <div className="space-y-2">
       <div>
         <h3 className="text-base font-medium">{t("automations:thenTitle")}</h3>
-        <p className="text-sm text-muted-foreground">{t("automations:thenDescription")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t(
+            form.taskMode === "managed_conversation"
+              ? "automations:thenManagedConversationDescription"
+              : "automations:thenDescription",
+          )}
+        </p>
       </div>
       <div
         className="rounded-lg border bg-card p-4 space-y-4"
         data-settings-dirty={isDirty}
         data-settings-dirty-level="container"
       >
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t("automations:taskTitleLabel")}</Label>
-          <Input
-            ref={inputRef}
-            value={form.taskTitleTemplate}
-            data-settings-dirty={isAutomationFieldDirty(form, savedForm, "taskTitleTemplate")}
-            onChange={(event) => updateField("taskTitleTemplate", clampChange(event))}
-            // defaultTaskTitle is the backend trigger type's own template — a
-            // persisted value, not copy. The fallback is the example hint.
-            placeholder={defaultTaskTitle || t("automations:taskTitlePlaceholder")}
-          />
-          <p className="text-xs text-muted-foreground">{t("automations:taskTitleHelp")}</p>
-        </div>
+        {form.taskMode !== "managed_conversation" ? (
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t("automations:taskTitleLabel")}</Label>
+            <Input
+              ref={inputRef}
+              value={form.taskTitleTemplate}
+              data-settings-dirty={isAutomationFieldDirty(form, savedForm, "taskTitleTemplate")}
+              onChange={(event) => updateField("taskTitleTemplate", clampChange(event))}
+              // defaultTaskTitle is the backend trigger type's own template — a
+              // persisted value, not copy. The fallback is the example hint.
+              placeholder={defaultTaskTitle || t("automations:taskTitlePlaceholder")}
+            />
+            <p className="text-xs text-muted-foreground">{t("automations:taskTitleHelp")}</p>
+          </div>
+        ) : null}
         <PromptSection
           value={form.prompt}
           isDirty={isAutomationFieldDirty(form, savedForm, "prompt")}
@@ -180,30 +190,32 @@ export function ThenSection({
           placeholders={placeholders}
         />
         <Separator />
-        <ConfigSection
-          workspaceId={workspaceId}
-          workflowId={form.workflowId}
-          agentProfileId={form.agentProfileId}
-          executorProfileId={form.executorProfileId}
-          taskMode={form.taskMode}
-          repositorySelections={form.repositorySelections}
-          dirtyFields={{
-            workflowId: isAutomationFieldDirty(form, savedForm, "workflowId"),
-            agentProfileId: isAutomationFieldDirty(form, savedForm, "agentProfileId"),
-            executorProfileId: isAutomationFieldDirty(form, savedForm, "executorProfileId"),
-            repositorySelections: isAutomationFieldDirty(form, savedForm, "repositorySelections"),
-          }}
-          onWorkflowChange={(value) => {
-            updateField("workflowId", value);
-            updateField("workflowStepId", "");
-          }}
-          onAgentProfileChange={(value) => updateField("agentProfileId", value)}
-          onExecutorProfileChange={(value) => updateField("executorProfileId", value)}
-          onRepositoriesChange={(value) => {
-            updateField("repositorySelections", value);
-            updateField("repositoryMode", value.length > 0 ? "selected" : "none");
-          }}
-        />
+        {form.taskMode === "managed_conversation" ? null : (
+          <ConfigSection
+            workspaceId={workspaceId}
+            workflowId={form.workflowId}
+            agentProfileId={form.agentProfileId}
+            executorProfileId={form.executorProfileId}
+            taskMode={form.taskMode}
+            repositorySelections={form.repositorySelections}
+            dirtyFields={{
+              workflowId: isAutomationFieldDirty(form, savedForm, "workflowId"),
+              agentProfileId: isAutomationFieldDirty(form, savedForm, "agentProfileId"),
+              executorProfileId: isAutomationFieldDirty(form, savedForm, "executorProfileId"),
+              repositorySelections: isAutomationFieldDirty(form, savedForm, "repositorySelections"),
+            }}
+            onWorkflowChange={(value) => {
+              updateField("workflowId", value);
+              updateField("workflowStepId", "");
+            }}
+            onAgentProfileChange={(value) => updateField("agentProfileId", value)}
+            onExecutorProfileChange={(value) => updateField("executorProfileId", value)}
+            onRepositoriesChange={(value) => {
+              updateField("repositorySelections", value);
+              updateField("repositoryMode", value.length > 0 ? "selected" : "none");
+            }}
+          />
+        )}
       </div>
     </div>
   );
@@ -307,18 +319,23 @@ function ContinuationPolicySection({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- This section keeps the three task modes and their complete accessible descriptions together.
 function TargetModeSection({
   form,
   savedForm,
+  workspaceId,
   updateField,
 }: {
   form: FormState;
   savedForm: FormState;
+  workspaceId: string;
   updateField: UpdateField;
 }) {
   const { t } = useTranslation();
   const targetIsDirty = isAutomationFieldDirty(form, savedForm, "taskMode");
+  const automationRun = form.taskMode === "automation_run";
   const normalTask = form.taskMode === "normal_task";
+  const managedConversation = form.taskMode === "managed_conversation";
   const descriptionId = "automation-task-mode-description";
   return (
     <div className="space-y-2">
@@ -341,7 +358,7 @@ function TargetModeSection({
         <Label
           htmlFor="automation-task-mode-hidden"
           className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
-            !normalTask ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
+            automationRun ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
           }`}
         >
           <RadioGroupItem
@@ -384,7 +401,39 @@ function TargetModeSection({
             </span>
           </span>
         </Label>
+        <Label
+          htmlFor="automation-task-mode-managed-conversation"
+          className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
+            managedConversation ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
+          }`}
+        >
+          <RadioGroupItem
+            id="automation-task-mode-managed-conversation"
+            value="managed_conversation"
+            aria-describedby="automation-task-mode-managed-conversation-description"
+            className="mt-0.5"
+          />
+          <span className="min-w-0 space-y-1">
+            <span className="block text-sm font-medium">
+              {t("automations:managedConversationMode")}
+            </span>
+            <span
+              id="automation-task-mode-managed-conversation-description"
+              className="block whitespace-normal break-words text-xs text-muted-foreground"
+            >
+              {t("automations:managedConversationModeDescription")}
+            </span>
+          </span>
+        </Label>
       </RadioGroup>
+      {managedConversation ? (
+        <ManagedConversationDestinationSelector
+          workspaceId={workspaceId}
+          value={form.managedDestination}
+          isDirty={isAutomationFieldDirty(form, savedForm, "managedDestination")}
+          onChange={(destination) => updateField("managedDestination", destination)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -392,10 +441,12 @@ function TargetModeSection({
 export function SettingsSection({
   form,
   savedForm,
+  workspaceId,
   updateField,
 }: {
   form: FormState;
   savedForm: FormState;
+  workspaceId: string;
   updateField: UpdateField;
 }) {
   const { t } = useTranslation();
@@ -440,8 +491,15 @@ export function SettingsSection({
           />
         </div>
       </div>
-      <TargetModeSection form={form} savedForm={savedForm} updateField={updateField} />
-      <ContinuationPolicySection form={form} savedForm={savedForm} updateField={updateField} />
+      <TargetModeSection
+        form={form}
+        savedForm={savedForm}
+        workspaceId={workspaceId}
+        updateField={updateField}
+      />
+      {form.taskMode === "managed_conversation" ? null : (
+        <ContinuationPolicySection form={form} savedForm={savedForm} updateField={updateField} />
+      )}
     </div>
   );
 }

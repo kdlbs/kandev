@@ -8,12 +8,25 @@ import type { TaskEventPayload } from "@/lib/types/backend";
 // user-chosen title apart from the placeholder.
 const QUICK_CHAT_PLACEHOLDER_TITLE = "Quick Chat";
 
+// i18n-exempt: wire metadata keys. These values are part of the backend task
+// contract and are never rendered as user-facing copy.
+const MANAGED_PLUGIN_ID_KEY = "kandev.plugin_id";
+const MANAGED_EPHEMERAL_KEY = "kandev.ephemeral";
+
 function readMetadataString(
   metadata: Record<string, unknown> | null | undefined,
   key: string,
 ): string | undefined {
   const value = metadata?.[key];
   return typeof value === "string" && value ? value : undefined;
+}
+
+function isManagedConversationEvent(payload: TaskEventPayload): boolean {
+  const metadata = payload.metadata;
+  if (!metadata || typeof metadata[MANAGED_PLUGIN_ID_KEY] !== "string") {
+    return false;
+  }
+  return payload.is_ephemeral || metadata[MANAGED_EPHEMERAL_KEY] === true;
 }
 
 /**
@@ -29,6 +42,7 @@ export function quickChatSessionFromTaskEvent(payload: TaskEventPayload): QuickC
   if (!payload.is_ephemeral) return null;
   if (payload.workflow_id) return null;
   if (payload.origin === "automation_run") return null;
+  if (isManagedConversationEvent(payload)) return null;
   const sessionId = payload.primary_session_id;
   const workspaceId = payload.workspace_id;
   if (!sessionId || !workspaceId) return null;

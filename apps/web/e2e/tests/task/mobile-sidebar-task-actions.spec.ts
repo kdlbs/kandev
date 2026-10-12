@@ -6,6 +6,7 @@ import { activeSessionId, seedSecondaryClarificationTask } from "../../helpers/c
 import { makeGitEnv } from "../../helpers/git-helper";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 import {
   expectActiveTaskRow,
   expectActiveTaskRowWithoutColor,
@@ -32,7 +33,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${source.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const targetRow = drawer.getByTestId("sidebar-task-item").filter({ hasText: target.title });
     await expect(targetRow).toBeVisible();
@@ -40,7 +41,9 @@ test.describe("Mobile sidebar task actions", () => {
     await targetRow.tap();
 
     await expect(drawer).toBeHidden();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${target.id}$`));
+    await expect(testPage).toHaveURL(
+      new RegExp(`/t/${target.id}\\?sessionId=${target.clarificationSessionId}$`),
+    );
     await expect.poll(() => activeSessionId(testPage)).toBe(target.clarificationSessionId);
     await expect(session.clarificationOverlay()).toBeVisible();
     await expect(session.clarificationOverlay()).toContainText(
@@ -62,7 +65,7 @@ test.describe("Mobile sidebar task actions", () => {
     apiClient,
     seedData,
   }) => {
-    const title = "Mobile sidebar PR badge spacing";
+    const title = "Mobile sidebar PR badge spacing with a clipped long title";
     const task = await apiClient.createTask(seedData.workspaceId, title, {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
@@ -104,10 +107,11 @@ test.describe("Mobile sidebar task actions", () => {
       );
       const priority = el.querySelector('[data-testid="sidebar-task-priority-indicator"]');
       const pr = el.querySelector('[data-testid^="pr-task-icon-"]');
-      if (!titleElement || !priority || !pr) {
+      const titleContainer = titleElement?.parentElement;
+      if (!titleContainer || !priority || !pr) {
         return { found: false, titleRight: -1, priorityLeft: -1, priorityRight: -1, prLeft: -1 };
       }
-      const titleBox = titleElement.getBoundingClientRect();
+      const titleBox = titleContainer.getBoundingClientRect();
       const priorityBox = priority.getBoundingClientRect();
       const prBox = pr.getBoundingClientRect();
       return {
@@ -197,7 +201,7 @@ test.describe("Mobile sidebar task actions", () => {
       timeout: 30_000,
     });
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const destinationRow = drawer
       .getByTestId("sidebar-task-item")
@@ -206,9 +210,9 @@ test.describe("Mobile sidebar task actions", () => {
     await destinationRow.tap();
 
     await expect(drawer).toBeHidden();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${destination.id}$`));
+    await expect(testPage).toHaveURL(new RegExp(`/t/${destination.id}(?:\\?sessionId=[^&]+)?$`));
     const mobileTopBar = testPage
-      .getByTestId("mobile-session-menu")
+      .getByTestId("mobile-task-picker-trigger")
       .locator("xpath=ancestor::header");
     await expect(mobileTopBar.getByText(destinationTitle, { exact: true })).toBeVisible();
     await expect(session.chat.getByText(destinationResponse).last()).toBeVisible({
@@ -262,7 +266,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const row = drawer.getByTestId("sidebar-task-item").filter({ hasText: task.title });
@@ -284,7 +288,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const surface = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(surface).toBeVisible();
@@ -308,12 +312,12 @@ test.describe("Mobile sidebar task actions", () => {
     expect(cardBox.y).toBeGreaterThan(0);
   });
 
-  test("keeps the inline archive confirmation readable on a phone", async ({
+  test("keeps the archive confirmation sheet readable on a phone", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    const task = await apiClient.seedTask(seedData.workspaceId, "Mobile archive inline target", {
+    const task = await apiClient.seedTask(seedData.workspaceId, "Mobile archive sheet target", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
@@ -321,28 +325,35 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const drawerId = await drawer.getAttribute("id");
     const taskRow = drawer
       .getByTestId("sidebar-task-item")
-      .filter({ hasText: "Mobile archive inline target" });
+      .filter({ hasText: "Mobile archive sheet target" });
     await taskRow.getByRole("button", { name: "Task actions" }).tap();
     await testPage.getByRole("menuitem", { name: "Archive", exact: true }).tap();
 
-    const confirmation = taskRow.getByTestId("task-archive-inline-confirmation");
+    const confirmation = testPage.getByRole("dialog", { name: "Archive task?", exact: true });
     await expect(confirmation).toBeVisible();
+    await expect(confirmation).toHaveAttribute("id", drawerId!);
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
-    await expect(confirmation).toContainText("Mobile archive inline target");
+    await expect(testPage.getByTestId("task-archive-inline-confirmation")).toHaveCount(0);
+    await expect(confirmation).toContainText("Mobile archive sheet target");
+    await expectContentSizedBottomConfirmation(
+      confirmation,
+      confirmation.getByTestId("mobile-action-confirmation"),
+    );
 
     for (const button of [
       confirmation.getByRole("button", { name: "Cancel" }),
       confirmation.getByTestId("archive-task-confirm"),
     ]) {
       const box = await button.boundingBox();
-      if (!box) throw new Error("inline archive action has no layout box");
+      if (!box) throw new Error("archive sheet action has no layout box");
       expect(box.width).toBeGreaterThanOrEqual(44);
-      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(48);
       await expect(button).toBeInViewport();
     }
 
@@ -351,6 +362,8 @@ test.describe("Mobile sidebar task actions", () => {
       client: document.documentElement.clientWidth,
     }));
     expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.client);
+    await confirmation.getByRole("button", { name: "Cancel", exact: true }).tap();
+    await expect(taskRow).toBeVisible();
   });
 
   test("keeps the in-flight warning compact and reachable on a phone", async ({
@@ -377,9 +390,11 @@ test.describe("Mobile sidebar task actions", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await waitForActiveSessionForegroundActivity(testPage, "generating");
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const drawerId = await drawer.getAttribute("id");
+    const drawerHeight = (await drawer.boundingBox())!.height;
     const taskRow = drawer.getByTestId("sidebar-task-item").filter({ hasText: title });
     const heightBefore = await taskRow.evaluate(
       (element) => element.getBoundingClientRect().height,
@@ -390,10 +405,17 @@ test.describe("Mobile sidebar task actions", () => {
     await taskRow.getByRole("button", { name: "Task actions" }).tap();
     await testPage.getByRole("menuitem", { name: "Archive", exact: true }).tap();
 
-    const confirmation = taskRow.getByTestId("task-archive-inline-confirmation");
+    const confirmation = testPage.getByRole("dialog", { name: "Archive task?", exact: true });
     const warning = confirmation.getByTestId("still-working-warning");
     await expect(confirmation).toBeVisible();
+    await expect(confirmation).toHaveAttribute("id", drawerId!);
+    await expect(testPage.locator('[data-slot="drawer-content"]')).toHaveCount(1);
+    await expect(taskRow).toBeHidden();
     await expect(warning).toBeVisible();
+    const confirmationBox = await expectContentSizedBottomConfirmation(
+      confirmation,
+      confirmation.getByTestId("mobile-action-confirmation"),
+    );
     await prCapture.screenshot("mobile-in-flight-archive-warning", {
       caption: "Compact in-flight warning in phone archive confirmation",
     });
@@ -404,17 +426,16 @@ test.describe("Mobile sidebar task actions", () => {
     });
     expect(warningMetrics).toEqual({ fontSize: "12px", lineHeight: "20px" });
     await expect(warning).toHaveClass(/text-pretty/);
-    const heightOpen = await taskRow.evaluate((element) => element.getBoundingClientRect().height);
-    expect(heightOpen).toBeGreaterThan(heightBefore);
+    expect(confirmationBox.height).toBeLessThan(drawerHeight);
 
     for (const button of [
       confirmation.getByRole("button", { name: "Cancel" }),
       confirmation.getByTestId("archive-task-confirm"),
     ]) {
       const box = await button.boundingBox();
-      if (!box) throw new Error("in-flight inline archive action has no layout box");
+      if (!box) throw new Error("in-flight archive sheet action has no layout box");
       expect(box.width).toBeGreaterThanOrEqual(44);
-      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(48);
       await expect(button).toBeInViewport();
     }
 
@@ -425,6 +446,11 @@ test.describe("Mobile sidebar task actions", () => {
     expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.client);
     await confirmation.getByRole("button", { name: "Cancel" }).tap();
     await expect(confirmation).toBeHidden();
+    await expect(taskRow).toBeVisible();
+    expect(await taskRow.evaluate((element) => element.getBoundingClientRect().height)).toBeCloseTo(
+      heightBefore,
+      0,
+    );
   });
 
   test("keeps the tablet task switcher as a left-side sheet", async ({
@@ -485,6 +511,7 @@ test.describe("Mobile sidebar task actions", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const taskTitle = "Mobile task with diff stats";
     const task = await apiClient.createTaskWithAgent(
@@ -509,7 +536,7 @@ test.describe("Mobile sidebar task actions", () => {
       timeout: 60_000,
     });
 
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
     const diffStats = taskRow.getByTestId("sidebar-task-diff-stats");
@@ -547,6 +574,9 @@ test.describe("Mobile sidebar task actions", () => {
           .map((animation) => animation.finished.catch(() => undefined)),
       ),
     );
+    await prCapture.screenshot("mobile-task-row-menu-grouping", {
+      caption: "Phone task-row actions grouped inside the scrolling menu",
+    });
     const [menuBox, itemBox] = await Promise.all([menu.boundingBox(), archiveItem.boundingBox()]);
     const viewport = testPage.viewportSize();
     if (!menuBox || !itemBox || !viewport) throw new Error("mobile action sheet has no layout box");
@@ -564,6 +594,37 @@ test.describe("Mobile sidebar task actions", () => {
       scrollHeight: element.scrollHeight,
     }));
     expect(menuOverflow.scrollHeight).toBeGreaterThan(menuOverflow.clientHeight);
+    const menuLabels = (await menu.locator(":scope > [role='menuitem']").allTextContents()).map(
+      (text) => text.replace(/\s+/g, " ").trim(),
+    );
+    const menuIndex = (label: string) => menuLabels.indexOf(label);
+    for (const label of [
+      "Pin",
+      "Color",
+      "Priority",
+      "Edit",
+      "Rename",
+      "Duplicate",
+      "Create Subtask",
+      "Nest under",
+      "Link",
+      "Move to",
+      "Archive",
+      "Delete",
+    ]) {
+      expect(menuIndex(label), `${label} should be in the task action menu`).toBeGreaterThanOrEqual(
+        0,
+      );
+    }
+    expect(menuIndex("Pin")).toBeLessThan(menuIndex("Color"));
+    expect(menuIndex("Color")).toBeLessThan(menuIndex("Priority"));
+    expect(menuIndex("Priority")).toBeLessThan(menuIndex("Edit"));
+    expect(menuIndex("Edit")).toBeLessThan(menuIndex("Create Subtask"));
+    expect(menuIndex("Create Subtask")).toBeLessThan(menuIndex("Link"));
+    expect(menuIndex("Link")).toBeLessThan(menuIndex("Move to"));
+    expect(menuIndex("Move to")).toBeLessThan(menuIndex("Archive"));
+    expect(menuIndex("Archive")).toBeLessThan(menuIndex("Delete"));
+    await expect(menu.locator(":scope > [data-slot='context-menu-separator']")).toHaveCount(4);
     for (const actionName of [
       "Pin",
       "Edit",
@@ -598,7 +659,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = drawer
@@ -687,7 +748,7 @@ test.describe("Mobile sidebar task actions", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = taskSheet.getByTestId("sidebar-task-item").filter({ hasText: parentTitle });
@@ -785,7 +846,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${activeTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
     const parentRow = taskSheet
@@ -819,7 +880,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = sheet
@@ -872,6 +933,11 @@ test.describe("Mobile sidebar task actions", () => {
       test.skip(true, "No local executor available");
       return;
     }
+    const localProfile = localExecutor.profiles?.[0];
+    if (!localProfile) {
+      test.skip(true, "No local executor profile available");
+      return;
+    }
 
     const policy = await apiClient.createRepositoryBranchPolicy(seedData.repositoryId, {
       name: `Mobile subtask policy ${Date.now()}`,
@@ -879,15 +945,10 @@ test.describe("Mobile sidebar task actions", () => {
       branch_template: "feature/{title}-{suffix}",
       pull_request_target: "develop",
     });
-    let localProfile: { id: string; name: string } | undefined;
     const parentTitle = `Mobile policy subtask parent ${Date.now()}`;
     const childTitle = `Mobile policy subtask child ${Date.now()}`;
 
     try {
-      localProfile = await apiClient.createExecutorProfile(
-        localExecutor.id,
-        `E2E Mobile Subtask Local ${Date.now()}`,
-      );
       const parent = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         parentTitle,
@@ -905,7 +966,7 @@ test.describe("Mobile sidebar task actions", () => {
       const session = new SessionPage(testPage);
       await session.waitForLoad();
       await session.waitForChatIdle({ timeout: 30_000 });
-      await testPage.getByTestId("mobile-session-menu").tap();
+      await testPage.getByTestId("mobile-task-picker-trigger").tap();
       const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
       const taskRow = taskSheet.getByTestId("sidebar-task-item").filter({ hasText: parentTitle });
       await taskRow.getByRole("button", { name: "Task actions" }).tap();
@@ -914,13 +975,15 @@ test.describe("Mobile sidebar task actions", () => {
       const dialog = testPage.getByTestId("new-subtask-dialog");
       await dialog.getByTestId("subtask-workspace-mode-new").tap();
       const executorSelector = dialog.getByTestId("executor-profile-selector");
-      await expect(async () => {
-        await executorSelector.tap();
-        await testPage
-          .getByRole("option", { name: new RegExp(localProfile.name) })
-          .tap({ force: true });
-        await expect(executorSelector).toContainText(localProfile.name, { timeout: 1_000 });
-      }).toPass({ timeout: 10_000 });
+      await executorSelector.tap();
+      const executorDrawer = testPage.getByTestId("executor-profile-selector-dropdown");
+      await expect(executorDrawer).toBeVisible();
+      const localProfileOption = executorDrawer.getByRole("option", {
+        name: new RegExp(localProfile.name),
+      });
+      await expect(localProfileOption).toBeVisible();
+      await localProfileOption.tap();
+      await expect(executorSelector).toContainText(localProfile.name);
       await dialog.getByTestId("branch-chip-trigger").tap();
       await testPage.getByRole("option", { name: new RegExp(policy.name) }).tap({ force: true });
       await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
@@ -983,7 +1046,6 @@ test.describe("Mobile sidebar task actions", () => {
         )
         .toBe(repository!.base_branch);
     } finally {
-      if (localProfile) await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
       await apiClient.deleteRepositoryBranchPolicy(policy.id).catch(() => {});
       normalizeSeedRepository();
     }

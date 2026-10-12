@@ -16,6 +16,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { latestRuntimeVersions, resolveRuntimeActiveVersion } from "@/lib/agent-runtime-update";
 import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateVersion } from "@/lib/api";
+import { settingsActionClassName } from "./settings-control";
 
 const ACTIVE_UPDATE_STATUSES = new Set<AgentUpdateJob["status"]>([
   "queued",
@@ -138,7 +139,9 @@ function RuntimeVersionQuickChoices({
         <Button
           type="button"
           variant={selectedVersion === latestVersion ? "secondary" : "outline"}
-          className="h-11 min-h-11 min-w-0 cursor-pointer justify-start px-2 text-left text-xs sm:h-10 sm:min-h-10"
+          className={settingsActionClassName(
+            "min-w-0 cursor-pointer justify-start px-2 text-left text-xs",
+          )}
           aria-pressed={selectedVersion === latestVersion}
           disabled={disabled}
           onClick={() => onSelectTarget(latestVersion)}
@@ -150,7 +153,9 @@ function RuntimeVersionQuickChoices({
           <Button
             type="button"
             variant={selectedUseDefault ? "secondary" : "outline"}
-            className="h-11 min-h-11 min-w-0 cursor-pointer justify-start px-2 text-left text-xs sm:h-10 sm:min-h-10"
+            className={settingsActionClassName(
+              "min-w-0 cursor-pointer justify-start px-2 text-left text-xs",
+            )}
             aria-pressed={selectedUseDefault}
             disabled={disabled}
             onClick={onSelectDefault}
@@ -228,7 +233,7 @@ export function RuntimeVersionPicker({
             <Button
               type="button"
               variant="outline"
-              className="h-12 w-full cursor-pointer justify-between px-3"
+              className={settingsActionClassName("w-full cursor-pointer justify-between px-3")}
               aria-expanded={browseOpen}
               aria-controls={browserId}
               disabled={disabled}

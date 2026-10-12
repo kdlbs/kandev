@@ -10,10 +10,13 @@ const discovery = vi.hoisted(() => ({
     { id: "", path: "/configured", display_path: "/configured", state: "connected" },
   ],
   homeConfirmationRequired: true,
+  failedRoots: [] as string[],
 }));
 const actions = vi.hoisted(() => ({
   refreshDiscovery: vi.fn(),
   handleChooseDiscoveryRoot: vi.fn(),
+  handleConfirmHomeDiscovery: vi.fn(),
+  isConfirmingHomeDiscovery: false,
   handleReconnectDiscoveryRoot: vi.fn(),
   handleRemoveDiscoveryRoot: vi.fn(),
 }));
@@ -34,11 +37,15 @@ vi.mock("@/components/repository-discovery-root-controls", () => ({
   RepositoryDiscoveryRootControls: (props: {
     discoveryRoots: Array<{ id: string }>;
     onChooseDiscoveryRoot: (path: string) => void;
+    onConfirmHomeDiscovery: () => void;
   }) => (
     <div data-testid="root-controls">
       <span data-testid="root-count">{props.discoveryRoots.length}</span>
       <button type="button" onClick={() => props.onChooseDiscoveryRoot("/picked")}>
         Choose
+      </button>
+      <button type="button" onClick={props.onConfirmHomeDiscovery}>
+        Confirm Home
       </button>
     </div>
   ),
@@ -49,6 +56,8 @@ import { RepositoryDiscoveryControls } from "./repository-discovery-controls";
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  discovery.desktopRuntime = true;
+  discovery.failedRoots = [];
 });
 
 describe("RepositoryDiscoveryControls", () => {
@@ -59,10 +68,21 @@ describe("RepositoryDiscoveryControls", () => {
     expect(screen.getByTestId("root-count").textContent).toBe("1");
     fireEvent.click(screen.getByRole("button", { name: "Choose" }));
     expect(actions.handleChooseDiscoveryRoot).toHaveBeenCalledWith("/picked");
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Home" }));
+    expect(actions.handleConfirmHomeDiscovery).toHaveBeenCalledOnce();
   });
 
   it("does not lease or render a surface when disabled", () => {
     render(<RepositoryDiscoveryControls workspaceId="workspace-1" enabled={false} />);
+
+    expect(screen.queryByTestId("root-controls")).toBeNull();
+  });
+
+  it("does not render failed-root diagnostics for a non-desktop picker", () => {
+    discovery.desktopRuntime = false;
+    discovery.failedRoots = ["/missing-repositories"];
+
+    render(<RepositoryDiscoveryControls workspaceId="workspace-1" presentation="picker" />);
 
     expect(screen.queryByTestId("root-controls")).toBeNull();
   });

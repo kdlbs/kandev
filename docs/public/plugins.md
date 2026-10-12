@@ -97,6 +97,13 @@ Kandev does not inspect or reorder children inside a contribution, and disabled
 plugins return to their saved position when re-enabled.
 Full-bleed routes that opt out of host topbar chrome own their Status trigger.
 
+## Use plugins on a phone
+
+Open the hamburger menu to find plugin controls together under **Plugins**.
+On a task, a plugin's task toolbar takes the place of its workspace toolbar,
+so shared status controls appear once. Workspace-only controls, sidebar actions,
+and plugin pages remain available. Desktop keeps its separate toolbar locations.
+
 ## Installing a plugin
 
 The easiest way to install is from the in-app catalog: **Settings > Plugins >
@@ -160,14 +167,15 @@ Once installed, the plugin appears in the list with its category, a status
 badge (`active`), a signing badge (`unsigned` today), and **Disable** and
 **Uninstall** actions. Selecting the row anywhere opens that plugin's own
 settings page; a `Setup required` badge marks a plugin whose manifest declares
-a required setting that has no value yet:
-
-![The Settings > Plugins page listing an installed, active plugin with its category, a Setup required badge, an unsigned badge, Disable/Uninstall actions, and a chevron opening the plugin's settings page.](../screenshots/plugin-settings-list.png)
+a required setting that has no value yet.
 
 The Installed tab also gives you an overview of automatic updates, installed
-versions, available updates, and per-plugin controls:
+versions, available updates, and per-plugin controls. **Install plugin** sits
+beside the list heading. **Sync** and **Check for updates** share a compact
+toolbar, with the automatic-update preference and plugin list below. On phones,
+the secondary actions wrap below the heading and retain touch-sized targets:
 
-![Settings > Plugins showing automatic updates and the installed plugin list with sync, update, enable, disable, uninstall, and settings controls.](../screenshots/plugin-settings.png)
+![Settings > Plugins showing the compact install, sync, and update toolbar, automatic updates, and divided plugin rows with enable, disable, uninstall, and settings controls.](../screenshots/plugin-settings.png)
 
 <details>
 <summary>Filesystem sideload and synchronization</summary>
@@ -203,8 +211,9 @@ binary an operator hasn't explicitly approved via install or Sync.
 
 ## Enable, disable, uninstall
 
-- **Disable** stops the subprocess. Config and state are preserved; no
-  events or webhooks are delivered while disabled.
+- **Disable** stops the subprocess and removes the plugin's managed agent
+  conversations. Config and other state are preserved; no events or webhooks
+  are delivered while disabled.
 - **Enable** respawns the subprocess and re-completes the handshake. It is also
   the manual recovery action for an `error` plugin; the Settings row and detail
   page show the last failure diagnostic when one is available. A successful
@@ -308,7 +317,9 @@ disk on its first restart after upgrading to this version.
   sessions, workspaces, workflows, agent profiles, repositories) is gated
   individually via `api_read:<resource>`. Task create/update and message send
   are independently gated by `api_write:tasks` and `api_write:messages` and
-  use Kandev's first-party service paths. An undeclared capability returns
+  use Kandev's first-party service paths. `agent_conversation` separately gates
+  plugin-owned hidden agent sessions and their Ensure, Dispatch, and Delete
+  lifecycle. An undeclared capability returns
   gRPC `PermissionDenied` with a message naming the missing capability,
   checked before the handler runs. `GetConfig` and `EmitEvent` are the only
   ungated RPCs: a plugin can always read its own config (secrets included)
@@ -320,11 +331,12 @@ disk on its first restart after upgrading to this version.
   a failing bundle or `initialize` is caught and never breaks boot; slot
   components render behind error boundaries. Hard sandboxing (a worker or
   realm boundary) is explicit future work: see below.
-- **Isolated web apps use a separate browser boundary.** Kandev serves their
-  packaged files in a sandboxed iframe with an opaque origin. The app receives
-  only reviewed Kandev capabilities and exact HTTPS network origins. It cannot
-  use the host DOM, cookies, host authentication headers, or an injected
-  JavaScript API. See [Security and trust](security.md#isolated-web-applications).
+- **Isolated web apps use a sandboxed iframe boundary.** Kandev serves their
+  packaged files same-origin with the host and trusts the source with the
+  viewing user's ordinary browser authority, including cookies, storage, and
+  host DOM access. Kandev protocol routes still expose only the reviewed
+  capabilities and exact HTTPS network origins declared for the canvas. There
+  is no injected JavaScript API. See [Security and trust](security.md#isolated-web-applications).
 - **Package integrity is always checked; signing is optional.** See
   "Signed vs. unsigned packages" above.
 - **Curated marketplace, no auto-install.** The [Plugin

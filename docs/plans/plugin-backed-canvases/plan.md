@@ -310,6 +310,14 @@ dependency order only. They do not authorize implementation subagents.
   heading links. The work order references `scripts/check-links.py`, which is
   not present in current `main`.
 
+## Follow-up repair
+
+The [canvas runtime and permission repair](../canvas-runtime-permission-fixes/plan.md)
+supersedes the original framing, load-as-ready, initial-approval, and review-layout
+assumptions. Its work orders 01-04 own the replacement tests and documentation.
+This completed package and its recorded results remain historical evidence,
+not validation of the repair.
+
 ## Risks
 
 - A branch transition can lose uncommitted design files or include superseded
@@ -325,3 +333,10 @@ dependency order only. They do not authorize implementation subagents.
 - Office skill synchronization can absorb the canvas skill if embeds overlap.
 - Permission changes can activate broader access before user confirmation.
 - Arbitrary application CSS can still produce a poor phone layout.
+
+## Same-origin follow-up
+
+The [trusted same-origin package](../canvas-same-origin-auth/plan.md) supersedes
+this package's opaque-origin and cookie-isolation assumptions. Existing results
+record the earlier implementation. They do not verify the new runtime behavior.
+The follow-up work orders own the replacement tests and documentation.

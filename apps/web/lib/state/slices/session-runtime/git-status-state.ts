@@ -1,5 +1,6 @@
 import type { FileChangeFacet, FileInfo, GitStatusEntry, SessionRuntimeSliceState } from "./types";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { reconcileGitStatusDisplay } from "./git-status-display-state";
 
 const debugGit = createDebugLogger("git-status:store");
 
@@ -28,6 +29,7 @@ function sameStringList(existing: string[] | undefined, incoming: string[] | und
 }
 
 const COMPARABLE_FILE_FIELDS = [
+  "is_symlink",
   "path",
   "status",
   "staged",
@@ -35,6 +37,7 @@ const COMPARABLE_FILE_FIELDS = [
   "deletions",
   "old_path",
   "diff",
+  "diff_state",
   "diff_skip_reason",
   "staged_change",
   "unstaged_change",
@@ -46,23 +49,27 @@ function comparableChangeFacet(facet: FileChangeFacet | undefined): string {
   if (!facet) return "";
   return [
     facet.status,
+    facet.is_symlink ?? "",
     facet.additions ?? 0,
     facet.deletions ?? 0,
     facet.old_path ?? "",
     facet.diff ?? "",
     facet.diff_skip_reason ?? "",
+    facet.diff_state ?? "",
   ].join("\0");
 }
 
 function comparableFileInfo(file: FileInfo) {
   return {
     path: file.path,
+    is_symlink: file.is_symlink,
     status: file.status,
     staged: file.staged,
     additions: file.additions ?? 0,
     deletions: file.deletions ?? 0,
     old_path: file.old_path ?? "",
     diff: file.diff ?? "",
+    diff_state: file.diff_state ?? "",
     diff_skip_reason: file.diff_skip_reason ?? "",
     staged_change: comparableChangeFacet(file.staged_change),
     unstaged_change: comparableChangeFacet(file.unstaged_change),
@@ -127,6 +134,18 @@ function hasComparisonSummaryChanged(existing: GitStatusEntry, incoming: GitStat
   );
 }
 
+function hasQualityChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  return (
+    existing.status_state !== incoming.status_state ||
+    existing.files_complete !== incoming.files_complete ||
+    existing.detail_state !== incoming.detail_state ||
+    existing.error_code !== incoming.error_code ||
+    existing.tracker_id !== incoming.tracker_id ||
+    existing.tracker_epoch !== incoming.tracker_epoch ||
+    existing.snapshot_revision !== incoming.snapshot_revision
+  );
+}
+
 function hasFileListsChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
   return (
     !sameStringList(existing.modified, incoming.modified) ||
@@ -153,6 +172,7 @@ export function hasGitStatusChanged(existing: GitStatusEntry, incoming: GitStatu
   // can carry a new timestamp for identical git data, so timestamp alone must
   // not force a store update or diff-cache invalidation.
   return (
+    hasQualityChanged(existing, incoming) ||
     hasBranchSummaryChanged(existing, incoming) ||
     hasFileListsChanged(existing, incoming) ||
     hasFileStatsChanged(existing, incoming) ||
@@ -166,9 +186,42 @@ function gitStatusTimestamp(timestamp: string | null | undefined): number | null
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function acceptsGitStatusTimestamp(
-  existing: GitStatusEntry | undefined,
-  incoming: GitStatusEntry,
+type GitStatusOrdering = {
+  tracker_id?: string;
+  tracker_epoch?: number;
+  snapshot_revision?: number;
+  timestamp?: string | null;
+};
+
+function trackerRevisionDecision(
+  existing: GitStatusOrdering,
+  incoming: GitStatusOrdering,
+): boolean | null {
+  const existingRevision = existing.snapshot_revision ?? 0;
+  const incomingRevision = incoming.snapshot_revision ?? 0;
+  if (existingRevision > 0 && incomingRevision === 0) return false;
+  if (incomingRevision < existingRevision) return false;
+  if (incomingRevision > existingRevision) return true;
+  return null;
+}
+
+function trackerVersionDecision(
+  existing: GitStatusOrdering | undefined,
+  incoming: GitStatusOrdering,
+): boolean | null {
+  if (
+    !existing?.tracker_id ||
+    !incoming.tracker_id ||
+    incoming.tracker_id !== existing.tracker_id
+  ) {
+    return null;
+  }
+  return trackerRevisionDecision(existing, incoming);
+}
+
+function acceptsLegacyTimestamp(
+  existing: GitStatusOrdering | undefined,
+  incoming: GitStatusOrdering,
 ): boolean {
   const existingTimestamp = gitStatusTimestamp(existing?.timestamp);
   const incomingTimestamp = gitStatusTimestamp(incoming.timestamp);
@@ -181,6 +234,20 @@ function acceptsGitStatusTimestamp(
     return false;
   }
   return true;
+}
+
+export function acceptsGitStatusOrdering(
+  existing: GitStatusOrdering | undefined,
+  incoming: GitStatusOrdering,
+): boolean {
+  return trackerVersionDecision(existing, incoming) ?? acceptsLegacyTimestamp(existing, incoming);
+}
+
+function acceptsGitStatusTimestamp(
+  existing: GitStatusEntry | undefined,
+  incoming: GitStatusEntry,
+): boolean {
+  return acceptsGitStatusOrdering(existing, incoming);
 }
 
 function advancesGitStatusTimestamp(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
@@ -292,10 +359,21 @@ export function applyGitStatus(
     return false;
   }
 
+  const acceptedStatus = gitStatus;
+
+  const displayState = (state.gitStatusDisplay ??= { byEnvironmentRepo: {} });
+  const displayByEnvironment = (displayState.byEnvironmentRepo[envKey] ??= {});
+  const checkoutGeneration = state.gitCheckoutGeneration?.byEnvironmentId[envKey]?.[repoName] ?? 0;
+  displayByEnvironment[repoName] = reconcileGitStatusDisplay(
+    displayByEnvironment[repoName],
+    acceptedStatus,
+    checkoutGeneration,
+  );
+
   const timestampAdvanced = existingRepo
-    ? advancesGitStatusTimestamp(existingRepo, gitStatus)
+    ? advancesGitStatusTimestamp(existingRepo, acceptedStatus)
     : true;
-  const changed = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
+  const changed = !existingRepo || hasGitStatusChanged(existingRepo, acceptedStatus);
   const context: GitStatusUpdateContext = {
     state,
     taskEnvironmentId,
@@ -303,7 +381,7 @@ export function applyGitStatus(
     repoName,
     repoMap,
     existing: existingRepo,
-    incoming: gitStatus,
+    incoming: acceptedStatus,
     changed,
     timestampAdvanced,
   };

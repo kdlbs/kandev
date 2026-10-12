@@ -19,6 +19,9 @@ export type SidebarTaskEditTarget = {
   state?: Task["state"];
   repositoryId?: string;
   repositories?: TaskRepositorySnapshot[];
+  primaryExecutorProfileId?: string;
+  runnerEditable?: boolean;
+  runnerIneligibleReason?: string;
 };
 
 export function buildSidebarTaskEditTarget(
@@ -38,25 +41,26 @@ export function buildSidebarTaskEditTarget(
     state: sourceTask.state,
     repositoryId: sourceTask.repositoryId ?? undefined,
     repositories: sourceTask.repositories,
+    primaryExecutorProfileId: sourceTask.primaryExecutorProfileId ?? undefined,
+    runnerEditable: sourceTask.runnerEditable,
+    runnerIneligibleReason: sourceTask.runnerIneligibleReason,
   };
 }
 
-export function useSidebarTaskEdit() {
+export function useSidebarTaskEdit(pageTasks: KanbanState["tasks"] = []) {
   const store = useAppStoreApi();
   const [editingTask, setEditingTask] = useState<SidebarTaskEditTarget | null>(null);
 
   const handleEditTask = useCallback(
     (item: TaskSwitcherItem) => {
       const state = store.getState();
-      const sourceTask = findTaskInSnapshots(
-        item.id,
-        state.kanbanMulti.snapshots,
-        state.kanban.tasks,
-      );
+      const sourceTask =
+        pageTasks.find((task) => task.id === item.id) ??
+        findTaskInSnapshots(item.id, state.kanbanMulti.snapshots, state.kanban.tasks);
       const target = buildSidebarTaskEditTarget(item, sourceTask);
       if (target) setEditingTask(target);
     },
-    [store],
+    [pageTasks, store],
   );
 
   return { editingTask, setEditingTask, handleEditTask };
@@ -96,6 +100,9 @@ export function SidebarTaskEditDialog({
               state: target.state,
               repositoryId: target.repositoryId,
               repositories: target.repositories,
+              primaryExecutorProfileId: target.primaryExecutorProfileId,
+              runnerEditable: target.runnerEditable,
+              runnerIneligibleReason: target.runnerIneligibleReason,
             }
           : null
       }

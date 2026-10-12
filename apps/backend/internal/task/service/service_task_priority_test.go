@@ -27,6 +27,11 @@ func (r *recordingPriorityTaskRepository) UpdateTask(ctx context.Context, task *
 	return r.TaskRepository.UpdateTask(ctx, task)
 }
 
+func (r *recordingPriorityTaskRepository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
+	r.fullWrites++
+	return r.TaskRepository.UpdateTaskPreservingDeferredLaunch(ctx, task)
+}
+
 func TestUpdateTask_PriorityOnlyUsesFieldScopedRepositoryWrite(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

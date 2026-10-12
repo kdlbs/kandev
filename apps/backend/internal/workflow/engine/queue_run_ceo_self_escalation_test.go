@@ -46,6 +46,23 @@ func TestQueueRunCallback_TargetWorkspaceCEO_SkipsSelfEscalation(t *testing.T) {
 	}
 }
 
+// TestQueueRunCallback_TargetWorkspaceCEO_SkipsPointerSelfEscalation covers
+// the pointer form accepted by agentErrorPayload. A matching pointer payload
+// must take the same self-escalation guard as the value form.
+func TestQueueRunCallback_TargetWorkspaceCEO_SkipsPointerSelfEscalation(t *testing.T) {
+	q := &fakeRunQueue{}
+	cb := QueueRunCallback{Adapter: q, CEOResolver: fakeCEO{id: "ceo-agent"}}
+	in := newOnAgentErrorInput("ceo-agent")
+	in.Payload = &OnAgentErrorPayload{FailedAgentID: "ceo-agent"}
+
+	if _, err := cb.Execute(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.calls) != 0 {
+		t.Fatalf("expected 0 calls (pointer self-escalation skipped), got %d: %+v", len(q.calls), q.calls)
+	}
+}
+
 // TestQueueRunCallback_TargetWorkspaceCEO_OnAgentErrorNonCEOStillQueues is
 // the no-regression witness: a sub-agent's failure must still wake the CEO.
 func TestQueueRunCallback_TargetWorkspaceCEO_OnAgentErrorNonCEOStillQueues(t *testing.T) {

@@ -11,6 +11,13 @@ type GitEventBase = {
 
 // Git status data
 export type GitStatusData = {
+  status_state?: "ready" | "loading" | "unavailable";
+  files_complete?: boolean;
+  detail_state?: "pending" | "ready" | "unavailable";
+  error_code?: string;
+  tracker_id?: string;
+  tracker_epoch?: number;
+  snapshot_revision?: number;
   branch: string;
   remote_branch: string | null;
   head_commit?: string;
@@ -60,6 +67,7 @@ export type GitCommitData = {
 
 // Git reset data
 export type GitResetData = {
+  repository_name?: string;
   previous_head: string;
   current_head: string;
   deleted_count: number;
@@ -67,6 +75,7 @@ export type GitResetData = {
 
 // Git branch switch data
 export type GitBranchSwitchData = {
+  repository_name?: string;
   previous_branch: string;
   current_branch: string;
   current_head: string;

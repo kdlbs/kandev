@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
 const originalMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
+const originalVisibilityState = Object.getOwnPropertyDescriptor(document, "visibilityState");
 
 afterEach(() => {
   cleanup();
@@ -18,6 +19,11 @@ afterEach(() => {
   } else {
     Reflect.deleteProperty(window, "matchMedia");
   }
+  if (originalVisibilityState) {
+    Object.defineProperty(document, "visibilityState", originalVisibilityState);
+  } else {
+    Reflect.deleteProperty(document, "visibilityState");
+  }
 });
 
 function installComputedAnimationStyles(overrides: Partial<CSSStyleDeclaration> = {}) {
@@ -31,7 +37,21 @@ function installComputedAnimationStyles(overrides: Partial<CSSStyleDeclaration> 
 }
 
 function installAnimate() {
-  const animation = { cancel: vi.fn() } as unknown as Animation;
+  let playState: AnimationPlayState = "running";
+  const animation = {
+    get playState() {
+      return playState;
+    },
+    cancel: vi.fn(() => {
+      playState = "idle";
+    }),
+    pause: vi.fn(() => {
+      playState = "paused";
+    }),
+    play: vi.fn(() => {
+      playState = "running";
+    }),
+  } as unknown as Animation;
   const animate = vi.fn(() => animation);
   Object.defineProperty(HTMLElement.prototype, "animate", {
     configurable: true,
@@ -62,6 +82,36 @@ function installReducedMotionMediaQuery(initialMatches = false) {
     },
   };
 }
+
+describe("CompositorPulse visibility", () => {
+  it("pauses and resumes its owned effect with document visibility", () => {
+    installComputedAnimationStyles();
+    const { animate, animation } = installAnimate();
+    const { getByTestId } = render(
+      <CompositorPulse data-testid="pulse" className="animate-pulse" />,
+    );
+    const pulse = getByTestId("pulse");
+
+    expect(animate).toHaveBeenCalledOnce();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(animation.pause).toHaveBeenCalledOnce();
+    expect(pulse.style.animationPlayState).toBe("paused");
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(animation.play).toHaveBeenCalledOnce();
+    expect(pulse.style.animationPlayState).toBe("");
+  });
+});
 
 describe("CompositorPulse", () => {
   it("replaces a CSS pulse with an infinite compositor opacity effect", () => {
@@ -107,8 +157,22 @@ describe("CompositorPulse", () => {
     const { getByTestId } = render(
       <CompositorPulse data-testid="pulse" className="animate-pulse" />,
     );
+    const pulse = getByTestId("pulse");
 
-    expect(getByTestId("pulse").style.animation).toBe("");
+    expect(pulse.style.animation).toBe("");
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(pulse.style.animationPlayState).toBe("paused");
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(pulse.style.animationPlayState).toBe("");
   });
 
   it("does not override CSS reduced-motion suppression", () => {

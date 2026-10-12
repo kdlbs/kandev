@@ -16,7 +16,7 @@ import { createWorkspaceAction } from "@/app/actions/workspaces";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { RequestIndicator } from "@/components/request-indicator";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   useWorkspaceSectionCounts,
   WorkspaceSectionStats,
@@ -124,7 +124,7 @@ function WorkspaceListItem({ workspace }: { workspace: Workspace }) {
 export function WorkspacesPageClient() {
   const items = useAppStore((state) => state.workspaces.items);
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const setWorkspaces = useAppStore((state) => state.setWorkspaces);
+  const storeApi = useAppStoreApi();
   const [isAdding, setIsAdding] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const createRequest = useRequest(createWorkspaceAction);
@@ -137,15 +137,10 @@ export function WorkspacesPageClient() {
     if (!newWorkspaceName.trim()) return;
     try {
       const created = await createRequest.run({ name: newWorkspaceName.trim() });
-      setWorkspaces([
-        // Both lists go through the shared mapper. Hand-copying fields here is
-        // how visibility and the caller's scopes got dropped from the store the
-        // first time, which silently rendered a workspace read-only to its own
-        // owner.
+      const current = storeApi.getState();
+      current.setWorkspaces([
         mapWorkspaceItem(created),
-        // Existing entries are already store items; re-listing their fields by
-        // hand is what dropped visibility and scopes before.
-        ...items,
+        ...current.workspaces.items.filter((workspace) => workspace.id !== created.id),
       ]);
       setNewWorkspaceName("");
       setIsAdding(false);
@@ -167,7 +162,7 @@ export function WorkspacesPageClient() {
             {t("workspaces:manageYourWorkspacesAndWorkflows")}
           </p>
         </div>
-        <Button size="sm" className={settingsActionClassName()} onClick={() => setIsAdding(true)}>
+        <Button className={settingsActionClassName()} onClick={() => setIsAdding(true)}>
           <IconPlus className="h-4 w-4 mr-2" />
           {t("workspaces:addWorkspace")}
         </Button>

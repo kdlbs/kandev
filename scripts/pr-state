@@ -2,19 +2,22 @@
 # pr-state — emit a raw JSON snapshot of PR CI and review state.
 #
 # Usage:
-#   scripts/pr-state [--summary] [--all] [--trusted-reviewer <login>] <PR>
-#   scripts/pr-state --comment <comment_id>
+#   scripts/pr-state [--summary | --compact] [--all] [--trusted-reviewer <login>] <PR>
+#   scripts/pr-state --comment <comment_id>  # review or top-level issue comment
 #   scripts/pr-state --job-log <job_id>
 #
 # Raw output:
 #   JSON object with:
 #   - pr: { number, branch, is_cross_repository, base_ref_name, base_head_oid,
-#       merge_base_oid, base_advanced_since_head, head_repository_owner,
+#       base_target_oid, merge_base_oid, base_advanced_since_head, head_repository_owner,
 #       head_repository_name, head_ref_name, head_ref_oid, maintainer_can_modify }
 #   - since: { head_oid, committed_at } or null
+#   - merge_state: { state, mergeable, mergeStateStatus, reviewDecision, headRefOid } or null
 #   - checks: [{ type, name, workflow, status, conclusion, details_url, target_url, run_id, job_id }]
 #   - checks_head_sha: <SHA or null>
 #   - checks_snapshot_complete: <boolean>
+#   - required_status_checks: [<status context>]
+#   - required_status_checks_known: <boolean>
 #   - approval_required_runs: [{ run_id, name, workflow, status, conclusion, head_sha, url }]
 #   - review_threads: [{ thread_id, is_resolved, path, comment_id, comment_created_at, author, body_preview }]
 #   - hidden_unresolved_threads: [{ thread_id, comment_id, author, path, body_preview }]
@@ -30,17 +33,21 @@
 #   - errors: [{ source, message }]
 #
 # Summary output (--summary):
+#   Includes closing-head merge_state, plus:
 #   JSON object with:
 #   - pr: { number, branch, is_cross_repository, base_ref_name, base_head_oid,
-#       merge_base_oid, base_advanced_since_head, head_repository_owner,
+#       base_target_oid, merge_base_oid, base_advanced_since_head, head_repository_owner,
 #       head_repository_name, head_ref_name, head_ref_oid, maintainer_can_modify }
 #   - since: { head_oid, committed_at } or null
 #   - failed_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url, target_url }]
 #   - pending_checks: [{ name, workflow, status, run_id, job_id, details_url, target_url }]
 #   - successful_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url, target_url }]
+#   - terminal_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url, target_url }]
 #   - passed_check_count: <N>
 #   - checks_head_sha: <SHA or null>
 #   - checks_snapshot_complete: <boolean>
+#   - required_status_checks: [<status context>]
+#   - required_status_checks_known: <boolean>
 #   - approval_required_runs: [{ run_id, name, workflow, status, conclusion, head_sha, url }]
 #   - unresolved_review_thread_count: <N>
 #   - filtered_review_thread_count: <N>
@@ -55,9 +62,16 @@
 #   - summary_notes: [<short human-readable notes>]
 #   - errors: [{ source, message }]
 #
+# Compact output (--compact):
+#   Summary output without successful_checks or terminal_checks rows.
+#   Adds skipped_check_count and neutral_check_count. Keeps review bodies,
+#   failed/pending checks, policy, errors, and evidence-completeness fields.
+#   Use --summary for pr-await's terminal confirmation fingerprint.
+#
 # Comment output (--comment):
-#   JSON object for one PR review comment:
-#   - comment_id, author, body, path, line, original_line, commit_id, html_url, created_at, updated_at
+#   JSON object for one PR review or top-level issue comment:
+#   - comment_id, comment_type, author, body, path, line, original_line,
+#     commit_id, html_url, created_at, updated_at
 #
 # Job-log output (--job-log):
 #   Bounded context around the most likely failing test or step. The GitHub
@@ -78,6 +92,7 @@ usage() {
 
 INCLUDE_ALL=0
 SUMMARY=0
+COMPACT=0
 TRUSTED_REVIEWER=''
 COMMENT_ID=''
 JOB_LOG_ID=''
@@ -90,6 +105,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --summary)
       SUMMARY=1
+      shift
+      ;;
+    --compact)
+      SUMMARY=1
+      COMPACT=1
       shift
       ;;
     --trusted-reviewer)
@@ -149,13 +169,19 @@ else
 fi
 
 errors='[]'
+GH_ERROR_FILE="$(mktemp "${TMPDIR:-/tmp}/pr-state-gh-error-XXXXXX")"
+state_tmp_dir=''
 pr_json='{}'
 pr_view_succeeded=false
 checks_json='[]'
 checks_head_sha=''
 checks_snapshot_complete=false
+merge_state_json='null'
+required_status_checks_json='[]'
+required_status_checks_known=false
 base_ref_name=''
 base_head_oid=''
+base_target_oid=''
 merge_base_oid=''
 base_advanced_since_head=null
 approval_required_runs_json='[]'
@@ -169,17 +195,46 @@ since_json='null'
 unresolved_review_thread_count=null
 filtered_review_thread_count=null
 
+cleanup_temp_files() {
+  rm -f "$GH_ERROR_FILE"
+  [[ -z "$state_tmp_dir" ]] || rm -rf "$state_tmp_dir"
+}
+trap cleanup_temp_files EXIT
+
+rate_limit_text() {
+  local text=$1
+  local lower
+  lower="$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')"
+  [[ "$lower" == *'rate limit'* || "$lower" == *'secondary rate'* ||
+    "$lower" == *'secondary-rate'* || "$lower" == *'retry-after'* ||
+    "$lower" == *'x-ratelimit'* || "$lower" == *'http 429'* ||
+    "$lower" == *'status 429'* ]]
+}
+
+rate_limit_detail() {
+  local detail=''
+  [[ -s "$GH_ERROR_FILE" ]] || return 0
+  detail="$(tr '\r\n' '  ' <"$GH_ERROR_FILE" | cut -c1-500)"
+  rate_limit_text "$detail" || return 0
+  printf '%s' "$detail"
+}
+
 add_error() {
   local source=$1
   local message=$2
+  local detail
+  detail="$(rate_limit_detail)"
+  [[ -z "$detail" ]] || message="$message: $detail"
+  : >"$GH_ERROR_FILE"
   errors="$(jq -cn --argjson prev "$errors" --arg source "$source" --arg message "$message" \
     '$prev + [{source: $source, message: $message}]')"
 }
 
 gh_json() {
+  : >"$GH_ERROR_FILE"
   env -u GH_DEBUG -u GITHUB_DEBUG -u GH_TRACE -u GITHUB_TRACE \
     GH_PAGER=cat GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 \
-    gh "$@" 2>/dev/null
+    gh "$@" 2>"$GH_ERROR_FILE"
 }
 
 emit_comment_json() {
@@ -188,6 +243,7 @@ emit_comment_json() {
   local owner
   local repo
   local comment_json
+  local comment_type
 
   repo_json="$(gh_json repo view --json owner,name)"
   owner="$(jq -r '.owner.login // ""' <<<"$repo_json")"
@@ -197,13 +253,18 @@ emit_comment_json() {
     return 1
   fi
 
-  if ! comment_json="$(gh_json api "repos/$owner/$repo/pulls/comments/$comment_id")"; then
+  if comment_json="$(gh_json api "repos/$owner/$repo/pulls/comments/$comment_id")"; then
+    comment_type='review'
+  elif comment_json="$(gh_json api "repos/$owner/$repo/issues/comments/$comment_id")"; then
+    comment_type='issue'
+  else
     printf 'failed to fetch PR comment %s\n' "$comment_id" >&2
     return 1
   fi
 
-  jq -c '{
+  jq -c --arg comment_type "$comment_type" '{
     comment_id: (.id // null),
+    comment_type: $comment_type,
     author: (.user.login // "unknown"),
     body: (.body // ""),
     path: (.path // null),
@@ -328,6 +389,8 @@ extract_issue_comments_json() {
       actionable: (
         (((.author.login // "unknown") == "github-actions") or ((.author.login // "unknown") == "github-actions[bot]"))
         and (
+          (((.body // "") | contains("<!-- kandev-docs-cloudflare-preview -->")) | not)
+          and
           (((.body // "") | gsub("^[[:space:]]+|[[:space:]]+$"; ""))
             | test("^<!-- opencode-review:no-findings -->\\n\\*\\*OpenCode review complete\\*\\*\\n\\nOpenCode model: `[^`\\n]+`\\n\\nNo suggestions found for commit `[0-9A-Fa-f]{7,40}`\\.$")
             | not)
@@ -562,29 +625,46 @@ summarize_state_json() {
       (.status == "completed" and .conclusion == "success")
       or (.status == "success" and (.conclusion == null or .conclusion == "success"));
 
-    {
+    (effective_checks) as $effective
+    | (if .required_status_checks_known == true then
+        [
+          (.required_status_checks // [])[] as $required
+          | select(any($effective[]?; .name == $required) | not)
+          | {name: $required, workflow: null, status: "missing", run_id: null,
+             job_id: null, details_url: null, target_url: null}
+        ]
+      else [] end) as $missing_required
+    | {
       pr,
       since,
+      merge_state,
       checks_head_sha,
       checks_snapshot_complete,
+      required_status_checks: (.required_status_checks // []),
+      required_status_checks_known: (.required_status_checks_known == true),
       approval_required_runs: (.approval_required_runs // []),
       failed_checks: [
-        effective_checks[]
+        $effective[]
         | select(terminal_failure_status and bad_conclusion)
         | {name, workflow, status, conclusion, run_id, job_id, details_url, target_url}
       ],
-      pending_checks: [
-        effective_checks[]
+      pending_checks: ([
+        $effective[]
         | select(pending_status and .conclusion == null)
         | {name, workflow, status, run_id, job_id, details_url, target_url}
-      ],
+      ] + $missing_required),
       successful_checks: [
-        effective_checks[]
+        $effective[]
         | select(successful_check)
         | {name, workflow, status, conclusion, run_id, job_id, details_url, target_url}
       ],
-      check_count: ([effective_checks[]] | length),
-      passed_check_count: ([effective_checks[] | select(successful_check)] | length),
+      terminal_checks: [
+        $effective[]
+        | select(.conclusion == "skipped" or .conclusion == "neutral")
+        | {name, workflow, status, conclusion, run_id, job_id, details_url, target_url}
+      ],
+      check_count: (($effective | length) + ($missing_required | length)),
+      passed_check_count: ([$effective[] | select(successful_check)] | length),
       unresolved_review_thread_count,
       filtered_review_thread_count,
       review_evidence,
@@ -597,6 +677,11 @@ summarize_state_json() {
       hidden_unresolved_threads: (.hidden_unresolved_threads // []),
       summary_notes: (
         [
+          if .required_status_checks_known != true then
+            "required status check policy is unavailable; terminal check counts are not sufficient"
+          else
+            empty
+          end,
           if (
             (.unresolved_review_thread_count | type) == "number"
             and .unresolved_review_thread_count > 0
@@ -660,6 +745,10 @@ fetch_head_commit_json() {
         repository(owner: $owner, name: $repo) {
           pullRequest(number: $pr) {
             headRefOid
+            state
+            mergeable
+            mergeStateStatus
+            reviewDecision
             commits(last: 1) {
               nodes {
                 commit {
@@ -674,7 +763,8 @@ fetch_head_commit_json() {
     -f owner="$owner" -f repo="$repo" -F pr="$pr_number" |
     jq -c '{
       head_oid: (.data.repository.pullRequest.headRefOid // .data.repository.pullRequest.commits.nodes[0].commit.oid // null),
-      committed_at: (.data.repository.pullRequest.commits.nodes[0].commit.committedDate // null)
+      committed_at: (.data.repository.pullRequest.commits.nodes[0].commit.committedDate // null),
+      merge_state: (.data.repository.pullRequest | {state, mergeable, mergeStateStatus, reviewDecision, headRefOid})
     }'
 }
 
@@ -690,14 +780,109 @@ fetch_base_ref_json() {
           pullRequest(number: $pr) {
             baseRefName
             baseRefOid
+            baseRef {
+              target {
+                oid
+              }
+            }
           }
         }
       }' \
     -f owner="$owner" -f repo="$repo" -F pr="$pr_number" |
     jq -c '{
       base_ref_name: (.data.repository.pullRequest.baseRefName // null),
-      base_head_oid: (.data.repository.pullRequest.baseRefOid // null)
+      base_head_oid: (.data.repository.pullRequest.baseRefOid // null),
+      base_target_oid: (.data.repository.pullRequest.baseRef.target.oid // null)
     }'
+}
+
+fetch_legacy_required_status_checks_json() {
+  local response status body succeeded=false
+  if response="$(gh_json api "$1" --include)"; then
+    succeeded=true
+  fi
+  status="$(awk '/^HTTP\// {code=$2} END {print code}' <<<"$response")"
+  body="$(awk 'body {print} !body && /^\r?$/ {body=1}' <<<"$response")"
+  # A generic 404 can hide inaccessible policy. Only the explicit absence
+  # response establishes that this branch has no legacy status requirements.
+  if [[ "$status" == '404' ]] && jq -e '.message == "Branch not protected"' >/dev/null 2>&1 <<<"$body"; then
+    printf '[]\n'
+  elif [[ "$succeeded" == true && "$status" == '200' ]]; then
+    jq -ce 'select(type == "object" and (.contexts | type) == "array" and (.checks | type) == "array")
+      | [.checks[]?.context, .contexts[]?] | map(select(type == "string" and length > 0)) | unique' <<<"$body"
+  else
+    return 1
+  fi
+}
+
+fetch_required_status_checks_json() {
+  local owner=$1
+  local repo=$2
+  local base_ref=$3
+  local default_ref=$4
+  local rulesets_pages rulesets_json details='[]' ruleset_id detail
+  local ruleset_required='[]' legacy_required='[]'
+
+  [[ -n "$owner" && -n "$repo" && -n "$base_ref" ]] || return 1
+
+  # Rulesets expose the required status contexts, while the list endpoint only
+  # exposes their IDs. Fetch the active rule definitions before deciding that a
+  # small rollup is complete. Legacy branch protection can coexist with
+  # rulesets, so query it as well and union both policy sources.
+  if rulesets_pages="$(gh_json api --paginate "repos/$owner/$repo/rulesets?per_page=100")"; then
+    rulesets_json="$(jq -cs '[.[][]?]' <<<"$rulesets_pages")" || return 1
+    while IFS= read -r ruleset_id; do
+      [[ -n "$ruleset_id" ]] || continue
+      if ! detail="$(gh_json api "repos/$owner/$repo/rulesets/$ruleset_id")"; then
+        return 1
+      fi
+      jq -e . >/dev/null 2>&1 <<<"$detail" || return 1
+      details="$(jq -cn --argjson prev "$details" --argjson detail "$detail" '$prev + [$detail]')" || return 1
+    done < <(jq -r '.[] | select(.target == "branch" and .enforcement == "active") | .id // empty' <<<"$rulesets_json")
+
+    # GitHub uses fnmatch semantics for ref conditions. Exact names and the
+    # documented special values are evaluated below; unsupported glob syntax
+    # must make policy discovery unknown instead of silently dropping a rule.
+    ruleset_required="$(jq -c --arg base "$base_ref" --arg default "$default_ref" '
+      def matches_ref($candidate):
+        $candidate == "~ALL"
+        or $candidate == $base
+        or $candidate == ("refs/heads/" + $base)
+        or ($candidate == "~DEFAULT_BRANCH" and $default != "" and $base == $default);
+      def unsupported_ref_pattern:
+        contains("*") or contains("?") or contains("[") or contains("]") or contains("\\");
+      if any(
+        .[]
+        | select(.enforcement == "active")
+        | ((.conditions.ref_name.include // []) + (.conditions.ref_name.exclude // []))[]?
+        ; unsupported_ref_pattern
+      ) then
+        error("ruleset ref pattern cannot be evaluated safely")
+      else
+        [
+          .[]
+          | select(.enforcement == "active")
+          | select(any((.conditions.ref_name.include // [])[]?; matches_ref(.)))
+          | select(any((.conditions.ref_name.exclude // [])[]?; matches_ref(.)) | not)
+          | .rules[]?
+          | select(.type == "required_status_checks")
+          | .parameters.required_status_checks[]?
+        ] as $required_checks
+        | if any($required_checks[]?; (.integration_id? // null) != null) then
+            error("ruleset required check integration source cannot be verified")
+          else
+            [$required_checks[]? | .context // empty] | unique
+          end
+      end
+    ' <<<"$details" 2>/dev/null)" || return 1
+
+    legacy_required="$(fetch_legacy_required_status_checks_json "repos/$owner/$repo/branches/$base_ref/protection/required_status_checks")" || return 1
+
+    jq -cn --argjson ruleset "$ruleset_required" --argjson legacy "$legacy_required" '$ruleset + $legacy | unique'
+    return
+  fi
+
+  return 1
 }
 
 fetch_merge_base_json() {
@@ -790,9 +975,11 @@ fetch_review_threads_nodes_json() {
 
 repo_owner=''
 repo_name=''
-if repo_json="$(gh_json repo view --json owner,name)"; then
+default_branch_name=''
+if repo_json="$(gh_json repo view --json owner,name,defaultBranchRef)"; then
   repo_owner="$(jq -r '.owner.login // ""' <<<"$repo_json")"
   repo_name="$(jq -r '.name // ""' <<<"$repo_json")"
+  default_branch_name="$(jq -r '.defaultBranchRef.name // ""' <<<"$repo_json")"
 else
   add_error "repo" "gh repo view failed"
 fi
@@ -814,6 +1001,7 @@ if pr_view_json="$(gh_json pr view "$PR" --json number,baseRefName,headRefName,h
     is_cross_repository: (if has("isCrossRepository") then .isCrossRepository else null end),
     base_ref_name: (.baseRefName // null),
     base_head_oid: null,
+    base_target_oid: null,
     merge_base_oid: null,
     base_advanced_since_head: null,
     head_repository_owner: (.headRepositoryOwner.login // null),
@@ -840,8 +1028,17 @@ if [[ "$pr_view_succeeded" == "true" && -n "$repo_owner" && -n "$repo_name" && -
   if base_context_json="$(fetch_base_ref_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
     base_ref_name="$(jq -r '.base_ref_name // ""' <<<"$base_context_json")"
     base_head_oid="$(jq -r '.base_head_oid // ""' <<<"$base_context_json")"
+    base_target_oid="$(jq -r '.base_target_oid // ""' <<<"$base_context_json")"
   else
     add_error "base" "gh api graphql base ref lookup failed"
+  fi
+
+  if [[ -n "$base_ref_name" ]]; then
+    if required_status_checks_json="$(fetch_required_status_checks_json "$repo_owner" "$repo_name" "$base_ref_name" "$default_branch_name")"; then
+      required_status_checks_known=true
+    else
+      add_error "required_status_checks" "required status check policy lookup failed"
+    fi
   fi
 
   if [[ -n "$base_head_oid" && -n "$checks_head_sha" ]]; then
@@ -863,11 +1060,13 @@ if [[ "$pr_view_succeeded" == "true" && -n "$repo_owner" && -n "$repo_name" && -
   pr_json="$(jq -c \
     --arg base_ref_name "$base_ref_name" \
     --arg base_head_oid "$base_head_oid" \
+    --arg base_target_oid "$base_target_oid" \
     --arg merge_base_oid "$merge_base_oid" \
     --argjson base_advanced_since_head "$base_advanced_since_head" \
     '. + {
       base_ref_name: (if $base_ref_name == "" then null else $base_ref_name end),
       base_head_oid: (if $base_head_oid == "" then null else $base_head_oid end),
+      base_target_oid: (if $base_target_oid == "" then null else $base_target_oid end),
       merge_base_oid: (if $merge_base_oid == "" then null else $merge_base_oid end),
       base_advanced_since_head: $base_advanced_since_head
     }' <<<"$pr_json")"
@@ -940,6 +1139,7 @@ closing_head_oid=''
 if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
   if closing_since_json="$(fetch_head_commit_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
     closing_head_oid="$(jq -r '.head_oid // ""' <<<"$closing_since_json")"
+    merge_state_json="$(jq -c '.merge_state // null' <<<"$closing_since_json")"
     if [[ -z "$closing_head_oid" ]]; then
       add_error "closing_head" "head commit SHA unavailable after evidence collection"
     fi
@@ -955,6 +1155,7 @@ if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
   if closing_base_context_json="$(fetch_base_ref_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
     closing_base_ref_name="$(jq -r '.base_ref_name // ""' <<<"$closing_base_context_json")"
     closing_base_head_oid="$(jq -r '.base_head_oid // ""' <<<"$closing_base_context_json")"
+    closing_base_target_oid="$(jq -r '.base_target_oid // ""' <<<"$closing_base_context_json")"
     closing_merge_base_oid=''
     comparison_head_oid="$closing_head_oid"
     [[ -n "$comparison_head_oid" ]] || comparison_head_oid="$checks_head_sha"
@@ -967,6 +1168,7 @@ if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
     fi
     base_ref_name="$closing_base_ref_name"
     base_head_oid="$closing_base_head_oid"
+    base_target_oid="$closing_base_target_oid"
     merge_base_oid="$closing_merge_base_oid"
     base_advanced_since_head=null
     if [[ -n "$base_head_oid" && -n "$merge_base_oid" ]]; then
@@ -980,17 +1182,20 @@ if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
     add_error "closing_base" "gh api graphql base ref lookup failed after evidence collection"
     base_ref_name=''
     base_head_oid=''
+    base_target_oid=''
     merge_base_oid=''
     base_advanced_since_head=null
   fi
   pr_json="$(jq -c \
     --arg base_ref_name "$base_ref_name" \
     --arg base_head_oid "$base_head_oid" \
+    --arg base_target_oid "$base_target_oid" \
     --arg merge_base_oid "$merge_base_oid" \
     --argjson base_advanced_since_head "$base_advanced_since_head" \
     '. + {
       base_ref_name: (if $base_ref_name == "" then null else $base_ref_name end),
       base_head_oid: (if $base_head_oid == "" then null else $base_head_oid end),
+      base_target_oid: (if $base_target_oid == "" then null else $base_target_oid end),
       merge_base_oid: (if $merge_base_oid == "" then null else $merge_base_oid end),
       base_advanced_since_head: $base_advanced_since_head
     }' <<<"$pr_json")"
@@ -1005,14 +1210,11 @@ fi
 review_evidence_json="$(review_evidence_json "$opening_head_oid" "$closing_head_oid" "$checks_head_sha" "$reviews_known" "$reviews_api_json" "$is_cross_repository" "$trusted_workflow_json")"
 
 state_tmp_dir="$(mktemp -d)"
-cleanup_state_tmp() {
-  rm -rf "$state_tmp_dir"
-}
-trap cleanup_state_tmp EXIT
 
 printf '%s\n' "$pr_json" >"$state_tmp_dir/pr.json"
 printf '%s\n' "$since_json" >"$state_tmp_dir/since.json"
 printf '%s\n' "$checks_json" >"$state_tmp_dir/checks.json"
+printf '%s\n' "$required_status_checks_json" >"$state_tmp_dir/required_status_checks.json"
 printf '%s\n' "$approval_required_runs_json" >"$state_tmp_dir/approval_required_runs.json"
 printf '%s\n' "$review_threads_json" >"$state_tmp_dir/review_threads.json"
 printf '%s\n' "$hidden_unresolved_threads_json" >"$state_tmp_dir/hidden_unresolved_threads.json"
@@ -1025,6 +1227,7 @@ state_json="$(jq -cn \
   --slurpfile pr "$state_tmp_dir/pr.json" \
   --slurpfile since "$state_tmp_dir/since.json" \
   --slurpfile checks "$state_tmp_dir/checks.json" \
+  --slurpfile required_status_checks "$state_tmp_dir/required_status_checks.json" \
   --slurpfile approval_required_runs "$state_tmp_dir/approval_required_runs.json" \
   --slurpfile review_threads "$state_tmp_dir/review_threads.json" \
   --slurpfile hidden_unresolved_threads "$state_tmp_dir/hidden_unresolved_threads.json" \
@@ -1032,16 +1235,21 @@ state_json="$(jq -cn \
   --slurpfile review_evidence "$state_tmp_dir/review_evidence.json" \
   --slurpfile issue_comments "$state_tmp_dir/issue_comments.json" \
   --arg checks_head_sha "$checks_head_sha" \
+  --argjson merge_state "$merge_state_json" \
   --argjson checks_snapshot_complete "$checks_snapshot_complete" \
+  --argjson required_status_checks_known "$required_status_checks_known" \
   --argjson unresolved_review_thread_count "$unresolved_review_thread_count" \
   --argjson filtered_review_thread_count "$filtered_review_thread_count" \
   --slurpfile errors "$state_tmp_dir/errors.json" \
   '{
     pr: $pr[0],
     since: $since[0],
+    merge_state: $merge_state,
     checks: $checks[0],
     checks_head_sha: (if $checks_head_sha == "" then null else $checks_head_sha end),
     checks_snapshot_complete: $checks_snapshot_complete,
+    required_status_checks: $required_status_checks[0],
+    required_status_checks_known: $required_status_checks_known,
     approval_required_runs: $approval_required_runs[0],
     review_threads: $review_threads[0],
     hidden_unresolved_threads: $hidden_unresolved_threads[0],
@@ -1054,7 +1262,14 @@ state_json="$(jq -cn \
     errors: $errors[0]
   }')"
 
-if [[ "$SUMMARY" == "1" ]]; then
+if [[ "$COMPACT" == "1" ]]; then
+  summarize_state_json <<<"$state_json" | jq -c '
+    . + {
+      skipped_check_count: ([.terminal_checks[] | select(.conclusion == "skipped")] | length),
+      neutral_check_count: ([.terminal_checks[] | select(.conclusion == "neutral")] | length)
+    } | del(.successful_checks, .terminal_checks)
+  '
+elif [[ "$SUMMARY" == "1" ]]; then
   summarize_state_json <<<"$state_json"
 else
   printf '%s\n' "$state_json"

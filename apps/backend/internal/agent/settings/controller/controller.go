@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/singleflight"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/discovery"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -40,16 +42,24 @@ func buildCommandString(cmd []string) string {
 
 var (
 	ErrAgentNotFound                        = errors.New("agent not found")
+	ErrAgentFeatureDisabled                 = errors.New("agent feature is disabled")
 	ErrAgentAlreadyExists                   = errors.New("agent already exists")
 	ErrAgentProfileNotFound                 = errors.New("agent profile not found")
 	ErrAgentMcpUnsupported                  = errors.New("mcp not supported by agent")
 	ErrModelRequired                        = errors.New("model is required for agent profiles")
+	ErrProfileOrderStale                    = errors.New("profile order is stale")
+	ErrProfileOrderUnsupported              = errors.New("profile order unsupported")
 	ErrLogoNotAvailable                     = errors.New("logo not available for agent")
 	ErrInvalidSlug                          = errors.New("display name must produce a valid slug")
 	ErrCommandRequired                      = errors.New("command is required")
 	ErrInvalidProfileEnvVars                = errors.New("invalid profile env vars")
 	ErrInvalidCommandPrefix                 = errors.New("invalid command prefix")
+	ErrInvalidProviderConfig                = errors.New("invalid OpenAI-compatible provider configuration")
+	ErrRequireExactModelNeedsModel          = errors.New("exact model requires a concrete model")
+	ErrRequireExactModelUnsupported         = errors.New("exact model is not supported for this profile")
 	ErrUnknownMCPStrategy                   = errors.New("unknown MCP strategy")
+	ErrUnknownCustomAgentProtocol           = errors.New("unknown custom agent protocol")
+	ErrMCPStrategyNotApplicable             = errors.New("MCP strategy does not apply to this protocol")
 	ErrNotCustomTUIAgent                    = errors.New("agent is not a custom TUI agent")
 	ErrDynamicAgentRoutingDisabled          = errors.New("dynamic agent routing is disabled")
 	ErrDynamicProfileCandidatesRequired     = errors.New("dynamic profile candidates are required")
@@ -70,11 +80,13 @@ type Controller struct {
 	automationDeps              AutomationDependencyChecker
 	utilityDeps                 UtilityDependencyChecker
 	mcpService                  *mcpconfig.Service
+	cursorMCPDiscoverySource    *cursorMCPDiscoverySource
 	hostUtility                 hostUtilityProvider
 	jobStore                    *JobStore
 	updateJobStore              *AgentUpdateJobStore
 	runtimeUpdater              RuntimeUpdater
 	managedRuntimeSelections    managedruntime.SelectionStore
+	openCodeMigrationGuard      OpenCodeMigrationGuard
 	maintenance                 *maintenanceCoordinator
 	hub                         JobBroadcaster
 	logger                      *logger.Logger
@@ -84,7 +96,20 @@ type Controller struct {
 	runtimeUpdateStatusNow      func() time.Time
 	runtimeUpdateStatusResolver RuntimeUpdateStatusResolver
 	runtimeUpdateStatusLookup   chan struct{}
+	runtimeUpdateStatusFlight   singleflight.Group
+	runtimeAutoUpdateStore      *managedruntime.AutoUpdateStore
+	runtimeUpdateNotifier       RuntimeUpdateNotifier
+	runtimeBackgroundMu         sync.Mutex
+	runtimeBackground           *runtimeUpdateBackground
+	runtimeAutoUpdateMu         sync.Mutex
+	runtimeUpdatePassMu         sync.Mutex
 	dynamicAgentRoutingEnabled  bool
+
+	hostCLIMu         sync.Mutex
+	hostCLIRunner     hostcli.Runner
+	hostCLIModels     map[string]hostCLIModelEntry
+	hostCLIGeneration map[string]uint64
+	hostCLISlots      chan struct{}
 }
 
 // SetDynamicAgentRoutingEnabled applies the authoritative runtime flag to the
@@ -246,6 +271,10 @@ type hostUtilityProvider interface {
 	) (hostutility.ModelConfigResolution, error)
 }
 
+type profileHostUtilityProvider interface {
+	ProbeProfileCapabilities(context.Context, string, hostutility.ProfileCapabilityRequest) (hostutility.ProfileCapabilityResult, error)
+}
+
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,
 ) *Controller {
 	return &Controller{
@@ -254,10 +283,13 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 		agentRegistry:             agentRegistry,
 		sessionChecker:            sessionChecker,
 		mcpService:                mcpconfig.NewService(repo),
+		cursorMCPDiscoverySource:  newCursorMCPDiscoverySource(),
 		logger:                    log.WithFields(zap.String("component", "agent-settings-controller")),
 		runtimeUpdateStatusCache:  make(map[string]runtimeUpdateStatusCacheEntry),
 		runtimeUpdateStatusNow:    time.Now,
 		runtimeUpdateStatusLookup: make(chan struct{}, runtimeUpdateStatusMaxConcurrent),
+		hostCLIRunner:             hostcli.ExecRunner{},
+		hostCLIModels:             make(map[string]hostCLIModelEntry),
 	}
 }
 
@@ -275,6 +307,7 @@ func (c *Controller) SetHostUtility(h *hostutility.Manager) {
 	c.SetRuntimeUpdater(&hostRuntimeUpdater{
 		host:     h,
 		executor: execDirectCommandExecutor{},
+		logger:   c.logger,
 	})
 }
 
@@ -293,6 +326,17 @@ func (c *Controller) SetManagedRuntimeSelectionStore(store managedruntime.Select
 	c.initializeUpdateJobStore()
 }
 
+// OpenCodeMigrationGuard reserves lifecycle and utility admission around the
+// authoritative selection write.
+type OpenCodeMigrationGuard func(context.Context) (context.Context, func(), error)
+
+func (c *Controller) SetOpenCodeMigrationGuard(guard OpenCodeMigrationGuard) {
+	c.openCodeMigrationGuard = guard
+	if c.updateJobStore != nil {
+		c.updateJobStore.SetOpenCodeMigrationGuard(guard)
+	}
+}
+
 // SetJobBroadcaster initializes the install job store with a WS broadcaster
 // for streaming install progress. Called once during handler registration.
 // If unset (hub == nil), the streaming install API returns
@@ -309,24 +353,120 @@ func (c *Controller) SetJobBroadcaster(hub JobBroadcaster) {
 	c.maintenance = newMaintenanceCoordinator()
 	c.jobStore = NewJobStore(hub, c.logger.Zap(), func(agentName string) {
 		c.InvalidateDiscoveryCache()
-		// Kick a fresh capability probe immediately so the UI doesn't sit on
-		// stale "not_installed" until the next periodic poll. When the probe
-		// finishes, re-broadcast the updated availability so any open profile
-		// page transitions out of "Probing…" without a manual refresh.
-		if c.hostUtility != nil {
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				if _, err := c.hostUtility.Refresh(ctx, agentName); err != nil {
-					c.logger.Debug("post-install capability refresh failed",
-						zap.String("agent", agentName), zap.Error(err))
-				}
-				c.BroadcastAvailableAgents()
-			}()
-		}
+		c.kickCapabilityProbe(agentName)
+		// An install re-runs the agent's npm install script, so the vendor CLI
+		// on disk may be a different release with a different model list.
+		c.hostCLIInstallSucceeded(agentName)
 		c.logger.Info("install succeeded", zap.String("agent", agentName))
 	}, c.maintenance)
 	c.initializeUpdateJobStore()
+}
+
+// kickCapabilityProbe refreshes one agent's capability cache off the request
+// path. The periodic poll would get there eventually, but until it does the
+// profile editor sits on a stale status — "not_installed" after an install, or
+// "not_configured" for an agent registered after boot, which is every custom
+// ACP agent. Re-broadcasting availability afterwards moves any open profile
+// page out of "Probing…" without a manual refresh.
+func (c *Controller) kickCapabilityProbe(agentName string) {
+	c.probeAndAdoptModel(agentName, "")
+}
+
+// probeAndAdoptModel refreshes an agent's capabilities off the request path and,
+// when profileID names a profile, copies the probed default into it if it still
+// has no model.
+//
+// ProfileReconciler already fills an empty model from the probe, but it runs
+// once during startup (see backendapp/main.go), so an agent registered
+// afterwards would keep an empty model until the next restart and its sessions
+// would silently take whatever the agent defaults to.
+func (c *Controller) probeAndAdoptModel(agentName, profileID string) {
+	if c.hostUtility == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		caps, err := c.hostUtility.Refresh(ctx, agentName)
+		if err != nil {
+			c.logger.Debug("capability refresh failed",
+				zap.String("agent", agentName), zap.Error(err))
+		} else if profileID != "" {
+			c.adoptProbedModel(ctx, profileID, caps)
+		}
+		c.BroadcastAvailableAgents()
+	}()
+}
+
+// adoptProbedModel fills an empty profile model from the probe. A model the
+// operator already chose is left alone: overwriting it is exactly the silent
+// fallback the reconciler refuses to make.
+func (c *Controller) adoptProbedModel(
+	ctx context.Context,
+	profileID string,
+	caps hostutility.AgentCapabilities,
+) {
+	if caps.CurrentModelID == "" {
+		return
+	}
+	adopter, ok := c.repo.(store.AgentProfileModelAdopter)
+	if !ok {
+		c.logger.Debug("profile store cannot adopt a probed model",
+			zap.String("profile_id", profileID))
+		return
+	}
+	updated, err := adopter.UpdateAgentProfileModelIfEmpty(ctx, profileID, caps.CurrentModelID)
+	if err != nil {
+		c.logger.Debug("adopting the probed model failed",
+			zap.String("profile_id", profileID), zap.Error(err))
+		return
+	}
+	if updated {
+		c.broadcastProfileUpdated(ctx, profileID)
+	}
+}
+
+// broadcastProfileUpdated tells settings clients that background model
+// adoption changed a profile. Custom ACP profiles are global today, but keep
+// workspace routing here so this path cannot leak a scoped profile if the
+// creation flow gains workspace ownership later.
+func (c *Controller) broadcastProfileUpdated(ctx context.Context, profileID string) {
+	if c.hub == nil {
+		return
+	}
+	profile, err := c.repo.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil {
+		if err != nil {
+			c.logger.Debug("loading adopted profile for broadcast failed",
+				zap.String("profile_id", profileID), zap.Error(err))
+		}
+		return
+	}
+
+	profileDTO := toProfileDTO(profile)
+	c.decorateProviderSupportByAgentID(ctx, &profileDTO)
+	inferenceCapable := false
+	if agent, agentErr := c.repo.GetAgent(ctx, profile.AgentID); agentErr == nil && agent != nil && c.agentRegistry != nil {
+		_, inferenceCapable = c.agentRegistry.GetInferenceAgent(agent.Name)
+	}
+	notification, err := ws.NewNotification(ws.ActionAgentProfileUpdated, map[string]any{
+		"profile":           &profileDTO,
+		"inference_capable": inferenceCapable,
+	})
+	if err != nil {
+		c.logger.Debug("building adopted profile broadcast failed",
+			zap.String("profile_id", profileID), zap.Error(err))
+		return
+	}
+	if profile.WorkspaceID != "" {
+		if workspaceHub, ok := c.hub.(interface {
+			BroadcastToWorkspaceOrDrop(string, *ws.Message)
+		}); ok {
+			workspaceHub.BroadcastToWorkspaceOrDrop(profile.WorkspaceID, notification)
+		}
+		return
+	}
+	c.hub.Broadcast(notification)
 }
 
 func (c *Controller) initializeUpdateJobStore() {
@@ -346,6 +486,14 @@ func (c *Controller) initializeUpdateJobStore() {
 		c.managedRuntimeSelections,
 	)
 	c.updateJobStore.SetStatusInvalidator(c.InvalidateRuntimeUpdateStatus)
+	if reader, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader); ok {
+		c.updateJobStore.SetOpenCodeSelectionReader(reader)
+	}
+	if writer, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionWriter); ok {
+		c.updateJobStore.SetOpenCodeSelections(writer)
+	}
+	c.updateJobStore.SetOpenCodeMigrationGuard(c.openCodeMigrationGuard)
+	c.updateJobStore.onFinished = c.retainAutomaticOutcome
 }
 
 // BroadcastAvailableAgents fetches the current available-agents snapshot and

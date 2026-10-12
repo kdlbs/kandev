@@ -17,9 +17,33 @@ function instance(id: string, name: string): SentryConfig {
   };
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+});
 
 describe("SentryInstanceCard", () => {
+  it("names the phone instance in a sheet and keeps its delete button mounted", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const onCancel = vi.fn();
+    render(
+      <SentryInstanceCard
+        instance={instance("production", "Production")}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        isFinePointer={false}
+        confirmingDelete
+        onDeleteCancel={onCancel}
+        onDeleteConfirm={vi.fn()}
+      />,
+    );
+    const sheet = screen.getByRole("dialog");
+    expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+    expect(sheet.textContent).toContain("Production");
+    expect(screen.getByTestId("sentry-instance-delete-button").isConnected).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalledExactlyOnceWith("production");
+  });
   it("gives each instance action a distinct accessible name", () => {
     render(
       <>

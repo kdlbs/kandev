@@ -5,7 +5,7 @@ description: "Route persistent Office agent identities through interchangeable p
 
 # Office Provider Routing
 
-Office provider routing separates an agent's persistent role from the CLI profile used to run it. This lets a CTO, reviewer, or other custom Office agent keep the same instructions, skills, permissions, budget, task ownership, and history while Kandev selects a Codex, Claude Code, or another configured execution profile for each launch.
+Office provider routing separates an agent's persistent role from the CLI profile used to run it. This lets a CTO, reviewer, or other custom Office agent keep the same instructions, skills, permissions, budget, task ownership, and history while Kandev selects a Codex, Claude Code, or another configured execution profile for each launch. Lightweight routine runs use the same routing choices without inventing a task: each fire has its own run-owned session and attempt identity.
 
 Office mode is currently feature-flagged. The routing settings appear under **Office > Routing** when Office is enabled.
 
@@ -35,3 +35,5 @@ Kandev preserves the Office agent ID, task, run, task environment, worktree, ins
 A provider-native session token is never reused by a different execution profile. Cross-provider fallback starts a fresh provider session and tells the new agent to inspect the durable task conversation, run state, and repository state before continuing. Provider chat history itself is not transferred.
 
 For example, a custom CTO can normally run through a Codex GPT profile. When that route reaches its usage limit, an enabled fallback chain can launch a Claude Code Opus profile while the CTO's role, five assigned skills, instructions, task, and current worktree remain unchanged.
+
+For a lightweight routine, provider fallback starts a fresh run-owned session for the next attempt. Delayed lifecycle events and usage from the previous provider are checked against their exact run session and cannot finish or charge the replacement attempt.

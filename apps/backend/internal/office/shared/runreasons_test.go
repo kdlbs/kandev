@@ -31,6 +31,21 @@ func TestIsPeriodicTasklessWake_CronConstantIsSkippable(t *testing.T) {
 	}
 }
 
+// TestIsPeriodicTasklessWake_RoutineDispatchEventIsNonSkippable pins
+// AC-OFFICE-TASKLESS-001.3's second sentence: a manual or webhook fire
+// (RunReasonRoutineDispatchEvent) must never be treated as a periodic wake,
+// so periodic idle-skipping can never consume it. Nothing pinned this
+// value before — it falls through IsPeriodicTasklessWake's switch to the
+// default case today, so deleting that branch or moving the constant into
+// the "true" case would be a silent behavior change.
+func TestIsPeriodicTasklessWake_RoutineDispatchEventIsNonSkippable(t *testing.T) {
+	if shared.IsPeriodicTasklessWake(shared.RunReasonRoutineDispatchEvent) {
+		t.Errorf("IsPeriodicTasklessWake(%q) = true, want false — manual/webhook "+
+			"fires must not be treated as a periodic wake",
+			shared.RunReasonRoutineDispatchEvent)
+	}
+}
+
 // TestRoutineDispatchReason_SourceMapping pins RoutineDispatchReason's
 // source→reason mapping so RunReasonRoutineDispatchCron and
 // RunReasonRoutineDispatchEvent cannot silently drift apart from

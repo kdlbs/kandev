@@ -16,10 +16,14 @@ import (
 // capturingQueueEventBus records the last message.queue.status_changed payload
 // so tests can assert the task_id enrichment on the published event.
 type capturingQueueEventBus struct {
-	lastData map[string]interface{}
+	lastData    map[string]interface{}
+	lastSubject string
+	lastCtx     context.Context
 }
 
-func (m *capturingQueueEventBus) Publish(_ context.Context, _ string, event *bus.Event) error {
+func (m *capturingQueueEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	m.lastCtx = ctx
+	m.lastSubject = subject
 	if data, ok := event.Data.(map[string]interface{}); ok {
 		m.lastData = data
 	}
@@ -51,7 +55,59 @@ func setupQueueHandlersWithResolver(
 	events := &capturingQueueEventBus{}
 	svc := messagequeue.NewServiceMemory(log)
 	handlers := NewQueueHandlers(svc, events, log, nil, allowQueueAccess{}, resolver)
+	handlers.Start(context.Background())
+	t.Cleanup(handlers.Stop)
 	return handlers, svc, events
+}
+
+type blockingQueueEventBus struct {
+	capturingQueueEventBus
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingQueueEventBus) Publish(context.Context, string, *bus.Event) error {
+	b.entered <- struct{}{}
+	<-b.release
+	return nil
+}
+
+func TestPublishStatusSerializesSnapshotAndPublish(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{
+		Level:      "error",
+		Format:     "console",
+		OutputPath: "stderr",
+	})
+	require.NoError(t, err)
+	events := &blockingQueueEventBus{
+		entered: make(chan struct{}, 2),
+		release: make(chan struct{}),
+	}
+	svc := messagequeue.NewServiceMemory(log)
+	handlers := NewQueueHandlers(svc, events, log, nil, allowQueueAccess{}, nil)
+	ctx := context.Background()
+
+	firstDone := make(chan struct{})
+	go func() {
+		handlers.publishStatus(ctx, "s1")
+		close(firstDone)
+	}()
+	<-events.entered
+
+	secondDone := make(chan struct{})
+	go func() {
+		handlers.publishStatus(ctx, "s1")
+		close(secondDone)
+	}()
+	select {
+	case <-events.entered:
+		t.Fatal("second queue status reached the event bus before the first publish completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(events.release)
+	<-firstDone
+	<-secondDone
 }
 
 func TestPublishStatusIncludesTaskIDWhenResolvable(t *testing.T) {
@@ -75,6 +131,17 @@ func TestPublishStatusIncludesTaskIDWhenResolvable(t *testing.T) {
 	require.Equal(t, "s1", events.lastData["session_id"])
 	require.Equal(t, false, events.lastData["auto_run"])
 	require.Equal(t, true, events.lastData["merge_enabled"])
+}
+
+func TestPublishStatusDetachesCancelledRequest(t *testing.T) {
+	handlers, _, events := setupQueueHandlersWithResolver(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	handlers.publishStatus(ctx, "s1")
+
+	require.NotNil(t, events.lastCtx)
+	require.NoError(t, events.lastCtx.Err(), "queue status publication must not inherit a cancelled request")
 }
 
 func TestWsQueueMessagePublishesUserPromptActivity(t *testing.T) {

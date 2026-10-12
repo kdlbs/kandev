@@ -17,7 +17,15 @@ export type {
 } from "./agent-profile";
 
 import type { AgentProfile } from "./agent-profile";
+import type { CLIFlag } from "./agent-profile";
 import type { BackendMessage } from "./backend-message";
+
+/**
+ * How kandev drives a custom agent's command. Absent means terminal
+ * passthrough, which is what every definition stored before the field existed
+ * decodes to.
+ */
+export type CustomAgentProtocol = "acp";
 
 export type TUIConfig = {
   command: string;
@@ -33,6 +41,15 @@ export type TUIConfig = {
    * list here, or a strategy added in Go silently stops being selectable.
    */
   mcp_strategy?: string;
+  /**
+   * Runtime kandev drives the command with. Absent means terminal passthrough;
+   * `"acp"` means kandev speaks the Agent Client Protocol to it on standard
+   * input and output, which is what gives the agent structured chat, tool
+   * calls, models, and modes.
+   */
+  protocol?: CustomAgentProtocol;
+  /** Use paced unframed writes for TUIs that reject bracketed-paste markers. */
+  disable_bracketed_paste?: boolean;
 };
 
 /** One selectable MCP injection mechanism, served by the backend. */
@@ -40,6 +57,12 @@ export type MCPStrategyOption = {
   key: string;
   /** The strategy's own description of the mechanism it uses. */
   description: string;
+};
+
+export type AgentProfilesReorderedPayload = {
+  agent_id: string;
+  profile_ids: string[];
+  revision: number;
 };
 
 export type Agent = {
@@ -50,6 +73,7 @@ export type Agent = {
   mcp_config_path?: string | null;
   tui_config?: TUIConfig | null;
   profiles: AgentProfile[];
+  profile_order_revision?: number;
   /**
    * Host utility probe status for this agent type — mirrors
    * `ModelConfig.status`. Populated by the backend from the host utility
@@ -58,6 +82,8 @@ export type Agent = {
    */
   capability_status?: CapabilityStatus;
   capability_error?: string;
+  /** Whether this agent supports sessionless host-utility inference. */
+  inference_capable?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -92,6 +118,12 @@ export type AgentDiscovery = {
   available: boolean;
   matched_path?: string | null;
   login_command?: LoginCommand;
+  /**
+   * Vendor CLI version state. Present only for agent types that declare a
+   * host CLI (Claude, Codex); every other agent omits both fields.
+   */
+  cli_version?: string;
+  cli_version_error?: string;
 };
 
 export type AgentCapabilities = {
@@ -107,7 +139,8 @@ export type ModelEntry = {
   provider?: string;
   context_window?: number;
   is_default?: boolean;
-  source?: "static" | "dynamic";
+  /** "cli" for a vendor-CLI-discovered entry, "acp" for a bridge-advertised one. */
+  source?: "static" | "dynamic" | "cli" | "acp";
   /**
    * Agent-specific extras from ACP's `_meta` field. GitHub Copilot exposes
    * `copilotUsage` (e.g. "1x", "0.33x", "0x" — premium-request multiplier)
@@ -147,7 +180,37 @@ export type CapabilityStatus =
   | "auth_required"
   | "not_installed"
   | "failed"
-  | "not_configured";
+  | "not_configured"
+  | "unsupported";
+
+export type ProfileLaunchSettingsRequest = {
+  env_vars: { key: string; value?: string; secret_id?: string }[];
+  cli_flags: CLIFlag[];
+  command_prefix: string;
+};
+
+export type ProfileCapabilityRequest = {
+  profile_id?: string;
+  launch_settings?: ProfileLaunchSettingsRequest;
+  refresh?: boolean;
+};
+
+export type ProfileRuntimeComponent = {
+  role: "bridge" | "provider";
+  name: string;
+  package?: string;
+  source: "managed" | "bundled" | "external" | "unknown";
+  owner: "kandev" | "external" | "unknown";
+  effective_version?: string;
+  observed_version?: string;
+  guidance_url?: string;
+};
+
+export type ProfileRuntimeInfo = {
+  scope: "host";
+  observed_at: string;
+  components: ProfileRuntimeComponent[];
+};
 
 export type ModelConfig = {
   default_model: string;
@@ -160,6 +223,22 @@ export type ModelConfig = {
   supports_dynamic_models: boolean;
   status?: CapabilityStatus;
   error?: string;
+  /** How the model list was assembled. Absent for agent types without a vendor CLI. */
+  discovery?: ModelDiscovery;
+};
+
+// ModelDiscovery reports how Kandev assembled an agent type's model list and
+// whether the operator may type a model identifier that is not in it.
+export type ModelDiscovery = {
+  /** "cli_command" when the vendor CLI supplied models, "acp_probe" otherwise. */
+  source: "cli_command" | "acp_probe";
+  executable?: string;
+  cli_version?: string;
+  /** "ok", "skipped" (the CLI publishes no list), "pending", or a failure reason. */
+  status: string;
+  error?: string;
+  checked_at?: string;
+  allows_custom_model: boolean;
 };
 
 export type DynamicModelsResponse = {
@@ -171,6 +250,11 @@ export type DynamicModelsResponse = {
   current_mode_id?: string;
   commands?: CommandEntry[];
   error: string | null;
+  /** Mirrors ModelConfig.discovery for the models endpoint. */
+  discovery?: ModelDiscovery;
+  context_revision?: string;
+  /** Ephemeral host-scoped runtime evidence for this exact profile probe. */
+  runtime_info?: ProfileRuntimeInfo;
 };
 
 export type ResolveAgentModelConfigRequest = {
@@ -178,6 +262,8 @@ export type ResolveAgentModelConfigRequest = {
   mode?: string;
   config_options?: Record<string, string>;
   refresh?: boolean;
+  profile_id?: string;
+  launch_settings?: ProfileLaunchSettingsRequest;
 };
 
 export type AgentModelConfigResponse = {
@@ -186,6 +272,7 @@ export type AgentModelConfigResponse = {
   status: CapabilityStatus;
   config_options: ConfigOptionEntry[];
   error: string | null;
+  context_revision?: string;
 };
 
 export type PermissionSetting = {
@@ -224,11 +311,14 @@ export type ToolStatus = {
 
 export type LoginCommand = {
   cmd: string[];
+  variants?: Record<string, string[]>;
   description?: string;
 };
 
 export type RuntimeUpdate = {
+  managed_fallback?: boolean;
   supported: boolean;
+  update_mode: "pinned" | "self_update";
   package: string;
   current_version?: string;
   default_version?: string;
@@ -283,6 +373,8 @@ export type ClarificationQuestion = {
   title: string;
   prompt: string;
   options: ClarificationOption[];
+  /** Omitted for existing agents, which retain the custom-answer field. */
+  allow_custom_text?: boolean;
 };
 
 // Each per-question chat message carries its own metadata. For multi-question
@@ -328,11 +420,118 @@ export type TaskPlan = {
   implementation_started_at?: string | null;
   implementation_started_session_id?: string | null;
   implementation_started_by?: string | null;
+  comments_revision?: number;
 };
 
 export type TaskPlanResponse = {
   plan: TaskPlan | null;
 };
+
+export type TaskPlanComment = {
+  id: string;
+  task_id: string;
+  plan_id: string;
+  body: string;
+  selected_text: string;
+  anchor_from: number;
+  anchor_to: number;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskPlanCommentSnapshot = {
+  task_id: string;
+  plan_id: string;
+  revision: number;
+  comments: TaskPlanComment[];
+};
+
+export type TaskPlanCommentRef = Pick<TaskPlanComment, "id" | "version">;
+
+export type PreviewCaptureRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  document_x?: number;
+  document_y?: number;
+  scroll_x?: number;
+  scroll_y?: number;
+  viewport_width?: number;
+  viewport_height?: number;
+  device_pixel_ratio?: number;
+};
+
+export type PreviewElementSnapshot = {
+  tag: string;
+  id?: string;
+  classes: string[];
+  role?: string;
+  accessible_label?: string;
+  visible_text?: string;
+  selector?: string;
+  outer_html: string;
+};
+
+export type PreviewTextEndpoint = {
+  selector?: string;
+  node_path: number[];
+  offset: number;
+};
+
+export type PreviewTextAnchor = {
+  start: PreviewTextEndpoint;
+  end: PreviewTextEndpoint;
+  rects?: PreviewCaptureRect[];
+  union_rect?: PreviewCaptureRect;
+  scroll_x?: number;
+  scroll_y?: number;
+  viewport_width?: number;
+  viewport_height?: number;
+  device_pixel_ratio?: number;
+  containing_element?: PreviewElementSnapshot;
+};
+
+export type TaskPreviewScreenshot = {
+  attachment_id: string;
+  name: string;
+  mime_type: string;
+  kind: string;
+  delivery_mode: string;
+  size_bytes: number;
+  state: string;
+};
+
+export type TaskPreviewFeedback = {
+  id: string;
+  task_id: string;
+  kind: "text" | "element" | "screenshot";
+  comment: string;
+  source_kind: "browser" | "html_file";
+  source_session_id?: string;
+  source_label: string;
+  source_path?: string;
+  page_route: string;
+  page_title: string;
+  selected_text?: string;
+  text_anchor?: PreviewTextAnchor;
+  element_snapshot?: PreviewElementSnapshot;
+  capture_rect?: PreviewCaptureRect;
+  screenshot_attachment_id?: string;
+  screenshot_attachment?: TaskPreviewScreenshot;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskPreviewFeedbackSnapshot = {
+  task_id: string;
+  revision: number;
+  items: TaskPreviewFeedback[];
+};
+
+export type TaskPreviewFeedbackRef = Pick<TaskPreviewFeedback, "id" | "version">;
 
 /** A single anchored stop in a code walkthrough. */
 export type WalkthroughStep = {

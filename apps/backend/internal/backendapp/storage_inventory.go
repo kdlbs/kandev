@@ -65,7 +65,7 @@ func (i *storageInventory) activeWorktreePaths(ctx context.Context) ([]string, e
 	query := "SELECT ter.worktree_path FROM task_environment_repos ter " +
 		"INNER JOIN task_environments te ON te.id = ter.task_environment_id " +
 		"INNER JOIN tasks t ON t.id = te.task_id " +
-		"WHERE t.archived_at IS NULL AND ter.status = 'active' " +
+		"WHERE ter.status = 'active' " +
 		"AND ter.deleted_at IS NULL AND ter.worktree_path <> ''"
 	if err := i.reader.SelectContext(ctx, &paths, query); err != nil {
 		return nil, err

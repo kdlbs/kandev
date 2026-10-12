@@ -42,45 +42,45 @@ export class WorkflowSettingsPage {
     { waitForName = false }: { waitForName?: boolean } = {},
   ): Promise<Locator> {
     const cards = this.page.locator('[data-testid^="workflow-card-"]');
+    let matchingTestId: string | null = null;
+    const findMatchingTestId = async (): Promise<string | null> => {
+      try {
+        const testIds = await cards.evaluateAll((elements) =>
+          elements
+            .map((element) => element.getAttribute("data-testid"))
+            .filter((testId): testId is string => Boolean(testId)),
+        );
+        for (const testId of testIds) {
+          const input = this.page.getByTestId(testId).locator("input").first();
+          if ((await input.inputValue({ timeout: 500 }).catch(() => null)) === name) {
+            return testId;
+          }
+        }
+      } catch {
+        // The import handler refreshes this route. A navigation can destroy
+        // the evaluation context between the card query and input read; the
+        // next poll observes the freshly hydrated page.
+      }
+      return null;
+    };
     if (waitForName) {
       await expect
         .poll(
           async () => {
-            const testIds = await cards.evaluateAll((elements) =>
-              elements
-                .map((element) => element.getAttribute("data-testid"))
-                .filter((testId): testId is string => Boolean(testId)),
-            );
-            for (const testId of testIds) {
-              const input = this.page.getByTestId(testId).locator("input").first();
-              if ((await input.inputValue({ timeout: 500 }).catch(() => null)) === name)
-                return true;
-            }
-            return false;
+            matchingTestId = await findMatchingTestId();
+            return matchingTestId !== null;
           },
           { timeout: 5_000 },
         )
         .toBe(true);
     } else {
       await expect(cards.first()).toBeVisible();
+      matchingTestId = await findMatchingTestId();
     }
 
-    const testIds = await cards.evaluateAll((elements) =>
-      elements
-        .map((element) => element.getAttribute("data-testid"))
-        .filter((testId): testId is string => Boolean(testId)),
-    );
-
-    for (const testId of testIds) {
-      const card = this.page.getByTestId(testId);
-      const input = card.locator("input").first();
-      const value = await input.inputValue({ timeout: 500 }).catch(() => null);
-      if (value === name) {
-        return card;
-      }
-    }
-
-    return this.page.getByTestId(`workflow-card-not-found-${name}`);
+    return matchingTestId
+      ? this.page.getByTestId(matchingTestId)
+      : this.page.getByTestId(`workflow-card-not-found-${name}`);
   }
 
   /** The pipeline step nodes within a specific workflow card. */
@@ -93,6 +93,35 @@ export class WorkflowSettingsPage {
   /** Find a step node by its name text within a card. */
   stepNodeByName(card: Locator, stepName: string): Locator {
     return card.locator(".group.relative").filter({ hasText: stepName });
+  }
+
+  completeTaskOnEnterCheckbox(card: Locator, stepId: string): Locator {
+    return card.getByTestId(`${stepId}-complete-task-on-enter-checkbox`);
+  }
+
+  completeTaskOnEnterHelp(card: Locator, stepId: string): Locator {
+    return card.getByTestId(`${stepId}-complete-task-on-enter-help`);
+  }
+
+  async reorderStep(card: Locator, fromName: string, toName: string): Promise<void> {
+    const source = this.stepNodeByName(card, fromName).locator("button").first();
+    const target = this.stepNodeByName(card, toName);
+    const sourceBox = await source.boundingBox();
+    const targetBox = await target.boundingBox();
+    if (!sourceBox || !targetBox) throw new Error(`Cannot drag ${fromName} to ${toName}`);
+    const sourcePoint = {
+      x: sourceBox.x + sourceBox.width / 2,
+      y: sourceBox.y + sourceBox.height / 2,
+    };
+    const targetPoint = {
+      x: targetBox.x + targetBox.width / 2,
+      y: targetBox.y + targetBox.height / 2,
+    };
+    await this.page.mouse.move(sourcePoint.x, sourcePoint.y);
+    await this.page.mouse.down();
+    await this.page.mouse.move(sourcePoint.x + 12, sourcePoint.y, { steps: 2 });
+    await this.page.mouse.move(targetPoint.x, targetPoint.y, { steps: 8 });
+    await this.page.mouse.up();
   }
 
   /** A replay-cycle diagnostic rendered inside a workflow card or guard dialog. */

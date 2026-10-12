@@ -152,4 +152,12 @@ separate plugin repo, backend tests, public docs) and parallelize.
   new method on the task repository's `git_snapshots.go`. Recommendation:
   analytics repository, consistent with `GetGitStats`/`GetRepositoryStats`.
   Settle in task-02.
+
+## Related follow-on work
+
+Exposing task dependencies on this same read model is tracked as its own plan,
+[`docs/plans/plugin-task-dependency-projection/`](../plugin-task-dependency-projection/plan.md),
+kept separate because this plan's directory nests an extra path segment
+(`plugins/host-data-api`) that later tooling expects a single-segment
+initiative directory to not have.
 </content>

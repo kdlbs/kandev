@@ -21,6 +21,7 @@ function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
     implementation_started_at,
     implementation_started_session_id,
     implementation_started_by,
+    comments_revision,
   } = message.payload;
   const prevPlan = store.getState().taskPlans.byTaskId[task_id];
   store.getState().setTaskPlan(task_id, {
@@ -34,6 +35,7 @@ function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
     implementation_started_at,
     implementation_started_session_id,
     implementation_started_by,
+    comments_revision,
   });
 
   // User-authored writes mark the plan as seen — but only when the content

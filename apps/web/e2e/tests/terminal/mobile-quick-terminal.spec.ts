@@ -41,8 +41,13 @@ async function sendCommand(page: Page, command: string, marker: string) {
 async function closeSurvivingQuickTerminals(page: Page) {
   const dialog = page.getByRole("dialog", { name: "Quick Chat" });
   if (!(await dialog.isVisible().catch(() => false))) {
-    const launcher = page.getByTestId("mobile-quick-terminal-button");
-    if (await launcher.isVisible().catch(() => false)) await launcher.tap();
+    const launcher = page.getByTestId("mobile-quick-chat-button");
+    const menu = page.getByTestId("app-nav-trigger");
+    if (!(await menu.isVisible())) return;
+    if ((await menu.getAttribute("aria-expanded")) !== "true") await menu.tap();
+    await expect(menu).toHaveAttribute("aria-expanded", "true");
+    await page.getByRole("dialog", { name: "Menu", exact: true }).waitFor();
+    await launcher.tap({ timeout: 10_000 });
   }
   if (!(await dialog.isVisible().catch(() => false))) return;
 
@@ -56,6 +61,152 @@ async function closeSurvivingQuickTerminals(page: Page) {
 }
 
 test.describe("mobile quick terminal tabs", () => {
+  // @covers AC-UI-QUICK-TERMINAL-001.8, AC-UI-QUICK-TERMINAL-001.13
+  test("shortcuts interrupt the selected shell and retain keyboard focus", async ({
+    testPage,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.goto("/");
+    try {
+      await testPage.getByTestId("app-nav-trigger").tap();
+      await testPage.getByTestId("mobile-quick-terminal-button").tap();
+      const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+      await expect(dialog).toBeVisible();
+      await waitForTerminalReady(testPage);
+      const bar = dialog.getByTestId("mobile-terminal-keybar");
+      await expect(dialog.getByRole("button", { name: "Control", exact: true })).toBeVisible();
+      await expect(bar).toHaveCount(1);
+      for (const id of [
+        "ctrl",
+        "shift",
+        "ctrl-c",
+        "ctrl-d",
+        "esc",
+        "tab",
+        "up",
+        "down",
+        "left",
+        "right",
+        "home",
+        "end",
+        "pageup",
+        "pagedown",
+        "pipe",
+        "tilde",
+        "slash",
+        "dash",
+        "underscore",
+      ]) {
+        const key = bar.getByTestId(`keybar-key-${id}`);
+        await key.scrollIntoViewIfNeeded();
+        const box = await key.boundingBox();
+        expect(box!.height).toBeGreaterThanOrEqual(44);
+        expect(box!.width).toBeGreaterThanOrEqual(44);
+      }
+      await bar.getByTestId("keybar-key-ctrl").scrollIntoViewIfNeeded();
+      await testPage.getByTestId("quick-terminal-terminal").tap();
+      await testPage.keyboard.type("printf 'FIRST%s\\n' '_SHELL_READY'\n");
+      await expect
+        .poll(async () => normalizeTerminalText(await readQuickTerminalBuffer(testPage)))
+        .toContain("FIRST_SHELL_READY");
+      const tabs = dialog.getByTestId("quick-terminal-tab");
+      await dialog.getByTestId("quick-chat-add-menu-trigger").tap();
+      await testPage.getByTestId("quick-chat-new-terminal").tap();
+      await expect(tabs).toHaveCount(2);
+      await waitForTerminalReady(testPage);
+      await testPage.getByTestId("quick-terminal-terminal").tap();
+      await testPage.keyboard.type("sleep 30\n");
+      await bar.getByTestId("keybar-key-ctrl-c").tap();
+      await expect(dialog.locator(".xterm-helper-textarea")).toBeFocused();
+      // Assembled output cannot match the echoed command text.
+      await testPage.keyboard.type("printf 'SECOND%s\\n' '_INTERRUPTED'\n");
+      await expect
+        .poll(async () => normalizeTerminalText(await readQuickTerminalBuffer(testPage)), {
+          timeout: 10_000,
+        })
+        .toContain("SECOND_INTERRUPTED");
+      await testPage.keyboard.type("discard_this");
+      await bar.getByTestId("keybar-key-ctrl").tap();
+      await testPage.keyboard.type("u");
+      await expect(bar.getByTestId("keybar-key-ctrl")).toHaveAttribute("aria-pressed", "false");
+      await testPage.keyboard.type("printf 'LATCH%s\\n' '_CLEARED'\n");
+      await expect
+        .poll(async () => normalizeTerminalText(await readQuickTerminalBuffer(testPage)))
+        .toContain("LATCH_CLEARED");
+      await bar.getByTestId("keybar-key-ctrl").tap();
+      await bar.getByTestId("keybar-key-shift").tap();
+      await bar.getByTestId("keybar-key-shift").tap();
+      await tabs.nth(0).tap();
+      await expect(bar.getByTestId("keybar-key-ctrl")).toHaveAttribute("aria-pressed", "false");
+      await expect(bar.getByTestId("keybar-key-shift")).toHaveAttribute("aria-pressed", "false");
+      await expect
+        .poll(async () => normalizeTerminalText(await readQuickTerminalBuffer(testPage)))
+        .toContain("FIRST_SHELL_READY");
+      expect(normalizeTerminalText(await readQuickTerminalBuffer(testPage))).not.toContain(
+        "SECOND_INTERRUPTED",
+      );
+      await bar.getByTestId("keybar-key-ctrl").tap();
+      await dialog.getByTestId("quick-chat-close").tap();
+      await expect(dialog).toBeHidden();
+      await testPage.getByTestId("app-nav-trigger").tap();
+      await testPage.getByTestId("mobile-quick-terminal-button").tap();
+      await expect(bar.getByTestId("keybar-key-ctrl")).toHaveAttribute("aria-pressed", "false");
+      await testPage.evaluate(() => {
+        const vv = window.visualViewport!;
+        Object.defineProperty(vv, "height", {
+          configurable: true,
+          value: window.innerHeight - 300,
+        });
+        vv.dispatchEvent(new Event("resize"));
+      });
+      await expect
+        .poll(async () => {
+          const box = await bar.boundingBox();
+          return box!.y + box!.height;
+        })
+        .toBeLessThanOrEqual(testPage.viewportSize()!.height - 300 + 1);
+      const terminalBox = await dialog.getByTestId("quick-terminal-terminal").boundingBox();
+      const barBox = await bar.boundingBox();
+      expect(terminalBox!.y + terminalBox!.height).toBeLessThanOrEqual(barBox!.y + 1);
+      await bar.getByTestId("keybar-key-tab").tap();
+      await expect(dialog.locator(".xterm-helper-textarea")).toBeFocused();
+      await assertNoDocumentHorizontalOverflow(testPage, "quick terminal shortcut controls");
+      await prCapture.screenshot("phone-keyboard-controls", {
+        caption: "Quick Terminal shortcuts above the on-screen keyboard",
+      });
+      await testPage.evaluate(() => {
+        const vv = window.visualViewport!;
+        Object.defineProperty(vv, "height", { configurable: true, value: window.innerHeight });
+        vv.dispatchEvent(new Event("resize"));
+      });
+      await expect
+        .poll(async () => (await bar.boundingBox())!.y)
+        .toBeGreaterThan(testPage.viewportSize()!.height - 100);
+      await prCapture.screenshot("phone-controls", {
+        caption: "Quick Terminal shares the task terminal shortcut controls",
+      });
+      // Close descriptors before dismissal, while their hydrated tabs are visible.
+      await closeQuickTerminalTab(testPage, tabs.nth(1));
+      await expect(tabs).toHaveCount(1);
+      await bar.getByTestId("keybar-key-ctrl-c").tap();
+      await testPage.keyboard.type("cat; printf 'EOF%s\\n' '_RECEIVED'\n");
+      await bar.getByTestId("keybar-key-ctrl-d").tap();
+      await expect
+        .poll(async () => normalizeTerminalText(await readQuickTerminalBuffer(testPage)))
+        .toContain("EOF_RECEIVED");
+      await testPage.keyboard.type("exit\n");
+      await expect(dialog.getByTestId("quick-terminal-status")).toBeVisible();
+      await expect(bar).toHaveCount(0);
+      await closeQuickTerminalTab(testPage, tabs.nth(0));
+      await expect(tabs).toHaveCount(0);
+      await expect(dialog).toBeHidden();
+      await expect(testPage.getByTestId("mobile-terminal-keybar")).toHaveCount(0);
+    } finally {
+      await closeSurvivingQuickTerminals(testPage);
+    }
+  });
+
   test("uses a safe full-height surface, touch-safe menu, and contained terminal scroll", async ({
     testPage,
   }) => {
@@ -64,19 +215,21 @@ test.describe("mobile quick terminal tabs", () => {
     try {
       const terminalButton = testPage.getByTestId("mobile-quick-terminal-button");
       const quickChatButton = testPage.getByTestId("mobile-quick-chat-button");
-      const menuButton = testPage.getByTestId("mobile-topbar-menu");
-      await expect(terminalButton).toBeVisible();
-      await expect(quickChatButton).toBeVisible();
+      const menuButton = testPage.getByTestId("app-nav-trigger");
       await expect(menuButton).toBeVisible();
       const headerMenuBox = await menuButton.boundingBox();
       expect(headerMenuBox).not.toBeNull();
       if (!headerMenuBox) throw new Error("mobile menu geometry unavailable");
+      await menuButton.tap();
+      await expect(terminalButton).toBeVisible();
+      await expect(quickChatButton).toBeVisible();
       for (const button of [terminalButton, quickChatButton]) {
         const buttonBox = await button.boundingBox();
         expect(buttonBox).not.toBeNull();
         if (!buttonBox) throw new Error("mobile launcher geometry unavailable");
-        expect(buttonBox.width).toBeCloseTo(headerMenuBox.width, 1);
-        expect(buttonBox.height).toBeCloseTo(headerMenuBox.height, 1);
+        expect(buttonBox.width).toBeGreaterThanOrEqual(44);
+        expect(buttonBox.height).toBeGreaterThanOrEqual(44);
+        expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(testPage.viewportSize()!.width);
       }
 
       await terminalButton.tap();
@@ -112,6 +265,7 @@ test.describe("mobile quick terminal tabs", () => {
       // A mobile reload restores the durable descriptor and reattaches the
       // detached PTY before the user creates any additional terminal.
       await testPage.reload();
+      await menuButton.tap();
       await expect(terminalButton).toBeVisible();
       await terminalButton.tap();
       await expect(dialog).toBeVisible();
@@ -194,9 +348,10 @@ test.describe("mobile quick terminal tabs", () => {
 
       await dialog.getByTestId("quick-chat-close").tap();
       await expect(dialog).toBeHidden();
-      await expect(terminalButton).toBeFocused();
+      await expect(menuButton).toBeFocused();
 
       // Reopening through the mobile launcher selects the same terminal tab.
+      await menuButton.tap();
       await terminalButton.tap();
       await expect(dialog).toBeVisible();
       await expect(terminalTabs).toHaveCount(1);
@@ -205,6 +360,7 @@ test.describe("mobile quick terminal tabs", () => {
         .toContain(normalizeTerminalText("MOBILE_TERMINAL_ONE"));
       await dialog.getByTestId("quick-chat-close").tap();
       await expect(dialog).toBeHidden();
+      await expect(menuButton).toBeFocused();
     } finally {
       await closeSurvivingQuickTerminals(testPage);
     }

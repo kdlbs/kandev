@@ -102,6 +102,7 @@ Choose the narrowest surface that satisfies the behavior:
 | Store files or use a plugin-managed database | `KANDEV_PLUGIN_DATA_DIR` | The plugin owns schema, locking, migrations, and recovery. |
 | Read Kandev entities | Typed Host readers plus `api_read` | Use opaque pagination cursors and stable SDK DTOs; never query Kandev's database or internal HTTP API. |
 | Mutate Kandev entities | Typed Host writers | `api_write:tasks` gates `Tasks().Create/Update`; `api_write:messages` gates `Messages().Send`. A missing mutation requires a separate Host API change. |
+| Add task-agent tools | Manifest `agent_tools` plus `pluginsdk.AgentToolPlugin` | Kandev owns MCP registration, routing, and verified caller identity; do not add a send webhook or separate MCP server for task-agent calls. |
 | Notify another plugin | `Host.EmitEvent` | Events are published as `plugin.<id>.<name>`; keep names and payloads versionable. |
 | Add native interface | UI registry and `host.ui` | Use host-owned React and components so themes, contexts, portals, and mobile behavior remain compatible. |
 
@@ -117,6 +118,12 @@ Read these sources before designing the plugin:
    entry.
 4. The current `kdlbs/kandev-plugin-template` repository, including its
    `README.md`, `Makefile`, tests, and release workflow.
+
+**Marketplace attribution:** The manifest `author` is independent from GitHub
+repository ownership or organization. Never infer author `kandev` from a
+`kdlbs/kandev-plugin-*` repository. Read and preserve the manifest author,
+verify `repo_url` separately, and require an explicit contributor identity when
+an externally maintained plugin is released.
 
 Prefer the public authoring docs and current template over old examples. The
 frontend contract pair is `docs/plans/plugins/PLUGIN-API.md` plus
@@ -203,6 +210,11 @@ repository above.
    template's `go.mod` replacement deliberately. Until the SDK is a standalone
    module, the default `replace` resolves `../kandev/apps/backend`.
 
+For a standalone plugin that replaces the SDK with a sibling checkout, record
+the exact tested SDK ref, align CI and release checkouts with that ref, and
+verify minimum-host compatibility separately. Do not tidy or build against
+whatever monorepo checkout happens to be present.
+
 If the requested repository does not exist and cannot be created with the
 available GitHub tooling, stop after producing a precise repository bootstrap
 request. Do not silently substitute a directory in the Kandev monorepo.
@@ -214,6 +226,11 @@ request. Do not silently substitute a directory in the Kandev monorepo.
 2. Declare only the capabilities the plugin exercises. Treat `api_read`,
    `state`, `secrets`, event subscriptions, and webhooks as permission
    boundaries rather than descriptive metadata.
+   When a capability adds scopes, update its manifest field descriptions and
+   the Settings card, including guidance for already-connected installations:
+   explain reauthorization or reinstallation and any fallback limitations.
+   Name diagnostic controls and results for the behavior they actually check;
+   authentication success does not prove scope or delivery validation.
 3. Embed `pluginsdk.UnimplementedPlugin`, override only required methods, and
    access Kandev through the injected Host API. The Host can be unavailable
    during construction and isolated tests, so resolve it when handling work.
@@ -262,6 +279,11 @@ then verify the artifact rather than only the source tree:
    exercise every declared capability. Cover config validation, permission
    failures, lifecycle restart, events or webhooks, and native UI registration
    as applicable.
+   For `agent_tools`, start a task agent before testing (prepare-only is not
+   enough), then use that task's endpoint for MCP `initialize`, `tools/list`,
+   and `tools/call`. Exercise both successful and error serialization, include
+   SSH when supported, and distinguish mocked external delivery from a real
+   external-service verification in the evidence.
 4. Exercise the failure guarantees that matter to this plugin: duplicate event
    delivery, handler cancellation, missing or invalid webhook authentication,
    unavailable dependencies, denied Host calls, and corrupt state. For native

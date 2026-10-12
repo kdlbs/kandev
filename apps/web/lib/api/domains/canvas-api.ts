@@ -6,6 +6,15 @@ export type CanvasReleaseStatus = "valid" | "pending_permission" | "invalid" | "
 
 export type CanvasRelease = {
   id: string;
+  package_id?: string;
+  version?: string;
+  display_name?: string;
+  description?: string;
+  author?: string;
+  license?: string;
+  source_mode?: "static" | "project" | string;
+  min_kandev_version?: string;
+  repo_url?: string;
   package_digest?: string;
   validation_status: CanvasReleaseStatus | string;
   validation_error?: string;
@@ -15,7 +24,9 @@ export type CanvasRelease = {
   source_actor_kind?: string;
   source_user_id?: string;
   source_task_id?: string;
+  source_task_title?: string;
   source_session_id?: string;
+  source_session_name?: string;
   protocol_version?: number;
   created_at?: string;
 };
@@ -29,6 +40,7 @@ export type Canvas = {
   origin_task_id?: string;
   created_by_session_id?: string;
   scope_kind: CanvasScopeKind | string;
+  data_scope_kind?: CanvasScopeKind | string;
   title: string;
   status: CanvasStatus | string;
   active_release_id?: string;
@@ -41,6 +53,19 @@ export type Canvas = {
   created_at?: string;
   updated_at?: string;
 };
+
+export function canvasDataScope(canvas: Pick<Canvas, "scope_kind" | "data_scope_kind">): string {
+  return canvas.data_scope_kind || canvas.scope_kind;
+}
+
+export function canvasCanEnableWorkspaceData(canvas: Canvas): boolean {
+  return (
+    canvas.scope_kind === "task" &&
+    canvasDataScope(canvas) === "task" &&
+    canvas.status === "active" &&
+    canvas.active_release_status === "valid"
+  );
+}
 
 export type CanvasListResponse = {
   canvases: Canvas[];
@@ -57,6 +82,7 @@ export type CanvasRuntimeResponse = {
   canvas?: Canvas;
   binding?: {
     scope_kind?: CanvasScopeKind | string;
+    data_scope_kind?: CanvasScopeKind | string;
     grant_generation?: number;
   };
 };
@@ -83,7 +109,9 @@ export type CanvasPromotionPreview = {
   source_actor_kind?: string;
   source_user_id?: string;
   source_task_id?: string;
+  source_task_title?: string;
   source_session_id?: string;
+  source_session_name?: string;
   active_release?: CanvasRelease;
   permissions?: CanvasPermissionReview;
   active_release_id?: string;
@@ -91,7 +119,19 @@ export type CanvasPromotionPreview = {
   grant_generation?: number;
   current_scope?: CanvasScopeKind | string;
   target_scope?: CanvasScopeKind | string;
+  current_data_scope_kind?: CanvasScopeKind | string;
+  target_data_scope_kind?: CanvasScopeKind | string;
   placement?: string;
+};
+
+export type CanvasWorkspaceDataPreview = {
+  canvas: Canvas;
+  active_release_id: string;
+  permission_digest: string;
+  grant_generation: number;
+  current_data_scope_kind: CanvasScopeKind | string;
+  target_data_scope_kind: CanvasScopeKind | string;
+  permissions?: CanvasPermissionReview;
 };
 
 export type CanvasReleaseListResponse = {
@@ -151,6 +191,14 @@ export function getCanvas(canvasId: string, options?: ApiRequestOptions): Promis
   return fetchJson<Canvas>(canvasPath(canvasId), options);
 }
 
+export function renameCanvas(
+  canvasId: string,
+  title: string,
+  options?: ApiRequestOptions,
+): Promise<Canvas> {
+  return mutate<Canvas>(canvasPath(canvasId), "PATCH", { title }, options);
+}
+
 export function getCanvasRuntime(
   canvasId: string,
   options?: ApiRequestOptions,
@@ -175,6 +223,28 @@ export function confirmCanvasPromotion(
   options?: ApiRequestOptions,
 ): Promise<Canvas> {
   return mutate<Canvas>(canvasPath(canvasId, "/promotion"), "POST", review, options);
+}
+
+export function requestCanvasWorkspaceData(
+  canvasId: string,
+  options?: ApiRequestOptions,
+): Promise<CanvasWorkspaceDataPreview> {
+  return fetchJson<CanvasWorkspaceDataPreview>(
+    canvasPath(canvasId, "/workspace-data-preview"),
+    options,
+  );
+}
+
+export function enableCanvasWorkspaceData(
+  canvasId: string,
+  review: {
+    expected_release_id: string;
+    expected_permission_digest: string;
+    expected_grant_generation: number;
+  },
+  options?: ApiRequestOptions,
+): Promise<Canvas> {
+  return mutate<Canvas>(canvasPath(canvasId, "/workspace-data"), "POST", review, options);
 }
 
 export function listCanvasReleases(
@@ -246,7 +316,7 @@ export function removeCanvas(canvasId: string, options?: ApiRequestOptions): Pro
 
 function mutate<T>(
   path: string,
-  method: "POST" | "DELETE",
+  method: "POST" | "PATCH" | "DELETE",
   body: unknown,
   options?: ApiRequestOptions,
 ): Promise<T> {

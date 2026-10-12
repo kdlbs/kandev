@@ -1,0 +1,18 @@
+{
+  "tabLabel": "Failed",
+  "openTask": "Open task",
+  "reasonUnknown": "No failure reason was recorded.",
+  "unknownFailureTime": "Failure time unknown",
+  "originAgentCreated": "Created by an agent",
+  "originRoutine": "Created by a routine",
+  "originOnboarding": "Created during onboarding",
+  "originAutomationRun": "Automation run",
+  "originAutomationTask": "Created by automation",
+  "originGeneric": "Automated",
+  "emptyTitle": "Nothing has failed in {{workspace}}.",
+  "emptyTitleUnnamedWorkspace": "Nothing has failed in this workspace.",
+  "emptyDescription": "Failed tasks show up here for triage. They are never counted toward the sidebar total.",
+  "errorTitle": "Could not load failed tasks",
+  "errorDescription": "Something went wrong loading the tasks that failed in this workspace. This will retry automatically.",
+  "truncatedNotice": "Showing the first failed tasks. More are waiting."
+}

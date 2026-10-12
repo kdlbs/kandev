@@ -1,0 +1,18 @@
+{
+  "tabLabel": "Ƒàĩĺēď",
+  "openTask": "Ōƥēń ţàśķ",
+  "reasonUnknown": "Ńō ƒàĩĺũŕē ŕēàśōń ŵàś ŕēćōŕďēď.",
+  "unknownFailureTime": "Ƒàĩĺũŕē ţĩḿē ũńķńōŵń",
+  "originAgentCreated": "Ćŕēàţēď ƀŷ àń àĝēńţ",
+  "originRoutine": "Ćŕēàţēď ƀŷ à ŕōũţĩńē",
+  "originOnboarding": "Ćŕēàţēď ďũŕĩńĝ ōńƀōàŕďĩńĝ",
+  "originAutomationRun": "Àũţōḿàţĩōń ŕũń",
+  "originAutomationTask": "Ćŕēàţēď ƀŷ àũţōḿàţĩōń",
+  "originGeneric": "Àũţōḿàţēď",
+  "emptyTitle": "Ńōţĥĩńĝ ĥàś ƒàĩĺēď ĩń {{workspace}}.",
+  "emptyTitleUnnamedWorkspace": "Ńōţĥĩńĝ ĥàś ƒàĩĺēď ĩń ţĥĩś ŵōŕķśƥàćē.",
+  "emptyDescription": "Ƒàĩĺēď ţàśķś śĥōŵ ũƥ ĥēŕē ƒōŕ ţŕĩàĝē. Ţĥēŷ àŕē ńēvēŕ ćōũńţēď ţōŵàŕď ţĥē śĩďēƀàŕ ţōţàĺ.",
+  "errorTitle": "Ćōũĺď ńōţ ĺōàď ƒàĩĺēď ţàśķś",
+  "errorDescription": "Śōḿēţĥĩńĝ ŵēńţ ŵŕōńĝ ĺōàďĩńĝ ţĥē ţàśķś ţĥàţ ƒàĩĺēď ĩń ţĥĩś ŵōŕķśƥàćē. Ţĥĩś ŵĩĺĺ ŕēţŕŷ àũţōḿàţĩćàĺĺŷ.",
+  "truncatedNotice": "Śĥōŵĩńĝ ţĥē ƒĩŕśţ ƒàĩĺēď ţàśķś. Ḿōŕē àŕē ŵàĩţĩńĝ."
+}

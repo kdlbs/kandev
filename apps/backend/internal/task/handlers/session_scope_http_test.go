@@ -108,6 +108,7 @@ func TestProcessRoutesDenyForeignSession(t *testing.T) {
 		"set-model":         h.httpSetSessionModel,
 		"set-config-option": h.httpSetSessionConfigOption,
 		"authenticate":      h.httpAuthenticate,
+		"publish-preview":   h.httpPublishWorkspacePreview,
 		"stop-process":      h.httpStopProcessByID,
 	}
 	for name, handler := range routes {

@@ -4,6 +4,7 @@ import path from "node:path";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 
 // The TOGGLE_SIDEBAR shortcut lives on a global app-root listener (useAppShortcuts),
@@ -39,6 +40,9 @@ async function expectShortcutTogglesSidebar(page: Page, sidebar: Locator): Promi
 
   await page.keyboard.press(`${MODIFIER}+b`);
   await expect(sidebar).toHaveAttribute("data-collapsed", initial);
+  // The collapsed state updates before the width transition completes. Wait
+  // for that transition before a later measurement captures the next toggle.
+  await waitForFiniteAnimations(sidebar);
 }
 
 type SidebarToggleFrame = {
@@ -168,10 +172,11 @@ function expectStableAnimatedToggle(capture: SidebarToggleCapture): void {
   const panelWidths = frames.map((frame) => frame.panelWidth);
   const minimumPanelWidth = Math.min(...panelWidths);
   const maximumPanelWidth = Math.max(...panelWidths);
+  // Browser layout can report the 200px design delta one subpixel below 200.
   expect(
     maximumPanelWidth - minimumPanelWidth,
     "Visual sidebar should travel between its expanded and collapsed widths",
-  ).toBeGreaterThan(200);
+  ).toBeGreaterThanOrEqual(199);
   expect(
     panelWidths
       .slice(1, -1)

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KubernetesConnectionCard } from "./kubernetes-connection-card";
@@ -106,8 +106,29 @@ describe("Kubernetes settings cards", () => {
     const card = screen.getByTestId("kubernetes-mobile-session-list");
     expect(within(card).getByText("task-123456789")).toBeTruthy();
     expect(within(card).getByText("session-987654321")).toBeTruthy();
-    expect(within(card).getByText("Task")).toBeTruthy();
-    expect(within(card).getByText("Session")).toBeTruthy();
+    expect(within(card).getByText(/^Task:/)).toBeTruthy();
+    expect(within(card).getByText(/^Session:/)).toBeTruthy();
+  });
+
+  it("shows retained requests, guidance, and task navigation on mobile", () => {
+    responsive.isMobile = true;
+    const state = sessionsState();
+    state.sessions[0] = {
+      ...state.sessions[0],
+      session_state: "CANCELLED",
+      retention_state: "retained",
+      main_container_requests: { cpu: "0", memory: "512Mi" },
+    };
+
+    render(<KubernetesSessionsCard state={state} />);
+
+    const card = screen.getByTestId("kubernetes-mobile-session-list");
+    expect(within(card).getByText("Retained")).toBeTruthy();
+    expect(within(card).getByTestId("kubernetes-session-request-summary").textContent).toContain(
+      "0 CPU · 512Mi memory",
+    );
+    expect(within(card).getByRole("link").getAttribute("href")).toBe("/t/task-123456789");
+    expect(screen.getByText(/Stop preserves Kubernetes resources/)).toBeTruthy();
   });
 });
 
@@ -118,8 +139,8 @@ describe("Kubernetes session status cards", () => {
 
     const row = screen.getByText("task-123").closest("tr");
     expect(row).not.toBeNull();
-    const statusCell = within(row as HTMLTableRowElement).getByTestId("kubernetes-session-status");
-    expect(within(statusCell).getByText("pods is forbidden: RBAC denied")).toBeTruthy();
+    fireEvent.click(within(row as HTMLTableRowElement).getByLabelText("Show session details"));
+    expect(screen.getByText("pods is forbidden: RBAC denied")).toBeTruthy();
   });
 
   it("labels a successfully completed Pod as succeeded instead of terminated", () => {
@@ -134,8 +155,9 @@ describe("Kubernetes session status cards", () => {
 
     render(<KubernetesSessionsCard state={state} />);
 
-    expect(screen.getByText("Succeeded")).toBeTruthy();
-    expect(screen.queryByText("Terminated")).toBeNull();
+    const status = screen.getByTestId("kubernetes-session-status-summary");
+    expect(within(status).getByText("Pod: Succeeded")).toBeTruthy();
+    expect(within(status).getByText("Container: Terminated")).toBeTruthy();
   });
 });
 
@@ -154,6 +176,9 @@ function sessionsState(): KubernetesSessionsState {
         workspace_kind: "managed_pvc",
         created_at: "2026-08-24T10:00:00Z",
         failure_reason: "pods is forbidden: RBAC denied",
+        session_state: "RUNNING",
+        retention_state: "active",
+        main_container_requests: { cpu: "250m", memory: "1Gi" },
       },
     ],
     loading: false,

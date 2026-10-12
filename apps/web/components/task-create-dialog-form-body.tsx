@@ -17,7 +17,10 @@ import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
+import { RUNNER_INELIGIBLE_REASON_KEYS } from "@/components/task-create-dialog-helpers";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 import { useTranslation } from "react-i18next";
+import type { ComboboxOption } from "@/components/combobox";
 
 type SelectorOption = {
   value: string;
@@ -33,11 +36,7 @@ type CreateEditSelectorsProps = {
   agentProfileId: string;
   onAgentProfileChange: (value: string) => void;
   isCreatingSession: boolean;
-  executorProfileOptions: Array<{
-    value: string;
-    label: string;
-    renderLabel?: () => React.ReactNode;
-  }>;
+  executorProfileOptions: ComboboxOption[];
   executorProfileId: string;
   onExecutorProfileChange: (value: string) => void;
   executorsLoading: boolean;
@@ -51,7 +50,7 @@ type CreateEditSelectorsProps = {
     popoverPortal?: boolean;
   }>;
   ExecutorProfileSelectorComponent: React.ComponentType<{
-    options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+    options: ComboboxOption[];
     value: string;
     onValueChange: (value: string) => void;
     disabled: boolean;
@@ -64,6 +63,10 @@ type CreateEditSelectorsProps = {
   selectedAgentProfileName: string | null;
   effectiveWorkflowName: string | null;
   executorProfileName: string | null;
+  /** Gates the executor-profile column independently of isTaskStarted. */
+  runnerEditable: boolean;
+  /** Presented instead of the selector when runnerEditable is false. */
+  runnerIneligibleReason: string;
 };
 
 type AgentColumnProps = Pick<
@@ -84,7 +87,7 @@ type AgentColumnProps = Pick<
 >;
 
 function credentialsHref(executorProfileId: string): string {
-  return executorProfileId ? `/settings/executors/${executorProfileId}` : "/settings/executors";
+  return executorProfileId ? executorProfileSettingsPath(executorProfileId) : "/settings/executors";
 }
 
 function useExecutorTarget(executorProfileName: string | null): string {
@@ -264,36 +267,47 @@ function AgentColumn({
   );
 }
 
+function RunnerIneligibleNote({ reason }: { reason: string }) {
+  const { t } = useTranslation();
+  const key = RUNNER_INELIGIBLE_REASON_KEYS[reason] ?? "task:runnerReasonEvaluationUnavailable";
+  return (
+    <div
+      className="flex h-auto min-h-7 items-center rounded-sm border border-input px-3 py-1.5 text-xs text-muted-foreground"
+      data-testid="runner-ineligible-note"
+    >
+      <span>{t(key)}</span>
+    </div>
+  );
+}
+
 export const CreateEditSelectors = memo(function CreateEditSelectors(
   props: CreateEditSelectorsProps,
 ) {
   const { t } = useTranslation();
-  if (props.isTaskStarted) return null;
-  const {
-    executorProfileOptions,
-    executorProfileId,
-    onExecutorProfileChange,
-    executorsLoading,
-    ExecutorProfileSelectorComponent,
-  } = props;
+  const showAgentColumn = !props.isTaskStarted;
+  const { executorProfileOptions, executorProfileId, onExecutorProfileChange, executorsLoading } =
+    props;
+  const { ExecutorProfileSelectorComponent, runnerEditable, runnerIneligibleReason } = props;
 
   // Branch + repo selection (and the FreshBranchToggle, which is per-task
   // branch strategy) live in the chip row above the description; this row
   // carries only agent and executor profile selectors.
   return (
     <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="min-w-0">{showAgentColumn && <AgentColumn {...props} />}</div>
       <div className="min-w-0">
-        <AgentColumn {...props} />
-      </div>
-      <div className="min-w-0">
-        <ExecutorProfileSelectorComponent
-          options={executorProfileOptions}
-          value={executorProfileId}
-          onValueChange={onExecutorProfileChange}
-          placeholder={executorsLoading ? t("task:loadingProfiles") : t("task:selectProfile")}
-          disabled={executorsLoading}
-          popoverPortal
-        />
+        {runnerEditable ? (
+          <ExecutorProfileSelectorComponent
+            options={executorProfileOptions}
+            value={executorProfileId}
+            onValueChange={onExecutorProfileChange}
+            placeholder={executorsLoading ? t("task:loadingProfiles") : t("task:selectProfile")}
+            disabled={executorsLoading}
+            popoverPortal
+          />
+        ) : (
+          <RunnerIneligibleNote reason={runnerIneligibleReason} />
+        )}
       </div>
     </div>
   );
@@ -305,11 +319,7 @@ type SessionSelectorsProps = {
   onAgentProfileChange: (value: string) => void;
   agentProfilesLoading: boolean;
   isCreatingSession: boolean;
-  executorProfileOptions: Array<{
-    value: string;
-    label: string;
-    renderLabel?: () => React.ReactNode;
-  }>;
+  executorProfileOptions: ComboboxOption[];
   executorProfileId: string;
   onExecutorProfileChange: (value: string) => void;
   executorsLoading: boolean;
@@ -323,7 +333,7 @@ type SessionSelectorsProps = {
     popoverPortal?: boolean;
   }>;
   ExecutorProfileSelectorComponent: React.ComponentType<{
-    options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+    options: ComboboxOption[];
     value: string;
     onValueChange: (value: string) => void;
     disabled: boolean;
@@ -382,6 +392,7 @@ type WorkflowSectionProps = {
     [key: string]: unknown;
   }>;
   snapshots: Record<string, WorkflowSnapshotData>;
+  previewWorkspaceId?: string | null;
   effectiveWorkflowId: string | null;
   onWorkflowChange: (value: string) => void;
   agentProfiles: AgentProfileOption[];
@@ -400,6 +411,7 @@ function renderWorkflowSection({
   isTaskStarted,
   workflows: allWorkflows,
   snapshots,
+  previewWorkspaceId,
   effectiveWorkflowId,
   onWorkflowChange,
   agentProfiles,
@@ -418,6 +430,7 @@ function renderWorkflowSection({
       <WorkflowSelectorRow
         workflows={workflows}
         snapshots={snapshots}
+        previewWorkspaceId={previewWorkspaceId}
         selectedWorkflowId={effectiveWorkflowId ?? null}
         onWorkflowChange={onWorkflowChange}
         agentProfiles={agentProfiles}
@@ -474,6 +487,7 @@ export const WorkflowSection = memo(function WorkflowSection(workflowProps: Work
 
 export type DialogPromptSectionProps = {
   isSessionMode: boolean;
+  promptReferencesEnabled?: boolean;
   isTaskStarted: boolean;
   initialDescription: string;
   fs: DialogFormState;
@@ -515,6 +529,7 @@ function importBindings<T>(
 
 export function DialogPromptSection({
   isSessionMode,
+  promptReferencesEnabled = false,
   isTaskStarted,
   initialDescription,
   fs,
@@ -540,6 +555,7 @@ export function DialogPromptSection({
       <TaskFormInputs
         key={fs.openCycle}
         isSessionMode={isSessionMode}
+        promptReferencesEnabled={promptReferencesEnabled}
         workspaceId={workspaceId}
         autoFocus={shouldAutoFocus}
         initialDescription={initialDescription}

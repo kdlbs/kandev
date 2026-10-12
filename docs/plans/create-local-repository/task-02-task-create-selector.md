@@ -10,6 +10,9 @@ spec: "../../specs/workspaces/requirements/create-local-repository.md"
 
 # Task 02: Task-Create Local Repository Selector
 
+The [availability follow-up](../repository-creation-availability/plan.md) replaces
+the single-row restriction recorded below and preserves multi-row executors.
+
 ## Acceptance
 
 - A task-create repository picker exposes **Create new repository**, and success selects the returned

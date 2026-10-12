@@ -5,7 +5,9 @@ requirements:
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003
+  - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004
 created: 2026-08-30
+updated: 2026-10-02
 owners:
   - kandev
 ---
@@ -31,6 +33,7 @@ executor transition, and agent promotion or resume. It follows
 | `REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001` | [Canonical environment and inventory](#canonical-environment-and-inventory) |
 | `REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002` | [Recovery and path authority](#recovery-and-path-authority) |
 | `REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003` | [Executor transition](#executor-transition), [Launch admission](#launch-admission) |
+| `REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004` | [Concurrent session visibility](#concurrent-session-visibility) |
 
 ## Canonical environment and inventory
 
@@ -114,15 +117,64 @@ inventory validation and filesystem validation:
 - the validated path belongs to the selected environment, not a stale session
   projection.
 
+The canonical inventory match for a slot is scoped per repository. The legacy
+empty-branch fallback stands in for a repository's branch slot only when that
+repository has no row carrying a non-empty branch slug; branch scoping does not
+depend on a worktree identifier, so a local-executor row with a branch and no
+worktree ID is already branch-scoped and suppresses the fallback for its own
+repository. A slot therefore never matches more than one row.
+
 Validation is read-only and uses the existing bounded Git inspection path. It
 does not read file contents or alter the index, HEAD, branch, tracked files, or
 untracked files. Remote executors validate through their executor-owned
 inventory contract rather than host filesystem inspection.
 
+The [worktree recovery](worktree-metadata-recovery.md) operation can restore a
+missing canonical checkout before attachment under its exclusive recovery claim.
+Attach-only preparation remains read-only.
+
+The [managed clone relocation](managed-clone-relocation.md) operation can
+establish a new canonical worktree before this admission check. It holds its own
+environment claim and leaves admission read-only. A failed relocation cannot
+make an invalid checkout ready.
+
 The lifecycle manager retains a defense-in-depth guard: if a repo-backed
 `WorkspaceInfo` reaches execution creation without the validated-environment
 marker and exact selected environment identity, it refuses to create the
 execution. It never treats a non-empty path as sufficient proof.
+
+## Concurrent session visibility
+
+Multiple sessions of one task attach to a single canonical environment and its
+single physical worktree. Concurrent writing is permitted by design; this
+section adds no lock, no refusal, and no ordering between those writers. It
+makes the condition observable.
+
+Two seams start an agent process against an already-attached workspace:
+`Executor.LaunchPreparedSession` when it is asked to start the agent, and
+`Executor.resumeSession`. Both already hold the per-session lock and both know
+the task ID. Immediately before the process starts, each reads the task's
+sessions and counts siblings in a working state, excluding the session being
+started. The existing `sessionstate.IsWorking` predicate defines that state, so
+observation and the executor's own review reconciliation agree on one
+definition.
+
+A non-zero count emits a structured warning naming the admitting site, the
+session being started, and the sibling session IDs, and increments an expvar
+counter under `session_coresidency_*`. Labels carry the admitting site and, for
+skips, the reason; identifiers stay in the log entry and never become label
+values, so counter cardinality is bounded.
+
+The sibling read can fail. A failed read records a skip with its reason instead
+of a zero count, so a degraded observer is distinguishable from a task that
+genuinely has one live session. The read never blocks admission: an observation
+error is logged and the launch proceeds.
+
+The workflow profile-switch park policy reaches this condition without any user
+request. Parking leaves the source session in `WAITING_FOR_INPUT` with its
+runtime stopped but its conversation answerable, while the destination step's
+session runs. A later message to the parked session starts a second agent in
+the shared worktree. That is the path this observation is calibrated for.
 
 ## Persistence and projection
 
@@ -131,6 +183,29 @@ After successful launch or resume, the orchestrator refreshes
 No schema migration is required. A successful resume under this contract also
 self-heals an environment path written incorrectly by the former fallback
 order, provided the canonical worktree inventory remains valid.
+
+Successful resume also persists the session's raw workspace binding after
+`persistTaskEnvironment` supplies the final environment identity and path.
+`bindSessionToTaskEnvironment` changes an in-memory value. That change requires
+a subsequent guarded repository write before resume reports success or starts
+the agent process. This applies to agent resume and workspace-only resume.
+
+The credential boundary still persists `STARTING` before credential issuance.
+The final binding write uses the current state and startup-attempt guards. If
+`LaunchAgent` returns after the same attempt advances from `STARTING` to
+`RUNNING` or `WAITING_FOR_INPUT`, persistence may retry against that observed
+state only while the captured attempt still owns it. The atomic state and
+attempt predicate rejects cancellation, terminal states, and a replaced
+attempt. Failure prevents agent startup and uses the existing owned-execution
+cleanup and resume rollback path.
+
+The environment-projected path cannot prove that this write occurred.
+`GetTaskSessionWorkspacePathsByTaskEnvironment` reads the raw session column
+for Git source validation. Verification therefore inspects persisted values
+independently of the mutable launch object and effective session projection.
+The canonical root and exact active repository worktrees remain the only
+eligible paths. Missing raw bindings remain unavailable until an authorized
+successful lifecycle operation records them.
 
 Task-session reads project the linked environment workspace before the legacy
 session-local path. The Files panel and other workspace consumers use that
@@ -162,6 +237,20 @@ historical records but cannot become the current task change projection.
   environment failure handling.
 
 ## Verification
+
+Resume coverage includes an initially empty raw session path and both agent
+and workspace-only materialization. Frozen write snapshots and repository
+integration checks prove that the final binding reaches persistent storage.
+Persistence-error and superseded-attempt cases prove that no agent starts
+through a failed final write. Existing credential-boundary checks retain
+their ordering assertions.
+
+Desktop and phone Changes regressions resume a disposable failed session,
+create a dirty file, reload the task, and verify fresh file membership.
+The browser checks use real backend refresh responses. They do not inject a
+successful status or rely on a later file mutation to recover the panel.
+The [resume binding repair plan](../../../plans/resume-workspace-binding/plan.md)
+records implementation scope and exact commands.
 
 The orchestrator unit boundary covers all workspace-path precedence cases,
 including workspace-only recovery with a source repository present. A session

@@ -36,7 +36,7 @@ vi.mock("./file-context-menu", () => ({
   getGitStatusTextClass: () => "",
 }));
 
-import { FileBrowserContentArea } from "./file-browser-parts";
+import { FileBrowserContentArea } from "./file-browser-content-area";
 
 const SEARCH_PATH = "src/components/chat-input.tsx";
 

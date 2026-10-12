@@ -3,6 +3,8 @@ package state
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -77,6 +79,60 @@ func TestStoreSetUpsertsOnRepeatedWrite(t *testing.T) {
 	}
 	if len(entries) != 1 {
 		t.Fatalf("expected exactly 1 entry after repeated Set, got %d: %+v", len(entries), entries)
+	}
+}
+
+// TestStoreClaimIsAtomicAcrossConnections is QA contract coverage for the
+// occurrence-key primitive. Two backend connections sharing one database must
+// not both win the same claim.
+func TestStoreClaimIsAtomicAcrossConnections(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "plugin-state.db") + "?_busy_timeout=5000&_journal_mode=WAL"
+	stores := make([]*Store, 2)
+	for i := range stores {
+		conn, err := sqlx.Open("sqlite3", dsn)
+		if err != nil {
+			t.Fatalf("open connection %d: %v", i, err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		stores[i], err = NewStore(db.NewPool(conn, conn))
+		if err != nil {
+			t.Fatalf("new store %d: %v", i, err)
+		}
+	}
+
+	start := make(chan struct{})
+	claimed := make([]bool, len(stores))
+	errs := make([]error, len(stores))
+	var wg sync.WaitGroup
+	for i, store := range stores {
+		wg.Add(1)
+		go func(index int, candidate *Store) {
+			defer wg.Done()
+			<-start
+			claimed[index], errs[index] = candidate.Claim(
+				context.Background(),
+				"kandev-plugin-coordinator",
+				"agent_conversation_occurrence",
+				"workspace/conversation",
+				"wake:cycle",
+				json.RawMessage(`{"claimed":true}`),
+			)
+		}(i, store)
+	}
+	close(start)
+	wg.Wait()
+
+	winners := 0
+	for i := range stores {
+		if errs[i] != nil {
+			t.Fatalf("claim %d: %v", i, errs[i])
+		}
+		if claimed[i] {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("winning claims = %d, want 1 (%v)", winners, claimed)
 	}
 }
 

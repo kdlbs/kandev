@@ -80,10 +80,10 @@ func TestPostgresSubagentContextSchemaAndBackfill(t *testing.T) {
 	if _, err := db.Exec(`DELETE FROM kandev_meta WHERE key IN ('subagent_context_capture_since', 'subagent_context_backfill_through')`); err != nil {
 		t.Fatalf("reset activation keys: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay runMigrations: %v", err)
 	}
 
@@ -265,7 +265,7 @@ func TestPostgresSubagentContextBackfillJSONHelpers(t *testing.T) {
 	if _, err := db.Exec(`DELETE FROM kandev_meta WHERE key IN ('subagent_context_capture_since', 'subagent_context_backfill_through')`); err != nil {
 		t.Fatalf("reset activation keys: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations must not abort on malformed metadata rows: %v", err)
 	}
 

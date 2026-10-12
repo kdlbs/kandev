@@ -67,6 +67,8 @@ export const KandevToolMessage = memo(function KandevToolMessage({
     handleAllowAlways,
     hasAllowAlways,
     handleReject,
+    offeredChoices,
+    handleOfferedChoice,
   } = usePermissionResponseHandlers({
     permissionMetadata,
     permissionMessage,
@@ -109,6 +111,8 @@ export const KandevToolMessage = memo(function KandevToolMessage({
           onApprove={handleApprove}
           onReject={handleReject}
           onAllowAlways={hasAllowAlways ? handleAllowAlways : undefined}
+          offeredChoices={offeredChoices}
+          onChooseOfferedChoice={handleOfferedChoice}
           isResponding={isResponding}
         />
       </div>

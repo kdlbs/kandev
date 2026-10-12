@@ -10,7 +10,7 @@ type StoreStep = {
 };
 type MockState = {
   kanban: { workflowId: string | null; steps: StoreStep[] };
-  kanbanMulti: { snapshots: Record<string, { steps: StoreStep[] }> };
+  kanbanMulti: { snapshots: Record<string, { steps: StoreStep[]; isPlaceholder?: boolean }> };
 };
 
 const ACTIVE_WORKFLOW_ID = "workflow-active";
@@ -23,6 +23,8 @@ let mockState: MockState = {
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
 }));
+
+vi.mock("./use-workflow-step-metadata", () => ({ useWorkflowStepMetadata: () => [] }));
 
 import { useWorkflowStepsById } from "./use-workflow-steps-by-id";
 
@@ -66,6 +68,42 @@ describe("useWorkflowStepsById", () => {
     const { result } = renderHook(() => useWorkflowStepsById("workflow-other"));
     expect(result.current).toHaveLength(1);
     expect(result.current[0]).toMatchObject({ id: "x", name: "Triage" });
+  });
+
+  it("updates ordered steps when a placeholder destination snapshot loads", () => {
+    mockState = {
+      kanban: {
+        workflowId: ACTIVE_WORKFLOW_ID,
+        steps: [{ id: "source", title: "Review", color: "#111", position: 0 }],
+      },
+      kanbanMulti: { snapshots: { "workflow-other": { steps: [] } } },
+    };
+    const { result, rerender } = renderHook(
+      ({ workflowId }: { workflowId: string }) => useWorkflowStepsById(workflowId),
+      { initialProps: { workflowId: "workflow-other" } },
+    );
+    expect(result.current).toEqual([]);
+
+    mockState = {
+      kanban: {
+        workflowId: ACTIVE_WORKFLOW_ID,
+        steps: [{ id: "source", title: "Review", color: "#111", position: 0 }],
+      },
+      kanbanMulti: {
+        snapshots: {
+          "workflow-other": {
+            steps: [
+              { id: "later", title: "Implement", color: "#222", position: 1 },
+              { id: "current", title: "Analysis", color: "#333", position: 0 },
+            ],
+          },
+        },
+      },
+    };
+    rerender({ workflowId: "workflow-other" });
+
+    expect(result.current.map((step) => step.id)).toEqual(["current", "later"]);
+    expect(result.current.map((step) => step.name)).toEqual(["Analysis", "Implement"]);
   });
 
   it("returns an empty list when neither the active workflow nor a snapshot resolves it", () => {

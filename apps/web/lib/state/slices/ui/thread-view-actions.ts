@@ -57,6 +57,8 @@ function cloneView(view: ThreadView): ThreadView {
     filters: view.filters.map(cloneClause),
     sort: { ...view.sort },
     maxColumns: view.maxColumns,
+    layout: view.layout,
+    autoHideComposer: view.autoHideComposer,
   };
 }
 
@@ -68,6 +70,8 @@ function cloneDraft(draft: ThreadViewDraft | null): ThreadViewDraft | null {
     filters: draft.filters.map(cloneClause),
     sort: { ...draft.sort },
     maxColumns: draft.maxColumns,
+    layout: draft.layout,
+    autoHideComposer: draft.autoHideComposer,
   };
 }
 
@@ -211,6 +215,7 @@ export function buildThreadViewActions(set: ImmerSet, get: () => UISlice) {
       const before = snapshotThreadViews(get().threadViews);
       let committed = false;
       set((draft) => {
+        if (draft.threadViews.draft) return;
         if (!draft.threadViews.views.some((view) => view.id === viewId)) return;
         draft.threadViews.activeViewId = viewId;
         draft.threadViews.draft = null;
@@ -246,6 +251,8 @@ export function buildThreadViewActions(set: ImmerSet, get: () => UISlice) {
         filters: ThreadFilterClause[];
         sort: ThreadSortSpec;
         maxColumns: number | null;
+        layout: ThreadView["layout"];
+        autoHideComposer: boolean;
       }>,
     ) => {
       mutate((state) => {
@@ -257,6 +264,8 @@ export function buildThreadViewActions(set: ImmerSet, get: () => UISlice) {
           filters: active.filters.map(cloneClause),
           sort: { ...active.sort },
           maxColumns: active.maxColumns,
+          layout: active.layout,
+          autoHideComposer: active.autoHideComposer,
         };
         state.draft = {
           baseViewId: active.id,
@@ -266,6 +275,8 @@ export function buildThreadViewActions(set: ImmerSet, get: () => UISlice) {
             : current.filters.map(cloneClause),
           sort: patch.sort ? { ...patch.sort } : { ...current.sort },
           maxColumns: patch.maxColumns === undefined ? current.maxColumns : patch.maxColumns,
+          layout: patch.layout ?? current.layout,
+          autoHideComposer: patch.autoHideComposer ?? current.autoHideComposer,
         };
       });
     },
@@ -285,6 +296,8 @@ export function buildThreadViewActions(set: ImmerSet, get: () => UISlice) {
           filters: state.draft.filters.map(cloneClause),
           sort: { ...state.draft.sort },
           maxColumns: state.draft.maxColumns,
+          layout: state.draft.layout,
+          autoHideComposer: state.draft.autoHideComposer,
         };
         state.views.push(view);
         state.activeViewId = view.id;
@@ -305,6 +318,8 @@ export function buildThreadViewActions(set: ImmerSet, get: () => UISlice) {
         view.filters = state.draft.filters.map(cloneClause);
         view.sort = { ...state.draft.sort };
         view.maxColumns = state.draft.maxColumns;
+        view.layout = state.draft.layout;
+        view.autoHideComposer = state.draft.autoHideComposer;
         state.draft = null;
       }),
     discardThreadViewDraft: () =>

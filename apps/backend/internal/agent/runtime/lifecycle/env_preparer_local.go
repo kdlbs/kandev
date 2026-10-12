@@ -32,6 +32,8 @@ type LocalPreparer struct {
 	logger *logger.Logger
 }
 
+const localGitNetworkTimeout = 30 * time.Second
+
 // NewLocalPreparer creates a new LocalPreparer.
 func NewLocalPreparer(log *logger.Logger) *LocalPreparer {
 	return &LocalPreparer{
@@ -216,7 +218,16 @@ func validateLocalRepositoryWorkspace(ctx context.Context, workspacePath, reposi
 	if err != nil {
 		return err
 	}
-	if workspaceCommonDir != repositoryCommonDir {
+	workspaceCommonInfo, err := os.Stat(workspaceCommonDir)
+	if err != nil {
+		return worktree.ErrReuseWorktreeUnavailable
+	}
+	repositoryCommonInfo, err := os.Stat(repositoryCommonDir)
+	if err != nil {
+		return worktree.ErrReuseWorktreeUnavailable
+	}
+	if !workspaceCommonInfo.IsDir() || !repositoryCommonInfo.IsDir() ||
+		!os.SameFile(workspaceCommonInfo, repositoryCommonInfo) {
 		return worktree.ErrReuseWorktreeUnavailable
 	}
 	return nil
@@ -241,9 +252,9 @@ func localGitTopLevel(ctx context.Context, path string) (string, error) {
 }
 
 // localGitCommonDir returns the canonical Git directory shared by a checkout
-// and all of its linked worktrees. Comparing this value, instead of the
-// worktree top-level paths, proves that a linked worktree belongs to the
-// selected repository while still rejecting an unrelated Git checkout.
+// and all of its linked worktrees. Its filesystem identity, rather than its
+// path spelling, proves that a linked worktree belongs to the selected
+// repository while still rejecting an unrelated Git checkout.
 func localGitCommonDir(ctx context.Context, path string) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil || !info.IsDir() {
@@ -315,14 +326,10 @@ func checkoutBranch(
 	var fetchOut []byte
 	var fetchErr error
 	if !remoteSyncHandled {
-		fetchCmd := subproc.NewGitCommand(ctx, "fetch", "origin", branch)
-		fetchCmd.Dir = workDir
-		fetchOut, fetchErr = subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, fetchCmd)
+		fetchOut, fetchErr = runLocalGit(ctx, workDir, "fetch", "origin", branch)
 	}
 
-	cmd := subproc.NewGitCommand(ctx, "checkout", branch)
-	cmd.Dir = workDir
-	out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
+	out, err := runLocalGit(ctx, workDir, "checkout", branch)
 	outStr := redactCheckoutOutput(strings.TrimSpace(string(out)), sensitiveValues)
 	if err != nil {
 		if fetchErr != nil {
@@ -332,6 +339,23 @@ func checkoutBranch(
 		return outStr, worktree.ClassifyGitError(outStr, err)
 	}
 	return outStr, nil
+}
+
+func runLocalGit(ctx context.Context, workDir string, args ...string) ([]byte, error) {
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		localGitNetworkTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, args...)
+			cmd.Dir = workDir
+			return cmd
+		},
+	)
+	if runErr == nil {
+		runErr = execCtxErr
+	}
+	return output, runErr
 }
 
 var credentialURLPattern = regexp.MustCompile(`(?i)(https?://)[^\s/@]+@`)

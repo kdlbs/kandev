@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -395,15 +394,7 @@ func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
 }
 
 func schemaSQLForDriver(schema, driver string) string {
-	schema = strings.ReplaceAll(schema, "TIMESTAMP", dialect.TimestampType(driver))
-	schema = strings.ReplaceAll(schema, "DATETIME", dialect.TimestampType(driver))
-	if dialect.IsPostgres(driver) {
-		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
-		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
-		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE")
-		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
-	}
-	return schema
+	return dialect.MustRenderSchema(driver, schema)
 }
 
 const selectConfigColumns = `workspace_id, site_url, email, auth_method, instance_type, default_project_key,

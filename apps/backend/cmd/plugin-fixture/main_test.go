@@ -154,6 +154,55 @@ func TestHandleAction_ReturnsAuthenticatedConnectionStatus(t *testing.T) {
 	require.JSONEq(t, `{"connected":true,"workspace_id":"workspace-42"}`, string(resp.Body))
 }
 
+func TestHandleAction_UtilityDefaultOmitsOptions(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	host := &fakeHost{utilityText: "executed mock-fast"}
+	p.SetHost(host)
+
+	resp, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: utilityDefaultAction,
+	})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"response":"executed mock-fast"}`, string(resp.Body))
+	require.Empty(t, host.lastUtilityOptions)
+}
+
+func TestHandleAction_UtilityPreferenceReadsConfigAndPassesProfile(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	host := &fakeHost{
+		configValues: map[string]any{"agent_profile": "profile-b"},
+		utilityText:  "executed mock-smart",
+	}
+	p.SetHost(host)
+
+	resp, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: utilityPreferenceAction,
+	})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"response":"executed mock-smart"}`, string(resp.Body))
+	require.Equal(t, []pluginsdk.UtilityAgentOptions{{ProfileID: "profile-b"}}, host.lastUtilityOptions)
+}
+
+func TestHandleAction_UtilityPreferenceEmptyConfigDelegatesDefault(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	host := &fakeHost{configValues: map[string]any{"agent_profile": ""}, utilityText: "default"}
+	p.SetHost(host)
+
+	_, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{ActionKey: utilityPreferenceAction})
+	require.NoError(t, err)
+	require.Equal(t, []pluginsdk.UtilityAgentOptions{{}}, host.lastUtilityOptions)
+}
+
+func TestHandleAction_UtilityPreferenceRejectsWrongConfigType(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	host := &fakeHost{configValues: map[string]any{"agent_profile": 42}}
+	p.SetHost(host)
+
+	_, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{ActionKey: utilityPreferenceAction})
+	require.EqualError(t, err, `plugin-fixture: config "agent_profile" must be a string`)
+	require.Empty(t, host.lastUtilityOptions)
+}
+
 func TestHandleAction_InspectsFixtureRepository(t *testing.T) {
 	p := &fixturePlugin{dataDir: t.TempDir()}
 
@@ -366,8 +415,13 @@ type setStateCall struct {
 type fakeHost struct {
 	pluginsdk.UnimplementedHostData
 
-	setStateCalls []setStateCall
-	setStateErr   error
+	setStateCalls      []setStateCall
+	setStateErr        error
+	configValues       map[string]any
+	configErr          error
+	utilityText        string
+	utilityErr         error
+	lastUtilityOptions []pluginsdk.UtilityAgentOptions
 
 	// Host data API write recording (ADR 0043 phase 2).
 	createdTaskID   string
@@ -424,11 +478,18 @@ func (h *fakeHost) ListState(context.Context, string, string) ([]pluginsdk.State
 	return nil, nil
 }
 
-func (h *fakeHost) GetConfig(context.Context) (map[string]any, error)       { return nil, nil }
+func (h *fakeHost) GetConfig(context.Context) (map[string]any, error) {
+	return h.configValues, h.configErr
+}
 func (h *fakeHost) GetSecret(context.Context, string) (string, bool, error) { return "", false, nil }
 func (h *fakeHost) SetSecret(context.Context, string, string) error         { return nil }
 func (h *fakeHost) DeleteSecret(context.Context, string) error              { return nil }
 func (h *fakeHost) RevealSecret(context.Context, string) (string, error)    { return "", nil }
+
+func (h *fakeHost) InvokeUtilityAgent(_ context.Context, _ string, options ...pluginsdk.UtilityAgentOptions) (string, error) {
+	h.lastUtilityOptions = append([]pluginsdk.UtilityAgentOptions(nil), options...)
+	return h.utilityText, h.utilityErr
+}
 
 func (h *fakeHost) EmitEvent(context.Context, string, map[string]any) error { return nil }
 

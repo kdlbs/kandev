@@ -141,6 +141,10 @@ func TestPostgresWritePlanRevisionUpsertAndImplementationMarker(t *testing.T) {
 	if first.RevisionNumber != 1 {
 		t.Fatalf("RevisionNumber = %d, want 1", first.RevisionNumber)
 	}
+	if head.WriteVersion == "" {
+		t.Fatal("first plan write did not assign a write version")
+	}
+	firstVersion := head.WriteVersion
 
 	// The nullable implementation marker: COALESCE + CASE WHEN over TIMESTAMP.
 	marked, err := repo.MarkTaskPlanImplementationStarted(ctx, "task-plan-pg", "session-pg", "jcfs")
@@ -149,6 +153,9 @@ func TestPostgresWritePlanRevisionUpsertAndImplementationMarker(t *testing.T) {
 	}
 	if marked.ImplementationStartedAt == nil {
 		t.Fatal("ImplementationStartedAt = nil, want the marker set")
+	}
+	if marked.WriteVersion != head.WriteVersion {
+		t.Fatalf("marker write version = %q, want %q unchanged", marked.WriteVersion, head.WriteVersion)
 	}
 	startedAt := *marked.ImplementationStartedAt
 	if marked.ImplementationStartedSessionID == nil || *marked.ImplementationStartedSessionID != "session-pg" {
@@ -177,6 +184,9 @@ func TestPostgresWritePlanRevisionUpsertAndImplementationMarker(t *testing.T) {
 	}
 	if second.RevisionNumber != 2 {
 		t.Errorf("second RevisionNumber = %d, want 2", second.RevisionNumber)
+	}
+	if head.WriteVersion == "" || head.WriteVersion == firstVersion {
+		t.Fatalf("second plan write version = %q, want a fresh token after %q", head.WriteVersion, firstVersion)
 	}
 	if got := countRows(t, repo, `SELECT COUNT(1) FROM task_plans WHERE task_id = ?`, "task-plan-pg"); got != 1 {
 		t.Errorf("HEAD rows = %d, want 1 (ON CONFLICT must update, not insert)", got)
@@ -271,7 +281,17 @@ func TestPostgresPlanRevisionWorkflowColumnsReplayMigration(t *testing.T) {
 			t.Fatalf("drop legacy column %s: %v", column, err)
 		}
 	}
+	if _, err := db.Exec(`ALTER TABLE task_plans DROP COLUMN write_version`); err != nil {
+		t.Fatalf("drop legacy task plan write_version: %v", err)
+	}
 	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_plans
+			(id, task_id, title, content, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`), "legacy-plan-pg", "task-plan-replay-pg", "Plan", "legacy plan", "agent", now, now); err != nil {
+		t.Fatalf("insert legacy task plan: %v", err)
+	}
 	if _, err := db.Exec(db.Rebind(`
 		INSERT INTO task_plan_revisions
 			(id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at)
@@ -280,11 +300,18 @@ func TestPostgresPlanRevisionWorkflowColumnsReplayMigration(t *testing.T) {
 		t.Fatalf("insert legacy plan revision: %v", err)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("run legacy plan migrations: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay legacy plan migrations: %v", err)
+	}
+	var writeVersion string
+	if err := db.QueryRow(db.Rebind(`SELECT write_version FROM task_plans WHERE task_id = ?`), "task-plan-replay-pg").Scan(&writeVersion); err != nil {
+		t.Fatalf("read migrated task plan write version: %v", err)
+	}
+	if writeVersion == "" {
+		t.Fatal("legacy task plan write version was not backfilled")
 	}
 
 	var stepID, stepName, stepColor string

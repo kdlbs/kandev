@@ -2,6 +2,9 @@ import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { expectTaskDescription } from "../../pages/task-description-editor";
+import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { seedIncompatibleAgentScenario, seedLockedWorkflow } from "./agent-compatibility-helpers";
 
 // Exercises the regular task-create dialog (New Task in the sidebar), so run
@@ -18,38 +21,74 @@ test.describe("Task creation", () => {
     apiClient,
     seedData,
   }) => {
-    const hidden = await apiClient.e2eCreateHiddenWorkflow(
-      seedData.workspaceId,
-      "Hidden task-detail workflow",
-    );
-    const hiddenStart = await apiClient.createWorkflowStep(hidden.id, "Improve", 0, {
-      is_start_step: true,
-    });
-    const sourceTask = await apiClient.createTask(seedData.workspaceId, "Hidden source task", {
-      description: "Source task in the hidden workflow",
-      workflow_id: hidden.id,
-      workflow_step_id: hiddenStart.id,
+    const initialLayout = (await apiClient.getUserSettings()).settings
+      .sidebar_layouts_by_workspace?.[seedData.workspaceId];
+    const collapsedLayout = initialLayout
+      ? { ...initialLayout, navigation_height: 0, navigation_expanded: false }
+      : {
+          version: 1,
+          revision: 0,
+          navigation_height: 0,
+          navigation_expanded: false,
+          nodes: [
+            { id: "home", kind: "builtin" as const, destination_id: "home", visible: true },
+            { id: "new-task", kind: "builtin" as const, destination_id: "new_task", visible: true },
+            {
+              id: "integrations",
+              kind: "builtin" as const,
+              destination_id: "integrations",
+              visible: true,
+            },
+          ],
+        };
+    await apiClient.saveUserSettings({
+      sidebar_layout_state: {
+        workspace_id: seedData.workspaceId,
+        expected_revision: initialLayout?.revision ?? 0,
+        layout: collapsedLayout,
+      },
     });
 
-    await testPage.goto(`/t/${sourceTask.id}`);
-    await testPage.getByTestId("create-task-button").first().click();
+    try {
+      const hidden = await apiClient.e2eCreateHiddenWorkflow(
+        seedData.workspaceId,
+        "Hidden task-detail workflow",
+      );
+      const hiddenStart = await apiClient.createWorkflowStep(hidden.id, "Improve", 0, {
+        is_start_step: true,
+      });
+      const sourceTask = await apiClient.createTask(seedData.workspaceId, "Hidden source task", {
+        description: "Source task in the hidden workflow",
+        workflow_id: hidden.id,
+        workflow_step_id: hiddenStart.id,
+      });
 
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
-    await dialog.getByTestId("task-title-input").fill("Visible workflow task");
-    await dialog.getByTestId("task-description-input").fill("Created from hidden task detail");
-    await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeEnabled({
-      timeout: START_ENABLED_TIMEOUT,
-    });
-    await dialog.getByTestId("submit-start-agent-chevron").click();
-    await testPage.getByTestId("submit-create-without-agent").click();
+      await testPage.goto(`/t/${sourceTask.id}`);
+      const navigationExpand = testPage.getByTestId("sidebar-navigation-expand");
+      await expect(navigationExpand).toHaveAttribute("aria-expanded", "false");
+      await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
+      await expect(navigationExpand).toHaveAttribute("aria-expanded", "true");
+      await testPage.getByTestId("create-task-button").first().click();
 
-    await expect
-      .poll(() => getTaskIdFromPage(testPage), { timeout: 15_000 })
-      .not.toBe(sourceTask.id);
-    const createdTaskId = await getTaskIdFromPage(testPage);
-    const createdTask = await apiClient.getTask(createdTaskId);
-    expect(createdTask.workflow_step_id).toBe(seedData.startStepId);
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await dialog.getByTestId("task-title-input").fill("Visible workflow task");
+      await dialog.getByTestId("task-description-input").fill("Created from hidden task detail");
+      await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeEnabled({
+        timeout: START_ENABLED_TIMEOUT,
+      });
+      await dialog.getByTestId("submit-start-agent-chevron").click();
+      await testPage.getByTestId("submit-create-without-agent").click();
+
+      await expect
+        .poll(() => getTaskIdFromPage(testPage), { timeout: 15_000 })
+        .not.toBe(sourceTask.id);
+      const createdTaskId = await getTaskIdFromPage(testPage);
+      const createdTask = await apiClient.getTask(createdTaskId);
+      expect(createdTask.workflow_step_id).toBe(seedData.startStepId);
+    } finally {
+      await restoreSidebarLayout(apiClient, seedData.workspaceId, initialLayout);
+    }
   });
 
   test("selects the single visible workflow when hidden workflows are loaded", async ({
@@ -245,7 +284,7 @@ test.describe("Task creation", () => {
       await expect(workflowSelector).toContainText("Launch Preview Workflow");
       await dialog.getByTestId("task-description-input").fill("");
       const launchStep = dialog.getByTestId("task-create-launch-step");
-      await expect(launchStep).toHaveText("Start step: Backlog");
+      await expect(launchStep).toHaveText("Backlog");
       await expect(workflowSelector).not.toContainText("Start step:");
       const selectorBox = await workflowSelector.boundingBox();
       const launchStepBox = await launchStep.boundingBox();
@@ -260,16 +299,17 @@ test.describe("Task creation", () => {
         launchStepInfoBox.x + launchStepInfoBox.width - 1,
       );
       await launchStepInfo.hover();
-      await expect(
-        testPage.getByRole("tooltip", {
-          name: "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
-        }),
-      ).toBeVisible();
+      const launchStepTooltip = testPage.getByRole("tooltip", {
+        name: "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
+      });
+      await expect(launchStepTooltip).toBeVisible();
+      await testPage.mouse.move(0, 0);
+      await expect(launchStepTooltip).toBeHidden();
 
       await dialog.getByTestId("task-title-input").fill("Preview the launch prompt");
       const description = "Review the launch preview";
       await dialog.getByTestId("task-description-input").fill(description);
-      await expect(launchStep).toHaveText("Start step: In Progress");
+      await expect(launchStep).toHaveText("In Progress");
       const toggle = dialog.getByTestId("task-create-launch-preview-toggle");
       await expect(toggle).toHaveAttribute(
         "aria-label",
@@ -290,7 +330,7 @@ test.describe("Task creation", () => {
       await expect(dialog.getByTestId("task-description-input")).toHaveCount(0);
 
       await toggle.click();
-      await expect(dialog.getByTestId("task-description-input")).toHaveValue(description);
+      await expectTaskDescription(dialog.getByTestId("task-description-input"), description);
       await expect(toggle).toHaveAttribute("aria-pressed", "false");
       await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
       await expect(dialog).not.toBeVisible();
@@ -521,7 +561,7 @@ test.describe("Task creation", () => {
 
     const descInput = testPage.getByTestId("task-description-input");
     await descInput.fill("This is a test description");
-    await expect(descInput).toHaveValue("This is a test description");
+    await expectTaskDescription(descInput, "This is a test description");
   });
 
   test("start agent: creates task, starts session, navigates to session", async ({ testPage }) => {

@@ -22,7 +22,11 @@ const PAGE_SIZE = 25;
 // Atlassian's /search/jql is token-paginated: each response carries a
 // nextPageToken cursor for the page that follows. We cache tokens for visited
 // pages so users can step backward without re-querying from page 1.
-export function useJiraSearch(workspaceId: string | null | undefined, jql: string): SearchState {
+export function useJiraSearch(
+  workspaceId: string | null | undefined,
+  jql: string,
+  enabled = true,
+): SearchState {
   const [items, setItems] = useState<JiraTicket[]>([]);
   const [page, setPage] = useState(1);
   const [isLast, setIsLast] = useState(true);
@@ -35,7 +39,7 @@ export function useJiraSearch(workspaceId: string | null | undefined, jql: strin
 
   const run = useCallback(
     async (p: number) => {
-      if (!workspaceId || !jql.trim()) return;
+      if (!enabled || !workspaceId || !jql.trim()) return;
       const token = tokensRef.current[p - 1] ?? "";
       const reqId = ++reqRef.current;
       setLoading(true);
@@ -63,8 +67,14 @@ export function useJiraSearch(workspaceId: string | null | undefined, jql: strin
         if (reqId === reqRef.current) setLoading(false);
       }
     },
-    [workspaceId, jql],
+    [enabled, workspaceId, jql],
   );
+
+  useEffect(() => {
+    if (enabled) return;
+    reqRef.current += 1;
+    setLoading(false);
+  }, [enabled]);
 
   useEffect(() => {
     tokensRef.current = [""];

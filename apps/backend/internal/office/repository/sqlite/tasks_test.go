@@ -17,6 +17,16 @@ import (
 func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 	t.Helper()
 	repo := newTestRepo(t)
+	createSearchTestSchema(t, repo)
+	return repo
+}
+
+// createSearchTestSchema applies the same minimal search-test schema to a
+// repo built on a caller-supplied *sqlx.DB (e.g. one wrapping a custom
+// counting driver), so tests needing driver-level introspection don't need
+// their own copy of this schema.
+func createSearchTestSchema(t *testing.T, repo *sqlite.Repository) {
+	t.Helper()
 	ctx := context.Background()
 
 	if _, err := repo.ExecRaw(ctx, `
@@ -36,6 +46,7 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 			workflow_step_id TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL DEFAULT '',
 			assignee_user_id TEXT NOT NULL DEFAULT '',
+			assignment_generation INTEGER NOT NULL DEFAULT 0,
 			description TEXT DEFAULT '',
 			state TEXT DEFAULT 'TODO',
 			priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('critical','high','medium','low')),
@@ -73,7 +84,10 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 	if _, err := repo.ExecRaw(ctx, `
 		CREATE TABLE IF NOT EXISTS workflow_steps (
 			id TEXT PRIMARY KEY,
-			agent_profile_id TEXT NOT NULL DEFAULT ''
+			agent_profile_id TEXT NOT NULL DEFAULT '',
+			workflow_id TEXT NOT NULL DEFAULT '',
+			position INTEGER NOT NULL DEFAULT 0,
+			name TEXT NOT NULL DEFAULT ''
 		)
 	`); err != nil {
 		t.Fatalf("create workflow_steps table: %v", err)
@@ -109,7 +123,6 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 	`); err != nil {
 		t.Fatalf("create workflow_step_decisions table: %v", err)
 	}
-	return repo
 }
 
 func insertTask(t *testing.T, repo *sqlite.Repository, ctx context.Context, id, wsID, title, desc, identifier string) {

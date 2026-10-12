@@ -8,13 +8,40 @@ const WEB_DIR = path.resolve(__dirname, "..");
 export type BackendArtifact = {
   path: string;
   rebuildTarget: string;
+  sourceFiles?: string[];
+};
+
+export type GlobalSetupOptions = {
+  verifyPluginFixtureIdentity?: boolean;
 };
 
 export default function globalSetup() {
+  runGlobalSetup();
+}
+
+export function runGlobalSetup(options: GlobalSetupOptions = {}): void {
   const customKandevBin = process.env.KANDEV_E2E_BIN;
   const kandevBin = customKandevBin ?? path.join(BACKEND_DIR, "bin", "kandev");
   const artifacts: BackendArtifact[] = [
     { path: path.join(BACKEND_DIR, "bin", "mock-agent"), rebuildTarget: "build" },
+    {
+      path: path.join(
+        BACKEND_DIR,
+        "bin",
+        `e2e-delivery-fixture${process.platform === "win32" ? ".exe" : ""}`,
+      ),
+      rebuildTarget: "build-e2e-delivery-fixture",
+      sourceFiles: [
+        path.join(
+          BACKEND_DIR,
+          "internal/agent/runtime/lifecycle/e2e_retained_capacity_fixture_test.go",
+        ),
+        path.join(
+          BACKEND_DIR,
+          "internal/agent/runtime/lifecycle/e2e_delivery_record_fixture_test.go",
+        ),
+      ],
+    },
     {
       path: path.join(BACKEND_DIR, ".build", "kandev-plugin-e2e-1.0.0.tar.gz"),
       rebuildTarget: "e2e-plugin-package",
@@ -44,6 +71,11 @@ export default function globalSetup() {
     assertArtifactExists(artifact.path, artifact.rebuildTarget);
   }
   assertBackendArtifactsFresh(BACKEND_DIR, artifacts);
+  const pluginIdentityPath = path.join(BACKEND_DIR, ".build", "e2e-plugin-identity.json");
+  assertArtifactExists(pluginIdentityPath, "e2e-plugin-package");
+  if (options.verifyPluginFixtureIdentity !== false) {
+    assertPluginFixtureIdentity(pluginIdentityPath);
+  }
 
   const spaIndex = path.join(WEB_DIR, "dist", "index.html");
   if (!fs.existsSync(spaIndex)) {
@@ -114,7 +146,8 @@ const BACKEND_SOURCE_SKIP_DIRS = new Set(["bin", ".build", ".git", "testdata"]);
  * `*_test.go` is compiled only by `go test`; `make -C apps/backend
  * test-coverage` writes coverage.out and coverage.html next to go.mod; and
  * `go test -c` leaves `*.test` binaries wherever it is run. None can affect
- * the backend or helper binaries exercised by E2E.
+ * production binaries exercised by E2E. Test-only fixture artifacts list their
+ * additional source files separately.
  *
  * Without this, the ordinary `make test-coverage` → run E2E sequence aborts
  * demanding a backend rebuild because a coverage profile — which changes
@@ -136,6 +169,7 @@ const BACKEND_SOURCE_SKIP_FILE_PATTERNS = [
  * pointless backend rebuild over a bundle the tests ignore.
  */
 const EMBEDDED_WEB_DIR = path.join("internal", "webapp", "embedded", "generated");
+const GENERATED_PLUGIN_FIXTURE_UI_DIR = path.join("cmd", "plugin-fixture", "fixture-package", "ui");
 
 /**
  * Every file counts, not just `*.go`: the binary `//go:embed`s a large asset
@@ -160,6 +194,7 @@ function findNewestBackendSource(
       if (entry.isDirectory()) {
         if (BACKEND_SOURCE_SKIP_DIRS.has(entry.name)) continue;
         if (path.relative(backendDir, entryPath) === EMBEDDED_WEB_DIR) continue;
+        if (path.relative(backendDir, entryPath) === GENERATED_PLUGIN_FIXTURE_UI_DIR) continue;
         walk(entryPath);
         continue;
       }
@@ -200,11 +235,15 @@ export function assertBackendArtifactsFresh(
   if (!newestSource) return;
 
   for (const artifact of artifacts) {
+    const artifactSource = (artifact.sourceFiles ?? []).reduce((newest, file) => {
+      const mtimeMs = fs.statSync(file).mtimeMs;
+      return mtimeMs > newest.mtimeMs ? { file, mtimeMs } : newest;
+    }, newestSource);
     const artifactMtimeMs = fs.statSync(artifact.path).mtimeMs;
-    if (artifactMtimeMs < newestSource.mtimeMs) {
+    if (artifactMtimeMs < artifactSource.mtimeMs) {
       throw new Error(
         `Required E2E artifact is older than apps/backend sources: ${artifact.path}. ` +
-          `${newestSource.file} is newer. Run "${backendMakeCommand(
+          `${artifactSource.file} is newer. Run "${backendMakeCommand(
             backendDir,
             artifact.rebuildTarget,
           )}". E2E uses prebuilt backend artifacts. The frontend build does not rebuild them.`,
@@ -274,6 +313,73 @@ function validateE2EBuildIdentity(
     }
   }
   return true;
+}
+
+type PluginFixtureIdentity = {
+  schemaVersion: number;
+  pluginId: string;
+  pluginVersion: string;
+  bundlePath: string;
+  sourceHash: string;
+  generatedOutputHash: string;
+  manifestHash: string;
+  archiveSha256: string;
+  manifestCapability: string;
+  minKandevVersion: string;
+  panelKey: string;
+};
+
+function assertPluginFixtureIdentity(identityPath: string): void {
+  const identity = JSON.parse(fs.readFileSync(identityPath, "utf8")) as PluginFixtureIdentity;
+  if (
+    identity.schemaVersion !== 2 ||
+    identity.pluginId !== "kandev-plugin-e2e" ||
+    identity.pluginVersion !== "1.0.0" ||
+    identity.bundlePath !== "ui/bundle.js" ||
+    identity.manifestCapability !== "messages" ||
+    identity.minKandevVersion !== "0.91.1" ||
+    identity.panelKey !== "prompt-history-plugin"
+  ) {
+    throw new Error(`Unsupported E2E plugin identity schema in ${identityPath}`);
+  }
+  const source = path.join(
+    WEB_DIR,
+    "e2e",
+    "fixtures",
+    "plugins",
+    "prompt-history-plugin",
+    "bundle.js",
+  );
+  const output = path.join(
+    BACKEND_DIR,
+    "cmd",
+    "plugin-fixture",
+    "fixture-package",
+    "ui",
+    "bundle.js",
+  );
+  const manifest = path.join(
+    BACKEND_DIR,
+    "cmd",
+    "plugin-fixture",
+    "fixture-package",
+    "manifest.yaml",
+  );
+  const archive = path.join(BACKEND_DIR, ".build", "kandev-plugin-e2e-1.0.0.tar.gz");
+  for (const [file, expected] of [
+    [source, identity.sourceHash],
+    [output, identity.generatedOutputHash],
+    [manifest, identity.manifestHash],
+    [archive, identity.archiveSha256],
+  ]) {
+    assertArtifactExists(file);
+    const actual = sha256File(file);
+    if (actual !== expected) {
+      throw new Error(
+        `E2E plugin identity checksum mismatch for ${file}: got ${actual}, expected ${expected}`,
+      );
+    }
+  }
 }
 
 /**

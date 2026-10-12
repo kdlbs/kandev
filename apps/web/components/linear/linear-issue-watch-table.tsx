@@ -142,6 +142,8 @@ function WatchActions({
         <TooltipContent>{t("common:reset")}</TooltipContent>
       </Tooltip>
       <WatcherDeleteAction
+        targetKey={`${watch.workspaceId}:${watch.id}`}
+        subject={summarizeFilter(watch.filter)}
         title={t("linear:deleteThisLinearWatcher")}
         cancelLabel={t("common:cancel")}
         confirmLabel={t("linear:delete")}

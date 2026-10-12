@@ -1,7 +1,11 @@
 ---
-spec: docs/specs/ui/requirements/cancel-turn-progress.md
 created: 2026-08-03
 status: completed
+requirements:
+  - REQ-UI-CANCEL-TURN-PROGRESS-001
+system_design:
+  - ../../specs/ui/system-design/cancel-turn-progress.md
+legacy_specs: []
 ---
 
 # Implementation Plan: Backend-owned cancel-turn progress
@@ -142,21 +146,23 @@ layouts. Because reload persistence changes user-visible behavior on compact scr
 ## E2E Tests
 
 - **Task switch and reload:** revise
-  `apps/web/e2e/tests/chat/cancel-progress-task-switch.spec.ts`. Start the existing slow mock-agent
-  turn, send cancellation through to the backend, wait until the exposed session store reports
+  `apps/web/e2e/tests/chat/cancel-progress-task-switch.spec.ts`. Start the mock agent's
+  `/e2e:cancel-hold` prompt, send cancellation through to the backend, wait until the exposed session store reports
   `cancellation_pending=true`, switch away and back, reload the page, and assert the same disabled
   animated control until the backend settles. This replaces the current helper that holds the
   request before backend acceptance.
 - **Compact reload parity:** add
   `apps/web/e2e/tests/chat/mobile-cancel-progress-reload.spec.ts`, limited to `mobile-chrome`. Tap
-  cancel during the slow mock turn, wait for backend-owned pending state, reload, and assert the
+  cancel during the held mock turn, wait for backend-owned pending state, reload, and assert the
   shared control remains disabled and animated without desktop-only navigation assumptions.
 - **Test support:** add a cancellation-pending reader/waiter to
   `apps/web/e2e/helpers/session-store.ts`; remove
   `routeMainWebSocketWithHeldCancelRequest` from `apps/web/e2e/helpers/ws-drop.ts` once no test uses
-  it. The existing `/slow` mock scenario is cancellation-insensitive long enough to keep the
-  lifecycle operation deterministically pending; no production delay or new test-only endpoint is
-  required.
+  it. The mock-agent hold gives the acknowledged cancellation a single predictable boundary in every
+  mock run. Managed E2E startup carries the profile's three-second baseline through
+  `AgentctlStartupConfig` to ACP; the two cancel-progress regressions scope a 12-second override,
+  while normal startup retains ACP's three-second default. No browser request hold, test timeout
+  increase, or production lifecycle change is required.
 
 ## Verification Results
 

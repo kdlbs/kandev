@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/plugins/webapp"
 	"go.uber.org/zap"
 )
 
@@ -184,6 +185,13 @@ func (c *canvasSourceCollector) visit(currentPath string, entry fs.DirEntry, wal
 	// package extension allowlist.
 	if relativePath == ".canvas-root" {
 		return nil
+	}
+	if err := webapp.ValidateCanvasSourcePath(relativePath, info.IsDir()); err != nil {
+		code := "source_contains_unsupported_file"
+		if errors.Is(err, webapp.ErrUnsafeSource) {
+			code = "source_contains_excluded_file"
+		}
+		return newCanvasSourceError(code, "canvas source contains an excluded or unsupported file", err)
 	}
 	if len([]byte(relativePath)) > 240 {
 		return newCanvasSourceLimitError(errors.New("source path is too long"))

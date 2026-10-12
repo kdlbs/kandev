@@ -55,6 +55,7 @@ func (a *SkillReaderAdapter) GetSkillFromConfig(ctx context.Context, idOrSlug st
 		Content:    sk.Content,
 		Files:      runtimeSkillFiles(sk.FileInventory),
 		SourceType: string(sk.SourceType),
+		IsSystem:   sk.IsSystem,
 	}, nil
 }
 

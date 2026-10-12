@@ -20,6 +20,7 @@ async function createTaskAndNavigate(
   apiClient: import("../../helpers/api-client").ApiClient,
   seedData: import("../../fixtures/test-base").SeedData,
   title: string,
+  navigateViaKanban = true,
 ) {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -43,11 +44,15 @@ async function createTaskAndNavigate(
     )
     .toBe(true);
 
-  const kanban = new KanbanPage(testPage);
-  await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 10_000 });
-  await card.click();
+  if (navigateViaKanban) {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const card = kanban.taskCardByTitle(title);
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.click();
+  } else {
+    await testPage.goto(`/t/${task.id}`);
+  }
   await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
   const session = new SessionPage(testPage);
@@ -68,6 +73,7 @@ test.describe("Multi-session UX", () => {
       apiClient,
       seedData,
       "Tab Naming Task",
+      false,
     );
 
     // Create a second session
@@ -143,9 +149,9 @@ test.describe("Multi-session UX", () => {
     });
   });
 
-  // @covers AC-UI-PLAN-COMMENT-DRAFTS-001.2
-  // @covers AC-UI-PLAN-COMMENT-DRAFTS-001.3
-  test("preserves pending plan comments across session switches", async ({
+  // @covers AC-TASKS-PLAN-COMMENTS-001.2
+  // @covers AC-TASKS-PLAN-COMMENTS-002.1
+  test("shows task-owned plan comments across session switches", async ({
     testPage,
     apiClient,
     seedData,
@@ -217,7 +223,8 @@ test.describe("Multi-session UX", () => {
 
     await secondaryTab.click();
     await waitForStableActiveSession(testPage, secondarySessionId);
-    await expect(badge).toHaveCount(0);
+    await expect(badge).toHaveCount(1);
+    await expect(session.activeChat().getByText("1 plan comment", { exact: true })).toBeVisible();
     await testPage.evaluate(
       () =>
         new Promise<void>((resolve) => {
@@ -228,6 +235,7 @@ test.describe("Multi-session UX", () => {
     await primaryTab.click();
     await waitForStableActiveSession(testPage, primarySessionId);
     await expect(badge).toHaveCount(1, { timeout: 10_000 });
+    await expect(session.activeChat().getByText("1 plan comment", { exact: true })).toBeVisible();
     await badge.locator("svg").click();
     await expect(textarea).toHaveValue(commentText);
   });
@@ -643,15 +651,15 @@ test.describe("Multi-session UX", () => {
         .toBe(true);
     }
 
-    // Navigate to task 1
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const card1 = kanban.taskCardByTitle("Task Switch A");
-    await expect(card1).toBeVisible({ timeout: 10_000 });
-    await card1.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // The Kanban snapshot can lag behind a just-completed session. Open the
+    // known task directly; this test covers sidebar switching, not board refresh.
+    await testPage.goto(`/t/${task1.id}`);
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task1.id}(?:[/?#]|$)`), {
+      timeout: 15_000,
+    });
 
     const session = new SessionPage(testPage);
+    await session.waitForLoad();
 
     // After the AppSidebar overhaul, switching tasks via the sidebar restores
     // each task's dockview env layout. The restored layout can land the chat
@@ -675,7 +683,9 @@ test.describe("Multi-session UX", () => {
     await session.clickTaskInSidebar("Task Switch B");
 
     // Wait for URL to change to task 2's session
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task2.id}(?:[/?#]|$)`), {
+      timeout: 15_000,
+    });
 
     // Verify chat loads for task 2
     await session.showSessionContext();
@@ -687,6 +697,9 @@ test.describe("Multi-session UX", () => {
 
     // Switch back to task 1
     await session.clickTaskInSidebar("Task Switch A");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task1.id}(?:[/?#]|$)`), {
+      timeout: 15_000,
+    });
     await session.showSessionContext();
     await expect(
       session.activeChat().getByText("simple mock response", { exact: false }),

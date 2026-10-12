@@ -119,6 +119,12 @@ and save behavior.
 - [ ] [Task 03: Simplify the selector and add agent logos](task-03-expose-workflow-policy.md)
 - [ ] [Task 04: Prove all lifecycle combinations](task-04-prove-and-document-reuse-flows.md)
 
+## Follow-up delivery
+
+[Queued session ownership](../queued-session-ownership/plan.md) owns the later
+inspection/ceiling intersection and its regression matrix. This historical
+package does not establish that opening a parked predecessor is safe.
+
 ## Risks
 
 - A transition path can use the destination end setting by mistake.

@@ -140,6 +140,7 @@ type commandProcess struct {
 	buffer     *ringBuffer   // Memory-bounded output storage
 	stopOnce   sync.Once     // Ensures stopSignal is only closed once
 	stopSignal chan struct{} // Signals output readers to exit before process termination
+	exited     chan struct{} // Closed when cmd.Wait observes direct process exit
 	done       chan struct{} // Closed after cmd.Wait returns and lifecycle cleanup finishes
 	pgid       int
 	lifecycle  processLifecycleHandle
@@ -659,6 +660,9 @@ func (r *ProcessRunner) readOutput(proc *commandProcess, reader io.ReadCloser, s
 func (r *ProcessRunner) wait(proc *commandProcess) {
 	defer close(proc.done)
 	err := proc.cmd.Wait()
+	if proc.exited != nil {
+		close(proc.exited)
+	}
 	exitCode := 0
 	status := types.ProcessStatusExited
 	if err != nil {

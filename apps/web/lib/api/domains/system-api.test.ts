@@ -10,6 +10,7 @@ import {
   fetchDiskUsage,
   refreshDiskUsage,
   fetchDatabaseStats,
+  retryDatabaseStats,
   vacuumDatabase,
   optimizeDatabase,
   resetDatabase,
@@ -43,6 +44,8 @@ import {
   restoreStorageQuarantine,
   runStorageMaintenance,
   saveStorageSettings,
+  fetchRetentionStatus,
+  saveRetentionSettings,
 } from "./system-api";
 
 const BASE = "http://api.test/api/v1/system";
@@ -128,6 +131,14 @@ describe("fetchDatabaseStats", () => {
         backup_directory: "/data/backups",
         size_bytes: 1,
         wal_size_bytes: 0,
+        message_content_bytes: null,
+        message_metadata_bytes: null,
+        message_payload_bytes: null,
+        git_snapshot_bytes: null,
+        logical_stats_state: "pending",
+        logical_stats_measured_at: null,
+        metadata_stale: false,
+        metadata_measured_at: "2026-05-17T00:00:00Z",
         schema_version: "1",
         last_backup_at: "",
       }),
@@ -138,6 +149,13 @@ describe("fetchDatabaseStats", () => {
     expect(stats.driver).toBe("sqlite");
     expect(stats.path).toBe("/data/kandev.db");
     expect(stats.backup_directory).toBe("/data/backups");
+  });
+
+  it("POSTs /database/refresh to request an immediate background retry", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await retryDatabaseStats();
+    expect(lastCall().url).toBe(`${BASE}/database/refresh`);
+    expect(method()).toBe("POST");
   });
 });
 
@@ -398,7 +416,12 @@ const storageSettings = {
   quarantine_retention_hours: 168,
   workspaces: { enabled: true, dependency_cleanup_enabled: false },
   kandev_containers: { enabled: true },
-  go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
+  go_cache: {
+    enabled: false,
+    max_bytes: 16106127360,
+    adopted_path: "",
+    allow_cleanup_while_busy: false,
+  },
   docker: {
     dedicated_daemon_acknowledged: false,
     build_cache_enabled: false,
@@ -526,5 +549,49 @@ describe("storage policy", () => {
     expect(lastCall().init?.cache).toBe("no-store");
     expect(response.settings).toEqual(storageSettings);
     expect(response.capabilities.docker_available).toBe(true);
+  });
+});
+
+describe("office run history retention", () => {
+  const retentionSettings = {
+    enabled: true,
+    sweep_interval_hours: 6,
+    batch_limit: 5000,
+    routine_runs: { window_days: 30, floor_per_owner: 50, warn_rows: 25000 },
+    runs: { window_days: 30, floor_per_owner: 50, warn_rows: 25000 },
+    run_events: { warn_rows: 250000 },
+  };
+
+  it("loads retention status without caching", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        settings: retentionSettings,
+        last_sweep: null,
+        skip_count: 0,
+        retained_counts: {
+          office_routine_runs: { state: "not_computed", retained_count: 0, as_of: "" },
+          runs: { state: "not_computed", retained_count: 0, as_of: "" },
+          run_events: { state: "not_computed", retained_count: 0, as_of: "" },
+        },
+      }),
+    );
+
+    const response = await fetchRetentionStatus();
+
+    expect(lastCall().url).toBe(`${BASE}/retention`);
+    expect(lastCall().init?.cache).toBe("no-store");
+    expect(response.settings).toEqual(retentionSettings);
+    expect(response.last_sweep).toBeNull();
+  });
+
+  it("PUTs the full settings document to save", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(retentionSettings));
+
+    const response = await saveRetentionSettings(retentionSettings);
+
+    expect(lastCall().url).toBe(`${BASE}/retention`);
+    expect(method()).toBe("PUT");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual(retentionSettings);
+    expect(response).toEqual(retentionSettings);
   });
 });

@@ -77,6 +77,54 @@ func TestEnsureSessionForAgent_CreatesWhenMissing(t *testing.T) {
 	}
 }
 
+func TestEnsureSessionForAgentRetriesTaskRunnerChangedAfterReload(t *testing.T) {
+	repo := newOfficeTaskSessionCreatingRepository()
+	taskID := "task-office-runner-retry"
+	task := &v1.Task{
+		ID:          taskID,
+		WorkspaceID: "ws-office-runner-retry",
+		Title:       "Office runner retry",
+		Metadata:    map[string]interface{}{models.MetaKeyExecutorProfileID: "profile-old"},
+	}
+	repo.tasks[taskID] = &models.Task{
+		ID:          taskID,
+		WorkspaceID: task.WorkspaceID,
+		Metadata:    map[string]interface{}{models.MetaKeyExecutorProfileID: "profile-old"},
+	}
+	createAttempts := 0
+	repo.createTaskSessionFunc = func(_ context.Context, session *models.TaskSession) error {
+		createAttempts++
+		if createAttempts == 1 {
+			repo.mu.Lock()
+			repo.tasks[taskID].Metadata[models.MetaKeyExecutorProfileID] = "profile-new"
+			repo.mu.Unlock()
+			return models.ErrTaskRunnerChanged
+		}
+		repo.mu.Lock()
+		repo.sessions[session.ID] = session
+		repo.mu.Unlock()
+		return nil
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	ctx := WithTaskRunnerProfileExplicit(context.Background(), false)
+
+	created, wasCreated, err := exec.EnsureSessionForAgentWithCreation(
+		ctx, task, "agent-office-runner-retry", "agent-profile", "executor", "profile-old",
+	)
+	if err != nil {
+		t.Fatalf("EnsureSessionForAgentWithCreation: %v", err)
+	}
+	if !wasCreated {
+		t.Fatal("wasCreated = false, want true")
+	}
+	if createAttempts != 2 {
+		t.Fatalf("CreateTaskSession attempts = %d, want 2", createAttempts)
+	}
+	if created == nil || created.ExecutorProfileID != "profile-new" {
+		t.Fatalf("created session = %#v, want executor profile profile-new", created)
+	}
+}
+
 func TestEnsureSessionForAgentRejectsManagedIdentityBeforeCreatingSession(t *testing.T) {
 	repo := newMockRepository()
 	seedPreflightTaskRepository(repo, "task-office", "repo-1", &models.Repository{
@@ -469,8 +517,8 @@ func TestEnsureSessionForAgent_TerminalRowsCreateFresh(t *testing.T) {
 }
 
 // TestEnsureSessionForAgent_RejectsMissingAgentID reports an error rather
-// than silently inserting a row with an empty agent_profile_id (which would
-// defeat the partial unique index).
+// than silently creating an unkeyed row that the per-agent lookup cannot
+// reuse.
 func TestEnsureSessionForAgent_RejectsMissingAgentID(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)

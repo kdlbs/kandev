@@ -62,6 +62,16 @@ test.describe.serial("Data & Logs and Storage member gating", () => {
     await expect(row.first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("system-backups-name").first()).toHaveText(snapshotName);
     await expect(page.getByTestId("system-backups-admin-only")).toBeVisible();
+    await expect(page.getByTestId("tool-payload-retention-card")).toBeVisible();
+    for (const id of [
+      "tool-payload-enabled",
+      "tool-payload-age",
+      "tool-payload-unit",
+      "tool-payload-analyze",
+      "tool-payload-run",
+    ]) {
+      await expect(page.getByTestId(id)).toBeDisabled();
+    }
 
     // Every backups control that answers 403 is gone, not merely disabled.
     await expect(page.getByTestId("system-backups-create")).toHaveCount(0);
@@ -95,6 +105,8 @@ test.describe.serial("Data & Logs and Storage member gating", () => {
     await expect(page.getByTestId("system-backups-restore").first()).toBeVisible();
     await expect(page.getByTestId("system-backups-delete").first()).toBeVisible();
     await expect(page.getByTestId("system-backups-admin-only")).toHaveCount(0);
+    await expect(page.getByTestId("tool-payload-analyze")).toBeEnabled();
+    await expect(page.getByTestId("tool-payload-enabled")).toBeEnabled();
     await expect(page.getByTestId("storage-analyze")).toHaveCount(0);
     await expect(page.getByTestId("storage-run-now")).toHaveCount(0);
 

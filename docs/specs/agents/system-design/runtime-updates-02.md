@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-RUNTIME-UPDATES-001
 created: 2026-07-26
-updated: 2026-08-22
+updated: 2026-09-07
 owners:
   - Kandev
 ---
@@ -13,6 +13,14 @@ owners:
 ## Purpose and boundaries
 
 This design preserves the technical source detail for `REQ-AGENTS-RUNTIME-UPDATES-001` during migration.
+
+## OpenCode adoption amendment
+
+[OpenCode v2 adoption](opencode-v2-adoption.md) defines the proposed exception for trusted package families,
+managed source priority, isolated migration probes, and OpenCode interactive CLI selection.
+Its rules take precedence over the single-package and native-preference descriptions below once implemented.
+Other providers retain their existing behavior. Delivery is tracked in the
+[OpenCode package](../../../plans/opencode-v2-adoption/plan.md).
 
 ## Requirement mapping
 
@@ -28,14 +36,13 @@ This design preserves the technical source detail for `REQ-AGENTS-RUNTIME-UPDATE
   **WHEN** an operator selects an older published stable version and approves
   **Roll back runtime**, **THEN** Kandev prepares and probes that exact version,
   persists it only after success, and restores its model list without restart.
-- **GIVEN** a healthy exact active version, **WHEN** Kandev restarts, **THEN**
-  boot probes and later managed commands use the same exact version.
+- **GIVEN** a healthy exact active version and an unchanged default generation,
+  **WHEN** Kandev restarts, **THEN** boot probes and later commands use that version.
 - **GIVEN** an agent has no operator selection, **WHEN** Kandev builds any of
   its managed npm ACP commands, **THEN** the command uses the exact reviewed
   Kandev default and never an unversioned package spec.
-- **GIVEN** an agent has a validated operator selection, **WHEN** Kandev builds
-  a local, container, or SSH managed npm ACP command, **THEN** the command uses
-  that exact selection instead of the Kandev default.
+- **GIVEN** an agent has a current-generation operator selection, **WHEN**
+  Kandev builds a managed ACP command, **THEN** the command uses that selection.
 - **GIVEN** an operator selection exists, **WHEN** the operator chooses **Use
   Kandev default**, **THEN** Kandev validates the exact default, deletes the
   selection only after success, and future commands follow shipped defaults.
@@ -101,10 +108,9 @@ This design preserves the technical source detail for `REQ-AGENTS-RUNTIME-UPDATE
 
 ## Out of scope
 
-- Automatic runtime installation, automatic operator-selection changes, and
-  automatic rollback after launch failure.
-- Global npm cache cleanup, registry replacement, dependency substitution, or
-  automatic selection of another package version.
+- Automatic rollback after launch failure. Opt-in runtime installation and
+  selection are defined by [runtime update notifications](runtime-update-notifications.md).
+- Global npm cache cleanup, registry replacement, or dependency substitution.
 - Prerelease, tag, arbitrary package-spec, registry, or shell-command input.
 - Kandev-owned npm artifact retention or a package lockfile.
 - Removing npm or network access from the launch path, or locking transitive

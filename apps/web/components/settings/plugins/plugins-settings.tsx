@@ -10,16 +10,20 @@ import { SettingsPageTemplate } from "@/components/settings/settings-page-templa
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAutoUpdateSettings } from "@/hooks/domains/plugins/use-auto-update-settings";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { usePluginSetupStatus } from "@/hooks/domains/plugins/use-plugin-setup-status";
 import { usePluginUpdates } from "@/hooks/domains/plugins/use-plugin-updates";
 import { InstallPluginDialog } from "./install-plugin-dialog";
 import { MarketplaceBrowser } from "./marketplace-browser";
+import { CanvasMarketplace } from "./canvas-marketplace";
 import { PluginRow, type PluginRowUpdateState } from "./plugin-row";
 import { PluginUpdateStatus } from "./plugin-update-status";
 import { usePluginActions } from "./use-plugin-actions";
 import { usePluginUpdateAction } from "./use-plugin-update-action";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { SettingsRow } from "@/components/settings/settings-group";
+import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 
 /**
  * Operator UI to browse, install, enable, disable, uninstall, and update kandev
@@ -29,6 +33,7 @@ import { settingsActionClassName } from "@/components/settings/settings-control"
 export function PluginsSettings() {
   const { t } = useTranslation();
   const canManage = useIsAdmin();
+  const canvasesEnabled = useFeature("canvases");
   const { isFinePointer } = useResponsiveBreakpoint();
   const list = usePlugins();
   const actions = usePluginActions();
@@ -56,8 +61,9 @@ export function PluginsSettings() {
       saveStatus="idle"
       onSave={() => undefined}
       showSaveButton={false}
+      contentFrame="none"
     >
-      <Tabs defaultValue="installed" className="space-y-6">
+      <Tabs defaultValue="installed" className="space-y-4">
         <TabsList>
           <TabsTrigger
             value="installed"
@@ -69,9 +75,18 @@ export function PluginsSettings() {
           <TabsTrigger value="browse" data-testid="plugins-tab-browse" className="cursor-pointer">
             {t("plugins:tabBrowse")}
           </TabsTrigger>
+          {canvasesEnabled && (
+            <TabsTrigger
+              value="canvases"
+              data-testid="plugins-tab-canvases"
+              className="cursor-pointer"
+            >
+              {t("plugins:tabCanvases")}
+            </TabsTrigger>
+          )}
         </TabsList>
 
-        <TabsContent value="installed" className="space-y-6">
+        <TabsContent value="installed" className="space-y-4">
           <InstalledTab
             list={list}
             actions={actions}
@@ -86,6 +101,12 @@ export function PluginsSettings() {
         <TabsContent value="browse">
           <MarketplaceBrowser onInstallUrl={handleMarketplaceInstall} canManage={canManage} />
         </TabsContent>
+
+        {canvasesEnabled && (
+          <TabsContent value="canvases">
+            <CanvasMarketplace />
+          </TabsContent>
+        )}
       </Tabs>
 
       {canManage && (
@@ -122,46 +143,10 @@ function InstalledTab({
   updateAction,
   isFinePointer,
 }: InstalledTabProps) {
-  const { t } = useTranslation();
-
   return (
-    <>
+    <section className="min-w-0 space-y-3" aria-labelledby="installed-plugins-heading">
+      <InstalledPluginsToolbar actions={actions} updates={updates} canManage={canManage} />
       {canManage && <GlobalAutoUpdateToggle settings={autoUpdate} />}
-
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div className="text-sm font-medium text-foreground">{t("plugins:installedPlugins")}</div>
-        {canManage && (
-          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
-            <Button
-              data-testid="plugins-sync-button"
-              variant="secondary"
-              disabled={actions.syncBusy}
-              onClick={actions.handleSync}
-              className={settingsActionClassName("cursor-pointer")}
-            >
-              <IconRefresh className={`h-4 w-4 ${actions.syncBusy ? "animate-spin" : ""}`} />
-              {t("plugins:sync")}
-            </Button>
-            <Button
-              data-testid="plugins-check-updates-button"
-              variant="secondary"
-              disabled={updates.checking}
-              onClick={updates.checkForUpdates}
-              className={settingsActionClassName("cursor-pointer")}
-            >
-              <IconRefresh className={`h-4 w-4 ${updates.checking ? "animate-spin" : ""}`} />
-              {t("plugins:checkForUpdates")}
-            </Button>
-            <Button
-              data-testid="install-plugin-trigger"
-              onClick={actions.openInstall}
-              className={settingsActionClassName("cursor-pointer")}
-            >
-              {t("plugins:installPlugin")}
-            </Button>
-          </div>
-        )}
-      </div>
 
       <PluginUpdateStatus
         checking={updates.checking}
@@ -191,7 +176,61 @@ function InstalledTab({
         updateAction={updateAction}
         isFinePointer={isFinePointer}
       />
-    </>
+    </section>
+  );
+}
+
+function InstalledPluginsToolbar({
+  actions,
+  updates,
+  canManage,
+}: Pick<InstalledTabProps, "actions" | "updates" | "canManage">) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <h3 id="installed-plugins-heading" className={SETTINGS_TYPOGRAPHY.sectionTitle}>
+        {t("plugins:installedPlugins")}
+      </h3>
+      {canManage && (
+        <>
+          <Button
+            data-testid="install-plugin-trigger"
+            onClick={actions.openInstall}
+            className={settingsActionClassName("ml-auto cursor-pointer md:ml-0")}
+          >
+            {t("plugins:installPlugin")}
+          </Button>
+          <div className="flex w-full flex-wrap items-center gap-1 md:ml-auto md:w-auto">
+            <Button
+              data-testid="plugins-sync-button"
+              variant="ghost"
+              disabled={actions.syncBusy}
+              onClick={actions.handleSync}
+              className={settingsActionClassName("cursor-pointer text-muted-foreground")}
+            >
+              <IconRefresh
+                className={`size-4 ${actions.syncBusy ? "animate-spin" : ""}`}
+                aria-hidden
+              />
+              {t("plugins:sync")}
+            </Button>
+            <Button
+              data-testid="plugins-check-updates-button"
+              variant="ghost"
+              disabled={updates.checking}
+              onClick={updates.checkForUpdates}
+              className={settingsActionClassName("cursor-pointer text-muted-foreground")}
+            >
+              <IconRefresh
+                className={`size-4 ${updates.checking ? "animate-spin" : ""}`}
+                aria-hidden
+              />
+              {t("plugins:checkForUpdates")}
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -207,25 +246,24 @@ function GlobalAutoUpdateToggle({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 bg-background p-4">
-      <div className="min-w-0 space-y-1">
-        <label
-          htmlFor="plugins-auto-update-default"
-          className="text-sm font-medium text-foreground cursor-pointer"
-        >
-          {t("plugins:autoUpdateTitle")}
-        </label>
-        <p className="text-xs text-muted-foreground">{t("plugins:autoUpdateDescription")}</p>
-      </div>
-      <Switch
-        id="plugins-auto-update-default"
-        data-testid="plugins-auto-update-default"
-        checked={settings.autoUpdateDefault}
-        disabled={!settings.loaded}
-        onCheckedChange={settings.setDefault}
-        className="cursor-pointer"
-      />
-    </div>
+    <SettingsRow
+      label={<span className="text-sm">{t("plugins:autoUpdateTitle")}</span>}
+      description={t("plugins:autoUpdateDescription")}
+      controlId="plugins-auto-update-default"
+      touchTarget="switch"
+      className="flex-row items-center gap-4 border-y border-border/60"
+      controlWrapperClassName="max-md:w-auto"
+      control={
+        <Switch
+          id="plugins-auto-update-default"
+          data-testid="plugins-auto-update-default"
+          checked={settings.autoUpdateDefault}
+          disabled={!settings.loaded}
+          onCheckedChange={settings.setDefault}
+          className="cursor-pointer"
+        />
+      }
+    />
   );
 }
 
@@ -277,7 +315,7 @@ function PluginList({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="divide-y divide-border/60">
       {items.map((plugin) => {
         const rowUpdate: PluginRowUpdateState = {
           latest: updates.latestById.get(plugin.id),

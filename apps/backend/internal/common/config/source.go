@@ -65,22 +65,44 @@ type configSelection struct {
 // AutomaticEnv during Unmarshal: legacy invalid environment values must retain
 // their fallback behavior instead of turning into typed-config startup errors.
 var yamlOnlyStartupKeys = map[string]struct{}{
-	"server.trustedProxies":              {},
-	"tasks.preparationTimeout":           {},
-	"credentials.file":                   {},
-	"limits.ghMaxConcurrent":             {},
-	"limits.gitMaxConcurrent":            {},
-	"limits.lspMaxConnections":           {},
-	"messageQueue.maxPerSession":         {},
-	"agentctl.idleTimeout":               {},
-	"agentctl.idleReaperInterval":        {},
-	"agentctl.notificationQueueCapacity": {},
-	"planning.coalesceWindowMs":          {},
-	"office.schedulerTickMs":             {},
-	"observability.otlpEndpoint":         {},
-	"launcher.webPort":                   {},
-	"launcher.healthTimeoutMs":           {},
-	"launcher.noBrowser":                 {},
+	"server.trustedProxies":                    {},
+	"tasks.preparationTimeout":                 {},
+	"tasks.stallDetectionThreshold":            {},
+	"tasks.deliveryRetention.payloadGrace":     {},
+	"tasks.deliveryRetention.replayAge":        {},
+	"tasks.deliveryRetention.replayEvents":     {},
+	"tasks.deliveryRetention.interval":         {},
+	"tasks.deliveryRetention.batchRows":        {},
+	"tasks.deliveryRetention.batchBytes":       {},
+	"credentials.file":                         {},
+	"limits.ghMaxConcurrent":                   {},
+	"limits.gitMaxConcurrent":                  {},
+	"limits.lspMaxConnections":                 {},
+	"messageQueue.maxPerSession":               {},
+	"agentctl.idleTimeout":                     {},
+	"agentctl.idleReaperInterval":              {},
+	"agentctl.notificationQueueCapacity":       {},
+	"agentctl.recoveryDeadline":                {},
+	"agentctl.recoveryReadTimeout":             {},
+	"agentctl.recoveryReadRetries":             {},
+	"agentctl.unownedPeriod":                   {},
+	"agentctl.detachedEventLimit":              {},
+	"planning.coalesceWindowMs":                {},
+	"office.schedulerTickMs":                   {},
+	officeMaxConcurrentInstanceKey:             {},
+	officeMaxConcurrentWorkspaceKey:            {},
+	officeWorkspaceBudgetPerHourKey:            {},
+	officeRoutineBudgetPerHourKey:              {},
+	officePromotionAgeMinutesKey:               {},
+	officeMaxCausationDepthKey:                 {},
+	officeSelfTriggerAllowanceKey:              {},
+	officeSelfTriggerTotalAllowanceKey:         {},
+	officeGateFailureThresholdKey:              {},
+	"observability.otlpEndpoint":               {},
+	"launcher.webPort":                         {},
+	"launcher.healthTimeoutMs":                 {},
+	"launcher.noBrowser":                       {},
+	"executors.sshReachabilityIntervalSeconds": {},
 }
 
 func isYAMLOnlyStartupKey(key string) bool {
@@ -281,6 +303,13 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 		cfg.Server.TrustedProxies = nil
 	}
 	setDefaultDuration("tasks.preparationTimeout", &cfg.Tasks.PreparationTimeout, 10*time.Minute)
+	setDefaultDuration("tasks.stallDetectionThreshold", &cfg.Tasks.StallDetectionThreshold, 2*time.Hour)
+	setDefaultDuration("tasks.deliveryRetention.payloadGrace", &cfg.Tasks.DeliveryRetention.PayloadGrace, time.Hour)
+	setDefaultDuration("tasks.deliveryRetention.replayAge", &cfg.Tasks.DeliveryRetention.ReplayAge, 24*time.Hour)
+	setDefaultDuration("tasks.deliveryRetention.interval", &cfg.Tasks.DeliveryRetention.Interval, time.Minute)
+	setDefaultInt("tasks.deliveryRetention.replayEvents", &cfg.Tasks.DeliveryRetention.ReplayEvents, 10000)
+	setDefaultInt("tasks.deliveryRetention.batchRows", &cfg.Tasks.DeliveryRetention.BatchRows, 200)
+	setDefaultInt("tasks.deliveryRetention.batchBytes", &cfg.Tasks.DeliveryRetention.BatchBytes, 4<<20)
 	if !yamlKeys["credentials.file"] {
 		cfg.Credentials.File = ""
 	}
@@ -291,8 +320,22 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	setDefaultDuration("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour)
 	setDefaultDuration("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute)
 	setDefaultInt("agentctl.notificationQueueCapacity", &cfg.Agentctl.NotificationQueueCapacity, 131072)
+	setDefaultDuration("agentctl.recoveryDeadline", &cfg.Agentctl.RecoveryDeadline, 30*time.Second)
+	setDefaultDuration("agentctl.recoveryReadTimeout", &cfg.Agentctl.RecoveryReadTimeout, 2*time.Second)
+	setDefaultInt("agentctl.recoveryReadRetries", &cfg.Agentctl.RecoveryReadRetries, 2)
+	setDefaultDuration("agentctl.unownedPeriod", &cfg.Agentctl.UnownedPeriod, 10*time.Minute)
+	setDefaultInt("agentctl.detachedEventLimit", &cfg.Agentctl.DetachedEventLimit, 100)
 	setDefaultInt("planning.coalesceWindowMs", &cfg.Planning.CoalesceWindowMs, 300000)
 	setDefaultInt("office.schedulerTickMs", &cfg.Office.SchedulerTickMs, 5000)
+	setDefaultInt("office.maxConcurrentInstance", &cfg.Office.MaxConcurrentInstance, 8)
+	setDefaultInt("office.maxConcurrentWorkspace", &cfg.Office.MaxConcurrentWorkspace, 4)
+	setDefaultInt("office.workspaceBudgetPerHour", &cfg.Office.WorkspaceBudgetPerHour, 120)
+	setDefaultInt("office.routineBudgetPerHour", &cfg.Office.RoutineBudgetPerHour, 20)
+	setDefaultInt("office.promotionAgeMinutes", &cfg.Office.PromotionAgeMinutes, 15)
+	setDefaultInt("office.maxCausationDepth", &cfg.Office.MaxCausationDepth, 8)
+	setDefaultInt("office.selfTriggerAllowance", &cfg.Office.SelfTriggerAllowance, 3)
+	setDefaultInt("office.selfTriggerTotalAllowance", &cfg.Office.SelfTriggerTotalAllowance, 8)
+	setDefaultInt("office.gateFailureThreshold", &cfg.Office.GateFailureThreshold, 3)
 	if !yamlKeys["observability.otlpEndpoint"] {
 		cfg.Observability.OTLPEndpoint = ""
 	}
@@ -301,11 +344,13 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	if !yamlKeys["launcher.noBrowser"] {
 		cfg.Launcher.NoBrowser = false
 	}
+	setDefaultInt("executors.sshReachabilityIntervalSeconds", &cfg.Executors.SSHReachabilityIntervalSeconds, 60)
 }
 
 func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources map[string]SettingSource) {
 	applyTrustedProxiesEnv(cfg, envSnapshot, sources)
 	applyDurationEnv("tasks.preparationTimeout", &cfg.Tasks.PreparationTimeout, 10*time.Minute, envSnapshot, sources)
+	applyDurationEnv("tasks.stallDetectionThreshold", &cfg.Tasks.StallDetectionThreshold, 2*time.Hour, envSnapshot, sources)
 	applyStringEnvAllowEmpty("credentials.file", &cfg.Credentials.File, envSnapshot, sources)
 	applyPositiveIntEnv("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8, envSnapshot, sources)
 	applyPositiveIntEnv("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12, envSnapshot, sources)
@@ -314,12 +359,104 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyNonNegativeDurationEnv("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour, envSnapshot, sources)
 	applyDurationEnv("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute, envSnapshot, sources)
 	applyBoundedIntEnv("agentctl.notificationQueueCapacity", &cfg.Agentctl.NotificationQueueCapacity, 131072, 1024, 131072, envSnapshot, sources)
+	// UnownedPeriod's ordering-against-idle-timeout clamp and 1-minute floor
+	// are applied by agentctl itself at control-server start (it is the only
+	// place both values are simultaneously known); the backend only carries
+	// a sane positive duration through to the managed-child startup contract.
+	applyNonNegativeDurationEnv("agentctl.unownedPeriod", &cfg.Agentctl.UnownedPeriod, 10*time.Minute, envSnapshot, sources)
+	// agentctl.recoveryDeadline, agentctl.recoveryReadTimeout,
+	// agentctl.recoveryReadRetries and agentctl.detachedEventLimit are
+	// validated strictly (reject, never clamp) by applySurvivalRecoveryEnv,
+	// called separately by the caller so an out-of-range value fails startup
+	// instead of silently substituting the built-in default.
 	applyNonNegativeIntEnv("planning.coalesceWindowMs", &cfg.Planning.CoalesceWindowMs, 300000, envSnapshot, sources)
 	applyPositiveIntEnv("office.schedulerTickMs", &cfg.Office.SchedulerTickMs, 5000, envSnapshot, sources)
+	applyPositiveIntEnv("office.maxConcurrentInstance", &cfg.Office.MaxConcurrentInstance, 8, envSnapshot, sources)
+	applyPositiveIntEnv("office.maxConcurrentWorkspace", &cfg.Office.MaxConcurrentWorkspace, 4, envSnapshot, sources)
+	applyPositiveIntEnv("office.workspaceBudgetPerHour", &cfg.Office.WorkspaceBudgetPerHour, 120, envSnapshot, sources)
+	applyPositiveIntEnv("office.routineBudgetPerHour", &cfg.Office.RoutineBudgetPerHour, 20, envSnapshot, sources)
+	applyPositiveIntEnv("office.promotionAgeMinutes", &cfg.Office.PromotionAgeMinutes, 15, envSnapshot, sources)
+	applyPositiveIntEnv("office.maxCausationDepth", &cfg.Office.MaxCausationDepth, 8, envSnapshot, sources)
+	applyPositiveIntEnv("office.selfTriggerAllowance", &cfg.Office.SelfTriggerAllowance, 3, envSnapshot, sources)
+	applyPositiveIntEnv("office.selfTriggerTotalAllowance", &cfg.Office.SelfTriggerTotalAllowance, 8, envSnapshot, sources)
+	applyPositiveIntEnv("office.gateFailureThreshold", &cfg.Office.GateFailureThreshold, 3, envSnapshot, sources)
 	applyStringEnvAllowEmpty("observability.otlpEndpoint", &cfg.Observability.OTLPEndpoint, envSnapshot, sources)
 	applyBoundedIntEnv("launcher.webPort", &cfg.Launcher.WebPort, 0, 1, 65535, envSnapshot, sources)
 	applyPositiveIntEnv("launcher.healthTimeoutMs", &cfg.Launcher.HealthTimeoutMs, launcherHealthTimeoutDefault(), envSnapshot, sources)
 	applyBoolEnv("launcher.noBrowser", &cfg.Launcher.NoBrowser, false, envSnapshot, sources)
+	applyNonNegativeIntEnv("executors.sshReachabilityIntervalSeconds", &cfg.Executors.SSHReachabilityIntervalSeconds, 60, envSnapshot, sources)
+}
+
+func applyDeliveryRetentionEnvironment(cfg *Config, env map[string]string, sources map[string]SettingSource) error {
+	values := &cfg.Tasks.DeliveryRetention
+	if err := applyStrictDurationEnv("tasks.deliveryRetention.payloadGrace", &values.PayloadGrace, time.Minute, 30*24*time.Hour, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictDurationEnv("tasks.deliveryRetention.replayAge", &values.ReplayAge, time.Hour, 30*24*time.Hour, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictDurationEnv("tasks.deliveryRetention.interval", &values.Interval, 10*time.Second, time.Hour, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictIntEnv("tasks.deliveryRetention.replayEvents", &values.ReplayEvents, 100, 100000, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictIntEnv("tasks.deliveryRetention.batchRows", &values.BatchRows, 1, 200, env, sources); err != nil {
+		return err
+	}
+	return applyStrictIntEnv("tasks.deliveryRetention.batchBytes", &values.BatchBytes, 1<<20, 4<<20, env, sources)
+}
+
+// clampOfficeLaunchSafetyConfig clamps a below-minimum office.*
+// launch-safety value to its documented default and returns a warning
+// naming the key and the rejected value, per
+// AC-OFFICE-LAUNCH-SAFETY-001.5/003.1/004.3/004.8/005.1 and
+// AC-OFFICE-BACKPRESSURE-002.1/003.5: these values must degrade to their
+// default and let boot proceed, not fail startup. Defaults here must stay
+// in sync with applyStartupDefaults's and applyStartupEnvironment's
+// literals for the same keys. Only a YAML-sourced value can still be
+// invalid by the point this runs: applyStartupEnvironment's env path and
+// applyStartupDefaults's default path already resolve to a value >= 1.
+// This is also where the two self-trigger allowances are resolved
+// against each other: AC-OFFICE-LAUNCH-SAFETY-004.8 permits (and does
+// not clamp) a configured total below the per-reason value, but requires
+// a warn-level log naming that the total is now the binding limit.
+func clampOfficeLaunchSafetyConfig(cfg *Config) []string {
+	entries := []struct {
+		key   string
+		value *int
+		def   int
+	}{
+		{officeMaxConcurrentInstanceKey, &cfg.Office.MaxConcurrentInstance, 8},
+		{officeMaxConcurrentWorkspaceKey, &cfg.Office.MaxConcurrentWorkspace, 4},
+		{officeWorkspaceBudgetPerHourKey, &cfg.Office.WorkspaceBudgetPerHour, 120},
+		{officeRoutineBudgetPerHourKey, &cfg.Office.RoutineBudgetPerHour, 20},
+		{officePromotionAgeMinutesKey, &cfg.Office.PromotionAgeMinutes, 15},
+		{officeMaxCausationDepthKey, &cfg.Office.MaxCausationDepth, 8},
+		{officeSelfTriggerAllowanceKey, &cfg.Office.SelfTriggerAllowance, 3},
+		{officeSelfTriggerTotalAllowanceKey, &cfg.Office.SelfTriggerTotalAllowance, 8},
+		{officeGateFailureThresholdKey, &cfg.Office.GateFailureThreshold, 3},
+	}
+	var warnings []string
+	for _, e := range entries {
+		if *e.value >= 1 {
+			continue
+		}
+		warning := fmt.Sprintf("%s is configured as %d, which is below the minimum of 1; using the default %d instead", e.key, *e.value, e.def)
+		log.Print(warning)
+		warnings = append(warnings, warning)
+		*e.value = e.def
+	}
+	if cfg.Office.SelfTriggerTotalAllowance < cfg.Office.SelfTriggerAllowance {
+		warning := fmt.Sprintf(
+			"%s is configured as %d, below %s's %d; the total allowance is binding and the per-reason allowance is unreachable",
+			officeSelfTriggerTotalAllowanceKey, cfg.Office.SelfTriggerTotalAllowance,
+			officeSelfTriggerAllowanceKey, cfg.Office.SelfTriggerAllowance,
+		)
+		log.Print(warning)
+		warnings = append(warnings, warning)
+	}
+	return warnings
 }
 
 func launcherHealthTimeoutDefault() int {
@@ -426,13 +563,82 @@ func applyBoundedIntEnv(key string, target *int, fallback, minimum, maximum int,
 		return
 	}
 	parsed, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || parsed < minimum || parsed > maximum {
+	if err != nil {
+		log.Printf("environment override for %s (%q) is not a valid integer; using default %d", key, raw, fallback)
+		*target = fallback
+		sources[key] = SourceDefault
+		return
+	}
+	if parsed < minimum || parsed > maximum {
+		log.Printf("environment override for %s (%d) is out of range [%d,%d]; using default %d", key, parsed, minimum, maximum, fallback)
 		*target = fallback
 		sources[key] = SourceDefault
 		return
 	}
 	*target = parsed
 	sources[key] = SourceEnvironment
+}
+
+// applySurvivalRecoveryEnv validates the four agent-survival tunables whose
+// contract requires rejecting an out-of-range value at startup rather than
+// silently substituting the built-in default (unlike every other env-sourced
+// setting in this file, which falls back to its default on a bad value).
+func applySurvivalRecoveryEnv(cfg *Config, env map[string]string, sources map[string]SettingSource) error {
+	if err := applyStrictDurationEnv("agentctl.recoveryDeadline", &cfg.Agentctl.RecoveryDeadline, time.Second, 5*time.Minute, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictDurationEnv("agentctl.recoveryReadTimeout", &cfg.Agentctl.RecoveryReadTimeout, 100*time.Millisecond, time.Hour, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictIntEnv("agentctl.recoveryReadRetries", &cfg.Agentctl.RecoveryReadRetries, 0, 10, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictIntEnv("agentctl.detachedEventLimit", &cfg.Agentctl.DetachedEventLimit, 1, 10000, env, sources); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyStrictDurationEnv(key string, target *time.Duration, minimum, maximum time.Duration, env map[string]string, sources map[string]SettingSource) error {
+	entry, ok := CatalogEntryForKey(key)
+	if !ok {
+		return nil
+	}
+	raw, found := nonEmptyEnv(env, entry.EnvVars...)
+	if !found {
+		return nil
+	}
+	parsed, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("%s: invalid duration %q from %s", key, raw, entry.EnvVars[0])
+	}
+	if parsed < minimum || parsed > maximum {
+		return fmt.Errorf("%s: %s is outside the accepted range [%s, %s]", key, parsed, minimum, maximum)
+	}
+	*target = parsed
+	sources[key] = SourceEnvironment
+	return nil
+}
+
+func applyStrictIntEnv(key string, target *int, minimum, maximum int, env map[string]string, sources map[string]SettingSource) error {
+	entry, ok := CatalogEntryForKey(key)
+	if !ok {
+		return nil
+	}
+	raw, found := nonEmptyEnv(env, entry.EnvVars...)
+	if !found {
+		return nil
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("%s: invalid integer %q from %s", key, raw, entry.EnvVars[0])
+	}
+	if parsed < minimum || parsed > maximum {
+		return fmt.Errorf("%s: %d is outside the accepted range [%d, %d]", key, parsed, minimum, maximum)
+	}
+	*target = parsed
+	sources[key] = SourceEnvironment
+	return nil
 }
 
 func applyBoolEnv(key string, target *bool, fallback bool, env map[string]string, sources map[string]SettingSource) {

@@ -125,6 +125,7 @@ describe("agent update job websocket handlers", () => {
     const store = makeStore();
     const handlers = handlersFor(store);
     const snapshot = {
+      update_mode: "pinned",
       job_id: "update-1",
       agent_name: AGENT_NAME,
       status: "updating",
@@ -186,6 +187,22 @@ describe("agent profile events", () => {
 
     const stored = store.getState().agentProfiles.items[0];
     expect(stored?.model).toBe("new-model");
+  });
+
+  it("preserves event capability before the owning settings agent is hydrated", () => {
+    const store = makeStore();
+    const handlers = handlersFor(store);
+
+    handlers[PROFILE_CREATED](
+      message(PROFILE_CREATED, {
+        profile: profilePayload(),
+        inference_capable: true,
+      }),
+    );
+
+    expect(store.getState().settingsAgents.items).toHaveLength(0);
+    expect(store.getState().agentProfiles.items[0]?.inference_capable).toBe(true);
+    expect(store.getState().agentProfiles.version).toBe(1);
   });
 
   it("does not resurrect a deleted profile from a delayed create event", () => {
@@ -542,5 +559,43 @@ describe("agent profile event ordering", () => {
       ),
     );
     expect(store.getState().agentProfiles.items).toHaveLength(0);
+  });
+});
+
+describe("agent profile reorder events", () => {
+  it("applies reorder patches by revision while preserving current membership", () => {
+    const store = makeStore();
+    const handlers = handlersFor(store);
+    store.getState().setSettingsAgents([
+      {
+        id: "agent-1",
+        name: AGENT_NAME,
+        profiles: [
+          { id: "p1", name: "One" },
+          { id: "p2", name: "Two" },
+          { id: "p3", name: "New" },
+        ],
+      } as never,
+    ]);
+    handlers["agent.profiles.reordered"](
+      message("agent.profiles.reordered", {
+        agent_id: "agent-1",
+        profile_ids: ["p2", "p1"],
+        revision: 2,
+      }),
+    );
+    expect(store.getState().settingsAgents.items[0]?.profiles.map((profile) => profile.id)).toEqual(
+      ["p3", "p2", "p1"],
+    );
+    handlers["agent.profiles.reordered"](
+      message("agent.profiles.reordered", {
+        agent_id: "agent-1",
+        profile_ids: ["p1", "p2", "p3"],
+        revision: 1,
+      }),
+    );
+    expect(store.getState().settingsAgents.items[0]?.profiles.map((profile) => profile.id)).toEqual(
+      ["p3", "p2", "p1"],
+    );
   });
 });

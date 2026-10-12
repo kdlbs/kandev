@@ -3,7 +3,10 @@ package plugins
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -47,7 +50,11 @@ type userStateCleanupStore interface {
 //     (e.g. proxies checking a plugin's manifest/capabilities without
 //     going through Service's error-wrapping Get).
 type Service struct {
-	mu sync.Mutex
+	automationRevoker                     func(string) error
+	capabilityApprovalWorkspaceAuthorizer func(context.Context, string) error
+	humanInteractionResponseAuthorizer    func(context.Context, string) error
+	mu                                    sync.Mutex
+	approvalEffectMu                      sync.Mutex
 	// ownershipMu makes cross-plugin provider/reference ownership checks and
 	// transitions into active one atomic reservation. Per-plugin lifecycle
 	// locks cannot protect two different IDs claiming the same identity.
@@ -89,29 +96,43 @@ type Service struct {
 	// directory belongs to an install still waiting for it.
 	extractingPaths map[string]int
 
-	pluginsDir        string
-	store             store.Store
-	registry          *Registry
-	state             *state.Store
-	userState         *state.UserStore
-	instances         *instances.Store
-	instanceState     *state.InstanceStore
-	webArtifacts      *webapp.ArtifactStore
-	webRuntime        *webapp.Runtime
-	eventHub          *webapp.EventHub
-	eventSubscription bus.Subscription
-	userStateCleanup  userStateCleanupStore
-	eventBus          bus.EventBus
-	log               *logger.Logger
+	pluginsDir                 string
+	store                      store.Store
+	approvals                  *approvalLedger
+	registry                   *Registry
+	state                      *state.Store
+	exactCommandStore          *state.CommandStore
+	userState                  *state.UserStore
+	instances                  *instances.Store
+	instanceState              *state.InstanceStore
+	webArtifacts               *webapp.ArtifactStore
+	webRuntime                 *webapp.Runtime
+	eventHub                   *webapp.EventHub
+	eventSubscription          bus.Subscription
+	userStateCleanup           userStateCleanupStore
+	agentConvs                 AgentConversationService
+	managedConvs               ManagedAgentConversationService
+	managedAutomationSchedules ManagedConversationScheduleService
+	eventBus                   bus.EventBus
+	conversationTokens         *conversationTokenManager
+	conversationEpoch          string
+	log                        *logger.Logger
 
-	deliverer                Deliverer
-	agentToolCatalogListener AgentToolCatalogListener
-	agentToolGeneration      string
-	agentToolRevision        uint64
-	agentToolSnapshot        plugintools.Snapshot
-	agentToolSnapshotReady   bool
-	runtime                  PluginRuntime
-	secrets                  SecretVault
+	deliverer                       Deliverer
+	agentToolCatalogListener        AgentToolCatalogListener
+	agentToolGeneration             string
+	agentToolRevision               uint64
+	agentToolSnapshot               plugintools.Snapshot
+	agentToolSnapshotReady          bool
+	runtime                         PluginRuntime
+	executorProviderHostHandler     ExecutorProviderHostHandler
+	executorProviderInventoryReader ExecutorProviderInventoryReader
+	executorProviderOpMu            sync.Mutex
+	executorProviderOps             map[string]*activeExecutorProviderOperation
+	executorProviderDispatches      map[string]map[uint64]context.CancelFunc
+	executorProviderAdmissionClosed map[string]bool
+	executorProviderDispatchID      uint64
+	secrets                         SecretVault
 
 	// revokeGitCredentialProvider invalidates leases for a repository provider
 	// when its owning plugin is no longer active. It is wired by backendapp to
@@ -124,21 +145,25 @@ type Service struct {
 	// pluginHost built before that falls back to Unimplemented for these
 	// accessors regardless of declared capabilities (see host_data.go's
 	// accessor nil-checks).
-	taskData         taskDataSource
-	workflows        workflowLister
-	workflowSteps    workflowStepLister
-	agentProfiles    agentProfileDataSource
-	sessionCodeStats sessionCodeStatsSource
-	messageData      messageDataSource
-	interactionData  interactionDataSource
+	taskData               taskDataSource
+	workflows              workflowLister
+	workflowSteps          workflowStepLister
+	agentProfiles          agentProfileDataSource
+	sessionCodeStats       sessionCodeStatsSource
+	messageData            messageDataSource
+	interactionData        interactionDataSource
+	pendingTaskTransitions pendingTaskTransitionSource
 	// taskPRs is guarded by mu and read through taskPRSourceDep, because hosts can
 	// outlive the late SetTaskPRSource wiring.
-	taskPRs    taskPRSource
-	taskWriter taskWriter
+	taskPRs               taskPRSource
+	taskWriter            taskWriter
+	workspaceAdminWriter  WorkspaceAdminWriter
+	sourceIssueController SourceIssueController
 
-	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
-	utilityAgents utilityAgentSource
-	utilityRunner utilityRunner
+	// Utility agent invocation dependencies, wired via SetUtilityAgent.
+	utilityDefaultProfile utilityDefaultProfileSource
+	utilityProfiles       agentProfileSource
+	utilityRunner         utilityRunner
 
 	// Host data API write dependencies wired late via SetWriteDeps (ADR
 	// 0043): the task-message delivery path and the orchestrator task-starter,
@@ -151,7 +176,9 @@ type Service struct {
 	// 0052), for the same reason as messenger/taskStarter: the orchestrator
 	// and the clarification handler are constructed after boot-active plugins
 	// spawn. Mutex-guarded against the concurrent hostForPlugin reads.
-	interactionResponder interactionResponder
+	interactionResponder     interactionResponder
+	exactExecutionController exactExecutionController
+	humanInteractionReceipts *humanInteractionResponseReceiptStore
 
 	// authLogin establishes an authenticated browser session for an external
 	// identity an auth-capable plugin asserts via its webhook response
@@ -194,17 +221,31 @@ type ReferenceIdentity struct {
 // Provide is the usual entry point in production; NewService is exposed
 // directly for tests that want a fake store.Store/PluginRuntime.
 func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventBus, log *logger.Logger) *Service {
-	return &Service{
-		store:               pluginStore,
-		registry:            registry,
-		eventBus:            eventBus,
-		log:                 log,
-		httpClient:          &http.Client{},
-		lifecycleLocks:      newKeyedMutex(),
-		dispatchLocks:       newKeyedRWMutex(),
-		agentToolGeneration: uuid.NewString(),
-		eventHub:            webapp.NewEventHub(),
+	service := &Service{
+		store:                           pluginStore,
+		registry:                        registry,
+		eventBus:                        eventBus,
+		log:                             log,
+		httpClient:                      &http.Client{},
+		lifecycleLocks:                  newKeyedMutex(),
+		dispatchLocks:                   newKeyedRWMutex(),
+		agentToolGeneration:             uuid.NewString(),
+		eventHub:                        webapp.NewEventHub(),
+		conversationTokens:              newConversationTokenManager(),
+		conversationEpoch:               uuid.NewString(),
+		humanInteractionReceipts:        newHumanInteractionResponseReceiptStore(),
+		executorProviderOps:             make(map[string]*activeExecutorProviderOperation),
+		executorProviderDispatches:      make(map[string]map[uint64]context.CancelFunc),
+		executorProviderAdmissionClosed: make(map[string]bool),
 	}
+	return service
+}
+
+// ConversationEpoch identifies this backend process for Host-only source
+// reconciliation. A restart starts a new epoch, so a client cannot treat a
+// cursor or live batch from the previous process as current.
+func (s *Service) ConversationEpoch() string {
+	return s.conversationEpoch
 }
 
 // SetGitCredentialLeaseRevoker wires immediate provider-lease revocation for
@@ -361,6 +402,20 @@ func (s *Service) SetState(st *state.Store) {
 	s.state = st
 }
 
+// SetExactCommandStore wires the durable intent and receipt ledger for exact
+// Host commands.
+func (s *Service) SetExactCommandStore(st *state.CommandStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.exactCommandStore = st
+}
+
+func (s *Service) exactCommandStoreDep() *state.CommandStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.exactCommandStore
+}
+
 // StateStore returns the plugin_state store Provide constructed, for the
 // Host RPC implementation (host.go) and any HTTP wiring that needs it
 // without re-initializing the schema.
@@ -510,6 +565,17 @@ func (s *Service) SetDataSources(
 	s.taskWriter = taskWrites
 }
 
+// SetWorkspaceAdminWriter wires bounded workspace configuration mutations.
+// The writer is set during backend service assembly before active plugins start.
+func (s *Service) SetWorkspaceAdminWriter(writer WorkspaceAdminWriter) {
+	s.workspaceAdminWriter = writer
+}
+
+// SetSourceIssueController wires native linked Jira and Linear operations.
+func (s *Service) SetSourceIssueController(controller SourceIssueController) {
+	s.sourceIssueController = controller
+}
+
 // SetInteractionResponder wires the interaction write path (ADR 0052): the
 // adapter that answers permissions through the orchestrator and clarification
 // bundles through the clarification handler. Wired LATE for the same reason as
@@ -525,6 +591,21 @@ func (s *Service) SetTaskPRSource(src taskPRSource) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.taskPRs = src
+}
+
+// SetPendingTaskTransitionSource wires the durable orchestrator queue used by
+// exact workspace observations. Hosts resolve this source at read time because
+// the orchestrator is constructed after boot-active plugins may have started.
+func (s *Service) SetPendingTaskTransitionSource(src pendingTaskTransitionSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pendingTaskTransitions = src
+}
+
+func (s *Service) pendingTaskTransitionSourceDep() pendingTaskTransitionSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pendingTaskTransitions
 }
 
 // taskPRSourceDep returns the currently wired pull-request source. Hosts call
@@ -565,6 +646,50 @@ func (s *Service) SetWriteDeps(messenger taskMessenger, starter taskStarter) {
 	s.taskStarter = starter
 }
 
+// SetAgentConversations wires the managed agent conversation service
+// (AgentConversationService). Wired by backendapp, guarded by s.mu against
+// concurrent reads.
+func (s *Service) SetAgentConversations(svc AgentConversationService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentConvs = svc
+}
+
+// agentConversationDeps returns the wired agent conversation service, read
+// live (not snapshotted at hostForPlugin time). Guarded by s.mu.
+func (s *Service) agentConversationDeps() AgentConversationService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.agentConvs
+}
+
+// SetManagedAgentConversations wires the retained exact Host conversation
+// service. It is separate from v1 AgentConversations to preserve its cleanup
+// behavior.
+func (s *Service) SetManagedAgentConversations(svc ManagedAgentConversationService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managedConvs = svc
+}
+
+func (s *Service) managedAgentConversationDeps() ManagedAgentConversationService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.managedConvs
+}
+
+func (s *Service) SetManagedConversationSchedules(service ManagedConversationScheduleService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managedAutomationSchedules = service
+}
+
+func (s *Service) managedConversationScheduleDeps() ManagedConversationScheduleService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.managedAutomationSchedules
+}
+
 // writeDependencies returns the currently-wired task messenger and task
 // starter. Read live (not snapshotted at hostForPlugin time) so a plugin
 // spawned before SetWriteDeps still resolves them once it is called. Guarded by
@@ -575,30 +700,26 @@ func (s *Service) writeDependencies() (taskMessenger, taskStarter) {
 	return s.messenger, s.taskStarter
 }
 
-// SetUtilityAgent wires the dependencies behind Host.InvokeUtilityAgent
-// (ADR 0048): the service that resolves the utility agent selected in plugin
-// configuration, and the sessionless runner that executes a one-shot
-// completion. Wired by backendapp (not Provide) for the same import-cycle
-// reason as SetDataSources. Unlike the data sources, this is wired LATE in boot
-// (hostUtilityMgr is only available after agentctl control is healthy, by which
-// point StartActivePlugins has already spawned boot-active plugins), so hosts
-// read these live via utilityAgentDeps rather than snapshotting them — the
-// write here is mutex-guarded against those concurrent reads.
-func (s *Service) SetUtilityAgent(agents utilityAgentSource, runner utilityRunner) {
+// SetUtilityAgent wires the default-profile source, profile validator, and
+// sessionless runner behind Host.InvokeUtilityAgent. Wired by backendapp (not
+// Provide) for the same import-cycle reason as SetDataSources. The runner is
+// wired late in boot, so hosts read these live via utilityAgentDeps instead of
+// snapshotting them.
+func (s *Service) SetUtilityAgent(defaultProfile utilityDefaultProfileSource, profiles agentProfileSource, runner utilityRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.utilityAgents = agents
+	s.utilityDefaultProfile = defaultProfile
+	s.utilityProfiles = profiles
 	s.utilityRunner = runner
 }
 
-// utilityAgentDeps returns the currently-wired utility-agent dependencies. Read
-// live (not snapshotted at hostForPlugin time) so a plugin spawned before
-// SetUtilityAgent still resolves them once it is called. Guarded by s.mu against
-// the SetUtilityAgent write.
-func (s *Service) utilityAgentDeps() (utilityAgentSource, utilityRunner) {
+// utilityAgentDeps returns the currently-wired utility invocation
+// dependencies. Read live so a plugin spawned before SetUtilityAgent still
+// resolves them once it is called. Guarded by s.mu against the write.
+func (s *Service) utilityAgentDeps() (utilityDefaultProfileSource, agentProfileSource, utilityRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.utilityAgents, s.utilityRunner
+	return s.utilityDefaultProfile, s.utilityProfiles, s.utilityRunner
 }
 
 // SetAuthLoginBridge wires the SSO login bridge auth-capable plugins use to
@@ -670,10 +791,52 @@ func (s *Service) Shutdown() {
 	}
 }
 
+// Close stops plugin runtimes after workers stop.
+func (s *Service) Close() error {
+	s.Shutdown()
+	return nil
+}
+
 // SetPluginsDir wires the root directory pkgtar.Install/pkgtar.Remove
-// operate under (the same directory store.FSStore persists records in).
-func (s *Service) SetPluginsDir(dir string) {
+// operate under and initializes the signing key for conversation bindings.
+func (s *Service) SetPluginsDir(dir string) error {
+	// Keep package installation rooted correctly even when binding setup fails
+	// and the caller continues in degraded mode.
 	s.pluginsDir = dir
+	s.approvals = newApprovalLedger(dir)
+	hostDir := filepath.Join(dir, ".host")
+	if err := removeLegacyConversationFiles(hostDir); err != nil {
+		return err
+	}
+	conversationTokens, err := loadOrCreateConversationTokenManager(
+		filepath.Join(hostDir, "conversation-token.key"),
+	)
+	if err != nil {
+		return err
+	}
+	s.pluginsDir = dir
+	s.conversationTokens = conversationTokens
+	return nil
+}
+
+func removeLegacyConversationFiles(hostDir string) error {
+	for _, name := range []string{"session-events.sqlite", "session-events.sqlite-wal", "session-events.sqlite-shm"} {
+		path := filepath.Join(hostDir, name)
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect legacy conversation file %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing to remove non-regular legacy conversation file %s", path)
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove legacy conversation file %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 // RevealSecret resolves the cleartext value of the secret reference ref via
@@ -722,27 +885,52 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		rec = &store.Record{} // every capability check below denies; should not happen in practice
 	}
 	return &pluginHost{
-		pluginID:            pluginID,
-		capabilities:        rec.Capabilities,
-		repositoryProviders: rec.RepositoryProviders,
-		configSchema:        rec.ConfigSchema,
-		state:               s.state,
-		secrets:             s.secrets,
-		bus:                 s.eventBus,
-		configs:             s.store,
-		taskData:            s.taskData,
-		workflows:           s.workflows,
-		workflowSteps:       s.workflowSteps,
-		agentProfiles:       s.agentProfiles,
-		sessionCodeStats:    s.sessionCodeStats,
-		messageData:         s.messageData,
-		interactionData:     s.interactionData,
-		taskPRsDep:          s.taskPRSourceDep,
-		taskWriter:          s.taskWriter,
-		utilityDeps:         s.utilityAgentDeps,
-		writeDeps:           s.writeDependencies,
-		interactionDeps:     s.interactionResponderDep,
+		service:                    s,
+		pluginID:                   pluginID,
+		installationID:             rec.InstallationID,
+		commandStore:               s.exactCommandStoreDep(),
+		capabilities:               rec.Capabilities,
+		repositoryProviders:        rec.RepositoryProviders,
+		configSchema:               rec.ConfigSchema,
+		state:                      s.state,
+		secrets:                    s.secrets,
+		bus:                        s.eventBus,
+		configs:                    s.store,
+		taskData:                   s.taskData,
+		workflows:                  s.workflows,
+		workflowSteps:              s.workflowSteps,
+		agentProfiles:              s.agentProfiles,
+		sessionCodeStats:           s.sessionCodeStats,
+		messageData:                s.messageData,
+		interactionData:            s.interactionData,
+		taskPRsDep:                 s.taskPRSourceDep,
+		pendingTaskTransitions:     s.pendingTaskTransitionSourceDep,
+		taskWriter:                 s.taskWriter,
+		workspaceAdminWriter:       s.workspaceAdminWriter,
+		sourceIssueController:      s.sourceIssueController,
+		utilityDeps:                s.utilityAgentDeps,
+		writeDeps:                  s.writeDependencies,
+		interactionDeps:            s.interactionResponderDep,
+		executionControllerDep:     s.exactExecutionControllerDep,
+		agentConversations:         s.agentConversationDeps,
+		managedConversations:       s.managedAgentConversationDeps,
+		managedAutomationSchedules: s.managedConversationScheduleDeps,
+		log:                        s.log,
 	}
+}
+
+// SetExactExecutionController wires the native run, recovery, pending-transition,
+// and provider-mode operations exposed by the exact Host extension.
+func (s *Service) SetExactExecutionController(controller ExactExecutionController) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.exactExecutionController = controller
+}
+
+func (s *Service) exactExecutionControllerDep() exactExecutionController {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.exactExecutionController
 }
 
 // notifyDeliverer calls Refresh on the attached Deliverer, if any. Must be

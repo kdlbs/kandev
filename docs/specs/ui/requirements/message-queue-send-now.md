@@ -26,7 +26,16 @@ When an agent is in a long-running turn, an urgent correction can sit in the que
 - **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.5:** The bulk turn uses the oldest selected entry's model and plan-mode snapshot. Its transcript envelope uses that entry's sender attribution while retaining source entry identities and provenance in metadata for restoration and diagnostics.
 - **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.6:** If the aggregate would exceed the existing per-message attachment count, attachment byte, or entity-reference limits, the request is rejected before cancellation. No content is truncated and the queue is unchanged.
 - **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.7:** A promptable session dispatches immediately without cancellation. A busy session uses the existing backend-owned cancellation progress, cancels only the turn observed when the action began, and starts the replacement turn after cancellation settles.
-- **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.8:** If ordinary FIFO delivery has reserved a queued entry but has not yet accepted its prompt, Send Now wins that same-session handoff. The reserved source is restored before the requested selection is claimed, so an all-scope replacement can include it in one aggregate prompt. Once FIFO has accepted its prompt, Send Now fails closed with `send_now_conflict`; it does not duplicate or cancel that successor turn.
+- **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.8:** If ordinary FIFO delivery has reserved a queued entry but has not yet accepted its prompt, Send Now wins that same-session handoff. The reserved source is restored before the requested selection is claimed, so an all-scope replacement can include it in one aggregate prompt. During the accepted prompt handoff, Send Now fails closed with `send_now_conflict`. Once the successor owns the running turn, a new Send Now request can interrupt it under the same captured-turn checks as any other active turn.
+
+- **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.9:** A running turn started by ordinary FIFO delivery shall be interruptible by a new Send Now request after its prompt handoff completes. This applies to fixed and dynamic profiles, including Cursor. The selected pending entry runs once; the interrupted input is not restored or repeated, and other pending entries retain FIFO order.
+- **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.10:** A request that observes an older turn shall not cancel a newer successor. Overlapping cancellation requests remain conflicts. Late completion from an interrupted turn shall not settle the replacement or release its pending queue work.
+- **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.11:** Desktop and phone Send Now actions shall show the existing localized conflict feedback for a genuine handoff conflict and refresh the authoritative queue. They shall allow a later request after handoff without a page reload.
+
+## Design and delivery
+
+- [System design](../system-design/message-queue-send-now.md)
+- [FIFO interruption repair package](../../../plans/queue-send-now-live-fifo/plan.md)
 
 ## Migrated source detail
 
@@ -79,8 +88,9 @@ follow-up, without completing or advancing the task's workflow step.
   accepted its prompt, Send Now wins that same-session handoff. The reserved
   source is restored before the requested selection is claimed, so an
   all-scope replacement can include it in one aggregate prompt. Once FIFO has
-  accepted its prompt, Send Now fails closed with `send_now_conflict`; it does
-  not duplicate or cancel that successor turn.
+  accepted its prompt but has not completed the handoff, Send Now fails closed
+  with `send_now_conflict`. A later request can interrupt the running successor
+  when it is the turn captured by that request.
 - Send Now is a replacement/steering cancellation. It does not create the
   ordinary **Turn cancelled** message, move the task to review, evaluate
   `cancel_triggers_turn_complete`, or run the cancelled turn's
@@ -174,8 +184,11 @@ queue-take serialization point. An ordinary FIFO handoff has an explicit
 pre-acceptance phase: Send Now may supersede that reservation while the worker
 has not claimed prompt ownership, but the worker must claim ownership before
 creating a visible user message, running turn-start workflow effects, or
-accepting the agent prompt. After that claim, the handoff is terminal for Send
-Now and the existing conflict response applies.
+accepting the agent prompt. The accepted handoff remains protected until the
+successor owns the running turn. A later Send Now request can replace that turn;
+an older request cannot cancel a successor that appeared after its capture.
+The [Send Now system design](../system-design/message-queue-send-now.md) defines
+the ownership boundary and settlement rules.
 
 When Send Now supersedes a pre-acceptance FIFO reservation, the backend
 restores that exact source (including clearing a durable lifecycle
@@ -216,8 +229,9 @@ not undo that explicit resume instruction.
 - **FIFO handoff race:** if normal FIFO delivery reserved the head but has not
   accepted its prompt, Send Now restores/reclaims that reservation and
   dispatches the requested exact selection. If FIFO already accepted the
-  prompt, Send Now returns `send_now_conflict`; it leaves that successor and
-  the remaining queue authoritative rather than creating a duplicate turn.
+  prompt but has not completed the handoff, Send Now returns
+  `send_now_conflict`. After handoff, a new request may replace that running
+  successor without restoring or duplicating its already accepted input.
 - **Prompt admission fails after claim:** the backend restores the original
   entries and their FIFO positions before publishing status. Auto-run stays ON
   because the operation was already accepted as a resume. Existing ordinary
@@ -274,10 +288,13 @@ not undo that explicit resume instruction.
   a protocol client requests `scope: "all"`, **THEN** the FIFO reservation is
   restored, both messages are claimed in FIFO order, and exactly one
   replacement prompt contains both bodies.
-- **GIVEN** normal FIFO delivery has already accepted its successor prompt,
-  **WHEN** the user clicks Send Now, **THEN** the action fails closed without a
-  duplicate user message, duplicate prompt, or cancellation of that successor,
-  and the authoritative remaining queue is preserved.
+- **GIVEN** normal FIFO delivery is in its accepted prompt handoff, **WHEN**
+  the user clicks Send Now, **THEN** the action fails closed without a duplicate
+  message, prompt, or cancellation, and the remaining queue is preserved.
+- **GIVEN** normal FIFO delivery has completed the handoff and its turn is
+  running, **WHEN** the user sends another pending entry now, **THEN** the
+  captured running turn is interrupted and the exact selected entry starts once.
+  The interrupted input is not returned to the queue.
 - **GIVEN** the workflow step enables `cancel_triggers_turn_complete`, **WHEN**
   the user sends a queued message now, **THEN** the task stays on the same step
   and only the replacement turn's ordinary lifecycle hooks may change it.
@@ -298,7 +315,8 @@ not undo that explicit resume instruction.
 - Sending an arbitrary user-selected subset other than one entry or all visible
   pending entries.
 - Changing **Remove**, **Clear all**, edit, or merge semantics. FIFO participates
-  in Send Now handoff arbitration only until its prompt is accepted. Normal
+  in Send Now reservation arbitration before prompt acceptance and in ordinary
+  captured-turn interruption after the handoff completes. Normal
   FIFO policy and first-party queue controls are governed by
   [Control Pending Message Auto-run](message-queue-run.md).
 - Making ordinary queued-message dispatch crash-durable after its existing

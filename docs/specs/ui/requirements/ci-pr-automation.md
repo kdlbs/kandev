@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-06-18
-updated: 2026-09-06
+updated: 2026-09-11
 owners:
   - tbd
 ---
@@ -64,6 +64,19 @@ Consequences section).
 - **AC-UI-CI-PR-AUTOMATION-001.14:** Every retry shall consume the existing per-PR 10-round budget. Kandev shall never create an 11th accepted round, and disabling then re-enabling auto-fix shall reset the retry state with the existing checkpoint and round state.
 - **AC-UI-CI-PR-AUTOMATION-001.15:** Existing installations whose built-in `ci-auto-fix` prompt still matches a shipped, untouched legacy revision shall receive the current default content on startup. Kandev shall preserve edited prompt rows, and the server-owned outcome instructions shall apply even when a task or global prompt is customized.
 
-## System design
+### Outcome scope clarification
+
+The following criteria clarify the existing turn-bound outcome contract.
+The [scope repair plan](../../../plans/pr-auto-fix-outcome-scope/plan.md) records the implementation and regression coverage.
+
+- **AC-UI-CI-PR-AUTOMATION-001.16:** Agent guidance shall restrict outcome reporting to the current Kandev-dispatched auto-fix turn. Manual PR fixup, sibling review messages, and historical auto-fix instructions shall not establish that obligation. Tool availability and enabled automation settings alone shall not establish that obligation.
+- **AC-UI-CI-PR-AUTOMATION-001.17:** When no matching unresolved attempt exists, Kandev shall reject the report with a scope explanation. The explanation shall direct the agent to finish ordinary work without retrying the report or enabling automation. The rejected report shall not create an attempt, consume a round, or change automation settings.
+
+## Implementation plans
+
+- [Outcome retries](../../../plans/pr-auto-fix-outcome-retries/plan.md): existing implementation.
+- [Outcome scope repair](../../../plans/pr-auto-fix-outcome-scope/plan.md): implementation record.
+
+## System-design references
 
 The migrated technical source is split into [part 1](../system-design/ci-pr-automation-01.md), [part 2](../system-design/ci-pr-automation-02.md), [part 3](../system-design/ci-pr-automation-03.md).

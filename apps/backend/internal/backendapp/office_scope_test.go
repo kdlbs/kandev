@@ -17,6 +17,7 @@ import (
 	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -159,6 +160,8 @@ func officeScopeCases() []officeScopeCase {
 		{"agent-channel", http.MethodDelete, "/api/v1/office/agents/:id/channels/:channelId",
 			"/api/v1/office/agents/agent-user-a/channels/channel-user-a", ""},
 		{"workspace", http.MethodGet, "/api/v1/office/workspaces/:wsId/agents", "", ""},
+		{"workspace-pause", http.MethodPost, "/api/v1/office/workspaces/:wsId/pause", "", `{"reason":"incident"}`},
+		{"workspace-resume", http.MethodPost, "/api/v1/office/workspaces/:wsId/resume", "", `{}`},
 		{"inbox-dismiss", http.MethodPost, "/api/v1/office/inbox/dismiss", "/api/v1/office/inbox/dismiss",
 			`{"kind":"agent_run_failed","item_id":"run-user-a"}`},
 	}
@@ -296,6 +299,37 @@ func TestOfficeScopeAllowsOwner(t *testing.T) {
 			}
 			if reached != tc.pattern {
 				t.Errorf("reached handler %q, want %q", reached, tc.pattern)
+			}
+		})
+	}
+}
+
+// TestOfficeScopeRequiresWorkspaceManageForPauseMutations keeps the
+// workspace read and mutation boundaries distinct: a viewer may inspect the
+// pause state but cannot stop or resume autonomous work.
+func TestOfficeScopeRequiresWorkspaceManageForPauseMutations(t *testing.T) {
+	h := newOfficeScopeHarness(t)
+	workspaceID := h.workspaces[officeScopeUserA]
+	if _, err := h.taskSvc.UpsertWorkspaceMember(
+		authn.WithIdentity(context.Background(), authn.Identity{UserID: officeScopeUserA, Role: authn.RoleMember}),
+		workspaceID, "viewer-user", "viewer",
+	); err != nil {
+		t.Fatalf("seed viewer membership: %v", err)
+	}
+
+	for _, tc := range []officeScopeCase{
+		{name: "pause", method: http.MethodPost, pattern: "/api/v1/office/workspaces/:wsId/pause", body: `{"reason":"incident"}`},
+		{name: "resume", method: http.MethodPost, pattern: "/api/v1/office/workspaces/:wsId/resume", body: `{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var reached string
+			engine := officeScopeEngine(h, "viewer-user", &reached)
+			rec := officeScopeRequest(t, engine, tc, strings.Replace(tc.pattern, ":wsId", workspaceID, 1))
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d (%s), want 403", rec.Code, rec.Body.String())
+			}
+			if reached != "" {
+				t.Fatalf("handler %q ran for a viewer mutation", reached)
 			}
 		})
 	}
@@ -548,7 +582,7 @@ func TestOfficeRouteGroupMountsScopeGuard(t *testing.T) {
 			c.Request.Context(), authn.Identity{UserID: officeScopeUserB, Role: authn.RoleMember}))
 		c.Next()
 	})
-	mountOfficeRoutes(engine, officeTestServices(), h.authSvc, h.taskSvc, h.officeRepo, nil, testLogger(t))
+	mountOfficeRoutes(engine, officeTestServices(), h.authSvc, h.taskSvc, h.officeRepo, nil, officeruntime.HandoffDependencies{}, testLogger(t))
 
 	// The scope guard: user B naming user A's agent must be refused before
 	// the (zero-value, would-panic) handler runs.

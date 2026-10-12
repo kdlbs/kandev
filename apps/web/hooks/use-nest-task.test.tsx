@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useNestTask } from "./use-nest-task";
+import { useNestTask, useNestTaskByDrag } from "./use-nest-task";
 
 const updateTaskMock = vi.hoisted(() => vi.fn());
 const detachTaskMock = vi.hoisted(() => vi.fn());
@@ -79,4 +79,16 @@ describe("useNestTask", () => {
     expect(setWorkflowSnapshotMock).toHaveBeenCalled();
     expect(updateTaskMock).toHaveBeenCalledWith("task-1", { parent_id: "parent-1" });
   });
+});
+
+it("reparents a bounded page task without a workflow snapshot", async () => {
+  setWorkflowSnapshotMock.mockClear();
+  store.state = { kanbanMulti: { snapshots: {} }, setWorkflowSnapshot: setWorkflowSnapshotMock };
+  updateTaskMock.mockReset().mockResolvedValue(undefined);
+  const { result } = renderHook(() =>
+    useNestTaskByDrag([{ id: "page-child", workflowId: "wf-1" }]),
+  );
+  await act(async () => result.current("page-child", "new-parent"));
+  expect(updateTaskMock).toHaveBeenCalledExactlyOnceWith("page-child", { parent_id: "new-parent" });
+  expect(setWorkflowSnapshotMock).not.toHaveBeenCalled();
 });

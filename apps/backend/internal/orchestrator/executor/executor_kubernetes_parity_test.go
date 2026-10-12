@@ -36,8 +36,8 @@ func TestKubernetesCredentialBrokerRequiresHTTPS(t *testing.T) {
 func TestKubernetesProfileTokenSkipsManagedCredentialPreflight(t *testing.T) {
 	repo := newMockRepository()
 	seedPreflightTaskRepository(repo, "task-1", "repo-1", &models.Repository{
-		ID: "repo-1", SourceType: sourceTypeLocal, Provider: "acme-forge",
-		RemoteURL: "https://forge.example/acme/widgets.git",
+		ID: "repo-1", SourceType: sourceTypeLocal, Provider: gitHubProviderID,
+		RemoteURL: "https://github.com/acme/widgets.git",
 	})
 	repo.executors["exec-k8s"] = &models.Executor{
 		ID: "exec-k8s", Type: models.ExecutorTypeKubernetes,

@@ -6,6 +6,13 @@ status: implemented
 
 # Implementation Plan: Send Queued Messages Now
 
+## Follow-up contract change
+
+The [live FIFO interruption package](../queue-send-now-live-fifo/plan.md)
+amends the accepted-handoff exclusion in the current requirement. This plan
+and its completed work orders remain historical implementation evidence;
+the follow-up owns new race tests, desktop/phone scenarios, and final results.
+
 ## Overview
 
 Add one explicit WebSocket operation that asks the orchestrator to replace the

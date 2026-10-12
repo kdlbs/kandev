@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Page, Response } from "@playwright/test";
 import { DWELL_CATEGORIES, dwell, injectLatency, waitForHttp, watchWs } from "./causal-waits";
 
@@ -150,6 +150,23 @@ describe("watchWs().waitForEvent", () => {
       payload: { task_id: "t1", status: "cancelled" },
     });
   });
+  it("resolves on an ordered session event using its legacy action alias", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    const pending = ws.waitForEvent("session.message.added", {
+      where: (payload) => payload.session_id === "session-1",
+    });
+    socket.emit("framereceived", {
+      type: "session.event",
+      event_type: "message.added",
+      payload: { session_id: "session-1", message_id: "message-1" },
+    });
+    await expect(pending).resolves.toMatchObject({
+      eventType: "message.added",
+      payload: { session_id: "session-1", message_id: "message-1" },
+    });
+  });
 
   it("skips notifications that fail the `where` predicate", async () => {
     const { page, fake } = fakePage();
@@ -289,6 +306,69 @@ describe("watchWs().waitForResponse", () => {
     await expect(pending).rejects.toThrow(
       'watchWs.waitForResponse: no reply to "task.plan.get" within 30ms',
     );
+  });
+
+  it("starts the timeout after the dependent operation completes", async () => {
+    vi.useFakeTimers();
+    try {
+      const { page } = fakePage();
+      const ws = watchWs(page);
+      let completeRestart!: () => void;
+      const restart = new Promise<void>((resolve) => {
+        completeRestart = resolve;
+      });
+      const pending = ws.waitForResponse("user.subscribe", {
+        timeout: 30,
+        timeoutAfter: restart,
+      });
+      const outcome = pending.then(
+        () => "resolved",
+        () => "rejected",
+      );
+
+      await vi.advanceTimersByTimeAsync(31);
+      expect(await Promise.race([outcome, Promise.resolve("pending")])).toBe("pending");
+
+      completeRestart();
+      await vi.advanceTimersByTimeAsync(29);
+      expect(await Promise.race([outcome, Promise.resolve("pending")])).toBe("pending");
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).rejects.toThrow(
+        'watchWs.waitForResponse: no reply to "user.subscribe" within 30ms',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps observing responses while waiting for the dependent operation", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    let completeRestart!: () => void;
+    const restart = new Promise<void>((resolve) => {
+      completeRestart = resolve;
+    });
+    const pending = ws.waitForResponse("user.subscribe", {
+      timeout: 30,
+      timeoutAfter: restart,
+    });
+    socket.emit("framesent", {
+      id: "req-1",
+      type: "request",
+      action: "user.subscribe",
+      payload: {},
+    });
+    socket.emit("framereceived", {
+      id: "req-1",
+      type: "response",
+      action: "user.subscribe",
+      payload: {},
+    });
+
+    await expect(pending).resolves.toMatchObject({ id: "req-1" });
+    completeRestart();
   });
 
   it("rejects with the backend error payload when the request is refused", async () => {
