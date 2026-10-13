@@ -307,9 +307,10 @@ commit. Never leave pre-fixup screenshots in the PR.
 Anchor each recapture on the promised user-visible notice or download affordance
 and assert that affordance is visible before capture; a preview container alone
 is not evidence of the behavior. If the UI changes after publication, upload
-the fresh assets with `gh pr edit --body-file <merged-body> --attach <path>`
-(repeat `--attach` for each asset) using `/pr` step 7. Replace only the owned
-screenshot section through its live-body fetch/merge/check procedure and
+the fresh assets with `gh pr comment --body-file <screenshots-file> --attach
+<path>` (repeat `--attach` for each asset) using `/pr` step 7. After uploading,
+replace only the owned screenshot section through its live-body
+fetch/merge/check procedure, without attachments on the body edit, and
 verify the uploaded embeds by reading the PR body back. Do not create or
 rewrite media refs; preserve legacy refs used by historical PR embeds.
 

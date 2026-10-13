@@ -57,18 +57,19 @@ explicitly requests task tracking.
    Request explicit user approval before a `workflow_dispatch` or other action
    writes a shared registry, and verify the target tag/digest exists.
 
-4. **Screenshots — capture and validate before publication.** For a UI-visible
-   change, capture fresh screenshots for every affected viewport before creating
-   the PR. For repository UI, use `/playwright-cli` with an isolated headless
+4. **Screenshots — capture and validate before publication.** For GitHub UI
+   changes, verify the attachment prerequisites in step 7 before capture. For
+   every host, capture fresh screenshots for every affected viewport of a
+   UI-visible change before creating the PR. For repository UI, use
+   `/playwright-cli` with an isolated headless
    session or the managed `apps/web` E2E runner. See step 7 for capture routing
    and blocker classification. When the changed surface is structurally absent
    on another viewport, record that rationale instead of capturing an unrelated
    screen.
    Use synthetic or redacted data, validate the assets, and compress PNGs using
-   the recipe in step 7. For GitHub UI PRs, also check the attachment
-   prerequisites in step 7 before creating the PR. If capture is impossible,
-   report the concrete blocker and stop before PR publication. For non-UI
-   changes, record that screenshots are not required and continue.
+   the recipe in step 7. If capture is impossible, report the concrete blocker
+   and stop before PR publication. For non-UI changes, record that screenshots
+   are not required and continue.
 
 5. **Create the PR.** Before creating, check open PRs for the current branch and
    inspect task-linked PR metadata. Reuse an existing PR; create a duplicate only
@@ -196,25 +197,27 @@ required screenshot embedding in step 7 is complete.
      ```
 
    **Embed (GitHub only):** Upload screenshots with native `gh --attach`.
-   Require GitHub CLI **2.99.0 or newer**, confirm `gh pr edit --help` lists
-   `--attach`, and verify authenticated repository push access. GitHub
-   Enterprise Server is unsupported. If these prerequisites are
-   missing, report the concrete upgrade, authentication, or host blocker before
-   publication. See [GitHub's attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
+   Require GitHub CLI **2.99.0 or newer**, confirm `gh pr comment --help` lists
+   `--attach`, and verify authenticated repository push access. Determine the
+   target hostname from `git remote get-url origin` before capture. For a
+   custom GitHub hostname, establish its deployment type and attachment support
+   first; GitHub Enterprise Server is unsupported. If support cannot be
+   established, report the host blocker. Report missing CLI or authentication
+   prerequisites before publication. See [GitHub's attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
    and [the release announcement](https://github.blog/changelog/2026-09-01-github-cli-media-in-issues-pull-requests-and-comments/).
 
    Keep assets in ignored `apps/web/.pr-assets`; do not commit them or create
    media branches. Images must be within GitHub's 10 MB upload limit. Add a
-   `## Screenshots` section to a candidate built from the live PR body using
-   Markdown image embeds with descriptive alt text and matching local paths:
+   `## Screenshots` section to a PR-scoped upload comment body using Markdown
+   image embeds with descriptive alt text and matching local paths:
    ```markdown
    ![Desktop task dialog](apps/web/.pr-assets/task-dialog-desktop.png)
    ![Mobile task dialog](apps/web/.pr-assets/task-dialog-mobile.png)
    ```
-   Follow the live-body procedure below before submitting the candidate. Run
-   from the repository root and repeat `--attach` once per manifest asset:
+   Upload before fetching the PR body for its final update. Run from the
+   repository root and repeat `--attach` once per manifest asset:
    ```bash
-   gh pr edit <PR_NUMBER> --body-file /tmp/pr-body-<PR_NUMBER>-merged.md \
+   gh pr comment <PR_NUMBER> --body-file /tmp/pr-screenshots-<PR_NUMBER>.md \
      --attach apps/web/.pr-assets/task-dialog-desktop.png \
      --attach apps/web/.pr-assets/task-dialog-mobile.png
    ```
@@ -224,20 +227,26 @@ required screenshot embedding in step 7 is complete.
    attach each file only once. For issue or PR comments, the same repeatable
    flag works with `gh issue comment` and `gh pr comment`; for an unreferenced
    image, `--attach 'path/to/shot.png#Descriptive alt text'` supplies its caption.
-   On a nonzero exit, read the PR body before retrying: some attachments may
-   have succeeded and the body may already be updated. Retry only missing
-   assets against a newly merged live body.
+   Read the created comment back through the API and require every expected
+   embed to contain an uploaded HTTPS URL with its alt text intact. On a
+   nonzero exit or lost response, inspect the PR's comments before retrying;
+   do not assume the upload or comment creation failed. Recover verified URLs
+   and retry only missing assets. Keep the upload comment as capture evidence.
+
+   Only after all uploads finish, fetch the live PR body and merge the
+   verified uploaded embeds into its owned screenshot section using the
+   live-body procedure below. Write the merged body with
+   `gh pr edit <PR_NUMBER> --body-file <merged-file>` **without `--attach`**.
+   Never combine attachment uploads with a post-creation body replacement:
+   the upload interval would separate the concurrency check from the write.
 
    `gh pr edit` can fail on this repo (GraphQL touches the deprecated
    Projects-classic API), or report success without changing the body. Treat
-   read-back as authoritative. If the intended uploaded embeds are absent,
-   upload the screenshot section alone with `gh pr comment <PR_NUMBER>
-   --body-file <screenshots-file> --attach <path>` (repeat for every asset).
-   Fetch that comment's body through the API to obtain the rewritten embeds,
-   then merge those uploaded URLs into a freshly fetched PR body using the
-   live-body procedure below. Never REST PATCH local image paths: REST does
-   not upload attachments. If upload fails, report the blocker instead of
-   reviving the media-branch workaround. For REST, build the payload with
+   read-back as authoritative. If the intended section is absent, re-fetch
+   and merge the already uploaded URLs before falling back to REST. Never
+   REST PATCH local image paths: REST does not upload attachments. If upload
+   fails, report the blocker instead of reviving the media-branch workaround.
+   For REST, build the payload with
    `jq --rawfile`, never by hand-escaping shell strings:
    ```bash
    set -euo pipefail
@@ -269,7 +278,8 @@ required screenshot embedding in step 7 is complete.
    verify that its start and end markers occur exactly once before and after
    the update.
 
-   1. Fetch the current body from GitHub and keep that pristine live response
+   1. Complete screenshot uploads first, then fetch the current body from
+      GitHub and keep that pristine live response
       as the merge base:
       `rtk proxy gh pr view <PR_NUMBER> --json body | jq -j .body > /tmp/pr-body-<PR_NUMBER>-latest.md`.
    2. Change only the section owned by this operation. For screenshots, wrap
@@ -280,7 +290,8 @@ required screenshot embedding in step 7 is complete.
       `<!-- kandev-preview-start --> ... <!-- kandev-preview-end -->`.
    3. Build a separate merged candidate, then re-fetch the live body immediately
       before `gh pr edit` or REST PATCH and compare the two live snapshots
-      (not the candidate with a snapshot). Use PR-scoped temporary filenames, fail immediately on a
+      (not the candidate with a snapshot). Do not upload assets between this
+      check and the write. Use PR-scoped temporary filenames, fail immediately on a
       differing `cmp`, and discard any payload on failure; never reuse a prior
       `/tmp` payload. Extract JSON bodies byte-for-byte with `jq -j .body` before
       `cmp`; `jq -r .body` appends a newline and can report a false mismatch.
