@@ -20,6 +20,7 @@ describe("backend fixture port ownership", () => {
     const replacement = backendPorts(0, { workerIndex: 1, parallelIndex: 0 });
     const sibling = backendPorts(1, { workerIndex: 0, parallelIndex: 0 });
     expect(replacement.backendPort).not.toBe(sibling.backendPort);
+    expect(replacement.standaloneAgentctlPort).not.toBe(sibling.standaloneAgentctlPort);
     expect(replacement.agentctlPortMax).toBeLessThan(sibling.agentctlPortBase);
   });
 
@@ -28,7 +29,7 @@ describe("backend fixture port ownership", () => {
     for (let offset = 0; offset < 30; offset++) {
       for (let slot = 0; slot < 5; slot++) {
         const ports = backendPorts(offset, { workerIndex: 91, parallelIndex: slot });
-        const allocated = [ports.backendPort];
+        const allocated = [ports.backendPort, ports.standaloneAgentctlPort];
         for (let port = ports.agentctlPortBase; port <= ports.agentctlPortMax; port++) {
           allocated.push(port);
         }

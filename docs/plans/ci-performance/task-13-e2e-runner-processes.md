@@ -142,3 +142,45 @@ and is not a paired speed comparison. All 69 focused runner/fixture unit tests,
 17 workflow contracts, changed-file lint, web typecheck, documentation checks
 and action pinning pass. Full hosted remeasurement remains pending. Do not
 interpret fewer processes as a full-suite improvement until that evidence exists.
+
+The new log capture exposed a standalone-agentctl bind failure in the
+two-process trial, job 115423582334. The fixture isolated backend listeners
+and per-task agentctl ranges but left standalone agentctl at its production
+default 39429. Concurrent availability checks can both succeed before either
+child binds. Allocate that listener at backendPort + 1000 and pass AGENTCTL_PORT
+explicitly; no production launcher behavior changes. Container and SSH executor
+launchers already set their own target ports explicitly.
+
+Extend the allocation regression to include every standalone listener across
+all supported offsets and slots. It fails twice before the fix and passes
+afterward; 48 focused runner/fixture tests pass. A real two-process run passes
+all 26 probe cases with no retries/skips in 71.347 seconds, under the unchanged
+memory guard and four-CPU affinity. Both standalone listeners are observed
+simultaneously at 19080 and 19081. Formatting, lint, typecheck and documentation
+checks pass. This addresses the observed startup race; it does not claim to
+resolve unrelated hosted failures or meet the full-suite runtime target.
+
+The completed two-process trial at fb2f7828 (run 38432683722) also failed:
+longest normal test step 1,466 seconds, summed normal steps 18,026 seconds,
+workflow elapsed 2,950 seconds. All 3,935 first-attempt identities match f68.
+Twelve normal shards and all six container shards passed; two normal shards
+failed. Final failures are managed-runtime cancellation during retry backoff
+and the mobile multi-repository Restore-first journey. Sidebar sampling passed
+only after retries. These timings are not an accepted passing improvement.
+
+The cancellation case now observes the persisted startup-retry marker before
+calling the same real stop API, retaining CANCELLED state and both launch-count
+checks across the full 3.5-second negative observation. Its companion still
+asserts the browser retry banner. The full four-case file passes in the CI
+runtime image with no retries; see the managed-runtime cancellation audit.
+The exact mobile Restore-first case passes locally in 29.7 seconds, but its
+hosted snapshot shows session recovery failure and a closed backend connection;
+it remains an unresolved hosted observation, not a relaxed geometry assertion.
+
+Unexpected test-body failures now also print the bounded backend log tail before
+the automatic fixture cleanup, rather than capturing only fixture setup errors.
+A new regression distinguishes passing/skipped/expected-failure outcomes from
+unexpected failure, timeout and interruption. It fails before implementation;
+all 49 focused tests pass afterward. A temporary real failing Playwright case
+confirms the automatic fixture prints the backend log and preserves exit 1;
+the temporary probe is removed. Fresh hosted validation remains required.

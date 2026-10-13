@@ -14,6 +14,12 @@ export function backendPorts(
   // Replacement workers reuse a slot after its previous fixture has stopped.
   // workerIndex increases across failures and projects and cannot own a port.
   const backendPort = 18080 + offset + slot * 30;
+  const standaloneAgentctlPort = backendPort + 1000;
   const agentctlPortBase = 30001 + offset * 1000 + slot * 200;
-  return { backendPort, agentctlPortBase, agentctlPortMax: agentctlPortBase + 199 };
+  return {
+    backendPort,
+    standaloneAgentctlPort,
+    agentctlPortBase,
+    agentctlPortMax: agentctlPortBase + 199,
+  };
 }

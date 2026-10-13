@@ -1,4 +1,4 @@
-import { test as base } from "@playwright/test";
+import { test as base, type TestInfo } from "@playwright/test";
 import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -214,6 +214,20 @@ function removeOwnedTempRoot(tmpDir: string): void {
   });
 }
 
+export function reportUnexpectedBackendFailure(
+  tmpDir: string,
+  outcome: Pick<TestInfo, "status" | "expectedStatus">,
+): void {
+  if (outcome.status === outcome.expectedStatus) return;
+  if (
+    outcome.status === "failed" ||
+    outcome.status === "timedOut" ||
+    outcome.status === "interrupted"
+  ) {
+    reportFailedBackendLog(tmpDir);
+  }
+}
+
 function reportFailedBackendLog(tmpDir: string): void {
   let descriptor: number | undefined;
   try {
@@ -334,10 +348,8 @@ function spawnBackendProcess(
 export const backendFixture = base.extend<object, { backend: BackendContext }>({
   backend: [
     async ({ browserName: _browserName }, use, workerInfo) => {
-      const { backendPort, agentctlPortBase, agentctlPortMax } = backendPorts(
-        E2E_PORT_OFFSET,
-        workerInfo,
-      );
+      const { backendPort, standaloneAgentctlPort, agentctlPortBase, agentctlPortMax } =
+        backendPorts(E2E_PORT_OFFSET, workerInfo);
       const frontendPort = backendPort;
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), `kandev-e2e-${workerInfo.workerIndex}-`),
@@ -451,6 +463,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           KANDEV_WORKTREE_BASEPATH: worktreeBase,
           KANDEV_REPOCLONE_BASEPATH: repoCloneBase,
           KANDEV_LOG_LEVEL: dockerEnabled ? "debug" : (process.env.KANDEV_LOG_LEVEL ?? "info"),
+          AGENTCTL_PORT: String(standaloneAgentctlPort),
           AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
           AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
           // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true and

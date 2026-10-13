@@ -99,11 +99,13 @@ Serial groups, project-specific backend options, retries and timeouts retain
 their existing Playwright behavior.
 
 Each process owns a distinct explicit port offset, test-result directory and
-blob directory. Backend and agentctl ports use the stable `parallelIndex`
+blob directory. Backend, standalone agentctl, and per-task agentctl ports use the stable `parallelIndex`
 slot, never `workerIndex`, which increases when Playwright replaces workers
 after a failure or project boundary. Teardown must complete before a replacement
 worker reuses the slot. Existing per-worker temporary HOME, database, repository
 and backend ownership remain intact.
+The standalone listener has its own allocation outside every backend and
+per-task range; parallel fixtures must not race for its production default port.
 
 Start all selected processes before waiting, join every started process even
 after a sibling fails, and propagate cancellation to owned process groups.

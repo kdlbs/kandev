@@ -2,7 +2,7 @@ import { devices, type Page } from "@playwright/test";
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { backendFixture, type BackendContext } from "./backend";
+import { backendFixture, reportUnexpectedBackendFailure, type BackendContext } from "./backend";
 import { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
 export { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
 import { ApiClient } from "../helpers/api-client";
@@ -502,7 +502,7 @@ export const test = backendFixture.extend<
   },
 
   integrationCleanup: [
-    async ({ apiClient, backend, seedData }, use) => {
+    async ({ apiClient, backend, seedData }, use, testInfo) => {
       await backend.ensureReady();
       const scoped = `workspace_id=${encodeURIComponent(seedData.workspaceId)}`;
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config?${scoped}`).catch(() => undefined);
@@ -544,6 +544,7 @@ export const test = backendFixture.extend<
       try {
         await use();
       } finally {
+        reportUnexpectedBackendFailure(backend.tmpDir, testInfo);
         await apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined);
         restoreSeedRepositoryOrigin(seedData, { refreshTrackingRefs: false });
       }
