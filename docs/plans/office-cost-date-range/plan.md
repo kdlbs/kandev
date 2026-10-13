@@ -160,8 +160,9 @@ GREEN exits and original joined handles. Both affected Go packages passed with
 race/trimpath/fts5/p1; three frontend suites passed 10 tests, followed by the
 changed component test after required lint-label corrections. Typecheck,
 scoped Go lint, zero-warning frontend lint, the focused query matcher, i18n
-ratchet/check and document checks passed. Real PostgreSQL parity remains
-unverified locally: its env-gated test explicitly skipped without a DSN.
+ratchet/check and document checks passed. At initial publication, real
+PostgreSQL parity was unverified locally: its env-gated test explicitly skipped
+without a DSN. The required PostgreSQL CI correction below supersedes that skip.
 
 All 16 actual changed files (six production, six tests, four docs) were staged
 before changed-line lint, including every new helper/test. The final index
@@ -179,6 +180,18 @@ i18n and minimal design clarification are recorded in the same work order.
 This adds no Go change, new design package, layout/copy or public-doc work.
 The original hosted observer and deadline are retained; optional backend
 suggestions were dispositioned without published backend changes.
+
+The required PostgreSQL CI correction uses an owned PostgreSQL 16 instance to
+execute the existing window assertions. The fixture now seeds the parent agent
+and inserts portable SQL event rows, leaving the recording path unchanged.
+PostgreSQL also rejected the provider label's raw-column fallback outside its
+grouped expression; the fallback now uses that same canonical expression, with
+unchanged labels and memberships. Real PostgreSQL and SQLite window assertions
+and existing lifetime/provider-label controls pass with race detection. Required
+full Go changed-line lint passed with zero issues after the evidenced timeout
+calibration recorded in the work order. The owned tmpfs PostgreSQL container
+was removed after those tests. Normal hooks, final indexed coverage and the
+single corrective publication follow these completed local checks.
 
 ## Risks
 

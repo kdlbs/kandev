@@ -54,10 +54,7 @@ func seedCostsWindowEvents(t *testing.T, repo *sqlite.Repository, start, before 
 		{"old-ingested-now", "window-task", "", "window-agent", "excluded", "anthropic", start.Add(-time.Hour), 400},
 	}
 	for _, row := range rows {
-		event := &models.CostEvent{ID: row.id, TaskID: row.task, SessionID: row.session, AgentProfileID: row.agent, ProjectID: "old-project", Model: row.model, Provider: row.provider, OccurredAt: row.at, CostSubcents: row.cost}
-		if err := repo.CreateCostEvent(context.Background(), event); err != nil {
-			t.Fatal(err)
-		}
+		windowSQL(t, repo, `INSERT INTO office_cost_events (id,task_id,session_id,agent_profile_id,project_id,model,provider,occurred_at,cost_subcents,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`, row.id, row.task, row.session, row.agent, "old-project", row.model, row.provider, row.at, row.cost, start)
 	}
 	windowSQL(t, repo, `DELETE FROM agent_profiles WHERE id=?`, "deleted-profile")
 	windowSQL(t, repo, `UPDATE office_cost_events SET created_at=? WHERE id=?`, start.Add(-24*time.Hour), "lower-in")

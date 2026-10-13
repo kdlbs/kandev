@@ -283,7 +283,7 @@ func (r *Repository) getCostsByProviderInWindow(
 				WHEN 'openai'    THEN 'OpenAI'
 				WHEN 'google'    THEN 'Gemini'
 				WHEN 'unknown'   THEN '(unknown)'
-				ELSE e.provider
+				ELSE COALESCE(NULLIF(e.provider, ''), 'unknown')
 			END AS group_label,
 			SUM(e.cost_subcents) AS total_subcents,
 			COUNT(*) AS count

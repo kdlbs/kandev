@@ -311,7 +311,7 @@ request. All implementation checks below were completed before publication.
 | Real component/API/fetch RED | Exit 1, handle 49049 joined: lifetime metric/group membership displayed for MTD |
 | HTTP and component first GREEN | Exit 0, original handles 16073 and 30951 joined |
 | Final affected Go race/trimpath/fts5/p1 | Exit 0, both costs and repository/sqlite packages; handle 48954 joined |
-| Explicit PostgreSQL query twin | Command exit 0, handle 98210 joined; test SKIPPED because KANDEV_TEST_POSTGRES_DSN was absent. PostgreSQL query execution is unverified locally |
+| Initial PostgreSQL query twin | Command exit 0, handle 98210 joined; test SKIPPED because KANDEV_TEST_POSTGRES_DSN was absent. Superseded by the executed PostgreSQL correction below |
 | Frontend affected suites | Exit 0, 3 files / 10 tests; handle 54422 joined |
 | Component after required lint-label corrections | Exit 0, 1 test; final handle 12340 joined |
 | Exact existing query-string matcher check | Exit 0, 1 pass / 28 filtered skips; handle 67237 joined |
@@ -383,3 +383,45 @@ diff is the selected-range display guard and its real regression. No manual
 FULL review was requested. Normal active hooks and one corrective push follow
 these results; retain observer `87974`, original launch `01:38:32.496Z` and
 90-minute deadline `03:08:32Z` across the head change.
+
+### Required PostgreSQL CI correction
+
+The real PostgreSQL CI window test failed because the fixture's profiles had
+no parent `claude-acp` agent. Owned PostgreSQL 16 reproduction `0470d9` exited 1
+with the same foreign-key violation. Adding the parent row exposed the existing
+recording path's boolean-to-integer binding (`f82c7d`, exit 1; SQLite control
+passed). The query fixture now inserts portable SQL event rows directly, so this
+correction does not change recording, schema or ledger behavior. A temporary
+missing-import compile failure (`97c096`, exit 1) was corrected and is not causal
+RED evidence.
+
+With valid rows, PostgreSQL RED `ca5699` exited 1: the provider label selected
+raw `e.provider` outside the canonical grouped expression (SQLSTATE 42803).
+Reusing that grouped expression in the fallback preserves provider labels and
+group memberships. GREEN `5e734f` exited 0: real PostgreSQL and SQLite window
+tests both executed and passed with race/trimpath/fts5/p1. Existing lifetime
+breakdown and provider-label controls `da314f` also exited 0. Each command
+returned its actual terminal exit; no DSN skip is counted as execution.
+
+The owned database used task-labelled, memory-bounded PostgreSQL 16 on loopback
+with tmpfs storage and no Docker volume. Its exact ID and task/session labels
+were verified before removal (`ff2025`, exit 0), after the tests had returned.
+All five affected files were staged before the required full Go lint against
+actual PR base `e8cf123d03a91a51b2031e796df9e2cee26ce29e`. Original `88762`
+returned exit 4 at the five-minute package-loading deadline; bounded retry
+`41561` returned outer exit 124 without diagnostics. Neither is a lint pass.
+After both original handles joined, the same full scope was calibrated to a
+ten-minute internal deadline / 620-second outer timeout / 10-second kill grace,
+with Go 1.26.0, GOTOOLCHAIN=local, GOMAXPROCS=2 and GOMEMLIMIT=512MiB unchanged.
+The owned linter's measured RSS was 2363556 KiB at 5m51s. Original `42768`
+returned exit 0 / zero issues; no duplicate or linter-memory switch was used.
+Final indexed coverage and normal hooks precede the one corrective push;
+exact delivery receipts remain in the external task checkpoint.
+No frontend check is replayed for this Go/query-fixture correction. The existing
+requirement/design contract and public documentation audit remain unchanged.
+
+After the ROOT interruption, resuming original observer `87974` returned
+`Unknown process id`. Exact checks for its original timeout and helper argument
+strings found no process. Its terminal exit/report is unavailable; no join,
+success or replacement is inferred. Its original clock and last returned
+progress are retained in the external task checkpoint for ROOT reconciliation.
