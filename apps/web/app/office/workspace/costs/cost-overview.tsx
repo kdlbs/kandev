@@ -57,7 +57,7 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
     const current = ++requestId.current;
     // Single composed call (Stream D of office optimization). Was four
     // parallel round-trips (summary + by-agent + by-project + by-model).
-    getCostsBreakdown(workspaceId)
+    getCostsBreakdown(workspaceId, { range })
       .then((res) => {
         if (current !== requestId.current) return;
         setLoadedWorkspaceId(workspaceId);
@@ -71,11 +71,11 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
         if (current !== requestId.current) return;
         toast.error(err instanceof Error ? err.message : staticT("office:failedToLoadCostData"));
       });
-  }, [workspaceId]);
+  }, [workspaceId, range]);
 
   useEffect(() => {
     fetchCosts();
-  }, [fetchCosts, range]);
+  }, [fetchCosts]);
 
   // The WS handler bumps "costs" on a new cost event (office.cost.recorded)
   // and on a task project reassignment (office.task.updated with
