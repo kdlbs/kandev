@@ -147,3 +147,9 @@ Final checks after the last production edit:
 - PR documentation coverage preflight: covered; whitespace checks passed.
 
 Public docs updated: sessions-and-review.md (explanation) and operations.md (how-to/reference context). No rendered UI changes or screenshots are required. Existing phone history/recovery coverage satisfies mobile parity. Live database cleanup, deployment and compaction remain excluded.
+
+PR review clarified the public explanation: output-only snapshots have a minimum
+250 ms spacing, with ordered boundaries allowed to flush sooner; later retained
+output means later events in the contiguous sequence. This changes documentation
+wording only. Public docs validator tests and page validation were rerun and passed
+(63 tests, 48 pages); production race and E2E results above remain applicable.
