@@ -94,7 +94,7 @@ func readRichOutputCSVHeader(reader *csv.Reader) (map[string]int, error) {
 }
 
 func parseRichOutputTableCSV(table richOutputTableProperties, content, id string) (*richOutputResolvedTable, error) {
-	reader := csv.NewReader(strings.NewReader(content))
+	reader := newRichOutputCSVReader(content)
 	headers, err := readRichOutputCSVHeader(reader)
 	if err != nil {
 		return nil, err
