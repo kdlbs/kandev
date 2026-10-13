@@ -1,0 +1,111 @@
+---
+id: "01-interruptible-close"
+title: "Make shared Unix PTY closure interruptible"
+status: in_progress
+wave: 1
+depends_on: []
+plan: "plan.md"
+requirements:
+  - REQ-PLATFORM-SHARED-PTY-001
+acceptance_criteria:
+  - AC-PLATFORM-SHARED-PTY-001.1
+  - AC-PLATFORM-SHARED-PTY-001.2
+  - AC-PLATFORM-SHARED-PTY-001.3
+  - AC-PLATFORM-SHARED-PTY-001.4
+system_design:
+  - ../../specs/platform/system-design/shared-pty-lifecycle.md
+---
+
+# Task 01: Make shared Unix PTY closure interruptible
+
+## Summary
+
+Enable the existing shared PTY's close operation to release a pending read
+without waiting for child output or death. Preserve caller process policy and
+clean up any child started before a descriptor-setup failure.
+
+## In scope
+
+- Unix descriptor initialization, safe failure cleanup and focused regressions.
+- Read/write/resize behavior, concurrent close and child ownership verification.
+- Compatibility verification of existing interactive and login/host-shell consumers.
+
+## Out of scope
+
+Embedded shell migration, ConPTY changes, grace-period changes, UI and test selection.
+
+## Acceptance
+
+1. `TestUnixPTYCloseInterruptsRead` fails against current Start while the child
+   side remains open, then passes after the correction. Synchronize a live
+   reader and prove the slave was not closed to make the test pass. Repeat
+   through resize with `TestUnixPTYResizePreservesInterruptibleRead`.
+2. Inject an initialization failure through a private argument boundary in
+   `TestUnixPTYInitializationFailureReapsChild`. Assert original-error identity,
+   closed resources and reaped child. Do not introduce global mutable test hooks.
+3. Existing stop, reconnect, retained host-shell, read/write and resize tests
+   pass. Real Linux and macOS PTY regressions run; unchanged native Windows CI
+   stays required. Failure or missing evidence cannot become a success claim.
+
+## Verification
+
+From repository root, run the focused regression before and after correction.
+Then run the following checks, sequentially. Run the first two commands on both
+Linux and macOS; record unavailable native execution as pending.
+
+```bash
+(cd apps/backend && go test -trimpath -race ./internal/common/ptyexec -count=10)
+(cd apps/backend && go test -trimpath -race ./internal/agent/loginpty ./internal/agentctl/server/process ./internal/agentctl/server/shell -count=1)
+(cd apps/backend && GOOS=windows GOARCH=amd64 go test -c -o .build/ci-half/ptyexec-windows.test.exe ./internal/common/ptyexec)
+make -C apps/backend lint
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
+
+## Files likely touched
+
+- `apps/backend/internal/common/ptyexec/pty_unix.go`
+- `apps/backend/internal/common/ptyexec/pty_close_unix_test.go`
+- `.github/workflows/pty-compatibility.yml` for native macOS verification.
+- `apps/backend/internal/agent/loginpty/manager_test.go` only if caller evidence needs strengthening.
+- `apps/backend/internal/agentctl/server/process/interactive_lifecycle_test.go` only if caller evidence needs strengthening.
+
+## Dependencies
+
+None. Implementation follows the October 13 request to continue reducing E2E time.
+
+## Risks
+
+`StartWithSize` has already launched the child. Failure cleanup must not leak it.
+Later `Fd()` use can undo nonblocking mode. Tests must prove native I/O behavior,
+not merely successful Close return or an already-dead child.
+
+## Parallelism
+
+`sequential`
+
+## Inputs
+
+- [Requirement](../../specs/platform/requirements/shared-pty-lifecycle.md).
+- [Design](../../specs/platform/system-design/shared-pty-lifecycle.md).
+- [Plan diagnosis](plan.md#evidence-and-root-cause).
+
+## Results
+
+The close and resize regressions failed at the intended pending-read assertion
+on the baseline in three repetitions each. The failure-cleanup regression
+failed because the child had not been reaped. With the correction, the complete
+PTY package passed `go test -trimpath -race ./internal/common/ptyexec -count=10`.
+Login and shell caller suites passed with the race detector. The process suite
+failed only `TestProcessRunnerCapturesOutput` and
+`TestProcessRunnerStopLogsSignalAttempts`; both fail identically with an overlay
+of the unchanged parent PTY implementation. This host's `sh -lc` exits because
+its login profile sources a missing `/home/jcfs/.cargo/env`, before either test
+fixture runs. No shell profile or subprocess assertion was changed to hide that
+baseline limitation. Native hosted caller checks remain required before merge.
+
+Windows PTY compilation and full backend lint passed (zero issues).
+Specification lint and action SHA pinning passed. Native macOS execution is
+pending in the new focused compatibility workflow. The work order remains open
+until native compatibility checks pass.

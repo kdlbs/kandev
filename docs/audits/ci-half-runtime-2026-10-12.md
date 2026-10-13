@@ -1,13 +1,38 @@
-# Halving test execution time
+# Halving E2E execution time
 
 Status: implementation and verification in progress.
 
-The user requested a 50% time reduction after draft PR #4440 reached
-`dc36fe3f709ebe35bce51dbdb203c66ae213f4eb`. That head is the reference:
-frontend Run tests took 2,008 seconds; the longest normal E2E test step took
-2,159 seconds. The respective targets are 1,004 and 1,079.5 seconds. Workflow
-elapsed time and runner-minutes are separate measures; queue variability must
-not be presented as an execution improvement.
+The user clarified on October 13 that the 50% target applies to E2E.
+The reference remains draft PR #4440 head
+`dc36fe3f709ebe35bce51dbdb203c66ae213f4eb`: its longest normal E2E test step
+took 2,159 seconds, giving a target of 1,079.5 seconds. Frontend improvements
+recorded below are useful separate work and do not count toward this target.
+Workflow elapsed time and runner-minutes are separate measures; queue
+variability must not be presented as an execution improvement.
+
+PR #4440 merged as `b706496d5b2e54e1cebc1e13f38b516e041d8ec1`.
+The E2E target remains open. The follow-up starts with the measured shared-PTY
+cleanup bottleneck in [the implementation plan](../plans/shared-pty-close/plan.md),
+then audits repeated E2E journeys without removing distinct regression coverage.
+
+## Merged-parent E2E result
+
+[Run 38388102356](https://github.com/kdlbs/kandev/actions/runs/38388102356),
+attempt 1 at head `57ee8042d739574f173bff434273c2a49681f598`, passed before
+PR #4440 merged. Its longest normal test step was 2161 seconds (36m01s),
+compared with the fixed 2159-second reference. E2E execution is effectively
+unchanged, and the 50% target is not achieved.
+
+The 14 normal test steps accumulated 27316 seconds versus 27739 seconds in
+the reference (about 1.5% lower). Workflow elapsed fell from 4084 to 3033
+seconds, but the latest normal shard began 683 seconds after the trigger
+instead of 1643 seconds. That improvement is largely queue/prerequisite
+timing and must not be attributed to faster tests. These accumulated test-step
+seconds exclude setup and container jobs; they are not total billed runner time.
+
+The follow-up local measurements and coverage map are tracked in the
+[PTY plan](../plans/shared-pty-close/plan.md) and
+[workflow-switch audit](workflow-switch-consolidation-2026-10-13.md).
 
 ## Cost evidence
 
