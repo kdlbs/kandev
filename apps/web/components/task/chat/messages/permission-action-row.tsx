@@ -17,6 +17,8 @@ type PermissionActionRowProps = {
   offeredChoices?: PermissionActionChoice[];
   onChooseOfferedChoice?: (optionId: string) => void;
   isResponding?: boolean;
+  // Approve stays visible but sends nothing when the request offers no allow option.
+  approveDisabled?: boolean;
 };
 
 const ACTION_BUTTON_CLASS =
@@ -31,6 +33,7 @@ export const PermissionActionRow = memo(function PermissionActionRow({
   offeredChoices,
   onChooseOfferedChoice,
   isResponding = false,
+  approveDisabled = false,
 }: PermissionActionRowProps) {
   const { t } = useTranslation();
   if (offeredChoices?.length && onChooseOfferedChoice) {
@@ -78,7 +81,7 @@ export const PermissionActionRow = memo(function PermissionActionRow({
         size="xs"
         variant="outline"
         onClick={onApprove}
-        disabled={isResponding}
+        disabled={isResponding || approveDisabled}
         data-testid="permission-approve"
         className={ACTION_BUTTON_CLASS}
       >

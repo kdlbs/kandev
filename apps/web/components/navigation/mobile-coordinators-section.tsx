@@ -82,6 +82,7 @@ function MobileCoordinatorsSectionBody({
     (s) => s.appSidebar.sectionExpanded[APP_SIDEBAR_SECTION_IDS.coordinators] ?? true,
   );
   const toggleSection = useAppStore((s) => s.toggleAppSidebarSection);
+  const fastActions = useAppStore((state) => state.userSettings.sidebarFastActionsEnabled);
   const { coordinators, badgeByCoordinatorId } = useCoordinatorSidebarEntries(workspaceId);
   if (!coordinators) return null;
 
@@ -102,6 +103,7 @@ function MobileCoordinatorsSectionBody({
           aria-controls={BODY_ID}
           onClick={() => toggleSection(APP_SIDEBAR_SECTION_IDS.coordinators, true)}
         >
+          <CoordinatorIcon className="size-4 shrink-0" aria-hidden="true" />
           {t("coordinator:sidebarSectionLabel")}
           {!expanded && summary > 0 && (
             <span
@@ -117,30 +119,74 @@ function MobileCoordinatorsSectionBody({
             <IconChevronRight className="size-3.5 text-muted-foreground" />
           )}
         </Button>
-        <Button
-          asChild
-          variant="ghost"
-          className="cursor-pointer size-11 shrink-0 text-muted-foreground"
-        >
-          <Link
-            href={linkToCoordinator(workspaceId)}
-            onClick={onNavigate}
-            aria-label={t("coordinator:openCoordinators")}
-            data-testid="mobile-coordinators-open-list"
-          >
-            <IconListDetails className="size-4" />
-          </Link>
-        </Button>
+        <FastOpenListShortcut workspaceId={workspaceId} onNavigate={onNavigate} />
       </div>
       {expanded && (
-        <CoordinatorRows
-          workspaceId={workspaceId}
-          coordinators={coordinators}
-          badgeByCoordinatorId={badgeByCoordinatorId}
-          onNavigate={onNavigate}
-        />
+        <>
+          {!fastActions && <OpenListBodyLink workspaceId={workspaceId} onNavigate={onNavigate} />}
+          <CoordinatorRows
+            workspaceId={workspaceId}
+            coordinators={coordinators}
+            badgeByCoordinatorId={badgeByCoordinatorId}
+            onNavigate={onNavigate}
+          />
+        </>
       )}
     </section>
+  );
+}
+
+function FastOpenListShortcut({
+  workspaceId,
+  onNavigate,
+}: {
+  workspaceId: string;
+  onNavigate: () => void;
+}) {
+  const { t } = useTranslation();
+  const fastActions = useAppStore((state) => state.userSettings.sidebarFastActionsEnabled);
+  if (!fastActions) return null;
+  return (
+    <Button
+      asChild
+      variant="ghost"
+      className="cursor-pointer size-11 shrink-0 text-muted-foreground"
+    >
+      <Link
+        href={linkToCoordinator(workspaceId)}
+        onClick={onNavigate}
+        aria-label={t("coordinator:openCoordinators")}
+        data-testid="mobile-coordinators-open-list"
+      >
+        <IconListDetails className="size-4" />
+      </Link>
+    </Button>
+  );
+}
+
+function OpenListBodyLink({
+  workspaceId,
+  onNavigate,
+}: {
+  workspaceId: string;
+  onNavigate: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      asChild
+      variant="outline"
+      className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
+    >
+      <Link
+        href={linkToCoordinator(workspaceId)}
+        onClick={onNavigate}
+        data-testid="mobile-coordinators-open-list-body"
+      >
+        <IconListDetails className="size-4 shrink-0" />
+        {t("coordinator:openCoordinators")}
+      </Link>
+    </Button>
   );
 }
 

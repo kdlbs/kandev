@@ -23,11 +23,13 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 		}
 		return nil, err
 	}
-	profiles, err := c.repo.ListAgentProfiles(ctx, agent.ID)
+	snapshots, err := c.repo.GetAgentProfileOrderSnapshots(ctx, []string{agent.ID})
 	if err != nil {
 		return nil, err
 	}
-	result := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
+	snapshot := snapshots[agent.ID]
+	result := c.toAgentDTO(agent, filterGlobalProfiles(snapshot.Profiles))
+	result.ProfileOrderRevision = snapshot.Revision
 	if err := c.decorateAgentDTO(ctx, &result); err != nil {
 		return nil, err
 	}
@@ -42,13 +44,19 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 	if err != nil {
 		return nil, err
 	}
+	agentIDs := make([]string, 0, len(agents))
+	for _, agent := range agents {
+		agentIDs = append(agentIDs, agent.ID)
+	}
+	snapshots, err := c.repo.GetAgentProfileOrderSnapshots(ctx, agentIDs)
+	if err != nil {
+		return nil, err
+	}
 	payload := make([]dto.AgentDTO, 0, len(agents))
 	for _, agent := range agents {
-		profiles, err := c.repo.ListAgentProfiles(ctx, agent.ID)
-		if err != nil {
-			return nil, err
-		}
-		entry := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
+		snapshot := snapshots[agent.ID]
+		entry := c.toAgentDTO(agent, filterGlobalProfiles(snapshot.Profiles))
+		entry.ProfileOrderRevision = snapshot.Revision
 		if err := c.decorateAgentDTO(ctx, &entry); err != nil {
 			return nil, err
 		}

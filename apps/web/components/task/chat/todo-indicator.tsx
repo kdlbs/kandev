@@ -130,7 +130,7 @@ const TodoIndicatorTrigger = forwardRef<HTMLButtonElement, TodoIndicatorButtonPr
         data-testid="todo-indicator"
         aria-expanded={open}
         className={cn(
-          "flex items-center gap-1.5 px-2 py-0.5 text-xs transition-colors rounded cursor-pointer",
+          "flex h-6 items-center gap-1.5 px-2 py-0.5 text-xs transition-colors rounded cursor-pointer max-md:min-h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11",
           allComplete
             ? "text-green-500 hover:text-green-400"
             : "text-muted-foreground hover:text-foreground",

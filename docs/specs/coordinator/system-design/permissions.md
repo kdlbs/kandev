@@ -344,7 +344,11 @@ order, for a coordinator principal with the phase-2 flag on:
 
 0. Phase-1 preliminaries, unchanged and writing no row: a reserved decision
    action is refused with the phase-1 unknown-action error, and a
-   principal-only action from a non-coordinator principal is refused.
+   principal-only action from a non-coordinator principal is refused. From
+   phase 3, an action that exists only in phase 3 (`propose_improvement`) is
+   also refused here with the same error while phase 3 is not effective, so it
+   reaches checks 1 to 3 only when it can succeed
+   ([integration](integration.md#tool-list)).
 1. Resolve the bound names from the execution's MCP handler identity with
    the table above. A parse or validation error refuses.
 2. Map the action to its tool name with `ToolForAction`; the tool name must

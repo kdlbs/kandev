@@ -3,7 +3,10 @@ import { mapSidebarWorkspaces } from "../slices/ui/sidebar-workspace-state";
 import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
 import type { KanbanState } from "../slices/kanban/types";
-import type { TaskSessionHydrationEpoch } from "../slices/session/types";
+import type {
+  ActiveTurnWindowObservation,
+  TaskSessionHydrationEpoch,
+} from "../slices/session/types";
 import { migrateSidebarViewDraft, migrateView } from "../slices/ui/ui-slice";
 import { normalizeThreadViews } from "../slices/ui/thread-view-builtins";
 import {
@@ -18,9 +21,11 @@ import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-ses
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 import {
+  captureActiveTurnWindowObservation,
   mergeTurnRows,
   parseTurnTimestamp,
   reconcileActiveTurnAfterHydrationDraft,
+  reconcileActiveTurnWindowDraft,
   seedSettledSessionBoundaries,
 } from "@/lib/state/slices/session/turn-actions";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
@@ -34,6 +39,12 @@ import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
 import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
+import {
+  acceptAgentOrdersFromSnapshot,
+  acceptServerOrder,
+  reconcileAgentOrders,
+} from "@/lib/settings/agent-profile-order";
+import { hydrateSelectorProfileOptions } from "@/lib/settings/agent-profile-selector-order";
 
 /**
  * Hydration options for controlling merge behavior
@@ -45,6 +56,7 @@ export type HydrationOptions = {
   skipSessionRuntime?: boolean;
   /** Force merge this session even if it's active (for navigation refresh) */
   forceMergeSessionId?: string | null;
+  turnWindowObservationsAtRequestStart?: Readonly<Record<string, ActiveTurnWindowObservation>>;
   /** Session generations captured when the hydration request started. */
   taskSessionHydrationEpochsAtRequestStart?: Readonly<Record<string, TaskSessionHydrationEpoch>>;
 };
@@ -168,6 +180,58 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
   if (state.repositoryBranches) deepMerge(draft.repositoryBranches, state.repositoryBranches);
 }
 
+function hydrateAgentProfileOrderState(
+  draft: Draft<AppState>,
+  state: HydrationState,
+  preserveLiveAgentProfiles: boolean,
+): void {
+  if (!state.agentProfiles || preserveLiveAgentProfiles) return;
+  for (const [agentId, incoming] of Object.entries(state.agentProfiles.orderByAgent ?? {})) {
+    if (!incoming.order) continue;
+    draft.agentProfiles.orderByAgent = acceptServerOrder(
+      draft.agentProfiles.orderByAgent,
+      agentId,
+      incoming.order,
+      incoming.revision,
+    );
+  }
+  draft.agentProfiles.orderByAgent = acceptAgentOrdersFromSnapshot(
+    draft.agentProfiles.orderByAgent,
+    state.settingsAgents?.items ?? [],
+  );
+  const orderByAgent = { ...draft.agentProfiles.orderByAgent };
+  deepMerge(draft.agentProfiles, state.agentProfiles);
+  draft.agentProfiles.orderByAgent = orderByAgent;
+}
+
+function hydrateAgentProfileOrder(
+  draft: Draft<AppState>,
+  state: HydrationState,
+  preserveLiveAgentProfiles: boolean,
+): void {
+  hydrateAgentProfileOrderState(draft, state, preserveLiveAgentProfiles);
+  if (state.settingsAgents && !preserveLiveAgentProfiles) {
+    deepMerge(draft.settingsAgents, {
+      ...state.settingsAgents,
+      items: reconcileAgentOrders(
+        state.settingsAgents.items.map(normalizeAgentProfiles),
+        draft.agentProfiles.orderByAgent,
+      ),
+    });
+  } else if (state.settingsAgents && preserveLiveAgentProfiles) {
+    draft.settingsAgents.items = reconcileAgentOrders(
+      draft.settingsAgents.items,
+      draft.agentProfiles.orderByAgent,
+    );
+  }
+  if (state.agentProfiles && !preserveLiveAgentProfiles) {
+    draft.agentProfiles.items = hydrateSelectorProfileOptions(
+      draft.agentProfiles.items,
+      draft.settingsAgents.items,
+    );
+  }
+}
+
 /** Hydrate settings slices, preserving loading states. */
 function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   if (state.executors) deepMerge(draft.executors, state.executors);
@@ -175,19 +239,7 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   mergeWithLoading(draft.availableAgents, state.availableAgents);
   const preserveLiveAgentProfiles =
     (state.agentProfiles?.version ?? 0) < draft.agentProfiles.version;
-  if (state.settingsAgents && !preserveLiveAgentProfiles) {
-    deepMerge(draft.settingsAgents, {
-      ...state.settingsAgents,
-      items: state.settingsAgents.items.map(normalizeAgentProfiles),
-    });
-  }
-  if (state.agentProfiles) {
-    // Preserve a newer profile mutation delivered over WebSocket while this
-    // snapshot was in flight; otherwise the stale response can erase it.
-    if (!preserveLiveAgentProfiles) {
-      deepMerge(draft.agentProfiles, state.agentProfiles);
-    }
-  }
+  hydrateAgentProfileOrder(draft, state, preserveLiveAgentProfiles);
   mergeWithLoading(draft.editors, state.editors);
   mergeWithLoading(draft.prompts, state.prompts);
   mergeWithLoading(draft.notificationProviders, state.notificationProviders);
@@ -315,7 +367,7 @@ function clearHydratedRetiredActiveMarkers({
   reconciledTurnSessions,
 }: HydratedTurnMarkerContext): void {
   for (const sessionId in turns.activeBySession) {
-    const shouldForceMerge = forceMergeSessionId && sessionId === forceMergeSessionId;
+    const shouldForceMerge = sessionId === forceMergeSessionId;
     const skippedAsActive = !shouldForceMerge && sessionId === activeSessionId;
     if (skippedAsActive) continue;
     if (reconciledTurnSessions.has(sessionId)) continue;
@@ -341,19 +393,70 @@ function clearHydratedRetiredActiveMarkers({
  * pre-existing), and the merge's skip-as-active predicate must be mirrored
  * (active sessions keep their live state and marker).
  */
+function mergeHydratedTurnCoverage(
+  draft: Draft<AppState>,
+  sessionId: string,
+  windowCoverage: NonNullable<AppState["turns"]["windowCoverageBySession"]>[string] | undefined,
+) {
+  if (windowCoverage) {
+    const retainedIds = new Set(
+      (draft.messages.bySession[sessionId] ?? []).map((message) => message.id),
+    );
+    const existingCoverage = draft.turns.windowCoverageBySession?.[sessionId];
+    const messageIds = new Set(
+      (existingCoverage?.messageIds ?? []).filter((id) => retainedIds.has(id)),
+    );
+    for (const id of windowCoverage.messageIds) {
+      if (retainedIds.has(id)) messageIds.add(id);
+    }
+    (draft.turns.windowCoverageBySession ??= {})[sessionId] = {
+      messageIds: [...messageIds],
+      activeTurnObserved: true,
+    };
+  } else {
+    draft.turns.loadedBySession[sessionId] = true;
+  }
+}
+
+function reconcileHydratedTurnMarker(
+  draft: Draft<AppState>,
+  turns: NonNullable<HydrationState["turns"]>,
+  sessionId: string,
+  hasWindow: boolean,
+  observations?: {
+    atRequestStart?: ActiveTurnWindowObservation;
+    beforeMerge: ActiveTurnWindowObservation;
+  },
+) {
+  const hydrationEpoch = draft.turns.reconcileEpochBySession[sessionId] ?? 0;
+  if (hasWindow) {
+    reconcileActiveTurnWindowDraft(
+      draft,
+      sessionId,
+      turns.activeBySession?.[sessionId] ?? null,
+      observations?.atRequestStart?.reconcileEpoch ?? hydrationEpoch,
+      observations,
+    );
+  } else {
+    reconcileActiveTurnAfterHydrationDraft(draft, sessionId, hydrationEpoch);
+  }
+}
+
 function mergeHydratedTurns(
   draft: Draft<AppState>,
   turns: NonNullable<HydrationState["turns"]>,
   activeSessionId: string | null,
   forceMergeSessionId: string | null,
+  observations?: Readonly<Record<string, ActiveTurnWindowObservation>>,
 ): Set<string> {
   const reconciledTurnSessions = new Set<string>();
   const preMergeActiveSessions = new Set(Object.keys(draft.turns.activeBySession));
   for (const [sessionId, incoming] of Object.entries(turns.bySession ?? {})) {
-    const shouldForceMerge = forceMergeSessionId && sessionId === forceMergeSessionId;
+    const shouldForceMerge = sessionId === forceMergeSessionId;
     const skippedAsActive = !shouldForceMerge && sessionId === activeSessionId;
     if (skippedAsActive) continue;
 
+    const beforeMerge = captureActiveTurnWindowObservation(draft, sessionId);
     const target = draft.turns.bySession[sessionId];
     // Preserve an existing non-active session's live list. Navigation uses the
     // force flag when it owns the refresh; background hydration must not
@@ -365,14 +468,17 @@ function mergeHydratedTurns(
       draft.turns.bySession[sessionId] = [...incoming];
     }
     reconciledTurnSessions.add(sessionId);
-    draft.turns.loadedBySession[sessionId] = true;
+    const windowCoverage = turns.windowCoverageBySession?.[sessionId];
+    mergeHydratedTurnCoverage(draft, sessionId, windowCoverage);
 
     // A pre-existing marker is live client state unless this is an explicit
     // route refresh. New installs and forced refreshes derive the marker from
     // the merged rows instead of trusting the snapshot's stale marker field.
     if (shouldForceMerge || !preMergeActiveSessions.has(sessionId)) {
-      const hydrationEpoch = draft.turns.reconcileEpochBySession[sessionId] ?? 0;
-      reconcileActiveTurnAfterHydrationDraft(draft, sessionId, hydrationEpoch);
+      reconcileHydratedTurnMarker(draft, turns, sessionId, Boolean(windowCoverage), {
+        atRequestStart: observations?.[sessionId],
+        beforeMerge,
+      });
     }
   }
   return reconciledTurnSessions;
@@ -395,7 +501,7 @@ function mergeHydratedActiveTurnMarkers(
   if (!turns.activeBySession) return;
   const preMergeActiveSessions = new Set(Object.keys(draft.turns.activeBySession));
   for (const [sessionId, activeTurnId] of Object.entries(turns.activeBySession)) {
-    const shouldForceMerge = forceMergeSessionId && sessionId === forceMergeSessionId;
+    const shouldForceMerge = sessionId === forceMergeSessionId;
     const skippedAsActive = !shouldForceMerge && sessionId === activeSessionId;
     if (skippedAsActive || reconciledTurnSessions.has(sessionId)) continue;
     if (shouldForceMerge || !(sessionId in draft.turns.activeBySession)) {
@@ -423,9 +529,10 @@ function hydrateTurnState(
   turns: NonNullable<HydrationState["turns"]>,
   activeSessionId: string | null,
   forceMergeSessionId: string | null,
+  observations?: Readonly<Record<string, ActiveTurnWindowObservation>>,
 ): void {
   const reconciledTurnSessions = turns.bySession
-    ? mergeHydratedTurns(draft, turns, activeSessionId, forceMergeSessionId)
+    ? mergeHydratedTurns(draft, turns, activeSessionId, forceMergeSessionId, observations)
     : new Set<string>();
   mergeHydratedActiveTurnMarkers(
     draft,
@@ -554,10 +661,13 @@ function hydrateSession(
   state: HydrationState,
   activeSessionId: string | null,
   forceMergeSessionId: string | null,
-  taskSessionHydrationEpochsAtRequestStart:
-    | Readonly<Record<string, TaskSessionHydrationEpoch>>
-    | undefined,
+  options: Pick<
+    HydrationOptions,
+    "taskSessionHydrationEpochsAtRequestStart" | "turnWindowObservationsAtRequestStart"
+  >,
 ): void {
+  const { taskSessionHydrationEpochsAtRequestStart, turnWindowObservationsAtRequestStart } =
+    options;
   if (state.messages) {
     if (state.messages.bySession)
       mergeSessionMap(
@@ -583,7 +693,13 @@ function hydrateSession(
     seedHydrationSettledBoundaries(draft, state.taskSessions);
   }
   if (state.turns) {
-    hydrateTurnState(draft, state.turns, activeSessionId, forceMergeSessionId);
+    hydrateTurnState(
+      draft,
+      state.turns,
+      activeSessionId,
+      forceMergeSessionId,
+      turnWindowObservationsAtRequestStart,
+    );
   }
   if (state.taskSessionsByTask) {
     hydrateTaskSessionsByTask(
@@ -928,17 +1044,15 @@ export function hydrateState(
     skipSessionRuntime = false,
     forceMergeSessionId = null,
     taskSessionHydrationEpochsAtRequestStart,
+    turnWindowObservationsAtRequestStart,
   } = options;
 
   hydrateKanbanAndWorkspace(draft, state);
   hydrateSettings(draft, state);
-  hydrateSession(
-    draft,
-    state,
-    activeSessionId,
-    forceMergeSessionId,
+  hydrateSession(draft, state, activeSessionId, forceMergeSessionId, {
     taskSessionHydrationEpochsAtRequestStart,
-  );
+    turnWindowObservationsAtRequestStart,
+  });
 
   if (!skipSessionRuntime) {
     hydrateSessionRuntime(draft, state, activeSessionId, forceMergeSessionId);

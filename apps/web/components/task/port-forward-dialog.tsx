@@ -101,7 +101,7 @@ function PortForwardSurface({
     if (element instanceof HTMLElement && element.dataset.testid === PORT_FORWARD_BUTTON_ID)
       opener.current = element;
     else opener.current = document.querySelector('[data-testid="mobile-session-nav-panels"]');
-    if (!management.loaded) void management.refresh();
+    void management.refresh();
   };
   const body = (
     <PortForwardContent

@@ -46,6 +46,10 @@ var ErrTaskCompletionHumanConfirmationRequired = errors.New("human confirmation 
 // a different task or payload.
 var ErrTaskOperationConflict = errors.New("task operation identity conflict")
 
+// ErrSilentRestoreAttemptConflict reports reuse of a restore-attempt ID for a
+// different durable source identity.
+var ErrSilentRestoreAttemptConflict = errors.New("silent restore attempt identity conflict")
+
 // ErrNoPrimarySession reports that a task exists but has no primary session.
 // Callers can repair that state without hiding other repository failures.
 var ErrNoPrimarySession = errors.New("no primary session")
@@ -133,6 +137,10 @@ var ErrArchiveCleanupInProgress = errors.New("archive cleanup in progress")
 // did. See task/service.MoveTaskOptions.ExpectedWorkflowID for the caller
 // contract.
 var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
+
+// ErrTaskTransferConflict is the stable, non-leaking result for a stale,
+// ambiguous, incompatible, or idempotency-mismatched transfer request.
+var ErrTaskTransferConflict = errors.New("task transfer conflict")
 
 // ErrWorkflowChangeConflict reports that an explicit change-workflow request
 // no longer matches the task source or task version it was opened against.

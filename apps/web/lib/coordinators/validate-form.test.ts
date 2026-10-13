@@ -35,7 +35,13 @@ describe("isValidCoordinatorName", () => {
 });
 
 describe("canAddCoordinator", () => {
-  const validForm = { name: "Coordinator", agentProfileId: "agent-1", executorProfileId: "exec-1" };
+  const validForm = {
+    name: "Coordinator",
+    agentProfileId: "agent-1",
+    executorProfileId: "exec-1",
+    taskAgentProfileId: "agent-2",
+    taskExecutorProfileId: "exec-2",
+  };
 
   it("is true when the name is valid and both profiles are chosen", () => {
     expect(canAddCoordinator(validForm)).toBe(true);
@@ -51,5 +57,10 @@ describe("canAddCoordinator", () => {
 
   it("is false when no executor profile is chosen", () => {
     expect(canAddCoordinator({ ...validForm, executorProfileId: "" })).toBe(false);
+  });
+
+  it("is false when the agent for created tasks is not chosen", () => {
+    expect(canAddCoordinator({ ...validForm, taskAgentProfileId: "" })).toBe(false);
+    expect(canAddCoordinator({ ...validForm, taskExecutorProfileId: "" })).toBe(false);
   });
 });

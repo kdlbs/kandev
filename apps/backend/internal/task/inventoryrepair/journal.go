@@ -215,7 +215,7 @@ func prepareJournal(ctx context.Context, in *inspection, db *sql.DB) (*journal, 
 	if _, err = os.Lstat(backup); !errors.Is(err, os.ErrNotExist) {
 		return nil, errors.New("backup destination already exists or cannot be inspected; use a new operation ID")
 	}
-	if _, err = persistence.SnapshotSQLiteContext(ctx, sqlx.NewDb(db, "sqlite3"), backup); err != nil {
+	if _, err = persistence.CopySQLiteSnapshotContext(ctx, sqlx.NewDb(db, "sqlite3"), backup); err != nil {
 		return nil, err
 	}
 	if err = os.Chmod(backup, 0600); err != nil {

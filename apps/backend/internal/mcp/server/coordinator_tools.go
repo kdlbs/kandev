@@ -81,8 +81,10 @@ func (s *Server) coordinatorToolCatalog() map[string]func() {
 		"propose_resume_kandev":            s.registerProposeResumeTool,
 		"propose_message_kandev":           s.registerProposeMessageTool,
 		"propose_move_kandev":              s.registerProposeMoveTool,
+		"propose_improvement_kandev":       s.registerProposeImprovementTool,
 		"get_coordinator_item_kandev":      s.registerGetCoordinatorItemTool,
 		"list_coordinator_activity_kandev": s.registerListCoordinatorActivityTool,
+		"list_coordinator_turns_kandev":    s.registerListCoordinatorTurnsTool,
 	}
 }
 
@@ -97,6 +99,7 @@ func (s *Server) registerProposeTaskTool() {
 			mcp.WithString(mcpcontract.FieldStepID, mcp.Description("Optional workflow step the task would be created in. Defaults to the workflow's start step")),
 			mcp.WithString(mcpKeyRepositoryID, mcp.Description("Optional repository the task would target")),
 			mcp.WithString("source_task_id", mcp.Description("Optional existing task this proposal originated from")),
+			mcp.WithString("in_reply_to", mcp.Description("Optional id of a returned proposal of yours that this one revises after the manager's reply")),
 			standingOrderIDsOption(),
 		),
 		s.wrapHandler("propose_task_kandev", s.proposeTaskHandler()),
@@ -129,6 +132,7 @@ func (s *Server) proposeTaskHandler() server.ToolHandlerFunc {
 			mcpcontract.FieldStepID:     req.GetString(mcpcontract.FieldStepID, ""),
 			mcpKeyRepositoryID:          req.GetString(mcpKeyRepositoryID, ""),
 			"source_task_id":            req.GetString("source_task_id", ""),
+			"in_reply_to":               req.GetString("in_reply_to", ""),
 			standingOrderIDsArg:         req.GetStringSlice(standingOrderIDsArg, nil),
 		}
 		var result map[string]interface{}
@@ -211,6 +215,45 @@ func (s *Server) listCoordinatorActivityHandler() server.ToolHandlerFunc {
 	}
 }
 
+const turnsTaskArg = "task"
+
+// registerListCoordinatorTurnsTool registers list_coordinator_turns_kandev
+// (docs/specs/coordinator/system-design/turn-ledger.md): the coordinator's own
+// turn ledger, resolved from the principal alone.
+func (s *Server) registerListCoordinatorTurnsTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_coordinator_turns_kandev",
+			mcp.WithDescription("List your own recent turns, newest first: trigger, outcome, verdict, the configuration stamp the turn ran under, proposals made, a digest of the tool calls it made and their allowed or refused result, and token and cost totals. Returns no message text. Filter with since (RFC 3339, default 30 days ago), verdict, trigger and task. Use limit (1 to 50, default 20) and the returned next_before as before to page."),
+			mcp.WithString("since", mcp.Description("Optional RFC 3339 time; only turns started at or after it (default 30 days ago, at most 400 days back)")),
+			mcp.WithString("verdict", mcp.Description("Optional verdict filter: blocked, acted, proposed, needs_you or nothing_needed")),
+			mcp.WithString("trigger", mcp.Description("Optional trigger filter: message, wake or dream")),
+			mcp.WithString(turnsTaskArg, mcp.Description("Optional task id; only turns that made a call targeting this task")),
+			mcp.WithNumber("limit", mcp.Description("Optional page size, 1 to 50 (default 20)")),
+			mcp.WithString("before", mcp.Description("Optional cursor: the next_before of the previous page")),
+		),
+		s.wrapHandler("list_coordinator_turns_kandev", s.listCoordinatorTurnsHandler()),
+	)
+}
+
+func (s *Server) listCoordinatorTurnsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := map[string]interface{}{}
+		if args := req.GetArguments(); args != nil {
+			for _, key := range []string{"since", "verdict", "trigger", turnsTaskArg, "limit", "before"} {
+				if v, ok := args[key]; ok {
+					payload[key] = v
+				}
+			}
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionListTurns, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 const standingOrderIDsArg = "standing_order_ids"
 
 func standingOrderIDsOption() mcp.ToolOption {
@@ -268,6 +311,48 @@ func (s *Server) proposeKindHandler(action string, fields ...string) server.Tool
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+const improvementContextArg = "context"
+
+func (s *Server) registerProposeImprovementTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("propose_improvement_kandev",
+			mcp.WithDescription("Propose a replacement for your own context text, with the unattended runs that show why, for a human to review. Nothing is applied by approving it: a manager applies the change separately in your settings. title is 1 to 60 characters, rationale 1 to 10,000, context the full replacement text (1 to 4,000 characters, different from your current context). evidence is 1 to 10 objects, each with exactly one of run_id (one of your unattended turns) or task_id (a task in this workspace); at least one is a run_id."),
+			mcp.WithString(canvasTitleArg, mcp.Required(), mcp.Description("Short title, 1 to 60 characters after trimming")),
+			mcp.WithString("rationale", mcp.Required(), mcp.Description("Why the change helps, at most 10,000 characters")),
+			mcp.WithString(improvementContextArg, mcp.Required(), mcp.Description("The full replacement context text, at most 4,000 characters")),
+			mcp.WithArray(mcpcontract.FieldEvidence, mcp.Required(),
+				mcp.Description("1 to 10 references, each an object with exactly one of run_id or task_id"),
+				mcp.Items(map[string]any{
+					typeKey: objType,
+					propsKey: map[string]any{
+						"run_id":     map[string]any{typeKey: stringType},
+						mcpKeyTaskID: map[string]any{typeKey: stringType},
+					},
+				})),
+		),
+		s.wrapHandler("propose_improvement_kandev", s.proposeImprovementHandler()),
+	)
+}
+
+// proposeImprovementHandler forwards the arguments untouched; the coordinator
+// service validates every field and names the offending one.
+func (s *Server) proposeImprovementHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := map[string]interface{}{
+			canvasTitleArg:            req.GetString(canvasTitleArg, ""),
+			"rationale":               req.GetString("rationale", ""),
+			improvementContextArg:     req.GetString(improvementContextArg, ""),
+			mcpcontract.FieldEvidence: req.GetArguments()[mcpcontract.FieldEvidence],
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeImprovement, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

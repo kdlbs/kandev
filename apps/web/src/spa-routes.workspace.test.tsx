@@ -361,9 +361,14 @@ async function expectSelectedWorkspace() {
       SELECTED_WORKSPACE_ID,
     );
   });
-  expect(mocks.listWorkflows).toHaveBeenCalledWith(SELECTED_WORKSPACE_ID, {
-    cache: "no-store",
-  });
+  expect(mocks.listWorkflows).toHaveBeenCalledWith(
+    SELECTED_WORKSPACE_ID,
+    expect.objectContaining({
+      cache: "no-store",
+      includeHidden: false,
+      init: { signal: expect.any(AbortSignal) },
+    }),
+  );
 }
 
 function workspace(id: string) {

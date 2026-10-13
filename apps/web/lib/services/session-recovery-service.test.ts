@@ -5,10 +5,14 @@ import {
   managedCloneRelocationRecoveryDetails,
   contextContinuationDetails,
   requestSessionRecover,
+  resumeSession,
   recoveryInspectionBusyDetails,
   recoveryInspectionBusyMessage,
   resolveRequestErrorMessage,
+  runtimeCleanupFailureCauses,
   sessionRecoveryGuardDetails,
+  sessionDeliveryRecoveryResponse,
+  sessionDeliveryRecoveryMessage,
 } from "./session-recovery-service";
 import { WebSocketRequestError } from "@/lib/ws/client";
 
@@ -17,7 +21,28 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: mocks.request }),
 }));
 
+const CONTINUE_FROM_HISTORY = "continue_from_history";
+
 beforeEach(() => vi.clearAllMocks());
+
+it("localizes typed cleanup responses without inspecting transport prose", () => {
+  const failure = new WebSocketRequestError("private kubelet response", "INTERNAL_ERROR", {
+    kind: "runtime_cleanup_failed",
+    session_id: "session-1",
+    causes: [{ operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true }],
+  });
+  expect(resolveRequestErrorMessage(failure, (key) => key)).toBe(
+    "task:sessionRuntimeCleanupFailedBody",
+  );
+  expect(resolveRequestErrorMessage(new Error("runtime_cleanup_failed"), (key) => key)).toBe(
+    "runtime_cleanup_failed",
+  );
+  expect(runtimeCleanupFailureCauses(failure, "session-1")).toEqual([
+    { operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true },
+  ]);
+  expect(runtimeCleanupFailureCauses(failure, "another-session")).toEqual([]);
+});
+const recoveryAction = "session.recover";
 
 describe("recoveryInspectionBusyDetails", () => {
   it("recognizes only the structured inspection-contention conflict", () => {
@@ -47,6 +72,33 @@ describe("recoveryInspectionBusyDetails", () => {
     expect(resolveRequestErrorMessage(busy, t)).toBe("localized busy");
     expect(resolveRequestErrorMessage(new Error("raw transport failure"), t)).toBe(
       "raw transport failure",
+    );
+  });
+});
+
+describe("native session resume", () => {
+  it("returns the native resume response and allows a full launch timeout", async () => {
+    const response = {
+      success: true,
+      task_id: "task-1",
+      session_id: "session-1",
+      state: "WAITING_FOR_INPUT",
+      worktree_path: "/workspace",
+      worktree_branch: "main",
+    };
+    mocks.request.mockResolvedValueOnce(response);
+    await expect(resumeSession("task-1", "session-1", "failed")).resolves.toBe(response);
+    expect(mocks.request).toHaveBeenCalledWith(
+      recoveryAction,
+      { task_id: "task-1", session_id: "session-1", action: "resume" },
+      60_000,
+    );
+  });
+
+  it("surfaces a refused resume instead of hydrating a successful session", async () => {
+    mocks.request.mockResolvedValueOnce({ success: false, error: "runtime unavailable" });
+    await expect(resumeSession("task-1", "session-1", "failed")).rejects.toThrow(
+      "runtime unavailable",
     );
   });
 });
@@ -110,14 +162,14 @@ describe("session recovery service", () => {
       "SESSION_RESTORE_REQUIRED",
       {
         kind: "session_restore_required",
-        recovery_action: "continue_from_history",
+        recovery_action: CONTINUE_FROM_HISTORY,
         reason: "native_state_missing",
         generation: 3,
       },
     );
     expect(contextContinuationDetails(error)).toMatchObject({
       kind: "session_restore_required",
-      recovery_action: "continue_from_history",
+      recovery_action: CONTINUE_FROM_HISTORY,
       reason: "native_state_missing",
     });
     expect(
@@ -131,13 +183,13 @@ describe("session recovery service", () => {
       requestSessionRecover({
         taskId: "task-1",
         sessionId: "session-1",
-        action: "continue_from_history",
+        action: CONTINUE_FROM_HISTORY,
         failureMessage: "failed",
       }),
     ).resolves.toBeUndefined();
     expect(mocks.request).toHaveBeenCalledWith(
-      "session.recover",
-      { task_id: "task-1", session_id: "session-1", action: "continue_from_history" },
+      recoveryAction,
+      { task_id: "task-1", session_id: "session-1", action: CONTINUE_FROM_HISTORY },
       30_000,
     );
   });
@@ -153,7 +205,7 @@ it("sends the current stamp with an explicit managed clone relocation", async ()
     errorStamp: "stamp-1",
   });
   expect(mocks.request).toHaveBeenCalledWith(
-    "session.recover",
+    recoveryAction,
     {
       task_id: "task-1",
       session_id: "session-1",
@@ -207,7 +259,7 @@ it("sends provider-restored settings policy only with an explicit resume", async
     settingsPolicy: "provider_restored",
   });
   expect(mocks.request).toHaveBeenCalledWith(
-    "session.recover",
+    recoveryAction,
     {
       task_id: "task-1",
       session_id: "session-1",
@@ -271,4 +323,125 @@ it("recognizes only the typed, path-free managed clone error details", () => {
   });
   expect(managedCloneRelocationRecoveryDetails(error)?.error_stamp).toBe("stamp-2");
   expect(managedCloneRelocationRecoveryDetails(new Error("plain"))).toBeNull();
+});
+
+it("treats historical continued as restored instead of showing an uncertainty warning", () => {
+  const response = sessionDeliveryRecoveryResponse({
+    task_id: "task",
+    session_id: "session",
+    outcome: "continued",
+    recovery_revision: 1,
+  });
+  expect(response?.outcome).toBe("continued");
+  expect(response && sessionDeliveryRecoveryMessage(response, (key) => key)).toBe(
+    "task:deliveryRecoveryAttached",
+  );
+});
+
+it("rejects the retired restored-blocked continuation outcome", () => {
+  expect(
+    sessionDeliveryRecoveryResponse({
+      task_id: "task",
+      session_id: "session",
+      outcome: "restored_blocked",
+      recovery_revision: 1,
+    }),
+  ).toBeNull();
+});
+
+it("returns the typed retry outcome and rejects malformed retry results", async () => {
+  mocks.request.mockResolvedValueOnce({
+    task_id: "task-1",
+    session_id: "session-1",
+    outcome: "blocked",
+    reason: "missing_canonical_submission",
+    recovery_revision: 4,
+  });
+  await expect(
+    requestSessionRecover({
+      taskId: "task-1",
+      sessionId: "session-1",
+      action: "retry_connection",
+      failureMessage: "failed",
+    }),
+  ).resolves.toMatchObject({
+    outcome: "blocked",
+    reason: "missing_canonical_submission",
+    recovery_revision: 4,
+  });
+
+  mocks.request.mockResolvedValueOnce({ success: true });
+  await expect(
+    requestSessionRecover({
+      taskId: "task-1",
+      sessionId: "session-1",
+      action: "retry_connection",
+      failureMessage: "failed",
+    }),
+  ).rejects.toThrow("failed");
+});
+
+it("translates typed delivery outcomes and bounded block reasons", () => {
+  const t = (key: string) => key;
+  const base = {
+    task_id: "task-1",
+    session_id: "session-1",
+    recovery_revision: 2,
+  };
+  expect(sessionDeliveryRecoveryMessage({ ...base, outcome: "attached" }, t)).toBe(
+    "task:deliveryRecoveryAttached",
+  );
+  expect(sessionDeliveryRecoveryMessage({ ...base, outcome: "settled" }, t)).toBe(
+    "task:deliveryRecoverySettled",
+  );
+  expect(sessionDeliveryRecoveryMessage({ ...base, outcome: "uncertain" }, t)).toBe(
+    "task:deliveryRecoveryUncertain",
+  );
+  expect(sessionDeliveryRecoveryMessage({ ...base, outcome: "unavailable" }, t)).toBe(
+    "task:deliveryRecoveryUnavailable",
+  );
+  expect(
+    sessionDeliveryRecoveryMessage(
+      { ...base, outcome: "blocked", reason: "missing_canonical_submission" },
+      t,
+    ),
+  ).toBe("task:deliveryRecoveryMissingSubmission");
+  expect(
+    sessionDeliveryRecoveryMessage(
+      { ...base, outcome: "blocked", reason: "delivery_identity_mismatch" },
+      t,
+    ),
+  ).toBe("task:deliveryRecoveryOwnershipBlocked");
+});
+
+it.each([
+  ["delivery_output_paused", "task:deliveryRecoveryOutputPaused"],
+  ["delivery_cancellation_pending", "task:deliveryRecoveryCancellationPending"],
+  ["delivery_storage_pressure", "task:deliveryRecoveryStoragePressure"],
+])("reports verified delivery state %s independently of process death", (reason, key) => {
+  expect(
+    sessionDeliveryRecoveryMessage(
+      { task_id: "task", session_id: "session", outcome: "blocked", recovery_revision: 1, reason },
+      (value) => value,
+    ),
+  ).toBe(key);
+});
+
+it.each([
+  ["unresolved_durable_work", "task:deliveryRecoveryMissingSubmission"],
+  ["recovery_identity_incomplete", "task:deliveryRecoveryIdentityIncomplete"],
+  ["retained_evidence_ambiguous", "task:deliveryRecoveryAmbiguousEvidence"],
+])("reports retained-record recovery cause %s", (reason, key) => {
+  expect(
+    sessionDeliveryRecoveryMessage(
+      {
+        task_id: "task",
+        session_id: "session",
+        outcome: "blocked",
+        recovery_revision: 1,
+        reason,
+      },
+      (translationKey) => translationKey,
+    ),
+  ).toBe(key);
 });

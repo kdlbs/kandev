@@ -24,6 +24,7 @@ import (
 
 type taskSessionExecutor interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
 // Turn operations
@@ -109,6 +110,9 @@ func stampTurnDefaults(turn *models.Turn) {
 // dispatched without a user message (auto-start, workflow on_enter) must
 // reset the clock even though no message row exists yet.
 func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecutor, turn *models.Turn) error {
+	if err := r.authorizeManualCreation(ctx, execer, "turn", turn.ID, turn.TaskID); err != nil {
+		return err
+	}
 	metadataJSON := "{}"
 	if turn.Metadata != nil {
 		metadataBytes, err := json.Marshal(turn.Metadata)
@@ -122,6 +126,9 @@ func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecut
 		INSERT INTO task_session_turns (id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.ExecutionProfileID, turn.RouteGeneration, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt); err != nil {
+		return err
+	}
+	if err := r.clearManualCreation(ctx, execer, "turn", turn.ID, turn.TaskID); err != nil {
 		return err
 	}
 	_, err := execer.ExecContext(ctx, r.db.Rebind(`
@@ -679,7 +686,7 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 			}
 			return fmt.Errorf("%w: the initial workspace materialization did not complete", models.ErrWorkspaceReuseUnsafe)
 		}
-		return fmt.Errorf("%w: retry after the initial workspace launch completes", models.ErrWorkspacePreparing)
+		return &models.WorkspacePreparingError{EnvironmentID: envID, Reason: "retry after the initial workspace launch completes"}
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = envID
 	default:
@@ -827,7 +834,7 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = environmentID
 	case models.TaskEnvironmentStatusCreating:
-		return fmt.Errorf("%w: retry after the shared workspace launch completes", models.ErrWorkspacePreparing)
+		return &models.WorkspacePreparingError{EnvironmentID: environmentID, Reason: "retry after the shared workspace launch completes"}
 	default:
 		return fmt.Errorf("%w: shared workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
@@ -906,10 +913,15 @@ func (r *Repository) applyInitialRuntimeSeedTx(ctx context.Context, tx *sqlx.Tx,
 	if err != nil {
 		return err
 	}
-	var sessionCount int
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`), session.TaskID).Scan(&sessionCount); err != nil {
+	var sessionCount, primaryCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN is_primary = 1 THEN 1 ELSE 0 END), 0)
+		FROM task_sessions WHERE task_id = ?
+	`), session.TaskID).Scan(&sessionCount, &primaryCount); err != nil {
 		return fmt.Errorf("check task sessions before workspace binding: %w", err)
 	}
+	// The task lock or SQLite writer serializes primary election with insertion.
+	session.IsPrimary = session.IsPrimary && primaryCount == 0
 	if sessionCount == 0 {
 		if session.Metadata == nil {
 			session.Metadata = make(map[string]interface{})
@@ -1022,6 +1034,18 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	if session.ID == "" {
 		session.ID = uuid.New().String()
 	}
+	if tx, ok := exec.(*sqlx.Tx); ok {
+		if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{session.ID}, nil); err != nil {
+			return fmt.Errorf("lock agent delivery identity before session creation: %w", err)
+		}
+	}
+	queryer, ok := exec.(taskSessionQueryRowExecutor)
+	if !ok {
+		return fmt.Errorf("task session executor cannot check delivery retirement")
+	}
+	if err := r.ensureAgentDeliveryIdentityAvailable(ctx, queryer, session.ID); err != nil {
+		return err
+	}
 	if session.QueueIncarnationID == "" {
 		session.QueueIncarnationID = uuid.New().String()
 	}
@@ -1053,6 +1077,9 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		}
 	}
 
+	if err := r.authorizeManualCreation(ctx, exec, "session", session.ID, session.TaskID); err != nil {
+		return err
+	}
 	metadataJSON, err := json.Marshal(session.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to serialize agent session metadata: %w", err)
@@ -1106,7 +1133,10 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
 
-	return err
+	if err != nil {
+		return err
+	}
+	return r.clearManualCreation(ctx, exec, "session", session.ID, session.TaskID)
 }
 
 // verifyTaskRunnerResolutionTx rejects a session built from a task snapshot
@@ -2114,15 +2144,17 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 			repository_id = ?, base_branch = ?, base_commit_sha = ?, workspace_path = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
-			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?
+			review_status = ?, is_passthrough = ?, task_environment_id = ?,
+			is_primary = CASE WHEN ? = 1 THEN 0 ELSE is_primary END
 		WHERE id = ?`
 	args := []interface{}{agentProfileID, session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
 		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, session.CompletedAt, session.UpdatedAt,
-		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
+		session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID,
+		dialect.BoolToInt(expectedUpdatedAt != nil && !session.IsPrimary),
 		session.ID}
 	if expected != nil {
 		query += " AND state = ?"
@@ -2132,15 +2164,21 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 		query += optimisticUpdatedAtPredicate
 		args = append(args, *expectedUpdatedAt)
 	}
-	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
+	// Primary selection belongs to the task-scoped SetSessionPrimary transaction.
+	// Lifecycle writes return that stored selection without reclaiming it;
+	// snapshot-guarded rollback may release its owned primary flag. Promotion
+	// still goes through SetSessionPrimary so it clears the other primary rows.
+	query += " RETURNING is_primary"
+	var primary int
+	err = exec.QueryRowContext(ctx, r.db.Rebind(query), args...).Scan(&primary)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return rows > 0, nil
+	session.IsPrimary = primary == 1
+	return true, nil
 }
 
 // ensureTaskSessionEnvironmentAvailableTx protects full-row session updates
@@ -3015,12 +3053,29 @@ func (r *Repository) SetSessionMetadataKeyIfJSONValue(
 			path, string(expectedJSON), path, string(expectedJSON), string(expectedJSON), path,
 		}
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}
 	rows, err := result.RowsAffected()
-	return rows > 0, err
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 // SetSessionMetadataKeyIfState atomically sets one metadata key only while the
@@ -4162,6 +4217,10 @@ func (r *Repository) deleteEphemeralTaskForProfileTx(
 	tx *sqlx.Tx,
 	taskID, agentProfileID string,
 ) (bool, error) {
+	identities, err := r.agentDeliverySessionIdentitiesInTx(ctx, tx, taskID)
+	if err != nil {
+		return false, err
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM tasks
 		WHERE id = ? AND is_ephemeral = 1
@@ -4174,7 +4233,16 @@ func (r *Repository) deleteEphemeralTaskForProfileTx(
 		return false, err
 	}
 	rows, err := result.RowsAffected()
-	return rows > 0, err
+	if err != nil || rows == 0 {
+		return rows > 0, err
+	}
+	if err := r.lockAgentDeliverySessionIdentitiesTx(ctx, tx, identities); err != nil {
+		return false, err
+	}
+	if err := r.insertAgentDeliveryRetirementJobsTx(ctx, tx, identities); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // scanTaskSessions is a helper to scan multiple agent session rows
@@ -4302,6 +4370,12 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	if err := r.confirmTaskSessionDeletionIdentityTx(ctx, tx, session); err != nil {
 		return nil, err
 	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), session.ID); err != nil {
+		return nil, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{session.ID}, nil); err != nil {
+		return nil, err
+	}
 	var environmentID string
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COALESCE(task_environment_id, '') FROM task_sessions WHERE id = ?`), session.ID).Scan(&environmentID); err != nil {
 		return nil, fmt.Errorf("load deleted session environment: %w", err)
@@ -4361,6 +4435,11 @@ func (r *Repository) purgeTaskSessionStateTx(
 	session *models.TaskSession,
 ) ([]*models.TaskMessageAttachment, error) {
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), session.ID); err != nil {
+		return nil, err
+	}
+	if err := r.retireAgentDeliverySessionsTx(ctx, tx, []agentDeliverySessionIdentity{{
+		sessionID: session.ID, incarnationID: session.QueueIncarnationID,
+	}}); err != nil {
 		return nil, err
 	}
 

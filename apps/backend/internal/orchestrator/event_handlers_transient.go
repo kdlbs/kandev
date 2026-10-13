@@ -196,6 +196,9 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 	if data.SessionID == "" {
 		return false
 	}
+	if s.automationOwnsRetrySession(ctx, data.TaskID, data.SessionID) {
+		return false
+	}
 
 	noticeState, releaseNoticeState := s.acquireTransientRetryNoticeState(data.SessionID)
 	noticeState.mu.Lock()
@@ -455,6 +458,10 @@ func (s *Service) runTransientRetry(retryCtx context.Context, taskID, sessionID,
 // the re-send straight away.
 func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, execID string) {
 	if ctx.Err() != nil {
+		return
+	}
+	if s.automationOwnsRetrySession(ctx, taskID, sessionID) {
+		s.resetTransientRetry(sessionID)
 		return
 	}
 	var retryEntry *transientRetryEntry

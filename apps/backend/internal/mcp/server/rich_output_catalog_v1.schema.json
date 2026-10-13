@@ -1,0 +1,1240 @@
+{
+  "type": "object",
+  "description": "One literal tree: at most four Chart, Table, StatusList, Metrics or FilePreview data components. Callout and Text are explanatory. At most eight levels; every element must be reachable exactly once.",
+  "examples": [
+    {
+      "version": 2,
+      "catalog_version": 1,
+      "title": "Service failures",
+      "spec": {
+        "root": "failures",
+        "elements": {
+          "failures": {
+            "type": "Chart",
+            "props": {
+              "chart_type": "bar",
+              "title": "Failures by service",
+              "summary": "Failed requests in the latest interval.",
+              "labels": [
+                "A",
+                "B"
+              ],
+              "series": [
+                {
+                  "label": "Count",
+                  "values": [
+                    42,
+                    27
+                  ]
+                }
+              ]
+            },
+            "children": []
+          }
+        }
+      }
+    },
+    {
+      "version": 2,
+      "catalog_version": 1,
+      "title": "Latency trend",
+      "spec": {
+        "root": "latency",
+        "elements": {
+          "latency": {
+            "type": "Chart",
+            "props": {
+              "chart_type": "line",
+              "title": "p95 latency",
+              "summary": "Latency across recorded samples.",
+              "csv": {
+                "path": "reports/latency.csv",
+                "x_column": "recorded_at",
+                "series": [
+                  {
+                    "column": "p95_ms",
+                    "label": "p95 (ms)"
+                  }
+                ]
+              }
+            },
+            "children": []
+          }
+        }
+      }
+    },
+    {
+      "version": 2,
+      "catalog_version": 1,
+      "title": "Build health",
+      "spec": {
+        "root": "report",
+        "elements": {
+          "report": {
+            "type": "Stack",
+            "props": {
+              "direction": "horizontal"
+            },
+            "children": [
+              "checks",
+              "context"
+            ]
+          },
+          "checks": {
+            "type": "Group",
+            "props": {
+              "title": "Checks"
+            },
+            "children": [
+              "counts"
+            ]
+          },
+          "counts": {
+            "type": "Metrics",
+            "props": {
+              "items": [
+                {
+                  "label": "Passed",
+                  "value": "38"
+                }
+              ]
+            },
+            "children": []
+          },
+          "context": {
+            "type": "Text",
+            "props": {
+              "text": "All focused checks passed."
+            },
+            "children": []
+          }
+        }
+      }
+    },
+    {
+      "version": 2,
+      "catalog_version": 1,
+      "title": "Service comparison",
+      "spec": {
+        "root": "services",
+        "elements": {
+          "services": {
+            "type": "Table",
+            "props": {
+              "columns": [
+                {
+                  "key": "service",
+                  "label": "Service"
+                },
+                {
+                  "key": "cost",
+                  "label": "Monthly cost (USD)"
+                }
+              ],
+              "rows": [
+                [
+                  "API",
+                  "420"
+                ],
+                [
+                  "Payments",
+                  "680"
+                ]
+              ]
+            },
+            "children": []
+          }
+        }
+      }
+    },
+    {
+      "version": 2,
+      "catalog_version": 1,
+      "title": "CSV service comparison",
+      "spec": {
+        "root": "services",
+        "elements": {
+          "services": {
+            "type": "Table",
+            "props": {
+              "columns": [
+                {
+                  "key": "service",
+                  "label": "Service"
+                },
+                {
+                  "key": "cost",
+                  "label": "Monthly cost (USD)"
+                }
+              ],
+              "csv": {
+                "path": "reports/services.csv"
+              }
+            },
+            "children": []
+          }
+        }
+      }
+    },
+    {
+      "version": 2,
+      "catalog_version": 1,
+      "title": "Verification findings",
+      "spec": {
+        "root": "checks",
+        "elements": {
+          "checks": {
+            "type": "StatusList",
+            "props": {
+              "title": "Verification",
+              "items": [
+                {
+                  "label": "Unit tests",
+                  "status": "passed",
+                  "detail": "38 checks passed."
+                },
+                {
+                  "label": "Load budget",
+                  "status": "failed",
+                  "detail": "p95 exceeds target."
+                },
+                {
+                  "label": "Dependency audit",
+                  "status": "pending"
+                }
+              ]
+            },
+            "children": []
+          }
+        }
+      }
+    },
+    {
+      "version": 2,
+      "catalog_version": 1,
+      "title": "Main finding",
+      "spec": {
+        "root": "finding",
+        "elements": {
+          "finding": {
+            "type": "Callout",
+            "props": {
+              "kind": "warning",
+              "title": "Investigate Payments",
+              "text": "Payments has the highest monthly cost and p95 latency in this sample."
+            },
+            "children": []
+          }
+        }
+      }
+    },
+    {
+      "version": 2,
+      "catalog_version": 1,
+      "title": "Source context",
+      "spec": {
+        "root": "source",
+        "elements": {
+          "source": {
+            "type": "FilePreview",
+            "props": {
+              "path": "reports/notes.md"
+            },
+            "children": []
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 2
+    },
+    "catalog_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "not": {
+            "enum": [
+              "constructor",
+              "prototype",
+              "__proto__"
+            ]
+          }
+        },
+        "elements": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 64,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+            "not": {
+              "enum": [
+                "constructor",
+                "prototype",
+                "__proto__"
+              ]
+            }
+          },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "object",
+                "description": "Ordered vertical or horizontal group. Horizontal groups stack on phones.",
+                "examples": [
+                  {
+                    "type": "Stack",
+                    "props": {
+                      "direction": "horizontal"
+                    },
+                    "children": [
+                      "checks",
+                      "context"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "type": {
+                    "const": "Stack"
+                  },
+                  "props": {
+                    "type": "object",
+                    "properties": {
+                      "direction": {
+                        "type": "string",
+                        "enum": [
+                          "vertical",
+                          "horizontal"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "direction"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+                      "not": {
+                        "enum": [
+                          "constructor",
+                          "prototype",
+                          "__proto__"
+                        ]
+                      }
+                    },
+                    "minItems": 1,
+                    "maxItems": 64
+                  }
+                },
+                "required": [
+                  "type",
+                  "props",
+                  "children"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "description": "Labelled group of native content.",
+                "examples": [
+                  {
+                    "type": "Group",
+                    "props": {
+                      "title": "Checks"
+                    },
+                    "children": [
+                      "counts"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "type": {
+                    "const": "Group"
+                  },
+                  "props": {
+                    "type": "object",
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 120
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+                      "not": {
+                        "enum": [
+                          "constructor",
+                          "prototype",
+                          "__proto__"
+                        ]
+                      }
+                    },
+                    "minItems": 1,
+                    "maxItems": 64
+                  }
+                },
+                "required": [
+                  "type",
+                  "props",
+                  "children"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "description": "Plain-text explanation; no markup.",
+                "examples": [
+                  {
+                    "type": "Text",
+                    "props": {
+                      "text": "All focused checks passed."
+                    },
+                    "children": []
+                  }
+                ],
+                "properties": {
+                  "type": {
+                    "const": "Text"
+                  },
+                  "props": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+                      "not": {
+                        "enum": [
+                          "constructor",
+                          "prototype",
+                          "__proto__"
+                        ]
+                      }
+                    },
+                    "minItems": 0,
+                    "maxItems": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "props",
+                  "children"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "description": "Native line or bar chart with inline data or a workspace CSV source. Label series with units.",
+                "examples": [
+                  {
+                    "type": "Chart",
+                    "props": {
+                      "chart_type": "bar",
+                      "title": "Failures by service",
+                      "summary": "Failed requests in the latest interval.",
+                      "labels": [
+                        "A",
+                        "B"
+                      ],
+                      "series": [
+                        {
+                          "label": "Count",
+                          "values": [
+                            42,
+                            27
+                          ]
+                        }
+                      ]
+                    },
+                    "children": []
+                  },
+                  {
+                    "type": "Chart",
+                    "props": {
+                      "chart_type": "line",
+                      "title": "p95 latency",
+                      "summary": "Latency across recorded samples.",
+                      "csv": {
+                        "path": "reports/latency.csv",
+                        "x_column": "recorded_at",
+                        "series": [
+                          {
+                            "column": "p95_ms",
+                            "label": "p95 (ms)"
+                          }
+                        ]
+                      }
+                    },
+                    "children": []
+                  }
+                ],
+                "properties": {
+                  "type": {
+                    "const": "Chart"
+                  },
+                  "props": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "chart_type": {
+                            "type": "string",
+                            "enum": [
+                              "line",
+                              "bar"
+                            ]
+                          },
+                          "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "labels": {
+                            "minItems": 1,
+                            "maxItems": 100,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            }
+                          },
+                          "series": {
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                },
+                                "values": {
+                                  "minItems": 1,
+                                  "maxItems": 100,
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "label",
+                                "values"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "chart_type",
+                          "title",
+                          "summary",
+                          "labels",
+                          "series"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "chart_type": {
+                            "type": "string",
+                            "enum": [
+                              "line",
+                              "bar"
+                            ]
+                          },
+                          "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "csv": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1024,
+                                "description": "One workspace-relative CSV path ending in .csv."
+                              },
+                              "repo": {
+                                "type": "string",
+                                "minLength": 0,
+                                "maxLength": 255
+                              },
+                              "x_column": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120,
+                                "description": "Exact CSV header for x-axis labels."
+                              },
+                              "series": {
+                                "minItems": 1,
+                                "maxItems": 4,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "column": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 120,
+                                      "description": "Exact numeric column header."
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 120
+                                    }
+                                  },
+                                  "required": [
+                                    "column"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "x_column",
+                              "series"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "chart_type",
+                          "title",
+                          "summary",
+                          "csv"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+                      "not": {
+                        "enum": [
+                          "constructor",
+                          "prototype",
+                          "__proto__"
+                        ]
+                      }
+                    },
+                    "minItems": 0,
+                    "maxItems": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "props",
+                  "children"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "description": "Structured multi-row comparison with labelled columns and literal cells, inline or selected from a workspace CSV. Use Markdown for small textual tables. Phone rows retain every field.",
+                "examples": [
+                  {
+                    "type": "Table",
+                    "props": {
+                      "columns": [
+                        {
+                          "key": "service",
+                          "label": "Service"
+                        },
+                        {
+                          "key": "cost",
+                          "label": "Monthly cost (USD)"
+                        }
+                      ],
+                      "rows": [
+                        [
+                          "API",
+                          "420"
+                        ],
+                        [
+                          "Payments",
+                          "680"
+                        ]
+                      ]
+                    },
+                    "children": []
+                  },
+                  {
+                    "type": "Table",
+                    "props": {
+                      "columns": [
+                        {
+                          "key": "service",
+                          "label": "Service"
+                        },
+                        {
+                          "key": "cost",
+                          "label": "Monthly cost (USD)"
+                        }
+                      ],
+                      "csv": {
+                        "path": "reports/services.csv"
+                      }
+                    },
+                    "children": []
+                  }
+                ],
+                "properties": {
+                  "type": {
+                    "const": "Table"
+                  },
+                  "props": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "title": {
+                            "type": "string",
+                            "minLength": 0,
+                            "maxLength": 120
+                          },
+                          "columns": {
+                            "minItems": 1,
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "key": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                }
+                              },
+                              "required": [
+                                "key",
+                                "label"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "rows": {
+                            "maxItems": 100,
+                            "type": "array",
+                            "items": {
+                              "minItems": 1,
+                              "maxItems": 8,
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 0,
+                                "maxLength": 500
+                              }
+                            }
+                          }
+                        },
+                        "required": [
+                          "columns",
+                          "rows"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "title": {
+                            "type": "string",
+                            "minLength": 0,
+                            "maxLength": 120
+                          },
+                          "columns": {
+                            "minItems": 1,
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "key": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                }
+                              },
+                              "required": [
+                                "key",
+                                "label"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "csv": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1024
+                              },
+                              "repo": {
+                                "type": "string",
+                                "minLength": 0,
+                                "maxLength": 255
+                              }
+                            },
+                            "required": [
+                              "path"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "columns",
+                          "csv"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+                      "not": {
+                        "enum": [
+                          "constructor",
+                          "prototype",
+                          "__proto__"
+                        ]
+                      }
+                    },
+                    "minItems": 0,
+                    "maxItems": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "props",
+                  "children"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "description": "Prominent static observation with info, success, warning or error kind, optional title and literal text. Use for a key finding or issue worth investigating. It is a historical note, not a live alert or tool failure.",
+                "examples": [
+                  {
+                    "type": "Callout",
+                    "props": {
+                      "kind": "warning",
+                      "title": "Investigate Payments",
+                      "text": "Payments has the highest monthly cost and p95 latency in this sample."
+                    },
+                    "children": []
+                  }
+                ],
+                "properties": {
+                  "type": {
+                    "const": "Callout"
+                  },
+                  "props": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "info",
+                          "success",
+                          "warning",
+                          "error"
+                        ]
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 120
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "text"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+                      "not": {
+                        "enum": [
+                          "constructor",
+                          "prototype",
+                          "__proto__"
+                        ]
+                      }
+                    },
+                    "minItems": 0,
+                    "maxItems": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "props",
+                  "children"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "description": "Ordered verification findings with passed, failed, running, pending or skipped labels. These are static agent-recorded snapshots, never live task status. Use for explaining checks and their evidence.",
+                "examples": [
+                  {
+                    "type": "StatusList",
+                    "props": {
+                      "title": "Verification",
+                      "items": [
+                        {
+                          "label": "Unit tests",
+                          "status": "passed",
+                          "detail": "38 checks passed."
+                        },
+                        {
+                          "label": "Load budget",
+                          "status": "failed",
+                          "detail": "p95 exceeds target."
+                        },
+                        {
+                          "label": "Dependency audit",
+                          "status": "pending"
+                        }
+                      ]
+                    },
+                    "children": []
+                  }
+                ],
+                "properties": {
+                  "type": {
+                    "const": "StatusList"
+                  },
+                  "props": {
+                    "type": "object",
+                    "properties": {
+                      "title": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 120
+                      },
+                      "items": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "passed",
+                                "failed",
+                                "running",
+                                "pending",
+                                "skipped"
+                              ]
+                            },
+                            "detail": {
+                              "type": "string",
+                              "minLength": 0,
+                              "maxLength": 500
+                            }
+                          },
+                          "required": [
+                            "label",
+                            "status"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "items"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+                      "not": {
+                        "enum": [
+                          "constructor",
+                          "prototype",
+                          "__proto__"
+                        ]
+                      }
+                    },
+                    "minItems": 0,
+                    "maxItems": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "props",
+                  "children"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "description": "One to six compact label/value metrics.",
+                "examples": [
+                  {
+                    "type": "Metrics",
+                    "props": {
+                      "items": [
+                        {
+                          "label": "Passed",
+                          "value": "38"
+                        }
+                      ]
+                    },
+                    "children": []
+                  }
+                ],
+                "properties": {
+                  "type": {
+                    "const": "Metrics"
+                  },
+                  "props": {
+                    "type": "object",
+                    "properties": {
+                      "items": {
+                        "minItems": 1,
+                        "maxItems": 6,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "value": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "detail": {
+                              "type": "string",
+                              "minLength": 0,
+                              "maxLength": 500
+                            }
+                          },
+                          "required": [
+                            "label",
+                            "value"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "items"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+                      "not": {
+                        "enum": [
+                          "constructor",
+                          "prototype",
+                          "__proto__"
+                        ]
+                      }
+                    },
+                    "minItems": 0,
+                    "maxItems": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "props",
+                  "children"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "description": "Workspace file reference. The user explicitly previews or opens it.",
+                "examples": [
+                  {
+                    "type": "FilePreview",
+                    "props": {
+                      "path": "reports/notes.md"
+                    },
+                    "children": []
+                  }
+                ],
+                "properties": {
+                  "type": {
+                    "const": "FilePreview"
+                  },
+                  "props": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      },
+                      "repo": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 255
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 120
+                      },
+                      "caption": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 500
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+                      "not": {
+                        "enum": [
+                          "constructor",
+                          "prototype",
+                          "__proto__"
+                        ]
+                      }
+                    },
+                    "minItems": 0,
+                    "maxItems": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "props",
+                  "children"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "root",
+        "elements"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "version",
+    "catalog_version",
+    "title",
+    "spec"
+  ],
+  "additionalProperties": false
+}

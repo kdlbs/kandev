@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getCoordinatorSettings } from "@/lib/api/domains/coordinator-api";
+import {
+  getCoordinatorSettings,
+  type CoordinatorSettings,
+} from "@/lib/api/domains/coordinator-api";
 import type { WatchSet } from "@/lib/coordinator/watch-filter";
 import { useWebSocketClient } from "@/lib/ws/connection";
 import type { CoordinatorInputEntry } from "./use-coordinator-inputs";
@@ -10,6 +13,22 @@ export type UseCoordinatorWatchSetResult = {
   input: CoordinatorInputEntry<WatchSet>;
   retry: () => void;
 };
+
+/** Maps the wire (snake_case) settings read to the client filter's watch set. */
+export function watchSetFromSettings(settings: CoordinatorSettings): WatchSet {
+  const projects = settings.projects;
+  return {
+    scope: settings.watches.scope,
+    workflowIds: settings.watches.workflow_ids,
+    ...(projects && {
+      projects: {
+        scope: "selected" as const,
+        repositoryIds: projects.repository_ids ?? null,
+        includeNoRepository: projects.include_no_repository,
+      },
+    }),
+  };
+}
 
 const EMPTY: CoordinatorInputEntry<WatchSet> = {
   value: undefined,
@@ -41,10 +60,7 @@ export function useCoordinatorWatchSet(
       .then((settings) => {
         if (sequence !== sequenceRef.current) return;
         setInput({
-          value: {
-            scope: settings.watches.scope,
-            workflowIds: settings.watches.workflow_ids,
-          },
+          value: watchSetFromSettings(settings),
           loadedAt: Date.now(),
           error: false,
         });
@@ -72,6 +88,22 @@ export function useCoordinatorWatchSet(
       read();
     });
   }, [wsClient, active, workspaceId, coordinatorId, read]);
+
+  // A set changing membership, or a repository being deleted, changes which
+  // repositories a selected Projects scope resolves to; the server resolves, so
+  // re-read.
+  useEffect(() => {
+    if (!wsClient || !active) return;
+    const off = (
+      [
+        "repository_set.created",
+        "repository_set.updated",
+        "repository_set.deleted",
+        "repository.deleted",
+      ] as const
+    ).map((event) => wsClient.on(event, () => read()));
+    return () => off.forEach((unsubscribe) => unsubscribe());
+  }, [wsClient, active, read]);
 
   return { input, retry: read };
 }

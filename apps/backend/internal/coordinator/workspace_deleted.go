@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -34,7 +35,9 @@ func (h *workspaceDeletedSubscriber) handle(ctx context.Context, event *bus.Even
 	if workspaceID == "" {
 		return nil
 	}
-	if err := h.svc.store.DeleteWorkspaceState(ctx, workspaceID); err != nil {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := h.svc.store.DeleteWorkspaceState(cleanupCtx, workspaceID); err != nil {
 		return fmt.Errorf("delete coordinator state for workspace %q: %w", workspaceID, err)
 	}
 	return nil

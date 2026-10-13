@@ -9,6 +9,8 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   FIRST_PROMPT_MARKER,
   LAST_PROMPT_MARKER,
+  expectPromptAlignedAtStart,
+  persistedLastPromptId,
   seedScrolledPastLastPrompt,
 } from "./last-prompt-scroll-helpers";
 
@@ -126,6 +128,59 @@ test.describe("@chat last prompt scroll affordance", () => {
     await expect(chat.getByText(FIRST_PROMPT_MARKER, { exact: false })).toHaveCount(0);
     await button.click();
     await expect(marker).toBeInViewport({ timeout: 10_000 });
+  });
+
+  test("retains an unloaded last prompt after reload and navigates from both desktop controls", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    await apiClient.saveUserSettings({ show_anchored_prompt_bar: true });
+    let sessionId = "";
+    const session = await seedScrolledPastLastPrompt(
+      testPage,
+      apiClient,
+      seedData,
+      "unloaded-last-prompt-desktop",
+      {
+        trailingFillerCount: 120,
+        onSessionId: (id) => {
+          sessionId = id;
+        },
+      },
+    );
+    const promptId = await persistedLastPromptId(apiClient, sessionId);
+    const chat = session.activeChat();
+    const row = chat.locator(`#msg-${promptId}`);
+    const bar = chat.getByTestId("anchored-last-prompt-bar");
+    const control = chat.getByTestId("chat-status-bar").getByTestId("scroll-to-last-prompt-button");
+    const newestRow = chat.locator("[id^='msg-']").filter({
+      has: testPage.getByText("filler message 120", { exact: true }),
+    });
+    const reloadUnloadedWindow = async () => {
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+      await expect(row).toHaveCount(0);
+      await expect(control).toBeVisible({ timeout: 15_000 });
+      await expect(control.locator("svg")).toHaveClass(/tabler-icon-arrow-up/);
+      await expect(bar).toHaveAttribute("data-state", "open");
+      await expect(bar.getByTestId("anchored-last-prompt-text")).toContainText(LAST_PROMPT_MARKER);
+      await expect(bar.getByTestId("scroll-to-last-prompt-button")).toBeVisible();
+    };
+
+    await reloadUnloadedWindow();
+    await bar.getByTestId("scroll-to-last-prompt-button").click();
+    await expect(row).toHaveCount(1);
+    await expectPromptAlignedAtStart(row);
+    await expect(newestRow).toHaveCount(1);
+
+    await reloadUnloadedWindow();
+    await control.click();
+    await expect(row).toHaveCount(1);
+    await expectPromptAlignedAtStart(row);
+    await expect(newestRow).toHaveCount(1);
   });
 
   test("scroll-to-start button jumps back to the first prompt", async ({

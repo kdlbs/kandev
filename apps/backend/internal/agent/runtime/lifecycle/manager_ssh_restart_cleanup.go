@@ -46,7 +46,15 @@ func (m *Manager) stopPersistedSSHExecution(
 	if row == nil || row.Runtime != agentruntime.RuntimeSSH {
 		return false, nil
 	}
+	return m.stopPersistedSSHRecord(ctx, row, reason, force)
+}
 
+func (m *Manager) stopPersistedSSHRecord(
+	ctx context.Context,
+	row *models.ExecutorRunning,
+	reason string,
+	force bool,
+) (bool, error) {
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {
 		return true, err

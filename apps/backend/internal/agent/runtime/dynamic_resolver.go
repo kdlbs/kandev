@@ -735,6 +735,9 @@ func (r *ProfileExecutionResolver) agentNameForProfile(
 	if err != nil {
 		return "", fmt.Errorf("resolve agent for execution profile %s: %w", profile.ID, err)
 	}
+	if agent.Name == agents.DynamicAgentID {
+		return "", fmt.Errorf("execution profile %s: %w", profile.ID, ErrVirtualProfile)
+	}
 	return agent.Name, nil
 }
 

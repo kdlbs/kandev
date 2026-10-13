@@ -40,7 +40,7 @@ func getThroughTunnel(t *testing.T, client *http.Client, tunnelPort int, path st
 
 func newTunnelManagerForTest(t *testing.T, log *logger.Logger) *TunnelManager {
 	t.Helper()
-	manager := NewTunnelManager(newProxyTestManager(t, log), log)
+	manager := newTestTunnelManager(newProxyTestManager(t, log), log)
 	t.Cleanup(manager.Shutdown)
 	return manager
 }
@@ -64,7 +64,7 @@ func TestStartTunnelForwardsRootPathsToAgentctlPortProxy(t *testing.T) {
 
 	lifecycleMgr := newProxyTestManager(t, log)
 	addExecutionForURL(t, lifecycleMgr, "sess-tunnel", upstream.server.URL, "tunnel-token", log)
-	manager := NewTunnelManager(lifecycleMgr, log)
+	manager := newTestTunnelManager(lifecycleMgr, log)
 	t.Cleanup(manager.Shutdown)
 
 	tunnelPort, err := manager.StartTunnel("sess-tunnel", 5173, 0)
@@ -107,7 +107,7 @@ func TestStartTunnelBindsRequestedPortAndIsIdempotent(t *testing.T) {
 
 	lifecycleMgr := newProxyTestManager(t, log)
 	addExecutionForURL(t, lifecycleMgr, "sess-fixed", upstream.server.URL, "", log)
-	manager := NewTunnelManager(lifecycleMgr, log)
+	manager := newTestTunnelManager(lifecycleMgr, log)
 	t.Cleanup(manager.Shutdown)
 
 	// Reserving a port means binding it, reading it, and releasing it, so another
@@ -156,7 +156,7 @@ func TestStartTunnelReleasesReservationWhenResolutionFails(t *testing.T) {
 	if err := lifecycleMgr.ExecutionStoreForTesting().Add(clientless); err != nil {
 		t.Fatalf("add execution: %v", err)
 	}
-	manager := NewTunnelManager(lifecycleMgr, log)
+	manager := newTestTunnelManager(lifecycleMgr, log)
 	t.Cleanup(manager.Shutdown)
 
 	tests := []struct {
@@ -200,7 +200,7 @@ func TestStopTunnelClosesTheListenerAndForgetsTheEntry(t *testing.T) {
 	})
 	lifecycleMgr := newProxyTestManager(t, log)
 	addExecutionForURL(t, lifecycleMgr, "sess-stop", upstream.server.URL, "", log)
-	manager := NewTunnelManager(lifecycleMgr, log)
+	manager := newTestTunnelManager(lifecycleMgr, log)
 	t.Cleanup(manager.Shutdown)
 
 	tunnelPort, err := manager.StartTunnel("sess-stop", 3000, 0)
@@ -265,7 +265,7 @@ func TestInvalidateSessionStopsOnlyThatSessionsTunnels(t *testing.T) {
 	lifecycleMgr := newProxyTestManager(t, log)
 	addExecutionForURL(t, lifecycleMgr, "sess-gone", upstream.server.URL, "", log)
 	addExecutionForURL(t, lifecycleMgr, "sess-kept", upstream.server.URL, "", log)
-	manager := NewTunnelManager(lifecycleMgr, log)
+	manager := newTestTunnelManager(lifecycleMgr, log)
 	t.Cleanup(manager.Shutdown)
 
 	gonePort, err := manager.StartTunnel("sess-gone", 3000, 0)
@@ -300,7 +300,7 @@ func TestShutdownStopsEveryTunnel(t *testing.T) {
 	lifecycleMgr := newProxyTestManager(t, log)
 	addExecutionForURL(t, lifecycleMgr, "sess-1", upstream.server.URL, "", log)
 	addExecutionForURL(t, lifecycleMgr, "sess-2", upstream.server.URL, "", log)
-	manager := NewTunnelManager(lifecycleMgr, log)
+	manager := newTestTunnelManager(lifecycleMgr, log)
 	// Registered before the StartTunnel calls below: an early t.Fatalf there
 	// would otherwise strand the listeners this test already opened.
 	t.Cleanup(manager.Shutdown)
@@ -337,7 +337,7 @@ func TestTunnelProxyReportsBadGatewayWhenAgentctlIsDown(t *testing.T) {
 
 	lifecycleMgr := newProxyTestManager(t, log)
 	addExecutionForURL(t, lifecycleMgr, "sess-dead", deadURL, "", log)
-	manager := NewTunnelManager(lifecycleMgr, log)
+	manager := newTestTunnelManager(lifecycleMgr, log)
 	t.Cleanup(manager.Shutdown)
 
 	tunnelPort, err := manager.StartTunnel("sess-dead", 3000, 0)

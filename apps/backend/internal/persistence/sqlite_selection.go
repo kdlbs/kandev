@@ -244,7 +244,7 @@ func adoptLegacySQLite(legacyPath, currentPath string, legacy sqliteCandidate) e
 		return fmt.Errorf("open legacy sqlite database: %w", err)
 	}
 	defer func() { _ = source.Close() }()
-	if _, err := snapshotSQLite(source, stagedPath); err != nil {
+	if _, err := CopySQLiteSnapshot(source, stagedPath); err != nil {
 		return fmt.Errorf("snapshot legacy sqlite database: %w", err)
 	}
 	if err := os.Chmod(stagedPath, 0o600); err != nil {

@@ -127,7 +127,9 @@ its work through complete existing agent profiles.
 - Kandev always registers one built-in virtual agent family with canonical ID
   `dynamic` and display name Dynamic. It cannot be disabled or uninstalled,
   does not expose a CLI command, and is not probed as a concrete inference
-  agent. Profiles created under it have kind `dynamic`.
+  agent. Profiles created under it have kind `dynamic`. Every lifecycle launch
+  path resolves its agent through one helper that rejects the virtual family
+  with `ErrVirtualProfile`, so a virtual agent never reaches command building.
 - Agent settings can create a dynamic profile with a user-defined name,
   description, icon, and availability scope.
 - A dynamic profile references existing concrete agent profiles. It never

@@ -66,7 +66,7 @@ func TestServerSurfaceCoordinatorRegistersEveryBoundToolForEveryPolicy(t *testin
 			}
 			policy.Actions[a] = setting
 		}
-		want := coordinator.ToolNames(policy, true)
+		want := coordinator.ToolNames(policy, true, false)
 		profile := mcpprofile.NewCoordinator()
 		profile.CoordinatorToolPolicy = &mcpprofile.CoordinatorToolPolicy{
 			Version: 1, CoordinatorID: "c", WorkspaceID: "w", ConversationTaskID: "t", ToolNames: want,
@@ -74,4 +74,20 @@ func TestServerSurfaceCoordinatorRegistersEveryBoundToolForEveryPolicy(t *testin
 		s := NewWithProfile(backend, "s", "t", 10005, log, "", false, profile)
 		assert.ElementsMatch(t, want, getRegisteredToolNames(s), "mask %d", mask)
 	}
+}
+
+func TestServerSurfaceCoordinatorRegistersBoundTurnsToolOnly(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	bound := func(names ...string) []string {
+		profile := mcpprofile.NewCoordinator()
+		profile.CoordinatorToolPolicy = &mcpprofile.CoordinatorToolPolicy{
+			Version: 1, CoordinatorID: "c", WorkspaceID: "w", ConversationTaskID: "t", ToolNames: names,
+		}
+		return getRegisteredToolNames(NewWithProfile(backend, "s", "t", 10005, log, "", false, profile))
+	}
+	assert.ElementsMatch(t, []string{"list_tasks_kandev", "list_coordinator_turns_kandev"}, bound("list_tasks_kandev", "list_coordinator_turns_kandev"))
+	assert.NotContains(t, bound("list_tasks_kandev", "list_coordinator_activity_kandev"), "list_coordinator_turns_kandev")
 }

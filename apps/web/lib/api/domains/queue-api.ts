@@ -412,11 +412,13 @@ export async function sendQueuedNow(
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
   try {
+    // Cancellation owns a 30-second backend budget; retain its acknowledgement
+    // beyond that budget plus the ordinary five-second transport allowance.
     return await client.request<{
       session_id: string;
       dispatched: boolean;
       sent_count: number;
-    }>("message.queue.send_now", params);
+    }>("message.queue.send_now", params, 35_000);
   } catch (err) {
     rethrowQueueError(err);
   }

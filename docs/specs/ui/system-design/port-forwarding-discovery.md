@@ -78,6 +78,12 @@ updates with the initiating scope; `useTunnelActions` also resets pending state
 and ignores late results/toasts after a scope change. Runtime calls and business
 logic remain shared. Resize preserves the controller and manual draft.
 
+Each management visit refreshes detected ports while retaining the manual draft.
+Only the latest detection request in a session scope may publish results or clear
+loading. Tunnel hydration captures the mutation revision when its read starts:
+only later local mutations override that snapshot, so a new read can reconcile
+changes made by another client without replaying old local starts or stops.
+
 ## Responsive surface and focus
 
 Scene: a developer checks or stops a development service from a phone during

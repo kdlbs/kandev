@@ -358,6 +358,9 @@ func (r *Repository) purgeWorkspaceTaskQueuesInTx(ctx context.Context, tx *sqlx.
 		if err := r.purgeTaskPromptSequenceTx(ctx, tx, task.ID, sessions); err != nil {
 			return err
 		}
+		if err := r.retireAgentDeliveryTaskSessionsTx(ctx, tx, task.ID); err != nil {
+			return fmt.Errorf("retire delivery sessions for cascade task %s: %w", task.ID, err)
+		}
 		if err := r.purgeTaskQueueInTx(ctx, tx, task.ID, sessions, true); err != nil {
 			return fmt.Errorf("purge task queue for workspace cascade task %s: %w", task.ID, err)
 		}

@@ -417,3 +417,29 @@ func TestMigration_Idempotent(t *testing.T) {
 	}
 	_ = repo2
 }
+
+func TestMigration_LegacyCheckRebuildPreservesProfileSortOrder(t *testing.T) {
+	db := newLegacyDB(t)
+	if _, err := db.Exec(`ALTER TABLE agent_profiles ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO agents (id, name, created_at, updated_at) VALUES ('a1', 'legacy-order', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, created_at, updated_at, sort_order)
+		VALUES ('p1', 'a1', 'legacy', 'Legacy', 'model', CURRENT_TIMESTAMP, datetime('now'), 7)`); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := newSQLiteRepository(db, db, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order int
+	if err := db.Get(&order, `SELECT sort_order FROM agent_profiles WHERE id = 'p1'`); err != nil {
+		t.Fatal(err)
+	}
+	if order != 7 {
+		t.Fatalf("sort_order after table recreation = %d, want 7", order)
+	}
+	_ = repo
+}

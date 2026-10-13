@@ -374,6 +374,15 @@ func TestPromptSendNowClaimStartsCreatedSessionManually(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, "task-created", v1.TaskStateInProgress)
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	agentMgr.startAgentProcessFunc = func(context.Context, string) error {
+		agentMgr.mu.Lock()
+		accepted := agentMgr.initialPromptDispatchCallback
+		agentMgr.mu.Unlock()
+		if accepted != nil {
+			accepted()
+		}
+		return nil
+	}
 	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
@@ -434,6 +443,15 @@ func TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt(t *testing
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, "queued-created", v1.TaskStateScheduling)
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	agentMgr.startAgentProcessFunc = func(context.Context, string) error {
+		agentMgr.mu.Lock()
+		accepted := agentMgr.initialPromptDispatchCallback
+		agentMgr.mu.Unlock()
+		if accepted != nil {
+			accepted()
+		}
+		return nil
+	}
 	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
 	svc.messageCreator = &mockMessageCreator{}
 	t.Cleanup(svc.stopSendNowWorkers)
@@ -814,11 +832,11 @@ func (m *callbackAfterPromptEntryAgentManager) PromptAgentWithAdmissionCallback(
 	executionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*executor.PromptResult, error) {
 	if beforeAdmission != nil {
-		if err := beforeAdmission(); err != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
 			return nil, err
 		}
 	}

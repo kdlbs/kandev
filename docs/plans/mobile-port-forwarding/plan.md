@@ -203,3 +203,18 @@ Implementation validation on 2026-10-09:
 - Shared wrappers must preserve manual drafts while hiding shortcut/resizing.
 - Eight conditional dock entries can crowd 320px widths.
 - Remote-topbar E2E references the removed action and must migrate too.
+
+## PR remediation (2026-10-13)
+
+The current main branch was merged with both catalog additions preserved.
+Review fixes refresh ports on each visit, reconcile tunnel snapshots against
+only newer mutations, reject older overlapping detection results, and retain
+Refresh focus while busy. The sidebar CI assertion now accounts for subpixel
+DOMRect precision without changing product sizing.
+
+Local verification passed 77 unit tests, 14 Chromium port/workflow cases,
+six sidebar executions and 21 mobile/tablet/plugin/canvas cases without
+retries, plus typecheck (6 GiB heap), focused lint/formatting, i18n,
+catalog/specification/harness and public-doc validation. Exact review and CI
+monitoring remain delivery work after the fixup is published. See Task 01 for
+regression evidence and runner settings.

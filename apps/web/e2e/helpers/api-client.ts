@@ -5,6 +5,7 @@ import type {
   ListWorkflowsResponse,
   ListWorkflowStepsResponse,
   TaskSessionState,
+  TaskSession,
   TaskCreateLastUsedApi,
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
@@ -16,8 +17,8 @@ import type {
   SidebarTaskColorPatchApi,
   WorkflowAgentOverrides,
   Repository,
-  WorkspaceRecoveryProjection,
 } from "../../lib/types/http";
+import type { RetryPolicy } from "../../lib/types/automation";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import type {
   Coordinator,
@@ -2833,12 +2834,6 @@ export class ApiClient {
     return this.request("GET", `/api/v1/sessions/${sessionId}/workflow/history`);
   }
 
-  async getTaskSession(sessionId: string): Promise<{
-    session: { id: string; last_read_message_id?: string };
-  }> {
-    return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
-  }
-
   /**
    * Force-sets the session's read cursor directly, bypassing the production
    * mark-read endpoint's forward-only (monotonic) guard. Used by e2e specs
@@ -2903,18 +2898,18 @@ export class ApiClient {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
   }
 
-  async getTaskSession(sessionId: string): Promise<{
-    session: {
-      id: string;
-      task_id: string;
-      agent_profile_id?: string;
-      agent_profile_snapshot?: Record<string, unknown> | null;
-      state: string;
-      task_environment_id?: string;
-      workspace_recovery?: WorkspaceRecoveryProjection | null;
-      error_message?: string;
-    };
-  }> {
+  async listTaskSessionDetails(taskId: string) {
+    const summary = await this.listTaskSessions(taskId);
+    const sessions = await Promise.all(
+      summary.sessions.map(async (row) => {
+        const { session } = await this.getTaskSession(row.id);
+        return { ...row, ...session };
+      }),
+    );
+    return { ...summary, sessions };
+  }
+
+  async getTaskSession(sessionId: string): Promise<{ session: TaskSession }> {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
   }
 
@@ -4059,6 +4054,7 @@ export class ApiClient {
     workflowStepId?: string;
     taskMode?: "automation_run" | "normal_task" | "managed_conversation";
     managedDestination?: { plugin_id: string; instance_key: string; revision: number };
+    retryPolicy?: RetryPolicy;
     repositoryMode?: "workspace_default" | "selected" | "none";
     repositoryIds?: string[];
     repositories?: Array<{ repository_id: string; base_branch: string }>;
@@ -4085,10 +4081,8 @@ export class ApiClient {
     /**
      * Backdate the row's `execution_mode` to `task` after creation, which is
      * what an install predating the withdrawal of execution modes carries on
-     * disk. The API ignores `execution_mode` on input by design, so this is
-     * the only way to stand up the state the board-move migration notice
-     * exists to explain; the `legacy_board_card` flag the UI reads is then
-     * derived by the same production SQL a real upgraded install goes through.
+     * disk. The API ignores `execution_mode` on input by design, so this flag
+     * seeds the state a real upgraded install carries.
      */
     legacyBoardCard?: boolean;
   }): Promise<{ id: string; workspace_id: string; name: string }> {
@@ -4102,6 +4096,7 @@ export class ApiClient {
       repository_mode: opts.repositoryMode,
       repository_ids: opts.repositoryIds,
       repositories: opts.repositories,
+      retry_policy: opts.retryPolicy,
       prompt: opts.prompt ?? "",
       agent_profile_id: opts.agentProfileId ?? "",
       executor_profile_id: opts.executorProfileId ?? "",

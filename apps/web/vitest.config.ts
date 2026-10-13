@@ -21,6 +21,8 @@ if (configuredMaxWorkers && !isCI && !allowUnsafeParallelism) {
 export default mergeConfig(
   viteConfig,
   defineConfig({
+    // Catalogs use default imports; parse their data without generating a named export per key.
+    json: { stringify: true, namedExports: false },
     resolve: {
       alias: [
         {
@@ -55,6 +57,21 @@ export default mergeConfig(
           extends: true,
           test: {
             name: "browser",
+            // Only explicitly reviewed suites use bundled dependency loading.
+            deps: {
+              optimizer: {
+                client: {
+                  enabled: true,
+                  include: [
+                    "@tabler/icons-react",
+                    "radix-ui",
+                    "@base-ui/react",
+                    "date-fns",
+                    "react-day-picker",
+                  ],
+                },
+              },
+            },
             include: [...projectDefinitions.browser.include],
             exclude: [...projectDefinitions.browser.exclude],
             setupFiles: ["./vitest.setup.ts"],

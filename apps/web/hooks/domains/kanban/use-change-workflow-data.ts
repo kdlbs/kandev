@@ -8,7 +8,7 @@ import {
 } from "@/lib/api";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { Task, Workflow, WorkflowSnapshot } from "@/lib/types/http";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { toSelectorProfileOptions } from "@/lib/settings/agent-profile-selector-order";
 
 export type ChangeWorkflowLoadStatus = "idle" | "loading" | "success" | "error";
 type OpenTaskArgs = { open: boolean; taskId: string | null; workspaceId: string | null };
@@ -143,11 +143,7 @@ export function useChangeWorkflowProfiles(open: boolean, workspaceId: string | n
     Promise.all([listAgents({ cache: "no-store" }), listExecutors({ cache: "no-store" })]).then(
       ([agents, executorResponse]) => {
         if (!active) return;
-        setProfiles(
-          agents.agents.flatMap((agent) =>
-            agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-          ),
-        );
+        setProfiles(toSelectorProfileOptions(agents.agents));
         setExecutors(executorResponse.executors);
         setStatus("success");
       },

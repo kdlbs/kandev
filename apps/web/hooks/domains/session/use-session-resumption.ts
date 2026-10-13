@@ -8,10 +8,7 @@ import {
 } from "@/lib/ws/client";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { launchSession } from "@/lib/services/session-launch-service";
-import {
-  buildResumeRequest,
-  buildRestoreWorkspaceRequest,
-} from "@/lib/services/session-launch-helpers";
+import { buildRestoreWorkspaceRequest } from "@/lib/services/session-launch-helpers";
 import { useSessionRecoveryFeedback } from "./use-session-recovery-feedback";
 import {
   clearArchiveRecovery,
@@ -40,6 +37,7 @@ import {
   recoveryInspectionBusyDetails,
   recoveryInspectionBusyMessage,
   resolveRequestErrorMessage,
+  resumeSession as requestSessionResume,
 } from "@/lib/services/session-recovery-service";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
@@ -955,7 +953,11 @@ function useManualResumeSession({
     clearResumptionNoticeUnlessInspectionBusy(guardedSetters, noticeKind);
     guardedSetters.setRecoveryFailure?.(null);
     try {
-      const response = await launchSession(buildResumeRequest(taskId, sessionId).request);
+      const response = await requestSessionResume(
+        taskId,
+        sessionId,
+        t("task:failedToResumeSession"),
+      );
       if (!canContinue()) {
         startingProjection?.rollback();
         return false;

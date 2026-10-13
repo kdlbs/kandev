@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -82,7 +81,10 @@ func (r *Repository) initAgentDeliverySchema() error {
 			outcome TEXT NOT NULL DEFAULT ''
 		);
 	`, blob, blob))
-	return err
+	if err != nil {
+		return err
+	}
+	return r.initAgentDeliveryRetentionSchema()
 }
 
 func (r *Repository) PrepareAgentDeliverySubmission(ctx context.Context, submission *models.AgentDeliverySubmission) (bool, error) {
@@ -98,11 +100,23 @@ func (r *Repository) PrepareAgentDeliverySubmission(ctx context.Context, submiss
 	if submission.UpdatedAt.IsZero() {
 		submission.UpdatedAt = submission.CreatedAt
 	}
+	if submission.PayloadBytes == 0 {
+		submission.PayloadBytes = int64(len(submission.Payload))
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), submission.SessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{submission.SessionID}, nil); err != nil {
+		return false, err
+	}
+	if err := r.ensureAgentDeliverySessionNotRetired(ctx, tx, submission.SessionID, submission.IncarnationID); err != nil {
+		return false, err
+	}
 	var existingHash string
 	err = tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT payload_hash FROM agent_delivery_submissions WHERE id = ?`), submission.ID).Scan(&existingHash)
 	switch err {
@@ -118,11 +132,11 @@ func (r *Repository) PrepareAgentDeliverySubmission(ctx context.Context, submiss
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO agent_delivery_submissions
 		(id, session_id, incarnation_id, harness_generation, owner_generation,
-		 dispatch_attempt_id, payload_hash, payload, state, outcome, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		 dispatch_attempt_id, payload_hash, payload, state, outcome, payload_bytes, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		submission.ID, submission.SessionID, submission.IncarnationID,
 		submission.HarnessGeneration, submission.OwnerGeneration, submission.DispatchAttemptID,
-		submission.PayloadHash, submission.Payload, submission.State, submission.Outcome,
+		submission.PayloadHash, submission.Payload, submission.State, submission.Outcome, submission.PayloadBytes,
 		submission.CreatedAt, submission.UpdatedAt)
 	if err != nil {
 		return false, err
@@ -136,59 +150,63 @@ func (r *Repository) PrepareAgentDeliverySubmission(ctx context.Context, submiss
 func (r *Repository) GetAgentDeliverySubmission(ctx context.Context, id string) (*models.AgentDeliverySubmission, error) {
 	row := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, incarnation_id, harness_generation, owner_generation,
-		       dispatch_attempt_id, payload_hash, payload, state, outcome, created_at, updated_at
+		       dispatch_attempt_id, payload_hash, payload, state, outcome, payload_pruned_at,
+		       payload_bytes, fully_settled_at, terminal_stream_id, terminal_sequence,
+		       terminal_turn_id, created_at, updated_at
 		FROM agent_delivery_submissions WHERE id = ?`), id)
 	var submission models.AgentDeliverySubmission
+	var payloadPrunedAt, fullySettledAt sql.NullTime
 	if err := row.Scan(
 		&submission.ID, &submission.SessionID, &submission.IncarnationID,
 		&submission.HarnessGeneration, &submission.OwnerGeneration, &submission.DispatchAttemptID,
 		&submission.PayloadHash, &submission.Payload, &submission.State, &submission.Outcome,
+		&payloadPrunedAt, &submission.PayloadBytes, &fullySettledAt, &submission.TerminalStreamID,
+		&submission.TerminalSequence, &submission.TerminalTurnID,
 		&submission.CreatedAt, &submission.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, repoerrors.ErrAgentDeliverySubmissionNotFound
 		}
 		return nil, err
 	}
+	if payloadPrunedAt.Valid {
+		at := payloadPrunedAt.Time
+		submission.PayloadPrunedAt = &at
+	}
+	if fullySettledAt.Valid {
+		at := fullySettledAt.Time
+		submission.FullySettledAt = &at
+	}
+	if submission.PayloadPrunedAt != nil {
+		return nil, fmt.Errorf("submission %q: %w", id, repoerrors.ErrAgentDeliveryPayloadPruned)
+	}
 	return &submission, nil
-}
-
-// ListAgentDeliverySubmissions returns the backend-owned submissions for one
-// session in creation order. Recovery uses the complete bounded SQL view to
-// compare a surviving peer's submission evidence before it admits a stream.
-func (r *Repository) ListAgentDeliverySubmissions(ctx context.Context, sessionID string) ([]*models.AgentDeliverySubmission, error) {
-	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT id, session_id, incarnation_id, harness_generation, owner_generation,
-		       dispatch_attempt_id, payload_hash, payload, state, outcome, created_at, updated_at
-		FROM agent_delivery_submissions
-		WHERE session_id = ?
-		ORDER BY created_at ASC, id ASC`), sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var submissions []*models.AgentDeliverySubmission
-	for rows.Next() {
-		submission := new(models.AgentDeliverySubmission)
-		if err := rows.Scan(
-			&submission.ID, &submission.SessionID, &submission.IncarnationID,
-			&submission.HarnessGeneration, &submission.OwnerGeneration, &submission.DispatchAttemptID,
-			&submission.PayloadHash, &submission.Payload, &submission.State, &submission.Outcome,
-			&submission.CreatedAt, &submission.UpdatedAt); err != nil {
-			return nil, err
-		}
-		submissions = append(submissions, submission)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return submissions, nil
 }
 
 func (r *Repository) TransitionAgentDeliverySubmission(ctx context.Context, id string, from, to models.DeliverySubmissionState, outcome string, updatedAt time.Time) (bool, error) {
 	if updatedAt.IsZero() {
 		updatedAt = r.nowUTC()
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var sessionID string
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT session_id FROM agent_delivery_submissions WHERE id = ?`), id).Scan(&sessionID)
+	if err == sql.ErrNoRows {
+		return false, tx.Commit()
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_delivery_submissions
 		SET state = ?, outcome = ?, updated_at = ?
 		WHERE id = ? AND state = ?`), to, outcome, updatedAt, id, from)
@@ -196,22 +214,42 @@ func (r *Repository) TransitionAgentDeliverySubmission(ctx context.Context, id s
 		return false, err
 	}
 	count, err := result.RowsAffected()
-	return count == 1, err
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return count == 1, nil
 }
 
 func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, remoteHighWater int64) (bool, error) {
-	if event == nil || event.StreamID == "" || event.Sequence <= 0 || event.EventType == "" {
-		return false, fmt.Errorf("stream, positive sequence, and event type are required")
+	if event == nil || event.StreamID == "" || event.Sequence <= 0 || event.EventType == "" ||
+		event.SessionID == "" || event.IncarnationID == "" || event.HarnessGeneration <= 0 {
+		return false, fmt.Errorf("stream, positive sequence, event type, and owner identity are required")
 	}
 	if event.ReceivedAt.IsZero() {
 		event.ReceivedAt = r.nowUTC()
+	}
+	contentHash := agentDeliveryEventHash(event)
+	event.ContentHash = contentHash
+	event.HashVersion = agentDeliveryPayloadHashVersion
+	event.PayloadBytes = int64(len(event.Payload))
+	if err := r.prepareAgentDeliveryOwnerStatement(ctx, event); err != nil {
+		return false, err
+	}
+	if err := r.prepareAgentDeliveryReceiptStatement(ctx); err != nil {
+		return false, err
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	inserted, err := r.receiveAgentDeliveryEventTx(ctx, tx, event, remoteHighWater)
+	if err := lockAgentDeliveryEventWritesMode(ctx, tx, r.db.DriverName(), []string{event.SessionID}, []string{event.StreamID}, !event.Terminal); err != nil {
+		return false, err
+	}
+	inserted, err := r.receiveAgentDeliveryEventTx(ctx, tx, event, remoteHighWater, contentHash)
 	if err != nil {
 		return false, err
 	}
@@ -222,14 +260,42 @@ func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *model
 	return inserted == 1, nil
 }
 
-func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, remoteHighWater int64) (int64, error) {
-	inserted, err := r.insertAgentDeliveryEventTx(ctx, tx, event)
+func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, remoteHighWater int64, contentHash string) (int64, error) {
+	if err := r.validateAgentDeliveryEventAdmissionTx(ctx, tx, event); err != nil {
+		return 0, err
+	}
+	cursor, cursorExists, err := r.loadAgentDeliveryCursorTx(ctx, tx, event.StreamID)
 	if err != nil {
 		return 0, err
 	}
-	cursor, err := r.loadOrCreateAgentDeliveryCursorTx(ctx, tx, event)
+	if cursorExists {
+		if err := validateAgentDeliveryCursorEvent(cursor, event); err != nil {
+			return 0, err
+		}
+	}
+	found, err := r.validateAgentDeliveryEventSequenceTx(ctx, tx, event, cursor, cursorExists)
 	if err != nil {
 		return 0, err
+	}
+	var inserted int64
+	if !found {
+		inserted, err = r.insertAgentDeliveryEventTx(ctx, tx, event, contentHash)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if !cursorExists {
+		cursor = models.AgentDeliveryCursor{
+			StreamID: event.StreamID, SessionID: event.SessionID,
+			IncarnationID: event.IncarnationID, HarnessGeneration: event.HarnessGeneration,
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO agent_delivery_cursors
+			(stream_id, session_id, incarnation_id, harness_generation, updated_at)
+			VALUES (?, ?, ?, ?, ?)`), event.StreamID, event.SessionID, event.IncarnationID,
+			event.HarnessGeneration, event.ReceivedAt); err != nil {
+			return 0, err
+		}
 	}
 	if remoteHighWater > cursor.RemoteHighWater {
 		cursor.RemoteHighWater = remoteHighWater
@@ -246,72 +312,142 @@ func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.T
 	return inserted, nil
 }
 
-func (r *Repository) insertAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent) (int64, error) {
+func validateAgentDeliveryCursorEvent(cursor models.AgentDeliveryCursor, event *models.AgentDeliveryEvent) error {
+	if cursor.SessionID != event.SessionID || cursor.IncarnationID != event.IncarnationID ||
+		cursor.HarnessGeneration != event.HarnessGeneration {
+		return repoerrors.ErrAgentDeliveryIdentityMismatch
+	}
+	if event.Sequence <= cursor.RetiredSequence {
+		return repoerrors.ErrAgentDeliveryReplayExpired
+	}
+	return nil
+}
+
+func (r *Repository) validateAgentDeliveryEventSequenceTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	event *models.AgentDeliveryEvent,
+	cursor models.AgentDeliveryCursor,
+	cursorExists bool,
+) (bool, error) {
+	// A future sequence can be inserted under the stream lock. A conflicting
+	// receipt is still independently validated by the insert conflict path.
+	if cursorExists && event.Sequence > cursor.ReceivedSequence {
+		return false, nil
+	}
+	stored, _, found, err := r.findAgentDeliveryEventTx(ctx, tx, event.StreamID, event.Sequence)
+	if err != nil {
+		return false, err
+	}
+	if found {
+		return true, validateStoredAgentDeliveryEvent(stored, event, cursorExists)
+	}
+	return false, r.validateMissingAgentDeliveryEventSequenceTx(ctx, tx, event, cursor, cursorExists)
+}
+
+func validateStoredAgentDeliveryEvent(
+	stored models.AgentDeliveryEvent,
+	incoming *models.AgentDeliveryEvent,
+	cursorExists bool,
+) error {
+	if !cursorExists {
+		return repoerrors.ErrAgentDeliveryCheckpointMissing
+	}
+	matches, err := sameAgentDeliveryEvent(&stored, incoming)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		return repoerrors.ErrAgentDeliveryEventConflict
+	}
+	return nil
+}
+
+func (r *Repository) validateMissingAgentDeliveryEventSequenceTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	event *models.AgentDeliveryEvent,
+	cursor models.AgentDeliveryCursor,
+	cursorExists bool,
+) error {
+	if cursorExists {
+		if event.Sequence <= cursor.ReceivedSequence {
+			return repoerrors.ErrAgentDeliveryCheckpointMissing
+		}
+		return nil
+	}
+	hasRows, err := r.agentDeliveryStreamHasRowsTx(ctx, tx, event.StreamID)
+	if err != nil {
+		return err
+	}
+	if hasRows {
+		return repoerrors.ErrAgentDeliveryCheckpointMissing
+	}
+	return nil
+}
+
+func (r *Repository) insertAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, contentHash string) (int64, error) {
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO agent_delivery_inbox
 		(stream_id, sequence, session_id, incarnation_id, harness_generation,
-		 submission_id, event_type, payload, terminal, received_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 submission_id, event_type, payload, terminal, received_at, content_hash, hash_version, payload_bytes)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (stream_id, sequence) DO NOTHING`),
 		event.StreamID, event.Sequence, event.SessionID, event.IncarnationID,
 		event.HarnessGeneration, event.SubmissionID, event.EventType, event.Payload,
-		boolToInt(event.Terminal), event.ReceivedAt)
+		boolToInt(event.Terminal), event.ReceivedAt, contentHash,
+		agentDeliveryPayloadHashVersion, len(event.Payload))
 	if err != nil {
 		return 0, err
 	}
+	event.ContentHash = contentHash
+	event.HashVersion = agentDeliveryPayloadHashVersion
+	event.PayloadBytes = int64(len(event.Payload))
 	inserted, err := result.RowsAffected()
 	if err != nil || inserted != 0 {
 		return inserted, err
 	}
-	var stored models.AgentDeliveryEvent
-	var terminal int
-	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT session_id, incarnation_id, harness_generation, submission_id,
-		       event_type, payload, terminal
-		FROM agent_delivery_inbox
-		WHERE stream_id = ? AND sequence = ?`), event.StreamID, event.Sequence).Scan(
-		&stored.SessionID, &stored.IncarnationID, &stored.HarnessGeneration,
-		&stored.SubmissionID, &stored.EventType, &stored.Payload, &terminal); err != nil {
+	stored, _, found, err := r.findAgentDeliveryEventTx(ctx, tx, event.StreamID, event.Sequence)
+	if err != nil {
 		return 0, err
 	}
-	stored.StreamID = event.StreamID
-	stored.Sequence = event.Sequence
-	stored.Terminal = terminal != 0
-	if !sameAgentDeliveryEvent(&stored, event) {
+	if !found {
+		return 0, repoerrors.ErrAgentDeliveryCheckpointMissing
+	}
+	matches, err := sameAgentDeliveryEvent(&stored, event)
+	if err != nil {
+		return 0, err
+	}
+	if !matches {
 		return 0, repoerrors.ErrAgentDeliveryEventConflict
 	}
 	return 0, nil
 }
 
-func (r *Repository) loadOrCreateAgentDeliveryCursorTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent) (models.AgentDeliveryCursor, error) {
+func (r *Repository) loadAgentDeliveryCursorTx(ctx context.Context, tx *sqlx.Tx, streamID string) (models.AgentDeliveryCursor, bool, error) {
 	var cursor models.AgentDeliveryCursor
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT session_id, incarnation_id, harness_generation, received_sequence,
-		       projected_sequence, remote_high_water, updated_at
-		FROM agent_delivery_cursors WHERE stream_id = ?`), event.StreamID).Scan(
+		       projected_sequence, remote_high_water, retired_sequence, updated_at
+		FROM agent_delivery_cursors WHERE stream_id = ?`), streamID).Scan(
 		&cursor.SessionID, &cursor.IncarnationID, &cursor.HarnessGeneration,
 		&cursor.ReceivedSequence, &cursor.ProjectedSequence, &cursor.RemoteHighWater,
-		&cursor.UpdatedAt)
+		&cursor.RetiredSequence, &cursor.UpdatedAt)
 	if err == nil {
-		if cursor.SessionID != event.SessionID || cursor.IncarnationID != event.IncarnationID || cursor.HarnessGeneration != event.HarnessGeneration {
-			return models.AgentDeliveryCursor{}, fmt.Errorf("agent delivery stream owner mismatch")
-		}
-		cursor.StreamID = event.StreamID
-		return cursor, nil
+		cursor.StreamID = streamID
+		return cursor, true, nil
 	}
 	if err != sql.ErrNoRows {
-		return models.AgentDeliveryCursor{}, err
+		return models.AgentDeliveryCursor{}, false, err
 	}
-	cursor = models.AgentDeliveryCursor{
-		StreamID: event.StreamID, SessionID: event.SessionID, IncarnationID: event.IncarnationID,
-		HarnessGeneration: event.HarnessGeneration,
-	}
-	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO agent_delivery_cursors
-		(stream_id, session_id, incarnation_id, harness_generation, updated_at)
-		VALUES (?, ?, ?, ?, ?)`), event.StreamID, event.SessionID, event.IncarnationID,
-		event.HarnessGeneration, event.ReceivedAt)
-	return cursor, err
+	return models.AgentDeliveryCursor{}, false, nil
+}
+
+func (r *Repository) agentDeliveryStreamHasRowsTx(ctx context.Context, tx *sqlx.Tx, streamID string) (bool, error) {
+	var exists bool
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT EXISTS (SELECT 1 FROM agent_delivery_inbox WHERE stream_id = ?)`), streamID).Scan(&exists)
+	return exists, err
 }
 
 func advanceReceivedCursorTx(ctx context.Context, tx *sqlx.Tx, rebind func(string) string, streamID string, cursor *models.AgentDeliveryCursor) error {
@@ -331,12 +467,12 @@ func advanceReceivedCursorTx(ctx context.Context, tx *sqlx.Tx, rebind func(strin
 func (r *Repository) GetAgentDeliveryCursor(ctx context.Context, streamID string) (*models.AgentDeliveryCursor, error) {
 	row := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT stream_id, session_id, incarnation_id, harness_generation,
-		       received_sequence, projected_sequence, remote_high_water, updated_at
+		       received_sequence, projected_sequence, remote_high_water, retired_sequence, updated_at
 		FROM agent_delivery_cursors WHERE stream_id = ?`), streamID)
 	var cursor models.AgentDeliveryCursor
 	if err := row.Scan(&cursor.StreamID, &cursor.SessionID, &cursor.IncarnationID,
 		&cursor.HarnessGeneration, &cursor.ReceivedSequence, &cursor.ProjectedSequence,
-		&cursor.RemoteHighWater, &cursor.UpdatedAt); err != nil {
+		&cursor.RemoteHighWater, &cursor.RetiredSequence, &cursor.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &cursor, nil
@@ -348,7 +484,8 @@ func (r *Repository) ListUnprojectedAgentDeliveryEvents(ctx context.Context, str
 	}
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT stream_id, sequence, session_id, incarnation_id, harness_generation,
-		       submission_id, event_type, payload, terminal, received_at, projected_at
+		       submission_id, event_type, payload, terminal, received_at, projected_at,
+		       content_hash, hash_version, payload_pruned_at, payload_bytes
 		FROM agent_delivery_inbox
 		WHERE stream_id = ? AND projected_at IS NULL
 		ORDER BY sequence LIMIT ?`), streamID, limit)
@@ -363,16 +500,29 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 	if event == nil {
 		return false, fmt.Errorf("event is required")
 	}
+	if err := r.prepareAgentDeliveryReceiptStatement(ctx); err != nil {
+		return false, err
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), event.SessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{event.SessionID}, []string{event.StreamID}); err != nil {
+		return false, err
+	}
 	stored, projectedAt, err := r.loadAgentDeliveryEventTx(ctx, tx, event.StreamID, event.Sequence)
 	if err != nil {
 		return false, err
 	}
-	if !sameAgentDeliveryEvent(&stored, event) {
+	matches, err := sameAgentDeliveryEvent(&stored, event)
+	if err != nil {
+		return false, err
+	}
+	if !matches {
 		return false, repoerrors.ErrAgentDeliveryEventConflict
 	}
 	terminalEffect, err := deliveryTerminalSettlementEffect(&stored)
@@ -432,26 +582,64 @@ func insertProjectionEffects(
 	return nil
 }
 
-func (r *Repository) loadAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, streamID string, sequence int64) (models.AgentDeliveryEvent, sql.NullTime, error) {
+func (r *Repository) findAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, streamID string, sequence int64) (models.AgentDeliveryEvent, sql.NullTime, bool, error) {
 	var stored models.AgentDeliveryEvent
 	var terminal int
-	var projectedAt sql.NullTime
-	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT session_id, incarnation_id, harness_generation, submission_id,
-		       event_type, payload, terminal, projected_at
-		FROM agent_delivery_inbox WHERE stream_id = ? AND sequence = ?`), streamID, sequence).Scan(
+	var projectedAt, payloadPrunedAt sql.NullTime
+	statement, err := r.agentDeliveryReceiptStatement()
+	if err != nil {
+		return models.AgentDeliveryEvent{}, sql.NullTime{}, false, err
+	}
+	var row *sqlx.Row
+	if statement == nil {
+		row = tx.QueryRowxContext(ctx, r.db.Rebind(agentDeliveryReceiptQuery), streamID, sequence)
+	} else {
+		bound := tx.StmtxContext(ctx, statement)
+		defer func() { _ = bound.Close() }()
+		row = bound.QueryRowxContext(ctx, streamID, sequence)
+	}
+	err = row.Scan(
 		&stored.SessionID, &stored.IncarnationID, &stored.HarnessGeneration,
-		&stored.SubmissionID, &stored.EventType, &stored.Payload, &terminal, &projectedAt)
+		&stored.SubmissionID, &stored.EventType, &stored.Payload, &terminal, &projectedAt,
+		&stored.ContentHash, &stored.HashVersion, &payloadPrunedAt, &stored.PayloadBytes)
 	if err == sql.ErrNoRows {
-		return models.AgentDeliveryEvent{}, sql.NullTime{}, fmt.Errorf("agent delivery event not found")
+		return models.AgentDeliveryEvent{}, sql.NullTime{}, false, nil
 	}
 	if err != nil {
-		return models.AgentDeliveryEvent{}, sql.NullTime{}, err
+		return models.AgentDeliveryEvent{}, sql.NullTime{}, false, err
 	}
 	stored.StreamID = streamID
 	stored.Sequence = sequence
 	stored.Terminal = terminal != 0
-	return stored, projectedAt, nil
+	if payloadPrunedAt.Valid {
+		at := payloadPrunedAt.Time
+		stored.PayloadPrunedAt = &at
+	}
+	return stored, projectedAt, true, nil
+}
+
+func (r *Repository) loadAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, streamID string, sequence int64) (models.AgentDeliveryEvent, sql.NullTime, error) {
+	stored, projectedAt, found, err := r.findAgentDeliveryEventTx(ctx, tx, streamID, sequence)
+	if err != nil {
+		return models.AgentDeliveryEvent{}, sql.NullTime{}, err
+	}
+	if found {
+		return stored, projectedAt, nil
+	}
+	cursor, exists, err := r.loadAgentDeliveryCursorTx(ctx, tx, streamID)
+	if err != nil {
+		return models.AgentDeliveryEvent{}, sql.NullTime{}, err
+	}
+	if !exists {
+		return models.AgentDeliveryEvent{}, sql.NullTime{}, repoerrors.ErrAgentDeliveryCheckpointMissing
+	}
+	if sequence <= cursor.RetiredSequence {
+		return models.AgentDeliveryEvent{}, sql.NullTime{}, repoerrors.ErrAgentDeliveryReplayExpired
+	}
+	if sequence <= cursor.ProjectedSequence || sequence <= cursor.ReceivedSequence {
+		return models.AgentDeliveryEvent{}, sql.NullTime{}, repoerrors.ErrAgentDeliveryCheckpointMissing
+	}
+	return models.AgentDeliveryEvent{}, sql.NullTime{}, fmt.Errorf("agent delivery event not found")
 }
 
 func advanceProjectedCursorTx(ctx context.Context, tx *sqlx.Tx, rebind func(string) string, streamID string, now time.Time) error {
@@ -495,6 +683,12 @@ func (r *Repository) PutAgentDeliveryEffect(ctx context.Context, effect *models.
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), effect.SessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{effect.SessionID}, []string{effect.StreamID}); err != nil {
+		return false, err
+	}
 	inserted, err := insertDeliveryEffectTx(ctx, tx, r.db.Rebind, effect)
 	if err != nil {
 		return false, err
@@ -601,16 +795,40 @@ func sameAgentDeliveryEffect(existing, incoming *models.AgentDeliveryEffect) boo
 		existing.TurnID == incoming.TurnID && existing.Outcome == incoming.Outcome
 }
 
-func sameAgentDeliveryEvent(stored, incoming *models.AgentDeliveryEvent) bool {
-	return stored.StreamID == incoming.StreamID &&
-		stored.Sequence == incoming.Sequence &&
-		stored.SessionID == incoming.SessionID &&
-		stored.IncarnationID == incoming.IncarnationID &&
-		stored.HarnessGeneration == incoming.HarnessGeneration &&
-		stored.SubmissionID == incoming.SubmissionID &&
-		stored.EventType == incoming.EventType &&
-		stored.Terminal == incoming.Terminal &&
-		sameAgentDeliveryPayload(stored.Payload, incoming.Payload)
+func sameAgentDeliveryEvent(stored, incoming *models.AgentDeliveryEvent) (bool, error) {
+	if !sameAgentDeliveryEventIdentity(stored, incoming) {
+		return false, nil
+	}
+	if stored.HashVersion > agentDeliveryPayloadHashVersion {
+		return false, fmt.Errorf("hash version %d: %w", stored.HashVersion, repoerrors.ErrAgentDeliveryHashVersion)
+	}
+	return sameAgentDeliveryEventPayload(stored, incoming)
+}
+
+func sameAgentDeliveryEventIdentity(stored, incoming *models.AgentDeliveryEvent) bool {
+	return stored.StreamID == incoming.StreamID && stored.Sequence == incoming.Sequence &&
+		stored.SessionID == incoming.SessionID && stored.IncarnationID == incoming.IncarnationID &&
+		stored.HarnessGeneration == incoming.HarnessGeneration && stored.SubmissionID == incoming.SubmissionID &&
+		stored.EventType == incoming.EventType && stored.Terminal == incoming.Terminal
+}
+
+func sameAgentDeliveryEventPayload(stored, incoming *models.AgentDeliveryEvent) (bool, error) {
+	if stored.PayloadPrunedAt != nil {
+		if stored.HashVersion != agentDeliveryPayloadHashVersion || stored.ContentHash == "" {
+			return false, repoerrors.ErrAgentDeliveryReceiptCorrupt
+		}
+		return stored.ContentHash == agentDeliveryEventHash(incoming), nil
+	}
+	if stored.HashVersion == agentDeliveryPayloadHashVersion {
+		if stored.ContentHash == "" || stored.ContentHash != agentDeliveryEventHash(stored) {
+			return false, repoerrors.ErrAgentDeliveryReceiptCorrupt
+		}
+		if bytes.Equal(stored.Payload, incoming.Payload) {
+			return true, nil
+		}
+		return stored.ContentHash == agentDeliveryEventHash(incoming), nil
+	}
+	return sameAgentDeliveryPayload(stored.Payload, incoming.Payload), nil
 }
 
 // sameAgentDeliveryPayload compares the transport event content while
@@ -625,24 +843,9 @@ func sameAgentDeliveryPayload(stored, incoming []byte) bool {
 	if bytes.Equal(stored, incoming) {
 		return true
 	}
-	var storedEvent, incomingEvent streams.AgentEvent
-	if err := json.Unmarshal(stored, &storedEvent); err != nil {
-		return false
-	}
-	if err := json.Unmarshal(incoming, &incomingEvent); err != nil {
-		return false
-	}
-	stripLifecycleDeliveryFields(&storedEvent)
-	stripLifecycleDeliveryFields(&incomingEvent)
-	storedPayload, err := json.Marshal(storedEvent)
-	if err != nil {
-		return false
-	}
-	incomingPayload, err := json.Marshal(incomingEvent)
-	if err != nil {
-		return false
-	}
-	return bytes.Equal(storedPayload, incomingPayload)
+	storedMode, storedPayload := normalizeAgentDeliveryPayload(stored)
+	incomingMode, incomingPayload := normalizeAgentDeliveryPayload(incoming)
+	return storedMode == incomingMode && bytes.Equal(storedPayload, incomingPayload)
 }
 
 func stripLifecycleDeliveryFields(event *streams.AgentEvent) {
@@ -665,15 +868,21 @@ func scanAgentDeliveryEvents(rows deliveryEventRows) ([]*models.AgentDeliveryEve
 		var event models.AgentDeliveryEvent
 		var terminal int
 		var projected sql.NullTime
+		var payloadPrunedAt sql.NullTime
 		if err := rows.Scan(&event.StreamID, &event.Sequence, &event.SessionID,
 			&event.IncarnationID, &event.HarnessGeneration, &event.SubmissionID,
-			&event.EventType, &event.Payload, &terminal, &event.ReceivedAt, &projected); err != nil {
+			&event.EventType, &event.Payload, &terminal, &event.ReceivedAt, &projected,
+			&event.ContentHash, &event.HashVersion, &payloadPrunedAt, &event.PayloadBytes); err != nil {
 			return nil, err
 		}
 		event.Terminal = terminal != 0
 		if projected.Valid {
 			t := projected.Time
 			event.ProjectedAt = &t
+		}
+		if payloadPrunedAt.Valid {
+			t := payloadPrunedAt.Time
+			event.PayloadPrunedAt = &t
 		}
 		events = append(events, &event)
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 )
 
@@ -147,6 +148,10 @@ func (h *TerminalHandler) handleAgentTerminalRoute(c *gin.Context, sessionID str
 func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environmentID, terminalID string) {
 	execution, err := h.lifecycleMgr.GetOrEnsureExecutionForEnvironment(c.Request.Context(), environmentID)
 	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskEnvironmentNotFound) {
+			h.closeMissingEnvironmentTerminal(c)
+			return
+		}
 		h.logger.Warn("environment terminal execution not ready",
 			zap.String("task_environment_id", environmentID),
 			zap.String("terminal_id", terminalID),
@@ -179,6 +184,23 @@ func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environme
 		zap.String("terminal_id", terminalID),
 		zap.String("remote_addr", c.Request.RemoteAddr))
 	h.handleUserShellWS(c, execution, environmentID, terminalID, interactiveRunner)
+}
+
+func (h *TerminalHandler) closeMissingEnvironmentTerminal(c *gin.Context) {
+	if !gorillaws.IsWebSocketUpgrade(c.Request) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "task environment not found"})
+		return
+	}
+	// Browsers hide failed handshake status codes. Complete the upgrade so a
+	// retained terminal can distinguish a removed target from a temporary outage.
+	conn, err := terminalUpgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.WriteControl(gorillaws.CloseMessage,
+		gorillaws.FormatCloseMessage(gorillaws.CloseNormalClosure, "environment_not_found"),
+		time.Now().Add(time.Second))
 }
 
 func (h *TerminalHandler) handleRemoteUserShellWS(

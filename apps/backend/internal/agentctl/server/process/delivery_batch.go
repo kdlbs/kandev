@@ -36,6 +36,8 @@ type deliveryWriteResult struct {
 // stays bounded independently.
 type deliveryEventWriter struct {
 	manager  *Manager
+	ctx      context.Context
+	cancel   context.CancelFunc
 	input    chan deliveryWriteRequest
 	space    chan struct{}
 	closedCh chan struct{}
@@ -49,7 +51,13 @@ type deliveryEventWriter struct {
 }
 
 func newDeliveryEventWriter(manager *Manager) *deliveryEventWriter {
+	parent := manager.lifetimeCtx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
 	writer := &deliveryEventWriter{
+		ctx: ctx, cancel: cancel,
 		manager:  manager,
 		input:    make(chan deliveryWriteRequest, 256),
 		space:    make(chan struct{}, 1),
@@ -70,26 +78,8 @@ func (w *deliveryEventWriter) persist(ctx context.Context, update adapter.AgentE
 		return update, fmt.Errorf("%w: delivery queue item is %d bytes", journal.ErrJournalFull, size)
 	}
 	request := deliveryWriteRequest{update: update, size: size, result: make(chan deliveryWriteResult, 1)}
-	for {
-		w.mu.Lock()
-		if w.closed {
-			w.mu.Unlock()
-			return update, errDeliveryWriterClosed
-		}
-		if w.queued+size <= deliveryWriterQueueBytes {
-			w.queued += size
-			w.mu.Unlock()
-			break
-		}
-		space := w.space
-		w.mu.Unlock()
-		select {
-		case <-space:
-		case <-w.closedCh:
-			return update, errDeliveryWriterClosed
-		case <-ctx.Done():
-			return update, ctx.Err()
-		}
+	if err := w.reserve(ctx, size); err != nil {
+		return update, err
 	}
 
 	// Serialize the send with close. Without this lock, close can close input
@@ -100,12 +90,17 @@ func (w *deliveryEventWriter) persist(ctx context.Context, update adapter.AgentE
 	if w.closed {
 		w.mu.Unlock()
 		w.sendMu.Unlock()
+		w.release(size)
 		return update, errDeliveryWriterClosed
 	}
 	w.mu.Unlock()
 	select {
 	case w.input <- request:
 		w.sendMu.Unlock()
+	case <-w.ctx.Done():
+		w.sendMu.Unlock()
+		w.release(size)
+		return update, errDeliveryWriterClosed
 	case <-ctx.Done():
 		w.sendMu.Unlock()
 		w.release(size)
@@ -117,6 +112,33 @@ func (w *deliveryEventWriter) persist(ctx context.Context, update adapter.AgentE
 	case <-ctx.Done():
 		return update, ctx.Err()
 	}
+}
+
+func (w *deliveryEventWriter) reserve(ctx context.Context, size int) error {
+	for {
+		w.mu.Lock()
+		if w.closed {
+			w.mu.Unlock()
+			return errDeliveryWriterClosed
+		}
+		if w.queued+size <= deliveryWriterQueueBytes {
+			w.queued += size
+			w.mu.Unlock()
+			return nil
+		}
+		space := w.space
+		w.mu.Unlock()
+		select {
+		case <-space:
+		case <-w.ctx.Done():
+			return errDeliveryWriterClosed
+		case <-w.closedCh:
+			return errDeliveryWriterClosed
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
 }
 
 func (w *deliveryEventWriter) release(size int) {
@@ -134,6 +156,7 @@ func (w *deliveryEventWriter) release(size int) {
 
 func (w *deliveryEventWriter) close() {
 	w.closeOnce.Do(func() {
+		w.cancel()
 		w.sendMu.Lock()
 		w.mu.Lock()
 		w.closed = true
@@ -193,7 +216,7 @@ func (w *deliveryEventWriter) commit(batch []deliveryWriteRequest) {
 	for i, request := range batch {
 		updates[i] = request.update
 	}
-	committed, err := w.manager.persistDeliveryBatch(context.Background(), updates)
+	committed, err := w.manager.persistDeliveryBatch(w.ctx, updates)
 	for i, request := range batch {
 		result := deliveryWriteResult{update: request.update, err: err}
 		if err == nil {

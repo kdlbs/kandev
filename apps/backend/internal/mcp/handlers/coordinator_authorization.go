@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/coordinator"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -32,6 +34,9 @@ var coordinatorSurfaceActions = map[string]struct{}{
 	coordinator.ActionProposeMove:    {},
 	coordinator.ActionGetItem:        {},
 	coordinator.ActionListActivity:   {},
+
+	coordinator.ActionProposeImprovement: {},
+	coordinator.ActionListTurns:          {},
 }
 
 // coordinatorPrincipalOnlyActions are registered coordinator-surface actions
@@ -47,6 +52,9 @@ var coordinatorPrincipalOnlyActions = map[string]struct{}{
 	coordinator.ActionProposeMove:    {},
 	coordinator.ActionGetItem:        {},
 	coordinator.ActionListActivity:   {},
+
+	coordinator.ActionProposeImprovement: {},
+	coordinator.ActionListTurns:          {},
 }
 
 // authorizeCoordinatorRequest is the one execution-time boundary for the
@@ -75,6 +83,12 @@ func (h *Handlers) authorizeCoordinatorRequest(ctx context.Context, msg *ws.Mess
 	if _, reserved := coordinator.DecisionActions[msg.Action]; reserved && (isCoordinator || !hasPrincipal) {
 		return coordinatorUnknownAction(msg)
 	}
+	if msg.Action == coordinator.ActionProposeImprovement && (h.coordinatorSvc == nil || !h.coordinatorSvc.Phase3Enabled()) {
+		return coordinatorUnknownAction(msg)
+	}
+	if msg.Action == coordinator.ActionListTurns && (h.coordinatorSvc == nil || !h.coordinatorSvc.Phase31Enabled() || h.coordinatorTurns == nil) {
+		return coordinatorUnknownAction(msg)
+	}
 	if _, principalOnly := coordinatorPrincipalOnlyActions[msg.Action]; principalOnly && !isCoordinator {
 		return coordinatorUnknownAction(msg)
 	}
@@ -92,6 +106,9 @@ func (h *Handlers) authorizeCoordinatorSurface(
 	ctx context.Context, principal mcpscope.Principal, msg *ws.Message,
 ) (*ws.Message, *ws.Message, error) {
 	phase2 := h.coordinatorSvc != nil && h.coordinatorSvc.Phase2()
+	if phase2 && !h.coordinatorWorkspaceMatches(ctx, principal) {
+		return coordinatorNotFound(msg)
+	}
 	if phase2 && principal.WorkspaceID != "" {
 		if refused, response, err := h.authorizeCoordinatorPolicy(ctx, principal, msg); refused {
 			return response, nil, err
@@ -107,7 +124,7 @@ func (h *Handlers) authorizeCoordinatorSurface(
 	fields, err := automationPayloadFields(msg.Payload)
 	if err != nil {
 		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest,
-			"Invalid payload: "+err.Error(), nil)
+			"Invalid JSON payload", nil)
 		return response, nil, responseErr
 	}
 	if !h.authorizeCoordinatorReferenceFields(ctx, principal, msg.Action, fields) {
@@ -119,12 +136,23 @@ func (h *Handlers) authorizeCoordinatorSurface(
 	return nil, msg, nil
 }
 
+func (h *Handlers) coordinatorWorkspaceMatches(ctx context.Context, principal mcpscope.Principal) bool {
+	if h.coordinatorSvc == nil || principal.WorkspaceID == "" {
+		return false
+	}
+	workspaceID, err := h.coordinatorSvc.WorkspaceIDOf(ctx, principal.CoordinatorID)
+	return err == nil && workspaceID == principal.WorkspaceID
+}
+
 // phaseOneToolNames is the tool list of a conversation that has no binding.
-var phaseOneToolNames = coordinator.ToolNames(coordinator.PhaseOnePolicy(), false)
+var phaseOneToolNames = coordinator.ToolNames(coordinator.PhaseOnePolicy(), false, false)
 
 // actionClass is the activity class a refused request is recorded under: the
 // policy action of a propose tool, otherwise unknown.
 func actionClass(action string) coordinator.Action {
+	if action == coordinator.ActionProposeImprovement {
+		return coordinator.ActionImprovement
+	}
 	if tool, ok := coordinator.ToolForAction(action); ok {
 		if class, isPropose := coordinator.ProposeActionFor(tool); isPropose {
 			return class
@@ -195,6 +223,17 @@ func coordinatorBindingMatches(binding *mcpprofile.CoordinatorToolPolicy, princi
 func (h *Handlers) refuseCoordinator(
 	ctx context.Context, principal mcpscope.Principal, msg *ws.Message, class coordinator.Action, reason string,
 ) (bool, *ws.Message, error) {
+	// A dream episode's refusals are written nowhere: the episode has no row a
+	// turn could read, and a failed read records nothing either.
+	dream, dreamErr := h.coordinatorSvc.IsDreamEpisodeTask(ctx, principal.CallerTaskID)
+	if dreamErr != nil {
+		h.logger.Warn("coordinator refusal not recorded: dream episode check failed",
+			zap.String("coordinator_id", principal.CoordinatorID), zap.Error(dreamErr))
+	}
+	if dreamErr != nil || dream {
+		response, _, respErr := coordinatorUnknownAction(msg)
+		return true, response, respErr
+	}
 	if err := h.coordinatorSvc.RecordRefusal(ctx, principal.CoordinatorID, principal.WorkspaceID, class, reason); err != nil {
 		h.logger.Error("coordinator refusal not recorded",
 			zap.String("coordinator_id", principal.CoordinatorID), zap.String("reason", reason), zap.Error(err))
@@ -226,9 +265,20 @@ func (h *Handlers) coordinatorWatchesFields(
 		if err != nil || task == nil {
 			return false
 		}
-		workflowID = task.WorkflowID
+		return h.coordinatorWatchesTask(ctx, principal, task.ID, task.WorkflowID)
 	}
 	return h.coordinatorWatchesWorkflow(ctx, principal, workflowID)
+}
+
+// coordinatorWatchesTask reports whether the task is in the coordinator's
+// Watches, workflow and projects together; an unreadable scope refuses.
+func (h *Handlers) coordinatorWatchesTask(ctx context.Context, principal mcpscope.Principal, taskID, workflowID string) bool {
+	watched, err := h.coordinatorSvc.TaskWatched(ctx, principal.CoordinatorID, taskID, workflowID)
+	if err != nil {
+		h.logger.Error("coordinator watch scope read failed; refusing", zap.String("coordinator_id", principal.CoordinatorID), zap.Error(err))
+		return false
+	}
+	return watched
 }
 
 // coordinatorWatchesWorkflow reports whether the workflow is in the
@@ -306,10 +356,43 @@ func coordinatorNotFound(msg *ws.Message) (*ws.Message, *ws.Message, error) {
 // propose tools, whose own field and target validation runs in the coordinator
 // service and names the offending field.
 func isCoordinatorProposeAction(action string) bool {
+	if action == coordinator.ActionProposeImprovement {
+		return true
+	}
 	tool, ok := coordinator.ToolForAction(action)
 	if !ok {
 		return false
 	}
 	_, isPropose := coordinator.ProposeActionFor(tool)
 	return isPropose
+}
+
+// errCoordinatorProjectsRead is surfaced to the caller verbatim so an agent
+// can tell a failed projects read from an empty board.
+var errCoordinatorProjectsRead = errors.New("could not read the coordinator's projects")
+
+// filterCoordinatorTasks drops the tasks outside a coordinator principal's
+// projects. Other callers, and a coordinator without phase 2, see the list
+// unchanged. A resolver failure is an error naming projects.
+func (h *Handlers) filterCoordinatorTasks(ctx context.Context, tasks []*taskmodels.Task) ([]*taskmodels.Task, error) {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok || !principal.IsCoordinator() || h.coordinatorSvc == nil || !h.coordinatorSvc.Phase2() {
+		return tasks, nil
+	}
+	refs := make([]coordinator.TaskRef, 0, len(tasks))
+	for _, t := range tasks {
+		refs = append(refs, coordinator.TaskRef{ID: t.ID, WorkflowID: t.WorkflowID})
+	}
+	watched, err := h.coordinatorSvc.WatchedTaskIDs(ctx, principal.CoordinatorID, refs)
+	if err != nil {
+		h.logger.Error("coordinator projects read failed", zap.String("coordinator_id", principal.CoordinatorID), zap.Error(err))
+		return nil, errCoordinatorProjectsRead
+	}
+	kept := make([]*taskmodels.Task, 0, len(tasks))
+	for _, t := range tasks {
+		if watched[t.ID] {
+			kept = append(kept, t)
+		}
+	}
+	return kept, nil
 }

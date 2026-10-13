@@ -3,6 +3,7 @@ package launcher
 import (
 	"net"
 	"net/netip"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -94,6 +95,9 @@ func TestFindFreePortOnLoopbackHosts(t *testing.T) {
 }
 
 func TestFindFreePortOnWildcardHostIsAvailableAtEveryInterface(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a wildcard test listener prompts for Windows Firewall access from each temporary test binary")
+	}
 	addresses, err := netprobe.ProbeAddresses("0.0.0.0")
 	if err != nil {
 		t.Fatalf("ProbeAddresses: %v", err)
@@ -108,6 +112,9 @@ func TestFindFreePortOnWildcardHostIsAvailableAtEveryInterface(t *testing.T) {
 }
 
 func TestEnsurePortAvailableChecksConfiguredListenHost(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a non-loopback test listener prompts for Windows Firewall access from each temporary test binary")
+	}
 	listener, host := listenOnNonLoopbackIPv4ForLauncher(t)
 	defer func() { _ = listener.Close() }()
 	port := listener.Addr().(*net.TCPAddr).Port

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   linkToCoordinator,
   linkToCoordinatorAdd,
+  linkToCoordinatorAutonomySettings,
   linkToCoordinatorNeedsYou,
   linkToCoordinatorNeedsYouForm,
   linkToCoordinatorQueue,
@@ -72,5 +73,13 @@ describe("linkToCoordinatorSettings", () => {
 describe("linkToCoordinatorAdd", () => {
   it("builds the add-coordinator path", () => {
     expect(linkToCoordinatorAdd("ws-1")).toBe("/settings/workspaces/ws-1/coordinators/new");
+  });
+});
+
+describe("linkToCoordinatorAutonomySettings", () => {
+  it("opens the settings page on the autonomy section", () => {
+    expect(linkToCoordinatorAutonomySettings("w 1", "c1")).toBe(
+      "/settings/workspaces/w%201/coordinators/c1?section=autonomy",
+    );
   });
 });

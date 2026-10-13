@@ -537,6 +537,16 @@ func (s *Service) executeSendNowClaimWithContext(
 		}
 	}
 	deliveryAttempted, err := s.promptSendNowClaim(ctx, claim)
+	if errors.Is(err, errSendNowInitialPromptUncertain) {
+		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendNowClaimRecoveryTimeout)
+		defer cancel()
+		recoveryErr := s.recordSessionRecoveryBlock(recoveryCtx, sessionID, "send_now", &sessionRecoveryRequiredError{
+			Block: &models.SessionRecoveryBlock{Reason: "unknown_send_now_outcome"},
+		})
+		s.logger.Warn("retained initial Send Now claim with uncertain acceptance",
+			zap.String("session_id", sessionID), zap.Error(errors.Join(err, recoveryErr)))
+		return
+	}
 	if err != nil {
 		var acceptedDispatch *acceptedPromptDispatchError
 		if deliveryAttempted || errors.As(err, &acceptedDispatch) {
@@ -658,6 +668,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 				)
 			},
 		}
+		waitForAdmission := s.configureSendNowInitialAdmission(ctx, claim, &startOptions)
 		createdPrompt := promptContent
 		createdSkipMessageRecord := false
 		createdPlanMode := claim.Dispatch.PlanMode
@@ -729,6 +740,9 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 		}
 		if execution == nil {
 			return false, errors.New("send-now launch did not dispatch a created session")
+		}
+		if admissionErr := waitForAdmission(); admissionErr != nil {
+			return false, admissionErr
 		}
 		if ceilingClaim != nil {
 			ceilingClaim.settle(ctx)

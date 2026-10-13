@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/coordinator/replay"
 )
 
 func retentionRowCount(t *testing.T, store *Store, coordinatorID string) int {
@@ -34,25 +36,39 @@ func TestActivityRetention_StartRunsPassAndTickerThenStops(t *testing.T) {
 	old := svc.store.now().UTC().Add(-activityRetentionAge - time.Hour)
 	seedActivity(t, store, c.ID, "o1", ActionMove, ActivityProposed, old)
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		svc.WaitActivityRetentionStopped()
+	})
 	tick := make(chan time.Time)
 	stopped := make(chan struct{})
+	passes := make(chan struct{}, 2)
+	svc.afterRetentionPass = func() { passes <- struct{}{} }
 	svc.startActivityRetention(ctx, tick, func() { close(stopped) })
 	deadline := time.After(5 * time.Second)
-	for retentionRowCount(t, store, c.ID) != 0 {
-		select {
-		case <-deadline:
-			t.Fatal("startup pass did not delete")
-		case <-time.After(10 * time.Millisecond):
-		}
+	select {
+	case <-passes:
+	case <-deadline:
+		t.Fatal("startup pass did not delete")
+	}
+	if retentionRowCount(t, store, c.ID) != 0 {
+		t.Fatal("startup pass did not delete")
+	}
+	if svc.retentionRunning.Load() {
+		t.Fatal("startup pass did not finish")
 	}
 	seedActivity(t, store, c.ID, "o2", ActionMove, ActivityProposed, old)
 	tick <- time.Now()
-	for retentionRowCount(t, store, c.ID) != 0 {
-		select {
-		case <-deadline:
-			t.Fatal("tick pass did not delete")
-		case <-time.After(10 * time.Millisecond):
-		}
+	select {
+	case <-passes:
+	case <-deadline:
+		t.Fatal("tick pass did not delete")
+	}
+	if retentionRowCount(t, store, c.ID) != 0 {
+		t.Fatal("tick pass did not delete")
+	}
+	if svc.retentionRunning.Load() {
+		t.Fatal("tick pass did not finish")
 	}
 	cancel()
 	svc.WaitActivityRetentionStopped()
@@ -100,5 +116,34 @@ func TestActivityRetention_CancelledContextDeletesNothing(t *testing.T) {
 	}
 	if svc.retentionRunning.Load() {
 		t.Fatal("running flag left set")
+	}
+}
+
+func TestActivityRetention_PrunesOutcomeRowsPastCutoff(t *testing.T) {
+	svc, store, c, _, _ := newActivityService(t, true)
+	old := svc.store.now().UTC().Add(-outcomesRetention - time.Hour)
+	fresh := svc.store.now().UTC().Add(-outcomesRetention + time.Hour)
+	seedOutcomeRows(t, store, c.ID, old)
+	mustExec(t, store, `INSERT INTO coordinator_outcomes (proposal_id, coordinator_id, kind, decision, decided_at, graded_at)
+		VALUES ('p-keep', ?, 'create_task', 'approved', ?, ?)`, c.ID, fresh, fresh)
+	svc.runActivityRetention(context.Background())
+	if n := count(t, store, "coordinator_outcomes"); n != 1 {
+		t.Fatalf("outcome rows = %d, want the fresh one", n)
+	}
+	if n := count(t, store, "coordinator_feedback") + count(t, store, "coordinator_moveback_seen"); n != 0 {
+		t.Fatalf("old feedback and seen rows left: %d", n)
+	}
+}
+
+func TestActivityRetention_PrunesReplayResultsPastCutoff(t *testing.T) {
+	svc, store, c, _, _ := newActivityService(t, true)
+	now := svc.store.now().UTC()
+	mustExec(t, store, `INSERT INTO coordinator_replay_results (id, coordinator_id, status, created_at) VALUES ('r-old', ?, 'done', ?)`,
+		c.ID, now.Add(-replay.Retention-time.Hour))
+	mustExec(t, store, `INSERT INTO coordinator_replay_results (id, coordinator_id, status, created_at) VALUES ('r-new', ?, 'done', ?)`,
+		c.ID, now.Add(-replay.Retention+time.Hour))
+	svc.runActivityRetention(context.Background())
+	if n := count(t, store, "coordinator_replay_results"); n != 1 {
+		t.Fatalf("replay rows = %d, want the fresh one", n)
 	}
 }

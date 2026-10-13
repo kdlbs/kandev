@@ -19,6 +19,8 @@ test.describe("Coordinator sections on a phone viewport", () => {
       name: "Mobile Sections Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -54,6 +56,8 @@ test.describe("Coordinator sections on a phone viewport", () => {
       name: "Mobile Control Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     const base = linkToCoordinatorSettings(seedData.workspaceId, coordinator.id);
     for (const section of ["may-do", "watches"]) {

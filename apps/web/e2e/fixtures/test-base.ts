@@ -9,6 +9,7 @@ import { ApiClient } from "../helpers/api-client";
 import { dwell } from "../helpers/causal-waits";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
+import { restoreSidebarLayout } from "../helpers/sidebar-layout";
 import type { WorkflowStep } from "../../lib/types/http";
 
 const DEFAULT_SIDEBAR_VIEW = {
@@ -178,6 +179,7 @@ async function waitForSeedAgentProfile(
 export const test = backendFixture.extend<
   {
     testPage: Page;
+    desktopTestPage: Page;
     tabletTestPage: Page;
     coarseDesktopTestPage: Page;
     prCapture: PrAssetCapture;
@@ -366,6 +368,7 @@ export const test = backendFixture.extend<
       restoreSeedRepositoryOrigin(seedData);
       await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
       await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
+      await restoreSidebarLayout(apiClient, seedData.workspaceId, undefined);
 
       const { settings } = await apiClient.getUserSettings();
       await apiClient.saveUserSettings({
@@ -441,6 +444,22 @@ export const test = backendFixture.extend<
     await setupPage(page, backend);
     await use(page);
     await context.close();
+  },
+
+  desktopTestPage: async ({ browser, backend, testPage }, use) => {
+    // Share the test's backend reset while observing it from a desktop context.
+    void testPage;
+    const context = await browser.newContext({
+      ...devices["Desktop Chrome"],
+      baseURL: backend.frontendUrl,
+    });
+    try {
+      const page = await context.newPage();
+      await setupPage(page, backend);
+      await use(page);
+    } finally {
+      await context.close();
+    }
   },
 
   tabletTestPage: async ({ browser, backend, testPage }, use) => {

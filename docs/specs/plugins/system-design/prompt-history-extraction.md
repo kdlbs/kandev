@@ -40,8 +40,9 @@ Adjacent contracts this design uses but does not own:
 
 ### Removed from core
 
-- The built-in panel UI, prompt-only message projection and paging hooks, and
-  panel-only transcript sentinel options.
+- The built-in panel UI, its prompt-history older-page reader and paging hooks,
+  and panel-only transcript sentinel options. The distinct latest-prompt
+  projection for pinned transcript affordances remains under UI ownership.
 - Prompt-entry derivation and compact duration formatting; shared transcript
   duration rendering remains in core.
 - The retired panel/component identity, desktop and mobile entry points,
@@ -76,6 +77,10 @@ public shape and must not gain prompt-history-specific names or branches.
 - Shared transcript machinery: `hooks/use-lazy-load-messages.ts` (including the
   visible-pagination stop at prompt `#1`), `hooks/use-lazy-load-sentinel.ts`
   without the panel-only option, and `message-list-native-scroll.ts`.
+- Pinned prompt availability: the session-scoped `messagePrompts` projection
+  and `useSessionPrompts` provide the latest user prompt to `TaskChatPanel`.
+  This projection does not load older prompt pages or expose a Prompt History
+  surface.
 - Turn-duration helpers used by the transcript hover row:
   `messageTurnDurationSeconds`, `formatPromptDuration`, and
   `PromptDurationUnits`, relocated to `apps/web/lib/turn-duration.ts` and
@@ -117,7 +122,9 @@ routes consistent.
 
 ## Data and contracts
 
-- No backend API, DTO, table, migration, route, or prompt-projection change.
+- No backend API, DTO, table, migration, route, or plugin conversation
+  projection change. The latest-prompt projection is frontend state for pinned
+  transcript affordances, not a replacement for plugin-owned prompt history.
   Repository hard-delete paths remove session prompt-sequence rows with their
   owning task/session so a deleted identity cannot leave stale internal state.
 - `prompt_index` stays on `models.Message` and the public `v1.Message`, and the
@@ -151,9 +158,9 @@ routes consistent.
    dropping the first term means a task with no canvases and no enabled plugin
    panel no longer shows an entry that would open an empty sheet.
 3. **Read prompt data.** The plugin calls the façade, which performs authorized
-   reads and live reconciliation into its own scope cache. Core's store is no
-   longer involved, so no store slice, generation counter, or live fan-out is
-   needed for prompts.
+   reads and live reconciliation into its own scope cache for Prompt History.
+   Separately, `TaskChatPanel` reads the latest-prompt projection for pinned
+   transcript affordances; it does not page older prompt history.
 4. **Navigate to a prompt.** The plugin's navigation capability calls
    `scrollTranscriptToMessage`, which activates the chat panel and queues the
    pending scroll target in the dockview store; the transcript consumes it

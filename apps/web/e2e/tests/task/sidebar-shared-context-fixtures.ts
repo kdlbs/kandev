@@ -41,6 +41,10 @@ async function switchSurfaceWorkspace(
       .getByRole("dialog", { name: "Tasks", exact: true })
       .getByTitle("Switch workspace")
       .tap();
+    await expect(page.getByRole("dialog", { name: "Tasks", exact: true })).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => getComputedStyle(document.body).pointerEvents))
+      .toBe("none");
     const name = await page.evaluate(
       (id) =>
         (window as Window & { __KANDEV_E2E_STORE__: StoreApi<AppState> }).__KANDEV_E2E_STORE__
@@ -55,6 +59,12 @@ async function switchSurfaceWorkspace(
     await page.getByTestId(`task-card-${context.anchor.id}`).click();
   }
   await expect(page).toHaveURL(new RegExp(`/t/${context.anchor.id}$`));
+  if (mobile) {
+    await expect(page.getByRole("dialog", { name: "Tasks", exact: true })).toBeHidden();
+    await expect
+      .poll(() => page.evaluate(() => getComputedStyle(document.body).pointerEvents))
+      .not.toBe("none");
+  }
   return surface(page, mobile);
 }
 
@@ -110,6 +120,16 @@ export async function exerciseSharedContextRecovery(
     try {
       await socket!.close({ code: 1012, reason: "Sidebar reconnect regression" });
       await held.captured;
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (
+                window as Window & { __KANDEV_E2E_STORE__: StoreApi<AppState> }
+              ).__KANDEV_E2E_STORE__.getState().connection.status,
+          ),
+        )
+        .toBe("connected");
       currentSurface = await switchSurfaceWorkspace(page, mobile, after);
       await expect(
         currentSurface.rows.locator(`[data-task-row-id="${after.anchor.id}"]`),

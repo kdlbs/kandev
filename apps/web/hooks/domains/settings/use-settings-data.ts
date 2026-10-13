@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { listAvailableAgents, listExecutors } from "@/lib/api";
+import { listAvailableAgents } from "@/lib/api";
+import { loadInitialExecutors } from "./initial-executor-catalogue-read";
 import {
   agentListAuthScopeIdentity,
   getAgentListResourceScope,
@@ -32,11 +33,11 @@ function useAgentListResource(enabled: boolean) {
 }
 
 export function useSettingsData(enabled = true) {
+  const store = useAppStoreApi();
   const executors = useAppStore((state) => state.executors.items);
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const settingsData = useAppStore((state) => state.settingsData);
   const availableAgents = useAppStore((state) => state.availableAgents);
-  const setExecutors = useAppStore((state) => state.setExecutors);
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
   const setAvailableAgents = useAppStore((state) => state.setAvailableAgents);
@@ -46,16 +47,8 @@ export function useSettingsData(enabled = true) {
 
   useEffect(() => {
     if (!enabled || !agentListResource) return;
-    if (settingsData.executorsLoaded) return;
-    if (executors.length === 0) {
-      listExecutors({ cache: "no-store" })
-        .then((response) => setExecutors(response.executors))
-        .catch(() => setExecutors([]))
-        .finally(() => setSettingsData({ executorsLoaded: true }));
-    } else {
-      setSettingsData({ executorsLoaded: true });
-    }
-  }, [enabled, executors.length, setExecutors, setSettingsData, settingsData.executorsLoaded]);
+    void loadInitialExecutors(store);
+  }, [enabled, agentListResource, store, executors.length, settingsData.executorsLoaded]);
 
   useEffect(() => {
     if (!enabled || !agentListResource) return;

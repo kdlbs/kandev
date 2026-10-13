@@ -4,13 +4,13 @@ import { listPorts, listTunnels, type ListeningPort } from "@/lib/api/domains/po
 import { toast } from "@/lib/toast/sonner";
 import { useTunnelActions } from "./use-tunnel-actions";
 
-type Scope = { sessionId: string | null };
+type Scope = { sessionId: string | null; refreshVersion: number; mutationVersion: number };
 
 function initialState(scope: Scope) {
   return {
     scope,
     activeTunnels: new Map<number, number>(),
-    mutatedPorts: new Set<number>(),
+    mutatedPorts: new Map<number, number>(),
     detectedPorts: [] as ListeningPort[],
     manualPorts: [] as number[],
     manualValue: "",
@@ -25,10 +25,11 @@ function retainTargets(previous: number[], tunnels: Map<number, number>) {
   return [...new Set([...previous, ...tunnels.keys()])];
 }
 
-function updateTunnels(state: State, activeTunnels: Map<number, number>) {
-  const mutatedPorts = new Set(state.mutatedPorts);
+function updateTunnels(state: State, activeTunnels: Map<number, number>, mutationVersion: number) {
+  const mutatedPorts = new Map(state.mutatedPorts);
   for (const port of new Set([...state.activeTunnels.keys(), ...activeTunnels.keys()])) {
-    if (state.activeTunnels.get(port) !== activeTunnels.get(port)) mutatedPorts.add(port);
+    if (state.activeTunnels.get(port) !== activeTunnels.get(port))
+      mutatedPorts.set(port, mutationVersion);
   }
   return {
     ...state,
@@ -40,15 +41,16 @@ function updateTunnels(state: State, activeTunnels: Map<number, number>) {
 
 export function usePortForwardManagement(sessionId: string | null, active: boolean) {
   const { t } = useTranslation();
-  const scope = useMemo(() => ({ sessionId }), [sessionId]);
+  const scope = useMemo(() => ({ sessionId, refreshVersion: 0, mutationVersion: 0 }), [sessionId]);
   const [state, setState] = useState(() => initialState(scope));
   if (state.scope !== scope) setState(initialState(scope));
 
   const setActiveTunnels = useCallback(
     (updater: (previous: Map<number, number>) => Map<number, number>) => {
+      const mutationVersion = ++scope.mutationVersion;
       setState((previous) =>
         previous.scope === scope
-          ? updateTunnels(previous, updater(previous.activeTunnels))
+          ? updateTunnels(previous, updater(previous.activeTunnels), mutationVersion)
           : previous,
       );
     },
@@ -58,13 +60,15 @@ export function usePortForwardManagement(sessionId: string | null, active: boole
 
   useEffect(() => {
     if (!active || !sessionId) return;
+    const readVersion = scope.mutationVersion;
     let cancelled = false;
     void listTunnels(sessionId).then((tunnels) => {
       if (cancelled) return;
       setState((previous) => {
         if (previous.scope !== scope) return previous;
         const hydrated = new Map(tunnels.map((tunnel) => [tunnel.port, tunnel.tunnel_port]));
-        for (const port of previous.mutatedPorts) {
+        for (const [port, mutationVersion] of previous.mutatedPorts) {
+          if (mutationVersion <= readVersion) continue;
           const tunnelPort = previous.activeTunnels.get(port);
           if (tunnelPort === undefined) hydrated.delete(port);
           else hydrated.set(port, tunnelPort);
@@ -83,15 +87,20 @@ export function usePortForwardManagement(sessionId: string | null, active: boole
 
   const refresh = useCallback(async () => {
     if (!sessionId) return;
+    const refreshVersion = ++scope.refreshVersion;
     setState((previous) => (previous.scope === scope ? { ...previous, loading: true } : previous));
     try {
       const detectedPorts = await listPorts(sessionId);
       setState((previous) =>
-        previous.scope === scope ? { ...previous, detectedPorts, loaded: true } : previous,
+        previous.scope === scope && refreshVersion === scope.refreshVersion
+          ? { ...previous, detectedPorts, loaded: true }
+          : previous,
       );
     } finally {
       setState((previous) =>
-        previous.scope === scope ? { ...previous, loading: false } : previous,
+        previous.scope === scope && refreshVersion === scope.refreshVersion
+          ? { ...previous, loading: false }
+          : previous,
       );
     }
   }, [scope, sessionId]);

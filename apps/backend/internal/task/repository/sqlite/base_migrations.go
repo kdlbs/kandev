@@ -89,6 +89,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		{"session_recovery_blocks.delivery_sequence", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_sequence BIGINT NOT NULL DEFAULT 0`},
 		{"session_recovery_blocks.delivery_turn_id", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_turn_id TEXT NOT NULL DEFAULT ''`},
 		{"session_recovery_blocks.delivery_outcome", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_outcome TEXT NOT NULL DEFAULT ''`},
+		{"session_restore_attempts.checkpoint_json", `ALTER TABLE session_restore_attempts ADD COLUMN checkpoint_json TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.session_id", `ALTER TABLE agent_delivery_effects ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.incarnation_id", `ALTER TABLE agent_delivery_effects ADD COLUMN incarnation_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.harness_generation", `ALTER TABLE agent_delivery_effects ADD COLUMN harness_generation BIGINT NOT NULL DEFAULT 0`},
@@ -380,6 +381,15 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// repo hasn't run yet.
 	if err := r.ensureRunnerProjectionTables(); err != nil {
 		return err
+	}
+	if err := r.migrate.Apply("workflow_steps.wip_limit", `ALTER TABLE workflow_steps ADD COLUMN wip_limit INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("migrate workflow_steps.wip_limit: %w", err)
+	}
+	if err := r.migrate.Apply("workflow_steps.pull_from_step_id", `ALTER TABLE workflow_steps ADD COLUMN pull_from_step_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate workflow_steps.pull_from_step_id: %w", err)
+	}
+	if err := r.migrate.Apply("workflow_step_participants.provenance", `ALTER TABLE workflow_step_participants ADD COLUMN provenance TEXT NOT NULL DEFAULT 'manual'`); err != nil {
+		return fmt.Errorf("migrate workflow_step_participants.provenance: %w", err)
 	}
 	// Keep the projection table compatible with existing task-only stores.
 	// The workflow repository owns this table in production, but task queries

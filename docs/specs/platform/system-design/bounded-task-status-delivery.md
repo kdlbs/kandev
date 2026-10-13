@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001
 created: 2026-08-01
-updated: 2026-09-17
+updated: 2026-10-13
 owners:
   - kandev
 ---
@@ -149,6 +149,29 @@ already cached the task's workspace before deletion.
   auto-merge enabled, but it never carries the per-pull-request option list.
   Integration option updates refresh the authoritative keyed pull-request
   observations through the existing task-summary projector.
+- `launch_queue` is refreshed only from task-row sources (`task.created`,
+  `task.updated`, `task.state_changed`), `task_session.state_changed`, and
+  `message.queue.status_changed`, plus any event that reaches a task whose queue
+  has not been observed yet. A ceiling deferral is written on the task row and
+  every such write attempts to publish `task.updated`. Before replay, each
+  existing 20-second ceiling sweep publishes `task.updated` for the ordered,
+  deduplicated union of actual deferred tasks and persisted positive queue
+  summaries. The latter retain cleared tasks after a lost mutation publication;
+  actual records retain enqueues even when a claimed or failed replay emits
+  nothing. Reload, transport, and projection failures leave durable eligibility
+  for another pass. Once a cleared summary commits, it leaves the recovery set.
+  This refresh changes no deferral ownership, task state, completion gate,
+  summary schema, timer owner, or sweep cadence. Each publication reloads the
+  current task and the projector reads the authoritative queue, including nil;
+  deleted tasks are excluded by the summary query and existing publication
+  and missing-task guards. Capacity samples also stay current through these
+  task events. Any other source keeps the last observation instead of
+  re-reading the task row and the install-wide admitted-session population, so
+  per-message and per-turn traffic does not scale the summary's read volume.
+  The refresh set is closed: a newly subscribed source must be classified.
+  Change detection compares the next queue with both the in-memory observation
+  and the last persisted summary. A failed write may advance the observation
+  without committing it; the next source refresh retries that transition.
 - A semantic no-op does not increment `revision` or emit an update.
 - For valid summaries, `TaskStatusSummary.SemanticEqual` uses the same
   canonical semantic payload as `SemanticJSON` and the repository's no-op
@@ -429,3 +452,7 @@ intermediate replacement.
   [Task-summary semantic equality](../../../plans/task-summary-semantic-equality/plan.md)
 - Late deleted-task queue event repair:
   [Recent runtime log remediation](../../../plans/recent-runtime-log-remediation/plan.md)
+
+## Journey loading extension
+
+[Journey data loading](journey-data-loading.md) owns the new reader-isolation, visible-detail, boot, and shared-loading work. The [delivery package](../../../plans/journey-data-efficiency/plan.md) preserves the existing completed plans and their verification history.

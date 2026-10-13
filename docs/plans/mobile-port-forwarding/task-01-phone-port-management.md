@@ -94,8 +94,8 @@ Run from repo root. In a fresh worktree without dependencies, first run
 `(cd apps && pnpm install --frozen-lockfile)`.
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/task/mobile/session-mobile-bottom-nav.test.tsx components/task/port-forwarding-visibility-provider.test.tsx components/task/port-forward-dialog.test.tsx components/task/port-forward-rows.test.ts components/task/port-forwarding-visibility.test.ts components/task/dockview-add-panel-items.test.tsx components/task/use-tunnel-actions.test.ts)
-(cd apps/web && NODE_OPTIONS=--max-old-space-size=4096 pnpm run typecheck)
+(cd apps/web && pnpm exec vitest run components/task/mobile/session-mobile-bottom-nav.test.tsx components/task/port-forwarding-visibility-provider.test.tsx components/task/port-forward-dialog.test.tsx components/task/port-forward-rows.test.ts components/task/port-forwarding-visibility.test.ts components/task/dockview-add-panel-items.test.tsx components/task/use-tunnel-actions.test.ts components/task/use-port-forward-management.test.ts)
+(cd apps/web && NODE_OPTIONS=--max-old-space-size=6144 pnpm run typecheck)
 (cd apps/web && pnpm exec eslint --max-warnings 0 components/task/mobile/session-mobile-bottom-nav.tsx components/task/mobile/plugin-panel-picker.tsx components/task/mobile/session-task-switcher-sheet.tsx components/task/port-forward-dialog.tsx components/task/port-forwarding-visibility-provider.tsx components/task/port-forward-content.tsx components/task/use-port-forward-management.ts components/task/use-tunnel-actions.ts components/task/task-page-inner.tsx e2e/tests/plugins/mobile-plugin-task-panel.spec.ts e2e/tests/session/mobile-port-forwarding.spec.ts e2e/tests/session/port-forward-dialog.spec.ts e2e/tests/task/mobile-remote-repository-topbar.spec.ts e2e/pages/session-page.ts)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm run i18n:ratchet)
@@ -206,3 +206,30 @@ Builds used host mode, one browser worker, `GOMAXPROCS=2` and `GOMEMLIMIT=512MiB
 inside the 8 GiB container. Test-only reruns reused the current build; final
 mobile and Chromium evidence used fresh builds. Keyboard clearance uses a
 shortened browser viewport, not an actual OS keyboard or a Safari device run.
+
+### PR remediation (2026-10-13)
+
+- Merged the current main branch and preserved both sets of catalog additions.
+- Each management visit refreshes detection while retaining the manual draft.
+  Tunnel reads protect only mutations newer than their own starting revision;
+  overlapping detection requests cannot replace newer results or clear loading.
+- Refresh remains focusable while busy and guards duplicate activation.
+- Sidebar E2E height comparisons round to four decimal places to account for
+  transformed DOMRect endpoint precision; product touch sizing is unchanged.
+- The new controller regressions failed on the previous implementation (three
+  failures) and passed with the fix. The verification unit command above passed
+  all 77 tests across eight files. Focused ESLint and formatting passed.
+- Typecheck passed with a 6 GiB heap; the updated main branch exceeded 4 GiB.
+- Managed Chromium verification of port forwarding and workflow overrides
+  passed 14 cases without retries. Sidebar verification passed six executions
+  with `tests/task/sidebar-title-width.spec.ts --retries=0 --repeat-each=3`.
+- Managed mobile verification passed 21 cases without retries, including all
+  port, plugin, remote-topbar and canvas scenarios. Commands used the same host,
+  one-worker, strict-WS runner settings recorded above; test-only repetitions
+  reused the fresh build. Japanese font support was installed for the local
+  localized-width reproduction.
+- Full i18n checking, catalog/specification/harness validation, both public-doc
+  validators, and the normal pre-commit hooks passed. The public how-to now
+  describes reopening and manual-draft retention.
+- Current-head CI and automated review monitoring remain delivery checks after
+  publication; earlier PR-head CI and review evidence is superseded.

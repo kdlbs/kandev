@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -131,6 +132,7 @@ func (f *fakeConversationTasks) ListCoordinatorOriginTasks(_ context.Context, wo
 
 // fakeSessionEnsurer is a test double for SessionEnsurer.
 type fakeSessionEnsurer struct {
+	mu       sync.Mutex
 	err      error
 	sessions map[string]string // taskID -> sessionID
 	states   map[string]string // taskID -> session state reported by EnsureSession
@@ -143,6 +145,8 @@ func newFakeSessionEnsurer() *fakeSessionEnsurer {
 }
 
 func (f *fakeSessionEnsurer) EnsureSession(_ context.Context, taskID string, opts ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, taskID)
 	if len(opts) > 0 {
 		f.lastOpts = opts[0]

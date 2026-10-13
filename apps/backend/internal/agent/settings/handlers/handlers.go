@@ -25,6 +25,10 @@ const queryTrue = "true"
 
 var availableAgentsBroadcastTimeout = 10 * time.Second
 
+// hostCLIWarmupTimeout bounds the background vendor CLI model refresh started
+// by a discovery request.
+var hostCLIWarmupTimeout = 30 * time.Second
+
 type Handlers struct {
 	controller *controller.Controller
 	hub        Broadcaster
@@ -73,6 +77,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/agents/:id", cfg, h.interlock, h.httpUpdateAgent)
 	api.DELETE("/agents/:id", cfg, h.interlock, h.httpDeleteAgent)
 	api.POST("/agents/:id/profiles", cfg, h.interlock, h.httpCreateProfile)
+	api.PUT("/agents/:id/profiles/order", cfg, h.interlock, h.httpReorderAgentProfiles)
 	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
 	api.POST("/agent-models/:agentName/probe", cfg, h.httpProbeAgentProfile)
@@ -104,6 +109,20 @@ func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, resp)
 	h.broadcastAvailableAgentsAsync()
+	// An Agents settings page load and a Rescan both land here. Re-read any
+	// stale vendor CLI catalogue off the response path so the model selector
+	// reflects the CLI currently on disk.
+	h.warmHostCLIModelsAsync()
+}
+
+// warmHostCLIModelsAsync refreshes stale vendor CLI model catalogues without
+// delaying the discovery response.
+func (h *Handlers) warmHostCLIModelsAsync() {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), hostCLIWarmupTimeout)
+		defer cancel()
+		h.controller.WarmHostCLIModels(ctx)
+	}()
 }
 
 func (h *Handlers) httpListAvailableAgents(c *gin.Context) {

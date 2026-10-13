@@ -15,6 +15,33 @@ import {
 } from "../../helpers/layout-assertions";
 
 test.describe("Port forwarding on mobile", () => {
+  // @covers AC-UI-PORT-FORWARDING-DISCOVERY-001.9, .14
+  test("reopening refreshes runtime state while preserving the manual draft", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { session, ports } = await seedPorts(
+      testPage,
+      apiClient,
+      seedData,
+      "Fresh ports on reopening",
+    );
+    await openPorts(session);
+    await session.portForwardTunnelToggle(3000).tap();
+    await session.portForwardTunnelStart(3000).tap();
+    await expect(session.portForwardRow(3000)).toHaveAttribute("data-forwarded", "true");
+    await session.portForwardInput.fill("7777");
+    await session.portForwardDialog.getByRole("button", { name: "Close", exact: true }).tap();
+    await expect(session.portForwardDialog).toBeHidden();
+    ports.setDetectedPorts([{ port: 8080, address: "*", process: "new-server" }]);
+    ports.setTunnels([]);
+    await openPorts(session);
+    await expect(session.portForwardRow(8080)).toBeVisible();
+    await expect(session.portForwardRow(3000)).toHaveAttribute("data-forwarded", "false");
+    await expect(session.portForwardInput).toHaveValue("7777");
+  });
+
   // @covers AC-UI-PORT-FORWARDING-ACTIVE-FIRST-001.1-.3, .6-.7
   test("shows forwards first with touch actions and a single bounded scroller", async ({
     testPage,

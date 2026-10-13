@@ -128,6 +128,7 @@ async function configureProfileSessionWorkflow(
   });
   await apiClient.updateWorkflowStep(stepAAgain.id, {
     agent_profile_id: profileA.id,
+    prompt: "/e2e:simple-message",
     // Seed the opposite values so every lifecycle combination exercises the
     // shared draft, dirty, and save path, including the default pair.
     profile_session_start_policy: startPolicy === "reuse" ? "new" : "reuse",
@@ -245,19 +246,25 @@ async function runProfileSessionLifecycleScenario(
   await pollSessions(apiClient, task.id, 2);
   await waitForProfileSession(apiClient, task.id, profileB.id, 60_000);
 
+  const priorATurnIds = new Set(
+    (await apiClient.listSessionTurns(originalASessionId)).turns.map((turn) => turn.id),
+  );
   await apiClient.moveTask(task.id, workflow.id, stepAAgain.id);
   await expect
     .poll(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(task.id);
-        return startPolicy === "reuse"
-          ? sessions.some((item) => item.id === originalASessionId && item.is_primary)
-          : sessions.some(
-              (item) =>
-                item.agent_profile_id === profileA.id &&
-                item.id !== originalASessionId &&
-                item.is_primary,
-            );
+        const primaryA = sessions.find(
+          (item) =>
+            item.agent_profile_id === profileA.id &&
+            item.is_primary &&
+            (startPolicy === "reuse"
+              ? item.id === originalASessionId
+              : item.id !== originalASessionId),
+        );
+        if (!primaryA || primaryA.state !== "WAITING_FOR_INPUT") return false;
+        const { turns } = await apiClient.listSessionTurns(primaryA.id);
+        return turns.some((turn) => !priorATurnIds.has(turn.id) && Boolean(turn.completed_at));
       },
       { timeout: 30_000 },
     )

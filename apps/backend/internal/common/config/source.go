@@ -68,6 +68,12 @@ var yamlOnlyStartupKeys = map[string]struct{}{
 	"server.trustedProxies":                    {},
 	"tasks.preparationTimeout":                 {},
 	"tasks.stallDetectionThreshold":            {},
+	"tasks.deliveryRetention.payloadGrace":     {},
+	"tasks.deliveryRetention.replayAge":        {},
+	"tasks.deliveryRetention.replayEvents":     {},
+	"tasks.deliveryRetention.interval":         {},
+	"tasks.deliveryRetention.batchRows":        {},
+	"tasks.deliveryRetention.batchBytes":       {},
 	"credentials.file":                         {},
 	"limits.ghMaxConcurrent":                   {},
 	"limits.gitMaxConcurrent":                  {},
@@ -298,6 +304,12 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	}
 	setDefaultDuration("tasks.preparationTimeout", &cfg.Tasks.PreparationTimeout, 10*time.Minute)
 	setDefaultDuration("tasks.stallDetectionThreshold", &cfg.Tasks.StallDetectionThreshold, 2*time.Hour)
+	setDefaultDuration("tasks.deliveryRetention.payloadGrace", &cfg.Tasks.DeliveryRetention.PayloadGrace, time.Hour)
+	setDefaultDuration("tasks.deliveryRetention.replayAge", &cfg.Tasks.DeliveryRetention.ReplayAge, 24*time.Hour)
+	setDefaultDuration("tasks.deliveryRetention.interval", &cfg.Tasks.DeliveryRetention.Interval, time.Minute)
+	setDefaultInt("tasks.deliveryRetention.replayEvents", &cfg.Tasks.DeliveryRetention.ReplayEvents, 10000)
+	setDefaultInt("tasks.deliveryRetention.batchRows", &cfg.Tasks.DeliveryRetention.BatchRows, 200)
+	setDefaultInt("tasks.deliveryRetention.batchBytes", &cfg.Tasks.DeliveryRetention.BatchBytes, 4<<20)
 	if !yamlKeys["credentials.file"] {
 		cfg.Credentials.File = ""
 	}
@@ -373,6 +385,26 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyPositiveIntEnv("launcher.healthTimeoutMs", &cfg.Launcher.HealthTimeoutMs, launcherHealthTimeoutDefault(), envSnapshot, sources)
 	applyBoolEnv("launcher.noBrowser", &cfg.Launcher.NoBrowser, false, envSnapshot, sources)
 	applyNonNegativeIntEnv("executors.sshReachabilityIntervalSeconds", &cfg.Executors.SSHReachabilityIntervalSeconds, 60, envSnapshot, sources)
+}
+
+func applyDeliveryRetentionEnvironment(cfg *Config, env map[string]string, sources map[string]SettingSource) error {
+	values := &cfg.Tasks.DeliveryRetention
+	if err := applyStrictDurationEnv("tasks.deliveryRetention.payloadGrace", &values.PayloadGrace, time.Minute, 30*24*time.Hour, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictDurationEnv("tasks.deliveryRetention.replayAge", &values.ReplayAge, time.Hour, 30*24*time.Hour, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictDurationEnv("tasks.deliveryRetention.interval", &values.Interval, 10*time.Second, time.Hour, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictIntEnv("tasks.deliveryRetention.replayEvents", &values.ReplayEvents, 100, 100000, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictIntEnv("tasks.deliveryRetention.batchRows", &values.BatchRows, 1, 200, env, sources); err != nil {
+		return err
+	}
+	return applyStrictIntEnv("tasks.deliveryRetention.batchBytes", &values.BatchBytes, 1<<20, 4<<20, env, sources)
 }
 
 // clampOfficeLaunchSafetyConfig clamps a below-minimum office.*

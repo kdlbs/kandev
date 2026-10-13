@@ -2,7 +2,7 @@
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { Message } from "@/lib/types/http";
+import type { Message, Turn } from "@/lib/types/http";
 
 const mockListSessionTurns = vi.fn();
 const mockWebSocketClient = {
@@ -18,6 +18,7 @@ const mockWebSocketClient = {
   ),
 };
 let registeredCoreRecovery: (() => Promise<boolean>) | undefined;
+const WINDOW_TEST_TIMESTAMP = "2026-08-30T09:00:00Z";
 
 const mockState = {
   messages: {
@@ -36,6 +37,7 @@ const mockState = {
   turns: {
     bySession: { "sess-1": [] as unknown[] },
     activeBySession: { "sess-1": null },
+    windowCoverageBySession: {},
     loadedBySession: {} as Record<string, boolean>,
     reconcileEpochBySession: {} as Record<string, number>,
     settledBoundaryBySession: {} as Record<string, string>,
@@ -47,6 +49,7 @@ const mockState = {
   prependMessages: vi.fn(),
   addTurn: vi.fn(),
   mergeTurnsSnapshot: vi.fn(),
+  mergeTurnsWindow: vi.fn(),
   markTurnsLoaded: vi.fn((sessionId: string) => {
     mockState.turns.loadedBySession[sessionId] = true;
   }),
@@ -75,7 +78,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockState.mergeMessages.mockReset();
   mockListSessionTurns.mockResolvedValue({ turns: [], total: 0 });
-  mockWebSocketClient.request.mockResolvedValue({ messages: [], has_more: false });
+  mockWebSocketClient.request.mockResolvedValue({
+    messages: [],
+    has_more: false,
+    turns: [],
+    turn_coverage: { message_ids: [], active_turn_id: null },
+  });
   mockWebSocketClient.subscribeSession.mockReturnValue(vi.fn());
   registeredCoreRecovery = undefined;
   mockWebSocketClient.registerCoreSessionRecovery.mockImplementation((_sessionId, handler) => {
@@ -517,7 +525,7 @@ describe("session subscription hydration ordering", () => {
 
     const staleOldest = makeMessage({
       id: "stale-1",
-      created_at: "2026-08-30T09:00:00Z",
+      created_at: WINDOW_TEST_TIMESTAMP,
     });
     const staleNewest = makeMessage({
       id: "stale-2",
@@ -585,7 +593,7 @@ describe("session subscription hydration ordering", () => {
     expect(mockWebSocketClient.subscribeSessionWithReady).toHaveBeenCalledTimes(1);
     expect(mockWebSocketClient.request).toHaveBeenCalledWith(
       "message.list",
-      expect.objectContaining({ session_id: "sess-1" }),
+      expect.objectContaining({ session_id: "sess-1", include_turns: true }),
       10000,
     );
     expect(mockWebSocketClient.request).toHaveBeenCalledTimes(1);
@@ -594,6 +602,47 @@ describe("session subscription hydration ordering", () => {
       response.resolve({ messages: [], has_more: false });
       await response.promise;
     });
+    unmount();
+  });
+});
+
+describe("message-turn window hydration", () => {
+  it("merges covered turn rows from the message snapshot without fetching full history", async () => {
+    const readiness = Promise.resolve();
+    const message = makeMessage({ id: "window-message", turn_id: "window-turn" });
+    const turn = {
+      id: "window-turn",
+      session_id: sessionId("sess-1"),
+      task_id: taskId("task-1"),
+      started_at: WINDOW_TEST_TIMESTAMP,
+      created_at: WINDOW_TEST_TIMESTAMP,
+      updated_at: WINDOW_TEST_TIMESTAMP,
+    } satisfies Turn;
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness,
+      unsubscribe: vi.fn(),
+    });
+    mockWebSocketClient.request.mockResolvedValueOnce({
+      messages: [message],
+      has_more: false,
+      turns: [turn],
+      turn_coverage: { message_ids: [message.id], active_turn_id: turn.id },
+    });
+
+    const { unmount } = renderHook(() => useSessionMessages("sess-1"));
+    await waitFor(() =>
+      expect(mockState.mergeTurnsWindow).toHaveBeenCalledWith(
+        "sess-1",
+        [turn],
+        { message_ids: [message.id], active_turn_id: turn.id },
+        0,
+        { activeTurnId: null, reconcileEpoch: 0, updatedAt: undefined },
+      ),
+    );
+
+    expect(mockListSessionTurns).not.toHaveBeenCalled();
+    expect(mockState.turns.loadedBySession["sess-1"]).toBeUndefined();
     unmount();
   });
 
@@ -1010,6 +1059,7 @@ describe("history feedback generation", () => {
 
 describe("turn loading for sessions without hydrated turns", () => {
   it("fetches and merges turns when the session has none in the store", async () => {
+    mockWebSocketClient.request.mockResolvedValue({ messages: [], has_more: false });
     const readiness = deferred<void>();
     mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
     mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
@@ -1057,6 +1107,7 @@ describe("turn loading for sessions without hydrated turns", () => {
     // WS `session.turn.*` events seed individual live turns without the full
     // history; array presence must NOT suppress the REST hydration, or older
     // messages keep resolving to `turn = null` (the reported regression).
+    mockWebSocketClient.request.mockResolvedValue({ messages: [], has_more: false });
     const readiness = deferred<void>();
     mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
     mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
@@ -1084,6 +1135,7 @@ describe("turn loading for sessions without hydrated turns", () => {
   });
 
   it("refreshes the turn snapshot for the current subscription generation", async () => {
+    mockWebSocketClient.request.mockResolvedValue({ messages: [], has_more: false });
     const readiness = deferred<void>();
     mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
     mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
@@ -1118,7 +1170,7 @@ describe("deduplicated message request baselines", () => {
 
     const staleOldest = makeMessage({
       id: "stale-1",
-      created_at: "2026-08-30T09:00:00Z",
+      created_at: WINDOW_TEST_TIMESTAMP,
     });
     const staleNewest = makeMessage({
       id: "stale-2",
@@ -1221,5 +1273,42 @@ describe("running message backfill visibility", () => {
 
     expect(messageListCalls() - before).toBe(0);
     unmount();
+  });
+});
+
+describe("panel-scoped session detail demand", () => {
+  it("retains cached history while hidden and reconciles once when shown", async () => {
+    const cached = makeMessage({ id: "cached-visible-session" });
+    configureSession("sess-1", "WAITING_FOR_INPUT", [cached]);
+    const unsubscribe = vi.fn();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(Promise.resolve());
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: Promise.resolve(),
+      unsubscribe,
+    });
+    mockWebSocketClient.request.mockResolvedValue({ messages: [cached], has_more: false });
+
+    const { result, rerender } = renderHook(
+      ({ detailActive }: { detailActive: boolean }) =>
+        useSessionMessages("sess-1", { detailActive }),
+      { initialProps: { detailActive: false } },
+    );
+
+    expect(result.current.messages).toEqual([cached]);
+    expect(mockWebSocketClient.subscribeSessionWithReady).not.toHaveBeenCalled();
+    expect(mockWebSocketClient.registerCoreSessionRecovery).not.toHaveBeenCalled();
+    expect(mockWebSocketClient.request).not.toHaveBeenCalled();
+    expect(mockListSessionTurns).not.toHaveBeenCalled();
+
+    rerender({ detailActive: true });
+    await waitFor(() => expect(mockWebSocketClient.request).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockListSessionTurns).toHaveBeenCalledTimes(1));
+    expect(mockWebSocketClient.subscribeSessionWithReady).toHaveBeenCalledTimes(1);
+    expect(result.current.messages).toEqual([cached]);
+
+    rerender({ detailActive: false });
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(mockWebSocketClient.request).toHaveBeenCalledTimes(1);
+    expect(result.current.messages).toEqual([cached]);
   });
 });

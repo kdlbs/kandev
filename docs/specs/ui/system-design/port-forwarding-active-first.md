@@ -106,9 +106,11 @@ when a session changes while the dialog is open. Ensure async refresh/mutation
 results cannot write into a replacement session: use the existing effect
 cancellation pattern and scope the active-map setter to its initiating session.
 Prevent an initial tunnel-list response that began before a successful local
-mutation from overwriting that newer map. Track successfully mutated targets
-within the session owner and merge hydration for untouched targets, retaining
-newer local values or deletions for touched targets. This preserves other
+mutation from overwriting that newer map. Capture the local mutation revision
+when each read begins and track the latest successful revision per target.
+Merge hydration for untouched targets, retaining only local values or deletions
+newer than that read. A later snapshot can replace earlier local changes made
+before it started. This preserves other
 existing tunnels when a Start succeeds before the initial tunnel read resolves.
 No additional fetches, subscriptions, polling, or tunnel lifecycle changes are needed.
 

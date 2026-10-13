@@ -20,6 +20,11 @@ type Repository interface {
 	GetCostsByProject(ctx context.Context, workspaceID string) ([]*CostBreakdown, error)
 	GetCostsByModel(ctx context.Context, workspaceID string) ([]*CostBreakdown, error)
 	GetCostsByProvider(ctx context.Context, workspaceID string) ([]*CostBreakdown, error)
+	GetCostsByAgentInWindow(ctx context.Context, workspaceID string, start, before time.Time) ([]*CostBreakdown, error)
+	GetCostsByProjectInWindow(ctx context.Context, workspaceID string, start, before time.Time) ([]*CostBreakdown, error)
+	GetCostsByModelInWindow(ctx context.Context, workspaceID string, start, before time.Time) ([]*CostBreakdown, error)
+	GetCostsByProviderInWindow(ctx context.Context, workspaceID string, start, before time.Time) ([]*CostBreakdown, error)
+	SumCostsInWindow(ctx context.Context, workspaceID string, start, before time.Time) (int64, error)
 	SumCosts(ctx context.Context, workspaceID string) (int64, error)
 	SumCostsSince(ctx context.Context, workspaceID string, since time.Time) (int64, error)
 	GetCostForAgent(ctx context.Context, agentID string) (int64, error)
@@ -168,61 +173,38 @@ func (s *CostService) GetCostsByProvider(ctx context.Context, wsID string) ([]*C
 func (s *CostService) GetCostsBreakdown(
 	ctx context.Context, wsID string,
 ) (total int64, byAgent, byProject, byModel, byProvider []*CostBreakdown, err error) {
+	return s.getCostsBreakdown(ctx, wsID, nil)
+}
+
+func (s *CostService) getCostsBreakdown(
+	ctx context.Context, wsID string, window *costWindow,
+) (total int64, byAgent, byProject, byModel, byProvider []*CostBreakdown, err error) {
+	sum, readers := s.breakdownReaders(wsID, window)
+	var groups [4][]*CostBreakdown
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		t, e := s.repo.SumCosts(gctx, wsID)
-		if e != nil {
-			return e
+		value, readErr := sum(gctx)
+		if readErr == nil {
+			total = value
 		}
-		total = t
-		return nil
+		return readErr
 	})
-	g.Go(func() error {
-		v, e := s.repo.GetCostsByAgent(gctx, wsID)
-		if e != nil {
-			return e
-		}
-		byAgent = v
-		return nil
-	})
-	g.Go(func() error {
-		v, e := s.repo.GetCostsByProject(gctx, wsID)
-		if e != nil {
-			return e
-		}
-		byProject = v
-		return nil
-	})
-	g.Go(func() error {
-		v, e := s.repo.GetCostsByModel(gctx, wsID)
-		if e != nil {
-			return e
-		}
-		byModel = v
-		return nil
-	})
-	g.Go(func() error {
-		v, e := s.repo.GetCostsByProvider(gctx, wsID)
-		if e != nil {
-			return e
-		}
-		byProvider = v
-		return nil
-	})
+	for i, read := range readers {
+		g.Go(func() error {
+			value, readErr := read(gctx)
+			if readErr == nil {
+				groups[i] = value
+			}
+			return readErr
+		})
+	}
 	if err = g.Wait(); err != nil {
 		return 0, nil, nil, nil, nil, err
 	}
-	if byAgent == nil {
-		byAgent = []*CostBreakdown{}
+	for i := range groups {
+		if groups[i] == nil {
+			groups[i] = []*CostBreakdown{}
+		}
 	}
-	if byProject == nil {
-		byProject = []*CostBreakdown{}
-	}
-	if byModel == nil {
-		byModel = []*CostBreakdown{}
-	}
-	if byProvider == nil {
-		byProvider = []*CostBreakdown{}
-	}
-	return total, byAgent, byProject, byModel, byProvider, nil
+	return total, groups[0], groups[1], groups[2], groups[3], nil
 }

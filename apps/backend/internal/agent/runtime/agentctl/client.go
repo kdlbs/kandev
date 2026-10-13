@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -43,6 +45,8 @@ type Client struct {
 
 	// WebSocket connections for streaming
 	agentStreamConn     *websocket.Conn
+	updatesDial         *updatesStreamDial
+	updatesDialSequence uint64
 	workspaceStreamConn *websocket.Conn
 	// workspaceStream is the most-recent workspace stream returned by
 	// StreamWorkspace, retained so Client.Close can wait for its read/write
@@ -87,6 +91,24 @@ type Client struct {
 	// the most recent accepted prompt. It lets lifecycle reconcile a disconnect
 	// even when no terminal event reached the backend yet.
 	lastDeliverySubmissionID string
+}
+
+type updatesStreamDial struct {
+	sequence     uint64
+	ctx          context.Context
+	streamCtx    context.Context
+	cancel       context.CancelFunc
+	streamCancel context.CancelFunc
+	conn         net.Conn
+	stopConn     func() bool
+	retired      bool
+}
+
+type updatesStreamDialCleanup struct {
+	cancel       context.CancelFunc
+	streamCancel context.CancelFunc
+	conn         net.Conn
+	stopConn     func() bool
 }
 
 func (c *Client) setLastSessionModelState(state *streams.SessionModelState) {
@@ -180,6 +202,11 @@ func (c *Client) getTraceCtx() context.Context {
 
 // StatusResponse from agentctl
 type StatusResponse struct {
+	DeliveryHealth struct {
+		State               string `json:"state"`
+		CancellationPending bool   `json:"cancellation_pending"`
+		ProducerPaused      bool   `json:"producer_paused"`
+	} `json:"delivery_health"`
 	AgentStatus string                 `json:"agent_status"`
 	ProcessInfo map[string]interface{} `json:"process_info"`
 }
@@ -251,6 +278,14 @@ func (c *Client) RuntimeProcessID() int {
 	return c.runtimeGuard.binding.processID
 }
 
+// RuntimeProcessIdentity retains the authenticated local runtime's birth identity.
+func (c *Client) RuntimeProcessIdentity() processidentity.Identity {
+	if c == nil || c.runtimeGuard == nil || c.runtimeGuard.binding == nil {
+		return processidentity.Identity{}
+	}
+	return c.runtimeGuard.binding.processIdentity
+}
+
 // RuntimeCurrent reports whether this client still targets the published
 // local runtime generation. Clients owned by remote executors are unbound and
 // remain current for this purpose.
@@ -265,11 +300,193 @@ func (c *Client) RuntimeBoundContext(ctx context.Context) (context.Context, cont
 	if c == nil {
 		return nil, func() {}, errors.New("agentctl client is nil")
 	}
-	boundCtx, cancel, err := c.runtimeGuard.bindContext(ctx)
+	return c.runtimeGuard.bindContext(ctx)
+}
+
+func (c *Client) beginUpdatesStreamDial(ctx context.Context) (*updatesStreamDial, context.Context, error) {
+	streamCtx, streamCancel, err := c.RuntimeBoundContext(ctx)
 	if err != nil {
-		return nil, func() {}, err
+		return nil, nil, err
 	}
-	return boundCtx, cancel, nil
+	dialCtx, dialCancel := context.WithCancel(streamCtx)
+	attempt := &updatesStreamDial{
+		ctx:          dialCtx,
+		streamCtx:    streamCtx,
+		cancel:       dialCancel,
+		streamCancel: streamCancel,
+	}
+
+	c.mu.Lock()
+	c.updatesDialSequence++
+	attempt.sequence = c.updatesDialSequence
+	previous := c.takeUpdatesStreamDialLocked()
+	c.updatesDial = attempt
+	c.mu.Unlock()
+	closeUpdatesStreamDial(previous)
+
+	return attempt, streamCtx, nil
+}
+
+func (c *Client) takeUpdatesStreamDialLocked() updatesStreamDialCleanup {
+	attempt := c.updatesDial
+	if attempt == nil {
+		return updatesStreamDialCleanup{}
+	}
+	c.updatesDial = nil
+	attempt.retired = true
+	cleanup := updatesStreamDialCleanup{
+		cancel:       attempt.cancel,
+		streamCancel: attempt.streamCancel,
+		conn:         attempt.conn,
+		stopConn:     attempt.stopConn,
+	}
+	attempt.conn = nil
+	attempt.stopConn = nil
+	return cleanup
+}
+
+func closeUpdatesStreamDial(cleanup updatesStreamDialCleanup) {
+	if cleanup.stopConn != nil {
+		cleanup.stopConn()
+	}
+	if cleanup.cancel != nil {
+		cleanup.cancel()
+	}
+	if cleanup.streamCancel != nil {
+		cleanup.streamCancel()
+	}
+	if cleanup.conn != nil {
+		_ = cleanup.conn.Close()
+	}
+}
+
+func (c *Client) registerUpdatesStreamDialConn(attempt *updatesStreamDial, conn net.Conn) error {
+	stopConn := context.AfterFunc(attempt.ctx, func() { _ = conn.Close() })
+	c.mu.Lock()
+	if attempt.retired || c.updatesDial != attempt || c.updatesDialSequence != attempt.sequence || attempt.ctx.Err() != nil {
+		err := attempt.ctx.Err()
+		c.mu.Unlock()
+		stopConn()
+		_ = conn.Close()
+		if err != nil {
+			return err
+		}
+		return context.Canceled
+	}
+	attempt.conn = conn
+	attempt.stopConn = stopConn
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *Client) retireUpdatesStreamDial(attempt *updatesStreamDial) {
+	c.mu.Lock()
+	var cleanup updatesStreamDialCleanup
+	if c.updatesDial == attempt {
+		c.updatesDialSequence++
+		cleanup = c.takeUpdatesStreamDialLocked()
+	}
+	c.mu.Unlock()
+	closeUpdatesStreamDial(cleanup)
+}
+
+func (c *Client) completeUpdatesStreamDial(
+	attempt *updatesStreamDial,
+	conn *websocket.Conn,
+) (context.CancelFunc, error) {
+	stopStream := context.AfterFunc(attempt.streamCtx, func() { _ = conn.Close() })
+	c.mu.Lock()
+	if attempt.retired || c.updatesDial != attempt || c.updatesDialSequence != attempt.sequence || attempt.ctx.Err() != nil || attempt.streamCtx.Err() != nil {
+		err := updatesStreamDialContextError(attempt)
+		if err == nil {
+			err = context.Canceled
+		}
+		var cleanup updatesStreamDialCleanup
+		if c.updatesDial == attempt {
+			c.updatesDialSequence++
+			cleanup = c.takeUpdatesStreamDialLocked()
+		}
+		c.mu.Unlock()
+		return rejectCompletedUpdatesStreamDial(stopStream, cleanup, conn, err)
+	}
+
+	stopConn := attempt.stopConn
+	if stopConn != nil && !stopConn() {
+		c.updatesDialSequence++
+		cleanup := c.takeUpdatesStreamDialLocked()
+		c.mu.Unlock()
+		return rejectCompletedUpdatesStreamDial(stopStream, cleanup, conn, context.Canceled)
+	}
+	if err := updatesStreamDialContextError(attempt); err != nil {
+		c.updatesDialSequence++
+		cleanup := c.takeUpdatesStreamDialLocked()
+		c.mu.Unlock()
+		return rejectCompletedUpdatesStreamDial(stopStream, cleanup, conn, err)
+	}
+
+	attempt.stopConn = nil
+	attempt.conn = nil
+	attempt.retired = true
+	c.updatesDial = nil
+	c.agentStreamConn = conn
+	streamCancel := attempt.streamCancel
+	dialCancel := attempt.cancel
+	c.mu.Unlock()
+
+	if err := updatesStreamDialContextError(attempt); err != nil {
+		c.mu.Lock()
+		if c.agentStreamConn == conn {
+			c.agentStreamConn = nil
+		}
+		c.mu.Unlock()
+		stopStream()
+		_ = conn.Close()
+		dialCancel()
+		streamCancel()
+		return nil, err
+	}
+	dialCancel()
+	return func() {
+		stopStream()
+		streamCancel()
+	}, nil
+}
+
+func rejectCompletedUpdatesStreamDial(
+	stopStream func() bool,
+	cleanup updatesStreamDialCleanup,
+	conn *websocket.Conn,
+	err error,
+) (context.CancelFunc, error) {
+	stopStream()
+	closeUpdatesStreamDial(cleanup)
+	_ = conn.Close()
+	return nil, err
+}
+
+func updatesStreamDialContextError(attempt *updatesStreamDial) error {
+	if err := attempt.ctx.Err(); err != nil {
+		return err
+	}
+	if err := attempt.streamCtx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Client) takeUpdatesStreamLocked() (updatesStreamDialCleanup, *websocket.Conn) {
+	c.updatesDialSequence++
+	cleanup := c.takeUpdatesStreamDialLocked()
+	conn := c.agentStreamConn
+	c.agentStreamConn = nil
+	return cleanup, conn
+}
+
+func closeUpdatesStream(cleanup updatesStreamDialCleanup, conn *websocket.Conn) {
+	closeUpdatesStreamDial(cleanup)
+	if conn != nil {
+		_ = conn.Close()
+	}
 }
 
 // ProxyTransport returns the same authenticated upstream transport used by
@@ -947,6 +1164,7 @@ type (
 func (c *Client) Close() {
 	c.mu.Lock()
 	c.closed = true
+	updatesDial, agentConn := c.takeUpdatesStreamLocked()
 	ws := c.workspaceStream
 	connections := make([]*websocket.Conn, 0, len(c.runtimeConns))
 	stops := make([]func() bool, 0, len(c.runtimeConns))
@@ -956,6 +1174,7 @@ func (c *Client) Close() {
 	}
 	c.runtimeConns = nil
 	c.mu.Unlock()
+	closeUpdatesStream(updatesDial, agentConn)
 	for _, stop := range stops {
 		stop()
 	}
@@ -963,7 +1182,6 @@ func (c *Client) Close() {
 		_ = conn.Close()
 	}
 
-	c.CloseUpdatesStream()
 	// CloseWorkspaceStream closes the raw conn to wake the blocked read loop.
 	// ws.Close (below) is needed to close the writeLoop's closeCh; closeOnce
 	// makes ws.Close idempotent so the duplicate conn.Close it issues just

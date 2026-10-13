@@ -55,6 +55,31 @@ function readSuccessfulMessageListResponse(
 
 /** Records whether either transcript loading row is ever inserted. */
 export async function watchLoadingRows(page: Page) {
+  await page.waitForFunction(
+    (selector) => {
+      const store = (
+        window as unknown as {
+          __KANDEV_E2E_STORE__?: {
+            getState: () => {
+              tasks: { activeSessionId: string | null };
+              messages: {
+                metaBySession: Record<
+                  string,
+                  { historyInitialized?: boolean; isLoading?: boolean }
+                >;
+              };
+            };
+          };
+        }
+      ).__KANDEV_E2E_STORE__;
+      const state = store?.getState();
+      const sessionId = state?.tasks.activeSessionId;
+      const meta = sessionId ? state?.messages.metaBySession[sessionId] : undefined;
+      return meta?.historyInitialized && !meta.isLoading && !document.querySelector(selector);
+    },
+    LOADING_ROWS,
+    { timeout: 30_000, message: "initial history should settle before monitoring recovery" },
+  );
   await page.evaluate((selector) => {
     const w = window as unknown as { __loadingRowSeen?: boolean };
     w.__loadingRowSeen = false;

@@ -37,7 +37,7 @@ scan. Opening either settings route must not scan message bodies.
 | Requirement | Design sections |
 | --- | --- |
 | REQ-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-001 | Policy, Eligibility, Analysis, Settings surface |
-| REQ-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002 | Removal rules, Preparation, Transaction and replay safety |
+| REQ-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002 | Removal rules, Preparation, Transaction and replay safety, Failure and observability (preparation failure cause) |
 | REQ-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003 | Scheduling, Failure and observability, Security |
 
 ## Components and responsibilities
@@ -229,6 +229,28 @@ read can race cleanup. Inspect all metadata replacement and fallback-create
 paths, including turn recovery. Keep tool-call identity to preserve deduplication.
 New tool calls after resumption remain normal messages.
 
+### Guarded message replacement
+
+Ordinary message updates, conversation-receipt updates, and changed agent-plan
+upserts share `updateMessageWithPayloadGuardTx`. Its retained-metadata read,
+field merge, and message replacement remain in the caller's genuine transaction.
+The [Platform writer factory](../../platform/system-design/postgres-domain-store-parity.md#sqlite-writer-transaction-admission)
+acquires SQLite's writer at BEGIN. A message-row no-op UPDATE is therefore not
+needed to reserve that writer. Guarded replacement performs the actual message
+UPDATE once, after reading current metadata. PostgreSQL retains its message-row
+`FOR UPDATE` and existing caller lock order.
+
+Map a missing row from the metadata SELECT to the existing message-not-found
+error on both engines. Preserve removal markers, payload identity, retained
+fields, timestamps, and conversation revision/receipt behavior. Failed writes
+roll back through the existing transaction owner. This does not change insert
+replay guards or session identity locks.
+
+The [message update optimization package](../../../plans/message-update-writer-occupancy/plan.md)
+tracks implementation and verification. Its deterministic row-write count tests
+supplement existing stale-read and transaction-admission coverage. Performance
+comparisons are evidence, not machine-dependent test thresholds.
+
 The shell output endpoint checks the marker before returning output. Return
 410 with code `tool_payload_removed`, removal time, and retained summary.
 Client reducers and lazy-output caches must discard removed details when the
@@ -260,6 +282,23 @@ Report committed message counts and payload bytes, skipped reasons, pass state,
 last error code, and last/next times. Interrupted work remains distinguishable
 from success. Logs contain operation IDs and counts, never payload bodies.
 No new unbounded telemetry table is needed.
+
+A failed backup preparation stores only the `backup_failed` code in
+`Status.Preparation.Error`. The scheduler counts the returned error without
+logging it, so the code alone loses the cause. `finishPreparation` therefore
+reports the backup error once after committing `backup_failed` for the matching
+policy revision and operation, through the `Options.Log` callback, which
+`system.provideToolRetention` wires to the backend logger at error level. It
+also keeps the message in the runtime record's `preparation_detail` field. The
+field is part of the persisted record, not of `Status`, so the authorized read
+endpoint never returns raw error text. Invalid UTF-8 byte sequences are replaced
+before the message is cut to 1,024 bytes at a UTF-8 boundary, keeping the decoded
+stored value within the limit after JSON serialization. The logger receives
+the original error. A cancelled preparation, an obsolete completion, or a
+failed state transaction does not emit a current-preparation failure log.
+A successful preparation, a disable, a new pending
+preparation, and `failPreparation` (interrupted preparation) clear it, so a
+stored message always belongs to the current failure.
 
 Cleanup frees database pages for reuse but does not run `VACUUM`. The existing
 database card supplies an explicit compaction action and its before/after result.

@@ -274,6 +274,44 @@ func TestCreate_SweepsStaleTmpSidecar(t *testing.T) {
 	}
 }
 
+// An interrupted pre-migration backup leaves a ".kandev-backup-*" staging
+// directory with a whole database copy. Creating a backup must reclaim it once
+// it is past the boot staging liveness window, and leave a recent one alone.
+// @covers AC-PLATFORM-SQLITE-FILE-HYGIENE-002.2
+func TestCreate_SweepsStaleBootStaging(t *testing.T) {
+	svc, dataDir := newTestService(t)
+	backupsDir := filepath.Join(dataDir, "backups")
+	seed := func(name string, age time.Duration) string {
+		dir := filepath.Join(backupsDir, name)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("mkdir staging: %v", err)
+		}
+		staged := filepath.Join(dir, "kandev-v1.0.0-20260101T000000Z.db")
+		if err := os.WriteFile(staged, []byte("staged copy"), 0o600); err != nil {
+			t.Fatalf("seed staged file: %v", err)
+		}
+		when := time.Now().Add(-age)
+		for _, p := range []string{staged, dir} {
+			if err := os.Chtimes(p, when, when); err != nil {
+				t.Fatalf("chtimes %s: %v", p, err)
+			}
+		}
+		return dir
+	}
+	abandoned := seed(".kandev-backup-111", 7*time.Hour)
+	recent := seed(".kandev-backup-222", time.Hour)
+
+	id := svc.Create(context.Background())
+	waitForJob(t, svc.jobs, id, jobs.StateSucceeded)
+
+	if _, err := os.Stat(abandoned); !os.IsNotExist(err) {
+		t.Errorf("abandoned boot staging not swept: stat err = %v", err)
+	}
+	if _, err := os.Stat(recent); err != nil {
+		t.Errorf("recent boot staging was swept but should have been preserved: %v", err)
+	}
+}
+
 // A recently-modified ".tmp" sidecar may be the in-progress VACUUM INTO of a
 // concurrent Create job (jobs are not serialized), so the sweep must leave it
 // alone — deleting it would make the other job's os.Rename fail with ENOENT.

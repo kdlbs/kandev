@@ -31,6 +31,8 @@ vi.mock("@/lib/ws/connection", () => ({
 vi.mock("@/lib/api/domains/workflow-api", () => ({ listWorkflowSteps: mocks.listWorkflowSteps }));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mocks.state) => unknown) => selector(mocks.state),
+  useOptionalAppStoreApi: () => null,
+  useOptionalAppStore: (_selector: unknown, fallback: unknown) => fallback,
 }));
 import { useTaskListWorkflowSteps, useTasksListStepRefresh } from "./use-task-list-workflow-steps";
 

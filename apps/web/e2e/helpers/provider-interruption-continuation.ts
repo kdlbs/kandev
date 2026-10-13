@@ -140,6 +140,21 @@ export function assertNativeNoContinuationTrace(tracePath: string, scenario: str
   expect(records.filter((record) => record.event === "prompt")).toHaveLength(1);
 }
 
+export async function waitForNativeContinuationPrompt(tracePath: string) {
+  await pollUntil(
+    () =>
+      fs
+        .readFileSync(tracePath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Trace)
+        .some((record) => record.event === "prompt" && record.prompt === "continue"),
+    Boolean,
+    30_000,
+    "waiting for the native agent to receive the continuation prompt",
+  );
+}
+
 export function assertNativeContinuationTrace(tracePath: string, scenario: string, loads = 0) {
   const records: Trace[] = fs
     .readFileSync(tracePath, "utf8")
@@ -164,9 +179,9 @@ export function assertNativeContinuationTrace(tracePath: string, scenario: strin
     expect(record.connection_id).toBeTruthy();
     expect(record.session_id).toBeTruthy();
   }
-  expect(new Set(nativeRecords.map((record) => record.process_id)).size).toBe(1);
-  expect(new Set(nativeRecords.map((record) => record.connection_id)).size).toBe(1);
-  expect(records.filter((record) => record.event === "initialize")).toHaveLength(1);
+  expect(new Set(nativeRecords.map((record) => record.process_id)).size).toBe(1 + loads);
+  expect(new Set(nativeRecords.map((record) => record.connection_id)).size).toBe(1 + loads);
+  expect(records.filter((record) => record.event === "initialize")).toHaveLength(1 + loads);
   expect(
     records.filter((record) => record.event === "session_load" && record.session_id === nativeId),
   ).toHaveLength(loads);
