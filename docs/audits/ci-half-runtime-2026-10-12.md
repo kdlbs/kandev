@@ -366,3 +366,24 @@ now reports 3,960 configured instances: Chromium 2,702; mobile 1,059; auth 37;
 routing nine; containers 152; Kubernetes compatibility one. Relative to the
 whole-branch starting inventory, 153 repeated/obsolete configured instances
 have been removed; no runtime percentage is inferred from that count.
+
+## Follow-up E2E run (2026-10-13)
+
+PR #4457's first E2E run, `38405876470` at `f5466aafe8`, passed all normal and
+container shards. The longest normal test step was 2,126s (35m26s), versus
+2,161s on the merged parent and the fixed 2,159s original reference. This is
+only a **1.53% reduction against the target reference**; 50% is not achieved.
+The sum of 14 normal test steps fell from the merged parent's 27,316s to
+25,078s (8.19% lower). Workflow elapsed increased from 3,033s to 3,454s
+(50m33s to 57m34s) as the last normal job started 1,448s after the trigger,
+versus 683s on the parent. Do not count queue changes as execution savings.
+
+That run predates the portable poller correction and the Git/Quick Chat
+consolidation. The first head's added native macOS PTY check failed because
+its master file had no Go poller registration; `58eb30d5be` adds explicit
+registration and a reproducing regression. Its native check remains pending
+until the next push. The later local two-file audit preserves all 50 scenarios
+in 44 cases and measures 381.425s to 316.745s (16.96% lower), including repair
+of a branch-cleanup ordering defect that previously triggered a 30-second
+reset failure and backend recovery. See the dedicated Git/Quick Chat ledger
+for assertion mappings, mutation evidence and measurement scope.

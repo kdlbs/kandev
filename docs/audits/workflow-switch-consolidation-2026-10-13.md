@@ -15,10 +15,13 @@ with the candidate PTY implementation. Source SHA-256:
 The complete candidate passed all 13 cases in 135.525s, with zero skips or
 retries: **14.14% lower for this file**. The JSON report confirms all five removed
 titles executed as successful named steps, preserving all 18 original scenario
-identities. Both sides used the corrected PTY implementation, so this comparison
+identities. Both sides used the initial Linux PTY implementation, so this comparison
 attributes no cleanup-fix saving to consolidation. Changed-file ESLint passes.
 Full discovery passes with 4019 configured instances across 1393 files on this
 parent snapshot. This is a local file comparison, not a hosted critical-path claim.
+After the portable poller-registration correction (`58eb30d5be`), all 13 cases
+passed again in the complete 42-case desktop verification run. That correctness
+run overlapped backend lint and is not a controlled timing comparison.
 
 ## Coverage decisions
 
