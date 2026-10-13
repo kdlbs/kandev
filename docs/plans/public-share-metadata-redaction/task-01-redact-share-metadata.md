@@ -33,6 +33,8 @@ while removing values matched by the existing rules and recording those rules.
 - Update the existing public redaction paragraph with implemented coverage and
   the frozen historical-share limit.
 - Record actual results and close this order and its manifest before publication.
+- Correct only the proven fake-prober registration barrier that failed required
+  backend CI, preserving runtime behavior and the one-dial/response assertions.
 
 ## Out of scope
 
@@ -124,6 +126,20 @@ timeout --signal=TERM --kill-after=10s 360s env GOMAXPROCS=2 GOMEMLIMIT=512MiB b
 git diff --cached --check
 ```
 
+For the required-CI fixture correction, after the bounded deterministic overlay
+proof, run only the affected SSH test and complete package from the repository
+root. Do not replay passing share/frontend/broad-backend checks:
+
+```bash
+(cd apps/backend && timeout --signal=TERM --kill-after=10s 280s env GOTOOLCHAIN=local GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -tags fts5 -p 1 ./internal/ssh -run '^TestProbeReachability_CoalescesConcurrentProbes$' -count=1)
+(cd apps/backend && timeout --signal=TERM --kill-after=10s 280s env GOTOOLCHAIN=local GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -tags fts5 -p 1 ./internal/ssh -count=1)
+timeout --signal=TERM --kill-after=10s 360s env GOTOOLCHAIN=local GOMAXPROCS=2 GOMEMLIMIT=512MiB bash scripts/lint-go-changed apps/backend/internal/ssh/reachability_handlers_test.go
+```
+
+Use the existing Go 1.26.0 bin directory at task PATH, stage the changed SSH
+file before canonical lint, and preserve normal hooks. No SSH production change
+or dependency update is in scope.
+
 Retain and join every actual native command handle; do not infer completion
 from a duplicate run. Preserve normal commit hooks and their required checks;
 do not bypass them. The initial full-backend scan belongs to hosted CI. Release
@@ -133,6 +149,7 @@ the heavy lease after actual checks and publication work before hosted waiting.
 
 - `apps/backend/internal/task/share/builder.go`
 - `apps/backend/internal/task/share/metadata_redaction_test.go` (new)
+- `apps/backend/internal/ssh/reachability_handlers_test.go` (required-CI fixture only)
 - `docs/public/sessions-and-review.md` (one existing redaction paragraph)
 - The owning requirement/design pair and this plan/order for final results.
 
@@ -186,9 +203,21 @@ Go 1.26.0 came from the existing mise toolchain, prepended to task command PATH,
 with `GOTOOLCHAIN=local` and the resource/timeout settings above. No validator
 unit tests were repeated. The historical design receipt remains in the manifest.
 The first formatting invocation had an incorrect cwd-relative path; it was
-corrected before GREEN and was not a Go compilation failure. No source edits
+corrected before GREEN and was not a Go compilation failure. No share production edits
 followed the passing product checks. No live gist publication was performed.
 
 See the [manifest verification record](plan.md#verification-results) for full
 local results. Commit-hook, push, exact-head hosted CI/review, and merge outcomes
 remain external delivery evidence and are not represented as completed here.
+
+Required-CI remediation completed before fixup publication: the actual failed
+shard's two-dial assertion was reproduced deterministically by pausing the
+second caller after the pre-registration counter. Witness RED native 85295
+joined exit 1 (0.067s); after `DoChan` registration before signaling entry, the
+same witness GREEN 87107 joined exit 0 (1.068s). Original one-dial/identical
+response test 72361 joined exit 0 (1.066s), complete affected SSH package 43906
+joined exit 0 (5.558s), and staged whole-package lint 39735 joined exit 0
+(`0 issues.`). The original assertions and SSH runtime remain unchanged. Full
+CI log/artifact, blob comparison, and temporary proof are retained externally.
+See the manifest's required-CI correction record; hosted readiness remains
+pending on the original observer and unchanged deadline.

@@ -35,6 +35,8 @@ this narrow clarification does not promote the entire migrated share feature.
 - Ordinary values, source nonmutation, schema, identifiers, timestamps, and
   existing message controls.
 - A small public-doc clarification accompanying the implemented behavior.
+- The proven test-fixture barrier correction required by the backend CI failure,
+  without changing SSH runtime behavior.
 
 ### Out of scope
 
@@ -142,8 +144,10 @@ service/provider authorization tests run in the complete affected Go package.
 ## Verification results
 
 Implementation and local work-order verification are complete. The single order
-was closed before first publication. Commit hooks, remote CI/review, and eventual
-merge outcomes are tracked externally; they are not claimed complete here.
+was closed before first publication and closed again after the required-CI
+fixture correction, before its fixup publication. Commit hooks, remote CI/review,
+and eventual merge outcomes are tracked externally; they are not claimed
+complete here.
 
 Implementation validation on 2026-10-13, sequential under the exclusive heavy
 lease, with Node 24.18.0 and existing Go 1.26.0 from the mise installation:
@@ -172,10 +176,46 @@ Logs and native receipts are retained under the task-owned temporary directory
 `/tmp/kandev-child121-share-metadata-20261013-AVcjTX`. A preliminary `gofmt`
 command used an incorrect relative path; its error did not prevent the RED Go
 command from compiling and reaching the causal assertions. Formatting was
-corrected from the repository root before GREEN. No code changed after the
+corrected from the repository root before GREEN. No share production code changed after the
 passing GREEN/package checks. No real data or network gist publication was used.
 The public how-to redaction paragraph was updated; no UI or mobile composition
 changed.
+
+### Required backend CI fixture correction
+
+The initial published head's `Backend Tests (2/2)` job 115315316321, run
+38402986234 attempt 1, failed only
+`internal/ssh.TestProbeReachability_CoalescesConcurrentProbes` with
+`dialCount = 2, want 1`. The full raw job log and shard-2 test artifact are
+retained in the task evidence directory. An initial log fetch was rejected by
+the CLI because of terminal escape sequences; the explicit raw-to-file fetch
+succeeded. This was not a network or product failure.
+
+The actual tested merge `4a7bc486eb93ccde9db21c415f334dcdc772eae4`, its base,
+the published head, and current main `a02db609519e97c0d622bad7657c390feee0fc24`
+have identical implicated fixture, handler, and poller blobs. The fixture
+incremented its entry counter before joining `singleflight.Group.Do`; its test
+therefore could release the first dial before the second caller registered.
+
+Under ROOT's scoped lease, one deterministic test-only overlay paused the
+second caller immediately after that marker, completed the first dial, then
+released the second. RED native 85295 joined exit 1, package 0.067s, with the
+same two-dial assertion. The minimal permanent fixture correction uses
+`DoChan` to register synchronously before signaling entry and then waits for
+the result. No runtime, handler, poller, expectation, sleep, retry, or dependency
+changed. The witness source is temporary evidence, not a production test seam.
+
+- Identical scheduling witness GREEN: native 87107 joined exit 0, 1.068s.
+- Original coalescing test GREEN: native 72361 joined exit 0, 1.066s.
+- Complete affected `./internal/ssh` race/trimpath/fts5 package once: native
+  43906 joined exit 0, 5.558s.
+- Staged canonical `bash scripts/lint-go-changed` for the changed SSH test file:
+  native 39735 joined exit 0, `0 issues.`
+
+Commands retain Go 1.26.0/local toolchain, `GOMAXPROCS=2`, `GOMEMLIMIT=512MiB`,
+`-p 1`, and bounded timeouts. Passing share/frontend/full-backend suites were
+not replayed. Hosted results remain pending; the original observer and its
+deadline continue across the fixup head without a new timer or budget reset.
 
 Design validation on 2026-10-13:
 

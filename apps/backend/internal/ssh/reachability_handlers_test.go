@@ -81,13 +81,15 @@ type fakeReachabilityProber struct {
 }
 
 func (f *fakeReachabilityProber) ProbeAndWait(executor *models.Executor) (reachabilitypkg.ProbeResult, bool) {
-	atomic.AddInt32(&f.callsEntered, 1)
-	v, _, _ := f.group.Do(executor.ID, func() (any, error) {
+	result := f.group.DoChan(executor.ID, func() (any, error) {
 		atomic.AddInt32(&f.dialCount, 1)
 		<-f.gate
 		return f.result, nil
 	})
-	return v.(reachabilitypkg.ProbeResult), true
+	// DoChan registers the waiter before the caller-entry barrier is signaled.
+	atomic.AddInt32(&f.callsEntered, 1)
+	v := <-result
+	return v.Val.(reachabilitypkg.ProbeResult), true
 }
 
 func (f *fakeReachabilityProber) EffectiveIntervalSeconds() int { return f.interval }
