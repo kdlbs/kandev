@@ -304,3 +304,40 @@ formatting passed. The hosted frontend file comparison retains all reference
 files; its five additions are secrets initial-error/global-error, terminal
 settings save, legacy session-stopped banner and delivery-recovery view.
 The PR-archive-banner and composer-props suites also gain upstream cases.
+
+## Clarification dismissal and restoration
+
+Four desktop cases independently launched the same three-question blocked
+conversation to check local Escape dismissal, unchanged agent state, normal
+answering after restoration and preservation of a partial answer. One journey
+now exercises all four as [named steps](clarification-consolidation-2026-10-13.csv):
+dismiss from the second carousel step, restore and dismiss from chat focus,
+restore and choose PostgreSQL, dismiss/restore with that answer, then complete
+and submit PostgreSQL/Go/Docker. All original visibility, progress, selected
+answer, idle composer, request-count and session-state assertions remain.
+The 300ms no-rejection and 500ms no-resumption observation windows remain.
+
+The original four passed in 30.353 seconds; the keeper passed in 12.196 seconds,
+**59.8% lower for this cohort**, with no retry or skip. All four original titles
+were verified as executed steps in the report. Unit coverage of keyboard scope,
+Escape guards and local collapse remains independent; this journey still uses
+the real clarification endpoint and blocked mock-agent conversation. Detached
+questions, skips, focus conflicts, races, submitting guards and mobile tests
+remain independent. Reviewed owners are ClarificationPanelSection and
+ClarificationInputOverlay, with the clarification response reliability and
+active lifecycle contracts preserving local dismissal versus explicit Skip.
+
+A temporary mutation removed the keyboard Escape dismissal callback. The
+keeper failed because the overlay stayed visible. The file's existing retry
+policy also retried that deliberate failure; it failed again. Production source
+was restored byte for byte and the normal E2E application rebuilt before the
+complete file verification. No production change or retry-policy change is
+included.
+
+After restoring the owner, all 29 clarification cases passed in
+235.678 seconds, without skips or retries. Changed-file ESLint,
+formatting and documentation reference validation pass. Complete discovery
+now reports 3,960 configured instances: Chromium 2,702; mobile 1,059; auth 37;
+routing nine; containers 152; Kubernetes compatibility one. Relative to the
+whole-branch starting inventory, 153 repeated/obsolete configured instances
+have been removed; no runtime percentage is inferred from that count.
