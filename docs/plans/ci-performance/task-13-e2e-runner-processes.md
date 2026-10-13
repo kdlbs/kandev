@@ -227,6 +227,10 @@ ambiguous text locator and skips an expansion control before it renders.
 Cancellation adds sequential assertion overhead to its two-second check;
 another attempt finishes its short mock turn during page setup. The routing
 and cancellation readiness audit records the focused repairs and evidence.
+The complete artifact audit corrects the initial failure classification:
+executor routing passes on its second retry; the mobile 50,000-file viewport
+case is the third final failure. Its scroll helper correction is recorded
+in the large Changes scroll audit; no size or geometry assertion is removed.
 
 Threads consolidation retains twelve scenarios in nine cases and passes its
 complete local comparison at 107.038 to 87.831 summed seconds. A persisted

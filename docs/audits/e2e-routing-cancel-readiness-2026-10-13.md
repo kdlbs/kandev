@@ -3,7 +3,10 @@
 Full hosted run 38448127809 fails normal shards 6 and 12. The longest normal
 step is 1,520 seconds, 29.60% below the fixed 2,159-second reference; summed
 normal execution is 18,128 seconds. Twelve normal shards and all six container
-shards pass. This is a failed run, not an accepted speed improvement.
+shards pass. Final failures are the mobile 50,000-file viewport case and both
+cancellation policies; executor routing passes only on its second retry. The
+full artifact audit records 3,885 passed, 40 skipped, three failed and twelve
+retry attempts. This is a failed run, not an accepted speed improvement.
 
 ## Executor settings
 
