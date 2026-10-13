@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/journal"
@@ -106,4 +108,55 @@ func TestNativeReadinessKeepsFenceWhenProofOrFreshCapabilityRefuses(t *testing.T
 			require.Empty(t, manager.capturedPromptCalls)
 		})
 	}
+}
+
+type bootReadinessReloadFailureRepository struct {
+	*sqliterepo.Repository
+	resolved, failNext, failed bool
+}
+
+func (r *bootReadinessReloadFailureRepository) ResolveSessionRecoveryBlockWithNativeEvidence(ctx context.Context, id string, proof *models.NativeResumeDeliveryEvidence, at time.Time) (bool, error) {
+	changed, err := r.Repository.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, id, proof, at)
+	r.resolved = changed
+	return changed, err
+}
+
+func (r *bootReadinessReloadFailureRepository) GetOpenSessionRecoveryBlock(ctx context.Context, sessionID, incarnationID string, generation int64) (*models.SessionRecoveryBlock, error) {
+	block, err := r.Repository.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, generation)
+	if r.resolved && !r.failed && errors.Is(err, sql.ErrNoRows) {
+		r.failNext = true
+	}
+	return block, err
+}
+
+func (r *bootReadinessReloadFailureRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	if r.failNext {
+		r.failNext, r.failed = false, true
+		return nil, errors.New("transient session read failure after fence reconciliation")
+	}
+	return r.Repository.GetTaskSession(ctx, id)
+}
+
+func TestNativeReadinessReloadFailurePreservesCommittedRecovery(t *testing.T) {
+	svc, _, submission := nativeReadinessFixture(t, false)
+	repo := &bootReadinessReloadFailureRepository{Repository: svc.repo.(*sqliterepo.Repository)}
+	svc.repo = repo
+	ctx := context.Background()
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, submission.SessionID, models.SessionMetaKeyAgentDeliveryRecovery, &models.AgentDeliveryRecovery{
+		Phase: models.AgentDeliveryRecoveryUncertain, Revision: 1, PromptGeneration: 1,
+		SessionID: submission.SessionID, IncarnationID: submission.IncarnationID,
+		AgentExecutionID: "old-execution", SubmissionID: submission.ID,
+		StreamID: "native-resume-stream", HarnessGeneration: submission.HarnessGeneration, UpdatedAt: time.Now().UTC(),
+	}))
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "task1", SessionID: submission.SessionID, AgentExecutionID: "old-execution"})
+	require.True(t, repo.failed)
+	stored, err := repo.GetTaskSession(ctx, submission.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, stored.State)
+	recovery, exists := models.LoadAgentDeliveryRecovery(stored.Metadata)
+	require.True(t, exists)
+	require.Equal(t, models.AgentDeliveryRecoveryRestored, recovery.Phase)
+	block, err := svc.GetOpenSessionRecoveryBlock(ctx, submission.SessionID)
+	require.NoError(t, err)
+	require.Nil(t, block)
 }
