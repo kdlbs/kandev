@@ -252,3 +252,31 @@ evidence directory `/tmp/kandev-child120-implementation-kALaKN/` (`install.log`,
 paths supplement the durable command/results above and are not repository inputs.
 Normal hook/commit/push/PR receipts live in the external task delivery record;
 publication and hosted review follow these completed local checks.
+
+### Required CI remediation
+
+Hosted `Backend Static Checks`, job `115264964136` in run `38388120019` at
+`a7b2ff8f87330b1da719042ada3acc78417e6755`, failed its required-store SQL
+portability step on this verifier's `PRAGMA integrity_check`. Build, dependency
+graph and settings-catalog steps passed; golangci-lint had not run in that job.
+
+Under the separately re-granted heavy lease, exact reproduction from
+`apps/backend` with Go 1.26, `GOTOOLCHAIN=local`, `GOMAXPROCS=2`,
+`GOMEMLIMIT=512MiB` and `timeout --signal=TERM --kill-after=10s 280s`:
+
+- `go run -trimpath ./cmd/sqlguard ./internal`: native 77468, actual joined
+  exit 1, one `sqlite-catalog` violation in `verifyProductionSnapshot`.
+- Added one exact existing registration in
+  `internal/db/sqlguard/exemptions.json` for this file/function/rule. The reason
+  states that the launcher opens only read-only `sqlite3` and verifies integrity
+  before publication. The analyzer, shared stores, schema and runtime are unchanged.
+- The same exact command: native 34022, actual joined exit 0, SQL guard passed.
+  Its normal scan validates precise matching and rejects unused exemptions.
+
+This configuration-only correction needs no new permanent test or full-backend
+suite. The canonical staged Go-file lint pipeline has no affected Go inputs for
+this fixup, so it is a no-op rather than a new package-lint pass. Normal hooks
+and spec/documentation/diff coverage remain required before the fixup push.
+The single original hosted observer continues across this correction; no new
+FULL review request was sent. Optional style/coverage suggestions and hard-kill
+staging reclamation do not expand this required-CI correction.

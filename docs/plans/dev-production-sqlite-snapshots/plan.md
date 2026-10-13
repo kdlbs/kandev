@@ -175,6 +175,13 @@ and diff checks passed. Public remote-environment instructions were updated.
 No shared engine, schema, restore/recovery, ownership, frontend or UI changes
 were made; no broad checks or extra semantic reviews were added.
 
+Required hosted CI later identified the verifier's missing precise SQLite-only
+SQL-guard registration. The exact guard command reproduced that one finding and
+passed after adding one file/function/rule entry in the existing exemption JSON.
+No analyzer or runtime behavior changed; [Task 01](task-01-complete-snapshot.md#required-ci-remediation)
+records the exact RED/GREEN commands and joins. This is a required CI repair,
+not an initial speculative schema audit or a broadened persistence change.
+
 ## Risks
 
 - Full verification and free-page-preserving copies require disk space and can
