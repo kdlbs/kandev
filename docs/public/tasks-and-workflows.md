@@ -72,6 +72,8 @@ Closing the port manager leaves active tunnels running.
 Reopening refreshes detected ports and current tunnel state while preserving
 your unfinished manual-port entry. Use **Refresh** to check for new listening
 ports while the manager stays open.
+If the current tunnel status cannot be read, the manager keeps the last known
+status until a later successful read.
 
 ## Keep your view when creating tasks
 

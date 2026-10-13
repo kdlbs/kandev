@@ -218,3 +218,11 @@ retries, plus typecheck (6 GiB heap), focused lint/formatting, i18n,
 catalog/specification/harness and public-doc validation. Exact review and CI
 monitoring remain delivery work after the fixup is published. See Task 01 for
 regression evidence and runner settings.
+
+A subsequent non-inline CodeRabbit finding is remediated in the same owner:
+failed or unavailable tunnel snapshots preserve the last known map, and successful
+empty snapshots clear it. API and phone regression RED evidence is recorded in
+Task 01; the expanded unit command passed 82 tests and fresh-build mobile port
+verification passed 11 cases without retries. Runtime wire contracts and viewport
+composition are unchanged. Current-head CI and review evidence is collected after
+publication; prior-head snapshots remain historical.

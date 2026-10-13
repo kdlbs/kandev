@@ -83,6 +83,8 @@ Only the latest detection request in a session scope may publish results or clea
 loading. Tunnel hydration captures the mutation revision when its read starts:
 only later local mutations override that snapshot, so a new read can reconcile
 changes made by another client without replaying old local starts or stops.
+A failed or unavailable tunnel read retains the last known active map; only
+a successful snapshot, including an empty one, replaces it.
 
 ## Responsive surface and focus
 

@@ -113,6 +113,9 @@ newer than that read. A later snapshot can replace earlier local changes made
 before it started. This preserves other
 existing tunnels when a Start succeeds before the initial tunnel read resolves.
 No additional fetches, subscriptions, polling, or tunnel lifecycle changes are needed.
+Failed or unavailable tunnel reads preserve the last known active map. The
+client distinguishes those reads from a successful empty snapshot, which may
+clear the map while retaining known target ports for restarting.
 
 Detection/list clients currently convert errors into empty arrays. Preserve that
 API behavior in this scope: an empty port result cannot remove active-map rows.

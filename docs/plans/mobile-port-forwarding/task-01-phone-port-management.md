@@ -94,7 +94,7 @@ Run from repo root. In a fresh worktree without dependencies, first run
 `(cd apps && pnpm install --frozen-lockfile)`.
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/task/mobile/session-mobile-bottom-nav.test.tsx components/task/port-forwarding-visibility-provider.test.tsx components/task/port-forward-dialog.test.tsx components/task/port-forward-rows.test.ts components/task/port-forwarding-visibility.test.ts components/task/dockview-add-panel-items.test.tsx components/task/use-tunnel-actions.test.ts components/task/use-port-forward-management.test.ts)
+(cd apps/web && pnpm exec vitest run components/task/mobile/session-mobile-bottom-nav.test.tsx components/task/port-forwarding-visibility-provider.test.tsx components/task/port-forward-dialog.test.tsx components/task/port-forward-rows.test.ts components/task/port-forwarding-visibility.test.ts components/task/dockview-add-panel-items.test.tsx components/task/use-tunnel-actions.test.ts components/task/use-port-forward-management.test.ts lib/api/domains/port-api.test.ts)
 (cd apps/web && NODE_OPTIONS=--max-old-space-size=6144 pnpm run typecheck)
 (cd apps/web && pnpm exec eslint --max-warnings 0 components/task/mobile/session-mobile-bottom-nav.tsx components/task/mobile/plugin-panel-picker.tsx components/task/mobile/session-task-switcher-sheet.tsx components/task/port-forward-dialog.tsx components/task/port-forwarding-visibility-provider.tsx components/task/port-forward-content.tsx components/task/use-port-forward-management.ts components/task/use-tunnel-actions.ts components/task/task-page-inner.tsx e2e/tests/plugins/mobile-plugin-task-panel.spec.ts e2e/tests/session/mobile-port-forwarding.spec.ts e2e/tests/session/port-forward-dialog.spec.ts e2e/tests/task/mobile-remote-repository-topbar.spec.ts e2e/pages/session-page.ts)
 (cd apps/web && pnpm run i18n:check)
@@ -233,3 +233,23 @@ shortened browser viewport, not an actual OS keyboard or a Safari device run.
   describes reopening and manual-draft retention.
 - Current-head CI and automated review monitoring remain delivery checks after
   publication; earlier PR-head CI and review evidence is superseded.
+
+### Tunnel-read failure remediation
+
+A later non-inline CodeRabbit finding identified that a failed tunnel read
+looked like a successful empty snapshot. The client now returns an explicit
+unavailable result for missing connections or rejected requests. The shared
+controller retains its last known active map on that result, while a successful
+empty snapshot still clears it. No runtime protocol or tunnel lifecycle changes.
+
+The API failure/unavailable regressions failed on the old client (two failures),
+and the phone reopening regression failed when the failed read removed its
+Forwarding state. The final unit command above passed 82 tests in nine files;
+managed mobile port verification passed all 11 cases without retries against a
+fresh build. The extended reopening case covers a failed read followed by a
+successful empty snapshot. The same shared state owner serves every viewport.
+Focused lint/formatting, specification/catalog and public-doc validation passed.
+Desktop port verification passed all 12 cases without retries; typecheck passed
+with a 6 GiB heap. A later harness-only main update was merged and shared
+harness validation passed. Current-head CI and reviews remain delivery checks
+after publication.

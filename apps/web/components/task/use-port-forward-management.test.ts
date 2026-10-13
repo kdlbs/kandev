@@ -99,6 +99,18 @@ describe("port detection request ownership", () => {
 
 // @covers AC-UI-PORT-FORWARDING-ACTIVE-FIRST-001.7-.8
 describe("tunnel snapshot freshness", () => {
+  it("retains known active tunnels when a later snapshot is unavailable", async () => {
+    const { result, rerender } = renderHook(
+      ({ active }) => usePortForwardManagement("session", active),
+      { initialProps: { active: true } },
+    );
+    await act(async () => result.current.handleTunnelStart(9000));
+    listTunnelsMock.mockResolvedValueOnce(null);
+    rerender({ active: false });
+    await act(async () => rerender({ active: true }));
+    expect(result.current.activeTunnels.get(9000)).toBe(49152);
+  });
+
   it("accepts an externally stopped tunnel on a later management visit", async () => {
     const { result, rerender } = renderHook(
       ({ active }) => usePortForwardManagement("session", active),

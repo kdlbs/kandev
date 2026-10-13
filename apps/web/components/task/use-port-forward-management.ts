@@ -63,7 +63,7 @@ export function usePortForwardManagement(sessionId: string | null, active: boole
     const readVersion = scope.mutationVersion;
     let cancelled = false;
     void listTunnels(sessionId).then((tunnels) => {
-      if (cancelled) return;
+      if (cancelled || tunnels === null) return;
       setState((previous) => {
         if (previous.scope !== scope) return previous;
         const hydrated = new Map(tunnels.map((tunnel) => [tunnel.port, tunnel.tunnel_port]));

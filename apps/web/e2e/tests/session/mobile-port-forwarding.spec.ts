@@ -35,6 +35,13 @@ test.describe("Port forwarding on mobile", () => {
     await session.portForwardDialog.getByRole("button", { name: "Close", exact: true }).tap();
     await expect(session.portForwardDialog).toBeHidden();
     ports.setDetectedPorts([{ port: 8080, address: "*", process: "new-server" }]);
+    ports.failNext("port.tunnel.list");
+    const priorReads = ports.requestCount("port.tunnel.list");
+    await openPorts(session);
+    await expect(session.portForwardRow(8080)).toBeVisible();
+    expect(ports.requestCount("port.tunnel.list")).toBe(priorReads + 1);
+    await expect(session.portForwardRow(3000)).toHaveAttribute("data-forwarded", "true");
+    await session.portForwardDialog.getByRole("button", { name: "Close", exact: true }).tap();
     ports.setTunnels([]);
     await openPorts(session);
     await expect(session.portForwardRow(8080)).toBeVisible();
