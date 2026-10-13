@@ -154,7 +154,10 @@ the same native conversation without resending the old prompt. **Retry connectio
 and **Stop** remain available. A successful load alone cannot replace missing
 proof about the original process, so automatic recovery may leave this action
 to you. If Resume cannot verify the saved evidence, it keeps the session blocked
-and reports the cause.
+and reports the cause. If the saved delivery already has a fully recorded
+terminal result, Kandev reconciles the matching stale block when the idle native
+conversation is restored. The old result remains unchanged, and no previous
+prompt is sent again.
 
 After a backend restart, Kandev uses durable evidence to verify the saved owner
 and native conversation. If they match, Kandev restores the same task session

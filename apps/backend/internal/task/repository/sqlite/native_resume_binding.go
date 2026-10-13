@@ -81,6 +81,10 @@ func (r *Repository) verifyNativeResumeInventoryTx(ctx context.Context, tx *sqlx
 	if !valid {
 		return false, nil
 	}
+	terminalCount, valid, err := r.verifyNativeResumeTerminalsTx(ctx, tx, proof)
+	if err != nil || !valid {
+		return false, err
+	}
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`SELECT id, incarnation_id, harness_generation, payload_hash, state, terminal_stream_id, terminal_sequence FROM agent_delivery_submissions WHERE session_id = ? AND state IN ('prepared', 'accepted', 'dispatching', 'interrupted_unknown')`), proof.SessionID)
 	if err != nil {
 		return false, err
@@ -95,13 +99,13 @@ func (r *Repository) verifyNativeResumeInventoryTx(ctx context.Context, tx *sqlx
 			return false, err
 		}
 		row, found := retired[id]
-		if !found || state != models.DeliverySubmissionInterruptedUnknown || incarnation != proof.IncarnationID ||
+		if !found || state != models.DeliverySubmissionInterruptedUnknown || (row.State != "" && row.State != state) || incarnation != proof.IncarnationID ||
 			generation != row.HarnessGeneration || hash != row.PayloadHash || sequence != row.TerminalSequence || stream != row.TerminalStreamID {
 			return false, nil
 		}
 		count++
 	}
-	return count == len(retired), rows.Err()
+	return count+terminalCount == len(retired), rows.Err()
 }
 
 func (r *Repository) verifyNativeResumeCursorTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence) (bool, error) {

@@ -57,7 +57,7 @@ func (s *Service) checkNativeResumeDeliveryBlock(ctx context.Context, taskID, se
 			unknown = true
 		}
 	}
-	if !unknown {
+	if !unknown && !s.canProveSettledNativeDeliveryBlock(block) {
 		return &sessionRecoveryRequiredError{Block: block}
 	}
 	return nil
@@ -133,4 +133,13 @@ func (s *Service) finishLoadedNativeDeliveryBlock(ctx context.Context, block *mo
 		s.publishAgentDeliveryRecoveryState(ctx, block.SessionID)
 	}
 	return changed, err
+}
+
+// Empty delivery fences can outlive fully settled SQL history. Admission still
+// waits for authenticated native evidence and the transactional inventory check.
+func (s *Service) canProveSettledNativeDeliveryBlock(block *models.SessionRecoveryBlock) bool {
+	_, canProve := s.agentManager.(nativeResumeDeliveryEvidenceReader)
+	_, canResolve := s.repo.(nativeResumeEvidenceBlockResolver)
+	return canProve && canResolve && block.ConsumerReference == agentDeliveryConsumer &&
+		block.DeliverySubmissionID == "" && block.DeliveryStreamID == ""
 }
