@@ -542,6 +542,10 @@ exact committed projection receipt, authenticated cursor and replay hash must su
 The unresolved terminal and prompt keep their stronger recovery protections.
 Recent duplicate receipts remain for up to 24 hours or 10000 events per stream.
 Contiguous retirement checkpoints reject older events without applying them again.
+Fully projected known control notifications, such as capability and model reports,
+also become eligible after their exact consumer receipts complete. They do not
+permanently pin later expired output. Unknown notifications, pending effects and
+unresolved evidence still stop the retirement checkpoint.
 A lost ACK uses the persisted projected cursor. Cleanup never resends a prompt or a tool action.
 
 Unprojected events, uncertain prompts, pending claims, and incomplete terminal or workflow settlement remain protected.

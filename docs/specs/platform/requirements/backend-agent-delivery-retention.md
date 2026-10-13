@@ -80,6 +80,14 @@ Implementation is in progress. The paired [design](../system-design/backend-agen
 - **AC-PLATFORM-DELIVERY-RETENTION-005.5:** Protected-only discovery pages shall not prevent later eligible output from being visited. Cleanup shall persist fair progress while retaining its transaction, payload, pass-duration and cancellation limits.
 
 - **AC-PLATFORM-DELIVERY-RETENTION-005.6:** When bounded work remains after a productive pass, cleanup shall continue immediately without artificial inter-batch or inter-pass sleeps while preserving all work limits and maintenance priority. The worker shall begin when its normal lifecycle admits it without an additional startup timer. Exhausted or busy-only passes shall return to the configured idle cadence; errors retain bounded backoff.
+- **AC-PLATFORM-DELIVERY-RETENTION-005.7:** Known, fully projected control
+  notifications with exact completed consumer evidence shall become eligible
+  for replay-window expiry. They shall not permanently pin later eligible
+  events merely because they precede conversation output. Every event in a
+  retired prefix shall independently satisfy its identity, projection, content
+  and dependency proofs; a gap or an unknown, unprojected or unresolved event
+  shall stop advancement. Cleanup shall preserve current session state and
+  shall not repeat control actions or manufacture missing consumer evidence.
 
 ### REQ-PLATFORM-DELIVERY-RETENTION-006: Upgrade, operations and surface parity
 
@@ -104,6 +112,10 @@ clarifies eligibility without weakening protected terminal or replay boundaries.
 The [throughput design](../system-design/backend-agent-delivery-retention-throughput.md)
 and [delivery plan](../../../plans/database-maintenance-throughput/plan.md) define
 productive continuation scheduling.
+
+The [stream storage design](../system-design/delivery-stream-storage.md) and
+[combined repair plan](../../../plans/delivery-stream-storage/plan.md) address
+known control notifications that pin otherwise expired replay receipts.
 
 ## Out of scope
 

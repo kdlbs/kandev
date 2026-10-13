@@ -417,6 +417,12 @@ When the repository defines a dev script, the desktop header shows a dev server 
 
 Structured shell-command activity keeps the command, working directory, status, and output size in the chat row. Expand **Output** to fetch the transcript; Kandev continues refreshing an open, running command and stops when it reaches a terminal state. The disclosure separates standard output and errors, reports truncation and the exit code when known, and offers **Retry** when the transcript request fails. Historical command transcripts are loaded only when opened, which keeps long conversations responsive without discarding the stored output.
 
+For foreground ACP commands, consecutive output-only updates are grouped into
+periodic snapshots, normally no more than 250 ms apart while delivery is available.
+The first output and final result remain immediate. This avoids repeatedly saving
+the accumulated transcript for every small output chunk; command state changes,
+conversation text and committed replay records keep their normal ordering.
+
 The ring in the chat-input toolbar shows the active session's context-window use
 when the agent reports a trustworthy window size. Open it to see used and total
 tokens; it focuses on the active session's context window. The hover also shows

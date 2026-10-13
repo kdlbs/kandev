@@ -17,10 +17,10 @@ requirements:
 Platform owns retained delivery evidence; Tasks owns schema, lifecycle authenticates traffic, and orchestrator owns queue/workflow authority.
 Extends [delivery](durable-agent-delivery.md), [reattachment](durable-agent-reattachment.md) and [stream processing](durable-agent-stream-processing.md).
 The [checkpoint ADR](../../../decisions/2026-10-05-backend-delivery-retirement-checkpoints.md) records replay; the [barrier ADR](../../../decisions/2026-10-10-delivery-event-retention-barriers.md) defines scoped serialization.
-Journal policy, wire version and runtime flags remain unchanged.
 Contiguous checkpoints replace permanent generic receipts; parent delivery boundaries remain authoritative.
 
-Payload proof: [details](backend-agent-delivery-retention-payloads.md).
+[Payload proof](backend-agent-delivery-retention-payloads.md) and
+[control eligibility](delivery-stream-storage.md).
 
 ## Requirement mapping
 
