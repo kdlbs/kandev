@@ -197,8 +197,8 @@ required screenshot embedding in step 7 is complete.
 
    **Embed (GitHub only):** Upload screenshots with native `gh --attach`.
    Require GitHub CLI **2.99.0 or newer**, confirm `gh pr edit --help` lists
-   `--attach`, and verify repository push access with an OAuth token or classic
-   PAT. GitHub Enterprise Server is unsupported. If these prerequisites are
+   `--attach`, and verify authenticated repository push access. GitHub
+   Enterprise Server is unsupported. If these prerequisites are
    missing, report the concrete upgrade, authentication, or host blocker before
    publication. See [GitHub's attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
    and [the release announcement](https://github.blog/changelog/2026-09-01-github-cli-media-in-issues-pull-requests-and-comments/).
@@ -224,6 +224,9 @@ required screenshot embedding in step 7 is complete.
    attach each file only once. For issue or PR comments, the same repeatable
    flag works with `gh issue comment` and `gh pr comment`; for an unreferenced
    image, `--attach 'path/to/shot.png#Descriptive alt text'` supplies its caption.
+   On a nonzero exit, read the PR body before retrying: some attachments may
+   have succeeded and the body may already be updated. Retry only missing
+   assets against a newly merged live body.
 
    `gh pr edit` can fail on this repo (GraphQL touches the deprecated
    Projects-classic API), or report success without changing the body. Treat
