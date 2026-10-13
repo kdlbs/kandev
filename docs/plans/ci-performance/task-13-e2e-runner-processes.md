@@ -184,3 +184,36 @@ unexpected failure, timeout and interruption. It fails before implementation;
 all 49 focused tests pass afterward. A temporary real failing Playwright case
 confirms the automatic fixture prints the backend log and preserves exit 1;
 the temporary probe is removed. Fresh hosted validation remains required.
+
+The next full two-process trial (run 38439998051) finishes with thirteen normal
+shards and all six container shards passing. Longest normal execution is 1,503
+seconds, summed normal execution 17,680 seconds, and workflow elapsed 2,589
+seconds. Full project/file/suite/title/repeat identities account for 3,931
+cases plus four executed consolidation steps against 3,935 baseline cases;
+the same 40 cases are skipped. Final outcomes are 3,890 passed, 40 skipped and
+one failed, with five retry attempts. Cancellation and Restore-first both pass.
+The remaining mobile goal-clear assertion expires while the agent is still
+running; its readiness repair and local verification are recorded in the
+mobile goal response audit. This failed run does not satisfy acceptance.
+
+A further local three-process trial is rejected. Before intentional shutdown,
+64 matching first-attempt passing cases take 672.7 summed seconds versus 427.0
+with two processes, and a Quick Chat detached-work cancellation case fails.
+This partial sample is neither a complete timing comparison nor proof that
+concurrency caused that failure. The workflow remains at two processes.
+
+A temporary executable 2 GiB RAM-backed Docker /tmp mount is also rejected.
+The same eight desktop/mobile cases pass without retries on both sides,
+taking 101.692 summed seconds on ordinary storage versus 99.179 seconds on
+RAM-backed storage (2.47%). One small sample does not establish a useful full
+suite gain or justify the new memory bound. The runner is restored byte for
+byte. No hosted capacity or storage configuration changes are adopted.
+
+Session-dialog consolidation retains nine scenarios in six cases, with a
+complete local comparison of 95.1 to 69.6 summed seconds. A separate attempt
+to share runtime-summary notification setup between desktop and phone is
+rejected after a reconnect failure in its complete file run. The original
+notification tests and helper are restored. Both coverage decisions are
+recorded in their respective audits. The longest-step target remains open;
+the next complete hosted run must validate this batch before any passing
+speed claim.
