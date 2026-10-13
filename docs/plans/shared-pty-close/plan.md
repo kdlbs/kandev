@@ -120,12 +120,22 @@ parent and candidate because the local login shell sources a missing Cargo
 environment file. Windows compilation and full backend lint passed. Native
 Linux/macOS compatibility remains a pre-merge hosted gate.
 
-Three alternating pairs retained all 29 exact identities and outcomes without
+Three alternating pairs of the initial Linux implementation retained all 29 exact identities and outcomes without
 skips or retries. Median complete-file duration fell from 479.358s to 448.100s,
 6.52% lower locally. Median per-run reset total fell from 60.592s to 27.934s;
 median per-run reset median fell from 2581.10ms to 584.05ms. All temporary
 instrumentation was restored byte-for-byte. An interrupted earlier candidate
 is excluded. See Task 02 for all six samples. No hosted saving is claimed.
+
+The first hosted macOS run failed because creack/pty constructs its master
+with a blocking `os.NewFile` there, leaving the handle outside Go's poller.
+Nonblocking flags alone made reads return EAGAIN. A local raw-descriptor
+regression reproduced the missing poller before the correction. Initialization
+now creates a nonblocking close-on-exec duplicate, registers a new Go handle,
+checks deadline support and closes the original. Linux PTY race repetitions
+pass; fresh E2E and native compatibility evidence is required for this revised
+implementation. The earlier 6.52% local result belongs to the initial Linux
+implementation, not an accepted portable revision.
 
 The complete mobile continuity file passed all four cases without skips or
 retries. Web typecheck and complete E2E discovery passed (4019 configured
@@ -149,3 +159,11 @@ complete; these files now track the subsequently authorized implementation.
 - Initialization failure happens after child creation and must not leak or double-wait it.
 - Native PTY hangup behavior differs between operating systems and shells.
 - This common wrapper does not cover every terminal in the application.
+
+Portable revision local verification passed: all 42 desktop cases across queue,
+transcript and workflow-switch files, plus all four mobile continuity cases,
+with zero skips or retries. This combined correctness run overlapped backend
+lint and is not a controlled speed comparison. PTY race tests passed ten times;
+login/shell suites and all interactive-runner, first-idle and PTY-dimension tests
+passed. Full backend lint reports zero issues, Windows compilation passes, and
+documentation validation passes. Hosted macOS and final E2E timing remain pending.

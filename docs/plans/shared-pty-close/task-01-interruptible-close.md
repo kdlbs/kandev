@@ -109,3 +109,26 @@ Windows PTY compilation and full backend lint passed (zero issues).
 Specification lint and action SHA pinning passed. Native macOS execution is
 pending in the new focused compatibility workflow. The work order remains open
 until native compatibility checks pass.
+
+### Native portability correction
+
+Hosted macOS run 38405876695 failed both pending-read regressions in all ten
+repetitions: Read returned EAGAIN before Close. Its dependency path constructs
+a blocking `os.NewFile`, which has no Go poller. The new
+`TestUnixPTYInitializationRegistersUnpollableFile` reproduces that starting
+state with a real descriptor and failed locally before correction. It requires
+poller support, original-handle closure and intact I/O through the replacement.
+
+Initialize a close-on-exec duplicate in nonblocking mode before `os.NewFile`,
+require poller registration, and close the original only after the replacement
+is ready. Failure paths close the duplicate and preserve existing child cleanup.
+The new native run and fresh affected E2E execution remain required. No macOS
+failure is suppressed, and the test is not skipped by platform.
+
+Portable revision local verification passed: all 42 desktop cases across queue,
+transcript and workflow-switch files, plus all four mobile continuity cases,
+with zero skips or retries. This combined correctness run overlapped backend
+lint and is not a controlled speed comparison. PTY race tests passed ten times;
+login/shell suites and all interactive-runner, first-idle and PTY-dimension tests
+passed. Full backend lint reports zero issues, Windows compilation passes, and
+documentation validation passes. Hosted macOS and final E2E timing remain pending.

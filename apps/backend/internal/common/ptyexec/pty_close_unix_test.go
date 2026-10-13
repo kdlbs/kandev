@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 // @covers AC-PLATFORM-SHARED-PTY-001.1
@@ -29,10 +30,10 @@ func TestUnixPTYInitializationFailureReapsChild(t *testing.T) {
 	cmd, ready := heldPTYCommand(t)
 	initializationErr := errors.New("PTY initialization failed")
 	var master *os.File
-	handle, err := startUnixPTY(cmd, 80, 24, func(f *os.File) error {
+	handle, err := startUnixPTY(cmd, 80, 24, func(f *os.File) (*os.File, error) {
 		master = f
 		waitHeldPTYReady(t, ready)
-		return initializationErr
+		return nil, initializationErr
 	})
 	require.ErrorIs(t, err, initializationErr)
 	require.Nil(t, handle)
@@ -40,6 +41,32 @@ func TestUnixPTYInitializationFailureReapsChild(t *testing.T) {
 	require.ErrorIs(t, master.Close(), os.ErrClosed)
 	require.NotNil(t, cmd.ProcessState, "the started child must be reaped before Start returns")
 	require.ErrorIs(t, cmd.Process.Signal(syscall.Signal(0)), os.ErrProcessDone)
+}
+
+// @covers AC-PLATFORM-SHARED-PTY-001.1
+func TestUnixPTYInitializationRegistersUnpollableFile(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
+	fd, err := unix.FcntlInt(reader.Fd(), unix.F_DUPFD_CLOEXEC, 0)
+	require.NoError(t, err)
+	// A blocking NewFile has no poller, matching creack/pty's Darwin master.
+	raw := os.NewFile(uintptr(fd), "unregistered reader")
+	t.Cleanup(func() { _ = raw.Close() })
+	require.ErrorIs(t, raw.SetReadDeadline(time.Time{}), os.ErrNoDeadline)
+	require.NoError(t, reader.Close())
+
+	initialized, err := initializeUnixPTY(raw)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = initialized.Close() })
+	require.NoError(t, initialized.SetReadDeadline(time.Now().Add(time.Second)))
+	require.ErrorIs(t, raw.Close(), os.ErrClosed)
+	_, err = writer.Write([]byte("x"))
+	require.NoError(t, err)
+	buf := make([]byte, 1)
+	_, err = io.ReadFull(initialized, buf)
+	require.NoError(t, err)
+	require.Equal(t, "x", string(buf))
 }
 
 func assertUnixPTYCloseInterruptsRead(t *testing.T, resize bool) {

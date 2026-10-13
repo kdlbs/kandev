@@ -99,7 +99,8 @@ operations; do not double-count them or add concurrent durations to wall time.
 
 ## Results
 
-All three alternating pairs passed with 29 identical test identities/outcomes,
+The initial Linux implementation passed three alternating pairs with 29 identical
+test identities/outcomes,
 zero skips and zero retries. Each sample rebuilt through the guarded managed
 runner with the same one-worker selection and temporary instrumentation.
 
@@ -130,3 +131,18 @@ with zero skips or retries, including the shared desktop/phone exhaustion
 journey. Web typecheck, full E2E discovery, changed-file ESLint, backend lint,
 documentation validation and whitespace checks pass. Hosted execution and
 native macOS compatibility remain pending.
+
+The first native macOS run exposed a missing-poller initialization defect.
+Task 01 corrects it with a newly registered duplicate descriptor. The numbers
+above describe the initial Linux implementation at f5466aafe8, not the portable
+revision. Fresh affected-suite verification and exact-head hosted timing are
+pending for that correction; do not carry the prototype percentage forward as
+a measured portable result.
+
+Portable revision local verification passed: all 42 desktop cases across queue,
+transcript and workflow-switch files, plus all four mobile continuity cases,
+with zero skips or retries. This combined correctness run overlapped backend
+lint and is not a controlled speed comparison. PTY race tests passed ten times;
+login/shell suites and all interactive-runner, first-idle and PTY-dimension tests
+passed. Full backend lint reports zero issues, Windows compilation passes, and
+documentation validation passes. Hosted macOS and final E2E timing remain pending.
