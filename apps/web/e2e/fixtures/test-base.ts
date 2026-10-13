@@ -179,6 +179,7 @@ async function waitForSeedAgentProfile(
 export const test = backendFixture.extend<
   {
     testPage: Page;
+    desktopTestPage: Page;
     tabletTestPage: Page;
     coarseDesktopTestPage: Page;
     prCapture: PrAssetCapture;
@@ -443,6 +444,22 @@ export const test = backendFixture.extend<
     await setupPage(page, backend);
     await use(page);
     await context.close();
+  },
+
+  desktopTestPage: async ({ browser, backend, testPage }, use) => {
+    // Share the test's backend reset while observing it from a desktop context.
+    void testPage;
+    const context = await browser.newContext({
+      ...devices["Desktop Chrome"],
+      baseURL: backend.frontendUrl,
+    });
+    try {
+      const page = await context.newPage();
+      await setupPage(page, backend);
+      await use(page);
+    } finally {
+      await context.close();
+    }
   },
 
   tabletTestPage: async ({ browser, backend, testPage }, use) => {

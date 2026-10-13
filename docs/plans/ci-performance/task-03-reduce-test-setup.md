@@ -204,3 +204,11 @@ versus 30.506 seconds (23.5% lower). These are separate measurements. A forks
 pool experiment was slower and rejected. Typecheck, ESLint, formatting, the
 nine frontend workflow contract tests, discovery and documentation validation
 pass. Hosted acceptance and the 50% target remain open.
+
+The first hosted optimized run (`38322865444`, head `b81c562`) passed in
+1,091 seconds for Run tests versus 2,008 seconds at `dc36fe3`: 45.7% lower,
+87 seconds above the 50% target. Workflow elapsed was 1,448 seconds versus
+2,595 seconds. The tested merge base advanced: all 2,872 reference files remain,
+with five additional files and extra cases from upstream (2,877 files, 25,668
+passes, four skips). This is one historical pair, not the required hosted
+median. The work order and stricter continuation target remain open.

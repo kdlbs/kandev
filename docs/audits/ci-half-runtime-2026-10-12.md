@@ -242,3 +242,65 @@ auth 37; routing 9; containers 152; Kubernetes compatibility 1). This follow-up
 removes eight additional Chromium instances; all other project counts remain
 unchanged. The whole-branch discovery reduction is 4,113 to 3,963 (150 fewer
 configured instances), which is not a runtime percentage.
+
+## Hosted frontend result at b81c562
+
+[Actions run 38322865444](https://github.com/kdlbs/kandev/actions/runs/38322865444)
+passed. Its Run tests step took **1,091 seconds (18m11s)**, versus 2,008 seconds
+(33m28s) at the continuation reference: **45.7% less execution time**. It is
+87 seconds above the 1,004-second target. Workflow elapsed fell from 2,595 to
+1,448 seconds (43m15s to 24m08s, 44.2% lower); the main job occupied 1,421
+seconds. These are separate wall-time measurements, not a median.
+
+The earlier draft reference took 2,291 seconds, so this run is 52.4% faster
+than that earlier point. That does not satisfy the stricter continuation
+reference or establish a 50% whole-pipeline reduction.
+
+The hosted suite passed 2,877 files and 25,668 tests with four skips, compared
+with 2,872 files and 25,613 passes/four skips in the reference. GitHub tested
+merge commit `59130a7012857ce21a0ef5dfb61adcb761688ec3`, combining this branch
+with advanced base `371d9c18193af5893fbe70387fee9330f7dbb65b`. Log comparison
+finds no removed files: five upstream additions and two common files with
+additional cases account for the difference. Local same-source identity
+comparisons above remain the controlled coverage evidence. Runner class,
+worker budgets and test isolation remain unchanged.
+
+## One capacity episode, two browser observers
+
+The desktop and phone continuity files previously ran the same real backend
+capacity-exhaustion sequence independently. The phone project now starts both
+a Pixel 5 context and an explicit Desktop Chrome context against one episode.
+Both observe the retry card and usable chat after exhaustion. The original
+desktop error row, model selector, absent recovery controls, feedback count,
+single persisted error, unchanged execution identity and six-prompt ACP trace
+assertions remain. Phone overflow and composer assertions remain. Independent
+mouse and touch cancellation tests still exercise their respective controls.
+
+The real five-retry ladder (5, 10, 20, 40 and 60 seconds) is unchanged. A single
+episode also checks that connecting a second viewer does not duplicate retry
+dispatches. No production clock or retry budget changes, skipped case, shared
+cross-test browser state, or mocked recovery response is introduced. The
+secondary fixture depends on the existing per-test reset and closes its
+context in `finally`; the original fixture disposes its task and profile.
+
+The original desktop cancel/exhaust case and phone exhaustion case passed in
+157.174 and 143.732 seconds. Their replacements passed in 12.819 and 146.741
+seconds: **300.906 to 159.559 seconds combined, 47.0% lower** in fresh guarded
+one-worker commands, with zero retries or skips. This is a selected cohort,
+not whole-suite timing. The first candidate exposed Playwright inheriting the
+phone project's device defaults for the secondary browser. Explicit Desktop
+Chrome options corrected that; fine/coarse pointer and desktop width
+assertions guard the two actual environments.
+
+The reviewed contract is transient-turn-runtime-continuity, especially
+AC-PLATFORM-TURN-CONTINUITY-003.3/003.4 (bounded retries and duplicate
+viewer safety), with the existing capacity-continuation and durable-runtime
+history preserved. See the [assertion ownership map](capacity-consolidation-2026-10-13.csv).
+
+Both complete continuity files passed after the fixture correction: four
+desktop cases in 48.881 seconds and four phone cases in 170.745 seconds, with
+zero retries, skips or failures. Web typecheck, changed-file ESLint and
+formatting passed. The hosted frontend file comparison retains all reference
+files; its five additions are secrets initial-error/global-error, terminal
+settings save, legacy session-stopped banner and delivery-recovery view.
+The PR-archive-banner and composer-props suites also gain upstream cases.
