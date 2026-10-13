@@ -350,3 +350,36 @@ runtime, container or browser was created. Managed dependencies/caches/refs
 remain intact. Normal active hooks and authorized publication follow these
 completed implementation checks; their exact commit/PR receipts live in the
 task plan, preserving the required first-publication freeze and hosted clock.
+
+
+### Required frontend review correction
+
+Greptile thread `4253896781` at initial head `0fd79a91f3` identified a valid
+AC-.8 violation: a pending or failed MTD-to-30d request left MTD totals/groups
+under the selected 30d control. CodeRabbit independently noted the same issue.
+The existing display guard now includes the range that produced the accepted
+response. Mismatched pending/failed selections use the existing empty view;
+workspace eligibility, request-generation rejection, toast handling and
+same-range live refresh retain their behavior. The owning design carries this
+eligibility clarification; no new requirement, design package or UI layout/copy
+was introduced.
+
+Causal RED `37729` exited 1 and joined: the real component/API/fetch path showed
+four old-window groups under pending 30d when zero were expected. The deferred
+failure was settled for cleanup. GREEN `48977` exited 0 and joined, both affected
+component suites / six tests, including assertions after pending and failure.
+The actual two changed TS/TSX paths were staged before strict zero-warning
+ESLint `86694` (exit 0/join). Typecheck `82393`, i18n ratchet `74545` (zero added,
+two modified source files clean against resolved fork point `e8cf123d0`), and
+full i18n `19579` all exited 0 and joined. Catalog and spec lint passed after the
+minimal design edit. Indexed documentation coverage and whitespace are checked
+again with the five-file corrective inventory before publication.
+
+This correction changes no Go source; the passing Go/PG/whole-web commands were
+not replayed. Claude's two future-facing SQL suggestions were acknowledged and
+resolved without backend changes. Its completed authenticated FULL review and
+CodeRabbit's completed FULL review covered the initial head; the bounded later
+diff is the selected-range display guard and its real regression. No manual
+FULL review was requested. Normal active hooks and one corrective push follow
+these results; retain observer `87974`, original launch `01:38:32.496Z` and
+90-minute deadline `03:08:32Z` across the head change.

@@ -249,7 +249,11 @@ transport options; append the encoded query only when present and preserve
 signals/other request options. `CostOverview` passes its selected range on
 initial load, selection and Office live refresh. Include range in the existing
 fetch callback dependencies so live refresh cannot retain an earlier range.
-Retain the request-generation guard and existing error handling. Do not fetch
+Retain the request-generation guard and existing error handling. Track the
+loaded range with the loaded workspace: results are display-eligible only when
+both match the current selection. Pending or failed switches use the existing
+empty view rather than another window's spending; same-range live refresh
+retains its current behavior. Do not fetch
 or filter raw lifetime rows in the browser.
 
 **Mobile and validation.** `CostOverview` already shares controls, selection,

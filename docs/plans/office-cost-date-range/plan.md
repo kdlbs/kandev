@@ -171,6 +171,15 @@ No UI composition/copy or public-doc change was introduced; the data-only mobile
 exemption and unchanged E2E pathname matcher apply. Normal active hook/commit
 and publication receipts are recorded in the task plan.
 
+The required frontend review correction is complete before its corrective
+publication: pending/failed range switches cannot display another window's
+spending. The existing accepted-result guard now pairs workspace and range.
+Its causal real component/API RED and six-test GREEN, strict lint, typecheck,
+i18n and minimal design clarification are recorded in the same work order.
+This adds no Go change, new design package, layout/copy or public-doc work.
+The original hosted observer and deadline are retained; optional backend
+suggestions were dispositioned without published backend changes.
+
 ## Risks
 
 - Changing only a subset of queries could mix intervals; assert all five bounds

@@ -12,6 +12,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const MTD_TOTAL = "$1.00";
 const CURRENT_USAGE_LABEL = "Current usage";
 const PREVIOUS_USAGE_LABEL = "Previous usage";
 
@@ -64,7 +65,7 @@ describe("Costs selected range transport", () => {
         <CostOverview workspaceId="ws-range" />
       </StateProvider>,
     );
-    await waitFor(() => expect(screen.getAllByText("$1.00")).toHaveLength(5));
+    await waitFor(() => expect(screen.getAllByText(MTD_TOTAL)).toHaveLength(5));
     expect(urls[0].pathname).toBe("/api/v1/office/workspaces/ws-range/costs/breakdown");
     expect(urls[0].searchParams.get("range")).toBe("mtd");
     expect(screen.queryByText("Old usage")).toBeNull();
@@ -86,6 +87,50 @@ describe("Costs selected range transport", () => {
     await waitFor(() => expect(screen.queryByText("$4.00")).toBeNull());
     expect(urls.at(-1)?.searchParams.get("range")).toBe("mtd");
     expect(screen.queryByText(PREVIOUS_USAGE_LABEL)).toBeNull();
+  });
+
+  it("does not label prior-window spending as a pending or failed range", async () => {
+    let rejectRange!: (error: Error) => void;
+    const urls: URL[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        urls.push(url);
+        if (url.searchParams.get("range") === "30d") {
+          return new Promise<Response>((_resolve, reject) => {
+            rejectRange = reject;
+          });
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify(breakdown("mtd")), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }),
+    );
+    render(
+      <StateProvider initialState={{ workspaces: { activeId: "ws-range", items: [] } }}>
+        <CostOverview workspaceId="ws-range" />
+      </StateProvider>,
+    );
+    await waitFor(() => expect(screen.getAllByText(MTD_TOTAL)).toHaveLength(5));
+    fireEvent.click(screen.getByRole("button", { name: t("office:last30Days") }));
+    await waitFor(() => expect(urls).toHaveLength(2));
+    try {
+      expect(screen.queryAllByText(CURRENT_USAGE_LABEL)).toHaveLength(0);
+      expect(screen.queryAllByText(MTD_TOTAL)).toHaveLength(0);
+      assertGroupCards("0");
+    } finally {
+      await act(async () => rejectRange(new Error("selected range unavailable")));
+    }
+    expect(screen.queryAllByText(CURRENT_USAGE_LABEL)).toHaveLength(0);
+    expect(screen.queryAllByText(MTD_TOTAL)).toHaveLength(0);
+    assertGroupCards("0");
+    expect(
+      screen.getByRole("button", { name: t("office:last30Days") }).getAttribute("data-variant"),
+    ).toBe("secondary");
   });
 });
 
