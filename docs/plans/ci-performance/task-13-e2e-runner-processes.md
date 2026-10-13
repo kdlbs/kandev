@@ -240,3 +240,14 @@ Threads cases pass together without retries. Desktop and phone Quick Chat
 response readiness also pass their five complete cases. These are local
 results only. Fresh full hosted validation, review resolution and the
 1,079.5-second E2E target remain open.
+
+A further session/clarification batch retains forty scenarios in thirty-six
+cases. Active-session deletion now carries its exact surviving-session and
+same-task assertions in the Changes-retention journey. Dirty and removed-file
+sibling hydration share setup while keeping separate reloads and real Git
+event evidence. Clarification layout and custom-draft clearing run as named
+steps in their existing journeys. The complete local baseline and candidate
+both pass, with no retries/skips, at 378.013 and 336.768 summed seconds
+(10.91% locally). The identity audit verifies all four moved scenarios.
+See the session/clarification consolidation audit. This is a focused local
+saving; full hosted validation and the 50% target remain open.

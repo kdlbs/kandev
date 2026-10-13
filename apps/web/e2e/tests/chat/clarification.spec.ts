@@ -116,6 +116,19 @@ test.describe("Clarification flow", () => {
     await expect(session.clarificationOverlay()).toContainText("Which database");
     await expect(session.clarificationContext()).toHaveCount(0);
 
+    await test.step("options render label and description on separate rows", async () => {
+      const labels = session.clarificationOptionLabels();
+      const descriptions = session.clarificationOptionDescriptions();
+      await expect(labels).toHaveCount(3);
+      await expect(descriptions).toHaveCount(3);
+      const labelBox = await labels.first().boundingBox();
+      const descriptionBox = await descriptions.first().boundingBox();
+      if (!labelBox || !descriptionBox) {
+        throw new Error("expected both label and description to have bounding boxes");
+      }
+      expect(descriptionBox.y).toBeGreaterThanOrEqual(labelBox.y + labelBox.height - 1);
+    });
+
     // Single-question bundles still expose option click → instant resolve.
     await session.clarificationOption("PostgreSQL").click();
 
@@ -634,32 +647,6 @@ test.describe("Clarification flow", () => {
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("Use the embedded database for this task");
-  });
-
-  test("options render label and description on separate rows", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedClarificationTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Clarification Layout",
-      "clarification",
-    );
-
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-    const labels = session.clarificationOptionLabels();
-    const descriptions = session.clarificationOptionDescriptions();
-    await expect(labels).toHaveCount(3);
-    await expect(descriptions).toHaveCount(3);
-    const labelBox = await labels.first().boundingBox();
-    const descriptionBox = await descriptions.first().boundingBox();
-    if (!labelBox || !descriptionBox) {
-      throw new Error("expected both label and description to have bounding boxes");
-    }
-    expect(descriptionBox.y).toBeGreaterThanOrEqual(labelBox.y + labelBox.height - 1);
   });
 
   test("renders lightweight markdown across active and resolved clarification text", async ({
@@ -1279,36 +1266,16 @@ test.describe("Multi-question clarification carousel", () => {
     ).toHaveCount(0);
     await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "true");
     await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
-  });
 
-  test("emptying the custom draft clears the answer and reverts the stepper", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedClarificationTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Multi-q draft clears answer",
-      "clarification-multi",
-    );
-
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-
-    const input = session.clarificationInputForQuestion("db");
-    await input.click();
-    await input.fill("Bespoke KV store");
-    await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "true");
-    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
-
-    await input.fill("");
-    await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "false");
-    await expect(session.clarificationGroupProgress()).toContainText("0 of 3 answered");
-    await expect(session.clarificationCustomInputContainerForQuestion("db")).toHaveAttribute(
-      "data-active",
-      "false",
-    );
+    await test.step("emptying the custom draft clears the answer and reverts the stepper", async () => {
+      await input.fill("");
+      await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "false");
+      await expect(session.clarificationGroupProgress()).toContainText("0 of 3 answered");
+      await expect(session.clarificationCustomInputContainerForQuestion("db")).toHaveAttribute(
+        "data-active",
+        "false",
+      );
+    });
   });
 
   test("Cmd+Enter from the last step's custom input submits the bundle", async ({
