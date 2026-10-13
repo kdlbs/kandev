@@ -110,6 +110,32 @@ func TestNativeReadinessKeepsFenceWhenProofOrFreshCapabilityRefuses(t *testing.T
 	}
 }
 
+func TestNativeReadinessBootResolvesProviderFailureWhileDeliveryRemainsBlocked(t *testing.T) {
+	svc, manager, submission := nativeReadinessFixture(t, true)
+	ctx := context.Background()
+	lastError := models.LastAgentError{Message: "Automatic continuation was interrupted by a backend restart.",
+		OccurredAt: time.Now().Add(-time.Minute), StampValue: "interrupted-continuation"}
+	require.NoError(t, svc.repo.SetSessionMetadataKey(ctx, submission.SessionID, models.SessionMetaKeyLastAgentError, lastError))
+	attempt, owner := svc.resumeAttemptStore().begin(ctx, "task1", submission.SessionID)
+	require.True(t, owner)
+	require.True(t, svc.resumeAttemptStore().setRecoveryErrorStamp(attempt, lastError.Stamp()))
+	attempt.setExecutionID("old-execution")
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "task1", SessionID: submission.SessionID,
+		AgentExecutionID: "old-execution", AttemptID: attempt.identity()})
+	stored, err := svc.repo.GetTaskSession(ctx, submission.SessionID)
+	require.NoError(t, err)
+	storedError, found := models.LoadLastAgentError(stored.Metadata)
+	require.True(t, found)
+	require.True(t, storedError.IsDismissed(), "native boot must resolve its captured provider failure independently of delivery retirement")
+	require.Equal(t, models.TaskSessionStateWaitingForInput, stored.State)
+	block, err := svc.GetOpenSessionRecoveryBlock(ctx, submission.SessionID)
+	require.NoError(t, err)
+	require.NotNil(t, block, "provider recovery must not clear unproven delivery work")
+	_, err = svc.resolveDeliveryProtocol(ctx, submission.SessionID, "old-execution", messagequeue.DeliveryProtocolPending)
+	require.ErrorIs(t, err, ErrSessionRecoveryRequired)
+	require.Empty(t, manager.capturedPromptCalls)
+}
+
 type bootReadinessReloadFailureRepository struct {
 	*sqliterepo.Repository
 	resolved, failNext, failed bool

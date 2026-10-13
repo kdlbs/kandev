@@ -62,3 +62,11 @@ Specification/catalog and public-document validation passed. Scoped E2E
 typechecking found no remaining changed-file errors, but shared existing E2E
 helpers have duplicate-method and global-declaration errors. Browser execution
 and final delivery are pending CI; no local E2E was run.
+
+CI exposed provider-continuation restart and mobile runtime-replacement paths
+whose native boot succeeded while delivery retirement was still pending. The
+early delivery-gate return skipped attempt-owned provider recovery bookkeeping,
+leaving the old provider-failure card after delivery metadata was restored.
+A focused regression reproduces that stale error. Boot now completes provider
+recovery bookkeeping while retaining the independent delivery fence and skipping
+queue drain until delivery is ready. CI owns the existing browser regressions.

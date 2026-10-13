@@ -148,8 +148,10 @@ unresolved inventory creates the existing persistent delivery fence before any
 first-send attempt. The same guarded loaded-native reconciliation used for an
 existing fence may retire eligible history and resolve it transactionally.
 When original-owner evidence is insufficient, retain the fence and expose the
-existing explicit Resume controls on desktop and phone. Do not mark recovery
-resolved or drain queued instructions while this gate remains closed.
+existing explicit Resume controls on desktop and phone. Successful native boot
+still records its attempt-owned provider recovery and dismisses only that
+captured provider error. This does not resolve the independent delivery fence:
+do not drain queued instructions or admit prompts while that fence remains open.
 
 Both pending and explicitly selected V1 delivery repeat this reconciliation at
 admission, including when no fence existed at entry. Re-read capability after
