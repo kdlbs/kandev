@@ -25,7 +25,7 @@ func runDev(ctx context.Context, opts Options, build BuildInfo) int {
 	if code != 0 {
 		return code
 	}
-	if err := backupProductionDBIfNeeded(cfg.dbPath); err != nil {
+	if err := backupProductionDBIfNeeded(ctx, cfg.dbPath); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
@@ -242,11 +242,11 @@ func loadDevBootstrapConfig(repoRoot string) (*config.Config, error) {
 
 // backupProductionDBIfNeeded snapshots the resolved DB before dev mode runs
 // against it, unless it already lives under a .kandev-dev segment.
-func backupProductionDBIfNeeded(dbPath string) error {
+func backupProductionDBIfNeeded(ctx context.Context, dbPath string) error {
 	if !isProductionDb(dbPath) {
 		return nil
 	}
-	backupPath, err := backupProductionDb(dbPath, userHomeDir(), time.Now())
+	backupPath, err := backupProductionDb(ctx, dbPath, userHomeDir(), time.Now())
 	if err != nil {
 		// Abort rather than continue: the backup exists precisely to protect
 		// the production db before dev mode touches it. Proceeding on failure
