@@ -651,6 +651,15 @@ func (h *TaskHandlers) httpEnsureTaskSession(c *gin.Context) {
 	}
 	resp, err := h.orchestrator.EnsureSession(c.Request.Context(), taskID)
 	if err != nil {
+		if errors.Is(err, models.ErrWorkspaceReuseUnsupported) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":       models.WorkspaceReuseUnsupportedMessage,
+				"reason":      "workspace_reuse_unsupported",
+				"recoverable": true,
+				"retry":       "create a task with workspace_mode=\"new_workspace\"",
+			})
+			return
+		}
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}

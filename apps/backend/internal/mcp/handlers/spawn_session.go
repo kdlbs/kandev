@@ -51,6 +51,14 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 		SpawnOrigin:    spawnOriginFromSession(spawner),
 	})
 	if err != nil {
+		if errors.Is(err, models.ErrWorkspaceReuseUnsupported) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, models.WorkspaceReuseUnsupportedMessage,
+				map[string]interface{}{
+					"reason":      "workspace_reuse_unsupported",
+					"recoverable": true,
+					"retry":       "create a task with workspace_mode=\"new_workspace\"",
+				})
+		}
 		if errors.Is(err, models.ErrWorkspacePreparing) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
 				"the task workspace is still being prepared; retry after its initial launch completes",

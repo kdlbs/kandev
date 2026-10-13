@@ -9,9 +9,12 @@ import (
 // They deliberately describe state rather than filesystem details: callers can
 // offer a bounded retry without exposing a checkout path or branch name.
 var (
-	ErrWorkspacePreparing   = errors.New("workspace is preparing")
-	ErrWorkspaceReuseUnsafe = errors.New("workspace reuse is unsafe")
+	ErrWorkspacePreparing        = errors.New("workspace is preparing")
+	ErrWorkspaceReuseUnsafe      = errors.New("workspace reuse is unsafe")
+	ErrWorkspaceReuseUnsupported = errors.New("workspace reuse is unsupported")
 )
+
+const WorkspaceReuseUnsupportedMessage = "the selected executor cannot reuse another task's workspace; create a task with workspace_mode=\"new_workspace\""
 
 // DescribeInheritedEnvironmentUnavailable builds the reason clause for an
 // inherit_parent task whose inherited task_environments row cannot be used

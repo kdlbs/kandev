@@ -136,6 +136,18 @@ export function resolveFinalStepInfo(
   return { isFinalStep, stepsKnown };
 }
 
+function useEnsureRequestLifetime() {
+  const taskGenerationRef = useRef(0);
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  return { taskGenerationRef, mountedRef };
+}
+
 export function useEnsureTaskSession(
   task: EnsureTaskInput,
   opts?: { enabled?: boolean },
@@ -173,11 +185,13 @@ export function useEnsureTaskSession(
   // doesn't refire, but switching tasks or calling retry() does.
   const launchedKeyRef = useRef<string | null>(null);
   const previousTaskIdRef = useRef<string | null>(taskId);
+  const { taskGenerationRef, mountedRef } = useEnsureRequestLifetime();
 
   /* eslint-disable react-hooks/set-state-in-effect -- task changes must clear stale ensure-session errors before early returns */
   useEffect(() => {
     if (previousTaskIdRef.current === taskId) return;
     previousTaskIdRef.current = taskId;
+    taskGenerationRef.current += 1;
     launchedKeyRef.current = null;
     setStatus("idle");
     setError(null);
@@ -205,8 +219,13 @@ export function useEnsureTaskSession(
     if (launchedKeyRef.current === key) return;
     launchedKeyRef.current = key;
 
-    // Cancel guard so a stale resolution can't overwrite a switched-away task.
-    let cancelled = false;
+    // Same-task hydration preserves the admitted request. Task changes,
+    // retries, and unmount invalidate its response ownership.
+    const generation = taskGenerationRef.current;
+    const isCurrentAttempt = () =>
+      mountedRef.current &&
+      taskGenerationRef.current === generation &&
+      launchedKeyRef.current === key;
     setStatus("preparing");
     setError(null);
     const ensurePromise = isFinalStep
@@ -217,22 +236,18 @@ export function useEnsureTaskSession(
       : ensureTaskSession(taskId, { activationSource: "session_open" });
     ensurePromise
       .then(async () => {
-        if (cancelled || launchedKeyRef.current !== key) return;
+        if (!isCurrentAttempt()) return;
         // Force-reload: backend may have returned an existing_* source our initial list missed.
         await loadSessions(true);
-        if (cancelled || launchedKeyRef.current !== key) return;
+        if (!isCurrentAttempt()) return;
         setStatus("idle");
       })
       .catch((err: unknown) => {
-        if (cancelled || launchedKeyRef.current !== key) return;
+        if (!isCurrentAttempt()) return;
         setStatus("error");
         setError(err instanceof Error ? err : new Error(String(err)));
         // Keep the key latched. The retry token or a task change owns the next attempt.
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, [
     enabled,
     taskId,

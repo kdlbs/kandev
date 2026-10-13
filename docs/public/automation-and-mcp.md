@@ -61,6 +61,10 @@ Office sessions do not receive an MCP task-creation tool. A direct backend call 
 
 The optional `workspace_mode` field advertises exactly two values: `inherit_parent` reuses the parent's materialized workspace/worktree and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `inherit_parent`. There is no unconditional schema default for top-level tasks.
 
+For a Kubernetes parent, use `workspace_mode: "new_workspace"` when creating a child that will run. Kubernetes Pods belong to one task, so a child cannot attach to the parent's environment.
+
+Queued creation with `start_agent: false` still succeeds with the default `inherit_parent`, but opening or launching that child returns `workspace_reuse_unsupported` before a session is created. Create a separate-workspace task to proceed; retrying or restoring the healthy parent does not enable cross-task attachment. Additional sessions on the same Kubernetes task remain supported.
+
 Omit `workspace_mode` to use defaulting instead of sending an empty string. MCP schema validation rejects empty, whitespace-only, and padded values before backend dispatch, even though the backend policy resolver still trims strings. `shared` and `shared_group` are not supported by this MCP endpoint.
 
 ## Quick path

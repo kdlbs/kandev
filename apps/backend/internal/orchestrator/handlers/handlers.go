@@ -144,6 +144,9 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	resp, err := h.service.LaunchSession(ctx, &req)
 	if err != nil {
+		if response, responseErr := workspaceReuseUnsupportedConflictResponse(msg, err); response != nil || responseErr != nil {
+			return response, responseErr
+		}
 		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
 		}
@@ -236,6 +239,9 @@ func (h *Handlers) wsEnsureSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		AutoStart: req.AutoStart, ActivationSource: req.ActivationSource,
 	})
 	if err != nil {
+		if response, responseErr := workspaceReuseUnsupportedConflictResponse(msg, err); response != nil || responseErr != nil {
+			return response, responseErr
+		}
 		h.logger.Error("failed to ensure session",
 			zap.String("task_id", req.TaskID),
 			zap.Error(err))

@@ -258,6 +258,24 @@ func TestHandleSpawnSession_WorkspaceUnsafeReturnsRecoverableConflict(t *testing
 	assert.Empty(t, orch.renameCalls)
 }
 
+func TestHandleSpawnSession_KubernetesInheritedWorkspaceUnsupportedConflict(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.launchErr = models.ErrWorkspaceReuseUnsupported
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, spawnPayload(target.ID, "do things", target.ID, sess.ID))
+	resp, err := h.handleSpawnSession(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeConflict)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	require.Equal(t, "workspace_reuse_unsupported", payload.Details["reason"])
+	require.Equal(t, true, payload.Details["recoverable"])
+	require.Contains(t, payload.Details["retry"], "new_workspace")
+	require.Contains(t, payload.Message, "new_workspace")
+	require.Empty(t, orch.renameCalls)
+}
+
 // A rename failure after a successful launch must not fail the spawn — the
 // session is already running; the label is best-effort.
 func TestHandleSpawnSession_RenameFailure_DoesNotFailSpawn(t *testing.T) {

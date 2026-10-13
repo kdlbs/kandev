@@ -371,6 +371,10 @@ Kandev blocks deleting an executor, or changing an executor into or out of Kuber
 
 Do not manually delete by name or label alone. If manual incident cleanup is unavoidable, compare the Kandev runtime inventory with namespace, name, UID, and all ownership labels first, preserve required workspace data, and record the out-of-band action.
 
+Subtasks cannot attach to a different task's Kubernetes environment. When creating a runnable child with `create_task_kandev`, explicitly select `workspace_mode: "new_workspace"` and keep the desired Kubernetes executor profile.
+
+Queued creation with `start_agent: false` can still default to `inherit_parent`; later workspace or agent admission returns `workspace_reuse_unsupported` before creating a session. Restoring or retrying the parent does not change this ownership restriction. See [MCP workspace modes](automation-and-mcp.md#task-creation-boundaries).
+
 Older installations may have several session Pods for one task. Kandev does not merge or delete those Pods automatically. Additional attachment requires an unambiguous recorded Pod and claim with matching task ownership and recoverable credentials; conflicting inventory blocks attachment. Adopted legacy resources keep their original labels.
 
 ### Read retained resource status
