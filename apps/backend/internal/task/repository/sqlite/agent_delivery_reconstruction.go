@@ -52,7 +52,10 @@ func (r *Repository) ReconstructAgentDeliverySubmission(
 	if existing, exists := rows[request.Submission.ID]; exists {
 		return r.reconcileExistingReconstructionTx(ctx, tx, owner, existing, block, request)
 	}
-	if owner.exists {
+	if request.ExistingSubmissionOnly {
+		return nil, repoerrors.ErrAgentDeliveryReconstructionStale
+	}
+	if owner.exists && !owner.historical {
 		return nil, repoerrors.ErrAgentDeliveryReconstructionConflict
 	}
 	if err := r.insertReconstructedSubmissionTx(ctx, tx, request); err != nil {
@@ -105,12 +108,15 @@ func (r *Repository) reconcileExistingReconstructionTx(ctx context.Context, tx *
 	copy := *request
 	copy.Submission = existing
 	request = &copy
-	if !owner.exists && (existing.State == models.DeliverySubmissionDispatching || existing.State == models.DeliverySubmissionInterruptedUnknown) {
+	if (!owner.exists || owner.historical) && (existing.State == models.DeliverySubmissionDispatching || existing.State == models.DeliverySubmissionInterruptedUnknown) {
 		return r.reconstructExistingDispatchTx(ctx, tx, request, owner, block)
 
 	}
 	if reconstructionAlreadyCommitted(owner, existing, block, request) {
 		return commitIdempotentReconstruction(tx, owner.current, *block)
+	}
+	if canRecordReconstructedHistoryGap(owner, existing, request) {
+		return r.reconstructExistingDispatchTx(ctx, tx, request, owner, block)
 	}
 	if canEnrichReconstructedIdentity(owner, existing, block, request) {
 		recovery, writeErr := r.persistReconstructedRecoveryTx(ctx, tx, request, owner, r.nowUTC())
@@ -171,6 +177,7 @@ type agentDeliveryReconstructionOwner struct {
 	metadataValue sql.NullString
 	current       models.AgentDeliveryRecovery
 	exists        bool
+	historical    bool
 	workspacePath string
 }
 
@@ -200,7 +207,8 @@ func (r *Repository) lockAgentDeliveryReconstructionOwnerTx(
 		return nil, false, err
 	}
 	if taskID != request.TaskID || incarnationID != request.IncarnationID || executionID != request.ExpectedExecutionID ||
-		sessionState != request.ExpectedSessionState || isTerminalReconstructionSession(sessionState) ||
+		sessionState != request.ExpectedSessionState || (isTerminalReconstructionSession(sessionState) &&
+		(sessionState != models.TaskSessionStateFailed || request.Recovery.HistoryGap == nil)) ||
 		owner.workspacePath != request.ExpectedWorkspacePath {
 		return owner, false, nil
 	}
@@ -221,6 +229,13 @@ func (r *Repository) lockAgentDeliveryReconstructionOwnerTx(
 	owner.metadata = metadata
 	owner.current = current
 	owner.exists = exists
+	if exists && current.Phase == models.AgentDeliveryRecoveryRestored && current.Revision == request.Recovery.Revision &&
+		current.SessionID == request.SessionID && current.IncarnationID == request.IncarnationID && current.SubmissionID != request.Submission.ID {
+		owner.historical, err = r.hasResolvedNativeResumeRecoveryTx(ctx, tx, current)
+		if err != nil {
+			return nil, false, err
+		}
+	}
 	return owner, true, nil
 }
 
@@ -260,6 +275,9 @@ func (r *Repository) validateReconstructionMessageTx(
 	tx *sqlx.Tx,
 	request *models.AgentDeliveryReconstructionRequest,
 ) error {
+	if request.ExistingSubmissionOnly {
+		return nil
+	}
 	query := `SELECT task_id, task_session_id, author_type FROM task_session_messages WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR KEY SHARE`
@@ -360,7 +378,7 @@ func (r *Repository) validateReconstructionCursorTx(
 		&current.ProjectedSequence, &current.RemoteHighWater, &current.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		if request.ExpectedCursor == nil && request.SourceStreamFirstRetained == 1 {
+		if request.ExpectedCursor == nil && (request.SourceStreamFirstRetained == 1 || request.Recovery.HistoryGap != nil) {
 			return nil
 		}
 		return repoerrors.ErrAgentDeliveryReconstructionStale
@@ -418,6 +436,7 @@ func reconstructionAlreadyCommitted(
 	request *models.AgentDeliveryReconstructionRequest,
 ) bool {
 	if !owner.exists || block == nil || owner.current.Reconstruction == nil || owner.current.AgentExecutionID != request.Recovery.AgentExecutionID ||
+		!models.SameAgentDeliveryHistoryGap(owner.current.HistoryGap, request.Recovery.HistoryGap) ||
 		owner.current.PromptGeneration != request.Recovery.PromptGeneration || owner.current.OriginalRuntime != request.Recovery.OriginalRuntime ||
 		owner.current.SubmissionID != request.Submission.ID || owner.current.StreamID != request.Recovery.StreamID ||
 		owner.current.IncarnationID != request.IncarnationID || owner.current.HarnessGeneration != request.HarnessGeneration ||
@@ -571,8 +590,8 @@ func (r *Repository) reconstructExistingDispatchTx(ctx context.Context, tx *sqlx
 		if proof == nil || !*proof {
 			return nil, repoerrors.ErrAgentDeliveryReconstructionConflict
 		}
-		result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE agent_delivery_submissions SET state = ? WHERE id = ? AND state = ?`),
-			models.DeliverySubmissionInterruptedUnknown, existing.ID, existing.State)
+		result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE agent_delivery_submissions SET state = ?, outcome = CASE WHEN outcome = '' THEN ? ELSE outcome END, updated_at = ? WHERE id = ? AND state = ?`),
+			models.DeliverySubmissionInterruptedUnknown, reconstructionUnknownOutcome, r.nowUTC(), existing.ID, existing.State)
 		if err != nil {
 			return nil, err
 		}

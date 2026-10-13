@@ -248,7 +248,8 @@ export class SessionPage {
     const idle = this.anyIdleInput();
     const editor = this.activeChat().locator(".tiptap.ProseMirror:visible").first();
     const isReady = async () =>
-      (await idle.isVisible()) && (!opts.requireEditable || (await editor.isEditable()));
+      (await idle.isVisible()) &&
+      (!opts.requireEditable || (await editor.getAttribute("contenteditable")) === "true");
     const start = Date.now();
     let lastReloadAt = start;
 

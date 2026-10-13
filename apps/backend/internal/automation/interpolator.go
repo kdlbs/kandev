@@ -22,20 +22,25 @@ var placeholderRe = regexp.MustCompile(`\{\{([a-zA-Z0-9_.-]+)\}\}`)
 // an agent — quoting there would let a fence character leak into a truncated
 // title.
 func InterpolatePrompt(prompt string, triggerType TriggerType, triggerData json.RawMessage) string {
-	return interpolate(prompt, triggerType, triggerData, false)
+	return InterpolatePromptAt(prompt, triggerType, triggerData, time.Now().UTC())
+}
+
+func InterpolatePromptAt(prompt string, triggerType TriggerType, triggerData json.RawMessage, resolvedAt time.Time) string {
+	return interpolate(prompt, triggerType, triggerData, false, resolvedAt)
 }
 
 // InterpolateAgentPrompt replaces {{placeholder}} tokens for the prompt sent
-// to the agent. On the webhook trigger, every substituted payload value is
-// quoted (inline code span, or a fenced block for a value containing a
-// newline) so that no payload-derived text can be mistaken for prompt syntax.
-// Other trigger types render exactly as InterpolatePrompt — hardening their
-// payload-derived tokens is out of scope for this change.
+// to the agent. Webhook payload values are quoted so payload text cannot be
+// mistaken for prompt syntax.
 func InterpolateAgentPrompt(prompt string, triggerType TriggerType, triggerData json.RawMessage) string {
-	return interpolate(prompt, triggerType, triggerData, triggerType == TriggerTypeWebhook)
+	return InterpolateAgentPromptAt(prompt, triggerType, triggerData, time.Now().UTC())
 }
 
-func interpolate(prompt string, triggerType TriggerType, triggerData json.RawMessage, quoteValues bool) string {
+func InterpolateAgentPromptAt(prompt string, triggerType TriggerType, triggerData json.RawMessage, resolvedAt time.Time) string {
+	return interpolate(prompt, triggerType, triggerData, triggerType == TriggerTypeWebhook, resolvedAt)
+}
+
+func interpolate(prompt string, triggerType TriggerType, triggerData json.RawMessage, quoteValues bool, resolvedAt time.Time) string {
 	if prompt == "" || !strings.Contains(prompt, "{{") {
 		return prompt
 	}
@@ -45,7 +50,7 @@ func interpolate(prompt string, triggerType TriggerType, triggerData json.RawMes
 		data = make(map[string]interface{})
 	}
 	fixed := fixedTriggerPlaceholders(triggerType, data)
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := resolvedAt.UTC().Format(time.RFC3339)
 
 	result := placeholderRe.ReplaceAllStringFunc(prompt, func(match string) string {
 		token := match[2 : len(match)-2]
@@ -103,7 +108,7 @@ func interpolate(prompt string, triggerType TriggerType, triggerData json.RawMes
 // dataPathTokenRe matches the "data.<path>" or "webhook.<path>" shape of a
 // captured placeholder token (braces already stripped), requiring at least
 // one further segment after the prefix.
-var dataPathTokenRe = regexp.MustCompile(`^(?:data|webhook)\.(.+)$`)
+var dataPathTokenRe = regexp.MustCompile(`^(data|webhook)\.(.+)$`)
 
 // resolveDataOrWebhookToken resolves a "data.<path>" or "webhook.<path>"
 // token against the parsed payload via lookupPath. Available for any trigger
@@ -113,7 +118,11 @@ func resolveDataOrWebhookToken(token string, data map[string]interface{}) (strin
 	if m == nil {
 		return "", false
 	}
-	return lookupPath(data, m[1])
+	value, ok := lookupPath(data, m[2])
+	if !ok && m[1] == string(TriggerTypeWebhook) {
+		value, ok = lookupWebhookProjectionPath(data, m[2])
+	}
+	return value, ok
 }
 
 // pluginEventTokenRe matches "data.<path>" or "webhook.<path>", capturing the
@@ -122,7 +131,7 @@ func resolveDataOrWebhookToken(token string, data map[string]interface{}) (strin
 var pluginEventTokenRe = regexp.MustCompile(`^(data|webhook)\.(.+)$`)
 
 // resolvePluginEventToken resolves a "data.<path>" or "webhook.<path>" token
-// against a plugin event's envelope payload — data["data"] or
+// against a plugin event's envelope payload: data["data"] or
 // data["webhook"] respectively, not the top-level payload itself.
 func resolvePluginEventToken(token string, data map[string]interface{}) (string, bool) {
 	m := pluginEventTokenRe.FindStringSubmatch(token)
@@ -168,10 +177,22 @@ func lookupPath(data map[string]interface{}, path string) (string, bool) {
 	return toString(cur), true
 }
 
-// ResolvePayloadPath resolves a dot path against a raw JSON payload,
-// trimming the result and treating a present-but-empty value as unresolved.
-// This is the shared trim-then-test semantics used by dedup key resolution
-// (webhook.go) and repository selector resolution (orchestrator package).
+func lookupWebhookProjectionPath(data map[string]interface{}, path string) (string, bool) {
+	payload, ok := data["payload"].(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	parts := strings.Split(path, ".")
+	pointer := "/" + strings.Join(parts, "/")
+	if value, ok := payload[pointer]; ok && value != nil {
+		return toString(value), true
+	}
+	return lookupPath(payload, path)
+}
+
+// ResolvePayloadPath resolves a path in top-level trigger data or its webhook
+// payload projection, trimming the result and treating empty values as unresolved.
+// It is shared by webhook deduplication and repository selector resolution.
 func ResolvePayloadPath(triggerData json.RawMessage, path string) (value string, ok bool) {
 	if path == "" {
 		return "", false
@@ -182,6 +203,9 @@ func ResolvePayloadPath(triggerData json.RawMessage, path string) (value string,
 	}
 	raw, found := lookupPath(data, path)
 	if !found {
+		raw, found = lookupWebhookProjectionPath(data, path)
+	}
+	if !found {
 		return "", false
 	}
 	trimmed := strings.TrimSpace(raw)
@@ -190,7 +214,7 @@ func ResolvePayloadPath(triggerData json.RawMessage, path string) (value string,
 
 func fixedTriggerPlaceholders(triggerType TriggerType, data map[string]interface{}) map[string]string {
 	switch triggerType {
-	case TriggerTypeGitHubPR:
+	case TriggerTypeGitHubPR, TriggerTypeGitHubPRMerged:
 		return prPlaceholders(data)
 	case TriggerTypeGitHubPush:
 		return pushPlaceholders(data)
@@ -202,10 +226,18 @@ func fixedTriggerPlaceholders(triggerType TriggerType, data map[string]interface
 }
 
 func prPlaceholders(data map[string]interface{}) map[string]string {
+	number := data[automationPRNumberKey]
+	if number == nil {
+		number = data[automationMergedPRNumberKey]
+	}
+	url := data[automationHTMLURLKey]
+	if url == nil {
+		url = data["pr_url"]
+	}
 	return map[string]string{
-		"pr.number":      toString(data["number"]),
-		"pr.title":       toString(data["title"]),
-		"pr.url":         toString(data[automationHTMLURLKey]),
+		"pr.number":      toString(number),
+		"pr.title":       toString(data[automationTitleKey]),
+		"pr.url":         toString(url),
 		"pr.author":      toString(data[automationAuthorLoginKey]),
 		"pr.repo":        toString(data[automationRepoKey]),
 		"pr.branch":      toString(data[automationHeadBranchKey]),
@@ -216,17 +248,17 @@ func prPlaceholders(data map[string]interface{}) map[string]string {
 
 func pushPlaceholders(data map[string]interface{}) map[string]string {
 	return map[string]string{
-		"push.branch":  toString(data["branch"]),
+		"push.branch":  toString(data[automationBranchKey]),
 		"push.repo":    toString(data[automationRepoKey]),
-		"push.sha":     toString(data["sha"]),
-		"push.message": toString(data["message"]),
+		"push.sha":     toString(data[automationSHAKey]),
+		"push.message": toString(data[automationMessageKey]),
 	}
 }
 
 func ciPlaceholders(data map[string]interface{}) map[string]string {
 	return map[string]string{
-		"ci.check_name": toString(data["check_name"]),
-		"ci.conclusion": toString(data["conclusion"]),
+		"ci.check_name": toString(data[automationCheckNameKey]),
+		"ci.conclusion": toString(data[automationConclusionKey]),
 		"ci.repo":       toString(data[automationRepoKey]),
 		"ci.url":        toString(data[automationHTMLURLKey]),
 	}

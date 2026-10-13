@@ -13,6 +13,7 @@ import { SessionRecoveryCard } from "./session-recovery-card";
 import { useSessionComposerRecovery } from "./session-recovery-context";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { SessionStoppedBanner } from "./session-stopped-banner";
+import { DeliveryHistoryNotice } from "./delivery-history-notice";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import {
   ChatInputBody,
@@ -444,35 +445,38 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     }
 
     return (
-      <ChatInputBody
-        containerRef={s.containerRef}
-        height={s.height}
-        resizeHandleProps={s.resizeHandleProps}
-        isStarting={isBusyVisual}
-        isAgentBusy={isAgentBusy}
-        hasClarification={s.hasClarification}
-        showRequestChangesTooltip={p.showRequestChangesTooltip}
-        hasPendingComments={s.hasPendingComments}
-        planModeEnabled={props.planModeEnabled}
-        showFocusHint={s.showFocusHint}
-        needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
-        addFiles={s.addFiles}
-        contextAreaProps={buildContextAreaProps(s, p)}
-        promptResultRecovery={
-          promptEnhancement.promptDelivery.pendingResult ? (
-            <PromptResultRecovery
-              pendingResult={promptEnhancement.promptDelivery.pendingResult}
-              onApply={promptEnhancement.promptDelivery.applyPending}
-              onCopy={promptEnhancement.promptDelivery.copyPending}
-            />
-          ) : null
-        }
-        editorAreaProps={buildEditorAreaProps(s, p, {
-          onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
-          isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
-          isUtilityConfigured: promptEnhancement.isUtilityConfigured,
-        })}
-      />
+      <>
+        <DeliveryHistoryNotice sessionId={sessionId} />
+        <ChatInputBody
+          containerRef={s.containerRef}
+          height={s.height}
+          resizeHandleProps={s.resizeHandleProps}
+          isStarting={isBusyVisual}
+          isAgentBusy={isAgentBusy}
+          hasClarification={s.hasClarification}
+          showRequestChangesTooltip={p.showRequestChangesTooltip}
+          hasPendingComments={s.hasPendingComments}
+          planModeEnabled={props.planModeEnabled}
+          showFocusHint={s.showFocusHint}
+          needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
+          addFiles={s.addFiles}
+          contextAreaProps={buildContextAreaProps(s, p)}
+          promptResultRecovery={
+            promptEnhancement.promptDelivery.pendingResult ? (
+              <PromptResultRecovery
+                pendingResult={promptEnhancement.promptDelivery.pendingResult}
+                onApply={promptEnhancement.promptDelivery.applyPending}
+                onCopy={promptEnhancement.promptDelivery.copyPending}
+              />
+            ) : null
+          }
+          editorAreaProps={buildEditorAreaProps(s, p, {
+            onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
+            isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
+            isUtilityConfigured: promptEnhancement.isUtilityConfigured,
+          })}
+        />
+      </>
     );
   },
 );

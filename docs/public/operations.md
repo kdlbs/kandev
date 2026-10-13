@@ -31,7 +31,21 @@ See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-se
 
 Kandev automatically checks interrupted sessions at startup and after replacement of a crashed local agent runtime. When retained delivery records agree with the session's saved identity and the original process is proven terminated, Kandev restores the same native conversation without resending its interrupted prompt. Recovery checks continue while Kandev runs, so a temporarily unavailable runtime can recover later. These checks are enabled by default; the Agent Survival feature toggle separately controls whether local agents survive a graceful backend shutdown.
 
-The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
+The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Recovery also reconciles a shutdown failure label that lacks terminal evidence with the backend's unknown outcome. It preserves both historical records and repairs missing recovery associations only after verifying the saved conversation and retired work. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
+
+If an older crash left journal acknowledgments ahead of saved output, Kandev
+can restore a verified conversation on a new delivery generation while keeping
+the missing history explicit. **Resume** uses the same guarded recovery. A
+notice remains beside the composer when some earlier output is unavailable;
+the interrupted prompt's outcome remains unknown. Only a new instruction you
+send starts new work. Available retained output is synchronized normally.
+
+Recovery remains blocked if the original or replacement process cannot be
+proven terminated, native state is missing, records conflict, or retained work
+still needs acknowledgment. An older agent runtime may require an update
+before Resume can verify a history gap. Backend SQLite commits use FULL
+synchronization before output acknowledgments so new acknowledgments do not
+outlive their committed receipts after a power loss.
 
 ## Prevent host sleep during active tasks
 
@@ -522,6 +536,10 @@ This cleanup is separate from **Message compaction** and agentctl journal prunin
 
 The default payload grace is one hour. Eligible projected event payloads and fully settled prompt payloads expire after this grace.
 Cleanup retains compact identities, hashes, outcomes, and settlement evidence.
+Independently projected nonterminal output can lose its redundant raw body even when
+an older terminal is unresolved or legacy submission bookkeeping is missing. Its
+exact committed projection receipt, authenticated cursor and replay hash must survive.
+The unresolved terminal and prompt keep their stronger recovery protections.
 Recent duplicate receipts remain for up to 24 hours or 10000 events per stream.
 Contiguous retirement checkpoints reject older events without applying them again.
 A lost ACK uses the persisted projected cursor. Cleanup never resends a prompt or a tool action.
@@ -530,9 +548,9 @@ Unprojected events, uncertain prompts, pending claims, and incomplete terminal o
 Archive and Stop preserve this evidence. Explicit deletion retires the session identity and schedules bounded removal of its delivery records.
 Protected backlog and canonical history can continue to grow. Retention is not a database quota.
 
-Cleanup starts after the first normal interval, which defaults to one minute.
+Cleanup starts when the background worker starts, without an initial delay.
 Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
-Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work, with a 100 ms pause between batches. A pass starts no further batch after five seconds.
+Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, without artificial sleeps between batches. Frontier wrap alone does not repeat a phase. Passes are bounded to five seconds. When productive work remains, the next pass starts immediately; exhausted or busy-only passes wait for the configured idle interval (one minute by default). Errors use bounded retry backoff.
 SQLite native writer admission can wait through its existing five-second busy timeout after cancellation.
 Stop joins that work before database closure. The 250 ms deadline is not a wall-clock completion promise during contention.
 Startup [configuration](configuration.md#backend-delivery-retention) controls grace, replay limits, cadence, and batch size.
@@ -544,8 +562,13 @@ Unavailable backlog or age values use `-1`. These counters do not label session 
 
 ### Delivery retention upgrades and rollback
 
+After upgrade, the normal worker revisits eligible historical payloads in bounded
+batches using its persisted scan frontiers. No session reset or manual bookkeeping
+deletion is needed. Large backlogs take multiple passes; unresolved recovery evidence
+and canonical history remain protected.
+
 **Preserve a verified pre-pruning backup before the pruning upgrade.** Removed transport payloads cannot be restored within the live database.
-SQLite version changes create a `VACUUM INTO` snapshot before migration.
+SQLite version changes create a consistent page-copy snapshot before migration and verify its integrity. Backup copying does not rebuild the database or reclaim free pages; explicit physical compaction remains separate.
 Automatic rotation retains only the newest two snapshots. Copy the verified pre-pruning snapshot outside that directory.
 PostgreSQL has no automatic upgrade snapshot. Create a `pg_dump` before the upgrade and verify restoration into an isolated database.
 

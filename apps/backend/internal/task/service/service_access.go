@@ -211,7 +211,20 @@ func (s *Service) coordinatorPromptScope(ctx context.Context, taskID string) (au
 	if err != nil {
 		return scope, err
 	}
-	if task != nil && task.Origin == models.TaskOriginCoordinator {
+	if task == nil {
+		return scope, repoerrors.ErrTaskNotFound
+	}
+	if task.Origin == models.TaskOriginCoordinator {
+		if task.WorkspaceID == "" {
+			return scope, repoerrors.ErrTaskNotFound
+		}
+		workspace, err := s.workspaces.GetWorkspace(ctx, task.WorkspaceID)
+		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) || (err == nil && workspace == nil) {
+			return scope, repoerrors.ErrTaskNotFound
+		}
+		if err != nil {
+			return scope, err
+		}
 		scope = authz.ScopeWorkspaceManage
 	}
 	return scope, nil
@@ -387,10 +400,30 @@ func (s *Service) AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessio
 	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeWorkspaceRead)
 }
 
-// AuthorizeTaskSessionPromptAccess checks the task/session pair and requires
-// the session.prompt capability used to create or dispatch user messages.
+// AuthorizeTaskSessionPromptAccess checks the task/session pair and enforces
+// its ordinary prompt scope or coordinator manager scope before admission.
 func (s *Service) AuthorizeTaskSessionPromptAccess(ctx context.Context, taskID, sessionID string) error {
-	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeSessionPrompt)
+	scope, err := s.coordinatorPromptScope(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, scope)
+}
+
+// AuthorizeSessionPromptAccess applies the task's prompt scope to a session,
+// including message replays whose task identity comes from the session row.
+func (s *Service) AuthorizeSessionPromptAccess(ctx context.Context, sessionID string) error {
+	if _, scoped := callerScope(ctx); !scoped {
+		return nil
+	}
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	return s.AuthorizeTaskPromptScope(ctx, session.TaskID)
 }
 
 func (s *Service) authorizeTaskSessionScope(

@@ -13,6 +13,13 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// PromptAdmissionPersistenceError distinguishes failed durable admission from
+// ownership or cancellation rejections that must leave the current owner intact.
+type PromptAdmissionPersistenceError struct{ Err error }
+
+func (e *PromptAdmissionPersistenceError) Error() string { return e.Err.Error() }
+func (e *PromptAdmissionPersistenceError) Unwrap() error { return e.Err }
+
 type initialDeliveryAdmissionStore interface {
 	PrepareAgentDeliverySubmission(context.Context, *models.AgentDeliverySubmission) (bool, error)
 	GetAgentDeliverySubmission(context.Context, string) (*models.AgentDeliverySubmission, error)

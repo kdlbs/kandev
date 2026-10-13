@@ -93,7 +93,7 @@ after journal classification or retirement resumes from retained proof. A single
 does not abort other sessions. Startup and replacement triggers must share bounded ownership
 and cancellation rather than start competing restore workers.
 
-Both automatic restoration and successful explicit native Resume must commit a newer
+When a recovery snapshot exists, both automatic restoration and successful explicit native Resume must commit a newer
 `restored` recovery revision with the matching recovery-block resolution. Keep the original
 recovery identity as historical evidence, and preserve its submission's unknown outcome.
 Guard this SQL commit against a new execution, generation, recovery revision, or independent

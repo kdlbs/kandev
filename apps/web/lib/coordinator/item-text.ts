@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import type { AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
+import { heldFixText } from "@/lib/coordinator/autonomy-text";
 import { formatAge, truncatePreview } from "@/lib/coordinator/format";
 
 export type NeedsYouItemSeverity = "decide-now" | "review";
@@ -43,6 +44,11 @@ export function whyClearsText(item: NeedsYouItem, t: TFunction): WhyClearsText {
       return {
         why: t("coordinator:whyStall", { duration: formatAge(item.stall.stalled_for_ms) }),
         clears: t("coordinator:clearsStall"),
+      };
+    case "autonomy":
+      return {
+        why: t("coordinator:autonomyWhy", { count: item.pendingWakes }),
+        clears: heldFixText(item.reason, item.detail, item.conditions, t) ?? "",
       };
     case "error": {
       const preview = item.activeError?.preview;

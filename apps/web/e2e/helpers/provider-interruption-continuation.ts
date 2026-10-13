@@ -179,9 +179,9 @@ export function assertNativeContinuationTrace(tracePath: string, scenario: strin
     expect(record.connection_id).toBeTruthy();
     expect(record.session_id).toBeTruthy();
   }
-  expect(new Set(nativeRecords.map((record) => record.process_id)).size).toBe(1);
-  expect(new Set(nativeRecords.map((record) => record.connection_id)).size).toBe(1);
-  expect(records.filter((record) => record.event === "initialize")).toHaveLength(1);
+  expect(new Set(nativeRecords.map((record) => record.process_id)).size).toBe(1 + loads);
+  expect(new Set(nativeRecords.map((record) => record.connection_id)).size).toBe(1 + loads);
+  expect(records.filter((record) => record.event === "initialize")).toHaveLength(1 + loads);
   expect(
     records.filter((record) => record.event === "session_load" && record.session_id === nativeId),
   ).toHaveLength(loads);

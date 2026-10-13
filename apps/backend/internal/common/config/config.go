@@ -579,6 +579,17 @@ type FeaturesConfig struct {
 	// kinds). It only takes effect together with Coordinator.
 	CoordinatorPhase2 bool `mapstructure:"coordinator_phase2" json:"coordinatorPhase2"`
 
+	// CoordinatorPhase3 gates coordinator autonomy (unattended wakes, the
+	// spend ceiling, automatic decisions). It only takes effect together
+	// with Coordinator and CoordinatorPhase2.
+	CoordinatorPhase3 bool `mapstructure:"coordinator_phase3" json:"coordinatorPhase3"`
+
+	// CoordinatorPhase31 gates the phase 3.1 surfaces: pausing a coordinator,
+	// the Projects scope editor, and everything that reads or acts on the
+	// recorded turn ledger. Recording itself runs without it. It only takes
+	// effect together with Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
+	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
+
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.

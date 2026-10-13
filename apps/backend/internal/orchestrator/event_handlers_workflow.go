@@ -2062,6 +2062,23 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		}
 		return
 	}
+	// An automation-created task's initial start is owned by its automation
+	// run. A feeder pull's task.moved (or any other workflow entry) must not
+	// launch a second session for it; the automation dispatch or its ceiling
+	// replay performs the single launch and binds the run. See
+	// models.MetaKeyAutomationStartOwned.
+	if models.AutomationStartOwned(task.Metadata) && s.reconcileAutomationStartOwnership(ctx, task) {
+		delete(task.Metadata, models.MetaKeyAutomationStartOwned)
+	}
+	if models.AutomationStartOwned(task.Metadata) {
+		s.logger.Info(eventName+": automation run owns this task's start; skipping workflow auto-start",
+			zap.String("task_id", task.ID),
+			zap.String("to_step_id", step.ID))
+		if autoStartOnCreateClaimed {
+			s.discardAutoStartOnCreate(ctx, task.ID, eventName)
+		}
+		return
+	}
 	if s.skipForkPRAutoStart(ctx, task, eventName, autoStartOnCreateClaimed) {
 		return
 	}
@@ -3078,18 +3095,34 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 	if step.AgentProfileID != "" {
 		return step.AgentProfileID
 	}
-	if s.workflowStepGetter != nil && step.WorkflowID != "" {
-		meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
-		if err != nil {
-			s.logger.Warn("failed to resolve workflow agent profile, falling back to task defaults",
-				zap.String("workflow_id", step.WorkflowID),
-				zap.String("step_id", step.ID),
-				zap.Error(err))
-		} else if meta.AgentProfileID != "" {
-			return meta.AgentProfileID
-		}
+	return s.workflowDefaultProfile(ctx, step)
+}
+
+// workflowDefaultProfile returns the default agent profile of the step's
+// workflow, or "" when there is none or it cannot be read.
+func (s *Service) workflowDefaultProfile(ctx context.Context, step *wfmodels.WorkflowStep) string {
+	if s.workflowStepGetter == nil || step.WorkflowID == "" {
+		return ""
 	}
-	return ""
+	meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
+	if err != nil {
+		s.logger.Warn("failed to resolve workflow agent profile, falling back to task defaults",
+			zap.String("workflow_id", step.WorkflowID),
+			zap.String("step_id", step.ID),
+			zap.Error(err))
+		return ""
+	}
+	return meta.AgentProfileID
+}
+
+// stepProfileInputs returns the task's fixed-step replacement and the step's
+// own agent profile. replaced reports whether the task carries a replacement
+// for the step at all, which an empty replacement still settles.
+func (s *Service) stepProfileInputs(task *models.Task, step *wfmodels.WorkflowStep) (replacement string, replaced bool, own string) {
+	if task != nil && step.SessionTarget == nil && task.WorkflowID == step.WorkflowID {
+		replacement, replaced = task.WorkflowAgentOverrides.ReplacementFor(task.WorkflowID, step.ID)
+	}
+	return replacement, replaced, step.AgentProfileID
 }
 
 // resolveStepAgentProfileForTask applies a task's fixed-step substitution

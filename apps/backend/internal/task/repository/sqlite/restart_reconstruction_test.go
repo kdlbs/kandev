@@ -2,7 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
@@ -16,7 +18,13 @@ func TestRestartRecoveryRepairsMissingCanonicalProjection(t *testing.T) {
 }
 
 func TestRestartRecoveryPreservesCanonicalLiveDispatch(t *testing.T) {
-	for _, condition := range []string{"live", "no death proof", "dead", "lost CAS", "retired verified", "retired changed", "retired live"} {
+	for _, condition := range []string{"live", "no death proof", "dead", "lost CAS", "retired verified", "retired changed", "retired live", "continuation", "continuation missing", "continuation changed", "initial", "initial attempt changed"} {
+		t.Run(condition, func(t *testing.T) { testMissingProjectionReconstruction(t, condition) })
+	}
+}
+
+func TestRestartRecoveryReplacesOnlyResolvedHistoricalMetadata(t *testing.T) {
+	for _, condition := range []string{"history resolved", "history unresolved"} {
 		t.Run(condition, func(t *testing.T) { testMissingProjectionReconstruction(t, condition) })
 	}
 }
@@ -41,12 +49,21 @@ func testMissingProjectionReconstruction(t *testing.T, condition string) {
 		PayloadHash: journal.SubmissionHash(payload), State: models.DeliverySubmissionInterruptedUnknown, Outcome: "unknown"}
 	if condition != "unknown" {
 		submission.State = models.DeliverySubmissionDispatching
+		submission.Outcome = ""
+	}
+	continuation := condition == "continuation" || condition == "continuation missing" || condition == "continuation changed"
+	if continuation {
+		submission.ID, submission.DispatchAttemptID = "prompt:continuation:attempt", "continuation:attempt"
+	}
+	initial := strings.HasPrefix(condition, "initial")
+	if initial {
+		submission.ID, submission.DispatchAttemptID = "prompt:initial:session:1:execution", "execution"
 	}
 	_, err := repo.PrepareAgentDeliverySubmission(ctx, &submission)
 	require.NoError(t, err)
 	request := &models.AgentDeliveryReconstructionRequest{TaskID: "task", SessionID: "session", IncarnationID: "incarnation",
 		HarnessGeneration: 1, ExpectedSessionState: models.TaskSessionStateWaitingForInput, NativeSessionID: "native",
-		MessageID: "message", ExpectedBlock: *block, Submission: submission, SourceStreamFirstRetained: 1,
+		ExistingSubmissionOnly: continuation || initial, MessageID: strings.TrimPrefix(submission.ID, "prompt:"), ExpectedBlock: *block, Submission: submission, SourceStreamFirstRetained: 1,
 		Recovery: models.AgentDeliveryRecovery{Phase: models.AgentDeliveryRecoveryUncertain, SessionID: "session",
 			SubmissionID: submission.ID, StreamID: "stream", IncarnationID: "incarnation", HarnessGeneration: 1,
 			Reconstruction: &models.AgentDeliveryReconstructionProvenance{SourceSessionID: "session", SourceIncarnationID: "incarnation",
@@ -80,7 +97,49 @@ func testMissingProjectionReconstruction(t *testing.T, condition string) {
 			require.NoError(t, err)
 		}
 	}
+	if condition == "history resolved" || condition == "history unresolved" {
+		_, err = repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{ID: "historical", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, OwnerGeneration: 1, PayloadHash: "history-hash", Payload: []byte("history"), State: models.DeliverySubmissionInterruptedUnknown})
+		require.NoError(t, err)
+		historical, err := repo.GetAgentDeliverySubmission(ctx, "historical")
+		require.NoError(t, err)
+		request.VerifiedRetiredSubmissions = []models.AgentDeliverySubmission{*historical}
+		restoredAt := time.Now().UTC()
+		prior := models.AgentDeliveryRecovery{Phase: models.AgentDeliveryRecoveryRestored, SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, SubmissionID: "historical", StreamID: "historical-stream", Revision: 9, UpdatedAt: restoredAt}
+		require.NoError(t, repo.SetSessionMetadataKey(ctx, "session", models.SessionMetaKeyAgentDeliveryRecovery, prior))
+		historicalBlock := models.SessionRecoveryBlock{ID: "historical-block", SessionID: "session", IncarnationID: "incarnation", ExpectedGeneration: 1, Reason: "historical-unknown", ConsumerReference: "agent_delivery", DeliverySubmissionID: prior.SubmissionID, DeliveryStreamID: prior.StreamID, State: models.RecoveryBlockResolved, AuthorizedAction: "resume", ResolvedAt: &restoredAt}
+		if condition == "history unresolved" {
+			historicalBlock.AuthorizedAction = "stop"
+		}
+		require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, &historicalBlock))
+		request.Recovery.Revision = prior.Revision
+	}
+
+	if condition == "continuation missing" {
+		_, err = repo.DB().ExecContext(ctx, `DELETE FROM agent_delivery_submissions WHERE id = ?`, submission.ID)
+		require.NoError(t, err)
+	}
+	if condition == "continuation changed" {
+		_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET payload_hash = 'changed' WHERE id = ?`, submission.ID)
+		require.NoError(t, err)
+	}
+	if condition == "initial attempt changed" {
+		_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET dispatch_attempt_id = 'replacement' WHERE id = ?`, submission.ID)
+		require.NoError(t, err)
+	}
 	result, err := repo.ReconstructAgentDeliverySubmission(ctx, request)
+	if condition == "continuation missing" || condition == "continuation changed" || condition == "initial attempt changed" {
+		require.Error(t, err, "canonical-only repair must not insert missing or overwrite changed evidence")
+		current, readErr := repo.GetTaskSession(ctx, "session")
+		require.NoError(t, readErr)
+		_, exists := models.LoadAgentDeliveryRecovery(current.Metadata)
+		require.False(t, exists)
+		return
+	}
+	if condition == "history unresolved" {
+		require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryReconstructionConflict)
+		return
+	}
+
 	if condition == "retired changed" || condition == "retired live" {
 		require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryReconstructionConflict)
 		current, readErr := repo.GetTaskSession(ctx, "session")
@@ -115,6 +174,7 @@ func testMissingProjectionReconstruction(t *testing.T, condition string) {
 	require.Equal(t, submission.ID, result.Recovery.SubmissionID)
 	retained, err := repo.GetAgentDeliverySubmission(ctx, submission.ID)
 	require.NoError(t, err)
+	require.Equal(t, submission.DispatchAttemptID, retained.DispatchAttemptID)
 	require.Equal(t, "unknown", retained.Outcome, "projection repair preserves the canonical historical outcome")
 	repeated, err := repo.ReconstructAgentDeliverySubmission(ctx, request)
 	require.NoError(t, err)

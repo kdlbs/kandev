@@ -174,6 +174,32 @@ describe("useComposerProps", () => {
 });
 
 describe("canonical interrupted prompt recovery", () => {
+  it("keeps a new generic fence visible despite an earlier restored snapshot", () => {
+    const args = composerArgs();
+    args.panelState.session = {
+      metadata: {
+        agent_delivery_recovery: {
+          ...deliveryIdentity,
+          phase: "restored",
+          revision: 4,
+          harness_generation: 2,
+        },
+      },
+      session_recovery_blocks: [
+        {
+          id: "new-block",
+          reason: "unresolved_durable_work",
+          consumer_reference: "agent_delivery",
+          delivery_submission_id: "",
+          delivery_stream_id: "",
+        },
+      ],
+    } as never;
+    const { result } = renderHook(() => useComposerProps(args));
+    expect(result.current.uncertainDelivery).toBe(true);
+    expect(result.current.needsRecovery).toBe(true);
+  });
+
   it("keeps existing Resume available for canonical interrupted work without a recovery record", () => {
     const args = composerArgs();
     args.panelState.needsRecovery = false;

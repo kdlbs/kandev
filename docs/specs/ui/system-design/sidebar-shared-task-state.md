@@ -211,7 +211,7 @@ Temporary reconciliation journals and tombstones also have explicit settlement/o
 
 Desktop retains the Tasks sidebar. Phone retains `SessionTaskSwitcherSheet` and `MobileTaskList` in the existing drawer.
 Both use the same source controller and page projection. No new navigation or controls are introduced.
-Phone keeps safe-area handling, 44px touch targets, contained scrolling, and focus return.
+Phone keeps safe-area handling, 44px touch targets, contained scrolling, and focus return. The open Tasks modal retains its identity while workspace contents change; workspace generation fences data and workspace-keyed contents release their scoped state. Closing Tasks removes its content portal immediately, so Radix releases the pointer and scroll locks and restores focus without waiting for an exit animation. Entry motion and open-drawer geometry remain unchanged; Tasks dismissal is immediate.
 Shared data appears immediately; background refresh uses the existing localized nonblocking status.
 Uncovered initial loads use the existing loading state. Errors and Retry remain distinct from a successful empty list.
 Any new copy uses all six locale catalogs. Do not hardcode provisional-state text.

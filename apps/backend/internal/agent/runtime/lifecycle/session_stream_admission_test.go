@@ -127,7 +127,7 @@ func TestSessionManager_StreamBoundaryPrecedesAdmission(t *testing.T) {
 	go func() {
 		_, err := sm.SendPromptWithAdmissionCallback(
 			context.Background(), execution, "next prompt", true, nil, true,
-			func() error {
+			func(context.Context, string, []v1.MessageAttachment) error {
 				lockSessionGuard()
 				if execution.promptGeneration != 7 {
 					unlockSessionGuard()

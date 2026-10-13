@@ -48,6 +48,7 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
   const [byModel, setByModel] = useState<CostBreakdownItem[]>([]);
   const [byProvider, setByProvider] = useState<CostBreakdownItem[]>([]);
   const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string | null>(null);
+  const [loadedRange, setLoadedRange] = useState<DateRange | null>(null);
 
   // Range changes, workspace changes, and WS-triggered refetches (below) can
   // all call fetchCosts in overlapping succession; guard against an older
@@ -57,10 +58,11 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
     const current = ++requestId.current;
     // Single composed call (Stream D of office optimization). Was four
     // parallel round-trips (summary + by-agent + by-project + by-model).
-    getCostsBreakdown(workspaceId)
+    getCostsBreakdown(workspaceId, { range })
       .then((res) => {
         if (current !== requestId.current) return;
         setLoadedWorkspaceId(workspaceId);
+        setLoadedRange(range);
         setTotalSubcents(res.total_subcents ?? 0);
         setByAgent((res.by_agent ?? []) as CostBreakdownItem[]);
         setByProject((res.by_project ?? []) as CostBreakdownItem[]);
@@ -71,11 +73,11 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
         if (current !== requestId.current) return;
         toast.error(err instanceof Error ? err.message : staticT("office:failedToLoadCostData"));
       });
-  }, [workspaceId]);
+  }, [workspaceId, range]);
 
   useEffect(() => {
     fetchCosts();
-  }, [fetchCosts, range]);
+  }, [fetchCosts]);
 
   // The WS handler bumps "costs" on a new cost event (office.cost.recorded)
   // and on a task project reassignment (office.task.updated with
@@ -83,11 +85,10 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
   // already-open tab.
   useOfficeRefetch("costs", fetchCosts);
 
-  // Do not render a previous workspace's response while a new workspace is
-  // loading. This also keeps the old values hidden when the new request
-  // fails, instead of showing them under the wrong workspace.
+  // Results are eligible only for the workspace and range that produced them.
+  // A pending or failed selection cannot display another window's spending.
   const displayData =
-    loadedWorkspaceId === workspaceId
+    loadedWorkspaceId === workspaceId && loadedRange === range
       ? { totalSubcents, byAgent, byProject, byModel, byProvider }
       : EMPTY_COST_OVERVIEW;
 

@@ -4,7 +4,7 @@ system: desktop
 requirements:
   - REQ-DESKTOP-DESKTOP-TAURI-APP-001
 created: 2026-06-23
-updated: 2026-09-30
+updated: 2026-10-12
 owners:
   - tbd
 ---
@@ -277,6 +277,14 @@ Size, position, and maximized state are persisted after stable changes. Minimize
 restored. If a saved position is outside all current displays, the window is clamped to a visible
 display before being shown.
 
+Saved bounds describe the outer window frame in physical pixels, as reported by the platform
+window's outer position and outer size. Restore applies the same basis. Tauri's `set_size`
+resizes the client area, so the shell first measures the current frame (outer size minus inner
+size) and applies the saved outer size minus that frame. Restarting without resizing therefore
+restores the saved outer size instead of growing the window by the frame each time. Clamping to a
+visible display also compares outer sizes. Without a measurable frame, such as the macOS overlay
+title bar, the saved size is applied unchanged.
+
 ## Failure modes
 
 - A menu command received before SPA readiness is ignored or replayed once when explicitly safe;
@@ -360,6 +368,8 @@ display before being shown.
   and does not mark a task route from generic activation.
 - **GIVEN** a saved window position belongs to a disconnected display, **WHEN** Kandev reopens,
   **THEN** the main window appears within a currently visible display.
+- **GIVEN** a decorated main window was saved at an outer size, **WHEN** Kandev restarts
+  repeatedly without the user resizing it, **THEN** each restart restores that same outer size.
 - **GIVEN** the same settings page is opened in a browser or narrow/mobile viewport, **WHEN** it
   renders, **THEN** the existing service-update experience and responsive layout remain intact;
   desktop-only native actions are not shown.

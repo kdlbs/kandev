@@ -33,6 +33,7 @@ test.describe("Mobile sidebar task PR unlink menu", () => {
 
     await testPage.getByTestId("mobile-task-picker-trigger").tap();
     await expect(row).toBeVisible({ timeout: 15_000 });
+    await waitForFiniteAnimations(testPage.getByRole("dialog", { name: "Tasks", exact: true }));
     const taskActions = row.locator("button.mobile-task-actions-button");
     const taskActionsBounds = await taskActions.boundingBox();
     expect(taskActionsBounds).not.toBeNull();

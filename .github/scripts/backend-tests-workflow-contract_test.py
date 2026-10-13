@@ -37,6 +37,7 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("mapfile -t postgres_packages", self.workflow)
         persistence_gate = step_block(self.workflow, "Run fixed PostgreSQL 16 persistence gates")
         self.assertIn("./internal/coordinator", persistence_gate)
+        self.assertIn("./internal/coordinator/ledger", persistence_gate)
         self.assertIn("./internal/persistence/storeconformance ./internal/backendapp", self.workflow)
         for test_name in (
             "TestStoreCatalogCompleteness",

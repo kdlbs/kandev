@@ -63,6 +63,12 @@ export function recoveryCopy(
   model: ActiveSessionRecovery,
   t: ReturnType<typeof useTranslation>["t"],
 ) {
+  if (model.kind === "delivery_history_gap")
+    return {
+      title: t("task:deliveryHistoryGapTitle"),
+      summary: t("task:deliveryHistoryGapBody"),
+      showSummary: true,
+    };
   if (model.kind === "recovery_inspection_busy")
     return {
       title: t("task:launchNeedsAttention"),
@@ -389,7 +395,11 @@ function withAutomaticNotice(
   actions: SessionRecoveryActions,
 ) {
   const notice = actions.recoveryNotice ?? automatic?.notice;
-  return notice && !actions.recoveryError && !copy.hasTypedSelectionCause
+  const noticeKind = actions.recoveryNotice ? actions.recoveryNoticeKind : automatic?.noticeKind;
+  return notice &&
+    !actions.recoveryError &&
+    !copy.hasTypedSelectionCause &&
+    (!copy.hasTypedCleanupCause || noticeKind === "inspection_busy")
     ? { ...copy, summary: notice }
     : copy;
 }
@@ -434,6 +444,7 @@ function recoveryPresentationCopy(
     return {
       ...recoveryCopy({ ...model, kind: "managed_clone_relocation_required" }, t),
       hasTypedSelectionCause: false,
+      hasTypedCleanupCause: false,
       noPromptSent: false,
       freshStartWarning: false,
       workspaceStatus: null,
@@ -444,6 +455,7 @@ function recoveryPresentationCopy(
       summary: bootstrap.summary,
       showSummary: bootstrap.showSummary,
       hasTypedSelectionCause: bootstrap.hasTypedSelectionCause,
+      hasTypedCleanupCause: bootstrap.hasTypedCleanupCause,
       noPromptSent: bootstrap.noPromptSent,
       freshStartWarning: bootstrap.freshStartWarning,
       workspaceStatus: bootstrap.workspaceStatus,
@@ -451,6 +463,7 @@ function recoveryPresentationCopy(
   return {
     ...recoveryCopy(model, t),
     hasTypedSelectionCause: false,
+    hasTypedCleanupCause: false,
     noPromptSent: false,
     freshStartWarning: false,
     workspaceStatus: null,
@@ -464,7 +477,7 @@ function recoveryPresentationDetails(
   actions: SessionRecoveryActions,
   t: ReturnType<typeof useTranslation>["t"],
 ) {
-  if (bootstrap?.hasTypedSelectionCause) return "";
+  if (bootstrap?.hasTypedSelectionCause || bootstrap?.hasTypedCleanupCause) return "";
   const manualFailure = actions.manualRecoveryFailure;
   const ownsManualFailure =
     !manualFailure ||

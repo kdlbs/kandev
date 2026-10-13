@@ -3452,6 +3452,12 @@ func (s *Service) reconcileCompleteEventRuntime(
 	if s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
 		return true
 	}
+	if payload.Data.TurnID != "" && payload.Data.TurnID == completionTurnID {
+		if !s.observeAutomationRetryTurnTerminal(ctx, payload.TaskID, payload.SessionID, completionTurnID, payload.ExecutionID) {
+			return false
+		}
+	}
+
 	return s.handleAutomationTurnCompleteForTurn(
 		ctx,
 		payload.TaskID,

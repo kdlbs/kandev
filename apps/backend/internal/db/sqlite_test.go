@@ -3,6 +3,7 @@ package db_test
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"path/filepath"
 	"runtime"
@@ -18,6 +19,30 @@ import (
 )
 
 type sqliteFactoryFixture struct{ writer, waiter, observer, reader *sqlx.DB }
+
+// @covers AC-PLATFORM-PRUNED-DELIVERY-RECOVERY-001.1
+func TestSQLiteWriterPowerLossDurability(t *testing.T) {
+	ctx := t.Context()
+	writer, err := internaldb.OpenSQLite(filepath.Join(t.TempDir(), "delivery.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+	check := func() {
+		t.Helper()
+		var mode string
+		var synchronous int
+		require.NoError(t, writer.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode))
+		require.Equal(t, "wal", mode)
+		require.NoError(t, writer.QueryRowContext(ctx, `PRAGMA synchronous`).Scan(&synchronous))
+		require.Equal(t, 2, synchronous, "journal pruning requires a power-loss-durable WAL commit")
+	}
+	check()
+	conn, err := writer.Conn(ctx)
+	require.NoError(t, err)
+	// Discard the physical connection; the pool must reopen with the same durability.
+	require.ErrorIs(t, conn.Raw(func(any) error { return driver.ErrBadConn }), driver.ErrBadConn)
+	_ = conn.Close()
+	check()
+}
 
 func newSQLiteFactoryFixture(t *testing.T, ctx context.Context) sqliteFactoryFixture {
 	t.Helper()

@@ -1,7 +1,11 @@
 import type { useSessionRecoveryActions } from "./use-session-recovery-actions";
 import type { SessionRecoveryNoticeKind } from "./use-session-resumption";
 import { useCallback, useRef } from "react";
-import type { SessionRecoveryAction } from "@/lib/services/session-recovery-service";
+import {
+  managedCloneRelocationRecoveryDetails,
+  runtimeCleanupFailureDetails,
+  type SessionRecoveryAction,
+} from "@/lib/services/session-recovery-service";
 import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
 
 export type RecoveryOperation = { requestKey: string; sessionKey: string; operationId: number };
@@ -51,6 +55,56 @@ export function useRecoveryOperationFence(
   );
 
   return { beginOperation, isCurrentOperation, isCurrentSession, matchesLatestErrorStamp };
+}
+
+type RecoveryFailureAssociation = {
+  managedClone: ReturnType<typeof managedCloneRelocationRecoveryDetails>;
+  errorStamp: string | null;
+  requestKey: string;
+};
+
+export function recoveryFailureAssociation({
+  cause,
+  operation,
+  errorStamp,
+  taskId,
+  sessionId,
+  isCurrentOperation,
+  isCurrentSession,
+  matchesLatestErrorStamp,
+}: {
+  cause: unknown;
+  operation: RecoveryOperation;
+  errorStamp?: string | null;
+  taskId: string;
+  sessionId: string;
+  isCurrentOperation: (operation: RecoveryOperation) => boolean;
+  isCurrentSession: (operation: RecoveryOperation) => boolean;
+  matchesLatestErrorStamp: (stamp: string | undefined) => boolean;
+}): RecoveryFailureAssociation | null {
+  const managedClone = managedCloneRelocationRecoveryDetails(cause);
+  const currentOperation = isCurrentOperation(operation);
+  const successorStamp = recoveryFailureSuccessorStamp(cause, sessionId, managedClone);
+  const isSuccessor = Boolean(
+    successorStamp && isCurrentSession(operation) && matchesLatestErrorStamp(successorStamp),
+  );
+  if (!currentOperation && !isSuccessor) return null;
+  const associatedStamp = isSuccessor ? (successorStamp ?? null) : (errorStamp ?? null);
+  const requestKey = currentOperation
+    ? operation.requestKey
+    : `${taskId}\u0000${sessionId}\u0000${associatedStamp ?? ""}`;
+  return { managedClone, errorStamp: associatedStamp, requestKey };
+}
+
+function recoveryFailureSuccessorStamp(
+  cause: unknown,
+  sessionId: string,
+  managedClone: RecoveryFailureAssociation["managedClone"],
+): string | undefined {
+  const cleanup = runtimeCleanupFailureDetails(cause, sessionId);
+  if (cleanup?.errorStamp) return cleanup.errorStamp;
+  if (managedClone?.kind === "managed_clone_relocation_required") return managedClone.error_stamp;
+  return undefined;
 }
 
 function compareDecimalIdentity(left: string, right: string): number | null {
@@ -108,6 +162,7 @@ export type ManualSessionRecoveryFailure = {
   errorStamp: string | null;
   requestKey: string;
   operationId: number;
+  causes?: import("@/lib/types/task-status-summary").AgentErrorCause[];
 };
 
 export type SessionRecoveryActions = Omit<
@@ -115,10 +170,14 @@ export type SessionRecoveryActions = Omit<
   | "workspaceRecoveryMatchesCurrentFailure"
   | "recoveryNoticeKind"
   | "deliveryRecoveryNotice"
+  | "deliveryHistoryGap"
+  | "deliveryResumeAvailable"
   | "clearInspectionContentionNotice"
 > & {
   workspaceRecoveryMatchesCurrentFailure?: boolean;
   recoveryNoticeKind?: SessionRecoveryNoticeKind | null;
   deliveryRecoveryNotice?: string | null;
+  deliveryResumeAvailable?: boolean;
+  deliveryHistoryGap?: import("@/lib/session-agent-delivery-recovery").AgentDeliveryHistoryGap;
   clearInspectionContentionNotice?: () => void;
 };

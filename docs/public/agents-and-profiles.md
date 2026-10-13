@@ -302,6 +302,11 @@ When an existing native OpenCode v1 installation remains selected, same-family
 updates can still update that native executable. A v2 migration always uses
 the managed `@opencode/cli` package and does not run a global npm install.
 
+If a native OpenCode version check still fails after retries, Kandev can use a
+recent supported detection or the selected supported version. Cancelling the
+launch stops it. An observed unsupported major blocks launch until a later
+check reports a supported version; a transient probe failure cannot clear it.
+
 Kandev enables the action only after the backend validates the selected version
 against the trusted package catalogue. It does not accept package names, npm
 tags, prereleases, registry URLs, or command text. When the active version,
@@ -586,6 +591,13 @@ change the workflow's selected step or primary session. You can open another
 session and use its normal controls. Kandev resumes it when the session can run;
 the automatic session ceiling still applies unless you explicitly start,
 resume, or message the session.
+
+Opening or refocusing a conversation parked by the ACP idle policy also uses
+automatic admission. With **Limit automatic sessions** enabled and capacity
+full, it stays parked without a manual-override notice. A queued focus resume,
+including a completed conversation, retries when capacity is available and
+only while the same conversation remains idle-suspended. Explicit **Resume**
+and message delivery keep manual admission.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn

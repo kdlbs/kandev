@@ -161,8 +161,17 @@ func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType
 	return nil
 }
 
+// newAgentEventPayload takes execution.promptLifecycleMu to snapshot the turn.
+// Never call it while the execution store lock is held; use
+// ExecutionStore.WithPromptLifecycleLock with newAgentEventPayloadPromptLocked.
 func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 	return newAgentEventPayloadWithTurnID(execution, execution.promptTurnIDSnapshot())
+}
+
+// newAgentEventPayloadPromptLocked is newAgentEventPayload for callers that
+// already hold execution.promptLifecycleMu.
+func newAgentEventPayloadPromptLocked(execution *AgentExecution) AgentEventPayload {
+	return newAgentEventPayloadWithTurnID(execution, execution.promptTurnID)
 }
 
 func newAgentEventPayloadWithTurnID(execution *AgentExecution, turnID string) AgentEventPayload {

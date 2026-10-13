@@ -4204,6 +4204,32 @@ func (r *Repository) ListTasksWithCeilingDeferred(ctx context.Context) ([]*model
 	return r.scanTasks(rows)
 }
 
+// ListTasksWithAutomationStartOwned returns every task whose metadata reserves
+// its initial start for an automation dispatch. The marker is stamped on
+// automation-origin tasks, so unlike ListTasksWithMetadataKey this includes
+// automation-origin, ephemeral and archived tasks.
+func (r *Repository) ListTasksWithAutomationStartOwned(ctx context.Context) ([]*models.Task, error) {
+	var predicate, path string
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		predicate = "jsonb_extract_path(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}'::jsonb ELSE t.metadata::jsonb END, ?) IS NOT NULL"
+		path = models.MetaKeyAutomationStartOwned
+	} else {
+		predicate = "json_type(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}' ELSE t.metadata END, ?) IS NOT NULL"
+		path = jsonPath(models.MetaKeyAutomationStartOwned)
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE `+predicate+`
+		ORDER BY t.id ASC
+	`), path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
 // ListTasksByWorkspace returns paginated tasks for a workspace with total count
 // If query is non-empty, filters by task title, description, repository name, or repository path
 // If includeArchived is false, archived tasks are excluded. If onlyArchived

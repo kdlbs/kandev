@@ -252,6 +252,15 @@ func registeredSettingsContract(t *testing.T, transport string) {
 		for _, payload := range []string{`{}`, `{"name":null,"description":null,"default_executor_id":null,"default_environment_id":null,"default_agent_profile_id":null,"default_config_agent_profile_id":null,"acp_idle_suspension_enabled":null,"acp_idle_timeout_minutes":null,"unit_id":null}`} {
 			before, err := f.repo.GetWorkspace(t.Context(), "registered-settings")
 			require.NoError(t, err)
+			_, err = f.database.ExecContext(
+				t.Context(),
+				`UPDATE workspaces SET updated_at = ? WHERE id = ?`,
+				time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+				before.ID,
+			)
+			require.NoError(t, err)
+			before, err = f.repo.GetWorkspace(t.Context(), before.ID)
+			require.NoError(t, err)
 			result := f.update(t.Context(), transport, payload)
 			requireSettingsSuccess(t, transport, result)
 			requireSettingsObservation(t, f, result.row)

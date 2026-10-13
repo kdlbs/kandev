@@ -46,6 +46,7 @@ type AgentDeliveryRecovery struct {
 	PromptGeneration  uint64                                 `json:"prompt_generation"`
 	Message           string                                 `json:"message,omitempty"`
 	Reconstruction    *AgentDeliveryReconstructionProvenance `json:"reconstruction,omitempty"`
+	HistoryGap        *AgentDeliveryHistoryGap               `json:"history_gap,omitempty"`
 	UpdatedAt         time.Time                              `json:"updated_at"`
 }
 
@@ -72,22 +73,25 @@ type AgentDeliveryReconstructionRequest struct {
 	// Retirement evidence is verified through the authenticated runtime before
 	// these immutable canonical snapshots are checked under the SQL write lock.
 	VerifiedRetiredSubmissions []AgentDeliverySubmission
-	TaskID                     string
-	SessionID                  string
-	IncarnationID              string
-	HarnessGeneration          int64
-	ExpectedExecutionID        string
-	ExpectedSessionState       TaskSessionState
-	ExpectedWorkspacePath      string
-	NativeSessionID            string
-	MessageID                  string
-	ExpectedBlock              SessionRecoveryBlock
-	SourceStreamHighWater      int64
-	SourceStreamAcknowledged   int64
-	SourceStreamFirstRetained  int64
-	ExpectedCursor             *AgentDeliveryCursor
-	Submission                 AgentDeliverySubmission
-	Recovery                   AgentDeliveryRecovery
+	// ExistingSubmissionOnly repairs presentation from a canonical SQL row and
+	// cannot insert a missing submission or infer a user-message association.
+	ExistingSubmissionOnly    bool
+	TaskID                    string
+	SessionID                 string
+	IncarnationID             string
+	HarnessGeneration         int64
+	ExpectedExecutionID       string
+	ExpectedSessionState      TaskSessionState
+	ExpectedWorkspacePath     string
+	NativeSessionID           string
+	MessageID                 string
+	ExpectedBlock             SessionRecoveryBlock
+	SourceStreamHighWater     int64
+	SourceStreamAcknowledged  int64
+	SourceStreamFirstRetained int64
+	ExpectedCursor            *AgentDeliveryCursor
+	Submission                AgentDeliverySubmission
+	Recovery                  AgentDeliveryRecovery
 }
 
 // AgentDeliveryReconstructionResult reports the committed recovery identity.

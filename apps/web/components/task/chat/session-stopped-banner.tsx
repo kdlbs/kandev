@@ -58,14 +58,24 @@ function uncertainDeliveryRecoveryChoices(
   t: RecoveryTranslator,
 ): RecoveryChoice[] {
   if (!props.taskId || !props.sessionId) return [];
-  return [
-    {
+  const choices: RecoveryChoice[] = [];
+  if (props.actions.deliveryHistoryGap || props.actions.deliveryResumeAvailable) {
+    choices.push({
+      kind: "resume",
+      label: t("task:resume"),
+      testId: "recovery-resume-button",
+      onClick: () => void props.actions.handleRecover("resume"),
+    });
+  }
+  if (!props.actions.deliveryHistoryGap) {
+    choices.push({
       kind: "retry_connection",
       label: t("task:retryConnection"),
       testId: "recovery-retry-connection-button",
       onClick: () => void props.actions.handleRecover("retry_connection"),
-    },
-  ];
+    });
+  }
+  return choices;
 }
 
 function sessionRecoveryChoices(
@@ -414,16 +424,18 @@ function StoppedSessionContent(props: StoppedRecoveryProps) {
     cause,
     t,
   );
-  const title = stoppedSessionTitle(
-    {
-      completed,
-      managedCloneRecovery,
-      uncertainDelivery: Boolean(props.uncertainDelivery),
-      deliveryRecoveryPhase: props.deliveryRecoveryPhase,
-      message: props.message ?? "",
-    },
-    t,
-  );
+  const title = props.actions.deliveryHistoryGap
+    ? t("task:deliveryHistoryGapTitle")
+    : stoppedSessionTitle(
+        {
+          completed,
+          managedCloneRecovery,
+          uncertainDelivery: Boolean(props.uncertainDelivery),
+          deliveryRecoveryPhase: props.deliveryRecoveryPhase,
+          message: props.message ?? "",
+        },
+        t,
+      );
   const Icon = completed ? IconCircleCheck : IconAlertTriangle;
   return (
     <>
@@ -443,6 +455,14 @@ function StoppedSessionContent(props: StoppedRecoveryProps) {
               recoveryErrorMessage={recoveryErrorMessage}
             />
             <StoppedSessionRecoveryControls props={props} choices={choices} blocked={blocked} />
+            {props.actions.deliveryHistoryGap && (
+              <SessionErrorDetails>
+                {t("task:deliveryHistoryGapRange", {
+                  first: props.actions.deliveryHistoryGap.firstSequence,
+                  last: props.actions.deliveryHistoryGap.lastSequence,
+                })}
+              </SessionErrorDetails>
+            )}
             {!props.uncertainDelivery && (
               <SessionErrorDetails>
                 {[props.message, props.detail, props.actions.recoveryError?.message]

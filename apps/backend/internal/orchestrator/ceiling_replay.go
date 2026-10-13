@@ -353,6 +353,9 @@ func (s *Service) dropCeilingDeferral(
 	}
 
 	s.clearCeilingDeferredRecord(ctx, task.ID, deferral)
+	if run := automationRunFromCeilingPayload(deferral.Payload); run != nil {
+		s.releaseDroppedAutomationStartOwnership(ctx, task, run.RunID)
+	}
 	s.publishTaskUpdatedByID(ctx, task.ID)
 }
 
@@ -787,10 +790,17 @@ func (s *Service) replayCeilingLaunchResume(ctx context.Context, task *models.Ta
 		ctx, task.ID,
 		stringField(payload, metaKeySessionID),
 		executor.ResumeOptions{
-			AllowBranchReplacement: boolField(payload, "allow_branch_replacement"),
-			Origin:                 string(launchOriginAutomatic),
+			AllowBranchReplacement:          boolField(payload, "allow_branch_replacement"),
+			AllowCompletedSessionResume:     boolField(payload, resumePayloadAllowCompletedKey),
+			RequireIdleSuspensionProvenance: boolField(payload, resumePayloadIdleProvenanceKey),
+			Origin:                          string(launchOriginAutomatic),
 		},
 	)
+	if errors.Is(err, ErrIdleSuspensionProvenanceRequired) {
+		// The session is no longer parked by the idle policy, so the focus
+		// resume this record carries no longer applies.
+		return ceilingReplaySuperseded
+	}
 	return ceilingReplayOutcomeFromExecution(execution, err)
 }
 

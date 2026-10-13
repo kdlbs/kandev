@@ -26,6 +26,19 @@ export async function assertCapacityContinuationAfterPruning(
   context: { taskId: string; sessionId: string; tracePath: string },
 ) {
   const { taskId, sessionId, tracePath } = context;
+  // A restart restores the workspace before the agent. Complete a normal turn
+  // before measuring retained-runtime continuation, rather than queueing at startup.
+  await session.sendMessageViaButton("/slow 2s");
+  await expect(
+    session.chat.getByText("Slow response complete after 2s.", { exact: false }),
+  ).toBeVisible({ timeout: 60_000 });
+  await expect
+    .poll(
+      async () =>
+        (await api.listTaskSessions(taskId)).sessions.find((row) => row.id === sessionId)?.state,
+      { timeout: 30_000 },
+    )
+    .toBe("WAITING_FOR_INPUT");
   const traceStart = readMockACPTrace(tracePath).length;
   const previousSubmissions = retentionEvidence(backend, sessionId).prompts.map((row) => row.id);
   await session.sendMessageViaButton("/capacity-completed-tools");

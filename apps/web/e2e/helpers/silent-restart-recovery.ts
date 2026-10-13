@@ -77,14 +77,19 @@ export async function expectSilentRestartRestoration(
         const recovery = restored.metadata?.agent_delivery_recovery as
           | { phase?: unknown }
           | undefined;
-        return typeof recovery?.phase === "string" ? recovery.phase : "";
+        return {
+          phase: typeof recovery?.phase === "string" ? recovery.phase : "",
+          executionReplaced:
+            Boolean(restored.agent_execution_id) &&
+            restored.agent_execution_id !== snapshot.agentExecutionId,
+        };
       },
       {
         timeout: 60_000,
-        message: "session delivery recovery was not durably committed after backend restart",
+        message: "session delivery recovery was not durably committed after process loss",
       },
     )
-    .toBe("restored");
+    .toEqual({ phase: "restored", executionReplaced: true });
 
   await expectRestartConversationIdentity({
     page,

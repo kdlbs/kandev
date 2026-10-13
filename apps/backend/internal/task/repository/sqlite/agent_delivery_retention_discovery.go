@@ -214,3 +214,26 @@ func compactionCandidateAfter(candidate, previous *agentDeliveryRetentionCandida
 	}
 	return candidate.event.StreamID > previous.event.StreamID || (candidate.event.StreamID == previous.event.StreamID && candidate.event.Sequence > previous.event.Sequence)
 }
+
+// Only increasing persisted frontiers justify continuing a protected-only phase.
+// Wrapping or changing sweep preference alone cannot keep a pass repeating.
+func agentDeliveryDiscoveryAdvanced(previous agentDeliveryRetentionProgress, candidates []agentDeliveryRetentionCandidate, prompts []agentDeliveryPromptRetentionCandidate, receiptWrapped bool) bool {
+	next := previous
+	advanceAgentDeliveryEventRetentionProgress(&next, candidates, receiptWrapped)
+	if next.lastStreamID > previous.lastStreamID || (next.lastStreamID == previous.lastStreamID && next.lastSequence > previous.lastSequence) {
+		return true
+	}
+	if len(prompts) > 0 && prompts[len(prompts)-1].submissionID > previous.lastSubmissionID {
+		return true
+	}
+	if !next.lastCompactionAt.Valid {
+		return false
+	}
+	if !previous.lastCompactionAt.Valid {
+		return true
+	}
+	return next.lastCompactionAt.Time.After(previous.lastCompactionAt.Time) ||
+		(next.lastCompactionAt.Time.Equal(previous.lastCompactionAt.Time) &&
+			(next.lastCompactionStreamID > previous.lastCompactionStreamID ||
+				(next.lastCompactionStreamID == previous.lastCompactionStreamID && next.lastCompactionSequence > previous.lastCompactionSequence)))
+}

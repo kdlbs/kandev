@@ -33,6 +33,11 @@ A missing sequence triggers catch-up or typed recovery, never silent advancement
 A positively identified legacy stream uses the existing projection path without durable inbox lookups.
 Missing identity on a v1 stream is a protocol error, not evidence of legacy support.
 
+The proposed [pruned-history recovery](pruned-delivery-recovery.md) addresses
+typed startup diagnosis and unavailable acknowledged intervals.
+It preserves actual receipt/projection cursors; the current expiry reconciliation
+does not authorize skipping missing receipt.
+
 ### Projection and acknowledgment scheduling
 
 A per-stream worker batches at most 64 KiB of compatible output with a maximum 20 ms batching wait.
@@ -128,3 +133,22 @@ Stop remains reachable. Retry connection only queries and reconnects the origina
 Storage failure alone does not authorize context continuation.
 
 The [journal shutdown and recovery package](../../../plans/agentctl-journal-shutdown-recovery/plan.md) owns the October ACK replacement and capacity recurrence repairs.
+
+## Resumed bootstrap recovery
+
+Generation-one admission includes native conversations first entering durable
+delivery; a saved native resume token does not prove SQL authority has committed.
+The processor owns its connection context. Processing failure cancels that
+connection immediately and reaches disconnect reconciliation with its original
+error, even if no later frame arrives. A replacement connection remains independent.
+
+For a native generation-one bootstrap that never received its first event,
+explicit startup may establish a checkpoint by receiving the actual retained
+sequence-one setup event. Require the matching committed native conversation,
+authenticated stream and current execution, a fully retained prefix from one,
+and zero peer acknowledgments. The first event must have no submission, turn
+content or terminal outcome. The normal SQL receive transaction rejects orphaned
+receipts, retired sessions and changed owners; checkpoint creation accompanies
+the real receipt.
+Preflight performs no projection, acknowledgment, prompt dispatch or block resolution.
+Subsequent replay projects retained events through the normal idempotent pipeline.

@@ -6,6 +6,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // Validate the complete SQL history before retiring any peer work and require
@@ -28,8 +29,15 @@ func (m *Manager) validateNativeResumeSQLHistory(
 	if err != nil {
 		return err
 	}
+	return validateNativeResumeSQLRows(execution, status, peer, active, retired)
+}
+
+func validateNativeResumeSQLRows(execution *AgentExecution, status *agentctl.DeliveryStatus, peer []journal.Submission, active []*models.AgentDeliverySubmission, retired bool) error {
 	retained := make(map[string]journal.Submission, len(peer))
 	for _, submission := range peer {
+		if _, duplicate := retained[submission.ID]; duplicate {
+			return fmt.Errorf("%w: duplicate native resume evidence", ErrDurableAdoptionBlocked)
+		}
 		retained[submission.ID] = submission
 	}
 	for _, submission := range active {

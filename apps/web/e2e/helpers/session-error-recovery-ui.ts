@@ -4,6 +4,180 @@ import { expect, test } from "../fixtures/test-base";
 import { waitForSessionDone } from "./session";
 import { SessionPage } from "../pages/session-page";
 import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
+import { waitForFiniteAnimations } from "./pr-capture";
+
+export function runtimeCleanupFailureScenario() {
+  test("runtime cleanup guidance survives reload and a blocked retry", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }, testInfo) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Resume runtime cleanup", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const stamp = "cleanup-failure-fixture";
+    const occurredAt = new Date().toISOString();
+    const message =
+      "The previous runtime could not be stopped. Check executor connectivity, then retry Resume.";
+    const causes = [{ operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true }];
+    const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+      state: "FAILED",
+      completedAt: new Date().toISOString(),
+      agentProfileId: seedData.agentProfileId,
+      errorMessage: message,
+      metadata: {
+        last_agent_error: {
+          message,
+          stamp,
+          scope: "session",
+          phase: "bootstrap",
+          code: "generic_launch_failure",
+          occurred_at: occurredAt,
+          attempt_id: "resume-1",
+          causes,
+        },
+      },
+    });
+    await apiClient.seedSessionMessage(sessionId, {
+      type: "status",
+      content: message,
+      createdAt: occurredAt,
+      metadata: {
+        recovery_actions: true,
+        scope: "session",
+        error_stamp: stamp,
+        failure_kind: "generic_launch_failure",
+        phase: "bootstrap",
+        causes,
+        actions: [
+          {
+            type: "ws_request",
+            label: "Resume session",
+            params: {
+              method: "session.recover",
+              payload: { task_id: task.id, session_id: sessionId, action: "resume" },
+            },
+          },
+        ],
+      },
+    });
+    let rejectRetry: (() => void) | undefined;
+    let retryCount = 0;
+    await testPage.routeWebSocket(/\/ws$/, (socket) => {
+      const server = socket.connectToServer();
+      socket.onMessage((data) => {
+        if (typeof data !== "string") return server.send(data);
+        for (const part of data.split("\n").filter(Boolean)) {
+          const frame = JSON.parse(part);
+          if (
+            frame.type === "request" &&
+            frame.action === "session.recover" &&
+            frame.payload?.session_id === sessionId
+          ) {
+            retryCount += 1;
+            const inspectionBusy = retryCount > 1;
+            rejectRetry = () =>
+              socket.send(
+                JSON.stringify({
+                  id: frame.id,
+                  type: "error",
+                  action: frame.action,
+                  payload: {
+                    code: inspectionBusy ? "CONFLICT" : "INTERNAL_ERROR",
+                    message: inspectionBusy ? "Recovery inspection is busy" : message,
+                    details: inspectionBusy
+                      ? { kind: "recovery_inspection_busy" }
+                      : {
+                          kind: "runtime_cleanup_failed",
+                          session_id: sessionId,
+                          error_stamp: stamp,
+                          attempt_id: "resume-2",
+                          causes,
+                        },
+                  },
+                }),
+              );
+          } else server.send(part);
+        }
+      });
+      server.onMessage((data) => socket.send(data));
+    });
+    await testPage.goto(`/t/${task.id}`);
+    const card = testPage.getByTestId("session-recovery-card");
+    await expect(card).toHaveCount(1);
+    await expect(card.getByRole("heading", { name: "Resume could not finish" })).toBeVisible();
+    await expect(card).toContainText(message);
+    await expect(card.locator("pre")).toBeHidden();
+    const resume = card.getByTestId("recovery-resume-button");
+    await expect(resume).toBeEnabled();
+    if (testInfo.project.name === "mobile-chrome")
+      expect((await resume.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await assertNoDocumentHorizontalOverflow(testPage, "runtime cleanup guidance");
+    await waitForFiniteAnimations(card);
+    await prCapture.screenshot("runtime-cleanup", {
+      caption: "Cleanup failure keeps the existing session and explains how to retry.",
+    });
+    await resume.click();
+    await expect(resume).toBeDisabled();
+    await expect.poll(() => Boolean(rejectRetry)).toBe(true);
+    rejectRetry!();
+    await expect(resume).toBeEnabled();
+    await expect(card).toHaveCount(1);
+    await expect(card).toContainText(message);
+    await card.getByText("Technical details", { exact: true }).click();
+    await expect(card.locator("pre")).toContainText("runtime_cleanup_failed");
+    await expect(card).not.toContainText("already has an agent running");
+    rejectRetry = undefined;
+    await resume.click();
+    await expect(resume).toBeDisabled();
+    await expect.poll(() => Boolean(rejectRetry)).toBe(true);
+    rejectRetry!();
+    await expect(resume).toBeEnabled();
+    await expect(card).toContainText(
+      "This workspace is still being checked. Try resuming the session again.",
+    );
+    await expect(card.locator("pre")).toContainText("runtime_cleanup_failed");
+    await waitForFiniteAnimations(card);
+    await prCapture.screenshot("runtime-cleanup-inspection", {
+      caption:
+        "Current inspection contention takes precedence while cleanup evidence remains available.",
+    });
+    await testPage.reload();
+    await expect(card.getByRole("heading", { name: "Resume could not finish" })).toBeVisible();
+    await expect(card).toHaveCount(1);
+    await expect(testPage.getByTestId("session-recovery-history")).toHaveCount(1);
+    await assertNoDocumentHorizontalOverflow(testPage, "reloaded cleanup failure");
+    const resolvedAt = new Date().toISOString();
+    await apiClient.seedTaskSession(task.id, {
+      sessionId,
+      state: "WAITING_FOR_INPUT",
+      agentProfileId: seedData.agentProfileId,
+      errorMessage: "",
+      metadata: {
+        last_agent_error: {
+          message,
+          stamp,
+          scope: "session",
+          phase: "bootstrap",
+          causes,
+          occurred_at: occurredAt,
+        },
+        recovery_resolved_at: resolvedAt,
+        recovery_resolutions: [
+          { error_stamp: stamp, resolved_at: resolvedAt, attempt_id: "resume-3" },
+        ],
+      },
+    });
+    await testPage.reload();
+    await expect(card).toHaveCount(0);
+    await expect(testPage.locator('[contenteditable="true"]:visible').first()).toBeVisible();
+    await expect(testPage.getByTestId("session-recovery-history")).toContainText(message);
+  });
+}
 
 export function sessionErrorDetailsScenario() {
   test("details wrap and copy safely", async ({ testPage, apiClient, seedData }, testInfo) => {

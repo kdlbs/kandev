@@ -853,7 +853,7 @@ func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, 
 // ownership check and acceptance callbacks to the lifecycle execution.
 func (a *lifecycleAdapter) RegisterInitialPromptAdmissionCallbacks(
 	executionID string,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) error {
 	return a.mgr.RegisterInitialPromptAdmissionCallbacks(
@@ -867,7 +867,7 @@ func (a *lifecycleAdapter) PromptAgentWithAdmissionCallback(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*executor.PromptResult, error) {
 	result, err := a.mgr.PromptAgentWithAdmissionCallback(
@@ -884,7 +884,7 @@ func (a *lifecycleAdapter) PromptAgentWithAdmissionCallbackAndSubmissionID(
 	agentInstanceID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 ) (*executor.PromptResult, error) {
@@ -925,7 +925,7 @@ var _ interface {
 } = (*lifecycleAdapter)(nil)
 
 var _ interface {
-	RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+	RegisterInitialPromptAdmissionCallbacks(string, func(context.Context, string, []v1.MessageAttachment) error, func(), func()) error
 	RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
 } = (*lifecycleAdapter)(nil)
 

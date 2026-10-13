@@ -6,6 +6,19 @@ import { ApiError } from "@/lib/api/client";
 const mockReplace = vi.fn();
 const mockSetup = vi.fn();
 const mockAdd = vi.fn();
+const phase31 = vi.hoisted(() => ({ on: false }));
+
+vi.mock("@/hooks/domains/settings/use-coordinator-phase31-effective", () => ({
+  useCoordinatorPhase31Effective: () => phase31.on,
+}));
+vi.mock("@/hooks/domains/coordinator/use-workspace-projects", () => ({
+  useWorkspaceProjects: () => ({
+    sets: [{ kind: "repository_set", id: "s1", name: "Platform", repositoryCount: 2 }],
+    loose: [{ kind: "repository", id: "r1", name: "docs" }],
+    status: "ready",
+    retry: vi.fn(),
+  }),
+}));
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: vi.fn(), replace: mockReplace }),
@@ -27,6 +40,7 @@ vi.mock("@/lib/api/domains/coordinator-api", async (importOriginal) => ({
 }));
 
 const storeState = {
+  settingsData: { agentsLoaded: true },
   addCoordinator: (...args: unknown[]) => mockAdd(...args),
   agentProfiles: {
     items: [
@@ -90,6 +104,7 @@ function toReview({ skipGoal = true } = {}) {
 }
 
 beforeEach(() => {
+  phase31.on = false;
   mockSetup.mockResolvedValue({ id: "new-1" });
 });
 
@@ -163,7 +178,7 @@ describe("CoordinatorSetup navigation", () => {
 });
 
 describe("CoordinatorSetup review", () => {
-  it("lists 12 rows in order with the owner and a Change button per row", () => {
+  it("lists 13 rows in order with the owner and a Change button per row", () => {
     open();
     toReview();
     const rows = screen.getAllByTestId(/^setup-review-row-/);
@@ -172,6 +187,7 @@ describe("CoordinatorSetup review", () => {
         "name",
         "agent",
         "executor",
+        "taskPair",
         "watches",
         "goal",
         "context",
@@ -280,6 +296,8 @@ describe("CoordinatorSetup finish", () => {
       name: PLANNER,
       agent_profile_id: "a1",
       executor_profile_id: "p1",
+      task_agent_profile_id: "a1",
+      task_executor_profile_id: "p1",
       context: "",
       watches: { scope: "all" },
       policy: {
@@ -427,5 +445,58 @@ describe("CoordinatorSetup refusals", () => {
     await waitFor(() => expect(screen.getByTestId("setup-banner-unconfirmed")).toBeDefined());
     expect((screen.getByTestId(FINISH_ID) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByTestId("setup-review-value-name").textContent).toContain(PLANNER);
+  });
+});
+
+describe("CoordinatorSetup projects step", () => {
+  it("is absent while the flag is off and sends no projects member", () => {
+    open();
+    expect(screen.queryByTestId("setup-step-projects")).toBeNull();
+    typeName(PLANNER);
+    next();
+    next();
+    expect(screen.getByTestId("setup-body-goal")).toBeDefined();
+  });
+
+  it("is the optional step after watches and Skip sends no member", async () => {
+    phase31.on = true;
+    open();
+    typeName(PLANNER);
+    next();
+    next();
+    expect(screen.getByTestId("setup-body-projects")).toBeDefined();
+    click(SKIP_ID);
+    click(SKIP_ID);
+    click(SKIP_ID);
+    next();
+    click(FINISH_ID);
+    await waitFor(() => expect(mockSetup).toHaveBeenCalledTimes(1));
+    expect(mockSetup.mock.calls[0][1]).not.toHaveProperty("projects");
+  });
+
+  it("holds Next on an empty selected scope and sends the chosen entries", async () => {
+    phase31.on = true;
+    open();
+    typeName(PLANNER);
+    next();
+    next();
+    click("watches-projects-all");
+    expect((screen.getByTestId(NEXT_ID) as HTMLButtonElement).disabled).toBe(false);
+    click("watches-project-toggle-s1");
+    click("watches-project-toggle-r1");
+    expect((screen.getByTestId(NEXT_ID) as HTMLButtonElement).disabled).toBe(true);
+    click("watches-project-toggle-r1");
+    click("watches-projects-no-repo");
+    expect((screen.getByTestId(NEXT_ID) as HTMLButtonElement).disabled).toBe(false);
+    click("watches-project-toggle-s1");
+    next();
+    click(SKIP_ID);
+    click(SKIP_ID);
+    next();
+    expect(screen.getByTestId("setup-review-value-projects").textContent).toContain("Platform");
+    click(FINISH_ID);
+    await waitFor(() => expect(mockSetup).toHaveBeenCalledTimes(1));
+    expect(mockSetup.mock.calls[0][1].projects.scope).toBe("selected");
+    expect(mockSetup.mock.calls[0][1].projects.include_no_repository).toBe(true);
   });
 });

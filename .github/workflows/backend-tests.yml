@@ -634,6 +634,7 @@ jobs:
             ./internal/azuredevops
             ./internal/backendapp
             ./internal/coordinator
+            ./internal/coordinator/ledger
             ./internal/db
             ./internal/delivery
             ./internal/github

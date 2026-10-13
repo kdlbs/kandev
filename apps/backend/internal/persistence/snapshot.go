@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
 )
 
 // snapshotPath returns the absolute path for a new backup file.
@@ -74,6 +75,24 @@ func snapshotSQLiteContext(ctx context.Context, writer *sqlx.DB, path string) (i
 		return 0, fmt.Errorf("snapshot canceled before installing %s: %w", path, err)
 	}
 	installed = true
+	return info.Size(), nil
+}
+
+// CopySQLiteSnapshot creates a consistent page copy without physical compaction.
+func CopySQLiteSnapshot(source *sqlx.DB, path string) (int64, error) {
+	return CopySQLiteSnapshotContext(context.Background(), source, path)
+}
+
+// CopySQLiteSnapshotContext copies in bounded increments. The caller verifies
+// integrity before publishing the completed snapshot.
+func CopySQLiteSnapshotContext(ctx context.Context, source *sqlx.DB, path string) (int64, error) {
+	if err := db.BackupSQLite(ctx, source.DB, path); err != nil {
+		return 0, fmt.Errorf("copy SQLite snapshot: %w", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, fmt.Errorf("stat snapshot: %w", err)
+	}
 	return info.Size(), nil
 }
 

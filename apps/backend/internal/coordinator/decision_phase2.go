@@ -15,7 +15,7 @@ var ErrUnknownProposalKind = errors.New("coordinator: unknown proposal kind")
 
 func knownProposalKind(kind string) bool {
 	switch kind {
-	case ProposalKindCreateTask, ProposalKindMessage, ProposalKindMove, ProposalKindResume:
+	case ProposalKindCreateTask, ProposalKindMessage, ProposalKindMove, ProposalKindResume, ProposalKindImprovement:
 		return true
 	}
 	return false
@@ -29,7 +29,7 @@ func (s *Service) checkApprovable(p *Proposal) error {
 	return fmt.Errorf("%w: %q cannot be approved", ErrUnknownProposalKind, p.Kind)
 }
 
-// checkRejectable rejects a proposal whose kind is not one of the four.
+// checkRejectable rejects a proposal whose kind is not a known kind.
 func (s *Service) checkRejectable(p *Proposal) error {
 	if !s.phase2 || p.Kind == "" || knownProposalKind(p.Kind) {
 		return nil
@@ -105,6 +105,9 @@ func (s *Service) completeProposalStore(ctx context.Context, workspaceID, coordi
 		TargetTaskID: &taskID, ProposalID: &proposalID, ActorUserID: actor,
 		Detail: approvedDetail(current),
 	}
+	if current.ClaimedAutomatically {
+		row.Authorization, row.UnattendedTurnID = AuthAutomatic, automaticTurnFrom(ctx)
+	}
 	return s.settleDecision(ctx, coordinatorID, row, func(tx coordinatorExec) (bool, error) {
 		return s.store.CompleteProposalTx(ctx, tx, proposalID, token, taskID, time.Now())
 	})
@@ -119,17 +122,27 @@ func (s *Service) failProposalStore(ctx context.Context, workspaceID, coordinato
 		Outcome: ActivityFailed, Authorization: AuthRequiresApproval, ReasonCode: optString(approvalFailedCode),
 		ProposalID: &proposalID, ActorUserID: optString(decidingUserID(ctx)), Detail: errMsg,
 	}
+	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return false, err
+	}
+	if err == nil && current.ClaimedAutomatically {
+		row.Authorization, row.UnattendedTurnID = AuthAutomatic, automaticTurnFrom(ctx)
+		if current.DecidedBy != nil {
+			row.ActorUserID = optString(*current.DecidedBy)
+		}
+	}
 	return s.settleDecision(ctx, coordinatorID, row, func(tx coordinatorExec) (bool, error) {
 		return s.store.FailProposalTx(ctx, tx, proposalID, token, errMsg, time.Now())
 	})
 }
 
-func (s *Service) rejectProposalStore(ctx context.Context, p *Proposal, reason, decidedBy string) (bool, error) {
+func (s *Service) rejectProposalStore(ctx context.Context, p *Proposal, reason, decidedBy string, decidedAt time.Time) (bool, error) {
 	if !s.phase2 {
-		return s.store.RejectProposal(ctx, p.ID, reason, decidedBy, time.Now())
+		return s.store.RejectProposal(ctx, p.ID, reason, decidedBy, decidedAt)
 	}
 	class := ActionUnknown
-	if a := Action(p.Kind); isPolicyAction(a) {
+	if a := Action(p.Kind); isPolicyAction(a) || a == ActionImprovement {
 		class = a
 	}
 	row := ActivityRow{
@@ -138,7 +151,7 @@ func (s *Service) rejectProposalStore(ctx context.Context, p *Proposal, reason, 
 		TargetTaskID: p.TargetTaskID, ProposalID: &p.ID, ActorUserID: optString(decidedBy), Detail: reason,
 	}
 	return s.settleDecision(ctx, p.CoordinatorID, row, func(tx coordinatorExec) (bool, error) {
-		return s.store.RejectProposalTx(ctx, tx, p.ID, reason, decidedBy, time.Now())
+		return s.store.RejectProposalTx(ctx, tx, p.ID, reason, decidedBy, decidedAt)
 	})
 }
 

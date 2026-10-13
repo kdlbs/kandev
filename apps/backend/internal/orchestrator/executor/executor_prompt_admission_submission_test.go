@@ -18,13 +18,13 @@ func (m *admissionSubmissionManager) PromptAgentWithAdmissionCallbackAndSubmissi
 	executionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 ) (*PromptResult, error) {
 	m.submissionID = submissionID
 	if beforeAdmission != nil {
-		if err := beforeAdmission(); err != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
 			return nil, err
 		}
 	}
@@ -44,7 +44,7 @@ func TestPromptWithAdmissionCallbackAndSubmissionIDPreservesBothCapabilities(t *
 	var admitted, dispatched bool
 	result, err := exec.PromptWithAdmissionCallbackAndSubmissionID(
 		context.Background(), "task-1", "session-1", "prompt", nil, true,
-		func() error {
+		func(context.Context, string, []v1.MessageAttachment) error {
 			admitted = true
 			return nil
 		},
@@ -74,7 +74,7 @@ func TestPromptWithAdmissionCallbackAndSubmissionIDFailsClosedWithoutCapability(
 	var callbackCalled bool
 	_, err := exec.PromptWithAdmissionCallbackAndSubmissionID(
 		context.Background(), "task-1", "session-1", "prompt", nil, true,
-		func() error { callbackCalled = true; return nil },
+		func(context.Context, string, []v1.MessageAttachment) error { callbackCalled = true; return nil },
 		func() { callbackCalled = true },
 		"submission-42",
 	)

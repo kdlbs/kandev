@@ -17,6 +17,8 @@ type AgentDeliveryRetentionBatchOptions struct {
 // AgentDeliveryRetentionBatchResult reports the durable work committed by one
 // bounded retention transaction.
 type AgentDeliveryRetentionBatchResult struct {
+	// DiscoveryAdvanced reports committed forward movement, excluding frontier wrap.
+	DiscoveryAdvanced        bool
 	Candidates               int
 	EligibleCandidates       int
 	OldestEligibleAgeSeconds int64

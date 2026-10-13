@@ -97,7 +97,7 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   // and avoids the lint rule against "components created during render".
   const rendered = (
     <KandevPermissionUIProvider value={permissionUI}>
-      {renderer({ args, result, status, sessionId, onOpenFile })}
+      {renderer({ args, result, status, sessionId, messageId: comment.id, onOpenFile })}
     </KandevPermissionUIProvider>
   );
 

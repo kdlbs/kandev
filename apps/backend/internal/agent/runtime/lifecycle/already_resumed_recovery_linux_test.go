@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -20,7 +21,7 @@ type loadedNativeDeliveryReconciler interface {
 }
 
 func TestRestartRecoveryRetiresOnlyProvenDeadLoadedConversation(t *testing.T) {
-	for _, condition := range []string{"dead owner", "live owner", "missing proof", "different native", "active replacement"} {
+	for _, condition := range []string{"dead owner", "live owner", "missing proof", "different native", "active replacement", "legacy dead owner", "legacy live owner", "legacy missing proof"} {
 		t.Run(condition, func(t *testing.T) {
 			ctx := context.Background()
 			child := exec.Command("/bin/sleep", "60")
@@ -29,7 +30,7 @@ func TestRestartRecoveryRetiresOnlyProvenDeadLoadedConversation(t *testing.T) {
 			t.Cleanup(func() { _ = child.Process.Kill(); _ = child.Wait() })
 			birth, err := processidentity.Capture(child.Process.Pid)
 			require.NoError(t, err)
-			if condition != "live owner" {
+			if !strings.HasSuffix(condition, "live owner") {
 				require.NoError(t, child.Process.Kill())
 				require.Error(t, child.Wait())
 			}
@@ -38,6 +39,9 @@ func TestRestartRecoveryRetiresOnlyProvenDeadLoadedConversation(t *testing.T) {
 			t.Cleanup(func() { _ = store.Close() })
 			peer := journal.Submission{ID: "interrupted", SessionID: "session", IncarnationID: "incarnation",
 				HarnessGeneration: 2, StreamID: "stream", Hash: "hash", State: journal.SubmissionInterruptedUnknown}
+			if strings.HasPrefix(condition, "legacy") {
+				peer.State = journal.SubmissionFailed
+			}
 			_, err = store.PutSubmission(ctx, peer)
 			require.NoError(t, err)
 			manager := newTestManager(t)
@@ -58,13 +62,25 @@ func TestRestartRecoveryRetiresOnlyProvenDeadLoadedConversation(t *testing.T) {
 			identity := AgentDeliveryRecoveryIdentity{TaskID: "task", SessionID: "session", ExecutionID: "old",
 				IncarnationID: "incarnation", HarnessGeneration: 2, StreamID: "stream", SubmissionID: peer.ID,
 				PromptGeneration: 3, OriginalRuntime: birth}
-			if condition == "missing proof" {
+			if strings.HasSuffix(condition, "missing proof") {
 				identity.OriginalRuntime = processidentity.Identity{}
 			}
 			reconciler, supported := any(manager).(loadedNativeDeliveryReconciler)
 			require.True(t, supported, "restart recovery must finish an already loaded native successor")
-			restored, recoverErr := reconciler.ReconcileAlreadyResumedDelivery(ctx, identity, "native")
-			if condition == "dead owner" {
+			restored, recoverErr := false, error(nil)
+			if strings.HasPrefix(condition, "legacy") {
+				manager.runningWriter = &captureExecutorRunningWriter{prior: &models.ExecutorRunning{TaskID: "task", SessionID: "session", AgentExecutionID: "replacement", Metadata: map[string]any{deliveryPromptTurnBindingMetadataKey: deliveryPromptTurnBinding{
+					TaskID: "task", SessionID: "session", ExecutionID: "old", IncarnationID: "incarnation", HarnessGeneration: 2, StreamID: "stream", SubmissionID: peer.ID, TurnID: "turn", PromptGeneration: 3, OriginalRuntime: identity.OriginalRuntime}}}}
+				automatic, ok := any(manager).(interface {
+					ReconcileLoadedNativeDelivery(context.Context, string) (*models.NativeResumeDeliveryEvidence, error)
+				})
+				require.True(t, ok, "loaded replacement must reconcile without recovery presentation metadata")
+				proof, err := automatic.ReconcileLoadedNativeDelivery(ctx, "session")
+				restored, recoverErr = proof != nil, err
+			} else {
+				restored, recoverErr = reconciler.ReconcileAlreadyResumedDelivery(ctx, identity, "native")
+			}
+			if strings.HasSuffix(condition, "dead owner") {
 				require.NoError(t, recoverErr)
 				require.True(t, restored)
 			} else {
@@ -73,8 +89,8 @@ func TestRestartRecoveryRetiresOnlyProvenDeadLoadedConversation(t *testing.T) {
 			}
 			saved, err := store.GetSubmission(ctx, peer.ID)
 			require.NoError(t, err)
-			require.Equal(t, condition == "dead owner", saved.Retired)
-			require.Equal(t, journal.SubmissionInterruptedUnknown, saved.State)
+			require.Equal(t, strings.HasSuffix(condition, "dead owner"), saved.Retired)
+			require.Equal(t, peer.State, saved.State)
 			current, exists := manager.GetExecutionBySessionID("session")
 			require.True(t, exists)
 			require.Same(t, replacement, current)

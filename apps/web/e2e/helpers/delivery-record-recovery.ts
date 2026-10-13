@@ -27,6 +27,8 @@ const execute = promisify(execFile);
 
 type FixtureAction =
   | "seed"
+  | "seed_pruned"
+  | "assert_pruned_restored"
   | "seed_ambiguous"
   | "seed_unblocked"
   | "assert_reconstructed"
@@ -63,6 +65,8 @@ export async function deliveryRecordRecoveryFixture(
   });
   const marker = {
     seed: "KANDEV_E2E_RECORD_FIXTURE:seeded",
+    seed_pruned: "KANDEV_E2E_RECORD_FIXTURE:seeded",
+    assert_pruned_restored: "KANDEV_E2E_RECORD_FIXTURE:pruned_restored",
     seed_ambiguous: "KANDEV_E2E_RECORD_FIXTURE:seeded",
     seed_unblocked: "KANDEV_E2E_RECORD_FIXTURE:seeded",
     assert_reconstructed: "KANDEV_E2E_RECORD_FIXTURE:reconstructed_once",
@@ -76,7 +80,7 @@ export async function createDeliveryRecordRecoverySession(
   seedData: SeedData,
   fixtureRoot: string,
   title: string,
-  options: { ambiguous?: boolean; unblocked?: boolean } = {},
+  options: { ambiguous?: boolean; unblocked?: boolean; pruned?: boolean } = {},
 ) {
   const { ambiguous = false, unblocked = false } = options;
   const { agents } = await apiClient.listAgents();
@@ -104,7 +108,7 @@ export async function createDeliveryRecordRecoverySession(
         task_id: task.id,
         agent_profile_id: profile.id,
         executor_profile_id: seedData.worktreeExecutorProfileId,
-        intent: "prepare",
+        intent: "start",
         launch_workspace: true,
       })
     : await apiClient.seedTaskSession(task.id, {
@@ -119,11 +123,17 @@ export async function createDeliveryRecordRecoverySession(
         timeout: 60_000,
       })
       .toBe("ready");
+    await expect
+      .poll(async () => (await apiClient.getTaskSession(seeded.session_id)).session.state, {
+        timeout: 30_000,
+      })
+      .toBe("WAITING_FOR_INPUT");
     await apiClient.stopSession({ session_id: seeded.session_id, force: true });
   }
   let action: FixtureAction = "seed";
   if (ambiguous) action = "seed_ambiguous";
   else if (unblocked) action = "seed_unblocked";
+  if (options.pruned) action = "seed_pruned";
   await deliveryRecordRecoveryFixture(fixtureRoot, seeded.session_id, action);
   const promptMessage = ambiguous
     ? "Ambiguous saved instruction 1"
@@ -191,9 +201,11 @@ export async function exerciseDeliveryRecordRecovery({
     "Delivery is blocked while session recovery is pending.",
   );
   await expect(page.getByText(broken.promptMessage, { exact: true })).toBeVisible();
-  await expect(banner).toContainText("The saved prompt record is missing. Recovery is blocked.");
+  await expect(banner).toContainText(
+    "Resume checks the saved conversation without sending the previous prompt again.",
+  );
+  await expect(banner.getByTestId("recovery-resume-button")).toBeVisible();
   await expect(banner.getByTestId("recovery-stop-button")).toBeVisible();
-  await expect(banner.getByTestId("recovery-resume-button")).toHaveCount(0);
   await expect(page.getByTestId("interrupted-session-continuation")).toHaveCount(0);
   if (mobile) {
     await expect(page.locator("[data-testid='mobile-task-layout']:visible")).toBeVisible();
@@ -256,6 +268,7 @@ export async function exerciseDeliveryRecordRecovery({
       "Retry restored the saved record. Missing original process proof keeps continuation blocked.",
   });
 
+  await expect(banner.getByTestId("recovery-resume-button")).toHaveCount(0);
   const firstRecovery = await recoverySnapshot(apiClient, broken.task.id, broken.sessionId);
   expect(firstRecovery.revision).toBe(1);
   expect(firstRecovery.messageCount).toBe(1);

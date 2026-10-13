@@ -27,6 +27,7 @@ var (
 // historical execution whose process proof may be available. It contains no
 // storage path and is not a browser-facing request.
 type DeliveryRecordEvidenceRequest struct {
+	StoredSubmissionID  string
 	RetiredSubmissionID string
 	TaskID              string
 	SessionID           string
@@ -39,6 +40,7 @@ type DeliveryRecordEvidenceRequest struct {
 // DeliveryRecordEvidence separates the live session instance from proof about
 // the historical process that owned a candidate prompt.
 type DeliveryRecordEvidence struct {
+	StoredSubmission  *journal.Submission
 	RetiredSubmission *journal.Submission
 	Descriptor        journal.RecoveryDescriptor
 	ProcessTerminated *bool
@@ -93,6 +95,9 @@ func (m *Manager) InspectDeliveryRecordEvidence(
 		return result, errors.Join(ErrDeliveryRecordEvidenceTruncated, ErrDeliveryRecoveryBlocked)
 	}
 	result.ControlIdentity = m.deliveryRecordControlIdentity(ctx, request, result.Descriptor)
+	if result.ControlIdentity == nil {
+		result.ControlIdentity = m.targetedDeliveryRecordControlIdentity(ctx, request, result)
+	}
 	if identity := result.ControlIdentity; identity != nil {
 		result.ProcessTerminated = historicalProcessTermination(DeliveryRecordEvidenceRequest{
 			ExecutionID: identity.ExecutionID, OriginalRuntime: &identity.OriginalRuntime,
@@ -270,4 +275,15 @@ func historicalProcessTermination(request DeliveryRecordEvidenceRequest, liveExe
 		return nil
 	}
 	return &terminated
+}
+
+func (m *Manager) targetedDeliveryRecordControlIdentity(ctx context.Context, request DeliveryRecordEvidenceRequest, result *DeliveryRecordEvidence) *AgentDeliveryRecoveryIdentity {
+	if result.Descriptor.SubmissionCount == 0 && result.StoredSubmission != nil {
+		selected := result.StoredSubmission
+		if selected.ID == request.StoredSubmissionID && selected.SessionID == request.SessionID && selected.IncarnationID == request.IncarnationID && selected.HarnessGeneration == request.HarnessGeneration {
+			return m.persistedDeliveryRecordControlIdentity(ctx, request, journal.SubmissionSummary{
+				ID: selected.ID, SessionID: selected.SessionID, IncarnationID: selected.IncarnationID, HarnessGeneration: selected.HarnessGeneration, StreamID: selected.StreamID})
+		}
+	}
+	return nil
 }

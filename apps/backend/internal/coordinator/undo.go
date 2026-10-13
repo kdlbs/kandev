@@ -138,6 +138,8 @@ func (s *Service) UndoActivity(ctx context.Context, workspaceID, coordinatorID, 
 	if err := s.markUndone(ctx, row, decidingUserID(ctx)); err != nil {
 		return nil, err
 	}
+	s.afterUndo(ctx, row)
+	s.notifyUndone(ctx, row)
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	fresh, err := s.store.GetActivityRow(ctx, s.store.db, coordinatorID, rowID)
 	if err != nil {
@@ -267,4 +269,29 @@ func (s *Service) markUndone(ctx context.Context, row *ActivityRow, undoneBy str
 			UpdatedAt:     now,
 		})
 	})
+}
+
+// tryAcquire takes key without waiting; ok is false when it is held.
+func (k *keyedLock) tryAcquire(key string) (release func(), ok bool) {
+	k.mu.Lock()
+	if k.entries == nil {
+		k.entries = map[string]*keyedEntry{}
+	}
+	e, exists := k.entries[key]
+	if !exists {
+		e = &keyedEntry{token: make(chan struct{}, 1)}
+		k.entries[key] = e
+	}
+	e.refs++
+	k.mu.Unlock()
+	select {
+	case e.token <- struct{}{}:
+		return func() {
+			<-e.token
+			k.leave(key, e)
+		}, true
+	default:
+		k.leave(key, e)
+		return nil, false
+	}
 }
