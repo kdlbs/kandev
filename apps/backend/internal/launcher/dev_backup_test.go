@@ -16,7 +16,9 @@ func TestRunDevProductionBackupAdmission(t *testing.T) {
 			clearLauncherConfigurationEnvironment(t)
 			t.Chdir(makeRepoTree(t))
 			t.Setenv("KANDEV_TASK_ID", "")
-			t.Setenv("HOME", t.TempDir())
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
 			source := filepath.Join(t.TempDir(), "production.db")
 			t.Setenv("KANDEV_DATABASE_PATH", source)
 			if name == "invalid_source" {

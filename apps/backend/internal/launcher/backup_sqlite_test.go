@@ -27,6 +27,7 @@ func TestBackupProductionDbCommittedWAL(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			origin := filepath.Join(t.TempDir(), "source.db")
 			createBackupFixture(t, origin, true)
+			assertBackupRecords(t, origin)
 			source := origin
 			if offline {
 				source = filepath.Join(t.TempDir(), "offline.db")
@@ -34,7 +35,6 @@ func TestBackupProductionDbCommittedWAL(t *testing.T) {
 					copyBackupFixtureFile(t, origin+suffix, source+suffix)
 				}
 			}
-			assertBackupRecords(t, source)
 			mainBefore := readBackupFixtureFile(t, source)
 			walBefore := readBackupFixtureFile(t, source+"-wal")
 			if len(walBefore) <= 32 {
@@ -202,6 +202,10 @@ func seedBackupHistory(t *testing.T, home string) map[string][]byte {
 		name := backupPrefix + backupTimestamp(base.Add(time.Duration(i)*time.Second)) + backupSuffix
 		contents[name] = []byte(name)
 		if err := os.WriteFile(filepath.Join(dir, name), contents[name], 0o600); err != nil {
+			t.Fatal(err)
+		}
+		stamp := base.Add(time.Duration(i) * time.Second)
+		if err := os.Chtimes(filepath.Join(dir, name), stamp, stamp); err != nil {
 			t.Fatal(err)
 		}
 	}

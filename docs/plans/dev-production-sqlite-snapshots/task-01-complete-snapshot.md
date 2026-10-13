@@ -14,6 +14,7 @@ acceptance_criteria:
   - AC-PLATFORM-GO-DEV-LAUNCHER-001.13
   - AC-PLATFORM-GO-DEV-LAUNCHER-001.14
   - AC-PLATFORM-GO-DEV-LAUNCHER-001.15
+  - AC-PLATFORM-GO-DEV-LAUNCHER-001.16
 system_design:
   - ../../specs/platform/system-design/go-dev-launcher.md
 ---
@@ -51,6 +52,9 @@ contracts, and reconcile public instructions in the same delivery.
   operations, independent backup advice and deliberate `make dev-prod-db` intent.
   State that this snapshot does not bypass the existing exclusive runtime
   ownership guard; development against production must still have sole ownership.
+- Separately reviewed and released amendment: snapshot-only `signal.NotifyContext` derived
+  after dev-local skip, stopped after attempt cleanup and before supervisor signal
+  registration. Implementation followed ROOT's later explicit release.
 
 ## Out of scope
 
@@ -58,6 +62,7 @@ Shared engine rewrites, shared reader behavior changes, schema/migrations,
 source recovery, storage selection, other snapshot families, backup reuse,
 compaction, restore, ownership redesign, new configuration, UI/i18n/screenshots,
 frontend suites, broad QA/review/verification, delegates, sessions or tasks.
+Global launcher signal ownership and automatic crash-stage scavenging are excluded.
 
 ## Acceptance
 
@@ -174,6 +179,9 @@ checkpoint itself remains unstaged and uncommitted.
 
 A small launcher-local helper/test file is allowed if needed to keep Go limits;
 name it in the actual result and include it in staged changed-package lint.
+After signal-amendment release only: `dev_backup_signal_test.go` (Unix-only) and
+the existing `testmain_test.go` private-helper dispatch may change for its isolated
+real-signal regression. No new TestMain or production helper mode is introduced.
 
 ## Dependencies
 
@@ -280,3 +288,84 @@ and spec/documentation/diff coverage remain required before the fixup push.
 The single original hosted observer continues across this correction; no new
 FULL review request was sent. Optional style/coverage suggestions and hard-kill
 staging reclamation do not expand this required-CI correction.
+
+### Review fixture corrections
+
+The supervising task explicitly authorized two bounded test corrections after
+reading the full Greptile and CodeRabbit findings. The offline case now verifies
+records at the origin before cloning, captures the copied main/WAL bytes without
+opening SQLite there, and leaves the copied source unopened until the actual
+backup adapter. Both source and standalone destination are queried afterward.
+The dev admission fixture pins both `HOME` and Windows `USERPROFILE` to the same
+owned temporary directory, preventing a valid snapshot from reaching a real home.
+
+The documented Go/race/trimpath/fts5/p1/resource/timeout command with
+`-run 'TestBackupProductionDbCommittedWAL|TestRunDevProductionBackupAdmission'`
+joined native 64093 with exit 0 in 1.204s. No runtime or existing process-test
+assertion changed for these corrections. Staged affected-package lint and normal
+hooks precede their batch publication; signal-admission findings are assessed
+separately before any production extension.
+
+### Snapshot signal amendment
+
+Design maps AC-PLATFORM-GO-DEV-LAUNCHER-001.16 to the guard's temporary signal owner.
+Write the isolated Unix helper regression first and observe causal RED before
+production changes. An exact helper argument plus private environment marker is
+required, dispatched in existing `TestMain` before normal tests. Signal only that
+test-owned helper after its inherited-pipe ready barrier; join it before inspecting
+owned stage/history/source records. Use bounded contexts/pipes and no sleeps.
+The old normal CLI path must die from SIGINT before reporting/cleanup; the fixed
+path must report non-zero admission failure with cleanup complete, no children and
+source unchanged. A successful admission control proves the temporary owner was
+stopped before the existing supervisor seam. Keep all normal signal lifecycle
+implementation and second-signal semantics unchanged.
+
+After explicit release, use the existing verification environment and GNU
+280-second bound from `apps/backend` for these exact commands:
+
+```bash
+go test -v -race -trimpath -tags=fts5 -p=1 ./internal/launcher -run '^TestRunDevSnapshotInterruptCleanup$' -count=1
+go test -v -race -trimpath -tags=fts5 -p=1 ./internal/launcher -run 'TestRunDevSnapshotInterruptCleanup|TestRunDevProductionBackupAdmission|TestBackupProductionDbCanceled|TestBackupProductionDbCommittedWAL' -count=1
+go test -v -race -trimpath -tags=fts5 -p=1 ./internal/launcher -count=1
+```
+
+Record RED/GREEN and exact native joins. One full launcher run is justified by
+the new runtime signal boundary; no full backend suite, schema audit or manual
+FULL review request follows. Stage actual helpers/tests and runtime Go edits
+before canonical affected-package lint; use normal hooks and reconcile this
+order/manifest before the next batch push. SIGKILL/power loss cannot run defers;
+historical-stage reclamation remains a separate excluded ownership contract.
+
+ROOT completed full review of the four-file amendment (`d4ce7a`, exact review
+receipt in `signal-design-review.json`) and separately released implementation.
+Only `dev.go:backupProductionDBIfNeeded` gains temporary `signal.NotifyContext`
+after the dev-local skip, defer-stop after attempt cleanup, and a context check
+before any success message/return. Global launcher dispatch, other modes and the
+existing supervisor signal implementation remain unchanged.
+
+Actual runtime/test receipts with the same documented Go environment and bounds:
+
+| Evidence | Native handle | Actual joined result |
+| --- | --- | --- |
+| Isolated real-SIGINT RED, exact first command above | 78563 | Exit 1, 0.247s; copy helper died by SIGINT before cooperative result/cleanup; handoff control passed |
+| Signal plus existing WAL/cancel/admission GREEN, second command | 92070 | Exit 0, 1.419s; both signal subcases and all selected controls passed |
+| Complete owning launcher, third command, after all runtime/test edits | 19662 | Exit 0, 264 top-level tests, 18.004s, race clean |
+| Canonical actual-staged complete-launcher-package lint | 52909 | Exit 0, zero issues |
+| Exact required SQL guard `go run -trimpath ./cmd/sqlguard ./internal` after signal edits | 89508 | Exit 0, with the documented Go/resource/280-second bound |
+
+The copy-phase helper reports dev exit 1 with no success message, supervisor or
+backend, and parent assertions prove no owned staging/history/source change.
+The successful handoff helper actually dies by the default SIGINT action at the
+injected supervisor registration boundary, proving the temporary notification
+was removed. Every signal targets only the newly created helper PID; parent tests
+and foreign processes are untouched. Both helpers are joined before assertions.
+Old-history mtimes are fixed for deterministic handoff/retention evidence.
+The cold-WAL first-open and Windows home corrections are included in this batch.
+
+New test files are `dev_backup_signal_test.go` (Unix-only) and the small private
+dispatch addition in the existing `testmain_test.go`; no product helper mode or
+new TestMain exists. Full Windows OS-signal injection is unavailable through Go's
+Unix process-signal transport; platform-neutral fixtures still pin both homes.
+Public how-to documents ordinary-interrupt cleanup and the explicit lack of
+SIGKILL/power-loss staging reclamation. Normal hooks and hosted checks follow;
+no new manual FULL review request or broad backend suite is added.

@@ -34,6 +34,7 @@ owners:
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.13:** A failed attempt shall preserve all existing snapshots and remove only its own incomplete artifacts. An existing destination with the same timestamp shall be preserved and cause failure. A successful snapshot shall keep the existing `dev-prod-db-<timestamp>.db` naming and timestamp, private `0700` backup directory and `0600` file permissions where supported.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.14:** A missing source shall continue to produce no snapshot and no backup error, without creating the source or backup artifacts. A database inside a `.kandev-dev` segment shall continue to skip the production snapshot guard.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.15:** Only after a new snapshot succeeds shall retention keep the five newest `dev-prod-db-*.db` files by modification time. Other backup families and unrelated files shall remain untouched. Failure to remove an old snapshot shall remain non-fatal.
+- **AC-PLATFORM-GO-DEV-LAUNCHER-001.16:** During production snapshot admission, an ordinary interrupt or termination signal shall cancel the attempt, finish its owned cleanup and abort dev with a non-zero exit before child launch. Temporary snapshot signal handling shall end before the existing supervisor takes ownership; other launch modes and supervised second-signal behavior shall remain unchanged. SIGKILL and power loss cannot guarantee deferred cleanup; automatic reclamation of abandoned staging is excluded.
 
 ## Migrated source detail
 

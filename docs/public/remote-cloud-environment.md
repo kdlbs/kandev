@@ -158,6 +158,8 @@ When the checkout itself is a Kandev task workspace, the launcher deliberately c
 
 The snapshot includes committed WAL content, including WAL left after an interrupted shutdown, and can be opened without the source's sidecar files. The launcher reads the source without migrating or checkpointing it, verifies the copy before publication, and fails if the operation cannot finish within five minutes. This safeguard does not bypass exclusive runtime ownership: stop the existing backend before starting development against the same production state. Create an independent backup through **Settings > System > Backups** as well; see [SQLite backups](operations.md#sqlite-backups).
 
+An ordinary interrupt during the pre-launch snapshot cancels the attempt, cleans its owned staging and aborts startup. SIGKILL or power loss can leave private staging directories; the launcher does not automatically reclaim those abandoned directories.
+
 `make dev-prod-db` deliberately points development mode at `~/.kandev/data/kandev.db`. Use it only when testing against that database is intentional and after an independent backup.
 
 To erase disposable development state after stopping `make dev`:

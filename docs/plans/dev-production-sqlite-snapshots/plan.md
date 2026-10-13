@@ -56,6 +56,9 @@ and live `make dev-prod-db` steps are not this repair's checks.
 - Replace affected arbitrary-byte backup fixtures with real SQLite and add
   independently authored causal RED/GREEN regressions.
 - Amend the existing public development-state instructions with the implementation.
+- Review amendment: AC-PLATFORM-GO-DEV-LAUNCHER-001.16, a temporary snapshot-only
+  signal owner before the existing supervisor, with isolated helper-process RED
+  and owned cleanup evidence. Implementation followed the separate release.
 
 ### Out of scope
 
@@ -106,6 +109,7 @@ Permanent evidence, all under `apps/backend/internal/launcher/`:
 | .13 | `backup_test.go`: adapt `TestBackupProductionDbCreatesStampedSnapshot`; add `TestBackupProductionDbPreservesExistingDestination` |
 | .14 | Existing `TestBackupProductionDbSkipsMissingSource`, `TestBackupProductionDbPropagatesSourceErrors`, `TestIsProductionDb`; add no-artifact assertions |
 | .15 | Adapt existing `TestBackupProductionDbPrunesToFiveNewest` and `TestBackupProductionDbPruneLeavesOtherFamilies` to valid SQLite sources |
+| .16 | Unix `dev_backup_signal_test.go`: `TestRunDevSnapshotInterruptCleanup`, private helper/pipe barrier/actual SIGINT; success handoff control and full launcher integration |
 
 Use actual SQLite copying for completeness tests. Small explicit local failure
 seams are allowed only where deterministic verification/publication errors cannot
@@ -181,6 +185,26 @@ passed after adding one file/function/rule entry in the existing exemption JSON.
 No analyzer or runtime behavior changed; [Task 01](task-01-complete-snapshot.md#required-ci-remediation)
 records the exact RED/GREEN commands and joins. This is a required CI repair,
 not an initial speculative schema audit or a broadened persistence change.
+
+Signal-admission amendment checkpoint: drafted after ROOT read the full
+CodeRabbit finding that ordinary Ctrl-C arrives before supervisor registration.
+The [same owning design](../../specs/platform/system-design/go-dev-launcher.md#temporary-snapshot-signal-owner)
+limits notification to the production snapshot guard, preserving every other
+launch mode and existing supervised second-signal ownership. At that design
+checkpoint no production signal edit/helper test existed. ROOT then read all four
+actual amendment diffs and separately released this same work order's extension.
+Pure test-precision corrections passed targeted tests/lint; no full package was
+rerun merely for them.
+
+Signal extension completed before batch publication: isolated real-SIGINT RED
+78563 joined 1, focused GREEN 92070 joined 0, whole launcher 19662 joined 0
+(264 top-level tests, 18.004s), and canonical staged-package lint 52909 joined 0
+(zero issues). The temporary owner stops after snapshot cleanup and before the
+existing supervisor registration. The actual default-signal handoff probe passed.
+Source/history/owned-staging and no-child assertions passed, with no parent or
+foreign process signal. [Task 01](task-01-complete-snapshot.md#snapshot-signal-amendment)
+records exact commands/joins and platform limits. The public how-to now states
+ordinary-interrupt cleanup and SIGKILL/power-loss limitations without scavenging.
 
 ## Risks
 

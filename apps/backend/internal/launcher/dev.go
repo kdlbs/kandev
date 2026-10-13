@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/config"
@@ -246,7 +248,12 @@ func backupProductionDBIfNeeded(ctx context.Context, dbPath string) error {
 	if !isProductionDb(dbPath) {
 		return nil
 	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	backupPath, err := backupProductionDb(ctx, dbPath, userHomeDir(), time.Now())
+	if err == nil {
+		err = ctx.Err()
+	}
 	if err != nil {
 		// Abort rather than continue: the backup exists precisely to protect
 		// the production db before dev mode touches it. Proceeding on failure
