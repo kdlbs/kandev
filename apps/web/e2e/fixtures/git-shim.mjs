@@ -1,8 +1,9 @@
 // Cross-platform E2E `git` shim.
 //
 // The E2E backend invokes `git` via PATH lookup. Tests prepend a per-worker bin
-// directory (see backend.ts) whose `git` launcher runs this script instead of
-// the real binary. Written in Node so it behaves identically on macOS, Linux,
+// directory (see backend.ts) whose `git` launcher runs this script when controls
+// are active (and for all commands on Windows). Written in Node so the controls
+// behave identically on macOS, Linux,
 // and Windows and never depends on the developer's login shell (bash/zsh/fish)
 // or on a POSIX `sh` being present. It replaces an earlier `/bin/sh` shim whose
 // `case` block inside a `$(...)` substitution tripped bash 5.x's parser and

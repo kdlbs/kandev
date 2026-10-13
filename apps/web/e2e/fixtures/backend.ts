@@ -385,12 +385,9 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         // When the file is absent the shim is a transparent passthrough, so
         // other tests in the same worker are unaffected.
         //
-        // The shim logic lives in `git-shim.mjs` (Node) so it behaves the same
-        // on macOS, Linux, and Windows and never depends on the developer's
-        // login shell (bash/zsh/fish) or a POSIX `sh`. Only a tiny launcher is
-        // generated here to hand control to Node: an extensionless `git`
-        // shebang file on POSIX, and a `git.cmd` on Windows (extensionless
-        // files aren't executable via PATHEXT there).
+        // Active controls use the cross-platform `git-shim.mjs` implementation.
+        // The POSIX launcher directly execs Git when both control files are
+        // absent; Windows uses a .cmd wrapper to reach the Node implementation.
         const shimDir = path.join(tmpDir, "bin");
         const shimScript = path.join(__dirname, "git-shim.mjs");
         const shimDelayFile = path.join(tmpDir, "git-delay-ms");

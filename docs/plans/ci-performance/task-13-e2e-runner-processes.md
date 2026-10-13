@@ -260,3 +260,29 @@ command from an already-ready chat passes the same probe. The final real
 browser journey passes three repetitions with no retries/skips and retains
 the normal-output negative case as a named step. See the empty-turn live
 notice readiness audit. Product behavior and assertion timeouts are unchanged.
+
+### Git launcher overhead, October 14 continuation
+
+The next bounded candidate removes a Node startup from ordinary POSIX Git
+commands in the shared E2E fixture. It preserves the existing Node control
+implementation whenever either control file exists, and checks those files on
+every invocation rather than caching their initial absence. The Windows path
+is unchanged. Ownership includes `fixtures/git-shim-launcher.ts`, its launcher
+regressions and real-Git integration tests; fixture/shim comments explain the
+new execution path. No product or public configuration changes are involved.
+
+[The launcher audit](../../audits/e2e-git-launcher-overhead-2026-10-14.md)
+records the RED, control-bypass mutation, preserved command/environment/stream
+contract, rejected Go-concurrency probe and pending paired browser comparison.
+Adopt only after the focused real-control and browser checks pass; the full
+hosted passing-run target remains the acceptance gate.
+
+The latest-base comparison passes all 26 unchanged test identities on both
+launchers: execution 71.477s to 48.078s (32.74% lower), whole local invocation
+91.922s to 68.044s (25.98% lower). An earlier original/candidate/original sequence
+reproduces the direction. The audit separates a further sample that overlapped
+typecheck. All 12 real-control desktop/mobile cases also pass against the fresh
+latest-main build with no retries/skips. Eight launcher/integration tests,
+changed-file lint/formatting, primary and merged typechecks and documentation
+checks pass. This selects the candidate for hosted measurement; it does not
+close the full-suite 50% acceptance gate.
