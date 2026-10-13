@@ -217,3 +217,22 @@ notification tests and helper are restored. Both coverage decisions are
 recorded in their respective audits. The longest-step target remains open;
 the next complete hosted run must validate this batch before any passing
 speed claim.
+
+
+Run 38448127809 completes with twelve normal shards and all six container
+shards passing; normal shards 6 and 12 fail. Longest normal execution is 1,520
+seconds (29.60% below the fixed reference), summed normal execution 18,128
+seconds. This is not a passing speed result. Executor routing uses an
+ambiguous text locator and skips an expansion control before it renders.
+Cancellation adds sequential assertion overhead to its two-second check;
+another attempt finishes its short mock turn during page setup. The routing
+and cancellation readiness audit records the focused repairs and evidence.
+
+Threads consolidation retains twelve scenarios in nine cases and passes its
+complete local comparison at 107.038 to 87.831 summed seconds. A persisted
+hidden-column leak is reproduced by a browser regression before the fixture
+repair; the repaired regression, all five preview-workflow cases and nine
+Threads cases pass together without retries. Desktop and phone Quick Chat
+response readiness also pass their five complete cases. These are local
+results only. Fresh full hosted validation, review resolution and the
+1,079.5-second E2E target remain open.
