@@ -175,6 +175,9 @@ settings from the default workspace.
 
 Use **New Task** in the sidebar. In an open task, the **Task** split button also opens task creation.
 
+IME composition confirmation keeps your text in the creation dialog. When ready,
+use a separate `Cmd/Ctrl+Enter` shortcut or the visible submit action.
+
 <DocsVideo
   webm="./media/feature-guides/task-create.webm"
   mp4="./media/feature-guides/task-create.mp4"
