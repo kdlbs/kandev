@@ -251,3 +251,12 @@ both pass, with no retries/skips, at 378.013 and 336.768 summed seconds
 (10.91% locally). The identity audit verifies all four moved scenarios.
 See the session/clarification consolidation audit. This is a focused local
 saving; full hosted validation and the 50% target remain open.
+
+Hosted run 38472002693 exposes a separate empty-turn notice ordering failure:
+the original fixture starts a three-second empty turn before navigating, but
+the failed retry spends about eight seconds in navigation. A controlled
+late-navigation probe reproduces the missed live hint; submitting the empty
+command from an already-ready chat passes the same probe. The final real
+browser journey passes three repetitions with no retries/skips and retains
+the normal-output negative case as a named step. See the empty-turn live
+notice readiness audit. Product behavior and assertion timeouts are unchanged.
