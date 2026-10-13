@@ -120,7 +120,13 @@ async function captureSidebarToggleFrames(
           : (transitionDurationsMs[widthTransitionIndex % transitionDurationsMs.length] ?? 0);
       const frames = [readFrame()];
       button.click();
-      const sampleUntil = performance.now() + 400;
+      const expectedCollapsed = label === "Collapse sidebar" ? "true" : "false";
+      const deadline = performance.now() + 5_000;
+      const transitionPending = () =>
+        panel.dataset.collapsed !== expectedCollapsed ||
+        panel
+          .getAnimations()
+          .some((animation) => animation.pending || animation.playState === "running");
       do {
         // rAF callbacks run before ResizeObserver delivery and paint. Hop through
         // a timer so each measurement reflects geometry the user actually saw.
@@ -128,7 +134,10 @@ async function captureSidebarToggleFrames(
           requestAnimationFrame(() => setTimeout(resolve, 0));
         });
         frames.push(readFrame());
-      } while (performance.now() < sampleUntil);
+        if (performance.now() > deadline) {
+          throw new Error(`Sidebar ${label} animation did not settle`);
+        }
+      } while (transitionPending());
       return { frames, widthTransitionDurationMs, transitionProperties };
     },
     { label: buttonLabel, paneTarget: target },

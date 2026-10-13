@@ -229,21 +229,6 @@ async function expectSeparateTurnsInOrder(scope: Locator, markers: string[]): Pr
 }
 
 test.describe("Task session queue", () => {
-  test("full queue scrolls internally without hiding the composer", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const { session } = await seedFullQueueTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Desktop full queue scrolling",
-    );
-
-    await expectFullQueueScrolls(session);
-  });
-
   test("automatic merge compacts compatible user rows and disabled mode keeps them separate", async ({
     testPage,
     apiClient,
@@ -299,6 +284,12 @@ test.describe("Task session queue", () => {
       seedData,
       "Full queue auto merge",
     );
+
+    await test.step("full queue scrolls internally without hiding the composer", async () => {
+      await expectFullQueueScrolls(session);
+      await session.activeChat().getByTestId("queue-close").click();
+      await expect(session.activeChat().getByTestId("queued-ghost-list")).not.toBeVisible();
+    });
 
     // The queue is at capacity (10 separate rows, auto-merge off per spec
     // isolation). Enabling automatic merge must fold the next compatible
@@ -511,72 +502,6 @@ test.describe("Task session queue", () => {
     await expect(testPage.getByTestId("queue-chip")).not.toBeVisible({ timeout: 15_000 });
   });
 
-  test("queue editor textarea scrolls when content is long", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(90_000);
-
-    const session = await seedTaskAndWaitForIdle(
-      testPage,
-      apiClient,
-      seedData,
-      "Queue editor scroll test",
-    );
-
-    // Keep a real agent turn running while the message is queued.
-    await session.sendMessage("/sleep 10s");
-    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await waitForComposerQueueMode(testPage);
-
-    // Type a short message while agent is busy and queue it.
-    const editor = testPage.locator(".tiptap.ProseMirror").first();
-    await typeWhileBusy(testPage, editor, "short queued msg");
-
-    const submitBtn = testPage.getByTestId("submit-message-button");
-    await expect(submitBtn).toBeVisible({ timeout: 5_000 });
-    await submitBtn.click();
-
-    // Expand the collapsed queue panel to reveal the per-entry Edit affordance.
-    await openQueuePanel(testPage);
-
-    const editBtn = testPage.getByTitle("Edit queued message");
-    await expect(editBtn).toBeVisible({ timeout: 10_000 });
-    await editBtn.click();
-
-    // The edit textarea should now be visible.
-    const textarea = testPage.getByTestId("queue-edit-textarea");
-    await expect(textarea).toBeVisible({ timeout: 5_000 });
-
-    // Fill via native setter + React event so the controlled component updates.
-    const longText = Array.from(
-      { length: 30 },
-      (_, i) => `Line ${i + 1} of scroll test content`,
-    ).join("\n");
-    await textarea.evaluate((el: HTMLTextAreaElement, text: string) => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
-      setter.call(el, text);
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-    }, longText);
-
-    // Verify the textarea has a constrained max-height and is scrollable.
-    // The auto-grow effect re-measures after React commits the new value, so
-    // poll the metrics rather than sampling them once behind a fixed settle.
-    await expect
-      .poll(
-        async () =>
-          textarea.evaluate((el: HTMLTextAreaElement) => ({
-            scrollable: el.scrollHeight > el.clientHeight,
-            maxHeight: getComputedStyle(el).maxHeight,
-            overflowY: getComputedStyle(el).overflowY,
-          })),
-        { timeout: 5_000 },
-      )
-      .toEqual({ scrollable: true, maxHeight: "200px", overflowY: "auto" });
-  });
-
   test("editing a later queued entry does not pause earlier FIFO delivery", async ({
     testPage,
     apiClient,
@@ -655,7 +580,42 @@ test.describe("Task session queue", () => {
 
     await openQueuePanel(testPage);
     const row = testPage.getByTestId("queue-entry").first();
-    await row.getByTestId("queue-entry-edit").click();
+    const editBtn = row.getByTitle("Edit queued message");
+    await expect(editBtn).toBeVisible({ timeout: 10_000 });
+    await editBtn.click();
+    await test.step("queue editor textarea scrolls when content is long", async () => {
+      const textarea = testPage.getByTestId("queue-edit-textarea");
+      await expect(textarea).toBeVisible({ timeout: 5_000 });
+      // Fill via native setter + React event so the controlled component updates.
+      const longText = Array.from(
+        { length: 30 },
+        (_, i) => `Line ${i + 1} of scroll test content`,
+      ).join("\n");
+      await textarea.evaluate((el: HTMLTextAreaElement, text: string) => {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype,
+          "value",
+        )!.set!;
+        setter.call(el, text);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }, longText);
+
+      // Verify the textarea has a constrained max-height and is scrollable.
+      // The auto-grow effect re-measures after React commits the new value, so
+      // poll the metrics rather than sampling them once behind a fixed settle.
+      await expect
+        .poll(
+          async () =>
+            textarea.evaluate((el: HTMLTextAreaElement) => ({
+              scrollable: el.scrollHeight > el.clientHeight,
+              maxHeight: getComputedStyle(el).maxHeight,
+              overflowY: getComputedStyle(el).overflowY,
+            })),
+          { timeout: 5_000 },
+        )
+        .toEqual({ scrollable: true, maxHeight: "200px", overflowY: "auto" });
+    });
     await testPage
       .getByTestId("queue-edit-textarea")
       .fill(scriptedQueueMessage("edited head dispatched after save"));
