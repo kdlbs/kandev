@@ -159,8 +159,11 @@ Hosted acceptance remains pending, so this work order stays in progress.
 
 ### October 12 continuation
 
-Reviewed 581 additional files: 47 Node and 534 English browser assignments. The
-registry now contains 468 Node and 1,401 browser files; 995 unreviewed/multilingual
+Reviewed 581 additional files: 47 Node and 534 English browser assignments.
+Before this batch, the October 11 E2E cleanup added
+`e2e/helpers/backend-fixture-lifecycle.test.ts` to Node, taking the prior count
+from 420 to 421. The 47 reviewed migrations then brought it to 468.
+The registry at that snapshot contains 468 Node and 1,401 browser files; 995 unreviewed/multilingual
 files retain full setup at this 2,864-file source snapshot. Test bodies, assertions,
 skips, setup implementations, isolation and worker budgets are unchanged for this
 batch. See [the review ledger](../../audits/frontend-test-setup-2026-10-12.md) and
@@ -212,3 +215,18 @@ The first hosted optimized run (`38322865444`, head `b81c562`) passed in
 with five additional files and extra cases from upstream (2,877 files, 25,668
 passes, four skips). This is one historical pair, not the required hosted
 median. The work order and stricter continuation target remain open.
+
+### Merge-readiness typecheck remediation
+
+After incorporating main, hosted frontend run 38381773696 failed before unit
+tests: the complete TypeScript graph exhausted Node's default 4 GiB heap.
+The same command reproduced the heap failure locally; with an 8 GiB heap it
+completed successfully. The workflow now scopes that heap ceiling to the
+typecheck step alone. Unit-test workers, isolation, selection and memory
+configuration remain unchanged. This restores mandatory verification rather
+than claiming an execution-time improvement. Targeted workflow contracts and
+the complete typecheck are the remediation gates; fresh hosted evidence is
+required after the fix is pushed. The fresh full typecheck with an isolated
+incremental-cache path passed with the 8 GiB ceiling. All nine frontend workflow
+contracts, workflow YAML parsing and step-scope checks, documentation catalog
+validation and full specification lint passed. Hosted verification is pending.

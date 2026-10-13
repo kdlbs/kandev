@@ -273,6 +273,9 @@ jobs:
       # them, so nothing in this job used to fail on a type error. Runs before
       # the tests to fail fast on the cheaper check.
       - name: Run typecheck
+        env:
+          # The complete TypeScript graph exceeds Node's default 4 GiB heap.
+          NODE_OPTIONS: --max-old-space-size=8192
         run: pnpm --filter @kandev/web typecheck
 
       - name: Verify standalone plugin SDK contract

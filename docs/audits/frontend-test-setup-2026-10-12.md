@@ -6,6 +6,10 @@ These overlapping worker phases are not wall-clock durations.
 
 This continuation removes unused setup for 581 explicitly reviewed suites:
 47 move from `browser-locales` to `node`, and 534 move to `browser`.
+The Node baseline is 421: the earlier October 11 cleanup added
+`e2e/helpers/backend-fixture-lifecycle.test.ts` to the original 420 assignments
+in commit `aa3e581676`. These 47 migrations bring that count to 468 in
+`354212310f`; the additional helper is not part of this migration ledger.
 The 581 Vitest assignments preserve test source, assertions, skips, setup
 implementations, isolation and worker budgets. Production code stays unchanged.
 The explicit registry remains the only routing authority. New/unclassified suites continue to use full setup.
@@ -110,13 +114,16 @@ changed-spec ESLint, nine frontend workflow checks, seven measurement-script
 checks, documentation inventory validation, specification lint and diff checks
 passed.
 
-## Draft review dispositions
+## Review dispositions
 
 The clock-install suggestion was checked against installed Playwright
 1.62.0-alpha-1783623505000: `server/clock.ts` uses `Date.now()` when time is absent.
 The existing LSP test already uses current wall time; no timestamp change is needed.
+Merge-readiness review rechecked the current installed Playwright 1.61.1 and
+confirmed the same default.
 
 The Office status lifecycle keeps valid writes, invalid-status rejection,
 terminal-step persistence and comment persistence in one fixture-backed journey.
-Splitting it again would restore repeated setup. These nonblocking suggestions
-remain documented here; no review replies or resolutions were posted.
+Splitting it again would restore repeated setup. Both suggestions were replied
+to and resolved during the user-authorized merge-readiness pass, with the
+current-source evidence recorded in their respective GitHub review threads.
