@@ -86,8 +86,8 @@ merge. Recheck it immediately before pushing; use the explicit lease shown in
    to finish the conflict resolution.
 3. If conflicts appear, inspect each conflicted file, preserve the intended behavior from both sides, remove all conflict markers, and stage only the resolved files. When the index has conflict stages, inspect the competing versions with `git show :2:<path>`, `git show :3:<path>`, and `git log -- <path>` (or compare the merge-base, current branch, and base branch versions when stages are unavailable). Do not choose ours/theirs merely to remove markers; preserve each side's behavioral invariant, compare analogous provider implementations and their tests, then run the focused test for the conflicted feature.
    If `git show :2:<path>` or `:3:<path>` output will be copied, compared
-   byte-for-byte, or used to make a patch, run it through `rtk proxy` or
-   `rtk bash -lc`; ordinary RTK output is diagnostic only.
+   byte-for-byte, or used to make a patch, run Git directly and preserve its
+   unmodified output.
 4. Confirm the conflict is gone before continuing:
    ```bash
    git ls-files -u

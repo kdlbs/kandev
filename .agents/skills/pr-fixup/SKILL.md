@@ -58,7 +58,8 @@ If the PR is merged or closed, stop. For a merge, report
 `mergedAt` and `mergeCommit.oid`.
 
 Treat peer alerts as advisory until their SHA matches the current head.
-If captured output is empty, truncated, or invalid, rerun through `rtk proxy`.
+If captured output is empty, truncated, or invalid, rerun the command directly
+and save its unmodified output to a file.
 Capture stdout and stderr separately and preserve the exit code.
 An empty capture cannot prove that the PR is clean.
 

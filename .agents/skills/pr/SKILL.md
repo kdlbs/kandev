@@ -263,9 +263,8 @@ required screenshot embedding in step 7 is complete.
    **JSON payloads:** Use `jq` (or an equivalent JSON tool) to build and
    validate payloads without interpolating untrusted Markdown into shell
    syntax. When command output is redirected, piped, or consumed by `jq` or
-   another parser, run the command through `rtk proxy` so stdout is
-   byte-preserving; normal RTK filtering can truncate or annotate machine-readable
-   output. Keep the REST fallback byte-preserving for command substitutions,
+   another parser, run the command directly and preserve stdout byte-for-byte.
+   Keep the REST fallback byte-preserving for command substitutions,
    `xargs`, and any other consumer that expects unmodified Git or JSON output.
 
    **Preserve the existing PR description:** The PR body is a shared, mutable
@@ -281,7 +280,7 @@ required screenshot embedding in step 7 is complete.
    1. Complete screenshot uploads first, then fetch the current body from
       GitHub and keep that pristine live response
       as the merge base:
-      `rtk proxy gh pr view <PR_NUMBER> --json body | jq -j .body > /tmp/pr-body-<PR_NUMBER>-latest.md`.
+      `gh pr view <PR_NUMBER> --json body | jq -j .body > /tmp/pr-body-<PR_NUMBER>-latest.md`.
    2. Change only the section owned by this operation. For screenshots, wrap
       the section in `<!-- kandev-screenshots-start -->` and
       `<!-- kandev-screenshots-end -->` markers (or replace the existing
