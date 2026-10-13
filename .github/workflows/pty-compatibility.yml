@@ -46,5 +46,11 @@ jobs:
       - name: Verify real PTY closure and resize
         run: go test -trimpath -race ./internal/common/ptyexec -count=10
 
-      - name: Verify PTY callers
-        run: go test -trimpath -race ./internal/agent/loginpty ./internal/agentctl/server/process ./internal/agentctl/server/shell -count=1
+      - name: Verify login and shell callers
+        run: go test -trimpath -race ./internal/agent/loginpty ./internal/agentctl/server/shell -count=1
+
+      - name: Verify interactive process callers
+        run: >-
+          go test -trimpath -race ./internal/agentctl/server/process
+          -run '^(TestInteractiveRunner_|TestWaitForFirstIdle_|TestEmitTurnComplete_|TestPTYDimension$)'
+          -count=1

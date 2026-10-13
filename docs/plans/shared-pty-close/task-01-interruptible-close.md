@@ -50,12 +50,16 @@ Embedded shell migration, ConPTY changes, grace-period changes, UI and test sele
 ## Verification
 
 From repository root, run the focused regression before and after correction.
-Then run the following checks, sequentially. Run the first two commands on both
-Linux and macOS; record unavailable native execution as pending.
+Then run the following checks, sequentially. Run the first three commands on both
+Linux and macOS; record unavailable native execution as pending. The process
+command selects the interactive PTY callers, including output, input, resize,
+stop, user-shell ownership and first-idle behavior. The full process suite
+remains covered by the existing Linux backend workflow.
 
 ```bash
 (cd apps/backend && go test -trimpath -race ./internal/common/ptyexec -count=10)
-(cd apps/backend && go test -trimpath -race ./internal/agent/loginpty ./internal/agentctl/server/process ./internal/agentctl/server/shell -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/agent/loginpty ./internal/agentctl/server/shell -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/agentctl/server/process -run '^(TestInteractiveRunner_|TestWaitForFirstIdle_|TestEmitTurnComplete_|TestPTYDimension$)' -count=1)
 (cd apps/backend && GOOS=windows GOARCH=amd64 go test -c -o .build/ci-half/ptyexec-windows.test.exe ./internal/common/ptyexec)
 make -C apps/backend lint
 python3 scripts/list-docs.py validate
@@ -132,3 +136,13 @@ lint and is not a controlled speed comparison. PTY race tests passed ten times;
 login/shell suites and all interactive-runner, first-idle and PTY-dimension tests
 passed. Full backend lint reports zero issues, Windows compilation passes, and
 documentation validation passes. Hosted macOS and final E2E timing remain pending.
+
+Native macOS run 38416314810 passed all ten repetitions of the shared PTY
+regressions, the complete login suite and the complete shell suite. Its broad
+process invocation failed two managed npm-cache repair tests and timed out in
+`TestWorkspaceGitExternalHelperBudgets/environment/per_file`. Those paths do
+not call the shared PTY wrapper; this is not evidence that the complete process
+suite passes on macOS. The new compatibility workflow now selects all interactive
+runner, first-idle, turn-complete and PTY-dimension tests, while existing Linux
+backend CI retains the full process suite. This focused native caller run is
+still required before completing the work order.

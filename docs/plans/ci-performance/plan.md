@@ -167,6 +167,7 @@ No browser E2E is needed for CI-only behavior. Existing application E2E coverage
 - [x] [Task 10: Attribute E2E fixture and planner costs](task-10-profile-e2e-fixture-costs.md)
 - [x] [Task 11: Reject journal operations after shutdown](task-11-journal-shutdown.md)
 - [x] [Task 12: Keep closed task menus closed during processing](task-12-task-menu-recovery.md)
+- [ ] [Task 13: Reduce E2E execution within existing runners](task-13-e2e-runner-processes.md)
 
 ## Execution and evidence
 

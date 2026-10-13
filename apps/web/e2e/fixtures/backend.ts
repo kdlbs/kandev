@@ -9,6 +9,7 @@ import { E2E_DOCKER_SCOPE } from "./docker-probe";
 import { dwell } from "../helpers/causal-waits";
 import { killProcessGroup } from "./process-group";
 import { writeGitShimLauncher } from "./git-shim-launcher";
+import { backendPorts } from "../helpers/backend-ports";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
@@ -23,7 +24,6 @@ const E2E_PORT_OFFSET = rawPortOffset === undefined ? process.pid % 30 : Number(
 if (!Number.isInteger(E2E_PORT_OFFSET) || E2E_PORT_OFFSET < 0 || E2E_PORT_OFFSET > 29) {
   throw new Error(`E2E_PORT_OFFSET must be an integer 0-29, got: ${rawPortOffset}`);
 }
-const BACKEND_BASE_PORT = 18080 + E2E_PORT_OFFSET;
 const HEALTH_TIMEOUT_MS = 30_000;
 const HEALTH_POLL_MS = 250;
 
@@ -318,7 +318,10 @@ function spawnBackendProcess(
 export const backendFixture = base.extend<object, { backend: BackendContext }>({
   backend: [
     async ({ browserName: _browserName }, use, workerInfo) => {
-      const backendPort = BACKEND_BASE_PORT + workerInfo.workerIndex;
+      const { backendPort, agentctlPortBase, agentctlPortMax } = backendPorts(
+        E2E_PORT_OFFSET,
+        workerInfo,
+      );
       const frontendPort = backendPort;
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), `kandev-e2e-${workerInfo.workerIndex}-`),
@@ -345,19 +348,6 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           path.join(tmpDir, ".gitconfig"),
           "[user]\n  name = E2E Test\n  email = e2e@test.local\n[commit]\n  gpgsign = false\n[tag]\n  gpgsign = false\n",
         );
-
-        // Give each worker its own agentctl port range, offset from the default
-        // range (41001-41100) to avoid conflicts with a running dev instance.
-        // The async cleanup of agent instances runs after each test deletes its
-        // tasks, so during a 60+ test shard the in-flight cleanup queue can hold
-        // several dozen ports at any given moment. 200 ports per worker keeps
-        // headroom for that without overflowing the 65535 port space. With the
-        // current playwright config (workers: 1, so workerIndex == 0) and shard
-        // offsets capped at 29, the highest port used is 30001 + 29*1000 + 199
-        // = 59200. The `workerIndex * 200` term is defensive for the case where
-        // a future config sets workers > 1.
-        const agentctlPortBase = 30001 + E2E_PORT_OFFSET * 1000 + workerInfo.workerIndex * 200;
-        const agentctlPortMax = agentctlPortBase + 199;
 
         // Install a `git` shim that can sleep on `fetch`/`pull` before execing
         // the real git binary. Tests that need to simulate slow network git

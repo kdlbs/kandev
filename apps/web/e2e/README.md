@@ -396,7 +396,9 @@ Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5
 
 Every Playwright worker gets:
 
-- A unique backend port in `BACKEND_BASE_PORT + workerIndex` (default `18080+`).
+- A backend port owned by the shard offset and stable `parallelIndex` slot
+  (default `18080+`). Replacement workers reuse that slot after teardown;
+  increasing `workerIndex` values never move into a sibling shard's ports.
 - A unique frontend port in `FRONTEND_BASE_PORT + workerIndex` (default `13000+`).
 - A fresh tmpdir (`HOME`, `KANDEV_HOME_DIR`, worktree base, repo clone base — all under that tmpdir).
 - A unique agentctl instance port range (`30001 + E2E_PORT_OFFSET * 1000 + workerIndex * 200`).
@@ -800,6 +802,17 @@ for a result it could never receive.
 
 The build job uploads `e2e-shard-manifests` for the current run. Both cohorts
 upload blob reports that `e2e-report` merges into a single HTML artifact.
+
+Normal jobs request up to three independent Playwright processes through
+`E2E_RUNNER_PROCESSES`. Each keeps one worker and a disjoint set of whole files.
+The wrapper applies the existing memory guard, and the runner leaves one CPU
+available when choosing the process count. Unknown resources select one
+process; container jobs always use one. Set `E2E_RUNNER_PROCESSES=1` to compare
+or restore serial execution without changing the manifest or test selection.
+Separate port slots, result directories and blob files preserve isolation
+across project changes and retries. All children finish before the parent
+writes its single metadata record; a child failure or missing CI report fails
+the job.
 
 Keep the default at `workers: 1` until the controlled worker-concurrency
 experiment shows a repeatable wall-time improvement without retries. Record
