@@ -194,6 +194,8 @@ Use the supplied presets: every 5, 15, or 30 minutes; hourly; every 6 hours; dai
 
 The editor accepts arbitrary five-field cron text, including fixed calendar forms such as `30 8 * * *`, weekday ranges such as `15 9 * * 1-5`, and day-of-month schedules, all of which now fire at the correct time. A saved timezone (for example `America/New_York`) is honored, including that zone's daylight-saving transitions; an empty timezone means UTC, so schedules are deterministic regardless of the host clock. Scheduled runs are deduplicated per trigger per minute.
 
+A non-empty schedule must have a next occurrence within the supported five-year search horizon. Schedules such as February 31 are rejected on save. Already-saved impossible schedules do not create automatic runs; edit them to a valid schedule. Empty schedules remain unscheduled. Valid leap-day schedules within that horizon remain supported, and day-of-month/day-of-week OR expressions such as `0 0 31 2 MON` still run on Mondays in February.
+
 ### GitHub pull requests
 
 The GitHub evaluator polls every 60 seconds and requires a working GitHub integration. It searches open PRs and supports:
