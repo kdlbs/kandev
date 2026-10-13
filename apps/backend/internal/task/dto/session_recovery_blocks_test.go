@@ -2,6 +2,8 @@ package dto
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,9 +12,11 @@ import (
 )
 
 type recoveryBlockProjectionReader struct {
-	generation *models.HarnessSessionGeneration
-	blocks     []*models.SessionRecoveryBlock
-	listOwner  [3]any
+	generation    *models.HarnessSessionGeneration
+	blocks        []*models.SessionRecoveryBlock
+	listOwner     [3]any
+	generationErr error
+	blocksErr     error
 }
 
 func (r *recoveryBlockProjectionReader) GetCurrentHarnessSessionGeneration(
@@ -20,7 +24,7 @@ func (r *recoveryBlockProjectionReader) GetCurrentHarnessSessionGeneration(
 	sessionID, incarnationID string,
 ) (*models.HarnessSessionGeneration, error) {
 	r.listOwner = [3]any{sessionID, incarnationID, int64(0)}
-	return r.generation, nil
+	return r.generation, r.generationErr
 }
 
 func (r *recoveryBlockProjectionReader) ListOpenSessionRecoveryBlocks(
@@ -29,7 +33,7 @@ func (r *recoveryBlockProjectionReader) ListOpenSessionRecoveryBlocks(
 	generation int64,
 ) ([]*models.SessionRecoveryBlock, error) {
 	r.listOwner = [3]any{sessionID, incarnationID, generation}
-	return r.blocks, nil
+	return r.blocks, r.blocksErr
 }
 
 func TestEnrichSessionRecoveryBlocksProjectsOnlyOpenCurrentGeneration(t *testing.T) {
@@ -62,4 +66,41 @@ func TestEnrichSessionRecoveryBlocksClearsWhenGenerationIsMissing(t *testing.T) 
 	require.NoError(t, EnrichSessionRecoveryBlocks(context.Background(), &dto, &models.TaskSession{ID: "session-no-generation"}, reader))
 	require.Empty(t, dto.SessionRecoveryBlocks)
 	require.Equal(t, [3]any{"session-no-generation", "session-no-generation", int64(0)}, reader.listOwner)
+}
+
+// @covers AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.22
+func TestEnrichSessionRecoveryBlocksTypedMissingGeneration(t *testing.T) {
+	for _, err := range []error{models.ErrTaskSessionNotFound, fmt.Errorf("generation: %w", models.ErrTaskSessionNotFound)} {
+		t.Run(err.Error(), func(t *testing.T) {
+			reader := &recoveryBlockProjectionReader{generationErr: err, blocksErr: errors.New("must not list blocks")}
+			projection := TaskSessionDTO{SessionRecoveryBlocks: []SessionRecoveryBlockDTO{{ID: "stale"}}}
+			require.NoError(t, EnrichSessionRecoveryBlocks(context.Background(), &projection, &models.TaskSession{ID: "fresh"}, reader))
+			require.NotNil(t, projection.SessionRecoveryBlocks)
+			require.Empty(t, projection.SessionRecoveryBlocks)
+		})
+	}
+}
+
+// @covers AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.23
+func TestEnrichSessionRecoveryBlocksPreservesReadFailures(t *testing.T) {
+	readErr := errors.New("database unavailable")
+	for _, tc := range []struct {
+		name          string
+		generationErr error
+		blocksErr     error
+		want          error
+	}{
+		{name: "generation failure", generationErr: readErr, want: readErr},
+		{name: "block failure", blocksErr: readErr, want: readErr},
+		{name: "block not found", blocksErr: models.ErrTaskSessionNotFound, want: models.ErrTaskSessionNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &recoveryBlockProjectionReader{
+				generation:    &models.HarnessSessionGeneration{Generation: 1},
+				generationErr: tc.generationErr, blocksErr: tc.blocksErr,
+			}
+			projection := TaskSessionDTO{}
+			require.ErrorIs(t, EnrichSessionRecoveryBlocks(context.Background(), &projection, &models.TaskSession{ID: "session"}, reader), tc.want)
+		})
+	}
 }
