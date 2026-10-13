@@ -13,6 +13,7 @@ acceptance_criteria:
   - AC-PLATFORM-CI-PERFORMANCE-005.5
   - AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-001.1
 system_design:
+  - ../../specs/platform/system-design/ci-performance.md
   - ../../specs/platform/system-design/e2e-duration-aware-sharding.md
 ---
 
@@ -109,3 +110,35 @@ three processes; peak RSS was not separately sampled for this short probe.
 Full hosted E2E run 38416314881 at f68a9c867d74eee3406460e610577aa468acad5c
 passed before concurrency changes: longest normal step 2,178 seconds, summed
 normal steps 26,058 seconds. The 50% target remains open.
+
+The three-process hosted trial at 3314a962 (run 38425537974) failed. All 3,935
+first-attempt identities matched the prior complete run, but six normal shards
+failed and seven tests remained failed after retries. Longest normal execution
+was 1,657 seconds, summed normal execution 17,615 seconds, and workflow elapsed
+time 2,481 seconds. This failed run is not a new best passing result. Among
+3,354 matching first-attempt passing tests in the first artifact snapshot,
+summed individual durations rose from 22,411.289 to 37,366.244 seconds, consistent
+with substantial contention. The trial does not satisfy the 1,079.5-second goal.
+
+The next candidate requests two processes with the same memory guard, CPU cap,
+fourteen normal jobs, six container jobs, assertions, timeouts and retry budget.
+Failed backend fixture setup now prints at most 8 KiB of its own process-log
+tail after log streams close and before deleting the temporary root. This
+preserves the underlying startup error without suppressing the original failure.
+Its regression failed before implementation and passes afterward. Missing
+frontmatter design references were repaired against the trusted PR validator;
+no documentation waiver was used.
+
+Local diagnosis retained a three-process, four-file attempt with 22 cases:
+17 passed, one settings case timed out, and four managed-runtime cases failed
+because this host did not expose the required OpenCode managed metadata. Those
+four failures occur before the hosted failing assertion and are not equivalent
+reproductions. The settings and workspace files together pass all three cases
+serially in 27.840 seconds with no retries. A fresh two-process probe passed
+all 26 cases from settings, workspace attachment, navigation and automation
+files in 69.271 seconds, on four CPUs with zero retries/skips and two actual
+processes. It excludes the host-incompatible managed-runtime metadata cases
+and is not a paired speed comparison. All 69 focused runner/fixture unit tests,
+17 workflow contracts, changed-file lint, web typecheck, documentation checks
+and action pinning pass. Full hosted remeasurement remains pending. Do not
+interpret fewer processes as a full-suite improvement until that evidence exists.

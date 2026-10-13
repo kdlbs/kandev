@@ -803,7 +803,7 @@ for a result it could never receive.
 The build job uploads `e2e-shard-manifests` for the current run. Both cohorts
 upload blob reports that `e2e-report` merges into a single HTML artifact.
 
-Normal jobs request up to three independent Playwright processes through
+Normal jobs request up to two independent Playwright processes through
 `E2E_RUNNER_PROCESSES`. Each keeps one worker and a disjoint set of whole files.
 The wrapper applies the existing memory guard, and the runner leaves one CPU
 available when choosing the process count. Unknown resources select one

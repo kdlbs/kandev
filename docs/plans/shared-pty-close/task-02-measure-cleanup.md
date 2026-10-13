@@ -146,3 +146,9 @@ lint and is not a controlled speed comparison. PTY race tests passed ten times;
 login/shell suites and all interactive-runner, first-idle and PTY-dimension tests
 passed. Full backend lint reports zero issues, Windows compilation passes, and
 documentation validation passes. Hosted macOS and final E2E timing remain pending.
+
+Native macOS compatibility run 38425537679 passes at 3314a962, including the
+ten-repeat PTY race tests and the affected callers. Complete pre-concurrency E2E
+run 38416314881 passed with a 2,178-second longest normal step. The later
+three-process trial failed and is not portable-PTY performance evidence. The
+50% E2E goal remains open; native compatibility is now verified.

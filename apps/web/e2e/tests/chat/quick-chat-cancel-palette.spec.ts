@@ -43,7 +43,7 @@ function commandDialog(page: Page) {
   return page.locator('[role="dialog"]:has([cmdk-input])').last();
 }
 
-test.describe.serial("Quick Chat cancellation palette and composer", () => {
+test.describe("Quick Chat cancellation palette and composer", () => {
   test.afterEach(async ({ backend }, testInfo) => {
     if (testInfo.status === testInfo.expectedStatus) return;
     await testInfo.attach("quick-chat-cancellation-backend.log", {

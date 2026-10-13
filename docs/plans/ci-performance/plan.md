@@ -8,10 +8,12 @@ requirements:
   - REQ-PLATFORM-CI-PERFORMANCE-004
   - REQ-PLATFORM-CI-PERFORMANCE-005
   - REQ-PLATFORM-CI-PERFORMANCE-006
+  - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-001
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
   - REQ-TASKS-TASK-ACTIONS-MENU-004
 system_design:
   - ../../specs/platform/system-design/ci-performance.md
+  - ../../specs/platform/system-design/e2e-duration-aware-sharding.md
   - ../../specs/platform/system-design/durable-agent-delivery.md
   - ../../specs/tasks/system-design/task-actions-menu.md
 legacy_specs: []

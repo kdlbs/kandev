@@ -214,6 +214,21 @@ function removeOwnedTempRoot(tmpDir: string): void {
   });
 }
 
+function reportFailedBackendLog(tmpDir: string): void {
+  let descriptor: number | undefined;
+  try {
+    descriptor = fs.openSync(path.join(tmpDir, "backend-process.log"), "r");
+    const size = fs.fstatSync(descriptor).size;
+    const buffer = Buffer.alloc(Math.min(size, 8_192));
+    const read = fs.readSync(descriptor, buffer, 0, buffer.length, size - buffer.length);
+    console.error(`[failed backend log: ${tmpDir}]\n${buffer.subarray(0, read).toString()}`);
+  } catch {
+    // Setup may fail before a log exists; preserve the original fixture error.
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
 export async function runOwnedBackendFixture<T>(
   tmpDir: string,
   run: (registerProcess: (proc: BackendProcess) => void) => Promise<T>,
@@ -252,6 +267,7 @@ export async function runOwnedBackendFixture<T>(
     }
   }
 
+  if (failures.length > 0) reportFailedBackendLog(tmpDir);
   try {
     removeTempRoot(tmpDir);
   } catch (error) {

@@ -83,8 +83,9 @@ A successful irrelevant-change verdict skips report processing and passes the ch
 
 The October E2E candidate retains fourteen normal jobs and six container jobs.
 A normal job may subdivide its validated manifest selection into at most three
-independent Playwright processes, each with `workers: 1`. Container jobs retain
-one process. The existing memory guard caps the process count using the lower
+independent Playwright processes, each with `workers: 1`. The current workflow
+requests two processes. Container jobs retain one process. The existing memory
+guard caps the process count using the lower
 of host-available memory and cgroup headroom: one below 6 GiB or when unknown,
 two below 12 GiB, and three otherwise. CPU availability also caps the count.
 No unsafe-parallelism override participates in this CI decision.

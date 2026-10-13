@@ -215,7 +215,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
     def test_only_normal_jobs_request_bounded_in_runner_processes(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
         normal_job = job_block(workflow, "e2e", "playwright_image")
-        self.assertIn('E2E_RUNNER_PROCESSES: "3"', normal_job)
+        self.assertIn('E2E_RUNNER_PROCESSES: "2"', normal_job)
         self.assertEqual(workflow.count("E2E_RUNNER_PROCESSES:"), 1)
         wrapper = REPO_ROOT / "apps/web/e2e/scripts/run-planned-shard.sh"
         self.assertIn('export E2E_RUNNER_MAX_SHARDS="$(e2e_max_local_shards)"', wrapper.read_text())

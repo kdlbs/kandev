@@ -121,3 +121,33 @@ Prettier, web typecheck, guarded E2E discovery (4013 instances across 1393 files
 document catalog validation and specification lint. No temporary instrumentation
 or mutation remains. Native macOS and full hosted validation of the next PR head
 remain required.
+
+## Cancellation group retry scope
+
+The three cases in `chat/quick-chat-cancel-palette.spec.ts` retain distinct
+coverage: foreground composer cancellation, detached-background cancellation,
+and command-palette targeting while an underlying task remains running. Each
+case creates its own task/session state through the reset fixture. No case
+consumes state created by an earlier case. The file's shared flag setup and
+restoration remain in `beforeAll`/`afterAll`, including on worker replacement.
+
+The serial declaration unnecessarily retries the entire group. Full hosted
+runs 38405876470 and 38416314881 both replayed the first two passing cases when
+the palette-targeting case failed. Its logs include cancellation escalation
+and recovery-required state, so its assertions remain relevant and are kept.
+
+A controlled local probe injected one failure at the start of only the third
+case's first attempt, with one retry and one worker in both configurations.
+The serial declaration ran six attempts in 200.376 seconds. The ordinary
+declaration ran four attempts in 114.368 seconds. Every case's final attempt
+passed all original assertions; the only failed attempt was the intentional
+probe in each run. Both commands correctly returned failure under the local
+fail-on-flaky policy. These are retry-scope measurements, not full-suite gains.
+
+Remove only `.serial`. Keep all three cases, flag lifecycle hooks, assertions,
+timeouts and retry counts. The deliberate failure and `testInfo` argument were
+removed and the original source was verified byte-for-byte before applying
+the one-line change. A fresh unmutated run with retries disabled passed all
+three cases in 108.466 seconds, with no skipped or flaky cases.
+Raw reports and restoration receipts are retained under
+`apps/backend/.build/ci-half/e2e-focus/cancel-retry-*`.
