@@ -144,3 +144,40 @@ Internal specs and this plan define the correction. No public documentation
 change is needed for this design package or the proposed internal admission
 repair; commands, controls, polling promises, and operator configuration retain
 their existing contracts.
+
+## PR remediation scope
+
+PR #4462 reviews identified partial feedback renewing status freshness and
+provider feedback events reading an older cached snapshot. Preserve the previous
+status-sync timestamp on feedback-only writes, invalidate it on head/base
+changes, and invalidate the scoped feedback cache on provider feedback events.
+Internal write-through events keep reusing cached feedback and fresh status.
+This extends the same freshness contract (AC-001.6 and AC-001.7), with no schema
+or public API change and no review-policy normalization.
+
+New evidence belongs to `TestPRFeedbackPreservesStatusFreshness` (five cases),
+`TestPRFeedbackEventReadsNewFeedbackWithoutStatusRefresh`, and
+`TestAutomationFeedbackInvalidationPreservesSiblingCache`. The existing
+cache-hit persistence test also gains an independent stored-title sentinel.
+Review remediation validation:
+
+- RED: `TestPRFeedbackPreservesStatusFreshness` failed all five cases because
+  partial feedback renewed the stored and published timestamp.
+- RED: `TestPRFeedbackEventReadsNewFeedbackWithoutStatusRefresh` failed with
+  no queued prompt when the provider event reused an older cached response.
+- Focused GitHub producer/cache tests and orchestrator freshness/event tests
+  passed. Coverage now includes 23 new regression cases plus the strengthened
+  existing cache-hit persistence check.
+- `(cd apps/backend && go test -trimpath -race ./internal/github ./internal/orchestrator -count=1)`:
+  passed. GitHub package: 98.231s; orchestrator package: 210.856s.
+- `(cd apps/backend && golangci-lint run ./... --new-from-rev=7c340deb50847c9015e3be73998e78f921e4aec4 --timeout=5m)`:
+  passed, zero issues.
+- Documentation catalog, 36 specification-linter tests, full specification
+  lint, documentation coverage over the full changed-file set, and diff
+  checks passed.
+
+The targeted cache invalidation preserves sibling PR cache entries. Credential
+failure prevents dispatch from cached feedback. Partial feedback retains the
+existing status-sync timestamp or clears it when the head/base changes; normal
+status-sync writes continue advancing it. Both review findings are addressed
+locally. Publication and exact-head CI/review evidence are tracked in PR #4462.

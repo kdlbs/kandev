@@ -134,6 +134,10 @@ type mockGitHubService struct {
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
 
+func (m *mockGitHubService) InvalidatePRFeedbackForAutomation(context.Context, string, string, string, int) error {
+	return nil
+}
+
 func (m *mockGitHubService) FindPRByBranchForWorkspace(
 	ctx context.Context, _, owner, repo, branch string,
 ) (*github.PR, error) {

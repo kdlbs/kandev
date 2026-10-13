@@ -15,6 +15,7 @@ func setupCIAutomationFreshnessTest(t *testing.T) (*Service, *github.TaskPR) {
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	t.Cleanup(svc.stopCIAutomationWorkers)
 	now := time.Now().UTC()
 	return svc, &github.TaskPR{
 		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget",

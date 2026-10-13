@@ -51,6 +51,17 @@ and the existing merge safety gates.
   and evaluations with neither auto-fix nor auto-merge enabled for that PR,
   shall not gain a forced status synchronization.
 
+- **AC-INTEGRATIONS-GITHUB-CI-PR-FRESHNESS-001.6:** A partial feedback
+  observation shall not renew status freshness for aggregates it did not fetch.
+  It shall retain the preceding status-sync timestamp for the same head and
+  base, including a missing timestamp, and invalidate that timestamp when
+  either identity changes. Stored state and published updates shall agree.
+- **AC-INTEGRATIONS-GITHUB-CI-PR-FRESHNESS-001.7:** A provider feedback event
+  shall invalidate the affected automation feedback cache before evaluation,
+  so a recent cached response cannot suppress newly observed feedback.
+  Internal feedback-save events shall continue reusing the cache and fresh
+  PR status.
+
 ## Out of scope
 
 - Review-policy changes, including whether comment-only reviews are pending.

@@ -62,8 +62,25 @@ path. A matching PR in partial sync results remains usable; an unmatched result
 never establishes freshness. Lifecycle evaluation and CI error publication keep
 their existing ordering. Archived or missing tasks remain excluded.
 
-No persistence, transport, configuration, or permission changes are needed.
+No schema, public transport, configuration, or permission changes are needed.
 Existing semantic-change and coalesced-follow-up logs remain available.
+
+## Partial feedback and provider events
+
+`persistPRFeedbackState` marks its derived `PRStatus` with the private
+`feedbackOnly` flag. `SyncTaskPR` computes the timestamp before mutating the
+stored head and base: feedback-only writes retain `LastSyncedAt` when both
+identities match, otherwise clear it. Ordinary status-sync callers continue
+stamping their observation as before. The partial feedback write still updates
+observed fields and publishes through the same canonical persistence path.
+No new wire field or database column is introduced.
+
+`handlePRFeedback` invalidates only the affected automation feedback cache
+through `InvalidatePRFeedbackForAutomation` before enqueueing evaluation.
+The service resolves the existing workspace automation credential scope and
+invalidates that PR's scoped feedback key. `handleTaskPRUpdated` does not
+invalidate feedback: write-through events can reuse cached feedback without
+recreating the forced-refresh loop. Cache TTLs and singleflight remain intact.
 
 ## Verification design
 
@@ -73,6 +90,13 @@ assert automation continues: an actionable comment is queued for auto-fix,
 and a ready auto-merge uses the supplied head. Stale and nil timestamps must
 exercise refresh and verify use of the returned PR. Cover both switches,
 PR-scoped eligibility, and the no-refresh path with the existing test mocks.
+Producer-level tests enter `GetPRFeedbackForAutomation` and assert stored and
+published status freshness for stale, fresh, absent, changed-head, and
+changed-base observations. Event-level coverage asserts that a provider
+feedback event queues newly observed feedback without forcing status sync.
+A real cache test proves that invalidation refreshes the targeted PR and
+preserves a sibling PR cache entry. Cache-hit persistence coverage uses a
+stored title sentinel because partial feedback no longer renews the timestamp.
 
 Retain freshness-boundary, failed-sync, stale-merge, option-save, and partial-sync
 coverage. A partial-sync test must enter with stale input so it actually tests
