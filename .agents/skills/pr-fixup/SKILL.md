@@ -108,9 +108,14 @@ not flood the conversation. If it returns only GitHub request/transport lines
 or no failure text, treat logs as unavailable and, after terminal state, use
 `scripts/pr-state --job-log <job_id>`. For temporary gaps or aggregate-only
 logs, use the same fallback; it handles plain-text and ZIP responses and emits
-bounded context. Follow `references/ci-troubleshooting.md`. Reproduce the exact
-failed command where possible; CI-specific Go lint often needs
-`golangci-lint run ./... --new-from-rev=<base> --timeout=5m`.
+bounded context. Follow `references/ci-troubleshooting.md`. Reproduce the failing
+scope locally. For Go lint, use `bash scripts/lint-go-changed <changed-go-files>`
+from the repository root, including any file named by the failure. Follow
+`apps/backend/AGENTS.md` for PR-base selection and resource defaults. CI owns the
+full-backend scan; `--new-from-rev` only filters reported findings. Run lint and
+race/build suites sequentially. If the scoped check cannot reproduce CI, use its
+logs before expanding local scope; a full local scan requires explicit user
+authorization and OS-level resource limits.
 
 Bind every failed status and workflow run to the current PR head SHA and the
 current run attempt before acting. Older red runs can remain visible after a

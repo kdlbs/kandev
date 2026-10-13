@@ -35,9 +35,10 @@ synthetic merge.
 Treat `mergeable:"CONFLICTING"` or `mergeStateStatus:"DIRTY"` as an actionable merge-conflict blocker. Treat `mergeable:"UNKNOWN"` as inconclusive: wait one short cadence and query again before deciding. States such as `BEHIND`, `BLOCKED`, `UNSTABLE`, or `HAS_HOOKS` may require an update or more CI/review work, but they are not by themselves proof of file-level conflicts.
 
 If a current-base merge exposes Go-lint violations in files outside the PR
-diff, run the CI-equivalent changed-scope check against the authoritative base,
-such as `golangci-lint run ./... --new-from-rev=<base> --timeout=5m`, and verify
-the violation paths before proceeding. Only when the violations are confirmed
+diff, run `bash scripts/lint-go-changed <changed-go-files>` from the repository
+root against the authoritative base, following `apps/backend/AGENTS.md`, and
+verify the violation paths before proceeding. `--new-from-rev` filters findings,
+so adding it to `./...` does not narrow analysis. Only when violations are confirmed
 outside the changed scope and the scoped check passes may a local merge hook be
 run with `SKIP=go-lint`; record that hook omission and never use it to bypass
 lint for changed files.

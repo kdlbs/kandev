@@ -16,7 +16,7 @@ apps/
 ## Tooling
 
 - **Package manager**: `pnpm` workspace (run from `apps/`, not repo root)
-- **Backend**: Go with Make (`make -C apps/backend test|lint|build`)
+- **Backend**: Go with Make (`make -C apps/backend test|build`); local lint uses `bash scripts/lint-go-changed <changed-go-files>` (see `apps/backend/AGENTS.md`). Explicit full-backend lint remains `make -C apps/backend lint`.
 - **Launcher**: all four launch modes (`dev`, `start`, `run`, `service`) go through the native Go binary at `apps/backend/bin/kandev`; the launcher package is `apps/backend/internal/launcher`. `make dev` execs a copy of that binary (`bin/kandev-launcher`).
 - **CLI**: `apps/cli` is the npm-published shim only (`bin/cli.js` + `bin/native-shim.js`); its tests run on the Node built-in test runner (`node --test`).
 - **Frontend**: Vite/React SPA (`cd apps && pnpm --filter @kandev/web dev|build:vite|lint`; for direct web typecheck use `cd apps/web && pnpm run typecheck`)
