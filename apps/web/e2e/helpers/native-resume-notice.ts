@@ -17,7 +17,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
   api: ApiClient,
   seed: SeedData,
   tmpDir: string,
-  legacy = false,
+  legacy: boolean | "readiness" = false,
 ) {
   const task = await api.createTaskWithAgent(
     seed.workspaceId,
@@ -45,6 +45,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
     .toBe("WAITING_FOR_INPUT");
   const native = (await api.getTaskSession(active.id)).session.metadata?.acp;
   expect(native).toMatchObject({ session_id: expect.any(String) });
+  if (legacy === "readiness") await session.fillMessage("/slow 1s");
   await api.stopSession({ session_id: active.id, force: true });
   await expect
     .poll(
@@ -60,6 +61,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
   expect(active.agent_execution_id).toBeTruthy();
   const originalMessages = (await api.listSessionMessages(active.id)).messages;
   const seeded = seedInterruptedPrompt(tmpDir, active.id, active.agent_execution_id);
+  let recoveryBlockId: string = seeded.blockId;
   if (legacy) {
     withDatabase(tmpDir, (db) => {
       db.prepare(
@@ -67,7 +69,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
       ).run(seeded.submissionId);
       db.prepare(
         "UPDATE session_recovery_blocks SET reason = 'unresolved_durable_work', delivery_submission_id = '', delivery_stream_id = '' WHERE id = ?",
-      ).run(seeded.blockId);
+      ).run(recoveryBlockId);
       const row = db.prepare("SELECT metadata FROM task_sessions WHERE id = ?").get(active.id) as {
         metadata: string;
       };
@@ -79,8 +81,47 @@ export async function verifyNativeResumeClearsRecoveryNotice(
       ).run(JSON.stringify(metadata), active.id);
     });
   }
+  if (legacy === "readiness") {
+    withDatabase(tmpDir, (db) => {
+      db.prepare("DELETE FROM session_recovery_blocks WHERE id = ?").run(recoveryBlockId);
+    });
+    await api.launchSession({ task_id: task.id, session_id: active.id, intent: "resume" });
+    await expect
+      .poll(() =>
+        withDatabase(tmpDir, (db) => {
+          const block = db
+            .prepare(
+              "SELECT id FROM session_recovery_blocks WHERE session_id = ? AND state = 'open'",
+            )
+            .get(active.id) as { id: string } | undefined;
+          return block?.id;
+        }),
+      )
+      .toBeTruthy();
+    recoveryBlockId = withDatabase(
+      tmpDir,
+      (db) =>
+        (
+          db
+            .prepare(
+              "SELECT id FROM session_recovery_blocks WHERE session_id = ? AND state = 'open'",
+            )
+            .get(active.id) as { id: string }
+        ).id,
+    );
+  }
   await page.reload();
   await session.waitForLoad();
+  if (legacy === "readiness") {
+    await expect(session.activeChat().locator(".tiptap.ProseMirror:visible")).toHaveCount(0);
+    expect(
+      (await api.listSessionMessages(active.id)).messages
+        .filter((item) => item.author_type === "user")
+        .map((item) => item.id),
+    ).toEqual(
+      originalMessages.filter((item) => item.author_type === "user").map((item) => item.id),
+    );
+  }
   await expect(page.getByTestId("failed-session-banner")).toContainText(
     "The prompt outcome is uncertain.",
   );
@@ -95,7 +136,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
       if (test.info().project.name === "mobile-chrome") await resume.tap();
       else await resume.click();
       await expect
-        .poll(() => readRecovery(tmpDir, seeded.blockId, seeded.submissionId).block, {
+        .poll(() => readRecovery(tmpDir, recoveryBlockId, seeded.submissionId).block, {
           timeout: 60_000,
         })
         .toMatchObject({ state: "resolved", authorized_action: "resume" });
@@ -129,7 +170,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
   await expect(page.getByTestId("failed-session-banner")).toHaveCount(0);
   await expect(page.getByTestId("delivery-recovery-result")).toHaveCount(0);
   expect((await api.getTaskSession(active.id)).session.metadata?.acp).toEqual(native);
-  expect(readRecovery(tmpDir, seeded.blockId, seeded.submissionId)).toMatchObject({
+  expect(readRecovery(tmpDir, recoveryBlockId, seeded.submissionId)).toMatchObject({
     block: { state: "resolved", authorized_action: "resume" },
     submission: { state: "interrupted_unknown" },
   });
@@ -140,7 +181,14 @@ export async function verifyNativeResumeClearsRecoveryNotice(
       .map((item) => item.id),
   ).toEqual(originalMessages.filter((item) => item.author_type === "user").map((item) => item.id));
   await expect(session.chat.getByText("simple mock response", { exact: false })).toHaveCount(1);
-  await session.sendMessageViaButton("/slow 1s");
+  if (legacy === "readiness") {
+    const draft = session.activeChat().locator(".tiptap.ProseMirror:visible").first();
+    await expect(draft).toContainText("/slow 1s");
+    if (test.info().project.name === "mobile-chrome") await session.tapSubmitWhenReady();
+    else await session.clickSubmitWhenReady();
+  } else {
+    await session.sendMessageViaButton("/slow 1s");
+  }
   await expect(
     session.chat.getByText("Slow response complete after 1s.", { exact: false }),
   ).toBeVisible({ timeout: 30_000 });

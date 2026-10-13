@@ -159,6 +159,11 @@ terminal result, Kandev reconciles the matching stale block when the idle native
 conversation is restored. The old result remains unchanged, and no previous
 prompt is sent again.
 
+A resumed runtime checks delivery recovery before enabling new work. If the saved
+evidence needs explicit recovery, the Resume controls appear before you send a
+new instruction. An existing draft is retained while recovery runs; send it once
+after the conversation is ready.
+
 After a backend restart, Kandev uses durable evidence to verify the saved owner
 and native conversation. If they match, Kandev restores the same task session
 when its agentctl process has terminated. It does not send another prompt, add

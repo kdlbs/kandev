@@ -138,3 +138,22 @@ outcome along with the complete active inventory, current native execution and
 matching recovery fences. Any independent active record or projection gap
 refuses resolution. The same proof permits normal loaded-session reconciliation
 and explicit Resume; neither path dispatches an old prompt.
+
+## Prompt readiness after native boot
+
+A native boot event establishes runtime availability, not delivery admission.
+Before publishing the ordinary idle session state and draining queued work,
+orchestrator checks the current execution's durable delivery capability. An
+unresolved inventory creates the existing persistent delivery fence before any
+first-send attempt. The same guarded loaded-native reconciliation used for an
+existing fence may retire eligible history and resolve it transactionally.
+When original-owner evidence is insufficient, retain the fence and expose the
+existing explicit Resume controls on desktop and phone. Do not mark recovery
+resolved or drain queued instructions while this gate remains closed.
+
+Both pending and explicitly selected V1 delivery repeat this reconciliation at
+admission, including when no fence existed at entry. Re-read capability after
+successful resolution; a changed or unresolved inventory still refuses dispatch.
+No implicit recovery sends an old prompt. Rejected instructions retain their
+existing blocked delivery record; an unsent composer draft remains retained while the recovery controls replace
+the editor and is sent only by a subsequent explicit user submit after recovery.

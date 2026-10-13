@@ -586,6 +586,15 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 		s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
 		return
 	}
+	if !s.prepareBootDeliveryReadiness(ctx, data.SessionID, data.AgentExecutionID) {
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID)
+		return
+	}
+	// Reconciliation can update recovery metadata in its own transaction.
+	session, err = s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil {
+		return
+	}
 	s.clearDynamicStartupStreakForBootReady(ctx, data, session)
 	if err := s.persistProviderRestoredResumeNotice(ctx, session, data); err != nil {
 		s.logger.Warn("failed to create provider-restored resume notice",

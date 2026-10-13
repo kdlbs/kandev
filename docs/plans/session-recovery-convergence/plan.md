@@ -41,6 +41,7 @@ No private payloads or live native conversations belong in fixtures.
 4. [Prepared prompt admission](task-04-prepared-prompt-admission.md).
 5. [Legacy delivery Resume controls](task-05-legacy-resume-controls.md).
 6. [Projected terminal delivery recovery](task-06-terminal-delivery-recovery.md).
+7. [Native resume prompt readiness](task-07-native-prompt-readiness.md).
 
 Each work order is executed here sequentially. Native restoration and retirement
 are never prompt authority. Historical labels, hashes, cursors and independent
@@ -71,3 +72,5 @@ attachments were present. Task 04 repairs a separately reproduced pre-dispatch
 payload divergence: SQL admission occurred before attachment materialization.
 
 Task 05 addresses a legacy session with a loaded native conversation and an empty delivery fence. Explicit authenticated Resume succeeded operationally, but the UI exposed only Retry connection and Stop. Automatic reconciliation correctly refused absent original-process proof.
+
+Task 06 merged in PR #4465 as 7c340deb50847c9015e3be73998e78f921e4aec4. All 54 required/executed checks passed; both review threads resolved. The capacity trigger remains unproven. Task 07 follows the separately observed boot-to-first-send readiness gap.

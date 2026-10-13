@@ -1,7 +1,7 @@
 ---
 id: "06-terminal-delivery-recovery"
 title: "Reconcile projected terminal deliveries after restart"
-status: in_progress
+status: completed
 wave: 6
 depends_on:
   - 05-legacy-resume-controls
