@@ -63,6 +63,9 @@ agent is alive, and is a separate protocol change.
   run-write failure, successful retry publication, legacy partial-write repair,
   and late run observations with terminal outcomes preserved.
 - PostgreSQL multi-connection coverage verifies the delayed-run advisory lock.
+- The production PostgreSQL boot integration test exercises rollback, retry,
+  stale output, late outcomes and legacy repair through the configured task
+  service. Both existing PostgreSQL 16 and 18 hosted gates select this test.
 - Lifecycle regressions cover live/unknown probes, failed workflow stops, and
   successful stop after the terminal session transition.
 - Hosted verification results are recorded with the closing commit in the PR.

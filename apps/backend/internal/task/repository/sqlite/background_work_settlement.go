@@ -45,7 +45,7 @@ func (r *Repository) SettleBackgroundWorkloads(ctx context.Context, sessionID st
 		return nil, err
 	}
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += forUpdateClause
 	}
 	var workloads []*models.BackgroundWorkload
 	if err := tx.SelectContext(ctx, &workloads, tx.Rebind(query), args...); err != nil {

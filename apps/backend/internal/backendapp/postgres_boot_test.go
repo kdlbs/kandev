@@ -139,6 +139,9 @@ func TestPostgresBootInitializesRepositories(t *testing.T) {
 	if err := runInitialAgentSetup(context.Background(), services.User, agentSettingsController, log); err != nil {
 		t.Fatalf("run initial agent setup with postgres: %v", err)
 	}
+	t.Run("background_work_settlement", func(t *testing.T) {
+		assertPostgresBackgroundWorkSettlement(t, services.Task, repos.Task)
+	})
 }
 
 type postgresConnInfo struct {
