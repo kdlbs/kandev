@@ -95,6 +95,10 @@ and filesystem proof before accepting independent Git administration. The check
 binds the selected environment, repository, logical worktree, branch identity and
 physical checkout. Ordinary registered-source comparison remains in place when
 no current adoption is present.
+Repository transition reloads and session-scoped inventory queries project the
+complete durable worktree metadata, including source clone/common directories,
+branch ownership/integration, recovery head and compaction time. An inventory-only
+resume cannot erase these fields while retaining the same physical binding.
 
 Receipt validation binds the original session incarnation, owner generation,
 workspace, complete branch-driving attachment set, selected slot branch identity
