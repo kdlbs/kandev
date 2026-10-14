@@ -79,13 +79,15 @@ const SESSION_EVENT_PREFIXES: [&str; 3] = [
     "session.clarification_requested:",
 ];
 const UPDATE_AVAILABLE_PREFIX: &str = "system.update_available:";
+const SETTINGS_TEST_PREFIX: &str = "desktop.test_notification:";
 
 fn validate_request(request: &NativeNotificationRequest) -> Result<(), String> {
     let is_session_event = SESSION_EVENT_PREFIXES
         .iter()
         .any(|prefix| request.event_id.starts_with(prefix));
     let is_update_event = request.event_id.starts_with(UPDATE_AVAILABLE_PREFIX);
-    if !is_session_event && !is_update_event {
+    let test_occurrence = request.event_id.strip_prefix(SETTINGS_TEST_PREFIX);
+    if !is_session_event && !is_update_event && test_occurrence.is_none() {
         return Err("unsupported native notification event".to_string());
     }
     if request.event_id.len() > 256
@@ -96,6 +98,11 @@ fn validate_request(request: &NativeNotificationRequest) -> Result<(), String> {
         || request.task_id.as_ref().is_some_and(|id| id.len() > 256)
     {
         return Err("invalid native notification payload".to_string());
+    }
+    if let Some(occurrence) = test_occurrence {
+        if occurrence.is_empty() || request.task_id.is_some() || request.session_id.is_some() {
+            return Err("invalid native notification payload".to_string());
+        }
     }
     if is_session_event {
         match request.task_id.as_deref() {
@@ -253,6 +260,108 @@ mod tests {
         let request = update_available_request("system.update_available:v1.2.3");
 
         assert_eq!(validate_request(&request), Ok(()));
+    }
+
+    #[test]
+    fn bridge_accepts_app_scoped_settings_test() {
+        let request = NativeNotificationRequest {
+            event_id: "desktop.test_notification:click-1".to_string(),
+            title: "Test notification".to_string(),
+            body: "Notifications are working on this device.".to_string(),
+            task_id: None,
+            session_id: None,
+        };
+
+        assert_eq!(validate_request(&request), Ok(()));
+    }
+
+    #[test]
+    fn bridge_rejects_invalid_settings_test_scope_and_occurrence() {
+        let mut request = update_available_request("desktop.test_notification:");
+        assert!(validate_request(&request).is_err());
+        request.event_id.push_str("click-1");
+        for task_id in ["", "task-1"] {
+            request.task_id = Some(task_id.to_string());
+            assert!(validate_request(&request).is_err());
+        }
+        request.task_id = None;
+        for session_id in ["", "session-1"] {
+            request.session_id = Some(session_id.to_string());
+            assert!(validate_request(&request).is_err());
+        }
+        for event_id in [
+            "desktop.test_notification_other:click-1",
+            "desktop.test_notification",
+            "desktop.anything:click-1",
+        ] {
+            assert!(validate_request(&update_available_request(event_id)).is_err());
+        }
+    }
+
+    #[test]
+    fn bridge_bounds_settings_test_payload() {
+        let mut request = update_available_request(&format!(
+            "desktop.test_notification:{}",
+            "x".repeat(256 - SETTINGS_TEST_PREFIX.len())
+        ));
+        request.title = "x".repeat(160);
+        request.body = "x".repeat(1000);
+        assert_eq!(validate_request(&request), Ok(()));
+
+        let mut invalid = request.clone();
+        invalid.event_id.push('x');
+        assert!(validate_request(&invalid).is_err());
+        invalid = request.clone();
+        invalid.title.push('x');
+        assert!(validate_request(&invalid).is_err());
+        invalid.title.clear();
+        assert!(validate_request(&invalid).is_err());
+        invalid = request;
+        invalid.body.push('x');
+        assert!(validate_request(&invalid).is_err());
+    }
+
+    #[test]
+    fn settings_test_occurrences_keep_existing_dedup_rules() {
+        let state = NativeNotificationState::default();
+        let first = update_available_request("desktop.test_notification:click-1");
+        let second = update_available_request("desktop.test_notification:click-2");
+        assert_eq!(
+            state.claim_after_permission(&first, false),
+            NativeNotificationResult::PermissionDenied
+        );
+        assert_eq!(
+            state.claim_after_permission(&first, true),
+            NativeNotificationResult::Shown
+        );
+        assert_eq!(
+            state.claim_after_permission(&first, true),
+            NativeNotificationResult::Duplicate
+        );
+        assert_eq!(
+            state.claim_after_permission(&second, true),
+            NativeNotificationResult::Shown
+        );
+        state.release(&first.event_id);
+        assert_eq!(
+            state.claim_after_permission(&first, true),
+            NativeNotificationResult::Shown
+        );
+    }
+
+    #[test]
+    fn session_types_still_require_non_empty_task_context() {
+        for event_id in [
+            "session.turn_finished:turn-1",
+            "session.clarification_requested:request-1",
+            "session.failed:session-1",
+        ] {
+            for task_id in [None, Some(String::new())] {
+                let mut request = request(event_id, "task-1");
+                request.task_id = task_id;
+                assert!(validate_request(&request).is_err());
+            }
+        }
     }
 
     #[test]

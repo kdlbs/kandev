@@ -53,6 +53,10 @@ const (
 	// ceilingReasonDroppedUnreplayableRecord is AC-17b(f): the record's own
 	// ceiling_launch_kind is absent or outside the closed set.
 	ceilingReasonDroppedUnreplayableRecord = "ceiling_dropped_unreplayable_record"
+	// ceilingReasonDroppedLaunchInvalid marks a permanently invalid launch:
+	// the replayed launch's built command failed validation, so every later
+	// pass would rebuild the same command and leave another failed session.
+	ceilingReasonDroppedLaunchInvalid = "ceiling_dropped_launch_invalid"
 	// ceilingReasonSurfaceWriteFailed is AC-49g: the deferral itself persisted
 	// successfully, but the card note describing it could not be written.
 	ceilingReasonSurfaceWriteFailed = "ceiling_surface_write_failed"

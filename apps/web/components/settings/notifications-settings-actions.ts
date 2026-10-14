@@ -11,6 +11,7 @@ import { useRequest } from "@/lib/http/use-request";
 import { t } from "@/lib/i18n";
 import { DEFAULT_NOTIFICATION_EVENTS } from "@/lib/notifications/events";
 import { nativeNotifications } from "@/lib/desktop/native-notification-client";
+import { sendTestNotification } from "./notification-test-action";
 import { useNotificationProviders } from "@/hooks/domains/settings/use-notification-providers";
 import { useAppStore } from "@/components/state-provider";
 import type { NotificationProvider } from "@/lib/types/http";
@@ -544,18 +545,7 @@ export function useNotificationsActions(
     }
   };
 
-  const handleTestNotification = async () => {
-    if (typeof Notification === "undefined") return;
-    let permission = Notification.permission;
-    if (permission === "default") {
-      permission = await Notification.requestPermission();
-      bumpPermission();
-    }
-    if (permission !== "granted") return;
-    new Notification(t("settings:testNotificationTitle"), {
-      body: t("settings:testNotificationBody"),
-    });
-  };
+  const handleTestNotification = () => sendTestNotification(bumpPermission);
 
   const handleTestProvider = async (providerId: string) => {
     try {

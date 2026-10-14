@@ -230,7 +230,7 @@ Kandev has no registered public URL scheme, file association, or command-line de
 
 External `http`, `https`, and `mailto` destinations open in the system browser or mail client. The desktop bridge blocks links with embedded credentials and unsupported schemes. It keeps `localhost` names, loopback IPs, and unspecified IPs in the WebView. It does not block all private-LAN hosts. Kandev routes, previews, and downloads stay in the WebView. Downloads that you start inside the desktop app open the system Save dialog. Kandev reports whether the transfer succeeds. The WebView transfers the file data.
 
-Native notifications are limited to selected agent-turn-finished and
+Automatic agent notifications are limited to selected agent-turn-finished and
 agent-needs-an-answer events, plus session failures. Semantic session events
 respect each provider's event selections. Session failures remain an independent
 safety alert whenever the Local provider is enabled. Delivery also respects the
@@ -238,6 +238,15 @@ application's notification preference and OS permission. Requests carry
 task/session and semantic event identifiers for validation and event
 de-duplication, but the desktop registers no notification activation/deep-link
 handler. Clicking a notification is therefore not a supported navigation path.
+
+To test delivery, open **Settings > Preferences > Notifications** and select
+**Send test notification**. Desktop tests use native notifications even when
+browser notifications are unavailable or blocked; the message confirms
+notification delivery on this device. An undecided OS permission can be
+requested from that click. If permission is denied, enable Kandev in the OS
+notification settings and refresh the permission status. With permission
+granted, each click makes a new test attempt. Browser-only clients retain
+browser notification tests through the same control.
 
 ## Troubleshooting
 

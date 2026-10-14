@@ -506,6 +506,9 @@ func (m *Manager) openNoFollowWorktreePath(worktreePath string) (storageworkspac
 }
 
 func (m *Manager) openReusableWorktreePath(ctx context.Context, worktreePath string, wt *Worktree) (storageworkspaces.DirectoryHandle, bool, error) {
+	if _, err := m.validateWorkspaceAdoptionBinding(ctx, wt); err != nil {
+		return nil, false, err
+	}
 	handle, err := m.validateWorktreePathSafe(worktreePath)
 	if err != nil {
 		return nil, false, err

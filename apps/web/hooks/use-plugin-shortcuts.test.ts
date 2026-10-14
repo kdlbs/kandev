@@ -36,8 +36,117 @@ vi.mock("@/hooks/use-app-destinations", () => ({
 import { useAppShortcuts } from "./use-app-shortcuts";
 import { useKeyboardShortcut } from "./use-keyboard-shortcut";
 import type { KeyboardShortcut } from "@/lib/keyboard/constants";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
 
 const PLUGIN_ID = "session-cost";
+
+// @covers AC-PLUGINS-PLUGIN-SHORTCUT-SETTINGS-001.5
+describe("accepted-event core precedence", () => {
+  beforeEach(() => {
+    mockOverrides = {};
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+  });
+
+  afterEach(() => {
+    cleanup();
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ["explicit Ctrl+F on Mac", "ctrl+f", "f", { ctrlKey: true }, 1, 0],
+    ["canonical Meta+F control", "ctrl+f", "f", { metaKey: true }, 1, 0],
+    ["noncolliding Ctrl+Q control", "ctrl+q", "q", { ctrlKey: true }, 0, 1],
+  ] as const)("preserves %s", (...testCase) => {
+    const [_name, combo, key, modifiers, coreCalls, pluginCalls] = testCase;
+    mockItems = [
+      makePlugin({
+        ui: { keybindings: [{ id: "find", default: combo, description: "Plugin Find" }] },
+      }),
+    ];
+    const core = vi.fn();
+    const plugin = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("find", plugin);
+    renderHook(() => {
+      usePluginShortcuts();
+      useKeyboardShortcut(SHORTCUTS.FIND_IN_PANEL, core);
+    });
+
+    const event = pressKey(key, modifiers);
+
+    expect({
+      core: core.mock.calls.length,
+      plugin: plugin.mock.calls.length,
+      prevented: event.defaultPrevented,
+    }).toEqual({
+      core: coreCalls,
+      plugin: pluginCalls,
+      prevented: true,
+    });
+  });
+});
+
+// @covers AC-PLUGINS-PLUGIN-SHORTCUT-SETTINGS-001.5
+describe("event-specific core reservations", () => {
+  beforeEach(() => {
+    mockOverrides = {};
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+  });
+
+  afterEach(() => {
+    cleanup();
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+    vi.restoreAllMocks();
+  });
+
+  it("reserves only accepted events and reads remapped and unbound overrides freshly", () => {
+    mockItems = [
+      makePlugin({
+        ui: { keybindings: [{ id: "open", default: "mod+q", description: "Open" }] },
+      }),
+    ];
+    mockOverrides = { SEARCH: { key: "q", modifiers: { ctrl: true } } };
+    const plugin = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("open", plugin);
+    renderHook(() => usePluginShortcuts());
+
+    expect(pressKey("q", { ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(plugin).not.toHaveBeenCalled();
+    expect(pressKey("q", { metaKey: true }).defaultPrevented).toBe(true);
+    expect(plugin).toHaveBeenCalledTimes(1);
+
+    mockOverrides = { SEARCH: { key: "" as never } };
+    pressKey("q", { ctrlKey: true });
+    expect(plugin).toHaveBeenCalledTimes(2);
+    mockOverrides = { "plugin:session-cost:open": { key: "" as never } };
+    expect(pressKey("q", { metaKey: true }).defaultPrevented).toBe(false);
+    expect(plugin).toHaveBeenCalledTimes(2);
+    mockOverrides = {};
+    pressKey("q", { ctrlKey: true });
+    expect(plugin).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ["FIND_IN_PANEL", "ctrl+f", "f", false],
+    ["SAVE", "ctrl+s", "s", false],
+    ["COMMAND_PANEL_SHIFT", "ctrl+shift+p", "p", true],
+  ] as const)(
+    "keeps fixed %s defaults reserved without a mounted core listener",
+    (id, combo, key, shiftKey) => {
+      mockItems = [
+        makePlugin({
+          ui: { keybindings: [{ id: "open", default: combo, description: "Open" }] },
+        }),
+      ];
+      mockOverrides = { [id]: { key: "" } };
+      const plugin = vi.fn();
+      pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("open", plugin);
+      renderHook(() => usePluginShortcuts());
+      expect(pressKey(key, { ctrlKey: true, shiftKey }).defaultPrevented).toBe(false);
+      expect(plugin).not.toHaveBeenCalled();
+    },
+  );
+});
 
 function makePlugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
   return {

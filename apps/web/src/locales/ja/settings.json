@@ -694,7 +694,7 @@
   "terminalFontSizeMustBeA": "ターミナルのフォントサイズは 8 から 24 の間の数値である必要があります。",
   "terminalLinks": "ターミナルのリンク",
   "testConnection": "接続をテスト",
-  "testNotificationBody": "これが読める場合、ブラウザ通知は正常に動作しています。",
+  "testNotificationBody": "このメッセージが読める場合、このデバイスで通知が正常に動作しています。",
   "testNotificationTitle": "テスト通知",
   "theBuiltInDefaultLayoutWill": "内蔵のデフォルトレイアウトが既定になります。",
   "thisAppliesWhenKandevStarts": "この選択はデバイス間であなたのユーザーに引き継がれます。明示的なリンクはリンク先を保持し、Office ワークスペースは Office ホームを保持します。",

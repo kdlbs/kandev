@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { useAppStore } from "@/components/state-provider";
@@ -30,6 +30,7 @@ import {
 import { PromptZone, SubtaskFormBody } from "./new-subtask-form-parts";
 import { applySummarizeSessionResult, type SummaryToastFn } from "./session-context-summary";
 import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
+import { useSubtaskParentDefaults } from "./use-subtask-parent-defaults";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Message, TaskSession } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
@@ -127,7 +128,10 @@ function useSubtaskDialogState(parentTaskId: string, parentSessions: TaskSession
   const workflowId = useAppStore((s) => s.kanban.workflowId);
   const executors = useAppStore((s) => s.executors.items);
   const parentTask = useAppStore(
-    (s) => s.kanban.tasks.find((task) => task.id === parentTaskId) ?? null,
+    (s) =>
+      s.taskOverview.byId[parentTaskId] ??
+      s.kanban.tasks.find((task) => task.id === parentTaskId) ??
+      null,
   );
   const sessionsById = useAppStore((s) => s.taskSessions.items);
   const sessionsByTaskId = useAppStore((s) => s.taskSessionsByTask.itemsByTaskId);
@@ -222,35 +226,30 @@ function useExecutorDefault(
   }, [allProfiles, executorProfileId, lastUsedExecutorProfileId, setExecutorProfileId]);
 }
 
-/**
- * Seeds the chip row with the parent task's repo + branch when the form
- * mounts. Form parent passes `key={open}` so each dialog open remounts the
- * form, which is when this fires. The user can still change or add repos
- * after seeding.
- */
-function useSeedParentRepository(
-  fs: ReturnType<typeof useSubtaskFormState>,
-  parentRepositoryId: string | null,
-  baseBranch: string | null,
+function useInitialWorkspaceMode(
+  worktreeBranch: string | null,
+  contextReady: boolean,
+  sourceTouched: boolean,
 ) {
+  const [mode, setMode] = useState<SubtaskWorkspaceMode>(() =>
+    defaultSubtaskWorkspaceMode(worktreeBranch),
+  );
+  const seededOrTouched = useRef(false);
   useEffect(() => {
-    if (!parentRepositoryId) return;
-    fs.setRepositories([
-      { key: "subtask-row-1", repositoryId: parentRepositoryId, branch: baseBranch ?? "" },
-    ]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-}
-
-/** Pre-fills the agent profile with the parent session's profile on mount. */
-function useSeedAgentProfileId(
-  fs: ReturnType<typeof useSubtaskFormState>,
-  defaultProfileId: string,
-) {
-  useEffect(() => {
-    if (defaultProfileId) fs.setAgentProfileId(defaultProfileId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (seededOrTouched.current) return;
+    if (sourceTouched) {
+      seededOrTouched.current = true;
+      return;
+    }
+    if (!contextReady) return;
+    seededOrTouched.current = true;
+    setMode(defaultSubtaskWorkspaceMode(worktreeBranch));
+  }, [contextReady, worktreeBranch, sourceTouched]);
+  const onChange = (value: SubtaskWorkspaceMode) => {
+    seededOrTouched.current = true;
+    setMode(value);
+  };
+  return [mode, onChange] as const;
 }
 
 /**
@@ -333,6 +332,7 @@ type SubtaskFormProps = {
   parentTaskId: string;
   defaultTitle: string;
   defaultProfileId: string;
+  parentContextReady: boolean;
   worktreeBranch: string | null;
   initialPrompt: string | null;
   agentProfiles: AgentProfileOption[];
@@ -355,6 +355,7 @@ function NewSubtaskForm({
   parentTaskId,
   defaultTitle,
   defaultProfileId,
+  parentContextReady,
   worktreeBranch,
   initialPrompt,
   agentProfiles,
@@ -376,14 +377,28 @@ function NewSubtaskForm({
   const [hasPrompt, setHasPrompt] = useState(false);
   const [promptValue, setPromptValue] = useState("");
   const [contextValue, setContextValue] = useState("blank");
-  const [workspaceMode, setWorkspaceMode] = useState<SubtaskWorkspaceMode>(() =>
-    defaultSubtaskWorkspaceMode(worktreeBranch),
-  );
   // Shim DialogFormState shared with the create-task dialog.
   const fs = useSubtaskFormState(workspaceId);
-  useSeedParentRepository(fs, parentRepositoryId, baseBranch);
-  useSeedAgentProfileId(fs, defaultProfileId);
-  const handlers = useDialogHandlers(fs, availableRepositories);
+  const [workspaceMode, setWorkspaceMode] = useInitialWorkspaceMode(
+    worktreeBranch,
+    parentContextReady,
+    fs.repositoriesDirty || fs.useRemote || fs.remoteRepos.length > 0,
+  );
+  const sharedHandlers = useDialogHandlers(fs, availableRepositories);
+  const parentProfile = useSubtaskParentDefaults({
+    parentRepositoryId,
+    baseBranch,
+    defaultProfileId,
+    repositoriesDirty: fs.repositoriesDirty,
+    hasRepositorySelection: Boolean(
+      fs.repositories.length || fs.useRemote || fs.remoteRepos.length,
+    ),
+    agentProfileId: fs.agentProfileId,
+    setRepositories: fs.setRepositories,
+    setAgentProfileId: fs.setAgentProfileId,
+    onAgentProfileChange: sharedHandlers.handleAgentProfileChange,
+  });
+  const handlers = { ...sharedHandlers, handleAgentProfileChange: parentProfile.onChange };
   useGitHubUrlErrorEffect(fs, isOpen);
   useDiscoverReposEffect(fs, isOpen, workspaceId, false, toast);
   const profileOptions = useAgentProfileOptions(agentProfiles, "task_create");
@@ -427,7 +442,7 @@ function NewSubtaskForm({
   const { handleSubmit } = useSubtaskSubmit({
     fs,
     parentTaskId,
-    defaultProfileId,
+    defaultProfileId: parentProfile.submissionDefaultProfileId,
     workspaceId,
     workflowId,
     availableRepositories,
@@ -453,7 +468,7 @@ function NewSubtaskForm({
     worktreeBranch,
     profileOptions,
     executorProfileOptions,
-    agentProfileId: fs.agentProfileId || defaultProfileId,
+    agentProfileId: fs.agentProfileId,
     workspaceMode,
     onWorkspaceModeChange: (mode: SubtaskWorkspaceMode) => {
       if (mode !== "new_workspace") fs.setFreshBranchEnabled(false);
@@ -503,7 +518,11 @@ export function NewSubtaskDialog({
   parentTaskTitle,
 }: NewSubtaskDialogProps) {
   const { t } = useTranslation();
-  const { sessions: parentSessions } = useTaskSessions(parentTaskId);
+  const {
+    sessions: parentSessions,
+    isLoaded: parentSessionsLoaded,
+    error: parentSessionsError,
+  } = useTaskSessions(parentTaskId);
   const {
     agentProfiles,
     workspaceId,
@@ -557,6 +576,9 @@ export function NewSubtaskDialog({
           parentTaskId={parentTaskId}
           defaultTitle={defaultTitle}
           defaultProfileId={parentSession?.agent_profile_id ?? ""}
+          parentContextReady={
+            Boolean(parentSession) || parentSessionsLoaded || Boolean(parentSessionsError)
+          }
           worktreeBranch={worktreeBranch}
           initialPrompt={initialPrompt}
           agentProfiles={agentProfiles}

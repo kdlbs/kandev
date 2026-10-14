@@ -4,7 +4,7 @@ system: desktop
 requirements:
   - REQ-DESKTOP-DESKTOP-TAURI-APP-001
 created: 2026-06-23
-updated: 2026-10-12
+updated: 2026-10-14
 owners:
   - tbd
 ---
@@ -19,7 +19,7 @@ This design defines the technical contract for `REQ-DESKTOP-DESKTOP-TAURI-APP-00
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-DESKTOP-DESKTOP-TAURI-APP-001` | [Desktop architecture](#desktop-architecture), [macOS window chrome](#macos-window-chrome), [Auxiliary child ownership](#auxiliary-child-ownership) |
+| `REQ-DESKTOP-DESKTOP-TAURI-APP-001` | [Desktop architecture](#desktop-architecture), [macOS window chrome](#macos-window-chrome), [Auxiliary child ownership](#auxiliary-child-ownership), [Settings notification test](#settings-notification-test) |
 
 ## Desktop architecture
 
@@ -224,6 +224,80 @@ Notifications settings control requests native permission from a user gesture;
 background events never prompt. An open app keeps the in-app update indication
 when native permission is denied or native delivery fails.
 
+### Settings notification test
+
+The existing `DesktopNotificationsSection` control uses the same delivery
+target as `useNotificationPermission`: the native client when its Tauri invoke
+transport is available, otherwise the Web Notification API. This covers
+`AC-DESKTOP-DESKTOP-TAURI-APP-001.15` through `.17`. Target selection occurs
+before inspecting the browser API. Native delivery never falls back to the
+browser after a permission or command failure.
+
+`useNotificationsActions.handleTestNotification` delegates to a cohesive
+settings action in `notification-test-action.ts`, keeping provider draft and
+save logic separate. The native branch uses the existing
+`nativeNotifications.permission.get`, `.request`, and `.show` commands. It
+queries permission at the gesture boundary, requests only `prompt` or
+`prompt-with-rationale` from that explicit click, and sends only after a
+`granted` result. A denied result refreshes the permission owner without
+requesting again. A permission request also refreshes that owner. Neither
+branch changes provider enabled state or event selections. The browser branch
+retains its granted/default/denied/unsupported behavior. Both targets use the
+existing `settings:testNotificationTitle` unchanged and the existing
+`settings:testNotificationBody` key with device-neutral copy: "If you can read
+this, notifications are working on this device." The body value is corrected
+in English, Portuguese, Simplified Chinese, both Traditional Chinese catalogs,
+Japanese, and Korean. Traditional Chinese values come from the existing
+zh-hant generator. No new keys or unrelated translation changes are needed.
+
+The local native test identity is exactly
+`desktop.test_notification:<occurrence>`. Each click generates a non-empty
+occurrence with the existing `generateUUID()` capability fallback. The request
+omits both `taskId` and `sessionId`. This identity is private to the native
+bridge; it is not a provider catalog entry, backend event, or subscription.
+`native_notifications::validate_request` accepts this single additional known
+prefix, requires its non-empty suffix and absent task/session context, and
+applies the existing event-ID, title, body, and context length bounds. Unknown
+types, including lookalike prefixes, remain rejected. Session events still
+require a non-empty task ID. Update and session validation are otherwise
+unchanged.
+
+The command continues to check `BackendState::require_owned_origin` before
+validation and permission, then uses the existing permission-before-claim,
+bounded dedup cache, notification builder, and release-on-display-failure
+path. Replaying the same test identity deduplicates; two explicit clicks use
+different identities. No Tauri command, capability, plugin permission, backend
+ownership check, or OS permission bypass is added.
+
+Permission query/request rejection is caught and passed to the existing
+permission refresh callback's error argument. A `permission-denied` show result
+refreshes actual permission without another prompt. `shown` adds no success
+claim beyond the existing test notification; `duplicate` causes no retry or
+success claim. `display-failed` and show-command rejection use the existing
+test-failure console diagnostic and ordinary permission refresh, never its
+error argument. Thus a display error cannot change a still-granted permission
+to the misleading permission-check error state. Refresh failures are contained
+by the existing permission owner; any callback rejection is also contained by
+the action. There is no current dedicated delivery-result toast or status
+surface to reuse, so this repair adds none and preserves the existing Test
+control's troubleshooting hint.
+
+This is state/action routing in the unchanged settings surface: no geometry,
+touch, navigation, scrolling, or breakpoint changes. The existing settings
+group is the phone exemplar. Rendered component tests exercise the real
+control, permission hook, settings state/actions, native client, and Tauri
+invoke transport, replacing only provider/store IO and the external OS invoke
+boundary. Native and browser delivery assertions check the actual message body
+for the device-neutral diagnostic rather than a false browser-capability claim.
+Browser-only controls cover the shared mobile action path. This
+narrow case uses the mobile-parity state/data exception rather than adding
+layout or Playwright work. JS tests prove command delivery, not native OS
+display. Rust tests independently prove the real validator and dedup rules.
+
+The existing native-integration and semantic-event ADRs remain authoritative:
+an explicit local diagnostic is not a fabricated domain occurrence. This
+bounded extension needs no new ADR or general notification policy.
+
 ## Desktop bridge and permissions
 
 The Go-served SPA may receive a small versioned set of desktop events and commands for menu
@@ -381,7 +455,8 @@ title bar, the saved size is applied unchanged.
 - Global shortcuts that operate while another application is focused.
 - Silent, forced, or downgrade updates; App Store/Microsoft Store/Snap distribution.
 - Auto-updating Linux `.deb` or `.rpm` packages outside their package managers.
-- Notification events beyond the canonical provider catalog in this increment.
+- New provider notification events beyond the canonical catalog; the explicit
+  local settings test is not a provider event.
 - A separate native settings window, multiple native windows, or a rewritten native UI.
 - Mobile Tauri targets. Native shortcuts have no mobile analogue; the shared settings page must
   remain responsive and preserve browser/mobile behavior.
@@ -436,6 +511,7 @@ remain the authority. The local wait implementation needs no new ADR.
 
 ## Implementation plans and decisions
 
+- [Desktop settings notification test fix](../../../plans/desktop-notification-test/plan.md)
 - [Desktop child reaping fix](../../../plans/desktop-child-reaping/plan.md)
 - [Initial Desktop Tauri App plan](../../../plans/desktop-tauri-app/plan.md)
 - [Desktop Native Integration plan](../../../plans/desktop-native-integration/plan.md)

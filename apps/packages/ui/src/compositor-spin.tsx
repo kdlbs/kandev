@@ -1,4 +1,5 @@
 import * as React from "react";
+import { releaseAnimation } from "./animation-utils";
 import { cn } from "./lib/utils";
 import { createPersistentMotionVisibility } from "./persistent-motion-visibility";
 
@@ -55,7 +56,7 @@ function CompositorSpin({ className, style, ...props }: React.ComponentProps<"sp
     setCompositorReady(true);
 
     return () => {
-      animation.cancel();
+      releaseAnimation(animation);
       registration.unregister();
       visibility.dispose();
     };

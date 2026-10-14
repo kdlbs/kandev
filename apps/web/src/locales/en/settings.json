@@ -694,7 +694,7 @@
   "terminalFontSizeMustBeA": "Terminal font size must be a number between 8 and 24.",
   "terminalLinks": "Terminal Links",
   "testConnection": "Test Connection",
-  "testNotificationBody": "If you can read this, browser notifications are working.",
+  "testNotificationBody": "If you can read this, notifications are working on this device.",
   "testNotificationTitle": "Test notification",
   "theBuiltInDefaultLayoutWill": "The built-in Default layout will become the default.",
   "thisAppliesWhenKandevStarts": "This choice follows your user across devices. Explicit links keep their destination, and Office workspaces keep their Office Home.",
