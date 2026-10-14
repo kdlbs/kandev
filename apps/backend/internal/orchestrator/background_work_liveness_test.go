@@ -106,7 +106,7 @@ func TestSynchronousStopWithoutExecutionPreservesUnresolvedBackgroundWork(t *tes
 	seedSession(t, repo, "t1", "s1", "step1")
 	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "retained", TaskID: "t1", SessionID: "s1", AgentExecutionID: "retained"}))
 	agent := &mockAgentManager{getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return "", lifecycle.ErrNoExecutionForSession }}
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	svc := newCoordinatorStopTestService(repo, newMockTaskRepo(), agent)
 	observer := &settlingBackgroundWorkObserver{}
 	svc.SetBackgroundWorkObserver(observer)
 	require.NoError(t, svc.StopSessionSynchronously(ctx, "s1", "cleanup", true))
@@ -119,7 +119,7 @@ func TestSynchronousStopSettlesObservedExecutionAfterTeardown(t *testing.T) {
 	seedSession(t, repo, "t1", "s1", "step1")
 	agent := &mockAgentManager{isAgentRunning: true, getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return "exec", nil }}
 	agent.stopAgentWithReasonFunc = func(context.Context, string, string, bool) error { agent.isAgentRunning = false; return nil }
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	svc := newCoordinatorStopTestService(repo, newMockTaskRepo(), agent)
 	observer := &settlingBackgroundWorkObserver{}
 	svc.SetBackgroundWorkObserver(observer)
 	require.NoError(t, svc.StopSessionSynchronously(ctx, "s1", "cleanup", true))
@@ -132,7 +132,7 @@ func TestRecoverableCleanupKeepsRetainedBackgroundWork(t *testing.T) {
 	seedSession(t, repo, "t1", "s1", "step1")
 	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "retained", TaskID: "t1", SessionID: "s1", AgentExecutionID: "retained"}))
 	agent := &mockAgentManager{getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return "", lifecycle.ErrNoExecutionForSession }}
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	svc := newCoordinatorStopTestService(repo, newMockTaskRepo(), agent)
 	observer := &settlingBackgroundWorkObserver{}
 	svc.SetBackgroundWorkObserver(observer)
 	require.True(t, svc.cleanupAgentExecutionWithReason(ctx, "retained", "t1", "s1", lifecycle.StopReasonRecoverableAgentFailure))
@@ -172,7 +172,7 @@ func TestDelayedCompletionKeepsRetainedSuccessorBackgroundWork(t *testing.T) {
 	seedSession(t, repo, "t1", "s1", "step1")
 	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "successor", TaskID: "t1", SessionID: "s1", AgentExecutionID: "successor"}))
 	agent := &mockAgentManager{getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return "", lifecycle.ErrNoExecutionForSession }}
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	svc := newCoordinatorStopTestService(repo, newMockTaskRepo(), agent)
 	observer := &settlingBackgroundWorkObserver{}
 	svc.SetBackgroundWorkObserver(observer)
 	svc.cleanupAgentExecution("old", "t1", "s1")
