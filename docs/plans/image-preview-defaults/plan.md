@@ -121,6 +121,12 @@ Design validation on 2026-10-13:
 
 No production, permanent test or public-doc changes were made during design.
 
+## PR integration follow-up
+
+On 2026-10-14, the merged-tree targeted 32 tests and specification and harness
+checks passed after preserving both overlapping planning links. Current-head
+CI/review evidence remains external until checks finish; see the work order.
+
 ## Risks
 
 - Mounted image cards now read their workspace files automatically, including

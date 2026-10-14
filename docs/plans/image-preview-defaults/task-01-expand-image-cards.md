@@ -171,3 +171,13 @@ no lockfile or dependency-version changes. No application workaround was added.
 REQ-AGENTS-IMAGE-PREVIEW-DEFAULTS-001 and AC .1-.6 are covered. The paired specs
 are active/current. Parent lazy-only criteria, ADR and public reference were
 reconciled. No unresolved implementation or design issue remains.
+
+## PR integration follow-up
+
+On 2026-10-14, merge-conflict remediation preserved both this package's link
+and the current base's CSV-header-BOM repair link. The image-default production
+change and regression tests remain unchanged. The targeted 32 tests, catalog,
+specification lint, 19 harness-validator tests, full harness lint, and 36
+specification-validator tests passed on the merged tree. Normal merge hooks
+passed without bypass. Current-head CI and review completion are tracked
+externally while the PR checks run.
