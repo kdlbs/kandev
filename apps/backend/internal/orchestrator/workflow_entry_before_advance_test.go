@@ -213,7 +213,8 @@ func TestPrepareEngineTurnCompletion_HoldsAdvanceWhenEntryBindingUnreadable(t *t
 		f.queue(t, deferral)
 		disposition, _, err := f.svc.validateCeilingEntry(f.ctx, f.task(t), deferral)
 		require.NoError(t, err)
-		require.Equal(t, ceilingEntryUnavailable, disposition)
+		require.Equal(t, ceilingEntryPermanentlyUnavailable, disposition,
+			"a malformed durable binding is terminal for replay")
 		require.False(t, f.advances(t, turnCompletionCauseAgentTurn),
 			"an unreadable bound entry prompt must hold the signal-gated advance")
 	}

@@ -695,7 +695,7 @@
   "terminalFontSizeMustBeA": "终端字号必须是 8 到 24 之间的数字。",
   "terminalLinks": "终端链接",
   "testConnection": "测试连接",
-  "testNotificationBody": "如果你能读到这条消息，说明浏览器通知正常工作。",
+  "testNotificationBody": "如果您能读到这条消息，说明通知在此设备上正常工作。",
   "testNotificationTitle": "测试通知",
   "theBuiltInDefaultLayoutWill": "内置“默认”布局将成为默认布局。",
   "thisAppliesWhenKandevStarts": "此选择随用户在各设备间同步。明确指定的链接保留原有目标，Office 工作区仍使用 Office 主页。",

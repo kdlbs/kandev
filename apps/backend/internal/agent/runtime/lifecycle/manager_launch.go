@@ -19,6 +19,7 @@ import (
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/mcpmode"
@@ -872,11 +873,11 @@ func (m *Manager) resolveOtherManagedRuntimeOptions(
 
 func validateBuiltAgentCommands(args, continueArgs []string) error {
 	if err := cliflags.ValidateCommandArgs(args); err != nil {
-		return fmt.Errorf("validate agent command: %w", err)
+		return &routingerr.BuiltCommandValidationError{Command: "agent", Cause: err}
 	}
 	if continueArgs != nil {
 		if err := cliflags.ValidateCommandArgs(continueArgs); err != nil {
-			return fmt.Errorf("validate continue command: %w", err)
+			return &routingerr.BuiltCommandValidationError{Command: "continue", Cause: err}
 		}
 	}
 	return nil
@@ -2105,7 +2106,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
-	if err := validateLaunchWorkspaceAdmission(ctx, req, workspacePath); err != nil {
+	if err := validateLaunchWorkspaceAdmissionWithAdoption(ctx, req, workspacePath, m.worktreeMgr); err != nil {
 		return nil, err
 	}
 	owner := ownedDirectoryLinkOwner(req.TaskID, req.TaskDirName)
@@ -2298,6 +2299,10 @@ func executionOwnerKind(execution *AgentExecution) ExecutionOwnerKind {
 // executors own a different filesystem and perform their checks in the
 // executor backend instead.
 func validateLaunchWorkspaceAdmission(ctx context.Context, req *LaunchRequest, workspacePath string) error {
+	return validateLaunchWorkspaceAdmissionWithAdoption(ctx, req, workspacePath, nil)
+}
+
+func validateLaunchWorkspaceAdmissionWithAdoption(ctx context.Context, req *LaunchRequest, workspacePath string, manager *worktree.Manager) error {
 	if req == nil || workspacePath == "" || models.IsRemoteExecutorType(models.ExecutorType(req.ExecutorType)) {
 		return nil
 	}
@@ -2311,25 +2316,57 @@ func validateLaunchWorkspaceAdmission(ctx context.Context, req *LaunchRequest, w
 		return nil
 	}
 	for index, repository := range repositories {
-		candidate := workspacePath
-		entry := workspaceRepositoryEntryName(repository.RepoName)
-		if index > 0 {
-			candidate = filepath.Join(workspacePath, entry)
-		} else if len(repositories) > 1 && validateLocalRepositoryWorkspace(ctx, candidate, repository.RepositoryPath) != nil {
-			candidate = filepath.Join(workspacePath, entry)
-		}
-		// A missing worktree during ACP resume must reach WorktreePreparer.
-		// It classifies a deleted branch and returns the typed recovery error
-		// used by the explicit replacement action. The preparer still validates
-		// the saved worktree and task environment identity before any reuse.
-		if shouldDeferMissingWorktreeResumeValidation(req, candidate) {
-			continue
-		}
-		if err := validateLocalRepositoryWorkspace(ctx, candidate, repository.RepositoryPath); err != nil {
-			return fmt.Errorf("validate launch workspace repository %q: %w", repository.RepositoryID, err)
+		if err := validateLaunchRepositoryWorkspace(ctx, manager, req, repository, workspacePath, index, len(repositories)); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func validateLaunchRepositoryWorkspace(ctx context.Context, manager *worktree.Manager, req *LaunchRequest, repository WorkspaceRepositorySpec, workspacePath string, index, count int) error {
+	candidate := workspacePath
+	entry := workspaceRepositoryEntryName(repository.RepoName)
+	if index > 0 {
+		candidate = filepath.Join(workspacePath, entry)
+	} else if count > 1 && validateLocalRepositoryWorkspace(ctx, candidate, repository.RepositoryPath) != nil {
+		candidate = filepath.Join(workspacePath, entry)
+	}
+	// Missing resume checkouts reach the preparer's typed branch-recovery checks.
+	if shouldDeferMissingWorktreeResumeValidation(req, candidate) {
+		return nil
+	}
+	if manager != nil && req.ExecutorType == string(models.ExecutorTypeWorktree) {
+		adopted, err := validateAdoptedLaunchWorkspace(ctx, manager, req, repository, workspacePath)
+		if err != nil || adopted {
+			return err
+		}
+	}
+	if err := validateLocalRepositoryWorkspace(ctx, candidate, repository.RepositoryPath); err != nil {
+		return fmt.Errorf("validate launch workspace repository %q: %w", repository.RepositoryID, err)
+	}
+	return nil
+}
+
+func validateAdoptedLaunchWorkspace(ctx context.Context, manager *worktree.Manager, req *LaunchRequest, repository WorkspaceRepositorySpec, workspacePath string) (bool, error) {
+	if repository.WorktreeID == "" {
+		return false, nil
+	}
+	wt, err := manager.GetByID(ctx, repository.WorktreeID)
+	if err != nil || wt == nil {
+		return false, err
+	}
+	adopted, err := manager.ValidateWorkspaceAdoptionForReuse(ctx, worktree.CreateRequest{
+		TaskEnvironmentID: req.TaskEnvironmentID, RepositoryID: repository.RepositoryID,
+		WorktreeID: repository.WorktreeID, BranchSlug: repository.BranchSlug,
+		BranchIdentitySlug: repository.BranchIdentitySlug,
+	}, wt.Path)
+	if err != nil || !adopted {
+		return adopted, err
+	}
+	if workspacePath != wt.Path && workspacePath != filepath.Dir(wt.Path) {
+		return false, models.ErrWorkspaceAdoptionStale
+	}
+	return true, nil
 }
 
 // workspaceRepositoryEntryName returns the directory segment below the task

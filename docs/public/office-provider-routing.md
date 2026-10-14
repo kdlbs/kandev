@@ -28,6 +28,8 @@ The selectors store execution-profile IDs. Model names shown in the editor are d
 
 If no route is available, Kandev keeps the task assigned to the same Office agent and waits for provider capacity or user action. Retryable limits are retried automatically after their retry time. Credential and configuration failures remain blocked until corrected or retried manually.
 
+A launch rejected because its built agent or continue command is invalid fails the run immediately and reports the error, without consuming the retry budget. Correct the profile command before retrying. Temporary provider and workspace failures retain their existing recovery behavior.
+
 ## What A Provider Switch Preserves
 
 Kandev preserves the Office agent ID, task, run, task environment, worktree, instructions, and skills. The new execution profile supplies the provider CLI, account, model, mode, flags, environment, permission behavior, passthrough setting, and MCP configuration.

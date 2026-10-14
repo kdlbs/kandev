@@ -124,6 +124,9 @@ func (m *Manager) validateManagedMainCheckoutIdentity(
 	wt *Worktree,
 	proof *ManagedCloneRelocationProof,
 ) error {
+	if adopted, err := m.validateWorkspaceAdoptionBinding(ctx, wt); adopted || err != nil {
+		return err
+	}
 	if !managedCloneRelocationProofComplete(wt, proof) {
 		return nil
 	}

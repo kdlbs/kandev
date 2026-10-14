@@ -4,6 +4,7 @@ package workspaces
 
 import (
 	"errors"
+	"fmt"
 	"os"
 
 	"golang.org/x/sys/windows"
@@ -35,4 +36,17 @@ func pinnedDirectoryInfo(handle DirectoryHandle) (os.FileInfo, error) {
 		return nil, closeErr
 	}
 	return info, nil
+}
+
+// DirectoryIdentity returns the pinned filesystem identity for durable cleanup.
+func DirectoryIdentity(handle DirectoryHandle) (string, error) {
+	directory, ok := handle.(*windowsDirectoryHandle)
+	if !ok || directory == nil || directory.targetHandle == 0 {
+		return "", errors.New("directory handle does not expose pinned Windows identity")
+	}
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(directory.targetHandle, &info); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("windows:%d:%d:%d", info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow), nil
 }

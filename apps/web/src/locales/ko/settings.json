@@ -694,7 +694,7 @@
   "terminalFontSizeMustBeA": "터미널 글꼴 크기는 8에서 24 사이의 숫자여야 합니다.",
   "terminalLinks": "터미널 링크",
   "testConnection": "연결 테스트",
-  "testNotificationBody": "이 내용을 읽을 수 있다면 브라우저 알림이 작동합니다.",
+  "testNotificationBody": "이 메시지가 보이면 이 기기에서 알림이 정상적으로 작동하고 있습니다.",
   "testNotificationTitle": "테스트 알림",
   "theBuiltInDefaultLayoutWill": "기본 제공 Default 레이아웃이 기본값이 됩니다.",
   "thisAppliesWhenKandevStarts": "이 선택은 기기를 넘어 사용자를 따릅니다. 명시적 링크는 대상을 유지하고 오피스 워크스페이스는 오피스 홈을 유지합니다.",

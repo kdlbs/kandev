@@ -973,6 +973,11 @@ about 24 hours and removes it when it is clean. This task-lifecycle check runs
 even when scheduled storage cleanup is disabled. Git does not include ignored
 files in this check. Protect ignored work that must remain.
 
+After the last worktree is reclaimed and the task environment is no longer in
+use, Kandev also removes the enclosing task folder and everything inside it,
+including files or nested folders created beside the worktrees. A retained
+worktree keeps that task folder until reclamation can finish.
+
 | Executor      | Archive cleanup                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                                             |
@@ -1020,6 +1025,12 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 - Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants. If a new child arrives before deletion finishes, Kandev keeps the parent and reports a conflict. Refresh the deletion preview before retrying. Ephemeral and automation-created children may be excluded from the cascade preview, so refreshing alone may return the same conflict while one retains its parent relationship.
 - Executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
+
+Deleting or expiring an ordinary Quick Chat also attempts to remove its Claude Code or Codex
+session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
+leaves other conversations and the agent's shared indexes and history databases in place.
+It uses the host's home and config-directory settings; overrides set only in an agent or
+executor profile are outside this cleanup.
 
 ## Troubleshooting
 

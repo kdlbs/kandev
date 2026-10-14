@@ -52,8 +52,9 @@ override the user's existing confirmation preference.
 - The recheck needs bounded queries, persistent scheduling state, and
   mutation-time ownership and cleanliness checks. Existing task cleanup and
   unarchive races remain governed by the task lifecycle generation boundary.
-- Directory contents outside managed Git worktrees and truly orphaned roots
-  remain subject to the operator's separate storage policy.
+- The separate storage policy still owns unrelated orphan roots. Removal of
+  contents beside worktrees in an admitted archived task root is superseded by
+  [Archived task directory cleanup](2026-10-13-archived-task-directory-cleanup.md).
 
 ## Alternatives Considered
 

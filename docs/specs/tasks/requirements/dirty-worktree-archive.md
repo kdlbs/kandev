@@ -1,8 +1,8 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-09-21
-updated: 2026-09-24
+updated: 2026-10-14
 owners:
   - cfl
 ---
@@ -82,6 +82,38 @@ maintenance or risking the loss of local changes.
   becomes safe. The user's choice to bypass archive confirmation and
   programmatic archive behavior shall remain unchanged.
 
+### REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-003: Archived Task Directory Cleanup
+
+**Intent:** Once archive has reclaimed every task-owned worktree, the enclosing
+managed task directory shall be removed with any files and nested folders the
+agent created outside those worktrees.
+
+#### Acceptance criteria
+
+- **AC-TASKS-DIRTY-WORKTREE-ARCHIVE-003.1:** When archive cleanup has removed
+  every owned worktree and the task environment is no longer in use, the system
+  shall recursively remove the managed task directory, including loose files,
+  nested directories, and its ownership marker. The tasks base directory,
+  other tasks, and paths outside this task directory shall remain intact.
+- **AC-TASKS-DIRTY-WORKTREE-ARCHIVE-003.2:** When at least one worktree remains
+  dirty, active, shared, failed, or of uncertain ownership, or an owned runtime
+  has not stopped, the system shall preserve the enclosing directory. Cleaning
+  and reclaiming the last retained worktree shall complete directory cleanup.
+- **AC-TASKS-DIRTY-WORKTREE-ARCHIVE-003.3:** When directory deletion fails after
+  worktree removal, cleanup shall retain retryable intent across restart and
+  shall not report that required directory cleanup succeeded. A proven prior
+  removal shall complete idempotently. Unarchive or ownership change shall
+  prevent delayed cleanup from deleting an active or newly owned directory.
+- **AC-TASKS-DIRTY-WORKTREE-ARCHIVE-003.4:** The same behavior shall apply to
+  direct, cascade, and scheduled archive and later archived-worktree reclamation.
+  Removing an individual session or worktree shall not authorize recursive
+  removal of the enclosing task directory.
+
+## Exclusions
+
+This addition does not change dirty Git worktree retention, task-delete consent,
+remote task-directory policy, or removal of unrelated orphan directories.
+
 ## System design
 
 [Dirty worktree task archive](../system-design/dirty-worktree-archive.md).
@@ -90,3 +122,4 @@ maintenance or risking the loss of local changes.
 
 - [Preserve dirty worktrees on archive](../../../plans/dirty-worktree-archive/plan.md)
 - [Reclaim retained archived worktrees](../../../plans/archived-worktree-reclamation/plan.md)
+- [Remove archived task directories](../../../plans/archive-task-directory-cleanup/plan.md)
