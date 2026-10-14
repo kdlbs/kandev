@@ -82,6 +82,30 @@ for (const authenticated of [false, true]) {
         await assertAdoptionAuthentication(browser, context, backend.baseUrl, task.id);
       }
       const endpoint = `${backend.baseUrl}/api/v1/tasks/${task.id}/workspace-adoption`;
+      if (!authenticated) {
+        for (const [method, suffix] of [
+          ["POST", "preview"],
+          ["POST", "apply"],
+          ["GET", randomUUID()],
+        ]) {
+          const refused = await context.request.fetch(`${endpoint}/${suffix}`, {
+            method,
+            ...(method === "POST"
+              ? {
+                  data: {
+                    session_id: sessionId,
+                    slot_id: identity.slot_id,
+                    checkout_path: clone.candidate,
+                  },
+                }
+              : {}),
+          });
+          expect(refused.status(), await refused.text()).toBe(403);
+        }
+        expect(readAdoptionIdentity(backend.tmpDir, sessionId)).toEqual(identity);
+        expect(fs.readFileSync(path.join(identity.worktree_path, ".git"))).toEqual(clone.marker);
+        return;
+      }
       const previewResponse = await context.request.post(`${endpoint}/preview`, {
         data: { session_id: sessionId, slot_id: identity.slot_id, checkout_path: clone.candidate },
       });

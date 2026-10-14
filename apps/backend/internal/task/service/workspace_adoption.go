@@ -36,7 +36,7 @@ func (s *Service) adoptionDependencies(ctx context.Context, taskID string) (work
 		return nil, nil, ErrForbidden
 	}
 	identity, ok := authn.IdentityFromContext(ctx)
-	if !ok || !identity.IsAdmin() {
+	if !ok || identity.Synthetic || !identity.IsAdmin() {
 		return nil, nil, ErrForbidden
 	}
 	if err := s.AuthorizeTaskScope(ctx, taskID, authz.ScopeWorkspaceManage); err != nil {

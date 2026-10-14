@@ -35,7 +35,9 @@ Decision: [explicit checkout adoption](../../../decisions/2026-10-11-portable-ch
 
 - **AC-TASKS-PORTABLE-ADOPTION-001.1:** Preview and validation are read-only. Apply requires an
   explicit administrator request, ordinary task access and a complete preview token.
-  Agent-origin requests cannot invoke the operator HTTP surface.
+  The administrator must authenticate with a verified session or personal access
+  token. Auth-disabled synthetic identities and agent-origin requests cannot
+  invoke the operator HTTP surface.
 - **AC-TASKS-PORTABLE-ADOPTION-001.2:** Only host Worktree environments are eligible. Remote
   and Local executor workspace contracts remain unchanged, including Docker executors.
 - **AC-TASKS-PORTABLE-ADOPTION-001.3:** Apply requires the existing idle session incarnation,

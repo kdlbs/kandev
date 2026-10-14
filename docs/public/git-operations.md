@@ -624,12 +624,14 @@ not a task using the Docker executor.
 
 Before you preview an adoption, confirm these prerequisites:
 
+- [Authentication](authentication.md) is enabled, and the request uses an administrator session or personal access token. Auth-disabled requests are refused (403).
 - Every runtime consuming the environment is stopped through its normal lifecycle.
 - The existing session is waiting for input.
 - The prepared clone is a direct child of the same owned task root with independent Git metadata.
 - The clone uses the registered origin and the selected branch on an existing commit.
 - Its history contains the registered source branch commit as a real ancestor; replacement refs cannot provide proof.
 - The original pointer identifies missing administration in the registered source.
+- The source Git administration parent is a real directory, or is absent; a symlinked parent is refused.
 
 Escaped ref/object metadata, legacy grafts and external alternate object storage
 are refused. Ordinary packed refs are supported.

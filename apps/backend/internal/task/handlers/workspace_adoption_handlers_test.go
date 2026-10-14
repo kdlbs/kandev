@@ -91,7 +91,7 @@ func newAdoptionHTTPFixture(t *testing.T) adoptionHTTPFixture {
 		q    string
 		args []any
 	}{
-		{`INSERT INTO workspaces(id,name,created_at,updated_at) VALUES('ws-adoption','Fixture',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, nil},
+		{`INSERT INTO workspaces(id,name,owner_id,created_at,updated_at) VALUES('ws-adoption','Fixture','operator',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, nil},
 		{`INSERT INTO tasks(id,workspace_id,title,state,created_at,updated_at) VALUES('task-adoption','ws-adoption','Fixture','IN_PROGRESS',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, nil},
 		{`INSERT INTO repositories(id,workspace_id,name,source_type,local_path,created_at,updated_at) VALUES('repo-adoption','ws-adoption','Fixture','local',?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, []any{source}},
 		{`INSERT INTO task_repositories(id,task_id,repository_id,checkout_branch,position,created_at,updated_at) VALUES('attachment-adoption','task-adoption','repo-adoption','feature/adoption',2,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, nil},
@@ -125,7 +125,7 @@ func newAdoptionHTTPFixture(t *testing.T) adoptionHTTPFixture {
 		if c.GetHeader("X-Fixture-Member") == "true" {
 			role = authn.RoleMember
 		}
-		authn.SetOnGin(c, authn.Identity{UserID: "operator", Role: role, Synthetic: true})
+		authn.SetOnGin(c, authn.Identity{UserID: "operator", Role: role})
 		if c.GetHeader("X-Fixture-Agent") == "true" {
 			c.Set("agent_claims", &officeagents.AgentClaims{})
 		}

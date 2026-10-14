@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,11 +83,11 @@ func (m *Manager) inspectWorkspaceAdoption(ctx context.Context, selection models
 	i.Proof.OriginalPath = slot.WorktreePath
 	i.Proof.CandidatePath = candidate
 	i.Proof.Branch = slot.WorktreeBranch
-	if err := i.inspectOldMarker(); err != nil {
+	if err := i.pinSourceMetadata(ctx); err != nil {
 		i.Close()
 		return nil, err
 	}
-	if err := i.pinSourceMetadata(ctx); err != nil {
+	if err := i.inspectOldMarker(); err != nil {
 		i.Close()
 		return nil, err
 	}
@@ -139,11 +140,59 @@ func (i *WorkspaceAdoptionInspection) inspectOldMarker() error {
 	if err := validateMissingLinkedWorktreeAdmin(i.source, target); err != nil {
 		return err
 	}
-	if _, err := os.Lstat(target); !os.IsNotExist(err) {
-		return models.ErrWorkspaceAdoptionStale
+	if err := i.pinRetiredAdministrationParent(target); err != nil {
+		return err
 	}
 	i.Proof.MarkerSHA256 = adoptionHash(i.marker)
 	i.Proof.MissingGitDir = target
+	return nil
+}
+
+func (i *WorkspaceAdoptionInspection) pinRetiredAdministrationParent(target string) error {
+	if filepath.Dir(target) != filepath.Join(i.source, ".git", "worktrees") {
+		return models.ErrWorkspaceAdoptionStale
+	}
+	metadata := i.handles[filepath.Join(i.source, ".git")]
+	mode, err := metadata.LstatEntry("worktrees")
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !mode.IsDir() || mode&os.ModeSymlink != 0 {
+		return models.ErrWorkspaceAdoptionStale
+	}
+	parent, err := metadata.OpenSubdirectory("worktrees")
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(i.source, ".git", "worktrees")
+	i.handles[path] = parent
+	if err := parent.VerifyPath(path); err != nil {
+		return err
+	}
+	if _, err := parent.LstatEntry(filepath.Base(target)); !errors.Is(err, os.ErrNotExist) {
+		return models.ErrWorkspaceAdoptionStale
+	}
+	return nil
+}
+
+func (i *WorkspaceAdoptionInspection) verifyRetiredAdministration() error {
+	path := filepath.Join(i.source, ".git", "worktrees")
+	parent := i.handles[path]
+	if parent == nil {
+		if _, err := i.handles[filepath.Join(i.source, ".git")].LstatEntry("worktrees"); !errors.Is(err, os.ErrNotExist) {
+			return models.ErrWorkspaceAdoptionStale
+		}
+		return nil
+	}
+	if err := parent.VerifyPath(path); err != nil {
+		return err
+	}
+	if _, err := parent.LstatEntry(filepath.Base(i.Proof.MissingGitDir)); !errors.Is(err, os.ErrNotExist) {
+		return models.ErrWorkspaceAdoptionStale
+	}
 	return nil
 }
 
@@ -252,8 +301,8 @@ func (i *WorkspaceAdoptionInspection) Verify(ctx context.Context) error {
 	if !bytes.Equal(marker, i.marker) {
 		return models.ErrWorkspaceAdoptionStale
 	}
-	if _, err := os.Lstat(i.Proof.MissingGitDir); !os.IsNotExist(err) {
-		return models.ErrWorkspaceAdoptionStale
+	if err := i.verifyRetiredAdministration(); err != nil {
+		return err
 	}
 	return i.verifyGit(ctx)
 }

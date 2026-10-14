@@ -15,6 +15,9 @@ session, environment and logical worktree while selecting an existing clone.
 ## Decision
 
 The backend owns explicit preview, apply and validation of checkout adoption.
+The operator must use a verified administrator session or personal access token.
+Auth-disabled synthetic administrators are refused: a local agent can omit its
+credentials and otherwise receive the same synthetic identity as an operator.
 Only one selected host Worktree repository slot may change. Existing recovery
 claims serialize adoption with startup, cleanup and ownership transfer. Publication
 compares the complete selected inventory, session incarnation and task attachments,

@@ -30,7 +30,10 @@ behavior are separate contracts. No frontend or plugin surface is introduced.
 
 The task HTTP handlers expose administrator preview, apply and receipt lookup.
 The backend composition supplies the caller guard; agent-origin requests and an
-unwired guard fail closed. Task access and workspace management scopes still apply.
+unwired guard fail closed. Both composition and service require a verified,
+non-synthetic administrator identity. Auth-disabled requests are refused because
+they cannot distinguish an operator from an agent omitting credentials. Task access
+and workspace management scopes still apply.
 The service captures the existing waiting session incarnation, complete canonical
 inventory, owner generation and task attachments. Apply acquires a manager lock
 and durable recovery claim, rejects in-memory and persisted consumers, then repeats
@@ -44,7 +47,10 @@ materialized worktree branch; publication compares the full attachment set.
 
 The worktree manager pins the owned task root, original checkout, candidate and
 registered source metadata. The original pointer must identify missing linked
-administration in the registered source. The independent clone must be a direct
+administration in the registered source. A present `worktrees` administration
+parent is opened without following symlinks and retained in the directory proof;
+publication and reuse reject parent replacement or newly restored administration.
+If the parent is absent, publication requires it to remain absent. The independent clone must be a direct
 child of the same root and retain the selected branch, origin and real ancestry.
 Raw Git reads use explicit metadata paths, sanitized Git environment and disabled
 replacement objects. Bounded no-follow traversal refuses escaped refs or objects,

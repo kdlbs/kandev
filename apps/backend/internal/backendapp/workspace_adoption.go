@@ -11,7 +11,7 @@ import (
 func configureWorkspaceAdoptionCaller(h *taskhandlers.TaskHandlers) {
 	h.SetWorkspaceAdoptionCallerGuard(func(c *gin.Context) bool {
 		id, ok := authn.FromGin(c)
-		if !ok || (id.Synthetic && c.GetHeader("Authorization") != "") {
+		if !ok || id.Synthetic {
 			return false
 		}
 		return officeagents.CallerFromContext(c) == nil && officeagents.ClaimsFromContext(c) == nil

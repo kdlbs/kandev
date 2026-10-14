@@ -17,21 +17,22 @@ import (
 
 func TestWorkspaceAdoptionProductionCallerGuard(t *testing.T) {
 	cases := []struct {
-		name                 string
-		wired, agent, bearer bool
-		want                 int
+		name                            string
+		wired, agent, bearer, synthetic bool
+		want                            int
 	}{
-		{"unwired", false, false, false, http.StatusForbidden},
-		{"browser reaches request validation", true, false, false, http.StatusBadRequest},
-		{"known agent refused", true, true, false, http.StatusForbidden},
-		{"single user unknown bearer refused", true, false, true, http.StatusForbidden},
+		{"unwired", false, false, false, false, http.StatusForbidden},
+		{"verified operator reaches request validation", true, false, false, false, http.StatusBadRequest},
+		{"known agent refused", true, true, false, false, http.StatusForbidden},
+		{"single user no-header caller refused", true, false, false, true, http.StatusForbidden},
+		{"single user unknown bearer refused", true, false, true, true, http.StatusForbidden},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			r := gin.New()
 			r.Use(func(c *gin.Context) {
-				authn.SetOnGin(c, authn.Identity{Role: authn.RoleAdmin, Synthetic: true})
+				authn.SetOnGin(c, authn.Identity{Role: authn.RoleAdmin, Synthetic: tc.synthetic})
 				if tc.agent {
 					c.Set("agent_claims", &officeagents.AgentClaims{})
 				}
