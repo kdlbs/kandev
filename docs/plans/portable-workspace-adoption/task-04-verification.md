@@ -82,3 +82,19 @@ must invalidate a pending preview even when the branch strings remain equal.
 SQLite and PostgreSQL selection-CAS regressions include this mutation. This is a
 publication snapshot check; receipt reuse continues to validate its retained
 ownership, selected branch and filesystem authority.
+
+Publication and receipt checks also retain recovery's empty-or-active legacy
+status semantics. SQLite/PostgreSQL regressions prove refusal of a candidate
+already held by an active legacy slot and successful adoption of a selected
+legacy slot without changing its raw status. The narrow source-query predicate
+reproduced the omitted legacy binding and passed after correction; full repository
+and PostgreSQL acceptance remains hosted.
+
+Full hosted handler events exposed nil-versus-empty metadata normalization in the
+new CAS comparison; both sides now share an empty-metadata digest. Existing real
+HTTP positive cases retain their 200 assertions, and SQLite/PostgreSQL coverage
+checks equivalent null metadata. PostgreSQL 16 cutover leaves also exposed the
+receipt table's environment foreign key: synthetic legacy rewinds remove the
+future table, while production cutover preserves any existing receipt data and
+rebinds its constraint. A permanent hybrid PostgreSQL regression retains exact
+receipt JSON/environment identity and verifies the surviving foreign key/cascade.

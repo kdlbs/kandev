@@ -121,7 +121,7 @@ func (r *Repository) validateAdoptionAttachmentsTx(ctx context.Context, tx *sqlx
 		if err := json.Unmarshal([]byte(row.Metadata), &metadata); err != nil {
 			return fmt.Errorf("decode workspace adoption attachment metadata: %w", err)
 		}
-		row.MetadataDigest = models.WorkspaceAdoptionDigest(metadata)
+		row.MetadataDigest = models.WorkspaceAdoptionMetadataDigest(metadata)
 		attachments = append(attachments, row.WorkspaceAdoptionAttachment)
 	}
 	if models.WorkspaceAdoptionDigest(attachments) != p.Selection.AttachmentsDigest {
@@ -136,13 +136,13 @@ func (r *Repository) publishAdoptionTx(ctx context.Context, tx *sqlx.Tx, p model
 		return err
 	}
 	var count int
-	if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM task_environment_repos WHERE worktree_path=? AND deleted_at IS NULL AND status='active'`), p.Proof.CandidatePath); err != nil {
+	if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM task_environment_repos WHERE worktree_path=? AND deleted_at IS NULL AND (COALESCE(status,'')='' OR status='active')`), p.Proof.CandidatePath); err != nil {
 		return err
 	}
 	if count != 0 {
 		return models.ErrWorkspaceAdoptionStale
 	}
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_environment_repos SET worktree_path=?,worktree_source_clone_path=?,worktree_source_common_dir=?,updated_at=? WHERE id=? AND task_environment_id=? AND worktree_id=? AND worktree_path=? AND worktree_branch=? AND status='active' AND deleted_at IS NULL`),
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_environment_repos SET worktree_path=?,worktree_source_clone_path=?,worktree_source_common_dir=?,updated_at=? WHERE id=? AND task_environment_id=? AND worktree_id=? AND worktree_path=? AND worktree_branch=? AND (COALESCE(status,'')='' OR status='active') AND deleted_at IS NULL`),
 		p.Proof.CandidatePath, p.Proof.CandidatePath, filepath.Join(p.Proof.CandidatePath, ".git"), r.nowUTC(), p.SlotID, p.Selection.Snapshot.TaskEnvironmentID, slot.WorktreeID, p.Proof.OriginalPath, p.Proof.Branch)
 	if err != nil {
 		return err

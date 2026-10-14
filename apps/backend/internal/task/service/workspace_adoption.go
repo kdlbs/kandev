@@ -107,7 +107,7 @@ func (s *Service) selectAdoptionAttachment(ctx context.Context, selection *model
 			PRNumber: taskRepositoryPRNumber(link.Metadata), Position: link.Position}
 		attachments = append(attachments, models.WorkspaceAdoptionAttachment{ID: link.ID, TaskID: link.TaskID,
 			RepositoryID: link.RepositoryID, BaseBranch: link.BaseBranch, CheckoutBranch: link.CheckoutBranch,
-			MetadataDigest: models.WorkspaceAdoptionDigest(link.Metadata), Position: link.Position})
+			MetadataDigest: models.WorkspaceAdoptionMetadataDigest(link.Metadata), Position: link.Position})
 	}
 	plans := worktree.BuildBranchIdentityPlans(inputs)
 	matches := 0

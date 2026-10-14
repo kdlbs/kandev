@@ -58,6 +58,14 @@ func WorkspaceAdoptionDigest(value any) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// Empty metadata has the same branch authority regardless of repository decoding.
+func WorkspaceAdoptionMetadataDigest(metadata map[string]interface{}) string {
+	if len(metadata) == 0 {
+		metadata = map[string]interface{}{}
+	}
+	return WorkspaceAdoptionDigest(metadata)
+}
+
 func (p WorkspaceAdoptionPreview) Digest() string {
 	p.Token = ""
 	return WorkspaceAdoptionDigest(p)

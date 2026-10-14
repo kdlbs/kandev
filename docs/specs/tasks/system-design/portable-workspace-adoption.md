@@ -44,6 +44,10 @@ The receipt captures that selector and its base branch independently from the
 materialized worktree branch; publication compares the full attachment set,
 including its metadata digest so PR-number mutations cannot change a duplicate
 branch identity between selection and the transaction's locked comparison.
+Nil and empty metadata objects have the same digest, matching repository decoding.
+Publication and receipt lookup use the same active-inventory rule as recovery:
+an undeleted slot with an empty legacy status remains active. Competing legacy
+bindings prevent publication; adopting a selected legacy slot preserves its status.
 
 ## Filesystem and Git proof
 
@@ -79,6 +83,10 @@ advance normally; authority or metadata changes fail closed. There is currently
 one receipt per environment/slot. Re-attesting or replacing a stale receipt is an
 unimplemented lifecycle limitation requiring a separately reviewed operator
 contract; reuse checks must not be weakened to conceal it.
+PostgreSQL ownership cutover retains receipt bytes and rebinds their environment
+foreign key to the replacement table. A receipt referencing an environment that
+does not survive the cutover fails the constraint check and rolls back the cutover;
+its recorded authority is never rewritten.
 
 ## Failure and observability
 
