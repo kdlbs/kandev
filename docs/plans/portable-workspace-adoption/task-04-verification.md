@@ -75,3 +75,10 @@ Permanent HTTP regressions cover preview, apply rollback, receipt/replay and reu
 including replacement of a retained administration-parent handle. Bounded source
 checks reproduced these defects and passed after correction; real package and
 runtime acceptance still requires the hosted command results.
+
+Publication also captures attachment metadata in its CAS digest. A PR-number
+mutation can change the shared branch planner's duplicate identity slug, so it
+must invalidate a pending preview even when the branch strings remain equal.
+SQLite and PostgreSQL selection-CAS regressions include this mutation. This is a
+publication snapshot check; receipt reuse continues to validate its retained
+ownership, selected branch and filesystem authority.

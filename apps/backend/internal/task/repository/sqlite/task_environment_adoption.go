@@ -104,13 +104,25 @@ func (r *Repository) validateAdoptionSelectionTx(ctx context.Context, tx *sqlx.T
 
 func (r *Repository) validateAdoptionAttachmentsTx(ctx context.Context, tx *sqlx.Tx, p models.WorkspaceAdoptionPreview) error {
 	// Lock the complete attachment set before comparing its ordering/branch identity.
-	q := `SELECT id,task_id,repository_id,COALESCE(checkout_branch,'') AS checkout_branch,COALESCE(base_branch,'') AS base_branch,COALESCE(position,0) AS position FROM task_repositories WHERE task_id=? ORDER BY id`
+	q := `SELECT id,task_id,repository_id,COALESCE(checkout_branch,'') AS checkout_branch,COALESCE(base_branch,'') AS base_branch,COALESCE(metadata,'{}') AS metadata,COALESCE(position,0) AS position FROM task_repositories WHERE task_id=? ORDER BY id`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		q += ` FOR UPDATE`
 	}
-	var attachments []models.WorkspaceAdoptionAttachment
-	if err := tx.SelectContext(ctx, &attachments, r.db.Rebind(q), p.Selection.Snapshot.TaskID); err != nil {
+	var rows []struct {
+		models.WorkspaceAdoptionAttachment
+		Metadata string `db:"metadata"`
+	}
+	if err := tx.SelectContext(ctx, &rows, r.db.Rebind(q), p.Selection.Snapshot.TaskID); err != nil {
 		return err
+	}
+	attachments := make([]models.WorkspaceAdoptionAttachment, 0, len(rows))
+	for _, row := range rows {
+		var metadata map[string]interface{}
+		if err := json.Unmarshal([]byte(row.Metadata), &metadata); err != nil {
+			return fmt.Errorf("decode workspace adoption attachment metadata: %w", err)
+		}
+		row.MetadataDigest = models.WorkspaceAdoptionDigest(metadata)
+		attachments = append(attachments, row.WorkspaceAdoptionAttachment)
 	}
 	if models.WorkspaceAdoptionDigest(attachments) != p.Selection.AttachmentsDigest {
 		return models.ErrWorkspaceAdoptionStale

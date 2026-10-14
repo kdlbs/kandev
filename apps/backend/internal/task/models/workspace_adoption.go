@@ -79,5 +79,6 @@ type WorkspaceAdoptionAttachment struct {
 	RepositoryID   string `json:"repository_id" db:"repository_id"`
 	CheckoutBranch string `json:"checkout_branch" db:"checkout_branch"`
 	BaseBranch     string `json:"base_branch" db:"base_branch"`
+	MetadataDigest string `json:"metadata_digest" db:"-"`
 	Position       int    `json:"position" db:"position"`
 }

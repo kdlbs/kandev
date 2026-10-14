@@ -41,7 +41,9 @@ selection and filesystem inspection before publication. No prompt replay occurs.
 Attachment selection uses the same branch identity plans as ordinary launch, so
 a generated worktree branch retains the attachment's empty checkout selector.
 The receipt captures that selector and its base branch independently from the
-materialized worktree branch; publication compares the full attachment set.
+materialized worktree branch; publication compares the full attachment set,
+including its metadata digest so PR-number mutations cannot change a duplicate
+branch identity between selection and the transaction's locked comparison.
 
 ## Filesystem and Git proof
 
