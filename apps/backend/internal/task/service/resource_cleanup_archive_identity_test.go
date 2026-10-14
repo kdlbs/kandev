@@ -564,7 +564,7 @@ func TestArchiveCleanupSnapshotPreservesBranchMetadataAcrossRestart(t *testing.T
 	// Process the durable job with a fresh manager. This models a restart and
 	// proves that the JSON boundary, not the old manager cache, supplies the
 	// cleanup policy fields.
-	restartedManager := newCleanupTestWorktreeManager(t, repo)
+	restartedManager := newCleanupTestWorktreeManagerAt(t, repo, filepath.Dir(filepath.Dir(wt.Path)))
 	restartedManager.SetRepositoryProvider(worktree.NewRepositoryAdapter(repo))
 	svc.SetWorktreeCleanup(restartedManager)
 	svc.SetEnvironmentDestroyer(&archiveManagerEnvironmentDestroyer{mgr: restartedManager})

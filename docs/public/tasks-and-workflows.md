@@ -973,6 +973,11 @@ about 24 hours and removes it when it is clean. This task-lifecycle check runs
 even when scheduled storage cleanup is disabled. Git does not include ignored
 files in this check. Protect ignored work that must remain.
 
+After the last worktree is reclaimed and the task environment is no longer in
+use, Kandev also removes the enclosing task folder and everything inside it,
+including files or nested folders created beside the worktrees. A retained
+worktree keeps that task folder until reclamation can finish.
+
 | Executor      | Archive cleanup                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                                             |

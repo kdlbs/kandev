@@ -64,10 +64,12 @@ type taskArchiveWorktreeReclaimer interface {
 }
 
 type archiveReclaimSnapshot struct {
-	WorktreeID     string    `json:"worktree_id"`
-	WorktreePath   string    `json:"worktree_path"`
-	RepositoryPath string    `json:"repository_path"`
-	ArchivedAt     time.Time `json:"archived_at"`
+	TaskDirectory   *worktree.TaskDirectoryCleanup `json:"task_directory,omitempty"`
+	TaskEnvironment *models.TaskEnvironment        `json:"task_environment,omitempty"`
+	WorktreeID      string                         `json:"worktree_id"`
+	WorktreePath    string                         `json:"worktree_path"`
+	RepositoryPath  string                         `json:"repository_path"`
+	ArchivedAt      time.Time                      `json:"archived_at"`
 }
 
 type taskResourceCleanupTaskInspector interface {
@@ -107,7 +109,8 @@ type persistedWorktreeBranchMetadata struct {
 }
 
 type taskResourceCleanupSnapshot struct {
-	ManagedDelete *managed.DeleteClaim `json:"managed_delete,omitempty"`
+	TaskDirectory *worktree.TaskDirectoryCleanup `json:"task_directory,omitempty"`
+	ManagedDelete *managed.DeleteClaim           `json:"managed_delete,omitempty"`
 	// InventoryRepair retains the successor's provenance through progress saves.
 	InventoryRepair        json.RawMessage                            `json:"inventory_repair,omitempty"`
 	Sessions               []*models.TaskSession                      `json:"sessions,omitempty"`
@@ -936,9 +939,15 @@ func (s *Service) processArchiveReclaimJob(
 	}
 	if wt == nil {
 		if outcome == taskArchiveReclaimOutcomeStale {
+			if err := s.finishArchiveReclaimDirectory(ctx, job, snapshot); err != nil {
+				return s.retryTaskResourceCleanupJob(ctx, job, err)
+			}
 			return s.completeArchiveReclaimJob(ctx, job, outcome)
 		}
 		return s.waitForCleanArchiveReclaim(ctx, job, outcome)
+	}
+	if err := s.captureReclaimTaskDirectory(ctx, job, &snapshot, wt); err != nil {
+		return s.retryTaskResourceCleanupJob(ctx, job, err)
 	}
 	reclaimer, ok := s.worktreeCleanup.(taskArchiveWorktreeReclaimer)
 	if !ok {
@@ -961,6 +970,9 @@ func (s *Service) processArchiveReclaimJob(
 	}
 	if outcome == taskArchiveReclaimOutcomeInUse {
 		return s.waitForCleanArchiveReclaim(ctx, job, outcome)
+	}
+	if err := s.finishArchiveReclaimDirectory(ctx, job, snapshot); err != nil {
+		return s.retryTaskResourceCleanupJob(ctx, job, err)
 	}
 	return s.completeArchiveReclaimJob(ctx, job, outcome)
 }
@@ -1265,6 +1277,11 @@ func (s *Service) executeTaskResourceCleanupJob(
 	if cancelled, err := s.cancelIfTaskUnarchived(ctx, job); err != nil || cancelled {
 		return err
 	}
+	if len(failedStops) == 0 {
+		if err := s.captureArchiveTaskDirectory(ctx, job, snapshot); err != nil {
+			return err
+		}
+	}
 	if err := s.captureAndPersistTaskSourceManifest(ctx, job, snapshot, len(failedStops)); err != nil {
 		return err
 	}
@@ -1305,6 +1322,16 @@ func (s *Service) executeTaskResourceCleanupJob(
 			discardWorktreeChanges: snapshot.DiscardWorktreeChanges,
 		},
 		taskCleanupPreserveRows(stopOutcome))...)
+	if job.IsArchive() && len(failedStops) == 0 && len(errs) == 0 {
+		if cancelled, err := s.cancelIfTaskUnarchived(ctx, job); err != nil || cancelled {
+			// Worktrees may already be removed even when root cleanup is cancelled.
+			snapshot.OrphanReapRoots = mergeOrphanReapRoots(snapshot.OrphanReapRoots, confirmOrphanReapRootsRemoved(reapRootCandidates))
+			return err
+		}
+		if err := s.cleanupArchiveTaskDirectory(ctx, job.TaskID, snapshot.TaskEnvironment, snapshot.TaskDirectory); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	// Record every path this attempt actually removed and confirmed absent
 	// as a reap root, before any early return below can skip it. This
 	// recording obligation has no clean-stop gate and no cancellation gate:
