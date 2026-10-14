@@ -57,6 +57,34 @@ git diff --check
 
 ## Results
 
+### Shared-capacity investigation after the twelfth run
+
+Full E2E run 38634314141 succeeds in 24m37s. Normal jobs require only change
+detection and build, yet their starts span 20:47:47 through 20:55:47 UTC after
+build completion at 20:47:45. All run on GitHub-hosted Ubuntu. Other PR workflows
+overlap this interval; dependency-ready delay includes scheduling/provisioning
+and cannot identify the exact account-wide capacity cause by itself.
+
+Do not grow the matrix. A read-only diagnostic replans the exact 1,337 native
+units/3,810 tests using this run's selected successful-main profile 38628885177
+and evaluates its observed final test-body costs with three guarded processes.
+The longest body allocation grows from 476.6 seconds at 28 jobs to 555.6 at
+21, 651.2 at 18, and 791.4 at 14. Replaying observed ready-slot arrivals with
+fixed setup overhead shows no material improvement from those smaller matrices.
+This model excludes retry costs and changes to fleet scheduling, so it is not
+a hosted comparison or an unconditional rejection of fewer jobs. It does not
+justify adopting a new count. Retain the existing matrix until a candidate
+reduces measured work or loaded completion time.
+
+The last shard's recorded fixtures take 105.4 seconds in before-hooks and
+48.1 in after-hooks across 154 attempts; these overlap child fixture timings.
+It also has two 90-second timeouts waiting for a missing proceed button and a
+94.6-second oversized-message case. Retain assertions and lifecycle coverage;
+do not attribute those isolated observations to a proven whole-suite saving.
+No test, fixture, resource guard or runner-placement change is adopted from
+this investigation. The next full set measures warm host build/cache behavior
+without application, test or workflow changes.
+
 ### Runtime viewport flow audit
 
 Audit the three desktop-project cases `narrow fine-pointer runtime flow retains

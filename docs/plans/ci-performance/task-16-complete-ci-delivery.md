@@ -53,6 +53,34 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+Twelfth head `4dd5ae57f32` succeeds in all three complete workflows on hosted
+merge `74b4edcdc694`: backend 38634314044 takes 1,317 seconds and 229.55
+runner-minutes; frontend 38634314162 takes 795 seconds and 26.8 runner-minutes;
+E2E 38634314141 takes 1,477 seconds and 304.5167 runner-minutes. The complete
+set is 24m37s and 560.8667 runner-minutes. It fails timing acceptance; zero of
+the three required successful sub-fifteen-minute samples are established.
+All 3,963 E2E identities remain: 3,915 first passes, eight retry-only passes,
+40 existing skips and zero final failures. Every required check passes and
+the exact-head snapshot has no unresolved review thread. Walkthrough generation
+also succeeds on this head; the prior provider error is not a current failure.
+
+The new host build's first cache population takes 294 seconds including job
+cleanup. Native backend/web compilation takes 195 seconds; logs prove host
+pnpm and Go cache publication. This cold run does not establish a net build
+improvement over the earlier warm container build. E2E's final-finishing shard
+25 starts 399 seconds after build completion and runs for 687 seconds. Another
+normal shard starts 482 seconds after build. Those are dependency-ready delays,
+not test execution; concurrent workflows from other PRs are observed, but the
+API does not prove the exact capacity or provisioning cause. Reporting after
+the final shard adds 65 seconds through workflow completion.
+
+The user prioritizes full E2E and accepts jobs already near seventeen minutes;
+do not continue shaving those backend jobs. Keep total work and shared capacity
+visible rather than seeking a quiet-run best by increasing fanout. The next
+measurement changes delivery records only: application, test, workflow and
+runner selections stay byte-for-byte unchanged. Run one complete set at a time
+on this same PR cache scope, and retain all waiting and warm-up costs.
+
 Tenth candidate `cef9436c77d` completes all three workflows: backend
 38626664788 succeeds in 702 seconds (693 execution critical path; 196.3167
 runner-minutes), frontend 38626664893 succeeds in 759 seconds (751 execution
