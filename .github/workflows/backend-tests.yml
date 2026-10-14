@@ -825,7 +825,6 @@ jobs:
           key: go-sidebar-resources-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
           restore-keys: |
             go-sidebar-resources-${{ runner.os }}-
-            go-static-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
       - name: Measure isolated native memory and pooled retention
         if: startsWith(matrix.mode, 'memory-')
         env:
@@ -993,7 +992,7 @@ jobs:
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: apps/backend/go.mod
-          cache-dependency-path: apps/backend/go.sum
+          cache: false
 
       - name: Resolve Windows Go build cache
         id: windows_go_cache
@@ -1002,14 +1001,28 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $goVersion = go env GOVERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $modulePath = go env GOMODCACHE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "path=$cachePath" >> $env:GITHUB_OUTPUT
           "version=$goVersion" >> $env:GITHUB_OUTPUT
+          "modulePath=$modulePath" >> $env:GITHUB_OUTPUT
+          "day=$([DateTime]::UtcNow.ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture))" >> $env:GITHUB_OUTPUT
+
+      - name: Cache Windows Go modules
+        id: windows_module_cache
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.windows_go_cache.outputs.modulePath }}
+          key: go-windows-modules-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
 
       - name: Cache Windows compiled packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: windows_build_cache
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.windows_go_cache.outputs.path }}
-          key: go-windows-build-${{ matrix.suite }}-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-${{ github.sha }}
+          key: go-windows-build-${{ matrix.suite }}-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-${{ steps.windows_go_cache.outputs.day }}
           restore-keys: |
             go-windows-build-${{ matrix.suite }}-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-
 
@@ -1208,3 +1221,19 @@ jobs:
       - name: Test Windows agent-survival flag availability
         if: matrix.suite == 'native'
         run: go test -race -v -run '^TestAgentSurvivalAvailabilityMatchesPlatformScope$' ./internal/runtimeflags
+
+      - name: Save Windows Go modules
+        if: success() && matrix.suite == 'compile' && steps.windows_module_cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.windows_go_cache.outputs.modulePath }}
+          key: ${{ steps.windows_module_cache.outputs.cache-primary-key }}
+
+      - name: Save Windows compiled packages
+        if: success() && steps.windows_build_cache.outputs.cache-hit != 'true' && (matrix.suite != 'process' || matrix.cohort == 1)
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.windows_go_cache.outputs.path }}
+          key: ${{ steps.windows_build_cache.outputs.cache-primary-key }}

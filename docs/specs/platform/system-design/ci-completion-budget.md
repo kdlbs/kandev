@@ -138,8 +138,14 @@ every native Go build; Go's content-based invalidation remains authoritative.
 Exact same-day hits avoid recompressing an unchanged generation before browser
 jobs can start. Include cold population, rollover, compression, upload and restore
 in measurements, retain trusted cache scope and keep cache failures optional.
-Windows additionally snapshots only native GOCACHE by suite and source, retaining
-Setup-Go's module cache. Process cohorts share one compiled-package cache.
+Windows uses separate optional module-download and native-compilation caches;
+setup-go caching is disabled so each directory has one cache owner. Compilation
+generations roll daily in UTC within suite, architecture, installed Go version
+and module identity, retaining their compatible restore prefix. All process
+cohorts share one compiled-package key, published only by successful cohort one.
+Other suites publish their own build generations; only the compile suite
+publishes the common module cache. Exact hits skip saves, and every native
+command remains unconditional regardless of cache availability or outcome.
 
 Sidebar resource modes share an optional role/dependency Go module and build
 cache. Native Go cache validation still decides which compilation can be reused.

@@ -38,13 +38,40 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         discover = step_block(self.workflow, "Resolve Windows Go build cache")
         self.assertIn("go env GOCACHE", discover)
         self.assertIn("go env GOVERSION", discover)
+        self.assertIn("go env GOMODCACHE", discover)
+        self.assertIn("[DateTime]::UtcNow", discover)
+        self.assertIn("yyyy-MM-dd", discover)
+        setup = step_block(self.workflow, "Set up Go")
+        self.assertIn("cache: false", setup)
+        self.assertNotIn("cache-dependency-path", setup)
         cache = step_block(self.workflow, "Cache Windows compiled packages")
         self.assertIn("path: ${{ steps.windows_go_cache.outputs.path }}", cache)
         self.assertIn("${{ matrix.suite }}", cache)
-        self.assertIn("${{ github.sha }}", cache)
+        self.assertNotIn("${{ github.sha }}", cache)
+        self.assertIn("${{ steps.windows_go_cache.outputs.day }}", cache)
         self.assertIn("${{ steps.windows_go_cache.outputs.version }}", cache)
         self.assertNotIn("matrix.cohort", cache)
         self.assertIn("restore-keys:", cache)
+        self.assertIn("uses: actions/cache/restore@", cache)
+        self.assertIn("continue-on-error: true", cache)
+        modules = step_block(self.workflow, "Cache Windows Go modules")
+        self.assertIn("path: ${{ steps.windows_go_cache.outputs.modulePath }}", modules)
+        self.assertNotIn("outputs.path", modules)
+        self.assertNotIn("github.sha", modules)
+        self.assertNotIn("matrix.suite", modules)
+        self.assertIn("continue-on-error: true", modules)
+        build_save = step_block(self.workflow, "Save Windows compiled packages")
+        self.assertIn("success()", build_save)
+        self.assertIn("outputs.cache-hit != 'true'", build_save)
+        self.assertIn("matrix.suite != 'process' || matrix.cohort == 1", build_save)
+        self.assertIn("steps.windows_build_cache.outputs.cache-primary-key", build_save)
+        self.assertIn("continue-on-error: true", build_save)
+        module_save = step_block(self.workflow, "Save Windows Go modules")
+        self.assertIn("success()", module_save)
+        self.assertIn("matrix.suite == 'compile'", module_save)
+        self.assertIn("outputs.cache-hit != 'true'", module_save)
+        self.assertIn("steps.windows_module_cache.outputs.cache-primary-key", module_save)
+        self.assertIn("continue-on-error: true", module_save)
 
     def test_postgres_16_uses_fixed_catalog_commands(self) -> None:
         self.assertNotIn("PostgresDSNFromEnv", self.workflow)
@@ -222,7 +249,15 @@ func TestSidebarQueryPoolMemoryPlateau(t *testing.T) {
             self.assertIn("{suite: " + value + ", label: " + value + "}", windows_job)
         self.assertIn("fail-fast: false", windows_job)
         self.assertIn("name: Backend (windows, ${{ matrix.label }})", windows_job)
-        self.assertNotIn("continue-on-error", windows_job)
+        self.assertNotIn("continue-on-error", windows_job.partition("    steps:\n")[0])
+        optional_cache_steps = {
+            "Cache Windows Go modules", "Cache Windows compiled packages",
+            "Save Windows Go modules", "Save Windows compiled packages",
+        }
+        for step in windows_job.split("\n      - name: ")[1:]:
+            name = step.partition("\n")[0]
+            if name not in optional_cache_steps:
+                self.assertNotIn("continue-on-error", step, name)
         process = step_block(windows_job, "Test Windows process package")
         self.assertIn("if: matrix.suite == 'process'", process)
         self.assertIn("go run ./cmd/windows-process-tests -cohorts 4 -cohort $env:WINDOWS_PROCESS_COHORT", process)

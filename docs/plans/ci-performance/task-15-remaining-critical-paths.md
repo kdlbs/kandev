@@ -31,6 +31,9 @@ intervals and update this work order before changing E2E execution.
 
 No application behavior, paid capacity activation, trust expansion, assertion
 removal, automatic retries or delegation. Preserve unrelated user changes.
+The already reviewed three-process experiment remains within the unchanged
+memory/CPU guard, with one Playwright worker per process; no guard bypass or
+increase beyond that existing process budget is authorized.
 
 ## Acceptance
 
@@ -423,3 +426,37 @@ corrected `mobile-chrome` run supplies the passing evidence.
 All 37 focused sidebar/hook unit tests and full web typecheck pass. Strict
 changed-file ESLint and formatting pass. No existing test identity, interaction
 or assertion is removed. Hosted retry and elapsed-time impact remain unmeasured.
+
+### Bound Windows cache publication (review follow-up)
+
+Exact-head review and ninth hosted evidence identify per-commit Windows build
+cache publication and duplicate ownership through setup-go. The compile job
+alone spends 137 seconds restoring and 106 seconds publishing its build cache.
+Repository cache usage is 22,821,747,222 bytes across 37 entries at inspection;
+do not infer a quota or change any cache setting.
+
+Use a UTC daily generation for the existing suite/toolchain/architecture/module
+identity, retaining the compatible restore prefix and one shared process-suite
+key across four cohorts. Disable setup-go caching, retain module downloads in
+one separate optional module-only cache, and make compiled-cache failures
+optional. Only successful process cohort 1 publishes the shared process build
+generation; other suites publish their own build generations. Only the compile
+suite publishes the common module cache. Exact hits skip publication.
+Every original build, vet, race test, native selection, deadline and
+required gate must remain unconditional and unchanged. First update the existing
+workflow contract to reject the SHA key and duplicate cache owner; verify it
+fails before changing configuration. Remove the sidebar restore prefix that
+cannot match its different cache path set. Correct stale process-count prose.
+Keep the helper compilation job's compatible legacy fallback during migration;
+defer the optional gate-helper refactor because it changes no timing or coverage.
+Measure the next complete hosted set, including any first daily-generation cost.
+
+The updated cache contract fails before the configuration change and all 25
+backend workflow cases pass afterward. A separate structured YAML comparison
+proves every Windows non-cache step, native command, matrix, deadline,
+environment and permission is unchanged; all other backend jobs are unchanged
+apart from the dead sidebar fallback. Required-gate, runner-placement and action
+pinning checks pass, as do the full 27-workflow pin scan and docs/spec validation.
+This Linux host has no PowerShell runtime; actual Windows restoration,
+publication, UTC generation and the unchanged native tests remain hosted gates.
+No Windows timing savings are claimed before that measurement.
