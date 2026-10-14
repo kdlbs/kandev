@@ -54,7 +54,10 @@ If the parent is absent, publication requires it to remain absent. The independe
 child of the same root and retain the selected branch, origin and real ancestry.
 Raw Git reads use explicit metadata paths, sanitized Git environment and disabled
 replacement objects. Bounded no-follow traversal refuses escaped refs or objects,
-grafts and external alternates; packed refs remain supported. Revalidation retains
+grafts and external alternates in both source and candidate; packed refs remain supported.
+Both metadata layouts reject symlinked HEAD/config/index files and common-directory
+redirects before Git reads. Source object storage receives the same no-follow and
+promisor-pack checks as the candidate. Revalidation retains
 the root/marker/directory identities. No candidate files, index or old marker are
 rewritten. Both directories remain intact.
 

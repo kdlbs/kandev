@@ -202,7 +202,7 @@ func (i *WorkspaceAdoptionInspection) inspectCandidate(ctx context.Context) erro
 	if err != nil {
 		return err
 	}
-	if err := validateAdoptionMetadata(ctx, metadata, filepath.Join(path, ".git"), true); err != nil {
+	if err := validateAdoptionMetadata(ctx, metadata, filepath.Join(path, ".git")); err != nil {
 		return err
 	}
 	inspected := i.manager.inspectCheckout(ctx, path, i.handles[path])
@@ -244,7 +244,7 @@ func (i *WorkspaceAdoptionInspection) inspectCandidate(ctx context.Context) erro
 		return err
 	}
 	i.Proof.IndexSHA256 = adoptionHash(index)
-	return validateAdoptionMetadata(ctx, metadata, filepath.Join(path, ".git"), true)
+	return validateAdoptionMetadata(ctx, metadata, filepath.Join(path, ".git"))
 }
 
 func (i *WorkspaceAdoptionInspection) pinIdentityPaths() error {
@@ -309,7 +309,7 @@ func (i *WorkspaceAdoptionInspection) Verify(ctx context.Context) error {
 
 func (i *WorkspaceAdoptionInspection) verifyGit(ctx context.Context) error {
 	before := i.Proof
-	if err := validateAdoptionMetadata(ctx, i.handles[filepath.Join(i.source, ".git")], filepath.Join(i.source, ".git"), false); err != nil {
+	if err := validateAdoptionMetadata(ctx, i.handles[filepath.Join(i.source, ".git")], filepath.Join(i.source, ".git")); err != nil {
 		return err
 	}
 	// Reinspection owns temporary metadata handles, not this inspection's pins.

@@ -15,12 +15,12 @@ const maximumAdoptionMetadataEntries = 64 * 1024
 
 // Adoption requires self-contained reference/object storage, beyond ordinary
 // checkout health. Do not widen the healthy-checkout admission classifier.
-func validateAdoptionMetadata(ctx context.Context, h storageworkspaces.DirectoryHandle, path string, objects bool) error {
-	entries := 0
-	roots := []string{"refs", "info"}
-	if objects {
-		roots = append(roots, "objects")
+func validateAdoptionMetadata(ctx context.Context, h storageworkspaces.DirectoryHandle, path string) error {
+	if validateMainGitMetadataLayout(h) != "" {
+		return models.ErrWorkspaceAdoptionStale
 	}
+	entries := 0
+	roots := []string{"refs", "info", "objects"}
 	for _, name := range roots {
 		mode, err := h.LstatEntry(name)
 		if errors.Is(err, os.ErrNotExist) {
@@ -115,7 +115,7 @@ func (i *WorkspaceAdoptionInspection) pinSourceMetadata(ctx context.Context) err
 		}
 		i.handles[path] = metadata
 	}
-	return validateAdoptionMetadata(ctx, i.handles[path], path, false)
+	return validateAdoptionMetadata(ctx, i.handles[path], path)
 }
 
 func (i *WorkspaceAdoptionInspection) candidateMetadata() (storageworkspaces.DirectoryHandle, error) {

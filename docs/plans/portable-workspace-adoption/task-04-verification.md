@@ -64,3 +64,14 @@ stop/restart, operator adoption/replay, persisted logical identities, authentica
 WebSocket resume and file reads from the independent checkout. They introduce no
 UI surface or viewport-dependent behavior. No full-runtime acceptance is claimed
 until the actual hosted cases pass.
+
+Security remediation requires a verified, non-synthetic administrator at both
+the composition and service boundaries. Auth-disabled no-header requests against
+an idle real task are refused. The source's retired administration parent is
+pinned without following links and revalidated before commit/reuse. Both source
+and candidate now receive the same metadata-layout and ref/object-storage checks;
+source HEAD/configuration/object symlinks, alternates and promisor packs are refused.
+Permanent HTTP regressions cover preview, apply rollback, receipt/replay and reuse,
+including replacement of a retained administration-parent handle. Bounded source
+checks reproduced these defects and passed after correction; real package and
+runtime acceptance still requires the hosted command results.

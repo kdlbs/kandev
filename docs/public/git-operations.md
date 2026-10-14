@@ -633,8 +633,9 @@ Before you preview an adoption, confirm these prerequisites:
 - The original pointer identifies missing administration in the registered source.
 - The source Git administration parent is a real directory, or is absent; a symlinked parent is refused.
 
-Escaped ref/object metadata, legacy grafts and external alternate object storage
-are refused. Ordinary packed refs are supported.
+Escaped ref/object metadata, symlinked Git configuration, legacy grafts,
+promisor packs and external alternate object storage are refused in both the
+registered source and the prepared clone. Ordinary packed refs are supported.
 
 Use the operator HTTP API:
 
