@@ -21,6 +21,7 @@ for (const authenticated of [false, true]) {
   }) => {
     test.setTimeout(120_000);
     const context = await browser.newContext({ baseURL: backend.baseUrl });
+    let restoreAdministration: (() => void) | undefined;
     try {
       if (!authenticated) {
         for (const [method, suffix] of [
@@ -74,6 +75,7 @@ for (const authenticated of [false, true]) {
         seedData.repositoryPath,
         identity,
       );
+      restoreAdministration = clone.restoreAdministration;
       if (authenticated) {
         await setupAdmin(context, backend.baseUrl, {
           email: "adoption-admin@e2e.dev",
@@ -205,7 +207,9 @@ for (const authenticated of [false, true]) {
       expect(await receiptAfterResumedRestart.json()).toEqual(receipt);
     } finally {
       await context.close();
+      restoreAdministration?.();
       await backend.restart();
+      await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
     }
   });
 }

@@ -80,7 +80,13 @@ export function prepareIndependentAdoptionClone(
   tmpDir: string,
   source: string,
   identity: AdoptionIdentity,
-): { candidate: string; marker: Buffer; index: Buffer; sentinel: string } {
+): {
+  candidate: string;
+  marker: Buffer;
+  index: Buffer;
+  sentinel: string;
+  restoreAdministration: () => void;
+} {
   const candidate = path.join(path.dirname(identity.worktree_path), `adopted-${randomUUID()}`);
   const env = makeGitEnv(tmpDir);
   const git = (...args: string[]) =>
@@ -109,12 +115,19 @@ export function prepareIndependentAdoptionClone(
     .replace(/^gitdir:\s*/, "");
   const adminPath = path.resolve(identity.worktree_path, admin);
   expect(path.dirname(adminPath)).toBe(path.join(source, ".git", "worktrees"));
-  fs.rmSync(adminPath, { recursive: true });
+  const index = fs.readFileSync(path.join(candidate, ".git", "index"));
+  const retired = fs.mkdtempSync(path.join(tmpDir, "adoption-retired-admin-"));
+  const savedAdmin = path.join(retired, "administration");
+  fs.renameSync(adminPath, savedAdmin);
   return {
     candidate,
     marker,
-    index: fs.readFileSync(path.join(candidate, ".git", "index")),
+    index,
     sentinel,
+    restoreAdministration: () => {
+      fs.renameSync(savedAdmin, adminPath);
+      fs.rmSync(retired, { recursive: true });
+    },
   };
 }
 
