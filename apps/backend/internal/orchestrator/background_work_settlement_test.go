@@ -120,6 +120,19 @@ func TestStartupSettlesBackgroundWorkWithoutLiveAgent(t *testing.T) {
 	require.Len(t, backgroundWorkUpdates(recorded), 2)
 }
 
+func TestStartupKeepsBackgroundWorkOpenWhenLivenessProbeFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentManager := &failingAgentLivenessProbe{mockAgentManager: &mockAgentManager{}}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	observer := &settlingBackgroundWorkObserver{open: []string{"unknown"}}
+	svc.SetBackgroundWorkObserver(observer)
+
+	svc.settleOrphanedBackgroundWorkOnStartup(ctx)
+
+	require.Empty(t, observer.settledSessions())
+}
+
 func TestSettleWithoutSettlerIsNoop(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

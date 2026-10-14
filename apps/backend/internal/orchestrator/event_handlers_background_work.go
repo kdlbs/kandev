@@ -144,7 +144,8 @@ func (s *Service) settleOpenBackgroundWork(ctx context.Context, sessionID string
 
 // settleOrphanedBackgroundWorkOnStartup ends open workloads of every session
 // that has no live agent after a backend restart. A live agent keeps its work
-// open because it can still report completion.
+// open because it can still report completion, and a failed probe is treated
+// as live.
 func (s *Service) settleOrphanedBackgroundWorkOnStartup(ctx context.Context) {
 	settler := s.backgroundWorkSettler()
 	if settler == nil {
@@ -156,8 +157,11 @@ func (s *Service) settleOrphanedBackgroundWorkOnStartup(ctx context.Context) {
 		return
 	}
 	for _, sessionID := range sessionIDs {
-		if s.agentManager != nil && s.agentManager.IsAgentRunningForSession(ctx, sessionID) {
-			continue
+		if s.agentManager != nil {
+			running, err := s.probeAgentRunning(ctx, sessionID)
+			if err != nil || running {
+				continue
+			}
 		}
 		s.settleOpenBackgroundWork(ctx, sessionID)
 	}
