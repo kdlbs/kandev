@@ -21,7 +21,8 @@ for (const authenticated of [false, true]) {
   }) => {
     test.setTimeout(120_000);
     const context = await browser.newContext({ baseURL: backend.baseUrl });
-    let restoreAdministration: (() => void) | undefined;
+    let restoreAdministration: ((adopted: boolean) => void) | undefined;
+    let adopted = false;
     try {
       if (!authenticated) {
         for (const [method, suffix] of [
@@ -118,6 +119,7 @@ for (const authenticated of [false, true]) {
         data: { preview, operation_id: operationId },
       });
       expect(apply.status(), await apply.text()).toBe(200);
+      adopted = true;
       const receipt = await apply.json();
       const replay = await context.request.post(`${endpoint}/apply`, {
         data: { preview, operation_id: operationId },
@@ -207,7 +209,7 @@ for (const authenticated of [false, true]) {
       expect(await receiptAfterResumedRestart.json()).toEqual(receipt);
     } finally {
       await context.close();
-      restoreAdministration?.();
+      restoreAdministration?.(adopted);
       await backend.restart();
       await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
     }

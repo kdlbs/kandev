@@ -34,8 +34,9 @@ type taskCleanupJobContextKey struct{}
 // TaskCleanupJob identifies a task-level archive, delete, or environment-reset
 // job whose durable barrier authorizes resource cleanup for the same task.
 type TaskCleanupJob struct {
-	ID     string
-	TaskID string
+	ID       string
+	TaskID   string
+	Attempts int
 }
 
 // WithTaskCleanupJob carries an already admitted task cleanup job through the

@@ -85,7 +85,7 @@ export function prepareIndependentAdoptionClone(
   marker: Buffer;
   index: Buffer;
   sentinel: string;
-  restoreAdministration: () => void;
+  restoreAdministration: (adopted: boolean) => void;
 } {
   const candidate = path.join(path.dirname(identity.worktree_path), `adopted-${randomUUID()}`);
   const env = makeGitEnv(tmpDir);
@@ -124,8 +124,8 @@ export function prepareIndependentAdoptionClone(
     marker,
     index,
     sentinel,
-    restoreAdministration: () => {
-      fs.renameSync(savedAdmin, adminPath);
+    restoreAdministration: (adopted) => {
+      if (!adopted) fs.renameSync(savedAdmin, adminPath);
       fs.rmSync(retired, { recursive: true });
     },
   };

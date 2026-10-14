@@ -126,3 +126,22 @@ these synthetic fixtures. Unsupported filesystem identity platforms fail closed.
 
 - [Requirements](../requirements/portable-workspace-adoption.md).
 - [Explicit adoption decision](../../../decisions/2026-10-11-portable-checkout-adoption.md).
+
+
+## Retirement of an adopted checkout
+
+Cleanup intake validates the complete adoption binding before retaining its receipt
+in the backend-owned durable cleanup job. Archive capture and removal read this
+provenance only from the currently running job and its exact claimed attempt. The
+snapshot survives task/environment foreign-key deletion and backend restart.
+Archived tasks can supply unchanged retirement provenance but remain ineligible
+for runtime admission. Live inventory, when present, must still match its owner,
+generation, repository, branch identity and physical path.
+
+An independent task checkout requires the owned task-root marker and the retained
+no-follow directory/Git administration proof. Capture and removal revalidate pinned
+paths and current checkout provenance. Neither the registered project primary nor
+an alias to it can be admitted through this branch. Removal requires explicit
+discard consent and removes only the task-owned clone; it does not modify the
+project clone or its branches. Missing provenance, a stale cleanup claim, foreign
+ownership, path replacement or symlinked administration fails closed.

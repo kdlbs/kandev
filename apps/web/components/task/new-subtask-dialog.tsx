@@ -30,6 +30,7 @@ import {
 import { PromptZone, SubtaskFormBody } from "./new-subtask-form-parts";
 import { applySummarizeSessionResult, type SummaryToastFn } from "./session-context-summary";
 import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
+import { useSubtaskParentDefaults } from "./use-subtask-parent-defaults";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Message, TaskSession } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
@@ -223,37 +224,6 @@ function useExecutorDefault(
 }
 
 /**
- * Seeds the chip row with the parent task's repo + branch when the form
- * mounts. Form parent passes `key={open}` so each dialog open remounts the
- * form, which is when this fires. The user can still change or add repos
- * after seeding.
- */
-function useSeedParentRepository(
-  fs: ReturnType<typeof useSubtaskFormState>,
-  parentRepositoryId: string | null,
-  baseBranch: string | null,
-) {
-  useEffect(() => {
-    if (!parentRepositoryId) return;
-    fs.setRepositories([
-      { key: "subtask-row-1", repositoryId: parentRepositoryId, branch: baseBranch ?? "" },
-    ]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-}
-
-/** Pre-fills the agent profile with the parent session's profile on mount. */
-function useSeedAgentProfileId(
-  fs: ReturnType<typeof useSubtaskFormState>,
-  defaultProfileId: string,
-) {
-  useEffect(() => {
-    if (defaultProfileId) fs.setAgentProfileId(defaultProfileId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-}
-
-/**
  * Centralizes the Context selector's branching logic (Blank / Copy parent
  * prompt / Summarize session N) so the form component stays under the
  * complexity cap.
@@ -381,8 +351,15 @@ function NewSubtaskForm({
   );
   // Shim DialogFormState shared with the create-task dialog.
   const fs = useSubtaskFormState(workspaceId);
-  useSeedParentRepository(fs, parentRepositoryId, baseBranch);
-  useSeedAgentProfileId(fs, defaultProfileId);
+  useSubtaskParentDefaults({
+    parentRepositoryId,
+    baseBranch,
+    defaultProfileId,
+    repositoriesDirty: fs.repositoriesDirty,
+    agentProfileId: fs.agentProfileId,
+    setRepositories: fs.setRepositories,
+    setAgentProfileId: fs.setAgentProfileId,
+  });
   const handlers = useDialogHandlers(fs, availableRepositories);
   useGitHubUrlErrorEffect(fs, isOpen);
   useDiscoverReposEffect(fs, isOpen, workspaceId, false, toast);

@@ -80,3 +80,23 @@ Original Human test artifacts and the PostgreSQL fixture remain intact. New
 repair candidate SHA, exact tests and independent targeted Review/QA receipts
 are recorded in task metadata; the original verification does not establish
 acceptance of a new candidate. No deployment or integration occurred.
+
+
+### Hosted retirement regression
+
+Exact 5b74 native authenticated adoption, resume, write, file API, provenance and
+receipt assertions passed through the third backend restart. Its explicit reset
+then failed because archive capture classified the owned independent clone as a
+project primary. Retirement now retains validated receipts in the durable cleanup
+snapshot, checks the running job attempt and pinned owner/path/Git proof, and
+preserves the project primary. Real handler/Git/SQLite and environment-gated
+PostgreSQL tests cover archive/delete after foreign-key cascade and manager
+restart; negative cases cover primary, foreign owner/claim, replaced paths,
+symlinks and missing proof. Final hosted verification remains pending.
+
+The separate terminal mobile parent-default failure showed a correct parent
+session response arriving after form mount, while one-shot seeding left the
+repository and profile empty. Default seeding now accepts delayed parent context
+once, preserving edits. The existing mobile repository assertion and all native
+reset assertions remain unchanged. Hook tests cover delayed context and edited
+values. Final full frontend/mobile verification remains pending.

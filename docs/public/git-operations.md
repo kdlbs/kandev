@@ -637,6 +637,12 @@ Escaped ref/object metadata, symlinked Git configuration, legacy grafts,
 promisor packs and external alternate object storage are refused in both the
 registered source and the prepared clone. Ordinary packed refs are supported.
 
+After adoption, archive and deletion retain the validated checkout identity in the
+durable cleanup job, including across backend restart and task-row deletion.
+Discarding an independent task checkout requires explicit discard consent. Cleanup
+removes that task-owned clone while preserving the registered project clone and
+its branches. Changed ownership, replaced paths or missing provenance stop cleanup.
+
 Use the operator HTTP API:
 
 1. POST `/api/v1/tasks/:id/workspace-adoption/preview` with `session_id`, `slot_id`

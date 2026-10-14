@@ -43,6 +43,10 @@ func ValidateCurrentTx(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, receipt *m
 }
 
 func validateCurrent(ctx context.Context, db *sqlx.DB, q receiptQuery, receipt *models.WorkspaceAdoptionReceipt) error {
+	return validateBinding(ctx, db, q, receipt, " AND t.archived_at IS NULL")
+}
+
+func validateBinding(ctx context.Context, db *sqlx.DB, q receiptQuery, receipt *models.WorkspaceAdoptionReceipt, taskStateGuard string) error {
 	p := receipt.Preview
 	s := p.Selection.Snapshot
 	slot, err := p.Slot()
@@ -58,7 +62,7 @@ func validateCurrent(ctx context.Context, db *sqlx.DB, q receiptQuery, receipt *
  JOIN task_repositories tr ON tr.id=? AND tr.task_id=t.id AND tr.repository_id=r.id
  WHERE te.id=? AND te.task_id=? AND te.ownership_generation=? AND te.executor_type='worktree'
  AND te.task_dir_name=? AND te.workspace_path=? AND te.status='ready'
- AND t.workspace_id=? AND t.archived_at IS NULL AND r.workspace_id=t.workspace_id AND r.deleted_at IS NULL
+ AND t.workspace_id=?`+taskStateGuard+` AND r.workspace_id=t.workspace_id AND r.deleted_at IS NULL
  AND ts.task_id=t.id AND ts.queue_incarnation_id=? AND ts.workspace_path=?
  AND er.id=? AND er.worktree_id=? AND er.repository_id=? AND er.worktree_path=? AND er.worktree_branch=?
  AND er.branch_slug=? AND COALESCE(er.position,0)=?
@@ -79,6 +83,18 @@ func validateCurrent(ctx context.Context, db *sqlx.DB, q receiptQuery, receipt *
 }
 
 func ForWorktree(ctx context.Context, db *sqlx.DB, worktreeID string) (*models.WorkspaceAdoptionReceipt, error) {
+	return forWorktree(ctx, db, worktreeID, ValidateCurrent)
+}
+
+// ForWorktreeCleanupCapture retains unchanged binding authority for retirement.
+// Archived tasks remain ineligible for runtime reuse through ForWorktree.
+func ForWorktreeCleanupCapture(ctx context.Context, db *sqlx.DB, worktreeID string) (*models.WorkspaceAdoptionReceipt, error) {
+	return forWorktree(ctx, db, worktreeID, func(ctx context.Context, db *sqlx.DB, receipt *models.WorkspaceAdoptionReceipt) error {
+		return validateBinding(ctx, db, db, receipt, "")
+	})
+}
+
+func forWorktree(ctx context.Context, db *sqlx.DB, worktreeID string, validate func(context.Context, *sqlx.DB, *models.WorkspaceAdoptionReceipt) error) (*models.WorkspaceAdoptionReceipt, error) {
 	var ids []string
 	if err := db.SelectContext(ctx, &ids, db.Rebind(`SELECT a.operation_id FROM task_environment_checkout_adoptions a
  JOIN task_environment_repos er ON er.id=a.slot_id AND er.task_environment_id=a.task_environment_id
@@ -98,5 +114,5 @@ func ForWorktree(ctx context.Context, db *sqlx.DB, worktreeID string) (*models.W
 	if receipt == nil {
 		return nil, models.ErrWorkspaceAdoptionStale
 	}
-	return receipt, ValidateCurrent(ctx, db, receipt)
+	return receipt, validate(ctx, db, receipt)
 }

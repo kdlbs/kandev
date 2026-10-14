@@ -495,6 +495,9 @@ func (m *Manager) removeWorktreeWithReceipt(
 		return receipt, fmt.Errorf("audit worktree cleanup %s: %w", wt.ID, err)
 	}
 	defer func() {
+		if audit.adoption != nil {
+			audit.adoption.Close()
+		}
 		if audit.pathHandle != nil {
 			_ = audit.pathHandle.Close()
 		}
@@ -516,7 +519,7 @@ func (m *Manager) removeWorktreeWithReceipt(
 	if err := m.finalizeRemovedWorktree(ctx, wt); err != nil {
 		return receipt, err
 	}
-	if !removeBranch {
+	if !removeBranch && audit.adoption == nil {
 		receipt = m.compactManagedBranch(ctx, wt)
 	}
 

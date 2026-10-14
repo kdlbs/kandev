@@ -330,11 +330,19 @@ func (i *WorkspaceAdoptionInspection) verifyGit(ctx context.Context) error {
 
 // ValidateWorkspaceAdoptionProof validates a retained receipt without granting access.
 func (m *Manager) ValidateWorkspaceAdoptionProof(ctx context.Context, p models.WorkspaceAdoptionPreview) error {
-	inspection, err := m.inspectWorkspaceAdoption(ctx, p.Selection, p.SlotID, p.Proof.CandidatePath, p.Proof.SourceHead)
+	inspection, err := m.openWorkspaceAdoptionReceiptProof(ctx, p)
 	if err != nil {
 		return err
 	}
 	defer inspection.Close()
+	return nil
+}
+
+func (m *Manager) openWorkspaceAdoptionReceiptProof(ctx context.Context, p models.WorkspaceAdoptionPreview) (*WorkspaceAdoptionInspection, error) {
+	inspection, err := m.inspectWorkspaceAdoption(ctx, p.Selection, p.SlotID, p.Proof.CandidatePath, p.Proof.SourceHead)
+	if err != nil {
+		return nil, err
+	}
 	// Staging and HEAD may legitimately change after adoption. Origin, branch,
 	// exact marker and directory identities remain authority for the receipt.
 	got := inspection.Proof
@@ -342,9 +350,10 @@ func (m *Manager) ValidateWorkspaceAdoptionProof(ctx context.Context, p models.W
 	got.Head = want.Head
 	got.IndexSHA256 = want.IndexSHA256
 	if models.WorkspaceAdoptionDigest(got) != models.WorkspaceAdoptionDigest(want) {
-		return models.ErrWorkspaceAdoptionStale
+		inspection.Close()
+		return nil, models.ErrWorkspaceAdoptionStale
 	}
-	return nil
+	return inspection, nil
 }
 
 func (i *WorkspaceAdoptionInspection) pinRoot(selection models.WorkspaceAdoptionSelection) error {
