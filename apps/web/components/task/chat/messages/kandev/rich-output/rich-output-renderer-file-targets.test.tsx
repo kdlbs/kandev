@@ -160,19 +160,23 @@ it.each(["success", "failure"])(
     const image = { ...initial, path: "old.png" };
     transport.read.mockReturnValueOnce(pending.promise);
     const view = render(<RendererHarness {...propsFor(image)} />);
-    expect(screen.getByText(PREVIEW_LOADING)).toBeTruthy();
-    const text = { ...initial, path: "new.txt" };
-    view.rerender(<RendererHarness {...propsFor(text)} />);
-    expect(toggle().getAttribute(EXPANDED_ATTRIBUTE)).toBe("false");
-    expect(transport.read).toHaveBeenCalledOnce();
-    const replacement = { ...initial, path: "new.png" };
-    view.rerender(<RendererHarness {...propsFor(replacement)} />);
-    await screen.findByText(contentFor(replacement));
-    await settleOld(pending, outcome);
-    expect(screen.getByText(contentFor(replacement))).toBeTruthy();
-    expect(screen.queryByText(OLD_CONTENT)).toBeNull();
-    expect(screen.queryByText(PREVIEW_FAILURE)).toBeNull();
-    expect(transport.read).toHaveBeenCalledTimes(2);
+    try {
+      expect(screen.getByText(PREVIEW_LOADING)).toBeTruthy();
+      const text = { ...initial, path: "new.txt" };
+      view.rerender(<RendererHarness {...propsFor(text)} />);
+      expect(toggle().getAttribute(EXPANDED_ATTRIBUTE)).toBe("false");
+      expect(transport.read).toHaveBeenCalledOnce();
+      const replacement = { ...initial, path: "new.png" };
+      view.rerender(<RendererHarness {...propsFor(replacement)} />);
+      await screen.findByText(contentFor(replacement));
+      await settleOld(pending, outcome);
+      expect(screen.getByText(contentFor(replacement))).toBeTruthy();
+      expect(screen.queryByText(OLD_CONTENT)).toBeNull();
+      expect(screen.queryByText(PREVIEW_FAILURE)).toBeNull();
+      expect(transport.read).toHaveBeenCalledTimes(2);
+    } finally {
+      await settleOld(pending, outcome);
+    }
   },
 );
 

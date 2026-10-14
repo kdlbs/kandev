@@ -181,3 +181,11 @@ specification lint, 19 harness-validator tests, full harness lint, and 36
 specification-validator tests passed on the merged tree. Normal merge hooks
 passed without bypass. Current-head CI and review completion are tracked
 externally while the PR checks run.
+
+Claude's aggregate review noted inconsistent deferred-read cleanup in the
+image/text replacement test. Its success/failure variants now settle the old
+request in `finally`, including when an earlier assertion fails. The exact
+targeted Vitest command above passed 3 files / 32 tests, and targeted ESLint for
+`rich-output-renderer-file-targets.test.tsx` passed. No production behavior or
+durable contract changed, so no specification or public-doc amendment is needed.
+Current-head remote checks and reviews remain pending after this test-only fix.

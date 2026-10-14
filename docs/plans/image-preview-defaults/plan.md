@@ -127,6 +127,12 @@ On 2026-10-14, the merged-tree targeted 32 tests and specification and harness
 checks passed after preserving both overlapping planning links. Current-head
 CI/review evidence remains external until checks finish; see the work order.
 
+Claude's aggregate review cleanup note was addressed by settling the deferred
+image read in `finally`, matching adjacent lifecycle tests. The same 32 focused
+tests and targeted test-file ESLint passed. This is test cleanup only; the
+product contract and rendered UI are unchanged. Remote validation is pending
+for the remediation head.
+
 ## Risks
 
 - Mounted image cards now read their workspace files automatically, including
