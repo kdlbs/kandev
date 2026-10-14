@@ -687,6 +687,16 @@ func TestRunProbeCleansUpAfterLeaseCancellation(t *testing.T) {
 	}
 }
 
+func TestRunProbeAfterReclaimFailsBeforeCreationWhenInspectionFails(t *testing.T) {
+	h := newHarness(t)
+	h.docker.addNetwork(agentdocker.NetworkInfo{ID: "active", Name: "kd_active", Driver: "bridge"})
+	h.docker.inspectErr["active"] = errors.New("inspect failed")
+	result := h.provider.runProbeAfterReclaim(context.Background())
+	if result.Passed || result.Error == "" || h.docker.createdName != "" {
+		t.Fatalf("probe = %#v, created=%q; want closed failure before creation", result, h.docker.createdName)
+	}
+}
+
 func markAllElapsed(t *testing.T, h *providerHarness, deadline time.Time) {
 	t.Helper()
 	for id, entry := range h.ledger.entries {
