@@ -189,3 +189,10 @@ targeted Vitest command above passed 3 files / 32 tests, and targeted ESLint for
 `rich-output-renderer-file-targets.test.tsx` passed. No production behavior or
 durable contract changed, so no specification or public-doc amendment is needed.
 Current-head remote checks and reviews remain pending after this test-only fix.
+
+The follow-up aggregate review classified the repeated settlement as
+informational and confirmed no change is needed. Its test-name suggestion was
+addressed by renaming the existing text-target replacement case to
+`collapses a text preview when its $field changes`. The exact targeted Vitest
+command again passed 3 files / 32 tests, and targeted test-file ESLint passed.
+Assertions and product behavior are unchanged; remote validation remains pending.

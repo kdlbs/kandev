@@ -133,6 +133,11 @@ tests and targeted test-file ESLint passed. This is test cleanup only; the
 product contract and rendered UI are unchanged. Remote validation is pending
 for the remediation head.
 
+The follow-up Claude review confirmed that repeated promise settlement is safe
+and requested a clearer text-only target-replacement test name. That name now
+distinguishes text collapse from image auto-expansion. The same 32 focused tests
+and targeted ESLint passed after the rename; remote validation remains pending.
+
 ## Risks
 
 - Mounted image cards now read their workspace files automatically, including

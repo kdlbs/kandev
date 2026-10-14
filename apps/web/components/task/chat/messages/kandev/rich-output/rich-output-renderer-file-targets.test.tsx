@@ -200,7 +200,7 @@ it.each([
   { field: "path", target: { ...initial, path: "b.txt" } },
   { field: "repository", target: { ...initial, repo: "beta" } },
   { field: "session", target: { ...initial, sessionId: "session-b" } },
-])("collapses a loaded preview when its $field changes", async ({ target }) => {
+])("collapses a text preview when its $field changes", async ({ target }) => {
   const view = render(<RendererHarness {...propsFor(initial)} />);
   await togglePreview();
   expect(screen.getByText(contentFor(initial))).toBeTruthy();
