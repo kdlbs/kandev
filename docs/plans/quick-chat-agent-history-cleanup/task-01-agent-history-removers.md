@@ -93,11 +93,12 @@ Claude's cwd encoding is observed, not documented. Tests pin the observed format
   different store, and a relative override selected the default store. Literal absolute
   overrides and skipping unresolved relative overrides make both assertions and the full
   stdlib package pass. A pure extraction addresses the hosted function-complexity failure;
-  its hosted recheck remains pending.
+  hosted source-bound proofs 38613208219 and 38620076258 execute the complete
+  filesystem package successfully. Repository lint acceptance is recorded in the PR checks.
 
 - `go test -trimpath ./internal/task/service/agenthistory/... -count=1`: pass (tests fail when
   the removers are disabled).
-- Codex check, codex-cli 0.162.1, isolated `CODEX_HOME` with synthetic rollouts (no login, so
+- Contributor-recorded Codex check, codex-cli 0.162.1, isolated `CODEX_HOME` with synthetic rollouts (no login, so
   the interactive `codex resume` picker itself could not be opened): after deleting one
   thread's rollout, app-server `thread/list` (default and all source kinds) returned only the
   remaining thread; `thread/resume` and `codex exec resume <id>` failed with "failed to resolve

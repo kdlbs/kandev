@@ -1,7 +1,7 @@
 ---
 id: "02-wire-quick-chat-deletion"
 title: "Wire cleanup into Quick Chat deletion and expiry"
-status: in_progress
+status: done
 wave: 2
 depends_on:
   - "01-agent-history-removers"
@@ -94,15 +94,24 @@ eligibility check must run before capture so normal tasks never reach the remove
 
 ## Results
 
-- PR remediation is in progress. Hosted regression tests cover explicit token clear/rotation,
-  confirmed-dead cleanup, failed-stop retention, and archive retention. The history CAS tests
-  additionally cover stale executions, unrelated metadata, executor-row deletion, normal/remote
-  exclusions, and concurrent PostgreSQL writers. Broad execution remains hosted.
-- Actual hosted full-backend events reproduced the confirmed-dead and both clear/rotation
-  transcript failures. Archive and failed-stop controls passed. A separate exact-source
-  hosted proof reproduced missing retained identities after accepted CAS, clear, and executor
-  deletion. Transactional retention and failed-stop-only history preservation address those
-  failures; hosted GREEN and full final-head verification remain pending.
+- Transactional history retention and failed-stop-only history preservation are implemented.
+  Tests cover accepted token clear/rotation, stale executions, unrelated metadata,
+  executor-row deletion, foreign identities, normal/remote/managed exclusions, archive
+  preservation, and concurrent PostgreSQL writers. Broad execution stays hosted.
+- Actual full-backend events reproduced confirmed-dead and clear/rotation transcript
+  failures. Archive and failed-stop controls passed. The initial transactional fix passed
+  hosted source-bound proof 38613208219. Combined-source proof
+  [38620076258](https://github.com/kdlbs/kandev/actions/runs/38620076258) verifies
+  16 required named regressions with actual RUN/PASS events, including expiry cleanup
+  and the idle-clock assertion. Its production source is exactly e23279a748; only the
+  temporary focused workflow differs. This proof does not replace full PR acceptance.
+- Full-backend artifact 11919818440 exposed history bookkeeping renewing an old session's
+  activity timestamp and suppressing expiry. History-only metadata SQL now preserves
+  that clock, with SQLite rotation and PostgreSQL concurrent-CAS assertions. The original
+  expiry test and cleanup timeout are unchanged. Full PostgreSQL 16/18 and repository
+  acceptance are reported by the current PR checks.
+- The permission-denied cleanup test skips when the hosted container runs as root;
+  its skip is not claimed as a passing execution.
 
 - Identities are captured in `deleteTaskWithManagedClaim` (non-managed deletes only) and carried
   through `taskEnvironmentCleanup.agentHistory` and the cleanup job snapshot `agent_history`.

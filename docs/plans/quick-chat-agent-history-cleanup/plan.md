@@ -1,6 +1,6 @@
 ---
 created: 2026-10-14
-status: in_progress
+status: done
 requirements:
   - REQ-TASKS-QUICK-CHAT-AGENT-HISTORY-001
   - REQ-TASKS-QUICK-CHAT-AGENT-HISTORY-002
@@ -25,7 +25,7 @@ deletion and expiry.
 | Order | Work order | Wave | Depends on | Status |
 | --- | --- | --- | --- | --- |
 | 01 | [Agent history removers](task-01-agent-history-removers.md) | 1 | none | `done` |
-| 02 | [Wire cleanup into Quick Chat deletion and expiry](task-02-wire-quick-chat-deletion.md) | 2 | 01 | `in_progress` |
+| 02 | [Wire cleanup into Quick Chat deletion and expiry](task-02-wire-quick-chat-deletion.md) | 2 | 01 | `done` |
 
 ## Risks
 
@@ -33,12 +33,18 @@ deletion and expiry.
   name. The remover then finds nothing and deletion still succeeds (no data loss).
 - **Codex shared indexes.** Codex keeps a `threads` row in `state_5.sqlite` and an entry in
   `session_index.jsonl` after its rollout is removed. Kandev does not edit Codex-owned shared
-  stores. Verified (WO-01 results): the thread is hidden from listings and an explicit resume
+  stores. Contributor-recorded check (WO-01 results): the thread is hidden from listings and an explicit resume
   fails cleanly; the hidden row keeps the thread's preview text.
 - **Working directory of multi-repository Quick Chats.** Resolved: the standalone executor
   records its launch workspace path (the agent cwd) as `worktree_path`.
 
 ## Verification
+
+Implementation work orders are complete. Hosted source-bound proof
+[38620076258](https://github.com/kdlbs/kandev/actions/runs/38620076258) verifies
+the combined lifecycle, identity, expiry-clock, and filesystem regressions. Full
+repository and platform acceptance are recorded in the PR checks and review evidence.
+
 
 From `apps/backend`:
 
