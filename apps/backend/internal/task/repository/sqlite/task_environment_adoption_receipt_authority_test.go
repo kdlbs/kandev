@@ -15,7 +15,7 @@ func exerciseWorkspaceAdoptionReceiptAuthority(t *testing.T, newRepository func(
 		`UPDATE task_repositories SET position=7 WHERE id='adopt-attachment'`,
 		`UPDATE task_environment_repos SET branch_slug='foreign' WHERE id='adopt-slot'`,
 		`UPDATE task_environment_repos SET position=7 WHERE id='adopt-slot'`,
-		`INSERT INTO task_repositories(id,task_id,repository_id,checkout_branch,position,created_at,updated_at) VALUES('new-attachment','adopt-task','adopt-repo','feature/adopt',3,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+		`INSERT INTO task_repositories(id,task_id,repository_id,checkout_branch,position,created_at,updated_at) VALUES('new-attachment','adopt-task','adopt-repo','feature/new',3,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
 	} {
 		t.Run(mutation, func(t *testing.T) {
 			r := newRepository(t)
