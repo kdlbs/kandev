@@ -2,7 +2,7 @@
 status: active
 system: office
 created: 2026-04-25
-updated: 2026-10-13
+updated: 2026-10-14
 owners:
   - cfl
 ---
@@ -68,6 +68,10 @@ Office estimates agent spending from usage events, exposes cost aggregations, an
   the total and every breakdown. Live refresh shall use the currently selected
   range. Selecting a display window shall not alter budget evaluation or the
   recorded cost history.
+- **AC-OFFICE-COSTS-001.9:** Missing spend shall show neutral unknown status and
+  unavailable spend, percentage and remaining on desktop and phone. Retain
+  policy fields, controls and existing measured behavior for explicit values,
+  including zero.
 
 ### REQ-OFFICE-COSTS-002: Budget notifications fire on crossings, not on every evaluation
 
@@ -76,11 +80,9 @@ Office estimates agent spending from usage events, exposes cost aggregations, an
 crossing events ("spend crosses `alert_threshold_pct`"). Budget evaluation is
 implemented as a level check that runs on unrelated triggers: after every cost
 event, through the pre-execution budget API, and after every task reassignment
-into a project. Once a policy sits above its threshold each of those writes
-another activity row, so one over-budget policy floods the Office inbox (which
-lists both budget notification rows and counts them toward the badge) with
-duplicates carrying no new information. A reassignment adding no spend at all
-still produces one. This requirement makes the notification idempotent per
+into a project. Above the threshold, each trigger writes another activity row,
+flooding the Office inbox and badge with duplicate budget notifications. Even
+reassignment without spending produces one. This requirement makes the notification idempotent per
 policy, per period, per level, while leaving enforcement (pausing an agent,
 blocking a run) the level check it must remain. The current scheduler admission
 path uses `admitRun` and the pure-read `EvaluatePreLaunch` evaluator; that path
