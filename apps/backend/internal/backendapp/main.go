@@ -670,6 +670,7 @@ func startAgentInfrastructure(
 	if services.Coordinator != nil {
 		mcpScopeResolver.SetCoordinatorLookup(services.Coordinator)
 	}
+	mcpScopeResolver.SetOfficeCEOResolver(officeengineadapters.NewCEOAgentAdapter(repos.Office))
 	// ============================================
 	// AGENT MANAGER
 	// ============================================

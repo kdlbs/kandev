@@ -23,15 +23,17 @@ type RelatedReadScope string
 const (
 	RelatedReadScopeRelation          RelatedReadScope = "relation"
 	RelatedReadScopeWorkspaceTaskTree RelatedReadScope = "workspace-task-tree"
+	RelatedReadScopeTaskVisibility    RelatedReadScope = "task-visibility"
 )
 
 // RelatedReadRequest separates compact task-tree inspection from the document
 // access rules. The MCP server supplies Scope after resolving its profile.
 type RelatedReadRequest struct {
-	CallerTaskID string
-	TargetTaskID string
-	Scope        RelatedReadScope
-	Verbose      bool
+	CallerTaskID      string
+	CallerWorkspaceID string
+	TargetTaskID      string
+	Scope             RelatedReadScope
+	Verbose           bool
 }
 
 // RelatedReadDenialReason is safe to return to a caller. In particular,

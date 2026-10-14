@@ -42,7 +42,10 @@ const (
 	// to inspect compact relation trees for unrelated tasks in its workspace.
 	// It never grants document or verbose-description access.
 	CapabilityWorkspaceTaskTreeRead Capability = "workspace-task-tree-read"
-	CapabilityCanvas                Capability = "canvas-authoring"
+	// CapabilityTaskVisibilityRead exposes only the compact lifecycle lookup
+	// for one backend-granted manual task session.
+	CapabilityTaskVisibilityRead Capability = "task-visibility-read"
+	CapabilityCanvas             Capability = "canvas-authoring"
 )
 
 // Context is the complete, backend-resolved MCP profile for one agent

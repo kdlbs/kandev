@@ -60,7 +60,7 @@ func (s *Server) registerRelatedTasksTool() {
 func (s *Server) registerTaskVisibilityTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_visibility_kandev",
-			mcp.WithDescription("Get a compact task lifecycle/disposition receipt for an exact task in the Coordinator's workspace. This Office-only tool returns no descriptions, documents, sessions, or task metadata. Foreign and unavailable targets are intentionally indistinguishable."),
+			mcp.WithDescription("Get a compact task lifecycle/disposition receipt for an exact task in the caller's workspace. Requires an attested Office Coordinator or an exact manual-session visibility grant. Returns no descriptions, documents, sessions, or task metadata. Foreign and unavailable targets are intentionally indistinguishable."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("Exact target task UUID.")),
 		),
 		s.wrapHandler("get_task_visibility_kandev", s.getTaskVisibilityHandler()),
@@ -167,7 +167,7 @@ func (s *Server) getTaskVisibilityHandler() server.ToolHandlerFunc {
 		}
 		payload := map[string]string{
 			"task_id": taskID, "caller_task_id": s.taskID, "caller_session_id": s.sessionID,
-			"mcp_surface": string(s.Profile().Surface), "related_read_scope": s.relatedReadScope(),
+			"mcp_surface": string(s.Profile().Surface), "related_read_scope": s.taskVisibilityScope(),
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskVisibility, payload, &result); err != nil {
@@ -199,6 +199,15 @@ func (s *Server) relatedReadScope() string {
 		return "workspace-task-tree"
 	}
 	return "relation"
+}
+
+func (s *Server) taskVisibilityScope() string {
+	profileContext := s.Profile()
+	if profileContext.Surface == mcpprofile.SurfaceKanbanTask &&
+		profileContext.HasCapability(mcpprofile.CapabilityTaskVisibilityRead) {
+		return "task-visibility"
+	}
+	return s.relatedReadScope()
 }
 
 // relatedTaskGroups are the explicit keys of the ActionMCPListRelatedTasks

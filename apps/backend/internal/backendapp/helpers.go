@@ -69,6 +69,7 @@ import (
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
+	officeengineadapters "github.com/kandev/kandev/internal/office/engine_adapters"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/retention"
 	officetestharness "github.com/kandev/kandev/internal/office/testharness"
@@ -2639,6 +2640,9 @@ func registerMCPAndDebugRoutes(
 	)
 	if p.services != nil && p.services.Coordinator != nil {
 		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
+	}
+	if p.officeRepo != nil {
+		mcpScopeResolver.SetOfficeCEOResolver(officeengineadapters.NewCEOAgentAdapter(p.officeRepo))
 	}
 	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
 	if p.authSvc != nil {

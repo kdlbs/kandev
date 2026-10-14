@@ -106,10 +106,9 @@ func TestListRelatedTasks_ToolSchemaExposesVerbose(t *testing.T) {
 	assert.NotContains(t, tool.Tool.Description, "may inspect another task in the same workspace")
 }
 
-// A visibility lookup is deliberately a separate compact tool. It must be
-// available only to the Office task surface, and callers can name just the
-// target task: session, workspace, and scope are backend-attested.
-func TestGetTaskVisibilityToolIsOfficeOnlyAndTakesOnlyTaskID(t *testing.T) {
+// A visibility lookup is deliberately a separate compact tool. A granted
+// manual task gets only this tool, while caller identity stays backend-owned.
+func TestGetTaskVisibilityToolRequiresExplicitCapabilityAndTakesOnlyTaskID(t *testing.T) {
 	profile := mcpprofile.New(mcpprofile.SurfaceOfficeTask, []mcpprofile.Capability{
 		mcpprofile.CapabilityWorkspaceTaskTreeRead,
 	}, nil)
@@ -126,6 +125,22 @@ func TestGetTaskVisibilityToolIsOfficeOnlyAndTakesOnlyTaskID(t *testing.T) {
 
 	kanban := newTaskModeServer(t, &testBackend{}, "caller-A")
 	assert.NotContains(t, kanban.mcpServer.ListTools(), "get_task_visibility_kandev")
+	backend := &testBackend{response: map[string]interface{}{"task_id": "target"}}
+	manualProfile := mcpprofile.New(mcpprofile.SurfaceKanbanTask, []mcpprofile.Capability{
+		mcpprofile.CapabilityTaskVisibilityRead,
+	}, nil)
+	manual := NewWithProfile(backend, "session-A", "caller-A", 10005, newTestLogger(t), "", false, manualProfile)
+	assert.Contains(t, manual.mcpServer.ListTools(), "get_task_visibility_kandev")
+	assert.Equal(t, "relation", manual.relatedReadScope(), "manual grant must not widen related-task reads")
+	props = toolInputProperties(t, manual, "get_task_visibility_kandev")
+	assert.Equal(t, map[string]interface{}{"task_id": props["task_id"]}, props)
+	result := callTool(t, manual, "get_task_visibility_kandev", map[string]interface{}{"task_id": "target"})
+	require.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]string)
+	require.True(t, ok)
+	assert.Equal(t, "task-visibility", payload["related_read_scope"])
+	assert.Equal(t, "caller-A", payload["caller_task_id"])
+	assert.Equal(t, "session-A", payload["caller_session_id"])
 }
 
 func TestListRelatedTasks_AttestsProfileScopeAndCallerIdentity(t *testing.T) {

@@ -1219,7 +1219,10 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "walkthrough", enabled: kanban, register: func(s *Server) { s.registerWalkthroughTools() }},
 		{name: "review", enabled: kanban, register: func(s *Server) { s.registerReviewTools() }},
 		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
-		{name: "task-visibility", enabled: andProfilePredicates(office, capabilityEnabled(mcpprofile.CapabilityWorkspaceTaskTreeRead)), register: func(s *Server) { s.registerTaskVisibilityTool() }},
+		{name: "task-visibility", enabled: func(ctx mcpprofile.Context) bool {
+			return (office(ctx) && ctx.HasCapability(mcpprofile.CapabilityWorkspaceTaskTreeRead)) ||
+				(kanban(ctx) && ctx.HasCapability(mcpprofile.CapabilityTaskVisibilityRead))
+		}, register: func(s *Server) { s.registerTaskVisibilityTool() }},
 		{name: "office-documents", enabled: office, register: func(s *Server) { s.registerTaskDocumentTools() }},
 		{name: "task-branch-sources", enabled: kanban, register: func(s *Server) {
 			s.registerAddBranchToTaskTool()

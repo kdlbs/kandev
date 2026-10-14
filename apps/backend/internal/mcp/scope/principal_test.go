@@ -15,6 +15,14 @@ type principalLookup struct {
 	session   *models.TaskSession
 }
 
+type fixedOfficeCEOResolver struct {
+	profileID string
+}
+
+func (r fixedOfficeCEOResolver) ResolveCEOAgentProfileID(context.Context, string) (string, error) {
+	return r.profileID, nil
+}
+
 func (l principalLookup) GetTask(context.Context, string) (*models.Task, error) {
 	return l.task, nil
 }
@@ -63,6 +71,49 @@ func TestScopePrincipalRejectsSessionFromAnotherTask(t *testing.T) {
 
 	_, err := resolver.ScopePrincipal(context.Background(), "automation-task", "session-1")
 	require.Error(t, err)
+}
+
+func TestScopePrincipalBindsManualVisibilityGrant(t *testing.T) {
+	task := &models.Task{ID: "manual-coordinator", WorkspaceID: "workspace-a", Origin: models.TaskOriginManual}
+	session := &models.TaskSession{ID: "approved", TaskID: task.ID, Metadata: map[string]interface{}{
+		models.SessionMetaKeyTaskVisibilityGrant: models.TaskVisibilityGrant{
+			Version: 1, TaskID: task.ID, SessionID: "approved", WorkspaceID: task.WorkspaceID,
+		},
+	}}
+	resolver := &Resolver{tasks: principalLookup{task: task, workspace: &models.Workspace{ID: task.WorkspaceID}, session: session}}
+	ctx, err := resolver.ScopePrincipal(context.Background(), task.ID, session.ID)
+	require.NoError(t, err)
+	principal, ok := PrincipalFromContext(ctx)
+	require.True(t, ok)
+	require.Equal(t, mcpprofile.SurfaceKanbanTask, principal.Surface)
+	require.True(t, principal.TaskVisibilityGrant)
+	session.Metadata = nil
+	ctx, err = resolver.ScopePrincipal(context.Background(), task.ID, session.ID)
+	require.NoError(t, err)
+	principal, ok = PrincipalFromContext(ctx)
+	require.True(t, ok)
+	require.False(t, principal.TaskVisibilityGrant)
+}
+
+func TestScopePrincipalBindsOfficeTreeReadToCEOProfile(t *testing.T) {
+	task := &models.Task{ID: "office-task", WorkspaceID: "workspace-a", IsFromOffice: true}
+	session := &models.TaskSession{ID: "office-session", TaskID: task.ID, AgentProfileID: "ceo"}
+	resolver := &Resolver{
+		tasks:     principalLookup{task: task, workspace: &models.Workspace{ID: task.WorkspaceID}, session: session},
+		officeCEO: fixedOfficeCEOResolver{profileID: "ceo"},
+	}
+	ctx, err := resolver.ScopePrincipal(context.Background(), task.ID, session.ID)
+	require.NoError(t, err)
+	principal, ok := PrincipalFromContext(ctx)
+	require.True(t, ok)
+	require.True(t, principal.WorkspaceTaskTreeRead)
+	require.False(t, principal.TaskVisibilityGrant)
+	session.AgentProfileID = "worker"
+	ctx, err = resolver.ScopePrincipal(context.Background(), task.ID, session.ID)
+	require.NoError(t, err)
+	principal, ok = PrincipalFromContext(ctx)
+	require.True(t, ok)
+	require.False(t, principal.WorkspaceTaskTreeRead)
 }
 
 // fakeCoordinatorLookup is a test double for CoordinatorLookup.

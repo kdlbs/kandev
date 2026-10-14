@@ -10,6 +10,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
@@ -129,7 +131,7 @@ func TestGetTaskVisibilityDispatcherReturnsCompactReceiptAndHidesForeignTargets(
 	seedRelatedReadTasks(t, repo)
 
 	call := func(taskID string) *ws.Message {
-		response, err := dispatcher.Dispatch(context.Background(), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
+		response, err := dispatcher.Dispatch(visibilityOfficeContext(context.Background()), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
 			"task_id": taskID, "caller_task_id": "child-a", "caller_session_id": "session-caller",
 			"related_read_scope": "workspace-task-tree", "mcp_surface": "office-task",
 		}))
@@ -350,7 +352,7 @@ func TestGetTaskVisibilityDispatcherHidesLiveTaskWithoutReceipt(t *testing.T) {
 	require.NoError(t, err)
 
 	call := func(taskID string) *ws.Message {
-		response, dispatchErr := dispatcher.Dispatch(context.Background(), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
+		response, dispatchErr := dispatcher.Dispatch(visibilityOfficeContext(context.Background()), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
 			"task_id": taskID, "caller_task_id": "child-a", "caller_session_id": "session-caller",
 			"related_read_scope": "workspace-task-tree", "mcp_surface": "office-task",
 		}))
@@ -378,7 +380,7 @@ func TestPostgresGetTaskVisibilityDispatcherDeniedReadsDoNotMutate(t *testing.T)
 	seedRelatedReadTasks(t, repo)
 	before := snapshotVisibilityNativeTables(t, repo)
 	call := func(taskID string) *ws.Message {
-		response, dispatchErr := dispatcher.Dispatch(ctx, makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
+		response, dispatchErr := dispatcher.Dispatch(visibilityOfficeContext(ctx), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
 			"task_id": taskID, "caller_task_id": "child-a", "caller_session_id": "session-caller",
 			"related_read_scope": "workspace-task-tree", "mcp_surface": "office-task",
 		}))
@@ -391,6 +393,70 @@ func TestPostgresGetTaskVisibilityDispatcherDeniedReadsDoNotMutate(t *testing.T)
 	require.Equal(t, ws.MessageTypeError, missing.Type)
 	require.Equal(t, string(foreign.Payload), string(missing.Payload))
 	require.Equal(t, before, snapshotVisibilityNativeTables(t, repo))
+}
+
+func visibilityOfficeContext(ctx context.Context) context.Context {
+	return mcpscope.WithPrincipal(ctx, mcpscope.Principal{
+		WorkspaceID: "ws-a", CallerTaskID: "child-a", CallerSessionID: "session-caller",
+		Surface: mcpprofile.SurfaceOfficeTask, WorkspaceTaskTreeRead: true,
+	})
+}
+
+func TestGetTaskVisibilityDispatcherRequiresTrustedManualPrincipal(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	log := testLogger(t)
+	handoff := service.NewHandoffService(repo, repo, nil, nil, nil, log)
+	handlers := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
+	handlers.SetHandoffService(handoff)
+	dispatcher := ws.NewDispatcher()
+	handlers.RegisterHandlers(dispatcher)
+	seedRelatedReadTasks(t, repo)
+	principal := mcpscope.Principal{
+		WorkspaceID: "ws-a", CallerTaskID: "child-a", CallerSessionID: "approved-session",
+		Surface: mcpprofile.SurfaceKanbanTask, TaskVisibilityGrant: true,
+	}
+	call := func(ctx context.Context, taskID, callerSession, scope string) *ws.Message {
+		response, err := dispatcher.Dispatch(ctx, makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
+			"task_id": taskID, "caller_task_id": "child-a", "caller_session_id": callerSession,
+			"related_read_scope": scope, "mcp_surface": "kanban-task",
+		}))
+		require.NoError(t, err)
+		return response
+	}
+	approved := mcpscope.WithPrincipal(context.Background(), principal)
+	require.Equal(t, ws.MessageTypeResponse, call(approved, "stranger", "approved-session", "task-visibility").Type)
+	foreign := call(approved, "foreign", "approved-session", "task-visibility")
+	missing := call(approved, "missing", "approved-session", "task-visibility")
+	require.Equal(t, string(missing.Payload), string(foreign.Payload))
+	for _, tc := range []struct {
+		name    string
+		ctx     context.Context
+		session string
+		scope   string
+	}{
+		{"missing principal", context.Background(), "approved-session", "task-visibility"},
+		{"other session", approved, "other-session", "task-visibility"},
+		{"other task", mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{WorkspaceID: "ws-a", CallerTaskID: "parent", CallerSessionID: "approved-session", Surface: mcpprofile.SurfaceKanbanTask, TaskVisibilityGrant: true}), "approved-session", "task-visibility"},
+		{"wrong workspace", mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{WorkspaceID: "ws-b", CallerTaskID: "child-a", CallerSessionID: "approved-session", Surface: mcpprofile.SurfaceKanbanTask, TaskVisibilityGrant: true}), "approved-session", "task-visibility"},
+		{"forged office scope", approved, "approved-session", "workspace-task-tree"},
+		{"ungranted", mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{WorkspaceID: "ws-a", CallerTaskID: "child-a", CallerSessionID: "approved-session", Surface: mcpprofile.SurfaceKanbanTask}), "approved-session", "task-visibility"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			denied := call(tc.ctx, "stranger", tc.session, tc.scope)
+			require.Equal(t, ws.MessageTypeError, denied.Type)
+			require.Equal(t, string(missing.Payload), string(denied.Payload))
+		})
+	}
+	workerCtx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		WorkspaceID: "ws-a", CallerTaskID: "child-a", CallerSessionID: "approved-session",
+		Surface: mcpprofile.SurfaceOfficeTask,
+	})
+	worker, err := dispatcher.Dispatch(workerCtx, makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
+		"task_id": "stranger", "caller_task_id": "child-a", "caller_session_id": "approved-session",
+		"related_read_scope": "workspace-task-tree", "mcp_surface": "office-task",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, string(missing.Payload), string(worker.Payload))
 }
 
 func snapshotVisibilityNativeTables(t *testing.T, repo relatedReadSnapshotRepo) map[string][][]string {

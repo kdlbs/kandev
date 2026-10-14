@@ -42,10 +42,9 @@ type TaskVisibilityReceipt struct {
 	Provenance  string    `json:"provenance"`
 }
 
-// GetTaskVisibilityForRequest resolves the target only after the same
-// workspace-tree authorization used by compact related-task reads.
+// GetTaskVisibilityForRequest resolves the target only after a compact-read scope.
 func (s *HandoffService) GetTaskVisibilityForRequest(ctx context.Context, req RelatedReadRequest) (*TaskVisibility, error) {
-	if req.Scope != RelatedReadScopeWorkspaceTaskTree {
+	if req.Scope != RelatedReadScopeWorkspaceTaskTree && req.Scope != RelatedReadScopeTaskVisibility {
 		return nil, relatedReadDenied(RelatedReadDenialScopeRequired, "workspace task visibility requires coordinator scope")
 	}
 	caller, err := s.tasks.GetTask(ctx, req.CallerTaskID)
@@ -54,6 +53,9 @@ func (s *HandoffService) GetTaskVisibilityForRequest(ctx context.Context, req Re
 			return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller task missing")
 		}
 		return nil, err
+	}
+	if req.CallerWorkspaceID != "" && caller.WorkspaceID != req.CallerWorkspaceID {
+		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller workspace changed")
 	}
 	snapshots, ok := s.tasks.(taskVisibilitySnapshotReader)
 	if !ok {
