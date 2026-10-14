@@ -273,6 +273,18 @@ host grants. Declare exact HTTPS origins in `network_origins` when the app
 needs external network access. Paths, credentials, wildcards, query strings,
 and fragments are rejected.
 
+### Host version compatibility
+
+Stamped Stable and published npm Nightly hosts enforce `min_kandev_version`
+at install time. A Nightly is below the Stable release with the same numeric
+core: `1.2.4-nightly.sha123456789abc` accepts a minimum of `1.2.3` but rejects
+`1.2.4` or a newer minimum. Manifest minimums retain the stable numeric grammar
+described above; prerelease minimums are not accepted.
+
+Empty, development, git-describe, and unknown or malformed development host
+versions retain their install-time comparison exemption. Independent manifest
+validation, including capability-specific floors, still applies on those hosts.
+
 ### Static web app network origins
 
 `ui.web_apps[].network_origins` is optional. Each value must be an exact HTTPS
