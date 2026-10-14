@@ -24,14 +24,18 @@ type fakeDocker struct {
 	// attachAfterInspects makes InspectNetwork add a container endpoint after
 	// the Nth call, simulating a container attaching mid-cycle between
 	// classification and revalidation.
-	inspectCount int
-	attachAfter  int
-	listErr      error
-	removeErr    error
-	removed      []string
-	createErr    error
-	createdName  string
-	createInfo   agentdocker.NetworkInfo
+	inspectCount      int
+	attachAfter       int
+	listErr           error
+	removeErr         error
+	removeContext     context.Context
+	removeContextErr  error
+	removeHasDeadline bool
+	onCreate          func()
+	removed           []string
+	createErr         error
+	createdName       string
+	createInfo        agentdocker.NetworkInfo
 }
 
 func newFakeDocker() *fakeDocker {
@@ -88,9 +92,12 @@ func (f *fakeDocker) InspectNetwork(_ context.Context, id string) (agentdocker.N
 	return network, nil
 }
 
-func (f *fakeDocker) RemoveNetwork(_ context.Context, id string) error {
+func (f *fakeDocker) RemoveNetwork(ctx context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.removeContext = ctx
+	f.removeContextErr = ctx.Err()
+	_, f.removeHasDeadline = ctx.Deadline()
 	if _, ok := f.networks[id]; !ok {
 		return errors.New("network not found")
 	}
@@ -113,6 +120,9 @@ func (f *fakeDocker) CreateNetwork(
 	f.createdName = options.Name
 	f.createInfo.ID = "probe-net"
 	f.networks["probe-net"] = f.createInfo
+	if f.onCreate != nil {
+		f.onCreate()
+	}
 	return f.createInfo, nil
 }
 
@@ -670,9 +680,9 @@ func TestRunProbeFailsWhenCleanupFails(t *testing.T) {
 func TestRunProbeCleansUpAfterLeaseCancellation(t *testing.T) {
 	docker := newFakeDocker()
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	docker.onCreate = cancel
 	result := RunProbe(ctx, docker, "x", nil)
-	if !result.Passed || len(docker.removed) != 1 || docker.removed[0] != "probe-net" {
+	if !result.Passed || len(docker.removed) != 1 || docker.removed[0] != "probe-net" || docker.removeContextErr != nil || !docker.removeHasDeadline {
 		t.Fatalf("probe = %#v, removed=%v; want cleanup after cancellation", result, docker.removed)
 	}
 }
