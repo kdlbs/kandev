@@ -215,6 +215,29 @@ failed. A deferred detached relaunch leaves the automation run and its durable
 record for the sweep. Queue dispatch treats a seam-3 refusal as retryable so the
 original message remains in the queue.
 
+A replay returns its outcome together with the error and a short detail, so the
+warning for a preserved non-ceiling failure names the cause. Validation of the
+built agent or continue command (`validate agent command:` or
+`validate continue command:`) is a permanent failure. A later pass rebuilds the
+same command from the same profile, and each attempt leaves a failed session.
+The sweep drops that record with `ceiling_dropped_launch_invalid`. The lifecycle command producer emits a typed `BuiltCommandValidationError`,
+and consumers recognize it through `errors.As`, including resume, sanitizer,
+and cleanup wrappers. Display text alone never proves this failure. All seven
+replay kinds preserve the error until settlement; ensure and dynamic-relaunch
+paths classify it after their accepted/deferred/superseded guards. Other
+failures keep their retry.
+
+Entry validation distinguishes uncertainty from a dead end. `unavailable` keeps
+the record; it is reserved for failed step, transition, or task reads, which
+validation reports as errors. The start auto-start eligibility read also
+preserves uncertainty when the record already carries a binding. A genuine
+`ErrWorkflowStepNotFound` or a readable step without auto-start remains a
+terminal destination. `permanently unavailable` covers shapes that no
+later pass can repair: a legacy sessionless `start`, an underivable or
+incomplete binding, an unrouted entry whose step now routes sessions, and a task
+with no durable entry identity. The sweep, the claimed replay, and the claimed
+binding check treat it like `superseded` and drop the record.
+
 Office automatic starts do not use workflow-step auto-start eligibility when the
 sweep evaluates a `start` record. This keeps Office scheduling ownership in the
 Office path.

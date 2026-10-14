@@ -30,6 +30,7 @@ import {
 import { PromptZone, SubtaskFormBody } from "./new-subtask-form-parts";
 import { applySummarizeSessionResult, type SummaryToastFn } from "./session-context-summary";
 import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
+import { useSubtaskParentDefaults } from "./use-subtask-parent-defaults";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Message, TaskSession } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
@@ -225,55 +226,6 @@ function useExecutorDefault(
   }, [allProfiles, executorProfileId, lastUsedExecutorProfileId, setExecutorProfileId]);
 }
 
-/** Initial parent defaults never replace a user-edited repository selection. */
-function useSeedParentRepository(
-  fs: ReturnType<typeof useSubtaskFormState>,
-  parentRepositoryId: string | null,
-  baseBranch: string | null,
-) {
-  const seeded = useRef(false);
-  const { repositories, repositoriesDirty, useRemote, remoteRepos, setRepositories } = fs;
-  useEffect(() => {
-    if (seeded.current || !parentRepositoryId) return;
-    seeded.current = true;
-    if (repositoriesDirty || repositories.length || useRemote || remoteRepos.length) return;
-    setRepositories([
-      { key: "subtask-row-1", repositoryId: parentRepositoryId, branch: baseBranch ?? "" },
-    ]);
-  }, [
-    parentRepositoryId,
-    baseBranch,
-    repositoriesDirty,
-    repositories,
-    useRemote,
-    remoteRepos,
-    setRepositories,
-  ]);
-}
-
-function useSeedAgentProfileId(
-  fs: ReturnType<typeof useSubtaskFormState>,
-  defaultProfileId: string,
-  onChange: (value: string) => void,
-) {
-  const seededOrTouched = useRef(false);
-  const [touched, setTouched] = useState(false);
-  const { agentProfileId, setAgentProfileId } = fs;
-  useEffect(() => {
-    if (seededOrTouched.current || !defaultProfileId) return;
-    seededOrTouched.current = true;
-    if (!agentProfileId) setAgentProfileId(defaultProfileId);
-  }, [defaultProfileId, agentProfileId, setAgentProfileId]);
-  return {
-    submissionDefaultProfileId: touched ? "" : defaultProfileId,
-    onChange: (value: string) => {
-      seededOrTouched.current = true;
-      setTouched(true);
-      onChange(value);
-    },
-  };
-}
-
 function useInitialWorkspaceMode(
   worktreeBranch: string | null,
   contextReady: boolean,
@@ -432,13 +384,20 @@ function NewSubtaskForm({
     parentContextReady,
     fs.repositoriesDirty || fs.useRemote || fs.remoteRepos.length > 0,
   );
-  useSeedParentRepository(fs, parentRepositoryId, baseBranch);
   const sharedHandlers = useDialogHandlers(fs, availableRepositories);
-  const parentProfile = useSeedAgentProfileId(
-    fs,
+  const parentProfile = useSubtaskParentDefaults({
+    parentRepositoryId,
+    baseBranch,
     defaultProfileId,
-    sharedHandlers.handleAgentProfileChange,
-  );
+    repositoriesDirty: fs.repositoriesDirty,
+    hasRepositorySelection: Boolean(
+      fs.repositories.length || fs.useRemote || fs.remoteRepos.length,
+    ),
+    agentProfileId: fs.agentProfileId,
+    setRepositories: fs.setRepositories,
+    setAgentProfileId: fs.setAgentProfileId,
+    onAgentProfileChange: sharedHandlers.handleAgentProfileChange,
+  });
   const handlers = { ...sharedHandlers, handleAgentProfileChange: parentProfile.onChange };
   useGitHubUrlErrorEffect(fs, isOpen);
   useDiscoverReposEffect(fs, isOpen, workspaceId, false, toast);

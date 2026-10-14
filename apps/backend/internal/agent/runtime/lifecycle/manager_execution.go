@@ -178,7 +178,7 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
 	}
-	if err := validateWorkspaceInfoForRecoveryPreflight(ctx, info); err != nil {
+	if err := validateWorkspaceInfoWithAdoption(ctx, info, true, m.worktreeMgr); err != nil {
 		return nil, fmt.Errorf("%w: repository workspace failed validation", ErrSessionWorkspaceNotReady)
 	}
 	if info.SessionID == "" {
@@ -359,7 +359,7 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: session %s has no workspace path yet", ErrSessionWorkspaceNotReady, sessionID)
 	}
-	if err := validateWorkspaceInfoForRecoveryPreflight(ctx, info); err != nil {
+	if err := validateWorkspaceInfoWithAdoption(ctx, info, true, m.worktreeMgr); err != nil {
 		return nil, fmt.Errorf("%w: repository workspace failed validation", ErrSessionWorkspaceNotReady)
 	}
 
@@ -428,6 +428,10 @@ func validateWorkspaceInfoForRecoveryPreflight(ctx context.Context, info *Worksp
 }
 
 func validateWorkspaceInfo(ctx context.Context, info *WorkspaceInfo, deferManagedCloneMismatch bool) error {
+	return validateWorkspaceInfoWithAdoption(ctx, info, deferManagedCloneMismatch, nil)
+}
+
+func validateWorkspaceInfoWithAdoption(ctx context.Context, info *WorkspaceInfo, deferManagedCloneMismatch bool, manager *worktree.Manager) error {
 	if info == nil || len(info.WorkspaceRepositories) == 0 || models.IsRemoteExecutorType(models.ExecutorType(info.ExecutorType)) {
 		return nil
 	}
@@ -442,7 +446,7 @@ func validateWorkspaceInfo(ctx context.Context, info *WorkspaceInfo, deferManage
 		return ErrSessionWorkspaceNotReady
 	}
 	for index, repository := range info.WorkspaceRepositories {
-		if err := validateWorkspaceRepositoryInfo(ctx, info, index, repository, deferManagedCloneMismatch); err != nil {
+		if err := validateWorkspaceRepositoryInfo(ctx, info, index, repository, deferManagedCloneMismatch, manager); err != nil {
 			return err
 		}
 	}
@@ -455,8 +459,19 @@ func validateWorkspaceRepositoryInfo(
 	index int,
 	repository WorkspaceRepositorySpec,
 	deferManagedCloneMismatch bool,
+	manager *worktree.Manager,
 ) error {
 	candidate := workspaceRepositoryCandidate(ctx, info, index, repository)
+	if manager != nil && info.ExecutorType == string(models.ExecutorTypeWorktree) {
+		adopted, err := manager.ValidateWorkspaceAdoptionForReuse(ctx, worktree.CreateRequest{
+			TaskEnvironmentID: info.TaskEnvironmentID, RepositoryID: repository.RepositoryID,
+			WorktreeID: repository.WorktreeID, BranchSlug: repository.BranchSlug,
+			BranchIdentitySlug: repository.BranchIdentitySlug,
+		}, candidate)
+		if err != nil || adopted {
+			return err
+		}
+	}
 	expected := localWorkspaceExpectedRepository(info, repository)
 	err := validateLocalRepositoryWorkspace(ctx, candidate, expected)
 	if err == nil || managedCloneMismatchCanDefer(ctx, info, repository, candidate, deferManagedCloneMismatch) {
@@ -875,7 +890,7 @@ func (m *Manager) createExecutionWithMode(
 			}
 		}()
 	}
-	if err := validateWorkspaceInfoForExecution(ctx, info); err != nil {
+	if err := validateWorkspaceInfoWithAdoption(ctx, info, false, m.worktreeMgr); err != nil {
 		return nil, fmt.Errorf("%w: repository workspace failed post-recovery validation", models.ErrWorkspaceReuseUnsafe)
 	}
 	inputs, err := m.prepareExecutionCreation(operationCtx, taskID, info, agentLaunch)

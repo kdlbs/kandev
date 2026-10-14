@@ -143,6 +143,7 @@ const source = [
   'apps/web/components/settings/keyboard-shortcuts-card.test.tsx',
   'apps/web/components/settings/plugins/plugin-shortcuts-card.test.tsx',
   'apps/web/components/task/new-subtask-dialog.tsx',
+  'apps/web/components/task/use-subtask-parent-defaults.ts',
   'apps/web/components/task/new-subtask-dialog.test.tsx',
   'apps/web/components/task/new-subtask-dialog-context.test.ts',
 ];
@@ -404,3 +405,107 @@ pending a later explicit corrective release and local-heavy lease.
   staged whitespace checks passed, and the updated six-artifact/ten-source coverage
   API preflight returned `ok: true`, `errors: []`. Normal hooks and publication
   receipts remain in the external operational checkpoint.
+
+
+## Main extraction compatibility
+
+### Evidence and intent
+
+Current head `9ec419782599b8b1b0d5d185fec0d4cf8b120515` is published and its
+corrective Results remain historical evidence. Fresh REST mergeability is false
+(`dirty`), and the complete snapshot lists all six required checks as missing.
+The recorded PR base is `71ada983`; the actual main target is `148c84f072737ba7bc089960a321944f9e9088cb`.
+Main #4476 removes the two inline parent seed hooks and calls its new
+`useSubtaskParentDefaults`. This is the sole overlapping correction path.
+Main's form-state blob is unchanged; its helper's two existing tests cover
+late defaults and prior edits. No inspection or repair of the other main changes
+is needed for this conflict proposal.
+
+### Exact ownership
+
+- `apps/web/components/task/use-subtask-parent-defaults.ts`: retain this main
+  owner and reconcile our repository seed-once/dirty/existing-or-remote-choice
+  guard and profile seed-once/explicit-touch handling into it. Expose the local
+  profile change handler and effective submission fallback to its caller;
+  preserve existing helper callers/test inputs without a generic policy API.
+- `apps/web/components/task/new-subtask-dialog.tsx`: retain canonical selected
+  parent and primary-context resolution, stable form lifetime, initial workspace
+  mode/source-choice guards, and the effective profile fallback passed to the
+  unchanged submit hook. Wire the existing shared profile handler through the
+  extracted helper; remove duplicate inline repository/profile seed hooks.
+- Reuse `new-subtask-dialog.test.tsx`, `new-subtask-dialog-context.test.ts`, and
+  main's `use-subtask-parent-defaults.test.ts` as regression/control owners.
+  Change test inputs only if the minimal helper wiring requires them. No new
+  test-only export or injection seam. The same Tasks design needs only its
+  component-ownership wording synchronized during the released integration.
+
+Preserve main's adopted-checkout behavior and all other main files unchanged.
+Shared form state/parts, submit/session hooks, sidebar callers, backend adoption,
+API/eligibility behavior, keyboard matching, copy/layout, and existing acceptance
+criteria remain outside production ownership.
+
+### Sequential integration after later release
+
+Verify exact own branch/head, clean index, actual remote head, and fresh main
+identity before the ordinary local base merge for this concrete conflict. Keep
+main's extraction and port our invariants to its owner; do not choose a side
+merely to remove markers. Use existing rendered/request cases for a meaningful
+RED of lost explicit-profile behavior before implementing the helper guard,
+then GREEN. Preserve all failed receipts. Normal merge/commit hooks stay active;
+no bypass, dependency reinstall, or drift-only rebase.
+
+Run the focused five-file selection sequentially from `apps/web`:
+
+```bash
+pnpm exec vitest run components/task/new-subtask-dialog.test.tsx components/task/new-subtask-dialog-context.test.ts components/task/use-subtask-parent-defaults.test.ts components/task/new-subtask-form-state.test.ts components/task/new-subtask-form-parts.test.tsx --maxWorkers=1
+pnpm exec eslint --max-warnings 0 components/task/new-subtask-dialog.tsx components/task/use-subtask-parent-defaults.ts components/task/new-subtask-dialog.test.tsx components/task/new-subtask-dialog-context.test.ts components/task/use-subtask-parent-defaults.test.ts
+NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck
+```
+
+Use normal staged i18n selectors, actual owned-path coverage/spec/diff checks,
+and active hooks. Preserve incoming main changes rather than independently
+replay backend/adoption or keyboard suites. No new mobile runtime build is
+planned: the exact passed scenario's data/controls remain the contract and the
+rendered regressions cover the extracted owner; a concrete integration failure
+that changes that flow must be checkpointed before expanding validation.
+
+Retain observer 27809 and its 18:24:21/19:54:21 UTC clock; any replacement must
+follow its actual join/current owned absence, never an inferred completion.
+ROOT must review this proposal and send a later explicit integration request
+and local-heavy lease. No production mutation, base merge, rebase, or new observer
+was performed at this checkpoint.
+
+
+### Compatibility Results
+
+- ROOT reviewed and later released the bounded main-helper integration. The
+  ordinary `git merge --no-commit 148c84f072737ba7bc089960a321944f9e9088cb`
+  reported the expected dialog conflict; no rebase or side selection dropped
+  incoming behavior. Index blob comparison confirms the other 66 incoming
+  paths equal main, with no unmerged paths after resolution.
+- Main's helper is the sole repository/profile seed owner. Existing caller
+  source-state and mode guards remain; the helper's explicit profile handler
+  suppresses late reseeding and its effective fallback reaches the unchanged
+  submit hook. Tests were reused without changing their assertions or inputs.
+- The existing rendered cleared-profile case exposed late reseeding under
+  main's original helper (one expected failure, active-parent control passing).
+  GREEN passed both selected cases, including the actual omitted-profile
+  create request. The exact five affected suites then passed all 24 tests.
+- Scoped ESLint and the current 8 GiB typecheck passed. Failed RED and merge
+  conflict receipts remain under the existing external receipt prefix. No
+  keyboard/backend suite replay, dependency install, or second mobile build
+  was performed. Normal staged i18n, owning coverage/spec/diff checks, active
+  merge hooks, and bounded ROOT semantic assessment precede publication.
+- Original corrective observer 27809 was gracefully cancelled for the actual
+  merge conflict and joined at native chunk `93d3f7`, exit 143. Its owned group
+  3108686 is absent. This is a no-verdict conflict receipt, not CI success or
+  a spent retry. Its original clock and prior observer receipts are retained;
+  no replacement observer overlaps it.
+
+- Normal staged i18n passed with all five modified candidates clean and the
+  643-entry guard allowlist intact. Catalog validation (383 decisions, 1613
+  specifications), all-spec lint, working/index whitespace checks, and owning
+  six-artifact/eleven-source coverage passed (`ok: true`, `errors: []`). ROOT
+  accepted the complete integrated two-production-file diff and incoming-path
+  preservation receipt before publication. Normal merge hooks and hosted
+  current-head validation remain delivery gates, not inferred successes.

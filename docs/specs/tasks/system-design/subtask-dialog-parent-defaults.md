@@ -13,8 +13,9 @@ requirements:
 ## Purpose and boundaries
 
 Tasks owns selected-parent context for subtask creation. This is a local
-correction in `apps/web/components/task/new-subtask-dialog.tsx`, using existing
-task/session projections and form controls. No store architecture, loading
+correction in `apps/web/components/task/new-subtask-dialog.tsx` and its existing
+`use-subtask-parent-defaults.ts` helper, using existing task/session projections
+and form controls. No store architecture, loading
 policy, API, profile eligibility, persistence, or materialization change.
 The [Office parent/child design](../../office/system-design/tasks-01.md#b-parent--child-handoffs)
 is read-only workspace background, not acceptance coverage for this correction.
@@ -42,8 +43,8 @@ refreshes, and session options. Shared task/session hooks remain read-only.
 
 ## Initial seeding
 
-Replace mount-only repository/profile effects with one-time delayed seeds for
-untouched fields. Repository context can seed as soon as it is known; reuse
+`useSubtaskParentDefaults` is the sole repository/profile seed owner, with
+one-time delayed seeds for untouched fields. Repository context can seed as soon as it is known; reuse
 `repositoriesDirty` and preserve existing or remote selections. Profile and
 workspace-mode choices need only local initial-seed/touched tracking through
 existing handlers, including deliberate clearing. Existing repository dirty,
@@ -51,8 +52,9 @@ remote mode, and remote-row state also settle the initial new-workspace choice;
 late worktree data cannot switch to inheritance and discard an edited source. Resolve initial workspace
 mode when the primary context is available or the session read settles
 loaded/error; use `defaultSubtaskWorkspaceMode` without changing its rule.
-Later refreshes cannot reseed completed fields. The dialog caller also disables
-its submission profile fallback after an explicit profile choice, so clearing
+Later refreshes cannot reseed completed fields. The helper wraps the existing profile change handler and returns an empty
+submission fallback after an explicit profile choice. The dialog caller passes
+that fallback to its submit hook, so clearing
 the selector cannot silently submit the parent profile. `useSubtaskSubmit` stays
 read-only; ordinary omitted-profile backend defaults and eligibility are unchanged.
 

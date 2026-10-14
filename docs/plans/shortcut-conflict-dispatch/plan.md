@@ -203,3 +203,37 @@ ESLint, current 8 GiB typecheck, and the original managed mobile scenario once
 with one worker and zero retries. The later source-choice guard is inactive in
 that unchanged mobile flow; actual create-request regressions cover its changes.
 See Task 01's corrective Results for qualification and bounded verification.
+
+
+## Main extraction compatibility
+
+Published `9ec419782599b8b1b0d5d185fec0d4cf8b120515` retains the completed
+Results above. GitHub now reports an actual merge conflict; all six required
+checks are missing. Live main `148c84f072737ba7bc089960a321944f9e9088cb`
+(#4476, independent checkout adoption) extracted parent seeding into
+`apps/web/components/task/use-subtask-parent-defaults.ts`. The only intersection
+with this correction's paths is its caller, `new-subtask-dialog.tsx`.
+
+Retain main's helper as the single repository/profile seed owner. Reconcile our
+once-only and explicit-profile-touch guards there; keep canonical-parent lookup,
+workspace/source guards, and effective submission fallback in the dialog caller.
+Preserve adopted-checkout changes from main unchanged. Reuse the same five Tasks
+criteria, same manifest/order, existing rendered/request cases, and main's two
+helper controls. No new requirement, lifecycle policy, shared-submit/form-state
+change, or parallel inline seeding implementation.
+
+[Task 01's compatibility proposal](task-01-match-accepted-chords.md#main-extraction-compatibility-pending-review)
+records the minimal paths and checks. Production integration and any local base
+merge await ROOT review and a later explicit release/lease; no rebase is planned.
+The attached corrective observer's handle and original clock remain retained.
+
+
+The compatibility proposal was reviewed and explicitly released in the same
+primary. The local base merge retains main's extracted helper and all 66
+other incoming paths exactly. Repository/profile seeding now has one owner;
+the dialog keeps canonical selection, workspace/source guards, and actual
+submission fallback. The existing cleared-profile regression failed against
+main's original helper with its active-parent control passing; GREEN passed
+both. All five affected suites passed 24 tests, scoped ESLint passed, and the
+current 8 GiB typecheck passed. Existing helper tests and rendered regressions
+were reused unchanged. Task 01 records the remaining normal delivery checks.

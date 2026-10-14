@@ -77,7 +77,7 @@ func TestCeilingReplayReleasesAdmissionBeforeProviderDispatch(t *testing.T) {
 		<-providerRelease
 		return &executor.PromptResult{}, nil
 	}
-	result := make(chan ceilingReplayOutcome, 1)
+	result := make(chan ceilingReplayResult, 1)
 	go func() {
 		result <- svc.replayCeilingDeferral(ctx, &models.Task{ID: "replay-task"}, models.CeilingDeferral{
 			Kind: models.CeilingLaunchPromptEnsure,
@@ -120,7 +120,7 @@ func TestCeilingReplayReleasesAdmissionBeforeProviderDispatch(t *testing.T) {
 	releaseProvider()
 	outcome := <-result
 	result <- outcome
-	require.Equal(t, ceilingReplaySucceeded, outcome)
+	require.Equal(t, ceilingReplaySucceeded, outcome.outcome)
 }
 
 // @covers AC-AGENTS-SESSION-CEILING-001.2
@@ -218,7 +218,7 @@ func TestCeilingReplayCommitsRouteOwnershipBeforeProviderDispatch(t *testing.T) 
 		allowPrompt:      make(chan struct{}),
 	}
 	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agent)
-	result := make(chan ceilingReplayOutcome, 1)
+	result := make(chan ceilingReplayResult, 1)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -244,7 +244,7 @@ func TestCeilingReplayCommitsRouteOwnershipBeforeProviderDispatch(t *testing.T) 
 	require.Error(t, routeErr)
 	require.True(t, errors.Is(routeErr, ErrCeilingEntryDispatchCommitted), routeErr)
 	agent.releasePrompt()
-	require.Equal(t, ceilingReplaySucceeded, <-result)
+	require.Equal(t, ceilingReplaySucceeded, (<-result).outcome)
 
 	reloaded, err := repo.GetTask(ctx, task.ID)
 	require.NoError(t, err)
