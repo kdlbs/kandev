@@ -74,6 +74,7 @@ func TestKubernetesInheritedWorkspaceWSConflict(t *testing.T) {
 			require.Equal(t, ws.ErrorCodeConflict, payload.Code)
 			require.Equal(t, "workspace_reuse_unsupported", payload.Details["reason"])
 			require.Equal(t, true, payload.Details["recoverable"])
+			require.Equal(t, "create a task with workspace_mode=\"new_workspace\"", payload.Details["retry"])
 			require.Contains(t, payload.Message, "new_workspace")
 			sessions, err := repo.ListTaskSessions(ctx, child.ID)
 			require.NoError(t, err)

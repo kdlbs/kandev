@@ -183,3 +183,71 @@ Post-merge verification on 2026-10-14:
   exhausted memory; CI configures an 8 GiB heap.
 - The same managed rebuilt Kind command above passed with no retries: one
   test in 2.2 minutes. Log: `/tmp/kandev-run.e2e.nn7B8xCa.log`.
+
+Additional PR review remediation:
+
+- Shared retry guidance is one model constant used by HTTP, WebSocket and MCP.
+  Their tests assert the exact external guidance before and after extraction.
+  The Kubernetes predicate documents its intentional support for legacy task
+  rows without workspace-policy metadata.
+- The shared-group race matrix now covers both executor mismatch directions.
+  The local follower initially persisted a Kubernetes binding; the regression
+  failed and now verifies unsafe-reuse rejection before persistence.
+- A parent becoming available after preflight initially left a foreign
+  Kubernetes session bound. Propagation now checks the prepared session's
+  executor before updating the binding and compensates rejected preparation.
+  The regression also preserves supported Docker inheritance.
+- The browser initially reloaded sessions after disable/archive/removal and
+  could revive an obsolete request after re-enablement. Deferred tests failed
+  before correction. Admission loss now clears response ownership and permits
+  a fresh eligible attempt; same-task hydration and Strict Mode remain covered.
+- This is shared state handling in the existing desktop and phone surface.
+  Layout, copy, touch, scrolling and navigation are unchanged. Mobile parity
+  uses the state-only exception: deferred hook tests plus the existing
+  `ensure-session-error.test.tsx` and `task-page-mobile-feedback.test.ts`
+  consumers. No additional mobile composition test is required.
+- The session-hook directory and those consumers passed: 101 files, 972 tests.
+  Focused hook ESLint passed. Logs: `/tmp/pr4485-coderabbit-web-tests.log` and
+  `/tmp/pr4485-coderabbit-hook-lint2.log`.
+- Backend review regressions passed from `apps/backend`:
+  `PATH=/usr/local/go/bin:$PATH GOMAXPROCS=2 GOGC=20 go test -trimpath -p 1
+  -tags fts5 -race ./internal/task/repository/sqlite ./internal/orchestrator
+  ./internal/orchestrator/handlers ./internal/task/handlers
+  ./internal/mcp/handlers ./internal/orchestrator/executor
+  -run 'KubernetesInheritedWorkspace|KubernetesSharedGroupBinding|Inherit|WorkspaceBindingRetryOwnership|WorkspaceReuse|SpawnSession'
+  -count=1`. All six packages passed; PostgreSQL cases remain DSN-gated.
+  Log: `/tmp/pr4485-coderabbit-backend-green.log`.
+- Final `NODE_OPTIONS=--max-old-space-size=6144 pnpm run typecheck` passed from
+  `apps/web`. Log: `/tmp/pr4485-final-typecheck.log`.
+- The final managed rebuilt Kind regression passed with no retries: one test
+  in 2.3 minutes. Log: `/tmp/kandev-run.e2e.fiBBeNKa.log`.
+
+CI remediation:
+
+- PostgreSQL 16 reproduced a fixture-only mismatch: `UpdateTaskEnvironment`
+  leaves an in-memory nanosecond timestamp, while PostgreSQL stores
+  microseconds. The preservation assertion now compares database readbacks
+  before and after binding, retaining the full-row equality check.
+- A disposable local PostgreSQL 16 instance ran
+  `KANDEV_TEST_POSTGRES_DSN=<local test DSN> PATH=/usr/local/go/bin:$PATH
+  GOMAXPROCS=2 GOGC=20 go test -trimpath -p 1 -tags fts5 -race
+  ./internal/task/repository/sqlite
+  -run '^TestKubernetesSharedGroupBindingAdmission$' -count=3` from
+  `apps/backend`. All three runs passed across SQLite and PostgreSQL. The
+  disposable container and volume were removed. Log: `/tmp/pr4485-pg-fixed.log`.
+- The task-coordination layout fixture now supplies a valid profile and
+  explicitly prepares each workspace without running an agent. It no longer
+  mistakes a legitimate session-error banner for removed-control spacing.
+- File drag-and-drop waits for the actual rename reply and the existing
+  Changes activation, then returns to Files. Disk checks use the task's
+  resolved workspace path.
+- Both failed E2E titles passed three repetitions with no retries:
+  `PATH=/usr/local/go/bin:$PATH GOMAXPROCS=2 GOGC=20 GOFLAGS='-p=1'
+  MAKEFLAGS='VERSION=0.0.0' scripts/run-quiet e2e --summary --
+  pnpm --dir apps/web e2e:run --host --no-build --shards 1
+  --project chromium tests/task/task-coordination-ui-removal.spec.ts
+  tests/task/file-tree-drag-drop.spec.ts
+  --grep 'task details omit native coordination|drag a file into a folder'
+  --repeat-each=3 --retries=0`. Six tests passed in 51.1 seconds using the
+  freshly built Kind assets; only test fixtures changed afterward. Log:
+  `/tmp/kandev-run.e2e.kell2jIM.log`. Focused E2E lint passed.

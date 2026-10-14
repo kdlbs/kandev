@@ -1740,6 +1740,7 @@ func rejectInheritedEnvironmentExecutorMismatch(
 		return fmt.Errorf("%w: inherited task environment belongs to executor %q, launch selected %q",
 			models.ErrWorkspaceReuseUnsafe, env.ExecutorType, requestedExecutorType)
 	}
+	// Foreign Kubernetes ownership is invalid even for legacy tasks without an inherited-workspace policy.
 	if requestedExecutorType == string(models.ExecutorTypeKubernetes) && (env.ExecutorType == "" || env.ExecutorType == requestedExecutorType) {
 		return fmt.Errorf("%w: Kubernetes environments are task-owned; create a task with workspace_mode=\"new_workspace\"", models.ErrWorkspaceReuseUnsupported)
 	}

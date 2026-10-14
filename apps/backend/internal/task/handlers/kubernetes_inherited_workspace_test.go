@@ -34,5 +34,6 @@ func TestKubernetesInheritedWorkspaceHTTPEnsureConflict(t *testing.T) {
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
 	require.Equal(t, "workspace_reuse_unsupported", payload["reason"])
 	require.Equal(t, true, payload["recoverable"])
+	require.Equal(t, "create a task with workspace_mode=\"new_workspace\"", payload["retry"])
 	require.Contains(t, payload["error"], "new_workspace")
 }

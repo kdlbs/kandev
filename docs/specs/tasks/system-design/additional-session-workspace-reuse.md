@@ -256,9 +256,13 @@ Use the common preparation/start admission seam in `internal/orchestrator/` so
 workspace-only prepare, ensure, explicit start, and MCP session launch agree.
 The shared-group binding transaction checks the selected environment against
 the candidate executor and destination owner before saving the session, including
-when the group becomes materialized after preflight. Recheck the resolved binding
-before lifecycle attachment for already-persisted legacy sessions. Retain Kubernetes lifecycle's owner/generation checks as the
-final guard; orchestrator preflight does not authorize foreign resources.
+when the group becomes materialized after preflight. Compare known environment
+and candidate executor types for every executor. Parent and group propagation
+also recheck admission using the prepared session's resolved executor before
+binding an environment that became available after preflight; an admission
+failure uses the existing session compensation path. Recheck the resolved
+binding before lifecycle attachment for already-persisted legacy sessions.
+Retain Kubernetes lifecycle's owner/generation checks as the final guard; orchestrator preflight does not authorize foreign resources.
 
 Map unsupported reuse to `CONFLICT` with bounded recoverability details in
 `session.launch`, `session.ensure`, and `spawn_session_kandev`. Guidance tells
@@ -272,7 +276,10 @@ The browser's admitted `session.ensure` request keeps ownership through
 same-task session-list and workflow hydration. Its success or typed rejection
 must settle the pending state and reach the existing recovery presentation.
 Task identity generations, retry identity, and mount lifetime exclude stale
-results; an effect dependency rerender alone does not invalidate the request.
+results. Explicit disable, unknown or archived eligibility, and pending task
+removal revoke response ownership and reset the latch. Later re-enablement
+admits a fresh request without reviving the previous response. Session-list
+and workflow hydration alone do not invalidate the admitted request.
 
 The [repair plan](../../../plans/kubernetes-inherited-workspace-admission/plan.md)
 records the regression and paired live reproduction. This is conformance to the

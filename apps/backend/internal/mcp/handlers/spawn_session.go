@@ -56,7 +56,7 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 				map[string]interface{}{
 					"reason":      "workspace_reuse_unsupported",
 					"recoverable": true,
-					"retry":       "create a task with workspace_mode=\"new_workspace\"",
+					"retry":       models.WorkspaceReuseUnsupportedRetry,
 				})
 		}
 		if errors.Is(err, models.ErrWorkspacePreparing) {

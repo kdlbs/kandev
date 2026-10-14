@@ -271,7 +271,7 @@ func TestHandleSpawnSession_KubernetesInheritedWorkspaceUnsupportedConflict(t *t
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	require.Equal(t, "workspace_reuse_unsupported", payload.Details["reason"])
 	require.Equal(t, true, payload.Details["recoverable"])
-	require.Contains(t, payload.Details["retry"], "new_workspace")
+	require.Equal(t, "create a task with workspace_mode=\"new_workspace\"", payload.Details["retry"])
 	require.Contains(t, payload.Message, "new_workspace")
 	require.Empty(t, orch.renameCalls)
 }

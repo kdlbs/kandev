@@ -67,6 +67,51 @@ func TestKubernetesInheritedWorkspaceAdmissionArchivedGroupOwner(t *testing.T) {
 	require.ErrorIs(t, err, models.ErrWorkspaceReuseUnsafe)
 }
 
+func TestKubernetesInheritedWorkspaceAdmissionLateParent(t *testing.T) {
+	for _, executorType := range []models.ExecutorType{models.ExecutorTypeKubernetes, models.ExecutorTypeLocalDocker} {
+		t.Run(string(executorType), func(t *testing.T) {
+			svc, child := inheritedWorkspaceService(t, "inherit_parent", "workspace_group", executorType)
+			svc.SetWorkspaceMaterializer(&lateInheritedWorkspaceMaterializer{
+				stubMaterializer: stubMaterializer{envByTask: map[string]string{child.ID: "parent-env"}},
+			})
+			ctx := context.Background()
+			before, err := svc.repo.GetTaskEnvironment(ctx, "parent-env")
+			require.NoError(t, err)
+			sessionID, created, err := svc.prepareSessionForStart(ctx, child.ToAPI(), "agent-profile", "", "executor", "executor-profile", "")
+			if executorType == models.ExecutorTypeKubernetes {
+				require.ErrorIs(t, err, models.ErrWorkspaceReuseUnsupported)
+				require.False(t, created)
+				require.Empty(t, sessionID)
+				sessions, listErr := svc.repo.ListTaskSessions(ctx, child.ID)
+				require.NoError(t, listErr)
+				require.Empty(t, sessions)
+			} else {
+				require.NoError(t, err)
+				require.True(t, created)
+				session, readErr := svc.repo.GetTaskSession(ctx, sessionID)
+				require.NoError(t, readErr)
+				require.Equal(t, "parent-env", session.TaskEnvironmentID)
+			}
+			after, err := svc.repo.GetTaskEnvironment(ctx, "parent-env")
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+		})
+	}
+}
+
+type lateInheritedWorkspaceMaterializer struct {
+	stubMaterializer
+	reads int
+}
+
+func (m *lateInheritedWorkspaceMaterializer) GetSharedGroupEnvironment(ctx context.Context, taskID string) string {
+	m.reads++
+	if m.reads == 1 {
+		return ""
+	}
+	return m.stubMaterializer.GetSharedGroupEnvironment(ctx, taskID)
+}
+
 func inheritedWorkspaceService(t *testing.T, mode, source string, executorType models.ExecutorType) (*Service, *models.Task) {
 	t.Helper()
 	ctx := context.Background()

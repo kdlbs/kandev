@@ -15,6 +15,6 @@ func workspaceReuseUnsupportedConflictResponse(msg *ws.Message, err error) (*ws.
 		map[string]interface{}{
 			"reason":      "workspace_reuse_unsupported",
 			"recoverable": true,
-			"retry":       "create a task with workspace_mode=\"new_workspace\"",
+			"retry":       models.WorkspaceReuseUnsupportedRetry,
 		})
 }

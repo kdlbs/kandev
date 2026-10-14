@@ -115,7 +115,9 @@ The final command and result record is in the completed work order.
 Authentication was restored and ready PR [#4485](https://github.com/kdlbs/kandev/pull/4485)
 was published with desktop and mobile recovery screenshots. Review remediation
 also validates the shared-group environment selected inside the binding
-transaction, closing the interval after orchestrator preflight.
+transaction, closing the interval after orchestrator preflight. Later review
+remediation extends that check to all executor mismatches, rechecks late parent
+bindings, and revokes browser response ownership when admission is withdrawn.
 
 ## Risks
 

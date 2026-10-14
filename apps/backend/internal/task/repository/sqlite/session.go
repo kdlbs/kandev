@@ -833,8 +833,11 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	}
 	// The elected environment can change after preflight. Validate its owner
 	// under the binding transaction before exposing a destination session.
+	if executorType != "" && executorType != requestedExecutorType {
+		return fmt.Errorf("%w: shared workspace executor does not match the selected executor", models.ErrWorkspaceReuseUnsafe)
+	}
 	if requestedExecutorType == string(models.ExecutorTypeKubernetes) && ownerID != session.TaskID {
-		if ownerID == "" || (executorType != "" && executorType != requestedExecutorType) {
+		if ownerID == "" {
 			return fmt.Errorf("%w: shared workspace executor ownership is inconsistent", models.ErrWorkspaceReuseUnsafe)
 		}
 		return fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsupported, models.WorkspaceReuseUnsupportedMessage)

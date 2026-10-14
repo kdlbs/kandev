@@ -7,6 +7,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import type { FileTreePage } from "../../pages/file-tree-page";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+import { watchWs } from "../../helpers/causal-waits";
 
 // DnD in file-browser.tsx uses native HTML5 drag events (dragstart, dragover,
 // drop) keyed off React's onDragStart/Over/Drop. Playwright's locator.dragTo()
@@ -176,7 +177,8 @@ test.describe("File tree drag and drop", () => {
     git.stageAll();
     git.commit("seed dnd");
 
-    const { session } = await setupTask({
+    const ws = watchWs(testPage);
+    const { session, workspacePath } = await setupTask({
       testPage,
       apiClient,
       seedData,
@@ -185,9 +187,14 @@ test.describe("File tree drag and drop", () => {
       requiredPath: "movable.ts",
     });
 
+    const renameResponse = ws.waitForResponse("workspace.file.rename");
     await dispatchHtmlDnd(session.fileTree, "movable.ts", "target-dir");
+    await renameResponse;
+    // The dirty worktree activates Changes after the rename completes.
+    await expect(session.changes).toBeVisible();
+    await session.clickTab("Files");
 
-    // The file is removed from the root immediately (optimistic update).
+    // The completed move removes the source from the active Files tree.
     await expect(session.fileTreeNode("movable.ts")).toHaveCount(0, { timeout: 10_000 });
     // Expand the target folder to verify the moved child landed inside.
     // moveNodesInTree does not auto-expand the drop target.
@@ -195,11 +202,11 @@ test.describe("File tree drag and drop", () => {
     await expect(session.fileTreeNode("target-dir/movable.ts")).toBeVisible({ timeout: 10_000 });
 
     await expect
-      .poll(() => fs.existsSync(path.join(repoDir, "target-dir", "movable.ts")), {
+      .poll(() => fs.existsSync(path.join(workspacePath, "target-dir", "movable.ts")), {
         timeout: 10_000,
       })
       .toBe(true);
-    expect(fs.existsSync(path.join(repoDir, "movable.ts"))).toBe(false);
+    expect(fs.existsSync(path.join(workspacePath, "movable.ts"))).toBe(false);
   });
 
   test("selected directory carries selected and unselected descendants", async ({

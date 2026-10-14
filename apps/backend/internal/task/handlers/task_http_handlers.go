@@ -688,7 +688,7 @@ func (h *TaskHandlers) httpEnsureTaskSession(c *gin.Context) {
 				"error":       models.WorkspaceReuseUnsupportedMessage,
 				"reason":      "workspace_reuse_unsupported",
 				"recoverable": true,
-				"retry":       "create a task with workspace_mode=\"new_workspace\"",
+				"retry":       models.WorkspaceReuseUnsupportedRetry,
 			})
 			return
 		}

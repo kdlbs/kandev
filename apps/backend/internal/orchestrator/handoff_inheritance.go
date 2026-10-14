@@ -144,6 +144,9 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 	if err != nil || target == nil {
 		return fmt.Errorf("inherit_parent load target session: %w", err)
 	}
+	if err := s.admitSessionInheritedEnvironment(ctx, task, target, envID); err != nil {
+		return err
+	}
 	if target.TaskEnvironmentID == envID {
 		return nil
 	}
@@ -290,6 +293,9 @@ func (s *Service) inheritFromSharedGroup(ctx context.Context, task *v1.Task, ses
 	if err != nil || target == nil {
 		return fmt.Errorf("shared_group load target session: %w", err)
 	}
+	if err := s.admitSessionInheritedEnvironment(ctx, task, target, envID); err != nil {
+		return err
+	}
 	if target.TaskEnvironmentID == envID {
 		return nil
 	}
@@ -303,6 +309,16 @@ func (s *Service) inheritFromSharedGroup(ctx context.Context, task *v1.Task, ses
 		zap.String("session_id", sessionID),
 		zap.String("task_environment_id", envID))
 	return nil
+}
+
+// Propagation uses the prepared session's resolved executor before binding a
+// parent or group environment that may have become available after preflight.
+func (s *Service) admitSessionInheritedEnvironment(ctx context.Context, task *v1.Task, session *models.TaskSession, envID string) error {
+	env, err := s.repo.GetTaskEnvironment(ctx, envID)
+	if err != nil || env == nil {
+		return fmt.Errorf("%w: inherited environment could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	return s.executor.AdmitInheritedEnvironment(ctx, task, env, session.ExecutorID, session.ExecutorProfileID)
 }
 
 // workspacePolicyMode reads metadata.workspace.mode (set by

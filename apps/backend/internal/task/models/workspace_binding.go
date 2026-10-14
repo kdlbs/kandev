@@ -14,7 +14,10 @@ var (
 	ErrWorkspaceReuseUnsupported = errors.New("workspace reuse is unsupported")
 )
 
-const WorkspaceReuseUnsupportedMessage = "the selected executor cannot reuse another task's workspace; create a task with workspace_mode=\"new_workspace\""
+const (
+	WorkspaceReuseUnsupportedRetry   = "create a task with workspace_mode=\"new_workspace\""
+	WorkspaceReuseUnsupportedMessage = "the selected executor cannot reuse another task's workspace; " + WorkspaceReuseUnsupportedRetry
+)
 
 // WorkspacePreparingError is ErrWorkspacePreparing for a binding that lost the
 // workspace election. EnvironmentID names the environment being materialized.
