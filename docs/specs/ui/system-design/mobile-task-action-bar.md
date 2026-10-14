@@ -38,8 +38,11 @@ cluster is non-wrapping. These groups must permit complete-control wrapping.
 ## Phone composition
 
 - Entry: open a task's chat or passthrough conversation; no new navigation step.
-- Hierarchy: terminal notice first, then status/utility controls and the trailing
-  workflow action, then the existing composer.
+- Hierarchy: terminal notice first, then the existing status/control region and
+  composer. Normal chat's revised workflow-versus-utility order is owned by
+  [composer action placement](composer-action-wrapping.md); it places a
+  right-aligned workflow row above the utility row on phones. Passthrough
+  retains its inline/trailing composition.
 - Surface: inline composer tray. A short task notice should remain visible
   beside its action, so opening an additional drawer is unnecessary. Frequently
   used utility controls remain direct targets; whole controls wrap at high density.
@@ -80,7 +83,8 @@ navigation recovery remain owned by Tasks.
 
 Retain existing feature components and callbacks. Make both right controls and
 the transcript-navigation subgroup able to wrap complete controls. Keep Proceed
-at the trailing edge, allow a long step label to wrap inside a contained button,
+at the right content edge, apply the linked normal-chat phone row contract,
+allow a long step label to wrap inside a contained button,
 and preserve its full accessible name. Override nowrap for both phone widths
 and coarse pointers, including tablets at or above 768px, and verify that the
 label stays inside its button. Do not squeeze icons or make a

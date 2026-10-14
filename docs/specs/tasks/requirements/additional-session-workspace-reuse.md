@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-19
-updated: 2026-09-29
+updated: 2026-10-12
 owners:
   - kandev
 ---
@@ -149,6 +149,13 @@ An executor-type transition is not an attach. It must select or materialize an
 environment owned by the requested executor before a session can start. A
 persisted session or environment workspace path from the previous executor is
 diagnostic evidence only and is never a fallback launch directory.
+
+A `failed` canonical environment is never attachable. A `creating` environment
+whose materializer abandoned it, and a `failed` environment without physical
+workspace evidence, can instead elect the requesting session as a new
+materializer, as defined by
+[REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004](task-launch-failure-recovery.md).
+That election materializes the environment; it is not an attach.
 
 An incomplete, failed, deleted, path-mismatched, branch-mismatched, or
 duplicate repository slot is `workspace_reuse_unsafe`. An executor that cannot

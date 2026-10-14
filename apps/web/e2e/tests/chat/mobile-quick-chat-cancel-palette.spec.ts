@@ -13,6 +13,7 @@ import {
   sendQuickChatMessage,
   startQuickChatFromSetup,
   waitForQuickChatDirectInput,
+  waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
 
 function commandDialog(page: Page) {
@@ -35,6 +36,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
 
   test("cancels an active Quick Chat turn through the visible touch composer control", async ({
     testPage,
+    apiClient,
   }) => {
     test.setTimeout(120_000);
     await testPage.goto("/");
@@ -42,10 +44,18 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await testPage.getByTestId("mobile-quick-chat-button").tap();
 
     const quickChat = testPage.getByRole("dialog", { name: "Quick Chat" });
-    await startQuickChatFromSetup(quickChat, testPage);
+    const started = await startQuickChatFromSetup(quickChat, testPage);
+    await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
     await sendQuickChatMessage(quickChat, testPage, "/slow 30s");
+    await waitForAgentMessage(
+      apiClient,
+      started.session_id,
+      "Running slow response (30s total)",
+      30_000,
+    );
 
     const quickSessionId = await waitForActiveQuickChatSupportsSteering(testPage);
+    expect(quickSessionId).toBe(started.session_id);
     await waitForActiveQuickChatForegroundActivity(testPage, "generating");
     const editor = quickChat.locator('.tiptap.ProseMirror[contenteditable="true"]:visible');
     await expect(editor).toHaveText("");
@@ -86,7 +96,9 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await palette.getByRole("combobox").fill("cancel");
     const cancelOption = palette.getByRole("option").filter({ hasText: /Cancel Turn/i });
     await expect(cancelOption).toHaveCount(1);
-    expect((await cancelOption.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await expect
+      .poll(async () => (await cancelOption.boundingBox())?.height ?? 0)
+      .toBeGreaterThanOrEqual(44);
     await cancelOption.tap();
 
     await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });

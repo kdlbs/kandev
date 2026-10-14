@@ -60,6 +60,15 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 					"retry":       "retry after the initial workspace launch completes",
 				})
 		}
+		if errors.Is(err, models.ErrTaskEnvironmentResetRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
+				"the task workspace failed and keeps workspace resources; reset the task environment, then retry",
+				map[string]interface{}{
+					"reason":      "workspace_reuse_unsafe",
+					"recoverable": true,
+					"retry":       "reset the task environment, then retry",
+				})
+		}
 		if errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
 				"the task workspace cannot be safely reused; retry after restoring its existing workspace",

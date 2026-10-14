@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -255,6 +256,26 @@ func TestHandleSpawnSession_WorkspaceUnsafeReturnsRecoverableConflict(t *testing
 	var payload ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	assert.Equal(t, "workspace_reuse_unsafe", payload.Details["reason"])
+	assert.Empty(t, orch.renameCalls)
+}
+
+// @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.10
+func TestHandleSpawnSession_FailedEnvironmentWithResourcesPointsToReset(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.launchErr = fmt.Errorf("start task: %w", models.ErrTaskEnvironmentResetRequired)
+
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, spawnPayload(target.ID, "do things", target.ID, sess.ID))
+	resp, err := h.handleSpawnSession(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeConflict)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "workspace_reuse_unsafe", payload.Details["reason"])
+	assert.Equal(t, true, payload.Details["recoverable"])
+	assert.Equal(t, "reset the task environment, then retry", payload.Details["retry"])
+	assert.Contains(t, payload.Message, "reset the task environment")
 	assert.Empty(t, orch.renameCalls)
 }
 

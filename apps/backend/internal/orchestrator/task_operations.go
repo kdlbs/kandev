@@ -1845,6 +1845,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	var sessionID string
 	var sessionCreated bool
 	failPreparedLaunch := func(err error) error {
+		s.releaseStartEnvironmentClaim(ctx, task.ID, sessionID, sessionCreated, err)
 		return s.handleQuickChatStartFailure(ctx, task, sessionID, sessionCreated, err)
 	}
 	if selectedExplicitSession != nil {

@@ -4592,7 +4592,8 @@ func isWordByte(b byte) bool {
 
 // searchTasks fetches tasks matching a search query for a workspace with pagination.
 func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter, workflowID, repositoryID string, pageSize, offset int, sort string) (*sql.Rows, int, error) {
-	searchPattern := "%" + query + "%"
+	escaper := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	searchPattern := "%" + escaper.Replace(query) + "%"
 	like := dialect.Like(r.ro.DriverName())
 
 	// Reuse the same archive, ephemeral, and config predicates as the
@@ -4616,10 +4617,10 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter
 		LEFT JOIN repositories r ON tr.repository_id = r.id
 		WHERE t.workspace_id = ?%s
 		AND (
-			t.title %s ? OR
-			t.description %s ? OR
-			r.name %s ? OR
-			r.local_path %s ?
+			t.title %s ? ESCAPE '\' OR
+			t.description %s ? ESCAPE '\' OR
+			r.name %s ? ESCAPE '\' OR
+			r.local_path %s ? ESCAPE '\'
 		)
 	`, tFilter, like, like, like, like)
 	countArgs := append(append([]interface{}{workspaceID}, extraArgs...), searchPattern, searchPattern, searchPattern, searchPattern)
@@ -4644,10 +4645,10 @@ func taskSearchSelectQuery(driver, tFilter, like, sort string) string {
 			LEFT JOIN repositories r ON tr.repository_id = r.id
 			WHERE t.workspace_id = ?%s
 			AND (
-				t.title %s ? OR
-				t.description %s ? OR
-				r.name %s ? OR
-				r.local_path %s ?
+				t.title %s ? ESCAPE '\' OR
+				t.description %s ? ESCAPE '\' OR
+				r.name %s ? ESCAPE '\' OR
+				r.local_path %s ? ESCAPE '\'
 			)
 		) task_search
 		ORDER BY %s

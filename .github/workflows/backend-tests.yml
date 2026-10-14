@@ -779,6 +779,26 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Run PostgreSQL 18 materialization gates
+        run: |
+          set -euo pipefail
+          output_file="$(mktemp)"
+          go test -v -race \
+            ./internal/task/repository/sqlite ./internal/office/repository/sqlite \
+            -run '^(TestPostgresMaterializationSerializesAndRechecksOwner|TestPostgresWorkspaceGroupOwnershipRoundTrip|TestWorkspaceBindingRetryOwnership)$' \
+            2>&1 | tee "${output_file}"
+
+          for test_name in \
+            TestPostgresMaterializationSerializesAndRechecksOwner \
+            TestPostgresWorkspaceGroupOwnershipRoundTrip \
+            TestWorkspaceBindingRetryOwnership; do
+            if ! grep -q "^=== RUN   ${test_name}$" "${output_file}" || \
+               ! grep -q "^--- PASS: ${test_name} " "${output_file}"; then
+              echo "::error::PostgreSQL 18 materialization gate did not run and pass ${test_name}"
+              exit 1
+            fi
+          done
+
       - name: Run PostgreSQL 18 boot and upgrade gates
         run: |
           set -euo pipefail

@@ -1,13 +1,19 @@
-package sqlite
+package sqlite_test
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/db"
+	officemodels "github.com/kandev/kandev/internal/office/models"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/testutil"
 )
 
@@ -19,21 +25,40 @@ func TestWorkspaceBindingRetryOwnership(t *testing.T) {
 			name = "shared-group"
 		}
 		t.Run(name, func(t *testing.T) {
-			t.Run("SQLite", func(t *testing.T) { testWorkspaceRetryOwnership(t, newRepoForEntityTests(t), shared) })
+			t.Run("SQLite", func(t *testing.T) {
+				repo, database := newRetryOwnershipRepository(t, false)
+				testWorkspaceRetryOwnership(t, repo, database, shared)
+			})
 			t.Run("Postgres", func(t *testing.T) {
-				db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 4)
-				repo, err := NewWithDB(db, db, nil)
-				require.NoError(t, err)
-				testWorkspaceRetryOwnership(t, repo, shared)
+				repo, database := newRetryOwnershipRepository(t, true)
+				testWorkspaceRetryOwnership(t, repo, database, shared)
 			})
 		})
 	}
 }
 
-func testWorkspaceRetryOwnership(t *testing.T, repo *Repository, shared bool) {
+func newRetryOwnershipRepository(t *testing.T, postgres bool) (*tasksqlite.Repository, *sqlx.DB) {
+	t.Helper()
+	var database *sqlx.DB
+	if postgres {
+		database = testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+		database.SetMaxOpenConns(4)
+		database.SetMaxIdleConns(4)
+	} else {
+		connection, err := db.OpenSQLite(filepath.Join(t.TempDir(), "retry-ownership.db"))
+		require.NoError(t, err)
+		database = sqlx.NewDb(connection, "sqlite3")
+		t.Cleanup(func() { _ = database.Close() })
+	}
+	repo, err := tasksqlite.NewWithDB(database, database, nil)
+	require.NoError(t, err)
+	return repo, database
+}
+
+func testWorkspaceRetryOwnership(t *testing.T, repo *tasksqlite.Repository, database *sqlx.DB, shared bool) {
 	t.Helper()
 	ctx := context.Background()
-	seedWorkspace(t, repo, "ws-retry")
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-retry", Name: "Retry ownership"}))
 	seed := models.SessionRuntimeConfig{Model: "initial-model"}
 	for _, taskID := range []string{"owner", "follower"} {
 		require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "ws-retry", Title: taskID,
@@ -44,7 +69,7 @@ func testWorkspaceRetryOwnership(t *testing.T, repo *Repository, shared bool) {
 		}))
 	}
 	if shared {
-		seedRetryWorkspaceGroup(t, repo)
+		seedRetryWorkspaceGroup(t, database)
 	}
 	bind := func(session *models.TaskSession) error {
 		candidate := &models.TaskEnvironment{TaskID: session.TaskID, ExecutorType: string(models.ExecutorTypeLocal)}
@@ -91,23 +116,20 @@ func testWorkspaceRetryOwnership(t *testing.T, repo *Repository, shared bool) {
 	assertRetrySessionOwnership(t, repo, taskID, owner.TaskEnvironmentID, sessions, shared)
 }
 
-func seedRetryWorkspaceGroup(t *testing.T, repo *Repository) {
+func seedRetryWorkspaceGroup(t *testing.T, database *sqlx.DB) {
 	t.Helper()
-	_, err := repo.db.Exec(`
-		CREATE TABLE task_workspace_groups (
-			id TEXT PRIMARY KEY, materialized_environment_id TEXT NOT NULL DEFAULT '', updated_at TIMESTAMP NOT NULL
-		);
-		CREATE TABLE task_workspace_group_members (
-			workspace_group_id TEXT NOT NULL, task_id TEXT NOT NULL, released_at TIMESTAMP NULL
-		);
-		INSERT INTO task_workspace_groups (id, updated_at) VALUES ('group-retry', CURRENT_TIMESTAMP);
-		INSERT INTO task_workspace_group_members (workspace_group_id, task_id) VALUES
-			('group-retry', 'owner'), ('group-retry', 'follower');
-	`)
+	ctx := context.Background()
+	office, err := officesqlite.NewWithDB(database, database, nil)
 	require.NoError(t, err)
+	require.NoError(t, office.CreateWorkspaceGroup(ctx, &officemodels.WorkspaceGroup{
+		ID: "group-retry", WorkspaceID: "ws-retry", OwnerTaskID: "owner", MaterializedKind: officemodels.WorkspaceGroupKindPlainFolder,
+	}))
+	for _, taskID := range []string{"owner", "follower"} {
+		require.NoError(t, office.AddWorkspaceGroupMember(ctx, "group-retry", taskID, ""))
+	}
 }
 
-func assertRetrySessionOwnership(t *testing.T, repo *Repository, taskID, envID string, retries []*models.TaskSession, shared bool) {
+func assertRetrySessionOwnership(t *testing.T, repo *tasksqlite.Repository, taskID, envID string, retries []*models.TaskSession, shared bool) {
 	t.Helper()
 	stored, err := repo.ListTaskSessions(context.Background(), taskID)
 	require.NoError(t, err)
