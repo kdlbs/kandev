@@ -46,10 +46,6 @@ func adoptionGit(t *testing.T, path string, args ...string) string {
 }
 
 func newAdoptionHTTPFixture(t *testing.T) adoptionHTTPFixture {
-	return newAdoptionHTTPFixtureWithDB(t, nil)
-}
-
-func newAdoptionHTTPFixtureWithDB(t *testing.T, db *sqlx.DB) adoptionHTTPFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	home, resolveErr := filepath.EvalSymlinks(t.TempDir())
@@ -85,12 +81,10 @@ func newAdoptionHTTPFixtureWithDB(t *testing.T, db *sqlx.DB) adoptionHTTPFixture
 	require.NoError(t, os.WriteFile(filepath.Join(clone, "ignored"), []byte("ignored fixture\n"), 0600))
 	sibling := filepath.Join(root, "sibling")
 	adoptionGit(t, source, "worktree", "add", "-b", "feature/sibling", sibling, "main")
-	if db == nil {
-		raw, err := dbutil.OpenSQLite(filepath.Join(home, "fixture.db"))
-		require.NoError(t, err)
-		db = sqlx.NewDb(raw, "sqlite3")
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-	}
+	raw, err := dbutil.OpenSQLite(filepath.Join(home, "fixture.db"))
+	require.NoError(t, err)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	repo, err := tasksqlite.NewWithDB(db, db, nil)
 	require.NoError(t, err)
 	statements := []struct {
@@ -115,7 +109,7 @@ func newAdoptionHTTPFixtureWithDB(t *testing.T, db *sqlx.DB) adoptionHTTPFixture
 	}{`INSERT INTO task_environment_repos(id,task_environment_id,repository_id,worktree_id,worktree_path,worktree_branch,branch_slug,position,status,created_at,updated_at) VALUES('slot-sibling','env-adoption','repo-adoption','wt-sibling',?,'feature/sibling','feature-sibling',0,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, []any{sibling}})
 
 	for _, st := range statements {
-		_, err := db.Exec(db.Rebind(st.q), st.args...)
+		_, err := db.Exec(st.q, st.args...)
 		require.NoError(t, err)
 	}
 	log := newTestLogger(t)

@@ -89,9 +89,10 @@ receipt assertions passed through the third backend restart. Its explicit reset
 then failed because archive capture classified the owned independent clone as a
 project primary. Retirement now retains validated receipts in the durable cleanup
 snapshot, checks the running job attempt and pinned owner/path/Git proof, and
-preserves the project primary. Real handler/Git/SQLite and environment-gated
-PostgreSQL tests cover archive/delete after foreign-key cascade and manager
-restart; negative cases cover primary, foreign owner/claim, replaced paths,
+preserves the project primary. Real handler/Git/SQLite tests cover archive/delete after foreign-key cascade
+and manager restart. The explicitly hosted PostgreSQL worktree package covers
+durable running-job provenance, owner generation, cascade/reload and claim
+attempt/state refusals; negative cases cover primary, foreign owner/claim, replaced paths,
 symlinks and missing proof. Final hosted verification remains pending.
 
 The separate terminal mobile parent-default failure showed a correct parent

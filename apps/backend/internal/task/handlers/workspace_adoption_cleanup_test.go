@@ -8,16 +8,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
-	"github.com/kandev/kandev/internal/testutil"
 	"github.com/kandev/kandev/internal/worktree"
 	"github.com/stretchr/testify/require"
 )
 
-func adoptedCleanupFixture(t *testing.T, db *sqlx.DB) (adoptionHTTPFixture, *worktree.Worktree, context.Context) {
+func adoptedCleanupFixture(t *testing.T) (adoptionHTTPFixture, *worktree.Worktree, context.Context) {
 	t.Helper()
-	f := newAdoptionHTTPFixtureWithDB(t, db)
+	f := newAdoptionHTTPFixture(t)
 	p := adoptionPreview(t, f)
 	rec := adoptionRequest(f.router, "/api/v1/tasks/task-adoption/workspace-adoption/apply", map[string]any{"preview": p, "operation_id": "11111111-1111-4111-8111-111111111111"})
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -37,17 +35,7 @@ func adoptedCleanupFixture(t *testing.T, db *sqlx.DB) (adoptionHTTPFixture, *wor
 }
 
 func TestWorkspaceAdoptionArchiveAndDeleteRetainsProjectPrimary(t *testing.T) {
-	testAdoptedArchiveAndDelete(t, nil)
-}
-
-func TestWorkspaceAdoptionArchiveAndDeleteRetainsProjectPrimaryPostgres(t *testing.T) {
-	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
-	testAdoptedArchiveAndDelete(t, db)
-}
-
-func testAdoptedArchiveAndDelete(t *testing.T, db *sqlx.DB) {
-	t.Helper()
-	f, wt, ctx := adoptedCleanupFixture(t, db)
+	f, wt, ctx := adoptedCleanupFixture(t)
 	store, err := worktree.NewSQLiteStore(f.db, f.db)
 	require.NoError(t, err)
 	f.manager, err = worktree.NewManager(worktree.Config{Enabled: true, TasksBasePath: filepath.Dir(f.root)}, store, newTestLogger(t))
@@ -91,7 +79,7 @@ func TestWorkspaceAdoptionArchiveCaptureDoesNotAdmitArchivedRuntime(t *testing.T
 func TestWorkspaceAdoptionArchiveRejectsUnprovenCleanupPaths(t *testing.T) {
 	for _, mutation := range []string{"project-primary", "foreign-task", "foreign-job", "stale-attempt", "replaced-checkout", "symlink-metadata", "missing-provenance"} {
 		t.Run(mutation, func(t *testing.T) {
-			f, wt, ctx := adoptedCleanupFixture(t, nil)
+			f, wt, ctx := adoptedCleanupFixture(t)
 			switch mutation {
 			case "project-primary":
 				wt.Path, wt.SourceClonePath, wt.SourceCommonDir = f.source, f.source, filepath.Join(f.source, ".git")
