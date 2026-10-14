@@ -53,6 +53,35 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+Tenth candidate `cef9436c77d` completes all three workflows: backend
+38626664788 succeeds in 702 seconds (693 execution critical path; 196.3167
+runner-minutes), frontend 38626664893 succeeds in 759 seconds (751 execution
+critical path; 29.6333 runner-minutes), and E2E 38626664950 fails in 957 seconds
+(885 execution critical path; 302.1 runner-minutes). The full set is 15m57s,
+failed, and does not count toward the three required successful samples.
+All 3,963 E2E identities remain: 3,916 first passes, five retry-only passes,
+two final failures and 40 existing skips. The two failed cases are keyboard
+queue reorder and runtime replacement; keep their zero-retry policies.
+
+Exact daily module/build-cache hits are proven in tenth build 116067615073;
+it takes 185 seconds versus ninth's 487 seconds, with exact-hit saves skipped.
+The Windows process cohorts restore the previous compatible source snapshot;
+only cohort one publishes the new daily build key. All eight Windows suites
+succeed. These step/cache observations do not establish a controlled complete
+workflow speedup, and queue differences remain material.
+
+Conflict merge `5222f0bfe36` retains canonical parent lookup and the branch's
+same-ID selected-row fallback against main `b5705cfb069`. After fresh native,
+fixture/plugin and pseudo-locale web builds, both previously failed E2E cases
+pass twice without retries (four cases, 52.6s). This does not prove a flake
+repair. The selected-parent desktop and real phone scenarios pass without
+retries, alongside 26 focused parent unit cases, full typecheck and strict lint.
+Normal native enumeration preserves all 1,337 hosted-tenth project/file IDs,
+root-spec hashes and 3,810 test counts; containers retain 46 units/153 tests.
+The next candidate removes browser images from build/report per Task 15;
+23 E2E workflow contracts and existing join/placement/pinning checks pass.
+The measured 102-second container-start opportunity is gross, not a net claim.
+
 Ninth candidate `5f47945b531` succeeds as backend 38620159334, frontend
 38620159244 and E2E 38620159182. Backend succeeds in 1,181 seconds including
 queue/reporting (796 seconds execution critical path; 211.2 runner-minutes).

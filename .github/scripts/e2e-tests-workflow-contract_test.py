@@ -44,6 +44,33 @@ def job_block(workflow: str, job: str, next_job: str) -> str:
 
 
 class E2EWorkflowContractTest(unittest.TestCase):
+    def test_browser_free_jobs_bootstrap_host_tools_and_share_one_store_writer(self) -> None:
+        workflow = E2E_WORKFLOW.read_text()
+        build = job_block(workflow, "build", "e2e")
+        report = workflow.partition("  e2e-report:\n")[2]
+        for job in (build, report):
+            self.assertNotRegex(job, r"(?m)^    container:")
+            self.assertIn("runs-on: ubuntu-latest", job)
+            self.assertIn("uses: pnpm/action-setup@", job)
+            self.assertIn("version: 9.15.9", job)
+            self.assertIn("uses: actions/setup-node@", job)
+            self.assertIn("node-version: '24'", job)
+            self.assertIn('pnpm store path --silent', job)
+            self.assertIn("path: ${{ steps.pnpm_store.outputs.path }}", job)
+            self.assertIn("key: pnpm-e2e-host-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}", job)
+            self.assertLess(job.index("uses: pnpm/action-setup@"), job.index("pnpm store path --silent"))
+            self.assertLess(job.index("uses: actions/setup-node@"), job.index("pnpm install --frozen-lockfile"))
+            self.assertNotIn("apt-get", job)
+        self.assertIn("uses: actions/setup-go@", build)
+        self.assertIn("go-version-file: apps/backend/go.mod", build)
+        self.assertIn("cache: false", build)
+        self.assertIn("uses: actions/cache@", build)
+        self.assertIn("uses: actions/cache/restore@", report)
+        self.assertNotIn("uses: actions/cache@", report)
+        self.assertNotIn("uses: actions/setup-go@", report)
+        self.assertNotIn("if: steps.pnpm_store", build)
+        self.assertNotIn("if: steps.pnpm_store", report)
+
     def test_normal_matrix_matches_the_planner_and_keeps_guarded_processes(self) -> None:
         workflow = E2E_WORKFLOW.read_text()
         planner = (REPO_ROOT / "apps/web/e2e/scripts/plan-shards.ts").read_text()

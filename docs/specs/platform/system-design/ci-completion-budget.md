@@ -121,6 +121,15 @@ in parallel. Reuse existing Make targets without changing local/release builds.
 The report gate joins this job and rejects failure, cancellation or an unexpected
 skip. Every further change gets a source-specific work-order update before implementation.
 
+The browser-free build and report jobs bootstrap Go from `go.mod` (build only),
+Node 24 and pnpm 9.15.9 on their existing hosted Ubuntu runners. They do not
+pull a Playwright image. Browser and desktop jobs retain their existing images.
+Build resolves and publishes a separate host pnpm store; report only restores
+it. Both still install the frozen lockfile and execute every original operation.
+Setup-go caching stays disabled in build because the shared Go cache action
+owns its paths and validates installed compiler/environment compatibility.
+Cold tool/cache setup remains part of complete elapsed measurement.
+
 Container global setup owns one temporary canonical helper manifest per
 Playwright invocation. Worker bundles and caches remain isolated and validate
 the shared identity and Linux helper digest before using it. Teardown removes

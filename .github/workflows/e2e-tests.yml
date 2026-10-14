@@ -28,7 +28,7 @@ permissions:
   contents: read
   # The build/report jobs read the latest successful main timing artifact.
   actions: read
-  # Required so the containerized build / e2e shards / e2e-report jobs can
+  # Required so the containerized helper / browser / desktop jobs can
   # pull the kandev-ci image from GHCR via GITHUB_TOKEN.
   packages: read
 
@@ -191,12 +191,9 @@ jobs:
     # Build reads the GitHub API and downloads a timing artifact with the job token.
     # Keep this credential-bearing path on the GitHub-hosted boundary.
     runs-on: ubuntu-latest
-    # Pre-baked image bundles Go, Node 24, pnpm 9.15.9 — see
-    # .github/docker/ci-base/Dockerfile. Uses the `build` tag (with Go)
-    # because this job compiles the backend.
-    container: ghcr.io/kdlbs/kandev-ci:build-latest
     timeout-minutes: 20
-    # Container jobs default to `sh`; pin to bash for the few shell steps below.
+    env:
+      COREPACK_HOME: ${{ runner.temp }}/corepack
     defaults:
       run:
         shell: bash
@@ -207,18 +204,34 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Mark workspace safe for git
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: 9.15.9
+          run_install: false
 
-      # Inside the container the home dir is /root, so the pnpm store lives at
-      # /root/.local/share/pnpm/store. actions/cache resolves `~` against $HOME
-      # so the same path string works for both the host and container variants.
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '24'
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache: false
+
+      - name: Resolve pnpm store
+        id: pnpm_store
+        working-directory: apps
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
       - name: Cache pnpm store
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.local/share/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          path: ${{ steps.pnpm_store.outputs.path }}
+          key: pnpm-e2e-host-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-e2e-host-${{ runner.os }}-
 
       - name: Cache Go modules and compilation
         uses: ./.github/actions/cache-go
@@ -1213,14 +1226,12 @@ jobs:
     # Report aggregation queries GitHub history and downloads artifacts with the
     # job token, so it remains on a GitHub-hosted runner during the pilot.
     runs-on: ubuntu-latest
-    # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
-    # `runtime` tag — no Go needed for merging blob reports.
-    container: ghcr.io/kdlbs/kandev-ci:runtime-latest
     # 8 min (was 5) — the merge now also emits the JSON report used to
     # cross-check the flake count, and the flake baseline lookup walks recent
     # main runs looking for a published history artifact.
     timeout-minutes: 8
-    # Container jobs default to `sh`; pin to bash.
+    env:
+      COREPACK_HOME: ${{ runner.temp }}/corepack
     defaults:
       run:
         shell: bash
@@ -1232,33 +1243,41 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Mark workspace safe for git
+      - name: Set up pnpm
         if: needs.changes.outputs.run == 'true'
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Set up Node.js
+        if: needs.changes.outputs.run == 'true'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '24'
+
+      - name: Resolve pnpm store
+        if: needs.changes.outputs.run == 'true'
+        id: pnpm_store
+        working-directory: apps
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: Cache pnpm store
         if: needs.changes.outputs.run == 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.local/share/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          path: ${{ steps.pnpm_store.outputs.path }}
+          key: pnpm-e2e-host-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-e2e-host-${{ runner.os }}-
 
       - name: Install dependencies
         if: needs.changes.outputs.run == 'true'
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
-      # The published runtime image may predate the report-tool dependency;
-      # keep older images usable while the image rebuild adds unzip permanently.
-      - name: Ensure timing report tools are installed
+      - name: Verify timing report tools
         if: needs.changes.outputs.run == 'true'
-        run: |
-          if ! command -v unzip >/dev/null 2>&1; then
-            apt-get update
-            apt-get install -y --no-install-recommends unzip
-            rm -rf /var/lib/apt/lists/*
-          fi
+        run: command -v unzip
 
       - name: Download blob reports
         if: needs.changes.outputs.run == 'true'

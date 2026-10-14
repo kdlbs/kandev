@@ -57,6 +57,25 @@ git diff --check
 
 ## Results
 
+### Remove browser images from browser-free prerequisites
+
+Tenth build job 116067615073 spends 63 seconds initializing its browser-based
+container and only 20 seconds building backend/web. Report job 116074107123
+spends 39 seconds initializing another browser container although blob merging
+does not launch a browser. Those 102 seconds sit on the serial E2E dependency
+path. Bootstrap the existing Go version, Node 24 and pnpm 9.15.9 directly on
+the same GitHub-hosted Ubuntu runners for build and report only. Keep browser
+and desktop jobs, every build command, artifact identity and report gate intact.
+
+Resolve the installed pnpm store instead of assuming a container home. Give
+the host store its own key to avoid restoring archives rooted at `/root`;
+build publishes it and report only restores. Disable setup-go's automatic cache
+because the existing Go cache action remains the sole owner and still checks
+compiler/environment compatibility. Retain tool setup, first cold population,
+uploads and queue time in hosted measurements; the 102-second gross opportunity
+is not a promised net improvement. Verify bootstrap/version ordering, mandatory
+build/report execution and unchanged required jobs before pushing one candidate.
+
 Baseline run 38524205425 repository JSON contains 1,571 passing top-level tests,
 769.6 seconds summed test duration and 771.3 seconds package elapsed. Retention
 names account for only 147.9 seconds, so a retention/rest split would remain
