@@ -89,7 +89,10 @@ before the claim is released. Reuse checks the receipt before ordinary metadata
 classification, preventing stale bindings from falling into clone recovery.
 
 Receipt validation binds the original session incarnation, owner generation,
-workspace, attachment, selected branch and filesystem proof. HEAD and index may
+workspace, complete branch-driving attachment set, selected slot branch identity
+and ordering, and filesystem proof. Publication and receipt reuse share the same
+attachment digest comparison; PR metadata or attachment additions cannot retain
+old branch authority after publication. HEAD and index may
 advance normally; authority or metadata changes fail closed. There is currently
 one receipt per environment/slot. Re-attesting or replacing a stale receipt is an
 unimplemented lifecycle limitation requiring a separately reviewed operator

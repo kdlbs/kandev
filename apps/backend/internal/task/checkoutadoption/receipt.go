@@ -31,6 +31,7 @@ func Load(ctx context.Context, db *sqlx.DB, operationID string) (*models.Workspa
 // ValidateCurrent checks the original session incarnation and current slot owner.
 type receiptQuery interface {
 	GetContext(context.Context, any, string, ...any) error
+	attachmentQuery
 }
 
 func ValidateCurrent(ctx context.Context, db *sqlx.DB, receipt *models.WorkspaceAdoptionReceipt) error {
@@ -60,11 +61,13 @@ func validateCurrent(ctx context.Context, db *sqlx.DB, q receiptQuery, receipt *
  AND t.workspace_id=? AND t.archived_at IS NULL AND r.workspace_id=t.workspace_id AND r.deleted_at IS NULL
  AND ts.task_id=t.id AND ts.queue_incarnation_id=? AND ts.workspace_path=?
  AND er.id=? AND er.worktree_id=? AND er.repository_id=? AND er.worktree_path=? AND er.worktree_branch=?
+ AND er.branch_slug=? AND COALESCE(er.position,0)=?
  AND er.worktree_source_clone_path=? AND er.worktree_source_common_dir=?
  AND (COALESCE(er.status,'')='' OR er.status='active') AND er.deleted_at IS NULL AND COALESCE(tr.checkout_branch,'')=? AND COALESCE(tr.base_branch,'')=?`),
 		s.SessionID, p.Selection.AttachmentID, s.TaskEnvironmentID, s.EnvironmentOwnerTaskID, s.OwnershipGeneration,
 		s.TaskDirName, p.PublishedWorkspacePath(s.WorkspacePath), p.Selection.WorkspaceID, p.Selection.SessionIncarnation, p.PublishedWorkspacePath(p.Selection.SessionWorkspacePath),
 		p.SlotID, slot.WorktreeID, slot.RepositoryID, p.Proof.CandidatePath, p.Proof.Branch,
+		slot.BranchSlug, slot.Position,
 		p.Proof.CandidatePath, filepath.Join(p.Proof.CandidatePath, ".git"), p.Selection.AttachmentCheckoutBranch, p.Selection.AttachmentBaseBranch)
 	if err != nil {
 		return err
@@ -72,7 +75,7 @@ func validateCurrent(ctx context.Context, db *sqlx.DB, q receiptQuery, receipt *
 	if count != 1 {
 		return models.ErrWorkspaceAdoptionStale
 	}
-	return nil
+	return validateAttachments(ctx, db, q, p, false)
 }
 
 func ForWorktree(ctx context.Context, db *sqlx.DB, worktreeID string) (*models.WorkspaceAdoptionReceipt, error) {
