@@ -2,8 +2,19 @@
 id: "03-contract"
 title: "Align spawn profile and identity contracts"
 status: done
+wave: 3
 depends_on: ["02-launch-intent"]
 plan: "plan.md"
+requirements:
+  - REQ-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001
+acceptance_criteria:
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.1
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.2
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.6
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.7
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.8
+system_design:
+  - ../../specs/agents/system-design/spawn-session-effective-profile.md
 ---
 
 # Task 03: Align spawn profile and identity contracts

@@ -2,8 +2,20 @@
 id: "02-launch-intent"
 title: "Protect explicit spawn launch intent"
 status: done
+wave: 2
 depends_on: ["01-regression"]
 plan: "plan.md"
+requirements:
+  - REQ-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001
+acceptance_criteria:
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.2
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.3
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.4
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.5
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.9
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.10
+system_design:
+  - ../../specs/agents/system-design/spawn-session-effective-profile.md
 ---
 
 # Task 02: Protect explicit spawn launch intent

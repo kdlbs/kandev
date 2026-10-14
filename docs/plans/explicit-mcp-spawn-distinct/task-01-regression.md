@@ -2,8 +2,22 @@
 id: "01-regression"
 title: "Real spawn integration regression"
 status: done
+wave: 1
 depends_on: []
 plan: "plan.md"
+requirements:
+  - REQ-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001
+acceptance_criteria:
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.2
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.3
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.4
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.5
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.7
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.8
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.9
+  - AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.10
+system_design:
+  - ../../specs/agents/system-design/spawn-session-effective-profile.md
 ---
 
 # Task 01: Real spawn integration regression
