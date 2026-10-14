@@ -14,7 +14,7 @@ import (
 
 func TestWorkspaceAdoptionCleanupProvenancePostgres(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
-	_, err := tasksqlite.NewWithDB(db, db, nil)
+	repo, err := tasksqlite.NewWithDB(db, db, nil)
 	require.NoError(t, err)
 	for _, q := range []string{
 		`INSERT INTO workspaces(id,name,created_at,updated_at) VALUES('ws','Workspace',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
@@ -30,6 +30,12 @@ func TestWorkspaceAdoptionCleanupProvenancePostgres(t *testing.T) {
 	require.NoError(t, err)
 	wt, err := store.GetWorktreeByID(context.Background(), "wt")
 	require.NoError(t, err)
+	resetID, err := repo.ClaimTaskEnvironmentReset(context.Background(), "task", "env", 1, "reset")
+	require.NoError(t, err)
+	ordinary, err := store.GetWorkspaceAdoptionForArchive(recoveryclaim.WithTaskCleanupJob(context.Background(), recoveryclaim.TaskCleanupJob{ID: resetID, TaskID: "task"}), "wt")
+	require.NoError(t, err)
+	require.Nil(t, ordinary)
+	require.NoError(t, repo.ReleaseTaskEnvironmentReset(context.Background(), resetID, models.TaskResourceCleanupStateSucceeded, ""))
 	receipt := &models.WorkspaceAdoptionReceipt{OperationID: "adoption", Preview: models.WorkspaceAdoptionPreview{
 		SlotID: "slot",
 		Selection: models.WorkspaceAdoptionSelection{Snapshot: models.WorkspaceRecoverySelectionSnapshot{

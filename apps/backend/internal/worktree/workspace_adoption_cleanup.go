@@ -33,8 +33,11 @@ func (s *SQLiteStore) GetWorkspaceAdoptionForArchive(ctx context.Context, worktr
 	if !cleanup {
 		return s.GetCurrentWorkspaceAdoption(ctx, worktreeID)
 	}
-	if job.Attempts <= 0 {
+	if job.Attempts < 0 {
 		return nil, models.ErrWorkspaceAdoptionStale
+	}
+	if job.Attempts == 0 {
+		return s.workspaceAdoptionForPreparedReset(ctx, worktreeID, job)
 	}
 	var encoded string
 	if err := s.ro.GetContext(ctx, &encoded, s.ro.Rebind(`SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id=? AND task_id=? AND state='running' AND attempts=?`), job.ID, job.TaskID, job.Attempts); err != nil {
@@ -63,6 +66,25 @@ func (s *SQLiteStore) GetWorkspaceAdoptionForArchive(ctx context.Context, worktr
 		}
 	}
 	return nil, models.ErrWorkspaceAdoptionStale
+}
+
+func (s *SQLiteStore) workspaceAdoptionForPreparedReset(ctx context.Context, worktreeID string, job recoveryclaim.TaskCleanupJob) (*models.WorkspaceAdoptionReceipt, error) {
+	receipt, err := s.GetCurrentWorkspaceAdoption(ctx, worktreeID)
+	if err != nil || receipt == nil {
+		return receipt, err
+	}
+	if receipt.Preview.Selection.Snapshot.EnvironmentOwnerTaskID != job.TaskID {
+		return nil, models.ErrWorkspaceAdoptionStale
+	}
+	var count int
+	err = s.ro.GetContext(ctx, &count, s.ro.Rebind(`SELECT COUNT(*) FROM task_resource_cleanup_jobs WHERE id=? AND task_id=? AND trigger='reconcile' AND state='prepared' AND attempts=0`), job.ID, job.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if count != 1 {
+		return nil, models.ErrWorkspaceAdoptionStale
+	}
+	return receipt, nil
 }
 
 func (s *SQLiteStore) validateCleanupAdoptionBinding(ctx context.Context, worktreeID string, receipt *models.WorkspaceAdoptionReceipt) error {

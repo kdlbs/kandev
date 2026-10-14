@@ -115,3 +115,13 @@ This proof is narrower than the real package/SQL/native gates. A permanent genui
 HTTP/Git/SQLite test now repeats cleanup after clone removal and asserts the
 project head and branch remain intact. Replay must remain a no-op under the
 current durable job's provenance and refuse a reappearing checkout.
+
+
+Tracing the real environment-reset caller exposed a distinct compatibility guard:
+it passes an exact prepared reconciliation job at attempt zero. A bounded
+exact-source control-flow RED proved the new running-job-only reader refused even
+ordinary checkouts before consulting adoption. Prepared reset now uses live,
+fully validated binding authority and its exact prepared job/task for adopted
+checkouts; it does not admit a retained post-cascade receipt. Permanent SQLite
+claim/archive/refusal coverage and a real PostgreSQL ordinary-reset case protect
+this boundary. Full hosted verification remains pending.

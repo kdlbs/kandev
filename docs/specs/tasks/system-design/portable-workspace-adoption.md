@@ -150,3 +150,9 @@ An interrupted cleanup replay treats an already absent adopted checkout as a
 no-op only while the same durable cleanup provenance remains authoritative. It
 rechecks absence before completion and never falls back to project-source branch
 deletion, compaction or cleanup scripts. A reappearing path fails closed.
+
+Synchronous environment reset retains live inventory rather than deleting task
+rows first. Its prepared reconciliation claim therefore uses the complete current
+receipt binding plus the exact prepared job/task identity and no-follow filesystem
+proof. The prepared claim cannot authorize retained post-cascade provenance.
+Ordinary checkouts without an adoption keep their existing reset ownership guards.
