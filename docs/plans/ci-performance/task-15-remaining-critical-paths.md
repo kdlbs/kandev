@@ -57,6 +57,54 @@ git diff --check
 
 ## Results
 
+### Prepared workspace experiment for layout-only scenarios
+
+Candidate C: right-panel visibility's ten cases currently create an agent task
+and wait for a complete initial turn before inspecting layout. All ten pass
+without retries in 1.1 minutes locally. The UI-owned requirement explicitly
+excludes task and terminal lifecycle; retain every existing layout assertion,
+reload, preset, resize, keyboard/touch and real user-shell check.
+
+Evaluate the existing production `POST /tasks` `prepare_session:true` path
+for the nine non-keeper cases. It prepares a real session and workspace through
+`IntentPrepare`/`LaunchWorkspace`, without starting an agent. Keep the desktop
+hide/restore case on its original real-agent path as the completed-turn keeper.
+Prepared sessions remain CREATED on navigation because the existing resume
+policy excludes that state. No preference override is needed or retained.
+No backend endpoint, fake environment, assertion, timeout or new seam is added.
+Run the complete original file with one worker and no retries, compare its
+test identities and body durations, and reject if an assertion loses its real
+environment or terminal prerequisite. Relevant production owners are
+`prepareTaskSession`, `LaunchSession`, and the unchanged right-pane toggle and
+Dockview persistence. History retains layout, Git refresh, runtime notification
+and durable-session updates. Extend only after the sample demonstrates a
+material saving and its state/coverage differences are understood.
+
+The first pair preserves all ten original identities and every original action
+and assertion byte-for-byte after the setup options. Summed bodies fall from
+64.4 to 42.8 seconds. A second prepared pass adds after-test assertions that
+all nine prepared sessions remain CREATED with real environment IDs: all ten
+pass, 45.1 seconds summed bodies. The unchanged native-touch phone companion
+passes in 7.3 seconds full-run time. This small sample is not hosted attribution.
+
+Next evaluate `openWideTask` in `dockview-resize.ts`: its 13 callers protect
+pane widths/caps, resize/maximize/restore, sidebar sash and tab-strip geometry.
+The complete four-file baseline passes all 16 cases in 1.1 minutes. Retain the
+three cases with their own live/multi-task setup and every existing assertion;
+only the shared helper may use the production prepare path. Assert CREATED
+state and a real environment before handing the settled layout to a caller.
+No source beyond that helper changes in this second experiment. Reject the
+extension if startup is still required by a caller or the measured saving is
+too small. The original right-panel live-agent and phone keepers stay intact.
+
+The four-file prepared pass retains all 16 cases and reduces summed bodies
+from 63.6 to 51.0 seconds. The final combined five-file run passes all 26 cases
+in 1.7 minutes with no preference override, retries disabled, and unchanged
+original interaction/assertion bodies. Prepared-session state and real workspace
+checks pass before layout use; right-panel cases also retain those checks after
+the complete flow. These are local fixture-cost results. Whole-workflow savings
+and contention impact require the next complete hosted measurement.
+
 ### Shared-capacity investigation after the twelfth run
 
 Full E2E run 38634314141 succeeds in 24m37s. Normal jobs require only change

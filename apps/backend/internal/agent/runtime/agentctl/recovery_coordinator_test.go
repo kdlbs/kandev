@@ -148,9 +148,9 @@ func startRecoveryControlProcess(t *testing.T) (int, string, int, func()) {
 	deadline := time.Now().Add(3 * time.Second)
 	var endpoint string
 	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(readyPath)
+		published, err := readRecoveryControlEndpoint(readyPath)
 		if err == nil {
-			endpoint = string(data)
+			endpoint = published
 			break
 		}
 		time.Sleep(5 * time.Millisecond)

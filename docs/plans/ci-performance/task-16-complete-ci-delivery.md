@@ -53,6 +53,64 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+### Recurring phone Proceed failure
+
+Both complete E2E runs 38634314141 and 38638947962 spend two 90-second
+attempts waiting for the phone Proceed button, then pass on the third attempt.
+Do not remove or shorten its geometry/action assertions. Its production
+`useNextWorkflowStep` selector reads only board memberships, while the task
+route and detail already prefer `taskOverview.byId`. A selected task can remain
+owned by its detail without remaining in a displayed board's membership.
+The existing shared-task design makes that overview canonical; phone action
+criterion AC-UI-MOBILE-TASK-ACTION-BAR-001.2 requires its workflow action.
+
+Within this work order's existing-contract remediation scope, reproduce
+canonical-only placement and canonical-final-step precedence in the focused
+hook tests, then apply the same canonical-first lookup already used by
+`useTaskRouteProjection`. Retain board/snapshot fallback and all progression,
+visibility, ownership and move guards. No new store, endpoint or product
+contract is introduced. Verify the existing full phone status-bar file with no
+retries after a fresh web build, and retain repeated hosted evidence before
+attributing either timeout to a delivered improvement. Do not claim the
+selector explains every shared-runner delay.
+
+The two new hook regressions fail before the selector correction and all 69
+focused hook/action tests pass afterward. The existing browser case is
+strengthened by removing board membership through the existing E2E store bridge
+while asserting the active detail retains its canonical task. It first proves
+Proceed is visible, then fails after membership removal against the old bundle.
+After a fresh bundle with the correction, the full four-case phone status-bar
+file passes twice: eight passes in 1.1 minutes with retries disabled. Every
+original geometry/action assertion remains. Full web typecheck and strict
+changed-file lint/format checks pass. Hosted timeout improvement is pending.
+
+Thirteenth head `fa9a4135170` changes only the two delivery records. Backend
+38638948095 fails at 747 seconds (214.53 runner-minutes); frontend 38638947951
+passes at 638 seconds (25.55 runner-minutes); E2E 38638947962 passes at 1,268
+seconds (314.83 runner-minutes). The complete set is 21m08s and failed, with
+554.92 runner-minutes and zero accepted complete sets. E2E retains all 3,963
+identities: 3,916 first-pass, seven retry-only and forty pre-existing skips.
+The warm host build completes in 134 seconds, with 24 seconds backend/web
+compilation versus 195 seconds cold. The final-finishing normal shard waits
+346 seconds after build, then runs for 701 seconds; final reporting adds about
+61 seconds. Maximum normal dependency-ready delay is 443 seconds. These delays
+include scheduling and provisioning; the account quota cause is not established.
+The difference from the preceding 24m37s E2E run is not controlled attribution.
+
+Backend shard 2 fails `TestRuntimeReplacementKeepsBackendBoot` in 0.20 seconds:
+the child endpoint file exists but is empty. The helper currently accepts any
+successful read and exits its poll before checking for an empty payload. A
+regular-file creation can precede its write; the unchanged three-second bound
+has not expired in this failure. Reproduce the empty publication state using
+the existing filesystem boundary, then make the test helper wait for a
+nonempty publication. Keep the real child process, PID, boot ID, epoch, health,
+ownership and recovery assertions; do not add retries or extend timeouts.
+No application recovery behavior changes in this remediation. The real-file
+publication regression fails against the old helper and passes after the guard;
+the complete agentctl client package passes race tests in 6.505 seconds and
+changed-file Go lint reports zero issues. All original recovery assertions and
+the three-second publication deadline remain.
+
 Twelfth head `4dd5ae57f32` succeeds in all three complete workflows on hosted
 merge `74b4edcdc694`: backend 38634314044 takes 1,317 seconds and 229.55
 runner-minutes; frontend 38634314162 takes 795 seconds and 26.8 runner-minutes;

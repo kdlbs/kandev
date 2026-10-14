@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect, test as base } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import type { AppState } from "../../../lib/state/store";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { openConversationUsageTask } from "./conversation-usage-helpers";
@@ -65,6 +66,31 @@ async function expectPhoneControls(page: Page, banner: Locator) {
   ).toBe(true);
 }
 
+async function removeBoardMembership(page: Page, taskId: string) {
+  await page.evaluate((id) => {
+    const store = (
+      window as Window & {
+        __KANDEV_E2E_STORE__?: {
+          getState: () => AppState;
+          setState: (update: (state: AppState) => void) => void;
+        };
+      }
+    ).__KANDEV_E2E_STORE__;
+    if (!store?.getState().taskOverview.byId[id]) {
+      throw new Error("The active detail must retain its canonical task");
+    }
+    store.setState((state) => {
+      state.kanban.tasks = state.kanban.tasks.filter((task) => task.id !== id);
+      for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
+        snapshot.tasks = snapshot.tasks.filter((task) => task.id !== id);
+      }
+    });
+    if (!store.getState().taskOverview.byId[id]) {
+      throw new Error("Removing board membership released the active detail's task");
+    }
+  }, taskId);
+}
+
 // @covers AC-UI-MOBILE-TASK-ACTION-BAR-001.1 through AC-UI-MOBILE-TASK-ACTION-BAR-001.8
 // Geometry proves containment; actual actions prove the controls still work.
 test("gives the terminal notice its own phone row with reachable actions", async ({
@@ -91,6 +117,9 @@ test("gives the terminal notice its own phone row with reachable actions", async
   await expect(banner).toContainText("PR #3948 merged");
   await expect(bar.getByTestId("todo-indicator")).toBeVisible();
   await expect(bar.getByTestId("conversation-usage-trigger")).toBeVisible();
+  await expect(bar.getByTestId("proceed-next-step")).toBeVisible();
+  await removeBoardMembership(testPage, taskId);
+  await expect(bar.getByTestId("proceed-next-step")).toBeVisible();
   for (const width of [320, 393, 640, 767]) {
     await testPage.setViewportSize({ width, height: 851 });
     await expectPhoneControls(testPage, banner);
