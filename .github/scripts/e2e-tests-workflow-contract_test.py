@@ -49,6 +49,7 @@ class E2EWorkflowContractTest(unittest.TestCase):
         build = job_block(workflow, "build", "e2e")
         report = workflow.partition("  e2e-report:\n")[2]
         for job in (build, report):
+            self.assertNotIn("COREPACK_HOME: ${{ runner.", job.partition("    steps:\n")[0])
             self.assertNotRegex(job, r"(?m)^    container:")
             self.assertIn("runs-on: ubuntu-latest", job)
             self.assertIn("uses: pnpm/action-setup@", job)

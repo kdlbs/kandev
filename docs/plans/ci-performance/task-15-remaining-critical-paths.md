@@ -57,6 +57,47 @@ git diff --check
 
 ## Results
 
+### Runtime viewport flow audit
+
+Audit the three desktop-project cases `narrow fine-pointer runtime flow retains
+phone controls` and `runtime settings controls respect the 767px/768px phone
+boundary` in `agent-runtime-notifications.spec.ts`. Their initial local bodies
+take 16.2/16.5/16.0 seconds, without retries. Each calls the same full flow as
+`runtime notices, saved consent and native guidance work outside Settings`
+(16.0s) and the native-touch `phone runtime notices lead to saved policy,
+native guidance and version drawer` (16.7s). Baseline: all five pass.
+
+Candidate C (evaluated and rejected): keep all three viewport cases, but consolidate their repeated
+policy persistence, unknown-version/manual ownership, and retained activation
+failure checks into the unchanged desktop and real-touch full-flow keepers.
+Those checks exercise the same policy hook/status branch independently of
+width; both keepers retain every assertion, including draft retention, no write
+before Save, exactly one write, reload persistence, manual guidance, no manual
+switch, explicit unknown state and failed activation messaging. Retain each
+viewport's full compact settings disclosure/ordering/deep-link/focus checks,
+native and grouped toast bounds/touch links, floating-indicator absence,
+version dialog/drawer content and page-overflow assertions. Retain no accidental
+policy writes in the focused layout checks. Backend notification/reconnect and
+native-host fallback suites stay independent and unchanged.
+
+History: runtime notification #4148, settings #4156 and grouped notices #4211.
+Contracts: runtime notification AC001.1/3/5/6/7 and automatic opt-in AC002.1;
+production owners are AgentRuntimePolicies, useRuntimeAutoUpdatePolicy,
+settings shared control sizing and UpdateAvailableToastBridge. The fixture's
+status and policy-write controls have no production callers. No seam or
+production code is deleted. Main risk is accidentally losing a viewport-specific
+check while extracting phases; compare the original full-flow assertions and
+run all five original identities after the change. Measure execution separately
+from fixture setup; local savings are diagnostic, not full CI attribution.
+
+The extracted candidate passes all five identities without retries, full typecheck
+and strict lint. Desktop keeper remains 16.0s; phone keeper is 16.5s versus
+16.7s. Three layout bodies total 43.1s versus 48.7s, only 5.6s saved across
+three cases (11.5%). Reject this candidate as too small for its added helper
+complexity; restore both source files byte-for-byte to head 67a6c3cf430.
+Final disposition R: retain the original cases and every existing assertion.
+No test change from this experiment is adopted or attributed to hosted CI.
+
 ### Remove browser images from browser-free prerequisites
 
 Tenth build job 116067615073 spends 63 seconds initializing its browser-based

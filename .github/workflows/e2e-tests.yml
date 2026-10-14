@@ -193,7 +193,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      COREPACK_HOME: ${{ runner.temp }}/corepack
+      COREPACK_HOME: /tmp/kandev-corepack
     defaults:
       run:
         shell: bash
@@ -1231,7 +1231,7 @@ jobs:
     # main runs looking for a published history artifact.
     timeout-minutes: 8
     env:
-      COREPACK_HOME: ${{ runner.temp }}/corepack
+      COREPACK_HOME: /tmp/kandev-corepack
     defaults:
       run:
         shell: bash

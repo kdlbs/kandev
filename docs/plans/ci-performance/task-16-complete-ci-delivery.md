@@ -82,6 +82,18 @@ The next candidate removes browser images from build/report per Task 15;
 23 E2E workflow contracts and existing join/placement/pinning checks pass.
 The measured 102-second container-start opportunity is gross, not a net claim.
 
+Eleventh structural head `67a6c3cf430` is rejected before E2E execution:
+run 38632630783 fails workflow validation with zero jobs. Its job-level
+Corepack environment used `runner.temp`, a context unavailable at job-env
+evaluation. This invalid/partial attempt is not a timing sample or a passing
+gate. Local Actionlint v1.7.12 reproduces both offending expressions; the new
+bootstrap regression also fails against that head. Use a private temporary
+Corepack directory literal on each isolated hosted runner instead. Both local
+checks then pass. Retain the other workflows' terminal/partial evidence and
+collect a new complete set after pushing the correction. The walkthrough
+generator also exits unexpectedly after two seconds on the free provider;
+retain that infrastructure failure separately from application CI.
+
 Ninth candidate `5f47945b531` succeeds as backend 38620159334, frontend
 38620159244 and E2E 38620159182. Backend succeeds in 1,181 seconds including
 queue/reporting (796 seconds execution critical path; 211.2 runner-minutes).
