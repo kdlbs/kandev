@@ -418,3 +418,23 @@ pass and their blob step inventory accounts for all 29 original scenarios.
 All 54 focused unit tests, web typecheck, formatting, zero-warning ESLint and
 documentation checks pass. Main's intervening change is limited to literal
 executor-placeholder expansion; validate that owner on the final merge tree.
+
+
+### Hosted target reached; isolate no-progression scrolling before delivery
+
+Run 38500882345 passes every normal/container shard. Longest normal step:
+17m29s versus 35m59s, a 51.41% reduction; summed normal steps 12,823s.
+All 3,955 expected cases execute once before retries, with 3,915 passed and
+the same 40 skipped identities. Five first retries pass. Both phone startup
+retry cases pass first attempt. The full E2E workflow passes in 50m46s including queue, build and report.
+
+The consolidated scroll keeper is one of those retries. Restore clean-history
+isolation for the no-progression pair while retaining all assertions; the
+whole two-file audit then has 14 cases and all 29 scenarios. This gives back
+one setup rather than making an unsupported claim that the live-turn and
+no-progression preconditions are interchangeable. Repeat the entire scrolling
+file without retries and remeasure the subsequent head in full CI.
+
+The restored scrolling file passes all 21 cases over three full-file repetitions with retries disabled on current main. Transcript owner tests (35), current-main rich-output owner tests (28), typecheck, formatting/lint and documentation checks pass. The original shard passes 280 cases with the same three skipped identities, zero retries, omissions or duplicates. Next-head CI remains pending.
+
+The old-head frontend test job was cancelled after its test step exceeded 45 minutes (prior run: 16m42s). Normal cancellation completed after five minutes; no force-cancel was issued. GitHub did not publish that job log, including in the full workflow archive, so the cause is unconfirmed. The next head requires a fresh passing frontend run.

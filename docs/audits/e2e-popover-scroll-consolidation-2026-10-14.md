@@ -69,15 +69,15 @@ catch-up and persisted reader position. Existing message revisions and native
 geometry remain the independent oracles. The real mock-agent session and
 follow-up WebSocket delivery remain; no transcript outcome is stubbed.
 
-Consolidate these seven cases into **auto-scroll state transitions**:
+Consolidate these five cases into **auto-scroll state transitions**:
 
 - C: `enabled auto-scroll stays at the bottom for live messages`. Preserve the original assertions as a named step.
 - C: `disabling while genuinely at the bottom still freezes the view when new content arrives`. Preserve the original assertions as a named step.
-- C: `re-enabling does not jump to the bottom when nothing progressed while disabled`. Preserve the original assertions as a named step.
-- C: `re-enabling does not jump when the user scrolls further away themselves while disabled`. Preserve the original assertions as a named step.
 - C: `disabling freezes the position and suppresses auto-scroll for new messages`. Preserve the original assertions as a named step.
 - C: `preserves the frozen scroll position across navigating away and back`. Preserve the original assertions as a named step.
 - C: `catches up on re-enable when content arrives after remounting while already disabled`. Preserve the original assertions as a named step.
+
+Retain `re-enabling does not jump to the bottom when nothing progressed while disabled` with its own persisted-history setup. Consolidate `re-enabling does not jump when the user scrolls further away themselves while disabled` into a named step in that clean-history case. Neither scenario sends live follow-ups before its no-progression assertion.
 
 Each step restores enabled state or an explicit midpoint as needed. After live
 content while disabled, the test waits for the real turn to settle, re-enables
@@ -92,14 +92,37 @@ layout and transport preconditions cannot be established by the keeper.
 
 ## Validation
 
-Baseline: 29 passed in 183.174 seconds, zero retries/skips. The consolidated
+Baseline: 29 passed in 183.174 seconds, zero retries/skips. The initial consolidated
 run passes all 13 cases in 115.903 seconds under the same resource limits,
 saving 67.271 seconds (36.73%) in this local subset. Blob evidence accounts for
 all 29 original scenarios: 10 retain standalone identities and 19 execute as
 successful named steps. The first attempt exposed a missing action URL in the
 combined workflow fixture; the final seed preserves the original URL and
 failure output. No assertions were loosened. Whole-file zero-warning ESLint,
-web typecheck and 54 focused owner/fixture unit tests pass. Full hosted timing
-acceptance remains pending.
+web typecheck and 54 focused owner/fixture unit tests pass. That local subset did not establish hosted acceptance; the following section records the hosted result.
 The separate phone startup-retry failure is handled as a fixture race, not a
 consolidation or deleted assertion.
+
+## Hosted result and retained isolation
+
+Run 38500882345 completes all 14 normal and six container shards successfully.
+The longest normal test step is 1,049 seconds (17m29s), 51.41% below the fixed
+2,159-second reference. The 34 blobs contain exactly the 3,955 expected
+identities: 3,915 pass and the unchanged 40 skip. No cases are omitted or
+duplicated. Five cases recover on their first retry; both phone startup-retry
+cases pass their first attempts. The two-file consolidation retains all 29
+original scenarios. The full E2E workflow passes; elapsed time including queue, build and report is 50m46s.
+
+One retry occurs in the new scrolling sequence: its no-progression assertion
+observes scrollTop 2,117 after recording a 1,059 midpoint, following two live
+turns. Passing local runs did not prove that this combined setup preserved a
+quiet-history precondition. Restore the original standalone no-progression
+setup and place the manual-scroll/no-progression scenario beside it. Keep
+all scroll offsets, negative-assertion windows and live progression checks;
+do not add sleeps, increase timeouts or relax assertions. The revised two-file
+catalog is 14 cases covering 11 original standalone scenarios and 18 named
+steps. New-head validation and hosted timing remain required.
+
+The restored scrolling file passes all 21 cases over three full-file repetitions with retries disabled on current main. Transcript owner tests (35), current-main rich-output owner tests (28), typecheck, formatting/lint and documentation checks pass. The original shard passes 280 cases with the same three skipped identities, zero retries, omissions or duplicates. Next-head CI remains pending.
+
+The old-head frontend test job was cancelled after its test step exceeded 45 minutes (prior run: 16m42s). Normal cancellation completed after five minutes; no force-cancel was issued. GitHub did not publish that job log, including in the full workflow archive, so the cause is unconfirmed. The next head requires a fresh passing frontend run.

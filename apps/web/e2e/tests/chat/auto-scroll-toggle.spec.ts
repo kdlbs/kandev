@@ -571,6 +571,71 @@ test.describe("Transcript auto-scroll toggle", () => {
     await expect(icon).toHaveClass(/text-green-600/);
   });
 
+  test("re-enabling does not jump to the bottom when nothing progressed while disabled", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Auto-scroll Toggle No Progress",
+    );
+    await waitForOverflow(testPage);
+
+    const list = chatList(testPage);
+    const targetScrollTop = await list.evaluate((el) => {
+      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
+      return el.scrollTop;
+    });
+    expect(targetScrollTop).toBeGreaterThan(100);
+
+    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    // No new message arrives — the user is just reading older history that
+    // already existed below their view before they disabled.
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await dwell(
+      testPage,
+      300,
+      "negative-assertion",
+      'asserts a negative (no jump to bottom); there is no event for "the scroll that must not happen", so a regression needs the smooth-scroll window to elapse before the position is sampled',
+    );
+    expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 20);
+    expect(await list.evaluate((el) => el.scrollTop)).toBeLessThan(targetScrollTop + 20);
+    await test.step("re-enabling does not jump when the user scrolls further away themselves while disabled", async () => {
+      const list = chatList(testPage);
+      await list.evaluate((el) => {
+        el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
+      });
+
+      const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+      // The user scrolls further up on their own — no new content arrives.
+      const scrolledUpTarget = await list.evaluate((el) => {
+        el.scrollTop = 0;
+        return el.scrollTop;
+      });
+      expect(scrolledUpTarget).toBe(0);
+
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", "true");
+      await dwell(
+        testPage,
+        300,
+        "negative-assertion",
+        'asserts a negative (no jump to bottom); there is no event for "the scroll that must not happen", so a regression needs the smooth-scroll window to elapse before the position is sampled',
+      );
+      expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
+    });
+  });
+
   test("auto-scroll state transitions preserve reader position and live catch-up", async ({
     testPage,
     apiClient,
@@ -657,58 +722,6 @@ test.describe("Transcript auto-scroll toggle", () => {
         chatList(testPage).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight),
       )
       .toBeLessThan(10);
-    await test.step("re-enabling does not jump to the bottom when nothing progressed while disabled", async () => {
-      const list = chatList(testPage);
-      const targetScrollTop = await list.evaluate((el) => {
-        el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-        return el.scrollTop;
-      });
-      expect(targetScrollTop).toBeGreaterThan(100);
-
-      const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-      await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-pressed", "false");
-
-      // No new message arrives — the user is just reading older history that
-      // already existed below their view before they disabled.
-      await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-pressed", "true");
-      await dwell(
-        testPage,
-        300,
-        "negative-assertion",
-        'asserts a negative (no jump to bottom); there is no event for "the scroll that must not happen", so a regression needs the smooth-scroll window to elapse before the position is sampled',
-      );
-      expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 20);
-      expect(await list.evaluate((el) => el.scrollTop)).toBeLessThan(targetScrollTop + 20);
-    });
-    await test.step("re-enabling does not jump when the user scrolls further away themselves while disabled", async () => {
-      const list = chatList(testPage);
-      await list.evaluate((el) => {
-        el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-      });
-
-      const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-      await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-pressed", "false");
-
-      // The user scrolls further up on their own — no new content arrives.
-      const scrolledUpTarget = await list.evaluate((el) => {
-        el.scrollTop = 0;
-        return el.scrollTop;
-      });
-      expect(scrolledUpTarget).toBe(0);
-
-      await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-pressed", "true");
-      await dwell(
-        testPage,
-        300,
-        "negative-assertion",
-        'asserts a negative (no jump to bottom); there is no event for "the scroll that must not happen", so a regression needs the smooth-scroll window to elapse before the position is sampled',
-      );
-      expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
-    });
     await test.step("disabling freezes the position and suppresses auto-scroll for new messages", async () => {
       const list = chatList(testPage);
       const targetScrollTop = await list.evaluate((el) => {
