@@ -44,7 +44,7 @@ func RunProbe(
 	client DockerNetworkCreateRemover,
 	runID string,
 	activeNets []agentdocker.NetworkInfo,
-) ProbeResult {
+) (result ProbeResult) {
 	name := ProbeNamePrefix + runID
 	created, err := client.CreateNetwork(ctx, agentdocker.CreateNetworkOptions{
 		Name: name,
@@ -57,7 +57,10 @@ func RunProbe(
 	}
 	// The probe always removes its own network, even on assertion failure.
 	defer func() {
-		_ = client.RemoveNetwork(ctx, created.ID)
+		if err := client.RemoveNetwork(ctx, created.ID); err != nil {
+			result.Passed = false
+			result.Error = fmt.Sprintf("remove probe network %s: %v", created.ID, err)
+		}
 	}()
 
 	subnet, err := allocatedIPv4Subnet(created)

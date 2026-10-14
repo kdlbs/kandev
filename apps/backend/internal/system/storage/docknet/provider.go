@@ -388,7 +388,9 @@ func (p *Provider) runProbeAfterReclaim(ctx context.Context) ProbeResult {
 	for _, network := range networks {
 		detail, err := p.docker.InspectNetwork(ctx, network.ID)
 		if err != nil {
-			continue
+			probe := ProbeResult{Passed: false, Error: fmt.Sprintf("inspect active network %s: %v", network.ID, err)}
+			recordProbe(false)
+			return probe
 		}
 		if len(detail.Containers) > 0 {
 			active = append(active, detail)
