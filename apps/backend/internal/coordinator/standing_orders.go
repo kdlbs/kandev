@@ -360,12 +360,20 @@ func sanitizeOrderText(text string) string {
 // StandingOrdersSection renders the active orders, in number order, as the
 // standing-orders instruction section. No orders renders nothing.
 func StandingOrdersSection(orders []StandingOrder) string {
+	return standingOrdersSection(orders, -1)
+}
+
+func standingOrdersSection(orders []StandingOrder, candidateIndex int) string {
 	if len(orders) == 0 {
 		return ""
 	}
 	lines := []string{standingOrdersIntro, standingOrdersOpen}
 	for i, o := range orders {
-		line := fmt.Sprintf("%d. (added %s, id %s) %s", i+1, o.CreatedAt.UTC().Format("2006-01-02"), o.ID, sanitizeOrderText(o.Text))
+		added := o.CreatedAt.UTC().Format("2006-01-02")
+		if i == candidateIndex {
+			added = "candidate"
+		}
+		line := fmt.Sprintf("%d. (added %s, id %s) %s", i+1, added, o.ID, sanitizeOrderText(o.Text))
 		lines = append(lines, strings.TrimRight(line, " "))
 	}
 	lines = append(lines, standingOrdersClose, standingOrdersCite)

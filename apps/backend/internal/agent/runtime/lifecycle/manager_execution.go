@@ -1053,9 +1053,9 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if info.AgentID == "" {
 		return nil, fmt.Errorf("agent ID is required in WorkspaceInfo")
 	}
-	agentConfig, ok := m.registry.Get(info.AgentID)
-	if !ok {
-		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
+	agentConfig, err := m.resolveLaunchableAgent(info.AgentID)
+	if err != nil {
+		return nil, err
 	}
 	managedRuntimeOptions, err := m.resolveManagedRuntimeCommandOptions(ctx, models.ExecutorType(info.ExecutorType).Runtime(), agentConfig)
 	if err != nil {

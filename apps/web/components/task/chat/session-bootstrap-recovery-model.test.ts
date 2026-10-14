@@ -5,6 +5,53 @@ import { buildRecoveryCardModel } from "./session-bootstrap-recovery-model";
 
 const translate = ((key: string) => key) as unknown as TFunction;
 
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.12
+it("shows cleanup guidance from durable evidence after reload", () => {
+  const model = buildRecoveryCardModel({
+    error: error([
+      { operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true } as NonNullable<
+        TaskStatusSummaryActiveError["causes"]
+      >[number],
+    ]),
+    manualFailure: null,
+    manualError: null,
+    recoveryNotice: null,
+    translate,
+  });
+  expect(model).toMatchObject({
+    primaryCause: { code: "runtime_cleanup_failed" },
+    titleKey: "task:sessionRuntimeCleanupFailedTitle",
+    summary: "task:sessionRuntimeCleanupFailedBody",
+    noPromptSent: true,
+  });
+});
+
+it("keeps request-local cleanup and separate workspace restore causes", () => {
+  const model = buildRecoveryCardModel({
+    error: error([]),
+    automaticRecovery: {
+      resumptionState: "error",
+      error: "Resume and restore failed",
+      notice: null,
+      recoveryFailure: {
+        outcome: "recovery_failed",
+        resumeError: "Safe cleanup failure",
+        resumeCauses: [
+          { operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true },
+        ],
+        restoreError: "Workspace is unavailable",
+      } as never,
+      resumeSession: async () => false,
+    },
+    manualFailure: null,
+    manualError: null,
+    recoveryNotice: null,
+    translate,
+  });
+  expect(model.primaryCause?.code).toBe("runtime_cleanup_failed");
+  expect(model.causes.some((cause) => cause.operation === "restore_workspace")).toBe(true);
+});
+
 function error(
   causes: NonNullable<TaskStatusSummaryActiveError["causes"]>,
   stamp = "failure-1",

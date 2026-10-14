@@ -35,6 +35,10 @@ func enrichReconstructionControlIdentity(ctx context.Context, client deliveryRec
 	if latest == nil || latest.ControlIdentity == nil || *latest.ControlIdentity != *identity {
 		return staleDeliveryRecoveryReason
 	}
+	if request.Recovery.HistoryGap != nil && (!sameRestartDescriptor(evidence.Descriptor, latest.Descriptor) ||
+		latest.ProcessTerminated == nil || !*latest.ProcessTerminated) {
+		return staleDeliveryRecoveryReason
+	}
 	request.Recovery.AgentExecutionID = identity.ExecutionID
 	request.Recovery.PromptGeneration = identity.PromptGeneration
 	request.Recovery.OriginalRuntime = identity.OriginalRuntime

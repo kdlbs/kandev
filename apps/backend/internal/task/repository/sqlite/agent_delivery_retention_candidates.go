@@ -64,6 +64,13 @@ func agentDeliveryRetentionFilteredQuery(sourceFilters []string, args []any, lim
 	return retentionCandidateProofQuery(strings.Replace(agentDeliveryRetentionCandidateSQL, "/* source filters */", filter, 1)), args
 }
 
+const agentDeliveryRetentionOutputTypesSQL = `'message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan'`
+
+const agentDeliveryRetentionControlTypesSQL = `'agent_capabilities', 'session_status', 'available_commands',
+ 'session_mode', 'session_models', 'session_info', 'context_window', 'mcp_attachment', 'turn_started'`
+
+const agentDeliveryRetentionNonterminalTypesSQL = agentDeliveryRetentionOutputTypesSQL + ", " + agentDeliveryRetentionControlTypesSQL
+
 const agentDeliveryRetentionCandidateSQL = `
 		WITH source AS MATERIALIZED (
 			SELECT i.stream_id, i.sequence, i.session_id, i.incarnation_id,
@@ -115,8 +122,8 @@ const agentDeliveryRetentionCandidateSQL = `
 					AND cursor_harness_generation = harness_generation
 					AND sequence <= projected_sequence
 					AND projected_at IS NOT NULL AND eligible_at <= ?
-					AND event_type IN ('message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan', 'complete', 'error', 'cancelled', 'canceled')
-					AND ((terminal = 0 AND event_type IN ('message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan'))
+					AND event_type IN (` + agentDeliveryRetentionNonterminalTypesSQL + `, 'complete', 'error', 'cancelled', 'canceled')
+					AND ((terminal = 0 AND event_type IN (` + agentDeliveryRetentionNonterminalTypesSQL + `))
 						OR (/* settled event */ AND (first_terminal_sequence IS NULL OR sequence < first_terminal_sequence)))
 					AND generic_effect_complete = 1 AND has_pending_effect = 0
 					AND has_unknown_effect = 0
@@ -126,7 +133,7 @@ const agentDeliveryRetentionCandidateSQL = `
 					AND cursor_harness_generation = harness_generation
 					AND sequence <= projected_sequence
 					AND projected_at IS NOT NULL
-					AND event_type IN ('message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan', 'complete', 'error', 'cancelled', 'canceled')
+					AND event_type IN (` + agentDeliveryRetentionNonterminalTypesSQL + `, 'complete', 'error', 'cancelled', 'canceled')
 					AND /* settled event */
 					AND (first_terminal_sequence IS NULL OR sequence < first_terminal_sequence)
 					AND generic_effect_complete = 1 AND has_pending_effect = 0

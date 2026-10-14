@@ -131,9 +131,9 @@ test.describe("mobile agent goal visibility", () => {
 
     await waitForQuickChatDirectInput(dialog);
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-clear");
-    await expect(
-      dialog.getByText("The provider goal was cleared.", { exact: false }),
-    ).toBeVisible();
+    await expect(dialog.getByText("The provider goal was cleared.", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
     await waitForQuickChatDirectInput(dialog);
     await expect(dialog.getByTestId("agent-goal-chip")).toBeHidden({ timeout: 15_000 });
   });

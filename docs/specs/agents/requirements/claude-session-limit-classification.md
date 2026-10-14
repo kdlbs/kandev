@@ -17,6 +17,7 @@ Recognizing this notice lets existing policies distinguish exhausted quota from 
 ## Terminology
 
 - **Session-limit notice:** Claude's statement that the account has hit its session limit.
+- **Weekly-limit notice:** Claude's statement that the account has hit its weekly limit.
 - **Reset clock:** A twelve-hour time after `resets`, with an explicit timezone in parentheses.
 - **Reset hint:** An absolute timestamp available to existing recovery consumers.
 
@@ -49,6 +50,9 @@ Recognizing this notice lets existing policies distinguish exhausted quota from 
   An eligible dynamic route shall apply its saved hard-error policy and credential circuit rules.
 - **AC-AGENTS-CLAUDE-SESSION-LIMIT-001.7:** Unrelated limit text and other providers shall not acquire Claude's session-limit classification.
   A rate-limit notice shall retain its rate classification.
+- **AC-AGENTS-CLAUDE-SESSION-LIMIT-001.8:** Claude weekly-limit notices shall classify like session-limit notices under AC-AGENTS-CLAUDE-SESSION-LIMIT-001.1.
+  Their reset clock names no date, so they shall produce no text-derived reset hint; a structured hint still applies.
+  Unrelated weekly-limit text and other providers shall not acquire this classification.
 
 ## Out of scope
 

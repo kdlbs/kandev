@@ -7,24 +7,22 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-func (s *Service) prepareInitialAgentDeliverySubmission(
+func (s *Service) bindInitialAgentDeliverySubmission(
 	ctx context.Context,
 	session *models.TaskSession,
-	executionID, prompt string,
-	attachments []v1.MessageAttachment,
+	executionID string,
 	options promptTaskOptions,
-) error {
+) (promptTaskOptions, error) {
 	generatedIdentity := options.deliverySubmissionID == ""
 	if generatedIdentity {
 		protocol, err := s.resolveDeliveryProtocol(ctx, session.ID, executionID, options.deliveryProtocol)
 		if err != nil {
-			return err
+			return options, err
 		}
 		if protocol == messagequeue.DeliveryProtocolLegacy {
-			return nil
+			return options, nil
 		}
 		incarnationID := session.QueueIncarnationID
 		if incarnationID == "" {
@@ -32,25 +30,21 @@ func (s *Service) prepareInitialAgentDeliverySubmission(
 		}
 		generation, err := s.currentDeliveryGeneration(ctx, session, incarnationID)
 		if err != nil {
-			return s.deliveryRecoveryError(ctx, session.ID, "harness_generation_unavailable")
+			return options, s.deliveryRecoveryError(ctx, session.ID, "harness_generation_unavailable")
 		}
 		// The initial lifecycle dispatch derives this identity from the same owner and generation.
 		options.deliverySubmissionID = fmt.Sprintf("prompt:initial:%s:%d:%s", session.ID, generation, executionID)
 		options.deliveryProtocol = protocol
 		options.expectedDeliveryGeneration = generation
 	}
-	submission, err := s.prepareAgentDeliverySubmission(ctx, session, executionID, prompt, attachments, options)
-	if err != nil || submission == nil || !generatedIdentity {
-		return err
-	}
-	// Bind the generated SQL identity before lifecycle validates the initial
-	// launch handoff. Explicit first-message IDs are already bound by executor.
+	// Bind identity before startup. The final prepared payload is admitted by
+	// the lifecycle callback immediately before native dispatch.
 	setter, ok := s.agentManager.(executor.InitialDeliverySubmissionIDSetter)
 	if !ok {
-		return s.deliveryRecoveryError(ctx, session.ID, "backend_delivery_admission_failed", submission)
+		return options, s.deliveryRecoveryError(ctx, session.ID, "backend_delivery_admission_failed")
 	}
-	if err := setter.SetInitialDeliverySubmissionID(ctx, executionID, submission.id); err != nil {
-		return s.deliveryRecoveryError(ctx, session.ID, "backend_delivery_admission_failed", submission)
+	if err := setter.SetInitialDeliverySubmissionID(ctx, executionID, options.deliverySubmissionID); err != nil {
+		return options, s.deliveryRecoveryError(ctx, session.ID, "backend_delivery_admission_failed")
 	}
-	return nil
+	return options, nil
 }

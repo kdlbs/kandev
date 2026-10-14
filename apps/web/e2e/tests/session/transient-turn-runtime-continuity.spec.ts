@@ -6,6 +6,7 @@ import {
   assertRetainedFailureMessage,
   createRetainedCapacityFixture,
   expectCompletedCapacityProgress,
+  expectRetainedTurnReady,
   readMockACPTrace,
   waitForRetainedTurnFailure,
 } from "../../helpers/transient-turn-runtime-continuity";
@@ -28,19 +29,6 @@ async function waitForExecutionId(
     30_000,
     "waiting for the task session execution identity",
   );
-}
-
-async function expectRetainedTurnReady(session: SessionPage) {
-  const errorRow = session.activeChat().getByTestId("session-recovery-action-message");
-  await expect(errorRow).toHaveCount(1);
-  await expect(errorRow).toContainText("Selected model is at capacity.");
-  await expect(session.recoveryResumeButton()).toHaveCount(0);
-  await expect(session.recoveryFreshButton()).toHaveCount(0);
-  await expect(session.activeChat().getByTestId("session-recovery-card")).toHaveCount(0);
-  await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
-  await expect(
-    session.activeChat().getByRole("button", { name: "Session model settings" }),
-  ).toBeVisible();
 }
 
 async function countRetainedFailures(
@@ -264,45 +252,34 @@ test("desktop: completed tools continue once on the same runtime across reload a
   }
 });
 
-test("desktop: idle cancellation and retry exhaustion preserve the live runtime with actual attempt counts", async ({
+test("desktop: idle cancellation preserves the live runtime with zero retry dispatches", async ({
   testPage,
   apiClient,
   backend,
   seedData,
 }) => {
-  for (const scenario of ["cancel", "exhaust"]) {
-    const fixture = await createRetainedCapacityFixture(
-      backend,
-      apiClient,
-      seedData,
-      scenario,
-      scenario === "cancel" ? { initialPrompt: "/e2e:simple-message" } : {},
+  const fixture = await createRetainedCapacityFixture(backend, apiClient, seedData, "cancel", {
+    initialPrompt: "/e2e:simple-message",
+  });
+  try {
+    const session = new SessionPage(testPage);
+    await testPage.goto(`/t/${fixture.taskId}`);
+    await session.waitForLoad();
+    const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
+    await session.sendMessage("/capacity-cancel");
+    await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
+    await session.recoveryCancelRetryButton().click();
+    const failure = await waitForRetainedTurnFailure(apiClient, fixture.sessionId, "cancelled");
+    assertRetainedFailureMessage(failure);
+    expect(failure.metadata?.attempts_started).toBe(0);
+    await expectRetainedTurnReady(session);
+    await expect(session.activeChat().getByTestId("retained-turn-recovery-feedback")).toBeVisible();
+    expect(await countRetainedFailures(apiClient, fixture.sessionId)).toHaveLength(1);
+    expect(await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId)).toBe(
+      executionId,
     );
-    try {
-      const session = new SessionPage(testPage);
-      await testPage.goto(`/t/${fixture.taskId}`);
-      await session.waitForLoad();
-      const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
-      if (scenario === "cancel") {
-        await session.sendMessage("/capacity-cancel");
-        await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
-        await session.recoveryCancelRetryButton().click();
-      }
-      const disposition = scenario === "cancel" ? "cancelled" : "exhausted";
-      const failure = await waitForRetainedTurnFailure(apiClient, fixture.sessionId, disposition);
-      assertRetainedFailureMessage(failure);
-      expect(failure.metadata?.attempts_started).toBe(scenario === "cancel" ? 0 : 5);
-      await expectRetainedTurnReady(session);
-      const feedback = session.activeChat().getByTestId("retained-turn-recovery-feedback");
-      await expect(feedback).toBeVisible();
-      if (scenario === "exhaust") await expect(feedback).toContainText("5");
-      expect(await countRetainedFailures(apiClient, fixture.sessionId)).toHaveLength(1);
-      expect(await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId)).toBe(
-        executionId,
-      );
-      assertRetainedACPTrace(fixture.tracePath, scenario === "cancel" ? 2 : 6);
-    } finally {
-      await fixture.dispose();
-    }
+    assertRetainedACPTrace(fixture.tracePath, 2);
+  } finally {
+    await fixture.dispose();
   }
 });

@@ -9,6 +9,7 @@ import {
   recoveryInspectionBusyDetails,
   recoveryInspectionBusyMessage,
   resolveRequestErrorMessage,
+  runtimeCleanupFailureCauses,
   sessionRecoveryGuardDetails,
   sessionDeliveryRecoveryResponse,
   sessionDeliveryRecoveryMessage,
@@ -24,6 +25,23 @@ const CONTINUE_FROM_HISTORY = "continue_from_history";
 
 beforeEach(() => vi.clearAllMocks());
 
+it("localizes typed cleanup responses without inspecting transport prose", () => {
+  const failure = new WebSocketRequestError("private kubelet response", "INTERNAL_ERROR", {
+    kind: "runtime_cleanup_failed",
+    session_id: "session-1",
+    causes: [{ operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true }],
+  });
+  expect(resolveRequestErrorMessage(failure, (key) => key)).toBe(
+    "task:sessionRuntimeCleanupFailedBody",
+  );
+  expect(resolveRequestErrorMessage(new Error("runtime_cleanup_failed"), (key) => key)).toBe(
+    "runtime_cleanup_failed",
+  );
+  expect(runtimeCleanupFailureCauses(failure, "session-1")).toEqual([
+    { operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true },
+  ]);
+  expect(runtimeCleanupFailureCauses(failure, "another-session")).toEqual([]);
+});
 const recoveryAction = "session.recover";
 
 describe("recoveryInspectionBusyDetails", () => {

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ToastProvider } from "@/components/toast-provider";
@@ -14,6 +14,10 @@ import type {
   NeedsYouStallItem,
 } from "@/lib/coordinator/attention";
 import { NeedsYouItemCard, needsYouItemHeadingId } from "./needs-you-item-card";
+
+vi.mock("@/hooks/domains/settings/use-coordinator-phase3-effective", () => ({
+  useCoordinatorPhase3Effective: () => false,
+}));
 
 const TIMESTAMP = "2026-09-27T00:00:00Z";
 

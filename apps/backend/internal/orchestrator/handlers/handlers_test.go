@@ -50,6 +50,24 @@ func TestWsRecoverWorkspaceInventoryRequiresIdempotencyKeyBeforeServiceAccess(t 
 	require.Equal(t, ws.ErrorCodeValidation, payload.Code)
 }
 
+func TestWSRouteActionReportsNonDynamicProfileAsValidation(t *testing.T) {
+	service := &orchestrator.Service{}
+	service.SetRouteActionHandler(func(context.Context, orchestrator.RouteActionRequest) (*orchestrator.RouteActionResult, error) {
+		return nil, orchestrator.ErrRouteActionRequiresDynamicProfile
+	})
+	handlers := setupOrchestratorHandlers(t)
+	handlers.service = service
+
+	response, err := handlers.wsRouteAction(context.Background(), createTestMessage(t, ws.ActionSessionRouteAction, map[string]interface{}{
+		"session_id": "session-1",
+		"action":     string(orchestrator.RouteActionRetry),
+	}))
+	require.NoError(t, err)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	require.Equal(t, orchestrator.ErrRouteActionRequiresDynamicProfile.Error(), payload.Message)
+}
+
 func TestWsRecoverSessionValidatesSettingsPolicyAndOriginalAction(t *testing.T) {
 	handlers := setupOrchestratorHandlers(t)
 	tests := []struct {

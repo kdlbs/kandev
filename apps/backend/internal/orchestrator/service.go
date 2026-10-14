@@ -50,10 +50,11 @@ func isNoActiveTurnError(err error) bool {
 
 // Common errors
 var (
-	ErrServiceAlreadyRunning            = errors.New("service is already running")
-	ErrServiceNotRunning                = errors.New("service is not running")
-	ErrRouteActionActiveTurn            = errors.New("route actions require a settled turn")
-	ErrIdleSuspensionProvenanceRequired = errors.New("session is not suspended by the workspace idle policy")
+	ErrServiceAlreadyRunning             = errors.New("service is already running")
+	ErrServiceNotRunning                 = errors.New("service is not running")
+	ErrRouteActionActiveTurn             = errors.New("route actions require a settled turn")
+	ErrRouteActionRequiresDynamicProfile = errors.New("route actions are only available for sessions using a dynamic profile")
+	ErrIdleSuspensionProvenanceRequired  = errors.New("session is not suspended by the workspace idle policy")
 )
 
 const maxStartupTransferReconcileAttempts = 30
@@ -844,6 +845,10 @@ type Service struct {
 	// Nil = no block is attached. See SetCoordinatorStandingInstructionsReader.
 	coordinatorStandingInstructions func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error)
 
+	// unattendedPermissionHandler denies a permission request of a coordinator's
+	// unattended turn; nil = requests wait for a person. Set once at wiring.
+	unattendedPermissionHandler UnattendedPermissionHandler
+
 	// backgroundProbeConfig holds the validated KANDEV_PARKED_PROBE_BUDGET /
 	// KANDEV_PARKED_PROBE_INTERVAL tuning knobs for the background-workload
 	// liveness probe (spec docs/specs/disambiguate-waiting/spec.md). Loaded
@@ -1547,6 +1552,9 @@ type Service struct {
 	// callback. Each entry retains the prompt and route identity that authorized
 	// the reset across prompt-evidence replacement.
 	pendingDynamicStreakResets sync.Map
+	// countedEmptyTurns records, per session, the execution and prompt
+	// generation whose empty end_turn was counted as an unclassified failure.
+	countedEmptyTurns sync.Map
 
 	// resumeAttempts owns process-local startup identity. It is separate from
 	// dynamicAttemptEvidence because a provider execution may be reused by
@@ -2968,6 +2976,7 @@ func (s *Service) completeExpectedTurn(ctx context.Context, sessionID, expectedT
 	if err := s.turnService.CompleteTurn(ctx, expectedTurnID); err != nil {
 		return fmt.Errorf("complete captured turn %s: %w", expectedTurnID, err)
 	}
+	s.activeTurns.CompareAndDelete(sessionID, expectedTurnID)
 	active, err := s.turnService.GetActiveTurn(ctx, sessionID)
 	if err != nil {
 		if isNoActiveTurnError(err) {
@@ -3374,6 +3383,7 @@ func (s *Service) reconcileStartupState(ctx context.Context) error {
 		return err
 	}
 	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
+	s.releaseAbandonedAutomationStartOwnership(ctx)
 	// Recover routes orphaned at "starting" by a launch failure that never
 	// reached a terminal route status. Must run before
 	// reconcileExecutorSessionsOnStartup and scheduler.Start: the former

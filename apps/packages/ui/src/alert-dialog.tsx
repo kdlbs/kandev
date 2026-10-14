@@ -6,20 +6,20 @@ import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 import { cn } from "./lib/utils";
 import { Button } from "./button";
 import { handleDialogDefaultActionKeyDown } from "./lib/dialog-default-action";
+import { useDialogBodyLockRecovery } from "./lib/dialog-body-lock";
 
-function AlertDialog({ ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
-  React.useEffect(() => {
-    return () => {
-      // Safety cleanup: Radix AlertDialog sets pointer-events: none on body
-      // when modal. If unmounted mid-close (e.g. layout rebuild), Radix never
-      // finishes cleanup. Check the actual body state at unmount time.
-      if (document.body.style.pointerEvents === "none") {
-        document.body.style.removeProperty("pointer-events");
-      }
-    };
-  }, []);
-
-  return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
+function AlertDialog({
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
+  const handleOpenChange = useDialogBodyLockRecovery(props.open, onOpenChange);
+  return (
+    <AlertDialogPrimitive.Root
+      data-slot="alert-dialog"
+      onOpenChange={handleOpenChange}
+      {...props}
+    />
+  );
 }
 
 function AlertDialogTrigger({

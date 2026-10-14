@@ -29,6 +29,18 @@ func (m *clarificationDeliveryTestManager) PromptAgentWithDispatchCallbackAndSub
 	return m.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
 }
 
+func (m *clarificationDeliveryTestManager) PromptAgentWithAdmissionCallbackAndSubmissionID(
+	ctx context.Context, executionID, prompt string, attachments []v1.MessageAttachment,
+	dispatchOnly bool, beforeAdmission func(context.Context, string, []v1.MessageAttachment) error, onDispatched func(), submissionID string,
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
+			return nil, err
+		}
+	}
+	return m.PromptAgentWithDispatchCallbackAndSubmissionID(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched, submissionID)
+}
+
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-003.1
 func TestDetachedClarificationPersistsDeliveryBeforeDispatch(t *testing.T) {
 	for _, test := range []struct {

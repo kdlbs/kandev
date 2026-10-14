@@ -293,21 +293,12 @@ func (wt *WorkspaceTracker) captureBasicGitStatusSeed(ctx context.Context, statu
 
 func (wt *WorkspaceTracker) captureGitStatusComparisonEvidence(ctx context.Context, status types.GitStatusUpdate, comparison ComparisonResolution) (gitStatusComparisonEvidence, error) {
 	evidence := gitStatusComparisonEvidence{baseRef: wt.resolveBaseBranch(ctx), aheadRef: wt.resolveAheadBehindRef(ctx)}
-	var err error
-	evidence.baseOID, err = wt.gitRefOID(ctx, evidence.baseRef)
-	if err != nil {
-		return gitStatusComparisonEvidence{}, err
-	}
-	evidence.aheadOID, err = wt.gitRefOID(ctx, evidence.aheadRef)
-	if err != nil {
-		return gitStatusComparisonEvidence{}, err
-	}
-	evidence.remoteHeadOID, err = wt.gitRefOID(ctx, status.RemoteBranch)
-	if err != nil {
-		return gitStatusComparisonEvidence{}, err
-	}
-	evidence.comparisonOID, err = wt.gitRefOID(ctx, comparison.Ref)
-	return evidence, err
+	oids := wt.gitRefOIDs(ctx, []string{evidence.baseRef, evidence.aheadRef, status.RemoteBranch, comparison.Ref})
+	evidence.baseOID = oids[evidence.baseRef]
+	evidence.aheadOID = oids[evidence.aheadRef]
+	evidence.remoteHeadOID = oids[status.RemoteBranch]
+	evidence.comparisonOID = oids[comparison.Ref]
+	return evidence, nil
 }
 
 func (wt *WorkspaceTracker) validateBasicGitStatusCapture(
@@ -486,6 +477,91 @@ func (wt *WorkspaceTracker) gitRefOID(ctx context.Context, ref string) (string, 
 		return "", nil
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// gitRefOIDs resolves refs to commit object IDs with the same results as
+// calling gitRefOID for each ref, using one Git process when it can. Empty and
+// unsafe refs map to "" without reaching Git, and the allowlist stays inline
+// next to the runGitOutput call like gitRefOID's. A batch is accepted only when
+// rev-parse exits zero and returns one object ID per argument: rev-parse stops
+// at the first unresolvable argument and can echo an argument unchanged, so any
+// other outcome falls back to resolving each ref separately. A cancelled read
+// skips that fallback, whose separate reads would also yield "".
+func (wt *WorkspaceTracker) gitRefOIDs(ctx context.Context, refs []string) map[string]string {
+	oids := make(map[string]string, len(refs))
+	resolvable := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if _, seen := oids[ref]; seen {
+			continue
+		}
+		oids[ref] = ""
+		if ref == "" {
+			continue
+		}
+		if !gitObjectIDPattern.MatchString(ref) {
+			rest, hasOriginPrefix := strings.CutPrefix(ref, "origin/")
+			check := ref
+			if hasOriginPrefix {
+				check = rest
+			}
+			if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
+				continue
+			}
+		}
+		resolvable = append(resolvable, ref)
+	}
+	wt.resolveGitRefOIDs(ctx, resolvable, oids)
+	return oids
+}
+
+// resolveGitRefOIDs fills oids for refs that already passed gitRefOIDs'
+// allowlist: one batched rev-parse for two or more refs, otherwise or on an
+// unusable batch the per-ref gitRefOID path.
+func (wt *WorkspaceTracker) resolveGitRefOIDs(ctx context.Context, refs []string, oids map[string]string) {
+	if len(refs) >= 2 {
+		args := make([]string, 0, len(refs)+1)
+		args = append(args, "rev-parse")
+		for _, ref := range refs {
+			args = append(args, ref+"^{commit}")
+		}
+		out, err := wt.runGitOutput(ctx, args...)
+		if err == nil {
+			if resolved, ok := batchedRefOIDs(out, len(refs)); ok {
+				for i, ref := range refs {
+					oids[ref] = resolved[i]
+				}
+				return
+			}
+		}
+		if ctx.Err() != nil {
+			return
+		}
+	}
+	for _, ref := range refs {
+		oids[ref], _ = wt.gitRefOID(ctx, ref)
+	}
+}
+
+// batchedRefOIDs maps a multi-argument rev-parse output back to its arguments.
+// It reports false unless the output holds exactly count lines and each line is
+// a full object ID.
+func batchedRefOIDs(out []byte, count int) ([]string, bool) {
+	trimmed := strings.TrimSuffix(string(out), "\n")
+	if trimmed == "" {
+		return nil, false
+	}
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) != count {
+		return nil, false
+	}
+	for i, line := range lines {
+		line = strings.TrimSuffix(line, "\r")
+		if !gitObjectIDPattern.MatchString(line) {
+			return nil, false
+		}
+		lines[i] = line
+	}
+	return lines, true
 }
 
 func captureGitStatusFileEvidence(ctx context.Context, wt *WorkspaceTracker, root string, status types.GitStatusUpdate) (map[string]gitStatusFileEvidence, bool, error) {

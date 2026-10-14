@@ -23,8 +23,6 @@ This contract covers authenticated backend-to-agentctl traffic.
 [Browser subscription recovery](../requirements/session-subscription-recovery.md) remains separate.
 [Harness continuity](../../agents/system-design/harness-session-continuity.md) consumes submission outcomes.
 The existing task queue and environment-generation guards retain admission authority.
-The design baseline is main commit `65d64f6fa9f85b4977b8cdd62cf162380732effc`.
-Its durable queue dispatch claims are part of this design, not a parallel recovery mechanism.
 
 The guarantee starts at a successful journal commit.
 A harness can perform a tool action before agentctl observes its event.
@@ -169,11 +167,13 @@ No time-based expiration can make an old identifier executable again.
 
 ## Submission protocol
 
-The backend allocates and persists the submission ID before the HTTP request.
-Queued submissions retain the existing queue entry and dispatch-attempt identity.
-The record contains the current turn/queue identity and final composed payload hash.
-The hash covers context, prompt text, attachment references, effective configuration, and target identity.
-The payload cannot change under the same ID.
+Bind the initial submission ID before startup; retain source intent in its
+instruction or queue claim. After context preparation and attachment
+materialization, lifecycle's final callback revalidates ownership and persists
+exact dispatch text and descriptors. Initial, direct and queued prompts use
+this boundary: SQL and agentctl hash the same prepared payload, including
+hydration and collision renaming. Preparation failure preserves source intent.
+Existing IDs and hashes remain immutable; preparation never authorizes replay.
 
 The durable states are:
 

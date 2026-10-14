@@ -8,10 +8,12 @@ requirements:
   - REQ-PLATFORM-CI-PERFORMANCE-004
   - REQ-PLATFORM-CI-PERFORMANCE-005
   - REQ-PLATFORM-CI-PERFORMANCE-006
+  - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-001
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
   - REQ-TASKS-TASK-ACTIONS-MENU-004
 system_design:
   - ../../specs/platform/system-design/ci-performance.md
+  - ../../specs/platform/system-design/e2e-duration-aware-sharding.md
   - ../../specs/platform/system-design/durable-agent-delivery.md
   - ../../specs/tasks/system-design/task-actions-menu.md
 legacy_specs: []
@@ -167,6 +169,7 @@ No browser E2E is needed for CI-only behavior. Existing application E2E coverage
 - [x] [Task 10: Attribute E2E fixture and planner costs](task-10-profile-e2e-fixture-costs.md)
 - [x] [Task 11: Reject journal operations after shutdown](task-11-journal-shutdown.md)
 - [x] [Task 12: Keep closed task menus closed during processing](task-12-task-menu-recovery.md)
+- [ ] [Task 13: Reduce E2E execution within existing runners](task-13-e2e-runner-processes.md)
 
 ## Execution and evidence
 

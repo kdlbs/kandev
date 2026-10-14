@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 )
@@ -46,6 +48,16 @@ func WithPersistence(persistence Persistence) EngineOption {
 	}
 }
 
+// WithEngineLogger sets the logger used for routing lifecycle events, such as
+// an account-block hold and its owner release. It defaults to a no-op logger.
+func WithEngineLogger(log *zap.Logger) EngineOption {
+	return func(engine *Engine) {
+		if log != nil {
+			engine.logger = log
+		}
+	}
+}
+
 type Engine struct {
 	mu          sync.Mutex
 	now         func() time.Time
@@ -54,6 +66,7 @@ type Engine struct {
 	persistence Persistence
 	loader      StateLoader
 	probes      map[string]ProbeLease
+	logger      *zap.Logger
 	// retryClaims identifies retry launches owned by this process. A durable
 	// "retrying" state can survive a restart without its in-memory owner, so
 	// manual recovery may reclaim it only when this map does not contain the
@@ -67,6 +80,7 @@ func NewEngine(options ...EngineOption) *Engine {
 		circuits:    NewCircuitRegistry(),
 		states:      make(map[string]RouteState),
 		probes:      make(map[string]ProbeLease),
+		logger:      zap.NewNop(),
 		retryClaims: make(map[string]int64),
 	}
 	for _, option := range options {
@@ -232,6 +246,9 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 	if preferredProfileID != "" && candidate.ID != preferredProfileID {
 		return false
 	}
+	if e.circuits.IsHeld(accountBlockKey(candidate.ID)) {
+		return false
+	}
 	if candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now) {
 		return true
 	}
@@ -349,14 +366,19 @@ func (e *Engine) ActionFor(profile Profile, candidateID string, code routingerr.
 
 func actionForCandidate(candidate Candidate, code routingerr.Code) Action {
 	if candidate.Policies.Version == 0 {
-		return actionForRules(candidate.Rules, code)
+		action := actionForRules(candidate.Rules, code)
+		if action == ActionRetrySame && routingerr.HoldsUntilRelease(code) {
+			// A held candidate cannot serve the retry, so it moves on.
+			return ActionTryNext
+		}
+		return action
 	}
 	class := routingerr.ClassForCode(code)
 	policy, ok := candidate.Policies.PolicyFor(class)
 	if !ok {
 		return ActionStop
 	}
-	if policy.Retry.Enabled {
+	if policy.Retry.Enabled && !routingerr.HoldsUntilRelease(code) {
 		return ActionRetrySame
 	}
 	if policy.OnExhausted == routingpolicy.OutcomeSkip {
@@ -488,6 +510,13 @@ func decodePolicyState(raw string) PolicyState {
 		return PolicyState{}
 	}
 	return state
+}
+
+// CandidateUnclassifiedEnabled reports whether a candidate's repeated
+// unclassified policy is enabled with a threshold the engine will admit.
+func CandidateUnclassifiedEnabled(profile Profile, candidateID string) bool {
+	_, threshold := candidateUnclassifiedThreshold(profile, candidateID)
+	return threshold >= 2 && threshold <= 10
 }
 
 func candidateUnclassifiedThreshold(profile Profile, candidateID string) (Candidate, int64) {
@@ -1271,6 +1300,9 @@ func (e *Engine) resumePending(
 		}
 	}
 	now := e.now()
+	if e.circuits.IsHeld(accountBlockKey(state.ExecutionProfileID)) {
+		return RouteDecision{}, e.holdPendingRouteLocked(ctx, state, now)
+	}
 	if !force && policyState.Deadline != nil && now.Before(*policyState.Deadline) {
 		return RouteDecision{}, ErrRecoveryNotDue
 	}
@@ -1289,6 +1321,22 @@ func (e *Engine) resumePending(
 		CatalogueVersion: policyState.CatalogueVersion,
 		RetryOrdinal:     policyState.RetryOrdinal, PendingOutcome: policyState.PendingOutcome,
 	}, nil
+}
+
+// holdPendingRouteLocked refuses to resume a route on a profile that another
+// failure held after the route started waiting. The route returns to manual
+// recovery so the operator can skip to another candidate or release the hold.
+func (e *Engine) holdPendingRouteLocked(ctx context.Context, state RouteState, now time.Time) error {
+	if state.Status != routeStatusActionRequired {
+		expectedStatus := state.Status
+		state.Status = routeStatusActionRequired
+		state.UpdatedAt = now
+		if err := e.persistExpectedStatus(ctx, state.Generation, expectedStatus, state); err != nil {
+			return err
+		}
+		e.states[state.SessionID] = state
+	}
+	return ErrExecutionProfileHeld
 }
 
 // ReleaseProbe closes a successful half-open resource probe or applies the
@@ -1315,7 +1363,18 @@ func (e *Engine) releaseProbeForFailure(sessionID string, generation int64, cand
 }
 
 func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, failure *routingerr.Error) {
-	if failure == nil || e.circuits == nil || !qualifiesForCircuit(failure.Code) {
+	if failure == nil || e.circuits == nil {
+		return
+	}
+	if routingerr.HoldsUntilRelease(failure.Code) {
+		// The restriction belongs to this execution profile's account; its
+		// credential binding and model stay available to sibling profiles.
+		// A failed save is logged and kept pending by the registry, and the
+		// hold stays in memory, so routing proceeds without the profile.
+		_ = e.HoldAccountBlock(candidateID, failure.Code)
+		return
+	}
+	if !qualifiesForCircuit(failure.Code) {
 		return
 	}
 	for _, candidate := range profile.Candidates {

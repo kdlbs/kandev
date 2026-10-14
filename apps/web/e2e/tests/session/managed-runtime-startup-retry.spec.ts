@@ -49,10 +49,7 @@ test.describe("managed runtime startup retry", () => {
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
-      await expect(
-        session.activeChat().getByText("Retrying agent startup (attempt 2 of 2)", { exact: true }),
-      ).toBeVisible({ timeout: 30_000 });
-
+      // The transient retry can finish before navigation. Assert its durable outcomes.
       await waitForSessionDone(
         apiClient,
         task.id,
@@ -241,7 +238,6 @@ test.describe("managed runtime startup retry", () => {
     apiClient,
     backend,
     seedData,
-    testPage,
   }) => {
     test.skip(process.platform === "win32", "the deterministic npx fixture is a POSIX script");
     test.setTimeout(180_000);
@@ -270,12 +266,15 @@ test.describe("managed runtime startup retry", () => {
       );
       if (!task.session_id) throw new Error("managed runtime task did not return a session ID");
 
-      await testPage.goto(`/t/${task.id}`);
-      const session = new SessionPage(testPage);
-      await session.waitForLoad();
-      await expect(
-        session.activeChat().getByText("Retrying agent startup (attempt 2 of 2)", { exact: true }),
-      ).toBeVisible({ timeout: 30_000 });
+      await expect
+        .poll(
+          async () => {
+            const { messages } = await apiClient.listSessionMessages(task.session_id!);
+            return messages.some((message) => message.metadata?.startup_retrying === true);
+          },
+          { timeout: 30_000, intervals: [25, 50, 100], message: "Wait for startup retry backoff" },
+        )
+        .toBe(true);
       expect(
         (
           await apiClient.stopSession({

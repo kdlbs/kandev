@@ -14,7 +14,7 @@ import (
 
 func TestInitialPromptPersistsCanonicalSubmissionBeforeDispatch(t *testing.T) {
 	ctx := context.Background()
-	sm, execution, repo := initialDeliveryPersistenceFixture(t)
+	sm, execution, repo, _ := initialDeliveryPersistenceFixture(t)
 	id := initialPromptDeliverySubmissionID(execution)
 	reached := false
 	sm.beforePromptDispatchHook = func() {
@@ -37,12 +37,12 @@ func TestInitialPromptPersistsCanonicalSubmissionBeforeDispatch(t *testing.T) {
 
 func TestInitialPromptUsesCanonicalSubmissionAdmittedByItsCallback(t *testing.T) {
 	ctx := context.Background()
-	sm, execution, repo := initialDeliveryPersistenceFixture(t)
+	sm, execution, repo, _ := initialDeliveryPersistenceFixture(t)
 	execution.setMetadataValue(initialDeliverySubmissionIDMetadataKey, "first-message")
 	payload := []byte(`{"text":"initial instruction"}`)
 	reached := false
 	sm.beforePromptDispatchHook = func() { reached = true }
-	admit := func() error {
+	admit := func(context.Context, string, []v1.MessageAttachment) error {
 		_, err := repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
 			ID: "prompt:first-message", SessionID: "session", IncarnationID: "incarnation",
 			HarnessGeneration: 2, OwnerGeneration: 2, DispatchAttemptID: "first-message",
@@ -77,7 +77,7 @@ func TestInitialPromptNeverReusesUnownedCanonicalSubmission(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			sm, execution, repo := initialDeliveryPersistenceFixture(t)
+			sm, execution, repo, _ := initialDeliveryPersistenceFixture(t)
 			execution.setMetadataValue(initialDeliverySubmissionIDMetadataKey, "first-message")
 			payload := []byte(`{"text":"initial instruction"}`)
 			_, err := repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
@@ -93,7 +93,7 @@ func TestInitialPromptNeverReusesUnownedCanonicalSubmission(t *testing.T) {
 			sm.beforePromptDispatchHook = func() { reached = true }
 			callbacks := sendPromptCallbacks{deliverySubmissionID: "first-message"}
 			if test.callback {
-				callbacks.beforeAdmission = func() error { return nil }
+				callbacks.beforeAdmission = func(context.Context, string, []v1.MessageAttachment) error { return nil }
 			}
 			_, err = sm.sendPrompt(ctx, execution, "initial instruction", false, nil, true, callbacks, false)
 			require.Error(t, err)
@@ -104,7 +104,7 @@ func TestInitialPromptNeverReusesUnownedCanonicalSubmission(t *testing.T) {
 
 func TestInitialPromptUsesCanonicalSubmissionFromLaunchHandoff(t *testing.T) {
 	ctx := context.Background()
-	sm, execution, repo := initialDeliveryPersistenceFixture(t)
+	sm, execution, repo, _ := initialDeliveryPersistenceFixture(t)
 	execution.setMetadataValue(initialDeliverySubmissionIDMetadataKey, "first-message")
 	payload := []byte(`{"text":"initial instruction"}`)
 	_, err := repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
@@ -121,7 +121,7 @@ func TestInitialPromptUsesCanonicalSubmissionFromLaunchHandoff(t *testing.T) {
 	require.True(t, reached)
 }
 
-func initialDeliveryPersistenceFixture(t *testing.T) (*SessionManager, *AgentExecution, *tasksqlite.Repository) {
+func initialDeliveryPersistenceFixture(t *testing.T) (*SessionManager, *AgentExecution, *tasksqlite.Repository, *mockAgentServer) {
 	ctx := context.Background()
 	repo, _ := runOwnerTestRepository(t)
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task", Title: "Initial delivery"}))
@@ -139,5 +139,5 @@ func initialDeliveryPersistenceFixture(t *testing.T) (*SessionManager, *AgentExe
 	stream.setAgentDeliveryRepository(repo)
 	sm.SetDependencies(nil, stream, nil, nil)
 	execution := &AgentExecution{ID: "execution", TaskID: "task", SessionID: "session", Status: v1.AgentStatusReady, DeliveryMode: DurableDeliveryV1, DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 2, agentctl: client, promptDoneCh: make(chan PromptCompletionSignal, 1)}
-	return sm, execution, repo
+	return sm, execution, repo, mock
 }

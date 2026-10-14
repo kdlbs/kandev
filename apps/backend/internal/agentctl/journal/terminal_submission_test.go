@@ -36,7 +36,7 @@ func TestTerminalCompletionPreservesOtherSubmissionStates(t *testing.T) {
 		unresolved bool
 	}{
 		{"complete", SubmissionDispatching, "complete", false, SubmissionCompleted, false},
-		{"error", SubmissionDispatching, "error", false, SubmissionDispatching, true},
+		{"error", SubmissionDispatching, "error", false, SubmissionFailed, false},
 		{"prepared", SubmissionPrepared, "complete", false, SubmissionPrepared, true},
 		{"accepted", SubmissionAccepted, "complete", false, SubmissionAccepted, true},
 		{"uncertain", SubmissionInterruptedUnknown, "complete", false, SubmissionInterruptedUnknown, true},
@@ -128,5 +128,42 @@ func assertTerminalCompletionRollback(t *testing.T, j *Journal, event Event) {
 	}
 	if _, _, err := j.Replay(context.Background(), event.StreamID, 0, 10); !errors.Is(err, ErrStreamNotFound) {
 		t.Fatalf("rejected terminal committed a stream: %v", err)
+	}
+}
+
+func TestTerminalErrorSurvivesRestartBeforeDispatchReturn(t *testing.T) {
+	ctx := context.Background()
+	j, event := terminalSubmissionFixture(t, SubmissionDispatching, false)
+	event.Type = "error"
+	storedEvent, err := j.Append(ctx, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Acknowledge(ctx, event.StreamID, storedEvent.Sequence); err != nil {
+		t.Fatal(err)
+	}
+	config := j.config
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := reopened.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := reopened.ClassifyAbandonedDispatches(ctx, event.SessionID, event.IncarnationID, event.StreamID, event.HarnessGeneration); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := reopened.GetSubmission(ctx, event.SubmissionID)
+	if err != nil || stored.State != SubmissionFailed || stored.TerminalSequence != storedEvent.Sequence {
+		t.Fatalf("terminal failure changed on restart: %+v, %v", stored, err)
+	}
+	unresolved, err := reopened.HasUnresolvedWork(ctx)
+	if err != nil || unresolved {
+		t.Fatalf("terminal failure blocks admission: %v, %v", unresolved, err)
 	}
 }

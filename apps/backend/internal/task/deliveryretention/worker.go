@@ -24,11 +24,9 @@ import (
 const BackgroundBatchRows = 50
 
 const (
-	initialDelay    = time.Minute
 	defaultInterval = time.Minute
 	passBudget      = 5 * time.Second
 	batchBudget     = 250 * time.Millisecond
-	betweenBatches  = 100 * time.Millisecond
 	defaultRows     = 200
 	defaultBytes    = 4 << 20
 	maxRetryBackoff = 5 * time.Minute
@@ -72,6 +70,7 @@ type Options struct {
 
 // Snapshot contains only aggregate values. It never carries session or stream identity.
 type Snapshot struct {
+	ContinuationPending      bool
 	Duration                 time.Duration
 	Batches                  int
 	CommittedBatches         int
@@ -185,9 +184,6 @@ func (w *Worker) Stop() {
 
 func (w *Worker) loop(ctx context.Context) {
 	defer w.wg.Done()
-	if !wait(ctx, w.opts.After, initialDelay) {
-		return
-	}
 	for ctx.Err() == nil {
 		if w.suspended {
 			readiness := w.checkReadiness(ctx)
@@ -217,6 +213,9 @@ func (w *Worker) loop(ctx context.Context) {
 			delay = w.opts.RetryDelay(w.retryAttempt)
 		default:
 			w.retryAttempt = 0
+			if snapshot.ContinuationPending {
+				continue
+			}
 		}
 		if !wait(ctx, w.opts.After, delay) {
 			return
@@ -259,22 +258,17 @@ func (w *Worker) runPass(ctx context.Context) Snapshot {
 	deadline := started.Add(passBudget)
 	snapshot := Snapshot{OldestEligibleAgeSeconds: -1}
 	phases := []string{"retention", "orphans", "retirements"}
-	for index := 0; len(phases) > 0; index++ {
+	for len(phases) > 0 {
+		if ctx.Err() != nil {
+			break
+		}
+		remaining := deadline.Sub(w.opts.Now())
+		if remaining < batchBudget {
+			snapshot.ContinuationPending = committedRetentionWork(snapshot) > 0
+			break
+		}
 		phase := phases[0]
 		phases = phases[1:]
-		remaining := deadline.Sub(w.opts.Now())
-		if remaining <= 0 || ctx.Err() != nil {
-			break
-		}
-		if index > 0 {
-			if remaining <= betweenBatches || !wait(ctx, w.opts.After, betweenBatches) {
-				break
-			}
-		}
-		remaining = deadline.Sub(w.opts.Now())
-		if remaining < batchBudget || ctx.Err() != nil {
-			break
-		}
 		before := committedRetentionWork(snapshot)
 		if !w.runPassBatch(ctx, phase, remaining, &snapshot) {
 			break
@@ -426,6 +420,7 @@ func (w *Worker) report(snapshot Snapshot) {
 	}
 	fields := []zap.Field{
 		zap.Duration("duration", snapshot.Duration),
+		zap.Bool("continuation_pending", snapshot.ContinuationPending),
 		zap.Int("batches", snapshot.Batches),
 		zap.Int("committed_batches", snapshot.CommittedBatches),
 		zap.Int("discovery_batches", snapshot.DiscoveryBatches),

@@ -153,6 +153,13 @@ type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
 }
 
+// taskStepTransitionIDReader reads a task's latest step-transition ledger id.
+// The production task repository implements it; deferMoveTask type-asserts so a
+// fake that omits it simply keeps the legacy ordering behavior.
+type taskStepTransitionIDReader interface {
+	GetLatestTaskStepTransitionID(ctx context.Context, taskID string) (int64, error)
+}
+
 // RemoteContributionService resolves provider URLs before task creation and
 // associates an already-existing PR/MR after the target task-repository row
 // exists. Implementations must return only server-authored identity data.
@@ -365,6 +372,8 @@ type Handlers struct {
 	// registered and a coordinator principal's propose call 404s via the
 	// guard's nil-service check.
 	coordinatorSvc *coordinator.Service
+	// coordinatorTurns reads the turn ledger; nil while phase 3.1 is off.
+	coordinatorTurns CoordinatorTurnReader
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -569,8 +578,10 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 		d.RegisterFunc(coordinator.ActionProposeResume, h.proposeKindHandler(coordinator.ProposalKindResume))
 		d.RegisterFunc(coordinator.ActionProposeMessage, h.proposeKindHandler(coordinator.ProposalKindMessage))
 		d.RegisterFunc(coordinator.ActionProposeMove, h.proposeKindHandler(coordinator.ProposalKindMove))
+		d.RegisterFunc(coordinator.ActionProposeImprovement, h.handleProposeImprovement)
 		d.RegisterFunc(coordinator.ActionGetItem, h.handleGetCoordinatorItem)
 		d.RegisterFunc(coordinator.ActionListActivity, h.handleListCoordinatorActivity)
+		d.RegisterFunc(coordinator.ActionListTurns, h.handleListCoordinatorTurns)
 	}
 }
 
@@ -751,6 +762,9 @@ func (h *Handlers) handleListByField(
 	resp, err := fn(ctx, value)
 	if err != nil {
 		h.logger.Error(logErrMsg, zap.Error(err))
+		if errors.Is(err, errCoordinatorProjectsRead) {
+			clientErrMsg = clientErrMsg + ": " + err.Error()
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
@@ -831,6 +845,10 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 	return h.handleListByField(ctx, msg, "workflow_id", "failed to list tasks", "Failed to list tasks",
 		func(ctx context.Context, workflowID string) (any, error) {
 			tasks, err := h.taskSvc.ListTasks(ctx, workflowID)
+			if err != nil {
+				return nil, err
+			}
+			tasks, err = h.filterCoordinatorTasks(ctx, tasks)
 			if err != nil {
 				return nil, err
 			}

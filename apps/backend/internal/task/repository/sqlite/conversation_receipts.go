@@ -41,7 +41,7 @@ func (r *Repository) completePendingToolCallsForTurnTx(ctx context.Context, tx *
 	drv := r.db.DriverName()
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
-		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
+		SET metadata = %s, updated_at = ?
 		WHERE turn_id = ?
 		  AND type != 'permission_request'
 		  AND %s NOT IN ('complete', 'error')
@@ -49,7 +49,7 @@ func (r *Repository) completePendingToolCallsForTurnTx(ctx context.Context, tx *
 	`, dialect.JSONSet(drv, "metadata", "status", "complete"),
 		dialect.JSONExtract(drv, "metadata", "status"),
 		dialect.JSONExtractIsNotNull(drv, "metadata", "tool_call_id"))
-	result, err := tx.ExecContext(ctx, tx.Rebind(query), turnID)
+	result, err := tx.ExecContext(ctx, tx.Rebind(query), time.Now().UTC(), turnID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to complete pending tool calls for turn %s: %w", turnID, err)
 	}

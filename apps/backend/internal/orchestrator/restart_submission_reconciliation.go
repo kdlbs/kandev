@@ -148,7 +148,7 @@ func (s *Service) verifyRetiredRestartHistory(ctx context.Context, inputs *silen
 }
 
 func matchingRetiredRestartSubmission(inputs *silentRestoreInputs, row *models.AgentDeliverySubmission, peer *journal.Submission) bool {
-	return peer != nil && peer.Retired && peer.State == journal.SubmissionInterruptedUnknown && peer.ID == row.ID &&
+	return peer != nil && peer.Retired && journal.HasUnprovenOutcome(*peer) && row.State == models.DeliverySubmissionInterruptedUnknown && (peer.State == journal.SubmissionInterruptedUnknown || row.TerminalSequence == 0) && peer.ID == row.ID &&
 		peer.StreamID != "" && peer.SessionID == inputs.session.ID && row.SessionID == peer.SessionID &&
 		peer.IncarnationID == inputs.recovery.IncarnationID && row.IncarnationID == peer.IncarnationID &&
 		row.HarnessGeneration > 0 && row.HarnessGeneration <= inputs.recovery.HarnessGeneration &&
@@ -156,6 +156,9 @@ func matchingRetiredRestartSubmission(inputs *silentRestoreInputs, row *models.A
 }
 
 func sameRestartDescriptor(a, b journal.RecoveryDescriptor) bool {
+	if (a.Stream == nil) != (b.Stream == nil) || (a.Stream != nil && *a.Stream != *b.Stream) || a.StreamID != b.StreamID {
+		return false
+	}
 	if a.SessionID != b.SessionID || a.IncarnationID != b.IncarnationID || a.HarnessGeneration != b.HarnessGeneration ||
 		a.Durable != b.Durable || a.Version != b.Version || a.SubmissionCount != b.SubmissionCount ||
 		a.SubmissionsTruncated != b.SubmissionsTruncated || len(a.Submissions) != len(b.Submissions) {

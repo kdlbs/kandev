@@ -16,13 +16,13 @@ func (m *Manager) inspectDeliveryRecordTransport(ctx context.Context, lease *age
 func (m *Manager) inspectRetainedDeliveryRecord(ctx context.Context, lease *agentctl.RuntimeLease, control *agentctl.ControlClient, request DeliveryRecordEvidenceRequest) (*DeliveryRecordEvidence, error) {
 	retained, readErr := control.ReadRetainedReconstructionEvidence(ctx, journal.RetainedReconstructionEvidenceRequest{
 		Root: m.dataDir, SessionID: request.SessionID, IncarnationID: request.IncarnationID,
-		HarnessGeneration: request.HarnessGeneration, OriginalRuntime: request.OriginalRuntime, RetiredSubmissionID: request.RetiredSubmissionID,
+		HarnessGeneration: request.HarnessGeneration, OriginalRuntime: request.OriginalRuntime, RetiredSubmissionID: request.RetiredSubmissionID, StoredSubmissionID: request.StoredSubmissionID,
 	})
 	if readErr != nil {
 		return nil, deliveryEvidenceReadError(lease, readErr)
 	}
 	return &DeliveryRecordEvidence{
-		Descriptor: retained.Descriptor, ProcessTerminated: retained.ProcessTerminated, RetiredSubmission: retained.RetiredSubmission,
+		Descriptor: retained.Descriptor, ProcessTerminated: retained.ProcessTerminated, RetiredSubmission: retained.RetiredSubmission, StoredSubmission: retained.StoredSubmission,
 	}, nil
 }
 
@@ -44,20 +44,8 @@ func (m *Manager) inspectLiveDeliveryRecord(ctx context.Context, lease *agentctl
 		Descriptor: *descriptor, LiveExecutionID: instance.ID,
 		ProcessTerminated: historicalProcessTermination(request, instance.ID),
 	}
-	if request.RetiredSubmissionID != "" {
-		retired, err := client.GetDeliverySubmission(ctx, request.RetiredSubmissionID)
-		if err != nil {
-			return nil, deliveryEvidenceReadError(lease, err)
-		}
-		after, err := client.GetDeliveryStatus(ctx, "")
-		if err != nil {
-			return nil, deliveryEvidenceReadError(lease, err)
-		}
-		if !sameDeliveryRecordDescriptor(*descriptor, *after) {
-			return nil, ErrDeliveryRecordEvidenceStale
-		}
-		retired.Payload = nil
-		result.RetiredSubmission = retired
+	if err := m.readLiveStoredEvidence(ctx, lease, client, request, result); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -146,4 +134,48 @@ func (m *Manager) readLiveDeliveryRecord(ctx context.Context, lease *agentctl.Ru
 	}
 	after = *second
 	return &deliveryRecordRead{before: before, after: after, submission: submission}, nil
+}
+
+func (m *Manager) readLiveStoredEvidence(ctx context.Context, lease *agentctl.RuntimeLease, client *agentctl.Client, request DeliveryRecordEvidenceRequest, result *DeliveryRecordEvidence) error {
+	for _, id := range []string{request.RetiredSubmissionID, request.StoredSubmissionID} {
+		if id == "" {
+			continue
+		}
+		record, err := readLiveSubmissionMetadata(ctx, client, request, id)
+		if err != nil {
+			return deliveryEvidenceReadError(lease, err)
+		}
+		if id == request.RetiredSubmissionID {
+			if !record.Retired || !journal.HasUnprovenOutcome(*record) {
+				return ErrDeliveryOwnerMismatch
+			}
+			result.RetiredSubmission = record
+		}
+		if id == request.StoredSubmissionID {
+			result.StoredSubmission = record
+		}
+	}
+	if request.RetiredSubmissionID == "" && request.StoredSubmissionID == "" {
+		return nil
+	}
+	after, err := client.GetDeliveryStatus(ctx, "")
+	if err != nil {
+		return deliveryEvidenceReadError(lease, err)
+	}
+	if !sameNativeResumeProofStatus(&result.Descriptor, after) {
+		return ErrDeliveryRecordEvidenceStale
+	}
+	return nil
+}
+
+func readLiveSubmissionMetadata(ctx context.Context, client *agentctl.Client, request DeliveryRecordEvidenceRequest, id string) (*journal.Submission, error) {
+	record, err := client.GetDeliverySubmission(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if record == nil || record.SessionID != request.SessionID || record.IncarnationID != request.IncarnationID || record.HarnessGeneration == 0 || record.HarnessGeneration > request.HarnessGeneration {
+		return nil, ErrDeliveryOwnerMismatch
+	}
+	record.Payload = nil
+	return record, nil
 }

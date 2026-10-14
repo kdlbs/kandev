@@ -14,6 +14,9 @@ type alreadyResumedDeliveryReconciler interface {
 }
 
 func (s *Service) finishAlreadyResumedRestartRecovery(ctx context.Context, inputs *silentRestoreInputs) (bool, error) {
+	if inputs.recovery.HistoryGap != nil {
+		return false, nil
+	}
 	manager, ok := s.agentManager.(alreadyResumedDeliveryReconciler)
 	if !ok {
 		return false, nil
@@ -48,7 +51,10 @@ func (s *Service) finishAlreadyResumedRestartRecovery(ctx context.Context, input
 	if !ok {
 		return false, errors.New("restart recovery block store is unavailable")
 	}
-	changed, err := blocks.ResolveSessionRecoveryBlock(ownerCtx, inputs.block.ID, "resume", time.Now().UTC())
+	changed, handled, err := s.resolveNativeDeliveryBlock(ownerCtx, inputs.block, time.Now().UTC())
+	if !handled {
+		changed, err = blocks.ResolveSessionRecoveryBlock(ownerCtx, inputs.block.ID, "resume", time.Now().UTC())
+	}
 	if err == nil && !changed {
 		err = errors.New("restart recovery block changed before resolution")
 	}

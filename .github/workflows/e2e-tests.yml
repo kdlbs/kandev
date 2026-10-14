@@ -509,6 +509,7 @@ jobs:
         env:
           E2E_SHARD: ${{ matrix.shard }}
           E2E_MANIFEST_SHARD: ${{ matrix.shard }}
+          E2E_RUNNER_PROCESSES: "2"
           KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
           KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
         run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${E2E_MANIFEST_SHARD}.json"

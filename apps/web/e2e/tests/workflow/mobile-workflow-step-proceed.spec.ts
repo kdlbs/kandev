@@ -37,6 +37,8 @@ test("uses the task workflow when another board is selected on a phone", async (
   await session.waitForChatIdle({ timeout: 30_000 });
 
   await expect(session.proceedNextStepButton()).toContainText("Implement");
+  const proceedBox = (await session.proceedNextStepButton().boundingBox())!;
+  expect(proceedBox.height).toBeGreaterThanOrEqual(44);
   await session.proceedNextStepButton().tap();
 
   await expect

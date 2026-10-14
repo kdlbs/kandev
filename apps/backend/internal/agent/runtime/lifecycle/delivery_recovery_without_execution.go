@@ -23,6 +23,8 @@ type AgentDeliveryRecoveryIdentity struct {
 	IncarnationID     string
 	HarnessGeneration uint64
 	PromptGeneration  uint64
+	HistoryGap        *models.AgentDeliveryHistoryGap
+	PayloadHash       string
 }
 
 // RecoverAgentPromptStreamWithIdentity resolves a retained owner through the

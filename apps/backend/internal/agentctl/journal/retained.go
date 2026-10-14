@@ -28,19 +28,23 @@ type RetainedRecoveryRequest struct {
 	After             uint64                   `json:"after"`
 	Limit             int                      `json:"limit"`
 	Acknowledge       uint64                   `json:"acknowledge,omitempty"`
+	PrunedThrough     uint64                   `json:"pruned_through,omitempty"`
+	ExpectedHash      string                   `json:"expected_hash,omitempty"`
 }
 
 type RetainedRecoveryResponse struct {
-	Descriptor        RecoveryDescriptor `json:"descriptor"`
-	Submission        Submission         `json:"submission"`
-	Events            []Event            `json:"events"`
-	ProcessTerminated bool               `json:"process_terminated"`
+	Descriptor         RecoveryDescriptor `json:"descriptor"`
+	Submission         Submission         `json:"submission"`
+	Events             []Event            `json:"events"`
+	ProcessTerminated  bool               `json:"process_terminated"`
+	HistoryGapVerified bool               `json:"history_gap_verified,omitempty"`
 }
 
 // RetainedReconstructionEvidenceRequest reads the complete bounded candidate
 // set for one retained session. Process identity is optional because older
 // records do not always contain enough information to prove termination.
 type RetainedReconstructionEvidenceRequest struct {
+	StoredSubmissionID  string                    `json:"stored_submission_id,omitempty"`
 	RetiredSubmissionID string                    `json:"retired_submission_id,omitempty"`
 	Root                string                    `json:"root"`
 	SessionID           string                    `json:"session_id"`
@@ -52,6 +56,7 @@ type RetainedReconstructionEvidenceRequest struct {
 // RetainedReconstructionEvidence keeps process proof tri-state: nil means
 // that termination could not be established from retained evidence.
 type RetainedReconstructionEvidence struct {
+	StoredSubmission  *Submission        `json:"stored_submission,omitempty"`
 	RetiredSubmission *Submission        `json:"retired_submission,omitempty"`
 	Descriptor        RecoveryDescriptor `json:"descriptor"`
 	ProcessTerminated *bool              `json:"process_terminated,omitempty"`
@@ -95,12 +100,15 @@ func ReadRetainedReconstructionEvidence(
 		if err != nil {
 			return nil, err
 		}
-		if !retired.Retired || retired.State != SubmissionInterruptedUnknown || retired.SessionID != request.SessionID ||
+		if !retired.Retired || !HasUnprovenOutcome(retired) || retired.SessionID != request.SessionID ||
 			retired.IncarnationID != request.IncarnationID || retired.HarnessGeneration == 0 || retired.HarnessGeneration > request.HarnessGeneration {
 			return nil, ErrOwnerMismatch
 		}
 		retired.Payload = nil
 		result.RetiredSubmission = &retired
+	}
+	if err := journal.readStoredReconstructionEvidence(ctx, request, result); err != nil {
+		return nil, err
 	}
 	if request.OriginalRuntime != nil {
 		if err := request.OriginalRuntime.Validate(); err == nil {
@@ -110,6 +118,26 @@ func ReadRetainedReconstructionEvidence(
 		}
 	}
 	return result, nil
+}
+
+func (j *Journal) readStoredReconstructionEvidence(ctx context.Context, request RetainedReconstructionEvidenceRequest, result *RetainedReconstructionEvidence) error {
+	if request.StoredSubmissionID == "" {
+		return nil
+	}
+	stored, err := j.GetSubmission(ctx, request.StoredSubmissionID)
+	if err != nil {
+		return err
+	}
+	if !storedSubmissionOwnerMatches(stored, request) {
+		return ErrOwnerMismatch
+	}
+	stored.Payload = nil
+	result.StoredSubmission = &stored
+	if result.Descriptor.StreamID != "" || stored.HarnessGeneration != request.HarnessGeneration {
+		return nil
+	}
+	result.Descriptor, err = j.RecoveryDescriptor(ctx, request.SessionID, request.IncarnationID, request.HarnessGeneration, stored.StreamID)
+	return err
 }
 
 // ReadRetainedReconstructionSubmission returns the payload only when the
@@ -267,6 +295,9 @@ func ReadRetainedRecovery(ctx context.Context, request RetainedRecoveryRequest) 
 	if !retainedSubmissionMatches(submission, request) {
 		return nil, ErrOwnerMismatch
 	}
+	if request.PrunedThrough > 0 {
+		return readRetainedHistoryGap(ctx, j, request, descriptor, submission)
+	}
 	events, _, err := j.Replay(ctx, request.StreamID, request.After, request.Limit)
 	if err != nil && (descriptor.Stream != nil || request.After != 0) {
 		return nil, err
@@ -319,4 +350,8 @@ func openRetainedJournal(request RetainedRecoveryRequest, readOnly bool) (*Journ
 
 func retainedSubmissionMatches(submission Submission, request RetainedRecoveryRequest) bool {
 	return submission.SessionID == request.SessionID && submission.IncarnationID == request.IncarnationID && submission.HarnessGeneration == request.HarnessGeneration && submission.StreamID == request.StreamID
+}
+
+func storedSubmissionOwnerMatches(stored Submission, request RetainedReconstructionEvidenceRequest) bool {
+	return stored.SessionID == request.SessionID && stored.IncarnationID == request.IncarnationID && stored.HarnessGeneration > 0 && stored.HarnessGeneration <= request.HarnessGeneration
 }

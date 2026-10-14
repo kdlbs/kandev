@@ -59,6 +59,9 @@ func (r *Repository) restoreNativeResumeMetadataTx(ctx context.Context, tx *sqlx
 	if err != nil {
 		return false, err
 	}
+	if consumer == reconstructionDeliveryConsumer && submissionID == "" && streamID == "" {
+		return r.canResolveGenericNativeResumeTx(ctx, tx, blockID, recovery, exists)
+	}
 	if !exists {
 		if consumer != reconstructionDeliveryConsumer {
 			return true, nil
@@ -68,6 +71,9 @@ func (r *Repository) restoreNativeResumeMetadataTx(ctx context.Context, tx *sqlx
 		}
 		return r.hasLegacyNativeResumeEvidenceTx(ctx, tx, metadata["acp"], sessionID, incarnationID, generation, submissionID)
 	}
+	if recovery.HistoryGap != nil {
+		return false, nil
+	}
 	if recovery.SessionID != sessionID || recovery.IncarnationID != incarnationID || incarnationID != blockIncarnation ||
 		recovery.HarnessGeneration != generation || recovery.SubmissionID != submissionID || recovery.StreamID != streamID ||
 		(recovery.Phase != models.AgentDeliveryRecoveryUncertain && recovery.Phase != models.AgentDeliveryRecoveryReconnecting) {
@@ -75,7 +81,7 @@ func (r *Repository) restoreNativeResumeMetadataTx(ctx context.Context, tx *sqlx
 	}
 	return writeSilentRestoreRecoveryTx(ctx, tx, r.db.Rebind, &silentRestoreSessionRow{
 		taskID: taskID, state: state, metadata: metadata, current: recovery,
-	}, metadataRaw, completedAt)
+	}, metadataRaw, completedAt, "")
 }
 
 // Historical blocks can lack a recovery notice, but still require the current

@@ -14,7 +14,7 @@ owners:
 ## Scope and requirement mapping
 
 This design covers AC-WORKSPACES-REPOSITORY-SECRETS-001.9 through .14 and
-REQ-WORKSPACES-REPOSITORY-SECRETS-002 (all four acceptance criteria).
+REQ-WORKSPACES-REPOSITORY-SECRETS-002 (all six acceptance criteria).
 The existing repository-secrets requirement retains the other runtime and storage contracts during specification migration.
 
 ## Metadata list lifetimes
@@ -23,7 +23,7 @@ The existing repository-secrets requirement retains the other runtime and storag
 app store's `secrets` slice and Workspace metadata in hook-local state. Separate guarded
 effects own the two lifetimes. The Global effect depends on scope, Global loaded/loading
 flags, and the existing store setters. It retains the existing shared loaded/loading gate,
-default Global list request, empty-list failure settlement, and `filterGlobalSecrets` output.
+default Global list request, qualified server-failure settlement below, and `filterGlobalSecrets` output.
 
 The Workspace effect depends only on scope, workspace identity, `scopedKey`, and
 `initialItems`. It returns immediately for Global scope. A committed Workspace scope or
@@ -95,12 +95,35 @@ rows with omitted scope; it is not applied to the stored response itself.
 
 ### Failure and compatibility boundary
 
-Retain the current unguarded `catch(() => setSecrets([]))` and its loaded/loading/error
-policy. There is qualified evidence for stale successful publication only. Guarding
-failure settlement requires an independently authored companion causal RED proving loss
-of current accepted metadata; absent that evidence it is outside this package.
-Workspace identity, supplied-list replacement, abort/cancellation, profile selection,
-secret-value operations, transfer, and auth/lifecycle behavior are unchanged.
+The independently qualified companion failure proves accepted form/HTTP/event metadata
+loss after an older initial GET returns HTTP 500. AC-WORKSPACES-REPOSITORY-SECRETS-002.5/.6
+extends only the Global catch: import existing `ApiError` from `lib/api/client.ts`.
+At catch completion read the current owning store's items. Preserve that exact array through
+existing `setSecrets` only when the error is an `ApiError`, `500 <= status < 600`, and
+current items differ by reference from the initial read's captured array. Otherwise call
+`setSecrets([])` as before. Keep read/compare/set synchronous with no intervening await or
+external call. Existing `setSecrets` settles loaded=true; unchanged `finally` clears loading.
+
+Qualification is existential over an intervening accepted array-reference mutation;
+preservation is universal over the complete current inventory, including unchanged rows,
+all field values/order, mixed creation/edit/deletion/events, and an accepted empty list.
+Do not infer freshness from nonempty length, metadata equality, a single row, or loading
+flags. The same immutable-reference evidence already fences successful publication.
+A small unexported pure `failureItems` selector in the same hook file owns the typed
+error/reference predicate to satisfy the function-length lint limit. Catch passes error,
+captured initial items, and synchronously read current items; the selector returns the exact
+current array or `[]`, immediately passed to existing `setSecrets`. No helper module, store
+action, journal, cache, revision, or framework is introduced.
+
+`listSecrets` uses `fetchJson` directly without retry. HTTP 4xx, including 403, must clear
+even after accepted mutation. `fetchJson` retains its challenged-401 notification before
+rejecting; unchallenged 401 retains no auth notification. Network rejection, abort,
+malformed HTTP-200 JSON, and errors merely resembling `ApiError` remain nonqualified.
+Uncontested 5xx still clears. There is no retry, refresh, new error state, or trailing read.
+Admission, successful-reference fence, Global/legacy filtering, both consumers' shared
+readiness, and all Workspace callbacks remain unchanged. Workspace identity, supplied-list
+replacement, cancellation, profile selection, value operations, transfer, and auth/lifecycle
+behavior remain outside this extension.
 
 ### Evidence and surfaces
 
@@ -110,7 +133,14 @@ A rendered `SecretsSettings` test must exercise the real Add secret form, shared
 HTTP `createSecret` adapter, registered `secrets.created` handler, and exact row presence
 before and after releasing the older HTTP list response. Isolate only external transport;
 do not mock the hook, store, providers, API adapters, handlers, form, save, or row widgets.
-Use synthetic metadata and secret input; never reveal or inspect plaintext storage.
+Companion tests independently exercise that same mounted form/provider/save/API/event chain
+with a held GET and actual HTTP 500 Response, proving accepted row/store presence before
+failure and retention afterward. Four controls cover uncontested GET200, already-loaded real
+create with no initial GET, uncontested GET500 empty settlement, and accepted create then
+GET403 clearing. Real-provider hook tests cover mixed metadata, accepted empty inventory,
+5xx range, two consumers, 401 challenges, and nonqualified errors. Never reuse a private
+qualification fixture. Use synthetic metadata and secret input; never reveal or inspect
+plaintext storage.
 
 The state/data-only mobile-parity exception applies. Existing Settings composition,
 controls, scrolling, navigation, copy, and breakpoint behavior remain unchanged. The same
@@ -122,6 +152,7 @@ localized copy is required for this correction.
 
 - [Workspace secret list isolation](../../../plans/workspace-secret-list-isolation/plan.md).
 - [Preserve saved Global secrets](../../../plans/preserve-saved-global-secrets/plan.md).
+- [Global initial server-error settlement](../../../plans/global-secret-initial-server-error/plan.md).
 
 ## Deletion boundary
 

@@ -49,8 +49,16 @@ The task carries the outcome through the workflow. The repository and session pr
 
 ## Manage forwarded ports
 
-Enable **Port forwarding** from the task's `+` menu on desktop or the active-task
-drawer on a phone, then open the network control in the task top bar.
+On a phone, open **Panels** in the session's bottom dock and choose **Port
+forwarding**. The port manager opens in a bottom drawer without changing your
+selected session panel. On desktop, enable **Port forwarding** from the task's
+`+` menu, then use the network control in the task header. Tablets retain the
+Port forwarding action in the task switcher.
+
+The phone drawer's **Show in task header** switch controls an optional network
+shortcut shared by everyone viewing that task. You can always reopen the port
+manager through **Panels**, with the shortcut on or off. Changing the shortcut
+does not start or stop tunnels.
 
 **Forwarded ports** appears first with the number of active tunnels. Each row
 shows **Forwarding**, its dedicated tunnel URL, and controls to open, copy, or
@@ -59,8 +67,13 @@ you can start forwarding. Each group sorts by target port number.
 
 A proxy URL is also available for each listed port. A proxy link alone does not
 mean a dedicated tunnel is active. Starting a tunnel moves the port to the top
-group; stopping it keeps the port available to restart during that dialog visit.
-Closing the dialog leaves active tunnels running.
+group; stopping it keeps the port available to restart during that session visit.
+Closing the port manager leaves active tunnels running.
+Reopening refreshes detected ports and current tunnel state while preserving
+your unfinished manual-port entry. Use **Refresh** to check for new listening
+ports while the manager stays open.
+If the current tunnel status cannot be read, the manager keeps the last known
+status until a later successful read.
 
 ## Keep your view when creating tasks
 
@@ -174,6 +187,9 @@ settings from the default workspace.
 ## Create a task
 
 Use **New Task** in the sidebar. In an open task, the **Task** split button also opens task creation.
+
+IME composition confirmation keeps your text in the creation dialog. When ready,
+use a separate `Cmd/Ctrl+Enter` shortcut or the visible submit action.
 
 <DocsVideo
   webm="./media/feature-guides/task-create.webm"

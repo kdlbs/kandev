@@ -69,7 +69,13 @@ bounded instance capacity, so that one installation does not overload its host.
   trigger retry of eligible ceiling-deferred launches without losing their
   payload, entry ownership, or original queue time. Disabling shall not stop the
   retry mechanism or bypass workflow WIP and task eligibility checks.
-- **AC-AGENTS-SESSION-CEILING-001.10:** When the ceiling refuses the start of an
+- **AC-AGENTS-SESSION-CEILING-001.10:** A newly created automation task shall
+  have one initial-start owner before feeder publication. Workflow auto-start
+  shall yield until definitive admission or termination releases that exact
+  owner. Continuations shall preserve the existing ownership identity. Restart,
+  lease expiry, unknown acknowledgement and failed Stop shall not release
+  unresolved durable retry ownership or authorize generic replay.
+  When the ceiling refuses the start of an
   admitted automation run, the system shall keep the run open, holding its
   concurrency slot, and keep its task and deferred start. The replayed start
   shall bind its session and turn to that run, regardless of workflow-step

@@ -372,6 +372,11 @@ func provideToolRetention(pool *db.Pool, snapshots *backups.Service, eventBus bu
 		},
 		Changed: wiring.ToolPayloadChanged,
 		Report:  func(ctx context.Context, op *toolretention.Operation) { reportToolRetention(ctx, eventBus, log, op) },
+		Log: func(_ context.Context, message string, err error) {
+			if log != nil {
+				log.Error(message, zap.Error(err))
+			}
+		},
 	})
 }
 

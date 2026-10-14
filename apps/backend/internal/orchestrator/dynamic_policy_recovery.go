@@ -240,6 +240,14 @@ func (s *Service) handleDynamicPolicyResumeError(
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, dynamicruntime.ErrExecutionProfileHeld) {
+		// The engine returned the route to manual recovery; show it on the
+		// session so the operator can skip or release the held profile.
+		if session, loadErr := s.repo.GetTaskSession(ctx, sessionID); loadErr == nil {
+			s.mirrorDynamicRouteProjection(ctx, session, generation, dynamicRouteStatusActionRequired, "execution_profile_held")
+		}
+		return true
+	}
 	if errors.Is(err, dynamicruntime.ErrRecoveryNotDue) {
 		if refreshed, loadErr := loader.LoadRouteState(ctx, sessionID); loadErr == nil && refreshed != nil {
 			s.scheduleDynamicPolicyRecovery(sessionID, generation, refreshed.PolicyStateJSON)

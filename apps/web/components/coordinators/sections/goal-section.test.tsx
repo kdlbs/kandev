@@ -142,13 +142,34 @@ describe("GoalSection", () => {
 
 describe("GoalSection saving", () => {
   it("keeps typed values and shows the 400 message under the field", async () => {
-    getMock.mockResolvedValue(response(null));
+    let finishInitialLoad: ((value: GoalResponse) => void) | undefined;
+    getMock.mockReturnValue(
+      new Promise<GoalResponse>((resolve) => {
+        finishInitialLoad = resolve;
+      }),
+    );
     putMock.mockRejectedValue(
       new ApiError("bad", 400, { error: "name is too long", field: "name" }),
     );
     renderSection();
-    fireEvent.change(await screen.findByTestId("goal-name"), { target: { value: "x" } });
-    fireEvent.click(screen.getByTestId("goal-set"));
+    expect(screen.queryByTestId("goal-name")).toBeNull();
+    await act(async () => {
+      if (!finishInitialLoad) throw new Error("Initial goal load was not created");
+      finishInitialLoad(response(null));
+    });
+    const name = screen.getByTestId("goal-name") as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "x" } });
+    expect(name.value).toBe("x");
+    const submit = screen.getByTestId("goal-set") as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+    await waitFor(() =>
+      expect(putMock).toHaveBeenCalledExactlyOnceWith("ws", "c", {
+        name: "x",
+        due_on: null,
+        criteria: [],
+      }),
+    );
     expect(await screen.findByText("name is too long")).toBeTruthy();
     expect((screen.getByTestId("goal-name") as HTMLInputElement).value).toBe("x");
   });

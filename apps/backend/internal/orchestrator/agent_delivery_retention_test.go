@@ -24,13 +24,21 @@ func (m *retentionPromptAgentManager) PromptAgentWithAdmissionCallbackAndSubmiss
 	executionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 ) (*executor.PromptResult, error) {
-	m.submissionIDs = append(m.submissionIDs, submissionID)
+	admit := func(ctx context.Context, prompt string, attachments []v1.MessageAttachment) error {
+		if beforeAdmission != nil {
+			if err := beforeAdmission(ctx, prompt, attachments); err != nil {
+				return err
+			}
+		}
+		m.submissionIDs = append(m.submissionIDs, submissionID)
+		return nil
+	}
 	return m.PromptAgentWithAdmissionCallback(
-		ctx, executionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched,
+		ctx, executionID, prompt, attachments, dispatchOnly, admit, onDispatched,
 	)
 }
 

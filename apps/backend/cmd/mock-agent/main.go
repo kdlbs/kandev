@@ -55,6 +55,7 @@ type mockAgent struct {
 	sessions                       map[acp.SessionId]bool
 	promptCancels                  map[acp.SessionId]context.CancelFunc
 	promptCancelHolds              map[acp.SessionId]chan struct{}
+	detachedWork                   map[acp.SessionId]map[*mockDetachedWork]struct{}
 	sessionMCPServers              map[acp.SessionId]map[string]mcpServerDef
 	sessionConfig                  map[acp.SessionId][]acp.SessionConfigOption
 	sessionModes                   map[acp.SessionId]acp.SessionModeId
@@ -506,7 +507,10 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	a.mu.Lock()
 	sessionMCPServers := cloneMCPServerDefs(a.sessionMCPServers[req.SessionId])
 	a.mu.Unlock()
-	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId, mcpServers: sessionMCPServers}
+	e := &emitter{
+		ctx: promptCtx, conn: a.conn, sid: req.SessionId, mcpServers: sessionMCPServers,
+		registerDetachedWork: a.registerDetachedWork,
+	}
 	handlePrompt(e, prompt, a.sessionModel(req.SessionId))
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
@@ -531,6 +535,7 @@ func (a *mockAgent) Cancel(_ context.Context, req acp.CancelNotification) error 
 	cancelHold := a.promptCancelHolds[req.SessionId]
 	cancelPrompt := a.promptCancels[req.SessionId]
 	a.mu.Unlock()
+	a.cancelDetachedWork(req.SessionId)
 	if cancelHold != nil {
 		select {
 		case <-cancelHold:

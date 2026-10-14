@@ -97,7 +97,7 @@ type InitialPromptFailure struct {
 }
 
 type sendPromptCallbacks struct {
-	beforeAdmission      func() error
+	beforeAdmission      func(context.Context, string, []v1.MessageAttachment) error
 	onAdmissionRejected  func(InitialPromptFailure)
 	onDispatched         func()
 	onFailure            func(InitialPromptFailure)
@@ -540,7 +540,9 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 ) error {
 	negotiation := execution.beginDeliveryNegotiation()
 	defer negotiation.finish(ErrDurableAdoptionBlocked)
-	execution.deliveryBootstrap.Store(execution.ACPSessionID == "" && execution.DeliveryHarnessGeneration == 1)
+	// A restored native conversation can be entering durable delivery for the
+	// first time. Its setup frames still need to wait for SQL authority.
+	execution.deliveryBootstrap.Store(execution.DeliveryHarnessGeneration == 1)
 	defer func() {
 		if !execution.isSessionInitialized() {
 			execution.deliveryBootstrap.Store(false)
@@ -729,6 +731,9 @@ func (sm *SessionManager) initializeACPConnection(
 		sm.streamManager.ConnectAll(execution, updatesReady)
 		select {
 		case <-updatesReady:
+			if err := execution.deliveryStreamFailureSnapshot(); err != nil {
+				return ctx, nil, err
+			}
 			sm.logger.Debug("updates stream ready")
 		case <-time.After(10 * time.Second):
 			return ctx, nil, fmt.Errorf("timeout waiting for agent stream to connect")
@@ -1635,7 +1640,7 @@ func (sm *SessionManager) SendPromptWithAdmissionCallback(
 	validateStatus bool,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*PromptResult, error) {
 	return sm.SendPromptWithAdmissionCallbackAndSubmissionID(
@@ -1652,7 +1657,7 @@ func (sm *SessionManager) SendPromptWithAdmissionCallbackAndSubmissionID(
 	validateStatus bool,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 ) (*PromptResult, error) {
@@ -1939,13 +1944,18 @@ func (sm *SessionManager) sendPrompt(
 	}
 	flushStreamingStateWithHistory(execution, sm.historyManager, sm.logger)
 	if callbacks.beforeAdmission != nil {
-		if err := callbacks.beforeAdmission(); err != nil {
-			sm.reportPromptFailure(execution, 0, err, callbacks.onAdmissionRejected)
+		if err := callbacks.beforeAdmission(preparedCtx, effectivePrompt, materializedAttachments); err != nil {
+			handler := callbacks.onAdmissionRejected
+			var persistenceFailure *PromptAdmissionPersistenceError
+			if errors.As(err, &persistenceFailure) {
+				handler = callbacks.onFailure
+			}
+			sm.reportPromptFailure(execution, 0, err, handler)
 			return nil, err
 		}
 	}
 	if err := sm.persistInitialDeliveryBeforeDispatch(preparedCtx, execution, effectivePrompt, materializedAttachments, callbacks.deliverySubmissionID); err != nil {
-		sm.reportPromptFailure(execution, 0, err, callbacks.onAdmissionRejected)
+		sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
 		return nil, err
 	}
 	promptGeneration, err := sm.admitPrompt(execution, validateStatus)

@@ -270,6 +270,7 @@ func (s *Service) retryVerifiedSessionDelivery(ctx context.Context, session *mod
 		SubmissionID: recovery.SubmissionID, StreamID: recovery.StreamID,
 		IncarnationID: recovery.IncarnationID, HarnessGeneration: uint64(recovery.HarnessGeneration),
 		PromptGeneration: recovery.PromptGeneration,
+		HistoryGap:       recovery.HistoryGap, PayloadHash: submission.PayloadHash,
 	})
 	response := sessionDeliveryRecoveryResponse(session.TaskID, session.ID, attempt.outcome,
 		attempt.reason, recovery.Revision, identity)

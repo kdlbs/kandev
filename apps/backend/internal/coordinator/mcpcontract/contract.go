@@ -16,6 +16,10 @@ const (
 	ActionProposeMove    = "coordinator.propose_move"
 )
 
+// ActionProposeImprovement is the MCP action the propose_improvement_kandev
+// tool dispatches (docs/specs/coordinator/system-design/improvements.md#tool).
+const ActionProposeImprovement = "coordinator.propose_improvement"
+
 // ActionGetItem is the MCP action the get_coordinator_item_kandev tool
 // dispatches (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
 const ActionGetItem = "coordinator.get_item"
@@ -23,6 +27,10 @@ const ActionGetItem = "coordinator.get_item"
 // ActionListActivity is the MCP action the list_coordinator_activity_kandev
 // tool dispatches (docs/specs/coordinator/system-design/activity-log.md#read-tool).
 const ActionListActivity = "coordinator.list_activity"
+
+// ActionListTurns is the MCP action the list_coordinator_turns_kandev tool
+// dispatches (docs/specs/coordinator/system-design/turn-ledger.md).
+const ActionListTurns = "coordinator.list_turns"
 
 // ActionApproveProposal and ActionRejectProposal are reserved MCP action
 // names (docs/specs/coordinator/system-design/proposals.md#security): approve
@@ -33,6 +41,10 @@ const ActionListActivity = "coordinator.list_activity"
 const (
 	ActionApproveProposal = "coordinator.approve_proposal"
 	ActionRejectProposal  = "coordinator.reject_proposal"
+	// ActionReplyProposal and ActionDeliverReply reserve the reply route and
+	// the deliver route the same way: REST only, no handler.
+	ActionReplyProposal = "coordinator.reply_proposal"
+	ActionDeliverReply  = "coordinator.deliver_reply"
 )
 
 // DecisionActions is the set of reserved decision action names the
@@ -41,10 +53,14 @@ const (
 var DecisionActions = map[string]struct{}{
 	ActionApproveProposal: {},
 	ActionRejectProposal:  {},
+	ActionReplyProposal:   {},
+	ActionDeliverReply:    {},
 }
 
 // Proposal spec field names, matching their JSON keys.
 const (
 	FieldWorkflowID = "workflow_id"
 	FieldStepID     = "step_id"
+	// FieldEvidence is the improvement tool's evidence array argument.
+	FieldEvidence = "evidence"
 )

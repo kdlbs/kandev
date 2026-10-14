@@ -44,6 +44,8 @@ test.describe("Coordinator copilot activity display", () => {
       name: "Activity Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
     const panel = await openCopilot(testPage);
@@ -93,6 +95,8 @@ test.describe("Coordinator copilot activity display", () => {
       name: "Activity Proposal Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
     const panel = await openCopilot(testPage);

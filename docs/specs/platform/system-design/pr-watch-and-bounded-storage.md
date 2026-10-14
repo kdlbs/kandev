@@ -92,6 +92,10 @@ writes.
 
 ## Payload storage and retention candidates
 
+Pre-journal shell snapshot bounds and ordered preservation are specified in the
+[stream storage design](delivery-stream-storage.md) and
+[repair plan](../../../plans/delivery-stream-storage/plan.md).
+
 A payload above the inline threshold is stored in
 `task_message_payloads` keyed by digest with compression encoding, byte
 size, and an internal reference; message rows retain the lightweight

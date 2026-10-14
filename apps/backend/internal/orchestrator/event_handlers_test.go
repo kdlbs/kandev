@@ -304,7 +304,7 @@ type mockAgentManager struct {
 	launchAgentFunc                 func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
 	initialPromptDispatchCallback   func()
 	initialPromptFailureCallback    func()
-	initialPromptAdmissionCallback  func() error
+	initialPromptAdmissionCallback  func(context.Context, string, []v1.MessageAttachment) error
 	promptAdmissionEntered          chan struct{}
 	promptAdmissionRelease          chan struct{}
 	startAgentProcessCalls          []string
@@ -485,7 +485,7 @@ func (m *mockAgentManager) RegisterInitialPromptDispatchCallbacks(_ string, onDi
 
 func (m *mockAgentManager) RegisterInitialPromptAdmissionCallbacks(
 	_ string,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) error {
 	m.mu.Lock()
@@ -561,7 +561,7 @@ func (m *mockAgentManager) PromptAgentWithAdmissionCallback(
 	executionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*executor.PromptResult, error) {
 	m.mu.Lock()
@@ -578,7 +578,7 @@ func (m *mockAgentManager) PromptAgentWithAdmissionCallback(
 		<-release
 	}
 	if beforeAdmission != nil {
-		if err := beforeAdmission(); err != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
 			return nil, err
 		}
 	}

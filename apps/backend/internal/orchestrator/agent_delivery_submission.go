@@ -279,7 +279,7 @@ func (s *Service) resolvePendingDeliveryProtocol(
 		return messagequeue.DeliveryProtocolLegacy, nil
 	case agentruntime.DurableDeliveryV1:
 		if decision.Reason == durableDeliveryUnresolvedReason {
-			return "", s.deliveryRecoveryError(ctx, sessionID, decision.Reason)
+			return s.reconcileUnresolvedDeliveryProtocol(ctx, sessionID, executionID)
 		}
 		return messagequeue.DeliveryProtocolV1, nil
 	default:
@@ -300,7 +300,7 @@ func (s *Service) validateV1DeliveryProtocol(
 		return "", s.deliveryRecoveryError(ctx, sessionID, reason)
 	}
 	if decision.Reason == durableDeliveryUnresolvedReason {
-		return "", s.deliveryRecoveryError(ctx, sessionID, decision.Reason)
+		return s.reconcileUnresolvedDeliveryProtocol(ctx, sessionID, executionID)
 	}
 	return messagequeue.DeliveryProtocolV1, nil
 }

@@ -48,6 +48,8 @@ type CoordinatorDTO struct {
 	Name                  string         `json:"name"`
 	AgentProfileID        string         `json:"agent_profile_id"`
 	ExecutorProfileID     string         `json:"executor_profile_id"`
+	TaskAgentProfileID    string         `json:"task_agent_profile_id"`
+	TaskExecutorProfileID string         `json:"task_executor_profile_id"`
 	Context               string         `json:"context"`
 	ConversationTaskID    *string        `json:"conversation_task_id"`
 	ConfigRevision        int64          `json:"config_revision"`
@@ -56,9 +58,31 @@ type CoordinatorDTO struct {
 	OpenProposals         *int           `json:"open_proposals,omitempty"`
 	AgentProfileStatus    *ProfileStatus `json:"agent_profile_status,omitempty"`
 	ExecutorProfileStatus *ProfileStatus `json:"executor_profile_status,omitempty"`
+	TaskAgentStatus       *ProfileStatus `json:"task_agent_profile_status,omitempty"`
+	TaskExecutorStatus    *ProfileStatus `json:"task_executor_profile_status,omitempty"`
 	Summary               *SummaryDTO    `json:"summary,omitempty"`
 
 	*CoordinatorPhase2
+	*CoordinatorPhase3
+	*PauseView
+}
+
+// CoordinatorPhase3 carries the phase 3 read fields; nil (and so absent from
+// the JSON) while phase 3 is not effective.
+type CoordinatorPhase3 struct {
+	AutonomyEnabled bool    `json:"autonomy_enabled"`
+	CostCeilingUSD  *string `json:"cost_ceiling_usd"`
+}
+
+// WithAutonomy attaches the phase 3 fields and returns the receiver.
+func (d *CoordinatorDTO) WithAutonomy(c *Coordinator) *CoordinatorDTO {
+	p3 := &CoordinatorPhase3{AutonomyEnabled: c.AutonomyEnabled}
+	if c.CostCeilingSubcents != nil {
+		usd := FormatCostCeilingUSD(*c.CostCeilingSubcents)
+		p3.CostCeilingUSD = &usd
+	}
+	d.CoordinatorPhase3 = p3
+	return d
 }
 
 // CoordinatorPhase2 carries the phase-2 read fields; nil (and so absent from
@@ -67,6 +91,11 @@ type CoordinatorPhase2 struct {
 	Policy         CoordinatorPolicyDTO `json:"policy"`
 	PolicyRevision int                  `json:"policy_revision"`
 	Watches        CoordinatorWatchDTO  `json:"watches"`
+	// Projects and ProjectsConfig are the settings read's project members;
+	// absent unless the stored scope is selected (Projects) or phase 3.1 is
+	// effective (ProjectsConfig).
+	Projects       *ProjectsDTO       `json:"projects,omitempty"`
+	ProjectsConfig *ProjectsConfigDTO `json:"projects_config,omitempty"`
 }
 
 // SummaryDTO is the list route's per-coordinator card summary, present only
@@ -108,6 +137,9 @@ type CoordinatorPolicyDTO struct {
 type CoordinatorWatchDTO struct {
 	Scope       string   `json:"scope"`
 	WorkflowIDs []string `json:"workflow_ids"`
+	// Projects is *WatchProjectsDTO or *WatchProjectsAllDTO; absent when
+	// the stored project scope is every project and phase 3.1 is off.
+	Projects any `json:"projects,omitempty"`
 }
 
 // WithPolicyView attaches the phase-2 fields and returns the receiver.
@@ -133,6 +165,7 @@ func NewCoordinatorDTO(c *Coordinator) *CoordinatorDTO {
 		Name:               c.Name,
 		AgentProfileID:     c.AgentProfileID,
 		ExecutorProfileID:  c.ExecutorProfileID,
+		TaskAgentProfileID: c.TaskAgentProfileID, TaskExecutorProfileID: c.TaskExecutorProfileID,
 		Context:            c.Context,
 		ConversationTaskID: c.ConversationTaskID,
 		ConfigRevision:     c.ConfigRevision,
@@ -153,6 +186,14 @@ func (d *CoordinatorDTO) WithOpenProposals(count int) *CoordinatorDTO {
 func (d *CoordinatorDTO) WithProfileStatuses(agent, executor ProfileStatus) *CoordinatorDTO {
 	d.AgentProfileStatus = &agent
 	d.ExecutorProfileStatus = &executor
+	return d
+}
+
+// WithTaskPairStatuses sets the GET route's task_agent_profile_status and
+// task_executor_profile_status and returns the receiver.
+func (d *CoordinatorDTO) WithTaskPairStatuses(agent, executor ProfileStatus) *CoordinatorDTO {
+	d.TaskAgentStatus = &agent
+	d.TaskExecutorStatus = &executor
 	return d
 }
 
@@ -180,6 +221,9 @@ type CreateCoordinatorRequest struct {
 	AgentProfileID    string `json:"agent_profile_id"`
 	ExecutorProfileID string `json:"executor_profile_id"`
 	Context           string `json:"context"`
+
+	TaskAgentProfileID    string `json:"task_agent_profile_id"`
+	TaskExecutorProfileID string `json:"task_executor_profile_id"`
 }
 
 // PatchCoordinatorRequest is the raw PATCH .../coordinators/:cid request
@@ -198,6 +242,9 @@ const (
 	PatchFieldAgentProfileID    = "agent_profile_id"
 	PatchFieldExecutorProfileID = "executor_profile_id"
 	PatchFieldContext           = "context"
+
+	PatchFieldTaskAgentProfileID    = "task_agent_profile_id"
+	PatchFieldTaskExecutorProfileID = "task_executor_profile_id"
 )
 
 // StringField reports field's presence and value: (nil, false, nil) when
@@ -209,6 +256,9 @@ func (r PatchCoordinatorRequest) StringField(field string) (*string, bool, error
 	return rawStringField(r, field)
 }
 
+// jsonNullLiteral is the JSON null token compared against raw request values.
+const jsonNullLiteral = "null"
+
 // rawStringField implements the absent/null/string decoding shared by
 // PatchCoordinatorRequest (Build decision 7) and ApproveProposalRequest
 // (Build decision 16): both tell an absent field apart from an explicit
@@ -218,7 +268,7 @@ func rawStringField(values map[string]json.RawMessage, field string) (*string, b
 	if !present {
 		return nil, false, nil
 	}
-	if string(raw) == "null" {
+	if string(raw) == jsonNullLiteral {
 		return nil, true, &FieldError{Field: field, Message: field + " must not be null"}
 	}
 	var value string
@@ -244,10 +294,24 @@ type ProposalDTO struct {
 	DecidedBy     *string        `json:"decided_by"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
+	RunsWith      *RunsWith      `json:"runs_with"`
 
 	// ProposalPhase2 is nil, and its fields are absent from the body, while
 	// the phase-2 flag is off.
 	*ProposalPhase2
+
+	// ProposalPhase3 is nil, and its fields are absent from the body, while
+	// the phase-3 flag is off.
+	*ProposalPhase3
+}
+
+// ProposalPhase3 holds the proposal wire fields added by phase 3.
+type ProposalPhase3 struct {
+	ReplyText        *string    `json:"reply_text"`
+	ReplyDeliveredAt *time.Time `json:"reply_delivered_at"`
+	InReplyTo        *string    `json:"in_reply_to"`
+	// ChangeStatus is present for improvement proposals only.
+	ChangeStatus *string `json:"change_status,omitempty"`
 }
 
 // ProposalPhase2 holds the proposal wire fields added by phase 2.
@@ -271,6 +335,21 @@ func NewProposalDTOFor(p *Proposal, phase2 bool) *ProposalDTO {
 	return newProposalDTO(p, phase2)
 }
 
+// NewProposalDTOPhases builds a ProposalDTO carrying the phase-2 fields when
+// phase2 is true and the phase-3 reply fields when phase3 is true.
+func NewProposalDTOPhases(p *Proposal, phase2, phase3 bool) *ProposalDTO {
+	dto := newProposalDTO(p, phase2)
+	if phase3 {
+		dto.ProposalPhase3 = &ProposalPhase3{
+			ReplyText: p.ReplyText, ReplyDeliveredAt: p.ReplyDeliveredAt, InReplyTo: p.InReplyTo,
+		}
+		if p.Kind == ProposalKindImprovement && p.ChangeStatus != nil {
+			dto.ChangeStatus = p.ChangeStatus
+		}
+	}
+	return dto
+}
+
 func newProposalDTO(p *Proposal, phase2 bool) *ProposalDTO {
 	var spec any = p.Spec
 	if p.RawSpec != "" {
@@ -284,7 +363,7 @@ func newProposalDTO(p *Proposal, phase2 bool) *ProposalDTO {
 	if ids == nil {
 		ids = []string{}
 	}
-	outcome := json.RawMessage("null")
+	outcome := json.RawMessage(jsonNullLiteral)
 	if p.OutcomeJSON != nil && json.Valid([]byte(*p.OutcomeJSON)) {
 		outcome = json.RawMessage(*p.OutcomeJSON)
 	}
@@ -310,6 +389,7 @@ func newProposalDTO(p *Proposal, phase2 bool) *ProposalDTO {
 		DecidedBy:      p.DecidedBy,
 		CreatedAt:      p.CreatedAt,
 		UpdatedAt:      p.UpdatedAt,
+		RunsWith:       p.RunsWith,
 	}
 }
 
@@ -339,10 +419,16 @@ type ProposalConflictResponse struct {
 // NewProposalConflictResponse builds the 409 body from the proposal row, as
 // re-read after the conflict.
 func NewProposalConflictResponse(p *Proposal, phase2 bool) *ProposalConflictResponse {
+	return NewProposalConflictResponsePhases(p, phase2, false)
+}
+
+// NewProposalConflictResponsePhases is NewProposalConflictResponse carrying
+// the phase-3 reply fields when phase3 is true.
+func NewProposalConflictResponsePhases(p *Proposal, phase2, phase3 bool) *ProposalConflictResponse {
 	return &ProposalConflictResponse{
 		Error:     ErrorCodeProposalConflict,
 		ErrorCode: ErrorCodeProposalConflict,
-		Proposal:  *NewProposalDTOFor(p, phase2),
+		Proposal:  *NewProposalDTOPhases(p, phase2, phase3),
 	}
 }
 

@@ -466,9 +466,21 @@ for (const survives of [false, true]) {
           (message) => message.metadata?.recovery_disposition === "restart_interrupted",
         );
         expect(recovery.metadata?.attempts_started).toBe(1);
-        await expect(session.recoveryResumeButton()).toBeVisible();
+        await expect
+          .poll(
+            async () => {
+              const restored = (await apiClient.getTaskSession(fixture.sessionId)).session;
+              const delivery = restored.metadata?.agent_delivery_recovery as
+                | { phase?: string }
+                | undefined;
+              return { state: restored.state, phase: delivery?.phase };
+            },
+            { timeout: 90_000 },
+          )
+          .toEqual({ state: "WAITING_FOR_INPUT", phase: "restored" });
+        await session.composerReady();
       }
-      assertNativeContinuationTrace(fixture.tracePath, "read-hold");
+      assertNativeContinuationTrace(fixture.tracePath, "read-hold", survives ? 0 : 1);
       await expect(session.activeChat()).toContainText("partial history preserved");
     } finally {
       await fixture.dispose();

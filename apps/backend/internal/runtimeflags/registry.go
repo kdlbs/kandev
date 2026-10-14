@@ -307,6 +307,41 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase3",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE3",
+			Kind:        KindFeature,
+			Label:       "Coordinator autonomy",
+			Description: "Lets a coordinator run unattended within a spend ceiling and decide chosen proposal classes automatically. Requires Workspace coordinators and Coordinator control.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Lets a coordinator start turns and decide proposals without a human present, bounded by a spend ceiling and " +
+				"the permissions granted. Autonomy stays off per coordinator until enabled. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase3 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase3 = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase31",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE31",
+			Kind:        KindFeature,
+			Label:       "Coordinator record and measure",
+			Description: "Adds pausing a coordinator, the Projects scope for Watches and the coordinator's read of its own turn history. Turns are recorded whether or not this is on. Requires Workspace coordinators, Coordinator control and Coordinator autonomy.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "Adds controls that stop an unattended coordinator turn and narrow what a coordinator can see and act on by project, " +
+				"plus a read-only turn-history tool. A paused coordinator stays paused and a stored Projects scope stays enforced while the controls are off. " +
+				"Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase31 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase31 = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

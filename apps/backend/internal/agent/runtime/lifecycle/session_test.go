@@ -65,6 +65,7 @@ type mockAgentServer struct {
 	wsConnected          chan struct{} // closed when WS stream connects
 	materialized         []materializedUpload
 	failMaterialize      bool
+	materializedName     string
 }
 
 // materializedUpload records one /api/v1/attachments/materialize request so a
@@ -260,6 +261,9 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 		}
 		name := r.FormValue("name")
 		m.mu.Lock()
+		if m.materializedName != "" {
+			name = m.materializedName
+		}
 		m.materialized = append(m.materialized, materializedUpload{
 			sessionID:    r.FormValue("session_id"),
 			attachmentID: r.FormValue("attachment_id"),
@@ -1902,7 +1906,7 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 	}
 	callbacks := make(chan string, 2)
 	execution.setInitialPromptDispatchCallbacks(
-		func() error { callbacks <- "admission"; return nil },
+		func(context.Context, string, []v1.MessageAttachment) error { callbacks <- "admission"; return nil },
 		func() { callbacks <- "dispatched" },
 		nil,
 	)

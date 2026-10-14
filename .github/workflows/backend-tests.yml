@@ -222,12 +222,15 @@ jobs:
       - name: Check Makefile shell dispatch
         run: make check-make-shells
 
+      - name: Check backend lint workflow contract
+        run: node --test ../../scripts/backend-lint-workflow.test.mjs
+
       - name: Resolve base SHA
         shell: bash
         working-directory: ${{ github.workspace }}
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
+          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
@@ -245,6 +248,8 @@ jobs:
             BASE_SHA="$(git merge-base HEAD "origin/${BASE_REF}")"
           elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
             BASE_SHA="${MERGE_GROUP_BASE_SHA}"
+          elif [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            BASE_SHA="$(git merge-base HEAD "origin/${BASE_REF}")"
           else
             BASE_SHA="${PUSH_BEFORE}"
           fi
@@ -262,7 +267,7 @@ jobs:
           set -euo pipefail
 
           CHANGED_GO_FILES="$(
-            git diff --name-only --diff-filter=ACMRT "${BASE_SHA}...${{ github.sha }}" -- apps/backend \
+            git diff --name-only --diff-filter=ACMRT "${BASE_SHA}...${{ github.sha }}" -- ':(top)apps/backend' \
             | grep -E '^apps/backend/.*\.go$' \
             || true
           )"
@@ -634,6 +639,7 @@ jobs:
             ./internal/azuredevops
             ./internal/backendapp
             ./internal/coordinator
+            ./internal/coordinator/ledger
             ./internal/db
             ./internal/delivery
             ./internal/github
@@ -869,6 +875,18 @@ jobs:
         if: matrix.suite == 'native'
         run: go test -tags fts5 -race -v -json -timeout 25m -run '^TestRecoverySnapshotPreservesWindowsReadOnlyMode$' ./internal/worktree
 
+      - name: Test Windows Git executable memo
+        if: matrix.suite == 'native'
+        run: go test -tags fts5 -race -v -timeout 10m ./internal/common/subproc -run '^TestNewGitCommand'
+
+      - name: Test Windows Hermes ACP detection
+        if: matrix.suite == 'native'
+        timeout-minutes: 10
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 512MiB
+        run: go test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run '^Test(HermesACP|RunCommandCheck)'
+
       # Keep this targeted: these packages have broader tests, while these
       # native tests verify hidden consoles retain handles for descendants.
       - name: Test Windows helper console behavior
@@ -895,6 +913,16 @@ jobs:
           go test -race -v ./internal/common/netutil -run '^TestIsAddrInUse'
           go test -race -v ./internal/agentctl/server/instance -run '^TestAllocatePortAndListenerRetriesAddressInUse$'
           go test -race -v ./internal/gateway/websocket -run '^TestResolveAndBindReportsOccupiedPort$'
+
+      - name: Test Windows loopback listeners
+        if: matrix.suite == 'native'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -v -timeout 10m ./internal/common/portutil ./internal/common/netprobe ./internal/agentctl/server/config ./cmd/plugin-fixture
+          go test -race -v -timeout 10m ./internal/gateway/websocket -run 'Tunnel|ResolveAndBind|ConcurrentFailingStarts'
+          go test -race -v -timeout 10m ./internal/launcher -run 'TestPickPorts|TestPickDevPorts|TestCanBind|TestWaitForHealthBypassesHTTPProxyForSpecificBind'
+          go test -race -v -timeout 10m ./internal/agentctl/server/api -run '^(TestHandleVscodeStart_Success|TestHandleVscodeStatus_AfterStart|TestVscodeOpenFile_WaitsForRunning_E2E)$'
 
       # Keep this targeted: the service package has broad subprocess coverage,
       # while this native test is the Windows path-semantics regression.

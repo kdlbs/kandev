@@ -212,7 +212,7 @@ function ChatStatusBarRightControls({
   return (
     <div
       data-testid="chat-status-bar-right-controls"
-      className="flex shrink-0 items-center gap-1.5 empty:hidden"
+      className="flex min-w-0 flex-wrap items-center gap-1.5 empty:hidden max-md:contents"
     >
       {showThreadsLink && <OpenInThreadsButton taskId={taskId} sessionId={sessionId} />}
       {showAutoScrollControl && sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
@@ -262,7 +262,7 @@ function ChatStatusBarActions({
   return (
     <div
       data-testid="chat-status-bar-actions"
-      className="ml-auto flex min-w-0 flex-wrap items-center gap-1.5"
+      className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-md:contents"
     >
       {showRightControls && <ChatStatusBarRightControls {...rightControlProps} />}
       {showProceed && nextStepName && (
@@ -271,7 +271,7 @@ function ChatStatusBarActions({
           nextStepName={nextStepName}
           onProceed={onProceed}
           isMoving={isMoving}
-          className="h-6"
+          className="h-6 max-w-full max-md:ml-auto max-md:h-auto max-md:min-h-11 max-md:whitespace-normal max-md:break-words [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:whitespace-normal [@media(pointer:coarse)]:break-words"
           testId="proceed-next-step"
         />
       )}

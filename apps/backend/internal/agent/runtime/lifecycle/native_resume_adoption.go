@@ -64,9 +64,10 @@ func peerAcknowledgesUnknownHistory(execution *AgentExecution, status *agentctl.
 
 func peerMatchesUnknownHistory(execution *AgentExecution, status *agentctl.DeliveryStatus, peer journal.Submission, submission *models.AgentDeliverySubmission) bool {
 	return submission.State == models.DeliverySubmissionInterruptedUnknown &&
-		peer.ID == submission.ID && peer.State == journal.SubmissionInterruptedUnknown &&
+		(peer.State == journal.SubmissionInterruptedUnknown || submission.TerminalSequence == 0) && peer.ID == submission.ID && journal.HasUnprovenOutcome(peer) &&
 		peer.SessionID == execution.SessionID && peer.SessionID == submission.SessionID &&
 		peer.IncarnationID == status.IncarnationID && peer.IncarnationID == submission.IncarnationID &&
 		peer.HarnessGeneration > 0 && peer.HarnessGeneration <= status.HarnessGeneration && int64(peer.HarnessGeneration) == submission.HarnessGeneration &&
-		peer.Hash != "" && peer.Hash == submission.PayloadHash
+		peer.Hash != "" && peer.Hash == submission.PayloadHash &&
+		(peer.HarnessGeneration != status.HarnessGeneration || peer.StreamID == status.StreamID)
 }

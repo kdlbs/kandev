@@ -115,3 +115,31 @@ test("keeps uncertain delivery recovery usable on a phone", async ({
 
   await assertNoDocumentHorizontalOverflow(testPage, "mobile durable stream recovery");
 });
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
+test("legacy empty delivery fence exposes Resume without replaying the old prompt", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await verifyNativeResumeClearsRecoveryNotice(testPage, apiClient, seedData, backend.tmpDir, true);
+});
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-008.5
+test("ordinary native resume surfaces recovery before first send and retains the draft", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await verifyNativeResumeClearsRecoveryNotice(
+    testPage,
+    apiClient,
+    seedData,
+    backend.tmpDir,
+    "readiness",
+  );
+});

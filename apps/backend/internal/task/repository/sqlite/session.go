@@ -24,6 +24,7 @@ import (
 
 type taskSessionExecutor interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
 // Turn operations
@@ -109,6 +110,9 @@ func stampTurnDefaults(turn *models.Turn) {
 // dispatched without a user message (auto-start, workflow on_enter) must
 // reset the clock even though no message row exists yet.
 func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecutor, turn *models.Turn) error {
+	if err := r.authorizeManualCreation(ctx, execer, "turn", turn.ID, turn.TaskID); err != nil {
+		return err
+	}
 	metadataJSON := "{}"
 	if turn.Metadata != nil {
 		metadataBytes, err := json.Marshal(turn.Metadata)
@@ -122,6 +126,9 @@ func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecut
 		INSERT INTO task_session_turns (id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.ExecutionProfileID, turn.RouteGeneration, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt); err != nil {
+		return err
+	}
+	if err := r.clearManualCreation(ctx, execer, "turn", turn.ID, turn.TaskID); err != nil {
 		return err
 	}
 	_, err := execer.ExecContext(ctx, r.db.Rebind(`
@@ -679,7 +686,7 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 			}
 			return fmt.Errorf("%w: the initial workspace materialization did not complete", models.ErrWorkspaceReuseUnsafe)
 		}
-		return fmt.Errorf("%w: retry after the initial workspace launch completes", models.ErrWorkspacePreparing)
+		return &models.WorkspacePreparingError{EnvironmentID: envID, Reason: "retry after the initial workspace launch completes"}
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = envID
 	default:
@@ -827,7 +834,7 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = environmentID
 	case models.TaskEnvironmentStatusCreating:
-		return fmt.Errorf("%w: retry after the shared workspace launch completes", models.ErrWorkspacePreparing)
+		return &models.WorkspacePreparingError{EnvironmentID: environmentID, Reason: "retry after the shared workspace launch completes"}
 	default:
 		return fmt.Errorf("%w: shared workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
@@ -906,10 +913,15 @@ func (r *Repository) applyInitialRuntimeSeedTx(ctx context.Context, tx *sqlx.Tx,
 	if err != nil {
 		return err
 	}
-	var sessionCount int
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`), session.TaskID).Scan(&sessionCount); err != nil {
+	var sessionCount, primaryCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN is_primary = 1 THEN 1 ELSE 0 END), 0)
+		FROM task_sessions WHERE task_id = ?
+	`), session.TaskID).Scan(&sessionCount, &primaryCount); err != nil {
 		return fmt.Errorf("check task sessions before workspace binding: %w", err)
 	}
+	// The task lock or SQLite writer serializes primary election with insertion.
+	session.IsPrimary = session.IsPrimary && primaryCount == 0
 	if sessionCount == 0 {
 		if session.Metadata == nil {
 			session.Metadata = make(map[string]interface{})
@@ -1065,6 +1077,9 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		}
 	}
 
+	if err := r.authorizeManualCreation(ctx, exec, "session", session.ID, session.TaskID); err != nil {
+		return err
+	}
 	metadataJSON, err := json.Marshal(session.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to serialize agent session metadata: %w", err)
@@ -1118,7 +1133,10 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
 
-	return err
+	if err != nil {
+		return err
+	}
+	return r.clearManualCreation(ctx, exec, "session", session.ID, session.TaskID)
 }
 
 // verifyTaskRunnerResolutionTx rejects a session built from a task snapshot
@@ -2126,15 +2144,17 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 			repository_id = ?, base_branch = ?, base_commit_sha = ?, workspace_path = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
-			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?
+			review_status = ?, is_passthrough = ?, task_environment_id = ?,
+			is_primary = CASE WHEN ? = 1 THEN 0 ELSE is_primary END
 		WHERE id = ?`
 	args := []interface{}{agentProfileID, session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
 		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, session.CompletedAt, session.UpdatedAt,
-		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
+		session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID,
+		dialect.BoolToInt(expectedUpdatedAt != nil && !session.IsPrimary),
 		session.ID}
 	if expected != nil {
 		query += " AND state = ?"
@@ -2144,15 +2164,21 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 		query += optimisticUpdatedAtPredicate
 		args = append(args, *expectedUpdatedAt)
 	}
-	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
+	// Primary selection belongs to the task-scoped SetSessionPrimary transaction.
+	// Lifecycle writes return that stored selection without reclaiming it;
+	// snapshot-guarded rollback may release its owned primary flag. Promotion
+	// still goes through SetSessionPrimary so it clears the other primary rows.
+	query += " RETURNING is_primary"
+	var primary int
+	err = exec.QueryRowContext(ctx, r.db.Rebind(query), args...).Scan(&primary)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return rows > 0, nil
+	session.IsPrimary = primary == 1
+	return true, nil
 }
 
 // ensureTaskSessionEnvironmentAvailableTx protects full-row session updates

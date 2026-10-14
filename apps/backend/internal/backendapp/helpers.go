@@ -1871,7 +1871,6 @@ func registerSecondaryRoutes(
 
 	if p.features.Coordinator {
 		wireCoordinatorConversation(p)
-		registerCoordinatorRoutes(p)
 	}
 
 	failedinbox.RegisterRoutes(p.router, p.taskSvc, p.taskRepo, p.log, p.features.NeedsYouInbox)
@@ -2055,6 +2054,9 @@ func registerSecondaryRoutes(
 	}
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
+	if p.features.Coordinator {
+		registerCoordinatorRoutes(p)
+	}
 
 	var automationSvc *automation.Service
 	if p.services.Automation != nil {
@@ -2610,6 +2612,9 @@ func registerMCPAndDebugRoutes(
 
 	if p.services.Coordinator != nil {
 		mcpHandlers.SetCoordinatorService(p.services.Coordinator)
+		wireCoordinatorLedger(p, p.services.Coordinator, mcpHandlers)
+		wireCoordinatorOutcomes(p, p.services.Coordinator)
+		wireCoordinatorDream(p, p.services.Coordinator)
 		p.services.Coordinator.SetKindDeps(coordinator.KindDeps{
 			Tasks:     &coordinatorKindReader{tasks: p.taskSvc, liveExec: p.lifecycleMgr.HasLiveAgentExecution},
 			Resumer:   &coordinatorResumer{resume: p.orchestratorSvc.ResumeTaskSession},

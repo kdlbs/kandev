@@ -839,6 +839,9 @@ func startAgentInfrastructure(
 	agentSettingsController.SetRoutingTierDependencyChecker(&routingTierDepsAdapter{
 		repo: repos.Office,
 	})
+	if services.DynamicProfileResolver != nil {
+		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
+	}
 	// An enabled automation is a standing instruction to launch against a
 	// profile. Nothing is running, so it never reaches the active-session list,
 	// but deleting the profile would leave the schedule firing into nothing —
@@ -1710,10 +1713,13 @@ func constructOfficeServices(
 	// The ledger writer is the sole writer of task_sessions' usage rollup
 	// columns (AC-10) and must run in every install, so it too is
 	// constructed and started before the Office early return.
-	if err := startTaskUsageWriter(repos.Task, usagePricingAdapter{lookup: pricingLookup}, eventBus, log, addCleanup); err != nil {
+	usageWriter, err := startTaskUsageWriter(repos.Task, usagePricingAdapter{lookup: pricingLookup}, eventBus, log, addCleanup)
+	if err != nil {
 		log.Error("Failed to subscribe task usage ledger writer", zap.Error(err))
 		return nil, false
 	}
+	services.UsageWriter = usageWriter
+	services.Pricing = pricingLookup
 
 	if !cfg.Features.Office {
 		log.Info("Office feature disabled; Office services skipped while global run scheduling remains enabled")

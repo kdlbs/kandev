@@ -3,23 +3,6 @@ import { officeTopbarTitle } from "../../helpers/office-topbar";
 import { waitForHttp } from "../../helpers/causal-waits";
 
 test.describe("Costs & Budgets", () => {
-  test("cost summary starts at zero", async ({ officeApi, officeSeed }) => {
-    const summary = await officeApi.getCostSummary(officeSeed.workspaceId);
-    expect(summary).toBeDefined();
-  });
-
-  test("budgets list is initially empty", async ({ officeApi, officeSeed }) => {
-    const budgets = await officeApi.listBudgets(officeSeed.workspaceId);
-    expect(budgets).toBeDefined();
-  });
-
-  test("costs page renders", async ({ testPage, officeSeed: _ }) => {
-    await testPage.goto("/office/workspace/costs");
-    await expect(officeTopbarTitle(testPage)).toHaveText(/Costs/i, {
-      timeout: 10_000,
-    });
-  });
-
   test("costs page refetches the breakdown live when a task's project is reassigned", async ({
     testPage,
     officeApi,
@@ -37,6 +20,9 @@ test.describe("Costs & Budgets", () => {
       "Costs Refetch Project",
     )) as Record<string, unknown>;
     const projectId = project.id as string;
+
+    expect(await officeApi.getCostSummary(officeSeed.workspaceId)).toBeDefined();
+    expect(await officeApi.listBudgets(officeSeed.workspaceId)).toBeDefined();
 
     const breakdownPath = /\/costs\/breakdown$/;
     const initialLoad = waitForHttp(testPage, "GET", breakdownPath);

@@ -634,6 +634,7 @@ test.describe("Quick Chat", () => {
 
   test("explains quick chat and starts with repository context", async ({
     testPage,
+    apiClient,
     seedData,
     backend,
   }) => {
@@ -676,15 +677,57 @@ test.describe("Quick Chat", () => {
         }).trim(),
       ).toBe("main");
     } finally {
-      execFileSync("git", ["push", "origin", "--delete", contextBranch], { cwd: sourceRepo });
-      execFileSync("git", ["branch", "-D", contextBranch], { cwd: sourceRepo });
+      try {
+        // Worktree cleanup needs its base branch to remain resolvable.
+        await expect(
+          apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]),
+        ).resolves.toBeUndefined();
+      } finally {
+        execFileSync("git", ["push", "origin", "--delete", contextBranch], { cwd: sourceRepo });
+        execFileSync("git", ["branch", "-D", contextBranch], { cwd: sourceRepo });
+      }
     }
   });
 
   test("opens quick chat, selects agent, sends message and receives response", async ({
     testPage,
   }) => {
+    const availableCommands = attachAvailableCommandsCapture(testPage);
     const dialog = await openQuickChatWithAgent(testPage);
+
+    await test.step("slash commands populate after the opening prompt", async () => {
+      await expect
+        .poll(() => availableCommands.frames.some((frame) => frame.count > 0), { timeout: 15_000 })
+        .toBe(true);
+
+      const editor = dialog.locator(".tiptap.ProseMirror");
+      await editor.click();
+      await editor.pressSequentially("/");
+
+      // SlashCommandMenu renders into a portal at document root, so query at page level.
+      await expect(testPage.getByText("Commands").first()).toBeVisible({ timeout: 10_000 });
+      await expect(testPage.getByText("/slow")).toBeVisible({ timeout: 5_000 });
+      await expect(testPage.getByText("/error")).toBeVisible({ timeout: 5_000 });
+      await editor.fill("");
+      await expect(testPage.getByText("/slow")).not.toBeVisible();
+    });
+
+    await test.step("dynamic session options populate after the opening prompt", async () => {
+      const trigger = dialog.getByRole("button", { name: "Session model settings" });
+      await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+      await trigger.click();
+
+      const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+      await expect(effortTrigger).toBeVisible({
+        timeout: 10_000,
+      });
+      await effortTrigger.click();
+      await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible({
+        timeout: 10_000,
+      });
+      await trigger.click();
+      await expect(testPage.getByTestId("config-option-section-effort")).not.toBeVisible();
+    });
 
     await sendQuickChatMessage(dialog, testPage, "/e2e:simple-message");
 
@@ -790,55 +833,6 @@ test.describe("Quick Chat", () => {
 
     await recovery.getByRole("button", { name: "Apply" }).click();
     await expect(editor).toHaveText(generatedPrompt);
-  });
-
-  test("slash command menu populates before first message (eager agent init)", async ({
-    testPage,
-  }) => {
-    // Picking an agent in quick chat should boot the agent process eagerly,
-    // so available_commands_update fires from session/new — the slash menu is
-    // populated before the user sends their first prompt. Mock-agent emits
-    // /slow, /error, /thinking, etc. on session/new (parity with real ACP
-    // agents like OpenCode and Claude).
-    const availableCommands = attachAvailableCommandsCapture(testPage);
-
-    const dialog = await openQuickChatWithAgent(testPage);
-
-    // Wait for the available_commands WS frame to land. Eager init kicks off
-    // session/new during the HTTP request, but the agent emits commands
-    // asynchronously after the response flushes — so the frame can arrive
-    // moments after openQuickChatWithAgent resolves.
-    await expect
-      .poll(() => availableCommands.frames.some((frame) => frame.count > 0), { timeout: 15_000 })
-      .toBe(true);
-
-    const editor = dialog.locator(".tiptap.ProseMirror");
-    await editor.click();
-    await editor.pressSequentially("/");
-
-    // SlashCommandMenu renders into a portal at document root, so query at page level.
-    await expect(testPage.getByText("Commands").first()).toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByText("/slow")).toBeVisible({ timeout: 5_000 });
-    await expect(testPage.getByText("/error")).toBeVisible({ timeout: 5_000 });
-  });
-
-  test("model selector shows dynamic session options before first message", async ({
-    testPage,
-  }) => {
-    const dialog = await openQuickChatWithAgent(testPage);
-
-    const trigger = dialog.getByRole("button", { name: "Session model settings" });
-    await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
-    await trigger.click();
-
-    const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
-    await expect(effortTrigger).toBeVisible({
-      timeout: 10_000,
-    });
-    await effortTrigger.click();
-    await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible({
-      timeout: 10_000,
-    });
   });
 
   // @covers AC-TASKS-QUICK-CHAT-EXPIRATION-001.2

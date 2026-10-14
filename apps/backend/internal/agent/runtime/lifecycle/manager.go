@@ -655,6 +655,12 @@ func (m *Manager) SetAgentDeliveryRepository(repository AgentDeliveryRepository)
 	m.streamManager.setAgentDeliveryRepository(repository)
 }
 
+// CredentialsManager returns the credentials manager the manager launches
+// agents with, for read-only inspection by admission checks.
+func (m *Manager) CredentialsManager() CredentialsManager {
+	return m.credsMgr
+}
+
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
 // tool calls.
 //
