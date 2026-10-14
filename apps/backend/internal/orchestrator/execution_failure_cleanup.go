@@ -63,7 +63,7 @@ func (s *Service) cleanupAgentExecutionWithReason(ctx context.Context, execution
 		s.completeExecutionTeardownClaim(sessionID, executionID, claim)
 	}
 	if reason != completedExecutionCleanupReason {
-		s.settleOpenBackgroundWork(ctx, sessionID)
+		s.settleBackgroundWorkAfterTeardown(ctx, sessionID, "")
 	}
 	return true
 }

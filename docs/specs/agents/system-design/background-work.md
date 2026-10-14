@@ -164,7 +164,10 @@ the exact execution in the durable runtime record; a delayed predecessor
 completion cannot settle work owned by a retained successor. Generic recovery
 cleanup may preserve a remote process even when it returns success, so it uses
 the same liveness and retained-owner guards as startup. These paths never launch
-an agent.
+an agent. Settlement holds the existing session lifecycle fence shared by launch
+and resume through the database commit. Teardown callbacks wait for that fence;
+state-change hooks that may already hold it attempt settlement without waiting.
+An execution identity change during the process probe invalidates the observation.
 
 Workload and run settlement commits in one database transaction, with PostgreSQL
 session-scoped transaction advisory locking shared by run observations. Only

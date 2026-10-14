@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -197,4 +199,89 @@ func TestVerifiedBackgroundWorkStopStillRequiresSuccessfulLivenessProbe(t *testi
 			require.Empty(t, observer.settledSessions())
 		})
 	}
+}
+
+type rotatingBackgroundWorkProbe struct {
+	*mockAgentManager
+	probe func() (bool, error)
+}
+
+func (p *rotatingBackgroundWorkProbe) ProbeAgentRunningForSession(context.Context, string) (bool, error) {
+	return p.probe()
+}
+
+func TestBackgroundWorkProbeCannotAuthorizeUnprobedSuccessor(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "owner", TaskID: "t1", SessionID: "s1", AgentExecutionID: "old"}))
+	executionID := "old"
+	agent := &rotatingBackgroundWorkProbe{mockAgentManager: &mockAgentManager{getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return executionID, nil }}}
+	agent.probe = func() (bool, error) {
+		executionID = "successor"
+		require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "owner", TaskID: "t1", SessionID: "s1", AgentExecutionID: executionID}))
+		return false, nil
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	observer := &settlingBackgroundWorkObserver{}
+	svc.SetBackgroundWorkObserver(observer)
+	svc.settleOpenBackgroundWork(ctx, "s1")
+	require.Empty(t, observer.settledSessions())
+}
+
+func TestBackgroundSettlementSharesLaunchAdmissionFence(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	probed := make(chan struct{}, 1)
+	agent := &rotatingBackgroundWorkProbe{mockAgentManager: &mockAgentManager{}}
+	agent.probe = func() (bool, error) { probed <- struct{}{}; return false, nil }
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	observer := &settlingBackgroundWorkObserver{}
+	svc.SetBackgroundWorkObserver(observer)
+	release := svc.acquireSessionLifecycleLock("s1")
+	// The state-change hook is also called inside launch admission.
+	svc.settleOpenBackgroundWork(ctx, "s1")
+	require.Empty(t, observer.settledSessions())
+	done := make(chan struct{})
+	go func() { defer close(done); svc.settleBackgroundWorkAfterTeardown(ctx, "s1", "old") }()
+	select {
+	case <-probed:
+		release()
+		t.Fatal("teardown settlement bypassed launch admission")
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("teardown settlement did not proceed after admission released")
+	}
+	require.Equal(t, []string{"s1"}, observer.settledSessions())
+}
+
+type fencedBackgroundWorkObserver struct {
+	settlingBackgroundWorkObserver
+	check func()
+}
+
+func (o *fencedBackgroundWorkObserver) SettleOpenBackgroundWorkloads(ctx context.Context, sessionID string) ([]streams.WorkloadRunObservation, error) {
+	o.check()
+	return o.settlingBackgroundWorkObserver.SettleOpenBackgroundWorkloads(ctx, sessionID)
+}
+func TestBackgroundSettlementKeepsLaunchFenceThroughRepositoryCall(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	observer := &fencedBackgroundWorkObserver{check: func() {
+		release, acquired := svc.tryAcquireSessionLifecycleLock("s1")
+		if acquired {
+			release()
+			t.Fatal("settlement released launch admission before the repository call")
+		}
+	}}
+	svc.SetBackgroundWorkObserver(observer)
+	svc.settleBackgroundWorkAfterTeardown(ctx, "s1", "")
+	require.Equal(t, []string{"s1"}, observer.settledSessions())
 }

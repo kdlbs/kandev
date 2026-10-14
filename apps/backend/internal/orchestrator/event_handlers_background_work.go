@@ -135,8 +135,13 @@ func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID strin
 	if s.agentManager == nil {
 		return false
 	}
+	probedExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	running, err := s.probeAgentRunning(ctx, sessionID)
 	if err != nil || running {
+		return false
+	}
+	executionID, identityErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if executionID != probedExecutionID {
 		return false
 	}
 	row, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
@@ -151,14 +156,36 @@ func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID strin
 	if stoppedExecutionID != "" && stoppedExecutionID == row.AgentExecutionID {
 		return true
 	}
-	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
-	if err == nil && executionID != "" && executionID == row.AgentExecutionID {
+	if identityErr == nil && executionID != "" && executionID == row.AgentExecutionID {
 		return true
 	}
 	return s.rowLiveness(row) == models.ProcessLivenessDead
 }
 
 func (s *Service) settleBackgroundWork(ctx context.Context, sessionID string, stoppedExecutionID string) {
+	if sessionID == "" || s.backgroundWorkSettler() == nil {
+		return
+	}
+	release, acquired := s.tryAcquireSessionLifecycleLock(sessionID)
+	if !acquired {
+		return
+	}
+	defer release()
+	s.settleBackgroundWorkLocked(ctx, sessionID, stoppedExecutionID)
+}
+
+// Teardown callbacks run outside launch admission and can wait for its fence.
+// State-change hooks may already hold it and use the opportunistic path above.
+func (s *Service) settleBackgroundWorkAfterTeardown(ctx context.Context, sessionID, stoppedExecutionID string) {
+	if sessionID == "" || s.backgroundWorkSettler() == nil {
+		return
+	}
+	release := s.acquireSessionLifecycleLock(sessionID)
+	defer release()
+	s.settleBackgroundWorkLocked(ctx, sessionID, stoppedExecutionID)
+}
+
+func (s *Service) settleBackgroundWorkLocked(ctx context.Context, sessionID string, stoppedExecutionID string) {
 	settler := s.backgroundWorkSettler()
 	if settler == nil || sessionID == "" {
 		return
@@ -202,6 +229,6 @@ func (s *Service) settleOrphanedBackgroundWorkOnStartup(ctx context.Context) {
 				continue
 			}
 		}
-		s.settleOpenBackgroundWork(ctx, sessionID)
+		s.settleBackgroundWorkAfterTeardown(ctx, sessionID, "")
 	}
 }
