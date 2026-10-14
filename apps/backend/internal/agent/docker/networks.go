@@ -97,7 +97,16 @@ func (c *Client) CreateNetwork(ctx context.Context, options CreateNetworkOptions
 	if err != nil {
 		return NetworkInfo{}, fmt.Errorf("create Docker network %s: %w", options.Name, err)
 	}
-	return c.InspectNetwork(ctx, result.ID)
+	info, inspectErr := c.InspectNetwork(ctx, result.ID)
+	if inspectErr == nil {
+		return info, nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if removeErr := c.RemoveNetwork(cleanupCtx, result.ID); removeErr != nil {
+		return NetworkInfo{}, fmt.Errorf("inspect created Docker network %s: %w; rollback: %v", result.ID, inspectErr, removeErr)
+	}
+	return NetworkInfo{}, fmt.Errorf("inspect created Docker network %s: %w", result.ID, inspectErr)
 }
 
 func (c *Client) networkClient() networkAPI {
