@@ -157,12 +157,16 @@ func (s *Server) readRichOutputCSV(
 	return &response, nil
 }
 
+func newRichOutputCSVReader(content string) *csv.Reader {
+	return csv.NewReader(strings.NewReader(strings.TrimPrefix(content, "\ufeff")))
+}
+
 func parseRichOutputCSV(
 	source richOutputCSVSourceInput,
 	content string,
 	elementID string,
 ) (richOutputResolvedChart, error) {
-	reader := csv.NewReader(strings.NewReader(content))
+	reader := newRichOutputCSVReader(content)
 	headerIndexes, err := readRichOutputCSVHeader(reader)
 	if err != nil {
 		return richOutputResolvedChart{}, err

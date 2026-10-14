@@ -431,10 +431,12 @@ variants. Keep the old 39-case corpus and historical controls in the suite.
 
 Extend the existing resolver under `internal/mcp/server/` with a table-specific
 parser, using the same per-call `(repo, path)` file cache and authorized
-`workspace.file.get`. Share bounded UTF-8 file reads, CSV header indexing and
-row-width checks with charts where it reduces duplication; retain chart-only
-finite-number conversion, null-gap and minimum-row behavior. Tables allow zero
-rows after a valid header and preserve selected cells without conversion.
+`workspace.file.get`. After bounded UTF-8 admission, both parsers share reader
+construction that removes exactly one file-leading UTF-8 BOM before strict CSV
+tokenization, including a quoted first header. Keep existing header indexing
+and row-width checks; never enable `LazyQuotes`, strip embedded U+FEFF, or repair
+malformed quotes. Retain chart-only finite numbers, null gaps and minimum rows.
+Tables allow header-only sources and preserve selected cells without conversion.
 
 Validate the whole composition before any file access, then resolve every CSV
 Chart and Table. File content remains ephemeral. A failed read/parse or oversized
@@ -564,6 +566,7 @@ The published APIs include `defineCatalog`, `catalog.validate`,
 
 ## Implementation records
 
+- [CSV header BOM repair](../../../plans/rich-output-csv-header-bom/plan.md)
 - [Structured evidence extension](../../../plans/rich-output-evidence-components/plan.md)
 
 - [Replacement package](../../../plans/json-render-rich-output/plan.md)

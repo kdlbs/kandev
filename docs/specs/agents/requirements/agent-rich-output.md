@@ -126,6 +126,7 @@ contracts rather than exposing a general-purpose UI library automatically.
   [implementation plan](../../../plans/image-preview-defaults/plan.md) define
   the image exception to explicit expansion.
 
+- [CSV header BOM repair](../../../plans/rich-output-csv-header-bom/plan.md)
 - [Rich-output authoring recovery](../../../plans/rich-output-authoring-recovery/plan.md)
 - [Structured evidence catalog extension](../../../plans/rich-output-evidence-components/plan.md)
 

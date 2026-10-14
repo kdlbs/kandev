@@ -120,7 +120,7 @@ func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *g
 	}
 	options = resolvePRScopedCIOptions(options, pr)
 	freshlySynced := ciAutomationHasFreshPRStatus(pr)
-	if refresh && (options.AutoFixEnabled || options.AutoMergeEnabled) {
+	if refresh && !freshlySynced && (options.AutoFixEnabled || options.AutoMergeEnabled) {
 		refreshed, synced, syncErr := s.refreshTaskPRForCIAutomation(ctx, pr)
 		if syncErr != nil {
 			s.handleTaskPRLifecycleAutomation(ctx, pr, options)

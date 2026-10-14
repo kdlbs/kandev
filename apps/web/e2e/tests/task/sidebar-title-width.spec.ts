@@ -83,7 +83,8 @@ async function expectTouchSizedTimeSlot(
   expect(timeBox!.width).toBeGreaterThanOrEqual(minimumWidth);
   expect(timeBox!.width).toBeGreaterThanOrEqual(visualTimeBox!.width - 1);
   expect(actionBox!.width).toBeGreaterThanOrEqual(minimumWidth);
-  expect(actionBox!.height).toBeGreaterThanOrEqual(minimumWidth);
+  // Transformed DOMRect endpoints can introduce subpixel floating-point drift.
+  expect(Math.round(actionBox!.height * 10_000) / 10_000).toBeGreaterThanOrEqual(minimumWidth);
   expect(actionBox!.x).toBeGreaterThanOrEqual(timeBox!.x + timeBox!.width - 1);
   expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(slotBox!.x + slotBox!.width + 1);
   expect(
@@ -377,7 +378,7 @@ test("localized time slots respect the fine-pointer width breakpoint", async ({
       await expect(visualTime).toHaveText("99年以上");
       expect(timeBox!.width).toBeGreaterThanOrEqual(44);
       expect(actionBox!.width).toBeGreaterThanOrEqual(44);
-      expect(actionBox!.height).toBeGreaterThanOrEqual(44);
+      expect(Math.round(actionBox!.height * 10_000) / 10_000).toBeGreaterThanOrEqual(44);
       expect(visualTimeBox!.x).toBeGreaterThanOrEqual(timeBox!.x - 1);
       expect(visualTimeBox!.x + visualTimeBox!.width).toBeLessThanOrEqual(
         timeBox!.x + timeBox!.width + 1,

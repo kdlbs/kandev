@@ -560,6 +560,9 @@ type PRStatus struct {
 	// mergeQueueRecoveryPopulated distinguishes a GraphQL observation of the
 	// latest removal event (including no event) from REST and gh CLI reads.
 	mergeQueueRecoveryPopulated bool
+	// feedbackOnly preserves status-sync freshness because feedback does not
+	// observe every aggregate used by automation, including review threads.
+	feedbackOnly bool
 }
 
 // PRSearchPage is a paginated slice of PR search results, with the total

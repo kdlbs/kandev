@@ -3,6 +3,7 @@ package dto
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"time"
 
@@ -542,6 +543,9 @@ func EnrichSessionRecoveryBlocks(
 		incarnationID = session.ID
 	}
 	generation, err := reader.GetCurrentHarnessSessionGeneration(ctx, session.ID, incarnationID)
+	if errors.Is(err, models.ErrTaskSessionNotFound) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

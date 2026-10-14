@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-08-23
-updated: 2026-10-12
+updated: 2026-10-13
 owners:
   - kandev
 ---
@@ -42,6 +42,12 @@ This behavior obscures actionable errors and makes diagnostic bundles harder to 
 - **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.19:** When intentional agent shutdown has closed or canceled durable event publication and a late MCP attachment observation or attempt encounters that shutdown rejection, agentctl shall record the expected rejection at debug level without an error entry or stack trace. The observation shall not bypass durable publication or reopen shutdown resources.
 - **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.20:** An MCP attachment observation or attempt that encounters an unexpected durable publication failure shall retain its error-level entry. A closed publisher on an active process, storage corruption, unavailable storage, and unrelated cancellation shall not be classified as expected shutdown solely because the observation is diagnostic.
 - **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.21:** Log classification for late MCP attachment observations shall preserve shutdown completion, committed journal records, process restart behavior, and event delivery when durable publication remains available.
+
+#### Session recovery projection
+
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.22:** When an existing task session has no current harness generation, session reads and session-state notifications shall expose an empty recovery-block collection without a warning about a missing session. Repeated reads during first launch shall not create recovery state or delay launch awaiting a generation.
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.23:** Unexpected failures reading a current generation or its recovery blocks shall retain warning-level diagnostic evidence. Missing-session responses and recovery admission checks shall retain their existing behavior.
+- **AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.24:** Once the current harness generation exists, session reads and notifications shall project its open recovery blocks. They shall not inherit blocks from an earlier incarnation or generation.
 
 ## Migrated source detail
 

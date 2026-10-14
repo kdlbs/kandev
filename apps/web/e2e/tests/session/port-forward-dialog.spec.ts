@@ -6,6 +6,7 @@ import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 import { routePortForwarding } from "./port-forwarding-helpers";
+import { dwell } from "../../helpers/causal-waits";
 
 /**
  * Seed a task + session with a mock_remote executor and navigate to the session page.
@@ -96,6 +97,38 @@ async function seedLocalSession(
 }
 
 test.describe("Port Forward Dialog", () => {
+  test("keeps Refresh focused and guards duplicate requests while discovery is pending", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const ports = await routePortForwarding(testPage);
+    const { session, sessionId } = await seedLocalSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Refresh focus during discovery",
+    );
+    ports.setSession(sessionId);
+    await session.enablePortForwarding();
+    ports.holdNext("port.list");
+    await session.portForwardButton.press("Enter");
+    await expect.poll(ports.held).toBe(true);
+    await expect(session.portForwardRefresh).toBeFocused();
+    await expect(session.portForwardRefresh).toHaveAttribute("aria-disabled", "true");
+    const pendingRequests = ports.requestCount("port.list");
+    await testPage.keyboard.press("Enter");
+    await dwell(testPage, 250, "negative-assertion", "A guarded refresh emits no response event.");
+    expect(ports.requestCount("port.list")).toBe(pendingRequests);
+    ports.release();
+    await expect(session.portForwardRefresh).toHaveAttribute("aria-disabled", "false");
+    await expect(session.portForwardRefresh).toBeFocused();
+    ports.setDetectedPorts([{ port: 8080, address: "*" }]);
+    await testPage.keyboard.press("Enter");
+    await expect(session.portForwardRow(8080)).toBeVisible();
+    expect(ports.requestCount("port.list")).toBe(pendingRequests + 1);
+  });
+
   test("empty discovery shows no orphaned port group headings", async ({
     testPage,
     apiClient,
@@ -426,4 +459,60 @@ test.describe("Port Forward Dialog", () => {
     await expect(session.browserAddressInput).toHaveValue(proxyUrl!);
     await expect(session.browserPanel.locator("iframe")).toHaveAttribute("src", proxyUrl!);
   });
+});
+
+// @covers AC-UI-PORT-FORWARDING-DISCOVERY-001.7, .13-.14
+test("preserves shortcut preference and manual draft across desktop and phone layouts", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const ports = await routePortForwarding(testPage);
+  const { session, sessionId } = await seedLocalSession(
+    testPage,
+    apiClient,
+    seedData,
+    "Responsive port visit",
+  );
+  ports.setSession(sessionId);
+  await session.enablePortForwarding();
+  await session.portForwardButton.click();
+  await session.portForwardInput.fill("5432");
+  await testPage.setViewportSize({ width: 767, height: 851 });
+  await expect(session.portForwardDialog).toHaveAttribute("data-presentation", "drawer");
+  await expect(session.portForwardInput).toHaveValue("5432");
+  await expect(session.portForwardHeaderShortcut).toBeChecked();
+  await testPage.setViewportSize({ width: 1280, height: 900 });
+  await expect(session.portForwardDialog).toHaveAttribute("data-presentation", "dialog");
+  await expect(session.portForwardInput).toHaveValue("5432");
+  await expect(session.portForwardButton).toBeVisible();
+  await session.portForwardAddButton.click();
+  await expect(session.portForwardRow(5432)).toBeVisible();
+});
+
+// @covers AC-UI-PORT-FORWARDING-DISCOVERY-001.11
+test("767px fine-pointer phone uses the drawer and touch-sized actions", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await testPage.setViewportSize({ width: 767, height: 851 });
+  expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+  const ports = await routePortForwarding(testPage);
+  const { session, sessionId } = await seedLocalSession(
+    testPage,
+    apiClient,
+    seedData,
+    "Fine-pointer phone",
+  );
+  ports.setSession(sessionId);
+  await session.mobilePanels.click();
+  await session.mobilePortForwardingOpen.click();
+  await expect(session.portForwardDialog).toHaveAttribute("data-presentation", "drawer");
+  const close = session.portForwardDialog.getByRole("button", { name: "Close", exact: true });
+  const box = await close.boundingBox();
+  expect(box!.width).toBeGreaterThanOrEqual(44);
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+  await close.click();
+  await expect(session.mobilePanels).toBeFocused();
 });
