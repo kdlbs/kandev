@@ -166,6 +166,9 @@ func (s *Server) handleDeliverySubmissionRetire(c *gin.Context) {
 		writeDeliveryError(c, journal.ErrOwnerMismatch)
 		return
 	}
+	if c.Request.ContentLength != 0 && !s.validateInterruptedRetirement(c) {
+		return
+	}
 	if err := s.procMgr.RetireDeliverySubmission(
 		c.Request.Context(), c.Param("id"), s.procMgr.DeliveryHarnessGeneration(),
 	); err != nil {
@@ -468,8 +471,12 @@ func writeDeliveryError(c *gin.Context, err error) {
 		status, code = http.StatusConflict, deliveryOwnerMismatchCode
 	case errors.Is(err, journal.ErrSubmissionNotFound):
 		status, code = http.StatusNotFound, "SUBMISSION_NOT_FOUND"
+	case errors.Is(err, journal.ErrSubmissionConflict):
+		status, code = http.StatusConflict, "SUBMISSION_CONFLICT"
 	case errors.Is(err, journal.ErrSubmissionState):
 		status, code = http.StatusConflict, "SUBMISSION_STATE"
+	case errors.Is(err, journal.ErrStreamFull):
+		status, code = http.StatusRequestEntityTooLarge, "SUBMISSION_TOO_LARGE"
 	}
 	c.JSON(status, gin.H{"code": code, "message": code})
 }

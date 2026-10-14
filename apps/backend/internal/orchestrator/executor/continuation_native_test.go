@@ -94,3 +94,20 @@ func TestResumeLaunchRequestCanOmitAutomaticTaskDescription(t *testing.T) {
 	freshStart, _ := newResumeLaunchRequest(task, session, true, ResumeOptions{NoInitialPrompt: true})
 	require.Empty(t, freshStart.TaskDescription)
 }
+
+func TestResumeLaunchRequestCarriesSilentRestoreBootSuppression(t *testing.T) {
+	task := &v1.Task{ID: "t1", Description: "current task description"}
+	session := &models.TaskSession{ID: "s1"}
+
+	silentRestore, _ := newResumeLaunchRequest(task, session, true, ResumeOptions{
+		SuppressInitialMessageBackfill: true,
+	})
+	if !silentRestore.SuppressBootStatusMessage {
+		t.Fatal("silent restore did not suppress the boot status message")
+	}
+
+	ordinaryResume, _ := newResumeLaunchRequest(task, session, true, ResumeOptions{})
+	if ordinaryResume.SuppressBootStatusMessage {
+		t.Fatal("ordinary resume suppressed its boot status message")
+	}
+}

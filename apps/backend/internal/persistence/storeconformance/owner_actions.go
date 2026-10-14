@@ -511,7 +511,10 @@ func taskAction() apiAction {
 		return nil
 	}
 	action.transaction = func(s testconformance.ScenarioContext, id string) error {
-		return transactionAPICheck(action, s, id)
+		if err := transactionAPICheck(action, s, id); err != nil {
+			return err
+		}
+		return silentRestoreRepositoryCheck(s, id)
 	}
 	return action
 }
@@ -3206,6 +3209,12 @@ func coordinatorAction() apiAction {
 		}
 		return fallback
 	}}
+	action.assertUpdated = assertCoordinatorUpdated
+	action.setBoolean = setCoordinatorBoolean
+	action.readBoolean = func(record any) (bool, bool) {
+		value, ok := record.(*coordinator.Coordinator)
+		return ok && value != nil && value.AutonomyEnabled, ok && value != nil
+	}
 	action.create = func(s testconformance.ScenarioContext, id string) (any, error) {
 		store, err := coordinatorFactory(s)
 		if err != nil {
@@ -3264,6 +3273,37 @@ func coordinatorAction() apiAction {
 		return transactionAPICheck(action, s, id)
 	}
 	return action
+}
+
+func assertCoordinatorUpdated(_ any, after any, id string) error {
+	value, ok := after.(*coordinator.Coordinator)
+	if !ok || value == nil {
+		return fmt.Errorf("GetCoordinator returned %T", after)
+	}
+	if value.Name != "Updated "+id {
+		return fmt.Errorf("coordinator name = %q, want %q", value.Name, "Updated "+id)
+	}
+	return nil
+}
+
+func setCoordinatorBoolean(s testconformance.ScenarioContext, id string, _ any, enabled bool) (any, error) {
+	owner, err := coordinatorFactory(s)
+	if err != nil {
+		return nil, err
+	}
+	workspaceID, err := conformanceWorkspaceID(s)
+	if err != nil {
+		return nil, err
+	}
+	ceiling := int64(1000)
+	store := owner.(*coordinator.Store)
+	_, _, err = store.PatchCoordinator(s.Context, workspaceID, id, coordinator.CoordinatorPatch{
+		AutonomyEnabled: &enabled, CeilingSet: true, CostCeilingSubcents: &ceiling,
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return store.GetCoordinator(s.Context, workspaceID, id)
 }
 
 func reflectValue(record any) reflect.Value {

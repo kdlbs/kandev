@@ -48,6 +48,18 @@ type Writer struct {
 
 	events chan *usageEventPayload
 
+	// notices carries one (task, session) pair per committed row to the
+	// observer consumer. Only the worker sends and only Stop closes it, after
+	// the worker has been joined.
+	notices        chan usageNotice
+	observer       RecordedObserver
+	obsCtx         context.Context
+	obsCancel      context.CancelFunc
+	obsWG          sync.WaitGroup
+	observerFailed bool
+	obsActiveDone  <-chan struct{}
+	stopDone       chan struct{}
+
 	mu       sync.Mutex
 	started  bool
 	draining bool
@@ -62,7 +74,12 @@ type Writer struct {
 // log may be nil; metrics are still recorded, just not logged.
 func NewWriter(repo Repository, pricing PricingLookup, log *logger.Logger) *Writer {
 	workCtx, cancel := context.WithCancel(context.Background())
+	obsCtx, obsCancel := context.WithCancel(context.Background())
 	return &Writer{
+		stopDone:   make(chan struct{}),
+		notices:    make(chan usageNotice, observerQueueCapacity),
+		obsCtx:     obsCtx,
+		obsCancel:  obsCancel,
 		repo:       repo,
 		pricing:    pricing,
 		log:        log,
@@ -76,12 +93,14 @@ func NewWriter(repo Repository, pricing PricingLookup, log *logger.Logger) *Writ
 func (w *Writer) Start() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.started {
+	if w.started || w.draining {
 		return
 	}
 	w.started = true
 	w.wg.Add(1)
 	go w.run()
+	w.obsWG.Add(1)
+	go w.runObserver()
 }
 
 // Stop stops accepting new events, drains whatever is already buffered, and
@@ -91,17 +110,32 @@ func (w *Writer) Start() {
 // counted dropped:drain_timeout and never written. Idempotent.
 func (w *Writer) Stop() {
 	w.mu.Lock()
-	if !w.started || w.draining {
+	if w.draining {
+		done := w.stopDone
+		w.mu.Unlock()
+		<-done
+		return
+	}
+	if !w.started {
+		w.draining = true
+		w.cancelWork()
+		w.obsCancel()
+		close(w.stopDone)
 		w.mu.Unlock()
 		return
 	}
 	w.draining = true
 	close(w.events)
 	w.mu.Unlock()
+	defer close(w.stopDone)
 
 	timer := time.AfterFunc(drainDeadline, w.cancelWork)
 	defer timer.Stop()
 	w.wg.Wait()
+
+	close(w.notices)
+	w.obsCancel()
+	w.obsWG.Wait()
 }
 
 // Subscribe registers the writer's bus callback on the session-prompt-usage
@@ -198,6 +232,7 @@ func (w *Writer) processEvent(ctx context.Context, p *usageEventPayload) {
 	case err == nil:
 		w.recordWritten(event.CostSource, event.Provider)
 		w.publishUsageUpdated(ctx, event)
+		w.offerNotice(event.TaskID, event.SessionID)
 	case errors.Is(err, sqliterepo.ErrDuplicateUsageEvent):
 		w.recordDropped(dropReasonDuplicate, p.TaskID)
 	default:

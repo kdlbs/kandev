@@ -22,6 +22,8 @@ test.describe("Coordinator Needs you and Queue", () => {
       name: "Planner",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     const title = "Needs You Golden Path";
@@ -59,7 +61,9 @@ test.describe("Coordinator Needs you and Queue", () => {
     await expect(card).toContainText(title);
     await expect(card.getByText("Decide now")).toBeVisible();
     await expect(card.getByText("The agent is waiting for your answer")).toBeVisible();
-    await expect(card.getByText("Your answer, on the task")).toBeVisible();
+    // AC-COORDINATOR-RELAY-001.1: with phase 3 effective (the e2e profile), Answer here
+    // replaces the phase 1 "Your answer, on the task" text for an answerable question.
+    await expect(card.getByRole("button", { name: "Answer here" })).toBeVisible();
 
     const askAboutThis = card.getByRole("button", { name: "Ask about this" });
     await expect(askAboutThis).toBeVisible();
@@ -83,6 +87,8 @@ test.describe("Coordinator Needs you and Queue", () => {
       name: "Queue Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     const workingTask = await apiClient.createTaskWithAgent(
@@ -229,6 +235,8 @@ test.describe("Coordinator Needs you and Queue", () => {
         name: "Deep Link Coordinator",
         agent_profile_id: seedData.agentProfileId,
         executor_profile_id: seedData.worktreeExecutorProfileId,
+        task_agent_profile_id: seedData.agentProfileId,
+        task_executor_profile_id: seedData.worktreeExecutorProfileId,
       });
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,

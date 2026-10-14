@@ -735,7 +735,7 @@ func TestDispatchCompletion_ErrorFinalizationRejectsWaitingSuccessor(t *testing.
 	go func() {
 		_, err := fixture.manager.sessionManager.SendPromptWithAdmissionCallback(
 			ctx, fixture.execution, "successor", true, nil, true,
-			func() error {
+			func(context.Context, string, []v1.MessageAttachment) error {
 				admissionReached <- struct{}{}
 				return nil
 			}, nil,

@@ -1,6 +1,12 @@
 import { ApiError } from "@/lib/api/client";
 
-export type CoordinatorErrorField = "name" | "agent_profile_id" | "executor_profile_id" | "context";
+export type CoordinatorErrorField =
+  | "name"
+  | "agent_profile_id"
+  | "executor_profile_id"
+  | "task_agent_profile_id"
+  | "task_executor_profile_id"
+  | "context";
 
 export type CoordinatorFieldError = {
   field: CoordinatorErrorField | null;
@@ -12,6 +18,8 @@ function isCoordinatorErrorField(value: unknown): value is CoordinatorErrorField
     value === "name" ||
     value === "agent_profile_id" ||
     value === "executor_profile_id" ||
+    value === "task_agent_profile_id" ||
+    value === "task_executor_profile_id" ||
     value === "context"
   );
 }

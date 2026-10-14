@@ -40,14 +40,30 @@ type DeliveryRecoveryPresentation = {
 function deliveryRecoveryPresentation(
   phase: NonNullable<ReturnType<typeof readAgentDeliveryRecovery>>["phase"] | undefined,
   legacyUncertainDelivery: boolean,
+  hasDeliveryRecoveryBlock: boolean,
 ): DeliveryRecoveryPresentation {
   if (phase === "reconnecting" || phase === "uncertain") {
     return { uncertainDelivery: true, deliveryRecoveryPhase: phase };
   }
+  if (hasDeliveryRecoveryBlock)
+    return { uncertainDelivery: true, deliveryRecoveryPhase: "uncertain" };
   if (phase) return { uncertainDelivery: false, deliveryRecoveryPhase: undefined };
   return {
     uncertainDelivery: legacyUncertainDelivery,
     deliveryRecoveryPhase: legacyUncertainDelivery ? "uncertain" : undefined,
+  };
+}
+
+function deliveryRecoveryBlockPresentation(session: ChatPanelState["session"]) {
+  const blocks = session?.session_recovery_blocks?.filter(
+    (block) => block.consumer_reference === "agent_delivery",
+  );
+  return {
+    requiresRecovery: Boolean(blocks?.length),
+    hasDeliveryRecoveryBlock:
+      blocks?.some(
+        (block) => block.reason !== "unknown_prompt_outcome" || !block.delivery_submission_id,
+      ) ?? false,
   };
 }
 
@@ -91,10 +107,14 @@ export function useComposerProps(args: ComposerPropsArgs) {
   const { resolvedSessionId, taskId, isAgentBusy, isWorking, needsRecovery, planModeEnabled } =
     panelState;
   const deliveryRecovery = readAgentDeliveryRecovery(panelState.session?.metadata);
+  const { hasDeliveryRecoveryBlock, requiresRecovery } = deliveryRecoveryBlockPresentation(
+    panelState.session,
+  );
   const legacyUncertainDelivery = panelState.lastAgentError?.code === DURABLE_DELIVERY_UNCERTAIN;
   const recoveryPresentation = deliveryRecoveryPresentation(
     deliveryRecovery?.phase,
     legacyUncertainDelivery,
+    hasDeliveryRecoveryBlock,
   );
   const canQueueWhileStarting = panelState.inputMode === "queue" && panelState.isQueueReady;
   const supportsSteering = panelState.supportsSteering;
@@ -102,6 +122,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
   return {
     onSubmit: handleSubmit,
     sessionId: resolvedSessionId,
+    detailActive: panelState.detailActive,
     taskId,
     workspaceId: composerWorkspaceId,
     workspaceResolutionFailed,
@@ -137,7 +158,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     isCompleted: panelState.isCompleted,
     sessionErrorMessage: panelState.session?.error_message,
     ...recoveryPresentation,
-    needsRecovery,
+    needsRecovery: needsRecovery || requiresRecovery,
     executorUnavailable: executor.unavailable,
     executorUnavailableReason: executor.reason,
     contextItems: panelState.contextItems,

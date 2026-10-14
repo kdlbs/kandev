@@ -164,13 +164,14 @@ type TUIConfigDTO struct {
 }
 
 type AgentDTO struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	WorkspaceID   *string           `json:"workspace_id,omitempty"`
-	SupportsMCP   bool              `json:"supports_mcp"`
-	MCPConfigPath string            `json:"mcp_config_path,omitempty"`
-	TUIConfig     *TUIConfigDTO     `json:"tui_config,omitempty"`
-	Profiles      []AgentProfileDTO `json:"profiles"`
+	ID                   string            `json:"id"`
+	Name                 string            `json:"name"`
+	WorkspaceID          *string           `json:"workspace_id,omitempty"`
+	SupportsMCP          bool              `json:"supports_mcp"`
+	MCPConfigPath        string            `json:"mcp_config_path,omitempty"`
+	TUIConfig            *TUIConfigDTO     `json:"tui_config,omitempty"`
+	Profiles             []AgentProfileDTO `json:"profiles"`
+	ProfileOrderRevision int64             `json:"profile_order_revision"`
 	// CapabilityStatus mirrors the host utility probe status so clients can
 	// flag agents that need login or reinstallation without fetching the
 	// full model config separately. "" for agents that aren't probed
@@ -215,6 +216,11 @@ type AgentDiscoveryDTO struct {
 	Available         bool             `json:"available"`
 	MatchedPath       string           `json:"matched_path,omitempty"`
 	LoginCommand      *LoginCommandDTO `json:"login_command,omitempty"`
+
+	// Vendor CLI state. Present only for agent types that declare a host CLI;
+	// every other agent omits both fields.
+	CLIVersion      string `json:"cli_version,omitempty"`
+	CLIVersionError string `json:"cli_version_error,omitempty"`
 }
 
 // LoginCommandDTO describes an interactive login command surfaced to the UI.
@@ -264,6 +270,27 @@ type ModelConfigDTO struct {
 	// "probing" | "ok" | "auth_required" | "not_installed" | "failed".
 	Status string `json:"status,omitempty"`
 	Error  string `json:"error,omitempty"`
+	// Discovery describes where the model list came from. Absent for agent
+	// types without a vendor CLI.
+	Discovery *ModelDiscoveryDTO `json:"discovery,omitempty"`
+}
+
+// ModelDiscoveryDTO reports how Kandev assembled an agent type's model list
+// and whether the operator may type a model identifier that is not in it.
+type ModelDiscoveryDTO struct {
+	// Source is "cli_command" when the vendor CLI supplied models and
+	// "acp_probe" when only the managed runtime did.
+	Source string `json:"source"`
+	// Executable and CLIVersion identify the vendor CLI that was consulted.
+	Executable string `json:"executable,omitempty"`
+	CLIVersion string `json:"cli_version,omitempty"`
+	// Status is "ok", "skipped" (the CLI publishes no list), or a failure:
+	// "not_installed", "not_logged_in", "timeout", "failed".
+	Status    string     `json:"status"`
+	Error     string     `json:"error,omitempty"`
+	CheckedAt *time.Time `json:"checked_at,omitempty"`
+	// AllowsCustomModel permits a typed model identifier in the selector.
+	AllowsCustomModel bool `json:"allows_custom_model"`
 }
 
 type ConfigOptionDTO struct {
@@ -574,6 +601,7 @@ type DynamicModelsResponse struct {
 	CurrentModeID   string              `json:"current_mode_id,omitempty"`
 	Commands        []CommandEntryDTO   `json:"commands,omitempty"`
 	Error           *string             `json:"error"`
+	Discovery       *ModelDiscoveryDTO  `json:"discovery,omitempty"`
 	ContextRevision string              `json:"context_revision,omitempty"`
 	RuntimeInfo     *agents.RuntimeInfo `json:"runtime_info,omitempty"`
 }

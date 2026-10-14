@@ -67,10 +67,21 @@ type mockAgent struct {
 var _ acp.Agent = (*mockAgent)(nil)
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "--delivery-journal-fixture" {
+		if err := runDeliveryJournalFixture(os.Args[2], os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--profile-probe-wrapper" {
 		os.Exit(runProfileProbeWrapper(os.Args[2:], os.Getenv(profileProbeEvidenceEnv)))
 	}
 	recordProfileProbeChildEvidence(os.Args, os.Getenv(profileProbeEvidenceEnv))
+	// Vendor-CLI shaped entry points (`--version`, `app-server`) that the hostcli package drives in E2E.
+	if runHostCLICommand(os.Args[1:], os.Stdin, os.Stdout) {
+		return
+	}
 	model := parseModelFlag()
 
 	// TUI mode: simple terminal UI for passthrough/PTY testing

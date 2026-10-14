@@ -109,13 +109,13 @@ func TestAllActionsFixedOrderExcludesUnknown(t *testing.T) {
 
 func TestValidatePolicy(t *testing.T) {
 	ok := PhaseOnePolicy()
-	if err := Validate(ok); err != nil {
+	if err := Validate(ok, false); err != nil {
 		t.Fatalf("phase-1 policy invalid: %v", err)
 	}
 	all := allDenied()
 	all[ActionMove] = SettingRequiresApproval
 	all[ActionResume] = SettingRequiresApproval
-	if err := Validate(Policy{Version: 1, Actions: all}); err != nil {
+	if err := Validate(Policy{Version: 1, Actions: all}, false); err != nil {
 		t.Fatalf("valid policy rejected: %v", err)
 	}
 	cases := []struct {
@@ -137,7 +137,7 @@ func TestValidatePolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := allDenied()
 			tc.mutate(m)
-			err := Validate(Policy{Version: 1, Actions: m})
+			err := Validate(Policy{Version: 1, Actions: m}, false)
 			var fe *PolicyFieldError
 			if !errors.As(err, &fe) {
 				t.Fatalf("err = %v, want PolicyFieldError", err)
@@ -167,7 +167,7 @@ func TestActionForTool(t *testing.T) {
 }
 
 func TestToolNames(t *testing.T) {
-	phase1 := ToolNames(PhaseOnePolicy(), false)
+	phase1 := ToolNames(PhaseOnePolicy(), false, false)
 	if len(phase1) != 7 {
 		t.Fatalf("phase-1 tools = %v", phase1)
 	}
@@ -178,7 +178,7 @@ func TestToolNames(t *testing.T) {
 	p[ActionMove] = SettingRequiresApproval
 	p[ActionCreateTask] = SettingRequiresApproval
 	p[ActionStartAgent] = SettingRequiresApproval
-	got := ToolNames(Policy{Version: 1, Actions: p}, true)
+	got := ToolNames(Policy{Version: 1, Actions: p}, true, false)
 	want := append(append([]string{}, readTools...), "list_coordinator_activity_kandev", "propose_task_kandev", "propose_move_kandev")
 	if len(got) != len(want) {
 		t.Fatalf("got %v want %v", got, want)
@@ -189,7 +189,7 @@ func TestToolNames(t *testing.T) {
 		}
 	}
 	// start_agent and stop map to no tool.
-	none := ToolNames(Policy{Version: 1, Actions: allDenied()}, true)
+	none := ToolNames(Policy{Version: 1, Actions: allDenied()}, true, false)
 	if len(none) != len(readTools)+1 {
 		t.Fatalf("all denied tools = %v", none)
 	}

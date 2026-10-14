@@ -37,6 +37,9 @@ The retry flag alone does not authorize replay.
 Keep the period word `session` explicit.
 A generic period-word expression also matches `you've hit your rate limit`, incorrectly changing a transient throttle to a hard quota error.
 Other period signatures require captured evidence before expansion.
+Claude's weekly notice is captured evidence (`Internal error: You've hit your weekly limit · resets 4am (<zone>)`).
+Add `claude.stderr.weekly_limit.v1` with the same shape as the session-limit rule and the explicit period word `weekly`.
+Keep clock-only reset parsing restricted to the session-limit rule: a weekly reset can be days away, so its clock alone does not identify the date.
 Structured HTTP status continues to run before provider rules.
 
 ## Reset clock

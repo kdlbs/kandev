@@ -61,6 +61,7 @@ var errManagerClosed = errors.New("tunnel manager is shut down")
 type TunnelManager struct {
 	lifecycleMgr *lifecycle.Manager
 	logger       *logger.Logger
+	listenHost   string // empty binds all interfaces; Windows tests use loopback
 
 	mu      sync.Mutex
 	closed  bool                      // set by Shutdown; refuses every later start
@@ -221,7 +222,7 @@ func (m *TunnelManager) resolveAndBind(sessionID string, tunnelPort int) (*url.U
 	}
 	transport := agentctlClient.ProxyTransport()
 
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", tunnelPort))
+	ln, err := net.Listen("tcp", net.JoinHostPort(m.listenHost, strconv.Itoa(tunnelPort)))
 	if err != nil {
 		cancelBound()
 		if netutil.IsAddrInUse(err) {

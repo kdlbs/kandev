@@ -7,11 +7,11 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
-import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { useStaticDestinations } from "@/hooks/use-app-destinations";
 import { useOfficeModeState } from "@/hooks/use-in-office";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSidebarLayoutNavigation } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
 import { requestNewTaskCreation } from "@/lib/desktop/new-task-request";
 import type { ProjectedSidebarNode, ProjectedShortcut } from "@/lib/sidebar/layout-projection";
@@ -142,17 +142,13 @@ function MobileRequiredRows({
   omitSections,
   omitDestinations,
   inboxKind = "none",
-  coordinatorsWithAutomations = false,
 }: {
   onNavigate: () => void;
   omitSections: Set<string>;
   omitDestinations: string[];
   inboxKind?: "office" | "needs-you" | "none";
-  coordinatorsWithAutomations?: boolean;
 }) {
   const primary = useStaticDestinations("mobileMenu", "primary");
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const coordinatorEnabled = useFeature("coordinator") && !coordinatorsWithAutomations;
   if (omitSections.has("primary")) return null;
   if (inboxKind !== "none") return <MobileInboxRow kind={inboxKind} onNavigate={onNavigate} />;
   const fixedDestinations = primary.filter(
@@ -160,7 +156,7 @@ function MobileRequiredRows({
       (destination.id === "tasks" || destination.id === "threads") &&
       !omitDestinations.includes(destination.id),
   );
-  if (!fixedDestinations.length && !(coordinatorEnabled && workspaceId)) return null;
+  if (!fixedDestinations.length) return null;
   return (
     <div className="flex flex-col gap-3" data-testid="mobile-sidebar-fixed-navigation">
       {fixedDestinations.length > 0 && (
@@ -170,7 +166,6 @@ function MobileRequiredRows({
           className="h-11 gap-3 px-3 text-sm aria-[current=page]:bg-primary/10"
         />
       )}
-      {coordinatorEnabled && workspaceId && <MobileCoordinatorsSection onNavigate={onNavigate} />}
     </div>
   );
 }
@@ -339,6 +334,8 @@ function MobileBuiltinNodeContent(props: MobileLayoutNodeProps) {
     return omitSections.has("primary") || omitDestinations.includes("new_task") ? null : (
       <MobileNewTaskRow onNavigate={onNavigate} />
     );
+  if (node.destinationId === "coordinators")
+    return <MobileCoordinatorsSection onNavigate={onNavigate} />;
   if (node.destinationId === "integrations" && omitSections.has("integrations")) return null;
   if (homeCoversListings) return <MobilePhoneResource {...props} />;
 
@@ -363,13 +360,7 @@ function MobileBuiltinNodeContent(props: MobileLayoutNodeProps) {
 }
 
 function MobileBuiltinNode(props: MobileLayoutNodeProps) {
-  if (props.node.destinationId !== "automations") return <MobileBuiltinNodeContent {...props} />;
-  return (
-    <>
-      <MobileCoordinatorsSection onNavigate={props.onNavigate} />
-      <MobileBuiltinNodeContent {...props} />
-    </>
-  );
+  return <MobileBuiltinNodeContent {...props} />;
 }
 
 function MobileLayoutNode(props: MobileLayoutNodeProps) {
@@ -449,9 +440,6 @@ export function MobileSidebarLayoutNavigation({
       ]
     : visibleNodes;
   const toolNodes = phoneMain ? visibleNodes.filter((node) => !isPrimary(node)) : [];
-  const coordinatorsWithAutomations = visibleNodes.some(
-    (node) => node.destinationId === "automations",
-  );
   const renderNode = (node: ProjectedSidebarNode) => (
     <MobileLayoutNode
       key={node.id}
@@ -480,21 +468,20 @@ export function MobileSidebarLayoutNavigation({
       <div className="flex min-w-0 flex-col gap-2 md:gap-3">
         {!hasVisibleHome && quickActions}
         {primaryNodes.map(renderNode)}
-        <MobileRequiredRows
-          onNavigate={onNavigate}
-          omitSections={omitSections}
-          omitDestinations={omitDestinations}
-          coordinatorsWithAutomations={coordinatorsWithAutomations}
-        />
       </div>
+      {toolNodes.length > 0 && (
+        <div className="flex min-w-0 flex-col gap-3">{toolNodes.map(renderNode)}</div>
+      )}
       <MobileSidebarCustomization
         nodes={projection.nodes}
         catalog={catalog.catalog}
         onNavigate={onNavigate}
       />
-      {toolNodes.length > 0 && (
-        <div className="flex min-w-0 flex-col gap-3">{toolNodes.map(renderNode)}</div>
-      )}
+      <MobileRequiredRows
+        onNavigate={onNavigate}
+        omitSections={omitSections}
+        omitDestinations={omitDestinations}
+      />
     </div>
   );
 }

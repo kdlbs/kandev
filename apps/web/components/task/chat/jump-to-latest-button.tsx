@@ -18,7 +18,7 @@ export function JumpToLatestButton({
   onClick: () => void;
 }) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   if (!isVisible) return null;
   const label = t("task:jumpToLatest");
 
@@ -32,7 +32,7 @@ export function JumpToLatestButton({
           onClick={onClick}
           aria-label={label}
           data-testid="jump-to-latest-button"
-          className={cn(BUTTON_CLASS, isFinePointer ? "h-6 w-6" : "h-11 w-11")}
+          className={cn(BUTTON_CLASS, isFinePointer && !isMobile ? "h-6 w-6" : "h-11 w-11")}
         >
           <IconArrowDown className="h-3.5 w-3.5" />
         </Button>

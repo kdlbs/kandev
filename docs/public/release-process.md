@@ -161,6 +161,12 @@ Release-tag signing applies to future normal releases only. Backfills reuse the 
 
 Desktop OS signing and notarization are conditional on a complete secret set. Without them, the workflow can publish unsigned installers and adds a warning to release notes. Tauri updater signatures are stricter: the workflow publishes updater artifacts and `latest.json` only when the required signed set is complete. Do not claim in-app update availability from the presence of installers alone.
 
+The Windows runtime bundle is signed separately from the desktop installer through SignPath. Configure the repository secret `SIGNPATH_API_TOKEN` and repository variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`, and `SIGNPATH_SIGNING_POLICY_SLUG`. The bundle job has no environment, so environment-scoped values are unavailable. Missing or blank inputs produce an unsigned runtime bundle with a workflow notice.
+
+Signing runs before packaging, so both Stable archive variants and their checksums contain the same signed host binaries. Signed output is staged separately and adopted only after the action succeeds and both binaries are present and non-empty; their executable modes are restored before packaging. Upload, signing, or incomplete-output failures retain the original unsigned binaries and report a warning.
+
+A test-signing policy (slug `test` or starting with `test-`) is allowed only during `desktop_validation_only`, where nothing is published. Its self-signed certificate is not trusted by Windows; a Stable publishing run skips that policy with a warning. Scheduled and manual nightlies are never signed because the SignPath Foundation requires manual approval for each release signing request. Stable signing waits up to one hour for approval before falling back to an unsigned bundle.
+
 Never print signing material, tokens, certificate contents, or generated updater private data in logs.
 
 ## Verify every channel

@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-27
+last_updated: 2026-09-29
 ---
 
 # Needs you and Queue Requirements
@@ -108,11 +108,16 @@ Mockup:
   shall increase while the screen is open.
 - **AC-COORDINATOR-NEEDS-YOU-002.4:** Items shall be ordered by reference time
   ascending (oldest first), then by kind in the order proposal, question or
-  permission, stall, error, then by item id ascending (proposal id or task id,
-  compared bytewise).
+  permission, stall, error, then autonomy (phase 3,
+  [`AC-COORDINATOR-WAKE-006.2`](wake.md#req-coordinator-wake-006-seeing-what-autonomy-is-doing)),
+  then by item id ascending (proposal id, task id or `autonomy:<coordinator
+  id>`, compared bytewise).
 - **AC-COORDINATOR-NEEDS-YOU-002.5:** A question or permission item shall say
   "The agent is waiting for your answer. Answer it on the task." and offer
-  **Open task**; it shall not offer an answer control.
+  **Open task**; it shall not offer an answer control. While
+  `features.coordinatorPhase3` is effective, managers instead get the answer
+  control of [relay](relay.md) (`AC-COORDINATOR-RELAY-001.1`,
+  `AC-COORDINATOR-RELAY-002.1`).
 - **AC-COORDINATOR-NEEDS-YOU-002.6:** A stall item shall offer **Open task** and
   **Show the evidence**, which reveals stalled for, last event at, detected at,
   and whether an agent is running now from the task's primary session state.
@@ -215,16 +220,19 @@ Mockup:
 #### Acceptance criteria
 
 - **AC-COORDINATOR-NEEDS-YOU-006.1:** When the flag is on and a workspace is
-  active, the sidebar shall show a "Coordinators" section, immediately above
-  the Automations section, with one row per coordinator, by name and in the
+  active, the sidebar shall offer a "Coordinators" entry, by default immediately above
+  the Automations entry, with one row per coordinator, by name and in the
   order of `AC-COORDINATOR-COORDINATORS-003.1`, each linking to that
   coordinator's Needs you screen. The section shall be expanded until the user
-  folds it, shall keep its folded state across reloads, shall have a header
+  folds it, shall keep its folded state across reloads, shall provide a
   shortcut to `/workspaces/:id/coordinator`, and shall not render before the
   coordinator list has loaded. The phone menu shall show the same section: an
-  expandable "Coordinators" group immediately above its Automations section,
+  expandable "Coordinators" group with the same saved visibility and tool order,
   expanded until folded, with the same rows, folded summary, header shortcut
-  and empty row, and 44px touch targets.
+  and empty row, and 44px touch targets. Saved visibility, order, navigation
+  presentation, and fast action placement follow
+  [Sidebar customization](../../ui/requirements/sidebar-customization.md).
+  Personal visibility never changes the underlying coordinator capability.
 - **AC-COORDINATOR-NEEDS-YOU-006.2:** A coordinator's row shall show a badge
   with its open proposal count when that count is above zero and no badge
   at zero, and the badge shall update from `coordinator.updated` without reload.

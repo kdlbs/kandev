@@ -56,7 +56,7 @@ func Inspect(identity Identity) (State, error) {
 		return StateUnknown, ErrUnverifiableIdentity
 	}
 	stat, err := readProcStat(identity.PID)
-	if errors.Is(err, os.ErrNotExist) {
+	if processNoLongerExists(err) {
 		return StateExited, nil
 	}
 	if err != nil {
@@ -191,7 +191,7 @@ func processesInOwnedSession(sessionID int, rootStartTime uint64) ([]ownedProces
 			continue
 		}
 		stat, err := readProcStat(pid)
-		if errors.Is(err, os.ErrNotExist) {
+		if processNoLongerExists(err) {
 			continue
 		}
 		if err != nil {
@@ -217,7 +217,7 @@ func signalOwnedProcesses(processes []ownedProcess, sessionID int, signal syscal
 			return fmt.Errorf("open process identity for pid %d: %w", process.pid, err)
 		}
 		stat, statErr := readProcStat(process.pid)
-		if errors.Is(statErr, os.ErrNotExist) {
+		if processNoLongerExists(statErr) {
 			_ = unix.Close(pidfd)
 			continue
 		}
@@ -255,4 +255,29 @@ func waitForOwnedSessionExit(ctx context.Context, sessionID int, rootStartTime u
 		case <-ticker.C:
 		}
 	}
+}
+
+// OwnedSessionTerminated verifies process and descendant termination without signaling them.
+func OwnedSessionTerminated(identity Identity) (bool, error) {
+	state, err := Inspect(identity)
+	if err != nil {
+		return false, err
+	}
+	if state == StateAlive {
+		return false, nil
+	}
+	if state != StateExited || identity.SessionID != identity.PID {
+		return false, ErrUnverifiableIdentity
+	}
+	_, start, err := parseBirthToken(identity.BirthToken)
+	if err != nil {
+		return false, err
+	}
+	processes, err := processesInOwnedSession(identity.SessionID, start)
+	return len(processes) == 0, err
+}
+
+// Procfs can return ESRCH when a process exits after its stat file was opened.
+func processNoLongerExists(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
 }

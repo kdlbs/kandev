@@ -34,6 +34,15 @@ func (s *Service) reconcileAgentDeliverySettlements(ctx context.Context, session
 	return nil
 }
 
+func (s *Service) settleQueuedDeliveryPredecessor(ctx context.Context, taskID, sessionID string, effect *models.AgentDeliveryEffect) error {
+	ctx = context.WithoutCancel(ctx)
+	// The queue owns the successor, so this terminal intentionally has no workflow transition.
+	if err := s.recordNotRequiredDeliveryWorkflowOutcome(ctx, taskID, effect); err != nil {
+		return err
+	}
+	return s.reconcileAgentDeliverySettlements(ctx, sessionID)
+}
+
 func (s *Service) settleAgentDeliveryEffect(
 	ctx context.Context,
 	settlements repository.AgentDeliverySettlementRepository,

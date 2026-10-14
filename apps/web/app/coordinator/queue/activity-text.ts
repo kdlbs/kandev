@@ -10,6 +10,7 @@ export const CLASS_LABEL_KEY: Record<string, string> = {
   move: "coordinator:activityClassMove",
   resume: "coordinator:activityClassResume",
   stop: "coordinator:activityClassStop",
+  improvement: "coordinator:activityClassImprovement",
   unknown: "coordinator:activityClassUnknown",
 };
 
@@ -50,6 +51,11 @@ export function actionText(item: ActivityItem, t: TFunction): string {
       ? t("coordinator:activityRejectedDetail", { detail })
       : t("coordinator:activityRejected");
   }
+  if (item.outcome === "returned") {
+    return detail
+      ? t("coordinator:activityReturnedDetail", { detail })
+      : t("coordinator:activityReturned");
+  }
   if (item.outcome === "failed") {
     return detail
       ? t("coordinator:activityFailedDetail", { detail })
@@ -60,6 +66,7 @@ export function actionText(item: ActivityItem, t: TFunction): string {
 
 export function authorizationLine(item: ActivityItem, t: TFunction): string | null {
   if (item.authorization === "requires_approval") return t("coordinator:activityAuthRequires");
+  if (item.authorization === "automatic") return t("coordinator:activityAuthAutomatic");
   if (item.authorization !== "denied") return null;
   return item.refusal_count > 1
     ? t("coordinator:activityAuthDeniedRepeated", { count: item.refusal_count })
@@ -77,6 +84,11 @@ export function outcomeLine(item: ActivityItem, person: PersonName, t: TFunction
   const name = personName(person, t);
   switch (item.outcome) {
     case "approved":
+      if (item.authorization === "automatic") {
+        return name
+          ? t("coordinator:activityApprovedAutomatically", { name })
+          : t("coordinator:activityApprovedAutomaticallyNoName");
+      }
       if (item.edited) {
         return name
           ? t("coordinator:activityApprovedByEdited", { name })
@@ -89,6 +101,10 @@ export function outcomeLine(item: ActivityItem, person: PersonName, t: TFunction
       return name
         ? t("coordinator:activityRejectedBy", { name })
         : t("coordinator:activityRejected");
+    case "returned":
+      return name
+        ? t("coordinator:activityReturnedBy", { name })
+        : t("coordinator:activityReturned");
     case "failed":
       return t("coordinator:activityFailed");
     case "undone":

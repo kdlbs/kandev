@@ -28,6 +28,7 @@ import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
 import { useSidebarTaskEdit } from "../task-session-sidebar-edit";
 import { useOptionalPortForwardingVisibility } from "../port-forwarding-visibility-provider";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TaskSwitcherDialogs } from "./session-task-switcher-sheet-dialogs";
 import { MobileTaskList, type MobileTaskListProps } from "./mobile-task-list";
 export { MobileTaskList, type MobileTaskListProps } from "./mobile-task-list";
@@ -44,9 +45,12 @@ type SessionTaskSwitcherSheetProps = {
   selection?: TaskSheetSelectionController;
 };
 
-export function useMobileTaskLinking(workspaceId: string | null) {
+export function useMobileTaskLinking(
+  workspaceId: string | null,
+  pageTasks: Parameters<typeof useSidebarLinkActions>[1] = [],
+) {
   const store = useAppStoreApi();
-  const actions = useSidebarLinkActions(store);
+  const actions = useSidebarLinkActions(store, pageTasks);
   const taskListHandlers = useSidebarTaskLinking(workspaceId, actions);
   const { repositories } = useRepositories(workspaceId);
 
@@ -355,7 +359,8 @@ function PortForwardingTaskAction({
 }) {
   const { t } = useTranslation();
   const visibility = useOptionalPortForwardingVisibility();
-  if (!visibility) return null;
+  const { isMobile } = useResponsiveBreakpoint();
+  if (!visibility || isMobile) return null;
   const { enabled, canToggle, isUpdating, togglePortForwarding } = visibility;
 
   return (
@@ -377,6 +382,17 @@ function PortForwardingTaskAction({
       </Button>
     </div>
   );
+}
+
+function useMobileTaskQuickChat(
+  workspaceId: string | null | undefined,
+  onOpenChange: (open: boolean) => void,
+) {
+  const openQuickChat = useQuickChatLauncher(workspaceId);
+  return useCallback(() => {
+    onOpenChange(false);
+    openQuickChat();
+  }, [onOpenChange, openQuickChat]);
 }
 
 export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
@@ -403,15 +419,17 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     (nextOpen: boolean) => handleTaskSheetOpenChange(selectionController, nextOpen, onOpenChange),
     [onOpenChange, selectionController],
   );
-  const actions = useSheetActions(workspaceId, handleOpenChange, selectionController, navigate);
+  const actions = useSheetActions(
+    workspaceId,
+    handleOpenChange,
+    selectionController,
+    navigate,
+    data.tasksWithRepositories,
+  );
   const rename = useMobileTaskRename();
-  const edit = useSidebarTaskEdit();
-  const linking = useMobileTaskLinking(workspaceId);
-  const openQuickChat = useQuickChatLauncher(workspaceId);
-  const handleQuickChat = useCallback(() => {
-    handleOpenChange(false);
-    openQuickChat();
-  }, [handleOpenChange, openQuickChat]);
+  const edit = useSidebarTaskEdit(data.allTasks);
+  const linking = useMobileTaskLinking(workspaceId, data.allTasks);
+  const handleQuickChat = useMobileTaskQuickChat(workspaceId, handleOpenChange);
   const handleCreateSubtask = useCallback(
     (taskId: string, taskTitle: string) => {
       handleOpenChange(false);

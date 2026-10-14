@@ -116,6 +116,8 @@ test.describe("Coordinator proposals", () => {
       name: "Proposals Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -150,6 +152,8 @@ test.describe("Coordinator proposals", () => {
       name: "Proposals Approve Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -202,6 +206,8 @@ test.describe("Coordinator proposals", () => {
       name: "Proposals Edit Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -263,6 +269,8 @@ test.describe("Coordinator proposals", () => {
       name: "Proposals Reject Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -311,6 +319,8 @@ test.describe("Coordinator proposals", () => {
       name: "Proposals Deep Link Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));

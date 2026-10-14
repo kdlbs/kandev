@@ -17,9 +17,9 @@ This is a local responsive presentation adjustment in
 or workflow authority changes are needed. The screenshot shows transcript icons
 on the first line and Open PR left-aligned on the second line.
 
-`ChatStatusBarActions` uses `ml-auto` on a nested wrapping flex container.
-That aligns the container in its parent but does not right-align its wrapped
-children. Its current default `justify-content` starts each internal line at
+Before correction, `ChatStatusBarActions` used `ml-auto` on a nested wrapping flex container.
+That aligned the container in its parent but did not right-align its wrapped
+children. Default `justify-content` started each internal line at
 the left. The existing `PassthroughStatusRow` in `passthrough-toolbar.tsx`
 demonstrates a constrained wrapping action group with `justify-end`.
 
@@ -31,20 +31,20 @@ demonstrates a constrained wrapping action group with `justify-end`.
 
 ## Action-group layout
 
-Give `ChatStatusBarActions` end justification and constrain its maximum width
-to its parent, following the passthrough group. Retain its `ml-auto`, `min-w-0`,
-wrapping, item alignment, and existing gap. Keep `ChatStatusBarRightControls`
-before `WorkflowMoveProceedButton` in DOM order. Each internal flex line then
-ends against the action group's right edge, which the outer auto margin aligns
-with the toolbar's right content edge.
+On desktop, `ChatStatusBarActions` uses bounded end justification, following the
+passthrough group. Retain `ml-auto`, `min-w-0`, wrapping, item alignment, and the
+existing gap. Each internal flex line ends against the action group's right
+edge. Keep `ChatStatusBarRightControls` before `WorkflowMoveProceedButton` in DOM
+order.
 
-Use the same end justification at every width. It does not change the
-single-line order; it also works in a narrow desktop pane
-without JavaScript measurement, additional responsive state, or forcing every
-phone toolbar into two rows. Give this workflow-action caller a 44px minimum
-height and width below the canonical 768px phone boundary, including with a
-fine pointer. Retain its 24px desktop height. Pointer-specific popover/Drawer
-behavior and visibility rules remain with their existing owners.
+Below the canonical 768px boundary, preserve the landed
+[mobile action bar composition](mobile-task-action-bar.md): action and utility
+wrappers use `display: contents`, allowing whole controls to wrap directly in
+the toolbar. The workflow button's phone auto margin keeps it at the trailing
+edge. Do not restore a shrink-wrapped phone utility group. Its label may wrap
+inside the contained button, which retains 44px minimum height and width with
+either pointer. Fine-pointer desktop retains its 24px height. Coarse-pointer
+label wrapping and existing disclosure/visibility rules remain with their owners.
 
 ## Mobile contract
 
@@ -74,7 +74,9 @@ with either pointer. Activate it and verify the destination step via the existin
 Cover the configured phone viewport, 360px, and the 767/768px boundary; add a
 narrow fine-pointer case with a 44px target and click, and desktop cases with a
 24px height and wide single-line order. Measure computed
-end justification as well as geometry. Component tests retain the existing
+phone `display: contents` and desktop end justification as well as geometry.
+Measure the union of visible utility-control bounds because a phone wrapper
+does not generate a box. Component tests retain the existing
 no-content spacer case and move-gating coverage, but class assertions alone
 cannot establish rendered wrapping.
 

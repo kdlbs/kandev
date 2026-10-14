@@ -16,6 +16,7 @@ import (
 func TestInboxAckAfterCommitDeduplicatesMessages(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
+	seedAgentDeliveryTestSession(t, repo, "session-1", "incarnation-1")
 	event := &models.AgentDeliveryEvent{
 		SessionID:         "session-1",
 		IncarnationID:     "incarnation-1",
@@ -72,6 +73,7 @@ func TestInboxAckAfterCommitDeduplicatesMessages(t *testing.T) {
 func TestInboxRejectsConflictingDuplicateSequence(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
+	seedAgentDeliveryTestSession(t, repo, "session-conflict", "incarnation-1")
 	event := &models.AgentDeliveryEvent{
 		SessionID:         "session-conflict",
 		IncarnationID:     "incarnation-1",
@@ -100,6 +102,7 @@ func TestInboxAcceptsReplayWithReconstructedLifecycleFields(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-replay", "session-replay", "turn-original")
+	seedAgentDeliveryTestSession(t, repo, "session-replay", "incarnation-replay")
 
 	originalPayload, err := json.Marshal(streams.AgentEvent{
 		Type:               streams.EventTypeMessageChunk,
@@ -164,6 +167,7 @@ func TestInboxAcceptsReplayWithReconstructedLifecycleFields(t *testing.T) {
 func TestProjectionRejectsMismatchedEventIdentity(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
+	seedAgentDeliveryTestSession(t, repo, "session-projection", "incarnation-1")
 	event := &models.AgentDeliveryEvent{
 		SessionID:         "session-projection",
 		IncarnationID:     "incarnation-1",
@@ -196,6 +200,7 @@ func TestCanonicalAgentDeliveryProjectionPersistsNewlineFreeChunksExactlyOnce(t 
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-canonical", "session-canonical", "turn-canonical")
+	seedAgentDeliveryTestSession(t, repo, "session-canonical", "incarnation-canonical")
 
 	for sequence, text := range []string{"hello", " world"} {
 		sequenceNumber := int64(sequence + 1)
@@ -263,6 +268,7 @@ func TestCanonicalAgentDeliveryProjectionBatchesCompatibleChunks(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-canonical-batch", "session-canonical-batch", "turn-canonical-batch")
+	seedAgentDeliveryTestSession(t, repo, "session-canonical-batch", "incarnation-canonical-batch")
 
 	events := make([]*models.AgentDeliveryEvent, 0, 3)
 	effects := make([]*models.AgentDeliveryEffect, 0, 3)
@@ -324,6 +330,7 @@ func TestCanonicalAgentDeliveryProjectionPersistsThinkingInMetadata(t *testing.T
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-canonical-thinking", "session-canonical-thinking", "turn-canonical-thinking")
+	seedAgentDeliveryTestSession(t, repo, "session-canonical-thinking", "incarnation-canonical-thinking")
 
 	for sequence, reasoning := range []string{"inspect the repository", " and compare the changes"} {
 		sequenceNumber := int64(sequence + 1)
@@ -379,6 +386,7 @@ func TestCanonicalAgentDeliveryProjectionLeavesOutOfOrderEventsForReplay(t *test
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-canonical-gap", "session-canonical-gap", "turn-canonical-gap")
+	seedAgentDeliveryTestSession(t, repo, "session-canonical-gap", "incarnation-canonical-gap")
 
 	makeEvent := func(sequence int64, text string) *models.AgentDeliveryEvent {
 		payload, err := json.Marshal(streams.AgentEvent{
@@ -529,6 +537,7 @@ func TestWorkflowTransitionEffectIsAtomicAndIdempotent(t *testing.T) {
 func TestAgentDeliveryProjectionRetainsOrderAcrossGaps(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
+	seedAgentDeliveryTestSession(t, repo, "session-2", "incarnation-1")
 	for sequence := int64(2); sequence >= 1; sequence-- {
 		if _, err := repo.ReceiveAgentDeliveryEvent(ctx, &models.AgentDeliveryEvent{
 			SessionID:         "session-2",
@@ -575,6 +584,7 @@ func TestAgentDeliveryProjectionRetainsOrderAcrossGaps(t *testing.T) {
 func TestAgentDeliverySubmissionHashConflictBeforeDispatch(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
+	seedAgentDeliveryTestSession(t, repo, "session-1", "incarnation-1")
 	submission := &models.AgentDeliverySubmission{
 		ID:                "submission-1",
 		SessionID:         "session-1",
@@ -588,11 +598,11 @@ func TestAgentDeliverySubmissionHashConflictBeforeDispatch(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("prepare = %v, err=%v", created, err)
 	}
-	created, err = repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{ID: submission.ID, PayloadHash: submission.PayloadHash})
+	created, err = repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{ID: submission.ID, SessionID: submission.SessionID, IncarnationID: submission.IncarnationID, PayloadHash: submission.PayloadHash})
 	if err != nil || created {
 		t.Fatalf("idempotent prepare = %v, err=%v", created, err)
 	}
-	if _, err := repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{ID: submission.ID, PayloadHash: "hash-2"}); !errors.Is(err, repoerrors.ErrAgentDeliverySubmissionConflict) {
+	if _, err := repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{ID: submission.ID, SessionID: submission.SessionID, IncarnationID: submission.IncarnationID, PayloadHash: "hash-2"}); !errors.Is(err, repoerrors.ErrAgentDeliverySubmissionConflict) {
 		t.Fatalf("hash conflict = %v", err)
 	}
 	changed, err := repo.TransitionAgentDeliverySubmission(ctx, submission.ID, models.DeliverySubmissionPrepared, models.DeliverySubmissionAccepted, "", time.Now().UTC())

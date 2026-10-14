@@ -170,3 +170,43 @@ The touch and mouse regression cases also describe their behavioral contracts
 in addition to their acceptance-criterion tags. ESLint and Prettier passed after
 these comment-only additions; the production implementation and browser results
 above are unchanged.
+
+
+### Current-main reconciliation and CI remediation
+
+Resumed on 2026-10-14. The previous current-head CI run completed with two
+flaky tests: the agents fallback-summary case assumed the first provider owned
+a profile, and session-tab Rename lost its input to menu focus restoration.
+Neither failure is waived by the retry passing.
+
+Preserved the landed mobile action bar's flattened phone wrappers, trailing
+workflow button, and contained label wrapping, adding this package's 44px
+minimum width. Geometry now measures the union of visible utility controls;
+the old wrapper-box assertion failed on the merged phone layout. The desktop
+regression captures fresh mouse-phone and desktop screenshots.
+
+The fallback-summary fixture now selects the owner and profile by the seeded
+profile ID. The shared session menu hands Rename off after close-autofocus,
+following the terminal menu's existing pattern. Its real-menu component
+regression failed before the fix with one premature blur commit, then passed
+with no commit and a focused editor; ordinary dismissal retains focus return.
+The tab reconciliation design and its work order record that existing-contract
+repair. Public docs need no change: existing Rename and workflow actions retain
+the same entry points, semantics, and terminology.
+
+Post-remediation commands (from repository root):
+
+- `pnpm --dir apps/web exec vitest run components/task/session-tab-menu.test.tsx components/task/preview-session-tabs.test.tsx`: 45 passed.
+- The three Vitest suites in Verification: 60 passed.
+- `PATH=/usr/local/go/bin:$PATH scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --project chromium e2e/tests/workflow/workflow-step-move-overrides.spec.ts e2e/tests/settings/agents-browse-page.spec.ts e2e/tests/session/session-tab-rename.spec.ts -- --retries=0`: 9 passed (1.2m).
+- Focused ESLint for the changed component, menu, tests, and geometry helper: passed.
+- Harness validation: 19 harness tests, all 204 files, and 36 spec-linter tests passed.
+- Catalog validation: 381 decisions and 1594 specifications; full spec lint passed.
+
+- `PATH=/usr/local/go/bin:$PATH scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --no-build --project mobile-chrome e2e/tests/workflow/mobile-workflow-step-move-overrides.spec.ts e2e/tests/chat/mobile-chat-status-bar.spec.ts -- --retries=0`: 8 passed (1.1m), including the landed phone/coarse-tablet action bar scenarios.
+- Prettier formatted the geometry helper and screenshot call; remaining changed TypeScript files were already formatted.
+- The required staged Go format check identified four incoming base files; normalized indentation with `gofmt`, with an empty whitespace-insensitive diff against main. No Go logic changed.
+
+Fresh screenshot publication and remote CI/review completion remain pending
+for the new head. Strict whitespace checks on the incoming main
+delta identify pre-existing CRLF audit CSVs; the PR delta against main is clean.

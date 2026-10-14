@@ -9,16 +9,11 @@ import { useSidebarShortcutCatalog } from "./use-sidebar-shortcut-catalog";
 import { useShortcutActivity } from "./use-shortcut-activity";
 import { fromApiSidebarLayout } from "@/lib/sidebar/layout-types";
 import { projectSidebarLayout } from "@/lib/sidebar/layout-projection";
-
-const BUILTIN_LABEL_KEYS: Record<string, string> = {
-  home: "sidebar:home",
-  new_task: "sidebar:newTask",
-  automations: "common:automations",
-  canvases: "canvases:canvases",
-  integrations: "common:integrations",
-  inbox: "sidebar:inbox",
-  needs_you_inbox: "sidebar:inbox",
-};
+import {
+  BUILTIN_LAYOUT_NODES,
+  builtinLayoutNodeLabelKey,
+  type BuiltinLayoutContext,
+} from "@/lib/sidebar/builtin-layout-nodes";
 
 export function useHasSavedSidebarLayout(): boolean {
   return useAppStore((state) => {
@@ -32,6 +27,7 @@ export function useSidebarLayoutNavigation({ active = true }: { active?: boolean
   const inOffice = useOfficeModeState() === "office";
   const needsYouInbox = useFeature("needsYouInbox");
   const canvasesEnabled = useFeature("canvases");
+  const coordinatorEnabled = useFeature("coordinator");
   const workspaceId = useAppStore((state) => state.workspaces.activeId ?? undefined);
   const savedLayout = useAppStore((state) => {
     const activeWorkspaceId = state.workspaces.activeId;
@@ -41,38 +37,43 @@ export function useSidebarLayoutNavigation({ active = true }: { active?: boolean
   });
   const catalog = useSidebarShortcutCatalog({ active });
   const layout = useMemo(() => fromApiSidebarLayout(savedLayout), [savedLayout]);
+  const builtinContext = useMemo<BuiltinLayoutContext>(
+    () => ({
+      hasWorkspace: Boolean(workspaceId),
+      inOffice,
+      features: {
+        coordinator: coordinatorEnabled,
+        canvases: canvasesEnabled,
+        needsYouInbox,
+      },
+    }),
+    [canvasesEnabled, coordinatorEnabled, inOffice, needsYouInbox, workspaceId],
+  );
+  const builtinLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        BUILTIN_LAYOUT_NODES.map((node) => [
+          node.destinationId,
+          t(builtinLayoutNodeLabelKey(node, builtinContext)),
+        ]),
+      ),
+    [builtinContext, t],
+  );
   const rawProjection = useMemo(
     () =>
       projectSidebarLayout(layout, catalog.catalog, {
         unavailableLabel: t("common:unavailable"),
-        builtinLabels: Object.fromEntries(
-          Object.entries(BUILTIN_LABEL_KEYS).map(([id, key]) => [id, t(key)]),
-        ),
+        builtinLabels,
+        builtinContext,
       }),
-    [catalog.catalog, layout, t],
+    [builtinContext, builtinLabels, catalog.catalog, layout, t],
   );
   const projection = useMemo(
     () => ({
       ...rawProjection,
-      nodes: rawProjection.nodes
-        .filter((node) => {
-          if (node.destinationId === "inbox") return inOffice;
-          if (node.destinationId === "needs_you_inbox") return needsYouInbox;
-          if (node.destinationId === "canvases") return canvasesEnabled && !inOffice;
-          if (
-            inOffice &&
-            (node.destinationId === "integrations" || node.destinationId === "automations")
-          )
-            return false;
-          return node.kind !== "plugin" || node.available !== false;
-        })
-        .map((node) =>
-          node.destinationId === "needs_you_inbox" && inOffice
-            ? { ...node, label: t("sidebar:needsYouInbox") }
-            : node,
-        ),
+      nodes: rawProjection.nodes.filter((node) => node.available !== false),
     }),
-    [rawProjection, inOffice, needsYouInbox, canvasesEnabled, t],
+    [rawProjection],
   );
   const automationIds = useMemo(() => {
     const ids = new Set<string>();

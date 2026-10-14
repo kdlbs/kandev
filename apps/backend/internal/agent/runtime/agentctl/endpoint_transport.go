@@ -726,7 +726,16 @@ func mergeEndpointQuery(endpointQuery, requestQuery string) string {
 	return endpointValues.Encode()
 }
 
-func (t *endpointRoundTripper) dialWebSocket(ctx context.Context, endpoint *url.URL, lease *ConnectionLease, route string, callerHeaders http.Header, callerProtocols []string, instanceID string) (*websocket.Conn, *http.Response, error) {
+func (t *endpointRoundTripper) dialWebSocket(
+	ctx context.Context,
+	endpoint *url.URL,
+	lease *ConnectionLease,
+	route string,
+	callerHeaders http.Header,
+	callerProtocols []string,
+	instanceID string,
+	registerConn func(net.Conn) error,
+) (*websocket.Conn, *http.Response, error) {
 	u, err := joinEndpointPath(endpoint, route)
 	if err != nil {
 		return nil, nil, err
@@ -734,7 +743,6 @@ func (t *endpointRoundTripper) dialWebSocket(ctx context.Context, endpoint *url.
 	dialer := *websocket.DefaultDialer
 	dialer.Subprotocols = append([]string(nil), callerProtocols...)
 	if lease != nil {
-		dialer.NetDialContext = t.transport.DialContext
 		dialer.NetDialTLSContext = nil
 		if t.transport.TLSClientConfig != nil {
 			dialer.TLSClientConfig = t.transport.TLSClientConfig.Clone()
@@ -754,7 +762,53 @@ func (t *endpointRoundTripper) dialWebSocket(ctx context.Context, endpoint *url.
 	if instanceID != "" {
 		callerHeaders.Set("X-Instance-ID", instanceID)
 	}
+	installWebSocketConnRegistration(&dialer, t.transport.DialContext, registerConn)
 	return dialer.DialContext(ctx, u.String(), callerHeaders)
+}
+
+func installWebSocketConnRegistration(
+	dialer *websocket.Dialer,
+	dialContext func(context.Context, string, string) (net.Conn, error),
+	registerConn func(net.Conn) error,
+) {
+	if dialContext != nil {
+		dialer.NetDialContext = dialContext
+	}
+	if registerConn == nil {
+		return
+	}
+	if dialer.NetDialContext == nil {
+		if dialer.NetDial != nil {
+			legacyDial := dialer.NetDial
+			dialer.NetDialContext = func(_ context.Context, network, address string) (net.Conn, error) {
+				return legacyDial(network, address)
+			}
+		} else {
+			defaultDialer := &net.Dialer{}
+			dialer.NetDialContext = defaultDialer.DialContext
+		}
+	}
+	dialer.NetDialContext = registerWebSocketConn(dialer.NetDialContext, registerConn)
+	if dialer.NetDialTLSContext != nil {
+		dialer.NetDialTLSContext = registerWebSocketConn(dialer.NetDialTLSContext, registerConn)
+	}
+}
+
+func registerWebSocketConn(
+	dial func(context.Context, string, string) (net.Conn, error),
+	registerConn func(net.Conn) error,
+) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		conn, err := dial(ctx, network, address)
+		if err != nil {
+			return nil, err
+		}
+		if err := registerConn(conn); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		return conn, nil
+	}
 }
 
 func mergeHeaders(base, override http.Header) http.Header {
@@ -782,6 +836,27 @@ func appendUnique(existing []string, add ...string) []string {
 }
 
 func (c *Client) dialWebSocket(ctx context.Context, route string, callerHeaders http.Header, callerProtocols ...string) (*websocket.Conn, *http.Response, error) {
+	return c.dialWebSocketWithOptions(ctx, route, callerHeaders, nil, false, callerProtocols...)
+}
+
+func (c *Client) dialWebSocketWithConn(
+	ctx context.Context,
+	route string,
+	callerHeaders http.Header,
+	registerConn func(net.Conn) error,
+	callerProtocols ...string,
+) (*websocket.Conn, *http.Response, error) {
+	return c.dialWebSocketWithOptions(ctx, route, callerHeaders, registerConn, true, callerProtocols...)
+}
+
+func (c *Client) dialWebSocketWithOptions(
+	ctx context.Context,
+	route string,
+	callerHeaders http.Header,
+	registerConn func(net.Conn) error,
+	allowClosed bool,
+	callerProtocols ...string,
+) (*websocket.Conn, *http.Response, error) {
 	boundCtx, cancel, err := c.RuntimeBoundContext(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -800,7 +875,16 @@ func (c *Client) dialWebSocket(ctx context.Context, route string, callerHeaders 
 			return nil, nil, errors.New("remote executor lease endpoint is invalid")
 		}
 		var dialErr error
-		conn, response, dialErr = c.endpointTransport.dialWebSocket(boundCtx, endpoint, lease, route, callerHeaders, callerProtocols, c.executionID)
+		conn, response, dialErr = c.endpointTransport.dialWebSocket(
+			boundCtx,
+			endpoint,
+			lease,
+			route,
+			callerHeaders,
+			callerProtocols,
+			c.executionID,
+			registerConn,
+		)
 		if dialErr != nil {
 			return nil, response, dialErr
 		}
@@ -826,28 +910,36 @@ func (c *Client) dialWebSocket(ctx context.Context, route string, callerHeaders 
 		if c.executionID != "" {
 			callerHeaders.Set("X-Instance-ID", c.executionID)
 		}
+		installWebSocketConnRegistration(&dialer, nil, registerConn)
 		conn, response, err = dialer.DialContext(boundCtx, endpoint.String(), callerHeaders)
 	}
 	if err != nil {
 		return nil, response, err
 	}
+	if err := c.registerRuntimeWebSocket(conn, allowClosed); err != nil {
+		return nil, response, err
+	}
+	return conn, response, nil
+}
+
+func (c *Client) registerRuntimeWebSocket(conn *websocket.Conn, allowClosed bool) error {
 	if c.runtimeGuard == nil {
-		return conn, response, nil
+		return nil
 	}
 	stop := context.AfterFunc(c.runtimeGuard.binding.ctx, func() { _ = conn.Close() })
 	c.mu.Lock()
-	if c.closed || !c.runtimeGuard.current() {
+	if (c.closed && !allowClosed) || !c.runtimeGuard.current() {
 		c.mu.Unlock()
 		stop()
 		_ = conn.Close()
-		return nil, response, ErrRuntimeLeaseRetired
+		return ErrRuntimeLeaseRetired
 	}
 	if c.runtimeConns == nil {
 		c.runtimeConns = make(map[*websocket.Conn]func() bool)
 	}
 	c.runtimeConns[conn] = stop
 	c.mu.Unlock()
-	return conn, response, nil
+	return nil
 }
 
 // ConnectionGeneration resolves and returns the current provider connection

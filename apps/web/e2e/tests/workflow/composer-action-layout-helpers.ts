@@ -38,21 +38,31 @@ export async function expectComposerActionLayout(
   await expect(proceed).toHaveCount(1);
   await expect(proceed).toBeVisible();
   const rowBox = await row.boundingBox();
-  const controlsBox = await controls.boundingBox();
+  const controlBoxes = await controls.locator("button:visible").evaluateAll((elements) =>
+    elements.map((element) => {
+      const { x, y, width, height } = element.getBoundingClientRect();
+      return { x, y, width, height };
+    }),
+  );
+  expect(controlBoxes.length).toBeGreaterThan(0);
+  const controlsBox = {
+    x: Math.min(...controlBoxes.map((box) => box.x)),
+    y: Math.min(...controlBoxes.map((box) => box.y)),
+    right: Math.max(...controlBoxes.map((box) => box.x + box.width)),
+    bottom: Math.max(...controlBoxes.map((box) => box.y + box.height)),
+  };
   const proceedBox = await proceed.boundingBox();
   expect(rowBox).not.toBeNull();
-  expect(controlsBox).not.toBeNull();
   expect(proceedBox).not.toBeNull();
-  if (!rowBox || !controlsBox || !proceedBox)
-    throw new Error("composer controls are not measurable");
+  if (!rowBox || !proceedBox) throw new Error("composer controls are not measurable");
 
   if (wrapped) {
-    expect(proceedBox.y).toBeGreaterThanOrEqual(controlsBox.y + controlsBox.height);
+    expect(proceedBox.y).toBeGreaterThanOrEqual(controlsBox.bottom);
   } else if (wrapped === false) {
     expect(
-      Math.abs(proceedBox.y + proceedBox.height / 2 - controlsBox.y - controlsBox.height / 2),
+      Math.abs(proceedBox.y + proceedBox.height / 2 - (controlsBox.y + controlsBox.bottom) / 2),
     ).toBeLessThanOrEqual(1);
-    expect(proceedBox.x).toBeGreaterThanOrEqual(controlsBox.x + controlsBox.width);
+    expect(proceedBox.x).toBeGreaterThanOrEqual(controlsBox.right);
   }
   const padding = await row.evaluate((element) => {
     const style = getComputedStyle(element);
@@ -79,6 +89,8 @@ export async function expectComposerActionLayout(
       }),
     )
     .toBe(true);
-  await expect(actions).toHaveCSS("justify-content", "flex-end");
+  const phone = (await chat.page().evaluate(() => window.innerWidth)) < 768;
+  await expect(actions).toHaveCSS("display", phone ? "contents" : "flex");
+  if (!phone) await expect(actions).toHaveCSS("justify-content", "flex-end");
   await assertNoDocumentHorizontalOverflow(chat.page());
 }

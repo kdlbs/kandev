@@ -2,7 +2,7 @@
 status: active
 system: workspaces
 created: 2026-07-20
-updated: 2026-10-06
+updated: 2026-10-12
 owners:
   - kandev
 ---
@@ -179,6 +179,9 @@ behind a macOS access failure.
   polling active.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-004.5:** A denied watched path shall stop
   automatic polling until a visible user action retries access.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-004.6:** While unfocused scans observe no
+  change, each polling loop can lengthen its 30-second interval to 5 minutes; an
+  observed change or a mode push shall restore 30 seconds.
 
 ## Migrated source detail
 

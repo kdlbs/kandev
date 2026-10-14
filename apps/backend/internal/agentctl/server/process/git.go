@@ -469,6 +469,12 @@ func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResul
 		if defaultBranch := g.getDefaultRemoteBranch(ctx); defaultBranch != "" {
 			pullBranch = defaultBranch
 		}
+	} else {
+		remote, pullBranch, err = g.resolvePullUpstream(ctx, branch)
+		if err != nil {
+			result.Error = err.Error()
+			return result, nil
+		}
 	}
 
 	var args []string

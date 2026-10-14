@@ -28,11 +28,16 @@ A shortcut is a reference to an existing destination or supported host action.
 
 ### REQ-UI-SIDEBAR-CUSTOMIZATION-001: Personal workspace layout
 
-- **AC-UI-SIDEBAR-CUSTOMIZATION-001.1:** Users shall hide, show, and reorder Home, New Task, eligible Inbox entries, Automations, Canvases, Integrations, and available plugin navigation entries. Hiding an entry shall not disable its underlying capability.
+- **AC-UI-SIDEBAR-CUSTOMIZATION-001.1:** Users shall hide, show, and reorder Home, New Task, eligible Inbox entries, Coordinators, Automations, Canvases, Integrations, and available plugin navigation entries. Hiding an entry shall not disable its underlying capability.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-001.2:** Each user's workspace shall retain its own saved layout across reloads and signed-in clients. Changes shall not affect other users or workspaces.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-001.3:** A workspace without a saved layout shall place primary New Task before Home, followed by eligible tools. Restore defaults shall reset only that workspace's layout after Save changes.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-001.4:** Settings, workspace switching, and Tasks shall remain reachable. Hidden Inbox entries shall remain available through their existing routes and commands. Hiding Home shall not change the startup destination or brand-link destination.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-001.5:** Layout preferences shall affect the sidebar and corresponding phone navigation, without removing commands from search or changing settings navigation.
+
+- **AC-UI-SIDEBAR-CUSTOMIZATION-001.6:** When a feature adds an eligible sidebar entry, Sidebar settings and the Settings layout editor shall offer that entry independently. The same rule shall apply to phone customization. An empty resource list shall not remove its configuration choice.
+- **AC-UI-SIDEBAR-CUSTOMIZATION-001.7:** Feature eligibility shall take precedence over saved visibility. Disabled features shall not appear as active navigation or selectable shortcut targets. Existing saved nodes shall retain their visibility and position. Settings shall identify unavailable saved entries without activating them. Eligible returning entries shall recover their saved choices.
+- **AC-UI-SIDEBAR-CUSTOMIZATION-001.8:** Coordinators shall use the same icon, sentence-case label, and disclosure treatment as Automations and Canvases. Its visibility and position shall be independent of Automations. The fast action preference shall govern its header shortcut. When fast actions are hidden, the expanded list shall provide the same destination through a labelled link.
+- **AC-UI-SIDEBAR-CUSTOMIZATION-001.9:** When a saved layout lacks Coordinators, it shall gain that entry before Automations, or last when Automations is absent. Existing nodes shall retain their relative order and visibility. Ordinary reads shall never duplicate or reposition an existing Coordinators entry.
 
 ### REQ-UI-SIDEBAR-CUSTOMIZATION-002: Mixed shortcut sections
 
@@ -154,3 +159,5 @@ these fixed entries. Phone composition follows the
 - [Sidebar customization](../../../plans/sidebar-customization/plan.md)
 - [Mobile saved navigation](../../../plans/mobile-saved-navigation/plan.md)
 - [Sidebar preferences and direct editing](../../../plans/sidebar-presentation-preferences/plan.md)
+
+- [Flagged sidebar entries update](../../../plans/flagged-sidebar-entries/plan.md)

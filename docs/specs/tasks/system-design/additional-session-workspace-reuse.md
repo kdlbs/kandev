@@ -138,6 +138,25 @@ establish a new canonical worktree before this admission check. It holds its own
 environment claim and leaves admission read-only. A failed relocation cannot
 make an invalid checkout ready.
 
+A session binding that loses the materializer election is refused with
+`workspace_preparing`, which names the elected environment. For a shared group
+that environment belongs to another member task. Session preparation waits for
+that environment with the same bounded wait the launch path uses for a creating
+sibling, then retries the binding once. Before the retry it re-reads the task's
+sessions. The repository rechecks primary ownership under the task row lock on
+PostgreSQL or the SQLite writer transaction, alongside the first-session origin
+and initial runtime seed. This decision is returned on the inserted session;
+the caller uses it for primary notifications and does not promote a retry again
+after insertion. Concurrent retries for one shared-group member cannot replace
+each other's primary or consume the initial runtime seed twice. Explicit manual
+primary selection keeps its existing behavior. A failed environment, a wait that ends
+without readiness, or an environment owned by the same session keeps the
+original refusal, so no session or workspace is created.
+Cancellation before or after the wait also keeps the refusal without invoking
+the retry. The existing recovery admission remains held through binding and is
+released on both successful and failed preparation; retry does not grant a new
+recovery authority.
+
 The lifecycle manager retains a defense-in-depth guard: if a repo-backed
 `WorkspaceInfo` reaches execution creation without the validated-environment
 marker and exact selected environment identity, it refuses to create the

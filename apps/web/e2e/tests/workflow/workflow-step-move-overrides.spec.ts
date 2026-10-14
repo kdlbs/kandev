@@ -60,6 +60,15 @@ test("keeps the workflow action right-aligned on a phone with a mouse and on des
         wrapped,
         touch: width < 768,
       });
+      if (width === 360 || width === 1440) {
+        await testPage.screenshot({
+          path: test
+            .info()
+            .outputPath(
+              width === 360 ? "workflow-action-mouse-phone.png" : "workflow-action-desktop.png",
+            ),
+        });
+      }
     }
     await apiClient.updateWorkflowStep(fixture.targetStepId, {
       name: "Open pull request for review",

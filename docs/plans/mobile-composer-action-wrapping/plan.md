@@ -27,7 +27,9 @@ without changing commands, terminology, or user steps.
 
 Follow `PassthroughStatusRow`'s wrapping action-group pattern in
 `ChatStatusBarActions`: end justification with a bounded maximum width. Preserve
-DOM order and existing handlers. Extend the workflow move fixture for rendered
+DOM order and existing handlers. On phones, preserve the landed mobile action
+bar's `display: contents` wrappers and trailing button auto margin; measure
+visible utility controls directly. Extend the workflow move fixture for rendered
 coverage, using genuine transcript controls and disposable test data.
 Keep the phone workflow action at a minimum of 44px in each dimension with
 either pointer, while retaining the existing 24px desktop height.
@@ -115,3 +117,15 @@ An idle transcript can hide navigation controls and fail to reproduce wrapping.
 Tests must prove the wrapped layout before asserting its alignment. A class-only
 test would miss this regression. The existing non-wrapping utility cluster may
 have separate constraints below 360px; this package does not redesign it.
+
+
+## Current-main reconciliation
+
+On 2026-10-14, preserved the newer phone action-bar composition while retaining
+this plan's right alignment and 44px target contract. The browser helper now
+measures actual utility-control bounds. Both failed CI cases are remediated:
+the fallback-summary test selects its seeded profile owner, and the shared
+session menu starts inline rename after menu focus restoration. Component
+validation passed 105 tests; browser validation passed 9 desktop and 8 mobile
+tests with retries disabled. Detailed red/green evidence and commands are in
+the work order. Remote CI/review and new screenshot publication remain pending.

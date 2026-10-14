@@ -111,12 +111,20 @@ func (a *Adapter) startUpdateWorker() {
 // matching the SDK's own serial delivery contract.
 func (a *Adapter) runUpdateWorker() {
 	defer a.workerWg.Done()
+	defer a.discardShellSnapshot()
+	var snapshotTick <-chan time.Time
+	if a.shellSnapshotTimer != nil {
+		snapshotTick = a.shellSnapshotTimer.C
+	}
 	for {
 		select {
 		case <-a.lifetimeCtx.Done():
 			return
+		case <-snapshotTick:
+			a.flushDueShellSnapshot()
 		case item := <-a.notifQueue:
 			if item.sync != nil {
+				a.flushShellSnapshot()
 				if item.afterBarrier != nil && a.lifetimeCtx.Err() == nil {
 					item.afterBarrier()
 				}
@@ -261,7 +269,11 @@ func (a *Adapter) handleACPUpdate(
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, event)
 		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
 			event.Type, rawData, event)
-		a.sendUpdate(*event)
+		if shellSnapshotEligible(n, event) {
+			a.sendShellSnapshot(*event, promptGeneration)
+		} else {
+			a.sendUpdate(*event)
+		}
 		a.maybeScheduleAsyncTurnComplete(*event)
 	} else if !handled {
 		if updateJSON, err := json.Marshal(n.Update); err == nil {

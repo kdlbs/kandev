@@ -14,7 +14,7 @@ func TestToolForAction_CoversEveryBoundTool(t *testing.T) {
 		reachable[tool] = true
 	}
 	for _, phase2 := range []bool{false, true} {
-		for _, tool := range ToolNames(p, phase2) {
+		for _, tool := range ToolNames(p, phase2, false) {
 			if !reachable[tool] {
 				t.Errorf("phase2=%v: tool %q is bound but no action maps to it", phase2, tool)
 			}

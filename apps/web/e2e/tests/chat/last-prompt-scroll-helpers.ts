@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
@@ -12,13 +12,61 @@ export const LAST_PROMPT_MARKER =
 const MIDDLE_FILLER_COUNT = 30;
 const TRAILING_FILLER_COUNT = 50;
 
+export async function persistedLastPromptId(
+  apiClient: ApiClient,
+  sessionId: string,
+): Promise<string> {
+  const { messages } = await apiClient.listSessionMessages(sessionId);
+  const prompt = messages.find(
+    (message) => message.author_type === "user" && message.content === LAST_PROMPT_MARKER,
+  );
+  if (!prompt) throw new Error("Last prompt was not persisted");
+  return prompt.id;
+}
+
+export async function expectPromptAlignedAtStart(row: Locator): Promise<void> {
+  await expect(row).toBeAttached();
+  await expect
+    .poll(
+      async () => {
+        const metrics = await row.evaluate((element) => {
+          const scrollport = element.closest<HTMLElement>(".chat-message-list");
+          if (!scrollport) return { aligned: false, reason: "missing-scrollport" };
+          const rowRect = element.getBoundingClientRect();
+          const listRect = scrollport.getBoundingClientRect();
+          const margin = parseFloat(getComputedStyle(element).scrollMarginTop) || 0;
+          const delta = rowRect.top - listRect.top - margin;
+          const aligned = Math.abs(delta) <= 2;
+          // Around-window loads can make the target the first row. At scrollTop 0,
+          // positive scroll-margin cannot be satisfied; accept that nearest
+          // position only when the row is not clipped above.
+          const atTopBoundary =
+            scrollport.scrollTop <= 2 && delta < -2 && rowRect.top >= listRect.top - 2;
+          return {
+            aligned: aligned || atTopBoundary,
+            delta,
+            rowTop: rowRect.top,
+            listTop: listRect.top,
+            scrollTop: scrollport.scrollTop,
+            scrollHeight: scrollport.scrollHeight,
+            clientHeight: scrollport.clientHeight,
+            margin,
+          };
+        });
+        return metrics.aligned ? "aligned" : `misaligned: ${JSON.stringify(metrics)}`;
+      },
+      { timeout: 5_000 },
+    )
+    .toBe("aligned");
+}
+
 /**
  * Boots an idle session, sends `FIRST_PROMPT_MARKER` as the first user
  * prompt, buries it under filler, sends `LAST_PROMPT_MARKER` as a second,
- * later prompt (the "last prompt"), then buries that under more trailing
- * filler so the transcript auto-scrolls both prompts out of view above the
- * fold — exactly the "scrolled way down" scenario the scroll-to-last-prompt
- * and scroll-to-start affordances exist for. Keeping the two prompts
+ * later prompt (the "last prompt"), then seeds trailing filler and scrolls to
+ * its final message. This places both prompts above the fold for the "scrolled
+ * way down" scenario the scroll-to-last-prompt and scroll-to-start affordances
+ * exist for. Keeping the two prompts
  * distinct lets tests assert each button jumps to its own target.
  */
 export async function seedScrolledPastLastPrompt(
@@ -79,9 +127,11 @@ export async function seedScrolledPastLastPrompt(
   await send(opts.lastPromptText ?? LAST_PROMPT_MARKER);
   const trailingFillerCount = opts.trailingFillerCount ?? TRAILING_FILLER_COUNT;
   await apiClient.seedAgentMessages(sessionId, trailingFillerCount);
-  await expect(
-    session.activeChat().getByText(`filler message ${trailingFillerCount}`, { exact: false }),
-  ).toBeVisible({ timeout: 15_000 });
+  const lastFiller = session
+    .activeChat()
+    .getByText(`filler message ${trailingFillerCount}`, { exact: false });
+  await expect(lastFiller).toBeVisible({ timeout: 15_000 });
+  await lastFiller.scrollIntoViewIfNeeded();
 
   return session;
 }

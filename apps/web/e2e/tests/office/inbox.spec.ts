@@ -1,21 +1,22 @@
 import { test, expect } from "../../fixtures/office-fixture";
 import { officeTopbarTitle } from "../../helpers/office-topbar";
 
-test.describe("Inbox", () => {
-  test("inbox starts empty", async ({ officeApi, officeSeed }) => {
-    const inbox = await officeApi.getInbox(officeSeed.workspaceId);
-    expect(inbox).toBeDefined();
-  });
-
-  test("approvals list is initially empty", async ({ officeApi, officeSeed }) => {
-    const approvals = await officeApi.listApprovals(officeSeed.workspaceId);
-    expect(approvals).toBeDefined();
-  });
-
-  test("inbox page renders", async ({ testPage, officeSeed: _ }) => {
-    await testPage.goto("/office/inbox");
-    await expect(officeTopbarTitle(testPage)).toHaveText(/inbox/i, {
-      timeout: 10_000,
-    });
-  });
+test("inbox and approval endpoints serve the Inbox page", async ({
+  testPage,
+  officeApi,
+  officeSeed,
+}) => {
+  const inbox = (await officeApi.getInbox(officeSeed.workspaceId)) as {
+    items: unknown[];
+    total_count: number;
+  };
+  expect(Array.isArray(inbox.items)).toBe(true);
+  expect(inbox.total_count).toBe(inbox.items.length);
+  const approvals = (await officeApi.listApprovals(officeSeed.workspaceId)) as {
+    approvals: unknown[];
+  };
+  expect(Array.isArray(approvals.approvals)).toBe(true);
+  await testPage.goto("/office/inbox");
+  await expect(officeTopbarTitle(testPage)).toHaveText("Inbox", { timeout: 10_000 });
+  await expect(testPage.getByRole("tab", { name: "Mine" })).toBeVisible();
 });

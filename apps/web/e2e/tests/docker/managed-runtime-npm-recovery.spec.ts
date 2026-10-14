@@ -12,6 +12,17 @@ import {
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Docker executor - managed npm runtime recovery", () => {
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status !== testInfo.expectedStatus) {
+      await testInfo
+        .attach("managed-runtime-recovery-backend.log", {
+          path: backend.logPath,
+          contentType: "text/plain",
+        })
+        .catch(() => undefined);
+    }
+  });
+
   test("retries online without deleting the executor tree", async ({
     apiClient,
     backend,

@@ -226,7 +226,7 @@ async function inspectFailedStartup(options: {
   await session.waitForLoad();
   await expect(session.activeChat().getByTestId("session-recovery-card")).toBeVisible();
   await expect(session.recoveryFreshButton()).toBeVisible();
-  const { sessions } = await apiClient.listTaskSessions(taskId);
+  const { sessions } = await apiClient.listTaskSessionDetails(taskId);
   const captured = sessions.find((entry) => entry.id === sessionId);
   if (!captured) throw new Error("initial recovery session was not persisted");
   const submissionValue = captured.metadata?.initial_prompt_submission;
@@ -416,7 +416,7 @@ async function assertReplayDelivery(context: ScenarioContext) {
     "mock agent did not report the materialized resource path",
   );
   expect(relativePath).toMatch(/\.kandev\/attachments\//);
-  const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
+  const { sessions } = await apiClient.listTaskSessionDetails(fixture.taskId);
   const recovered = sessions.find((entry) => entry.id === fixture.sessionId);
   const workspacePath = requireValue(
     recovered?.workspace_path,

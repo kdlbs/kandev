@@ -63,6 +63,7 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 		return
 	}
 	if s.settleRetainedTurnFailure(ctx, data, session) {
+		s.settleFailedDeliveryWorkflowOutcome(context.WithoutCancel(ctx), data)
 		s.acknowledgeRetainedTurnFailure(data)
 	} else {
 		s.logger.Warn("retained turn failure settlement did not complete; successor admission remains fenced",
@@ -109,11 +110,18 @@ func (s *Service) handleAutomationOwnedTurnFailure(
 	if task == nil || !models.IsAutomationTaskOrigin(task.Origin) {
 		return false
 	}
+	if s.automationOwnsRetrySession(ctx, data.TaskID, data.SessionID) {
+		// Only the captured terminal turn can release a retry's launch fence.
+		if !s.releaseRetryTurnFailureOwnership(ctx, data) {
+			return true
+		}
+	}
 	// Automation owns terminal turn handling and concurrency-slot release.
 	// Reuse that owner under the identity guard instead of parking the
 	// failure in interactive Chat state.
 	dispatch := s.handleAgentFailedLocked(ctx, data)
 	releaseGuard()
+	s.settleFailedDeliveryWorkflowOutcome(context.WithoutCancel(ctx), data)
 	if dispatch != nil {
 		s.startAgentFailureRecovery(dispatch)
 	}

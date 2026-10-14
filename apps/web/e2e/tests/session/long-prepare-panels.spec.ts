@@ -32,8 +32,9 @@ test.describe("Long prepare (slow git fetch)", () => {
     // Hold the actual fetch so the file-tree retry budget is measured from the
     // preparation boundary, not from task creation or page navigation.
     const gateFile = path.join(backend.tmpDir, "git-delay-ms");
-    const startedFile = path.join(backend.tmpDir, "git-fetch-started");
-    const releaseFile = path.join(backend.tmpDir, "git-fetch-release");
+    const gateDir = fs.mkdtempSync(path.join(backend.tmpDir, "long-prepare-"));
+    const startedFile = path.join(gateDir, "started");
+    const releaseFile = path.join(gateDir, "release");
     const repositoryResponse = await apiClient.rawRequest(
       "GET",
       `/api/v1/repositories/${seedData.repositoryId}`,
@@ -105,8 +106,8 @@ test.describe("Long prepare (slow git fetch)", () => {
         });
       } finally {
         if (fs.existsSync(gateFile)) fs.unlinkSync(gateFile);
-        if (fs.existsSync(startedFile)) fs.unlinkSync(startedFile);
-        if (fs.existsSync(releaseFile)) fs.unlinkSync(releaseFile);
+        // Keep the unique release flag until worker cleanup so a held Git process
+        // cannot miss it between polling intervals.
       }
     }
   });

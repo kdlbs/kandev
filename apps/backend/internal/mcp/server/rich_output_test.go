@@ -57,11 +57,12 @@ func TestRichOutputToolResolvesCSVChartSnapshot(t *testing.T) {
 		"session_id": "session-1", "path": "reports/latency.csv", "repo": "api",
 	}, backend.lastPayload)
 	want := map[string]interface{}{
-		"version": 1,
+		"version":         2,
+		"catalog_version": 1,
 		"resolved_charts": []interface{}{
 			map[string]interface{}{
-				"block_index": 0,
-				"labels":      []interface{}{"2026-08-13T10:00:00Z", "2026-08-14T10:00:00Z"},
+				"element_id": "chart",
+				"labels":     []interface{}{"2026-08-13T10:00:00Z", "2026-08-14T10:00:00Z"},
 				"series": []interface{}{
 					map[string]interface{}{"label": "p50", "values": []interface{}{18.2, 16.4}},
 					map[string]interface{}{"label": "p95_ms", "values": []interface{}{29.4, nil}},
@@ -161,11 +162,11 @@ func TestRichOutputToolDescriptionStaysFocusedAndDiscoverable(t *testing.T) {
 		assert.Contains(t, tool.Description, phrase)
 	}
 	for _, phrase := range []string{
-		"explicit chart, graph, plot, preview, KPI, or metrics request with data, call directly",
-		"Do not implement the display as ASCII, SVG, HTML, or with another app",
+		"chart, graph, plot, preview, KPI, or metrics request with data, call directly",
+		"No ASCII, SVG, HTML, or separate app",
 		"Kandev owns axes, legends, tooltips, layout, and styling",
-		"task-workspace-relative",
-		"Markdown only for small text tables",
+		"workspace-relative",
+		"Markdown for small text tables",
 		"Label series with units",
 	} {
 		assert.Contains(t, tool.Description, phrase)
@@ -176,6 +177,13 @@ func TestRichOutputToolDescriptionStaysFocusedAndDiscoverable(t *testing.T) {
 	assert.NotContains(t, tool.Description, `"x_column":"recorded_at"`)
 
 	encoded := tool.RawInputSchema
+	var compact strings.Builder
+	var schemaDocument interface{}
+	require.NoError(t, json.Unmarshal(encoded, &schemaDocument))
+	compactBytes, err := json.Marshal(schemaDocument)
+	require.NoError(t, err)
+	compact.Write(compactBytes)
+	encoded = []byte(compact.String())
 	require.NotEmpty(t, encoded)
 	for _, phrase := range []string{"workspace-relative CSV", "x-axis", "numeric column"} {
 		assert.Contains(t, string(encoded), phrase)
@@ -194,7 +202,7 @@ func TestRichOutputToolDescriptionStaysFocusedAndDiscoverable(t *testing.T) {
 func TestRichOutputToolRejectsMismatchedChartSeries(t *testing.T) {
 	s := New(&testBackend{}, "session-1", "task-1", 10005, newTestLogger(t), "", false, ModeTask)
 	args := validRichOutputArgs()
-	chart := args["blocks"].([]interface{})[1].(map[string]interface{})
+	chart := richOutputTestProps(args, "chart")
 	series := chart["series"].([]interface{})[0].(map[string]interface{})
 	series["values"] = []interface{}{18.2}
 
@@ -221,7 +229,7 @@ func TestRichOutputToolRejectsUnsafeFilePaths(t *testing.T) {
 		t.Run(filePath, func(t *testing.T) {
 			s := New(&testBackend{}, "session-1", "task-1", 10005, newTestLogger(t), "", false, ModeTask)
 			args := validRichOutputArgs()
-			file := args["blocks"].([]interface{})[2].(map[string]interface{})
+			file := richOutputTestProps(args, "file")
 			file["path"] = filePath
 
 			result := callTool(t, s, richOutputToolName, args)
@@ -259,7 +267,20 @@ func TestRichOutputToolRejectsOversizedPayload(t *testing.T) {
 			"series":     series,
 		}
 	}
-	args := map[string]interface{}{"version": 1, "title": "Too large", "blocks": blocks}
+	args := validRichOutputArgs()
+	elements := args["spec"].(map[string]interface{})["elements"].(map[string]interface{})
+	children := make([]interface{}, 4)
+	for i, raw := range blocks {
+		props := raw.(map[string]interface{})
+		delete(props, "type")
+		id := fmt.Sprintf("chart%d", i)
+		children[i] = id
+		elements[id] = map[string]interface{}{"type": "Chart", "props": props, "children": []interface{}{}}
+	}
+	delete(elements, "metrics")
+	delete(elements, "chart")
+	delete(elements, "file")
+	elements["report"].(map[string]interface{})["children"] = children
 	encoded, err := json.Marshal(args)
 	require.NoError(t, err)
 	require.Greater(t, len(encoded), 64*1024)
@@ -278,87 +299,43 @@ func TestRichOutputToolRejectsSchemaViolations(t *testing.T) {
 		name   string
 		mutate func(map[string]interface{})
 	}{
-		{
-			name: "unsupported version",
-			mutate: func(args map[string]interface{}) {
-				args["version"] = 2
-			},
-		},
-		{
-			name: "unknown top-level field",
-			mutate: func(args map[string]interface{}) {
-				args["theme"] = "neon"
-			},
-		},
-		{
-			name: "no blocks",
-			mutate: func(args map[string]interface{}) {
-				args["blocks"] = []interface{}{}
-			},
-		},
-		{
-			name: "unknown block type",
-			mutate: func(args map[string]interface{}) {
-				args["blocks"] = []interface{}{map[string]interface{}{"type": "table"}}
-			},
-		},
-		{
-			name: "too many metrics",
-			mutate: func(args map[string]interface{}) {
-				items := make([]interface{}, 7)
-				for i := range items {
-					items[i] = map[string]interface{}{"label": "Metric", "value": "1"}
-				}
-				args["blocks"] = []interface{}{map[string]interface{}{"type": "metrics", "items": items}}
-			},
-		},
-		{
-			name: "too many chart labels",
-			mutate: func(args map[string]interface{}) {
-				labels := make([]interface{}, 101)
-				values := make([]interface{}, 101)
-				for i := range labels {
-					labels[i] = "run"
-					values[i] = i
-				}
-				args["blocks"] = []interface{}{map[string]interface{}{
-					"type":       "chart",
-					"chart_type": "line",
-					"title":      "Runs",
-					"summary":    "Run history",
-					"labels":     labels,
-					"series": []interface{}{
-						map[string]interface{}{"label": "Seconds", "values": values},
-					},
-				}}
-			},
-		},
-		{
-			name: "CSV chart with stray inline labels",
-			mutate: func(args map[string]interface{}) {
-				args["blocks"] = csvRichOutputArgs()["blocks"]
-				chart := args["blocks"].([]interface{})[0].(map[string]interface{})
-				chart["labels"] = []interface{}{"run-1"}
-			},
-		},
-		{
-			name: "inline chart with stray CSV source",
-			mutate: func(args map[string]interface{}) {
-				chart := args["blocks"].([]interface{})[1].(map[string]interface{})
-				chart["csv"] = csvChartSource(csvRichOutputArgs())
-			},
-		},
+		{"unsupported version", func(args map[string]interface{}) { args["version"] = 3 }},
+		{"unknown root field", func(args map[string]interface{}) { args["theme"] = "neon" }},
+		{"empty group", func(args map[string]interface{}) {
+			args["spec"].(map[string]interface{})["elements"].(map[string]interface{})["report"].(map[string]interface{})["children"] = []interface{}{}
+		}},
+		{"unknown component", func(args map[string]interface{}) {
+			args["spec"].(map[string]interface{})["elements"].(map[string]interface{})["file"].(map[string]interface{})["type"] = "Table"
+		}},
+		{"too many metrics", func(args map[string]interface{}) {
+			items := make([]interface{}, 7)
+			for i := range items {
+				items[i] = map[string]interface{}{"label": "Metric", "value": "1"}
+			}
+			richOutputTestProps(args, "metrics")["items"] = items
+		}},
+		{"too many labels", func(args map[string]interface{}) {
+			labels := make([]interface{}, 101)
+			values := make([]interface{}, 101)
+			for i := range labels {
+				labels[i] = "run"
+				values[i] = i
+			}
+			richOutputTestProps(args, "chart")["labels"] = labels
+			richOutputTestProps(args, "chart")["series"] = []interface{}{map[string]interface{}{"label": "Count", "values": values}}
+		}},
+		{"inline with CSV", func(args map[string]interface{}) {
+			richOutputTestProps(args, "chart")["csv"] = csvChartSource(csvRichOutputArgs())
+		}},
+		{"unused MIME hint", func(args map[string]interface{}) { richOutputTestProps(args, "file")["mime_type"] = "text/plain" }},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			backend := &testBackend{}
 			s := New(backend, "session-1", "task-1", 10005, newTestLogger(t), "", false, ModeTask)
 			args := validRichOutputArgs()
 			tt.mutate(args)
-
 			result := callTool(t, s, richOutputToolName, args)
-
 			require.True(t, result.IsError)
 			assert.Empty(t, backend.lastAction)
 		})
@@ -367,65 +344,27 @@ func TestRichOutputToolRejectsSchemaViolations(t *testing.T) {
 
 func validRichOutputArgs() map[string]interface{} {
 	return map[string]interface{}{
-		"version":     1,
-		"title":       "Build health",
-		"description": "Latest local verification",
-		"blocks": []interface{}{
-			map[string]interface{}{
-				"type": "metrics",
-				"items": []interface{}{
-					map[string]interface{}{"label": "Passed", "value": "38"},
-				},
-			},
-			map[string]interface{}{
-				"type":       "chart",
-				"chart_type": "line",
-				"title":      "Runtime by run",
-				"summary":    "Runtime fell across the last three runs.",
-				"labels":     []interface{}{"1", "2", "3"},
-				"series": []interface{}{
-					map[string]interface{}{"label": "Seconds", "values": []interface{}{18.2, 16.4, nil}},
-				},
-			},
-			map[string]interface{}{
-				"type":      "file",
-				"path":      "reports/build.json",
-				"repo":      "kandev",
-				"title":     "Raw report",
-				"caption":   "Generated by verification",
-				"mime_type": "application/json",
-			},
-		},
+		"version": 2, "catalog_version": 1, "title": "Build health", "description": "Latest local verification",
+		"spec": map[string]interface{}{"root": "report", "elements": map[string]interface{}{
+			"report":  map[string]interface{}{"type": "Stack", "props": map[string]interface{}{"direction": "vertical"}, "children": []interface{}{"metrics", "chart", "file"}},
+			"metrics": map[string]interface{}{"type": "Metrics", "props": map[string]interface{}{"items": []interface{}{map[string]interface{}{"label": "Passed", "value": "38"}}}, "children": []interface{}{}},
+			"chart":   map[string]interface{}{"type": "Chart", "props": map[string]interface{}{"chart_type": "line", "title": "Runtime", "summary": "Runtime fell across recorded runs.", "labels": []interface{}{"1", "2", "3"}, "series": []interface{}{map[string]interface{}{"label": "Seconds", "values": []interface{}{18.2, 16.4, nil}}}}, "children": []interface{}{}},
+			"file":    map[string]interface{}{"type": "FilePreview", "props": map[string]interface{}{"path": "reports/build.json", "repo": "kandev", "title": "Raw report", "caption": "Generated by verification"}, "children": []interface{}{}},
+		}},
 	}
 }
-
 func csvRichOutputArgs() map[string]interface{} {
-	return map[string]interface{}{
-		"version": 1,
-		"title":   "API latency",
-		"blocks": []interface{}{
-			map[string]interface{}{
-				"type":       "chart",
-				"chart_type": "line",
-				"title":      "Latency over time",
-				"summary":    "p50 and p95 latency from the workspace report.",
-				"csv": map[string]interface{}{
-					"path":     "reports/latency.csv",
-					"repo":     "api",
-					"x_column": "recorded_at",
-					"series": []interface{}{
-						map[string]interface{}{"column": "p50_ms", "label": "p50"},
-						map[string]interface{}{"column": "p95_ms"},
-					},
-				},
-			},
-		},
-	}
+	args := validRichOutputArgs()
+	richOutputTestProps(args, "chart")["csv"] = map[string]interface{}{"path": "reports/latency.csv", "repo": "api", "x_column": "recorded_at", "series": []interface{}{map[string]interface{}{"column": "p50_ms", "label": "p50"}, map[string]interface{}{"column": "p95_ms"}}}
+	delete(richOutputTestProps(args, "chart"), "labels")
+	delete(richOutputTestProps(args, "chart"), "series")
+	return args
 }
-
+func richOutputTestProps(args map[string]interface{}, id string) map[string]interface{} {
+	return args["spec"].(map[string]interface{})["elements"].(map[string]interface{})[id].(map[string]interface{})["props"].(map[string]interface{})
+}
 func csvChartSource(args map[string]interface{}) map[string]interface{} {
-	chart := args["blocks"].([]interface{})[0].(map[string]interface{})
-	return chart["csv"].(map[string]interface{})
+	return richOutputTestProps(args, "chart")["csv"].(map[string]interface{})
 }
 
 func assertJSONEquivalent(t *testing.T, want, got interface{}) {

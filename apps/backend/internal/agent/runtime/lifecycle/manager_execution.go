@@ -823,7 +823,7 @@ func (m *Manager) prepareExecutionCreation(
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
 	}
-	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch); err != nil {
+	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch, ""); err != nil {
 		return nil, err
 	}
 	if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
@@ -917,7 +917,7 @@ func (m *Manager) createExecutionWithMode(
 		inputs.preparation,
 	)
 
-	if err := m.ensureExecutionAdmission(operationCtx, taskID, info, agentLaunch); err != nil {
+	if err := m.ensureExecutionAdmission(operationCtx, taskID, info, agentLaunch, execution.ID); err != nil {
 		m.rollbackLaunchExecution(operationCtx, inputs.runtime, runtimeInstance, execution, "session ended during runtime creation")
 		return nil, err
 	}
@@ -980,7 +980,7 @@ func (m *Manager) registerAndPublishCreatedExecution(
 		m.rollbackRegisteredLaunchAfterPersistFailure(inputs.runtime, runtimeInstance, execution)
 		return nil, errors.Join(fmt.Errorf("persist execution registration: %w", err), secretCleanupErr)
 	}
-	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch); err != nil {
+	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch, execution.ID); err != nil {
 		execution.remoteInstanceLifecycleMu.Unlock()
 		if errors.Is(err, errTaskCleanupActive) {
 			m.rollbackRegisteredLaunchForTaskCleanup(inputs.runtime, runtimeInstance, execution)
@@ -1004,11 +1004,15 @@ func (m *Manager) ensureExecutionAdmission(
 	taskID string,
 	info *WorkspaceInfo,
 	agentLaunch bool,
+	expectedExecutionID string,
 ) error {
 	if agentLaunch {
 		return m.ensureLaunchSessionStillActive(ctx, info.SessionID, executionAdmissionAgent)
 	}
-	return m.ensureWorkspaceSessionAdmitted(ctx, taskID, info)
+	if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
+		return err
+	}
+	return m.ensureWorkspaceRecoveryResolved(ctx, info.SessionID, expectedExecutionID)
 }
 
 type executionCreatePreparation struct {
@@ -1049,9 +1053,9 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if info.AgentID == "" {
 		return nil, fmt.Errorf("agent ID is required in WorkspaceInfo")
 	}
-	agentConfig, ok := m.registry.Get(info.AgentID)
-	if !ok {
-		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
+	agentConfig, err := m.resolveLaunchableAgent(info.AgentID)
+	if err != nil {
+		return nil, err
 	}
 	managedRuntimeOptions, err := m.resolveManagedRuntimeCommandOptions(ctx, models.ExecutorType(info.ExecutorType).Runtime(), agentConfig)
 	if err != nil {
@@ -1477,6 +1481,7 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 		client.Close()
 	}
 	execution.EndSessionSpan()
+	m.cleanupPassthroughMCPConfig(execution)
 }
 
 const (

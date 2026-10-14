@@ -34,11 +34,13 @@ const setupPolicy = `{"actions":{"create_task":"requires_approval","start_agent"
 
 func setupBody(overrides map[string]string) string {
 	parts := map[string]string{
-		"name":                "Planner",
-		"agent_profile_id":    `"ap-1"`,
-		"executor_profile_id": `"ep-1"`,
-		"watches":             `{"scope":"all"}`,
-		"policy":              setupPolicy,
+		"name":                     "Planner",
+		"agent_profile_id":         `"ap-1"`,
+		"executor_profile_id":      `"ep-1"`,
+		"task_agent_profile_id":    `"ap-1"`,
+		"task_executor_profile_id": `"ep-1"`,
+		"watches":                  `{"scope":"all"}`,
+		"policy":                   setupPolicy,
 	}
 	parts["name"] = `"Planner"`
 	for k, v := range overrides {
@@ -157,6 +159,11 @@ func TestSetupValidationOrderAndFields(t *testing.T) {
 		{"missing name", map[string]string{"name": ""}, "identity", "name", ""},
 		{"unknown agent profile", map[string]string{"agent_profile_id": `"nope"`}, "identity", "agent_profile_id", ""},
 		{"missing executor profile", map[string]string{"executor_profile_id": ""}, "identity", "executor_profile_id", ""},
+		{"missing task agent", map[string]string{"task_agent_profile_id": ""}, "identity", "task_agent_profile_id", ""},
+		{"missing task executor", map[string]string{"task_executor_profile_id": ""}, "identity", "task_executor_profile_id", ""},
+		{"unknown task agent", map[string]string{"task_agent_profile_id": `"nope"`}, "identity", "task_agent_profile_id", ""},
+		{"unknown task executor", map[string]string{"task_executor_profile_id": `"nope"`}, "identity", "task_executor_profile_id", ""},
+		{"unknown task agent with empty task executor", map[string]string{"task_agent_profile_id": `"nope"`, "task_executor_profile_id": `""`}, "identity", "task_executor_profile_id", ""},
 		{"missing watches", map[string]string{"watches": ""}, "watches", "watches", codeInvalidScope},
 		{"bad scope", map[string]string{"watches": `{"scope":"some"}`}, "watches", "watches", codeInvalidScope},
 		{"selected empty", map[string]string{"watches": `{"scope":"selected","workflow_ids":[]}`}, "watches", "watches", codeWatchesEmpty},

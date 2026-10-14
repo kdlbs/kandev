@@ -177,7 +177,7 @@ func seam1StartPayload(
 		payload[models.CeilingLaunchEntryBindingKey] = ceilingEntryBindingValue(*opts.ceilingEntryBinding)
 	}
 	if opts.AutomationRun != nil {
-		payload[ceilingPayloadAutomationRunKey] = opts.AutomationRun
+		payload[ceilingPayloadAutomationRunKey] = automationRunForCeilingPayload(opts.AutomationRun)
 	}
 	return payload
 }

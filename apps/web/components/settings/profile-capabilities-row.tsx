@@ -13,8 +13,15 @@ import {
   profileModelIsDirty,
 } from "@/components/settings/profile-capability-helpers";
 import { ModelPicker, ModePicker } from "@/components/settings/profile-model-fields";
+import { ModelDiscoveryNote } from "@/components/settings/model-discovery-note";
 import type { ProfileDiscoveryStatus } from "@/hooks/domains/settings/use-profile-model-capabilities";
-import type { CommandEntry, ModelConfig, ModeEntry, ModelEntry } from "@/lib/types/http";
+import type {
+  CommandEntry,
+  ModelConfig,
+  ModeEntry,
+  ModelEntry,
+  ModelDiscovery,
+} from "@/lib/types/http";
 import {
   SettingsFieldDescription,
   SettingsFieldLabel,
@@ -23,6 +30,7 @@ import type { ProfileFormData } from "./profile-form-fields";
 import type { useProfileFormCapabilities } from "./profile-capability-helpers";
 
 type CapabilitiesRowProps = {
+  discovery?: ModelDiscovery;
   profile: ProfileFormData;
   models: ModelEntry[];
   modes: ModeEntry[];
@@ -85,6 +93,7 @@ function StatusOrAuthMessage({
 }
 
 type ModelAndModePickersProps = {
+  discovery?: ModelDiscovery;
   profile: ProfileFormData;
   baselineProfile?: ProfileFormData;
   models: ModelEntry[];
@@ -105,6 +114,7 @@ type ModelAndModePickersProps = {
 };
 
 function ModelAndModePickers({
+  discovery,
   profile,
   baselineProfile,
   models,
@@ -143,6 +153,7 @@ function ModelAndModePickers({
         >
           <SettingsFieldLabel className={labelCls}>{t("agents:startModel")}</SettingsFieldLabel>
           <ModelPicker
+            discovery={discovery}
             profile={profile}
             models={models}
             currentModelId={currentModelId}
@@ -183,6 +194,7 @@ function ModelAndModePickers({
 }
 
 function CapabilitiesRowContent({
+  discovery,
   profile,
   models,
   modes,
@@ -214,6 +226,7 @@ function CapabilitiesRowContent({
   return (
     <div className={gapCls}>
       <ModelAndModePickers
+        discovery={discovery}
         profile={profile}
         baselineProfile={baselineProfile}
         models={models}
@@ -232,6 +245,7 @@ function CapabilitiesRowContent({
         labelCls={labelCls}
         gapCls={gapCls}
       />
+      <ModelDiscoveryNote discovery={discovery} />
       <ModelConfigResolutionStatus
         status={configStatus}
         error={configError}
@@ -287,6 +301,7 @@ export function ProfileCapabilitiesSection({
     <CapabilitiesRow
       profile={profile}
       models={capabilities.models}
+      discovery={capabilities.discovery}
       modes={capabilities.modes}
       commands={capabilities.commands}
       currentModelId={capabilities.currentModelId}

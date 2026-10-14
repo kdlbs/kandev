@@ -10,7 +10,7 @@ type StoreStep = {
 };
 type MockState = {
   kanban: { workflowId: string | null; steps: StoreStep[] };
-  kanbanMulti: { snapshots: Record<string, { steps: StoreStep[] }> };
+  kanbanMulti: { snapshots: Record<string, { steps: StoreStep[]; isPlaceholder?: boolean }> };
 };
 
 const ACTIVE_WORKFLOW_ID = "workflow-active";
@@ -23,6 +23,8 @@ let mockState: MockState = {
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
 }));
+
+vi.mock("./use-workflow-step-metadata", () => ({ useWorkflowStepMetadata: () => [] }));
 
 import { useWorkflowStepsById } from "./use-workflow-steps-by-id";
 
