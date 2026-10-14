@@ -23,6 +23,35 @@ export async function revealTranscriptControls(chat: Locator): Promise<void> {
   await expect(chat.getByTestId("scroll-to-last-prompt-button")).toBeVisible();
 }
 
+/** Checks keyboard progression between the primary action and visible utilities. */
+export async function expectComposerActionKeyboardOrder(chat: Locator): Promise<void> {
+  const row = chat.getByTestId("chat-status-bar");
+  const proceed = row.getByTestId("proceed-next-step");
+  const controls = row.getByTestId("chat-status-bar-right-controls").locator("button:visible");
+  const phone = (await chat.page().evaluate(() => window.innerWidth)) < 768;
+  if (phone) {
+    await proceed.focus();
+    await chat.page().keyboard.press("Tab");
+    await expect(controls.first()).toBeFocused();
+  } else {
+    await controls.last().focus();
+    await chat.page().keyboard.press("Tab");
+    await expect(proceed).toBeFocused();
+    await chat.page().keyboard.press("Tab");
+  }
+}
+
+/** Removes transient hover/focus chrome before capturing the composer layout. */
+export async function prepareComposerCapture(chat: Locator): Promise<void> {
+  const page = chat.page();
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  await expect(page.locator('[data-slot="tooltip-content"]:visible')).toHaveCount(0);
+  await expect(chat.getByTestId("proceed-next-step-options")).toBeHidden();
+}
+
 /**
  * Checks rendered line placement, containment, touch targets, and page overflow.
  * @covers AC-UI-COMPOSER-ACTION-WRAP-001.1, .2, .3, .5
@@ -56,7 +85,10 @@ export async function expectComposerActionLayout(
   expect(proceedBox).not.toBeNull();
   if (!rowBox || !proceedBox) throw new Error("composer controls are not measurable");
 
-  if (wrapped) {
+  const phone = (await chat.page().evaluate(() => window.innerWidth)) < 768;
+  if (phone) {
+    expect(proceedBox.y + proceedBox.height).toBeLessThanOrEqual(controlsBox.y);
+  } else if (wrapped) {
     expect(proceedBox.y).toBeGreaterThanOrEqual(controlsBox.bottom);
   } else if (wrapped === false) {
     expect(
@@ -79,18 +111,19 @@ export async function expectComposerActionLayout(
   } else {
     expect(proceedBox.height).toBeCloseTo(24, 0);
   }
-  await expect
-    .poll(() =>
-      proceed.evaluate((element) => {
-        const rect = element.getBoundingClientRect();
-        return element.contains(
-          document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
-        );
-      }),
-    )
-    .toBe(true);
-  const phone = (await chat.page().evaluate(() => window.innerWidth)) < 768;
-  await expect(actions).toHaveCSS("display", phone ? "contents" : "flex");
+  if (await proceed.isEnabled()) {
+    await expect
+      .poll(() =>
+        proceed.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return element.contains(
+            document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
+          );
+        }),
+      )
+      .toBe(true);
+  }
+  await expect(actions).toHaveCSS("display", "flex");
   if (!phone) await expect(actions).toHaveCSS("justify-content", "flex-end");
   await assertNoDocumentHorizontalOverflow(chat.page());
 }

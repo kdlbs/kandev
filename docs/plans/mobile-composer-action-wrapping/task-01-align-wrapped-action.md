@@ -19,6 +19,14 @@ system_design:
 
 # Task 01: Align Wrapped Workflow Action
 
+## Historical placement revision
+
+This completed work order records the original below-utilities composition.
+The 2026-10-14 user correction changes phone placement; its implementation and
+UI-02 preview are owned by [Task 02](task-02-place-action-above-utilities.md).
+Results and UI-01 below are evidence of the earlier revision, not acceptance
+of the new upper workflow row.
+
 ## Summary
 
 Keep the next-step control right-aligned when it wraps below transcript utilities.

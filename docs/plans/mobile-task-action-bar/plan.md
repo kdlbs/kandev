@@ -51,6 +51,13 @@ archive hooks/phone adapters, usage drawer, share dialog, and Proceed callbacks.
 
 ## ASCII UI preview
 
+These previews record this package's original delivery composition. The later
+normal-chat correction places the phone workflow action above utility icons;
+its authoritative UI-02 preview and follow-up implementation belong to the
+[composer placement follow-up](../mobile-composer-action-wrapping/task-02-place-action-above-utilities.md).
+This package retains notice/sizing/state scope and its prior verification
+results. Passthrough composition is unaffected by that follow-up.
+
 ### UI-01: Phone task composer, merged PR
 
 Entry: task conversation, idle session with terminal PR and eligible next step.

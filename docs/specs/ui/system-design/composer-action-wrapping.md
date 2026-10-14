@@ -12,77 +12,94 @@ owners:
 
 ## Boundary and evidence
 
-This is a local responsive presentation adjustment in
-`apps/web/components/task/chat/chat-status-bar.tsx`. No API, state, persistence,
-or workflow authority changes are needed. The screenshot shows transcript icons
-on the first line and Open PR left-aligned on the second line.
+This presentation contract is owned by UI; Tasks continues to own movement,
+eligibility, preview, and options. The phone screenshot published for PR #4372
+showed the workflow action below the transcript utility icons. The 2026-10-14
+user correction places it above those icons while retaining right alignment.
 
-Before correction, `ChatStatusBarActions` used `ml-auto` on a nested wrapping flex container.
-That aligned the container in its parent but did not right-align its wrapped
-children. Default `justify-content` started each internal line at
-the left. The existing `PassthroughStatusRow` in `passthrough-toolbar.tsx`
-demonstrates a constrained wrapping action group with `justify-end`.
+`ChatStatusBarActions` in
+`apps/web/components/task/chat/chat-status-bar.tsx` previously rendered
+`ChatStatusBarRightControls` before `WorkflowMoveProceedButton`. Both wrapping
+containers became `display: contents` below 768px, placing their children in
+the status tray's flex flow. An auto margin aligned the trailing action right;
+it could not place it on a preceding row.
 
 ## Requirement mapping
 
 | Requirement | Design sections |
 | --- | --- |
-| REQ-UI-COMPOSER-ACTION-WRAP-001 | Action-group layout; Mobile contract; Verification |
+| REQ-UI-COMPOSER-ACTION-WRAP-001 | Responsive action group; Mobile contract; Verification |
 
-## Action-group layout
+## Responsive action group
 
-On desktop, `ChatStatusBarActions` uses bounded end justification, following the
-passthrough group. Retain `ml-auto`, `min-w-0`, wrapping, item alignment, and the
-existing gap. Each internal flex line ends against the action group's right
-edge. Keep `ChatStatusBarRightControls` before `WorkflowMoveProceedButton` in DOM
-order.
+Use `useResponsiveBreakpoint().isMobile`, whose boundary is 768px, to select
+the action/control order. Render one keyed workflow button and one keyed utility
+group under the same action-group parent. Phones place the button first; wider
+viewports retain utilities first. Keep component identity during resize and do
+not mount duplicate mobile/desktop workflow buttons or stateful disclosures.
 
-Below the canonical 768px boundary, preserve the landed
-[mobile action bar composition](mobile-task-action-bar.md): action and utility
-wrappers use `display: contents`, allowing whole controls to wrap directly in
-the toolbar. The workflow button's phone auto margin keeps it at the trailing
-edge. Do not restore a shrink-wrapped phone utility group. Its label may wrap
-inside the contained button, which retains 44px minimum height and width with
-either pointer. Fine-pointer desktop retains its 24px height. Coarse-pointer
-label wrapping and existing disclosure/visibility rules remain with their owners.
+On phones the action group occupies the available tray width and stacks the
+workflow button above the utility group. Align the button to the content right
+edge and constrain it to the available width. Its row is present whenever it is
+eligible, even with sparse controls or a short label. The utility row spans the
+available width and permits complete-control wrapping. It must not become a
+shrink-wrapped, non-wrapping cluster. Keep `TranscriptNavGroup`'s flattened phone
+subgroup and the utilities' existing relative order. Hide an empty utility group
+and allocate no placeholder for an ineligible workflow action.
+
+Above the phone boundary retain the bounded, end-justified wrapping action
+group and compact inline order. Existing fine-pointer desktop sizing remains
+24px; phone and coarse-pointer minimums remain 44px in both active dimensions.
+Keep contained label wrapping and pointer-specific disclosure behavior.
 
 ## Mobile contract
 
-- Entry: phone task Chat, in the persistent status row above the composer.
-- Exemplar: the shipped passthrough composer action group contributes bounded
-  wrapping and end justification. Existing phone task Chat owns overall layout.
-- Hierarchy: status information, transcript utilities, then the next-step action.
-  The workflow action remains inline and visible when it wraps.
-- Surface: inline toolbar, because advancement is a frequent action with no
-  additional content needed to locate it. This adjustment needs no overlay.
-- Scroll and viewport: retain the transcript as the scroll owner and the existing
+- Entry: phone task Chat, in the persistent tray above the composer input.
+- Exemplar: the shipped [mobile task action bar](mobile-task-action-bar.md)
+  contributes readable notices, complete-control wrapping, and reachable
+  utilities. `PassthroughStatusRow` supplies bounded end justification.
+- Hierarchy: existing notices/status information, right-aligned next-step row,
+  transcript utility row, then composer input. Utility rows can wrap downward.
+- Surface: inline tray, because progression and transcript navigation are
+  frequent actions. No additional overlay is needed to locate the action.
+- Scroll and viewport: retain the transcript as the scroll owner and existing
   composer/safe-area placement. Add no fixed positioning or nested scroller.
-- Touch and state: phone hit targets meet the 44px minimum with either pointer;
-  existing coarse-pointer targets and shared workflow handlers are preserved.
-- Desktop: retain the current compact controls and single-line placement when
-  there is enough space.
+- Touch and state: preserve shared handlers, gates, options, and disclosures.
+  The phone workflow action stays at least 44px with either pointer. Keyboard
+  traversal follows the visible order in each responsive composition.
+- Desktop: retain compact controls, inline utility/action order when space
+  permits, and right alignment when the narrower chat pane wraps.
 
 ## Verification
 
-Rendered Playwright geometry is the regression evidence. With real transcript
-controls present, first prove that the workflow action occupies a later line,
-then compare its right bound to the toolbar's content right bound within one
-CSS pixel. Check its full hitbox inside the row, touch dimensions, and document
-overflow. At phone widths, verify the button center is a reachable hit target
-with either pointer. Activate it and verify the destination step via the existing fixture.
+Revise `expectComposerActionLayout` in
+`apps/web/e2e/tests/workflow/composer-action-layout-helpers.ts`. Below 768px,
+compare the workflow button's bottom with the minimum top of all visible utility
+buttons. Require the entire action to precede every utility; checking one icon
+is insufficient. Compare its right bound with the toolbar content right bound
+within one CSS pixel. Continue measuring actual utility bounds, not just wrapper
+boxes, and verify containment, 44px hit dimensions, center-point reachability,
+and document overflow. Replace the obsolete phone `display: contents` assertion
+with rendered row geometry. Wider wrap cases retain the previous trailing-line
+oracle; wide desktop retains single-line order and 24px height.
 
-Cover the configured phone viewport, 360px, and the 767/768px boundary; add a
-narrow fine-pointer case with a 44px target and click, and desktop cases with a
-24px height and wide single-line order. Measure computed
-phone `display: contents` and desktop end justification as well as geometry.
-Measure the union of visible utility-control bounds because a phone wrapper
-does not generate a box. Component tests retain the existing
-no-content spacer case and move-gating coverage, but class assertions alone
-cannot establish rendered wrapping.
+Cover 360px, 393px, 767px, 768px, and wide desktop using the existing mobile and
+fine-pointer workflow move fixtures. Include dense controls, a longer fitting
+label, and sparse controls with a short label. Tap/click the phone action and
+verify the existing move request and destination. Check keyboard traversal and
+resize across the boundary without duplicate actions or lost task/session state.
+Retain meaningful component coverage for empty utility content, visibility gates,
+and moving state, plus the landed action-bar browser scenarios for terminal
+notices and 320px/coarse-tablet containment. Classes alone cannot prove row order.
 
-## Compatibility
+## Compatibility and delivery
 
-Preserve `shouldShowProceed`, all props, test IDs, callbacks, preview and options
-surfaces, and status-chip positions. No localization work is needed because no
-copy is added. The passthrough composer is a layout exemplar and remains outside
-the implementation scope.
+Preserve `shouldShowProceed`, props, test IDs, callbacks, preview/options
+surfaces, and status/notice positions. No copy, API, storage, or localization
+changes are needed. The passthrough composer retains its composition.
+
+The revised design is implemented and locally verified through
+[Task 02](../../../plans/mobile-composer-action-wrapping/task-02-place-action-above-utilities.md).
+Task 01 records the completed earlier alignment correction. Fresh desktop,
+mouse-phone, and touch-phone screenshots must replace the previous PR placement
+evidence during PR delivery. Rendered validation is recorded in the work order.

@@ -5,7 +5,9 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { dwell } from "../../helpers/causal-waits";
 import {
   COMPOSER_HISTORY_PROMPT,
+  expectComposerActionKeyboardOrder,
   expectComposerActionLayout,
+  prepareComposerCapture,
   revealTranscriptControls,
 } from "./composer-action-layout-helpers";
 import {
@@ -64,13 +66,14 @@ async function expectTargetStep(
 }
 
 /**
- * Verifies wrapped touch targets stay reachable on the right and still move the task.
+ * Verifies phone progression stays above utilities, reachable on the right, and moves the task.
  * @covers AC-UI-COMPOSER-ACTION-WRAP-001.2, .3, .4
  */
 test("keeps the wrapped mobile workflow action on the right and moves the task", async ({
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   const { settings } = await apiClient.getUserSettings();
   try {
@@ -100,7 +103,23 @@ test("keeps the wrapped mobile workflow action on the right and moves the task",
         wrapped: width < 767 ? true : undefined,
         touch: true,
       });
+      await expectComposerActionKeyboardOrder(chat);
     }
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: false,
+      show_scroll_to_start: false,
+      show_scroll_to_last_prompt: false,
+    });
+    await apiClient.updateWorkflowStep(fixture.targetStepId, { name: "Open PR" });
+    await testPage.setViewportSize({ width: 393, height: 844 });
+    await expect(chat.getByTestId("proceed-next-step")).toHaveText("Open PR");
+    await expect(chat.getByTestId("auto-scroll-toggle-button")).toBeHidden();
+    await expectComposerActionLayout(chat, { touch: true });
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: true,
+      show_scroll_to_start: true,
+      show_scroll_to_last_prompt: true,
+    });
     await apiClient.updateWorkflowStep(fixture.targetStepId, {
       name: "Open pull request and continue review",
     });
@@ -110,14 +129,35 @@ test("keeps the wrapped mobile workflow action on the right and moves the task",
     );
     await revealTranscriptControls(chat);
     await expectComposerActionLayout(chat, { wrapped: true, touch: true });
-    await testPage.screenshot({
-      path: test.info().outputPath("wrapped-workflow-action-phone.png"),
+    if (prCapture.capturing) await prepareComposerCapture(chat);
+    await prCapture.screenshot("workflow-action-touch-phone", {
+      caption: "Phone workflow action above the transcript utility icons",
     });
 
-    const request = waitForMoveRequest(testPage, fixture.taskId);
-    await chat.getByTestId("proceed-next-step").tap();
-    expect((await request).postDataJSON().workflow_step_id).toBe(fixture.targetStepId);
+    let releaseMove!: () => void;
+    const moveGate = new Promise<void>((resolve) => {
+      releaseMove = resolve;
+    });
+    const moveRoute = `**/api/v1/tasks/${fixture.taskId}/move`;
+    await testPage.route(moveRoute, async (route) => {
+      await moveGate;
+      await route.continue();
+    });
+    try {
+      const request = waitForMoveRequest(testPage, fixture.taskId);
+      await chat.getByTestId("proceed-next-step").tap();
+      expect((await request).postDataJSON().workflow_step_id).toBe(fixture.targetStepId);
+      await expect(chat.getByTestId("proceed-next-step")).toBeDisabled();
+      await expectComposerActionLayout(chat, { touch: true });
+    } finally {
+      releaseMove();
+    }
     await expectTargetStep(apiClient, fixture.taskId, fixture.targetStepId);
+    await testPage.unroute(moveRoute);
+    await expect(chat.getByTestId("proceed-next-step")).toHaveCount(0);
+    const actions = (await chat.getByTestId("chat-status-bar-actions").boundingBox())!;
+    const controls = (await chat.getByTestId("chat-status-bar-right-controls").boundingBox())!;
+    expect(Math.abs(controls.y - actions.y)).toBeLessThanOrEqual(1);
   } finally {
     await apiClient.saveUserSettings({
       show_transcript_auto_scroll_control: settings.show_transcript_auto_scroll_control ?? false,

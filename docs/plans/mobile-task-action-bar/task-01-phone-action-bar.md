@@ -24,6 +24,13 @@ system_design:
 
 ## Summary
 
+This completed work order records the original action order. The later
+normal-chat phone placement is owned by
+[the composer follow-up](../mobile-composer-action-wrapping/task-02-place-action-above-utilities.md).
+Its UI-02 supersedes this work order's workflow-versus-utility order only;
+notice placement, target sizing, and recorded results remain this work order's
+delivery evidence.
+
 Repair the phone tray and shared terminal notice as one vertical slice. Preserve
 domain callbacks, prove touch geometry and real archive/workflow outcomes, and
 update localized copy and the small public phone-controls explanation.

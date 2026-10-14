@@ -3,7 +3,9 @@ import { expect, test } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import {
   COMPOSER_HISTORY_PROMPT,
+  expectComposerActionKeyboardOrder,
   expectComposerActionLayout,
+  prepareComposerCapture,
   revealTranscriptControls,
 } from "./composer-action-layout-helpers";
 import {
@@ -25,6 +27,7 @@ test("keeps the workflow action right-aligned on a phone with a mouse and on des
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   const { settings } = await apiClient.getUserSettings();
   try {
@@ -60,16 +63,36 @@ test("keeps the workflow action right-aligned on a phone with a mouse and on des
         wrapped,
         touch: width < 768,
       });
+      await expectComposerActionKeyboardOrder(chat);
       if (width === 360 || width === 1440) {
-        await testPage.screenshot({
-          path: test
-            .info()
-            .outputPath(
-              width === 360 ? "workflow-action-mouse-phone.png" : "workflow-action-desktop.png",
-            ),
-        });
+        if (prCapture.capturing) await prepareComposerCapture(chat);
+        await prCapture.screenshot(
+          width === 360 ? "workflow-action-mouse-phone" : "workflow-action-desktop",
+          {
+            caption:
+              width === 360
+                ? "Phone workflow action above utilities with a fine pointer"
+                : "Desktop retains compact inline composer actions",
+          },
+        );
       }
     }
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: false,
+      show_scroll_to_start: false,
+      show_scroll_to_last_prompt: false,
+    });
+    await apiClient.updateWorkflowStep(fixture.targetStepId, { name: "Open PR" });
+    await testPage.setViewportSize({ width: 393, height: 900 });
+    const sparseChat = fixture.session.activeChat();
+    await expect(sparseChat.getByTestId("proceed-next-step")).toHaveText("Open PR");
+    await expect(sparseChat.getByTestId("auto-scroll-toggle-button")).toBeHidden();
+    await expectComposerActionLayout(sparseChat, { touch: true });
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: true,
+      show_scroll_to_start: true,
+      show_scroll_to_last_prompt: true,
+    });
     await apiClient.updateWorkflowStep(fixture.targetStepId, {
       name: "Open pull request for review",
     });
