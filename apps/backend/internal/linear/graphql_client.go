@@ -676,11 +676,7 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 
 // --- labels ---
 
-// Linear's GraphQL API caps `first` at 250. We don't paginate labels/users
-// because the watcher dialog renders them as a single dropdown — a workspace
-// with >250 labels or members would have UX problems regardless of how the
-// data is fetched. If this limit is hit in practice, switch to cursor-based
-// pagination here and lazy-load in the UI.
+// linearMaxPageSize is Linear's maximum number of results per page.
 const linearMaxPageSize = 250
 
 const teamLabelsQuery = `
@@ -720,60 +716,6 @@ func (c *GraphQLClient) ListLabels(ctx context.Context, teamKey string) ([]Linea
 	out := make([]LinearLabel, 0, len(data.IssueLabels.Nodes))
 	for _, l := range data.IssueLabels.Nodes {
 		out = append(out, LinearLabel{ID: l.ID, Name: l.Name, Color: l.Color})
-	}
-	return out, nil
-}
-
-// --- users ---
-
-const teamMembersQuery = `
-query TeamMembers($filter: UserFilter!, $first: Int!) {
-	users(first: $first, filter: $filter, orderBy: updatedAt) {
-		nodes { id name displayName email avatarUrl }
-	}
-}`
-
-type usersData struct {
-	Users struct {
-		Nodes []struct {
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			DisplayName string `json:"displayName"`
-			Email       string `json:"email"`
-			AvatarURL   string `json:"avatarUrl"`
-		} `json:"nodes"`
-	} `json:"users"`
-}
-
-// ListUsers returns members of the team identified by teamKey. The filter
-// uses Linear's `teamMemberships.some` to scope to that team.
-func (c *GraphQLClient) ListUsers(ctx context.Context, teamKey string) ([]LinearUser, error) {
-	if teamKey == "" {
-		return nil, fmt.Errorf("teamKey required")
-	}
-	vars := map[string]interface{}{
-		"filter": map[string]interface{}{
-			"teamMemberships": map[string]interface{}{
-				"some": map[string]interface{}{
-					"team": map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
-				},
-			},
-		},
-		"first": linearMaxPageSize,
-	}
-	var data usersData
-	if err := c.do(ctx, teamMembersQuery, vars, &data); err != nil {
-		return nil, err
-	}
-	out := make([]LinearUser, 0, len(data.Users.Nodes))
-	for _, u := range data.Users.Nodes {
-		out = append(out, LinearUser{
-			ID:          u.ID,
-			Name:        u.Name,
-			DisplayName: u.DisplayName,
-			Email:       u.Email,
-			AvatarURL:   u.AvatarURL,
-		})
 	}
 	return out, nil
 }
