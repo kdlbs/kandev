@@ -17,7 +17,8 @@ move a task through its configured process.
 
 ## Ownership
 
-This system owns task identity and metadata, task documents and attachments,
+This system owns task identity and metadata, workspace-scoped task discovery
+through the [workspace search contract](requirements/workspace-search.md), task documents and attachments,
 parent and dependency relationships, task creation and launch behavior, task
 runtime state publication, workflow definitions and transitions, completion
 signals, and task-scoped scheduling contracts.
