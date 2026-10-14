@@ -239,7 +239,7 @@ task/session and semantic event identifiers for validation and event
 de-duplication, but the desktop registers no notification activation/deep-link
 handler. Clicking a notification is therefore not a supported navigation path.
 
-To test delivery, open **Settings > General > Notifications** and select
+To test delivery, open **Settings > Preferences > Notifications** and select
 **Send test notification**. Desktop tests use native notifications even when
 browser notifications are unavailable or blocked; the message confirms
 notification delivery on this device. An undecided OS permission can be

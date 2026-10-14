@@ -44,6 +44,9 @@ remain delivery steps. Merge requires ROOT's separate later expected-head grant.
   with the old hook delegating; no action-file growth past limits.
 - Minimal public desktop Test paragraph after code change; synchronize this
   package's final command results/statuses and owning pair.
+- Later ROOT-authorized bounded correction: only rustls 0.23.45 to 0.23.46
+  in desktop Cargo.lock, plus General to Preferences in the owned new guide
+  paragraph. No manifest or unrelated dependency update.
 - Correct only `settings:testNotificationBody` in all seven settings catalogs
   to describe device notification delivery. Keep the existing title and keys;
   derive zh-hk/zh-tw through existing zh-hant generation and assert both actual
@@ -53,8 +56,8 @@ remain delivery steps. Merge requires ROOT's separate later expected-head grant.
 
 Provider/save/subscription/backend events, Go, ordinary session/update policy,
 auth/origin ownership, Tauri capabilities/commands, new translation keys,
-unrelated copy/catalog edits, dependency or
-lock changes, config/flags, layout/touch/navigation/scroll/breakpoint work,
+unrelated copy/catalog edits, dependency or lock changes beyond the authorized
+rustls patch, config/flags, layout/touch/navigation/scroll/breakpoint work,
 service workers, recovery/races/performance, broad test suites, bundled desktop
 rebuilds, native physical display claims, foreign resource cleanup.
 
@@ -206,7 +209,8 @@ changed predicate is feature-independent and the command/origin/builder are unch
 - `apps/web/components/settings/notifications-settings-actions.ts`
 - `apps/web/components/settings/notification-test-action.ts` (new cohesive action)
 - `apps/web/components/settings/notification-test-delivery.test.tsx` (new independent suite)
-- `apps/desktop/src-tauri/src/native_notifications.rs` (implementation and tests)
+- `apps/desktop/src-tauri/src/native_notifications.rs` (initial implementation and tests)
+- `apps/desktop/src-tauri/Cargo.lock` (later rustls security patch only)
 - `apps/web/src/locales/en/settings.json` (`testNotificationBody` only)
 - `apps/web/src/locales/pt-pt/settings.json` (same key only)
 - `apps/web/src/locales/zh-cn/settings.json` (same key only)
@@ -314,7 +318,7 @@ were not replaced or expanded.
 Every original command handle above was joined to actual terminal exit before
 its next heavy step. No process was replaced while its handle remained live.
 ROOT's private candidate/source files were not read, copied, replayed, or deleted.
-No Go, dependency, lock, native origin/permission, command/capability, provider,
+The initial delivery made no Go, dependency, lock, native origin/permission, command/capability, provider,
 layout, or protected-resource changes were made.
 
 Final catalog/specification/coverage/diff gates are recorded in the manifest.
@@ -322,3 +326,58 @@ Normal hook, commit/push, PR-head and hosted-CI receipts are tracked externally
 because those operations happen after this source record is committed.
 Physical OS display was not exercised; the real frontend tests prove delivery
 up to OS invoke, and Rust tests prove the real predicate and dedup behavior.
+
+
+### Later bounded correction release
+
+ROOT authorized closing the actual baseline security findings reported by
+Cargo Audit run 38585372942/job 115925834868 and the valid Greptile guide-path
+thread PRRT_kwDOQ2-eWs6sYT2X/comment 4272517574. Current order is reopened for
+this one batched correction. Prior passing receipts remain historical evidence
+for unchanged notification code and locale values.
+
+Verify the authoritative advisory database/registry metadata and inspect the
+exact target update. Existing local cargo-audit is unavailable; do not install
+it or claim a local pass. Current-head hosted Cargo Audit must show all four
+RUSTSEC-2026-0346/0347/0348/0349 findings closed. No old-head audit retry.
+
+After the approved lockfile-only patch, run exactly:
+
+```bash
+(cd apps/desktop/src-tauri && cargo update -p rustls@0.23.45 --precise 0.23.46)
+(cd apps/desktop/src-tauri && CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo test --locked --lib)
+node scripts/validate-public-docs.mjs
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
+
+Use the existing Node 24 and stable Rust paths from the earlier command block;
+retain original handles and actual exits. No unchanged frontend/Rust-native-only
+suite/typecheck/i18n replay, no test mirroring a generated lockfile version.
+Inspect actual-file documentation coverage and the bounded later diff, then use
+normal active hooks and one ordinary guarded push. Resolve the valid doc thread
+with actual correction evidence, not an acknowledgement alone. Optional
+annotation/docstring suggestions stay external. No new requirement/ADR/task,
+full review, toolchain installation, audit suppression, or unrelated upgrade.
+
+Correction local results:
+
+- Raw authoritative RustSec advisory entries 0346/0347/0348/0349 successfully
+  verified patched >=0.23.46; upstream release metadata confirms all four
+  fixes. Registry metadata confirms non-yanked target, unchanged dependency
+  declarations and minimum Rust 1.71. Sources are linked in the manifest.
+- Targeted `cargo update -p rustls@0.23.45 --precise 0.23.46`: handle `63024`,
+  actual join `d1d081`, exit 0. Parsed old/new lockfile comparison proves only
+  rustls version and checksum changed; no transitive or manifest change.
+- After patch `cargo test --locked --lib`: handle `10051`, actual join
+  `fda2bd`, exit 0; all 119 default-feature owning-crate tests passed with two
+  build jobs and dev/test debug 0. Existing compiler dead-code warnings retained.
+- Corrected only General to Preferences in the owned public paragraph, based
+  on actual `NOTIFICATIONS_SETTINGS_HREF` and settings route/catalog source.
+- Public-doc validator, final catalog/spec/reference coverage and diff gates
+  passed after final correction statuses. Normal active-hook commit/push,
+  Greptile thread disposition and hosted Cargo Audit closure remain externally
+  tracked until delivered. Local cargo-audit unavailable; no install or false
+  local pass. No frontend21+28/typecheck/i18n replay, new source test, full
+  review, unrelated dependency update, audit ignore, or optional style patch.

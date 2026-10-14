@@ -96,6 +96,9 @@ prefixes and `system.update_available`, with no dedicated test kind.
   validator/dedup coverage.
 - Owning desktop pair, this manifest/order, and the smallest affected public
   desktop notification paragraph after implementation.
+- ROOT's later bounded security correction: only rustls 0.23.45 to 0.23.46
+  in the existing desktop Cargo.lock, plus the owned guide path correction
+  General to Preferences. No manifest or unrelated dependency update.
 - Device-neutral `settings:testNotificationBody` in English, pt-pt, zh-cn,
   zh-hk, zh-tw, ja, and ko; existing zh-hant generation for the Traditional pair,
   actual native/browser delivered-body assertions, and i18n gates.
@@ -105,7 +108,8 @@ prefixes and `system.update_available`, with no dedicated test kind.
 - Provider drafts, saves, subscriptions, backend events, Go code, auth or origin
   ownership, ordinary session/update policy, and native command/capability expansion.
 - Service workers, mobile browser notification features, new translation keys,
-  unrelated translation edits or copy polish, new dependencies,
+  unrelated translation edits or copy polish, new dependencies or unrelated
+  upgrades beyond the explicitly authorized rustls lockfile patch,
   configuration, flags, SDK abstractions, cleanup, race/recovery/performance work.
 - Layout, touch, navigation, scrolling, breakpoint changes, full desktop rebuild,
   broad suites, and proof of physical OS notification display from jsdom.
@@ -224,7 +228,7 @@ fix; none of its old test counts count as new evidence.
 
 ## Verification results
 
-Task 01 implemented and locally verified on 2026-10-14 after ROOT's later
+Initial Task 01 delivery implemented and locally verified on 2026-10-14 after ROOT's later
 explicit release. See the exact [work-order results](task-01-native-test-delivery.md#results).
 
 - Independent frontend RED: native click sent zero commands; browser body was
@@ -254,7 +258,9 @@ Final implementation documentation gates:
   `status=covered`, `errors=[]`, exactly one work order; includes the new helper
   and all seven locale paths. No documentation-only exemption or validator-test replay.
 - `git diff --check` and `git diff --cached --check`: passed. Only the 16 owned
-  files are staged; no dependency, lock, generated backend, or foreign changes.
+  files were staged in the initial delivery; no dependency, lock, generated
+  backend, or foreign changes occurred in that initial pass. The later bounded
+  security correction below is the explicit lockfile exception.
 
 Design checks on 2026-10-14:
 
@@ -313,3 +319,59 @@ never delete caches, kill foreign processes, or widen the pipeline to proceed.
   Chinese generation must not introduce unrelated catalog changes.
 - Physical OS delivery and OS-specific prompt presentation remain unproven by
   jsdom/default-feature Rust tests. Report that limit accurately.
+
+
+## Bounded security and documentation correction
+
+ROOT later released one correction pass after the actual current-head Cargo
+Audit reported four rustls 0.23.45 vulnerabilities and Greptile identified the
+owned guide's wrong settings section. Reopen the same order for only the
+compatible rustls 0.23.46 Cargo.lock patch and General to Preferences in the
+new public paragraph. The reviewed notification code, ABI, guards, UI, locale
+values, requirement, and system design remain unchanged.
+
+Verify authoritative advisory database and Cargo registry metadata, then use
+`cargo update -p rustls@0.23.45 --precise 0.23.46`. Inspect the lockfile diff;
+only strictly required compatible transitives may change with resolved-manifest
+evidence. Never run an unqualified update, change a manifest, suppress an audit,
+or widen an upgrade. An unavailable or incompatible target checkpoints ROOT.
+Run the owning crate's default-feature `cargo test --locked --lib` once with
+two jobs and dev/test debug 0. No new version-mirroring tests or unchanged
+frontend/typecheck/i18n replay. Public-doc content validation, actual-file
+coverage, and final reference/diff checks cover the correction. Local cargo-audit
+is unavailable in the inspected existing tool paths; install no audit tool and
+claim no local audit pass. Hosted Cargo Audit at the corrective head must close
+all four findings. Old-head Cargo Audit retry budget remains zero.
+
+Completed substantive CodeRabbit/Claude/Greptile reports at the initial head
+plus a bounded assessment of this later diff provide review evidence; no
+routine full review or Codex service retry. Optional docstrings, Clippy timeout,
+and serde annotation suggestions remain deferred externally. Keep the original
+hosted observer and clock while it can follow the new head. Any replacement
+requires the original actual join and known absence, with separate receipts.
+
+Correction local results on 2026-10-14:
+
+- Authoritative raw RustSec entries for
+  [0346](https://raw.githubusercontent.com/RustSec/advisory-db/main/crates/rustls/RUSTSEC-2026-0346.md),
+  [0347](https://raw.githubusercontent.com/RustSec/advisory-db/main/crates/rustls/RUSTSEC-2026-0347.md),
+  [0348](https://raw.githubusercontent.com/RustSec/advisory-db/main/crates/rustls/RUSTSEC-2026-0348.md),
+  and [0349](https://raw.githubusercontent.com/RustSec/advisory-db/main/crates/rustls/RUSTSEC-2026-0349.md)
+  were successfully read; all identify rustls >=0.23.46 as patched. The HTML
+  pages previously unavailable to ROOT were not presented as verified.
+- Authenticated [upstream release](https://github.com/rustls/rustls/releases/tag/v/0.23.46)
+  metadata confirms the four fixes, published 2026-10-14T09:51:22Z.
+  [Cargo registry metadata](https://index.crates.io/ru/st/rustls) confirms the
+  non-yanked 0.23.46 target, identical dependency declarations, and unchanged
+  Rust minimum 1.71. Direct receipt `777a06`, exit 0.
+- Targeted resolver handle `63024`, actual join `d1d081`, exit 0. Parsed lockfile
+  diff permits only rustls version/checksum and confirms no transitive or
+  manifest changes. Actual bounded source diff is two lock fields and one
+  word in the new public instruction, plus this package's scope/results.
+- `cargo test --locked --lib`: handle `10051`, actual join `fda2bd`, exit 0,
+  119 passed, two jobs, dev/test debug 0, default features, once after patch.
+  No unchanged frontend/typecheck/i18n replay or new generated-version test.
+- Public/reference/coverage/diff gates passed once after final correction
+  statuses; normal active-hook delivery and current-head hosted audit closure
+  are externally tracked. No local cargo-audit tool was found or installed;
+  no local audit pass or vulnerability suppression is claimed.
