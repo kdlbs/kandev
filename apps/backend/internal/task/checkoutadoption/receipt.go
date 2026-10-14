@@ -61,11 +61,11 @@ func validateCurrent(ctx context.Context, db *sqlx.DB, q receiptQuery, receipt *
  AND ts.task_id=t.id AND ts.queue_incarnation_id=? AND ts.workspace_path=?
  AND er.id=? AND er.worktree_id=? AND er.repository_id=? AND er.worktree_path=? AND er.worktree_branch=?
  AND er.worktree_source_clone_path=? AND er.worktree_source_common_dir=?
- AND er.status='active' AND er.deleted_at IS NULL AND tr.checkout_branch=?`),
+ AND er.status='active' AND er.deleted_at IS NULL AND COALESCE(tr.checkout_branch,'')=? AND COALESCE(tr.base_branch,'')=?`),
 		s.SessionID, p.Selection.AttachmentID, s.TaskEnvironmentID, s.EnvironmentOwnerTaskID, s.OwnershipGeneration,
 		s.TaskDirName, s.WorkspacePath, p.Selection.WorkspaceID, p.Selection.SessionIncarnation, p.Selection.SessionWorkspacePath,
 		p.SlotID, slot.WorktreeID, slot.RepositoryID, p.Proof.CandidatePath, p.Proof.Branch,
-		p.Proof.CandidatePath, filepath.Join(p.Proof.CandidatePath, ".git"), p.Proof.Branch)
+		p.Proof.CandidatePath, filepath.Join(p.Proof.CandidatePath, ".git"), p.Selection.AttachmentCheckoutBranch, p.Selection.AttachmentBaseBranch)
 	if err != nil {
 		return err
 	}

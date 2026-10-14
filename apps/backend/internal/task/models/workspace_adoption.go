@@ -12,12 +12,14 @@ var ErrWorkspaceAdoptionStale = errors.New("workspace adoption identity changed"
 
 // WorkspaceAdoptionSelection is authoritative server state, not caller authority.
 type WorkspaceAdoptionSelection struct {
-	Snapshot             WorkspaceRecoverySelectionSnapshot `json:"snapshot"`
-	WorkspaceID          string                             `json:"workspace_id"`
-	SessionIncarnation   string                             `json:"session_incarnation"`
-	SessionWorkspacePath string                             `json:"session_workspace_path"`
-	AttachmentID         string                             `json:"attachment_id"`
-	AttachmentsDigest    string                             `json:"attachments_digest"`
+	Snapshot                 WorkspaceRecoverySelectionSnapshot `json:"snapshot"`
+	WorkspaceID              string                             `json:"workspace_id"`
+	SessionIncarnation       string                             `json:"session_incarnation"`
+	SessionWorkspacePath     string                             `json:"session_workspace_path"`
+	AttachmentCheckoutBranch string                             `json:"attachment_checkout_branch"`
+	AttachmentBaseBranch     string                             `json:"attachment_base_branch"`
+	AttachmentID             string                             `json:"attachment_id"`
+	AttachmentsDigest        string                             `json:"attachments_digest"`
 }
 
 type WorkspaceAdoptionProof struct {
@@ -76,5 +78,6 @@ type WorkspaceAdoptionAttachment struct {
 	TaskID         string `json:"task_id" db:"task_id"`
 	RepositoryID   string `json:"repository_id" db:"repository_id"`
 	CheckoutBranch string `json:"checkout_branch" db:"checkout_branch"`
+	BaseBranch     string `json:"base_branch" db:"base_branch"`
 	Position       int    `json:"position" db:"position"`
 }

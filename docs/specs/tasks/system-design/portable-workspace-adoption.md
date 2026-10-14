@@ -35,6 +35,10 @@ The service captures the existing waiting session incarnation, complete canonica
 inventory, owner generation and task attachments. Apply acquires a manager lock
 and durable recovery claim, rejects in-memory and persisted consumers, then repeats
 selection and filesystem inspection before publication. No prompt replay occurs.
+Attachment selection uses the same branch identity plans as ordinary launch, so
+a generated worktree branch retains the attachment's empty checkout selector.
+The receipt captures that selector and its base branch independently from the
+materialized worktree branch; publication compares the full attachment set.
 
 ## Filesystem and Git proof
 

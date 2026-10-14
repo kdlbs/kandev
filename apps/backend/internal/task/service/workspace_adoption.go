@@ -91,12 +91,30 @@ func (s *Service) selectAdoptionAttachment(ctx context.Context, selection *model
 	if err != nil {
 		return err
 	}
+	repositories, err := s.resolveBaseBranchRepositories(ctx, links)
+	if err != nil {
+		return err
+	}
+	inputs := make([]worktree.BranchIdentityInput, len(links))
 	attachments := make([]models.WorkspaceAdoptionAttachment, 0, len(links))
+	for index, link := range links {
+		defaultBranch := ""
+		if repositories[index] != nil {
+			defaultBranch = repositories[index].DefaultBranch
+		}
+		inputs[index] = worktree.BranchIdentityInput{RepositoryID: link.RepositoryID, BaseBranch: link.BaseBranch,
+			CheckoutBranch: link.CheckoutBranch, DefaultBranch: defaultBranch,
+			PRNumber: taskRepositoryPRNumber(link.Metadata), Position: link.Position}
+		attachments = append(attachments, models.WorkspaceAdoptionAttachment{ID: link.ID, TaskID: link.TaskID,
+			RepositoryID: link.RepositoryID, BaseBranch: link.BaseBranch, CheckoutBranch: link.CheckoutBranch, Position: link.Position})
+	}
+	plans := worktree.BuildBranchIdentityPlans(inputs)
 	matches := 0
-	for _, link := range links {
-		attachments = append(attachments, models.WorkspaceAdoptionAttachment{ID: link.ID, TaskID: link.TaskID, RepositoryID: link.RepositoryID, CheckoutBranch: link.CheckoutBranch, Position: link.Position})
-		if link.RepositoryID == slot.RepositoryID && link.CheckoutBranch == slot.WorktreeBranch {
+	for index, link := range links {
+		if link.RepositoryID == slot.RepositoryID && plans[index].IdentitySlug == slot.BranchSlug {
 			selection.AttachmentID = link.ID
+			selection.AttachmentCheckoutBranch = link.CheckoutBranch
+			selection.AttachmentBaseBranch = link.BaseBranch
 			matches++
 		}
 	}

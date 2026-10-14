@@ -37,7 +37,7 @@ func seedWorkspaceAdoptionDB(t *testing.T, r *Repository) models.WorkspaceAdopti
 	require.NoError(t, err)
 	repo, err := r.GetRepository(ctx, "adopt-repo")
 	require.NoError(t, err)
-	selection := models.WorkspaceAdoptionSelection{Snapshot: models.NewWorkspaceRecoverySelectionSnapshot(session, env, map[string]*models.Repository{repo.ID: repo}), WorkspaceID: "adopt-ws", SessionIncarnation: "adopt-incarnation", SessionWorkspacePath: root, AttachmentID: "adopt-attachment", AttachmentsDigest: models.WorkspaceAdoptionDigest([]models.WorkspaceAdoptionAttachment{{ID: "adopt-attachment", TaskID: "adopt-task", RepositoryID: "adopt-repo", CheckoutBranch: "feature/adopt", Position: 2}})}
+	selection := models.WorkspaceAdoptionSelection{Snapshot: models.NewWorkspaceRecoverySelectionSnapshot(session, env, map[string]*models.Repository{repo.ID: repo}), WorkspaceID: "adopt-ws", SessionIncarnation: "adopt-incarnation", SessionWorkspacePath: root, AttachmentID: "adopt-attachment", AttachmentCheckoutBranch: "feature/adopt", AttachmentsDigest: models.WorkspaceAdoptionDigest([]models.WorkspaceAdoptionAttachment{{ID: "adopt-attachment", TaskID: "adopt-task", RepositoryID: "adopt-repo", CheckoutBranch: "feature/adopt", Position: 2}})}
 	p := models.WorkspaceAdoptionPreview{Selection: selection, SlotID: "adopt-slot", Proof: models.WorkspaceAdoptionProof{OriginalPath: filepath.Join(root, "old"), CandidatePath: filepath.Join(root, "clone"), Branch: "feature/adopt"}}
 	p.Token = p.Digest()
 	return p
@@ -105,6 +105,7 @@ func exerciseWorkspaceAdoptionSelectionCAS(t *testing.T, newRepository func(*tes
 	for _, mutation := range []string{
 		`UPDATE task_sessions SET queue_incarnation_id='new' WHERE id='adopt-session'`,
 		`UPDATE task_repositories SET position=3 WHERE id='adopt-attachment'`,
+		`UPDATE task_repositories SET base_branch='changed' WHERE id='adopt-attachment'`,
 		`UPDATE task_environment_repos SET worktree_branch='foreign' WHERE id='adopt-slot'`,
 		`UPDATE task_environments SET workspace_path='foreign' WHERE id='adopt-env'`,
 	} {

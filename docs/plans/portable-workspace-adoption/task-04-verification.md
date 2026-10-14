@@ -43,3 +43,24 @@ for exact commands, session IDs, report paths and limitations. MAIN resolved bot
 Review findings with permanent regression coverage. Final documentation-only
 candidate verification is recorded in Kandev plan metadata to avoid a self-SHA
 documentation loop. No PR, deployment or local-overlay retirement is claimed.
+
+## Maintainer review remediation
+
+Original hosted full-backend evidence failed the previous-stable upgrade inventory
+for the new receipt table. The manifest now lists that table without modifying
+the immutable stable SQL fixtures. Initial main integration preserves both the
+task-creation authorization and checkout-adoption readiness entries.
+
+An isolated exact-source selection proof reproduced refusal of an ordinary
+generated worktree whose attachment keeps an empty checkout selector. Selection
+now shares the launch branch-identity planner and receipt validation retains the
+attachment selector/base branch. Permanent handler coverage exercises that path
+and SQL CAS covers base-branch mutation.
+
+Hosted verification is pending for the full packages and the two runtime/auth
+cases in `apps/web/e2e/tests/session/workspace-adoption.spec.ts`. Those cases use
+a real native mock process, production HTTP/auth middleware, graceful backend
+stop/restart, operator adoption/replay, persisted logical identities, authenticated
+WebSocket resume and file reads from the independent checkout. They introduce no
+UI surface or viewport-dependent behavior. No full-runtime acceptance is claimed
+until the actual hosted cases pass.

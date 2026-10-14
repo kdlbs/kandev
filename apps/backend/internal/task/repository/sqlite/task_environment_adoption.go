@@ -104,7 +104,7 @@ func (r *Repository) validateAdoptionSelectionTx(ctx context.Context, tx *sqlx.T
 
 func (r *Repository) validateAdoptionAttachmentsTx(ctx context.Context, tx *sqlx.Tx, p models.WorkspaceAdoptionPreview) error {
 	// Lock the complete attachment set before comparing its ordering/branch identity.
-	q := `SELECT id,task_id,repository_id,COALESCE(checkout_branch,'') AS checkout_branch,COALESCE(position,0) AS position FROM task_repositories WHERE task_id=? ORDER BY id`
+	q := `SELECT id,task_id,repository_id,COALESCE(checkout_branch,'') AS checkout_branch,COALESCE(base_branch,'') AS base_branch,COALESCE(position,0) AS position FROM task_repositories WHERE task_id=? ORDER BY id`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		q += ` FOR UPDATE`
 	}
