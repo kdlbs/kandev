@@ -4674,6 +4674,10 @@ const envRepoSelectCols = `
 	ter.id, ter.task_environment_id, ter.repository_id,
 	COALESCE(ter.branch_slug, ''), COALESCE(ter.worktree_id, ''),
 	COALESCE(ter.worktree_path, ''), COALESCE(ter.worktree_branch, ''),
+	COALESCE(ter.worktree_branch_owner, 'unknown'), COALESCE(ter.worktree_integration_ref, ''),
+	COALESCE(ter.worktree_recovery_head_sha, ''),
+	COALESCE(ter.worktree_source_clone_path, ''), COALESCE(ter.worktree_source_common_dir, ''),
+	ter.worktree_branch_compacted_at,
 	ter.position, COALESCE(ter.error_message, ''), ter.status,
 	ter.created_at, ter.updated_at, ter.merged_at, ter.deleted_at`
 
@@ -4681,14 +4685,20 @@ const envRepoSelectCols = `
 // models.TaskEnvironmentRepo.
 func scanEnvRepoRow(scanner rowScanner) (*models.TaskEnvironmentRepo, error) {
 	row := &models.TaskEnvironmentRepo{}
-	var mergedAt, deletedAt sql.NullTime
+	var compactedAt, mergedAt, deletedAt sql.NullTime
 	if err := scanner.Scan(
 		&row.ID, &row.TaskEnvironmentID, &row.RepositoryID, &row.BranchSlug,
-		&row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch, &row.Position,
+		&row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
+		&row.WorktreeBranchOwner, &row.WorktreeIntegrationRef, &row.WorktreeRecoveryHeadSHA,
+		&row.WorktreeSourceClonePath, &row.WorktreeSourceCommonDir, &compactedAt, &row.Position,
 		&row.ErrorMessage, &row.Status, &row.CreatedAt, &row.UpdatedAt,
 		&mergedAt, &deletedAt,
 	); err != nil {
 		return nil, err
+	}
+	if compactedAt.Valid {
+		t := compactedAt.Time
+		row.WorktreeBranchCompactedAt = &t
 	}
 	if mergedAt.Valid {
 		t := mergedAt.Time
@@ -4861,13 +4871,19 @@ func (r *Repository) appendWorktreesForSessionChunk(
 
 	for rows.Next() {
 		var sessionID string
-		var mergedAt, deletedAt sql.NullTime
+		var compactedAt, mergedAt, deletedAt sql.NullTime
 		row := &models.TaskEnvironmentRepo{}
 		if err := rows.Scan(&sessionID, &row.ID, &row.TaskEnvironmentID, &row.RepositoryID,
 			&row.BranchSlug, &row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
+			&row.WorktreeBranchOwner, &row.WorktreeIntegrationRef, &row.WorktreeRecoveryHeadSHA,
+			&row.WorktreeSourceClonePath, &row.WorktreeSourceCommonDir, &compactedAt,
 			&row.Position, &row.ErrorMessage, &row.Status, &row.CreatedAt, &row.UpdatedAt,
 			&mergedAt, &deletedAt); err != nil {
 			return err
+		}
+		if compactedAt.Valid {
+			t := compactedAt.Time
+			row.WorktreeBranchCompactedAt = &t
 		}
 		if mergedAt.Valid {
 			t := mergedAt.Time

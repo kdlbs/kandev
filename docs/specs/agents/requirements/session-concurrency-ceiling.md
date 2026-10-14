@@ -53,7 +53,10 @@ bounded instance capacity, so that one installation does not overload its host.
   caller shall receive an explicit conflict so it retains ownership.
 - **AC-AGENTS-SESSION-CEILING-001.5:** A retry sweep shall replay deferred
   launches by their stored kind. It shall preserve a record when capacity is
-  still full or replay fails for a non-ceiling reason.
+  still full or replay fails for a non-ceiling reason, except for the
+  permanent failures in AC-AGENTS-SESSION-CEILING-001.11 and
+  AC-AGENTS-SESSION-CEILING-001.12. The log entry for a preserved non-ceiling
+  failure shall name its cause.
 - **AC-AGENTS-SESSION-CEILING-001.6:** A callback from an older execution shall
   not release or confirm a reservation held by a successor execution for the
   same session.
@@ -87,6 +90,18 @@ bounded instance capacity, so that one installation does not overload its host.
   so the next sweep drops it instead of replaying it. If the task is deleted
   while its start waits, the unbound run shall fail and release its concurrency
   slot.
+- **AC-AGENTS-SESSION-CEILING-001.11:** When a replayed launch fails validation
+  of its built agent or continue command, the sweep shall drop the record with
+  a launch-invalid reason instead of preserving it. A later pass would build the
+  same command and leave another failed session. Wrapping the command-validation
+  error shall not change this disposition. A transient failure whose message
+  only mentions validation shall still be preserved.
+- **AC-AGENTS-SESSION-CEILING-001.12:** When a record's workflow entry can never
+  become valid, the sweep shall drop it as superseded. This covers a legacy
+  `start` with no recipient session, a binding that cannot be derived or is
+  incomplete, an unrouted entry whose step now routes sessions, and a task with
+  no durable entry identity. A failed step, transition, or task read during that
+  check shall preserve the record for a later pass.
 
 ### REQ-AGENTS-SESSION-CEILING-002: Configure automatic session capacity
 

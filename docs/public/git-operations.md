@@ -614,4 +614,61 @@ Before deleting a task or performing a hard reset, commit and push anything you 
 - **Multi-repository operation failed at workspace root:** choose the repository in the toolbar or include its exact `repo` subpath in the request.
 - **Missing work after cleanup:** inspect a retained local branch or the remote branch if it was pushed. On unarchive, Kandev recreates a safely compacted managed branch from its recorded exact head before trying remote recovery. Task deletion may already have force-deleted the local branch.
 
+## Adopt a prepared independent checkout
+
+An administrator with workspace management access can explicitly adopt an existing
+independent clone into a damaged host Worktree repository slot. This is separate
+from ordinary healthy-checkout admission and automatic metadata recovery. The
+server may run in Docker; the action still concerns a host Worktree environment,
+not a task using the Docker executor.
+
+Before you preview an adoption, confirm these prerequisites:
+
+- [Authentication](authentication.md) is enabled, and the request uses an administrator session or personal access token. Auth-disabled requests are refused (403).
+- Every runtime consuming the environment is stopped through its normal lifecycle.
+- The existing session is waiting for input.
+- The prepared clone is a direct child of the same owned task root with independent Git metadata.
+- The clone uses the registered origin and the selected branch on an existing commit.
+- Its history contains the registered source branch commit as a real ancestor; replacement refs cannot provide proof.
+- The original pointer identifies missing administration in the registered source.
+- The source Git administration parent is a real directory, or is absent; a symlinked parent is refused.
+
+Escaped ref/object metadata, symlinked Git configuration, legacy grafts,
+promisor packs and external alternate object storage are refused in both the
+registered source and the prepared clone. Ordinary packed refs are supported.
+
+After adoption, archive and deletion retain the validated checkout identity in the
+durable cleanup job, including across backend restart and task-row deletion.
+Discarding an independent task checkout requires explicit discard consent. Cleanup
+removes that task-owned clone while preserving the registered project clone and
+its branches. Changed ownership, replaced paths or missing provenance stop cleanup.
+
+Use the operator HTTP API:
+
+1. POST `/api/v1/tasks/:id/workspace-adoption/preview` with `session_id`, `slot_id`
+   and the absolute `checkout_path`. Preview is read-only and returns an exact
+   selection, filesystem proof and token.
+2. POST `/api/v1/tasks/:id/workspace-adoption/apply` with the complete response as
+   `preview` and a fresh UUID `operation_id`. Reusing that UUID with the identical
+   preview returns the original receipt while its authority remains valid.
+3. GET `/api/v1/tasks/:id/workspace-adoption/:operation_id` to validate the receipt.
+
+Apply preserves the task, session/incarnation, environment, repository attachment,
+slot and logical worktree identifiers, selected branch, task root and ordering.
+For a native single-repository session working inside the selected checkout,
+the environment and bound session working directories move to the candidate in
+the same transaction. Sessions working at the task root retain that directory.
+Both directories and their Git/file contents stay untouched. It does not clone,
+reset, copy files, reconstruct a lost index, create a session or replay a prompt.
+
+Stale selection or filesystem proof returns `WORKSPACE_ADOPTION_REFUSED` (409).
+Malformed requests return `WORKSPACE_ADOPTION_INVALID_REQUEST` (400). Administrator
+and workspace authorization still apply; agent-origin requests are refused.
+The server refuses platforms where it cannot prove stable filesystem identity.
+
+The receipt records exact obsolete marker provenance. Changed ownership, origin,
+branch, marker identity or restored administration invalidates it. It grants no
+filesystem permissions or exemption from an external guard. Deployment SQLite
+repair scripts, existing local receipts and outer guard integration stay local.
+
 Related guides: [Configuration](configuration.md), [Executors](executors.md), [Operations](operations.md), and [WebSocket API](websocket-api.md).
