@@ -53,6 +53,34 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+### Fifteenth complete hosted result
+
+Head `480259fac59` completes backend 38648580365 successfully in 837 seconds
+(219.87 runner-minutes) and frontend 38648580366 successfully in 761 seconds
+(26.93 runner-minutes). E2E 38648580304 fails in 1,575 seconds (26m15s;
+299.80 runner-minutes). The complete failed set uses 546.60 runner-minutes and
+does not count toward acceptance. All 3,963 native identities match run 14:
+3,916 first passes, six retry-only passes, one final failure and forty existing
+skips. The single failure is the runtime-replacement stale transient Stop
+expectation described and reproduced in Task 15. Both failed status contexts
+come from that shard and its aggregate required gate, not two test failures.
+
+Build finishes 3m46s after E2E creation. Final-finishing shard 11 then waits
+12m33s after dependencies, runs 8m51s, and reporting adds 1m05s. Scheduling/
+provisioning cause is not inferred from elapsed delay. The execution critical
+path is 848 seconds, but actual complete elapsed is 1,575 seconds. Accepted
+complete sets remain 0/3. The native clipboard batch passes its original four
+cases on their first attempt; large desktop and phone bodies are 38.861 and
+27.357 seconds. These successful case results do not erase the full failure.
+
+The native monitor reaches terminal with complete evidence: 87 passed checks,
+nine skipped, two failed and zero pending. The next candidate consolidates
+nine repeated search identities into three keepers and repairs the two runtime
+assertions against the already established silent-restoration contract. Its
+expected catalog is exactly 3,957, rather than unexplained test loss. Retain
+this failed measurement and verify selection, required checks, reviews and
+full hosted timing again on the new head.
+
 ### Fourteenth complete hosted result
 
 Head `2c886763966` passes all three complete workflows: backend 38644787855

@@ -29,8 +29,10 @@ intervals and update this work order before changing E2E execution.
 
 ## Exclusions
 
-No application behavior, paid capacity activation, trust expansion, assertion
-removal, automatic retries or delegation. Preserve unrelated user changes.
+No application behavior, paid capacity activation, trust expansion, loss of
+unique regression coverage, automatic retries or delegation. An obsolete or
+duplicate assertion may move to its existing contract keeper only with explicit
+ownership and before/after verification. Preserve unrelated user changes.
 The already reviewed three-process experiment remains within the unchanged
 memory/CPU guard, with one Playwright worker per process; no guard bypass or
 increase beyond that existing process budget is authorized.
@@ -56,6 +58,108 @@ git diff --check
 ```
 
 ## Results
+
+### Align runtime replacement checks with silent restoration
+
+Candidate F: fifteenth-run shard 4, job 116142861188, fails the zero-retry
+runtime-replacement case while expecting `recovery-stop-button` to be enabled.
+Its error snapshot already shows a resolved recovery message and ordinary
+composer. The active contract requires automatic confirmed-death restoration
+and no obsolete recovery controls after commit
+(AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.1, .2 and .4). History
+`135630f9bc` added silent restoration while retaining the former uncertain-phase
+checks. Requiring a transient banner/control after runtime availability races
+with correct completion; recovery must not be slowed to satisfy that assertion.
+
+Unmodified baseline runtime/control pairs pass on desktop (21.561 seconds) and
+phone (21.377 seconds). A controlled late observer waits for actual durable
+restoration immediately before the original Stop expectation: that same
+expectation fails with the same missing-control error in 19.156 seconds. No
+production state is forged or delayed; the original test is restored byte-for-
+byte afterward. Keep the real child kill, backend boot/page origin, native
+conversation/execution/workspace, no replay/duplicate turns/messages, reload
+and later-message assertions. Replace uncertain-phase UI expectations with the
+existing durable restored-state helper and an explicit absence-of-Stop check.
+
+| Former assertion | Retained primary owner |
+| --- | --- |
+| Retired runtime records uncertainty and keeps its submission identity | Native lifecycle `TestRuntimeReplacementUncertainSubmission`, `TestRuntimeReplacementRetiredDisconnectSurfacesUncertainOutcome`, and `TestRuntimeReplacementRecordsUncertaintyBeforePromptCompletionSignal` |
+| Persistent uncertain notice, enabled Stop and actual stop request | Desktop/phone `durable-stream-recovery.spec.ts` state-only recovery cases, which hold recovery and exercise rejected Stop truthfully |
+| Stop and phone target geometry after a real killed runtime with an independent block | `delivery-retention.spec.ts` / `mobile-delivery-retention.spec.ts` and `assertRetentionRecoveryControls` |
+| Automatic native restoration, ordinary composer and no obsolete actions after commit | Existing desktop/phone runtime-replacement cases and `expectSilentRestartRestoration` |
+
+Run the three native uncertainty keepers and desktop/phone restored-runtime plus
+stable-control cases. Keep all Stop action/geometry keepers and every current
+90/300-second bound and retry setting. This is an assertion ownership repair,
+not a product change or a removed scenario; only Candidate E changes identities.
+Verify the native catalog delta remains exactly its nine retired search cases
+and three combined keepers. Full hosted failure evidence remains retained.
+
+All three native uncertainty keepers pass in the fresh lifecycle fixture binary
+(the local binary run is not race-enabled). Final desktop and phone runtime/
+stable-control pairs each pass twice: four cases in 44.299 seconds and four in
+40.497 seconds, with zero retries, skips or failures. The controlled late-
+observer RED is retained separately. This verifies the stable restored-state
+oracle and the existing state-only Stop owners; no production source changes.
+The independent-block delivery-retention case also passes on desktop (49.3
+seconds) and phone (49.5 seconds), using actual runtime death,
+Stop click/tap and the original touch geometry. Full web typecheck, strict
+ESLint/Prettier and documentation/specification validation pass. Runtime case
+identities remain unchanged; only the explicit search consolidation changes
+the catalog.
+
+
+
+### Consolidate repeated panel-search setup
+
+Candidate E: `tests/search/panel-search-shared.spec.ts` passes all twelve
+baseline cases on their first attempt in 66.548 seconds. Each of session, Plan
+and terminal repeats the same seeded task and real panel preparation for
+S1/S7 (open, focus, empty input, counter), S3 (Escape) and S4 (Close button).
+Consolidate those three cases into one control flow per concrete panel, keeping
+all their assertions and both distinct close handlers. Reopen after Escape
+before clicking Close. Keep the real agent/Plan seed and terminal printf/output
+readiness from history `e96910ff9a`; no fake panel or new production seam.
+
+Keep S5 query reopening as a separate case for all three panels. The earlier
+12-to-3 proposal is rejected: session search explicitly clears a committed query
+(AC-UI-SESSION-SEARCH-OWNERSHIP-001.2), whereas the current Plan and terminal
+close handlers retain their query state. S5 currently closes before the bar's
+debounce necessarily commits, so its general empty-query title does not prove
+committed-query policy. Preserve those cases pending separate contract/assertion
+reconciliation; do not invent a uniform policy through this latency cleanup.
+Rich Plan matching and asynchronous session reply-ownership tests stay intact.
+
+The intended delta is twelve cases to six: retire exactly nine S1/S7/S3/S4
+identities and add three combined keepers. All other identities, including all
+three S5 cases, remain. Expected full catalog: 3,963 to 3,957, with the same
+normal/container project/file union and existing skips. Record the exact delta,
+not an unexplained smaller catalog. Every original direct behavior assertion
+must remain in order; only repeated fixture setup is shared.
+
+Run the full consolidated file and record native attempt counts, retaining
+the file's existing retry policy. For an independent coverage check, temporarily make only the shipped Close button callback a no-op:
+the session keeper must pass its Escape checks then fail the button's expected
+zero-bar assertion. Build and restore production source byte-for-byte in one
+try/finally operation, rebuild the restored bundle, and repeat the complete file.
+Reject the consolidation if an oracle/input handler disappears, the mutation
+passes, saved source is not restored, or the measured saving is immaterial.
+Do not change production behavior, retry policy or the existing 90-second bound.
+
+The six-case trial passes in approximately 35.6 seconds versus 66.548 seconds
+for the twelve-case baseline. After the Close-button mutation is rejected at
+the keeper's post-click zero-bar assertion, production source is restored byte
+for byte and the shipped bundle rebuilt. All six final cases pass twice in
+70.385 seconds total, on their first attempt. The deliberately broken button
+fails both attempts under the file's existing one-retry policy; CLI retry zero
+does not override that per-describe setting. No retry policy was changed.
+
+Native discovery reports no errors and exactly 3,957 cases. The explicit
+Counter comparison removes the named nine S1/S7, S3 and S4 identities and adds
+three combined keepers; every other identity and the complete project/file
+union remain. Full web typecheck and strict affected-file ESLint pass. Hosted
+selection and elapsed improvement still require a new complete workflow set.
+
 
 ### Native paste for oversized-message fixtures
 
@@ -104,8 +208,11 @@ and 16.394 seconds; phone bodies are 17.829 and 20.796 seconds. Every original
 expectation/assertion remains in order and the full 3,921-line generator is
 unchanged. The native clipboard event reaches the shipped paste handler, and
 complete persisted/downloaded byte comparisons still pass. Full web typecheck,
-strict changed-file lint/format and native discovery also pass. Hosted full-CI
-measurement for this batch remains pending.
+strict changed-file lint/format and native discovery also pass. Fifteenth-run
+hosted evidence retains all four first-pass cases, with the large desktop body
+at 38.861 seconds and phone at 27.357 seconds. That complete set fails the
+independent obsolete recovery assertion and takes 26m15s; local fixture savings
+do not establish whole-workflow acceptance.
 
 History/design retain these scenarios as the integration owners for the original
 large-log incident, not redundant small-string parser cases. Keep transcript,
