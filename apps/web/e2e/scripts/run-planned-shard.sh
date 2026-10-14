@@ -12,5 +12,5 @@ fi
 shift
 
 e2e_validate_playwright_args "$@" || exit 2
-export E2E_RUNNER_MAX_SHARDS="$(e2e_max_local_shards)"
+export E2E_RUNNER_MAX_SHARDS="$(e2e_max_planned_processes)"
 exec pnpm exec tsx e2e/scripts/run-planned-shard.ts --manifest "$manifest_path" "$@"

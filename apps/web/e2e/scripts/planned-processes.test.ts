@@ -13,19 +13,21 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-function fixture() {
+function fixture(count = 2) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-subshards-"));
   directories.push(dir);
-  const units = ["one.spec.ts", "two.spec.ts"].map((file) => ({
-    id: `chromium:${file}`,
-    file,
-    project: "chromium",
-    fileHash: "hash",
-    testCount: 1,
-    estimatedSeconds: 1,
-    classification: "profile" as const,
-  }));
-  const shard = { index: 7, files: units.map((unit) => unit.file), units, predictedSeconds: 2 };
+  const units = Array.from({ length: count }, (_, index) => `file-${index}.spec.ts`).map(
+    (file) => ({
+      id: `chromium:${file}`,
+      file,
+      project: "chromium",
+      fileHash: "hash",
+      testCount: 1,
+      estimatedSeconds: 1,
+      classification: "profile" as const,
+    }),
+  );
+  const shard = { index: 7, files: units.map((unit) => unit.file), units, predictedSeconds: count };
   const manifest = {
     cohort: "normal",
     projects: ["chromium", "mobile-chrome"],
@@ -48,7 +50,7 @@ function fixture() {
     children,
     spawn,
     start: () =>
-      executeSubshards(manifest, shard, 2, {
+      executeSubshards(manifest, shard, count, {
         spawn: spawn as unknown as typeof Spawn,
         outputDir: dir,
       }),
@@ -56,31 +58,36 @@ function fixture() {
 }
 
 describe("planned shard process supervision", () => {
-  it("starts every partition, joins a failed sibling, and preserves both reports", async () => {
-    const current = fixture();
+  it("starts all four partitions, joins failed siblings, and preserves every report", async () => {
+    const current = fixture(4);
     const pending = current.start();
-    expect(current.children).toHaveLength(2);
+    expect(current.children).toHaveLength(4);
     const [first, second] = current.children;
     const metadataPath = path.join(current.dir, "shard-normal-7-metadata.json");
     first!.emit("close", 7);
     await Promise.resolve();
     expect(fs.existsSync(metadataPath)).toBe(false);
     second!.emit("close", 0);
+    current.children[2]!.emit("close", 0);
+    await Promise.resolve();
+    expect(fs.existsSync(metadataPath)).toBe(false);
+    current.children[3]!.emit("close", 0);
     expect(await pending).toBe(7);
     expect(JSON.parse(fs.readFileSync(metadataPath, "utf8"))).toMatchObject({
       shard: 7,
       shardCount: 14,
       exitCode: 7,
+      processCount: 4,
       unitIds: current.shard.units.map((unit) => unit.id),
     });
     const reports = fs.readdirSync(current.dir).filter((file) => file.endsWith(".zip"));
-    expect(reports).toHaveLength(2);
+    expect(reports).toHaveLength(4);
     expect(
       reports.map((file) => fs.readFileSync(path.join(current.dir, file), "utf8")).sort(),
-    ).toEqual(["part-1", "part-2"]);
+    ).toEqual(["part-1", "part-2", "part-3", "part-4"]);
     const calls = current.spawn.mock.calls;
-    expect(calls.map((call) => call[2].env.E2E_PORT_OFFSET)).toEqual(["0", "1"]);
-    expect(new Set(calls.map((call) => call[2].env.PLAYWRIGHT_BLOB_OUTPUT_DIR)).size).toBe(2);
+    expect(calls.map((call) => call[2].env.E2E_PORT_OFFSET)).toEqual(["0", "1", "2", "3"]);
+    expect(new Set(calls.map((call) => call[2].env.PLAYWRIGHT_BLOB_OUTPUT_DIR)).size).toBe(4);
     for (const call of calls) {
       expect(call[1]).toContain("--workers=1");
       expect(call[1]).toContain("--project=chromium");
@@ -92,9 +99,9 @@ describe("planned shard process supervision", () => {
   });
 
   it("fails when a nominally successful child omits its blob report", async () => {
-    const current = fixture();
+    const current = fixture(4);
     const pending = current.start();
-    const missing = current.spawn.mock.calls[0]![2].env.PLAYWRIGHT_BLOB_OUTPUT_DIR!;
+    const missing = current.spawn.mock.calls[3]![2].env.PLAYWRIGHT_BLOB_OUTPUT_DIR!;
     fs.rmSync(missing, { recursive: true });
     for (const child of current.children) child.emit("close", 0);
     expect(await pending).toBe(1);

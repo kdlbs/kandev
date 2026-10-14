@@ -345,13 +345,50 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("timeout-minutes: 45", normal_job)
         self.assertNotIn("timeout-minutes: 25", normal_job)
 
+    def test_normal_resource_observation_preserves_native_execution_and_artifacts(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+        normal = job_block(workflow, "e2e", "playwright_image")
+        self.assertIn("Capture E2E resource budget", normal)
+        self.assertIn("Capture E2E resource outcome", normal)
+        self.assertIn("TIMEFORMAT=", normal)
+        self.assertIn('time bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${E2E_MANIFEST_SHARD}.json"', normal)
+        after = normal.partition("- name: Capture E2E resource outcome")[2].partition("- name: Upload blob report")[0]
+        self.assertIn("if: always()", after)
+        self.assertIn("e2e-resource-before.txt", normal)
+        self.assertIn("e2e-resource-after.txt", after)
+        self.assertNotIn("apps/web/e2e/blob-report/", after)
+        self.assertIn("name: e2e-resources-${{ matrix.shard }}", after)
+        self.assertNotIn("KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM", normal)
+        self.assertIn('E2E_RUNNER_PROCESSES: "4"', normal)
+
+    def test_resource_timing_propagates_native_failures_and_keeps_stderr(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+        step = workflow.partition("      - name: Run planned E2E tests (shard")[2].partition("\n      - name:")[0]
+        _, marker, raw_script = step.partition("        run: |\n")
+        self.assertTrue(marker, "the guarded command must remain an unconditional timed run")
+        script = textwrap.dedent(raw_script)
+        command = 'bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${E2E_MANIFEST_SHARD}.json"'
+        self.assertEqual(script.count(command), 1)
+        for status in (0, 37):
+            with self.subTest(status=status):
+                native = f"bash -c 'printf native-stderr >&2; exit {status}'"
+                result = subprocess.run(
+                    ["bash", "-eo", "pipefail", "-c", script.replace(command, native)],
+                    text=True, capture_output=True, timeout=5,
+                )
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertIn("native-stderr", result.stderr)
+                self.assertRegex(result.stderr, r"e2e_resources elapsed_seconds=\d+\.\d+")
+                self.assertIn("cpu_user_seconds=", result.stderr)
+                self.assertIn("cpu_system_seconds=", result.stderr)
+
     def test_only_normal_jobs_request_bounded_in_runner_processes(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
         normal_job = job_block(workflow, "e2e", "playwright_image")
-        self.assertIn('E2E_RUNNER_PROCESSES: "3"', normal_job)
+        self.assertIn('E2E_RUNNER_PROCESSES: "4"', normal_job)
         self.assertEqual(workflow.count("E2E_RUNNER_PROCESSES:"), 1)
         wrapper = REPO_ROOT / "apps/web/e2e/scripts/run-planned-shard.sh"
-        self.assertIn('export E2E_RUNNER_MAX_SHARDS="$(e2e_max_local_shards)"', wrapper.read_text())
+        self.assertIn('export E2E_RUNNER_MAX_SHARDS="$(e2e_max_planned_processes)"', wrapper.read_text())
 
     # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.1
     # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.2

@@ -557,6 +557,10 @@ jobs:
       # executor and the SSH executor's sshd target). Without --project the
       # container-bound specs would run here too, fail seeding (Docker not
       # enabled for these shards), and spam every shard.
+      - name: Capture E2E resource budget
+        continue-on-error: true
+        run: bash .github/scripts/e2e-resource-snapshot.sh > "$RUNNER_TEMP/e2e-resource-before.txt"
+
       # Cross-job archive extraction does not preserve useful mtimes. Validate
       # the source revision and every required artifact checksum instead.
       - name: Run planned E2E tests (shard ${{ matrix.shard }}/28)
@@ -564,10 +568,26 @@ jobs:
         env:
           E2E_SHARD: ${{ matrix.shard }}
           E2E_MANIFEST_SHARD: ${{ matrix.shard }}
-          E2E_RUNNER_PROCESSES: "3"
+          E2E_RUNNER_PROCESSES: "4"
           KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
           KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
-        run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${E2E_MANIFEST_SHARD}.json"
+        run: |
+          TIMEFORMAT='e2e_resources elapsed_seconds=%R cpu_user_seconds=%U cpu_system_seconds=%S cpu_percent=%P'
+          time bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${E2E_MANIFEST_SHARD}.json"
+
+      - name: Capture E2E resource outcome
+        if: always()
+        continue-on-error: true
+        run: bash .github/scripts/e2e-resource-snapshot.sh > "$RUNNER_TEMP/e2e-resource-after.txt"
+
+      - name: Upload E2E resource snapshots
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-resources-${{ matrix.shard }}
+          path: ${{ runner.temp }}/e2e-resource-*.txt
+          retention-days: 3
 
       - name: Upload blob report
         if: always()

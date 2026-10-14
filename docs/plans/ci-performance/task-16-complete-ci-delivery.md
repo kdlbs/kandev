@@ -53,6 +53,41 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+### Sixteenth complete hosted result
+
+Head `dc4d1c4f7f4` passes all three complete workflows: backend 38652558394
+in 1,201 seconds (209.18 runner-minutes), frontend 38652558464 in 853 seconds
+(24.98 runner-minutes), and E2E 38652558454 in 1,549 seconds (295.30
+runner-minutes). The green complete set takes 25m49s and 529.47 runner-minutes.
+It remains above fifteen minutes; accepted complete sets are still 0/3.
+
+All 3,957 hosted native test IDs match discovery, paired with their project
+and owning root spec even when a helper declares the test. The only delta
+from run 15 is exactly nine retired search IDs and three combined keepers.
+There are 3,914 first passes, three retry-only passes, forty existing skips
+and no final failures. Both repaired runtime cases and all six panel-search
+cases pass on their first attempt. Stable uncertainty/Stop owners remain.
+The normalized title keys are not a substitute for native identity: reporter
+file-title prefixes vary, and declaration locations can name helper files.
+
+E2E build is ready at 23:18:52 UTC, 7m10s after workflow creation, including
+2m26s before change detection starts and a further delay before Build. The
+final-finishing normal shard 16 waits 9m07s, runs 8m24s, and reporting adds
+1m08s. Its actual test step takes 442 seconds. Run 14's corresponding final
+job took 538 seconds versus 504 here, but build readiness was 223 seconds
+earlier; the green full workflow is therefore slower. These are observed
+scheduling/provisioning intervals, not proof of the account quota cause.
+
+A current-head helper snapshot reports 89 passed, zero failed/pending checks,
+no unresolved/hidden review threads, no actionable issue comments or evidence
+errors, and no exact-head review bodies. The native monitor reaches terminal
+exit zero after 1,906 seconds, with 89 passed and nine skipped checks, no
+failures/pending checks and complete evidence. Candidate 17's local resource
+control passes; its four-process preflight is guard-rejected before any tests
+start. The next hosted four-process request is explicitly an experiment, with
+full native/resource evidence required before adoption. This completed green
+measurement remains retained.
+
 ### Fifteenth complete hosted result
 
 Head `480259fac59` completes backend 38648580365 successfully in 837 seconds

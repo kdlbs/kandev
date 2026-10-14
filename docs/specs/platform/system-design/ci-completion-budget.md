@@ -169,11 +169,30 @@ backendapp, ACP adapter transport and coordinator. This explicit balancing rule
 changes placement only; new packages still enter the hash allocation and every
 selected package retains the original race/coverage command.
 
-After measuring the two-process tail, the next candidate requests up to three
-normal processes through the unchanged memory/CPU guard (12 GiB available,
+The earlier three-process experiment requested up to three normal processes
+through its existing memory/CPU guard (12 GiB available,
 four CPUs required for three). Each process still has one worker and disjoint
 whole files; container jobs remain single-process. Measure contention and retries
 before adoption, with no matrix growth or unsafe resource override.
+
+The following four-process experiment keeps the same 28 normal jobs and six
+single-process container jobs. A controlled four-CPU parent with three processes
+passes all 122 selected identities (one existing skip and one retry), peaking
+at 4.37 GiB with no swap or OOM event. It averages 3.34 busy cores, so a fourth
+process is an experiment within the existing VM rather than another runner.
+Its local preflight is rejected below ten GiB available; no four-browser local
+performance result is claimed. Full hosted observations decide adoption.
+
+Planned normal runs reserve two GiB, budget two GiB per isolated process, and
+clamp capacity to one through four. Use the lower host/cgroup remaining memory;
+resolve the current unified subgroup before reading its limit. Unknown memory
+permits one process. Four processes require four available CPUs; smaller CPU
+hosts retain the spare-core rule. Every process still has one Playwright worker,
+whole files and a separate backend/database. Managed local runners retain their
+existing maximum of three and six/twelve-GiB thresholds. No unsafe override,
+provider activation or matrix growth is part of the experiment. Shell timing
+preserves native exits; scoped cgroup counters are the CPU authority and missing
+counters remain unknown. Resource artifacts never replace native blob evidence.
 
 ## Evidence, acceptance and rollback
 

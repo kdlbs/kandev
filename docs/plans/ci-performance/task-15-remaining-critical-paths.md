@@ -33,9 +33,11 @@ No application behavior, paid capacity activation, trust expansion, loss of
 unique regression coverage, automatic retries or delegation. An obsolete or
 duplicate assertion may move to its existing contract keeper only with explicit
 ownership and before/after verification. Preserve unrelated user changes.
-The already reviewed three-process experiment remains within the unchanged
-memory/CPU guard, with one Playwright worker per process; no guard bypass or
-increase beyond that existing process budget is authorized.
+Process experiments retain one Playwright worker per process and enforce an
+explicit measured memory/CPU budget. No unsafe override or guard bypass is
+allowed. The next four-process experiment below changes the planned-runner
+budget only after its resource baseline; managed local full-suite limits stay
+unchanged.
 
 ## Acceptance
 
@@ -58,6 +60,94 @@ git diff --check
 ```
 
 ## Results
+
+### Compare four guarded processes within each existing normal job
+
+Candidate H follows G's resource observation, without more GitHub jobs or a
+larger fleet. The controlled sample runs on four CPUs with a 10-GiB cgroup,
+two managed shards and unchanged clarification, LSP and thread-composer cases.
+All 59 cases pass on their first attempt in 376.258 seconds. Its peak is
+2,891,640,832 bytes (2.693 GiB), with no OOM event. Cgroup CPU demand averages
+1.693 busy cores across the four-CPU sample. Use complete cgroup CPU
+counters rather than assuming shell timing includes every orphaned descendant. The fifteenth hosted logs
+confirm the existing three-process mode in shards 7, 10, 11 and 15.
+
+If that baseline passes without memory pressure, compare the same complete
+planned parent on the same four CPUs with three then four processes. Derive
+planned capacity from a two-GiB reserve plus two GiB per browser/backend stack,
+clamped to one through four; keep unknown memory at one. Observe the effective
+cgroup as well as host available memory, and use their lower remaining budget.
+The four-process mode requires four available CPUs; smaller CPU hosts retain
+the prior spare-core rule. Containers remain single-process and managed local
+entry points retain their existing three-shard maximum and memory thresholds.
+The three-process control passes the complete 122-case parent in 405.543
+seconds: 120 first passes, one retry-only pass and one existing skip. Peak
+memory is 4,688,642,048 bytes (4.367 GiB), with zero swap and zero OOM/max-memory
+events; complete cgroup CPU demand averages 3.335 cores. Its existing sidebar
+sort retry is retained, not attributed to the process cap.
+
+The four-process preflight is rejected before starting tests because current
+host memory is below the required 10 GiB. Keep that rejection and the guard;
+do not lower the threshold or override it to obtain a sample. Use one complete
+hosted four-process request as the bounded experiment instead. It is not a
+locally verified four-browser result. The same memory/CPU guard can reduce the
+actual count, which native metadata and logs must report.
+A separate fixed-admission replay of 14-28 parent jobs gives no consistent
+normal-tail benefit from a smaller matrix across runs 14-16. Keep 28 jobs and
+measure the four-process request first; no matrix change is adopted. Adoption still needs
+complete native coverage, successful checks, measured resource headroom and
+lower hosted occupancy/loaded elapsed; no local or partial sample establishes
+the fifteen-minute goal.
+
+Keep whole files, 28 normal jobs, six container jobs, independent databases,
+backend isolation, one worker per process, all manifests/reports, artifact
+identity checks, input handlers, deadlines and retry policies. Add tests that
+first reject unsupported four-process requests, verify memory boundaries and
+unknown/lower cgroup budgets, preserve exact disjoint selection, and retain
+failure/cancellation/report handling with four children. No environment bypass,
+new provider or paid runner is part of this candidate. Resource snapshots and
+native timing accompany the hosted comparison; reject OOM, swapping pressure,
+lost evidence or worse loaded feedback. Full fifteen-minute acceptance remains
+three successful complete hosted sets; this experiment alone cannot satisfy it.
+
+The initial two-process resource sample has passing native shard logs for
+30 and 29 cases. Its shared blob output directory retains only the latter
+report; preserve both logs and do not claim a complete 59-case structured
+report. The planned-parent control uses distinct per-process blob directories
+and retains all 122 native identities.
+
+### Measure existing E2E runner headroom
+
+Candidate G is observation only, before selecting another process budget.
+Fifteenth-run full E2E takes 26m15s, with 12m33s dependency-ready delay for
+the final shard. More GitHub jobs are not a demonstrated solution. An offline
+whole-file replay preserves all 1,337 normal units and the three-process cap:
+subdividing each parent's three static partitions into six or nine queued
+chunks increases summed parent occupancy by 4.5-9.2% with a 5-10-second cold
+process cost. Larger global matrices also add setup occupancy. Retain the
+existing allocation; neither sensitivity model proves hosted timing.
+
+Measure the existing normal jobs' resource envelope before proposing a higher
+local process cap. Keep 28 normal jobs, six container jobs, one worker per
+process, the exact guarded command, current resource guard, manifests, artifact
+identity, retry policy, deadlines and required gates. Use Bash's built-in time
+for the existing command's wall and reaped-child CPU counters, and capture
+raw Linux cgroup CPU/memory and host budget snapshots before and after it.
+Memory peak includes setup and is a conservative whole-container upper bound;
+missing or unsupported counters are unknown, not zero. Cgroup CPU counters
+are meaningful only after checking the recorded cgroup scope; they are the
+CPU-use authority because shell timing can miss orphaned descendants.
+
+Store the snapshots in a separate optional artifact. Keep native blob paths
+and missing-report checks unchanged.
+Measurement must neither replace native results nor hide the command's exit
+status. Do not add a privileged sampler, package/image dependency, capacity
+provider, retry, timeout or unsafe override. The observation itself changes no
+budget; a larger request follows Candidate H and its derived guard. Verify the existing workflow tests,
+required gates, action pinning, shell syntax, observer output, unchanged native
+catalog and unchanged workflow selection. Hosted counters, CPU demand and peak
+memory across representative heavy jobs determine whether Candidate H is
+adopted or rolled back. Do not claim a time saving for instrumentation.
 
 ### Align runtime replacement checks with silent restoration
 

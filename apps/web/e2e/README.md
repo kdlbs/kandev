@@ -820,17 +820,28 @@ Container global setup prepares one canonical helper manifest for the invocation
 each worker still validates its identity and digest and owns a private bundle
 and helper cache. Global teardown removes the shared temporary manifest.
 
-Normal jobs request up to three independent Playwright processes through
+Normal CI jobs request up to four independent Playwright processes through
 `E2E_RUNNER_PROCESSES`. Each keeps one worker and a disjoint set of whole files.
-The wrapper applies the existing memory guard, and the runner leaves one CPU
-available when choosing the process count. Three processes require at least
-12 GiB available memory and four CPUs. Unknown resources select one
-process; container jobs always use one. Set `E2E_RUNNER_PROCESSES=1` to compare
-or restore serial execution without changing the manifest or test selection.
+Planned execution reserves two GiB, then budgets two GiB per process from the
+lower of host available memory and the current cgroup's remaining memory.
+Four processes require at least ten GiB available and four CPUs. Smaller CPU
+hosts retain one spare core; unknown resources select one process. Container
+jobs always use one. The managed local runner retains its separate maximum of
+three shards and its existing six/twelve-GiB thresholds. Set
+`E2E_RUNNER_PROCESSES=1` to compare or restore serial planned execution without
+changing the manifest or test selection.
 Separate port slots, result directories and blob files preserve isolation
 across project changes and retries. All children finish before the parent
 writes its single metadata record; a child failure or missing CI report fails
 the job.
+
+Normal CI jobs retain optional `e2e-resources-<shard>` snapshots and print
+`e2e_resources` shell timing in the test-step log. Raw cgroup counters are the
+CPU-use authority because shell timing can miss orphaned descendants. Memory
+peak includes container setup; missing counters remain unknown. Resource
+artifacts never replace native blob reports or their missing-report checks.
+The four-process request is a measured rollout, not evidence by itself that
+full CI meets its elapsed-time target.
 
 Keep the default at `workers: 1` until the controlled worker-concurrency
 experiment shows a repeatable wall-time improvement without retries. Record
