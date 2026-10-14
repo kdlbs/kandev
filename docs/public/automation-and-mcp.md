@@ -649,10 +649,12 @@ resolve atomically; a source failure produces no partial report. They never stor
 CSV or reread the source on replay. Later edits or workspace cleanup do not
 change the accepted chart or table.
 
-File bytes do not persist. Kandev fetches a referenced file only after the user
-selects **Preview**; **Open file** uses the native desktop or mobile viewer.
-If the workspace disappears, the report remains and the file preview reports
-that it is unavailable.
+File bytes do not persist. Image file cards expand and load automatically when
+they appear in the conversation. Select **Hide preview** to collapse an image
+and **Preview** to reopen it. Other files load only after you select
+**Preview**. **Open file** uses the native desktop or mobile viewer. If the
+workspace disappears, the report remains and the file preview reports that it
+is unavailable.
 
 Historical version 1 reports still render, including their stored CSV snapshots.
 New version 1 calls are rejected with guidance to refresh tool discovery and

@@ -1,6 +1,6 @@
 # ADR-2026-08-14-kandev-native-agent-rich-output: Keep Agent Rich Output Host Native
 
-**Status:** accepted (amended 2026-08-15; composition extended 2026-10-08)
+**Status:** accepted (amended 2026-08-15; composition extended 2026-10-08; image defaults amended 2026-10-13)
 **Date:** 2026-08-14
 **Area:** backend, frontend, protocol, security
 
@@ -29,8 +29,11 @@ consistency, persistence, and security costs.
    values. Existing tool-result persistence stores that snapshot at
    `metadata.normalized.generic.output`; replay never re-reads the CSV.
 5. Heavy bytes remain workspace-owned. File blocks and CSV chart sources accept
-   only relative paths and optional repository identity. File previews still
-   fetch content only after explicit user action. CSV parsing persists no raw
+   only relative paths and optional repository identity. Non-image file previews
+   fetch content only after explicit user action. The user's 2026-10-13 image
+   default request selects a narrow exception: mounted image cards expand and
+   read automatically unless a retained user choice hides them. Implementation
+   is recorded in the [image-default plan](../plans/image-preview-defaults/plan.md). CSV parsing persists no raw
    bytes, but its bounded normalized snapshot remains after workspace cleanup.
 6. The frontend repeats validation at its trust boundary and renders completed
    rich-output calls outside generic tool-activity grouping.

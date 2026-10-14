@@ -80,7 +80,7 @@ export function FilePreview({ sessionId, onOpenFile, ...file }: NativeFilePrevie
   const previewId = useId();
   const [expanded, setExpanded] = useRichOutputViewState(
     JSON.stringify([file.repo, file.path]),
-    false,
+    getFileCategory(file.path) === "image",
   );
   const { load, state } = useWorkspaceFilePreview(sessionId, file.path, file.repo);
 

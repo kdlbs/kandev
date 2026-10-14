@@ -7,6 +7,28 @@ import { SessionPage } from "../../pages/session-page";
 
 export const RICH_OUTPUT_FILE = "rich-output-report.txt";
 export const RICH_OUTPUT_FILE_CONTENT = "RICH_OUTPUT_FILE_PREVIEW\nchecks=38\nfailures=0\n";
+export const RICH_OUTPUT_IMAGE = "rich-output-image.PNG";
+
+export function seedRichOutputImage(repositoryPath: string) {
+  fs.copyFileSync(
+    path.resolve(__dirname, "../../fixtures/rich-output-image.png"),
+    path.join(repositoryPath, RICH_OUTPUT_IMAGE),
+  );
+  return {
+    version: 2,
+    catalog_version: 1,
+    title: "Image evidence",
+    spec: {
+      root: "report",
+      elements: {
+        report: { type: "Stack", props: { direction: "vertical" }, children: ["image", "text"] },
+        image: { type: "FilePreview", props: { path: RICH_OUTPUT_IMAGE }, children: [] },
+        text: { type: "FilePreview", props: { path: RICH_OUTPUT_FILE }, children: [] },
+      },
+    },
+  };
+}
+
 const RICH_OUTPUT_CSV = "rich-output-chart-data.csv";
 const RICH_OUTPUT_CSV_CONTENT = [
   "recorded_at,route,p50_ms,p95_ms,requests,errors",

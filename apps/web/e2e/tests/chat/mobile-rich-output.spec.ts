@@ -1,5 +1,66 @@
 import { test, expect } from "../../fixtures/test-base";
-import { RICH_OUTPUT_FILE_CONTENT, seedRichOutputTask } from "./rich-output-helpers";
+import {
+  RICH_OUTPUT_FILE,
+  RICH_OUTPUT_FILE_CONTENT,
+  RICH_OUTPUT_IMAGE,
+  seedRichOutputImage,
+  seedRichOutputTask,
+} from "./rich-output-helpers";
+
+// @covers AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.1, AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.2,
+// AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.3, AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.6
+test("mobile image previews expand automatically with reachable hide and open actions", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, testInfo) => {
+  const session = await seedRichOutputTask({
+    page: testPage,
+    apiClient,
+    seedData,
+    title: "Mobile automatic image preview",
+    payload: seedRichOutputImage(seedData.repositoryPath),
+  });
+  const report = session.activeChat().getByTestId("rich-output");
+  const card = report.getByTestId("rich-output-file").filter({ hasText: RICH_OUTPUT_IMAGE });
+  const toggle = card.getByTestId("rich-output-file-preview-toggle");
+  const image = card.getByRole("img", { name: RICH_OUTPUT_IMAGE, exact: true });
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(image).toBeVisible();
+  await card.scrollIntoViewIfNeeded();
+  await expect(toggle).toBeInViewport();
+  await expect(card.getByTestId("rich-output-file-open")).toBeInViewport();
+  await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(640);
+  await expect(
+    report
+      .getByTestId("rich-output-file")
+      .filter({ hasText: RICH_OUTPUT_FILE })
+      .getByTestId("rich-output-file-preview-toggle"),
+  ).toHaveAttribute("aria-expanded", "false");
+  const imageBox = await image.boundingBox();
+  const cardBox = await card.boundingBox();
+  expect(imageBox).not.toBeNull();
+  expect(cardBox).not.toBeNull();
+  expect(imageBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
+  expect(imageBox!.x + imageBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+  expect(
+    await testPage.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
+  for (const button of await card.getByRole("button").all()) {
+    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
+  await testPage.screenshot({ path: testInfo.outputPath("automatic-image-phone.png") });
+  await toggle.tap();
+  await expect(image).toHaveCount(0);
+  await toggle.tap();
+  await expect(image).toBeVisible();
+  await card.getByTestId("rich-output-file-open").tap();
+  const viewer = testPage.getByTestId("mobile-file-viewer-panel");
+  await expect(viewer).toBeVisible();
+  await expect(viewer.getByRole("img", { name: RICH_OUTPUT_IMAGE, exact: true })).toBeVisible();
+});
 
 test("mobile rich output stays contained and opens the native file viewer", async ({
   testPage,

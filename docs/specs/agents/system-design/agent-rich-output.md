@@ -233,8 +233,8 @@ the real result-extraction path.
 
 Frontend normalization replaces each CSV descriptor with its accepted inline
 labels/series in a derived immutable spec, without mutating stored input. A
-missing result never triggers a CSV read during replay. File previews remain
-workspace references with the existing explicit-expansion lifecycle.
+missing result never triggers a CSV read during replay. File previews remain workspace references;
+[image defaults](image-preview-defaults.md) amend their disclosure lifecycle.
 
 ## Legacy compatibility
 

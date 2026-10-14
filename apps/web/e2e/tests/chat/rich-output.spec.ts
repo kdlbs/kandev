@@ -5,8 +5,49 @@ import type { Locator } from "@playwright/test";
 import {
   RICH_OUTPUT_FILE,
   RICH_OUTPUT_FILE_CONTENT,
+  RICH_OUTPUT_IMAGE,
+  seedRichOutputImage,
   seedRichOutputTask,
 } from "./rich-output-helpers";
+
+// @covers AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.1, AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.2,
+// AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.3, AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.4
+test("image file previews expand automatically while text remains lazy", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const session = await seedRichOutputTask({
+    page: testPage,
+    apiClient,
+    seedData,
+    title: "Automatic image preview",
+    payload: seedRichOutputImage(seedData.repositoryPath),
+  });
+  const report = session.activeChat().getByTestId("rich-output");
+  const imageCard = report.getByTestId("rich-output-file").filter({ hasText: RICH_OUTPUT_IMAGE });
+  const textCard = report.getByTestId("rich-output-file").filter({ hasText: RICH_OUTPUT_FILE });
+  const toggle = imageCard.getByTestId("rich-output-file-preview-toggle");
+  const image = imageCard.getByRole("img", { name: RICH_OUTPUT_IMAGE, exact: true });
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(640);
+  await expect(textCard.getByTestId("rich-output-file-preview-toggle")).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+  await expect(textCard).not.toContainText(RICH_OUTPUT_FILE_CONTENT.trim());
+  await toggle.click();
+  await expect(image).toHaveCount(0);
+  await testPage.setViewportSize({ width: 390, height: 844 });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await testPage.setViewportSize({ width: 1280, height: 900 });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.press("Space");
+  await expect(image).toBeVisible();
+  await imageCard.getByTestId("rich-output-file-open").click();
+  await expect(testPage.locator(`.dv-default-tab:has-text('${RICH_OUTPUT_IMAGE}')`)).toBeVisible();
+});
 
 async function revealChartPlot(chart: Locator): Promise<void> {
   await chart.getByTestId("rich-output-chart-plot").scrollIntoViewIfNeeded();

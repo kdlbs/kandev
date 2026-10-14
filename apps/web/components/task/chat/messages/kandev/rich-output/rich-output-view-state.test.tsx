@@ -21,6 +21,53 @@ afterEach(() => {
   transport.auth = "user-a";
 });
 
+// @covers AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.3
+it("retains hidden image choices across metadata changes and layout remounts independently", async () => {
+  const leaf = { type: "FilePreview", props: { path: "shared.png" }, children: [] };
+  const props: KandevRendererProps = {
+    sessionId: "image-session",
+    messageId: "image-message",
+    status: "complete",
+    result: undefined,
+    args: {
+      version: 2,
+      catalog_version: 1,
+      title: "Images",
+      spec: {
+        root: "report",
+        elements: {
+          report: {
+            type: "Stack",
+            props: { direction: "vertical" },
+            children: ["first", "second"],
+          },
+          first: structuredClone(leaf),
+          second: structuredClone(leaf),
+        },
+      },
+    },
+  };
+  transport.read.mockResolvedValue({ content: "aW1hZ2U=", is_binary: true });
+  const view = render(<Harness {...props} />);
+  expect(await screen.findAllByRole("img")).toHaveLength(2);
+  fireEvent.click(screen.getAllByTestId(TOGGLE)[0]);
+  const renamed = { ...props, args: { ...props.args, title: "Renamed images" } };
+  view.rerender(<Harness {...renamed} />);
+  expect(screen.getAllByTestId(TOGGLE).map((toggle) => toggle.getAttribute(EXPANDED))).toEqual([
+    "false",
+    "true",
+  ]);
+  expect(transport.read).toHaveBeenCalledTimes(2);
+  view.unmount();
+  render(<Harness {...renamed} />);
+  expect(screen.getAllByTestId(TOGGLE).map((toggle) => toggle.getAttribute(EXPANDED))).toEqual([
+    "false",
+    "true",
+  ]);
+  expect(await screen.findAllByRole("img")).toHaveLength(1);
+  expect(transport.read).toHaveBeenCalledTimes(3);
+});
+
 // @covers AC-AGENTS-AGENT-RICH-OUTPUT-003.9
 it("restores disclosure preferences across layout remounts without retaining file bytes", async () => {
   const props: KandevRendererProps = {
