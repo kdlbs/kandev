@@ -299,3 +299,30 @@ all native test identities, future-file discovery and optional gates remain.
 Verify both manifest modes and exact catalog union, then run the real worker
 lifecycle suite and measure complete hosted elapsed. Batch-loader support is
 confirmed in the pinned Kind v0.32.0 command implementation.
+
+### Queue edit synchronization (seventh candidate)
+
+Fifth-run native report `blob-report-8` records the mobile later-entry edit
+and held-head save cases at 46.825 and 43.989 seconds. Each starts a 30-second
+mock response and waits for it to finish after establishing an edit lease.
+The desktop equivalents use ten-second sleeps. Elapsed time is incidental:
+the contract requires the predecessor to remain active until the editor holds
+the intended queue row, then complete while that lease remains held.
+
+Reuse the sixth candidate's cancellation-aware `e2e:await_file` primitive to
+release the predecessor only after the existing editor and draft assertions.
+Keep native UI gestures, FIFO delivery, queue counts, editor persistence,
+save-triggered dispatch, touch layout and original deadlines. Release the
+test-owned marker in `finally` so failed assertions cannot leave a held agent.
+Other queue scenarios retain their current fixtures. Measure the same four
+tests before and after with retries disabled; validate their unchanged catalog
+identities and keep the sixth hosted set running to completion independently.
+
+Local baselines pass at 38.4/36.4 seconds on mobile and 18.1/16.6 on desktop.
+Three post-change repetitions each pass with medians 9.0/7.2 and 8.9/6.9
+seconds: combined test-body time is 109.5 to 32.0 seconds (70.8% lower).
+This is focused local evidence, not full-CI acceptance. The first trial exposed
+an exact-text selector against concatenated agent chunks; retain its failure
+and interrupted repetitions, scope the corrected locator to agent bodies,
+and use the fresh twelve-case passing run for verification. Native catalogs
+retain all identities/counts; only these two spec hashes change.

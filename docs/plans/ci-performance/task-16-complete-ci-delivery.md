@@ -53,6 +53,16 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+Sixth candidate `6e006a425` is pushed. Backend 38614506503, frontend
+38614506677 and E2E 38614506377 run on hosted merge
+`6b1b627b0ace6e462b78b2f66efc679457624fa8` over main `148c84f072`.
+Its tree matches locally verified synthetic merge `5d5da539316c`: 33 parent/mobile
+context tests, full web typecheck and affected race-enabled backend checks pass.
+Current-main enumeration adds only two workspace-adoption scenarios, for
+3,810 normal plus 153 container tests; no existing identity or count changes.
+The single primary waiter preserves this full attempt while the next local
+queue synchronization candidate is prepared. Hosted outcomes remain pending.
+
 Second candidate head `e2a66b8536` runs backend 38581852307, frontend
 38581852072 and E2E 38581852055. Its tested merge is
 `048610fb914664e1873c4ac671c66c1622bde238` over base `73c5ddb8c955`.
