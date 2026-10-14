@@ -53,6 +53,9 @@ Decision: [explicit checkout adoption](../../../decisions/2026-10-11-portable-ch
 - **AC-TASKS-PORTABLE-ADOPTION-002.1:** Task, session/incarnation, environment/owner generation,
   repository, task attachment, repository-slot and logical-worktree identifiers are retained.
   Session history, root path, selected branch and sibling ordering are unchanged.
+  If a native session's working directory is the selected checkout, its environment
+  and bound session paths move to the candidate atomically with the physical binding.
+  A working directory at the task root remains unchanged.
 - **AC-TASKS-PORTABLE-ADOPTION-002.2:** Both directories, old marker bytes and all tracked,
   staged, dirty, untracked and ignored candidate files remain untouched. Adoption performs
   no clone, branch creation, checkout, reset, content copying, cleanup or prompt replay.

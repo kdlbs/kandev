@@ -124,6 +124,7 @@ for (const authenticated of [false, true]) {
       expect(await replay.json()).toEqual(receipt);
       expect(readAdoptionIdentity(backend.tmpDir, sessionId)).toEqual({
         ...identity,
+        workspace_path: clone.candidate,
         worktree_path: clone.candidate,
       });
       expect(fs.readFileSync(path.join(identity.worktree_path, ".git"))).toEqual(clone.marker);
@@ -155,25 +156,26 @@ for (const authenticated of [false, true]) {
         content: "/e2e:diff-update-modify",
       });
       await expect
-        .poll(() => fs.existsSync(path.join(identity.workspace_path, "diff_update_test.txt")), {
+        .poll(() => fs.existsSync(path.join(clone.candidate, "diff_update_test.txt")), {
           timeout: 30_000,
         })
         .toBe(true);
-      expect(
-        fs.readFileSync(path.join(identity.workspace_path, "diff_update_test.txt"), "utf8"),
-      ).toContain("SECOND_MODIFICATION");
+      expect(fs.readFileSync(path.join(clone.candidate, "diff_update_test.txt"), "utf8")).toContain(
+        "SECOND_MODIFICATION",
+      );
       const file = await adoptionWS<{ content: string }>(
         page,
         backend.baseUrl,
         "workspace.file.get",
         {
           session_id: sessionId,
-          path: `${path.basename(clone.candidate)}/adoption-sentinel.txt`,
+          path: "adoption-sentinel.txt",
         },
       );
       expect(file.content).toBe(clone.sentinel);
       expect(readAdoptionIdentity(backend.tmpDir, sessionId)).toEqual({
         ...identity,
+        workspace_path: clone.candidate,
         worktree_path: clone.candidate,
       });
       const messagesResponse = await context.request.get(

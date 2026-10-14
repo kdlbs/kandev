@@ -206,6 +206,25 @@ func adoptionPreview(t *testing.T, f adoptionHTTPFixture) models.WorkspaceAdopti
 	return p
 }
 
+func TestWorkspaceAdoptionHTTPNativeWorkingDirectory(t *testing.T) {
+	f := newAdoptionHTTPFixture(t)
+	for _, table := range []string{"task_environments", "task_sessions"} {
+		_, err := f.db.Exec("UPDATE "+table+" SET workspace_path=?", f.old)
+		require.NoError(t, err)
+	}
+	p := adoptionPreview(t, f)
+	rec := adoptionRequest(f.router, "/api/v1/tasks/task-adoption/workspace-adoption/apply", map[string]any{"preview": p, "operation_id": "11111111-1111-4111-8111-111111111111"})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	for _, table := range []string{"task_environments", "task_sessions"} {
+		var cwd string
+		require.NoError(t, f.db.Get(&cwd, "SELECT workspace_path FROM "+table))
+		require.Equal(t, f.clone, cwd)
+	}
+	replay := adoptionRequest(f.router, "/api/v1/tasks/task-adoption/workspace-adoption/apply", map[string]any{"preview": p, "operation_id": "11111111-1111-4111-8111-111111111111"})
+	require.Equal(t, http.StatusOK, replay.Code, replay.Body.String())
+	require.JSONEq(t, rec.Body.String(), replay.Body.String())
+}
+
 func TestWorkspaceAdoptionHTTPRefusesStaleAndForeignProof(t *testing.T) {
 	cases := []struct {
 		name   string

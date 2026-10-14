@@ -71,6 +71,15 @@ func (p WorkspaceAdoptionPreview) Digest() string {
 	return WorkspaceAdoptionDigest(p)
 }
 
+// PublishedWorkspacePath projects a checkout working directory onto its replacement.
+// Task-root working directories retain their original path.
+func (p WorkspaceAdoptionPreview) PublishedWorkspacePath(path string) string {
+	if path == p.Proof.OriginalPath {
+		return p.Proof.CandidatePath
+	}
+	return path
+}
+
 func (p WorkspaceAdoptionPreview) Slot() (WorkspaceRecoveryInventorySlot, error) {
 	for _, s := range p.Selection.Snapshot.Slots {
 		if s.EnvironmentRepoID == p.SlotID {

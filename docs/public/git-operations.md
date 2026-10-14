@@ -649,6 +649,9 @@ Use the operator HTTP API:
 
 Apply preserves the task, session/incarnation, environment, repository attachment,
 slot and logical worktree identifiers, selected branch, task root and ordering.
+For a native single-repository session working inside the selected checkout,
+the environment and bound session working directories move to the candidate in
+the same transaction. Sessions working at the task root retain that directory.
 Both directories and their Git/file contents stay untouched. It does not clone,
 reset, copy files, reconstruct a lost index, create a session or replay a prompt.
 

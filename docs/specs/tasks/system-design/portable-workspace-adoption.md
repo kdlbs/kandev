@@ -52,7 +52,12 @@ bindings prevent publication; adopting a selected legacy slot preserves its stat
 ## Filesystem and Git proof
 
 The worktree manager pins the owned task root, original checkout, candidate and
-registered source metadata. The original pointer must identify missing linked
+registered source metadata. The root is derived from the configured tasks base
+and persisted task directory name, independently of the execution working directory.
+Native single-repository sessions use the selected checkout as their working
+directory; multi-repository sessions use the task root. Both layouts require
+the original and candidate checkouts to be direct children of the pinned root.
+The original pointer must identify missing linked
 administration in the registered source. A present `worktrees` administration
 parent is opened without following symlinks and retained in the directory proof;
 publication and reuse reject parent replacement or newly restored administration.
@@ -69,8 +74,14 @@ rewritten. Both directories remain intact.
 
 ## Durable receipt and reuse
 
-The task repository atomically updates only the selected physical path and source
-provenance and inserts a receipt in `task_environment_checkout_adoptions`. Full
+The task repository atomically updates the selected physical path and source
+provenance and inserts a receipt in `task_environment_checkout_adoptions`.
+When the environment working directory equals the retired checkout, the same
+transaction moves that directory and bound session paths referencing it to the
+candidate. Task-root working directories remain unchanged. The receipt retains
+the pre-publication snapshot for CAS and validates its deterministic published
+working-directory projection on replay and reuse. Logical identities and the
+owned task root remain unchanged. Full
 selection CAS, claim authority and pinned-path revalidation run in the same
 SQLite or PostgreSQL transaction. An operation replay validates current authority
 and finalizes only its own committed orphan claim. Cache aliases are invalidated

@@ -154,6 +154,14 @@ func (r *Repository) publishAdoptionTx(ctx context.Context, tx *sqlx.Tx, p model
 	if n != 1 {
 		return models.ErrWorkspaceAdoptionStale
 	}
+	if p.Selection.Snapshot.WorkspacePath == p.Proof.OriginalPath {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_environments SET workspace_path=?,updated_at=? WHERE id=? AND workspace_path=?`), p.Proof.CandidatePath, r.nowUTC(), p.Selection.Snapshot.TaskEnvironmentID, p.Proof.OriginalPath); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_sessions SET workspace_path=?,updated_at=? WHERE task_environment_id=? AND workspace_path=?`), p.Proof.CandidatePath, r.nowUTC(), p.Selection.Snapshot.TaskEnvironmentID, p.Proof.OriginalPath); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

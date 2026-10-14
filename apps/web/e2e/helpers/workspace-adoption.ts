@@ -77,7 +77,7 @@ export function prepareIndependentAdoptionClone(
   source: string,
   identity: AdoptionIdentity,
 ): { candidate: string; marker: Buffer; index: Buffer; sentinel: string } {
-  const candidate = path.join(identity.workspace_path, `adopted-${randomUUID()}`);
+  const candidate = path.join(path.dirname(identity.worktree_path), `adopted-${randomUUID()}`);
   const env = makeGitEnv(tmpDir);
   const git = (...args: string[]) =>
     execFileSync(

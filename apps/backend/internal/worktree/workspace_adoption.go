@@ -25,6 +25,7 @@ type WorkspaceAdoptionInspection struct {
 	source     string
 	selection  models.WorkspaceAdoptionSelection
 	sourceHead string
+	root       string
 }
 
 func (i *WorkspaceAdoptionInspection) Close() {
@@ -259,7 +260,7 @@ func (i *WorkspaceAdoptionInspection) pinIdentityPaths() error {
 		}
 		i.Proof.Identities[path] = identity
 	}
-	for _, path := range []string{filepath.Join(i.Proof.OriginalPath, ".git"), filepath.Join(i.selection.Snapshot.WorkspacePath, storageworkspaces.OwnershipMarkerFilename)} {
+	for _, path := range []string{filepath.Join(i.Proof.OriginalPath, ".git"), filepath.Join(i.root, storageworkspaces.OwnershipMarkerFilename)} {
 		identity, ok := recoveryartifact.FilesystemIdentity(path)
 		if !ok {
 			return models.ErrWorkspaceAdoptionStale
@@ -286,7 +287,7 @@ func (i *WorkspaceAdoptionInspection) Verify(ctx context.Context) error {
 			return err
 		}
 	}
-	root := i.selection.Snapshot.WorkspacePath
+	root := i.root
 	rootMarker, err := i.handles[root].ReadFile(storageworkspaces.OwnershipMarkerFilename)
 	if err != nil {
 		return err
@@ -347,11 +348,15 @@ func (m *Manager) ValidateWorkspaceAdoptionProof(ctx context.Context, p models.W
 }
 
 func (i *WorkspaceAdoptionInspection) pinRoot(selection models.WorkspaceAdoptionSelection) error {
-	root := selection.Snapshot.WorkspacePath
 	base, err := i.manager.TasksBasePath()
 	if err != nil {
 		return err
 	}
+	root, err := filepath.Abs(filepath.Join(base, selection.Snapshot.TaskDirName))
+	if err != nil {
+		return err
+	}
+	i.root = root
 	rootHandle, err := storageworkspaces.OpenDirectoryNoFollow(base, root)
 	if err != nil {
 		return err
@@ -393,8 +398,9 @@ func (i *WorkspaceAdoptionInspection) inspectCandidateHistory(ctx context.Contex
 }
 
 func validWorkspaceAdoptionPaths(selection models.WorkspaceAdoptionSelection, slot models.WorkspaceRecoveryInventorySlot, candidate, base string) bool {
-	root := selection.Snapshot.WorkspacePath
-	return filepath.IsAbs(candidate) && filepath.Clean(candidate) == candidate && candidate != slot.WorktreePath && filepath.Dir(candidate) == root && filepath.Dir(slot.WorktreePath) == root && filepath.Join(base, selection.Snapshot.TaskDirName) == root
+	root := filepath.Join(base, selection.Snapshot.TaskDirName)
+	cwd := selection.Snapshot.WorkspacePath
+	return selection.Snapshot.TaskDirName != "" && filepath.Dir(root) == base && (cwd == root || cwd == slot.WorktreePath) && filepath.IsAbs(candidate) && filepath.Clean(candidate) == candidate && candidate != slot.WorktreePath && filepath.Dir(candidate) == root && filepath.Dir(slot.WorktreePath) == root
 }
 
 // All adoption identity/history reads use the actual objects, not refs/replace.
