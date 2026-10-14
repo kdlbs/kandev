@@ -273,11 +273,11 @@ func (s *Service) captureWorkflowStartPromptAdmission(
 		}
 	}
 	return messagequeue.QueueSessionIdentity{
-		TaskID: taskID, SessionID: session.ID, SessionIncarnationID: session.QueueIncarnationID,
-	}, messagequeue.WorkflowEntryIdentity{
-		WorkflowID: task.WorkflowID, WorkflowStepID: task.WorkflowStepID,
-		TransitionID: transitionID, LifecycleGeneration: generation,
-	}, true, nil
+			TaskID: taskID, SessionID: session.ID, SessionIncarnationID: session.QueueIncarnationID,
+		}, messagequeue.WorkflowEntryIdentity{
+			WorkflowID: task.WorkflowID, WorkflowStepID: task.WorkflowStepID,
+			TransitionID: transitionID, LifecycleGeneration: generation,
+		}, true, nil
 }
 
 func (s *Service) captureWorkflowStartPromptTaskAndEntry(

@@ -25,6 +25,7 @@ import { ConversationUsageDisplay } from "@/components/task/chat/conversation-us
 import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
 import { OpenInThreadsButton } from "@/components/threads/open-in-threads-button";
 import { useIsDeckThread } from "@/hooks/domains/threads/use-deck-thread";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
@@ -212,7 +213,7 @@ function ChatStatusBarRightControls({
   return (
     <div
       data-testid="chat-status-bar-right-controls"
-      className="flex min-w-0 flex-wrap items-center gap-1.5 empty:hidden max-md:contents"
+      className="flex min-w-0 flex-wrap items-center gap-1.5 empty:hidden max-md:w-full max-md:justify-end"
     >
       {showThreadsLink && <OpenInThreadsButton taskId={taskId} sessionId={sessionId} />}
       {showAutoScrollControl && sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
@@ -241,6 +242,7 @@ function ChatStatusBarRightControls({
   );
 }
 
+/** Phones place progression above utilities; each composition follows its DOM order. */
 function ChatStatusBarActions({
   rightControlProps,
   showRightControls,
@@ -258,23 +260,29 @@ function ChatStatusBarActions({
   onProceed: ChatStatusBarProps["onProceed"];
   isMoving: boolean;
 }) {
+  const { isMobile } = useResponsiveBreakpoint();
   if (!showRightControls && !(showProceed && nextStepName)) return null;
+  const controls = showRightControls ? (
+    <ChatStatusBarRightControls key="controls" {...rightControlProps} />
+  ) : null;
+  const proceed =
+    showProceed && nextStepName ? (
+      <WorkflowMoveProceedButton
+        key="proceed"
+        previewTarget={previewTarget}
+        nextStepName={nextStepName}
+        onProceed={onProceed}
+        isMoving={isMoving}
+        className="h-6 max-w-full max-md:ml-auto max-md:h-auto max-md:min-h-11 max-md:min-w-11 max-md:whitespace-normal max-md:break-words [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:whitespace-normal [@media(pointer:coarse)]:break-words"
+        testId="proceed-next-step"
+      />
+    ) : null;
   return (
     <div
       data-testid="chat-status-bar-actions"
-      className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-md:contents"
+      className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-md:w-full max-md:flex-col max-md:items-stretch"
     >
-      {showRightControls && <ChatStatusBarRightControls {...rightControlProps} />}
-      {showProceed && nextStepName && (
-        <WorkflowMoveProceedButton
-          previewTarget={previewTarget}
-          nextStepName={nextStepName}
-          onProceed={onProceed}
-          isMoving={isMoving}
-          className="h-6 max-w-full max-md:ml-auto max-md:h-auto max-md:min-h-11 max-md:whitespace-normal max-md:break-words [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:whitespace-normal [@media(pointer:coarse)]:break-words"
-          testId="proceed-next-step"
-        />
-      )}
+      {isMobile ? [proceed, controls] : [controls, proceed]}
     </div>
   );
 }

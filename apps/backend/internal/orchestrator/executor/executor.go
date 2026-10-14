@@ -179,6 +179,20 @@ type taskEnvironmentMaterializationFinalizer interface {
 	FinalizeTaskEnvironmentMaterialization(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, string) error
 }
 
+// taskEnvironmentMaterializationReleaser stores failed for the creating
+// environment that a session still owns. A claim that another session took
+// over is left alone. Legacy test stores without it keep the full-row update.
+type taskEnvironmentMaterializationReleaser interface {
+	FailTaskEnvironmentMaterialization(context.Context, string) (bool, error)
+}
+
+// failedTaskEnvironmentReelector makes a session the owner of a failed task
+// environment that never created anything physical. Legacy test stores without
+// it keep refusing failed environments.
+type failedTaskEnvironmentReelector interface {
+	ReelectFailedTaskEnvironmentMaterialization(context.Context, string, string) (bool, error)
+}
+
 // taskEnvironmentTransitionPersister commits an existing environment rebind
 // and its repository inventory as one durable operation. Legacy adapters may
 // omit it and use the compatibility persistence path in executor_execute.go.

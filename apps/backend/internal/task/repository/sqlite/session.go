@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -657,9 +659,13 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 	}
 
 	var envID, status, materializationSessionID string
+	var claimUpdatedAt time.Time
+	if err := r.lockTaskMaterializationForBindingTx(ctx, tx, session.TaskID); err != nil {
+		return err
+	}
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, status, materialization_session_id FROM task_environments WHERE task_id = ?
-	`), session.TaskID).Scan(&envID, &status, &materializationSessionID)
+		SELECT id, status, materialization_session_id, updated_at FROM task_environments WHERE task_id = ?
+	`), session.TaskID).Scan(&envID, &status, &materializationSessionID, &claimUpdatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		if candidate.ID == "" {
@@ -676,18 +682,26 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 	case err != nil:
 		return fmt.Errorf("load workspace binding: %w", err)
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusCreating:
-		abandoned, err := r.failAbandonedWorkspaceMaterialization(ctx, tx, envID, materializationSessionID)
+		outcome, err := r.settleWorkspaceMaterializationClaim(ctx, tx, envID, materializationSessionID, claimUpdatedAt, session.ID)
 		if err != nil {
 			return err
 		}
-		if abandoned {
+		if outcome == materializationClaimFailed {
 			if err := tx.Commit(); err != nil {
 				return fmt.Errorf("persist abandoned workspace materialization failure: %w", err)
 			}
 			return fmt.Errorf("%w: the initial workspace materialization did not complete", models.ErrWorkspaceReuseUnsafe)
 		}
-		return &models.WorkspacePreparingError{EnvironmentID: envID, Reason: "retry after the initial workspace launch completes"}
+		if outcome != materializationClaimTakenOver {
+			return &models.WorkspacePreparingError{EnvironmentID: envID, Reason: "retry after the initial workspace launch completes"}
+		}
+		session.TaskEnvironmentID = envID
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
+		session.TaskEnvironmentID = envID
+	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusFailed:
+		if err := r.reelectFailedWorkspaceMaterializationTx(ctx, tx, envID, session.ID); err != nil {
+			return err
+		}
 		session.TaskEnvironmentID = envID
 	default:
 		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
@@ -756,6 +770,9 @@ func (r *Repository) createTaskSessionWithSharedGroupWorkspaceBinding(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSharedMaterializationTasksTx(ctx, tx, groupID, session.TaskID); err != nil {
+		return err
+	}
 	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
 		return err
 	}
@@ -816,37 +833,57 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	groupID string,
 	route *models.WorkflowSessionRoute,
 ) error {
-	var environmentID, status, ownerID, executorType string
+	var environmentID, status, materializationSessionID, ownerID, executorType string
+	var claimUpdatedAt sql.NullTime
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT materialized_environment_id FROM task_workspace_groups WHERE id = ?
+	`), groupID).Scan(&environmentID); err != nil {
+		return fmt.Errorf("load shared workspace identity: %w", err)
+	}
+	if err := r.lockTaskEnvironmentMaterializationTx(ctx, tx, environmentID); err != nil {
+		return err
+	}
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT COALESCE(e.id, ''), COALESCE(e.status, ''), COALESCE(e.task_id, ''), COALESCE(e.executor_type, '')
+		SELECT COALESCE(e.id, ''), COALESCE(e.status, ''), COALESCE(e.materialization_session_id, ''), e.updated_at,
+		       COALESCE(e.task_id, ''), COALESCE(e.executor_type, '')
 		FROM task_workspace_groups g
 		JOIN task_workspace_group_members m
 		  ON m.workspace_group_id = g.id AND m.task_id = ? AND m.released_at IS NULL
 		LEFT JOIN task_environments e ON e.id = g.materialized_environment_id
 		WHERE g.id = ?
-	`), session.TaskID, groupID).Scan(&environmentID, &status, &ownerID, &executorType)
+	`), session.TaskID, groupID).Scan(&environmentID, &status, &materializationSessionID, &claimUpdatedAt, &ownerID, &executorType)
 	if errors.Is(err, sql.ErrNoRows) || environmentID == "" {
 		return fmt.Errorf("%w: shared workspace group is unavailable", models.ErrWorkspaceReuseUnsafe)
 	}
 	if err != nil {
 		return fmt.Errorf("load shared workspace environment: %w", err)
 	}
-	// The elected environment can change after preflight. Validate its owner
-	// under the binding transaction before exposing a destination session.
-	if executorType != "" && executorType != requestedExecutorType {
-		return fmt.Errorf("%w: shared workspace executor does not match the selected executor", models.ErrWorkspaceReuseUnsafe)
-	}
-	if requestedExecutorType == string(models.ExecutorTypeKubernetes) && ownerID != session.TaskID {
-		if ownerID == "" {
-			return fmt.Errorf("%w: shared workspace executor ownership is inconsistent", models.ErrWorkspaceReuseUnsafe)
-		}
-		return fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsupported, models.WorkspaceReuseUnsupportedMessage)
+	if err := validateSharedWorkspaceExecutor(session.TaskID, ownerID, executorType, requestedExecutorType); err != nil {
+		return err
 	}
 	switch models.TaskEnvironmentStatus(status) {
 	case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = environmentID
 	case models.TaskEnvironmentStatusCreating:
-		return &models.WorkspacePreparingError{EnvironmentID: environmentID, Reason: "retry after the shared workspace launch completes"}
+		outcome, err := r.settleWorkspaceMaterializationClaim(ctx, tx, environmentID, materializationSessionID, claimUpdatedAt.Time, session.ID)
+		if err != nil {
+			return err
+		}
+		if outcome == materializationClaimFailed {
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("persist abandoned shared workspace materialization failure: %w", err)
+			}
+			return fmt.Errorf("%w: the shared workspace materialization did not complete", models.ErrWorkspaceReuseUnsafe)
+		}
+		if outcome != materializationClaimTakenOver {
+			return &models.WorkspacePreparingError{EnvironmentID: environmentID, Reason: "retry after the shared workspace launch completes"}
+		}
+		session.TaskEnvironmentID = environmentID
+	case models.TaskEnvironmentStatusFailed:
+		if err := r.reelectFailedWorkspaceMaterializationTx(ctx, tx, environmentID, session.ID); err != nil {
+			return err
+		}
+		session.TaskEnvironmentID = environmentID
 	default:
 		return fmt.Errorf("%w: shared workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
@@ -865,6 +902,21 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	return tx.Commit()
 }
 
+// The elected environment can change after preflight. Ownership and executor
+// compatibility must hold before binding or electing a replacement materializer.
+func validateSharedWorkspaceExecutor(taskID, ownerID, executorType, requestedExecutorType string) error {
+	if executorType != "" && executorType != requestedExecutorType {
+		return fmt.Errorf("%w: shared workspace executor does not match the selected executor", models.ErrWorkspaceReuseUnsafe)
+	}
+	if requestedExecutorType == string(models.ExecutorTypeKubernetes) && ownerID != taskID {
+		if ownerID == "" {
+			return fmt.Errorf("%w: shared workspace executor ownership is inconsistent", models.ErrWorkspaceReuseUnsafe)
+		}
+		return fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsupported, models.WorkspaceReuseUnsupportedMessage)
+	}
+	return nil
+}
+
 func (r *Repository) insertCreatingWorkspaceEnvironment(ctx context.Context, tx *sqlx.Tx, candidate *models.TaskEnvironment) error {
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environments (
@@ -881,32 +933,122 @@ func (r *Repository) insertCreatingWorkspaceEnvironment(ctx context.Context, tx 
 	return nil
 }
 
-func (r *Repository) failAbandonedWorkspaceMaterialization(
+// materializationClaimOutcome is a binding's decision about a creating
+// environment that another session claimed.
+type materializationClaimOutcome int
+
+const (
+	// materializationClaimActive leaves the claim with its owner.
+	materializationClaimActive materializationClaimOutcome = iota
+	// materializationClaimTakenOver made the binding session the new owner.
+	materializationClaimTakenOver
+	// materializationClaimFailed stored failed for an abandoned claim whose
+	// environment already holds physical workspace evidence.
+	materializationClaimFailed
+)
+
+// workspaceMaterializationAbandonAllowance matches the orphaned-session
+// reconciliation allowance on top of the preparation and launch budgets.
+const workspaceMaterializationAbandonAllowance = 5 * time.Minute
+
+// workspaceMaterializationAbandonAfter is how long a claim can go without an
+// update before an owner without a running execution counts as gone.
+// Preparation and each launch phase have separate bounds, so both count.
+func workspaceMaterializationAbandonAfter() time.Duration {
+	const maximum = time.Duration(math.MaxInt64)
+	budget := constants.SetupScriptTimeout
+	for _, phase := range []time.Duration{constants.AgentLaunchTimeout, workspaceMaterializationAbandonAllowance} {
+		if phase > maximum-budget {
+			return maximum
+		}
+		budget += phase
+	}
+	return budget
+}
+
+// settleWorkspaceMaterializationClaim decides a creating claim found by a
+// binding. A live or recent owner keeps it. An abandoned claim on an
+// environment without physical evidence passes to sessionID; one with evidence
+// is failed. Both writes require the owner the caller read, so a concurrent
+// binding that already took the claim over is left alone.
+func (r *Repository) settleWorkspaceMaterializationClaim(
 	ctx context.Context,
 	tx *sqlx.Tx,
-	environmentID string,
-	ownerID string,
-) (bool, error) {
-	var ownerState models.TaskSessionState
-	ownerErr := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM task_sessions WHERE id = ?`), ownerID).Scan(&ownerState)
-	abandoned := ownerID == "" || errors.Is(ownerErr, sql.ErrNoRows) || isTerminalWorkspaceMaterializerState(ownerState)
-	if ownerErr != nil && !errors.Is(ownerErr, sql.ErrNoRows) {
-		return false, fmt.Errorf("load workspace materialization owner: %w", ownerErr)
-	}
-	if !abandoned {
-		return false, nil
+	environmentID, ownerID string,
+	claimUpdatedAt time.Time,
+	sessionID string,
+) (materializationClaimOutcome, error) {
+	abandoned, err := r.workspaceMaterializationAbandonedTx(ctx, tx, ownerID, claimUpdatedAt)
+	if err != nil || !abandoned {
+		return materializationClaimActive, err
 	}
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
-		return false, err
+		return materializationClaimActive, err
 	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+	takenOver, err := r.reelectTaskEnvironmentMaterializationTx(
+		ctx, tx, environmentID, models.TaskEnvironmentStatusCreating, ownerID, sessionID,
+	)
+	if err != nil {
+		return materializationClaimActive, err
+	}
+	if takenOver {
+		return materializationClaimTakenOver, nil
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environments
 		SET status = ?, materialization_session_id = '', updated_at = ?
-		WHERE id = ? AND status = ?
-	`), string(models.TaskEnvironmentStatusFailed), r.nowUTC(), environmentID, string(models.TaskEnvironmentStatusCreating)); err != nil {
-		return false, fmt.Errorf("fail abandoned workspace materialization: %w", err)
+		WHERE id = ? AND status = ? AND COALESCE(materialization_session_id, '') = ?
+	`), string(models.TaskEnvironmentStatusFailed), r.nowUTC(), environmentID,
+		string(models.TaskEnvironmentStatusCreating), ownerID)
+	if err != nil {
+		return materializationClaimActive, fmt.Errorf("fail abandoned workspace materialization: %w", err)
 	}
-	return true, nil
+	failed, err := result.RowsAffected()
+	if err != nil {
+		return materializationClaimActive, err
+	}
+	if failed == 0 {
+		return materializationClaimActive, nil
+	}
+	return materializationClaimFailed, nil
+}
+
+// workspaceMaterializationAbandonedTx reports whether a creating claim's owner
+// is gone: missing, terminal, or silent past the launch budget without a
+// running execution.
+func (r *Repository) workspaceMaterializationAbandonedTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	ownerID string,
+	claimUpdatedAt time.Time,
+) (bool, error) {
+	if ownerID == "" {
+		return true, nil
+	}
+	var ownerState models.TaskSessionState
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM task_sessions WHERE id = ?`), ownerID).Scan(&ownerState)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("load workspace materialization owner: %w", err)
+	}
+	if isTerminalWorkspaceMaterializerState(ownerState) {
+		return true, nil
+	}
+	if claimUpdatedAt.After(r.nowUTC().Add(-workspaceMaterializationAbandonAfter())) {
+		return false, nil
+	}
+	if ownerState != models.TaskSessionStateStarting && ownerState != models.TaskSessionStateRunning {
+		return true, nil
+	}
+	var running bool
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT EXISTS (SELECT 1 FROM executors_running WHERE session_id = ?)
+	`), ownerID).Scan(&running); err != nil {
+		return false, fmt.Errorf("load workspace materialization owner execution: %w", err)
+	}
+	return !running, nil
 }
 
 func isTerminalWorkspaceMaterializerState(state models.TaskSessionState) bool {

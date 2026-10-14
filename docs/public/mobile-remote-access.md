@@ -19,7 +19,9 @@ Dismissal hides the notice without archiving the task.
 
 Todo, usage, sharing, and conversation controls remain available below the
 notice. Extra controls wrap onto another line on narrow screens. The action
-labelled with the next workflow step still moves the task to that step.
+labelled with the next workflow step still moves the task to that step. In task
+Chat, that action occupies a right-aligned row above the transcript utility
+icons, with the message composer below those icons.
 
 ## Confirm an action on a phone
 

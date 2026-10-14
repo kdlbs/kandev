@@ -251,3 +251,37 @@ CI remediation:
   --repeat-each=3 --retries=0`. Six tests passed in 51.1 seconds using the
   freshly built Kind assets; only test fixtures changed afterward. Log:
   `/tmp/kandev-run.e2e.kell2jIM.log`. Focused E2E lint passed.
+
+Latest-base integration and mobile CI follow-up:
+
+- Integrated the upstream failed/abandoned-environment recovery change. The
+  shared-group transaction keeps its materialization lock, claim takeover and
+  failed-environment re-election; executor ownership and compatibility are
+  checked before those mutations. MCP retains both unsupported-reuse guidance
+  and the upstream reset-required response.
+- The upstream retry fixture now uses the public task repository and real
+  Office workspace groups. The admission regression uses that fixture in the
+  external test package, retaining same-owner reuse, mismatch rejection and
+  complete environment-preservation assertions.
+- Focused race checks passed across task SQLite, orchestrator, executor and
+  MCP handlers, including admission, retry ownership, failed-environment and
+  materialization coverage. Log: `/tmp/pr4485-recovery-merge-tests2.log`.
+- CI shard 9 found a cancelled Quick Chat turn with a disabled composer. The
+  phone palette fixture admitted its slow turn without a confirmed opening
+  baseline. It now waits for that baseline and the slow-turn
+  acceptance marker before cancellation, then waits for cancellation settlement
+  before its follow-up prompt. Existing touch-target and overflow checks remain.
+  The merged baseline passed six runs without retries; this fixture correction
+  is validated separately. Log: `/tmp/kandev-run.e2e.uym4ga2d.log`.
+- The corrected mobile spec passed six runs without retries in 2.2 minutes.
+  Focused ESLint passed. Log: `/tmp/kandev-run.e2e.eyks8v0B.log`.
+- PostgreSQL 16 passed the admission and retry-ownership regressions twice
+  with `-race` (89.8 seconds), then the upstream materialization serialization
+  and shared-group failed-environment re-election cases (38.2 seconds).
+  Logs: `/tmp/pr4485-merge-pg-tests.log` and `/tmp/pr4485-merge-pg-locks.log`.
+  The disposable PostgreSQL container and volume were removed.
+- The managed rebuilt Kind regression passed without retries against the
+  integrated backend and fresh Linux mock-agent artifact. Log:
+  `/tmp/kandev-run.e2e.QWuYvV3e.log`.
+- Both previously failing Chromium fixture titles passed again on the merged
+  assets without retries. Log: `/tmp/pr4485-integration-chromium.log`.

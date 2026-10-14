@@ -220,32 +220,32 @@ func stringContains(value, want string) bool {
 
 func newCanvasEditTestDependencies() (*fakeCanvasEditTaskStore, *fakeCanvasEditCanvasStore, *fakeCanvasEditReleaseStore, *fakeCanvasEditArtifactStore) {
 	return &fakeCanvasEditTaskStore{
-		workspace: &models.Workspace{
-			ID:                    "workspace-a",
-			DefaultAgentProfileID: stringPointer("profile-default"),
-			DefaultExecutorID:     stringPointer("executor-default"),
-		},
-	}, &fakeCanvasEditCanvasStore{canvas: &canvas.Canvas{
-		ID:                  "canvas-a",
-		PluginInstanceID:    "instance-a",
-		WorkspaceID:         "workspace-a",
-		ScopeKind:           canvas.ScopeWorkspace,
-		Status:              instances.StatusActive,
-		ActiveReleaseID:     "release-a",
-		ActiveReleaseStatus: instances.ValidationValid,
-		EffectiveGrants: []canvas.GrantProjection{{
-			PermissionKind: "api_read", Resource: "tasks", ScopeCeiling: instances.ScopeWorkspace,
-		}},
-	}}, &fakeCanvasEditReleaseStore{release: instances.Release{
-		ID:               "release-a",
-		InstanceID:       "instance-a",
-		PackageDigest:    "digest-a",
-		ArtifactPath:     "releases/digest-a",
-		ValidationStatus: instances.ValidationValid,
-	}}, &fakeCanvasEditArtifactStore{files: map[string][]byte{
-		"manifest.yaml": []byte("manifest"),
-		"index.html":    []byte("index"),
-	}}
+			workspace: &models.Workspace{
+				ID:                    "workspace-a",
+				DefaultAgentProfileID: stringPointer("profile-default"),
+				DefaultExecutorID:     stringPointer("executor-default"),
+			},
+		}, &fakeCanvasEditCanvasStore{canvas: &canvas.Canvas{
+			ID:                  "canvas-a",
+			PluginInstanceID:    "instance-a",
+			WorkspaceID:         "workspace-a",
+			ScopeKind:           canvas.ScopeWorkspace,
+			Status:              instances.StatusActive,
+			ActiveReleaseID:     "release-a",
+			ActiveReleaseStatus: instances.ValidationValid,
+			EffectiveGrants: []canvas.GrantProjection{{
+				PermissionKind: "api_read", Resource: "tasks", ScopeCeiling: instances.ScopeWorkspace,
+			}},
+		}}, &fakeCanvasEditReleaseStore{release: instances.Release{
+			ID:               "release-a",
+			InstanceID:       "instance-a",
+			PackageDigest:    "digest-a",
+			ArtifactPath:     "releases/digest-a",
+			ValidationStatus: instances.ValidationValid,
+		}}, &fakeCanvasEditArtifactStore{files: map[string][]byte{
+			"manifest.yaml": []byte("manifest"),
+			"index.html":    []byte("index"),
+		}}
 }
 
 func stringPointer(value string) *string { return &value }

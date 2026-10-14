@@ -1,13 +1,14 @@
-package sqlite
+package sqlite_test
 
 import (
 	"context"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/testutil"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.4
@@ -25,30 +26,22 @@ func TestKubernetesSharedGroupBindingAdmission(t *testing.T) {
 		t.Run(dialect, func(t *testing.T) {
 			for _, tc := range cases {
 				t.Run(string(tc.owner)+"-"+string(tc.follower), func(t *testing.T) {
-					var repo *Repository
-					if dialect == "SQLite" {
-						repo = newRepoForEntityTests(t)
-					} else {
-						db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 4)
-						var err error
-						repo, err = NewWithDB(db, db, nil)
-						require.NoError(t, err)
-					}
-					assertSharedGroupBindingAdmission(t, repo, tc.owner, tc.follower, tc.want)
+					repo, database := newRetryOwnershipRepository(t, dialect == "Postgres")
+					assertSharedGroupBindingAdmission(t, repo, database, tc.owner, tc.follower, tc.want)
 				})
 			}
 		})
 	}
 }
 
-func assertSharedGroupBindingAdmission(t *testing.T, repo *Repository, ownerType, followerType models.ExecutorType, want error) {
+func assertSharedGroupBindingAdmission(t *testing.T, repo *tasksqlite.Repository, database *sqlx.DB, ownerType, followerType models.ExecutorType, want error) {
 	t.Helper()
 	ctx := context.Background()
-	seedWorkspace(t, repo, "ws-group-admission")
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-retry", Name: "Group admission"}))
 	for _, taskID := range []string{"owner", "follower"} {
-		require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "ws-group-admission", Title: taskID}))
+		require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "ws-retry", Title: taskID}))
 	}
-	seedRetryWorkspaceGroup(t, repo)
+	seedRetryWorkspaceGroup(t, database)
 	bind := func(session *models.TaskSession, executorType models.ExecutorType) error {
 		return repo.CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx, session,
 			&models.TaskEnvironment{TaskID: session.TaskID, ExecutorType: string(executorType)}, "group-retry")

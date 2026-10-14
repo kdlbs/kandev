@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-19
-updated: 2026-09-14
+updated: 2026-10-12
 owners:
   - cfl12
 ---
@@ -103,11 +103,84 @@ Draft amendment, 2026-10-02. Delivery: [Setup recovery UX](../../../plans/setup-
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.4:** A failure before a session exists shall retain the setup form, selected agent, repositories, and an inline safe error with a retry action. A toast alone shall not be the error surface. No nonexistent conversation shall be advertised as restorable.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.5:** Desktop and phone shall expose the same failure and recovery outcomes. Phone users shall retain the full-height Quick Chat surface, scroll to error details, and reach actions with at least 44px touch targets without horizontal page overflow.
 
+### REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004: Abandoned workspace materialization recovery
+
+Draft amendment, 2026-10-12. Delivery: [Environment failure recovery](../../../plans/upstream-environment-failure-recovery/plan.md).
+
+**Intent:** A task whose first workspace materialization was abandoned or failed
+before it created anything physical can start again, while a workspace that
+exists or is still being prepared stays protected.
+
+**User story:** As a user whose first launch failed before its workspace was
+created, I want the next start of the task to prepare the workspace again, so
+that the task does not stay unlaunchable until I find a manual reset.
+
+Terms used below:
+
+- *Materialization owner*: the session elected to turn the task's `creating`
+  environment into a physical workspace.
+- *Launch budget*: the configured preparation timeout plus the agent launch
+  timeout plus the allowance that the orphaned-session reconciliation uses.
+- *Live owner*: an owner session in `STARTING` or `RUNNING` with a durable
+  runtime record.
+- *Physical evidence*: a workspace path, container, sandbox, or non-deleted
+  repository inventory row on the environment.
+
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.1:** When a start or launch whose
+  session owns a `creating` environment returns an error before the environment
+  is ready, the system shall release that claim by storing the `failed` state.
+  A session ceiling deferral is not an error for this purpose and shall keep
+  the claim.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.2:** When a session binding finds
+  a `creating` environment whose owner is missing or terminal, or whose claim is
+  older than the launch budget without a live owner, the system shall elect the
+  requesting session as the new owner instead of returning `workspace_preparing`
+  or `workspace_reuse_unsafe`.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.3:** When the owner of a `creating`
+  environment is live, or its claim is younger than the launch budget, a session
+  binding shall keep returning the recoverable `workspace_preparing` error and
+  shall not change the environment.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.4:** When a session binding, or the
+  launch of a session already bound to the environment, finds a `failed`
+  environment of the same task or shared workspace group with no owner and no
+  physical evidence, the system shall elect that session as the new owner and run
+  full workspace preparation.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.5:** When a `failed` environment has
+  physical evidence, or belongs to a parent task through `inherit_parent`, a
+  start shall keep failing with `workspace_reuse_unsafe` and shall not change the
+  environment. The existing environment reset action remains its recovery.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.6:** When several starts re-elect the
+  same environment at the same time, exactly one shall become the owner. A launch
+  that loses the race shall wait for the new owner like any `creating` sibling or
+  attach to its published workspace, and no second physical workspace shall be
+  created.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.7:** When a former owner finishes or
+  fails after its claim was re-elected, its readiness publication and its failure
+  write shall be refused without changing the environment.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.8:** Re-election shall happen only
+  inside a session binding, start, or launch request. No background process,
+  page load, or failed `session.ensure` request shall retry a failed environment
+  without a new request.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.9:** A task that is being deleted or
+  an environment held by a worktree recovery claim shall not be re-elected; the
+  binding shall fail as it does today.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.10:** When a start is refused
+  because a `failed` environment of the task has physical evidence, the error
+  shall keep the `workspace_reuse_unsafe` reason and its message and retry
+  guidance shall name the task environment reset action, instead of asking the
+  caller to retry after the initial launch or to restore the workspace.
+
 ## Out of scope
 
 - A background poller for all repository defaults.
 - A PR gate for manual launches or providers other than GitHub.
 - Changes to ACP resume semantics or bulk repository-default repair.
+- A periodic sweep for abandoned `creating` environments. Abandonment is
+  decided when a start needs the environment.
+- Automatic replacement of a `failed` environment that has physical evidence,
+  for example a worktree created before the launch failed. It needs a way to
+  retain the old environment while a new one becomes canonical, which is a
+  separate schema decision.
 
 ## System design
 
