@@ -156,13 +156,18 @@ func isRepoUnavailableMessage(msg string) bool {
 }
 
 type worktreeCleanupAudit struct {
-	branchRef    string
-	branchOID    string
-	deleteBranch bool
-	pathPresent  bool
-	registration worktreeRegistrationOwnership
-	pathHandle   storageworkspaces.DirectoryHandle
-	adoption     *WorkspaceAdoptionInspection
+	branchRef      string
+	branchOID      string
+	deleteBranch   bool
+	pathPresent    bool
+	registration   worktreeRegistrationOwnership
+	pathHandle     storageworkspaces.DirectoryHandle
+	adoption       *WorkspaceAdoptionInspection
+	adoptionAbsent bool
+}
+
+func (a worktreeCleanupAudit) hasAdoption() bool {
+	return a.adoption != nil || a.adoptionAbsent
 }
 
 func (m *Manager) auditWorktreeCleanup(
@@ -188,7 +193,7 @@ func (m *Manager) auditWorktreeCleanup(
 		}
 	}()
 	adopted, adoptionErr := m.auditAdoptedWorktreeCleanup(ctx, wt, pathHandle, options, pathPresent)
-	if adoptionErr != nil || adopted.adoption != nil {
+	if adoptionErr != nil || adopted.hasAdoption() {
 		return adopted, adoptionErr
 	}
 	branchRef, branchOID, err := m.cleanupBranchIdentity(ctx, wt, pathPresent, removeBranch)
@@ -232,7 +237,8 @@ func (m *Manager) auditAdoptedWorktreeCleanup(
 	ctx context.Context, wt *Worktree, pathHandle storageworkspaces.DirectoryHandle, options WorktreeCleanupOptions, pathPresent bool,
 ) (worktreeCleanupAudit, error) {
 	if !pathPresent {
-		return worktreeCleanupAudit{}, nil
+		receipt, err := m.cleanupAdoptionReceipt(ctx, wt)
+		return worktreeCleanupAudit{adoptionAbsent: receipt != nil}, err
 	}
 	adoption, err := m.openWorkspaceAdoptionForArchive(ctx, wt)
 	if err != nil || adoption == nil {
@@ -448,6 +454,9 @@ func (m *Manager) completeAuditedWorktreeCleanup(
 ) error {
 	if audit.pathHandle != nil {
 		defer func() { _ = audit.pathHandle.Close() }()
+	}
+	if audit.adoptionAbsent {
+		return m.completeAbsentAdoptionCleanup(ctx, wt)
 	}
 	if audit.adoption != nil {
 		recheck, err := m.openWorkspaceAdoptionForArchive(ctx, wt)

@@ -122,7 +122,7 @@ func (m *Manager) CaptureWorkspaceAdoptionsForCleanup(ctx context.Context, workt
 	return receipts, nil
 }
 
-func (m *Manager) openWorkspaceAdoptionForArchive(ctx context.Context, wt *Worktree) (*WorkspaceAdoptionInspection, error) {
+func (m *Manager) cleanupAdoptionReceipt(ctx context.Context, wt *Worktree) (*models.WorkspaceAdoptionReceipt, error) {
 	reader, ok := m.store.(workspaceAdoptionArchiveReader)
 	if !ok {
 		return nil, nil
@@ -134,10 +134,26 @@ func (m *Manager) openWorkspaceAdoptionForArchive(ctx context.Context, wt *Workt
 	if !adoptionCleanupWorktreeMatches(wt, receipt) {
 		return nil, models.ErrWorkspaceAdoptionStale
 	}
+	return receipt, nil
+}
+
+func (m *Manager) openWorkspaceAdoptionForArchive(ctx context.Context, wt *Worktree) (*WorkspaceAdoptionInspection, error) {
+	receipt, err := m.cleanupAdoptionReceipt(ctx, wt)
+	if err != nil || receipt == nil {
+		return nil, err
+	}
 	i, err := m.openWorkspaceAdoptionReceiptProof(ctx, receipt.Preview)
 	if err != nil {
 		return nil, err
 	}
+	if err := validateArchivePrimarySeparation(i, wt); err != nil {
+		i.Close()
+		return nil, err
+	}
+	return i, nil
+}
+
+func validateArchivePrimarySeparation(i *WorkspaceAdoptionInspection, wt *Worktree) error {
 	source, err := storageworkspaces.PinnedDirectoryInfo(i.handles[i.source])
 	if err == nil {
 		var candidate os.FileInfo
@@ -147,32 +163,46 @@ func (m *Manager) openWorkspaceAdoptionForArchive(ctx context.Context, wt *Workt
 		}
 	}
 	if err != nil || filepath.Clean(wt.Path) == filepath.Clean(wt.RepositoryPath) {
-		i.Close()
 		if err == nil {
 			err = models.ErrWorkspaceAdoptionStale
 		}
-		return nil, err
+		return err
 	}
 	registered := i.handles[wt.RepositoryPath]
 	if registered == nil {
 		registered, err = storageworkspaces.OpenDirectoryNoFollow(filepath.Dir(wt.RepositoryPath), wt.RepositoryPath)
 		if err != nil {
-			i.Close()
-			return nil, err
+			return err
 		}
 		i.handles[wt.RepositoryPath] = registered
 		identity, ok := recoveryartifact.FilesystemIdentity(wt.RepositoryPath)
 		if !ok {
-			i.Close()
-			return nil, models.ErrWorkspaceAdoptionStale
+			return models.ErrWorkspaceAdoptionStale
 		}
 		i.Proof.Identities[wt.RepositoryPath] = identity
 	}
 	project, err := storageworkspaces.PinnedDirectoryInfo(registered)
 	candidate, candidateErr := storageworkspaces.PinnedDirectoryInfo(i.handles[wt.Path])
 	if err != nil || candidateErr != nil || os.SameFile(project, candidate) {
-		i.Close()
-		return nil, models.ErrWorkspaceAdoptionStale
+		return models.ErrWorkspaceAdoptionStale
 	}
-	return i, nil
+	return nil
+}
+
+func (m *Manager) completeAbsentAdoptionCleanup(ctx context.Context, wt *Worktree) error {
+	receipt, err := m.cleanupAdoptionReceipt(ctx, wt)
+	if err != nil {
+		return err
+	}
+	if receipt == nil {
+		return models.ErrWorkspaceAdoptionStale
+	}
+	present, err := cleanupPathPresent(wt.Path)
+	if err != nil {
+		return err
+	}
+	if present {
+		return models.ErrWorkspaceAdoptionStale
+	}
+	return nil
 }

@@ -48,6 +48,7 @@ func TestWorkspaceAdoptionArchiveAndDeleteRetainsProjectPrimary(t *testing.T) {
 	require.NotEmpty(t, manifests[wt.ID].IndexStateSHA256)
 	require.NotEmpty(t, manifests[wt.ID].Entries)
 	require.NoError(t, f.manager.CleanupWorktreesWithOptions(ctx, []*worktree.Worktree{wt}, worktree.WorktreeCleanupOptions{DiscardWorktreeChanges: true}))
+	require.NoError(t, f.manager.CleanupWorktreesWithOptions(ctx, []*worktree.Worktree{wt}, worktree.WorktreeCleanupOptions{DiscardWorktreeChanges: true}))
 	_, err = os.Stat(f.clone)
 	require.True(t, os.IsNotExist(err))
 	require.Equal(t, projectHead, adoptionGit(t, f.source, "rev-parse", "HEAD"))

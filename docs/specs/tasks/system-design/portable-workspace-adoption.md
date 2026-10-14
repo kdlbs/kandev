@@ -145,3 +145,8 @@ an alias to it can be admitted through this branch. Removal requires explicit
 discard consent and removes only the task-owned clone; it does not modify the
 project clone or its branches. Missing provenance, a stale cleanup claim, foreign
 ownership, path replacement or symlinked administration fails closed.
+
+An interrupted cleanup replay treats an already absent adopted checkout as a
+no-op only while the same durable cleanup provenance remains authoritative. It
+rechecks absence before completion and never falls back to project-source branch
+deletion, compaction or cleanup scripts. A reappearing path fails closed.

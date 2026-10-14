@@ -101,3 +101,17 @@ repository and profile empty. Default seeding now accepts delayed parent context
 once, preserving edits. The existing mobile repository assertion and all native
 reset assertions remain unchanged. Hook tests cover delayed context and edited
 values. Final full frontend/mobile verification remains pending.
+
+
+### Retirement replay and static check
+
+The real 4c5 hosted static check rejected the archive proof opener's cyclomatic
+complexity (18, maximum 15). Primary-clone separation is now a dedicated helper;
+no guard was removed. A bounded exact-source helper proof with real Git showed
+that an absent adopted path skipped receipt authority and could enter ordinary
+project-branch deletion. The setup refusal on read-only `/tmp` is retained and
+gives no RED credit; the corrected approved-container proof returned actual RED.
+This proof is narrower than the real package/SQL/native gates. A permanent genuine
+HTTP/Git/SQLite test now repeats cleanup after clone removal and asserts the
+project head and branch remain intact. Replay must remain a no-op under the
+current durable job's provenance and refuse a reappearing checkout.
