@@ -53,7 +53,7 @@ func (s *Service) admitInheritedEnvironment(ctx context.Context, task *v1.Task, 
 		if err != nil {
 			return err
 		}
-	case "shared_group":
+	case models.WorkspaceModeSharedGroup:
 		if s.workspaceMaterializer != nil {
 			envID = s.workspaceMaterializer.GetSharedGroupEnvironment(ctx, task.ID)
 		}
