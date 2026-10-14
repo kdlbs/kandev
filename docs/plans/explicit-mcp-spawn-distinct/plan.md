@@ -1,9 +1,18 @@
+---
+status: complete
+created: 2026-10-11
+requirements:
+  - REQ-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001
+system_design:
+  - ../../specs/agents/system-design/spawn-session-effective-profile.md
+---
+
 # Explicit MCP Spawn Distinct Session Repair
 
-Status: implementation complete; independent Review and QA pending. Sequential execution by MAIN.
+Status: implementation complete. Independent Review and QA passed the implementation and public-documentation correction; delivery-package revalidation follows the metadata repair. Sequential execution by MAIN.
 
 Spec: [Spawn session requirements](../../specs/agents/requirements/spawn-session-effective-profile.md).
-Approved platform plan: task 6cd04ffd-2351-4b45-9247-583200666444, version 2a1df183.
+Design: [Explicit spawn launch intent](../../specs/agents/system-design/spawn-session-effective-profile.md).
 Base: upstream/main e8c1761cb5b7006b905c0aa995925372ce8664e1.
 
 ## Problem and approach
@@ -30,4 +39,10 @@ Empty-profile refinement: a step with SessionTarget intentionally supplies no de
 
 Source ownership is core backend. Historical canonical 627b39b3dc and deployed overlay 37b8f8a744 protect only non-empty profiles and have a mocked flag assertion. This repair strengthens identity coverage and the empty-profile gate. Do not import the overlay's unrelated v0.96 prepared-retry port or workspace-adoption patch.
 
-PR creation, CI and merge belong to the later PR phase. Record actual merge SHA, first release containing it and isolated release acceptance (distinct ID enters a guarded running turn with requested profile, ordinary workflow reuse still valid) in task metadata before retiring spawn-specific overlay hunks. Source tests alone do not establish release runtime acceptance. The live deployment remains unchanged.
+Draft publication and CI are separate from Human acceptance and release acceptance. Record actual merge SHA, first release containing it and isolated release acceptance (distinct ID enters a guarded running turn with requested profile, ordinary workflow reuse still valid) in task metadata before retiring spawn-specific overlay hunks. Source tests alone do not establish release runtime acceptance. The live deployment remains unchanged.
+
+## Delivery documentation correction
+
+The trusted PR documentation evaluator rejected the three work orders because their frontmatter omitted `wave` and the requirement, acceptance-criterion, and system-design references. The work orders now link the existing requirement and a design record of the implemented launch boundary; this plan links back to all three work orders. No runtime behavior, validator rule, or documentation exemption changes.
+
+Local reproduction used `validateCoverage` from the trusted CI checkout against the exact PR file set and document contents: before the repair it reported `invalid` with three missing-`wave` errors; after the repair it reported `covered` with no errors and accepted all three requirement/design references. `python3 scripts/lint-spec-files.py --all` and `python3 scripts/list-docs.py validate` pass after using the supported system-design status. These local results do not represent a completed remote CI check. Independent Review and QA must account for the final documentation commit.
