@@ -53,6 +53,21 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+Ninth candidate `5f47945b531` is running as backend 38620159334, frontend
+38620159244 and E2E 38620159182. Backend succeeds in 1,181 seconds including
+queue/reporting (796 seconds execution critical path; 211.2 runner-minutes).
+Frontend succeeds in 1,002 seconds (949 seconds execution critical path;
+28.1333 runner-minutes). E2E remains incomplete, so the full set has no final
+timing and cannot establish acceptance. Its first daily-cache population build
+takes 487 seconds, including 85 seconds of cache publication; retain that cold
+cost in the complete sample. PR #4489 is ready and mergeable, not merged.
+
+The tenth candidate's sidebar retry repair has a deterministic browser red
+before the fix and three passing repetitions afterward. The complete affected
+desktop navigation/hover/resize/customization group and existing phone drawer
+pass without retries, alongside focused unit tests, full typecheck and strict
+lint. These local results do not establish a hosted speedup.
+
 Sixth candidate `6e006a425` is pushed. Backend 38614506503, frontend
 38614506677 and E2E 38614506377 run on hosted merge
 `6b1b627b0ace6e462b78b2f66efc679457624fa8` over main `148c84f072`.

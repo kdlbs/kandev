@@ -41,6 +41,26 @@ function renderSplit() {
     <SidebarNavigationSplit navigation={<div>Navigation</div>} tasks={<div>Tasks</div>} />,
   );
 }
+
+it("retains child drafts while the rail hides split layout and controls", () => {
+  const navigation = <input aria-label="Navigation draft" defaultValue="initial" />;
+  const tasks = <div>Tasks</div>;
+  const view = render(<SidebarNavigationSplit collapsed navigation={navigation} tasks={tasks} />);
+  const draft = screen.getByRole("textbox", { name: "Navigation draft" }) as HTMLInputElement;
+  fireEvent.change(draft, { target: { value: "unsaved" } });
+  expect(screen.queryByTestId(DIVIDER_TEST_ID)).toBeNull();
+  expect(screen.getByTestId("sidebar-navigation-split").className).toBe("contents");
+  view.rerender(<SidebarNavigationSplit navigation={navigation} tasks={tasks} />);
+  expect(screen.getByRole("textbox", { name: "Navigation draft" })).toBe(draft);
+  expect(draft.value).toBe("unsaved");
+  expect(screen.getByTestId(DIVIDER_TEST_ID)).toBeTruthy();
+  view.rerender(<SidebarNavigationSplit collapsed navigation={navigation} tasks={tasks} />);
+  expect(screen.getByRole("textbox", { name: "Navigation draft" })).toBe(draft);
+  expect(draft.value).toBe("unsaved");
+  expect(screen.queryByTestId(DIVIDER_TEST_ID)).toBeNull();
+  expect(mocks.mutate).not.toHaveBeenCalled();
+});
+
 describe("sidebar split persistence", () => {
   it("expands without discarding the compressed height and restores it", () => {
     const view = renderSplit();

@@ -384,3 +384,39 @@ repetitions; the disabled/sampled-out checks fail before the guard. All shared,
 ACP and tracing package race tests pass; strict changed-package lint finds zero
 issues. Fresh native and support builds pass four desktop queue/restart and two
 mobile queue browser cases, retries disabled. Hosted impact remains unmeasured.
+
+### Preserve sidebar action state across reveal (tenth candidate)
+
+Sixth-run navigation hierarchy retries lose the New Task dialog after its
+Cancel button appears. The collapsed and revealed Kanban sidebar place the
+navigation subtree under different React parents, so a pending hover timer can
+remount the local dialog owner. Three original one-CPU repetitions pass; do not
+claim a local reproduction until a controlled browser clock crosses that timer
+while the original dialog is open.
+
+Prove the existing portal/state-continuity contract
+AC-UI-SIDEBAR-HOVER-001.3 without removing the native rail click or any assertion.
+If confirmed, preserve component ownership through the visual transition,
+retaining existing rail/expanded geometry and all hover, focus and saved-state
+semantics. Do not disable hover, animation, pointer actionability or timeouts.
+Unit checks must retain child state and hide divider controls in the rail;
+browser checks cover navigation actions, hover/portals and split resizing.
+The existing phone drawer (mobile-sidebar-hover-reveal) remains the mobile
+entry point: tap controls, one drawer scroll owner and no horizontal overflow.
+Verify that scenario without introducing a phone hover rail or changing the
+saved desktop preference. The Bitbucket retry is investigated independently.
+
+The controlled browser clock reproduces the disappearing dialog before the
+fix, after the original rail click and visible-dialog assertion. Keeping the
+same navigation and task owners mounted through reveal fixes that failure.
+Three strengthened browser repetitions pass with retries disabled, including
+the actual hover-revealed state. All 14 desktop navigation/hover/width-resize
+cases, six customization/split-persistence cases and the existing phone drawer
+case pass against a fresh E2E web build, also without retries. The phone drawer
+remains within the viewport and navigation introduces no horizontal overflow.
+The first phone command selected a nonexistent project and ran no tests; the
+corrected `mobile-chrome` run supplies the passing evidence.
+
+All 37 focused sidebar/hook unit tests and full web typecheck pass. Strict
+changed-file ESLint and formatting pass. No existing test identity, interaction
+or assertion is removed. Hosted retry and elapsed-time impact remain unmeasured.
