@@ -87,6 +87,9 @@ SQLite or PostgreSQL transaction. An operation replay validates current authorit
 and finalizes only its own committed orphan claim. Cache aliases are invalidated
 before the claim is released. Reuse checks the receipt before ordinary metadata
 classification, preventing stale bindings from falling into clone recovery.
+The native preparer reports the validated worktree's source common directory
+in its launch result. Resume therefore retains the independent checkout's
+published provenance instead of projecting the registered clone back over it.
 
 Receipt validation binds the original session incarnation, owner generation,
 workspace, complete branch-driving attachment set, selected slot branch identity

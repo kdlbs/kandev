@@ -126,6 +126,8 @@ for (const authenticated of [false, true]) {
         ...identity,
         workspace_path: clone.candidate,
         worktree_path: clone.candidate,
+        worktree_source_clone_path: clone.candidate,
+        worktree_source_common_dir: path.join(clone.candidate, ".git"),
       });
       expect(fs.readFileSync(path.join(identity.worktree_path, ".git"))).toEqual(clone.marker);
       expect(fs.readFileSync(path.join(clone.candidate, ".git", "index"))).toEqual(clone.index);
@@ -177,7 +179,12 @@ for (const authenticated of [false, true]) {
         ...identity,
         workspace_path: clone.candidate,
         worktree_path: clone.candidate,
+        worktree_source_clone_path: clone.candidate,
+        worktree_source_common_dir: path.join(clone.candidate, ".git"),
       });
+      const receiptAfterResume = await context.request.get(`${endpoint}/${operationId}`);
+      expect(receiptAfterResume.status(), await receiptAfterResume.text()).toBe(200);
+      expect(await receiptAfterResume.json()).toEqual(receipt);
       const messagesResponse = await context.request.get(
         `${backend.baseUrl}/api/v1/task-sessions/${sessionId}/messages?limit=100`,
       );
@@ -190,6 +197,12 @@ for (const authenticated of [false, true]) {
           messages.some((message) => message.id === old.id && message.content === old.content),
         ).toBe(true);
       expect(fs.readFileSync(path.join(identity.worktree_path, ".git"))).toEqual(clone.marker);
+      await backend.restart({ KANDEV_FEATURES_AUTH: String(authenticated) });
+      const receiptAfterResumedRestart = await context.request.get(`${endpoint}/${operationId}`);
+      expect(receiptAfterResumedRestart.status(), await receiptAfterResumedRestart.text()).toBe(
+        200,
+      );
+      expect(await receiptAfterResumedRestart.json()).toEqual(receipt);
     } finally {
       await context.close();
       await backend.restart();

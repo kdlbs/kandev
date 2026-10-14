@@ -20,6 +20,8 @@ export type AdoptionIdentity = {
   worktree_branch: string;
   position: number;
   worktree_path: string;
+  worktree_source_clone_path: string;
+  worktree_source_common_dir: string;
 };
 
 type Database = {
@@ -40,7 +42,9 @@ export function readAdoptionIdentity(tmpDir: string, sessionId: string): Adoptio
         `SELECT ts.task_id, ts.id AS session_id, ts.queue_incarnation_id,
       te.id AS task_environment_id, te.ownership_generation, ts.workspace_path,
       er.id AS slot_id, tr.id AS attachment_id, COALESCE(tr.checkout_branch,'') AS checkout_branch, er.worktree_id, er.worktree_branch,
-      er.position, er.worktree_path
+      er.position, er.worktree_path,
+      COALESCE(er.worktree_source_clone_path,'') AS worktree_source_clone_path,
+      COALESCE(er.worktree_source_common_dir,'') AS worktree_source_common_dir
       FROM task_sessions ts JOIN task_environments te ON te.id=ts.task_environment_id
       JOIN task_environment_repos er ON er.task_environment_id=te.id
       JOIN task_repositories tr ON tr.task_id=ts.task_id AND tr.repository_id=er.repository_id
