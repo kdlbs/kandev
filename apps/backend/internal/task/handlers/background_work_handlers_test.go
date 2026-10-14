@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -189,4 +190,8 @@ func TestWSBackgroundWorkHandlers(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, resp.Type)
 	})
+}
+
+func (r *bgWorkMockRepo) SettleBackgroundWorkloads(context.Context, string, time.Time) ([]*models.BackgroundWorkload, error) {
+	return nil, nil
 }

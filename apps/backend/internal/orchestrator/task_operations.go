@@ -5658,6 +5658,7 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 		return err
 	}
 	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
+	s.settleBackgroundWork(ctx, sessionID, true)
 	return nil
 }
 
@@ -5673,6 +5674,7 @@ func (s *Service) StopSessionSynchronously(ctx context.Context, sessionID string
 		return err
 	}
 	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
+	s.settleBackgroundWork(ctx, sessionID, true)
 	return nil
 }
 

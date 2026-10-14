@@ -183,59 +183,28 @@ func (s *Service) RecordBackgroundWorkloadObservation(
 			StartedAt:      obs.StartedAt,
 			FinishedAt:     obs.FinishedAt,
 		}
-		_ = s.backgroundWork.UpsertBackgroundRun(ctx, run)
-	}
-	return nil
-}
-
-// SettleOpenBackgroundWorkloads marks every non-terminal workload of a session
-// as ended. Callers use it once the agent process that owned the work is gone,
-// because no provider completion can arrive for it after that. It returns the
-// settled observations so the caller can publish them.
-func (s *Service) SettleOpenBackgroundWorkloads(ctx context.Context, sessionID string) ([]streams.WorkloadRunObservation, error) {
-	if s.backgroundWork == nil || strings.TrimSpace(sessionID) == "" {
-		return nil, nil
-	}
-	workloads, err := s.backgroundWork.ListBackgroundWorkloadsBySession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	var settled []streams.WorkloadRunObservation
-	for _, work := range workloads {
-		if work == nil || streams.RunState(work.State).IsTerminal() {
-			continue
-		}
-		work.State = string(streams.RunStateEnded)
-		work.FinishedAt = &now
-		work.Revision++
-		if err := s.backgroundWork.UpsertBackgroundWorkload(ctx, work); err != nil {
-			return settled, err
-		}
-		if err := s.settleOpenBackgroundRuns(ctx, sessionID, work.ID, now); err != nil {
-			return settled, err
-		}
-		settled = append(settled, settledWorkloadObservation(work))
-	}
-	return settled, nil
-}
-
-func (s *Service) settleOpenBackgroundRuns(ctx context.Context, sessionID, workID string, now time.Time) error {
-	runs, err := s.backgroundWork.ListBackgroundRunsByWorkload(ctx, sessionID, workID)
-	if err != nil {
-		return err
-	}
-	for _, run := range runs {
-		if run == nil || streams.RunState(run.State).IsTerminal() {
-			continue
-		}
-		run.State = string(streams.RunStateEnded)
-		run.FinishedAt = &now
 		if err := s.backgroundWork.UpsertBackgroundRun(ctx, run); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// SettleOpenBackgroundWorkloads atomically ends open workloads and runs after
+// the owning agent process is gone, returning committed observations to publish.
+func (s *Service) SettleOpenBackgroundWorkloads(ctx context.Context, sessionID string) ([]streams.WorkloadRunObservation, error) {
+	if s.backgroundWork == nil || strings.TrimSpace(sessionID) == "" {
+		return nil, nil
+	}
+	workloads, err := s.backgroundWork.SettleBackgroundWorkloads(ctx, sessionID, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	settled := make([]streams.WorkloadRunObservation, 0, len(workloads))
+	for _, work := range workloads {
+		settled = append(settled, settledWorkloadObservation(work))
+	}
+	return settled, nil
 }
 
 // ListSessionIDsWithOpenBackgroundWork returns the sessions that still have a

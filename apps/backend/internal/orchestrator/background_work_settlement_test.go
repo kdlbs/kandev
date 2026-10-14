@@ -146,6 +146,11 @@ func TestSettleWithoutSettlerIsNoop(t *testing.T) {
 
 func TestIdleSuspensionSettlesOpenBackgroundWork(t *testing.T) {
 	svc, agent, _ := newIdleParkingFixture(t, true, 1, "claude-acp")
+	agent.suspendFunc = func(context.Context, agentapi.IdleSuspensionIdentity) error {
+		agent.isAgentRunning = false
+		return nil
+	}
+
 	observer := &settlingBackgroundWorkObserver{}
 	svc.SetBackgroundWorkObserver(observer)
 

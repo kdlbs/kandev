@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 
 	"go.uber.org/zap"
@@ -10,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func (s *Service) handleBackgroundWorkUpdatedEvent(ctx context.Context, payload *runtime.AgentStreamEventPayload) {
@@ -126,8 +128,39 @@ func (s *Service) backgroundWorkSettler() BackgroundWorkSettler {
 }
 
 func (s *Service) settleOpenBackgroundWork(ctx context.Context, sessionID string) {
+	s.settleBackgroundWork(ctx, sessionID, false)
+}
+
+func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID string, processStopped bool) bool {
+	if s.agentManager == nil {
+		return false
+	}
+	running, err := s.probeAgentRunning(ctx, sessionID)
+	if err != nil || running {
+		return false
+	}
+	if processStopped {
+		return true
+	}
+	row, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil {
+		return errors.Is(err, models.ErrExecutorRunningNotFound)
+	}
+	if row != nil {
+		executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+		if (err != nil || executionID == "") && s.rowLiveness(row) != models.ProcessLivenessDead {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) settleBackgroundWork(ctx context.Context, sessionID string, processStopped bool) {
 	settler := s.backgroundWorkSettler()
 	if settler == nil || sessionID == "" {
+		return
+	}
+	if !s.backgroundWorkProcessGone(ctx, sessionID, processStopped) {
 		return
 	}
 	settled, err := settler.SettleOpenBackgroundWorkloads(ctx, sessionID)

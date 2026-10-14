@@ -1193,6 +1193,7 @@ type UsageSpendReader interface {
 
 // BackgroundWorkRepository stores the background workload and run inspection projection.
 type BackgroundWorkRepository interface {
+	SettleBackgroundWorkloads(ctx context.Context, sessionID string, finishedAt time.Time) ([]*models.BackgroundWorkload, error)
 	UpsertBackgroundWorkload(ctx context.Context, workload *models.BackgroundWorkload) error
 	GetBackgroundWorkload(ctx context.Context, sessionID, id string) (*models.BackgroundWorkload, error)
 	ListBackgroundWorkloadsBySession(ctx context.Context, sessionID string) ([]*models.BackgroundWorkload, error)
