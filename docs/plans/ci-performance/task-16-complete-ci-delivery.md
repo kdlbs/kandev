@@ -53,6 +53,35 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+### Fourteenth complete hosted result
+
+Head `2c886763966` passes all three complete workflows: backend 38644787855
+in 776 seconds (220.45 runner-minutes), frontend 38644787749 in 874 seconds
+(29.90 runner-minutes), and E2E 38644787877 in 1,396 seconds (292.22
+runner-minutes). The green full set takes 23m16s and 542.57 runner-minutes.
+All 3,963 E2E identity counters match the thirteenth set: 3,920 first-pass,
+three retry-only, forty existing skips and no final failures. Every phone
+status-bar case passes on its first attempt, including the strengthened
+canonical-only Proceed scenario. The repaired readiness test also passes.
+One hosted pass is not a guarantee that every future timing or flake is fixed.
+
+The E2E execution critical path is 835 seconds (13m55s), while full elapsed
+includes much longer dependency-ready delays. Build finishes at 22:05:53 UTC,
+3m27s after workflow creation. The final-finishing normal shard 4 starts at
+22:15:31, after 9m38s waiting, then runs for 8m58s. Final reporting and workflow
+completion add 1m13s. These scheduling/provisioning delays are retained in the
+result; the account quota cause is not established. The faster local fixture
+results do not establish full-CI acceptance. Accepted complete sets remain 0/3.
+
+The native clipboard/causal-release batch in Task 15 is verified separately
+and is not included in this hosted measurement. It retains every original
+assertion and all 3,963 identities. Six desktop and two phone case repetitions
+pass with retries disabled, along with full web typecheck, affected lint/format
+and documentation checks. Commit only the reviewed test/support/documentation
+scope, preserve this completed hosted result, and measure one next full set.
+Keep current-head checks, review classification and mergeability external until
+the new head's complete workflows are terminal.
+
 ### Recurring phone Proceed failure
 
 Both complete E2E runs 38634314141 and 38638947962 spend two 90-second

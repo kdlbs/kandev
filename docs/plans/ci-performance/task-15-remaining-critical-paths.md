@@ -111,7 +111,7 @@ History/design retain these scenarios as the integration owners for the original
 large-log incident, not redundant small-string parser cases. Keep transcript,
 pinned, queued, narrow fine-pointer and coarse-pointer proofs; this batch changes
 only how the large log enters the editor and when one mock predecessor finishes.
-The native compiler/backoff ladder inspection also retains the 140.9-second
+Inspection of the production backoff ladder also retains the 140.9-second
 capacity-exhaustion scenario: its five real waits are 5, 10, 20, 40 and 60
 seconds, and one episode proves both phone and desktop behavior. Do not replace
 that distinct default-scheduler integration with a faster synthetic timer seam.
