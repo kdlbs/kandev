@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -95,4 +96,30 @@ func TestStartupPreservesUnresolvedBackgroundWorkRecovery(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSynchronousStopWithoutExecutionPreservesUnresolvedBackgroundWork(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "retained", TaskID: "t1", SessionID: "s1", AgentExecutionID: "retained"}))
+	agent := &mockAgentManager{getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return "", lifecycle.ErrNoExecutionForSession }}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	observer := &settlingBackgroundWorkObserver{}
+	svc.SetBackgroundWorkObserver(observer)
+	require.NoError(t, svc.StopSessionSynchronously(ctx, "s1", "cleanup", true))
+	require.Empty(t, observer.settledSessions())
+}
+
+func TestSynchronousStopSettlesObservedExecutionAfterTeardown(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	agent := &mockAgentManager{isAgentRunning: true, getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return "exec", nil }}
+	agent.stopAgentWithReasonFunc = func(context.Context, string, string, bool) error { agent.isAgentRunning = false; return nil }
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	observer := &settlingBackgroundWorkObserver{}
+	svc.SetBackgroundWorkObserver(observer)
+	require.NoError(t, svc.StopSessionSynchronously(ctx, "s1", "cleanup", true))
+	require.Equal(t, []string{"s1"}, observer.settledSessions())
 }
