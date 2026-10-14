@@ -188,6 +188,56 @@ func (s *Service) RecordBackgroundWorkloadObservation(
 	return nil
 }
 
+// SettleOpenBackgroundWorkloads marks every non-terminal workload of a session
+// as ended. Callers use it once the agent process that owned the work is gone,
+// because no provider completion can arrive for it after that. It returns the
+// settled observations so the caller can publish them.
+func (s *Service) SettleOpenBackgroundWorkloads(ctx context.Context, sessionID string) ([]streams.WorkloadRunObservation, error) {
+	if s.backgroundWork == nil || strings.TrimSpace(sessionID) == "" {
+		return nil, nil
+	}
+	workloads, err := s.backgroundWork.ListBackgroundWorkloadsBySession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	var settled []streams.WorkloadRunObservation
+	for _, work := range workloads {
+		if work == nil || streams.RunState(work.State).IsTerminal() {
+			continue
+		}
+		work.State = string(streams.RunStateEnded)
+		work.FinishedAt = &now
+		work.Revision++
+		if err := s.backgroundWork.UpsertBackgroundWorkload(ctx, work); err != nil {
+			return settled, err
+		}
+		settled = append(settled, settledWorkloadObservation(work))
+	}
+	return settled, nil
+}
+
+func settledWorkloadObservation(work *models.BackgroundWorkload) streams.WorkloadRunObservation {
+	obs := streams.WorkloadRunObservation{
+		SessionID:       work.SessionID,
+		WorkID:          work.ID,
+		Kind:            streams.NormalizeWorkloadKind(work.Kind),
+		Title:           work.Title,
+		State:           streams.RunState(work.State),
+		OriginTurnID:    work.OriginTurnID,
+		SourceMessageID: work.SourceMessageID,
+		SourceCallID:    work.SourceCallID,
+		ExitCode:        work.ExitCode,
+		StartedAt:       work.StartedAt,
+		FinishedAt:      work.FinishedAt,
+		Revision:        work.Revision,
+	}
+	if work.ParentWorkID != nil {
+		obs.ParentWorkID = *work.ParentWorkID
+	}
+	return obs
+}
+
 func mergeChunkIntoOutput(currentOutput string, workOffset int64, chunk string, chunkOffset int64) (string, int64, bool) {
 	if chunkOffset <= 0 || workOffset <= 0 {
 		return currentOutput + chunk, workOffset + int64(len(chunk)), false

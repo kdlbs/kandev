@@ -153,7 +153,13 @@ Represent this as terminal `ended` with `outcome_known=false` and render
 On backend start or transport loss, previously live inspection rows become
 unknown with controls disabled. Resume queries only the owning session's provider,
 reconciles stable bindings, and replaces capabilities for the new connection.
-Event-only providers remain unknown until fresh evidence. Browser disconnection
+Event-only providers remain unknown until fresh evidence.
+The end of the owning agent process is termination evidence for every
+non-terminal row of its session: when a session enters COMPLETED, FAILED or
+CANCELLED, when idle suspension stops its ACP process, or when startup finds open
+rows for a session with no live execution, those rows become `ended` with
+`finished_at` set. A provider that never reports completion, such as Claude's
+detached shells today, therefore cannot leave rows running past its process. Browser disconnection
 alone does not imply provider disconnection. Session reset/deletion fences its
 incarnation before clearing client state; late events cannot recreate it.
 

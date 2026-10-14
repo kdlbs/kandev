@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
@@ -104,5 +106,59 @@ func (s *Service) recordBackgroundWorkObservationFromToolPayload(ctx context.Con
 	if s.eventBus != nil {
 		subject := events.BuildBackgroundWorkUpdatedSubject(payload.SessionID)
 		_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &obs))
+	}
+}
+
+// BackgroundWorkSettler ends background workloads whose owning agent process
+// is gone. It is optional on the observer so recorders without durable storage
+// keep working.
+type BackgroundWorkSettler interface {
+	SettleOpenBackgroundWorkloads(ctx context.Context, sessionID string) ([]streams.WorkloadRunObservation, error)
+	ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error)
+}
+
+func (s *Service) backgroundWorkSettler() BackgroundWorkSettler {
+	settler, _ := s.backgroundWorkObserver.(BackgroundWorkSettler)
+	return settler
+}
+
+func (s *Service) settleOpenBackgroundWork(ctx context.Context, sessionID string) {
+	settler := s.backgroundWorkSettler()
+	if settler == nil || sessionID == "" {
+		return
+	}
+	settled, err := settler.SettleOpenBackgroundWorkloads(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to settle open background work",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+	if s.eventBus == nil {
+		return
+	}
+	subject := events.BuildBackgroundWorkUpdatedSubject(sessionID)
+	for i := range settled {
+		obs := settled[i]
+		_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &obs))
+	}
+}
+
+// settleOrphanedBackgroundWorkOnStartup ends open workloads of every session
+// that has no live agent after a backend restart. A live agent keeps its work
+// open because it can still report completion.
+func (s *Service) settleOrphanedBackgroundWorkOnStartup(ctx context.Context) {
+	settler := s.backgroundWorkSettler()
+	if settler == nil {
+		return
+	}
+	sessionIDs, err := settler.ListSessionIDsWithOpenBackgroundWork(ctx)
+	if err != nil {
+		s.logger.Warn("failed to list sessions with open background work", zap.Error(err))
+		return
+	}
+	for _, sessionID := range sessionIDs {
+		if s.agentManager != nil && s.agentManager.IsAgentRunningForSession(ctx, sessionID) {
+			continue
+		}
+		s.settleOpenBackgroundWork(ctx, sessionID)
 	}
 }

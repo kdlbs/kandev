@@ -49,6 +49,10 @@ func (r *bgWorkMockRepo) DeleteBackgroundWorkloadsBySession(ctx context.Context,
 	return nil
 }
 
+func (r *bgWorkMockRepo) ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error) {
+	return nil, nil
+}
+
 func (r *bgWorkMockRepo) UpsertBackgroundRun(ctx context.Context, run *models.BackgroundRun) error {
 	return nil
 }

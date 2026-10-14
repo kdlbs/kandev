@@ -1197,6 +1197,7 @@ type BackgroundWorkRepository interface {
 	GetBackgroundWorkload(ctx context.Context, sessionID, id string) (*models.BackgroundWorkload, error)
 	ListBackgroundWorkloadsBySession(ctx context.Context, sessionID string) ([]*models.BackgroundWorkload, error)
 	DeleteBackgroundWorkloadsBySession(ctx context.Context, sessionID string) error
+	ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error)
 	UpsertBackgroundRun(ctx context.Context, run *models.BackgroundRun) error
 	GetBackgroundRun(ctx context.Context, sessionID, id string) (*models.BackgroundRun, error)
 	ListBackgroundRunsByWorkload(ctx context.Context, sessionID, workloadID string) ([]*models.BackgroundRun, error)

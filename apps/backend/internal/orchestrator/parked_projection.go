@@ -331,6 +331,9 @@ func (s *Service) applySettledParkedSample(
 // rides on for every other transition (see onSessionStateChangedForParkedProjection).
 func (s *Service) ClearParkedProjectionOnSessionTerminated(ctx context.Context, taskID, sessionID string, newState models.TaskSessionState) {
 	s.clearParkedOnSessionStateLeft(ctx, taskID, sessionID, newState)
+	if isTerminalSessionState(newState) {
+		s.settleOpenBackgroundWork(ctx, sessionID)
+	}
 }
 
 // clearParkedOnSessionStateLeft is D8's session-state term: when a session

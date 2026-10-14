@@ -3394,6 +3394,7 @@ func (s *Service) reconcileStartupState(ctx context.Context) error {
 	// snapshot of "starting" routes.
 	s.reconcileOrphanedDynamicStartingRoutes(ctx)
 	s.reconcileExecutorSessionsOnStartup(ctx)
+	s.settleOrphanedBackgroundWorkOnStartup(ctx)
 	// Executor reconciliation abandons turns left open by a pre-crash active
 	// session. Run the CI attempt sweep again after that transition so a
 	// running auto-fix reservation can become retryable on the same startup.

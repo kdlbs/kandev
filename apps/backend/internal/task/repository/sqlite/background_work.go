@@ -240,6 +240,18 @@ func (r *Repository) ListBackgroundWorkloadsBySession(ctx context.Context, sessi
 	return workloads, nil
 }
 
+// ListSessionIDsWithOpenBackgroundWork returns the sessions that still have a
+// workload in a non-terminal state.
+func (r *Repository) ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error) {
+	const query = `SELECT DISTINCT session_id FROM task_session_background_work
+		WHERE state NOT IN ('completed', 'failed', 'interrupted', 'ended')`
+	var sessionIDs []string
+	if err := r.ro.SelectContext(ctx, &sessionIDs, r.ro.Rebind(query)); err != nil {
+		return nil, err
+	}
+	return sessionIDs, nil
+}
+
 func (r *Repository) DeleteBackgroundWorkloadsBySession(ctx context.Context, sessionID string) error {
 	const (
 		q1 = `DELETE FROM task_session_background_action_receipts WHERE session_id = ?`
