@@ -159,7 +159,12 @@ non-terminal row of its session. Terminal session transitions, successful idle
 suspension, completed teardown, and startup reconciliation attempt settlement
 only when the runtime liveness probe confirms no live process. A live process or
 failed probe leaves work open; terminal session state and stop acknowledgement
-alone are not process-termination evidence. These paths never launch an agent.
+alone are not process-termination evidence. Successful stop evidence is bound to
+the exact execution in the durable runtime record; a delayed predecessor
+completion cannot settle work owned by a retained successor. Generic recovery
+cleanup may preserve a remote process even when it returns success, so it uses
+the same liveness and retained-owner guards as startup. These paths never launch
+an agent.
 
 Workload and run settlement commits in one database transaction, with PostgreSQL
 session-scoped transaction advisory locking shared by run observations. Only

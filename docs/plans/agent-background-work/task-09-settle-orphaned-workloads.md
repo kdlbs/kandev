@@ -69,3 +69,10 @@ agent is alive, and is a separate protocol change.
 - Lifecycle regressions cover live/unknown probes, failed workflow stops, and
   successful stop after the terminal session transition.
 - Hosted verification results are recorded with the closing commit in the PR.
+
+Cleanup review also covers retained remote recovery: a successful generic
+cleanup result is not proof that its process stopped. Settlement after actual
+completion or synchronous stop matches the stopped execution against the durable
+owner, preserving an uncertain successor after a delayed predecessor callback.
+Source-adjacent regressions cover both boundaries; the controlled proof uses
+explicit repository/runtime stubs and does not substitute for hosted integration.

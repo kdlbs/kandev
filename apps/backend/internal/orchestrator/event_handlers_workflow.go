@@ -4041,7 +4041,7 @@ func (s *Service) completeAndStopSession(ctx context.Context, taskID string, ses
 				zap.String("session_id", session.ID),
 				zap.Error(stopErr))
 		} else {
-			s.settleBackgroundWork(ctx, session.ID, true)
+			s.settleBackgroundWork(ctx, session.ID, execID)
 		}
 	}
 }

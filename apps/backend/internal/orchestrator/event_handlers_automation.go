@@ -2599,5 +2599,5 @@ func (s *Service) stopAutomationAgent(
 			zap.Error(err))
 		return
 	}
-	s.settleBackgroundWork(ctx, sessionID, true)
+	s.settleBackgroundWork(ctx, sessionID, executionID)
 }

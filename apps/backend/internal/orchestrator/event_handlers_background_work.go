@@ -128,10 +128,10 @@ func (s *Service) backgroundWorkSettler() BackgroundWorkSettler {
 }
 
 func (s *Service) settleOpenBackgroundWork(ctx context.Context, sessionID string) {
-	s.settleBackgroundWork(ctx, sessionID, false)
+	s.settleBackgroundWork(ctx, sessionID, "")
 }
 
-func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID string, processStopped bool) bool {
+func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID string, stoppedExecutionID string) bool {
 	if s.agentManager == nil {
 		return false
 	}
@@ -139,28 +139,31 @@ func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID strin
 	if err != nil || running {
 		return false
 	}
-	if processStopped {
-		return true
-	}
 	row, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	if err != nil {
 		return errors.Is(err, models.ErrExecutorRunningNotFound)
 	}
-	if row != nil {
-		executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
-		if (err != nil || executionID == "") && s.rowLiveness(row) != models.ProcessLivenessDead {
-			return false
-		}
+	if row == nil {
+		return true
 	}
-	return true
+	// Stop evidence belongs to an execution; a retained successor still owns
+	// its work when a delayed completion arrives for the previous execution.
+	if stoppedExecutionID != "" && stoppedExecutionID == row.AgentExecutionID {
+		return true
+	}
+	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if err == nil && executionID != "" && executionID == row.AgentExecutionID {
+		return true
+	}
+	return s.rowLiveness(row) == models.ProcessLivenessDead
 }
 
-func (s *Service) settleBackgroundWork(ctx context.Context, sessionID string, processStopped bool) {
+func (s *Service) settleBackgroundWork(ctx context.Context, sessionID string, stoppedExecutionID string) {
 	settler := s.backgroundWorkSettler()
 	if settler == nil || sessionID == "" {
 		return
 	}
-	if !s.backgroundWorkProcessGone(ctx, sessionID, processStopped) {
+	if !s.backgroundWorkProcessGone(ctx, sessionID, stoppedExecutionID) {
 		return
 	}
 	settled, err := settler.SettleOpenBackgroundWorkloads(ctx, sessionID)

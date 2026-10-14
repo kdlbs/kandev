@@ -123,3 +123,78 @@ func TestSynchronousStopSettlesObservedExecutionAfterTeardown(t *testing.T) {
 	require.NoError(t, svc.StopSessionSynchronously(ctx, "s1", "cleanup", true))
 	require.Equal(t, []string{"s1"}, observer.settledSessions())
 }
+
+func TestRecoverableCleanupKeepsRetainedBackgroundWork(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "retained", TaskID: "t1", SessionID: "s1", AgentExecutionID: "retained"}))
+	agent := &mockAgentManager{getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return "", lifecycle.ErrNoExecutionForSession }}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	observer := &settlingBackgroundWorkObserver{}
+	svc.SetBackgroundWorkObserver(observer)
+	require.True(t, svc.cleanupAgentExecutionWithReason(ctx, "retained", "t1", "s1", lifecycle.StopReasonRecoverableAgentFailure))
+	require.Empty(t, observer.settledSessions(), "successful recoverable cleanup may retain its remote owner")
+	svc.cleanupAgentExecution("retained", "t1", "s1")
+	require.Equal(t, []string{"s1"}, observer.settledSessions(), "actual completion also works after a completed cleanup claim")
+}
+
+func TestBackgroundWorkStopEvidenceMatchesDurableOwner(t *testing.T) {
+	for _, tc := range []struct {
+		name, stopped, tracked string
+		wantSettled            bool
+	}{
+		{name: "same stopped owner", stopped: "retained", wantSettled: true},
+		{name: "old stopped owner", stopped: "old"},
+		{name: "different tracked owner", tracked: "old"},
+		{name: "same tracked owner", tracked: "retained", wantSettled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
+			require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "retained", TaskID: "t1", SessionID: "s1", AgentExecutionID: "retained"}))
+			agent := &mockAgentManager{getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return tc.tracked, nil }}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+			observer := &settlingBackgroundWorkObserver{}
+			svc.SetBackgroundWorkObserver(observer)
+			svc.settleBackgroundWork(ctx, "s1", tc.stopped)
+			require.Equal(t, tc.wantSettled, len(observer.settledSessions()) == 1)
+		})
+	}
+}
+
+func TestDelayedCompletionKeepsRetainedSuccessorBackgroundWork(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "successor", TaskID: "t1", SessionID: "s1", AgentExecutionID: "successor"}))
+	agent := &mockAgentManager{getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return "", lifecycle.ErrNoExecutionForSession }}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	observer := &settlingBackgroundWorkObserver{}
+	svc.SetBackgroundWorkObserver(observer)
+	svc.cleanupAgentExecution("old", "t1", "s1")
+	require.Empty(t, observer.settledSessions())
+	svc.cleanupAgentExecution("", "t1", "s1")
+	require.Empty(t, observer.settledSessions())
+}
+
+func TestVerifiedBackgroundWorkStopStillRequiresSuccessfulLivenessProbe(t *testing.T) {
+	for _, failProbe := range []bool{false, true} {
+		t.Run(fmt.Sprint(failProbe), func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
+			require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "retained", TaskID: "t1", SessionID: "s1", AgentExecutionID: "retained"}))
+			base := &mockAgentManager{isAgentRunning: true}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), base)
+			if failProbe {
+				svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &failingAgentLivenessProbe{mockAgentManager: base})
+			}
+			observer := &settlingBackgroundWorkObserver{}
+			svc.SetBackgroundWorkObserver(observer)
+			svc.settleBackgroundWork(ctx, "s1", "retained")
+			require.Empty(t, observer.settledSessions())
+		})
+	}
+}
