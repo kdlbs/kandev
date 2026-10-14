@@ -236,8 +236,8 @@ func TestArchiveTaskDirectoryDefersWhileEnvironmentIsInUse(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := svc.cleanupArchiveTaskDirectory(ctx, wt.TaskID, env, target); err != nil {
-				t.Fatal(err)
+			if err := svc.cleanupArchiveTaskDirectory(ctx, wt.TaskID, env, target); !errors.Is(err, errArchiveTaskDirectoryDeferred) {
+				t.Fatalf("in-use root must defer: %v", err)
 			}
 			if _, err := os.Stat(loose); err != nil {
 				t.Fatalf("in-use root removed: %v", err)

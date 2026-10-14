@@ -12,6 +12,8 @@ import (
 
 const taskDirectoryExecutorType = "worktree"
 
+var errArchiveTaskDirectoryDeferred = errors.New("archived task directory cleanup is deferred while in use")
+
 type taskDirectoryCleaner interface {
 	CaptureTaskDirectoryCleanup(context.Context, *worktree.Worktree) (*worktree.TaskDirectoryCleanup, error)
 	CleanupTaskDirectory(context.Context, *worktree.TaskDirectoryCleanup) (bool, error)
@@ -41,8 +43,8 @@ func (s *Service) captureArchiveTaskDirectory(ctx context.Context, job *models.T
 		if target == nil {
 			continue
 		}
-		if filepath.Clean(env.WorkspacePath) != target.Path {
-			return errors.New("archive task directory path differs from environment")
+		if !taskDirectoryMatchesEnvironment(env, target) {
+			return nil
 		}
 		snapshot.TaskDirectory = target
 		return s.persistTaskDirectorySnapshot(ctx, job, snapshot)
@@ -78,19 +80,31 @@ func (s *Service) cleanupArchiveTaskDirectory(ctx context.Context, taskID string
 		return err
 	}
 	runtimes, err := s.executors.ListExecutorsRunningByTaskID(ctx, taskID)
-	if err != nil || len(runtimes) > 0 {
+	if err != nil {
 		return err
 	}
+	if len(runtimes) > 0 {
+		return s.deferArchiveTaskDirectory(ctx, taskID)
+	}
 	shared, err := s.hasActiveOtherTaskSessionsForEnvironment(ctx, taskID, env)
-	if err != nil || shared {
+	if err != nil {
 		return err
+	}
+	if shared {
+		return s.deferArchiveTaskDirectory(ctx, taskID)
 	}
 	cleaner, ok := s.worktreeCleanup.(taskDirectoryCleaner)
 	if !ok {
 		return errors.New("archive task directory cleaner is unavailable")
 	}
-	_, err = cleaner.CleanupTaskDirectory(ctx, target)
-	return err
+	removed, err := cleaner.CleanupTaskDirectory(ctx, target)
+	if err != nil {
+		return err
+	}
+	if !removed {
+		return s.deferArchiveTaskDirectory(ctx, taskID)
+	}
+	return nil
 }
 
 func (s *Service) captureReclaimTaskDirectory(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *archiveReclaimSnapshot, wt *worktree.Worktree) error {
@@ -109,8 +123,8 @@ func (s *Service) captureReclaimTaskDirectory(ctx context.Context, job *models.T
 	if err != nil || target == nil {
 		return err
 	}
-	if filepath.Clean(env.WorkspacePath) != target.Path {
-		return errors.New("archive task directory path differs from environment")
+	if !taskDirectoryMatchesEnvironment(env, target) {
+		return nil
 	}
 	snapshot.TaskDirectory = target
 	snapshot.TaskEnvironment = env
@@ -143,5 +157,41 @@ func (s *Service) finishArchiveReclaimDirectory(ctx context.Context, job *models
 			return s.cleanupArchiveTaskDirectory(ctx, job.TaskID, snapshot.TaskEnvironment, snapshot.TaskDirectory)
 		}
 	}
-	return nil
+	return errors.New("reclaim task directory lacks matching deleted worktree evidence")
+}
+
+func taskDirectoryMatchesEnvironment(env *models.TaskEnvironment, target *worktree.TaskDirectoryCleanup) bool {
+	path := filepath.Clean(env.WorkspacePath)
+	if env.TaskDirName != "" && env.TaskDirName != target.Owner.TaskDirName {
+		return false
+	}
+	if path == target.Path {
+		return true
+	}
+	for _, worktreePath := range target.WorktreePaths {
+		if path == filepath.Clean(worktreePath) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) deferArchiveTaskDirectory(ctx context.Context, taskID string) error {
+	provider, ok := s.worktreeCleanup.(WorktreeProvider)
+	if !ok {
+		return errors.New("deferred task directory inventory is unavailable")
+	}
+	worktrees, err := provider.GetAllByTaskID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	for _, wt := range worktrees {
+		if wt == nil {
+			return errors.New("deferred task directory inventory is incomplete")
+		}
+		if wt.Status != worktree.StatusDeleted {
+			return nil
+		}
+	}
+	return errArchiveTaskDirectoryDeferred
 }

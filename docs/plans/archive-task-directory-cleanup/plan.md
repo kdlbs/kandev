@@ -162,3 +162,23 @@ and reported separately from this local verification record.
 [archived-worktree reclamation](../archived-worktree-reclamation/plan.md) remain
 completed delivery records for requirements 001 and 002. This pending package
 extends that contract with 003; it does not reopen or replace their results.
+
+## PR remediation results
+
+- Review findings now preserve individually audited checkout removal for legacy
+  unmarked/unsupported roots, changed task bases, multi-root inventory, and
+  unrelated workspace paths. The production primary-checkout workspace shape
+  admits the parent root. Persisted root removers still fail closed.
+- Deferred roots with no active checkout retain durable retry; missing deleted
+  repository evidence stays retryable. Worker/restart tests cover both cases.
+- Captured worktree paths are deduplicated, retaining the initial path when
+  active inventory omits deleted history. Platform identity helpers already
+  reject nil and typed-nil handles; no wrapper was added for that suggestion.
+- `go test -trimpath -race -tags fts5 ./internal/task/service ./internal/worktree ./internal/system/storage/workspaces -count=1`
+  passed (101.018s, 102.441s, 1.149s).
+- Scoped Go lint passed with zero issues.
+- Desktop archived-session recovery: the documented managed runner passed
+  all 3 tests (25.4s). Phone recovery reused that fresh build and passed all
+  3 tests (20.8s). These reproduce the failed CI shard cases.
+- Specification catalog/lint and diff checks passed. Exact-head remote checks
+  and thread disposition remain externally pending until the fixup push settles.

@@ -13,6 +13,8 @@ import (
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
+var errTaskDirectoryNotManaged = errors.New("task directory is outside the managed semantic layout")
+
 // TaskDirectoryCleanup retains the exact root admitted before worktree removal.
 type TaskDirectoryCleanup struct {
 	TaskID        string                            `json:"task_id"`
@@ -36,6 +38,9 @@ func (m *Manager) CaptureTaskDirectoryCleanup(ctx context.Context, wt *Worktree)
 		name = filepath.Base(root)
 	}
 	base, err := m.taskDirectoryCleanupBase(root, name)
+	if errors.Is(err, errTaskDirectoryNotManaged) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -57,6 +62,9 @@ func (m *Manager) CaptureTaskDirectoryCleanup(ctx context.Context, wt *Worktree)
 
 func (m *Manager) captureTaskDirectoryHandle(ctx context.Context, handle storageworkspaces.DirectoryHandle, wt *Worktree, root, name string) (*TaskDirectoryCleanup, error) {
 	owner, err := readTaskDirectoryOwner(handle)
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, errTaskDirectoryNotManaged) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -75,10 +83,18 @@ func (m *Manager) captureTaskDirectoryHandle(ctx context.Context, handle storage
 		return nil, err
 	}
 	paths := []string{wt.Path}
+	seen := map[string]bool{wt.Path: true}
 	for _, recorded := range worktrees {
-		if recorded == nil || filepath.Dir(recorded.Path) != root {
-			return nil, errors.New("task directory inventory path mismatch")
+		if recorded == nil {
+			return nil, errors.New("task directory inventory is incomplete")
 		}
+		if filepath.Dir(recorded.Path) != root {
+			return nil, nil
+		}
+		if seen[recorded.Path] {
+			continue
+		}
+		seen[recorded.Path] = true
 		paths = append(paths, recorded.Path)
 	}
 	return &TaskDirectoryCleanup{TaskID: wt.TaskID, Path: root, Identity: identity, Owner: owner, WorktreePaths: paths}, nil
@@ -92,7 +108,7 @@ func (m *Manager) taskDirectoryCleanupBase(root, name string) (string, error) {
 	base = filepath.Clean(base)
 	if name == "" || name == "." || name == ".." || filepath.Base(name) != name ||
 		filepath.Dir(root) != base || filepath.Base(root) != name {
-		return "", errors.New("task directory cleanup target is not an exact managed root")
+		return "", errTaskDirectoryNotManaged
 	}
 	return base, nil
 }
@@ -106,7 +122,10 @@ func readTaskDirectoryOwner(handle storageworkspaces.DirectoryHandle) (storagewo
 	if err := json.Unmarshal(raw, &owner); err != nil {
 		return owner, err
 	}
-	if owner.TaskID == "" || owner.TaskDirName == "" || owner.LayoutVersion != storageworkspaces.LayoutVersionSemantic || owner.CreatedAt.IsZero() {
+	if owner.LayoutVersion != storageworkspaces.LayoutVersionSemantic {
+		return owner, errTaskDirectoryNotManaged
+	}
+	if owner.TaskID == "" || owner.TaskDirName == "" || owner.CreatedAt.IsZero() {
 		return owner, errors.New("invalid managed task directory ownership marker")
 	}
 	return owner, nil

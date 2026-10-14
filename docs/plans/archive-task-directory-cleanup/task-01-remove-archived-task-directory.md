@@ -63,6 +63,8 @@ bash scripts/lint-go-changed \
   apps/backend/internal/task/service/resource_cleanup_jobs.go \
   apps/backend/internal/task/service/resource_cleanup_taskdir.go \
   apps/backend/internal/task/service/resource_cleanup_taskdir_test.go \
+  apps/backend/internal/task/service/resource_cleanup_taskdir_compat_test.go \
+  apps/backend/internal/task/service/resource_cleanup_taskdir_deferred_test.go \
   apps/backend/internal/task/service/resource_cleanup_task_owned_test.go \
   apps/backend/internal/task/service/resource_cleanup_archive_identity_test.go \
   apps/backend/internal/task/service/resource_cleanup_archive_reclaim_test.go \
@@ -72,6 +74,8 @@ bash scripts/lint-go-changed \
   apps/backend/internal/system/storage/workspaces/directory_handle_info_unix.go \
   apps/backend/internal/system/storage/workspaces/directory_handle_info_windows.go
 (cd apps/backend && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -trimpath -c -o /tmp/kandev-taskdir-workspaces-windows.test.exe ./internal/system/storage/workspaces)
+scripts/run-quiet e2e --summary -- corepack pnpm@9.15.9 --dir apps/web e2e:run --host --project chromium e2e/tests/task/archived-session-recovery.spec.ts
+scripts/run-quiet e2e --summary -- corepack pnpm@9.15.9 --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/task/mobile-archived-session-recovery.spec.ts
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.test.py
 python3 scripts/lint-spec-files.py --all
@@ -121,6 +125,14 @@ transactions across filesystem waits, and preserve existing lock order.
   and `resource_cleanup_archive_identity_test.go` fixtures.
 - Scoped backend guidance and `/tdd` before implementation.
 
+## PR remediation scope
+
+- Preserve legacy checkout cleanup when no recursive root can be admitted.
+- Accept the production checkout workspace shape as well as the task root.
+- Retain deferred folder obligations and missing deleted-row proof across retry.
+- Deduplicate persisted paths while retaining the seed path for deleted rows.
+- Reproduce the failed desktop and mobile archived-session recovery specs.
+
 ## Results
 
 Implemented final managed-root cleanup for archive and delayed reclamation.
@@ -156,3 +168,23 @@ how-to explains removal of files beside reclaimed worktrees.
 
 PR publication and exact-head CI/review follow-up are tracked in the task plan
 and reported separately from this local verification record.
+
+## PR remediation results
+
+- Review findings now preserve individually audited checkout removal for legacy
+  unmarked/unsupported roots, changed task bases, multi-root inventory, and
+  unrelated workspace paths. The production primary-checkout workspace shape
+  admits the parent root. Persisted root removers still fail closed.
+- Deferred roots with no active checkout retain durable retry; missing deleted
+  repository evidence stays retryable. Worker/restart tests cover both cases.
+- Captured worktree paths are deduplicated, retaining the initial path when
+  active inventory omits deleted history. Platform identity helpers already
+  reject nil and typed-nil handles; no wrapper was added for that suggestion.
+- `go test -trimpath -race -tags fts5 ./internal/task/service ./internal/worktree ./internal/system/storage/workspaces -count=1`
+  passed (101.018s, 102.441s, 1.149s).
+- Scoped Go lint passed with zero issues.
+- Desktop archived-session recovery: the documented managed runner passed
+  all 3 tests (25.4s). Phone recovery reused that fresh build and passed all
+  3 tests (20.8s). These reproduce the failed CI shard cases.
+- Specification catalog/lint and diff checks passed. Exact-head remote checks
+  and thread disposition remain externally pending until the fixup push settles.

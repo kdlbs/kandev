@@ -190,7 +190,9 @@ operation identity. Resolve the root from the snapshotted task environment and
 recorded `TaskDirName`, under the configured `TasksBasePath`. Require an exact
 immediate-child managed root, consistent recorded paths, current owner and
 archive identity, successful runtime stops, and no active borrower. A directory
-name or lexical containment alone does not authorize deletion.
+name or lexical containment alone does not authorize deletion. The environment
+workspace may name the root or an admitted checkout under it. A workspace path
+unrelated to the admitted set contributes no recursive cleanup target.
 
 Run this step after the original archive batch has removed all eligible
 worktrees and after successful `archive_reclaim` removal, before completing the
@@ -221,11 +223,22 @@ jobs readable; capture authoritative proof before their worktree removal. A retr
 already been marked deleted. In particular, `loadArchiveReclaimWorktree` currently
 treats a non-active row as stale; the new pending root obligation must survive
 that shortcut. Distinguish a deferred retained sibling from a removal failure.
-Removal or inspection failures reach existing job retry handling. Unarchive
+Removal or inspection failures reach existing job retry handling. A folder
+that becomes busy after the last checkout disappears remains a durable retry;
+it cannot rely on future active-worktree discovery. A captured root with missing
+deleted-worktree evidence also retains retry instead of completing as stale. Unarchive
 invalidates the same operation before any root deletion. Absence succeeds only
 with retained proof of the exact admitted target; generic not-found is not
 ownership evidence. Existing empty-only parent removal must not erase the
 identity evidence needed by this later step.
+
+Root capture is optional for supported legacy checkout cleanup. A missing or
+unsupported marker, changed tasks base, inventory spanning multiple roots, or
+unrelated environment workspace means no recursive root target. Individual
+checkout removal still runs through its existing Git/ownership audit. Capture
+I/O, malformed ownership, conflicting ownership, and path-identity errors remain
+retryable. A previously persisted root target never becomes eligible merely
+because admission rules changed; its remover remains fail-closed.
 
 Integrate with existing removed-root recording for orphan-process cleanup;
 record a successfully removed task root along with the worktree roots. Do not
