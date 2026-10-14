@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
@@ -23,7 +24,7 @@ func seedQuickChatHistory(t *testing.T, repo *Repository, sessionID string, ephe
 		t.Fatal(err)
 	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: sessionID, TaskID: sessionID + "-task", AgentProfileSnapshot: map[string]interface{}{"agent_name": "claude-acp"},
+		ID: sessionID, TaskID: sessionID + "-task", AgentProfileSnapshot: map[string]interface{}{"agent_name": quickChatHistoryClaudeAgent},
 		ExecutionProfileID: "history-profile",
 		Metadata:           map[string]interface{}{"unrelated": "keep"},
 	}); err != nil {
@@ -70,7 +71,7 @@ func TestQuickChatHistoryKeepsProviderAndCwdAcrossProfileRotation(t *testing.T) 
 	if err := json.Unmarshal(raw, &records); err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 2 || records[0].AgentName != "claude-acp" || records[0].WorkDir != "/w/chat" ||
+	if len(records) != 2 || records[0].AgentName != quickChatHistoryClaudeAgent || records[0].WorkDir != "/w/chat" ||
 		records[1].AgentName != "codex-app-server" || records[1].WorkDir != "/w/next" {
 		t.Fatalf("provider rotation relabelled history: %s", raw)
 	}
@@ -99,12 +100,42 @@ func quickChatHistoryTokens(t *testing.T, repo *Repository, sessionID string) ma
 	}
 	tokens := make(map[string]int)
 	for _, record := range records {
-		if record.AgentName != "claude-acp" || record.WorkDir != "/w/chat" {
+		if record.AgentName != quickChatHistoryClaudeAgent || record.WorkDir != "/w/chat" {
 			t.Fatalf("history identity lost its provider or cwd: %+v", record)
 		}
 		tokens[record.ResumeToken]++
 	}
 	return tokens
+}
+
+func TestQuickChatHistoryDoesNotRenewIdleActivity(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedQuickChatHistory(t, repo, "idle-history", true, agentruntime.RuntimeStandalone)
+	idleSince := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	if _, err := repo.DB().ExecContext(ctx, `UPDATE task_sessions SET updated_at = ? WHERE id = ?`, idleSince, "idle-history"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateResumeToken(ctx, "idle-history", "idle-history-execution", "token-b", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		SessionID: "idle-history", TaskID: "idle-history-task", AgentExecutionID: "idle-history-execution",
+		ExecutionProfileID: "history-profile", Runtime: agentruntime.RuntimeStandalone,
+		ResumeToken: "token-c", WorktreePath: "/w/chat",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session, err := repo.GetTaskSession(ctx, "idle-history")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !session.UpdatedAt.Equal(idleSince) {
+		t.Fatalf("history bookkeeping renewed idle activity: %s, want %s", session.UpdatedAt, idleSince)
+	}
+	if tokens := quickChatHistoryTokens(t, repo, session.ID); len(tokens) != 3 {
+		t.Fatalf("history retention lost accepted identities: %v", tokens)
+	}
 }
 
 func TestQuickChatHistorySurvivesTokenCASClearAndExecutorDeletion(t *testing.T) {
@@ -211,6 +242,10 @@ func TestPostgresQuickChatHistoryCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedQuickChatHistory(t, repo, "quick-history-pg", true, agentruntime.RuntimeStandalone)
+	idleSince := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	if _, err := db.ExecContext(context.Background(), db.Rebind(`UPDATE task_sessions SET updated_at = ? WHERE id = ?`), idleSince, "quick-history-pg"); err != nil {
+		t.Fatal(err)
+	}
 	secondDB := openSecondPostgresConnection(t, dsn, db)
 	secondRepo, err := NewWithDB(secondDB, secondDB, nil)
 	if err != nil {
@@ -238,5 +273,12 @@ func TestPostgresQuickChatHistoryCAS(t *testing.T) {
 	tokens := quickChatHistoryTokens(t, repo, "quick-history-pg")
 	if len(tokens) != 3 || tokens["token-a"] != 1 || tokens["token-b"] != 1 || tokens["token-c"] != 1 {
 		t.Fatalf("concurrent accepted identities = %v", tokens)
+	}
+	session, err := repo.GetTaskSession(context.Background(), "quick-history-pg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !session.UpdatedAt.Equal(idleSince) {
+		t.Fatalf("concurrent history writes renewed idle activity: %s, want %s", session.UpdatedAt, idleSince)
 	}
 }

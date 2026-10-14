@@ -9,8 +9,11 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+const quickChatHistoryClaudeAgent = "claude-acp"
 
 // retainQuickChatHistoryTx shares the executor write's ownership locks and
 // transaction. A rejected token CAS rolls back its history writes as well.
@@ -34,8 +37,20 @@ func (r *Repository) retainQuickChatHistoryTx(ctx context.Context, tx *sqlx.Tx, 
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, r.db.Rebind(metadataKeyUpdateQuery("task_sessions", r.db.DriverName())),
-		metadataKeyUpdateArgs(r.db.DriverName(), models.SessionMetaKeyQuickChatAgentHistory, string(payload), r.nowUTC(), sessionID)...)
+	return r.writeQuickChatHistoryTx(ctx, tx, sessionID, string(payload))
+}
+
+// Recording retained identities must not renew an idle chat's activity clock.
+func (r *Repository) writeQuickChatHistoryTx(ctx context.Context, tx *sqlx.Tx, sessionID, payload string) error {
+	key := models.SessionMetaKeyQuickChatAgentHistory
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = "UPDATE task_sessions SET metadata = jsonb_set(" + postgresMetadataObject + ", ARRAY[?]::text[], ?::jsonb, true)::text WHERE id = ?"
+	} else {
+		query = "UPDATE task_sessions SET metadata = json_set(" + sqliteMetadataObject + ", ?, json(?)) WHERE id = ?"
+		key = jsonPath(key)
+	}
+	_, err := tx.ExecContext(ctx, r.db.Rebind(query), key, payload, sessionID)
 	return err
 }
 
@@ -85,7 +100,7 @@ func parseQuickChatHistoryRecord(
 	}
 	record.AgentName = models.StringFromAny(profile["agent_name"])
 	switch record.AgentName {
-	case "claude-acp", "codex-acp", "codex-app-server":
+	case quickChatHistoryClaudeAgent, "codex-acp", "codex-app-server":
 	default:
 		return nil, nil, nil
 	}

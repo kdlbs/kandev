@@ -53,6 +53,8 @@ Retention shares the existing executor upsert or resume-token transaction. The t
 its history write commit together, so a rejected stale execution cannot append an identity.
 The existing session-turn write lock serializes writers on PostgreSQL; SQLite serializes its
 writers. The metadata update changes only the history key, preserving unrelated session data.
+History bookkeeping preserves the session activity timestamp, so retaining an identity during
+runtime persistence does not make an idle Quick Chat ineligible for expiration.
 Repeated identities are deduplicated. Only eligible Quick Chats and standalone runtimes
 produce host-history records.
 
