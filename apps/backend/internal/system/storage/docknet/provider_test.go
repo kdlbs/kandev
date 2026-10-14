@@ -27,6 +27,7 @@ type fakeDocker struct {
 	inspectCount int
 	attachAfter  int
 	listErr      error
+	removeErr    error
 	removed      []string
 	createErr    error
 	createdName  string
@@ -92,6 +93,9 @@ func (f *fakeDocker) RemoveNetwork(_ context.Context, id string) error {
 	defer f.mu.Unlock()
 	if _, ok := f.networks[id]; !ok {
 		return errors.New("network not found")
+	}
+	if f.removeErr != nil {
+		return f.removeErr
 	}
 	delete(f.networks, id)
 	f.removed = append(f.removed, id)
@@ -651,6 +655,15 @@ func TestRunProbeNoSubnetAllocatedFails(t *testing.T) {
 	result := RunProbe(context.Background(), docker, "x", nil)
 	if result.Passed || result.Error == "" {
 		t.Fatalf("probe = %#v, want failure with the missing-subnet error", result)
+	}
+}
+
+func TestRunProbeFailsWhenCleanupFails(t *testing.T) {
+	docker := newFakeDocker()
+	docker.removeErr = errors.New("daemon refused removal")
+	result := RunProbe(context.Background(), docker, "x", nil)
+	if result.Passed || result.Error == "" {
+		t.Fatalf("probe = %#v, want cleanup failure", result)
 	}
 }
 

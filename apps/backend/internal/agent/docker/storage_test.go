@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/netip"
 	"reflect"
 	"testing"
@@ -263,6 +264,14 @@ func TestCreateNetworkCreatesBridgeAndInspectsResult(t *testing.T) {
 		sdk.createOptions.EnableIPv4 == nil || !*sdk.createOptions.EnableIPv4 ||
 		sdk.createOptions.Labels["kandev.managed"] != "true" {
 		t.Fatalf("create call name=%q options=%#v", sdk.createName, sdk.createOptions)
+	}
+}
+
+func TestCreateNetworkRollsBackWhenInspectionFails(t *testing.T) {
+	sdk := &fakeNetworkAPI{createResult: client.NetworkCreateResult{ID: "network-1"}, inspectErr: errors.New("inspect failed")}
+	_, err := (&Client{networks: sdk}).CreateNetwork(context.Background(), CreateNetworkOptions{Name: "kd_probe"})
+	if err == nil || sdk.removedID != "network-1" {
+		t.Fatalf("CreateNetwork err=%v removed=%q, want rollback of created ID", err, sdk.removedID)
 	}
 }
 
