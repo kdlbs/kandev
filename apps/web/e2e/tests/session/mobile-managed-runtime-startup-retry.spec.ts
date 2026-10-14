@@ -2,6 +2,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import {
   managedRuntimeStartupAttemptFile,
   prepareManagedRuntimeProfile,
@@ -21,6 +22,7 @@ test("shows startup retry progress on phone and finishes in the same conversatio
   test.setTimeout(180_000);
 
   const launchId = randomUUID();
+  const retryReleaseFile = path.join(backend.tmpDir, `retry-release-${launchId}`);
   let profileId = "";
   let hostFixturePath = "";
   try {
@@ -28,6 +30,7 @@ test("shows startup retry progress on phone and finishes in the same conversatio
       startupMode: "silent-exit",
       launchId,
       hostSubprocess: true,
+      retryReleaseFile,
     });
     profileId = prepared.profile.id;
     hostFixturePath = prepared.hostFixturePath ?? "";
@@ -52,6 +55,7 @@ test("shows startup retry progress on phone and finishes in the same conversatio
     });
     await expect(progress).toBeVisible({ timeout: 30_000 });
     await expect(progress).toBeInViewport();
+    fs.writeFileSync(retryReleaseFile, "released");
     await waitForSessionDone(
       apiClient,
       task.id,
@@ -74,9 +78,12 @@ test("shows startup retry progress on phone and finishes in the same conversatio
       fullPage: true,
     });
   } finally {
+    fs.writeFileSync(retryReleaseFile, "released");
     if (profileId) await apiClient.deleteAgentProfile(profileId, true).catch(() => undefined);
     if (hostFixturePath) fs.rmSync(hostFixturePath, { force: true });
     await restoreE2EAgentRegistry(backend);
+    fs.rmSync(retryReleaseFile, { force: true });
+    fs.rmSync(`${retryReleaseFile}.waiting`, { force: true });
   }
 });
 

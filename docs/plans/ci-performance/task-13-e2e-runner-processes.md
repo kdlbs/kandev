@@ -381,3 +381,40 @@ Web typecheck, zero-warning focused ESLint, formatting, changed-Go lint,
 SQL guard, persistence conformance, specification validation, and harness
 validation pass. The next acceptance gate remains the complete hosted run,
 including restored helper-declared cases and current-base integration.
+
+
+## Remaining E2E gap and focused consolidation
+
+The next complete hosted measurement executes all 3,971 expected identities:
+3,930 passed, one failed, and the same 40 skipped identities; five retries
+remain counted. The longest normal step is 1,136 seconds (18m56), 47.38% below
+the 2,159-second reference, still 56.5 seconds above the target. The normal
+step sum is 13,027 seconds and total workflow elapsed is 3,834 seconds,
+including substantial runner queue delay. The slowest shard has 282 passes
+and no retries, so removing failed-attempt time alone cannot close this gap.
+
+The sole persistent failure is the phone startup-retry progress notice: a
+successful replacement can start before the browser renders the notice. The
+fixture now holds that real replacement until the existing visible/in-viewport
+assertions finish, with a bounded release gate and cleanup. Both new shell
+fixture regressions fail before the hold and pass afterward; three repeated
+phone journeys pass with no retries. The original same-session, attempt-count,
+message, screenshot and overflow assertions remain.
+
+The PR popover and transcript-scroll audit consolidates 29 standalone cases
+into 13 without dropping a scenario: 10 stay standalone and 19 run as named
+steps. Under identical one-worker limits, all cases pass before and after;
+elapsed time falls from 183.174 to 115.903 seconds (67.271 seconds saved).
+The first consolidation attempt missed a workflow action URL in its fixture;
+the final version preserves that URL and output and passes every original
+assertion. See `docs/audits/e2e-popover-scroll-consolidation-2026-10-14.md`.
+This subset measurement does not prove the complete hosted target. Final
+current-base validation, normal hooks and a fresh hosted run remain required.
+
+
+Final local validation passes all six desktop/phone startup-retry cases with
+zero retries, including cleanup of the held process. The 13 consolidated cases
+pass and their blob step inventory accounts for all 29 original scenarios.
+All 54 focused unit tests, web typecheck, formatting, zero-warning ESLint and
+documentation checks pass. Main's intervening change is limited to literal
+executor-placeholder expansion; validate that owner on the final merge tree.
