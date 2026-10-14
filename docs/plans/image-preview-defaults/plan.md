@@ -138,6 +138,11 @@ and requested a clearer text-only target-replacement test name. That name now
 distinguishes text collapse from image auto-expansion. The same 32 focused tests
 and targeted ESLint passed after the rename; remote validation remains pending.
 
+Claude's next review requested distinguishing an image target from its filename.
+The image-replacement case now names the new image target, including repository
+and session changes. The same 32 tests and targeted ESLint passed; remote checks
+and incoming feedback remain external until terminal.
+
 ## Risks
 
 - Mounted image cards now read their workspace files automatically, including

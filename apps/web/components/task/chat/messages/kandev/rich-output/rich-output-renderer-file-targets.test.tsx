@@ -135,7 +135,7 @@ it.each([
   { field: "path", target: { ...initial, path: "new.png" } },
   { field: "repository", target: { ...initial, path: "old.png", repo: "beta" } },
   { field: "session", target: { ...initial, path: "old.png", sessionId: "session-b" } },
-])("loads only the new image when its $field changes", async ({ target }) => {
+])("loads only the new image target when its $field changes", async ({ target }) => {
   const original = { ...initial, path: "old.png" };
   const view = render(<RendererHarness {...propsFor(original)} />);
   await screen.findByText(contentFor(original));

@@ -196,3 +196,9 @@ addressed by renaming the existing text-target replacement case to
 `collapses a text preview when its $field changes`. The exact targeted Vitest
 command again passed 3 files / 32 tests, and targeted test-file ESLint passed.
 Assertions and product behavior are unchanged; remote validation remains pending.
+
+The subsequent review's image-target naming suggestion was addressed as
+`loads only the new image target when its $field changes`. This describes the
+path/repository/session identity represented by the parameterized cases. The
+exact targeted command again passed 3 files / 32 tests, and targeted ESLint
+passed. Only test wording changed; final remote validation remains pending.
