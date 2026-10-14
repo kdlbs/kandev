@@ -8,6 +8,7 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
 import { waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
+import { pasteOversizedMessage } from "./oversized-message-helpers";
 import {
   MESSAGE_PREVIEW_MAX_LINES,
   MESSAGE_PREVIEW_MAX_CODE_UNITS,
@@ -143,7 +144,8 @@ test.describe("Oversized user-message previews", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    await session.sendMessage(source);
+    const editor = await pasteOversizedMessage(testPage, session, source, tail);
+    await session.submitMessageWithKeyboard(editor);
     // The durable transcript confirms acceptance even if the large WS reply is
     // delayed after the user message has already rendered.
     await expect

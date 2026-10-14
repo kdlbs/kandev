@@ -57,6 +57,65 @@ git diff --check
 
 ## Results
 
+### Native paste for oversized-message fixtures
+
+Candidate D: complete thirteenth-run blob events attribute 83.108 seconds of
+the desktop oversized-preview case and 82.623 seconds of its phone companion
+to Playwright filling the 3,921-line composer. Their assertions protect bounded
+previews, complete stored/downloaded bytes, session switching and follow-up
+submission (AC-UI-BOUNDED-USER-MESSAGE-001.1 through .6). Retain those oracles,
+the full generated input, desktop shortcut submission, phone touch submission,
+reloads and all viewport/target checks. The local baseline passes all three
+desktop cases in 1.3 minutes and its phone companion in 1.7 minutes, retries off.
+
+Evaluate real clipboard paste for these two large inputs only. Grant clipboard
+permissions to the isolated browser context, write the unchanged full source,
+focus the existing ready composer and invoke its native paste shortcut. Await
+the final marker in the editor before the original submission. Do not assign
+DOM/store/editor internals or seed the oversized submitted message over an API.
+The existing complete persisted-source/download assertions must remain exact.
+Ordinary fill, typing, keyboard and touch paths retain their existing owners.
+Reject this experiment if it changes saved bytes, bypasses production handlers,
+fails a retained assertion or does not materially reduce measured execution.
+No production change, permission bypass, retry or timeout increase is included.
+Measure full files before considering any causal replacement of the phone's
+independent fixed 30-second queue predecessor.
+
+The native clipboard trial passes all original cases: the full desktop file
+falls from approximately 78 seconds to 32.3 seconds and the phone file from
+approximately 102 seconds to 52.0 seconds. The generated 3,921-line source,
+complete persisted-source/download equality, switching, follow-up, geometry,
+keyboard/touch submission and all prior assertions are retained. This is local
+fixture evidence, not hosted full-workflow acceptance.
+
+Next replace only the phone case's fixed 30-second queue predecessor with the
+existing cancellation-aware `mockTurnGate`. Preserve its real running state,
+queue-mode readiness, expanded preview/download checks, queue clearing and real
+agent completion/session-done assertions. Release after the intermediate
+assertions, and again in finally for failure cleanup. Keep the original
+completion marker and every timeout. Do not change the already-short desktop
+queue case, generic message entry or production code. Repeat complete files
+with retries disabled before staging the coherent fixture batch.
+
+Final verification repeats every desktop case twice (six passes in 63.282
+seconds total) and the complete phone case twice (two passes in 44.727 seconds
+total), with no retries, failures or skips. Oversized desktop bodies are 17.283
+and 16.394 seconds; phone bodies are 17.829 and 20.796 seconds. Every original
+expectation/assertion remains in order and the full 3,921-line generator is
+unchanged. The native clipboard event reaches the shipped paste handler, and
+complete persisted/downloaded byte comparisons still pass. Full web typecheck,
+strict changed-file lint/format and native discovery also pass. Hosted full-CI
+measurement for this batch remains pending.
+
+History/design retain these scenarios as the integration owners for the original
+large-log incident, not redundant small-string parser cases. Keep transcript,
+pinned, queued, narrow fine-pointer and coarse-pointer proofs; this batch changes
+only how the large log enters the editor and when one mock predecessor finishes.
+The native compiler/backoff ladder inspection also retains the 140.9-second
+capacity-exhaustion scenario: its five real waits are 5, 10, 20, 40 and 60
+seconds, and one episode proves both phone and desktop behavior. Do not replace
+that distinct default-scheduler integration with a faster synthetic timer seam.
+
 ### Prepared workspace experiment for layout-only scenarios
 
 Candidate C: right-panel visibility's ten cases currently create an agent task
