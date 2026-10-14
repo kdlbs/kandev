@@ -54,14 +54,31 @@ class E2EWorkflowContractTest(unittest.TestCase):
         self.assertEqual(family["instances"], [{"shard": n} for n in range(1, count + 1)])
         self.assertIn("name: E2E Shard ${{ matrix.shard }}/28", workflow)
 
-    def test_go_cache_snapshots_refresh_after_source_changes(self) -> None:
+    def test_independent_helper_cache_snapshots_refresh_after_source_changes(self) -> None:
         workflow = E2E_WORKFLOW.read_text()
         dependency = "${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}"
-        for job, next_job, role in (("helper_compile", "build", "helpers"), ("build", "e2e", "build")):
-            block = job_block(workflow, job, next_job)
-            prefix = f"go-e2e-{role}-{dependency}"
-            self.assertIn(f"key: {prefix}-${{{{ github.sha }}}}", block)
-            self.assertIn(f"restore-keys: |\n            {prefix}-\n", block)
+        block = job_block(workflow, "helper_compile", "build")
+        prefix = f"go-e2e-helpers-{dependency}"
+        self.assertIn(f"key: {prefix}-${{{{ github.sha }}}}", block)
+        self.assertIn(f"restore-keys: |\n            {prefix}-\n", block)
+
+    def test_build_reuses_optional_daily_cache_without_conditioning_verification(self) -> None:
+        workflow = E2E_WORKFLOW.read_text()
+        build = job_block(workflow, "build", "e2e")
+        self.assertIn("uses: ./.github/actions/cache-go", build)
+        self.assertIn("family: e2e-build", build)
+        self.assertNotIn("key: go-e2e-build-", build)
+        self.assertNotIn("steps.cache", build)
+        self.assertIn(".github/actions/cache-go/**", workflow)
+        self.assertIn(".github/scripts/go-cache-identity.*", workflow)
+        self.assertIn("make -C apps/backend build-kandev", build)
+        self.assertIn("make build-web-e2e", build)
+        action = (REPO_ROOT / ".github/actions/cache-go/action.yml").read_text()
+        self.assertEqual(action.count("continue-on-error: true"), 4)
+        self.assertIn("key: ${{ steps.identity.outputs.buildKey }}", action)
+        self.assertIn("restore-keys: ${{ steps.identity.outputs.buildPrefix }}", action)
+        lint = LINT_WORKFLOW.read_text()
+        self.assertIn("node --test .github/scripts/go-cache-identity.test.mjs", lint)
 
     def test_parallel_build_joins_both_children_and_preserves_each_failure(self) -> None:
         source = E2E_WORKFLOW.read_text().split("      - name: Build backend and web\n", 1)[1]

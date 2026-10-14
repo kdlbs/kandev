@@ -60,8 +60,10 @@ Its tree matches locally verified synthetic merge `5d5da539316c`: 33 parent/mobi
 context tests, full web typecheck and affected race-enabled backend checks pass.
 Current-main enumeration adds only two workspace-adoption scenarios, for
 3,810 normal plus 153 container tests; no existing identity or count changes.
-The single primary waiter preserves this full attempt while the next local
-queue synchronization candidate is prepared. Hosted outcomes remain pending.
+Backend passes in 865 seconds including queue/reporting, with 802 seconds
+execution critical path and 245.6 runner-minutes. The single primary waiter
+preserves this full attempt while local queue/cache follow-ups are prepared.
+Frontend and E2E outcomes remain pending; full acceptance is still unmet.
 
 Second candidate head `e2a66b8536` runs backend 38581852307, frontend
 38581852072 and E2E 38581852055. Its tested merge is

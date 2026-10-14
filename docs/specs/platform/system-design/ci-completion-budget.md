@@ -129,10 +129,15 @@ Kind receives only the final worker harness images in one batch, retaining all
 real recipe builds and their layers while exporting their shared base once.
 The pinned Kind loader accepts multiple image names and saves one archive.
 
-E2E Go caches save source-specific snapshots under their existing job-role and
-dependency prefixes. Later sources restore the latest compatible snapshot;
-native Go cache validation remains authoritative. Include snapshot compression,
-upload and restore in measurements and retain the existing trusted cache scope.
+Independent E2E helper compilation saves source-specific snapshots under its
+existing job-role and dependency prefix. The browser build reuses the shared
+optional Go cache action: module downloads use dependency/toolchain keys, while
+compilation generations roll daily within installed compiler, architecture,
+build environment and image-recipe compatibility. Source changes still invoke
+every native Go build; Go's content-based invalidation remains authoritative.
+Exact same-day hits avoid recompressing an unchanged generation before browser
+jobs can start. Include cold population, rollover, compression, upload and restore
+in measurements, retain trusted cache scope and keep cache failures optional.
 Windows additionally snapshots only native GOCACHE by suite and source, retaining
 Setup-Go's module cache. Process cohorts share one compiled-package cache.
 

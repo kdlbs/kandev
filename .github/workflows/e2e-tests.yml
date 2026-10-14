@@ -95,6 +95,8 @@ jobs:
             .github/scripts/resolve-image-digest.sh
             .github/workflows/ci-base-image.yml
             .github/workflows/e2e-tests.yml
+            .github/actions/cache-go/**
+            .github/scripts/go-cache-identity.*
             .github/actions/download-artifact-retry/**
             .github/scripts/ci-test-only-changes.py
             .github/scripts/changed-paths.py
@@ -218,21 +220,10 @@ jobs:
           key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
 
-      # Same reasoning as the pnpm store above: the image sets GOPATH=/root/go
-      # and leaves GOCACHE at its default, and $HOME is /root, so these are the
-      # same two paths backend-tests.yml caches. Without this the backend build
-      # below starts from a cold module *and* build cache on every run.
-      - name: Cache Go modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Go modules and compilation
+        uses: ./.github/actions/cache-go
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-e2e-build-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-${{ github.sha }}
-          restore-keys: |
-            go-e2e-build-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-
-            go-e2e-build-${{ runner.os }}-
-            go-${{ runner.os }}-
+          family: e2e-build
 
       - name: Install dependencies
         working-directory: apps

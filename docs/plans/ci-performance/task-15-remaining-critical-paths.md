@@ -326,3 +326,32 @@ an exact-text selector against concatenated agent chunks; retain its failure
 and interrupted repetitions, scope the corrected locator to agent bodies,
 and use the fresh twelve-case passing run for verification. Native catalogs
 retain all identities/counts; only these two spec hashes change.
+
+### Bound E2E build-cache publication (eighth candidate)
+
+Sixth-run Build job 116026205121 finishes artifact publication at 18:26:21 UTC,
+then spends 102 seconds saving its per-commit Go cache before dependent jobs
+can start. Compilation itself takes 94 seconds. A source-only commit currently
+recompresses the cache despite compatible cached compilation inputs.
+
+Reuse the optional daily cache action and seven identity/failure tests from
+PR #4486 at `fe7d97c84c72`, initially for the E2E build job only. Preserve
+native Go content-based invalidation, installed compiler/toolchain/architecture
+and recipe compatibility, separate module keys, previous-generation restore,
+success-only save, and unconditional required build/verification commands.
+Register its tests in CI and add changed-path coverage for the shared action.
+Do not import that PR's unrelated workflow, image producer or specification
+changes. Its `007.*` annotations describe a different unmerged contract; keep
+this branch's existing IDs/meanings and describe local cache checks separately.
+
+Daily first-population saves remain real costs. Keep cold/warm full-run evidence
+and verify actual exact-key restores and skipped post-save on subsequent runs.
+No capacity, cache-limit or cache-deletion changes are authorized by this step.
+
+Local cache checks pass: seven identity/failure cases, 22 E2E workflow cases,
+25 backend workflow cases, required gates, efficiency, runner placement and
+SHA pinning. Structured comparison preserves every original non-cache command,
+guard, artifact and gate. The real installed-toolchain identity enables caching;
+a real Go source change in the same native cache produces the changed binary.
+The new workflow contract fails before integration and passes afterward.
+Hosted daily-generation population/reuse and full timing remain pending.
