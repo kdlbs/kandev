@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"time"
 
 	agentdocker "github.com/kandev/kandev/internal/agent/docker"
 )
@@ -57,7 +58,9 @@ func RunProbe(
 	}
 	// The probe always removes its own network, even on assertion failure.
 	defer func() {
-		if err := client.RemoveNetwork(ctx, created.ID); err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := client.RemoveNetwork(cleanupCtx, created.ID); err != nil {
 			result.Passed = false
 			result.Error = fmt.Sprintf("remove probe network %s: %v", created.ID, err)
 		}

@@ -667,6 +667,16 @@ func TestRunProbeFailsWhenCleanupFails(t *testing.T) {
 	}
 }
 
+func TestRunProbeCleansUpAfterLeaseCancellation(t *testing.T) {
+	docker := newFakeDocker()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := RunProbe(ctx, docker, "x", nil)
+	if !result.Passed || len(docker.removed) != 1 || docker.removed[0] != "probe-net" {
+		t.Fatalf("probe = %#v, removed=%v; want cleanup after cancellation", result, docker.removed)
+	}
+}
+
 func markAllElapsed(t *testing.T, h *providerHarness, deadline time.Time) {
 	t.Helper()
 	for id, entry := range h.ledger.entries {
