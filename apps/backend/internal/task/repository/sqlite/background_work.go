@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -243,10 +245,13 @@ func (r *Repository) ListBackgroundWorkloadsBySession(ctx context.Context, sessi
 // ListSessionIDsWithOpenBackgroundWork returns the sessions that still have a
 // workload in a non-terminal state.
 func (r *Repository) ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error) {
-	const query = `SELECT DISTINCT session_id FROM task_session_background_work
-		WHERE state NOT IN ('completed', 'failed', 'interrupted', 'ended')`
+	query, args, err := sqlx.In(`SELECT DISTINCT session_id FROM task_session_background_work
+		WHERE state NOT IN (?)`, streams.TerminalRunStates)
+	if err != nil {
+		return nil, err
+	}
 	var sessionIDs []string
-	if err := r.ro.SelectContext(ctx, &sessionIDs, r.ro.Rebind(query)); err != nil {
+	if err := r.ro.SelectContext(ctx, &sessionIDs, r.ro.Rebind(query), args...); err != nil {
 		return nil, err
 	}
 	return sessionIDs, nil

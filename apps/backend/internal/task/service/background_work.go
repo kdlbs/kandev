@@ -212,9 +212,39 @@ func (s *Service) SettleOpenBackgroundWorkloads(ctx context.Context, sessionID s
 		if err := s.backgroundWork.UpsertBackgroundWorkload(ctx, work); err != nil {
 			return settled, err
 		}
+		if err := s.settleOpenBackgroundRuns(ctx, sessionID, work.ID, now); err != nil {
+			return settled, err
+		}
 		settled = append(settled, settledWorkloadObservation(work))
 	}
 	return settled, nil
+}
+
+func (s *Service) settleOpenBackgroundRuns(ctx context.Context, sessionID, workID string, now time.Time) error {
+	runs, err := s.backgroundWork.ListBackgroundRunsByWorkload(ctx, sessionID, workID)
+	if err != nil {
+		return err
+	}
+	for _, run := range runs {
+		if run == nil || streams.RunState(run.State).IsTerminal() {
+			continue
+		}
+		run.State = string(streams.RunStateEnded)
+		run.FinishedAt = &now
+		if err := s.backgroundWork.UpsertBackgroundRun(ctx, run); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListSessionIDsWithOpenBackgroundWork returns the sessions that still have a
+// non-terminal workload.
+func (s *Service) ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error) {
+	if s.backgroundWork == nil {
+		return nil, nil
+	}
+	return s.backgroundWork.ListSessionIDsWithOpenBackgroundWork(ctx)
 }
 
 func settledWorkloadObservation(work *models.BackgroundWorkload) streams.WorkloadRunObservation {

@@ -277,3 +277,72 @@ func TestSettledWorkloadIgnoresLateRunningReplay(t *testing.T) {
 		t.Fatalf("late running replay reopened a settled workload: %s", got.State)
 	}
 }
+
+func TestSettleOpenBackgroundWorkloadsEndsOpenRunsAndListsOpenSessions(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	wsID := uuid.New().String()
+	taskID := uuid.New().String()
+	sessionID := uuid.New().String()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: wsID, Name: "Test WS"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: wsID, Title: "Task"})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID})
+
+	running := streams.WorkloadRunObservation{
+		WorkID: "shell", RunID: "run-1", Kind: streams.WorkloadKindShell, State: streams.RunStateRunning,
+	}
+	if err := svc.RecordBackgroundWorkloadObservation(ctx, running, taskID, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	open, err := svc.ListSessionIDsWithOpenBackgroundWork(ctx)
+	if err != nil || len(open) != 1 || open[0] != sessionID {
+		t.Fatalf("open sessions = %v, %v; want [%s]", open, err, sessionID)
+	}
+
+	if _, err := svc.SettleOpenBackgroundWorkloads(ctx, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := repo.ListBackgroundRunsByWorkload(ctx, sessionID, "shell")
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs = %v, %v", runs, err)
+	}
+	if runs[0].State != string(streams.RunStateEnded) || runs[0].FinishedAt == nil {
+		t.Fatalf("run not ended: %#v", runs[0])
+	}
+	open, err = svc.ListSessionIDsWithOpenBackgroundWork(ctx)
+	if err != nil || len(open) != 0 {
+		t.Fatalf("open sessions after settle = %v, %v", open, err)
+	}
+}
+
+func TestSettledWorkloadAcceptsLateTerminalOutcome(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	wsID := uuid.New().String()
+	taskID := uuid.New().String()
+	sessionID := uuid.New().String()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: wsID, Name: "Test WS"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: wsID, Title: "Task"})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID})
+
+	running := streams.WorkloadRunObservation{WorkID: "shell", Kind: streams.WorkloadKindShell, State: streams.RunStateRunning}
+	if err := svc.RecordBackgroundWorkloadObservation(ctx, running, taskID, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SettleOpenBackgroundWorkloads(ctx, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	exitCode := 0
+	completed := streams.WorkloadRunObservation{
+		WorkID: "shell", Kind: streams.WorkloadKindShell, State: streams.RunStateCompleted, ExitCode: &exitCode,
+	}
+	if err := svc.RecordBackgroundWorkloadObservation(ctx, completed, taskID, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := svc.GetBackgroundWorkload(ctx, sessionID, "shell")
+	if got.State != string(streams.RunStateCompleted) || got.ExitCode == nil || *got.ExitCode != 0 {
+		t.Fatalf("late completion did not replace the settled state: %#v", got)
+	}
+}

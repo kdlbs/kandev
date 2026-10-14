@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 
 	"go.uber.org/zap"
 
@@ -116,6 +117,8 @@ type BackgroundWorkSettler interface {
 	SettleOpenBackgroundWorkloads(ctx context.Context, sessionID string) ([]streams.WorkloadRunObservation, error)
 	ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error)
 }
+
+var _ BackgroundWorkSettler = (*taskservice.Service)(nil)
 
 func (s *Service) backgroundWorkSettler() BackgroundWorkSettler {
 	settler, _ := s.backgroundWorkObserver.(BackgroundWorkSettler)
