@@ -99,6 +99,67 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("mergeProposal - runs_with", () => {
+  const runs = (name: string) => ({
+    agent_profile_id: "ap",
+    agent_profile_name: name,
+    source: "coordinator" as const,
+  });
+
+  it("takes a fresh runs_with from an equal-time pending row", () => {
+    const cached = proposal({ id: "p-1", updated_at: T5, runs_with: runs("Old") });
+    const incoming = proposal({ id: "p-1", updated_at: T5, runs_with: runs("New") });
+    expect(mergeProposal(cached, incoming)).toEqual({ ...cached, runs_with: runs("New") });
+  });
+
+  it("never replaces a cached runs_with with a null one", () => {
+    const cached = proposal({ id: "p-1", updated_at: T5, runs_with: runs("Old") });
+    const incoming = proposal({ id: "p-1", updated_at: T5, runs_with: null });
+    expect(mergeProposal(cached, incoming)).toBe(cached);
+  });
+
+  it("does not touch a settled row", () => {
+    const cached = proposal({ id: "p-1", status: "approved", updated_at: T5 });
+    const incoming = proposal({
+      id: "p-1",
+      status: "approved",
+      updated_at: T5,
+      runs_with: runs("X"),
+    });
+    expect(mergeProposal(cached, incoming)).toBe(cached);
+  });
+});
+
+describe("mergeProposal - returned rows", () => {
+  it("never unsettles a returned row with a pending one", () => {
+    const cached = proposal({ id: "p-1", status: "returned", updated_at: T0 });
+    const incoming = proposal({ id: "p-1", status: "pending", updated_at: T5 });
+    expect(mergeProposal(cached, incoming)).toBe(cached);
+  });
+
+  it("takes an equal-time returned row that records the delivery", () => {
+    const cached = proposal({ id: "p-1", status: "returned", updated_at: T5 });
+    const incoming = proposal({
+      id: "p-1",
+      status: "returned",
+      updated_at: T5,
+      reply_delivered_at: T10,
+    });
+    expect(mergeProposal(cached, incoming)).toBe(incoming);
+  });
+
+  it("keeps a delivered returned row against an equal-time undelivered one", () => {
+    const cached = proposal({
+      id: "p-1",
+      status: "returned",
+      updated_at: T5,
+      reply_delivered_at: T10,
+    });
+    const incoming = proposal({ id: "p-1", status: "returned", updated_at: T5 });
+    expect(mergeProposal(cached, incoming)).toBe(cached);
+  });
+});
+
 describe("mergeProposal", () => {
   it("stores the incoming row when nothing is cached", () => {
     const incoming = proposal({ id: "p-1" });

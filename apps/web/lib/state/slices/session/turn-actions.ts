@@ -1,6 +1,6 @@
 import type { StateCreator } from "zustand";
 import type { Draft } from "immer";
-import type { SessionSlice } from "./types";
+import type { ActiveTurnWindowObservation, SessionSlice } from "./types";
 import type { Turn, TaskSession } from "@/lib/types/http";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 
@@ -190,6 +190,132 @@ export function reconcileActiveTurnAfterHydrationDraft(
   applyActiveTurnReconciliation(draft, sessionId, hydrationEpoch);
 }
 
+export function captureActiveTurnWindowObservation(
+  state: Pick<SessionSlice, "turns">,
+  sessionId: string,
+): ActiveTurnWindowObservation {
+  const activeTurnId = state.turns.activeBySession[sessionId] ?? null;
+  return {
+    activeTurnId,
+    reconcileEpoch: state.turns.reconcileEpochBySession[sessionId] ?? 0,
+    updatedAt: state.turns.bySession[sessionId]?.find((turn) => turn.id === activeTurnId)
+      ?.updated_at,
+  };
+}
+
+export function captureActiveTurnWindowObservations(
+  state: Pick<SessionSlice, "turns">,
+): Readonly<Record<string, ActiveTurnWindowObservation>> {
+  return Object.fromEntries(
+    Object.keys(state.turns.activeBySession).map((sessionId) => [
+      sessionId,
+      captureActiveTurnWindowObservation(state, sessionId),
+    ]),
+  );
+}
+
+/** Applies a window-scoped active-turn observation without clearing newer live state. */
+export function reconcileActiveTurnWindowDraft(
+  draft: TurnReconciliationDraft,
+  sessionId: string,
+  activeTurnId: string | null,
+  hydrationEpoch: number,
+  observations?: {
+    atRequestStart?: ActiveTurnWindowObservation;
+    beforeMerge?: ActiveTurnWindowObservation;
+  },
+): void {
+  const turns = draft.turns.bySession[sessionId] ?? [];
+  const currentId = draft.turns.activeBySession[sessionId];
+  const current = turns.find((turn) => turn.id === currentId);
+  retireCompletedWindowMarker(draft, sessionId, current);
+  if (!activeTurnId) {
+    clearUnchangedWindowMarker(draft, sessionId, observations);
+    return;
+  }
+  if ((draft.turns.reconcileEpochBySession[sessionId] ?? 0) !== hydrationEpoch) return;
+  const candidate = turns.find((turn) => turn.id === activeTurnId);
+  if (
+    !candidate ||
+    candidate.completed_at ||
+    isAtOrBeforeBoundary(draft, sessionId, candidate.started_at)
+  )
+    return;
+
+  if (!current || current.completed_at) {
+    draft.turns.activeBySession[sessionId] = activeTurnId;
+    return;
+  }
+  if (current.id === activeTurnId) return;
+  if (isNewerActiveTurnCandidate(candidate, current)) {
+    draft.turns.activeBySession[sessionId] = activeTurnId;
+  }
+}
+
+function retireCompletedWindowMarker(
+  draft: TurnReconciliationDraft,
+  sessionId: string,
+  current: Turn | undefined,
+): void {
+  if (
+    current &&
+    (current.completed_at || isAtOrBeforeBoundary(draft, sessionId, current.started_at))
+  ) {
+    draft.turns.activeBySession[sessionId] = null;
+  }
+}
+
+function clearUnchangedWindowMarker(
+  draft: TurnReconciliationDraft,
+  sessionId: string,
+  observations?: {
+    atRequestStart?: ActiveTurnWindowObservation;
+    beforeMerge?: ActiveTurnWindowObservation;
+  },
+): void {
+  if (
+    canClearWindowMarker(
+      draft,
+      sessionId,
+      observations?.atRequestStart,
+      observations?.beforeMerge ?? captureActiveTurnWindowObservation(draft, sessionId),
+    )
+  ) {
+    draft.turns.activeBySession[sessionId] = null;
+  }
+}
+
+function canClearWindowMarker(
+  draft: TurnReconciliationDraft,
+  sessionId: string,
+  observation: ActiveTurnWindowObservation | undefined,
+  beforeMerge: ActiveTurnWindowObservation,
+): boolean {
+  if (!observation) return false;
+  if ((draft.turns.reconcileEpochBySession[sessionId] ?? 0) !== observation.reconcileEpoch)
+    return false;
+  if ((draft.turns.activeBySession[sessionId] ?? null) !== observation.activeTurnId) return false;
+  if (!beforeMerge.activeTurnId) return true;
+  if (beforeMerge.activeTurnId !== observation.activeTurnId) return false;
+  const currentUpdated = parseTurnTimestamp(beforeMerge.updatedAt);
+  const observedUpdated = parseTurnTimestamp(observation.updatedAt);
+  return currentUpdated !== null && observedUpdated !== null && currentUpdated <= observedUpdated;
+}
+
+function isNewerActiveTurnCandidate(candidate: Turn, current: Turn): boolean {
+  const candidateStarted = parseTurnTimestamp(candidate.started_at);
+  const currentStarted = parseTurnTimestamp(current.started_at);
+  if (candidateStarted === null || currentStarted === null) return false;
+  if (candidateStarted !== currentStarted) return candidateStarted > currentStarted;
+
+  const candidateCreated = parseTurnTimestamp(candidate.created_at);
+  const currentCreated = parseTurnTimestamp(current.created_at);
+  if (candidateCreated !== null && currentCreated !== null && candidateCreated !== currentCreated) {
+    return candidateCreated > currentCreated;
+  }
+  return candidate.id > current.id;
+}
+
 /**
  * Parses a turn `updated_at` into a comparable epoch in nanoseconds (BigInt).
  * Missing, empty, malformed, or non-RFC3339 values map to `null` (stale), so
@@ -245,6 +371,42 @@ function mergeTurnsSnapshotAction(set: ImmerSet) {
     });
 }
 
+function mergeTurnsWindowAction(set: ImmerSet) {
+  return (
+    sessionId: string,
+    turns: Turn[],
+    coverage: { message_ids: string[]; active_turn_id: string | null },
+    hydrationEpoch: number,
+    observationAtRequestStart?: ActiveTurnWindowObservation,
+  ) =>
+    set((draft) => {
+      if (!draft.taskSessions.items[sessionId]) return;
+      const beforeMerge = captureActiveTurnWindowObservation(draft, sessionId);
+      const target = (draft.turns.bySession[sessionId] ??= []);
+      mergeTurnRows(target, turns);
+
+      const retainedMessageIds = new Set(
+        (draft.messages.bySession[sessionId] ?? []).map((message) => message.id),
+      );
+      const previous = draft.turns.windowCoverageBySession?.[sessionId];
+      const coveredMessageIds = new Set(
+        (previous?.messageIds ?? []).filter((id) => retainedMessageIds.has(id)),
+      );
+      for (const id of coverage.message_ids) {
+        if (retainedMessageIds.has(id)) coveredMessageIds.add(id);
+      }
+      const bySession = (draft.turns.windowCoverageBySession ??= {});
+      bySession[sessionId] = {
+        messageIds: [...coveredMessageIds],
+        activeTurnObserved: true,
+      };
+      reconcileActiveTurnWindowDraft(draft, sessionId, coverage.active_turn_id, hydrationEpoch, {
+        atRequestStart: observationAtRequestStart,
+        beforeMerge,
+      });
+    });
+}
+
 /** Builds the turn store actions (upsert, completion, markers, snapshots). */
 export function buildTurnActions(set: ImmerSet) {
   return {
@@ -275,6 +437,8 @@ export function buildTurnActions(set: ImmerSet) {
       }),
     /** Merges a complete turn snapshot and reconciles its marker atomically. */
     mergeTurnsSnapshot: mergeTurnsSnapshotAction(set),
+    /** Merges a message-window turn snapshot without marking full history loaded. */
+    mergeTurnsWindow: mergeTurnsWindowAction(set),
     completeTurn: (
       sessionId: Parameters<SessionSlice["completeTurn"]>[0],
       turnId: Parameters<SessionSlice["completeTurn"]>[1],

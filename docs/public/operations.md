@@ -27,6 +27,26 @@ Kandev does not currently provide a user-login boundary for the web application,
 
 See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for mode-specific prerequisites and commands.
 
+## Recover sessions after a restart
+
+Kandev automatically checks interrupted sessions at startup and after replacement of a crashed local agent runtime. When retained delivery records agree with the session's saved identity and the original process is proven terminated, Kandev restores the same native conversation without resending its interrupted prompt. Recovery checks continue while Kandev runs, so a temporarily unavailable runtime can recover later. These checks are enabled by default; the Agent Survival feature toggle separately controls whether local agents survive a graceful backend shutdown.
+
+The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Recovery also reconciles a shutdown failure label that lacks terminal evidence with the backend's unknown outcome. It preserves both historical records and repairs missing recovery associations only after verifying the saved conversation and retired work. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
+
+If an older crash left journal acknowledgments ahead of saved output, Kandev
+can restore a verified conversation on a new delivery generation while keeping
+the missing history explicit. **Resume** uses the same guarded recovery. A
+notice remains beside the composer when some earlier output is unavailable;
+the interrupted prompt's outcome remains unknown. Only a new instruction you
+send starts new work. Available retained output is synchronized normally.
+
+Recovery remains blocked if the original or replacement process cannot be
+proven terminated, native state is missing, records conflict, or retained work
+still needs acknowledgment. An older agent runtime may require an update
+before Resume can verify a history gap. Backend SQLite commits use FULL
+synchronization before output acknowledgments so new acknowledgments do not
+outlive their committed receipts after a power loss.
+
 ## Prevent host sleep during active tasks
 
 Administrators can open **Settings > Preferences > Task Behavior > Runtime** and enable
@@ -147,12 +167,14 @@ Keep the page open during recovery. Existing route data stays available in the
 browser. If automatic recovery stops, an administrator can select **Retry agent
 runtime** in the alert. This action does not restart Kandev.
 
-A session with an uncertain prompt outcome stays blocked after runtime recovery.
-Use that session's recovery card to reconnect or stop the original work. **Retry
-connection** checks the existing delivery and does not send the prompt again.
-Kandev keeps the composer blocked until it can confirm the delivery outcome. A
-Stop request does not prove cancellation; if Kandev cannot reach the original
-process, the card reports that the outcome is still unknown.
+After runtime replacement, Kandev automatically reconciles interrupted sessions
+as described in [Recover sessions after a restart](#recover-sessions-after-a-restart).
+A session remains blocked when termination cannot be verified, retained records
+conflict, or native state is missing. Use its recovery card to reconnect or stop
+the original work. **Retry connection** checks retained evidence without sending
+the prompt again. A successful native recovery admits new prompts while keeping
+the interrupted prompt's historical outcome unknown. Stop does not prove
+cancellation; an unreachable original process still has an unknown outcome.
 
 ![Settings > System > Status showing health checks, the running version, and disk usage.](../screenshots/system-status.png)
 
@@ -506,6 +528,71 @@ Removal is permanent within the current database. Restoring a backup replaces
 the whole database and can remove newer changes. Keep any backup you need before
 deleting it. Other database engines show this feature as unavailable.
 
+## Backend delivery retention
+
+Kandev automatically removes redundant backend transport data on SQLite and PostgreSQL.
+It preserves canonical messages, tool history, turns, and unresolved recovery evidence.
+This cleanup is separate from **Message compaction** and agentctl journal pruning.
+
+The default payload grace is one hour. Eligible projected event payloads and fully settled prompt payloads expire after this grace.
+Cleanup retains compact identities, hashes, outcomes, and settlement evidence.
+Independently projected nonterminal output can lose its redundant raw body even when
+an older terminal is unresolved or legacy submission bookkeeping is missing. Its
+exact committed projection receipt, authenticated cursor and replay hash must survive.
+The unresolved terminal and prompt keep their stronger recovery protections.
+Recent duplicate receipts remain for up to 24 hours or 10000 events per stream.
+Contiguous retirement checkpoints reject older events without applying them again.
+Fully projected known control notifications, such as capability and model reports,
+also become eligible after their exact consumer receipts complete. They do not
+permanently pin output from later events in the contiguous sequence once those
+events become eligible for expiry. Unknown notifications, pending effects and
+unresolved evidence still stop the retirement checkpoint.
+A lost ACK uses the persisted projected cursor. Cleanup never resends a prompt or a tool action.
+
+Unprojected events, uncertain prompts, pending claims, and incomplete terminal or workflow settlement remain protected.
+Archive and Stop preserve this evidence. Explicit deletion retires the session identity and schedules bounded removal of its delivery records.
+Protected backlog and canonical history can continue to grow. Retention is not a database quota.
+
+Cleanup starts when the background worker starts, without an initial delay.
+Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
+Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, without artificial sleeps between batches. Frontier wrap alone does not repeat a phase. Passes are bounded to five seconds. When productive work remains, the next pass starts immediately; exhausted or busy-only passes wait for the configured idle interval (one minute by default). Errors use bounded retry backoff.
+SQLite native writer admission can wait through its existing five-second busy timeout after cancellation.
+Stop joins that work before database closure. The 250 ms deadline is not a wall-clock completion promise during contention.
+Startup [configuration](configuration.md#backend-delivery-retention) controls grace, replay limits, cadence, and batch size.
+
+Production structured `agent_delivery.retention.*` logs report aggregate progress, removed bytes, bounded backlog samples, and skip or error reasons.
+Development or pprof diagnostics also expose `agent_delivery_retention_*` counters through `/debug/vars`.
+There is no production metrics endpoint. A bounded sample is not an exact database-wide total.
+Unavailable backlog or age values use `-1`. These counters do not label session identities or contain payloads.
+
+### Delivery retention upgrades and rollback
+
+After upgrade, the normal worker revisits eligible historical payloads in bounded
+batches using its persisted scan frontiers. No session reset or manual bookkeeping
+deletion is needed. Large backlogs take multiple passes; unresolved recovery evidence
+and canonical history remain protected.
+
+**Preserve a verified pre-pruning backup before the pruning upgrade.** Removed transport payloads cannot be restored within the live database.
+SQLite version changes create a consistent page-copy snapshot before migration and verify its integrity. Backup copying does not rebuild the database or reclaim free pages; explicit physical compaction remains separate.
+Automatic rotation retains only the newest two snapshots. Copy the verified pre-pruning snapshot outside that directory.
+PostgreSQL has no automatic upgrade snapshot. Create a `pg_dump` before the upgrade and verify restoration into an isolated database.
+
+The rollout uses two releases. Release N provides format-1 readers, writers, checkpoints, and deletion fences without a collector.
+Release N+1 activates pruning only after the actual Release N artifact passes the pruned-database rollback matrix.
+Release N pauses collection and preserves pending deletion jobs until a forward upgrade.
+The implementation plan records the artifact digest and required compatibility evidence.
+Do not treat a pre-retention binary as a supported rollback reader.
+A rollback to that binary requires a verified pre-pruning backup and loses changes after that snapshot.
+A restored snapshot cannot prove that external actions did not occur. It never authorizes their automatic replay.
+
+### Delivery retention and disk space
+
+Logical removal makes database space reusable. It does not guarantee a smaller file or secure erasure.
+SQLite file shrinkage uses the existing **Vacuum** action or verified offline [CLI compaction](cli.md#database-maintenance).
+PostgreSQL operators use normal vacuum or autovacuum for reusable space. The worker never runs `VACUUM FULL`.
+WAL, dead tuples, indexes, backups, and retained copies need separate capacity planning.
+Backups can still contain payload bytes removed from the live database.
+
 ## Database operation
 
 > **Single-owner rule:** SQLite uses one writer connection in WAL mode; only one Kandev backend should own the file. **Factory reset** is destructive and removes managed data after creating a pre-reset backup.
@@ -516,6 +603,15 @@ deleting it. Other database engines show this feature as unavailable.
 ### SQLite
 
 SQLite is the default and is appropriate for a desktop, CLI, service, or single-replica container installation. Kandev uses one writer connection and a read pool in WAL mode. Only one Kandev backend should own the file.
+
+After a WAL reset, Kandev limits the retained WAL file to 64 MiB. Writes can
+temporarily grow the WAL beyond that size between resets. This does not change
+write durability, checkpoint timing, or the separate database compaction action.
+
+At SQLite startup and before creating a system backup, Kandev reclaims private
+`.kandev-backup-*` staging directories when neither the directory nor any direct
+entry has changed for six hours. Recent crash debris remains until a later boot
+or backup creation. Published backups and other staging prefixes are preserved.
 
 #### Default database continuity and recovery
 
@@ -564,8 +660,8 @@ the SQLite file size.
 
 Compaction is an explicit maintenance operation, separate from backup, migration,
 and readiness. Startup does not compact the live database. The pre-migration
-snapshot uses `VACUUM INTO` to create a separate backup; it does not shrink the
-live file.
+snapshot copies SQLite pages into a separate backup, preserving free pages;
+it does not shrink the live file.
 
 1. Wait for the upgraded backend to become ready. Check history before proceeding.
 2. Copy the verified pre-upgrade backup outside the automatic retention directory

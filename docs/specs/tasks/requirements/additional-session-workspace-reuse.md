@@ -137,12 +137,12 @@ the task and can hide or modify uncommitted work from the new agent.
 | Mode | Canonical environment | Result |
 | --- | --- | --- |
 | `new_workspace` | none | Elect one initial materializer. |
-| `new_workspace` | `creating` | Return recoverable `workspace_preparing`; do not create a session or workspace. |
+| `new_workspace` | `creating` | Wait for the elected materializer, then attach; if it fails or does not finish within the launch timeout, return recoverable `workspace_preparing` without creating a session or workspace. |
 | `new_workspace` | ready and complete | Attach with `reuse_required`. |
 | `inherit_parent` | parent/group ready and complete | Attach to that environment. |
 | `inherit_parent` | missing or unsafe | Return a reuse error; never create a child environment. |
 | `shared_group` | none | Atomically elect one group materializer. |
-| `shared_group` | creating | Return recoverable `workspace_preparing`. |
+| `shared_group` | creating | Wait for the group's elected environment, then attach; otherwise return recoverable `workspace_preparing`. |
 | `shared_group` | ready and complete | Attach to the group environment. |
 
 An executor-type transition is not an attach. It must select or materialize an

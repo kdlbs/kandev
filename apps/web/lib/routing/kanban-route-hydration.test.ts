@@ -54,6 +54,20 @@ describe("hasHydratedKanbanRouteState", () => {
         }),
         {},
       ),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it("renders All Workflows from authorized metadata before board demand loads", () => {
+    expect(
+      hasHydratedKanbanRouteState(
+        state({
+          workflows: {
+            activeId: null,
+            items: [{ id: "wf-1", workspaceId: "ws-1", name: "Development" }],
+          },
+        }),
+        {},
+      ),
+    ).toBe(true);
   });
 });

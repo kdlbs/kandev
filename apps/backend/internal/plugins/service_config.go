@@ -61,6 +61,11 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	// path), so a client disconnect right after the commit cannot cancel it
 	// and orphan the now-unreferenced vault entries.
 	s.cleanupRemovedConfigSecrets(context.WithoutCancel(ctx), rec.ID, removedSecrets, existing)
+	// The committed config can change whether the plugin's required config
+	// is set, and so whether its agent tools are listed. Signal before the
+	// restart so the catalog is recomputed even when the plugin is not
+	// running or fails to restart.
+	s.notifyAgentToolCatalogChanged()
 	return s.restartForConfigChange(rec)
 }
 
@@ -237,13 +242,16 @@ func (s *Service) restartForConfigChange(rec *store.Record) error {
 	ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
 	defer cancel()
 	if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
-		if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
-			// The restart error stays the returned error (it is the primary
-			// signal), but a failed status write means the registry may show
-			// StatusActive with no process running — don't lose that.
+		setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true)
+		if setErr != nil {
+			// The status write failed; the registry keeps its previous state,
+			// which is usually StatusActive with no running process.
 			s.log.Warn("plugins: could not transition to error status after restart failure",
 				zap.String("plugin_id", rec.ID), zap.Error(setErr))
 		}
+		// Refresh consumers even when the status transition or its cleanup
+		// failed. Each consumer re-reads the authoritative registry state.
+		s.notifyAgentToolCatalogChanged()
 		s.notifyDeliverer()
 		return fmt.Errorf("plugins: config saved but restart of %q failed: %w", rec.ID, err)
 	}

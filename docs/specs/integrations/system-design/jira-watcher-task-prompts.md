@@ -53,6 +53,39 @@ Jira Cloud REST can return `description` as Atlassian Document Format. Jira Serv
 
 `extractDescription` keeps plain strings unchanged. For Atlassian Document Format, it keeps text order, explicit breaks, and paragraph separation.
 
+Both `CloudClient.GetTicket` and `CloudClient.SearchTicketsForWatch` use
+`issueToTicket`, which supplies `JiraTicket.Description` through this converter.
+The fetched ticket also supplies Jira launch-preset descriptions. Neither
+consumer adds paragraph boundaries after conversion.
+
+`walkADF` traverses `content` recursively in source order. Paragraph boundaries
+apply at every container depth, including sibling list items, several paragraphs
+inside one item, nested lists, blockquotes, and other containers. The traversal
+does not depend on a fixed list of enclosing node types. Adjacent inline text
+nodes within one paragraph remain adjacent; paragraph boundaries produce two
+newline characters between successive nonempty paragraph bodies.
+
+Structural separators are emitted once at a boundary: an existing document
+sibling separator satisfies the paragraph boundary there. Ancestor containers
+must not add duplicate separators for the same boundary. Explicit hard and soft
+breaks and newline characters already present in text retain their existing
+contribution. In particular, the converter must not globally collapse runs of
+newlines, trim individual text nodes, or insert a separator after each text node.
+The existing final ADF `TrimSpace` and top-level document sibling separation
+remain compatible, including top-level empty blocks.
+
+Empty nested paragraphs contribute no text or additional blank rows; surrounding
+nonempty paragraphs still remain separated. Missing or incorrectly typed text
+and content values, and non-object children, keep the current tolerant traversal
+behavior. Unknown containers with readable descendant paragraphs use the same
+paragraph rule; unsupported leaf nodes do not acquire a new text representation.
+This conversion does not reproduce list markers, table layout, rich-text marks,
+mentions, media, or link targets.
+
+The provider model follows Atlassian's [listItem schema](https://developer.atlassian.com/cloud/jira/platform/apis/document/nodes/listItem/),
+which permits paragraphs and nested lists, and [paragraph schema](https://developer.atlassian.com/cloud/jira/platform/apis/document/nodes/paragraph/),
+which separates block structure from inline content.
+
 The interpolation function replaces a missing description with an empty string. It does not keep an unresolved `{{issue.description}}` token.
 
 ## Failure and recovery
@@ -68,5 +101,10 @@ Watcher polling gets all required fields in one paginated search request. Intera
 ## Test strategy
 
 - REST client tests make sure that watcher searches request and convert descriptions for Cloud and Server or Data Center.
+- Real HTTP client regressions exercise nested paragraph descriptions through
+  both ticket lookup and watcher search, asserting the complete normalized value.
+- Converter tests cover paragraph boundaries under multiple container depths,
+  inline adjacency, explicit breaks, empty and malformed nodes, and existing
+  plain-string and top-level whitespace behavior.
 - Service tests make sure that `CheckIssueWatch` uses the watcher search contract and keeps the description on each new issue.
 - Orchestrator tests make sure that `{{issue.description}}` appears in the completed task prompt.

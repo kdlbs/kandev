@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -16,6 +17,9 @@ import (
 )
 
 func TestPluginExecutorFixtureContract(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Setenv("KANDEV_PLUGIN_FIXTURE_TEST_LOOPBACK", "1")
+	}
 	plugin := newFixturePluginAt(t.TempDir())
 	t.Cleanup(func() { require.NoError(t, plugin.Close()) })
 	profile := &pluginsdk.ExecutorProfileSnapshot{
@@ -101,6 +105,9 @@ func TestPluginExecutorFixtureContract(t *testing.T) {
 }
 
 func TestPluginExecutorFixtureRecoversLostProvisionReplyWithoutAllocatingAgain(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Setenv("KANDEV_PLUGIN_FIXTURE_TEST_LOOPBACK", "1")
+	}
 	dir := t.TempDir()
 	t.Setenv(fixtureExecutorBarrierEnv, fixtureBarrierLoseProvisionReplyOnce)
 	profile := &pluginsdk.ExecutorProfileSnapshot{ProfileId: "profile-1", Config: map[string]string{"region": "eu-west-1"}}
@@ -144,6 +151,9 @@ func TestPluginExecutorFixtureReportsAbsentForUnknownOperation(t *testing.T) {
 }
 
 func TestPluginExecutorFixtureFailureBarriersAreRetryable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Setenv("KANDEV_PLUGIN_FIXTURE_TEST_LOOPBACK", "1")
+	}
 	plugin := newFixturePluginAt(t.TempDir())
 	t.Cleanup(func() { require.NoError(t, plugin.Close()) })
 	ctx := &pluginsdk.ExecutorProviderRequestContext{

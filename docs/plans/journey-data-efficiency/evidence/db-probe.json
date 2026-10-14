@@ -1,0 +1,37 @@
+{
+  "warm": {
+    "route": "/?workflowId=journey-workflow-0",
+    "ms": 198.83425906300545,
+    "bytes": 3001535,
+    "status": 200,
+    "summary_mutations": []
+  },
+  "cold_missing_summaries": {
+    "route": "/?workflowId=journey-workflow-0",
+    "ms": 329.41779401153326,
+    "bytes": 3002515,
+    "status": 200,
+    "summary_mutations": [
+      [
+        "insert",
+        1000
+      ]
+    ]
+  },
+  "warm_after_repair": {
+    "route": "/?workflowId=journey-workflow-0",
+    "ms": 181.43224995583296,
+    "bytes": 3002515,
+    "status": 200,
+    "summary_mutations": []
+  },
+  "session_metadata_bytes": 8258595,
+  "warm_under_external_writer": {
+    "completed_before_release": false,
+    "hold_ms": 1000,
+    "route": "/?workflowId=journey-workflow-0",
+    "ms": 1203.4142315387726,
+    "bytes": 3002515,
+    "status": 200
+  }
+}

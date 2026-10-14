@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -37,6 +39,11 @@ const (
 	e2eTaskCleanupPollInterval = 25 * time.Millisecond
 )
 
+type e2eRetentionWorker interface {
+	Start(context.Context) error
+	Stop()
+}
+
 // registerE2EResetRoutes registers the E2E test-only endpoints.
 // The endpoints are available when KANDEV_MOCK_AGENT is "true" or "only" (dev/E2E modes).
 func registerE2EResetRoutes(
@@ -50,6 +57,8 @@ func registerE2EResetRoutes(
 	eventBus bus.EventBus,
 	agentRuntimeAvailability *agentruntime.RuntimeOwner,
 	lifecycleMgr agentruntime.SessionExecutionControl,
+	retentionWorker e2eRetentionWorker,
+	appCtx context.Context,
 	log *logger.Logger,
 ) {
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
@@ -64,7 +73,7 @@ func registerE2EResetRoutes(
 	if os.Getenv("KANDEV_E2E_MOCK") == "true" && lifecycleMgr != nil {
 		api.POST("/agent-runtime/disconnect-session-stream", handleE2EDisconnectSessionAgentStream(lifecycleMgr))
 	}
-	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, coordinatorSvc, log))
+	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, coordinatorSvc, retentionWorker, appCtx, log))
 	if githubSvc != nil {
 		api.POST("/tasks/:id/remote-contribution", handleE2EAttachGitHubContribution(repo, taskSvc, githubSvc, log))
 	}
@@ -257,9 +266,13 @@ func handleE2EReset(
 	githubSvc *github.Service,
 	gitlabSvc *gitlab.Service,
 	coordinatorSvc *coordinator.Service,
+	retentionWorker e2eRetentionWorker,
+	appCtx context.Context,
 	log *logger.Logger,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		resumeRetention := pauseDeliveryRetentionForReset(appCtx, retentionWorker, log)
+		defer resumeRetention()
 		workspaceID := c.Param("workspaceId")
 
 		// Optional: comma-separated workflow IDs to keep (e.g., the seeded workflow).
@@ -515,6 +528,25 @@ func handleE2EReset(
 	}
 }
 
+func pauseDeliveryRetentionForReset(
+	appCtx context.Context,
+	worker e2eRetentionWorker,
+	log *logger.Logger,
+) func() {
+	if worker == nil {
+		return func() {}
+	}
+	worker.Stop()
+	return func() {
+		if appCtx == nil || appCtx.Err() != nil {
+			return
+		}
+		if err := worker.Start(appCtx); err != nil && log != nil {
+			log.Warn("e2e reset: failed to resume durable delivery retention", zap.Error(err))
+		}
+	}
+}
+
 type e2eResetTaskDeleter interface {
 	DeleteTaskWithOptions(context.Context, string, taskservice.DeleteTaskOptions) error
 }
@@ -576,11 +608,27 @@ func deleteTaskForE2EReset(
 	taskDeleter e2eResetTaskDeleter,
 	taskID string,
 ) error {
-	return taskDeleter.DeleteTaskWithOptions(ctx, taskID, taskservice.DeleteTaskOptions{
-		// E2E reset is an explicit test cleanup boundary. It must remove
-		// disposable local changes left by the test that created the task.
-		DiscardWorktreeChanges: true,
-	})
+	waitCtx, cancel := context.WithTimeout(ctx, e2eTaskCleanupWaitTimeout)
+	defer cancel()
+	ticker := time.NewTicker(e2eTaskCleanupPollInterval)
+	defer ticker.Stop()
+	for {
+		if err := waitCtx.Err(); err != nil {
+			return err
+		}
+		err := taskDeleter.DeleteTaskWithOptions(waitCtx, taskID, taskservice.DeleteTaskOptions{
+			// E2E reset removes disposable local changes after session transfers settle.
+			DiscardWorktreeChanges: true,
+		})
+		if !errors.Is(err, messagequeue.ErrSessionTransferInProgress) {
+			return err
+		}
+		select {
+		case <-waitCtx.Done():
+			return waitCtx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func waitForE2ETaskCleanup(ctx context.Context, database *sql.DB, taskIDs []string) error {
@@ -850,7 +898,8 @@ type e2eCreateAutomationRequest struct {
 	// SQL (`execution_mode = 'task' AS legacy_board_card`), so seeding the
 	// column is the only honest way to put a workspace in the state the
 	// notice exists to explain.
-	LegacyBoardCard bool `json:"legacy_board_card"`
+	LegacyBoardCard bool                    `json:"legacy_board_card"`
+	RetryPolicy     *automation.RetryPolicy `json:"retry_policy,omitempty"`
 }
 
 // handleE2ECreateAutomation seeds an automation for E2E tests via HTTP so tests
@@ -866,6 +915,10 @@ func handleE2ECreateAutomation(
 			c.JSON(http.StatusBadRequest, gin.H{errKey: "workspace_id and name are required"})
 			return
 		}
+		retryPolicy := automation.RetryPolicy{}
+		if body.RetryPolicy != nil {
+			retryPolicy = *body.RetryPolicy
+		}
 		a, err := svc.CreateAutomation(c.Request.Context(), &automation.CreateAutomationRequest{
 			WorkspaceID:        body.WorkspaceID,
 			Name:               body.Name,
@@ -878,6 +931,7 @@ func handleE2ECreateAutomation(
 			Repositories:       body.Repositories,
 			Prompt:             body.Prompt,
 			AgentProfileID:     body.AgentProfileID,
+			RetryPolicy:        retryPolicy,
 			ExecutorProfileID:  body.ExecutorProfileID,
 			MaxConcurrentRuns:  10,
 		})

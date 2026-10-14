@@ -111,9 +111,11 @@ details, an independent child pod, and preservation of the parent pod,
 environment record, and dirty-file marker. The disposable cluster was removed.
 Go is installed at `/usr/local/go/bin`, outside the default shell PATH.
 
-The final command and result record is in the completed work order. GitHub
-publication is blocked by HTTP 401 from both `gh pr list` and `gh api user`;
-no PR is linked to this task and the branch has no upstream.
+The final command and result record is in the completed work order.
+Authentication was restored and ready PR [#4485](https://github.com/kdlbs/kandev/pull/4485)
+was published with desktop and mobile recovery screenshots. Review remediation
+also validates the shared-group environment selected inside the binding
+transaction, closing the interval after orchestrator preflight.
 
 ## Risks
 

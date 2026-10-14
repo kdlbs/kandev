@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { availableParallelism } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -10,6 +11,11 @@ import {
   type Shard,
   type ShardManifest,
 } from "./plan-shards";
+import { processCount } from "./planned-subshards";
+import { buildPlaywrightArgs, writeShardMetadata, executeSubshards } from "./planned-processes";
+export { buildPlaywrightArgs, writeShardMetadata } from "./planned-processes";
+
+export type { ShardManifest } from "./plan-shards";
 
 export function readManifest(filePath: string): ShardManifest {
   if (!fs.existsSync(filePath)) throw new Error(`Shard manifest does not exist: ${filePath}`);
@@ -45,47 +51,6 @@ export function resolveShard(
   throw new Error("E2E_SHARD must identify one shard in a multi-shard manifest");
 }
 
-export function writeShardMetadata(
-  manifest: ShardManifest,
-  shard: Shard,
-  startedAt: string,
-  exitCode: number,
-  outputDir = path.resolve("e2e/blob-report"),
-) {
-  fs.mkdirSync(outputDir, { recursive: true });
-  const metadata = {
-    cohort: manifest.cohort,
-    shard: shard.index,
-    shardCount: manifest.shardCount,
-    startedAt,
-    finishedAt: new Date().toISOString(),
-    exitCode,
-    predictedSeconds: shard.predictedSeconds,
-    unitIds: shard.units.map((unit) => unit.id),
-  };
-  fs.writeFileSync(
-    path.join(outputDir, `shard-${manifest.cohort}-${shard.index}-metadata.json`),
-    `${JSON.stringify(metadata, null, 2)}\n`,
-  );
-}
-
-export function buildPlaywrightArgs(
-  manifest: ShardManifest,
-  shard: Shard,
-  extraArgs: string[] = [],
-): string[] {
-  return [
-    "playwright",
-    "test",
-    "--config",
-    "e2e/playwright.config.ts",
-    "--workers=1",
-    ...manifest.projects.map((project) => `--project=${project}`),
-    ...shard.files,
-    ...extraArgs,
-  ];
-}
-
 export function executeShard(
   manifest: ShardManifest,
   shard: Shard,
@@ -99,11 +64,11 @@ export function executeShard(
     env: { ...process.env, E2E_PLANNED_SHARD: String(shard.index) },
   });
   const exitCode = result.status ?? 1;
-  writeShardMetadata(manifest, shard, startedAt, exitCode, outputDir);
+  writeShardMetadata(manifest, shard, startedAt, exitCode, { outputDir });
   return exitCode;
 }
 
-function run(): void {
+async function run(): Promise<void> {
   const manifestPath = process.argv[process.argv.indexOf("--manifest") + 1] ?? process.argv[2];
   if (!manifestPath) throw new Error("Usage: run-planned-shard.ts --manifest <manifest.json>");
   const manifest = readManifest(path.resolve(manifestPath));
@@ -116,10 +81,23 @@ function run(): void {
 
   const separator = process.argv.indexOf("--");
   const extraArgs = separator >= 0 ? process.argv.slice(separator + 1) : [];
-  const exitCode = executeShard(manifest, shard, spawnSync, undefined, extraArgs);
-  process.exitCode = exitCode;
+  const count = processCount(
+    process.env.E2E_RUNNER_PROCESSES ?? "1",
+    process.env.E2E_RUNNER_MAX_SHARDS ?? "1",
+    availableParallelism(),
+    manifest.cohort,
+  );
+  console.log(`planned shard ${shard.index}: ${count} processes, one worker each`);
+  if (count === 1) {
+    process.exitCode = executeShard(manifest, shard, spawnSync, undefined, extraArgs);
+  } else {
+    process.exitCode = await executeSubshards(manifest, shard, count, { extraArgs });
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  run();
+  run().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 }

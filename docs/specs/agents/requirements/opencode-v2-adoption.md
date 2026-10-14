@@ -60,6 +60,8 @@ The dialog must explain the shared scope before the user starts the upgrade.
   An unknown major version shall produce an explicit compatibility error rather than a guessed launch command.
 - **AC-AGENTS-OPENCODE-V2-001.12:** A native version check that fails, times out, or prints no readable version shall be retried before it blocks a launch.
   When the retries still fail and the same executable was detected successfully within the last ten minutes, the launch shall use that detection.
+  Without a recent supported detection, a transient failure may use the selected runtime's supported stable version only while the caller context remains live. Caller cancellation or deadline expiry shall stop command admission.
+  A definite unsupported-major observation shall remain a rejection for that executable path through later transient failures until a fresh supported observation replaces it.
   A missing executable or an unsupported major is a definite answer and shall not be retried. A final failure shall state a timeout and quote a bounded, home-redacted excerpt of the output.
 
 ### REQ-AGENTS-OPENCODE-V2-002: Existing conversation continuity

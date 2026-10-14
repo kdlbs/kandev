@@ -408,6 +408,34 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
 	h.broadcastToOwner(owner, msg)
 }
 
+// BroadcastToWorkspaceExcludingWorkspaceReaders delivers a source-only
+// notification to readers that cannot read the destination workspace.
+func (h *Hub) BroadcastToWorkspaceExcludingWorkspaceReaders(sourceWorkspaceID, destinationWorkspaceID string, msg *ws.Message) {
+	readers := h.authPolicy.WorkspaceReaders
+	if readers == nil || sourceWorkspaceID == "" || destinationWorkspaceID == "" {
+		return
+	}
+	sourceReaders, err := readers(h.DispatchContext(), sourceWorkspaceID)
+	if err != nil {
+		return
+	}
+	destinationReaders, err := readers(h.DispatchContext(), destinationWorkspaceID)
+	if err != nil {
+		return
+	}
+	destination := make(map[string]struct{}, len(destinationReaders))
+	for _, userID := range destinationReaders {
+		destination[userID] = struct{}{}
+	}
+	sourceOnly := make([]string, 0, len(sourceReaders))
+	for _, userID := range sourceReaders {
+		if _, ok := destination[userID]; !ok {
+			sourceOnly = append(sourceOnly, userID)
+		}
+	}
+	h.broadcastToUsers(sourceOnly, msg)
+}
+
 // broadcastToUsers delivers to exactly the given user IDs. An empty set
 // delivers to nobody: "no one may read this workspace" is a real answer, and
 // falling back to a global broadcast would invert it.
@@ -434,7 +462,7 @@ func (h *Hub) broadcastToUsers(userIDs []string, msg *ws.Message) {
 
 // BroadcastToWorkspaceOrDrop is the fail-closed sibling of
 // BroadcastToWorkspace: when per-user auth is enforced it DROPS the message
-// unless the workspace is non-empty AND resolves to a known owner — it never
+// unless the workspace is non-empty and its readers or owner resolve — it never
 // falls back to a global broadcast. Every notification using this path is
 // workspace-scoped, so a payload whose workspace could not be resolved must
 // never cross user boundaries. With auth disabled (single
@@ -447,6 +475,13 @@ func (h *Hub) BroadcastToWorkspaceOrDrop(workspaceID string, msg *ws.Message) {
 	}
 	if workspaceID == "" {
 		return // fail closed: no unattributed workspace fan-out under auth
+	}
+	if readers := h.authPolicy.WorkspaceReaders; readers != nil {
+		recipients, err := readers(h.DispatchContext(), workspaceID)
+		if err == nil {
+			h.broadcastToUsers(recipients, msg)
+		}
+		return
 	}
 	resolver := h.authPolicy.WorkspaceOwner
 	if resolver == nil {

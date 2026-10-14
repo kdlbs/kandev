@@ -146,6 +146,15 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     officeSeed,
     seedData,
   }) => {
+    // Automatic casting must not depend on the worker-shared CEO's status.
+    // Keep its unavailable state explicit and provide a fresh eligible agent;
+    // the worker below still claims a seat cast for a different agent.
+    await officeApi.updateAgentStatus(officeSeed.agentId, "stopped");
+    await officeApi.createAgent(officeSeed.workspaceId, {
+      name: "Quorum Automatic Reviewer",
+      role: "specialist",
+    });
+
     const reviewer = (await officeApi.createAgent(officeSeed.workspaceId, {
       name: "Quorum Reviewer",
       role: "worker",

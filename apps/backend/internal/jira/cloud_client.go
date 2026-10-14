@@ -692,7 +692,8 @@ func extractDescription(raw interface{}) string {
 		return ""
 	}
 	var b strings.Builder
-	walkADF(m, &b)
+	paragraphBreak := false
+	walkADF(m, &b, &paragraphBreak)
 	return strings.TrimSpace(b.String())
 }
 
@@ -700,14 +701,15 @@ func extractDescription(raw interface{}) string {
 // nodes, hard/soft breaks, and paragraphs; other node types (code blocks,
 // tables, mentions) collapse to their text content. Good enough for task
 // descriptions — we don't try to preserve rich formatting.
-func walkADF(node map[string]interface{}, b *strings.Builder) {
+func walkADF(node map[string]interface{}, b *strings.Builder, paragraphBreak *bool) {
+	start := b.Len()
 	switch node["type"] {
 	case "text":
 		if s, ok := node["text"].(string); ok {
-			b.WriteString(s)
+			writeADFText(s, b, paragraphBreak)
 		}
 	case "hardBreak", "softBreak":
-		b.WriteString("\n")
+		writeADFText("\n", b, paragraphBreak)
 	}
 	content, ok := node["content"].([]interface{})
 	if !ok {
@@ -715,11 +717,27 @@ func walkADF(node map[string]interface{}, b *strings.Builder) {
 	}
 	for i, c := range content {
 		if child, ok := c.(map[string]interface{}); ok {
-			walkADF(child, b)
+			walkADF(child, b, paragraphBreak)
 		}
 		// Insert paragraph breaks between top-level siblings.
 		if t, _ := node["type"].(string); t == "doc" && i < len(content)-1 {
 			b.WriteString("\n\n")
+			*paragraphBreak = false
 		}
 	}
+	if node["type"] == "paragraph" && b.Len() > start {
+		*paragraphBreak = true
+	}
+}
+
+// Paragraph boundaries follow their descendants through any enclosing container.
+func writeADFText(text string, b *strings.Builder, paragraphBreak *bool) {
+	if text == "" {
+		return
+	}
+	if *paragraphBreak && b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	*paragraphBreak = false
+	b.WriteString(text)
 }

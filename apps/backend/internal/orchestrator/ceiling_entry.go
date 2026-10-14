@@ -614,6 +614,8 @@ func (s *Service) enrichCeilingDeferralBinding(
 func ceilingDeferralsEquivalentForAdmission(a, b models.CeilingDeferral) (bool, error) {
 	left := cloneCeilingPayload(a.Payload)
 	right := cloneCeilingPayload(b.Payload)
+	normalizeCeilingAutomationRun(left)
+	normalizeCeilingAutomationRun(right)
 	_, leftBound := left[models.CeilingLaunchEntryBindingKey]
 	_, rightBound := right[models.CeilingLaunchEntryBindingKey]
 	if leftBound != rightBound {
@@ -810,7 +812,8 @@ func (s *Service) validateCeilingDestination(
 		}
 		return ceilingEntrySuperseded
 	}
-	if session.TaskID != task.ID || isTerminalSessionState(session.State) {
+	if session.TaskID != task.ID ||
+		(isTerminalSessionState(session.State) && !deferredIdleFocusResumeOfCompleted(deferral, session.State)) {
 		return ceilingEntrySuperseded
 	}
 	// A record waiting for capacity must never replay into a provider that has
@@ -819,6 +822,11 @@ func (s *Service) validateCeilingDestination(
 	// claimed RUNNING; the task-owned route and session identity remain guarded.
 	if checkDestinationState {
 		if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
+			// Bound workflow entry prompts retain their record while the
+			// destination is active. Unbound prompts remain superseded.
+			if binding.Valid() {
+				return ceilingEntryUnavailable
+			}
 			return ceilingEntrySuperseded
 		}
 	}

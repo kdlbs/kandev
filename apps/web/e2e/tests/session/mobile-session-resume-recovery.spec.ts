@@ -24,9 +24,18 @@ import {
   readPrivateManagedCloneRecoveryArtifacts,
   readManagedCloneRecoveryConsumers,
   removeRecoveryBranch,
+  waitForStoppedRecoveryRuntime,
   seedManagedCloneRelocationFixture,
   seedWorktreeRecoveryFixture,
 } from "../../helpers/session-resume-recovery";
+
+test.afterEach(async ({ backend }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) return;
+  await testInfo.attach("session-recovery-backend.log", {
+    path: backend.logPath,
+    contentType: "text/plain",
+  });
+});
 
 async function seedSessionWithProfile(
   testPage: Parameters<typeof seedDelayedResumeFixture>[0],
@@ -295,8 +304,6 @@ test.describe("mobile: failed resume recovery", () => {
 });
 
 test.describe("mobile: worktree branch resume recovery", () => {
-  test.describe.configure({ retries: 1 });
-
   test("keeps branch recovery touch-safe and reload-stable", async ({
     testPage,
     apiClient,
@@ -334,6 +341,8 @@ test.describe("mobile: worktree branch resume recovery", () => {
       timeout: 30_000,
     });
     await expect(fixture.session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
+
+    await waitForStoppedRecoveryRuntime(apiClient, backend.tmpDir, fixture);
 
     removeRecoveryBranch(seedData.repositoryPath, backend.tmpDir, fixture.repository);
 
@@ -469,7 +478,15 @@ test.describe("mobile: dirty managed clone relocation", () => {
     });
     await fixture.session.recoveryResumeButton().click();
 
-    const relocate = testPage.getByTestId("managed-clone-relocate-button");
+    const recoveryWarning = testPage
+      .getByRole("main")
+      .getByText("This worktree belongs to an older repository clone and has local changes.", {
+        exact: false,
+      });
+    await expect(recoveryWarning).toBeVisible({ timeout: 30_000 });
+    const relocate = testPage
+      .getByRole("main")
+      .getByRole("button", { name: "Move files and resume", exact: true });
     await expect(relocate).toBeVisible({ timeout: 30_000 });
     await expect
       .poll(
@@ -511,7 +528,6 @@ test.describe("mobile: dirty managed clone relocation", () => {
     await expect(confirmation).toContainText("snapshot");
     await expect(confirmation).toContainText("staging choices");
     const confirm = testPage.getByTestId("managed-clone-relocation-confirm");
-    await confirm.scrollIntoViewIfNeeded();
     if (prCapture.capturing) {
       await waitForFiniteAnimations(confirmation);
       await prCapture.screenshot("managed-clone-relocation-confirm-phone", {

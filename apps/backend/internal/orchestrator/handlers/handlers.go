@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -45,6 +46,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionSessionFork, h.wsForkConversation)
 	d.RegisterFunc(ws.ActionSessionEnsure, h.wsEnsureSession)
 	d.RegisterFunc(ws.ActionSessionRecover, h.wsRecoverSession)
+	d.RegisterFunc(ws.ActionSessionRecoverBatch, h.wsRejectRetiredRecoveryBatch)
 	d.RegisterFunc(ws.ActionSessionWorkspaceRecoveryGet, h.wsGetWorkspaceRecoveryStatus)
 	d.RegisterFunc(ws.ActionTaskLaunchRecover, h.wsRecoverTaskLaunch)
 	d.RegisterFunc(ws.ActionSessionResetContext, h.wsResetContext)
@@ -95,6 +97,9 @@ func (h *Handlers) wsRouteAction(ctx context.Context, msg *ws.Message) (*ws.Mess
 		}
 		if errors.Is(err, orchestrator.ErrRouteActionActiveTurn) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
+		}
+		if errors.Is(err, orchestrator.ErrRouteActionRequiresDynamicProfile) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
 		h.logger.Warn("route action failed", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "route action failed", nil)
@@ -158,6 +163,12 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		}
 		if archivedResponse, responseErr := taskArchivedConflictResponse(msg, err); archivedResponse != nil || responseErr != nil {
 			return archivedResponse, responseErr
+		}
+		if recoveryResponse, responseErr := runtimeCleanupFailureResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if recoveryResponse, responseErr := restoreRequiredRecoveryResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
 		}
 		intent := orchestrator.ResolveIntent(&req)
 		// A launch failing because the root context was cancelled or the
@@ -312,12 +323,13 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsRecoverSessionRequest struct {
-	TaskID         string                        `json:"task_id"`
-	SessionID      string                        `json:"session_id"`
-	Action         string                        `json:"action"`
-	IdempotencyKey string                        `json:"idempotency_key,omitempty"`
-	ErrorStamp     string                        `json:"error_stamp,omitempty"`
-	SettingsPolicy executor.ResumeSettingsPolicy `json:"settings_policy,omitempty"`
+	InterruptedResume json.RawMessage               `json:"interrupted_resume,omitempty"`
+	TaskID            string                        `json:"task_id"`
+	SessionID         string                        `json:"session_id"`
+	Action            string                        `json:"action"`
+	IdempotencyKey    string                        `json:"idempotency_key,omitempty"`
+	ErrorStamp        string                        `json:"error_stamp,omitempty"`
+	SettingsPolicy    executor.ResumeSettingsPolicy `json:"settings_policy,omitempty"`
 }
 
 type wsGetWorkspaceRecoveryStatusRequest struct {
@@ -390,9 +402,9 @@ func sessionRecoveryGuardConflictResponse(msg *ws.Message, err error) (*ws.Messa
 	return ws.NewError(msg.ID, msg.Action, code, err.Error(), guardErr.Details())
 }
 
-// restoreRequiredRecoveryResponse exposes only the bounded restore policy
-// needed by the shared recovery UI. Provider errors and internal recovery
-// blocks must remain server-side because neither is a safe browser contract.
+// restoreRequiredRecoveryResponse exposes the bounded continuity policy
+// needed by the shared recovery UI. Provider errors, journal contents and
+// internal recovery blocks remain server-side.
 func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID string) (*ws.Message, error) {
 	var reasoner interface{ RecoveryReason() string }
 	if !errors.As(err, &reasoner) {
@@ -400,7 +412,7 @@ func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID strin
 	}
 	reason := reasoner.RecoveryReason()
 	switch reason {
-	case "native_state_missing", "native_resume_unsupported", "workspace_incompatible":
+	case "native_state_missing", "native_resume_unsupported", "workspace_incompatible", "unresolved_durable_work":
 	default:
 		return nil, nil
 	}
@@ -419,7 +431,7 @@ func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID strin
 		msg.ID,
 		msg.Action,
 		ws.ErrorCodeConflict,
-		"Native session state requires explicit history continuation.",
+		"Session continuity requires explicit history continuation.",
 		details,
 	)
 }
@@ -464,6 +476,9 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": cancelled})
 	}
 
+	if req.Action == "resume_interrupted" || len(req.InterruptedResume) > 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "interrupted session recovery is no longer supported", nil)
+	}
 	if req.Action == "retry_connection" {
 		resp, err := h.service.RetrySessionDelivery(ctx, req.TaskID, req.SessionID)
 		if err != nil {
@@ -506,6 +521,9 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
 			return guardResponse, responseErr
+		}
+		if recoveryResponse, responseErr := runtimeCleanupFailureResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
 		}
 		if recoveryResponse, responseErr := restoreRequiredRecoveryResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr

@@ -158,4 +158,28 @@ Kind regression were rerun successfully after that final source edit.
 
 Public docs updated: Kubernetes how-to recovery guidance in `docs/public/k8s.md`
 and workspace-mode reference guidance in `docs/public/automation-and-mcp.md`.
-GitHub publication is blocked by authentication (HTTP 401), not by test failures.
+Authentication was restored and ready PR #4485 was published on 2026-10-14.
+
+PR remediation preserves the new workspace-preparation error from `main` and
+adds transactional shared-group Kubernetes admission. Its regression covers a
+materializer becoming ready after preflight, supported non-Kubernetes sharing,
+same-task sessions, and preservation of the canonical environment.
+
+Post-merge verification on 2026-10-14:
+
+- The eight-package targeted Go race check (adding task models and the
+  `WorkspacePreparing` selector) passed.
+- `PATH=/usr/local/go/bin:$PATH GOMAXPROCS=2 GOGC=20 go test -trimpath -p 1
+  -tags fts5 -race ./internal/task/repository/sqlite
+  -run 'TestKubernetesSharedGroupBindingAdmission|TestCreateTaskSessionWithSharedGroupWorkspaceBindingElectsOneMaterializer|TestWorkspaceBindingRetryOwnership'
+  -count=1` passed from `apps/backend`. The Kubernetes ordering case first
+  failed because it persisted the unsupported session; PostgreSQL cases are
+  environment-gated and were skipped locally without a DSN.
+- The session-hook and recovery/mobile-feedback tests passed: 101 files, 967
+  tests. Focused web/E2E ESLint, harness validation and its 19 tests,
+  specification lint and its 36 tests, and the documentation catalog passed.
+- `NODE_OPTIONS=--max-old-space-size=6144 pnpm run typecheck` passed from
+  `apps/web`, run separately from compilation. Smaller local heap limits
+  exhausted memory; CI configures an 8 GiB heap.
+- The same managed rebuilt Kind command above passed with no retries: one
+  test in 2.2 minutes. Log: `/tmp/kandev-run.e2e.nn7B8xCa.log`.

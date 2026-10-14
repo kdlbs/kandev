@@ -469,21 +469,15 @@ describe("sendQueuedNow", () => {
     });
     getWebSocketClientMock.mockReturnValue({ request });
 
-    await sendQueuedNow({
+    const params = {
       task_id: "task-1",
       session_id: SESSION_ID,
       session_incarnation_id: INCARNATION_ID,
       scope: "entry",
       entry_id: "q-2",
-    });
-
-    expect(request).toHaveBeenCalledWith("message.queue.send_now", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      scope: "entry",
-      entry_id: "q-2",
-    });
+    } as const;
+    await sendQueuedNow(params);
+    expect(request).toHaveBeenCalledWith("message.queue.send_now", params, 35_000);
   });
 
   it("omits entry_id for an all scope snapshot", async () => {
@@ -494,19 +488,14 @@ describe("sendQueuedNow", () => {
     });
     getWebSocketClientMock.mockReturnValue({ request });
 
-    await sendQueuedNow({
+    const params = {
       task_id: "task-1",
       session_id: SESSION_ID,
       session_incarnation_id: INCARNATION_ID,
       scope: "all",
-    });
-
-    expect(request).toHaveBeenCalledWith("message.queue.send_now", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      scope: "all",
-    });
+    } as const;
+    await sendQueuedNow(params);
+    expect(request).toHaveBeenCalledWith("message.queue.send_now", params, 35_000);
   });
 
   it("maps send-now conflict codes to a typed error", async () => {

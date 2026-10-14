@@ -642,6 +642,10 @@ func TestCreateTaskSessionWithWorkspaceBindingElectsAndAttaches(t *testing.T) {
 	if !errors.Is(err, models.ErrWorkspacePreparing) {
 		t.Fatalf("second bind error = %v, want preparing", err)
 	}
+	var preparing *models.WorkspacePreparingError
+	if !errors.As(err, &preparing) || preparing.EnvironmentID != first.TaskEnvironmentID {
+		t.Fatalf("second bind error = %#v, want the elected environment %q", err, first.TaskEnvironmentID)
+	}
 	sessions, err := repo.ListTaskSessions(ctx, "task-binding")
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("sessions after blocked bind = %+v, %v", sessions, err)
@@ -752,12 +756,14 @@ func TestCreateTaskSessionWithSharedGroupWorkspaceBindingElectsOneMaterializer(t
 	close(errs)
 
 	var succeeded, preparing int
+	var preparingErr error
 	for err := range errs {
 		switch {
 		case err == nil:
 			succeeded++
 		case errors.Is(err, models.ErrWorkspacePreparing):
 			preparing++
+			preparingErr = err
 		default:
 			t.Fatalf("concurrent group binding error = %v", err)
 		}
@@ -771,6 +777,12 @@ func TestCreateTaskSessionWithSharedGroupWorkspaceBindingElectsOneMaterializer(t
 	}
 	if environmentID == "" {
 		t.Fatal("shared group has no elected environment")
+	}
+	// The losing member's refusal names the environment elected for the group,
+	// which belongs to the other member task.
+	var refusal *models.WorkspacePreparingError
+	if !errors.As(preparingErr, &refusal) || refusal.EnvironmentID != environmentID {
+		t.Fatalf("losing group bind error = %#v, want the elected environment %q", preparingErr, environmentID)
 	}
 	var sessionCount int
 	if err := repo.db.Get(&sessionCount, `SELECT COUNT(*) FROM task_sessions WHERE task_id IN ('task-group-a', 'task-group-b')`); err != nil {

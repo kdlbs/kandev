@@ -56,6 +56,7 @@ A future major requires a separate reviewed adoption policy; package identity al
 
 Add a resolved runtime value carrying trusted package, effective version, source, and command arguments.
 Resolve it before building commands; do not mutate the registry's singleton agent per request.
+Resolve it for the runtime the execution resolved, not the requested executor type, so it matches the native-binary preference for the same launch.
 Pass this value through the current `CommandOptions` and runtime-selection seams as needed.
 Other agents retain their existing fixed-package resolution.
 
@@ -101,12 +102,18 @@ For native source, `selected_version` is absent. A bounded local version check d
 observed native version is a status projection, not a promise that Kandev controls that executable.
 If a user independently updates native v1 to v2, dispatch using its observed supported major and retain the
 same session/home. Report the actual version and offer managed v2 adoption. Do not replace the binary.
-An unknown major or failed detection blocks that launch with a diagnostic; do not guess arguments.
+An unknown major or a missing executable blocks that launch with a diagnostic; do not guess arguments.
 The version check boots the CLI's JavaScript runtime, so concurrent launches can make a healthy run slow.
 Each run is bounded at 10 seconds. A failed, timed-out, or unreadable run is retried twice (after 300 ms and 1 s).
 A successful detection is remembered per executable path for 10 minutes; when a later check still fails after
-its retries, that recent detection is used instead of blocking the launch. An unsupported major clears the
-remembered detection and is never retried; a missing executable is reported as absent, as before.
+its retries, that recent detection is used instead of blocking the launch. When no recent detection exists, a
+launch may proceed with the selected runtime's supported stable version while its caller context remains live,
+because the ACP arguments are identical across supported majors. Both ACP and interactive command resolution
+reject an unusable selected version, caller cancellation, and caller deadline expiry. A probe attempt's own
+timeout may fall back while the caller remains live. An unsupported major replaces the remembered supported
+detection with rejection evidence and is never retried in that detection. Later transient failures retain
+that rejection and their own error identity; a fresh supported observation replaces it. A missing executable
+is reported as absent, as before.
 The final diagnostic marks a deadline kill and quotes at most 200 characters of the output, with the user's
 home directory replaced by `~`.
 Managed v2 never returns to native preference when PATH changes.

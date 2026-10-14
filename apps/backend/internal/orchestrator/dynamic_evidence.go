@@ -868,6 +868,9 @@ func (s *Service) clearDynamicUnclassifiedStreakForCompletion(
 	ctx context.Context,
 	data watcher.AgentEventData,
 ) bool {
+	if s.consumeCountedEmptyTurn(data.SessionID, data.AgentExecutionID, data.PromptGeneration) {
+		return false
+	}
 	if !s.clearDynamicUnclassifiedStreakForEvent(ctx, data, false) {
 		return false
 	}

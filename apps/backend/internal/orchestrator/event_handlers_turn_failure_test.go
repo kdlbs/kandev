@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
@@ -53,6 +54,86 @@ func TestAgentTurnFailedSettlesDurableErrorWithoutStoppingRuntime(t *testing.T) 
 	agentMgr.mu.Lock()
 	require.Empty(t, agentMgr.stopAgentWithReasonArgs, "a retained turn failure must keep the process alive")
 	agentMgr.mu.Unlock()
+}
+
+func TestRetainedFailedDeliveryRecordsNoSuccessWorkflowOutcome(t *testing.T) {
+	ctx := context.Background()
+	_, repo := newServiceWithRealRepo(t)
+	const (
+		taskID       = "failed-delivery-task"
+		sessionID    = "failed-delivery-session"
+		submissionID = "prompt:failed-delivery"
+		streamID     = "failed-delivery-stream"
+	)
+	seedSession(t, repo, taskID, sessionID, "step-1")
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("read failed delivery session: %v", err)
+	}
+	incarnationID := session.QueueIncarnationID
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	if _, err := repo.DB().ExecContext(ctx, `
+		INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)`, "step-1", "wf1", "Failure step", 0, now, now); err != nil {
+		t.Fatalf("seed workflow policy revision: %v", err)
+	}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-1"] = &wfmodels.WorkflowStep{
+		ID: "step-1", WorkflowID: "wf1", Name: "Failure step", UpdatedAt: now,
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
+	service := createTestServiceWithAgent(repo, stepGetter, taskRepo, &mockAgentManager{
+		isAgentRunning: true, repoForExecutionLookup: repo,
+	})
+	messageCreator := &mockMessageCreator{}
+	service.messageCreator = messageCreator
+	service.beginPromptAttempt(sessionID, "execution-1", 7, false)
+
+	if _, err := repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
+		ID: submissionID, SessionID: sessionID, IncarnationID: incarnationID,
+		HarnessGeneration: 1, OwnerGeneration: 1, DispatchAttemptID: "failed-delivery-attempt",
+		PayloadHash: "failed-delivery-hash", Payload: []byte("original failed prompt"),
+		State: models.DeliverySubmissionDispatching, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("prepare failed delivery submission: %v", err)
+	}
+	event := persistedTerminalEvent(sessionID, incarnationID, 1, submissionID, streamID, "error")
+	projectOrchestratorDeliveryEvent(t, repo, ctx, event)
+
+	data := retainedTurnFailureData()
+	data.TaskID = taskID
+	data.SessionID = sessionID
+	data.TurnID = "turn-" + submissionID
+	data.DeliveryStreamID = streamID
+	data.DeliveryIncarnationID = incarnationID
+	data.DeliveryHarnessGeneration = 1
+	data.DeliverySequence = 1
+	data.DeliverySubmissionID = submissionID
+	data.DeliveryOutcome = string(models.DeliverySubmissionFailed)
+	service.handleAgentTurnFailed(ctx, data)
+
+	effect, err := repo.GetAgentDeliveryEffect(ctx, "workflow.on_turn_complete:"+data.TurnID)
+	if err != nil {
+		t.Fatalf("read failed-turn workflow receipt: %v", err)
+	}
+	if effect.Outcome != "not_required" || effect.StreamID != streamID || effect.Sequence != 1 || effect.SubmissionID != submissionID {
+		t.Fatalf("failed-turn workflow receipt = %+v", effect)
+	}
+	submission, err := repo.GetAgentDeliverySubmissionMetadata(ctx, submissionID)
+	if err != nil {
+		t.Fatalf("read failed delivery metadata: %v", err)
+	}
+	if submission.State != models.DeliverySubmissionFailed || submission.FullySettledAt == nil || submission.PayloadPrunedAt != nil {
+		t.Fatalf("failed terminal settlement = %+v", submission)
+	}
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil || task.WorkflowStepID != "step-1" {
+		t.Fatalf("failed turn changed workflow step to %q, err %v", task.WorkflowStepID, err)
+	}
+	if len(messageCreator.sessionMessages) != 1 {
+		t.Fatalf("failure messages = %d, want the retained failure only", len(messageCreator.sessionMessages))
+	}
 }
 
 func TestRetainedFailureCompleteStreamDefersSettlementToTurnOwner(t *testing.T) {

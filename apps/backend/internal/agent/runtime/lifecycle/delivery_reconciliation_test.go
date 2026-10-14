@@ -61,6 +61,8 @@ type fakeDeliveryReconciliationPeer struct {
 	streamOpen      bool
 }
 
+func (p *fakeDeliveryReconciliationPeer) IsCurrent() bool { return true }
+
 func (p *fakeDeliveryReconciliationPeer) GetStatus(ctx context.Context) (*agentctl.StatusResponse, error) {
 	p.mu.Lock()
 	p.statusCalls++

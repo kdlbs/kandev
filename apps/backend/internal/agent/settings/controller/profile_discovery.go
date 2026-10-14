@@ -41,14 +41,14 @@ func (c *Controller) FetchProfileDynamicModels(
 		Models: []dto.ModelEntryDTO{}, Modes: []dto.ModeEntryDTO{},
 	}
 	if c.hostUtility == nil {
-		return resp, nil
+		return c.finishDynamicModels(ctx, agentName, resp, req.Refresh), nil
 	}
 	provider, ok := c.hostUtility.(profileHostUtilityProvider)
 	if !ok {
 		resp.Status = string(hostutility.StatusUnsupported)
 		message := "profile discovery is not supported by this host utility"
 		resp.Error = &message
-		return resp, nil
+		return c.finishDynamicModels(ctx, agentName, resp, req.Refresh), nil
 	}
 	result, err := provider.ProbeProfileCapabilities(ctx, agentName, hostutility.ProfileCapabilityRequest{
 		Context: profileContext, Refresh: req.Refresh,
@@ -78,7 +78,7 @@ func (c *Controller) FetchProfileDynamicModels(
 	for _, command := range caps.Commands {
 		resp.Commands = append(resp.Commands, dto.CommandEntryDTO{Name: command.Name, Description: command.Description})
 	}
-	return resp, nil
+	return c.finishDynamicModels(ctx, agentName, resp, req.Refresh), nil
 }
 
 func (c *Controller) resolveProfileProbeContext(

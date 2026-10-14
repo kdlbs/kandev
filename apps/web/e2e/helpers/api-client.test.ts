@@ -315,3 +315,43 @@ describe("ApiClient.e2eReset", () => {
     expect(request).toHaveBeenCalledTimes(4);
   });
 });
+
+describe("explicit session detail inspection", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("keeps list reads compact and fetches rich data only for explicit detail inspection", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/tasks/task/sessions"))
+        return Response.json({
+          sessions: [
+            {
+              id: "session",
+              task_id: "task",
+              state: "RUNNING",
+              queue_incarnation_id: "incarnation",
+            },
+          ],
+          total: 1,
+        });
+      if (url.endsWith("/task-sessions/session"))
+        return Response.json({
+          session: {
+            id: "session",
+            task_id: "task",
+            state: "RUNNING",
+            metadata: { acp: { session_id: "native" } },
+          },
+        });
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("http://backend.test");
+    expect((await client.listTaskSessions("task")).sessions[0].metadata).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((await client.listTaskSessionDetails("task")).sessions[0]).toMatchObject({
+      queue_incarnation_id: "incarnation",
+      metadata: { acp: { session_id: "native" } },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});

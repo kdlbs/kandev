@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import {
   createStandardProfile,
   GitHelper,
@@ -109,8 +109,7 @@ test.describe("phone Git diff refresh continuity", () => {
     }) => {
       const repositoryPath = path.join(backend.tmpDir, "repos", "e2e-repo");
       const git = new GitHelper(repositoryPath, makeGitEnv(backend.tmpDir));
-      git.exec("git reset --hard HEAD");
-      git.exec("git clean -fd");
+      resetSeedRepositoryCheckout(seedData, backend.tmpDir);
       git.createFile(PREFIX_PATH, prefixContent(16, "mobile-prefix-before"));
       git.createFile(TARGET_PATH, targetContent(INITIAL_MARKER));
 
@@ -159,6 +158,7 @@ test.describe("phone Git diff refresh continuity", () => {
           `[data-review-file-key="${encodeURIComponent(TARGET_PATH)}"]`,
         );
         await expect(targetSection).toBeVisible({ timeout: 30_000 });
+        await expect(diffRoot.locator("[data-review-file-key]")).toHaveCount(2);
         await scrollDiffIntoReadingPosition(testPage, renderer, TARGET_PATH, "touch");
         const anchorBefore = await visibleDiffAnchor(testPage, renderer, TARGET_PATH);
         expect(anchorBefore?.line).toBeGreaterThan(15);

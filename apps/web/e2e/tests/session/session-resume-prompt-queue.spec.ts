@@ -7,6 +7,7 @@ import {
   waitForQueuedCount,
 } from "../../helpers/session-resume-prompt-queue";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { openQuickChatSetup, startQuickChatFromSetup } from "../chat/quick-chat-helpers";
 
 test.describe("Send during session resume", () => {
@@ -94,16 +95,28 @@ test.describe("Send during session resume", () => {
       )
       .toBe("RUNNING");
     const marker = "quick chat startup marker";
-    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });
-    await editor.fill(`e2e:message("${marker}")`);
+    await waitForComposerQueueMode(dialog);
+    await typeWhileBusy(testPage, editor, `e2e:message("${marker}")`);
+    await expect(submit).toBeVisible();
     await expect(submit).toBeEnabled({ timeout: 30_000 });
     await submit.click();
+    await expect(editor).toHaveText("");
 
     await expect
       .poll(() => apiClient.getQueueStatus(identity).then((status) => status.count), {
         timeout: 30_000,
       })
       .toBe(1);
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(taskId);
+          return sessions.find((session) => session.id === sessionId)?.state;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe("WAITING_FOR_INPUT");
+    await waitForQueuedCount(apiClient, identity, 1);
     await expect(apiClient.setQueueAutoRun(identity, true)).resolves.toMatchObject({
       auto_run: true,
     });

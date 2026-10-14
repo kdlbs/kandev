@@ -98,7 +98,7 @@ func durableAdoptionRepository() *adoptionDeliveryRepository {
 	return &adoptionDeliveryRepository{
 		cursor: &models.AgentDeliveryCursor{
 			SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 2,
-			StreamID: "stream-1", ProjectedSequence: 2,
+			StreamID: "stream-1", ReceivedSequence: 2, ProjectedSequence: 2,
 		},
 		generation: &models.HarnessSessionGeneration{
 			SessionID: "session-1", IncarnationID: "incarnation-1", Generation: 2,

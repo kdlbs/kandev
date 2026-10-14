@@ -70,9 +70,19 @@ describe("duration-aware shard planning", () => {
       ].join("\n"),
     );
     fs.writeFileSync(
+      path.join(testDir, "shared-cases.ts"),
+      [
+        'import { test } from "@playwright/test";',
+        "export function sharedCases() {",
+        '  test.describe("shared suite", () => { test("defined in a helper", async () => {}); });',
+        "}",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
       path.join(testDir, "example.spec.ts"),
       [
         'import { test } from "@playwright/test";',
+        'import { sharedCases } from "./shared-cases";',
         'test.describe("suite", () => {',
         "  test.beforeEach(async () => {});",
         '  test("works", async () => {});',
@@ -81,14 +91,25 @@ describe("duration-aware shard planning", () => {
         "    test(name, async () => {});",
         "  }",
         "});",
+        "sharedCases();",
       ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(testDir, "mobile-example.spec.ts"),
+      'import { sharedCases } from "./shared-cases"; sharedCases();',
     );
 
     expect(discoverTestCatalog(webRoot, "normal")).toEqual([
       expect.objectContaining({
         project: "chromium",
         file: "tests/chat/example.spec.ts",
-        testCount: 4,
+        testCount: 5,
+        fileHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+      expect.objectContaining({
+        project: "mobile-chrome",
+        file: "tests/chat/mobile-example.spec.ts",
+        testCount: 1,
         fileHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
     ]);

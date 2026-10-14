@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -19,7 +20,10 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-const durableDeliveryUnresolvedReason = "unresolved_durable_work"
+const (
+	durableDeliveryUnresolvedReason  = "unresolved_durable_work"
+	durableDeliveryStorageNotDurable = "storage_not_durable"
+)
 
 type durableDeliveryCapabilityReader = agentruntime.DurableDeliveryCapabilityReader
 
@@ -69,7 +73,7 @@ func (r *agentDeliverySubmissionRuntime) markCompleted(ctx context.Context) erro
 	if !changed {
 		// Terminal projection can settle the submission before the prompt RPC
 		// returns. Preserve that outcome instead of creating a recovery block.
-		stored, readErr := r.store.GetAgentDeliverySubmission(ctx, r.id)
+		stored, readErr := r.submissionMetadata(ctx)
 		if readErr != nil {
 			return fmt.Errorf("read delivery submission after completion race: %w", readErr)
 		}
@@ -79,6 +83,15 @@ func (r *agentDeliverySubmissionRuntime) markCompleted(ctx context.Context) erro
 	}
 	r.completed = true
 	return nil
+}
+
+func (r *agentDeliverySubmissionRuntime) submissionMetadata(ctx context.Context) (*models.AgentDeliverySubmission, error) {
+	if reader, ok := r.store.(interface {
+		GetAgentDeliverySubmissionMetadata(context.Context, string) (*models.AgentDeliverySubmission, error)
+	}); ok {
+		return reader.GetAgentDeliverySubmissionMetadata(ctx, r.id)
+	}
+	return r.store.GetAgentDeliverySubmission(ctx, r.id)
 }
 
 type agentDeliveryPromptPayload struct {
@@ -140,12 +153,18 @@ func (s *Service) deliveryCapabilityForExecution(
 			Reason: "legacy_peer",
 		}, false
 	}
+	peerVersion := capability.Version
+	if peerVersion == journal.CurrentVersion && !capability.Durable && capability.Reason == durableDeliveryStorageNotDurable {
+		// Supported peers without retained storage use legacy delivery;
+		// unresolved work still blocks that negotiation.
+		peerVersion = 0
+	}
 	return agentruntime.NegotiateDurableDelivery(
 		journal.StorageCapability{
 			Version: journal.CurrentVersion,
 			Durable: true,
 		},
-		capability.Version,
+		peerVersion,
 		capability.Durable,
 		capability.Unresolved,
 	), true
@@ -187,7 +206,7 @@ func (s *Service) prepareAgentDeliverySubmission(
 	s.logger.Debug("preparing direct agent delivery submission",
 		zap.String("session_id", sessionID), zap.String("execution_id", executionID),
 		zap.String("submission_id", options.deliverySubmissionID))
-	if session == nil || options.deliverySubmissionID == "" {
+	if session == nil {
 		return nil, nil
 	}
 
@@ -210,6 +229,9 @@ func (s *Service) prepareAgentDeliverySubmission(
 		return nil, nil
 	}
 
+	if options.deliverySubmissionID == "" {
+		options.deliverySubmissionID = "internal:" + uuid.NewString()
+	}
 	payload, err := marshalAgentDeliveryPromptPayload(prompt, attachments)
 	if err != nil {
 		return nil, fmt.Errorf("marshal durable delivery payload: %w", err)
@@ -257,7 +279,7 @@ func (s *Service) resolvePendingDeliveryProtocol(
 		return messagequeue.DeliveryProtocolLegacy, nil
 	case agentruntime.DurableDeliveryV1:
 		if decision.Reason == durableDeliveryUnresolvedReason {
-			return "", s.deliveryRecoveryError(ctx, sessionID, decision.Reason)
+			return s.reconcileUnresolvedDeliveryProtocol(ctx, sessionID, executionID)
 		}
 		return messagequeue.DeliveryProtocolV1, nil
 	default:
@@ -278,7 +300,7 @@ func (s *Service) validateV1DeliveryProtocol(
 		return "", s.deliveryRecoveryError(ctx, sessionID, reason)
 	}
 	if decision.Reason == durableDeliveryUnresolvedReason {
-		return "", s.deliveryRecoveryError(ctx, sessionID, decision.Reason)
+		return s.reconcileUnresolvedDeliveryProtocol(ctx, sessionID, executionID)
 	}
 	return messagequeue.DeliveryProtocolV1, nil
 }

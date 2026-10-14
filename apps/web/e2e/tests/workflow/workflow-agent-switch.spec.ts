@@ -128,6 +128,7 @@ async function configureProfileSessionWorkflow(
   });
   await apiClient.updateWorkflowStep(stepAAgain.id, {
     agent_profile_id: profileA.id,
+    prompt: "/e2e:simple-message",
     // Seed the opposite values so every lifecycle combination exercises the
     // shared draft, dirty, and save path, including the default pair.
     profile_session_start_policy: startPolicy === "reuse" ? "new" : "reuse",
@@ -245,19 +246,25 @@ async function runProfileSessionLifecycleScenario(
   await pollSessions(apiClient, task.id, 2);
   await waitForProfileSession(apiClient, task.id, profileB.id, 60_000);
 
+  const priorATurnIds = new Set(
+    (await apiClient.listSessionTurns(originalASessionId)).turns.map((turn) => turn.id),
+  );
   await apiClient.moveTask(task.id, workflow.id, stepAAgain.id);
   await expect
     .poll(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(task.id);
-        return startPolicy === "reuse"
-          ? sessions.some((item) => item.id === originalASessionId && item.is_primary)
-          : sessions.some(
-              (item) =>
-                item.agent_profile_id === profileA.id &&
-                item.id !== originalASessionId &&
-                item.is_primary,
-            );
+        const primaryA = sessions.find(
+          (item) =>
+            item.agent_profile_id === profileA.id &&
+            item.is_primary &&
+            (startPolicy === "reuse"
+              ? item.id === originalASessionId
+              : item.id !== originalASessionId),
+        );
+        if (!primaryA || primaryA.state !== "WAITING_FOR_INPUT") return false;
+        const { turns } = await apiClient.listSessionTurns(primaryA.id);
+        return turns.some((turn) => !priorATurnIds.has(turn.id) && Boolean(turn.completed_at));
       },
       { timeout: 30_000 },
     )
@@ -399,124 +406,6 @@ test.describe("Workflow agent profile switching", () => {
     // First session should be profileA (completed), second should be profileB
     expect(finalSessions[0].agent_profile_id).toBe(profileA.id);
     expect(finalSessions[1].agent_profile_id).toBe(profileB.id);
-  });
-
-  test("on_turn_complete transition creates new session with next step's agent profile", async ({
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(60_000);
-    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
-
-    // Create workflow: Inbox → Step1 (profileA, auto_start, move_to_next) → Step2 (profileB, auto_start) → Done
-    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Agent Switch Auto");
-    const inbox = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
-    const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 1);
-    const step2 = await apiClient.createWorkflowStep(workflow.id, "Step2", 2);
-    await apiClient.createWorkflowStep(workflow.id, "Done", 3);
-
-    await apiClient.updateWorkflowStep(step1.id, {
-      agent_profile_id: profileA.id,
-      prompt: 'e2e:delay(1000)\ne2e:message("step1 done")',
-      events: {
-        on_enter: [{ type: "auto_start_agent" }],
-        on_turn_complete: [{ type: "move_to_next" }],
-      },
-    });
-    await apiClient.updateWorkflowStep(step2.id, {
-      agent_profile_id: profileB.id,
-      events: { on_enter: [{ type: "auto_start_agent" }] },
-    });
-
-    // Create task in Inbox
-    const task = await apiClient.createTask(seedData.workspaceId, "Auto Switch Task", {
-      workflow_id: workflow.id,
-      workflow_step_id: inbox.id,
-      agent_profile_id: profileA.id,
-      repository_ids: [seedData.repositoryId],
-    });
-
-    // Move to Step1 — triggers auto_start with profileA, then on_turn_complete → Step2
-    await apiClient.moveTask(task.id, workflow.id, step1.id);
-
-    // Poll for second session (Step2 with profileB)
-    const finalSessions = await pollSessions(apiClient, task.id, 2, 45_000);
-    expect(finalSessions.length).toBeGreaterThanOrEqual(2);
-
-    finalSessions.sort((a, b) => a.started_at.localeCompare(b.started_at));
-
-    expect(finalSessions[0].agent_profile_id).toBe(profileA.id);
-    expect(finalSessions[1].agent_profile_id).toBe(profileB.id);
-  });
-
-  test("manual step move updates chat UI to show new agent profile", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(60_000);
-    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
-
-    // Create workflow: Step1 (profileA, auto_start, is_start) → Step2 (profileB, auto_start)
-    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "UI Switch Test");
-    const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
-      is_start_step: true,
-    });
-    const step2 = await apiClient.createWorkflowStep(workflow.id, "Step2", 1);
-
-    await apiClient.updateWorkflowStep(step1.id, {
-      agent_profile_id: profileA.id,
-      events: { on_enter: [{ type: "auto_start_agent" }] },
-    });
-    await apiClient.updateWorkflowStep(step2.id, {
-      agent_profile_id: profileB.id,
-      events: { on_enter: [{ type: "auto_start_agent" }] },
-    });
-
-    // Create task in Step1 with profileA
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "UI Switch Task",
-      profileA.id,
-      {
-        workflow_id: workflow.id,
-        workflow_step_id: step1.id,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-
-    // Navigate to task and wait for the chat to load
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await expect(session.chat).toBeVisible({ timeout: 15_000 });
-
-    // The session tab represents the workflow-started Profile A session. Its title
-    // is model-derived, so identify the tab by stable session ID instead of text.
-    const initialSessions = await pollSessions(apiClient, task.id, 1, 30_000);
-    const profileASession = initialSessions.find((item) => item.agent_profile_id === profileA.id);
-    expect(profileASession).toBeDefined();
-    await expect(session.sessionTabBySessionId(profileASession!.id)).toBeVisible({
-      timeout: 30_000,
-    });
-
-    // Wait for the agent to be ready (WAITING_FOR_INPUT) before moving
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions.some((s) => s.state === "WAITING_FOR_INPUT");
-        },
-        { timeout: 10_000, message: "no session reached WAITING_FOR_INPUT" },
-      )
-      .toBe(true);
-
-    // Move task to Step2 — should create new session with profileB
-    await apiClient.moveTask(task.id, workflow.id, step2.id);
-
-    // The UI should create a new session. Verify via API that the backend created it.
-    const finalSessions = await pollSessions(apiClient, task.id, 2, 30_000);
-    const profileBSession = finalSessions.find((s) => s.agent_profile_id === profileB.id);
-    expect(profileBSession).toBeDefined();
   });
 
   test("on_turn_start transition to step with agent override uses correct profile", async ({
@@ -661,121 +550,6 @@ test.describe("Workflow agent profile switching", () => {
       .not.toBe("CREATED");
   });
 
-  test("new session inherits task_environment_id from old session", async ({
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(60_000);
-    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
-
-    // Step1 (profileA, auto_start, is_start) → Step2 (profileB, auto_start)
-    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Env Inherit Test");
-    const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
-      is_start_step: true,
-    });
-    const step2 = await apiClient.createWorkflowStep(workflow.id, "Step2", 1);
-    await apiClient.createWorkflowStep(workflow.id, "Done", 2);
-
-    await apiClient.updateWorkflowStep(step1.id, {
-      agent_profile_id: profileA.id,
-      events: { on_enter: [{ type: "auto_start_agent" }] },
-    });
-    await apiClient.updateWorkflowStep(step2.id, {
-      agent_profile_id: profileB.id,
-      events: { on_enter: [{ type: "auto_start_agent" }] },
-    });
-
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Env Inherit Task",
-      profileA.id,
-      {
-        workflow_id: workflow.id,
-        workflow_step_id: step1.id,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-
-    // Wait for Step1 agent to finish
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions.some((s) => s.state === "WAITING_FOR_INPUT");
-        },
-        { timeout: 10_000, message: "no session reached WAITING_FOR_INPUT" },
-      )
-      .toBe(true);
-    const step1EnvironmentId = await waitForSessionEnvironmentId(apiClient, task.id, profileA.id);
-
-    // Move to Step2
-    await apiClient.moveTask(task.id, workflow.id, step2.id);
-
-    // Wait for the second session and the async environment handoff.
-    const finalSessions = await pollSessionsForEnvironmentInheritance(
-      apiClient,
-      task.id,
-      profileA.id,
-      profileB.id,
-      30_000,
-    );
-    const step2Session = finalSessions.find((s) => s.agent_profile_id === profileB.id);
-    expect(step2Session).toBeDefined();
-    const step2EnvironmentId = step2Session?.task_environment_id;
-    expect(step2EnvironmentId).toBe(step1EnvironmentId);
-  });
-
-  /**
-   * Verifies the StartCreatedSession fix: when a task is created in a step with an
-   * agent profile override, the initial session uses that profile rather than
-   * the workspace default. Tab titles are model-derived, so the tab is located
-   * by its stable session ID.
-   */
-  test("initial task creation uses step's agent profile for the session tab", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(60_000);
-    const { profileA } = await createProfiles(apiClient, seedData.agentProfileId);
-
-    // Create workflow with Step1 (profileA, auto_start, is_start)
-    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Initial Profile Tab");
-    const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
-      is_start_step: true,
-    });
-    await apiClient.createWorkflowStep(workflow.id, "Done", 1);
-
-    await apiClient.updateWorkflowStep(step1.id, {
-      agent_profile_id: profileA.id,
-      events: { on_enter: [{ type: "auto_start_agent" }] },
-    });
-
-    // Create task — should use Step1's profileA, not the workspace default
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Initial Profile Task",
-      profileA.id,
-      {
-        workflow_id: workflow.id,
-        workflow_step_id: step1.id,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-
-    // Navigate to task
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await expect(session.chat).toBeVisible({ timeout: 15_000 });
-
-    const sessions = await pollSessions(apiClient, task.id, 1, 30_000);
-    const profileASession = sessions.find((item) => item.agent_profile_id === profileA.id);
-    expect(profileASession).toBeDefined();
-    await expect(session.sessionTabBySessionId(profileASession!.id)).toBeVisible({
-      timeout: 30_000,
-    });
-  });
-
   test("manual New Agent picker overrides the pinned workflow profile", async ({
     testPage,
     apiClient,
@@ -907,11 +681,14 @@ test.describe("Workflow agent profile switching", () => {
     const session = new SessionPage(testPage);
     await expect(session.chat).toBeVisible({ timeout: 15_000 });
 
-    const initialSessions = await pollSessions(apiClient, task.id, 1, 60_000);
-    const profileASession = initialSessions.find((item) => item.agent_profile_id === profileA.id);
-    expect(profileASession).toBeDefined();
-    const profileATab = session.sessionTabBySessionId(profileASession!.id);
-    await expect(profileATab).toBeVisible({ timeout: 60_000 });
+    await test.step("initial task creation uses step's agent profile for the session tab", async () => {
+      const initialSessions = await pollSessions(apiClient, task.id, 1, 60_000);
+      const profileASession = initialSessions.find((item) => item.agent_profile_id === profileA.id);
+      expect(profileASession).toBeDefined();
+      await expect(session.sessionTabBySessionId(profileASession!.id)).toBeVisible({
+        timeout: 60_000,
+      });
+    });
 
     // Wait for agent to be ready (WAITING_FOR_INPUT)
     await expect
@@ -924,18 +701,38 @@ test.describe("Workflow agent profile switching", () => {
       )
       .toBe(true);
 
+    const step1EnvironmentId = await waitForSessionEnvironmentId(apiClient, task.id, profileA.id);
+
     // Move to Step2 — triggers new session with profileB
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
     // The new Profile B session tab should appear and the primary star should move to it.
     // The active tab stays on Profile A because the SSR-load pin protects it.
-    const finalSessions = await pollSessions(apiClient, task.id, 2, 60_000);
-    const profileBSession = finalSessions.find((item) => item.agent_profile_id === profileB.id);
-    expect(profileBSession).toBeDefined();
-    const profileBTab = session.sessionTabBySessionId(profileBSession!.id);
-    await expect(profileBTab).toBeVisible({ timeout: 60_000 });
-    await expect(session.primaryStarInSessionTab(profileBSession!.id)).toBeVisible({
-      timeout: 60_000,
+    const profileBSession =
+      await test.step("manual step move updates chat UI to show new agent profile", async () => {
+        const finalSessions = await pollSessions(apiClient, task.id, 2, 60_000);
+        const replacement = finalSessions.find((item) => item.agent_profile_id === profileB.id);
+        expect(replacement).toBeDefined();
+        await expect(session.sessionTabBySessionId(replacement!.id)).toBeVisible({
+          timeout: 60_000,
+        });
+        return replacement!;
+      });
+    await test.step("primary star icon appears on new session tab after step move", async () => {
+      await expect(session.primaryStarInSessionTab(profileBSession.id)).toBeVisible({
+        timeout: 60_000,
+      });
+    });
+    await test.step("new session inherits task_environment_id from old session", async () => {
+      const finalSessions = await pollSessionsForEnvironmentInheritance(
+        apiClient,
+        task.id,
+        profileA.id,
+        profileB.id,
+      );
+      const replacement = finalSessions.find((item) => item.agent_profile_id === profileB.id);
+      expect(replacement).toBeDefined();
+      expect(replacement?.task_environment_id).toBe(step1EnvironmentId);
     });
   });
 
@@ -994,86 +791,20 @@ test.describe("Workflow agent profile switching", () => {
 
     // After the cascade, the Profile B session tab should appear and own the primary star.
     const finalSessions = await pollSessions(apiClient, task.id, 2, 90_000);
+    await test.step("on_turn_complete transition creates new session with next step's agent profile", async () => {
+      expect(finalSessions.length).toBeGreaterThanOrEqual(2);
+      const chronological = [...finalSessions].sort((a, b) =>
+        a.started_at.localeCompare(b.started_at),
+      );
+      expect(chronological[0].agent_profile_id).toBe(profileA.id);
+      expect(chronological[1].agent_profile_id).toBe(profileB.id);
+    });
     const profileBSession = finalSessions.find((item) => item.agent_profile_id === profileB.id);
     expect(profileBSession).toBeDefined();
     const profileBTab = session.sessionTabBySessionId(profileBSession!.id);
     await expect(profileBTab).toBeVisible({ timeout: 90_000 });
     await expect(session.primaryStarInSessionTab(profileBSession!.id)).toBeVisible({
       timeout: 90_000,
-    });
-  });
-
-  /**
-   * Verifies that after a manual step move, the new session tab shows
-   * the primary star icon (★) without needing a page reload.
-   * Covers the fix: switchSessionForStep uses SetPrimarySession (with WS
-   * broadcast) instead of the raw repo.SetSessionPrimary.
-   */
-  test("primary star icon appears on new session tab after step move", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    // Two agent boots (git worktree checkouts) — one before the move, one after —
-    // can outlast the default budget under CI shard contention; give headroom.
-    test.setTimeout(180_000);
-    const { profileA, profileB } = await createProfiles(apiClient, seedData.agentProfileId);
-
-    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Primary Star Test");
-    const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
-      is_start_step: true,
-    });
-    const step2 = await apiClient.createWorkflowStep(workflow.id, "Step2", 1);
-    await apiClient.createWorkflowStep(workflow.id, "Done", 2);
-
-    await apiClient.updateWorkflowStep(step1.id, {
-      agent_profile_id: profileA.id,
-      events: { on_enter: [{ type: "auto_start_agent" }] },
-    });
-    await apiClient.updateWorkflowStep(step2.id, {
-      agent_profile_id: profileB.id,
-      events: { on_enter: [{ type: "auto_start_agent" }] },
-    });
-
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Primary Star Task",
-      profileA.id,
-      {
-        workflow_id: workflow.id,
-        workflow_step_id: step1.id,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await expect(session.chat).toBeVisible({ timeout: 15_000 });
-
-    // Wait for Profile A session to be ready
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions.some((s) => s.state === "WAITING_FOR_INPUT");
-        },
-        { timeout: 60_000, message: "Waiting for agent to be ready" },
-      )
-      .toBe(true);
-
-    // Move to Step2
-    await apiClient.moveTask(task.id, workflow.id, step2.id);
-
-    // The Profile B session tab should appear and own the primary star (no reload needed).
-    // The non-terminal Profile A tab stays user-pinned, so the star moving is
-    // what proves SetPrimarySession's WS broadcast landed.
-    const finalSessions = await pollSessions(apiClient, task.id, 2, 60_000);
-    const profileBSession = finalSessions.find((item) => item.agent_profile_id === profileB.id);
-    expect(profileBSession).toBeDefined();
-    const profileBTab = session.sessionTabBySessionId(profileBSession!.id);
-    await expect(profileBTab).toBeVisible({ timeout: 60_000 });
-    await expect(session.primaryStarInSessionTab(profileBSession!.id)).toBeVisible({
-      timeout: 60_000,
     });
   });
 

@@ -1,4 +1,4 @@
-import { test as base } from "@playwright/test";
+import { test as base, type TestInfo } from "@playwright/test";
 import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -9,6 +9,7 @@ import { E2E_DOCKER_SCOPE } from "./docker-probe";
 import { dwell } from "../helpers/causal-waits";
 import { killProcessGroup } from "./process-group";
 import { writeGitShimLauncher } from "./git-shim-launcher";
+import { backendPorts } from "../helpers/backend-ports";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
@@ -23,7 +24,6 @@ const E2E_PORT_OFFSET = rawPortOffset === undefined ? process.pid % 30 : Number(
 if (!Number.isInteger(E2E_PORT_OFFSET) || E2E_PORT_OFFSET < 0 || E2E_PORT_OFFSET > 29) {
   throw new Error(`E2E_PORT_OFFSET must be an integer 0-29, got: ${rawPortOffset}`);
 }
-const BACKEND_BASE_PORT = 18080 + E2E_PORT_OFFSET;
 const HEALTH_TIMEOUT_MS = 30_000;
 const HEALTH_POLL_MS = 250;
 
@@ -62,9 +62,10 @@ export type BackendContext = {
    * on every call, so `envOverrides` only apply to this restart — they do
    * NOT leak into a subsequent restart. Call `restart()` with no args to
    * revert to the baseline env. Only in-memory execution state (running
-   * agents, WS connections) is lost.
+   * agents, WS connections) is lost. An optional binary path runs a frozen
+   * compatible backend against the same disposable database for rollback tests.
    */
-  restart: (envOverrides?: Record<string, string>) => Promise<void>;
+  restart: (envOverrides?: Record<string, string>, binaryPath?: string) => Promise<void>;
   /**
    * Verify the worker backend is serving requests and recover it when a
    * previous test left the process unavailable.
@@ -213,6 +214,35 @@ function removeOwnedTempRoot(tmpDir: string): void {
   });
 }
 
+export function reportUnexpectedBackendFailure(
+  tmpDir: string,
+  outcome: Pick<TestInfo, "status" | "expectedStatus">,
+): void {
+  if (outcome.status === outcome.expectedStatus) return;
+  if (
+    outcome.status === "failed" ||
+    outcome.status === "timedOut" ||
+    outcome.status === "interrupted"
+  ) {
+    reportFailedBackendLog(tmpDir);
+  }
+}
+
+function reportFailedBackendLog(tmpDir: string): void {
+  let descriptor: number | undefined;
+  try {
+    descriptor = fs.openSync(path.join(tmpDir, "backend-process.log"), "r");
+    const size = fs.fstatSync(descriptor).size;
+    const buffer = Buffer.alloc(Math.min(size, 8_192));
+    const read = fs.readSync(descriptor, buffer, 0, buffer.length, size - buffer.length);
+    console.error(`[failed backend log: ${tmpDir}]\n${buffer.subarray(0, read).toString()}`);
+  } catch {
+    // Setup may fail before a log exists; preserve the original fixture error.
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
 export async function runOwnedBackendFixture<T>(
   tmpDir: string,
   run: (registerProcess: (proc: BackendProcess) => void) => Promise<T>,
@@ -251,6 +281,7 @@ export async function runOwnedBackendFixture<T>(
     }
   }
 
+  if (failures.length > 0) reportFailedBackendLog(tmpDir);
   try {
     removeTempRoot(tmpDir);
   } catch (error) {
@@ -317,7 +348,8 @@ function spawnBackendProcess(
 export const backendFixture = base.extend<object, { backend: BackendContext }>({
   backend: [
     async ({ browserName: _browserName }, use, workerInfo) => {
-      const backendPort = BACKEND_BASE_PORT + workerInfo.workerIndex;
+      const { backendPort, standaloneAgentctlPort, agentctlPortBase, agentctlPortMax } =
+        backendPorts(E2E_PORT_OFFSET, workerInfo);
       const frontendPort = backendPort;
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), `kandev-e2e-${workerInfo.workerIndex}-`),
@@ -345,19 +377,6 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           "[user]\n  name = E2E Test\n  email = e2e@test.local\n[commit]\n  gpgsign = false\n[tag]\n  gpgsign = false\n",
         );
 
-        // Give each worker its own agentctl port range, offset from the default
-        // range (41001-41100) to avoid conflicts with a running dev instance.
-        // The async cleanup of agent instances runs after each test deletes its
-        // tasks, so during a 60+ test shard the in-flight cleanup queue can hold
-        // several dozen ports at any given moment. 200 ports per worker keeps
-        // headroom for that without overflowing the 65535 port space. With the
-        // current playwright config (workers: 1, so workerIndex == 0) and shard
-        // offsets capped at 29, the highest port used is 30001 + 29*1000 + 199
-        // = 59200. The `workerIndex * 200` term is defensive for the case where
-        // a future config sets workers > 1.
-        const agentctlPortBase = 30001 + E2E_PORT_OFFSET * 1000 + workerInfo.workerIndex * 200;
-        const agentctlPortMax = agentctlPortBase + 199;
-
         // Install a `git` shim that can sleep on `fetch`/`pull` before execing
         // the real git binary. Tests that need to simulate slow network git
         // operations write a millisecond value to `${tmpDir}/git-delay-ms`; the
@@ -366,12 +385,9 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         // When the file is absent the shim is a transparent passthrough, so
         // other tests in the same worker are unaffected.
         //
-        // The shim logic lives in `git-shim.mjs` (Node) so it behaves the same
-        // on macOS, Linux, and Windows and never depends on the developer's
-        // login shell (bash/zsh/fish) or a POSIX `sh`. Only a tiny launcher is
-        // generated here to hand control to Node: an extensionless `git`
-        // shebang file on POSIX, and a `git.cmd` on Windows (extensionless
-        // files aren't executable via PATHEXT there).
+        // Active controls use the cross-platform `git-shim.mjs` implementation.
+        // The POSIX launcher directly execs Git when both control files are
+        // absent; Windows uses a .cmd wrapper to reach the Node implementation.
         const shimDir = path.join(tmpDir, "bin");
         const shimScript = path.join(__dirname, "git-shim.mjs");
         const shimDelayFile = path.join(tmpDir, "git-delay-ms");
@@ -444,6 +460,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           KANDEV_WORKTREE_BASEPATH: worktreeBase,
           KANDEV_REPOCLONE_BASEPATH: repoCloneBase,
           KANDEV_LOG_LEVEL: dockerEnabled ? "debug" : (process.env.KANDEV_LOG_LEVEL ?? "info"),
+          AGENTCTL_PORT: String(standaloneAgentctlPort),
           AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
           AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
           // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true and
@@ -492,7 +509,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
          * SQLite DB, tmpDir, and all persisted data survive the restart.
          * Only in-memory execution state (running agents, WS connections) is lost.
          */
-        const restart = async (envOverrides?: Record<string, string>) => {
+        const restart = async (envOverrides?: Record<string, string>, binaryPath?: string) => {
           // Rebuild from the baseline snapshot so a previous restart's
           // overrides don't leak into this one (e.g. KANDEV_MOCK_PROVIDERS
           // set by the routing specs would otherwise stick for the rest of
@@ -501,13 +518,15 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           const nextEnv = scopedEnv.apply(baselineEnv, envOverrides);
           const runningProcess = backendProc;
           if (!runningProcess) throw new Error("Backend process is not running");
-          await killProcessGroup(runningProcess);
+          if (runningProcess.exitCode === null && runningProcess.signalCode === null) {
+            await killProcessGroup(runningProcess);
+          }
           // Poll until the OS releases the TCP port rather than sleeping a fixed
           // 2 s. TIME_WAIT can linger for 30–120 s under load; the probe exits
           // as soon as the port stops accepting connections (typically <200 ms).
           await waitForPortFree(backendPort);
           backendProc = spawnBackendProcess(
-            compactRuntime?.launcherPath ?? KANDEV_BIN,
+            binaryPath ?? compactRuntime?.launcherPath ?? KANDEV_BIN,
             nextEnv,
             debug,
             backendPort,
@@ -556,9 +575,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
   ],
 });
 
-/** Strip GH_TOKEN / GITHUB_TOKEN so the mock client is used. */
-// Sanitize the inherited environment before handing it to the e2e backend.
-// Four classes of vars must not leak through the `...process.env` spread:
+/** Strip host-specific state before spawning E2E backends. */
 //   - GitHub tokens — tests must hit the mock GitHub, never a real token.
 //   - KANDEV_FEATURES_* flags — these are profile-managed (profiles.yaml `e2e:`
 //     column turns them on). When the suite is launched from inside a kandev
@@ -574,12 +591,23 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
 //   - PATH casing aliases — Windows commonly inherits `Path`; retaining it
 //     beside the fixture's new `PATH` makes child-process lookup order
 //     ambiguous. The caller restores one canonical PATH after sanitizing.
+//   - Service-install markers — a host's managed service identity must not make
+//     the source-built e2e backend appear eligible for managed updates.
 //   - Remote helper paths — container-backed tests must exercise the standard
 //     package cache path, never an inherited helper override.
 function sanitizeInheritedEnv(env: Record<string, string>): Record<string, string> {
   const cleaned = { ...env };
   delete cleaned.GH_TOKEN;
   delete cleaned.GITHUB_TOKEN;
+  for (const key of [
+    "KANDEV_RUNNING_AS_SERVICE",
+    "KANDEV_SERVICE_MODE",
+    "KANDEV_SERVICE_MANAGER",
+    "KANDEV_INSTALL_KIND",
+    "KANDEV_SERVICE_METADATA",
+  ]) {
+    delete cleaned[key];
+  }
   for (const key of Object.keys(cleaned)) {
     if (key === "KANDEV_WEB_TITLE_PREFIX" || key.startsWith("KANDEV_FEATURES_")) {
       delete cleaned[key];

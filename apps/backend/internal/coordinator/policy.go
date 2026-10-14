@@ -14,7 +14,7 @@ var ErrPolicyUnreadable = errors.New("coordinator: stored policy unreadable")
 // Setting is what a coordinator may do for one action.
 type Setting string
 
-// Policy settings. Automatic parses but Validate refuses it.
+// Policy settings. Validate accepts Automatic only for a raisable class.
 const (
 	SettingDenied           Setting = "denied"
 	SettingRequiresApproval Setting = "requires_approval"
@@ -33,6 +33,8 @@ const (
 	ActionResume     Action = "resume"
 	ActionStop       Action = "stop"
 	ActionUnknown    Action = "unknown"
+	// ActionImprovement is an activity-only class; it is not a policy action.
+	ActionImprovement Action = "improvement"
 )
 
 // AllActions is the fixed action order; ActionUnknown is not a policy action.
@@ -128,7 +130,9 @@ func validSetting(s Setting) bool {
 
 // Validate refuses a policy a save may not store. The first failing action in
 // the fixed action order is the one named; keys outside the six follow.
-func Validate(p Policy) error {
+// Automatic is accepted only for a raisable class, and only while phase 3 is
+// effective.
+func Validate(p Policy, phase3 bool) error {
 	for _, a := range AllActions {
 		s, ok := p.Actions[a]
 		if !ok {
@@ -137,7 +141,7 @@ func Validate(p Policy) error {
 		if !validSetting(s) {
 			return &PolicyFieldError{Field: string(a)}
 		}
-		if s == SettingAutomatic {
+		if s == SettingAutomatic && (!phase3 || !raisableClasses[a]) {
 			return &PolicyFieldError{Field: string(a), Code: "automatic_not_available"}
 		}
 		if a == ActionStop && s != SettingDenied {

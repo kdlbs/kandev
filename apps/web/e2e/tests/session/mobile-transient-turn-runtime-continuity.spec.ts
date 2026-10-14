@@ -6,6 +6,7 @@ import {
   assertRetainedFailureMessage,
   createRetainedCapacityFixture,
   expectCompletedCapacityProgress,
+  expectRetainedTurnReady,
   readMockACPTrace,
   waitForRetainedTurnFailure,
 } from "../../helpers/transient-turn-runtime-continuity";
@@ -243,8 +244,9 @@ test("phone: capacity retry can be cancelled during backoff", async ({
   }
 });
 
-test("phone: capacity continuation exhausts after five dispatches and keeps Chat available", async ({
+test("phone and desktop: one capacity episode exhausts after five dispatches and keeps Chat available", async ({
   testPage,
+  desktopTestPage,
   apiClient,
   backend,
   seedData,
@@ -254,6 +256,14 @@ test("phone: capacity continuation exhausts after five dispatches and keeps Chat
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
+    const desktopSession = new SessionPage(desktopTestPage);
+    await desktopTestPage.goto(`/t/${fixture.taskId}`);
+    await desktopSession.waitForLoad();
+    expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    expect(await desktopTestPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+    expect(await desktopTestPage.evaluate(() => innerWidth)).toBeGreaterThanOrEqual(1024);
+    await expect(session.transientRetryCard()).toBeVisible();
+    await expect(desktopSession.transientRetryCard()).toBeVisible();
     const executionId = await pollUntil(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
@@ -289,6 +299,16 @@ test("phone: capacity continuation exhausts after five dispatches and keeps Chat
         "waiting for the retained task session execution identity",
       ),
     ).toBe(executionId);
+    await expectRetainedTurnReady(desktopSession);
+    const desktopFeedback = desktopSession
+      .activeChat()
+      .getByTestId("retained-turn-recovery-feedback");
+    await expect(desktopFeedback).toBeVisible();
+    await expect(desktopFeedback).toContainText("5");
+    const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+    expect(messages.filter((message) => message.metadata?.runtime_retained === true)).toHaveLength(
+      1,
+    );
     assertRetainedACPTrace(fixture.tracePath, 6);
     await assertNoDocumentHorizontalOverflow(testPage);
   } finally {

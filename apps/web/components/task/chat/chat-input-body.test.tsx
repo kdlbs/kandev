@@ -92,6 +92,7 @@ function props(overrides: Partial<ChatInputBodyProps> = {}): ChatInputBodyProps 
       submitKey: "cmd_enter",
       setIsInputFocused: vi.fn(),
       sessionId: "session-1",
+      detailActive: true,
       taskId: "task-1",
       planContextEnabled: false,
       addFiles: vi.fn().mockResolvedValue(undefined),

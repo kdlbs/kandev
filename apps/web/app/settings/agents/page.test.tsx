@@ -1,6 +1,9 @@
 import { render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
+
 import type { AgentUpdateJob } from "@/lib/api";
 
 const startUpdateMock = vi.fn();
@@ -15,17 +18,6 @@ let onUpdateCallback:
     ) => Promise<AgentUpdateJob>)
   | undefined;
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (select: (state: unknown) => unknown) =>
-    select({
-      settingsAgents: { items: [] },
-      installJobs: { byAgent: {} },
-      setAgentDiscovery: vi.fn(),
-      setSettingsAgents: vi.fn(),
-      setAvailableAgents: vi.fn(),
-      setAgentProfiles: vi.fn(),
-    }),
-}));
 vi.mock("@/hooks/domains/auth/use-is-admin", () => ({ useIsAdmin: () => true }));
 vi.mock("@/hooks/domains/settings/use-agent-discovery", () => ({
   useAgentDiscovery: () => ({
@@ -111,7 +103,13 @@ describe("Agents settings self-update approval", () => {
       started_at: "2026-09-26T12:00:00Z",
     };
     startUpdateMock.mockResolvedValue(terminal);
-    render(<AgentsSettingsPage />);
+    render(
+      <StateProvider>
+        <ToastProvider>
+          <AgentsSettingsPage />
+        </ToastProvider>
+      </StateProvider>,
+    );
 
     if (!onUpdateCallback) throw new Error("installed agent update callback was not rendered");
     updatePromise = onUpdateCallback("omp-acp", "", false, "self_update");
@@ -137,7 +135,13 @@ describe("Agents settings self-update approval", () => {
       status: "queued",
       started_at: "2026-09-26T12:00:00Z",
     } satisfies AgentUpdateJob);
-    render(<AgentsSettingsPage />);
+    render(
+      <StateProvider>
+        <ToastProvider>
+          <AgentsSettingsPage />
+        </ToastProvider>
+      </StateProvider>,
+    );
 
     if (!onUpdateCallback) throw new Error("installed agent update callback was not rendered");
     updatePromise = onUpdateCallback("omp-acp", "", false, "self_update");

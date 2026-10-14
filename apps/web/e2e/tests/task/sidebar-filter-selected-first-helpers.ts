@@ -157,7 +157,7 @@ export async function verifySelectedFilters(
   expect(labelsAfterSearch.slice(0, seeded.selected.length).sort()).toEqual(
     [...seeded.selected].sort(),
   );
-  await activate(rows.filter({ hasText: seeded.selected[0] }), mobile);
+  await activate(picker.getByRole("option", { name: seeded.selected[0], exact: true }), mobile);
   await expect(rows.nth(0)).toHaveText(seeded.selected[1]);
   await expect(rows.nth(0)).toHaveAttribute("data-checked", "true");
   await search.fill(seeded.unselected[0]);

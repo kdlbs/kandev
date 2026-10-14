@@ -86,6 +86,12 @@ func (s *Service) createTurn(
 		CreatedAt:          time.Now().UTC(),
 		UpdatedAt:          time.Now().UTC(),
 	}
+	if identity, reserved := models.ReservedLaunchIdentityFromContext(ctx); reserved {
+		if identity.TaskID != session.TaskID || identity.SessionID != sessionID {
+			return nil, errors.New("reserved launch belongs to another task session")
+		}
+		turn.ID = identity.TurnID
+	}
 
 	var (
 		stamped bool

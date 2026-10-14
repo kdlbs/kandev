@@ -30,24 +30,10 @@ import {
 } from "./sidebar-layout-editor-dnd";
 
 const SECTION_NAME_LABEL_KEY = "settings:sectionName";
-const BUILTIN_LABEL_KEYS: Record<string, string> = {
-  home: "sidebar:home",
-  new_task: "sidebar:newTask",
-  automations: "common:automations",
-  canvases: "canvases:canvases",
-  integrations: "common:integrations",
-};
-
-function nodeTitle(
-  node: SidebarLayoutNode,
-  projected: ProjectedSidebarNode | undefined,
-  t: (key: string) => string,
-): string {
-  if (projected?.available === false) return projected.label;
+function nodeTitle(node: SidebarLayoutNode, projected: ProjectedSidebarNode | undefined): string {
+  if (projected) return projected.label;
   if (node.name) return node.name;
-  return node.destinationId && BUILTIN_LABEL_KEYS[node.destinationId]
-    ? t(BUILTIN_LABEL_KEYS[node.destinationId])
-    : node.id;
+  return node.id;
 }
 
 function handleProps(
@@ -149,13 +135,18 @@ function SidebarLayoutNodeHeader({
         />
       ) : (
         <span className="min-w-0 flex-1 truncate text-sm font-medium">
-          {nodeTitle(node, projected, t)}
+          {nodeTitle(node, projected)}
+          {node.kind === "builtin" && projected?.available === false && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {t("common:unavailable")}
+            </span>
+          )}
         </span>
       )}
       <Switch
         checked={node.visible}
         onCheckedChange={onToggle}
-        disabled={readOnly}
+        disabled={readOnly || (node.kind === "builtin" && projected?.available === false)}
         aria-label={t("settings:sidebarToggleVisibility")}
       />
       <Button

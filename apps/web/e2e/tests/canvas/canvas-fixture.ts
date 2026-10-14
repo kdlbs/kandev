@@ -596,6 +596,13 @@ export async function seedTaskCanvas(
   await session.waitForChatIdle({ timeout: 45_000 });
 
   const canvas = await waitForTaskCanvas(apiClient, task.id, title);
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "The canvas creation session did not finish before source authoring.",
+    45_000,
+  );
 
   const publishedCanvas = await publishTaskCanvas({
     apiClient,

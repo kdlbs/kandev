@@ -66,7 +66,16 @@ function isRecoverySessionEligible(
   const ordinaryFailureState = ["FAILED", "WAITING_FOR_INPUT", "STARTING"].includes(session.state);
   const cancelledRelocation =
     session.state === "CANCELLED" && error?.code === "managed_clone_relocation_required";
-  return (ordinaryFailureState || cancelledRelocation) && error?.scope !== "task";
+  const terminalCleanupFailure =
+    ["CANCELLED", "COMPLETED"].includes(session.state) &&
+    error?.phase === "bootstrap" &&
+    error.causes?.some(
+      (cause) => cause.operation === "resume" && cause.code === "runtime_cleanup_failed",
+    ) === true;
+  return (
+    (ordinaryFailureState || cancelledRelocation || terminalCleanupFailure) &&
+    error?.scope !== "task"
+  );
 }
 
 function shouldShowRecovery(

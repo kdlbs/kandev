@@ -65,7 +65,11 @@ export function executeMoveFiles(
   const { sources, targetPath, treeState, setSelectedPaths, onRenameFile } = params;
   const tree = treeState.tree;
   if (!tree || !treeState.isCurrentTree()) return;
-  const targets = computeMoveTargets(tree, sources, targetPath).map((target) => ({
+  const directories = sources.filter((path) => findNodeByPath(tree, path)?.is_dir);
+  const moveRoots = sources.filter(
+    (path) => !directories.some((directory) => path.startsWith(`${directory}/`)),
+  );
+  const targets = computeMoveTargets(tree, moveRoots, targetPath).map((target) => ({
     ...target,
     node: findNodeByPath(tree, target.oldPath),
   }));

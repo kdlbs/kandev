@@ -136,6 +136,17 @@ func (m *MockRepository) ListAgentProfiles(ctx context.Context, agentID string) 
 	}
 	return []*models.AgentProfile{}, nil
 }
+func (m *MockRepository) ReorderAgentProfiles(context.Context, string, []string) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (m *MockRepository) GetAgentProfileOrderSnapshots(_ context.Context, agentIDs []string) (map[string]store.AgentProfileOrderSnapshot, error) {
+	result := make(map[string]store.AgentProfileOrderSnapshot, len(agentIDs))
+	for _, id := range agentIDs {
+		result[id] = store.AgentProfileOrderSnapshot{Profiles: []*models.AgentProfile{}, Revision: 0}
+	}
+	return result, nil
+}
 
 func (m *MockRepository) HasDeletedAgentProfiles(ctx context.Context, agentID string) (bool, error) {
 	if m.HasDeletedAgentProfilesFn != nil {

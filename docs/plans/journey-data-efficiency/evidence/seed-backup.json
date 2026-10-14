@@ -1,0 +1,7 @@
+{
+  "path": ".kandev/diagnostics/journey-data-efficiency/seed.db",
+  "bytes": 24141824,
+  "sha256": "cdf1c8d5849da54f30b4c03b8fbd6f4444726e5328974f3516bf60ce8c69f3d1",
+  "integrity_check": "ok",
+  "foreign_key_violations": 0
+}

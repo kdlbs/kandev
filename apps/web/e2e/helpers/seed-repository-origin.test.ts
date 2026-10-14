@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -62,6 +62,26 @@ describe("seed origin ownership", () => {
         encoding: "utf8",
       });
       expect(tracked).toBe(local);
+    });
+  });
+
+  it("prunes missing worktree metadata before fetching and preserves live worktrees", () => {
+    withSeedRepository((seed) => {
+      const git = (args: string[]) =>
+        execFileSync("git", ["-C", seed.repositoryPath, ...args], { encoding: "utf8" });
+      const stale = path.join(path.dirname(seed.repositoryPath), "stale");
+      const live = path.join(path.dirname(seed.repositoryPath), "live");
+      git(["worktree", "add", "--detach", stale]);
+      git(["worktree", "add", "--detach", live]);
+      rmSync(stale, { recursive: true });
+      writeFileSync(
+        path.join(seed.repositoryPath, ".git", "worktrees", "stale", "HEAD"),
+        "a".repeat(40) + "\n",
+      );
+      expect(() => restoreSeedRepositoryOrigin(seed)).not.toThrow();
+      expect(git(["worktree", "list", "--porcelain"])).not.toContain(stale);
+      expect(git(["worktree", "list", "--porcelain"])).toContain(live);
+      expect(existsSync(path.join(live, ".git"))).toBe(true);
     });
   });
 

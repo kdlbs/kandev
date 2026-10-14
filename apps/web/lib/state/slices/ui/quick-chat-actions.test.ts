@@ -348,6 +348,22 @@ describe("quick terminal tabs", () => {
     });
   });
 
+  it("invalidates older workspace snapshots when terminals start, bind, or close", () => {
+    const store = makeStore();
+    const actions = withTerminalActions(store);
+    const revision = () => store.getState().quickChat.syncRevisionByWorkspace[WORKSPACE_A] ?? 0;
+    let captured = revision();
+    const tabId = actions.createQuickTerminal(WORKSPACE_A);
+    expect(revision()).toBeGreaterThan(captured);
+    captured = revision();
+    actions.updateQuickTerminal(tabId, { sessionId: "pty-1", status: "running" });
+    expect(revision()).toBeGreaterThan(captured);
+    captured = revision();
+    actions.removeQuickTerminal(tabId);
+    expect(revision()).toBeGreaterThan(captured);
+    expect(store.getState().quickChat.syncRevisionByWorkspace[WORKSPACE_B] ?? 0).toBe(0);
+  });
+
   it("updates lifecycle state without changing terminal identity", () => {
     const store = makeStore();
     const actions = withTerminalActions(store);

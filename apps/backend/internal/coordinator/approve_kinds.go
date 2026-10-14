@@ -17,7 +17,7 @@ import (
 // re-runs Execute on a claim that has gone stale (see settleStaleKind).
 func (s *Service) approveKind(ctx context.Context, exec KindExecutor, proposal *Proposal, edits ApproveProposalRequest) (*Proposal, error) {
 	switch proposal.Status {
-	case ProposalStatusApproved, ProposalStatusRejected:
+	case ProposalStatusApproved, ProposalStatusRejected, ProposalStatusReturned:
 		return nil, &ProposalConflictError{Proposal: proposal}
 	case ProposalStatusApproving:
 		return s.approveApprovingKind(ctx, proposal, edits)
@@ -132,9 +132,16 @@ func (s *Service) completeKind(ctx context.Context, exec KindExecutor, proposal 
 	if !matched {
 		return s.fencedResult(ctx, proposal)
 	}
+	if proposal.Kind == ProposalKindImprovement {
+		countImprovement(improvementApproved)
+	}
 	s.publishCoordinatorUpdated(ctx, proposal.WorkspaceID, proposal.CoordinatorID)
 	s.logger.Info("proposal approved", zap.String("proposal_id", proposal.ID), zap.String("kind", proposal.Kind), zap.String("task_id", target))
-	return s.store.GetProposal(ctx, proposal.WorkspaceID, proposal.CoordinatorID, proposal.ID, s.phase2)
+	approved, err := s.store.GetProposal(ctx, proposal.WorkspaceID, proposal.CoordinatorID, proposal.ID, s.phase2)
+	if err == nil {
+		s.notifyApproved(ctx, approved)
+	}
+	return approved, err
 }
 
 func (s *Service) failKind(ctx context.Context, exec KindExecutor, proposal *Proposal, token, text string) (*Proposal, error) {
@@ -174,7 +181,7 @@ func (s *Service) settleStaleKind(ctx context.Context, current *Proposal, exec K
 		return nil, err
 	}
 	if !matched {
-		latest, err := s.store.GetProposal(ctx, current.WorkspaceID, current.CoordinatorID, current.ID, true)
+		latest, err := s.store.GetProposalAnyKind(ctx, current.WorkspaceID, current.CoordinatorID, current.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -182,7 +189,7 @@ func (s *Service) settleStaleKind(ctx context.Context, current *Proposal, exec K
 	}
 	s.publishCoordinatorUpdated(ctx, current.WorkspaceID, current.CoordinatorID)
 	s.logger.Info("stale claim settled outcome_unknown", zap.String("proposal_id", current.ID), zap.String("kind", current.Kind))
-	return s.store.GetProposal(ctx, current.WorkspaceID, current.CoordinatorID, current.ID, true)
+	return s.store.GetProposalAnyKind(ctx, current.WorkspaceID, current.CoordinatorID, current.ID)
 }
 
 func errUnknownStatus(p *Proposal) error {

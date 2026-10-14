@@ -64,6 +64,7 @@ func DefaultSidebarLayout() SidebarLayout {
 			{ID: "home", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "home"},
 			{ID: "inbox", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "inbox"},
 			{ID: "needs-you-inbox", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "needs_you_inbox"},
+			{ID: "coordinators", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "coordinators"},
 			{ID: "automations", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "automations"},
 			{ID: "canvases", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "canvases"},
 			{ID: "integrations", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "integrations"},

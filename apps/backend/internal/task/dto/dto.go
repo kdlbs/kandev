@@ -1,7 +1,9 @@
 package dto
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"time"
 
@@ -387,6 +389,19 @@ type WorkspaceRecoveryDTO struct {
 	ReasonCode          string     `json:"reason_code,omitempty"`
 }
 
+// SessionRecoveryBlockDTO contains the path-free identity and cause needed to
+// present an open operator recovery block.
+type SessionRecoveryBlockDTO struct {
+	ID                   string    `json:"id"`
+	IncarnationID        string    `json:"incarnation_id"`
+	ExpectedGeneration   int64     `json:"expected_generation"`
+	Reason               string    `json:"reason"`
+	ConsumerReference    string    `json:"consumer_reference,omitempty"`
+	DeliverySubmissionID string    `json:"delivery_submission_id,omitempty"`
+	DeliveryStreamID     string    `json:"delivery_stream_id,omitempty"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
 type TaskSessionDTO struct {
 	ID                 string `json:"id"`
 	TaskID             string `json:"task_id"`
@@ -434,6 +449,9 @@ type TaskSessionDTO struct {
 	ReviewStatus      models.ReviewStatus   `json:"review_status,omitempty"`
 	TaskEnvironmentID string                `json:"task_environment_id,omitempty"`
 	WorkspaceRecovery *WorkspaceRecoveryDTO `json:"workspace_recovery"`
+	// SessionRecoveryBlocks is always serialized so a resolved block clears a
+	// prior client projection.
+	SessionRecoveryBlocks []SessionRecoveryBlockDTO `json:"session_recovery_blocks"`
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate so a
 	// fresh page-load / second tab sees live background work without waiting for
 	// a WS flip (ADR-0049). Generating is emitted only for RUNNING sessions;
@@ -496,6 +514,61 @@ func EnrichWorkspaceRecovery(
 		return
 	}
 	session.WorkspaceRecovery = WorkspaceRecoveryFromOperation(operation, runnerLive)
+}
+
+// SessionRecoveryBlockProjectionReader provides the current generation and its
+// open recovery causes to the session serialization boundary.
+type SessionRecoveryBlockProjectionReader interface {
+	GetCurrentHarnessSessionGeneration(context.Context, string, string) (*models.HarnessSessionGeneration, error)
+	ListOpenSessionRecoveryBlocks(context.Context, string, string, int64) ([]*models.SessionRecoveryBlock, error)
+}
+
+// EnrichSessionRecoveryBlocks projects blocks only for the current persisted
+// native-session generation. A missing generation cannot inherit an old one.
+func EnrichSessionRecoveryBlocks(
+	ctx context.Context,
+	result *TaskSessionDTO,
+	session *models.TaskSession,
+	reader SessionRecoveryBlockProjectionReader,
+) error {
+	if result == nil {
+		return nil
+	}
+	result.SessionRecoveryBlocks = []SessionRecoveryBlockDTO{}
+	if session == nil || reader == nil {
+		return nil
+	}
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	generation, err := reader.GetCurrentHarnessSessionGeneration(ctx, session.ID, incarnationID)
+	if errors.Is(err, models.ErrTaskSessionNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if generation == nil || generation.Generation < 1 {
+		return nil
+	}
+	blocks, err := reader.ListOpenSessionRecoveryBlocks(ctx, session.ID, incarnationID, generation.Generation)
+	if err != nil {
+		return err
+	}
+	for _, block := range blocks {
+		if block == nil || block.State != models.RecoveryBlockOpen {
+			continue
+		}
+		result.SessionRecoveryBlocks = append(result.SessionRecoveryBlocks, SessionRecoveryBlockDTO{
+			ID: block.ID, IncarnationID: block.IncarnationID,
+			ExpectedGeneration: block.ExpectedGeneration, Reason: block.Reason,
+			ConsumerReference:    block.ConsumerReference,
+			DeliverySubmissionID: block.DeliverySubmissionID,
+			DeliveryStreamID:     block.DeliveryStreamID, UpdatedAt: block.UpdatedAt,
+		})
+	}
+	return nil
 }
 
 // WorkspaceRecoveryFromOperation builds the public path-free progress shape.
@@ -630,10 +703,17 @@ type WorkflowSnapshotDTO struct {
 }
 
 type ListMessagesResponse struct {
-	Messages []*v1.Message `json:"messages"`
-	Total    int           `json:"total"`
-	HasMore  bool          `json:"has_more"`
-	Cursor   string        `json:"cursor"`
+	Messages     []*v1.Message           `json:"messages"`
+	Total        int                     `json:"total"`
+	HasMore      bool                    `json:"has_more"`
+	Cursor       string                  `json:"cursor"`
+	Turns        []TurnDTO               `json:"turns,omitempty"`
+	TurnCoverage *MessageTurnCoverageDTO `json:"turn_coverage,omitempty"`
+}
+
+type MessageTurnCoverageDTO struct {
+	MessageIDs   []string `json:"message_ids"`
+	ActiveTurnID *string  `json:"active_turn_id"`
 }
 
 // MessageSearchHit is a lightweight match returned by a session message search.
@@ -1166,6 +1246,12 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	return result
 }
 
+// FromTaskSessionSummaryObservation converts a bounded repository projection
+// to the existing compact session DTO without widening it with rich fields.
+func FromTaskSessionSummaryObservation(observation *models.TaskSessionSummaryObservation) TaskSessionSummaryDTO {
+	return FromTaskSessionSummary(observation.ToTaskSession())
+}
+
 func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 	result := TaskSessionDTO{
 		ID:                   session.ID,
@@ -1197,15 +1283,16 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		CompletedAt:          session.CompletedAt,
 		UpdatedAt:            session.UpdatedAt,
 		// Workflow fields
-		IsPrimary:         session.IsPrimary,
-		IsPassthrough:     session.IsPassthrough,
-		ReviewStatus:      session.ReviewStatus,
-		TaskEnvironmentID: session.TaskEnvironmentID,
-		LastReadMessageID: session.LastReadMessageID,
-		CostSubcents:      session.CostSubcents,
-		TokensIn:          session.TokensIn,
-		TokensCachedIn:    session.TokensCachedIn,
-		TokensOut:         session.TokensOut,
+		IsPrimary:             session.IsPrimary,
+		IsPassthrough:         session.IsPassthrough,
+		ReviewStatus:          session.ReviewStatus,
+		TaskEnvironmentID:     session.TaskEnvironmentID,
+		SessionRecoveryBlocks: []SessionRecoveryBlockDTO{},
+		LastReadMessageID:     session.LastReadMessageID,
+		CostSubcents:          session.CostSubcents,
+		TokensIn:              session.TokensIn,
+		TokensCachedIn:        session.TokensCachedIn,
+		TokensOut:             session.TokensOut,
 	}
 	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID

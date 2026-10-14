@@ -365,6 +365,8 @@ credentials or storage are missing, recovery fails rather than silently creating
 an empty replacement workspace. A software update cannot restore resources that
 were already deleted.
 
+If Resume cannot stop the previous runtime, verify that the Kubernetes API and the Pod's node/kubelet are reachable, including the API server's connection to the kubelet used for port forwarding. Restore executor connectivity and retry **Resume** in the existing session. Kandev preserves the registration when cleanup is unconfirmed; a retained registration is not evidence of a second live agent.
+
 Task archive/delete cleanup is destructive after all attached sessions are settled. Deleting or stopping an individual session does not delete the task Pod or its managed claim. Before deletion, Kandev verifies the recorded namespace, name, UID, and complete standard plus `kandev.ai/*` ownership-label set. It then deletes the exact Pod with UID/resource-version preconditions and deletes a PVC only when inventory proves Kandev created that managed claim. Existing claims are never deleted. A missing object is idempotent; an inventory read error, same-name replacement, UID mismatch, missing label, changed label, extra `kandev.ai/*` label, or mismatched create nonce fails closed without deleting the ambiguous object.
 
 Kandev blocks deleting an executor, or changing an executor into or out of Kubernetes, while runtime inventory still refers to it. Archive or delete the owning tasks to finish resource cleanup first. Removing the last session alone retains the task Pod. Profile deletion does not rewrite or destroy a retained workload because recovery owns the recorded profile ID and snapshot.

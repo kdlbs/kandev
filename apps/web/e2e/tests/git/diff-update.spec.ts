@@ -15,7 +15,7 @@ import {
 } from "./diff-update-helpers";
 
 test.describe("Diff update on file change", () => {
-  test.describe.configure({ retries: 2, timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000 });
 
   test("shows initial diff with FIRST_MODIFICATION", async ({ testPage, apiClient, seedData }) => {
     await seedDiffUpdateTask(testPage, apiClient, seedData);
@@ -272,7 +272,7 @@ test.describe("File editor auto-update on file change", () => {
 });
 
 test.describe("Multi-file editor + diff auto-update", () => {
-  test.describe.configure({ retries: 2, timeout: 180_000 });
+  test.describe.configure({ timeout: 180_000 });
 
   test("diff panel auto-updates across all 3 files during a single multi-file streaming turn", async ({
     testPage,
@@ -409,7 +409,7 @@ test.describe("User-save then diff view (colleague repro)", () => {
 });
 
 test.describe("Untracked file diff update", () => {
-  test.describe.configure({ retries: 2, timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000 });
 
   test("untracked file diff updates when modified", async ({ testPage, apiClient, seedData }) => {
     // This test verifies that modifying an untracked file triggers a git status update

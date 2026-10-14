@@ -74,6 +74,7 @@ func (h *stallSubscriber) handle(ctx context.Context, event *bus.Event) error {
 				zap.Error(err))
 		}
 	}
+	h.svc.runStallWakeHook(ctx, stall.WorkspaceID, stall.TaskID)
 	return nil
 }
 

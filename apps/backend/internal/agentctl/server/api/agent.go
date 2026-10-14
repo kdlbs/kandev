@@ -191,6 +191,17 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 		_ = conn.Close()
 		return
 	}
+	if s.procMgr == nil {
+		_ = conn.Close()
+		return
+	}
+	ownedCtx, release, err := s.procMgr.BeginOwnedOperation(c.Request.Context())
+	if err != nil {
+		s.logger.Debug("agent stream rejected during instance teardown", zap.Error(err))
+		_ = conn.Close()
+		return
+	}
+	defer release()
 
 	// This is the agentctl-local "instance is attached" signal
 	// (AC-EXECUTORS-SURVIVAL-001.5/.6): the permission-request notification
@@ -199,8 +210,16 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	s.procMgr.MarkAttached()
 	defer s.procMgr.MarkDetached()
 
-	ctx, cancel := context.WithCancel(c.Request.Context())
+	ctx, cancel := context.WithCancel(ownedCtx)
 	defer cancel()
+	stopOwnerCancel := context.AfterFunc(ownedCtx, cancel)
+	defer stopOwnerCancel()
+	stopConnClose := context.AfterFunc(ctx, func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			s.logger.Debug("failed to close agent stream during shutdown", zap.Error(closeErr))
+		}
+	})
+	defer stopConnClose()
 	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: terminate this stream if the
 	// control server's credential rotates while it is open, so a prior
 	// holder cannot keep consuming an instance's events past the moment its
@@ -248,8 +267,12 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 
 // runAgentStreamReader reads MCP responses and agent operation requests from the backend connection.
 func (s *Server) runAgentStreamReader(ctx context.Context, conn *websocket.Conn, writeMessage func([]byte) error, cancel context.CancelFunc, wg *sync.WaitGroup) {
-	defer wg.Done()
-	defer cancel()
+	var requestWG sync.WaitGroup
+	defer func() {
+		cancel()
+		requestWG.Wait()
+		wg.Done()
+	}()
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
@@ -266,7 +289,9 @@ func (s *Server) runAgentStreamReader(ctx context.Context, conn *websocket.Conn,
 			continue
 		}
 		if msg.Type == ws.MessageTypeRequest {
+			requestWG.Add(1)
 			go func(reqMsg ws.Message) {
+				defer requestWG.Done()
 				resp := s.handleAgentStreamRequest(ctx, &reqMsg)
 				if resp == nil {
 					return
@@ -1329,12 +1354,18 @@ func (s *Server) handleWSStderr(_ context.Context, msg *ws.Message) *ws.Message 
 	return resp
 }
 
+// probeBackgroundWorkloads is a seam over probe.ProbeBackgroundWorkloads so
+// tests can assert handleWSBackgroundProbe forwards req.SessionID without
+// exercising a real process table.
+var probeBackgroundWorkloads = probe.ProbeBackgroundWorkloads
+
 // handleWSBackgroundProbe implements agent.background.probe (spec
 // docs/specs/disambiguate-waiting/spec.md, §"Probe transport"). It samples
 // the running agent process's transitive descendant set for a member
-// started at-or-after the turn start recorded for req.SessionID (D3/D5).
-// Anything short of a clean sample — no adapter, an adapter that doesn't
-// record turn starts, or no recorded turn start for this session — reports
+// started at-or-after the active provider session's recorded turn start
+// (D3/D5). Anything short of a clean sample — no adapter, an adapter that
+// doesn't record turn starts, a request for another Kandev session, or no
+// recorded turn start for the active provider session — reports
 // ResultUnknown rather than an error, since "unknown" is itself one of the
 // three valid response literals (AC-45); only a fully unavailable agent
 // process is a transport-level error, consistent with the other handlers
@@ -1358,13 +1389,19 @@ func (s *Server) handleWSBackgroundProbe(_ context.Context, msg *ws.Message) *ws
 		return resp
 	}
 
-	turnStart, ok := recorder.RecordedTurnStart(req.SessionID)
+	if req.SessionID == "" || req.SessionID != s.cfg.SessionID {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, BackgroundProbeResponse{Result: string(probe.ResultUnknown)})
+		return resp
+	}
+
+	providerSessionID := agentAdapter.GetSessionID()
+	turnStart, ok := recorder.RecordedTurnStart(providerSessionID)
 	if !ok {
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, BackgroundProbeResponse{Result: string(probe.ResultUnknown)})
 		return resp
 	}
 
-	result, err := probe.ProbeBackgroundWorkloads(s.procMgr.AgentPID(), turnStart)
+	result, err := probeBackgroundWorkloads(s.procMgr.AgentPID(), turnStart, req.SessionID)
 	if err != nil {
 		s.logger.Warn("background probe failed", zap.String("session_id", req.SessionID), zap.Error(err))
 	}

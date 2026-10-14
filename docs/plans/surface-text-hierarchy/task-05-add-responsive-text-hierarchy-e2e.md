@@ -158,3 +158,18 @@ E2E_PORT_OFFSET=0 pnpm --dir apps/web e2e:run --host --no-build --shards 1 --pro
 ```
 
 Fresh hosted verification remains pending.
+
+### Tasks dismissal fixture ownership
+
+Retry PR head `6cf6050a` passes the frontend drawer close/reopen regression
+and the phone shared-context scenario, but its mobile Delete text-hierarchy
+case fails in all four attempts because it queries the Tasks drawer title
+after `surfaceAction` has closed Tasks and opened the separate rich Delete
+AlertDialog. The trace confirms the AlertDialog is visible before that
+obsolete drawer query. The fixture keeps the exact Drawer title visibility
+and balanced-text assertions while Tasks is open, before selecting Delete.
+It additionally asserts that the dismissed Tasks portal is detached while
+Delete is visible. All Delete geometry, typography, scroll, action hitboxes,
+consent, Cancel/task survival, deletion assertions and original timeouts remain
+unchanged. This fixture correction awaits full hosted E2E verification; the
+historical local GREEN results above are not claims for this head.

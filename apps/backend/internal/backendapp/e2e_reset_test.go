@@ -18,13 +18,18 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 type e2eResetTaskDeleterStub struct {
-	taskID  string
-	options taskservice.DeleteTaskOptions
+	taskID   string
+	options  taskservice.DeleteTaskOptions
+	calls    int
+	errors   []error
+	failure  error
+	onDelete func()
 }
 
 type e2eAttachTaskAuthorizerStub struct {
@@ -44,7 +49,52 @@ func (s *e2eResetTaskDeleterStub) DeleteTaskWithOptions(
 ) error {
 	s.taskID = taskID
 	s.options = options
-	return nil
+	s.calls++
+	if s.onDelete != nil {
+		s.onDelete()
+	}
+	if s.calls <= len(s.errors) {
+		return s.errors[s.calls-1]
+	}
+	return s.failure
+}
+
+func TestDeleteTaskForE2EResetWaitsForSessionTransfer(t *testing.T) {
+	deleter := &e2eResetTaskDeleterStub{
+		errors: []error{messagequeue.ErrSessionTransferInProgress, messagequeue.ErrSessionTransferInProgress},
+	}
+	if err := deleteTaskForE2EReset(context.Background(), deleter, "task-1"); err != nil {
+		t.Fatalf("deleteTaskForE2EReset: %v", err)
+	}
+	if deleter.calls != 3 {
+		t.Fatalf("delete calls = %d, want 3", deleter.calls)
+	}
+	if !deleter.options.DiscardWorktreeChanges {
+		t.Fatal("settled deletion must still discard disposable worktree changes")
+	}
+}
+
+func TestDeleteTaskForE2EResetPreservesOtherErrors(t *testing.T) {
+	failure := errors.New("deletion unavailable")
+	deleter := &e2eResetTaskDeleterStub{failure: failure}
+	if err := deleteTaskForE2EReset(context.Background(), deleter, "task-1"); !errors.Is(err, failure) {
+		t.Fatalf("delete error = %v, want %v", err, failure)
+	}
+	if deleter.calls != 1 {
+		t.Fatalf("delete calls = %d, want 1", deleter.calls)
+	}
+}
+
+func TestDeleteTaskForE2EResetHonorsCancellationDuringTransfer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	deleter := &e2eResetTaskDeleterStub{failure: messagequeue.ErrSessionTransferInProgress, onDelete: cancel}
+	if err := deleteTaskForE2EReset(ctx, deleter, "task-1"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("delete error = %v, want cancellation", err)
+	}
+	if deleter.calls != 1 {
+		t.Fatalf("delete calls = %d, want 1 before cancellation", deleter.calls)
+	}
 }
 
 func TestDeleteTaskForE2EResetDiscardsWorktreeChanges(t *testing.T) {

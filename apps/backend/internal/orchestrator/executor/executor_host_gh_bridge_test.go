@@ -6,6 +6,7 @@ import (
 	"os"
 	osExec "os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,27 +23,14 @@ import (
 )
 
 func TestExecutorHostGHBridgeCredentialFill(t *testing.T) {
-	ghPath := filepath.Join(t.TempDir(), "host tools", "gh")
-	if err := os.MkdirAll(filepath.Dir(ghPath), 0o700); err != nil {
-		t.Fatalf("create fake gh directory: %v", err)
-	}
-	const ghScript = `#!/bin/sh
-if [ "$1" = "auth" ] && [ "$2" = "token" ]; then
-  exit 0
-fi
-if [ "$1" = "auth" ] && [ "$2" = "git-credential" ]; then
-  cat >/dev/null
-  printf 'username=x-access-token\npassword=host-token\n'
-  exit 0
-fi
-exit 2
-`
-	if err := os.WriteFile(ghPath, []byte(ghScript), 0o700); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
+	isolateHostCredentialEnvironment(t)
+	ghPath := writeHostGHFake(t, filepath.Join(t.TempDir(), "host tools"))
 	t.Setenv("PATH", filepath.Dir(ghPath)+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	executor.SetHostGitHubCredentialProbe(func(context.Context, string, string, map[string]string) error {
+		return nil
+	})
 	executor.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
 		policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor},
 	})
@@ -103,27 +91,14 @@ exit 2
 }
 
 func TestExecutorHostGHBridgeNoninteractiveExecution(t *testing.T) {
-	ghPath := filepath.Join(t.TempDir(), "host tools", "gh")
-	if err := os.MkdirAll(filepath.Dir(ghPath), 0o700); err != nil {
-		t.Fatalf("create fake gh directory: %v", err)
-	}
-	const ghScript = `#!/bin/sh
-if [ "$1" = "auth" ] && [ "$2" = "token" ]; then
-  exit 0
-fi
-if [ "$1" = "auth" ] && [ "$2" = "git-credential" ]; then
-  cat >/dev/null
-  printf 'username=x-access-token\npassword=host-token\n'
-  exit 0
-fi
-exit 2
-`
-	if err := os.WriteFile(ghPath, []byte(ghScript), 0o700); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
+	isolateHostCredentialEnvironment(t)
+	ghPath := writeHostGHFake(t, filepath.Join(t.TempDir(), "host tools"))
 	t.Setenv("PATH", filepath.Dir(ghPath)+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	executor.SetHostGitHubCredentialProbe(func(context.Context, string, string, map[string]string) error {
+		return nil
+	})
 	executor.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
 		policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor},
 	})
@@ -158,6 +133,7 @@ exit 2
 }
 
 func TestExecutorHostGHBridgeRecoveryAfterUnavailableProbe(t *testing.T) {
+	isolateHostCredentialEnvironment(t)
 	initialPath := t.TempDir()
 	t.Setenv("PATH", initialPath)
 	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
@@ -173,13 +149,7 @@ func TestExecutorHostGHBridgeRecoveryAfterUnavailableProbe(t *testing.T) {
 		t.Fatalf("unavailable probe installed a host helper: %#v", request.Env)
 	}
 
-	ghPath := filepath.Join(t.TempDir(), "host tools", "gh")
-	if err := os.MkdirAll(filepath.Dir(ghPath), 0o700); err != nil {
-		t.Fatalf("create recovered gh directory: %v", err)
-	}
-	if err := os.WriteFile(ghPath, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatalf("write recovered gh: %v", err)
-	}
+	ghPath := writeHostGHFake(t, filepath.Join(t.TempDir(), "recovered host tools"))
 	t.Setenv("PATH", filepath.Dir(ghPath)+string(os.PathListSeparator)+initialPath)
 	if err := executor.configureGitCredentialBrokerForRepositories(context.Background(), request, repositories); err != nil {
 		t.Fatalf("recovered probe configuration: %v", err)
@@ -857,15 +827,53 @@ func executorHostGHBridgeRepository(id, host string) *repoInfo {
 	}
 }
 
-func setupHostGHExecutable(t *testing.T) string {
+// isolateHostCredentialEnvironment redirects every host credential source the
+// test process and its git children could read into a fresh temporary home.
+func isolateHostCredentialEnvironment(t *testing.T) {
 	t.Helper()
-	ghPath := filepath.Join(t.TempDir(), "host tools", "gh")
-	if err := os.MkdirAll(filepath.Dir(ghPath), 0o700); err != nil {
+	home := t.TempDir()
+	globalConfig := filepath.Join(home, "empty-gitconfig")
+	if err := os.WriteFile(globalConfig, nil, 0o600); err != nil {
+		t.Fatalf("write empty global gitconfig: %v", err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	t.Setenv("GIT_CONFIG_GLOBAL", globalConfig)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+}
+
+// writeHostGHFake writes a fake gh that both exec.LookPath and Git's credential
+// helper can invoke on the host platform, so no real gh is ever resolved.
+func writeHostGHFake(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("create fake gh directory: %v", err)
 	}
-	if err := os.WriteFile(ghPath, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if runtime.GOOS == "windows" {
+		return writeHostGHFakeExecutable(t, dir)
+	}
+	ghPath := filepath.Join(dir, "gh")
+	const script = "#!/bin/sh\n" +
+		"if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"token\" ]; then\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"git-credential\" ]; then\n" +
+		"  cat >/dev/null\n" +
+		"  printf 'username=x-access-token\\npassword=host-token\\n'\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"exit 2\n"
+	if err := os.WriteFile(ghPath, []byte(script), 0o700); err != nil {
 		t.Fatalf("write fake gh: %v", err)
 	}
+	return ghPath
+}
+
+func setupHostGHExecutable(t *testing.T) string {
+	t.Helper()
+	isolateHostCredentialEnvironment(t)
+	ghPath := writeHostGHFake(t, filepath.Join(t.TempDir(), "host tools"))
 	t.Setenv("PATH", filepath.Dir(ghPath)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return ghPath
 }
@@ -890,7 +898,15 @@ func isolatedGitEnvironment(t *testing.T, overrides map[string]string) []string 
 		}
 		envMap[key] = value
 	}
-	envMap["HOME"] = filepath.Join(t.TempDir(), "home")
+	home := t.TempDir()
+	globalConfig := filepath.Join(home, "empty-gitconfig")
+	if err := os.WriteFile(globalConfig, nil, 0o600); err != nil {
+		t.Fatalf("write empty global gitconfig: %v", err)
+	}
+	envMap["HOME"] = home
+	envMap["USERPROFILE"] = home
+	envMap["XDG_CONFIG_HOME"] = filepath.Join(home, "xdg")
+	envMap["GIT_CONFIG_GLOBAL"] = globalConfig
 	envMap["PATH"] = "/usr/bin:/bin"
 	envMap["GIT_CONFIG_NOSYSTEM"] = "1"
 	for key, value := range overrides {

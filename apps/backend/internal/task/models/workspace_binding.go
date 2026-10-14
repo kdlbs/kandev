@@ -16,6 +16,21 @@ var (
 
 const WorkspaceReuseUnsupportedMessage = "the selected executor cannot reuse another task's workspace; create a task with workspace_mode=\"new_workspace\""
 
+// WorkspacePreparingError is ErrWorkspacePreparing for a binding that lost the
+// workspace election. EnvironmentID names the environment being materialized.
+// In a shared workspace group it belongs to another member task, so a caller
+// that wants to wait must use this ID rather than look up its own task.
+type WorkspacePreparingError struct {
+	EnvironmentID string
+	Reason        string
+}
+
+func (e *WorkspacePreparingError) Error() string {
+	return fmt.Sprintf("%s: %s", ErrWorkspacePreparing, e.Reason)
+}
+
+func (e *WorkspacePreparingError) Unwrap() error { return ErrWorkspacePreparing }
+
 // DescribeInheritedEnvironmentUnavailable builds the reason clause for an
 // inherit_parent task whose inherited task_environments row cannot be used
 // (missing, or belonging to an archived parent). It is shared by

@@ -5,6 +5,7 @@ import type {
   SidebarShortcutTargetApi,
 } from "@/lib/types/http-user-settings";
 import type { NavSection } from "@/lib/navigation/types";
+import { BUILTIN_LAYOUT_NODES, type BuiltinLayoutNodeId } from "./builtin-layout-nodes";
 
 export const SIDEBAR_LAYOUT_VERSION = 1;
 export const SIDEBAR_LAYOUT_LIMITS = {
@@ -39,56 +40,20 @@ export type SidebarLayout = {
   unsupportedVersion?: boolean;
 };
 
-export const DEFAULT_SIDEBAR_NODE_IDS = [
-  "new-task",
-  "home",
-  "inbox",
-  "needs-you-inbox",
-  "automations",
-  "canvases",
-  "integrations",
-] as const;
+export const DEFAULT_SIDEBAR_NODE_IDS = BUILTIN_LAYOUT_NODES.map((node) => node.id);
 
-export type SidebarBuiltinNodeId = (typeof DEFAULT_SIDEBAR_NODE_IDS)[number];
+export type SidebarBuiltinNodeId = BuiltinLayoutNodeId;
 
 export function defaultSidebarLayout(): SidebarLayout {
   return {
     version: SIDEBAR_LAYOUT_VERSION,
     revision: 0,
-    nodes: [
-      {
-        id: "new-task",
-        kind: "builtin",
-        visible: true,
-        destinationId: "new_task",
-      },
-      {
-        id: "home",
-        kind: "builtin",
-        visible: true,
-        destinationId: "home",
-      },
-      { id: "inbox", kind: "builtin", visible: true, destinationId: "inbox" },
-      { id: "needs-you-inbox", kind: "builtin", visible: true, destinationId: "needs_you_inbox" },
-      {
-        id: "automations",
-        kind: "builtin",
-        visible: true,
-        destinationId: "automations",
-      },
-      {
-        id: "canvases",
-        kind: "builtin",
-        visible: true,
-        destinationId: "canvases",
-      },
-      {
-        id: "integrations",
-        kind: "builtin",
-        visible: true,
-        destinationId: "integrations",
-      },
-    ],
+    nodes: BUILTIN_LAYOUT_NODES.map(({ id, destinationId }) => ({
+      id,
+      kind: "builtin",
+      visible: true,
+      destinationId,
+    })),
   };
 }
 
@@ -113,7 +78,7 @@ export function fromApiSidebarLayout(value: SidebarLayoutApi | null | undefined)
       ? { navigationExpanded: value.navigation_expanded }
       : {}),
     ...(value.unsupported_version ? { unsupportedVersion: true } : {}),
-    nodes: materializeInboxNodes(
+    nodes: materializeSidebarBuiltinNodes(
       value.nodes.map((node) => ({
         id: node.id,
         kind: node.kind,
@@ -144,6 +109,29 @@ export function materializeInboxNodes(nodes: SidebarLayoutNode[]): SidebarLayout
   const homeIndex = result.findIndex((node) => node.destinationId === "home");
   result.splice(homeIndex >= 0 ? homeIndex + 1 : result.length, 0, ...missing);
   return result;
+}
+
+export function materializeSidebarBuiltinNodes(nodes: SidebarLayoutNode[]): SidebarLayoutNode[] {
+  nodes = materializeInboxNodes(nodes);
+  if (nodes.some((node) => node.kind === "builtin" && node.destinationId === "coordinators")) {
+    return nodes;
+  }
+  const coordinator = BUILTIN_LAYOUT_NODES.find((node) => node.destinationId === "coordinators");
+  if (!coordinator) return nodes;
+  const usedIds = new Set(nodes.map((node) => node.id));
+  let id: string = coordinator.id;
+  for (let suffix = 1; usedIds.has(id); suffix += 1) {
+    id = `${coordinator.id}-${suffix}`;
+  }
+  const entry: SidebarLayoutNode = {
+    id,
+    kind: "builtin",
+    visible: true,
+    destinationId: coordinator.destinationId,
+  };
+  const automationsIndex = nodes.findIndex((node) => node.destinationId === "automations");
+  const index = automationsIndex < 0 ? nodes.length : automationsIndex;
+  return [...nodes.slice(0, index), entry, ...nodes.slice(index)];
 }
 
 export function toApiSidebarLayout(value: SidebarLayout): SidebarLayoutApi {

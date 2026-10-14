@@ -11,8 +11,14 @@ var (
 	ErrEntryOptionsRequireStepChange = errors.New("entry options require a workflow step change")
 	ErrEntryTargetUnavailable        = errors.New("workflow move entry target has no session or auto-start")
 	ErrEntryOptionsUnsupported       = errors.New("workflow move entry options unsupported")
-	ErrMoveConflict                  = errors.New("another workflow move is already pending")
-	ErrPermanentPendingMoveMismatch  = errors.New("pending workflow move is permanently invalid")
+	// ErrEntryTargetIsManual reports agent-facing entry options supplied for a
+	// manual target step: one that does not start work on entry (see
+	// models.StepRunsOnEntry). Such a step cannot receive a one-shot hand-off,
+	// so the caller must move without options and record the instruction
+	// elsewhere.
+	ErrEntryTargetIsManual          = errors.New("the target workflow step does not start an agent on entry; omit prompt/entry_options and record the instruction in the task description or plan")
+	ErrMoveConflict                 = errors.New("another workflow move is already pending")
+	ErrPermanentPendingMoveMismatch = errors.New("pending workflow move is permanently invalid")
 	// ErrPendingMoveActiveSession is transient: a deferred move must remain
 	// queued until every session other than its source has stopped running.
 	ErrPendingMoveActiveSession = errors.New("pending workflow move has another active session")

@@ -71,6 +71,34 @@ test.describe("Task List", () => {
     expect(rowBox?.height).toBeLessThan(70);
   });
 
+  test("rows show non-medium priority on first render", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.createTask(seedData.workspaceId, "Urgent list task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      priority: "critical",
+    });
+    await apiClient.createTask(seedData.workspaceId, "Ordinary list task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      priority: "medium",
+    });
+
+    await testPage.goto("/tasks");
+
+    const list = testPage.getByTestId("tasks-list");
+    const urgentRow = list.getByTestId("tasks-list-row").filter({ hasText: "Urgent list task" });
+    const ordinaryRow = list
+      .getByTestId("tasks-list-row")
+      .filter({ hasText: "Ordinary list task" });
+    await expect(urgentRow.getByRole("img", { name: /Critical/ })).toBeVisible();
+    await expect(ordinaryRow).toBeVisible();
+    await expect(ordinaryRow.getByTestId("tasks-list-row-priority")).toHaveCount(0);
+  });
+
   test("subtasks render under their parent with indentation", async ({
     testPage,
     apiClient,

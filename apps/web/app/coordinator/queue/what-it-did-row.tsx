@@ -104,6 +104,11 @@ function ActionCell({
         {text}
       </span>{" "}
       <TaskReference item={item} availability={availability} />
+      {item.unattended_turn_id && (
+        <div className="text-muted-foreground text-xs" data-testid="activity-unattended">
+          {t("coordinator:activityUnattended")}
+        </div>
+      )}
     </div>
   );
 }
@@ -157,7 +162,11 @@ function UndoControl({ item, now, canManage, busy, resolvePerson, onUndo }: Undo
       </Button>
     );
   }
-  if (item.action_class === "message" || item.action_class === "resume") {
+  if (
+    item.action_class === "message" ||
+    item.action_class === "resume" ||
+    item.outcome === "returned"
+  ) {
     return <span className="text-muted-foreground text-xs">{t("coordinator:activityNoUndo")}</span>;
   }
   return null;

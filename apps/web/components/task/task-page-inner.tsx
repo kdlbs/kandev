@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { PortForwardingManager } from "./port-forward-dialog";
 import { TaskTopBar } from "@/components/task/task-top-bar";
 import { TaskLayout } from "@/components/task/task-layout";
 import { DebugOverlay } from "@/components/debug-overlay";
@@ -541,70 +542,72 @@ export function TaskPageInner(props: TaskPageInnerProps) {
         isAgentctlReady={props.agentctlStatus.isReady}
         isArchived={taskProps.isArchived}
       >
-        <VcsDialogsProvider
-          sessionId={effectiveSessionId}
-          baseBranch={taskProps.baseBranch}
-          pullRequestBaseBranch={taskProps.pullRequestTarget}
-          pullRequestTargetsByRepository={taskProps.pullRequestTargetsByRepository}
-          taskTitle={taskProps.taskTitle}
-          displayBranch={merged.worktreeBranch}
-        >
-          <div
-            className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background"
-            style={hasPageLevelMobileFeedback ? PAGE_LEVEL_MOBILE_FEEDBACK_STYLE : undefined}
+        <PortForwardingManager sessionId={effectiveSessionId}>
+          <VcsDialogsProvider
+            sessionId={effectiveSessionId}
+            baseBranch={taskProps.baseBranch}
+            pullRequestBaseBranch={taskProps.pullRequestTarget}
+            pullRequestTargetsByRepository={taskProps.pullRequestTargetsByRepository}
+            taskTitle={taskProps.taskTitle}
+            displayBranch={merged.worktreeBranch}
           >
-            <TaskPageCommandSurfaces
-              taskProps={taskProps}
-              debugEntries={debugEntries}
-              merged={merged}
-              sessionId={effectiveSessionId}
-              isPassthrough={sessionPanel.isSessionPassthrough}
-              isArchived={archivedValue.isArchived}
-            />
-            <TaskPageDesktopTopBar
-              isMobile={isMobile}
-              topBarProps={topBarProps}
-              onMoveStart={clearTaskMoveError}
-              onMoveError={reportTaskMoveError}
-            />
-            <TaskPageEntryFeedback
-              taskMoveError={taskMoveError}
-              ensureSession={ensureSession}
-              workspaceId={task.workspace_id ?? null}
-            />
-            <TaskNavigationReadFeedback recovery={props.taskReadRecovery} />
-            <TaskArchivedProvider value={archivedValue}>
-              <TaskCommands task={task} />
-              <TaskLaunchErrorProvider
-                value={{
-                  taskId: task.id,
-                  workspaceId: task.workspace_id,
-                  statusSummary: task.status_summary,
-                  repositories: task.repositories,
-                  automaticRecovery: props.resumption,
-                  automaticRecoveryOwnerSessionId: automaticRecoveryOwnedByChat
-                    ? effectiveSessionId
-                    : null,
-                }}
-              >
-                <TaskPageRecoveryFeedback
-                  ownedByChat={automaticRecoveryOwnedByChat}
-                  taskId={task.id}
-                  sessionId={effectiveSessionId}
-                  resumption={props.resumption}
-                  bootstrapRecoveryError={bootstrapRecoveryError}
-                  workspaceId={task?.workspace_id ?? null}
-                  isPassthrough={sessionPanel.isSessionPassthrough}
-                />
-                <TaskPageLayoutFeedback
-                  layoutProps={layoutProps}
-                  isMobile={isMobile}
-                  hasPageLevelMobileFeedback={hasPageLevelMobileFeedback}
-                />
-              </TaskLaunchErrorProvider>
-            </TaskArchivedProvider>
-          </div>
-        </VcsDialogsProvider>
+            <div
+              className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background"
+              style={hasPageLevelMobileFeedback ? PAGE_LEVEL_MOBILE_FEEDBACK_STYLE : undefined}
+            >
+              <TaskPageCommandSurfaces
+                taskProps={taskProps}
+                debugEntries={debugEntries}
+                merged={merged}
+                sessionId={effectiveSessionId}
+                isPassthrough={sessionPanel.isSessionPassthrough}
+                isArchived={archivedValue.isArchived}
+              />
+              <TaskPageDesktopTopBar
+                isMobile={isMobile}
+                topBarProps={topBarProps}
+                onMoveStart={clearTaskMoveError}
+                onMoveError={reportTaskMoveError}
+              />
+              <TaskPageEntryFeedback
+                taskMoveError={taskMoveError}
+                ensureSession={ensureSession}
+                workspaceId={task.workspace_id ?? null}
+              />
+              <TaskNavigationReadFeedback recovery={props.taskReadRecovery} />
+              <TaskArchivedProvider value={archivedValue}>
+                <TaskCommands task={task} />
+                <TaskLaunchErrorProvider
+                  value={{
+                    taskId: task.id,
+                    workspaceId: task.workspace_id,
+                    statusSummary: task.status_summary,
+                    repositories: task.repositories,
+                    automaticRecovery: props.resumption,
+                    automaticRecoveryOwnerSessionId: automaticRecoveryOwnedByChat
+                      ? effectiveSessionId
+                      : null,
+                  }}
+                >
+                  <TaskPageRecoveryFeedback
+                    ownedByChat={automaticRecoveryOwnedByChat}
+                    taskId={task.id}
+                    sessionId={effectiveSessionId}
+                    resumption={props.resumption}
+                    bootstrapRecoveryError={bootstrapRecoveryError}
+                    workspaceId={task?.workspace_id ?? null}
+                    isPassthrough={sessionPanel.isSessionPassthrough}
+                  />
+                  <TaskPageLayoutFeedback
+                    layoutProps={layoutProps}
+                    isMobile={isMobile}
+                    hasPageLevelMobileFeedback={hasPageLevelMobileFeedback}
+                  />
+                </TaskLaunchErrorProvider>
+              </TaskArchivedProvider>
+            </div>
+          </VcsDialogsProvider>
+        </PortForwardingManager>
       </PortForwardingVisibilityProvider>
     </TooltipProvider>
   );

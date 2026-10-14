@@ -55,7 +55,17 @@ const (
 	CodeResumeCorrupted             Code = "resume_corrupted"
 	CodeAgentTransportLost          Code = "agent_transport_lost"
 	CodeProviderResourceExhausted   Code = "provider_resource_exhausted"
+	// CodeAccountBlocked is a provider account restriction. Retrying cannot
+	// recover it and repeated requests can extend it, so routing holds the
+	// failing execution profile until its owner releases it.
+	CodeAccountBlocked Code = "account_blocked"
 )
+
+// HoldsUntilRelease reports whether a code suspends its execution profile
+// without expiry or probe, until an explicit owner release.
+func HoldsUntilRelease(code Code) bool {
+	return code == CodeAccountBlocked
+}
 
 // RemediationStartFreshSession is the symbolic RemediationPath value for
 // CodeResumeCorrupted. Unlike CodeNpxCacheCorrupted (whose RemediationPath is
@@ -136,7 +146,7 @@ func ClassForCode(code Code) Class {
 		CodeModelCapacity, CodeRateLimited, CodeAgentTransportLost, CodeProviderResourceExhausted:
 		return ClassTransient
 	case CodeAuthRequired, CodeMissingCredentials, CodeSubscriptionRequired,
-		CodeQuotaLimited, CodeModelUnavailable, CodeProviderNotConfigured:
+		CodeQuotaLimited, CodeModelUnavailable, CodeProviderNotConfigured, CodeAccountBlocked:
 		return ClassHard
 	default:
 		return ClassUnclassified
@@ -363,6 +373,12 @@ func applyInvariants(e *Error) *Error {
 	case CodeProviderUnavailable, CodeUnknownProvider:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
+	case CodeAccountBlocked:
+		// The owner resolves the restriction with the provider. Another
+		// candidate may serve the work, but the same account must not retry.
+		e.AutoRetryable = false
+		e.FallbackAllowed = true
+		e.UserAction = false
 	case CodeProviderOverloaded:
 		// 529 Overloaded is a transient, server-side condition. Retrying the
 		// same provider after a short backoff is the right move; falling back

@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-06
-updated: 2026-09-30
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -47,6 +47,10 @@ the bounded task-status projection and not the full pull-request record.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.23:** The existing phone PR drawer shall make the same long summary reachable through internal scrolling. Its fixed header and final entry shall remain inside the viewport without document horizontal overflow.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.24:** The desktop tooltip description shall retain the rendered PR identities and status details. Its keyboard-focusable scroll region shall have a localized accessible name.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.25:** Keyboard focus on the desktop scroll region shall have a visible focus indicator.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.26:** A mouse shall remain over a GitHub task PR indicator for 500 ms before its summary opens. Leaving before that interval shall cancel disclosure. Each subsequent entry, including entry onto another indicator, shall require the full interval.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.27:** Visible keyboard focus shall open the summary immediately. Touch activation shall open the existing drawer without a hover delay. An open summary shall retain pointer transfer, keyboard scrolling, and Escape dismissal.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.28:** Passing over an indicator without opening its summary shall not load its stored PR details. Deliberate disclosure shall retain loading, retry, and cache behavior.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.29:** The Automation section shall list only open PRs with auto-fix or auto-merge enabled. It shall be omitted when no open PR has either option enabled.
 
 ## Migrated source detail
 
@@ -156,3 +160,5 @@ do not align, and secondary merge-queue text begins under the icon instead of th
 [PR task summary scrolling](../../../plans/pr-task-summary-scrolling/plan.md)
 
 - [Preserve PR details after approval clears](../../../plans/pr-task-disclosure-negative-projection/plan.md).
+
+- [PR task hover delay](../../../plans/pr-task-hover-delay/plan.md) implements criteria 001.26 through 001.28.
