@@ -438,3 +438,20 @@ file without retries and remeasure the subsequent head in full CI.
 The restored scrolling file passes all 21 cases over three full-file repetitions with retries disabled on current main. Transcript owner tests (35), current-main rich-output owner tests (28), typecheck, formatting/lint and documentation checks pass. The original shard passes 280 cases with the same three skipped identities, zero retries, omissions or duplicates. Next-head CI remains pending.
 
 The old-head frontend test job was cancelled after its test step exceeded 45 minutes (prior run: 16m42s). Normal cancellation completed after five minutes; no force-cancel was issued. GitHub did not publish that job log, including in the full workflow archive, so the cause is unconfirmed. The next head requires a fresh passing frontend run.
+
+### Review: attribute helper timings to their owning specs
+
+Review comment 4266653399 identified that catalog discovery retained the owning
+spec, but timing collection used the helper declaration's filename. Carry the
+root suite's file through nested suites so future profiles can inform those
+specs' shard estimates. Keep declaration-location fallback for reports without
+a suite location.
+
+The regression reproduces two specs sharing one nested helper: before the fix,
+their timing entries collide; afterward, each owning spec receives its own
+measured estimate. All 51 focused timing/planner/runner tests, zero-warning
+ESLint and web typecheck pass. Replaying all 34 blobs from run 38500882345
+reattributes 30 observations across ten owning specs; all 3,960 attempts retain
+their result, retry identity, duration and attachments. This changes timing
+collection only, with no test selection or assertion changes. Final-head CI
+and review resolution remain required before merge.
