@@ -48,7 +48,8 @@ with an archived or deleted task, so that I can audit its terminal integrity.
   content digests for changed paths. It shall retain no source bytes or
   dereferenced symlink data. The staged-index digest shall include unmerged
   stages without writing Git objects. Dirty submodules shall have a stable
-  digest of their working-tree contents.
+  digest of their working-tree contents. Ignored directory entries follow
+  `AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.7`.
 - **AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.4:** Git metadata, index, status, path,
   or content capture failures shall be recorded as a recoverable cleanup error
   and shall block destructive cleanup. A disappeared untracked path shall not
@@ -59,6 +60,18 @@ with an archived or deleted task, so that I can audit its terminal integrity.
   task-not-found response.
 - **AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.6:** Captures shall not combine or
   attribute content from another task or repository.
+- **AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.7:** When Git identifies an ignored
+  directory entry, evidence shall retain its path and ignored status without
+  reading descendant contents. Evidence shall explicitly distinguish this
+  omission from deletion. Ignored regular files shall retain content digests.
+- **AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.8:** When an attempt expires or the
+  backend cancels capture, capture shall stop between directory entries and
+  file-read chunks. It shall return the cancellation cause and leave the
+  worktree intact. Partial evidence shall not authorize cleanup.
+- **AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.9:** Due source-manifest cleanup shall
+  run in the owned background worker without delaying backend readiness.
+  Recovery shall begin without a timer delay and retry repository errors.
+  Shutdown shall cancel and join that worker before releasing backend ownership.
 
 ## Out of scope
 

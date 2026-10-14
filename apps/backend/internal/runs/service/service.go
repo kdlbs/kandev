@@ -23,9 +23,9 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
+	"github.com/kandev/kandev/internal/runs/models"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
@@ -134,7 +134,7 @@ type QueueRunRequest struct {
 	// verbatim, distinct from Payload (the routing envelope: task id,
 	// workflow step id, agent profile id). Used by taskless
 	// wakeup-originated runs to carry the wakeup's own JSON context
-	// (including routine_id, which models.ContinuationScopeForRun reads
+	// (including routine_id, which office/models.ContinuationScopeForRun reads
 	// back out) without mixing it into the envelope. Empty for every
 	// other caller, which leaves the column at its default.
 	ContextSnapshot string

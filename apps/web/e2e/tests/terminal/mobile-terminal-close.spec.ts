@@ -9,6 +9,7 @@ import { switchToTerminalPanel, waitForShellReady } from "./mobile-terminal-help
 import { pauseNextTerminalDestroy } from "./terminal-close-pause";
 import { readTerminalHostBuffer } from "./terminal-test-helpers";
 import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 async function seedTaskWithSession(
   testPage: Page,
@@ -100,6 +101,7 @@ test.describe("Mobile terminal close", () => {
     await targetRow.getByRole("button", { name: /^Close / }).tap();
     const confirmation = testPage.getByTestId("mobile-terminal-close-confirmation");
     await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await waitForFiniteAnimations(confirmation);
     await expect(confirmation).toHaveRole("group");
     await expect(confirmation).toHaveAccessibleName("Close terminal?");
     await expectContentSizedBottomConfirmation(

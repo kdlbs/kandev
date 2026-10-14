@@ -7,15 +7,25 @@ owners:
 ---
 # Mid-Turn Steering Requirements
 
+## Scope of this existing contract
+
+This requirement family describes legacy automatic/provider-managed steering.
+The draft [explicit same-turn steering contract](explicit-turn-steering.md) adds
+native exact-turn delivery and an intentional queue bypass only when the user
+chooses Send now. Its separate capability and gate do not change the queue-first,
+opportunistic ACP behavior documented here. The later package has its own
+requirements, design and evidence; historical results below do not prove native support.
+
 ## Overview
 
-While a Claude session is genuinely generating, an operator who spots a wrong turn has only two bad options: queue a message that lands after the agent has already made the decision the message would have prevented, or cancel and lose the turn's work. Claude Code's own terminal and desktop surfaces accept typed input during generation and act on it at the next tool boundary, so operators arriving from those surfaces experience Kandev as strictly worse at the moment correction matters most.
+Deliver corrective input during generation through negotiated, provider-managed
+concurrent prompting, preserving ongoing work and ordered queued messages.
 
 ## Requirements
 
 ### REQ-PLATFORM-MID-TURN-STEERING-001: Mid-Turn Steering
 
-**Intent:** While a Claude session is genuinely generating, an operator who spots a wrong turn has only two bad options: queue a message that lands after the agent has already made the decision the message would have prevented, or cancel and lose the turn's work. Claude Code's own terminal and desktop surfaces accept typed input during generation and act on it at the next tool boundary, so operators arriving from those surfaces experience Kandev as strictly worse at the moment correction matters most.
+**Intent:** Allow corrective input without cancelling the active turn.
 
 #### Acceptance criteria
 

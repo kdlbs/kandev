@@ -7,6 +7,7 @@ import {
   createWorkflowAgentProfiles,
   waitForWorkflowProfileSession,
 } from "./workflow-agent-switch-helpers";
+import { waitForWorkflowMoveLifecycle } from "../task/task-workflow-agent-overrides-helpers";
 import { seedMoveOverrideFixture } from "./workflow-step-move-overrides-helpers";
 import {
   applyHarmlessPreviewUpdate,
@@ -153,7 +154,10 @@ test.describe("Workflow move preview", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { agentId, profileA, profileB } = await createWorkflowAgentProfiles(apiClient);
+    const { agentId, profileA, profileB } = await createWorkflowAgentProfiles(
+      apiClient,
+      seedData.agentProfileId,
+    );
     const profileC = await apiClient.createAgentProfile(agentId, "Profile C (new)", {
       model: "mock-fast",
     });
@@ -189,6 +193,7 @@ test.describe("Workflow move preview", () => {
     );
     const initialSessionId = await waitForWorkflowProfileSession(apiClient, task.id, profileA.id);
     await apiClient.moveTask(task.id, workflow.id, bridge.id);
+    await waitForWorkflowMoveLifecycle(apiClient, task.id);
     await waitForWorkflowProfileSession(apiClient, task.id, profileB.id);
 
     await testPage.goto(`/t/${task.id}`);
@@ -199,28 +204,33 @@ test.describe("Workflow move preview", () => {
     expect(returnPreview.preview.outcome).toBe("reuse_other");
     expect(returnPreview.preview.recipient.session_id).toBe(initialSessionId);
     expect(returnPreview.preview.model.after.known).toBe(true);
-    const returnMove = testPage.waitForRequest(
-      (request) =>
-        request.method() === "POST" &&
-        new URL(request.url()).pathname === `/api/v1/tasks/${task.id}/move`,
+    const returnMove = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === `/api/v1/tasks/${task.id}/move`,
     );
     await returnPreview.popover.getByTestId("workflow-step-move-here").click();
-    await returnMove;
+    expect((await returnMove).ok()).toBe(true);
+    await waitForWorkflowMoveLifecycle(apiClient, task.id);
     await expect
       .poll(() => apiClient.getTask(task.id).then((current) => current.primary_session_id))
       .toBe(initialSessionId);
+    expect(await waitForWorkflowProfileSession(apiClient, task.id, profileA.id)).toBe(
+      initialSessionId,
+    );
 
     const freshPreview = await openStepPreview(testPage, task.id, "Fresh C");
     expect(freshPreview.preview.outcome).toBe("create_new");
     expect(freshPreview.preview.recipient.session_id ?? "").toBe("");
     expect(freshPreview.preview.model.after.known).toBe(true);
-    const freshMove = testPage.waitForRequest(
-      (request) =>
-        request.method() === "POST" &&
-        new URL(request.url()).pathname === `/api/v1/tasks/${task.id}/move`,
+    const freshMove = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === `/api/v1/tasks/${task.id}/move`,
     );
     await freshPreview.popover.getByTestId("workflow-step-move-here").click();
-    await freshMove;
+    expect((await freshMove).ok()).toBe(true);
+    await waitForWorkflowMoveLifecycle(apiClient, task.id);
     const freshSessionId = await waitForWorkflowProfileSession(apiClient, task.id, profileC.id);
     expect(freshSessionId).not.toBe(initialSessionId);
   });

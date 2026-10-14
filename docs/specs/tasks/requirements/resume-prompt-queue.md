@@ -1,7 +1,8 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-09-09
+updated: 2026-10-04
 owners:
   - kandev
 ---
@@ -50,6 +51,14 @@ admission, and deferred dispatch. The shared composer exposes this behavior.
 - **AC-TASKS-RESUME-PROMPT-QUEUE-001.9:** Task chat and Quick Chat shall expose
   the same behavior on desktop and mobile. Mobile Send shall remain reachable
   by touch above the existing safe-area inset.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-001.10:** When a submitted message triggers a
+  workflow transition during resume, that transition shall not end startup or
+  cause a resume failure. Accepted input shall wait for readiness and retain
+  existing queue policy. The transition and prompt delivery shall each occur once.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-001.11:** Concurrent cancellation, terminal
+  settlement, or a genuine resume failure shall retain its outcome. A
+  message-triggered transition shall not revive the session, clear its error,
+  or dispatch input before the applicable recovery and admission barriers permit it.
 
 ## Compatibility and exclusions
 

@@ -6,7 +6,7 @@ export function taskRowActionAvailability(task: TaskSwitcherItem) {
     mark: !task.isArchived,
     edit: !task.isArchived && Boolean(task.workflowId && task.workflowStepId),
     nest: !task.isArchived && Boolean(task.workflowId),
-    move: !task.isArchived && Boolean(task.workflowId),
+    move: !task.isArchived && !task.isFromOffice && Boolean(task.workflowId),
     detach: Boolean(task.parentTaskId),
   };
 }

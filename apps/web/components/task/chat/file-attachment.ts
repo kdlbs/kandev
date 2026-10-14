@@ -12,6 +12,8 @@ export type FileAttachment = {
   data?: string;
   file?: File;
   attachmentId?: string;
+  /** Expiration time for a staged upload, when supplied by the backend. */
+  expiresAt?: string;
   uploadStatus?: "pending" | "uploading" | "ready" | "failed";
   uploadError?: string;
   mimeType: string; // MIME type

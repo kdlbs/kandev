@@ -79,7 +79,9 @@ export async function loadNodeChildren(
   try {
     const client = getWebSocketClient();
     if (!client) return false;
-    const response = await requestFileTree(client, sessionId, node.path, 1);
+    const response = await (treeState.readTree?.(node.path) ??
+      requestFileTree(client, sessionId, node.path, 1));
+    if (!response.root) return false;
     const updateNode = (n: FileTreeNode): FileTreeNode => {
       if (n.path === node.path) return { ...n, children: response.root.children };
       return n.children ? { ...n, children: n.children.map(updateNode) } : n;

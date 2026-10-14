@@ -1,4 +1,6 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
+import fs from "node:fs";
+import path from "node:path";
 import {
   execInContainer,
   listRemoteDir,
@@ -18,6 +20,7 @@ import { waitForLatestSessionDone } from "../../helpers/session";
 test.describe("ssh executor — task launch", () => {
   test("launches a session and records ssh runtime on the task environment", async ({
     apiClient,
+    backend,
     seedData,
   }) => {
     test.setTimeout(180_000);
@@ -70,6 +73,18 @@ test.describe("ssh executor — task launch", () => {
     expect(readRemoteFile(seedData.sshTarget, `${workspace}/remote-source.txt`)).toBe(
       "e2e-ssh fixture\n",
     );
+    const runtime = backend.compactRuntime;
+    expect(runtime, "SSH E2E backend must use a packaged standard runtime").toBeDefined();
+    expect(fs.readdirSync(path.join(runtime!.bundleDir, "bin")).sort()).toEqual([
+      "agentctl",
+      "kandev",
+    ]);
+    await expect
+      .poll(() => fs.readFileSync(backend.logPath, "utf8").includes(runtime!.cachePath), {
+        timeout: 10_000,
+        message: "SSH launch should resolve the verified helper from the standard cache",
+      })
+      .toBe(true);
   });
 
   test("runs custom prepare and terminal cleanup hooks on the remote workspace", async ({

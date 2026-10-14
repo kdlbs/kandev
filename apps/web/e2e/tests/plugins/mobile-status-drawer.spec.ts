@@ -1,12 +1,20 @@
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import {
+  captureAppStatusBarSettings,
+  restoreAppStatusBarSettings,
+  setAppStatusBarEnabled,
+  type AppStatusBarSettingsBaseline,
+} from "../../helpers/app-status-bar-settings";
 
 const PLUGIN_ID = "kandev-plugin-e2e";
 const PACKAGE_PATH = path.resolve(
   __dirname,
   "../../../../../apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
 );
+let statusBarBaseline: AppStatusBarSettingsBaseline | undefined;
+let metricsBaseline: { show_in_topbar: boolean; simplified?: boolean } | undefined;
 
 async function installFixture(page: Page) {
   await page.goto("/settings/plugins");
@@ -19,16 +27,33 @@ async function installFixture(page: Page) {
 
 test.describe("Mobile Status drawer", () => {
   test.beforeEach(async ({ apiClient }) => {
-    await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
-      app_status_bar_enabled: true,
-    });
+    statusBarBaseline = await captureAppStatusBarSettings(apiClient);
+    const { settings } = await apiClient.getUserSettings();
+    metricsBaseline = (settings.system_metrics_display as
+      | { show_in_topbar: boolean; simplified?: boolean }
+      | undefined) ?? { show_in_topbar: false };
+    await setAppStatusBarEnabled(apiClient, true);
   });
 
   test.afterEach(async ({ apiClient }) => {
-    await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
-    await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
-      app_status_bar_enabled: false,
-    });
+    try {
+      await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
+    } finally {
+      try {
+        if (metricsBaseline) {
+          const restoreResponse = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+            system_metrics_display: metricsBaseline,
+          });
+          expect(restoreResponse.ok).toBe(true);
+          const restored = await apiClient.getUserSettings();
+          expect(restored.settings.system_metrics_display).toMatchObject(metricsBaseline);
+        }
+      } finally {
+        await restoreAppStatusBarSettings(apiClient, statusBarBaseline);
+        statusBarBaseline = undefined;
+        metricsBaseline = undefined;
+      }
+    }
   });
 
   test("keeps a single status signal compact", async ({ testPage, apiClient }) => {
@@ -97,6 +122,19 @@ test.describe("Mobile Status drawer", () => {
       // the drawer's fractional mobile layout has been applied.
       expect(Math.round(rowHeight!)).toBeGreaterThanOrEqual(44);
     }
+    const pluginRow = drawer.locator(`[data-status-item-id="${leftOrderingId}"]`);
+    const drawerAction = pluginRow.getByTestId("e2e-status-drawer-action");
+    const busyAction = pluginRow.getByTestId("e2e-status-busy-action");
+    const disabledAction = pluginRow.getByTestId("e2e-status-disabled-action");
+    await expect(drawerAction).toHaveAttribute("data-surface", "status-drawer");
+    await expect(drawerAction).toBeEnabled();
+    await expect(busyAction).toHaveAttribute("aria-busy", "true");
+    await expect(busyAction).toBeEnabled();
+    await expect(disabledAction).toBeDisabled();
+    await drawerAction.tap();
+    await expect(drawerAction).toHaveAttribute("aria-pressed", "true");
+    await busyAction.tap();
+    await expect(testPage.getByRole("tooltip")).toHaveCount(0);
     let orderPatchCount = 0;
     testPage.on("request", (request) => {
       if (request.method() === "PATCH" && request.url().endsWith("/api/v1/user/settings")) {
@@ -136,6 +174,18 @@ test.describe("Mobile Status drawer", () => {
       await overlay.click({ position: { x: 4, y: 4 } });
     }
     await expect(drawer).toBeHidden();
+
+    await testPage.setViewportSize({ width: 800, height: 900 });
+    await testPage.goto("/tasks");
+    const compactStatusBar = testPage.getByTestId("app-status-bar");
+    await expect(compactStatusBar).toBeVisible();
+    const compactStatusAction = compactStatusBar
+      .locator(`[data-status-item-id="${leftOrderingId}"]`)
+      .getByTestId("e2e-status-bar-action");
+    const compactActionBox = await compactStatusAction.boundingBox();
+    expect(compactActionBox).not.toBeNull();
+    expect(compactActionBox!.height).toBe(24);
+    await testPage.setViewportSize({ width: 393, height: 851 });
 
     const task = await apiClient.createTask(seedData.workspaceId, "Mobile status task", {
       workflow_id: seedData.workflowId,

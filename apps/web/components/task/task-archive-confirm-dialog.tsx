@@ -16,7 +16,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { useAppStore } from "@/components/state-provider";
 import { useSubtaskCountState, type SubtaskCountResult } from "@/hooks/use-subtask-count";
 import { useTaskInFlight } from "@/hooks/use-task-in-flight";
-import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
+import { getArchiveCleanupSummary, getBulkArchiveCleanupSummary } from "./task-cleanup-summary";
 import { TaskCleanupConsequences } from "./task-cleanup-consequences";
 import { StillWorkingWarning } from "./task-still-working-warning";
 import {
@@ -117,8 +117,8 @@ function archiveCleanup({
   executorType,
 }: Pick<TaskArchiveConfirmDialogProps, "isBulkOperation" | "executorTypes" | "executorType">) {
   return isBulkOperation
-    ? getBulkCleanupSummary(executorTypes ?? [])
-    : getCleanupSummary(executorType);
+    ? getBulkArchiveCleanupSummary(executorTypes ?? [])
+    : getArchiveCleanupSummary(executorType);
 }
 
 function ArchiveOptions({

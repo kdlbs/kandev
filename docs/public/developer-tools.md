@@ -24,6 +24,12 @@ If Kandev does not detect Apprise, check the `PATH` used by the backend process.
 Apprise in a directory already in that `PATH`, rescan. If you install it elsewhere or change `PATH`
 after Kandev starts, restart Kandev so the running backend receives the new environment, then rescan.
 
+Each provider save applies its name, enabled state, settings, and selected events together.
+If validation fails or saving is rolled back, the provider's previously saved configuration remains intact.
+An aborted creation leaves no partially configured provider. If the connection fails while saving,
+reload the settings to confirm the saved state before retrying, especially when adding a provider.
+Saves for separate providers are independent.
+
 ## Quick Chat
 
 Quick Chat is an agent conversation outside the board. Use it for repository orientation, experiments, and disposable questions that do not need workflow state, review gates, dependencies, or a delivery record.
@@ -50,13 +56,31 @@ opens. The topbar menu button shows Quick Chat activity: a blue dot while a chat
 is running and a green dot when a reply is ready to read. Terminal tabs do not
 contribute to this activity indicator.
 
+On a phone, Quick Terminal includes the same shortcut row as a task terminal:
+**Ctrl**, **Shift**, **^C**, **^D**, **Esc**, **Tab**, navigation keys, and symbols.
+Swipe the row to reach more keys. Tap **^C** to interrupt a command. Tap a modifier
+once for the next input, twice to keep it enabled, and again to turn it off.
+Shortcuts target the selected terminal and keep the keyboard focused. The row
+stays above the on-screen keyboard. Modifiers reset when you switch terminal
+tabs or close the view.
+
 ### Start a chat
 
-1. Turn on **Configuration chat** when the conversation should inspect or change Kandev configuration. This option is hidden when the workspace already has a configuration conversation.
-2. Choose an agent profile. Quick Chat requires one and defaults to the workspace's default agent profile when configured.
-3. For an ordinary Quick Chat, optionally add one or more workspace repositories.
-4. For each repository, choose a branch. The same repository cannot be added twice.
-5. Select **Start chat**.
+1. Enter a non-empty opening prompt. Add files when they help explain the request. Wait for each
+   file to finish uploading before selecting **Send**. Retry or remove a failed upload first.
+2. Choose an enabled agent profile. Quick Chat uses the workspace default when available.
+3. For an ordinary Quick Chat, select **+** beside Attach to choose a workspace repository.
+   Each selected repository appears as a removable chip inside the prompt box.
+4. Choose a branch for each repository. Do not add the same repository twice.
+5. To inspect or change Kandev settings, workflows, agent profiles, or MCP configuration,
+   select the settings icon beside Attach. Hover or focus the icon to read its description.
+   On phones, the icon opens a sheet with that description and the **Configuration chat** switch.
+   This option is hidden when the workspace already has a configuration conversation.
+6. Select **Send**. Quick Chat creates the conversation and delivers the opening prompt.
+
+Quick Chat keeps the prompt, files, profile, and repositories in the setup after a creation error. Correct the problem and select **Send** again. After a conversation exists, a delivery error keeps the opening prompt in that chat for an explicit retry.
+
+Configuration Chat does not use repository selections. Its existing workspace permissions and Settings entry point remain in effect.
 
 Each selected repository gets an isolated worktree from the chosen branch. Uncommitted changes in your original checkout are not copied. Without a repository, Kandev creates an ephemeral working directory under `<KANDEV_HOME_DIR>/quick-chat/` (by default `~/.kandev/quick-chat/`).
 
@@ -73,7 +97,14 @@ or rename the chat first, the provisional or user-selected title remains authori
 
 Closing a real chat tab permanently deletes its conversation, hidden backing task data, and associated worktree. There is no undo. Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
 
-If **Start chat** is disabled, select a profile and finish every repository/branch row. If a repository is missing, confirm that it belongs to the current workspace and refresh the repository configuration. Use a normal task when the result must remain visible on a board or become a reviewed PR.
+If **Send** stays disabled, complete these steps:
+
+- Enter a prompt.
+- Select an enabled profile.
+- Complete every repository and branch row.
+- Wait for each attached file to finish uploading. Retry or remove a failed upload.
+
+If a repository is missing, make sure that it belongs to the current workspace. Then refresh the repository configuration. Use a normal task when the result must remain visible on a board or become a reviewed PR.
 
 ### Agent continuation goals
 
@@ -117,9 +148,11 @@ The same settings page configures the **Configuration Chat Agent** for each work
 
 Open Configuration Chat from the floating chat button on Settings pages, turn on **Configuration chat** while creating a Quick Chat, or run **Configuration Chat** from the `Cmd/Ctrl+K` command menu. A workspace currently has one configuration conversation. The Settings panel shows that conversation without tabs; **Open in Quick Chat** moves the same setup or session into the larger tabbed dialog without copying it.
 
-Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can list and read saved prompts by exact name. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
+Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can read, create, and update saved prompts by exact name, subject to their agent-edit permission. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
 
 Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
+
+If the session is broken, choose **Restart session** in the Settings panel header and confirm. Kandev stops the current agent, deletes the conversation and unsent prompts, and starts a blank session with the same agent profile and executor. Configuration changes already made are kept. On phones, confirmation opens in a bottom drawer. If the connection drops during restart, use **Refresh status** in the panel or expanded Quick Chat to recover the result before starting again. If a worktree has uncommitted changes, commit them before restarting.
 
 </details>
 
@@ -129,6 +162,17 @@ Closing the floating Settings panel preserves the conversation. To delete it, op
 <summary>Saved prompt details</summary>
 
 Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content.
+
+Shared prompt reads and reference use are available to org members. Creating,
+editing, or deleting prompts requires `org.config.manage` permission.
+
+To let the configuration assistant update an existing custom prompt, edit it,
+enable **Allow agent edits**, and choose **Save changes**. The control works on
+desktop and phone. Existing and Settings-created prompts default to human-only;
+MCP-created prompts allow later agent edits until you disable the permission.
+Built-in prompts always reject agent writes, while remaining editable by an
+operator. Changes affect every future reference to that prompt. See the
+[MCP write contract](automation-and-mcp.md#create-or-update-a-saved-prompt).
 
 Type `@` in the task chat composer and select a prompt. The visible message keeps the `@name`; Kandev expands the prompt content into hidden system context for the agent. References are recognized only at the start of the text or after whitespace and must match the stored name. Prompt content can reference other saved prompts. Expansion stops at a depth of eight, skips cycles, and includes each prompt only once.
 
@@ -145,6 +189,11 @@ the canvas authoring workflow at launch. Editing the prompt changes later
 canvas tasks; a user prompt with the same name keeps its own content.
 
 Initial task and Quick Chat launches also expand known references when no workflow step is configured. The stored message and the prompt sent to the agent keep the same saved-prompt context.
+
+Workflow-step launches, profile switches, context resets, and replacement
+launches keep one matching saved-prompt expansion in the stored message and
+agent prompt. A queued workflow prompt resolves references when it drains, and
+its recovery launch uses that same definition.
 
 The Settings prompt editor also offers the same `@name` completion when you edit a saved prompt, a workflow prompt, a workflow step, an automation instruction, a quick action, or a provider watch. The prompt being edited is excluded from its own completion list, so selecting a reference cannot create a direct self-reference by accident. The same `@name` reference works in a workflow step's Prompt field and in a GitHub Review Watch's prompt; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 
@@ -220,7 +269,9 @@ availability is unknown. The repository picker is also unavailable in that case.
 
 For an idle, non-archived repository-backed task, **Files → Workspace actions → Add Repositories to workspace** opens a tab-free source picker. **Add repository** offers a workspace repository, a local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. **Add folder** is available on Local/Local PC or Worktree. Every repository chooses one base branch, and Local/Local PC uses the current checkout without switching it. Desktop uses a dialog; phones use a full-height drawer with a touch-sized repository menu. A mixed submission is atomic, and repository additions refresh repository-aware tools while folders remain Files-only. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
-The task **Files** panel browses, searches, opens, and edits task-worktree files. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
+The task **Files** panel browses, searches, opens, and edits task-worktree files. In a multi-repository workspace, active checkout roots use their repository names. Search results and chat attachments can show those names while retaining the checkout's canonical file path. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
+
+Files and workspace search omit only recovery artifacts that Kandev has registered for that workspace. A similarly named user file remains visible. A repository label changes display text only; file open, search, and chat-context actions continue to use the canonical path.
 
 ### Preview an HTML file
 
@@ -301,9 +352,9 @@ The status surface separates process startup, the LSP `initialize` request, and 
 
 Kandev does not impose an automatic initialization timeout or invent a percentage or ETA. Some valid project imports take several minutes, and LSP has no universal indexing-progress contract. When a server reports standard work-done progress, Kandev shows its title, message, percentage, and concurrent work-item count when available. Those values describe only the work item the server reported; its completion does not guarantee that every cross-file definition or reference is ready. If cross-file navigation is still incomplete, leave the server running while its project model warms up, or stop it explicitly if the wait is unexpected.
 
-Task-owned browser continuity is controlled by the restart-required `features.lspBrowserContinuity` runtime flag. It is off in shipped profiles. When enabled, each browser window owns an independent lease for the task-host language-server process. Closing a browser window or losing its network connection detaches the window while the lease continues to drain server messages. Reopening the task can reattach to that lease without a second `initialize`; duplicated tabs and other windows receive independent leases. Current diagnostics are cleared on detach and restored only after the editor resends its open files.
+Task-owned browser continuity is on by default in shipped profiles. The restart-required `features.lspBrowserContinuity` runtime flag remains as an operator kill switch; an explicit false override restores browser-owned cleanup. With continuity enabled, each browser window owns an independent lease for the task-host language-server process. Closing a browser window or losing its network connection detaches the window while the lease continues to drain server messages. Reopening the task can reattach to that lease without a second `initialize`; duplicated tabs and other windows receive independent leases. Current diagnostics are cleared on detach and restored only after the editor resends its open files.
 
-With continuity enabled, **Stop** releases that window's lease, and closing the last editor releases it after two minutes. Closing the browser retains a detached lease for up to one hour; reopening it resets that deadline, and an attached editor has no expiry deadline. Expiry releases the language server and lets normal task-host cleanup resume. Archiving or deleting the task starts background runtime cleanup that releases its leases. Stopping the task runtime or Kandev also releases its leases. Kandev allows eight active or detached leases by default; operators can change that startup limit with `KANDEV_LSP_MAX_CONNECTIONS`. If the limit is reached, a new request is rejected while every lease is attached. When a detached lease is available, Kandev evicts the one detached longest. After expiry, eviction, or a backend restart, the next eligible connection starts a fresh server and project analysis must run again. With continuity disabled, closing the browser connection reaps its process as before. If the toolbar says the server is unavailable, distinguish a missing task-host binary from an unsupported executor or the active-lease limit before retrying.
+**Stop** releases that window's lease, and closing the last editor releases it after two minutes. Closing the browser retains a detached lease for up to one hour; reopening it resets that deadline, and an attached editor has no expiry deadline. Expiry releases the language server and lets normal task-host cleanup resume. Archiving or deleting the task starts background runtime cleanup that releases its leases. Stopping the task runtime or Kandev also releases its leases. Kandev allows eight active or detached leases by default; operators can change that startup limit with `KANDEV_LSP_MAX_CONNECTIONS`. If the limit is reached, a new request is rejected while every lease is attached. When a detached lease is available, Kandev evicts the one detached longest. After expiry, eviction, or a backend restart, the next eligible connection starts a fresh server and project analysis must run again. With continuity disabled by the kill switch, closing the browser connection reaps its process as before. If the toolbar says the server is unavailable, distinguish a missing task-host binary from an unsupported executor or the active-lease limit before retrying.
 
 During a temporary browser-to-backend transport failure, the status changes to **Reconnecting** while Kandev attempts to reattach; browser closes `1005` and `1006`, backend restart close `1001`, and backend transport close `4009` do not prove that the language server exited. A confirmed server process exit uses `4006` and shows the server-exited state with **Retry**. Close `4010` means the task runtime stopped, so Kandev ends that lease without reconnecting it.
 

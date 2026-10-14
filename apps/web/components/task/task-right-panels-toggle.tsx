@@ -1,8 +1,8 @@
 "use client";
 
 import { IconLayoutSidebarRightCollapse, IconLayoutSidebarRightExpand } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { SurfaceAction } from "@/components/actions/surface-action";
 import { useTaskRightPanelsToggle } from "@/hooks/use-task-right-panels-toggle";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -50,28 +50,27 @@ export function TaskRightPanelsToggle({ sessionId = null }: TaskRightPanelsToggl
           aria-label={canActivate ? undefined : label}
           className="inline-flex"
         >
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+          <SurfaceAction
+            surface="topbar"
+            presentation="desktop"
+            label={canActivate ? label : undefined}
+            title={label}
+            icon={
+              rightPanelsVisible ? (
+                <IconLayoutSidebarRightCollapse className="h-3.5 w-3.5" />
+              ) : (
+                <IconLayoutSidebarRightExpand className="h-3.5 w-3.5" />
+              )
+            }
             data-testid="task-right-panels-toggle"
             ref={buttonRef}
-            aria-label={canActivate ? label : undefined}
             aria-expanded={rightPanelsVisible}
-            title={label}
             disabled={!canActivate}
             onClick={() => {
               restoreFocusRef.current = document.activeElement === buttonRef.current;
               toggleRightPanels();
             }}
-          >
-            {rightPanelsVisible ? (
-              <IconLayoutSidebarRightCollapse className="h-3.5 w-3.5" />
-            ) : (
-              <IconLayoutSidebarRightExpand className="h-3.5 w-3.5" />
-            )}
-          </Button>
+          />
         </span>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>

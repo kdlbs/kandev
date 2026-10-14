@@ -213,16 +213,18 @@ func TestLSPBrowserContinuityFlagContract(t *testing.T) {
 	if !definition.RestartRequired {
 		t.Fatal("RestartRequired = false, want true")
 	}
-	if ValuesFromConfig(&config.Config{})[key] {
-		t.Fatal("LSP browser continuity must default off")
-	}
-
 	defaults, err := profiles.FeatureFlagDefaults()
 	if err != nil {
 		t.Fatalf("FeatureFlagDefaults: %v", err)
 	}
-	if got := defaults["lsp_browser_continuity"]; got != "false" {
-		t.Fatalf("profile default = %q, want false", got)
+	if got := defaults["lsp_browser_continuity"]; got != "true" {
+		t.Fatalf("profile default = %q, want true", got)
+	}
+
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{Key: key, EffectiveValue: false}})
+	if ValuesFromConfig(cfg)[key] {
+		t.Fatal("explicit false override did not disable LSP browser continuity")
 	}
 }
 

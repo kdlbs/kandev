@@ -126,6 +126,7 @@ import { IntegrationRepositoryFilter } from "@/components/integrations/integrati
 import { IntegrationCursorPagination } from "@/components/integrations/integration-cursor-pagination";
 import { TaskRowIndicator } from "@/components/integrations/task-row-indicator";
 import { IntegrationChangeRequestStatus } from "@/components/integrations/integration-change-request-status";
+import { PluginAction, PluginActionGroup } from "@/components/plugins/plugin-action";
 import { IntegrationIcon } from "@/components/integrations/integration-icon";
 import { TaskChangeRequestLinkForm } from "@/components/integrations/task-change-request-link-form";
 import { IntegrationAuthStatusBanner } from "@/components/integrations/auth-status-banner";
@@ -134,6 +135,11 @@ import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
+import { WorkspaceAgentChat as NativeWorkspaceAgentChat } from "@/components/plugins/workspace-agent-chat";
+import {
+  WorkspaceTaskStatus as NativeWorkspaceTaskStatus,
+  WorkspaceTaskUsage as NativeWorkspaceTaskUsage,
+} from "@/components/plugins/workspace-task-surfaces";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import { getBackendConfig } from "@/lib/config";
 import { fetchJson } from "@/lib/api/client";
@@ -153,6 +159,8 @@ import { composeWriterId, subscribeToUserStateChanges } from "./user-state-sync"
 import { buildPluginContextApi } from "./plugin-context-api";
 import { pluginTranslationNamespace } from "./plugin-translations";
 import { pluginConversationApi } from "./conversation-host";
+import { usePluginTaskStatus, usePluginTaskUsage } from "./host-queries";
+import { issueHumanInteractionResponseReceipt } from "./human-interaction-receipts";
 import type {
   PluginActionInput,
   PluginActionOptions,
@@ -232,6 +240,8 @@ const PLUGIN_UI: PluginUIApi & Record<string, unknown> = {
   AlertTitle,
   Badge,
   Button,
+  Action: PluginAction,
+  ActionGroup: PluginActionGroup,
   Card,
   CardAction,
   CardContent,
@@ -377,6 +387,9 @@ const PLUGIN_UI: PluginUIApi & Record<string, unknown> = {
   SettingsSection,
   SettingsCard,
   WorkspaceScopedSection,
+  WorkspaceAgentChat: () => null,
+  WorkspaceTaskStatus: NativeWorkspaceTaskStatus,
+  WorkspaceTaskUsage: NativeWorkspaceTaskUsage,
 };
 
 function pluginSettingsContributorId(pluginId: string, contributorId: string): string {
@@ -403,6 +416,14 @@ function createPluginUIApi(pluginId: string): PluginUIApi & Record<string, unkno
         id: pluginSettingsContributorId(pluginId, props.id),
       });
     },
+    WorkspaceAgentChat: (props) =>
+      React.createElement(NativeWorkspaceAgentChat, {
+        ...props,
+        pluginId,
+        onOpenSettings: () => softNavigate("/settings/plugins"),
+      }),
+    WorkspaceTaskStatus: NativeWorkspaceTaskStatus,
+    WorkspaceTaskUsage: NativeWorkspaceTaskUsage,
   };
 }
 
@@ -522,6 +543,13 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
       },
     },
     conversation: pluginConversationApi,
+    queries: {
+      useTaskStatus: usePluginTaskStatus,
+      useTaskUsage: usePluginTaskUsage,
+    },
+    interactions: {
+      issueResponseReceipt: issueHumanInteractionResponseReceipt,
+    },
     ui: createPluginUIApi(pluginId),
     useResponsiveBreakpoint,
     // Getter, not a value captured at boot: a plugin built once at page load

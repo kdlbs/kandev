@@ -1,6 +1,14 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useInsertionEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { DiffEditor } from "@monaco-editor/react";
 import { useTheme } from "@/components/theme/app-theme";
 import { cn } from "@kandev/ui/lib/utils";
@@ -18,6 +26,14 @@ import { useGlobalFolding } from "./use-global-folding";
 import { resolveDiffContent, buildDiffEditorOptions } from "./diff-viewer-helpers";
 import { initMonacoThemes } from "./monaco-init";
 import { useTranslation } from "react-i18next";
+import { djb2Hash } from "@/lib/utils/hash";
+import type { editor as monacoEditor } from "monaco-editor";
+import {
+  captureContentLineAnchor,
+  resolveContentLineAnchor,
+  type ContentLine,
+  type ContentLineAnchor,
+} from "@/components/review/line-content-anchor";
 
 initMonacoThemes();
 
@@ -25,9 +41,187 @@ function getMonacoTheme(resolvedTheme: string | undefined): string {
   return resolvedTheme === "dark" ? "kandev-dark" : "kandev-light";
 }
 
+type MonacoSelectionAnchor = {
+  selectionStart: ContentLineAnchor | null;
+  selectionStartColumn: number;
+  position: ContentLineAnchor | null;
+  positionColumn: number;
+};
+
+type MonacoPaneAnchor = {
+  visibleLine: ContentLineAnchor | null;
+  visibleOffset: number;
+  selection: MonacoSelectionAnchor | null;
+};
+
+type PendingMonacoRestore = {
+  viewState: monacoEditor.IDiffEditorViewState;
+  modified: MonacoPaneAnchor | null;
+  original: MonacoPaneAnchor | null;
+};
+
+function modelLines(content: string): ContentLine[] {
+  return content.split(/\r?\n/).map((line, index) => ({ line: index + 1, content: line }));
+}
+
+function capturePaneAnchor(
+  editor: monacoEditor.IStandaloneCodeEditor | null,
+  content: string,
+): MonacoPaneAnchor | null {
+  if (!editor) return null;
+  const lines = modelLines(content);
+  const visibleLine = editor.getVisibleRanges()[0]?.startLineNumber ?? 1;
+  const visibleOffset = editor.getTopForPosition(visibleLine, 1) - editor.getScrollTop();
+  const selection = editor.getSelection();
+  return {
+    visibleLine: captureContentLineAnchor(lines, visibleLine - 1),
+    visibleOffset,
+    selection: selection
+      ? {
+          selectionStart: captureContentLineAnchor(lines, selection.selectionStartLineNumber - 1),
+          selectionStartColumn: selection.selectionStartColumn,
+          position: captureContentLineAnchor(lines, selection.positionLineNumber - 1),
+          positionColumn: selection.positionColumn,
+        }
+      : null,
+  };
+}
+
+function mappedLine(content: string, anchor: ContentLineAnchor): number {
+  const lines = modelLines(content);
+  const match = resolveContentLineAnchor(lines, anchor);
+  return match?.line ?? Math.min(Math.max(1, anchor.line), Math.max(1, lines.length));
+}
+
+function restorePaneAnchor(
+  editor: monacoEditor.IStandaloneCodeEditor | null,
+  snapshot: MonacoPaneAnchor | null,
+  content: string,
+  restoreScroll = true,
+) {
+  if (!editor || !snapshot) return;
+  if (restoreScroll && snapshot.visibleLine) {
+    const line = mappedLine(content, snapshot.visibleLine);
+    editor.setScrollTop(Math.max(0, editor.getTopForPosition(line, 1) - snapshot.visibleOffset));
+  }
+
+  const selection = snapshot.selection;
+  if (!selection?.selectionStart || !selection.position) return;
+  const startLine = mappedLine(content, selection.selectionStart);
+  const positionLine = mappedLine(content, selection.position);
+  const model = editor.getModel();
+  const startColumn = Math.min(
+    selection.selectionStartColumn,
+    model?.getLineMaxColumn(startLine) ?? 1,
+  );
+  const positionColumn = Math.min(
+    selection.positionColumn,
+    model?.getLineMaxColumn(positionLine) ?? 1,
+  );
+  editor.setSelection({
+    selectionStartLineNumber: startLine,
+    selectionStartColumn: startColumn,
+    positionLineNumber: positionLine,
+    positionColumn,
+  });
+}
+
+function useMonacoDiffViewState(
+  modelKey: string,
+  diffEditorRef: React.RefObject<monacoEditor.IStandaloneDiffEditor | null>,
+  ready: boolean,
+  originalContent: string,
+  modifiedContent: string,
+) {
+  const previousModelKeyRef = useRef(modelKey);
+  const previousContentsRef = useRef({ original: originalContent, modified: modifiedContent });
+  const pendingRestoreRef = useRef<PendingMonacoRestore | null>(null);
+  const restoreFrameRef = useRef<number | null>(null);
+
+  useInsertionEffect(() => {
+    if (previousModelKeyRef.current !== modelKey) {
+      const editor = diffEditorRef.current;
+      const previousContents = previousContentsRef.current;
+      const viewState = editor?.saveViewState();
+      pendingRestoreRef.current =
+        editor && viewState
+          ? {
+              viewState,
+              modified: capturePaneAnchor(editor.getModifiedEditor(), previousContents.modified),
+              original: capturePaneAnchor(editor.getOriginalEditor(), previousContents.original),
+            }
+          : null;
+      previousModelKeyRef.current = modelKey;
+    }
+  }, [diffEditorRef, modelKey]);
+
+  useLayoutEffect(() => {
+    previousContentsRef.current = { original: originalContent, modified: modifiedContent };
+  }, [modifiedContent, originalContent]);
+
+  useEffect(() => {
+    const pendingRestore = pendingRestoreRef.current;
+    const editor = diffEditorRef.current;
+    if (!ready || !editor || !pendingRestore) return;
+    const scheduleRestore = () => {
+      if (restoreFrameRef.current !== null) return;
+      restoreFrameRef.current = requestAnimationFrame(() => {
+        restoreFrameRef.current = null;
+        if (pendingRestoreRef.current !== pendingRestore || diffEditorRef.current !== editor)
+          return;
+        const modifiedEditor = editor.getModifiedEditor();
+        const originalEditor = editor.getOriginalEditor();
+        const modifiedMatches = modifiedEditor.getValue() === modifiedContent;
+        const originalMatches = !originalEditor || originalEditor.getValue() === originalContent;
+        if (!modifiedMatches || !originalMatches) {
+          return;
+        }
+        editor.restoreViewState(pendingRestore.viewState);
+        modifiedEditor.layout();
+        const modifiedLineCount = modifiedEditor.getModel()?.getLineCount() ?? 0;
+        const originalLineCount = originalEditor?.getModel()?.getLineCount() ?? 0;
+        const restoreModifiedScroll =
+          !!pendingRestore.modified?.visibleLine &&
+          (!pendingRestore.original?.visibleLine || modifiedLineCount >= originalLineCount);
+        restorePaneAnchor(
+          modifiedEditor,
+          pendingRestore.modified,
+          modifiedContent,
+          restoreModifiedScroll,
+        );
+        restorePaneAnchor(
+          originalEditor,
+          pendingRestore.original,
+          originalContent,
+          !restoreModifiedScroll,
+        );
+        pendingRestoreRef.current = null;
+      });
+    };
+    const modifiedEditor = editor.getModifiedEditor();
+    const originalEditor = editor.getOriginalEditor();
+    const modifiedContentListener = modifiedEditor.onDidChangeModelContent(scheduleRestore);
+    const originalContentListener = originalEditor?.onDidChangeModelContent(scheduleRestore);
+    scheduleRestore();
+    return () => {
+      modifiedContentListener.dispose();
+      originalContentListener?.dispose();
+      if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
+      restoreFrameRef.current = null;
+    };
+  }, [diffEditorRef, modelKey, modifiedContent, originalContent, ready]);
+
+  return useCallback(() => {
+    if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
+    restoreFrameRef.current = null;
+    pendingRestoreRef.current = null;
+  }, []);
+}
+
 interface MonacoDiffViewerProps {
   data: FileDiffData;
   sessionId?: string;
+  enableComments?: boolean;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
   onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
@@ -55,6 +249,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     data,
     sessionId,
     compact = false,
+    enableComments,
     onCommentAdd,
     onCommentDelete,
     onCommentUpdate,
@@ -78,6 +273,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     sessionId,
     repositoryName: props.repo,
     compact,
+    enableComments,
     onCommentAdd,
     onCommentDelete,
     onCommentUpdate,
@@ -114,6 +310,14 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     originalContent: original,
     modifiedContent: modified,
   });
+  const modelKey = `${props.repo ?? ""}\u0000${filePath}\u0000${djb2Hash(original)}\u0000${djb2Hash(modified)}`;
+  const cancelPendingViewStateRestore = useMonacoDiffViewState(
+    modelKey,
+    commentState.diffEditorRef,
+    !!commentState.modifiedEditor,
+    original,
+    modified,
+  );
 
   return {
     resolvedTheme,
@@ -132,6 +336,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     modified,
     lineHeight,
     editorHeight,
+    cancelPendingViewStateRestore,
     hasDiff: !!(oldContent || newContent || diff),
     monacoTheme: getMonacoTheme(resolvedTheme),
     options: buildDiffEditorOptions({
@@ -168,7 +373,13 @@ export function MonacoDiffViewer(props: MonacoDiffViewerProps) {
   }
 
   return (
-    <div ref={wrapperRef} className={cn("monaco-diff-viewer relative", className)}>
+    <div
+      ref={wrapperRef}
+      className={cn("monaco-diff-viewer relative", className)}
+      onWheelCapture={state.cancelPendingViewStateRestore}
+      onTouchMoveCapture={state.cancelPendingViewStateRestore}
+      onKeyDownCapture={state.cancelPendingViewStateRestore}
+    >
       {showHeader && (
         <DiffViewerToolbar
           data={props.data}

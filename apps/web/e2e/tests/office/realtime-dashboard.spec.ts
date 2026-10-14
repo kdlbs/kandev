@@ -1,5 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, waitForHttp, watchWs } from "../../helpers/causal-waits";
 
 test.describe("Real-time dashboard updates", () => {
   test("dashboard metrics update after task creation", async ({
@@ -42,41 +42,46 @@ test.describe("Real-time dashboard updates", () => {
     const other = await apiClient.createWorkspace("Other WS for cross-ws test");
     const otherWf = await apiClient.createWorkflow(other.id, "Other WF");
 
-    // User stays on the active office workspace dashboard.
+    // The worker's Office agent can publish unrelated activity during this test.
+    // Forward the real other-workspace events through the production handlers,
+    // while isolating this observation from those independent Office producers.
+    let allowActiveWorkspaceEvents = false;
+    await testPage.routeWebSocket("**/ws", (client) => {
+      const server = client.connectToServer();
+      server.onMessage((message) => {
+        const frame = JSON.parse(message.toString()) as {
+          action?: string;
+          payload?: { workspace_id?: string };
+        };
+        if (
+          !allowActiveWorkspaceEvents &&
+          frame.action?.startsWith("office.") &&
+          frame.payload?.workspace_id !== other.id
+        ) {
+          return;
+        }
+        client.send(message);
+      });
+    });
+    const ws = watchWs(testPage);
+    const dashboardPath = `/api/v1/office/workspaces/${officeSeed.workspaceId}/dashboard`;
     await testPage.goto("/office");
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
+    await testPage.waitForLoadState("networkidle");
 
-    // Spy on dashboard refetches for the active workspace.
     const fetchTimes: number[] = [];
     const start = Date.now();
-    testPage.on("response", (resp) => {
-      const url = resp.url();
-      if (url.includes(`/api/v1/office/workspaces/${officeSeed.workspaceId}/dashboard`)) {
-        fetchTimes.push(Date.now() - start);
-      }
+    testPage.on("request", (request) => {
+      if (request.url().includes(dashboardPath)) fetchTimes.push(Date.now() - start);
     });
 
-    // Wait for the page + initial fetches to fully settle. The dashboard
-    // SSR + client hydration can fire late requests; give it a generous
-    // window so we only measure fetches caused by the cross-ws event below.
-    let priorFetchCount = -1;
-    await expect
-      .poll(
-        () => {
-          const settled = fetchTimes.length === priorFetchCount;
-          priorFetchCount = fetchTimes.length;
-          return settled;
-        },
-        { timeout: 8_000, intervals: [1_000], message: "dashboard fetches never settled" },
-      )
-      .toBe(true);
-    const baselineCount = fetchTimes.length;
-
-    // Create a task in the OTHER workspace via API (fires office.task.created
-    // with workspace_id=other.id).
-    await apiClient.createTask(other.id, "Other WS Task — should not trigger", {
+    const otherCreated = ws.waitForEvent("office.task.created", {
+      where: (payload) => payload.workspace_id === other.id,
+    });
+    await apiClient.createTask(other.id, "Other WS Task should not trigger", {
       workflow_id: otherWf.id,
     });
+    await otherCreated;
 
     await dwell(
       testPage,
@@ -86,14 +91,22 @@ test.describe("Real-time dashboard updates", () => {
     );
 
     // No additional dashboard fetches should have occurred after the event.
-    const newFetches = fetchTimes.length - baselineCount;
+    const newFetches = fetchTimes.length;
     expect(
       newFetches,
       `dashboard refetched ${newFetches} times after cross-workspace event (timeline ${fetchTimes.join("ms,")}ms)`,
     ).toBe(0);
 
-    // Sanity: the office API still returns the correct count for our workspace.
-    const dash = await officeApi.getDashboard(officeSeed.workspaceId);
-    expect(dash).toBeDefined();
+    // Positive control: the same production path still refetches for this workspace.
+    allowActiveWorkspaceEvents = true;
+    const activeCreated = ws.waitForEvent("office.task.created", {
+      where: (payload) => payload.workspace_id === officeSeed.workspaceId,
+    });
+    const activeRefetch = waitForHttp(testPage, "GET", new RegExp(`${dashboardPath}$`));
+    await officeApi.createTask(officeSeed.workspaceId, "Active workspace dashboard control", {
+      workflow_id: officeSeed.workflowId,
+    });
+    await activeCreated;
+    await activeRefetch;
   });
 });

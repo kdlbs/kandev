@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const state = {
+  userSettings: { sidebarFastActionsEnabled: true },
   features: { canvases: true },
   workspaces: { activeId: "workspace-1" },
   appSidebar: { sectionExpanded: { canvases: true } as Record<string, boolean> },
@@ -62,9 +63,11 @@ const ACTIVE_CANVAS_TEST_ID = "sidebar-canvas-canvas-1";
 const EMPTY_CANVAS_TEST_ID = "sidebar-canvases-empty";
 
 beforeEach(() => {
+  state.userSettings.sidebarFastActionsEnabled = true;
   mocks.enabled = true;
   mocks.pathname = "/";
   state.appSidebar.sectionExpanded.canvases = true;
+  state.toggleAppSidebarSection.mockClear();
   mocks.listWorkspaceCanvases.mockReset();
   mocks.listWorkspaceCanvases.mockResolvedValue({
     canvases: [
@@ -96,6 +99,19 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("CanvasesSection", () => {
+  it("retains settings and canvas children when fast icons are disabled", async () => {
+    state.userSettings.sidebarFastActionsEnabled = false;
+    render(
+      <TooltipProvider>
+        <CanvasesSection collapsed={false} />
+      </TooltipProvider>,
+    );
+    expect(await screen.findByTestId(ACTIVE_CANVAS_TEST_ID)).toBeTruthy();
+    const settings = screen.getByTestId("sidebar-canvases-settings");
+    expect(settings.closest("#sidebar-section-canvases")).toBeTruthy();
+    expect(settings.getAttribute("href")).toBe("/settings/workspaces/workspace-1/canvases");
+  });
+
   it("lists only active workspace canvases and links the settings shortcut", async () => {
     render(
       <TooltipProvider>
@@ -197,6 +213,27 @@ describe("CanvasesSection", () => {
 
     await waitFor(() => expect(screen.getByText(CANVASES_LABEL)).toBeTruthy());
     expect(screen.queryByTestId(ACTIVE_CANVAS_TEST_ID)).toBeNull();
+  });
+});
+
+describe("CanvasesSection settings shortcut", () => {
+  it("keeps workspace settings available while closed without toggling Canvases", async () => {
+    state.appSidebar.sectionExpanded.canvases = false;
+    render(
+      <TooltipProvider>
+        <CanvasesSection collapsed={false} />
+      </TooltipProvider>,
+    );
+
+    const heading = screen.getByRole("button", { name: CANVASES_LABEL });
+    const settings = await screen.findByTestId("sidebar-canvases-settings");
+    expect(heading.getAttribute("aria-expanded")).toBe("false");
+    expect(settings.getAttribute("href")).toBe("/settings/workspaces/workspace-1/canvases");
+
+    settings.click();
+
+    expect(state.toggleAppSidebarSection).not.toHaveBeenCalled();
+    expect(heading.getAttribute("aria-expanded")).toBe("false");
   });
 });
 

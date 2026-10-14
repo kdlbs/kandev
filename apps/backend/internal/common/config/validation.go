@@ -11,6 +11,7 @@ func validateStartupSettings(cfg *Config) error {
 	errs := validateTrustedProxies(cfg)
 	errs = append(errs, configuredValidation(cfg, "tasks.preparationTimeout", cfg.Tasks.PreparationTimeout <= 0, "tasks.preparationTimeout must be positive")...)
 	errs = append(errs, configuredValidation(cfg, "tasks.stallDetectionThreshold", cfg.Tasks.StallDetectionThreshold <= 0, "tasks.stallDetectionThreshold must be positive")...)
+	errs = append(errs, validateDeliveryRetentionSettings(cfg.Tasks.DeliveryRetention)...)
 	errs = append(errs, configuredValidation(cfg, "limits.ghMaxConcurrent", cfg.Limits.GHMaxConcurrent <= 0, "limits.ghMaxConcurrent must be positive")...)
 	errs = append(errs, configuredValidation(cfg, "limits.gitMaxConcurrent", cfg.Limits.GitMaxConcurrent <= 0, "limits.gitMaxConcurrent must be positive")...)
 	errs = append(errs, configuredValidation(cfg, "limits.lspMaxConnections", cfg.Limits.LSPMaxConnections <= 0, "limits.lspMaxConnections must be positive")...)
@@ -39,6 +40,29 @@ func validateStartupSettings(cfg *Config) error {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func validateDeliveryRetentionSettings(values DeliveryRetentionConfig) []string {
+	var errs []string
+	if values.PayloadGrace < time.Minute || values.PayloadGrace > 30*24*time.Hour {
+		errs = append(errs, "tasks.deliveryRetention.payloadGrace must be between 1m and 720h")
+	}
+	if values.ReplayAge < time.Hour || values.ReplayAge > 30*24*time.Hour {
+		errs = append(errs, "tasks.deliveryRetention.replayAge must be between 1h and 720h")
+	}
+	if values.ReplayEvents < 100 || values.ReplayEvents > 100000 {
+		errs = append(errs, "tasks.deliveryRetention.replayEvents must be between 100 and 100000")
+	}
+	if values.Interval < 10*time.Second || values.Interval > time.Hour {
+		errs = append(errs, "tasks.deliveryRetention.interval must be between 10s and 1h")
+	}
+	if values.BatchRows < 1 || values.BatchRows > 200 {
+		errs = append(errs, "tasks.deliveryRetention.batchRows must be between 1 and 200")
+	}
+	if values.BatchBytes < 1<<20 || values.BatchBytes > 4<<20 {
+		errs = append(errs, "tasks.deliveryRetention.batchBytes must be between 1048576 and 4194304")
+	}
+	return errs
 }
 
 // validateRecoveryReadBudget rejects a configured combination of

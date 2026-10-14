@@ -200,10 +200,11 @@ func TestDisposeSeam3PromptEnsureRefusalWritesRecordWhenReconstructable(t *testi
 		t.Fatalf("CreateTask: %v", err)
 	}
 	refusal := &seam3Refusal{reasonCode: ceilingReasonRefused}
+	const trustedPromptContext = "EXPANDED PROMPT REFERENCES:\n### @principles\nUse the repository principles."
 
 	err := svc.disposeSeam3PromptEnsureRefusal(
 		ctx, "seam3-prompt-a", "seam3-prompt-a-session", "hello", "", false, nil, false,
-		promptTaskOptions{lifecyclePrompt: true}, refusal,
+		promptTaskOptions{lifecyclePrompt: true, promptReferenceContext: trustedPromptContext}, refusal,
 	)
 	if err != nil {
 		t.Fatalf("disposeSeam3PromptEnsureRefusal: %v", err)
@@ -222,6 +223,9 @@ func TestDisposeSeam3PromptEnsureRefusalWritesRecordWhenReconstructable(t *testi
 	nested, _ := record[models.CeilingLaunchPayloadKey].(map[string]interface{})
 	if nested["prompt"] != "hello" {
 		t.Fatalf("the recorded payload does not match the refused prompt: %+v", record)
+	}
+	if nested["prompt_reference_context"] != trustedPromptContext {
+		t.Fatalf("the recorded payload lost trusted prompt context: %+v", nested)
 	}
 }
 

@@ -2,6 +2,7 @@ package linear
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 )
@@ -24,11 +25,17 @@ type MockClient struct {
 	issueOrder    []string
 	getError      *APIError
 	setStateCalls []setStateCall
+	comments      []commentCall
 }
 
 type setStateCall struct {
 	IssueID string
 	StateID string
+}
+
+type commentCall struct {
+	IssueID string
+	Body    string
 }
 
 // NewMockClient seeds a default-success TestAuth so a fresh config flips to
@@ -91,6 +98,13 @@ func (m *MockClient) SetIssueState(_ context.Context, issueID, stateID string) e
 	defer m.mu.Unlock()
 	m.setStateCalls = append(m.setStateCalls, setStateCall{IssueID: issueID, StateID: stateID})
 	return nil
+}
+
+func (m *MockClient) AddComment(_ context.Context, issueID, body string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.comments = append(m.comments, commentCall{IssueID: issueID, Body: body})
+	return fmt.Sprintf("mock-comment-%d", len(m.comments)), nil
 }
 
 func (m *MockClient) ListLabels(_ context.Context, teamKey string) ([]LinearLabel, error) {
@@ -210,6 +224,15 @@ func (m *MockClient) SetStateCalls() []setStateCall {
 	return out
 }
 
+// CommentCalls returns comments recorded through AddComment.
+func (m *MockClient) CommentCalls() []commentCall {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]commentCall, len(m.comments))
+	copy(out, m.comments)
+	return out
+}
+
 // Reset clears every seeded value back to defaults.
 func (m *MockClient) Reset() {
 	m.mu.Lock()
@@ -230,6 +253,7 @@ func (m *MockClient) Reset() {
 	m.issueOrder = nil
 	m.getError = nil
 	m.setStateCalls = nil
+	m.comments = nil
 }
 
 // MockClientFactory returns a ClientFactory that always hands back the shared

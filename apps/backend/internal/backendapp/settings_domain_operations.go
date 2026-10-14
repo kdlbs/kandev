@@ -235,6 +235,7 @@ func (s *settingsOperations) readPrompt(ctx context.Context, id string) (map[str
 			return map[string]any{
 				"id": prompt.ID, "name": prompt.Name, "content": prompt.Content, "builtin": prompt.Builtin,
 				"created_at": prompt.CreatedAt, "updated_at": prompt.UpdatedAt,
+				"allow_agent_edits": prompt.AllowAgentEdits && !prompt.Builtin,
 			}, nil
 		}
 	}
@@ -249,7 +250,7 @@ func (s *settingsOperations) updatePrompt(ctx context.Context, id string, change
 	if err := decodeOptionalChange(changes, "content", &content); err != nil {
 		return nil, err
 	}
-	return s.deps.prompts.UpdatePrompt(ctx, id, name, content)
+	return s.deps.prompts.UpdatePromptForAgent(ctx, id, name, content)
 }
 
 func (s *settingsOperations) readEditor(ctx context.Context, id string) (any, error) {

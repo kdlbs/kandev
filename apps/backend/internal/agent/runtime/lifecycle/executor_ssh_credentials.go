@@ -38,7 +38,6 @@ func (r *SSHExecutor) uploadCredentials(
 ) error {
 	catalog := r.buildRemoteAuthCatalog()
 	r.resolveAuthSecrets(ctx, req, catalog)
-	r.runAuthSetupScripts(ctx, client, req, catalog, platform)
 
 	var fileMethods []remoteauth.Method
 	if credsJSON := getMetadataString(req.Metadata, "remote_credentials"); credsJSON != "" {
@@ -59,6 +58,7 @@ func (r *SSHExecutor) uploadCredentials(
 	if err != nil {
 		return err
 	}
+	r.runAuthSetupScripts(ctx, client, req, catalog, platform)
 	var uploadErr error
 	if len(fileMethods) > 0 {
 		uploadErr = UploadCredentialFiles(ctx, uploader, fileMethods, homeDir, r.logger)

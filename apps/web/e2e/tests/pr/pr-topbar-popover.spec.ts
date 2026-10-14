@@ -4,6 +4,8 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Locator, Page } from "@playwright/test";
 import { dwell } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { makePRCheckRun, makePRWorkflowRun } from "../../helpers/pr-checks";
 
 const OWNER = "acme";
 const REPO = "demo";
@@ -132,7 +134,53 @@ async function openTaskAndWait(
   return session;
 }
 
+async function reopenPRPopover(testPage: Page, session: SessionPage) {
+  await testPage.keyboard.press("Escape");
+  await expect(session.prTopbarPopover()).toBeHidden();
+  await session.hoverPRTopbar();
+}
+
 test.describe("PR top-bar CI popover", () => {
+  test("single badge shows a conflict bubble beside the left status glyph and keeps its details", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Conflicting failing PR badge";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, {
+      checks_state: "failure",
+      mergeable_state: "blocked",
+      has_merge_conflicts: true,
+      checks_total: 2,
+      checks_passing: 1,
+      review_state: "changes_requested",
+    });
+    await expect
+      .poll(async () => (await apiClient.getTaskPR(seed.taskId))?.has_merge_conflicts)
+      .toBe(true);
+    const session = await openTaskAndWait(testPage, seed, title);
+    const badge = session.prTopbarButton();
+    await expect(badge).toHaveText("#42");
+    await expect(badge).toHaveAttribute(
+      "aria-label",
+      /Checks failed.*Changes requested.*Conflicts/,
+    );
+    await expect(badge.getByTestId("pr-merge-conflict-warning")).toBeVisible();
+    await expect(badge.locator("svg")).toHaveCount(2);
+    await badge.focus();
+    await expect(testPage.getByTestId("pr-topbar-popover")).toBeVisible();
+    await badge.click();
+    await expect(session.prDetailPanel()).toBeVisible();
+  });
+
   test("counts row uses TaskPR aggregates and hides zero-count buckets", async ({
     testPage,
     apiClient,
@@ -681,5 +729,307 @@ test.describe("PR top-bar CI popover", () => {
     releaseFeedback();
     await expect(session.prPopoverUpdatedAt()).toBeVisible({ timeout: 10_000 });
     await expect(session.prPopoverUpdating()).toHaveCount(0);
+  });
+
+  test("current PR checks: selected suites refresh, retain cancellation details, and preserve real failures", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(180_000);
+    const title = "current PR checks: selected workflow results";
+    const headSHA = "current-pr-checks-head";
+    const headBranch = "feat/popover";
+    const identity = {
+      number: PR_NUMBER,
+      headSHA,
+      headBranch,
+      headRepoOwner: "contributor",
+      headRepoName: "demo-fork",
+    };
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, {
+      head_sha: headSHA,
+      head_repo_owner: identity.headRepoOwner,
+      head_repo_name: identity.headRepoName,
+      checks_state: "failure",
+      checks_total: 2,
+      checks_passing: 0,
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [
+        makePRCheckRun({
+          id: 501,
+          suiteId: 1001,
+          name: "Preview / deploy-fork",
+          status: "completed",
+          conclusion: "cancelled",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/100/deploy",
+        }),
+        makePRCheckRun({
+          id: 502,
+          suiteId: 1001,
+          name: "Preview / update-description-fork",
+          status: "completed",
+          conclusion: "cancelled",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/100/description",
+        }),
+        makePRCheckRun({
+          id: 601,
+          suiteId: 1002,
+          name: "Preview / package",
+          status: "in_progress",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/101/package",
+        }),
+        makePRCheckRun({
+          id: 600,
+          suiteId: 1002,
+          name: "Preview / lint",
+          status: "completed",
+          conclusion: "success",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/101/lint",
+        }),
+      ],
+      workflow_runs: [
+        makePRWorkflowRun({
+          id: 100,
+          suiteId: 1001,
+          identity,
+          status: "completed",
+          conclusion: "cancelled",
+          url: "https://github.com/acme/demo/actions/runs/100",
+        }),
+        makePRWorkflowRun({
+          id: 101,
+          suiteId: 1002,
+          identity,
+          status: "in_progress",
+          url: "https://github.com/acme/demo/actions/runs/101",
+        }),
+      ],
+    });
+
+    let session = await openTaskAndWait(testPage, seed, title);
+    await session.hoverPRTopbar();
+    await expect
+      .poll(async () => (await apiClient.getTaskPR(seed.taskId))?.checks_state)
+      .toBe("pending");
+    await expect(session.prCheckGroup("in_progress")).toBeVisible();
+    await expect(session.prCheckGroupCount("in_progress")).toHaveText("1");
+    await expect(session.prCheckGroup("failed")).toHaveCount(0);
+    if (prCapture.capturing) {
+      await expect(session.prPopoverUpdatedAt()).toBeVisible({ timeout: 10_000 });
+      await expect(session.prPopoverUpdating()).toHaveCount(0);
+      const popover = session.prTopbarPopover();
+      await waitForFiniteAnimations(popover);
+      await prCapture.screenshot("current-pr-checks-desktop", {
+        caption: "Current workflow progress without superseded cancelled failures",
+      });
+    }
+    const currentRunPopup = testPage.waitForEvent("popup");
+    await session.prWorkflowOpenButton("Preview").click();
+    const openedCurrentRun = await currentRunPopup;
+    await expect(openedCurrentRun).toHaveURL(
+      "https://github.com/acme/demo/actions/runs/101/package",
+    );
+    await openedCurrentRun.close();
+
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [
+        makePRCheckRun({
+          id: 501,
+          suiteId: 1001,
+          name: "Preview / deploy-fork",
+          status: "completed",
+          conclusion: "cancelled",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/100/deploy",
+        }),
+        makePRCheckRun({
+          id: 502,
+          suiteId: 1001,
+          name: "Preview / update-description-fork",
+          status: "completed",
+          conclusion: "cancelled",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/100/description",
+        }),
+        makePRCheckRun({
+          id: 602,
+          suiteId: 1002,
+          name: "Preview / package",
+          status: "completed",
+          conclusion: "success",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/101/package",
+        }),
+        makePRCheckRun({
+          id: 603,
+          suiteId: 1002,
+          name: "Preview / deploy",
+          status: "completed",
+          conclusion: "success",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/101/deploy",
+        }),
+      ],
+      workflow_runs: [
+        makePRWorkflowRun({
+          id: 100,
+          suiteId: 1001,
+          identity,
+          status: "completed",
+          conclusion: "cancelled",
+          url: "https://github.com/acme/demo/actions/runs/100",
+        }),
+        makePRWorkflowRun({
+          id: 101,
+          suiteId: 1002,
+          identity,
+          status: "completed",
+          conclusion: "success",
+          url: "https://github.com/acme/demo/actions/runs/101",
+        }),
+      ],
+    });
+    await reopenPRPopover(testPage, session);
+    await expect
+      .poll(async () => (await apiClient.getTaskPR(seed.taskId))?.checks_state)
+      .toBe("success");
+    await expect(session.prCheckGroupCount("passed")).toHaveText("2");
+    await expect(session.prCheckGroup("failed")).toHaveCount(0);
+
+    await testPage.reload();
+    session = await openTaskAndWait(testPage, seed, title);
+    await session.hoverPRTopbar();
+    await expect(session.prCheckGroupCount("passed")).toHaveText("2");
+
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [
+        makePRCheckRun({
+          id: 701,
+          suiteId: 1003,
+          name: "Preview / deploy-fork",
+          status: "completed",
+          conclusion: "cancelled",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/102/deploy",
+        }),
+      ],
+      workflow_runs: [
+        makePRWorkflowRun({
+          id: 102,
+          suiteId: 1003,
+          identity,
+          status: "completed",
+          conclusion: "cancelled",
+          url: "https://github.com/acme/demo/actions/runs/102",
+        }),
+      ],
+    });
+    await reopenPRPopover(testPage, session);
+    await expect.poll(async () => (await apiClient.getTaskPR(seed.taskId))?.checks_state).toBe("");
+    await expect(session.prChecksEmpty()).toHaveText("Checks not successful");
+    await expect(session.prCheckGroup("passed")).toHaveCount(0);
+    await expect(session.prCheckGroup("in_progress")).toHaveCount(0);
+    await expect(session.prCheckGroup("failed")).toHaveCount(0);
+    await expect(session.prWorkflowAddContextButton("Preview")).toHaveCount(0);
+
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [],
+      workflow_runs: [
+        makePRWorkflowRun({
+          id: 103,
+          suiteId: 1004,
+          identity,
+          status: "in_progress",
+          url: "https://github.com/acme/demo/actions/runs/103",
+        }),
+      ],
+    });
+    await testPage.reload();
+    session = await openTaskAndWait(testPage, seed, title);
+    await session.hoverPRTopbar();
+    await expect
+      .poll(async () => (await apiClient.getTaskPR(seed.taskId))?.checks_state)
+      .toBe("pending");
+    await expect(session.prChecksEmpty()).toHaveText("No checks have started");
+    await expect(session.prCheckGroup("in_progress")).toHaveCount(0);
+    await expect(session.prCheckGroup("passed")).toHaveCount(0);
+
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [
+        makePRCheckRun({
+          id: 801,
+          suiteId: 1005,
+          name: "Preview / deploy-fork",
+          status: "completed",
+          conclusion: "cancelled",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/104/deploy",
+        }),
+        makePRCheckRun({
+          id: 802,
+          suiteId: 1006,
+          name: "Lint / check",
+          status: "completed",
+          conclusion: "failure",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/201/lint",
+        }),
+      ],
+      workflow_runs: [
+        makePRWorkflowRun({
+          id: 104,
+          suiteId: 1005,
+          identity,
+          status: "completed",
+          conclusion: "cancelled",
+          url: "https://github.com/acme/demo/actions/runs/104",
+        }),
+        makePRWorkflowRun({
+          id: 201,
+          suiteId: 1006,
+          identity,
+          name: "Lint",
+          event: "pull_request",
+          status: "completed",
+          conclusion: "failure",
+          url: "https://github.com/acme/demo/actions/runs/201",
+        }),
+      ],
+    });
+    await reopenPRPopover(testPage, session);
+    await expect
+      .poll(async () => (await apiClient.getTaskPR(seed.taskId))?.checks_state)
+      .toBe("failure");
+    await expect(session.prCheckGroupCount("failed")).toHaveText("1");
+    await expect(session.prWorkflowRow("Lint")).toContainText("0/1 passed");
+    await expect(session.prWorkflowAddContextButton("Lint")).toBeVisible();
+    await expect(session.prWorkflowRow("Preview")).toHaveCount(0);
+
+    await session.prTopbarButton().click();
+    await expect(session.prDetailPanel()).toBeVisible();
+    const cancelledDetail = session.prDetailPanel().getByTestId("check-run-Preview / deploy-fork");
+    await expect(cancelledDetail).toContainText("cancelled");
+    await expect(cancelledDetail.getByRole("link")).toHaveAttribute(
+      "href",
+      "https://github.com/acme/demo/actions/runs/104/deploy",
+    );
   });
 });

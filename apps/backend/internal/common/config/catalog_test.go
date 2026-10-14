@@ -41,6 +41,22 @@ func TestConfigurationCatalogMatchesAuditedEnvironmentInventory(t *testing.T) {
 	}
 }
 
+func TestRetiredOfficeSessionIdentityEnvironmentIsNotCataloged(t *testing.T) {
+	const envVar = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+	for _, entry := range ConfigurationCatalog() {
+		for _, candidate := range entry.EnvVars {
+			if candidate == envVar {
+				t.Fatalf("retired environment variable %q remains in configuration catalog", envVar)
+			}
+		}
+	}
+	for _, exclusion := range ConfigurationExclusions() {
+		if exclusion.EnvVar == envVar {
+			t.Fatalf("retired environment variable %q remains in configuration exclusions", envVar)
+		}
+	}
+}
+
 func TestConfigurationCatalogAuditRejectsUncatalogedEnvironmentVariable(t *testing.T) {
 	err := validateCatalogAgainstAuditedInventory(
 		[]CatalogEntry{{Key: "test.setting", EnvVars: []string{"KANDEV_UNCATALOGED_TEST"}}},
@@ -95,7 +111,6 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "DOCKER_HOST", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_APIVERSION", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_TLSVERIFY", class: "catalog"},
-		{envVar: "KANDEV_DOCKER_DEFAULTNETWORK", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_VOLUMEBASEPATH", class: "catalog"},
 		{envVar: "KANDEV_AGENT_STANDALONE_HOST", class: "catalog"},
 		{envVar: "AGENTCTL_PORT", class: "catalog"},
@@ -130,6 +145,12 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL", class: "catalog"},
 		{envVar: "KANDEV_TASK_PREPARATION_TIMEOUT", class: "catalog"},
 		{envVar: "KANDEV_TASK_STALL_DETECTION_THRESHOLD", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_PAYLOAD_GRACE", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_REPLAY_AGE", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_REPLAY_EVENTS", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_INTERVAL", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_BATCH_ROWS", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_BATCH_BYTES", class: "catalog"},
 		{envVar: "KANDEV_CREDENTIALS_FILE", class: "catalog"},
 		{envVar: "KANDEV_GH_MAX_CONCURRENT", class: "catalog"},
 		{envVar: "KANDEV_GIT_MAX_CONCURRENT", class: "catalog"},
@@ -173,7 +194,6 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_FEATURES_CANVASES", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING", class: "exclusion"},
-		{envVar: "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_AGENT_SURVIVAL", class: "exclusion"},
 		{envVar: "KANDEV_DEBUG_AGENT_MESSAGES", class: "exclusion"},
 		{envVar: "KANDEV_DEBUG_ACP_MAX_FILES", class: "exclusion"},

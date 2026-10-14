@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryartifact"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
 )
 
@@ -42,6 +43,15 @@ func (s *SQLiteStore) AcquireTaskEnvironmentRecoveryClaim(
 	return recoveryclaim.Acquire(ctx, s.db, req)
 }
 
+// GetTaskEnvironmentRecoveryClaim reads the durable authority held by an
+// interrupted recovery operation.
+func (s *SQLiteStore) GetTaskEnvironmentRecoveryClaim(
+	ctx context.Context,
+	environmentID string,
+) (*models.TaskEnvironmentRecoveryClaim, error) {
+	return recoveryclaim.Get(ctx, s.db, environmentID)
+}
+
 // ReleaseTaskEnvironmentRecoveryClaim releases the exact recovery authority
 // previously acquired for an environment.
 func (s *SQLiteStore) ReleaseTaskEnvironmentRecoveryClaim(
@@ -49,6 +59,24 @@ func (s *SQLiteStore) ReleaseTaskEnvironmentRecoveryClaim(
 	claim *models.TaskEnvironmentRecoveryClaim,
 ) error {
 	return recoveryclaim.Release(ctx, s.db, claim)
+}
+
+// RegisterTaskEnvironmentRecoveryArtifacts publishes exact operation-owned
+// paths while the recovery claim and selected inventory slot remain current.
+func (s *SQLiteStore) RegisterTaskEnvironmentRecoveryArtifacts(
+	ctx context.Context,
+	registration recoveryartifact.Registration,
+) error {
+	return recoveryartifact.Register(ctx, s.db, registration)
+}
+
+// ListTaskEnvironmentRecoveryArtifacts reads only artifact rows whose owner
+// generation and selected inventory identity remain current.
+func (s *SQLiteStore) ListTaskEnvironmentRecoveryArtifacts(
+	ctx context.Context,
+	environmentID string,
+) ([]recoveryartifact.Registered, error) {
+	return recoveryartifact.ListForEnvironment(ctx, s.db, environmentID)
 }
 
 // worktreeSelectCols is the SELECT projection shared by every worktree query.
@@ -69,6 +97,8 @@ const worktreeSelectCols = `
 	COALESCE(ter.worktree_branch_owner, 'unknown'),
 	COALESCE(ter.worktree_integration_ref, ''),
 	COALESCE(ter.worktree_recovery_head_sha, ''),
+	COALESCE(ter.worktree_source_clone_path, ''),
+	COALESCE(ter.worktree_source_common_dir, ''),
 	ter.worktree_branch_compacted_at,
 	ter.status,
 	ter.created_at,
@@ -103,6 +133,8 @@ func scanWorktreeRow(row rowScanner) (*Worktree, error) {
 		&wt.BranchOwner,
 		&wt.IntegrationRef,
 		&wt.RecoveryHeadSHA,
+		&wt.SourceClonePath,
+		&wt.SourceCommonDir,
 		&compactedAt,
 		&wt.Status,
 		&wt.CreatedAt,
@@ -231,9 +263,10 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch,
 			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
+			worktree_source_clone_path, worktree_source_common_dir,
 			worktree_branch_compacted_at, position,
 			error_message, status, created_at, updated_at, merged_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_environment_id, repository_id, branch_slug) DO UPDATE SET
 			worktree_id = excluded.worktree_id,
 			worktree_path = excluded.worktree_path,
@@ -241,6 +274,8 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			worktree_branch_owner = excluded.worktree_branch_owner,
 			worktree_integration_ref = excluded.worktree_integration_ref,
 			worktree_recovery_head_sha = excluded.worktree_recovery_head_sha,
+			worktree_source_clone_path = CASE WHEN excluded.worktree_source_clone_path <> '' THEN excluded.worktree_source_clone_path ELSE task_environment_repos.worktree_source_clone_path END,
+			worktree_source_common_dir = CASE WHEN excluded.worktree_source_common_dir <> '' THEN excluded.worktree_source_common_dir ELSE task_environment_repos.worktree_source_common_dir END,
 			worktree_branch_compacted_at = excluded.worktree_branch_compacted_at,
 			status = excluded.status,
 			updated_at = excluded.updated_at,
@@ -248,6 +283,7 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			deleted_at = excluded.deleted_at
 	`), uuid.New().String(), envID, wt.RepositoryID, wt.BranchSlug,
 		wt.ID, wt.Path, wt.Branch, wt.BranchOwner, wt.IntegrationRef, wt.RecoveryHeadSHA,
+		wt.SourceClonePath, wt.SourceCommonDir,
 		wt.BranchCompactedAt, 0,
 		"", wt.Status,
 		wt.CreatedAt, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt)
@@ -265,11 +301,13 @@ func (s *SQLiteStore) CompareAndSwapWorktree(ctx context.Context, expected, repl
 	}
 	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE task_environment_repos
-		SET worktree_id = ?, worktree_path = ?, worktree_branch = ?, updated_at = ?
+		SET worktree_id = ?, worktree_path = ?, worktree_branch = ?,
+		    worktree_source_clone_path = ?, worktree_source_common_dir = ?, updated_at = ?
 		WHERE task_environment_id = ? AND repository_id = ? AND branch_slug = ?
 		  AND worktree_id = ? AND worktree_path = ? AND worktree_branch = ?
 		  AND status = ? AND deleted_at IS NULL
-	`), replacement.ID, replacement.Path, replacement.Branch, replacement.UpdatedAt,
+	`), replacement.ID, replacement.Path, replacement.Branch,
+		replacement.SourceClonePath, replacement.SourceCommonDir, replacement.UpdatedAt,
 		expected.TaskEnvironmentID, expected.RepositoryID, expected.BranchSlug,
 		expected.ID, expected.Path, expected.Branch, StatusActive)
 	if err != nil {
@@ -300,11 +338,13 @@ func (s *SQLiteStore) CompareAndSwapWorktreeWithRecoveryClaim(
 	}
 	result, err := tx.ExecContext(ctx, s.db.Rebind(`
 		UPDATE task_environment_repos
-		SET worktree_id = ?, worktree_path = ?, worktree_branch = ?, updated_at = ?
+		SET worktree_id = ?, worktree_path = ?, worktree_branch = ?,
+		    worktree_source_clone_path = ?, worktree_source_common_dir = ?, updated_at = ?
 		WHERE task_environment_id = ? AND repository_id = ? AND branch_slug = ?
 		  AND worktree_id = ? AND worktree_path = ? AND worktree_branch = ?
 		  AND status = ? AND deleted_at IS NULL
-	`), replacement.ID, replacement.Path, replacement.Branch, replacement.UpdatedAt,
+	`), replacement.ID, replacement.Path, replacement.Branch,
+		replacement.SourceClonePath, replacement.SourceCommonDir, replacement.UpdatedAt,
 		expected.TaskEnvironmentID, expected.RepositoryID, expected.BranchSlug,
 		expected.ID, expected.Path, expected.Branch, StatusActive)
 	if err != nil {
@@ -336,13 +376,14 @@ func (s *SQLiteStore) checkTaskCleanupBarrierLocked(ctx context.Context, tx *sql
 	if err := tx.QueryRowContext(ctx, s.db.Rebind(`
 		SELECT EXISTS (
 			SELECT 1 FROM task_resource_cleanup_jobs
-			WHERE task_id = ? AND state IN (?, ?, ?, ?)
+			WHERE task_id = ? AND state IN (?, ?, ?, ?, ?)
 		)
 	`), taskID,
 		models.TaskResourceCleanupStatePrepared,
 		models.TaskResourceCleanupStatePending,
 		models.TaskResourceCleanupStateRunning,
 		models.TaskResourceCleanupStateRetryWait,
+		models.TaskResourceCleanupStateWaitingForClean,
 	).Scan(&active); err != nil {
 		return fmt.Errorf("check task cleanup barrier: %w", err)
 	}
@@ -364,6 +405,98 @@ func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree
 		LIMIT 1
 	`), id)
 	return scanWorktreeRow(row)
+}
+
+// ReadRecoverySelectionSnapshot reads the selected session, environment, and
+// complete active repository inventory in one statement snapshot.
+func (s *SQLiteStore) ReadRecoverySelectionSnapshot(
+	ctx context.Context,
+	expected models.WorkspaceRecoverySelectionSnapshot,
+) (models.WorkspaceRecoverySelectionSnapshot, error) {
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
+		SELECT
+			COALESCE(s.task_id, te.task_id), COALESCE(s.id, ?),
+			CASE WHEN s.id IS NULL THEN ? ELSE COALESCE(s.task_environment_id, '') END,
+			CASE WHEN s.id IS NULL THEN 0 ELSE 1 END,
+			te.id, te.task_id, te.ownership_generation,
+			COALESCE(te.executor_type, ''), COALESCE(te.executor_id, ''),
+			COALESCE(te.executor_profile_id, ''), COALESCE(te.status, ''),
+			COALESCE(te.task_dir_name, ''), COALESCE(te.workspace_path, ''),
+			COALESCE(ter.id, ''), COALESCE(ter.repository_id, ''),
+			COALESCE(ter.branch_slug, ''), COALESCE(ter.worktree_id, ''),
+			COALESCE(ter.worktree_path, ''), COALESCE(ter.worktree_branch, ''),
+			COALESCE(ter.worktree_branch_owner, 'unknown'),
+			COALESCE(ter.worktree_integration_ref, ''),
+			COALESCE(ter.worktree_recovery_head_sha, ''),
+			COALESCE(ter.worktree_source_clone_path, ''),
+			COALESCE(ter.worktree_source_common_dir, ''),
+			COALESCE(ter.position, 0), COALESCE(ter.status, ''),
+			CASE WHEN r.id IS NULL THEN 0 ELSE 1 END,
+			CASE WHEN r.deleted_at IS NULL THEN 0 ELSE 1 END,
+			COALESCE(r.workspace_id, ''), COALESCE(r.name, ''), COALESCE(r.source_type, ''),
+			COALESCE(r.local_path, ''), COALESCE(r.provider, ''),
+			COALESCE(r.provider_repo_id, ''), COALESCE(r.provider_host, ''),
+			COALESCE(r.provider_scope, ''), COALESCE(r.provider_owner, ''),
+			COALESCE(r.provider_name, ''), COALESCE(r.remote_url, '')
+		FROM task_environments te
+		LEFT JOIN task_sessions s ON s.id = ?
+		LEFT JOIN task_environment_repos ter
+			ON ter.task_environment_id = te.id AND (COALESCE(ter.status, '') = '' OR ter.status = ?) AND ter.deleted_at IS NULL
+		LEFT JOIN repositories r ON r.id = ter.repository_id
+		WHERE te.id = ?
+		ORDER BY COALESCE(ter.id, '')
+	`), expected.SessionID, expected.SessionTaskEnvironmentID, expected.SessionID, StatusActive, expected.TaskEnvironmentID)
+	if err != nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	return readRecoverySelectionSnapshotRows(rows)
+}
+
+func readRecoverySelectionSnapshotRows(rows *sql.Rows) (models.WorkspaceRecoverySelectionSnapshot, error) {
+	var snapshot models.WorkspaceRecoverySelectionSnapshot
+	var found bool
+	for rows.Next() {
+		found = true
+		var slotID string
+		var sessionPersisted, repositoryPresent, repositoryDeleted int
+		var slot models.WorkspaceRecoveryInventorySlot
+		if err := rows.Scan(
+			&snapshot.TaskID, &snapshot.SessionID, &snapshot.SessionTaskEnvironmentID,
+			&sessionPersisted,
+			&snapshot.TaskEnvironmentID, &snapshot.EnvironmentOwnerTaskID, &snapshot.OwnershipGeneration,
+			&snapshot.ExecutorType, &snapshot.ExecutorID, &snapshot.ExecutorProfileID,
+			&snapshot.EnvironmentStatus, &snapshot.TaskDirName, &snapshot.WorkspacePath,
+			&slotID, &slot.RepositoryID, &slot.BranchSlug, &slot.WorktreeID,
+			&slot.WorktreePath, &slot.WorktreeBranch, &slot.WorktreeBranchOwner,
+			&slot.WorktreeIntegrationRef, &slot.WorktreeRecoveryHeadSHA,
+			&slot.WorktreeSourceClonePath, &slot.WorktreeSourceCommonDir,
+			&slot.Position, &slot.Status, &repositoryPresent, &repositoryDeleted,
+			&slot.RepositoryWorkspaceID, &slot.RepositoryName, &slot.RepositorySourceType, &slot.RepositoryLocalPath,
+			&slot.RepositoryProvider, &slot.RepositoryProviderRepoID, &slot.RepositoryProviderHost,
+			&slot.RepositoryProviderScope, &slot.RepositoryProviderOwner,
+			&slot.RepositoryProviderName, &slot.RepositoryRemoteURL,
+		); err != nil {
+			return models.WorkspaceRecoverySelectionSnapshot{}, err
+		}
+		snapshot.SessionPersisted = sessionPersisted == 1
+		if slotID != "" {
+			slot.EnvironmentRepoID = slotID
+			if slot.Status == "" {
+				slot.Status = StatusActive
+			}
+			slot.RepositoryPresent = repositoryPresent == 1
+			slot.RepositoryDeleted = repositoryDeleted == 1
+			snapshot.Slots = append(snapshot.Slots, slot)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, err
+	}
+	if !found {
+		return models.WorkspaceRecoverySelectionSnapshot{}, fmt.Errorf("selected environment not found")
+	}
+	return snapshot.Canonical(), nil
 }
 
 // GetWorktreeBySessionID retrieves the worktree by session ID.
@@ -862,6 +995,8 @@ func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 			&wt.BranchOwner,
 			&wt.IntegrationRef,
 			&wt.RecoveryHeadSHA,
+			&wt.SourceClonePath,
+			&wt.SourceCommonDir,
 			&compactedAt,
 			&wt.Status,
 			&wt.CreatedAt,

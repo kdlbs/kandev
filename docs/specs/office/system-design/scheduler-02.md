@@ -3,6 +3,7 @@ status: draft
 system: office
 requirements:
   - REQ-OFFICE-SCHEDULER-001
+  - REQ-OFFICE-SCHEDULER-003
 created: 2026-04-25
 owners:
   - cfl
@@ -18,6 +19,7 @@ This design preserves the technical source detail for `REQ-OFFICE-SCHEDULER-001`
 | Requirement | Design section |
 | --- | --- |
 | `REQ-OFFICE-SCHEDULER-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-SCHEDULER-003` | [Create-time assignee validation](#create-time-assignee-validation) |
 
 ## Migrated source detail
 
@@ -351,6 +353,53 @@ The scheduler reads all `queued` and unexpired-retry wakeup requests on boot and
 - **GIVEN** a coordinator's pre-installed "Coordinator heartbeat" routine is deleted by the user, **WHEN** the next scheduler tick runs, **THEN** no routine wakeup is queued for that coordinator; the coordinator only wakes via reactive sources (comments, errors, manual, self, user).
 
 - **GIVEN** two routine triggers fire for the same coordinator within the coalescing window, **WHEN** the dispatcher claims the first, **THEN** the second wakeup-request is inserted with `status="coalesced"`, its payload is merged into the first run's `context_snapshot`, and `coalesced_count` is incremented.
+
+## Create-time assignee validation
+
+A create-task request may carry `assignee_agent_profile_id` (`httpCreateTaskRequest.AssigneeAgentProfileID`,
+`internal/task/handlers/task_http_handlers.go`), forwarded into `service.CreateTaskRequest`.
+`CreateTaskRequest.AssigneeAgentProfileID` is also populated by several trusted internal callers
+(agent-created subtasks, the onboarding adapter, routine-created tasks) that already trust their own
+value and must not be re-gated by this check, so the HTTP handler alone also sets a second,
+service-request field, `RequireAssigneeAgentProfileValidation`, on the same request. This field is not
+part of the HTTP JSON contract. `Service.prepareTaskForCreation`
+(`internal/task/service/service_tasks.go`) calls the exported `Service.ValidateAssigneeAgentProfile`
+(`internal/task/service/workflow_agent_overrides.go`) immediately after the existing
+`validateWorkflowAgentOverrides` check, and only when that flag is set — before any task row is
+built or written. Before it reads the profile, the service also verifies that the task is Office-owned:
+it must have a project or use the workspace's canonical Office workflow. An Office assignee on an
+ordinary Kanban workflow is rejected before insertion, because the Office assignment listener does
+not enqueue `task_assigned` runs for Kanban tasks. The validator reads the profile through the
+already-injected `AgentProfileReader`
+(`s.agentProfiles`, the same seam `internal/office` uses to serve `ListAgentInstances`) and rejects
+with `ErrInvalidAssigneeAgentProfile` (a sentinel whose message contains `"invalid"`, so
+`isValidationError` in `internal/task/handlers/errors.go` maps it to a 4xx with no additional
+routing) unless the profile exists, is not soft-deleted, and its `WorkspaceID` matches
+the request's own workspace exactly. It deliberately does not gate on the profile's `enabled` flag:
+`ListAgentInstances` never filters on that column either, and every Office agent instance created
+before the `enabled=1` persistence fix was stored with `enabled=0`, so gating here would have made
+every pre-existing Office agent unassignable after upgrade. A lookup failure that is not "not found"
+(`sql.ErrNoRows`) — a transient store error, for example — propagates unwrapped instead of folding
+into `ErrInvalidAssigneeAgentProfile`, so it surfaces as a 5xx rather than telling the caller their
+assignee choice was invalid. A profile with `WorkspaceID == ""` (global/kanban-legacy) is
+rejected here even though it is treated as universally allowed elsewhere
+(`normalizeWorkflowAgentOverrideSource`'s override-source rule) — the surfaces that populate this
+field never offer a global profile as an assignee, so this path holds the stricter, Office-only
+eligibility rule instead.
+
+Once validation passes, no new write path is introduced: `insertTaskTx`
+(`internal/task/repository/sqlite/task.go`) already calls `upsertRunnerInTx` unconditionally inside
+the create transaction whenever `AssigneeAgentProfileID` and `WorkflowStepID` are both non-empty,
+and `assignee_agent_profile_id` on a fetched task is a computed projection
+(`runnerProjection(alias) AS assignee_agent_profile_id`) read live from
+`workflow_step_participants`, not a stored column. The gap this requirement closes is entirely
+upstream of that transaction: before this change, the HTTP layer never decoded the field, so it was
+always empty by the time `buildTask` ran.
+
+The duplicate-`external_id` short-circuit (`service_tasks.go`'s Found-outcome path) returns the
+already-created task before `prepareTaskForCreation` runs again, so a duplicate request cannot
+re-trigger this validation or double-write a runner seat — this is the existing idempotent-create
+contract, unchanged.
 
 ## Out of scope
 

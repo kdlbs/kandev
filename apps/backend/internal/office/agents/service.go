@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/configloader"
@@ -344,6 +345,11 @@ func (s *AgentService) prepareAgentDefaults(agent *models.AgentInstance) {
 	if agent.Status == "" {
 		agent.Status = models.AgentStatusIdle
 	}
+	// persistAgent's canonical-profile write (profileStore.UpdateAgentProfile)
+	// round-trips the whole struct, so an unset Enabled here would overwrite
+	// the row's own DEFAULT 1 with 0 right after insert. Set it explicitly so
+	// a newly created office agent's persisted row matches the column default.
+	agent.Enabled = true
 	// Office names are user-facing identities, not generated profile labels.
 	agent.UserModified = true
 }
@@ -544,14 +550,27 @@ func (s *AgentService) ApplyProfileConfiguration(
 	if s.profileStore == nil {
 		return errors.New("agent profile store is not configured")
 	}
+	if target == nil {
+		return errors.New("target agent is required")
+	}
 	source, err := s.profileStore.GetAgentProfile(ctx, sourceProfileID)
 	if err != nil {
 		return fmt.Errorf("get source agent profile: %w", err)
+	}
+	if source == nil || source.DeletedAt != nil || !source.Enabled {
+		return errors.New("source agent profile is unavailable")
 	}
 	if source.WorkspaceID != "" && source.WorkspaceID != target.WorkspaceID {
 		return errors.New("source agent profile belongs to a different workspace")
 	}
 	target.AgentID = source.AgentID
+	target.ExecutionAgentProfileID = ""
+	if source.AgentID == agents.DynamicAgentID {
+		// A dynamic execution profile is a routing owner, not a concrete CLI
+		// family. Bind the Office identity to it so the shared resolver can
+		// select a concrete candidate without replacing the Office ID.
+		target.ExecutionAgentProfileID = source.ID
+	}
 	return nil
 }
 

@@ -30,6 +30,11 @@ import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
+import {
+  executorProfileUnavailableReason,
+  localizedExecutorProviderMessage,
+  executorProviderRetentionText,
+} from "@/lib/executor-provider-display";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
@@ -47,6 +52,7 @@ type OptionItem = {
   renderTriggerLabel?: () => React.ReactNode;
   disabled?: boolean;
   disabledReason?: string;
+  description?: string;
 };
 
 function ModelProbeWarning({ note }: { note: string }) {
@@ -351,32 +357,48 @@ export function useExecutorProfileOptions(
   allProfiles: ExecutorProfile[],
   config?: ExecutorProfileOptionsConfig,
 ): ExecutorProfileOptionItem[] {
+  const { t } = useTranslation();
   const disabledReasonFor = config?.disabledReasonFor;
   return useMemo(() => {
     return allProfiles.map((profile) => {
       const Icon = getExecutorIcon(profile.executor_type ?? "local");
-      const disabledReason = disabledReasonFor?.(profile) ?? null;
+      const providerUnavailableReason = executorProfileUnavailableReason(profile, t);
+      const disabledReason = providerUnavailableReason ?? disabledReasonFor?.(profile) ?? null;
+      const retentionText = executorProviderRetentionText(profile.provider, t);
+      const description = providerUnavailableReason ?? retentionText ?? undefined;
+      const executorLabel = localizedExecutorProviderMessage(
+        profile.provider,
+        "display_name",
+        profile.provider?.display_name ?? profile.executor_name ?? "",
+        t,
+      );
       return {
         value: profile.id,
         label: profile.name,
+        description,
         executorType: profile.executor_type,
         executorName: profile.executor_name,
         disabled: !!disabledReason,
         disabledReason: disabledReason ?? undefined,
         renderLabel: () => (
-          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-            <span className="flex min-w-0 items-center gap-1.5">
-              <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate">{profile.name}</span>
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5 py-1">
+              <span className="flex min-w-0 items-center justify-between gap-2">
+                <span className="truncate">{profile.name}</span>
+                {executorLabel && (
+                  <Badge variant="outline" className="shrink-0 text-xs">
+                    {executorLabel}
+                  </Badge>
+                )}
+              </span>
+              {description && (
+                <span className="truncate text-xs text-muted-foreground">{description}</span>
+              )}
             </span>
-            {profile.executor_name && (
-              <Badge variant="outline" className="text-xs">
-                {profile.executor_name}
-              </Badge>
-            )}
           </span>
         ),
       };
     });
-  }, [allProfiles, disabledReasonFor]);
+  }, [allProfiles, disabledReasonFor, t]);
 }

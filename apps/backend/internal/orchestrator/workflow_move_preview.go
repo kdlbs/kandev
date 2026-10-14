@@ -10,6 +10,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
@@ -19,10 +21,12 @@ import (
 // source session field: the server resolves the current session exactly as
 // the move path does.
 type WorkflowMovePreviewRequest struct {
-	TaskID         string
-	WorkflowID     string
-	WorkflowStepID string
-	EntryOptions   *workflowmove.EntryOptions
+	TaskID                     string
+	WorkflowID                 string
+	WorkflowStepID             string
+	EntryOptions               *workflowmove.EntryOptions
+	WorkflowChange             *models.WorkflowChangeRequest
+	CandidateWorkflowOverrides *models.WorkflowAgentOverrides
 }
 
 type WorkflowMovePreviewOutcome string
@@ -177,6 +181,16 @@ func (s *Service) PreviewWorkflowMove(ctx context.Context, request WorkflowMoveP
 	if task.ArchivedAt != nil {
 		return nil, fmt.Errorf("archived tasks cannot be moved")
 	}
+	if request.WorkflowChange != nil {
+		if task.WorkflowID != request.WorkflowChange.ExpectedWorkflowID ||
+			task.WorkflowStepID != request.WorkflowChange.ExpectedStepID ||
+			!task.UpdatedAt.Equal(request.WorkflowChange.ExpectedUpdatedAt) {
+			return nil, repoerrors.ErrWorkflowChangeConflict
+		}
+		if request.CandidateWorkflowOverrides != nil && request.CandidateWorkflowOverrides.WorkflowID != request.WorkflowID {
+			return nil, &taskservice.WorkflowChangeValidationError{Code: taskservice.WorkflowChangeErrorInvalid}
+		}
+	}
 
 	destination, err := s.workflowStepGetter.GetStep(ctx, request.WorkflowStepID)
 	if err != nil {
@@ -236,20 +250,28 @@ func (s *Service) resolveWorkflowMovePreviewInput(
 		input.OriginalSession = previewOriginalTaskSessionFromTask(task, sessions)
 	}
 
-	s.resolveWorkflowMovePreviewRecipient(ctx, request.TaskID, task, destination, &input)
+	profileTask := task
+	if request.WorkflowChange != nil {
+		candidate := *task
+		candidate.WorkflowID = request.WorkflowID
+		candidate.WorkflowStepID = request.WorkflowStepID
+		candidate.WorkflowAgentOverrides = request.CandidateWorkflowOverrides
+		profileTask = &candidate
+	}
+	s.resolveWorkflowMovePreviewRecipient(ctx, request.TaskID, profileTask, destination, &input)
 	return input, nil
 }
 
 func (s *Service) resolveWorkflowMovePreviewRecipient(
 	ctx context.Context,
 	taskID string,
-	task *models.Task,
+	profileTask *models.Task,
 	destination *wfmodels.WorkflowStep,
 	input *workflowMovePreviewInput,
 ) {
 	if destination.SessionTarget != nil {
 		input.ExplicitTarget = true
-		target, profileID, err := s.resolvePreviewWorkflowSessionTarget(ctx, taskID, task, destination)
+		target, profileID, err := s.resolvePreviewWorkflowSessionTarget(ctx, taskID, profileTask, destination)
 		if err != nil {
 			input.Notices = append(input.Notices, workflowMovePreviewNotice("target_unavailable", nil))
 		} else {
@@ -257,7 +279,7 @@ func (s *Service) resolveWorkflowMovePreviewRecipient(
 			input.TargetProfileID = profileID
 		}
 	} else {
-		profileID, err := s.previewStepAgentProfile(ctx, destination, task, input.SourceSession == nil)
+		profileID, err := s.previewStepAgentProfile(ctx, destination, profileTask, input.SourceSession == nil)
 		input.TargetProfileID = profileID
 		if err != nil {
 			input.Notices = append(input.Notices, workflowMovePreviewNotice("profile_unavailable", nil))
@@ -333,11 +355,13 @@ func (s *Service) resolvePreviewWorkflowSessionTarget(
 	if err := validateWorkflowSessionTargetSource(step, sourceStep); err != nil {
 		return nil, "", err
 	}
-	session, err := s.resolveBoundSourceWorkflowSession(ctx, taskID, step.WorkflowID, sourceStep)
+	profileID, err := s.previewStepAgentProfile(ctx, sourceStep, task, true)
 	if err != nil {
 		return nil, "", err
 	}
-	profileID, err := s.previewStepAgentProfile(ctx, sourceStep, task, true)
+	session, err := s.resolveBoundSourceWorkflowSessionWithProfile(
+		ctx, taskID, step.WorkflowID, sourceStep, profileID,
+	)
 	if err != nil {
 		return nil, "", err
 	}

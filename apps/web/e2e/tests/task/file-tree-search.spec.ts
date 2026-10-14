@@ -61,9 +61,9 @@ test.describe("File tree search", () => {
       "FT Search Collapsed",
     );
 
-    // Files are virtualized, so a root file below the viewport is not a readiness signal.
-    const collapsedFolder = session.fileTreeNode("deep");
-    await expect(collapsedFolder).toBeVisible({ timeout: 15_000 });
+    // The file tree may restore a prior scroll position, so mount the folder row
+    // before asserting that it is collapsed.
+    const collapsedFolder = await session.fileTree.waitForFileTreeNode("deep", 15_000);
     await expect(collapsedFolder.locator(".tabler-icon-chevron-right")).toBeVisible();
     // The parent is visibly collapsed, not merely outside the virtualized viewport.
     await expect(session.fileTreeNode("deep/nested/needle-target.ts")).toHaveCount(0);
@@ -102,7 +102,7 @@ test.describe("File tree search", () => {
       "FT Search Clear",
     );
 
-    await expect(session.fileTreeNode("clear-alpha.ts")).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode("clear-alpha.ts", 15_000);
     await testPage.getByRole("button", { name: "Search files" }).click();
     const input = testPage.getByPlaceholder("Search files...");
     await input.fill("clear-alpha");
@@ -113,6 +113,7 @@ test.describe("File tree search", () => {
 
     // Clear input - tree comes back, both files visible again.
     await input.fill("");
+    await session.fileTree.waitForFileTreeNode("clear-alpha.ts", 15_000);
     await expect(session.fileTreeNode("clear-alpha.ts")).toBeVisible({ timeout: 5_000 });
     await expect(session.fileTreeNode("clear-bravo.ts")).toBeVisible({ timeout: 5_000 });
   });
@@ -121,23 +122,9 @@ test.describe("File tree search", () => {
     testPage,
     apiClient,
     seedData,
-    backend,
   }) => {
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
-    git.createFile("escape-target.ts", "e");
-    git.stageAll();
-    git.commit("seed escape");
+    await setupTask(testPage, apiClient, seedData, "ft-search-escape", "FT Search Escape");
 
-    const session = await setupTask(
-      testPage,
-      apiClient,
-      seedData,
-      "ft-search-escape",
-      "FT Search Escape",
-    );
-
-    await expect(session.fileTreeNode("escape-target.ts")).toBeVisible({ timeout: 15_000 });
     await testPage.getByRole("button", { name: "Search files" }).click();
     const input = testPage.getByPlaceholder("Search files...");
     await expect(input).toBeVisible({ timeout: 5_000 });

@@ -94,6 +94,7 @@ type RunContext struct {
 	WorkflowStepID        string   `json:"workflow_step_id,omitempty"`
 	ActorID               string   `json:"actor_id,omitempty"`
 	ActorType             string   `json:"actor_type,omitempty"` // "user" | "agent"
+	AssignmentGeneration  *int64   `json:"-"`
 	CommentID             string   `json:"comment_id,omitempty"`
 	ResolvedBlockerTaskID string   `json:"resolved_blocker_task_id,omitempty"`
 	ChildTaskID           string   `json:"child_task_id,omitempty"`
@@ -572,7 +573,21 @@ func (ss *SchedulerService) checkPauseGate(ctx context.Context, agent *models.Ag
 	}
 	if active != nil {
 		pause.RecordBlocked("scheduler_queue_run")
-		return shared.ErrWorkspacePaused
+		return &pausedQueueError{pause: active}
 	}
 	return nil
 }
+
+// pausedQueueError wraps shared.ErrWorkspacePaused with the exact pause
+// record checkPauseGate already resolved, so a caller (the reactivity
+// pipeline's deferred-assignment recording) can recover the blocking
+// pause's id via errors.As without a second, potentially racy PauseState
+// read. Mirrors routines/service.go's pausedDispatchError. errors.Is
+// against shared.ErrWorkspacePaused still works for every existing caller
+// via Unwrap.
+type pausedQueueError struct {
+	pause *models.WorkspacePause
+}
+
+func (e *pausedQueueError) Error() string { return shared.ErrWorkspacePaused.Error() }
+func (e *pausedQueueError) Unwrap() error { return shared.ErrWorkspacePaused }

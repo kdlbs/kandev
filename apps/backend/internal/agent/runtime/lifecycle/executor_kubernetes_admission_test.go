@@ -165,7 +165,9 @@ func TestKubernetesCreateInstanceMaterializesSkillsCredentialsAndPortableConfig(
 			}}),
 		}, nil
 	}
-	executor.resolveBinary = func(kubeexecutor.Platform) ([]byte, error) { return []byte("agentctl"), nil }
+	executor.resolveBinary = func(context.Context, *ExecutorCreateRequest, kubeexecutor.Platform) ([]byte, error) {
+		return []byte("agentctl"), nil
+	}
 	req := validKubernetesCreateRequest()
 	req.AgentConfig = agents.NewMockAgentWithID("codex-acp", "Mock Codex", "Mock Codex")
 	req.Metadata[MetadataKeyRemoteAuthHome] = "/home/untrusted-task-value"

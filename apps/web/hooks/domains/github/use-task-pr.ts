@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import { deleteTaskPR, listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
+import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getTaskPRsForCurrentWorkspace } from "./use-task-pr-tooltip-hydration";
 import { getTaskPRSyncResource, type TaskPRSyncScope } from "./task-pr-sync-resource";
+import { unlinkTaskPRAssociation } from "./task-pr-mutations";
+import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
 import type { TaskPR } from "@/lib/types/github";
 
 /** Fetch all PR associations for a workspace. */
@@ -79,12 +81,21 @@ export function useTaskPR(taskId: string | null) {
 
   const unlink = useCallback(
     async (associationId: string) => {
-      if (!taskId || !workspaceId) throw new Error("No active workspace is selected.");
-      await deleteTaskPR(associationId, workspaceId);
-      removeTaskPR(taskId, associationId, { workspaceId, workspaceContextGeneration });
-      if (scope) resource.invalidate(scope);
+      await unlinkTaskPRAssociation({
+        associationId,
+        store,
+        taskId,
+        workspaceId,
+        workspaceContextGeneration,
+        isWorkspaceContextCurrent: () =>
+          isCurrentWorkspaceContext(store.getState(), workspaceId, workspaceContextGeneration),
+        removeTaskPR,
+        invalidateSync: () => {
+          if (scope) resource.invalidate(scope);
+        },
+      });
     },
-    [removeTaskPR, resource, scope, taskId, workspaceContextGeneration, workspaceId],
+    [removeTaskPR, resource, scope, store, taskId, workspaceContextGeneration, workspaceId],
   );
 
   return {

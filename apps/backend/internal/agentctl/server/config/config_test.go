@@ -142,10 +142,10 @@ func TestInjectedKandevMCPProvenance(t *testing.T) {
 	if len(cfg.McpServers) != 3 {
 		t.Fatalf("McpServers = %+v, want injected HTTP/SSE plus third-party", cfg.McpServers)
 	}
-	if cfg.McpServers[0].Name != "kandev" || cfg.McpServers[0].Type != "http" || cfg.McpServers[0].URL != "http://localhost:43210/mcp" {
+	if cfg.McpServers[0].Name != "kandev" || cfg.McpServers[0].Type != "http" || cfg.McpServers[0].URL != "http://127.0.0.1:43210/mcp" {
 		t.Fatalf("HTTP injection = %+v", cfg.McpServers[0])
 	}
-	if cfg.McpServers[1].Name != "kandev" || cfg.McpServers[1].Type != "sse" || cfg.McpServers[1].URL != "http://localhost:43210/sse" {
+	if cfg.McpServers[1].Name != "kandev" || cfg.McpServers[1].Type != "sse" || cfg.McpServers[1].URL != "http://127.0.0.1:43210/sse" {
 		t.Fatalf("SSE injection = %+v", cfg.McpServers[1])
 	}
 	if cfg.McpServers[2].Name != "third-party" {
@@ -461,10 +461,10 @@ exit 2
 	env, err := CollectAgentEnvWithError(map[string]string{
 		"GH_TOKEN":            "late-profile-token",
 		"HOME":                filepath.Join(t.TempDir(), "home"),
-		"PATH":                "/usr/bin:/bin",
+		"PATH":                os.Getenv(pathEnvKey),
 		"GIT_CONFIG_COUNT":    "1",
 		"GIT_CONFIG_KEY_0":    "credential.https://github.com.helper",
-		"GIT_CONFIG_VALUE_0":  "!'" + ghPath + "' auth git-credential",
+		"GIT_CONFIG_VALUE_0":  "!'" + filepath.ToSlash(ghPath) + "' auth git-credential",
 		"GIT_CONFIG_NOSYSTEM": "1",
 	})
 	if err != nil {

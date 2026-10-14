@@ -3,6 +3,8 @@ import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { expectTaskDescription } from "../../pages/task-description-editor";
+import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { seedIncompatibleAgentScenario, seedLockedWorkflow } from "./agent-compatibility-helpers";
 
 // Exercises the regular task-create dialog (New Task in the sidebar), so run
@@ -19,38 +21,74 @@ test.describe("Task creation", () => {
     apiClient,
     seedData,
   }) => {
-    const hidden = await apiClient.e2eCreateHiddenWorkflow(
-      seedData.workspaceId,
-      "Hidden task-detail workflow",
-    );
-    const hiddenStart = await apiClient.createWorkflowStep(hidden.id, "Improve", 0, {
-      is_start_step: true,
-    });
-    const sourceTask = await apiClient.createTask(seedData.workspaceId, "Hidden source task", {
-      description: "Source task in the hidden workflow",
-      workflow_id: hidden.id,
-      workflow_step_id: hiddenStart.id,
+    const initialLayout = (await apiClient.getUserSettings()).settings
+      .sidebar_layouts_by_workspace?.[seedData.workspaceId];
+    const collapsedLayout = initialLayout
+      ? { ...initialLayout, navigation_height: 0, navigation_expanded: false }
+      : {
+          version: 1,
+          revision: 0,
+          navigation_height: 0,
+          navigation_expanded: false,
+          nodes: [
+            { id: "home", kind: "builtin" as const, destination_id: "home", visible: true },
+            { id: "new-task", kind: "builtin" as const, destination_id: "new_task", visible: true },
+            {
+              id: "integrations",
+              kind: "builtin" as const,
+              destination_id: "integrations",
+              visible: true,
+            },
+          ],
+        };
+    await apiClient.saveUserSettings({
+      sidebar_layout_state: {
+        workspace_id: seedData.workspaceId,
+        expected_revision: initialLayout?.revision ?? 0,
+        layout: collapsedLayout,
+      },
     });
 
-    await testPage.goto(`/t/${sourceTask.id}`);
-    await testPage.getByTestId("create-task-button").first().click();
+    try {
+      const hidden = await apiClient.e2eCreateHiddenWorkflow(
+        seedData.workspaceId,
+        "Hidden task-detail workflow",
+      );
+      const hiddenStart = await apiClient.createWorkflowStep(hidden.id, "Improve", 0, {
+        is_start_step: true,
+      });
+      const sourceTask = await apiClient.createTask(seedData.workspaceId, "Hidden source task", {
+        description: "Source task in the hidden workflow",
+        workflow_id: hidden.id,
+        workflow_step_id: hiddenStart.id,
+      });
 
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
-    await dialog.getByTestId("task-title-input").fill("Visible workflow task");
-    await dialog.getByTestId("task-description-input").fill("Created from hidden task detail");
-    await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeEnabled({
-      timeout: START_ENABLED_TIMEOUT,
-    });
-    await dialog.getByTestId("submit-start-agent-chevron").click();
-    await testPage.getByTestId("submit-create-without-agent").click();
+      await testPage.goto(`/t/${sourceTask.id}`);
+      const navigationExpand = testPage.getByTestId("sidebar-navigation-expand");
+      await expect(navigationExpand).toHaveAttribute("aria-expanded", "false");
+      await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
+      await expect(navigationExpand).toHaveAttribute("aria-expanded", "true");
+      await testPage.getByTestId("create-task-button").first().click();
 
-    await expect
-      .poll(() => getTaskIdFromPage(testPage), { timeout: 15_000 })
-      .not.toBe(sourceTask.id);
-    const createdTaskId = await getTaskIdFromPage(testPage);
-    const createdTask = await apiClient.getTask(createdTaskId);
-    expect(createdTask.workflow_step_id).toBe(seedData.startStepId);
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await dialog.getByTestId("task-title-input").fill("Visible workflow task");
+      await dialog.getByTestId("task-description-input").fill("Created from hidden task detail");
+      await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeEnabled({
+        timeout: START_ENABLED_TIMEOUT,
+      });
+      await dialog.getByTestId("submit-start-agent-chevron").click();
+      await testPage.getByTestId("submit-create-without-agent").click();
+
+      await expect
+        .poll(() => getTaskIdFromPage(testPage), { timeout: 15_000 })
+        .not.toBe(sourceTask.id);
+      const createdTaskId = await getTaskIdFromPage(testPage);
+      const createdTask = await apiClient.getTask(createdTaskId);
+      expect(createdTask.workflow_step_id).toBe(seedData.startStepId);
+    } finally {
+      await restoreSidebarLayout(apiClient, seedData.workspaceId, initialLayout);
+    }
   });
 
   test("selects the single visible workflow when hidden workflows are loaded", async ({
@@ -401,14 +439,6 @@ test.describe("Task creation", () => {
     }
   });
 
-  test("opens create task dialog from kanban header", async ({ testPage }) => {
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    await kanban.createTaskButton.first().click();
-    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
-  });
-
   test("explains when a Docker executor has no compatible agent credentials", async ({
     testPage,
     apiClient,
@@ -509,24 +539,10 @@ test.describe("Task creation", () => {
     await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText("Select agent");
   });
 
-  test("can fill in task title and description", async ({ testPage }) => {
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    await kanban.createTaskButton.first().click();
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
-
-    const titleInput = testPage.getByTestId("task-title-input");
-    await titleInput.fill("My E2E Test Task");
-    await expect(titleInput).toHaveValue("My E2E Test Task");
-
-    const descInput = testPage.getByTestId("task-description-input");
-    await descInput.fill("This is a test description");
-    await expectTaskDescription(descInput, "This is a test description");
-  });
-
-  test("start agent: creates task, starts session, navigates to session", async ({ testPage }) => {
+  test("start agent: creates task, starts session, navigates to session", async ({
+    testPage,
+    apiClient,
+  }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
@@ -535,8 +551,12 @@ test.describe("Task creation", () => {
     await expect(dialog).toBeVisible();
 
     // Fill in title and description — description enables the "Start task" button
-    await testPage.getByTestId("task-title-input").fill("Start Agent Task");
-    await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+    const titleInput = testPage.getByTestId("task-title-input");
+    await titleInput.fill("Start Agent Task");
+    await expect(titleInput).toHaveValue("Start Agent Task");
+    const descriptionInput = testPage.getByTestId("task-description-input");
+    await descriptionInput.fill("/e2e:simple-message");
+    await expectTaskDescription(descriptionInput, "/e2e:simple-message");
 
     // The dialog auto-selects the E2E Repo (first available repository) and the main branch.
     // Wait for the button to become enabled (repo + branch + agent profile all resolved).
@@ -585,6 +605,14 @@ test.describe("Task creation", () => {
     await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step", {
       timeout: 15_000,
     });
+    const taskId = await getTaskIdFromPage(testPage);
+    const { sessions } = await apiClient.listTaskSessions(taskId);
+    expect(sessions).toHaveLength(1);
+    expect(DONE_STATES).toContain(sessions[0].state);
+    const env = await apiClient.getTaskEnvironment(taskId);
+    expect(env).not.toBeNull();
+    expect(env!.task_id).toBe(taskId);
+    expect(env!.status).toBe("ready");
   });
 
   test("plan mode with MCP tool: creates plan via create_task_plan", async ({ testPage }) => {
@@ -721,48 +749,6 @@ test.describe("Task creation", () => {
  * correctly with the new per-task environment layer.
  */
 test.describe("Create task regression", () => {
-  test("create and start agent: session completes with task environment created", async ({
-    testPage,
-    apiClient,
-  }) => {
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    await kanban.createTaskButton.first().click();
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
-
-    await testPage.getByTestId("task-title-input").fill("Regression Task");
-    await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
-
-    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
-    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
-    await startBtn.click();
-    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-
-    // Wait for mock agent to complete its turn
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
-
-    // Verify task has exactly one session
-    const taskId = await getTaskIdFromPage(testPage);
-    const { sessions } = await apiClient.listTaskSessions(taskId);
-    expect(sessions.length).toBe(1);
-    expect(DONE_STATES).toContain(sessions[0].state);
-
-    // Verify task environment was created
-    const env = await apiClient.getTaskEnvironment(taskId);
-    expect(env).not.toBeNull();
-    expect(env!.task_id).toBe(taskId);
-    expect(env!.status).toBe("ready");
-  });
-
   test("create task via API: session and environment link correctly", async ({
     apiClient,
     seedData,

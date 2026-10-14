@@ -1,6 +1,6 @@
 "use client";
 
-import type { WorkflowMoveEntryOptions } from "@/lib/api";
+import type { WorkflowChangePayload, WorkflowMoveEntryOptions } from "@/lib/api";
 import { useWorkflowMovePreview } from "@/hooks/domains/kanban/use-workflow-move-preview";
 import { useWorkflowMovePreviewRevision } from "@/hooks/domains/kanban/use-workflow-move-preview-revision";
 import { WorkflowMovePreviewDisclosure } from "./workflow-move-preview";
@@ -14,10 +14,12 @@ export type WorkflowMovePreviewTarget = {
 export function WorkflowMovePreviewFooter({
   target,
   entryOptions,
+  workflowChange,
   isTouchSurface,
 }: {
   target: WorkflowMovePreviewTarget;
   entryOptions?: WorkflowMoveEntryOptions;
+  workflowChange?: WorkflowChangePayload;
   isTouchSurface: boolean;
 }) {
   const invalidationKey = useWorkflowMovePreviewRevision(
@@ -25,6 +27,11 @@ export function WorkflowMovePreviewFooter({
     target.workflowId,
     target.workflowStepId,
   );
-  const state = useWorkflowMovePreview({ ...target, entryOptions, invalidationKey });
+  const state = useWorkflowMovePreview({
+    ...target,
+    entryOptions,
+    workflowChange,
+    invalidationKey,
+  });
   return <WorkflowMovePreviewDisclosure state={state} isTouchSurface={isTouchSurface} />;
 }

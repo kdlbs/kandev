@@ -200,6 +200,7 @@ func seam3PromptEnsurePayload(
 		"prompt_already_composed":     options.promptAlreadyComposed,
 		"fallback_launch_prompt":      options.fallbackLaunchPrompt,
 		"fallback_retry_prompt":       options.fallbackRetryPrompt,
+		"prompt_reference_context":    options.promptReferenceContext,
 	}
 	if options.ceilingEntryBinding != nil {
 		payload[models.CeilingLaunchEntryBindingKey] = ceilingEntryBindingValue(*options.ceilingEntryBinding)
@@ -251,7 +252,7 @@ func (s *Service) classifyEnsureSessionRunningFailureForPrompt(
 		}
 		return err
 	}
-	if errors.Is(err, errSessionAwaitingRuntimeLaunch) {
+	if errors.Is(err, errSessionAwaitingRuntimeLaunch) || isRetryableSessionRecoveryGuardError(err) {
 		return fmt.Errorf("%w: failed to ensure session is running: %w", ErrSessionRuntimeUnavailable, err)
 	}
 	return fmt.Errorf("failed to ensure session is running: %w", err)

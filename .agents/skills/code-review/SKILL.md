@@ -35,7 +35,12 @@ change and a small diff because this limits risk and maintainer burden.
 
 Determine the right diff scope:
 - **Local changes**: `git diff --name-only` (unstaged) and `git diff --cached --name-only` (staged)
+- **Untracked changes**: `git ls-files --others --exclude-standard`; read any in-scope source or tests before drawing conclusions
 - **PR review**: `git diff origin/<base_branch>...HEAD --name-only` to diff against the base branch
+
+Reconcile the inventory with `git status --short` without staging user changes. If
+the review includes uncommitted files, describe it as a working-tree snapshot
+over `HEAD`; do not imply that `HEAD` contains the implementation.
 
 For an existing PR, first confirm the exact head under review. Do not assume the
 local checkout is current: inspect the PR's base branch and head SHA, fetch the
@@ -62,11 +67,11 @@ For a follow-up round, inspect `<previous-reviewed-head>..<current-head>` first,
 then re-evaluate `<base>...<current-head>` for complete PR coverage. Record both
 immutable heads. The first range does not isolate the author's response when the
 branch merged or rebased onto an advanced base: it also carries every upstream
-commit that arrived with it. Use `rtk proxy git log --oneline --first-parent
+commit that arrived with it. Use `git log --oneline --first-parent
 <previous-reviewed-head>..<current-head>` to list the branch's own commits, then
-`rtk proxy git show --stat <sha>` per commit to size the response. When history
-shape decides review scope, use `rtk proxy git log` because the normal RTK
-wrapper can omit merge commits and truncate subjects.
+`git show --stat <sha>` per commit to size the response. When history shape
+decides review scope, preserve the complete Git output, including merge commits
+and subjects.
 
 When `pr.base_advanced_since_head` is `true`, validate the actual merge result
 before declaring the PR ready. Record the latest base and immutable head SHAs,
@@ -115,6 +120,7 @@ Before reviewing implementation details:
 - Check whether the selected test level is appropriate: unit for pure logic, integration for boundaries, E2E for critical browser flows.
 - Identify missing coverage for happy path, key error paths, edge cases, auth/workspace boundaries, and concurrency/order-sensitive behavior.
 - When a contract spans dispatchers, explicit service/API launches, approval/UI flows, or background handlers, enumerate every user-reachable entry point, trace each to the operation, and require path-specific regression coverage before declaring review clean.
+- When a gate or expression is duplicated across logical branches, assert each branch structurally rather than checking token presence; cover symmetric variants so same-repository or connector drift cannot pass unnoticed.
 - When a PR changes the semantics of a field, flag, enum, event, or API contract, grep all producers and consumers for comments, logs, names, and tests that describe the old meaning. Those unchanged descriptions are in scope because the PR makes them false; anchor the finding to the changed contract use and list affected downstream sites.
 - For concurrent or event-driven changes, require a deterministic schedule that checks ownership or generation identity, stale-event handling, cancellation, and lock scope. Channel/barrier coordination is preferable to timing sleeps.
 - For stale-event races, cover both event-before-successor and delayed-old-event-after-successor orderings. Prefer integration coverage for cross-package event or callback paths when practical.
@@ -183,9 +189,20 @@ Check every changed file for the following layers. Skip layers that don't apply 
   duplicate, and malformed-marker behavior before writing. Cleanup must no-op or
   fail closed when the body is not owned, and tests must cover each ownership
   boundary without retrying an unowned document.
+- For serve-time HTML rewriting or script injection, verify browser document
+  context rather than token presence alone. Valid HTML may omit `html`, `head`,
+  and `body`, and a script token may occur inside inert `template` or foreign
+  content. Cover scriptless omitted-wrapper documents and inert-content cases,
+  preserve stored artifact bytes, and verify that the served bootstrap executes.
 - Race conditions or concurrency issues in concurrent code
 - Async events carry an immutable identity when they can outlive the operation that created them; stale events cannot mutate a replacement operation
 - Locks protect only the atomic ownership boundary and are not held across unbounded I/O or a full asynchronous operation
+- When adding an RPC deadline, trace the actual transport, server operation, and
+  cleanup before the response. Compare nested timeout budgets, including
+  `context.WithoutCancel` cleanup; test successful work followed by stalled
+  cleanup. A client timeout or removed response-correlation ID does not stop
+  remote work or independent stream events, so fence late effects before
+  admitting successor work.
 - Synchronous callbacks cannot re-enter a lock they already need; moving publication asynchronous also requires an immutable value snapshot, clear shutdown ownership, and protection against a delayed event changing successor state
 - When a generation, token, or lease authorizes a side effect, validate and mutate within one critical section. Check every terminal path separately: success, raw error, cancellation, timeout, and disconnect.
 - Detached goroutines have immutable snapshots and a real happens-before relationship before reading state that can otherwise transition underneath them
@@ -262,6 +279,9 @@ author-facing delivery but retain it in the private review summary; repeat it
 only when the user explicitly asks for reinforcement. Re-fetch immediately
 before delivery and start a new review round if `headRefOid` changed. Name the
 exact reviewed SHA in the outgoing finding.
+
+When handing findings to another Kandev session, include the file and line,
+severity, concrete fix, and targeted verification.
 
 ### 5. Output
 

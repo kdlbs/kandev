@@ -2,6 +2,7 @@ import React, { createRef } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/toast-provider";
+import { setChatDraftAttachments } from "@/lib/local-storage";
 import { shouldShowChatFocusHint, useChatInputContainer } from "./use-chat-input-container";
 import type { ChatInputContainerHandle } from "./chat-input-container";
 import { ComposerDisclosureContext } from "./composer-disclosure";
@@ -9,11 +10,13 @@ import { useComposerDisclosure } from "./use-composer-disclosure";
 import * as files from "./file-attachment";
 
 const callerPlaceholder = "Continue working on the task...";
+const STAGED_ATTACHMENT_ID = "staged-attachment";
 
 function renderInputState(
   overrides: Partial<Parameters<typeof useChatInputContainer>[0]> = {},
   autoHide = false,
 ) {
+  const chatInputRef = createRef<ChatInputContainerHandle>();
   let disclosure: ReturnType<typeof useComposerDisclosure>;
   function Wrapper({ children }: { children: React.ReactNode }) {
     disclosure = useComposerDisclosure({ enabled: autoHide, sessionId: "session-1" });
@@ -30,8 +33,9 @@ function renderInputState(
   const hook = renderHook(
     (currentOverrides: Partial<Parameters<typeof useChatInputContainer>[0]>) =>
       useChatInputContainer({
-        ref: createRef<ChatInputContainerHandle>(),
+        ref: chatInputRef,
         sessionId: "session-1",
+        taskId: null,
         isSending: false,
         isStarting: false,
         canQueueWhileStarting: false,
@@ -59,7 +63,7 @@ function renderInputState(
       wrapper: Wrapper,
     },
   );
-  return { ...hook, disclosure: () => disclosure };
+  return { ...hook, chatInputRef, disclosure: () => disclosure };
 }
 
 describe("useChatInputContainer disclosure activity", () => {
@@ -114,6 +118,47 @@ describe("useChatInputContainer disclosure activity", () => {
       expect(disclosure().canCollapse).toBe(false);
     },
   );
+});
+
+describe("useChatInputContainer opening attachment recovery", () => {
+  it("restores rejected opening attachment descriptors through the mounted handle", async () => {
+    localStorage.clear();
+    const attachment = {
+      type: "resource" as const,
+      attachment_id: STAGED_ATTACHMENT_ID,
+      mime_type: "text/plain",
+      name: "notes.txt",
+      size_bytes: 7,
+      delivery_mode: "path" as const,
+    };
+    const { chatInputRef } = renderInputState({ workspaceId: "workspace-1" });
+
+    act(() => {
+      setChatDraftAttachments("session-1", [
+        {
+          id: STAGED_ATTACHMENT_ID,
+          attachmentId: STAGED_ATTACHMENT_ID,
+          expiresAt: "2030-01-01T00:00:00.000Z",
+          mimeType: "text/plain",
+          fileName: "notes.txt",
+          size: 7,
+          isImage: false,
+          deliveryMode: "path",
+        },
+      ]);
+      chatInputRef.current?.restoreStagedAttachments?.([attachment]);
+    });
+
+    await waitFor(() =>
+      expect(chatInputRef.current?.getAttachments()).toEqual([
+        expect.objectContaining({
+          attachment_id: STAGED_ATTACHMENT_ID,
+          name: "notes.txt",
+          delivery_mode: "path",
+        }),
+      ]),
+    );
+  });
 });
 
 describe("useChatInputContainer", () => {

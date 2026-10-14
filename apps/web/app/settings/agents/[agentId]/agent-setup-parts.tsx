@@ -21,7 +21,7 @@ import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { SettingsPageHeader, SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
-import { ProfileEnvVarsSection } from "@/components/settings/agent-profile-page";
+import { ProfileEnvVarsSection } from "@/components/settings/profile-edit/profile-env-vars-section";
 import { ProviderSection } from "@/components/settings/profile-edit/provider-section";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import type { Agent, ModelConfig, PermissionSetting, PassthroughConfig } from "@/lib/types/http";
@@ -50,7 +50,10 @@ function profileFormData(
     auto_approve: permissions.auto_approve,
     allow_indexing: permissions.allow_indexing,
     cli_passthrough: profile.cliPassthrough ?? false,
+    cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
+    cursor_plugins_mcp_enabled: profile.cursorPluginsMcpEnabled ?? true,
     cli_flags: profile.cliFlags ?? [],
+    env_vars: profile.envVars ?? [],
     command_prefix: profile.commandPrefix ?? "",
   };
 }
@@ -186,6 +189,10 @@ export function ProfileCardItem({
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={draftAgent.name}
+          capabilityProfileId={savedProfile?.id}
+          cursorMcpAuthSupported={
+            draftAgent.name === "cursor-acp" || draftAgent.tui_config?.mcp_strategy === "cursor"
+          }
           onRemove={() => onRemoveProfile(profile.id)}
           canRemove={draftAgent.profiles.length > 1}
           lockPassthrough={Boolean(draftAgent.tui_config)}

@@ -330,3 +330,19 @@ func TestServiceRefusesToTouchAnotherUsersProvider(t *testing.T) {
 		t.Fatalf("provider mutated by a foreign caller: %#v (%v)", after, err)
 	}
 }
+
+func (r *multiUserRepository) CreateProviderWithSubscriptions(ctx context.Context, provider *models.Provider, events []string) error {
+	if err := r.CreateProvider(ctx, provider); err != nil {
+		return err
+	}
+	return r.ReplaceSubscriptions(ctx, provider.ID, provider.UserID, events)
+}
+func (r *multiUserRepository) UpdateProviderWithSubscriptions(ctx context.Context, provider *models.Provider, events *[]string) error {
+	if err := r.UpdateProvider(ctx, provider); err != nil {
+		return err
+	}
+	if events != nil {
+		return r.ReplaceSubscriptions(ctx, provider.ID, provider.UserID, *events)
+	}
+	return nil
+}

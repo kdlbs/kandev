@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { APP_SIDEBAR_EXPANDED_WIDTH } from "./app-sidebar-constants";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/lib/layout/app-sidebar-geometry";
 
 const navigationMock = vi.hoisted(() => ({
   pathname: "/",
@@ -33,6 +33,21 @@ vi.mock("./app-sidebar-header", () => ({
     >
       header
     </button>
+  ),
+}));
+
+vi.mock("./sidebar-navigation-split", () => ({
+  SidebarNavigationSplit: ({
+    navigation,
+    tasks,
+  }: {
+    navigation: React.ReactNode;
+    tasks: React.ReactNode;
+  }) => (
+    <>
+      {navigation}
+      {tasks}
+    </>
   ),
 }));
 

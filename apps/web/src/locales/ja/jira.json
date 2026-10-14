@@ -223,5 +223,9 @@
   "watcherUpdated": "ウォッチャー更新済み",
   "workflow": "ワークフロー",
   "workflowStep": "ワークフローステップ",
-  "yourJiraSessionExpiredOrNeeds": "Jiraセッション期限切れ、またはステップアップ認証必要。再接続してこのチケット表示。"
+  "yourJiraSessionExpiredOrNeeds": "Jiraセッション期限切れ、またはステップアップ認証必要。再接続してこのチケット表示。",
+  "clearViewAsDefault": "{{name}} をデフォルトビューから解除",
+  "defaultViewDeleteFailed": "保存した Jira ビューを削除できませんでした。もう一度お試しください。",
+  "defaultViewSaveFailed": "Jira のデフォルトビューを保存できませんでした。もう一度お試しください。",
+  "setViewAsDefault": "{{name}} をデフォルトビューに設定"
 }

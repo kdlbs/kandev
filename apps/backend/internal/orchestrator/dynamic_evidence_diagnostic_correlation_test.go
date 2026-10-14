@@ -2,9 +2,37 @@ package orchestrator
 
 import (
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 )
+
+func TestDynamicAttemptEvidenceMatchesCodexUsageLimitDiagnostic(t *testing.T) {
+	var service Service
+	const notice = "You've hit your usage limit. try again at Sep 27th, 2026 3:09 AM"
+	service.beginPromptAttempt("session-1", "execution-1", 1, false)
+
+	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
+		SessionID:                   "session-1",
+		AgentExecutionID:            "execution-1",
+		AgentID:                     "codex-acp",
+		PromptGeneration:            1,
+		EvidenceKnown:               true,
+		ProviderDiagnosticCandidate: true,
+		ProviderDiagnosticText:      notice,
+		ErrorMessage:                "Internal error",
+		ProviderError: &streams.ProviderError{
+			Source:     streams.ProviderErrorSourceCodexACP,
+			ProviderID: "codex-acp",
+			Message:    notice,
+			OccurredAt: time.Now().UTC(),
+		},
+	})
+	if got.OutputObserved {
+		t.Fatal("matching Codex usage-limit notice was treated as generated output before its generic prompt error")
+	}
+}
 
 // TestDynamicAttemptEvidenceRequiresDiagnosticTextContainment pins
 // AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.23: a recorded diagnostic that
@@ -19,7 +47,7 @@ func TestDynamicAttemptEvidenceRequiresDiagnosticTextContainment(t *testing.T) {
 	const terminal = "API Error: Repeated 529 Overloaded errors. The API is at capacity."
 
 	service.beginPromptAttempt("session-1", "execution-1", 1, false)
-	service.observeProviderDiagnostic("session-1", "execution-1", 1, prose)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, "", prose)
 
 	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
 		SessionID:        "session-1",
@@ -46,7 +74,7 @@ func TestDynamicAttemptEvidenceContainmentIsCaseSensitive(t *testing.T) {
 	const terminal = "Internal error: API Error: 500 Internal server error. This is a server-side issue, usually temporary - try again in a moment."
 
 	service.beginPromptAttempt("session-1", "execution-1", 1, false)
-	service.observeProviderDiagnostic("session-1", "execution-1", 1, chunk)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, "", chunk)
 
 	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
 		SessionID:        "session-1",
@@ -76,7 +104,7 @@ func TestDynamicAttemptEvidenceContainmentSurvivesSanitizedTrailingPunctuation(t
 	const sanitizedTerminal = "API Error: Repeated 529 Overloaded errors. The API is at capacity"
 
 	service.beginPromptAttempt("session-1", "execution-1", 1, false)
-	service.observeProviderDiagnostic("session-1", "execution-1", 1, rawDiagnostic)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, "", rawDiagnostic)
 
 	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
 		SessionID:        "session-1",
@@ -106,8 +134,8 @@ func TestDynamicAttemptEvidenceSecondDiagnosticDoesNotOverwriteFirst(t *testing.
 	const terminalMatchingSecond = "Internal error: API Error: 500 Internal server error. This is a server-side issue, usually temporary - try again in a moment."
 
 	service.beginPromptAttempt("session-1", "execution-1", 1, false)
-	service.observeProviderDiagnostic("session-1", "execution-1", 1, firstDiagnostic)
-	service.observeProviderDiagnostic("session-1", "execution-1", 1, secondDiagnostic)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, "", firstDiagnostic)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, "", secondDiagnostic)
 
 	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
 		SessionID:        "session-1",
@@ -133,7 +161,7 @@ func TestDynamicAttemptEvidenceToolActivityAfterDiagnosticFailsEffectFenceWithou
 	const diagnostic = "API Error: Repeated 529 Overloaded errors. The API is at capacity."
 
 	service.beginPromptAttempt("session-1", "execution-1", 1, false)
-	service.observeProviderDiagnostic("session-1", "execution-1", 1, diagnostic)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, "", diagnostic)
 	service.observePromptAttempt("session-1", "execution-1", 1, false, true)
 
 	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
@@ -165,7 +193,7 @@ func TestDynamicAttemptEvidenceContainmentSatisfiedByGatewaySubstring(t *testing
 	const terminal = "Internal error: API Error: 500 Internal server error. This is a server-side issue, usually temporary - try again in a moment."
 
 	service.beginPromptAttempt("session-1", "execution-1", 1, false)
-	service.observeProviderDiagnostic("session-1", "execution-1", 1, chunk)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, "", chunk)
 
 	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
 		SessionID:        "session-1",
@@ -196,7 +224,7 @@ func TestDynamicAttemptEvidenceContainmentRequiresMatchingCode(t *testing.T) {
 	const terminal = "API Error: 500 Internal Server Error was retried automatically, but the provider also reported 529 overloaded upstream; giving up."
 
 	service.beginPromptAttempt("session-1", "execution-1", 1, false)
-	service.observeProviderDiagnostic("session-1", "execution-1", 1, diagnostic)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, "", diagnostic)
 
 	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
 		SessionID:        "session-1",

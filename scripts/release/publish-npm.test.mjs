@@ -53,6 +53,126 @@ const releases = [
   },
 ];
 
+function standardManifest() {
+  return {
+    schema_version: 1,
+    version: "v1.2.3",
+    commit: "a".repeat(40),
+    variant: "standard",
+    helpers: [
+      ["linux/amd64", "agentctl-linux-amd64.gz", "a"],
+      ["linux/arm64", "agentctl-linux-arm64.gz", "b"],
+      ["darwin/amd64", "agentctl-darwin-amd64.gz", "c"],
+      ["darwin/arm64", "agentctl-darwin-arm64.gz", "d"],
+    ].map(([platform, asset, marker]) => ({
+      platform,
+      asset,
+      sha256: marker.repeat(64),
+      size_bytes: 123,
+    })),
+  };
+}
+
+async function createRuntimeArchives(root, { variant }) {
+  const assetsDir = path.join(root, "runtime-assets");
+  await mkdir(assetsDir, { recursive: true });
+  for (const { platform } of runtimeInventory) {
+    const sourceRoot = path.join(root, `source-${platform}`, "kandev");
+    const binDir = path.join(sourceRoot, "bin");
+    await mkdir(binDir, { recursive: true });
+    const extension = platform === "windows-x64" ? ".exe" : "";
+    await Promise.all(
+      [`kandev${extension}`, `agentctl${extension}`].map((name) =>
+        writeFile(path.join(binDir, name), `stub ${name}\n`, { mode: 0o755 }),
+      ),
+    );
+    if (variant === "standard") {
+      await writeFile(
+        path.join(sourceRoot, "remote-helpers.json"),
+        `${JSON.stringify(standardManifest(), null, 2)}\n`,
+      );
+    } else {
+      await Promise.all(
+        [
+          "agentctl-linux-amd64",
+          "agentctl-linux-arm64",
+          "agentctl-darwin-amd64",
+          "agentctl-darwin-arm64",
+        ].map((name) =>
+          writeFile(path.join(binDir, name), `stub ${name}\n`, { mode: 0o755 }),
+        ),
+      );
+    }
+    const archive = path.join(assetsDir, `kandev-${platform}.tar.gz`);
+    const result = spawnSync(
+      "tar",
+      ["-czf", archive, "-C", path.join(root, `source-${platform}`), "kandev"],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  }
+  return assetsDir;
+}
+
+test("npm runtime packages carry the Stable manifest and keep Nightly complete", async () => {
+  const script = path.join(
+    sourceRoot,
+    "scripts/release/package-npm-runtime.sh",
+  );
+  for (const { variant, version, expectedFiles } of [
+    {
+      variant: "standard",
+      version: "1.2.3",
+      expectedFiles: ["bin", "remote-helpers.json"],
+    },
+    {
+      variant: "full",
+      version: "1.2.4-nightly.shaabcdef123456",
+      expectedFiles: ["bin"],
+    },
+  ]) {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "kandev-npm-runtime-layout-"),
+    );
+    try {
+      const assetsDir = await createRuntimeArchives(root, { variant });
+      const outputDir = path.join(root, "packages");
+      const result = spawnSync(
+        "bash",
+        [script, version, assetsDir, outputDir],
+        {
+          encoding: "utf8",
+        },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      for (const { platform, packageName } of runtimeInventory) {
+        const packageDir = path.join(
+          outputDir,
+          packageName.split("/")[0],
+          packageName.split("/")[1],
+        );
+        const metadata = JSON.parse(
+          await readFile(path.join(packageDir, "package.json"), "utf8"),
+        );
+        assert.deepEqual(metadata.files, expectedFiles, platform);
+        assert.equal(
+          await readFile(
+            path.join(packageDir, "remote-helpers.json"),
+            "utf8",
+          ).then(
+            () => true,
+            () => false,
+          ),
+          variant === "standard",
+          platform,
+        );
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
 async function createFixture() {
   const root = await mkdtemp(path.join(tmpdir(), "kandev-publish-npm-"));
   const releaseDir = path.join(root, "scripts/release");

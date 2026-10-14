@@ -49,6 +49,8 @@ Select **Settings > Workspaces > _Workspace_ > Integrations**, then choose a pro
 
 Compatibility routes under **Settings > Integrations** use the active workspace where the provider has workspace settings.
 
+The **Enabled** badge in Settings navigation appears only when the integration is connected and its saved workspace toggle is on. After changing a toggle, select **Save changes** to update the badge. With **Hide disabled integrations from left panel navigation** off, a disabled integration stays listed without the badge.
+
 GitHub, GitLab, Azure DevOps, Jira, and Linear configuration are workspace-specific. GitHub supports one automation connection per workspace and, for App-backed workspaces, one personal identity per Kandev user and workspace. The current GitHub integration targets `github.com`; GitLab supports `gitlab.com` and self-managed origins. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
 
 Provider secrets saved by these forms use Kandev's encrypted secret store. The backend must still decrypt them to make API requests. Limit access to settings and the Kandev data directory, and use the narrowest provider scope that works.
@@ -354,6 +356,8 @@ For a task with linked GitHub pull requests, open the PR status control above th
 
 If a current pull-request head has a GitHub Actions workflow that requires maintainer approval, the PR status control shows **Awaiting maintainer approval**, even when GitHub reports no checks. Detailed desktop and mobile views show the workflow name, the reason, and a link to GitHub. Approval-only workflow attention is not a failed check, does not start **Auto-fix CI & address comments**, and does not make the pull request ready for **Auto-merge or requeue when ready**. If GitHub does not provide enough evidence, Kandev keeps the workflow state unavailable or marks the last same-head observation as stale instead of claiming approval.
 
+Task lists, Kanban cards, and the task picker also show an amber lock when the current PR head awaits maintainer approval. Hover the icon on desktop or tap it on a phone to see the PR details. If the PR also has merge conflicts, the icon shows the red conflict warning; the details still show both conditions.
+
 Kandev refreshes GitHub Actions observations for empty, running, changing, or
 attention-required results within 30 seconds. Nonempty completed results with
 no attention requirement remain cached for up to five minutes. The cache is
@@ -608,6 +612,8 @@ Azure DevOps currently uses PAT authentication. It does not yet provide an Entra
 <summary>Jira details</summary>
 
 Jira configuration is workspace-specific. Use `/jira` to search with JQL, save views, open issue details, run supported transitions, and launch tasks with Jira prompt presets. Launch copies Jira URL/content into the task title and description; it does not store a durable Jira issue association on the task.
+
+In the **Views** picker, select the star beside a built-in or saved view to make it the default for future visits to `/jira`. Select the star again to clear the default. This does not change the current search.
 
 Enter the site URL (a missing scheme is normalized to HTTPS), choose **Cloud** or **Server/Data Center**, and optionally set a default project key. Authentication options are:
 

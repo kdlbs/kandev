@@ -1,4 +1,4 @@
-import type { StateCreator } from "zustand";
+import type { Draft } from "immer";
 import type { AzureDevOpsSlice, AzureDevOpsSliceState } from "./types";
 
 export const defaultAzureDevOpsState: AzureDevOpsSliceState = {
@@ -6,15 +6,9 @@ export const defaultAzureDevOpsState: AzureDevOpsSliceState = {
   azureDevOpsTaskWorkItems: { byTaskId: {} },
 };
 
-type AzureDevOpsStateCreator = StateCreator<
-  AzureDevOpsSlice,
-  [["zustand/immer", never]],
-  [],
-  AzureDevOpsSlice
->;
-type AzureDevOpsSliceCreator = (set: Parameters<AzureDevOpsStateCreator>[0]) => AzureDevOpsSlice;
+type ImmerSet = (updater: (draft: Draft<AzureDevOpsSlice>) => void) => void;
 
-export const createAzureDevOpsSlice: AzureDevOpsSliceCreator = (set) => ({
+export const createAzureDevOpsSlice = (set: ImmerSet): AzureDevOpsSlice => ({
   ...defaultAzureDevOpsState,
   setAzureDevOpsTaskPullRequests: (pullRequests) =>
     set((draft) => {

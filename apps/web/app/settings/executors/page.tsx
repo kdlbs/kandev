@@ -24,6 +24,7 @@ import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
+import { ExecutorProfilesCard } from "@/components/settings/executor-profiles-card";
 
 type ProfileWithExecutor = ExecutorProfile & {
   executor_type: string;
@@ -82,6 +83,11 @@ const EXECUTOR_TYPES: readonly ExecutorTypeCard[] = [
     type: "sprites",
     brandLabel: "Sprites.dev",
     descriptionKey: "executors:hubDescriptionSprites",
+  },
+  {
+    type: "remote_docker",
+    labelKey: "executors:remoteDocker",
+    descriptionKey: "executors:hubDescriptionRemoteDocker",
   },
   { type: "ssh", brandLabel: "SSH", descriptionKey: "executors:hubDescriptionSsh" },
   {
@@ -239,6 +245,10 @@ export default function ExecutorsHubPage() {
   const setExecutors = useAppStore((state) => state.setExecutors);
   const role = useAppStore((state) => state.auth.user?.role);
   const canManageKubernetes = role === undefined || role === "admin";
+  const pluginExecutors = executors.filter((executor) => executor.type === "plugin_remote");
+  const builtInProfiles = allProfiles.filter(
+    (profile) => profile.executor_type !== "plugin_remote",
+  );
   const [deleteProfileId, setDeleteProfileId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -273,15 +283,31 @@ export default function ExecutorsHubPage() {
       </div>
       <Separator />
       {!canManageKubernetes && <KubernetesReadOnlyNotice />}
-      {allProfiles.length > 0 && (
+      {builtInProfiles.length > 0 && (
         <SettingsGroup title={t("executors:profiles")} contentClassName="space-y-4 divide-y-0">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-            {allProfiles.map((profile) => (
+            {builtInProfiles.map((profile) => (
               <ProfileCard
                 key={profile.id}
                 profile={profile}
                 onDelete={setDeleteProfileId}
                 canDelete={profile.executor_type !== "k8s" || canManageKubernetes}
+              />
+            ))}
+          </div>
+        </SettingsGroup>
+      )}
+      {pluginExecutors.length > 0 && (
+        <SettingsGroup
+          title={t("executors:pluginProviders")}
+          contentClassName="space-y-4 divide-y-0"
+        >
+          <div className="space-y-4">
+            {pluginExecutors.map((executor) => (
+              <ExecutorProfilesCard
+                key={executor.id}
+                executorId={executor.id}
+                profiles={executor.profiles ?? []}
               />
             ))}
           </div>

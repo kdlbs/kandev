@@ -33,7 +33,6 @@ import { AgentGeneratedTaskTitleSettings } from "@/components/settings/agent-gen
 import { AnchoredPromptBarSettings } from "@/components/settings/anchored-prompt-bar-settings";
 import { TodoListPanelSettings } from "@/components/settings/todo-list-panel-settings";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
-import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { buildPluginShortcutEntries } from "@/lib/keyboard/plugin-shortcuts";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { StartupPageSettingsCard } from "@/components/settings/startup-page-settings-card";
@@ -46,6 +45,8 @@ import { AppearanceAccountSections } from "@/components/settings/appearance-acco
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
+import { useShortcutDraft } from "./use-shortcut-draft";
+import { useIntegrationShortcutEntries } from "@/hooks/use-integration-shortcut-entries";
 import {
   appearanceRevision,
   parseSidebarHoverDelay,
@@ -550,15 +551,16 @@ export function KeyboardShortcutsSettings() {
   const storeApi = useAppStoreApi();
   const { items: pluginItems } = usePlugins();
   const pluginShortcutEntries = buildPluginShortcutEntries(pluginItems);
+  const integrationEntries = useIntegrationShortcutEntries(pluginItems);
+  const shortcuts = useShortcutDraft("general-keyboard-shortcuts");
   const [saved, setSaved] = useState(() => ({
     chatSubmitKey: userSettings.chatSubmitKey,
-    keyboardShortcuts: userSettings.keyboardShortcuts as StoredShortcutOverrides,
   }));
   const [draft, setDraft] = useState(saved);
   const revision = JSON.stringify(draft);
 
   useSettingsSaveContributor({
-    id: "general-keyboard-shortcuts",
+    id: "general-chat-submit-key",
     revision,
     isDirty: revision !== JSON.stringify(saved),
     save: async () => {
@@ -568,7 +570,6 @@ export function KeyboardShortcutsSettings() {
         workspace_id: current.workspaceId || "",
         repository_ids: current.repositoryIds || [],
         chat_submit_key: submitted.chatSubmitKey,
-        keyboard_shortcuts: submitted.keyboardShortcuts,
       });
       setSaved(submitted);
       setUserSettings({ ...storeApi.getState().userSettings, ...submitted });
@@ -598,12 +599,11 @@ export function KeyboardShortcutsSettings() {
         description={t("settings:customizeKeyboardShortcutsForTheCommand")}
       >
         <KeyboardShortcutsCard
-          overrides={draft.keyboardShortcuts}
-          baselineOverrides={saved.keyboardShortcuts}
-          onChange={(keyboardShortcuts) =>
-            setDraft((current) => ({ ...current, keyboardShortcuts }))
-          }
+          overrides={shortcuts.draft}
+          baselineOverrides={shortcuts.saved}
+          onChange={(keyboardShortcuts) => shortcuts.setDraft(keyboardShortcuts)}
           pluginEntries={pluginShortcutEntries}
+          integrationEntries={integrationEntries}
         />
       </SettingsSection>
     </div>

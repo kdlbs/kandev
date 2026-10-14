@@ -51,22 +51,35 @@ func (r *githubTaskStatusSummaryPRReader) ListTaskStatusSummaryPullRequests(
 				requiredReviews = *pr.RequiredReviews
 			}
 			options := optionsByKey[key]
+			workflowAttentionState := ""
+			workflowAttentionHeadSHA := ""
+			if pr.WorkflowAttention != nil {
+				workflowAttentionState = string(pr.WorkflowAttention.State)
+				workflowAttentionHeadSHA = pr.WorkflowAttention.HeadSHA
+			}
 			result[taskID] = append(result[taskID], statussummary.PullRequestInput{
-				Key:                   key,
-				State:                 pr.State,
-				Number:                pr.PRNumber,
-				URL:                   pr.PRURL,
-				ReviewState:           pr.ReviewState,
-				ChecksState:           pr.ChecksState,
-				MergeableState:        pr.MergeableState,
-				MergeQueueState:       pr.MergeQueueState,
-				UnresolvedReviewCount: pr.UnresolvedReviewThreads,
-				PendingReviewCount:    pr.PendingReviewCount,
-				RequiredReviews:       requiredReviews,
-				ChecksTotal:           pr.ChecksTotal,
-				ChecksPassing:         pr.ChecksPassing,
-				AutoFixEnabled:        options != nil && options.AutoFixEnabled,
-				AutoMergeEnabled:      options != nil && options.AutoMergeEnabled,
+				Key:                      key,
+				Owner:                    pr.Owner,
+				Repo:                     pr.Repo,
+				State:                    pr.State,
+				Number:                   pr.PRNumber,
+				URL:                      pr.PRURL,
+				ReviewState:              pr.ReviewState,
+				ChecksState:              pr.ChecksState,
+				MergeableState:           pr.MergeableState,
+				HasMergeConflicts:        pr.HasMergeConflicts,
+				MergeQueueState:          pr.MergeQueueState,
+				UnresolvedReviewCount:    pr.UnresolvedReviewThreads,
+				PendingReviewCount:       pr.PendingReviewCount,
+				RequiredReviews:          requiredReviews,
+				ChecksTotal:              pr.ChecksTotal,
+				ChecksPassing:            pr.ChecksPassing,
+				AutoFixEnabled:           options != nil && options.AutoFixEnabled,
+				AutoMergeEnabled:         options != nil && options.AutoMergeEnabled,
+				HeadSHA:                  pr.HeadSHA,
+				WorkflowAttentionState:   workflowAttentionState,
+				WorkflowAttentionHeadSHA: workflowAttentionHeadSHA,
+				WorkflowAttentionStale:   pr.WorkflowAttention != nil && pr.WorkflowAttention.Stale,
 			})
 		}
 	}

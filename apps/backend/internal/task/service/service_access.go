@@ -181,6 +181,55 @@ func (s *Service) AuthorizeTaskScope(ctx context.Context, taskID string, scope a
 	return s.authorizeTaskScope(ctx, taskID, scope)
 }
 
+// AuthorizeTaskPromptScope enforces the scope required to start a turn on a
+// task: session.prompt for an ordinary task, or workspace.manage for a
+// coordinator conversation task (docs/specs/coordinator/system-design/
+// copilot.md#attended-only) — only an explicit manager message may start a
+// turn there. Wired as the orchestrator's task-prompt checker
+// (SetTaskPromptChecker) so session.launch enforces the same restriction as
+// message.add, which is a separate transport this scope selection also
+// covers via authorizeMessageCreate.
+func (s *Service) AuthorizeTaskPromptScope(ctx context.Context, taskID string) error {
+	scope, err := s.coordinatorPromptScope(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	return s.authorizeTaskScope(ctx, taskID, scope)
+}
+
+// coordinatorPromptScope resolves the scope required to start a turn on
+// taskID: session.prompt for an ordinary task, workspace.manage for a
+// coordinator conversation task. An unscoped (internal) caller is left alone
+// since authorizeTaskScope/authorizeTaskSessionScope already short-circuit for
+// it; the GetTask lookup here would be pure overhead for that path.
+func (s *Service) coordinatorPromptScope(ctx context.Context, taskID string) (authz.Scope, error) {
+	scope := authz.ScopeSessionPrompt
+	if _, scoped := callerScope(ctx); !scoped {
+		return scope, nil
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return scope, err
+	}
+	if task == nil {
+		return scope, repoerrors.ErrTaskNotFound
+	}
+	if task.Origin == models.TaskOriginCoordinator {
+		if task.WorkspaceID == "" {
+			return scope, repoerrors.ErrTaskNotFound
+		}
+		workspace, err := s.workspaces.GetWorkspace(ctx, task.WorkspaceID)
+		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) || (err == nil && workspace == nil) {
+			return scope, repoerrors.ErrTaskNotFound
+		}
+		if err != nil {
+			return scope, err
+		}
+		scope = authz.ScopeWorkspaceManage
+	}
+	return scope, nil
+}
+
 func (s *Service) authorizeTaskScope(ctx context.Context, taskID string, scope authz.Scope) error {
 	if _, scoped := callerScope(ctx); !scoped {
 		return nil
@@ -227,7 +276,7 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 		return err
 	}
 	if workflow == nil {
-		return repoerrors.ErrWorkspaceNotFound
+		return repoerrors.ErrWorkflowNotFound
 	}
 	if workflow.WorkspaceID == "" {
 		return nil
@@ -246,14 +295,21 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 	workspace, err := s.workspaces.GetWorkspace(ctx, workflow.WorkspaceID)
 	switch {
 	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
-		return repoerrors.ErrWorkspaceNotFound
+		// Collapse to the workflow's own not-found sentinel, same as the
+		// reachable-but-denied branch below: a caller must not be able to
+		// tell an orphaned workspace from a foreign-but-reachable one.
+		return repoerrors.ErrWorkflowNotFound
 	case err != nil:
 		// A failed lookup is not an answer at all: propagate it rather than
 		// letting a transient database error read as either allow or deny.
 		return err
 	}
 	if !s.workspaceDecision(ctx, workspace).CanRead() {
-		return repoerrors.ErrWorkspaceNotFound
+		// Collapse to the workflow's own not-found sentinel, matching
+		// authorizeTaskScope's equivalent branch, so a workflow that exists in
+		// a workspace the caller cannot reach reads identically to one that
+		// does not exist at all.
+		return repoerrors.ErrWorkflowNotFound
 	}
 	return nil
 }
@@ -344,10 +400,30 @@ func (s *Service) AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessio
 	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeWorkspaceRead)
 }
 
-// AuthorizeTaskSessionPromptAccess checks the task/session pair and requires
-// the session.prompt capability used to create or dispatch user messages.
+// AuthorizeTaskSessionPromptAccess checks the task/session pair and enforces
+// its ordinary prompt scope or coordinator manager scope before admission.
 func (s *Service) AuthorizeTaskSessionPromptAccess(ctx context.Context, taskID, sessionID string) error {
-	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeSessionPrompt)
+	scope, err := s.coordinatorPromptScope(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, scope)
+}
+
+// AuthorizeSessionPromptAccess applies the task's prompt scope to a session,
+// including message replays whose task identity comes from the session row.
+func (s *Service) AuthorizeSessionPromptAccess(ctx context.Context, sessionID string) error {
+	if _, scoped := callerScope(ctx); !scoped {
+		return nil
+	}
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	return s.AuthorizeTaskPromptScope(ctx, session.TaskID)
 }
 
 func (s *Service) authorizeTaskSessionScope(

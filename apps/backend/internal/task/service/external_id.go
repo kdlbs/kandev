@@ -21,6 +21,14 @@ const ExternalIDMaxBytes = 255
 // ExternalIDMaxBytes.
 var ErrExternalIDInvalid = errors.New("invalid external_id")
 
+// ReservedExternalIDPrefixCoordinatorProposal identifies external ids the
+// coordinator service allocates for the task it creates behind an approved
+// proposal (docs/specs/coordinator/system-design/proposals.md#reserved-prefix).
+// CreateTask refuses a value with this prefix unless the request sets
+// AllowReservedExternalID; ReleaseTaskExternalID refuses it unconditionally.
+// No other caller may create or release an id with this prefix.
+const ReservedExternalIDPrefixCoordinatorProposal = "coordinator-proposal:"
+
 // NormalizeExternalID applies the spec's validation/normalization rules to a
 // raw caller-supplied external_id, in this exact order — the order is
 // normative, since it decides which error a malformed value produces:
@@ -53,6 +61,17 @@ func NormalizeExternalID(raw string) (string, error) {
 
 func isASCIIControl(r rune) bool {
 	return (r >= 0x00 && r <= 0x1F) || r == 0x7F
+}
+
+// refuseReservedExternalIDPrefix reports ErrExternalIDInvalid when
+// normalized carries ReservedExternalIDPrefixCoordinatorProposal, unless
+// allowed is true.
+func refuseReservedExternalIDPrefix(normalized string, allowed bool) error {
+	if allowed || !strings.HasPrefix(normalized, ReservedExternalIDPrefixCoordinatorProposal) {
+		return nil
+	}
+	return fmt.Errorf("%w: external_id may not use the reserved prefix %q",
+		ErrExternalIDInvalid, ReservedExternalIDPrefixCoordinatorProposal)
 }
 
 // normalizeRequiredExternalID is NormalizeExternalID plus a "missing" check.
@@ -109,6 +128,9 @@ func (s *Service) ReleaseTaskExternalID(ctx context.Context, workspaceID, rawExt
 	}
 	externalID, err := normalizeRequiredExternalID(rawExternalID)
 	if err != nil {
+		return false, err
+	}
+	if err := refuseReservedExternalIDPrefix(externalID, false); err != nil {
 		return false, err
 	}
 	task, err := s.tasks.ReleaseTaskExternalID(ctx, workspaceID, externalID)

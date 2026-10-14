@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type RefObject, type ReactNode } from "react";
 import { IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import {
   Dialog,
   DialogContent,
@@ -200,7 +201,7 @@ function AddWorkspaceSourcesSurface({
       <Button
         type="button"
         variant="outline"
-        className="min-h-11 cursor-pointer"
+        className="cursor-pointer"
         disabled={submitting}
         onClick={onCancel}
       >
@@ -209,7 +210,7 @@ function AddWorkspaceSourcesSurface({
       <Button
         type="button"
         data-testid="add-workspace-sources-submit"
-        className="min-h-11 cursor-pointer"
+        className="cursor-pointer"
         disabled={submitting || !canSubmit}
         onClick={onSubmit}
       >
@@ -363,7 +364,7 @@ function SourceRow({
         <button
           type="button"
           aria-label={t("task:removeSource")}
-          className="min-h-11 min-w-11 cursor-pointer text-muted-foreground"
+          className={controlSizingClassName("icon", "cursor-pointer text-muted-foreground")}
           onClick={() => onRemove(row.key)}
         >
           <IconX className="mx-auto h-4 w-4" />

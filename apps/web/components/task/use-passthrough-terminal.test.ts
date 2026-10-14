@@ -200,6 +200,75 @@ describe("startReconnectLoop", () => {
   });
 });
 
+describe("startReconnectLoop one-shot terminal completion", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each(["initial_command_completed", "environment_not_found"])(
+    "stops retrying after %s",
+    (reason) => {
+      vi.useFakeTimers();
+
+      const connectWebSocket = vi.fn(({ onSocketClose }) => {
+        onSocketClose({ code: 1000, reason } as CloseEvent);
+      });
+      const onDisconnected = vi.fn();
+      const stop = startReconnectLoop({
+        environmentId: "env-1",
+        wsBaseUrl: WS_BASE_URL,
+        mode: "shell",
+        terminalId: "shell-1",
+        label: undefined,
+        terminal: { reset: vi.fn() } as unknown as Terminal,
+        fitAndResize: vi.fn(),
+        wsRef: { current: null },
+        attachAddonRef: { current: null },
+        onConnected: vi.fn(),
+        onDisconnected,
+        connectWebSocket,
+      });
+
+      vi.advanceTimersByTime(150);
+      vi.advanceTimersByTime(10_000);
+
+      expect(connectWebSocket).toHaveBeenCalledTimes(1);
+      expect(onDisconnected).toHaveBeenCalledTimes(1);
+      expect(onDisconnected).toHaveBeenCalledWith({ code: 1000, reason });
+      stop();
+    },
+  );
+
+  it("continues retrying for other normal WebSocket closes", () => {
+    vi.useFakeTimers();
+
+    const connectWebSocket = vi.fn(({ onSocketClose }) => {
+      if (connectWebSocket.mock.calls.length === 1) {
+        onSocketClose({ code: 1000, reason: "normal close" } as CloseEvent);
+      }
+    });
+    const stop = startReconnectLoop({
+      environmentId: "env-1",
+      wsBaseUrl: WS_BASE_URL,
+      mode: "shell",
+      terminalId: "shell-1",
+      label: undefined,
+      terminal: { reset: vi.fn() } as unknown as Terminal,
+      fitAndResize: vi.fn(),
+      wsRef: { current: null },
+      attachAddonRef: { current: null },
+      onConnected: vi.fn(),
+      connectWebSocket,
+    });
+
+    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(300);
+
+    expect(connectWebSocket).toHaveBeenCalledTimes(2);
+    stop();
+  });
+});
+
 // The env handler refuses a shell on an ended session, identically every time.
 // Opening the socket anyway only restarts the 5s retry timer.
 describe("computeCanConnect on ended sessions", () => {
@@ -274,6 +343,9 @@ describe("isEnvironmentEnded", () => {
 // actively false, and hides anything written into the pane behind it. "Ended"
 // has to outrank "connecting", or the user is told the opposite of the truth.
 describe("computeTerminalPaneState", () => {
+  it("shows confirmed removal even when cached workspace state says ready", () => {
+    expect(computeTerminalPaneState("shell", false, false, true, true)).toBe("ended");
+  });
   it("reports ended instead of connecting when the session is over", () => {
     expect(computeTerminalPaneState("shell", true, false)).toBe("ended");
   });

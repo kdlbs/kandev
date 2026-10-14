@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -16,9 +17,24 @@ func (m *Manager) captureCleanupBranchOID(
 		ctx, repositoryPath, "for-each-ref", cleanupBranchRefFormat, branchRef,
 	)
 	if err != nil {
-		return "", false, fmt.Errorf("inspect local branch %q: %w", branchRef, err)
+		return "", false, fmt.Errorf("inspect local branch %q: %w", branchRef,
+			classifyCleanupInspectionError(CleanupInspectionStageBranch, err, repositoryPath))
 	}
 	return parseCleanupBranchRefOutput(output, branchRef)
+}
+
+func classifyWorktreeCleanupInspectionError(stage string, err error, wt *Worktree) error {
+	classified := classifyCleanupInspectionError(stage, err, wt.RepositoryPath)
+	var inspection *CleanupInspectionError
+	if !errors.As(classified, &inspection) || inspection.Reason != CleanupInspectionReasonCommandFailed {
+		return classified
+	}
+	// Missing linked metadata explains a failed Git inspection; it does not
+	// establish that the surviving checkout is safe to remove.
+	if inspectLinkedWorktree(wt.Path).class == linkedWorktreeMissingAdmin {
+		return &CleanupInspectionError{Stage: stage, Reason: CleanupInspectionReasonRepoUnavailable, Err: err}
+	}
+	return classified
 }
 
 func parseCleanupBranchRefOutput(output, wantedRef string) (string, bool, error) {

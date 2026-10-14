@@ -2,9 +2,11 @@
 
 import type { GitHubAppRegistration } from "./github-app";
 import type { GitHubPRDiscoveryHealth } from "./github-pr-discovery";
+import type { CheckRun, WorkflowAttention } from "./github-checks";
 
 export * from "./github-app";
 export * from "./github-pr-discovery";
+export * from "./github-checks";
 
 export type GitHubAuthMethod =
   | "gh_cli"
@@ -172,41 +174,12 @@ export type PRComment = {
   in_reply_to: number | null;
 };
 
-export type CheckRun = {
-  name: string;
-  source: "check_run" | "status_context";
-  status: string;
-  conclusion: string;
-  html_url: string;
-  output: string;
-  started_at: string | null;
-  completed_at: string | null;
-};
-
-export type WorkflowAttentionState = "unknown" | "none" | "approval_required" | "action_required";
-
-export type WorkflowAttentionRun = {
-  run_id: number;
-  run_attempt: number;
-  workflow_id: number;
-  name: string;
-  url: string;
-  reason: string;
-};
-
-export type WorkflowAttention = {
-  state: WorkflowAttentionState;
-  head_sha: string;
-  observed_at: string;
-  stale: boolean;
-  runs: WorkflowAttentionRun[];
-};
-
 export type PRFeedback = {
   pr: GitHubPR;
   reviews: PRReview[];
   comments: PRComment[];
   checks: CheckRun[];
+  checks_state?: string;
   has_issues: boolean;
   workflow_attention?: WorkflowAttention | null;
 };
@@ -271,6 +244,7 @@ export type TaskPR = {
   review_state: "approved" | "changes_requested" | "pending" | "";
   checks_state: "success" | "failure" | "pending" | "unstable" | "";
   mergeable_state: MergeableState;
+  has_merge_conflicts?: boolean | null;
   review_count: number;
   pending_review_count: number;
   /** Number of approving reviews required by the base branch protection rule.

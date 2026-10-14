@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -82,6 +83,13 @@ func TestOfficeAgentIdentityMetadataIsSessionScoped(t *testing.T) {
 		"Office identity must not leak to a sibling session")
 }
 
+func TestPassthroughMCPClaimsArePersistentAndSessionScoped(t *testing.T) {
+	require.True(t, ShouldPersistMetadataKey(metadataKeyPassthroughMCPClaims),
+		"project MCP ownership must survive same-session backend recovery")
+	require.True(t, IsSessionScopedMetadataKey(metadataKeyPassthroughMCPClaims),
+		"project MCP ownership must not be copied into a sibling session")
+}
+
 func TestSSHRuntimeAPIMetadataIsPersistentAndSessionScoped(t *testing.T) {
 	for _, key := range []string{
 		MetadataKeySSHRuntimeAPILocalURL,
@@ -134,6 +142,23 @@ func TestToAgentExecutionRecordsHistoryForWorkspaceRebindFallback(t *testing.T) 
 	require.True(t, execution.historyEnabled)
 }
 
+func TestToAgentExecutionRecordsHistoryForContextContinuation(t *testing.T) {
+	instance := &ExecutorInstance{InstanceID: "execution"}
+	execution := instance.ToAgentExecution(&ExecutorCreateRequest{
+		ForceContextContinuation: true,
+	})
+
+	require.True(t, execution.historyEnabled)
+}
+
+func TestToAgentExecutionFreezesStartupDisposition(t *testing.T) {
+	metadata := map[string]interface{}{MetadataKeyReuseExistingProcess: true}
+	execution := (&ExecutorInstance{InstanceID: "execution", Metadata: metadata}).ToAgentExecution(&ExecutorCreateRequest{})
+	metadata[MetadataKeyReuseExistingProcess] = false
+
+	require.Equal(t, AgentStartupReattachedExisting, execution.startupDispositionSnapshot())
+}
+
 func TestToAgentExecutionCapturesDefensiveRuntimeEnvironment(t *testing.T) {
 	reqEnv := map[string]string{
 		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "http://127.0.0.1:9876",
@@ -147,6 +172,16 @@ func TestToAgentExecutionCapturesDefensiveRuntimeEnvironment(t *testing.T) {
 
 	got["PATH"] = "/mutated"
 	require.Equal(t, "/tmp/kandev-shim:/usr/bin", execution.RuntimeEnvironment()["PATH"])
+}
+
+func TestToAgentExecutionCarriesExecutorTypeForLocalityChecks(t *testing.T) {
+	execution := (&ExecutorInstance{InstanceID: "execution"}).ToAgentExecution(&ExecutorCreateRequest{
+		ExecutorType: string(models.ExecutorTypeWorktree),
+	})
+
+	require.Equal(t, string(models.ExecutorTypeWorktree), execution.ExecutorType)
+	require.Equal(t, string(models.ExecutorTypeWorktree), execution.metadataString(MetadataKeyExecutorType))
+	require.True(t, ShouldPersistMetadataKey(MetadataKeyExecutorType))
 }
 
 func TestToAgentExecutionCapturesRunID(t *testing.T) {

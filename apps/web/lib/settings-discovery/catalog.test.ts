@@ -266,6 +266,49 @@ describe("resolveSettingsDiscovery dynamic entries", () => {
   });
 });
 
+// Split from the block above to stay inside the per-function line limit: this
+// half is only about the flag-gated Coordinators discovery entry.
+describe("resolveSettingsDiscovery coordinators entry (D1)", () => {
+  const WORKSPACE = { id: "workspace-coord-1", name: "Coordinator Workspace" };
+
+  it("omits the per-workspace Coordinators entry when the flag is off", () => {
+    const resolved = resolveSettingsDiscovery({
+      t,
+      showAccount: false,
+      showUsers: false,
+      showOrganizations: false,
+      workspaces: [WORKSPACE],
+      agents: [],
+      executors: [],
+      coordinatorEnabled: false,
+    });
+
+    expect(resolved.some((entry) => entry.id === "workspace:workspace-coord-1:coordinators")).toBe(
+      false,
+    );
+  });
+
+  it("adds a per-workspace Coordinators entry when the flag is on", () => {
+    const resolved = resolveSettingsDiscovery({
+      t,
+      showAccount: false,
+      showUsers: false,
+      showOrganizations: false,
+      workspaces: [WORKSPACE],
+      agents: [],
+      executors: [],
+      coordinatorEnabled: true,
+    });
+    const coordinators = resolved.find(
+      (entry) => entry.id === "workspace:workspace-coord-1:coordinators",
+    );
+
+    expect(coordinators?.label).toBe("Coordinators");
+    expect(coordinators?.href).toBe("/settings/workspaces/workspace-coord-1/coordinators");
+    expect(coordinators?.breadcrumb).toEqual(["Workspaces", "Coordinator Workspace"]);
+  });
+});
+
 describe("resolveSettingsDiscovery visibility", () => {
   it("omits account and user-management entries when their rendering gates are closed", () => {
     const hidden = resolveSettingsDiscovery({

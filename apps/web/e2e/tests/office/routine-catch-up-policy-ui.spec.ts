@@ -48,20 +48,32 @@ async function assertCatchUpPolicyToggles(page: Page, catchUpMaxInput: () => Pro
 }
 
 test.describe("Routine catch-up policy UI", () => {
+  test.describe.configure({ timeout: 120_000 });
+
   test("create dialog: catch-up policy control visibility toggles live", async ({
+    officeApi,
+    officeSeed,
     testPage,
     prCapture,
   }) => {
+    test.setTimeout(120_000);
     await testPage.goto("/office/routines");
     await testPage.getByRole("button", { name: "New Routine" }).click();
 
     await testPage.getByLabel("Name").fill("E2E Catch-up Dialog");
+    const agent = await officeApi.getAgent(officeSeed.agentId);
+    const agentName = agent.name;
+    if (typeof agentName !== "string" || agentName.length === 0) {
+      throw new Error(`office seed agent ${officeSeed.agentId} has no name`);
+    }
     await testPage
       .getByText("Assignee", { exact: true })
       .locator("..")
       .getByRole("combobox")
       .click();
-    await testPage.getByRole("option", { name: "CEO", exact: true }).click();
+    const assigneeOption = testPage.getByRole("option", { name: agentName, exact: true });
+    await expect(assigneeOption).toBeVisible({ timeout: 60_000 });
+    await assigneeOption.click();
     await testPage.getByRole("button", { name: "Next" }).click();
     await testPage.getByRole("button", { name: "Next" }).click();
 

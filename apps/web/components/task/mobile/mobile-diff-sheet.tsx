@@ -8,7 +8,7 @@ import { TaskChangesPanel } from "../task-changes-panel";
 import { CommitDiffView } from "../commit-detail-panel";
 import type { ReviewSource, SourceCounts } from "@/hooks/domains/session/use-review-sources";
 import type { SelectedDiff } from "../task-layout";
-import type { DiffSheetMode } from "../changes-diff-target";
+import type { DiffSheetMode } from "@/lib/state/diff-target-types";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
@@ -172,7 +172,14 @@ function renderPanel(
 ): React.ReactNode {
   if (!mode) return null;
   if (mode.kind === "commit") {
-    return <CommitDiffView target={mode.target} onOpenFile={onOpenFile} wordWrap />;
+    return (
+      <CommitDiffView
+        target={mode.target}
+        onOpenFile={onOpenFile}
+        wordWrap
+        fileNavigation={mode.fileNavigation}
+      />
+    );
   }
   const panelMode = mode.kind;
   const filePath = mode.kind === "file" ? mode.path : undefined;
@@ -250,7 +257,10 @@ export const MobileDiffSheet = memo(function MobileDiffSheet({
 
   return (
     <Drawer open={mode !== null} onOpenChange={(open) => (!open ? onClose() : undefined)}>
-      <DrawerContent className="h-full max-h-screen flex flex-col rounded-none">
+      <DrawerContent
+        data-testid="mobile-diff-sheet"
+        className="h-dvh !max-h-dvh flex flex-col rounded-none data-[vaul-drawer-direction=bottom]:!mt-0"
+      >
         <SheetHeader
           title={title}
           showSourceChip={mode?.kind === "all" && sourceTabs.length === 1}

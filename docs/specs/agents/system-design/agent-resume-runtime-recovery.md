@@ -10,6 +10,8 @@ requirements:
 
 # Agent resume and runtime recovery system design
 
+[Explicit Auggie recovery settings](explicit-resume-settings.md) adds an optional attempt policy to Resume recovery; the identity and state-ownership guarantees below still apply.
+
 ## Purpose and boundaries
 
 This design preserves a provider conversation when session launch fails. It
@@ -107,6 +109,14 @@ at the configured remote. Authentication, network, timeout, and other fetch
 failures remain their original failure class and cannot authorize replacement.
 The wrapped error already reaches `Service.RecoverSession` and the
 `session.recover` WebSocket handler.
+
+During ordinary recreation after a successful managed refresh, an existing
+local task branch remains usable when `refs/remotes/origin/<branch>` is absent.
+The worktree is restored from that local branch without changing its head or
+requiring publication. If the tracking ref exists, normal refreshed-history
+selection still applies. Explicit checkout-branch and PR-snapshot selection
+continue to require their refreshed remote source. Missing local branches retain
+the existing recovery and explicit replacement rules.
 
 Attach-only reuse has one additional evidence boundary. If the local branch and
 `refs/remotes/origin/<branch>` are both absent, the manager runs a bounded,
@@ -333,6 +343,111 @@ callbacks from the earlier cycle. The frontend publishes the identity during
 the commit phase, before passive effects can start or finish a request. A late
 result from the prior task or navigation cycle cannot set an error, notice, or
 status on the newly selected task.
+
+## Runtime cleanup failure feedback
+
+Dependent workspace panes link to the matching automatic session recovery owner,
+even when no bootstrap metadata exists and workspace readiness supersedes the
+restore attempt. A separate restoration attempt or another failed session keeps
+its own controls. This preserves the existing single-owner recovery boundary.
+
+Implements requirement 002 criteria .10-.13 through
+[Resume cleanup failure feedback](../../../plans/resume-cleanup-failure-feedback/plan.md).
+The existing [session recovery presentation](session-recovery-failures.md)
+and [task launch error projection](../../tasks/system-design/task-launch-failure-recovery.md)
+remain authoritative for action ownership and durable error storage.
+
+### Cleanup admission and failure evidence
+
+`Executor.resumeSession` has two cleanup boundaries: terminal-session cleanup
+before preflight, and cleanup after a non-live `ErrAgentAlreadyRunning` result.
+Both return cleanup failures without attempting another launch, so a retained
+registration cannot hide the original failure.
+At the fallback boundary, route the cleanup error through the existing
+attempt-fenced rollback path rather than retrying `LaunchAgent`. Preflight
+cleanup failure has not entered `STARTING`; it must not invoke rollback with
+an absent startup-attempt identity or change state merely to project an error.
+
+The executor uses `ResumeCleanupFailure` around the existing `BootstrapFailure`
+safe-cause carrier with an additive closed
+cause code, `runtime_cleanup_failed`, and operation `resume`. Its detail is
+host-authored: the previous runtime could not be stopped and the operator
+should check executor connectivity before retrying. Set `prompt_not_sent` only
+for this failed attempt, which has not dispatched. Preserve the underlying
+cleanup error for `errors.Is`/`errors.As` and backend diagnostics. Cancellation
+must follow its existing cancellation path rather than becoming cleanup guidance.
+Do not parse Kubernetes strings in the browser or claim transport failure for
+every cleanup error; an ownership or inventory refusal is also possible.
+
+`Manager.cleanupStaleExecution` and `stopSharedKubernetesInstance` keep their
+current fail-closed behavior. A failed remote stop retains execution tracking
+and inventory. This package does not delete Pods, PVCs, secrets, or stale
+records, force a new execution, or change the genuine-live-execution guard.
+
+### Durable and request projections
+
+Extend the backend and browser `AgentErrorCause` allowlists for the new code.
+Project only safe code/detail into the existing `LastAgentError` and recovery
+response; preserve the existing generic launch category and recovery actions.
+No SQL schema, new recovery action, or parallel error store is needed.
+
+Both cleanup boundaries must publish a current, session-owned failure using
+the established observed-state/error-stamp and resume-attempt fences. For
+preflight failure, bind the error to the current host resume attempt and observed
+session rather than a fabricated new execution or startup transition. A stale
+attempt may not overwrite a newer error, cancellation, archive, or resumed
+execution. Existing task status summaries and chronological error history
+carry that projection through boot hydration and reconnect.
+
+`wsRecoverSession` and the `session.launch` response path must return a bounded
+host-authored message and structured cause/identity for this typed failure.
+They must not concatenate `BootstrapFailure.Error()` into browser responses:
+that method retains the underlying transport error for backend use. The request
+cause and durable record share their error stamp when available. Automatic
+recovery preserves this typed cause alongside any distinct restore failure;
+plain legacy messages retain the existing generic fallback.
+
+### Presentation and compatibility
+
+`session-bootstrap-recovery-model.ts` selects cleanup-specific localized copy
+from the typed code. `SessionRecoveryCard` keeps one active explanation in the
+composer region; its chronological transcript entry retains history without
+duplicate mutation controls. Request-local failures must preserve the same
+typed cause rather than reducing it to an uncorrelated plain string. Independent
+task-owned errors keep the existing shared strip, dialog, and phone drawer.
+An owned `inspection_busy` notice from the current manual or automatic retry
+takes precedence in the summary over retained cleanup guidance. The cleanup
+cause remains in Details; unrelated informational notices do not replace it.
+This session-instance cleanup failure does not acquire task scope merely because
+its runtime shares a Kubernetes Pod.
+
+Use the existing eligible Resume action, disabled while pending. Guidance is a
+prerequisite, not a connectivity detector: the user can retry after repairing
+the connection, and another failure remains visible. Fresh start and read-only
+restore keep their existing effects and must not be advertised as bypasses for
+the same unavailable runtime. Only a successful owned resume restores messaging.
+
+Desktop retains wrapped inline copy and a wrapping action row; phones retain
+the shipped composer recovery card with stacked, at-least-44px touch targets.
+Details stay initially collapsed and use the existing sanitized copy primitive
+and recovery-region scroll owner. No new overlay or navigation is needed.
+Reuse `task-layout.tsx` and `SessionRecoveryCard` as the mobile exemplars.
+Supply all seven shipped locale catalogs and regenerate pseudo/Traditional
+Chinese through their repository commands. Unknown codes and old generic
+records retain existing fallback behavior without guessed causes.
+
+### Regression evidence
+
+Cover terminal preflight and fallback cleanup errors, success after cleanup,
+and the live-concurrent guard through the actual executor Resume path. Assert
+launch call counts, error-chain preservation, unchanged token/inventory, and
+attempt-fenced rollback where `STARTING` was entered. Projection/handler tests
+must prove safe details, durable reload, separate resume/restore causes, stale
+attempt protection, and the absence of raw Kubernetes errors from responses.
+Browser model tests cover the new typed cause and legacy fallback. Desktop and
+phone E2E verify failed retry, pending controls, expanded/copied details, reload,
+and a later successful matching retry. Mock the connection failure; live cluster
+mutation is unnecessary for this feedback contract.
 
 ## Frontend status rendering
 

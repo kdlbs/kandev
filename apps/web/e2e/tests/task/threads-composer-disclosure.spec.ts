@@ -1,6 +1,6 @@
 import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 import { seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import {
@@ -100,10 +100,12 @@ for (const zoom of [1, 0.9]) {
         if (autoHideComposer) {
           expect(await list.evaluate((el) => el.scrollTop)).toBeCloseTo(anchor.scrollTop, 0);
         } else {
-          // Resuming agent work follows the bottom when auto-scroll is enabled.
+          // The reply stays below the reading position after a deliberate upward scroll.
           await expect
-            .poll(() => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
-            .toBeLessThan(3);
+            .poll(async () => {
+              return list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+            })
+            .toBeGreaterThan(300);
         }
       });
     });
@@ -311,6 +313,7 @@ test("reveals and collapses immediately with reduced motion", async ({
   await testPage.goto("/threads");
   const tile = testPage.getByTestId(`thread-column-${task.id}`);
   const editor = tile.getByTestId("chat-input-editor");
+  await expect(editor).toBeAttached();
   await expect(editor).toBeHidden();
   await tile.focus();
   await expect(editor).toBeVisible();
@@ -322,6 +325,7 @@ test("reveals and collapses immediately with reduced motion", async ({
   ).toBe(0);
   await tile.getByTestId("collapse-composer").click();
   await expect(editor).toBeHidden();
+  await expect(tile).toBeFocused();
   await expect(tile.getByTestId("chat-input-area")).toHaveJSProperty("offsetHeight", 0);
   await testPage.keyboard.press("Enter");
   await expect(editor).toBeVisible();
@@ -522,13 +526,21 @@ test("keeps the native model picker and attachment-only draft available after po
   apiClient,
   seedData,
 }) => {
+  const ws = watchWs(testPage);
   const task = await startPresentationThread(testPage, apiClient, seedData, "Composer controls");
+  await apiClient.seedAgentMessages(task.session_id!, 1, "Composer controls readiness");
   await seedThreadPresentation(apiClient, { layout: "columns", autoHideComposer: true });
   await testPage.goto("/threads");
+  await expect(testPage.getByTestId("threads-board")).toBeVisible({ timeout: 15_000 });
   const tile = testPage.getByTestId(`thread-column-${task.id}`);
+  await expect(tile).toBeVisible({ timeout: 15_000 });
   const editor = tile.getByTestId("chat-input-editor");
+  await expect(
+    tile.locator(".chat-message-list").getByText("Composer controls readiness 1", { exact: true }),
+  ).toBeVisible();
   await tile.locator("header").hover();
   const model = tile.getByRole("button", { name: "Session model settings" });
+  await expect(model).toBeVisible();
   await model.click();
   const options = testPage.getByRole("listbox");
   await expect(options).toBeVisible();
@@ -554,13 +566,15 @@ test("keeps the native model picker and attachment-only draft available after po
   await testPage.keyboard.press("Enter");
   await expect(tile.getByText("notes.txt", { exact: false })).toBeVisible();
   await tile.getByTestId("submit-message-button").click();
-  await expect
-    .poll(async () =>
-      (await apiClient.listSessionMessages(task.session_id!)).messages.some(
-        (message) =>
-          message.author_type === "user" &&
-          (message.metadata?.attachments as unknown[] | undefined)?.length,
-      ),
-    )
-    .toBe(true);
+  await ws.waitForEvent("session.message.added", {
+    where: (payload) => payload.session_id === task.session_id,
+  });
+  const { messages } = await apiClient.listSessionMessages(task.session_id!);
+  expect(
+    messages.some(
+      (message) =>
+        message.author_type === "user" &&
+        (message.metadata?.attachments as unknown[] | undefined)?.length,
+    ),
+  ).toBe(true);
 });

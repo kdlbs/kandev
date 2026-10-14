@@ -69,6 +69,7 @@ type GitHubService interface {
 	MarkTaskCIAutoFixExhausted(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
 	ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error
 	GetPRFeedbackForAutomation(ctx context.Context, workspaceID, owner, repo string, number int) (*github.PRFeedback, error)
+	InvalidatePRFeedbackForAutomation(ctx context.Context, workspaceID, owner, repo string, number int) error
 	MergePRForAutomation(ctx context.Context, workspaceID, owner, repo string, number int, mergeMethod, expectedHeadSHA string) error
 	ListActivePRWatches(ctx context.Context) ([]*github.PRWatch, error)
 	ReserveReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL string) (bool, error)
@@ -135,6 +136,12 @@ type ReviewTaskRequest struct {
 	// Origin tags the task with a provenance label (see task/models.TaskOrigin*).
 	// Defaults to TaskOriginManual when empty.
 	Origin string
+	// AutomationStartOwned reserves the created task's initial start for the
+	// automation dispatch (see models.MetaKeyAutomationStartOwned).
+	AutomationStartOwned bool
+	AutomationStartOwner string
+	// ExternalID is the stable provider identity for retry task creation.
+	ExternalID string
 }
 
 // ReviewTaskRepository associates a repository with a review task.
@@ -193,6 +200,10 @@ func (s *Service) handlePRFeedback(ctx context.Context, event *bus.Event) error 
 			return nil
 		}
 		if pr != nil {
+			if err := s.githubService.InvalidatePRFeedbackForAutomation(ctx, pr.WorkspaceID, pr.Owner, pr.Repo, pr.PRNumber); err != nil {
+				s.logger.Debug("failed to invalidate PR feedback for CI automation", zap.String("task_id", pr.TaskID), zap.Error(err))
+				return nil
+			}
 			s.startTaskPRCIAutomation(ctx, pr)
 		}
 	}

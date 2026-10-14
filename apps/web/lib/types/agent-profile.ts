@@ -29,6 +29,7 @@ export type CLIFlag = {
 export type BillingType = "api_key" | "subscription";
 
 export type AgentProfileKind = "concrete" | "dynamic";
+export type MCPSelectionMode = "inherit" | "selected";
 
 export type DynamicErrorClass = "transient" | "hard";
 export type DynamicPolicyOutcome = "skip" | "stop";
@@ -50,10 +51,16 @@ export type DynamicErrorPolicy = {
   onExhausted: DynamicPolicyOutcome;
 };
 
+export type DynamicUnclassifiedPolicy = {
+  enabled: boolean;
+  consecutiveFailureThreshold: number;
+};
+
 export type DynamicAgentPolicy = {
   version: number;
   transient: DynamicErrorPolicy;
   hard: DynamicErrorPolicy;
+  unclassified: DynamicUnclassifiedPolicy;
 };
 
 export type DynamicAgentCandidate = {
@@ -157,6 +164,14 @@ export type AgentProfile = {
   /** Environment variables injected when this profile starts an agent session. */
   envVars?: ProfileEnvVar[];
   cliPassthrough: boolean;
+  /** Reuse locally stored Cursor MCP OAuth credentials when this profile launches. */
+  cursorMcpAuthEnabled?: boolean;
+  /** Import local Cursor plugin MCP servers when this profile launches. */
+  cursorPluginsMcpEnabled?: boolean;
+  /** Use all imported MCP servers or only the profile's selected native IDs. */
+  mcpSelectionMode?: MCPSelectionMode;
+  /** Exact native MCP server IDs selected when mcpSelectionMode is selected. */
+  mcpSelectedServers?: string[];
   /**
    * False hides the profile from task/session creation pickers. Existing
    * sessions keep running and the profile stays editable in settings.
@@ -210,7 +225,10 @@ export type OfficeAgentProfile = AgentProfile &
       AgentProfile,
       "workspaceId" | "role" | "status" | "budgetMonthlyCents" | "maxConcurrentSessions"
     >
-  >;
+  > & {
+    /** Dynamic profile selected as this Office agent's authoritative execution route. */
+    executionAgentProfileId?: string;
+  };
 
 /**
  * Snake_case wire shape for HTTP request bodies sent to `POST/PATCH
@@ -242,6 +260,10 @@ export type AgentProfilePayload = {
   provider_supported?: boolean;
   env_vars?: ProfileEnvVar[];
   cli_passthrough: boolean;
+  cursor_mcp_auth_enabled?: boolean;
+  cursor_plugins_mcp_enabled?: boolean;
+  mcp_selection_mode?: MCPSelectionMode;
+  mcp_selected_servers?: string[];
   enabled?: boolean;
   user_modified?: boolean;
   created_at: string;
@@ -277,6 +299,10 @@ export type AgentProfilePayload = {
             max_wait_seconds: number;
           };
           on_exhausted: DynamicPolicyOutcome;
+        };
+        unclassified: {
+          enabled: boolean;
+          consecutive_failure_threshold: number;
         };
       };
       rules?: Record<string, string>;

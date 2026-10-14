@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/runs/models"
 )
 
 // AppendRunEvent inserts a new event row for a run. Seq is computed

@@ -30,7 +30,7 @@ export type ViewContentProps = {
 
 export type MobileWorkflowNavigation = {
   activeWorkflowId: string;
-  workflows: Array<{ id: string; name: string; taskCount: number }>;
+  workflows: Array<{ id: string; name: string; taskCount: number | null }>;
   onWorkflowChange: (workflowId: string) => void;
 };
 

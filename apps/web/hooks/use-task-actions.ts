@@ -17,6 +17,7 @@ type MovePayload = {
 export type TaskActionOptions = {
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
+  confirmationId?: string;
 };
 
 export function useTaskActions() {

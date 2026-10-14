@@ -42,8 +42,11 @@ describe("renameSession", () => {
   });
 });
 
-const { fetchJson } = vi.hoisted(() => ({ fetchJson: vi.fn() }));
-vi.mock("../client", () => ({ fetchJson }));
+const { fetchJson, fetchConditionalJson } = vi.hoisted(() => ({
+  fetchJson: vi.fn(),
+  fetchConditionalJson: vi.fn(),
+}));
+vi.mock("../client", () => ({ fetchJson, fetchConditionalJson }));
 const { openSessionFolder } = await import("./session-api");
 
 // @covers AC-TASKS-OPEN-FOLDER-001.2
@@ -70,4 +73,34 @@ it("preserves bodyless default folder requests", async () => {
     cache: "no-store",
     init: { method: "POST" },
   });
+});
+
+const { fetchTaskSessionConditional } = await import("./session-api");
+
+it("requests a task session with its owner-scoped validator and bypasses the browser cache", async () => {
+  await fetchTaskSessionConditional("sess-1", '"session-tag"');
+
+  expect(fetchConditionalJson).toHaveBeenCalledWith(
+    "/api/v1/task-sessions/sess-1",
+    expect.objectContaining({
+      cache: "no-store",
+      init: { headers: { "If-None-Match": '"session-tag"' } },
+    }),
+  );
+});
+
+const { listTaskSessionMessages } = await import("./session-api");
+
+it("requests bounded turn context alongside a message page when requested", async () => {
+  await listTaskSessionMessages("sess-1", {
+    limit: 50,
+    before: "message-1",
+    sort: "desc",
+    include_turns: true,
+  });
+
+  expect(fetchJson).toHaveBeenLastCalledWith(
+    "/api/v1/task-sessions/sess-1/messages?limit=50&before=message-1&sort=desc&include_turns=true",
+    undefined,
+  );
 });

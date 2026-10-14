@@ -55,6 +55,8 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
     handleAllowAlways,
     hasAllowAlways,
     handleReject,
+    offeredChoices,
+    handleOfferedChoice,
   } = usePermissionResponseHandlers({
     permissionMetadata,
     permissionMessage: comment,
@@ -112,6 +114,8 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
                 onApprove={handleApprove}
                 onReject={handleReject}
                 onAllowAlways={hasAllowAlways ? handleAllowAlways : undefined}
+                offeredChoices={offeredChoices}
+                onChooseOfferedChoice={handleOfferedChoice}
                 isResponding={isResponding}
               />
             </div>

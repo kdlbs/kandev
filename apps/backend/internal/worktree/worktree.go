@@ -66,6 +66,11 @@ type Worktree struct {
 	// Stored for recreation if the worktree directory is lost.
 	RepositoryPath string `json:"repository_path"`
 
+	// SourceClonePath and SourceCommonDir identify the managed clone that owns
+	// this linked worktree. They are internal recovery metadata.
+	SourceClonePath string `json:"-"`
+	SourceCommonDir string `json:"-"`
+
 	// Path is the absolute filesystem path to the worktree directory.
 	Path string `json:"path"`
 

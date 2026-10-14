@@ -20,13 +20,15 @@ export function TaskSwitcherDrawer({
     <MobileConfirmationHost open={open} surface="drawer">
       {({ contentProps }) => (
         <Drawer open={open} onOpenChange={onOpenChange}>
-          <DrawerContent
-            onCloseAutoFocus={onCloseAutoFocus}
-            {...contentProps}
-            className="h-[88dvh] max-h-[88dvh] overflow-hidden pb-[max(0.5rem,env(safe-area-inset-bottom))]"
-          >
-            <MobileConfirmationHostBody>{children}</MobileConfirmationHostBody>
-          </DrawerContent>
+          {open && (
+            <DrawerContent
+              onCloseAutoFocus={onCloseAutoFocus}
+              {...contentProps}
+              className="h-[88dvh] max-h-[88dvh] overflow-hidden pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+            >
+              <MobileConfirmationHostBody>{children}</MobileConfirmationHostBody>
+            </DrawerContent>
+          )}
         </Drawer>
       )}
     </MobileConfirmationHost>

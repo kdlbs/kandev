@@ -8,6 +8,7 @@ const mockToast = vi.hoisted(() => vi.fn());
 const mockAppState = vi.hoisted(() => ({
   value: {
     kanban: { workflowId: "workflow-1", steps: [], tasks: [] },
+    kanbanMulti: { snapshots: {} },
     tasks: { activeSessionId: "session-1" },
     taskSessions: { items: {} },
     setActiveSession: vi.fn(),
@@ -17,6 +18,7 @@ const mockAppState = vi.hoisted(() => ({
   } as Record<string, unknown>,
 }));
 const WORKFLOW_ID = "workflow-1";
+const FEATURE_WORKFLOW_ID = "workflow-feature";
 const SESSION_ID = "session-1";
 const TASK_ID = "task-1";
 const mockContextFilesStore = vi.hoisted(() => ({
@@ -182,7 +184,7 @@ function setUpPlanActionsState() {
           events: { on_enter: [{ type: "auto_start_agent" }] },
         },
       ],
-      tasks: [{ id: TASK_ID, workflowStepId: "plan-step" }],
+      tasks: [{ id: TASK_ID, workflowId: WORKFLOW_ID, workflowStepId: "plan-step" }],
     },
   };
 }
@@ -210,7 +212,7 @@ describe("useNextWorkflowStep visibility", () => {
             events: { on_enter: [{ type: "auto_start_agent" }] },
           },
         ],
-        tasks: [{ id: TASK_ID, workflowStepId: "plan-step" }],
+        tasks: [{ id: TASK_ID, workflowId: WORKFLOW_ID, workflowStepId: "plan-step" }],
       },
     };
 
@@ -244,13 +246,159 @@ describe("useNextWorkflowStep visibility", () => {
             events: { on_enter: [{ type: "auto_start_agent" }] },
           },
         ],
-        tasks: [{ id: TASK_ID, workflowStepId: "plan-step" }],
+        tasks: [{ id: TASK_ID, workflowId: WORKFLOW_ID, workflowStepId: "plan-step" }],
       },
     };
 
     const { result } = renderHook(() => useNextWorkflowStep(TASK_ID));
 
     expect(result.current.proceedStepName).toBeNull();
+  });
+});
+
+describe("useNextWorkflowStep task workflow resolution", () => {
+  beforeEach(setUpPlanActionsState);
+
+  it("uses the task workflow when a different board is selected", async () => {
+    const featureSteps = [
+      {
+        id: "analysis",
+        title: "Analysis",
+        position: 0,
+        auto_advance_requires_signal: true,
+        events: { on_turn_complete: [{ type: "move_to_next" }] },
+      },
+      {
+        id: "implement",
+        title: "Implement",
+        position: 1,
+        events: { on_enter: [{ type: "auto_start_agent" }] },
+      },
+    ];
+    const kanbanSteps = [
+      { id: "kanban-analysis", title: "Analysis", position: 0 },
+      { id: "kanban-next", title: "Wrong next step", position: 1 },
+    ];
+
+    mockAppState.value = {
+      ...mockAppState.value,
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: kanbanSteps,
+        tasks: [],
+      },
+      kanbanMulti: {
+        snapshots: {
+          [FEATURE_WORKFLOW_ID]: {
+            workflowId: FEATURE_WORKFLOW_ID,
+            workflowName: "Feature",
+            steps: featureSteps,
+            tasks: [
+              {
+                id: TASK_ID,
+                workflowId: FEATURE_WORKFLOW_ID,
+                workflowStepId: "analysis",
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const { result } = renderHook(() => useNextWorkflowStep(TASK_ID));
+
+    expect(result.current.proceedStepName).toBe("Implement");
+    expect(result.current.proceedPreviewTarget).toEqual({
+      taskId: TASK_ID,
+      workflowId: FEATURE_WORKFLOW_ID,
+      workflowStepId: "implement",
+    });
+    await act(async () => {
+      await result.current.proceed();
+    });
+    expect(mockMoveTask).toHaveBeenCalledWith(TASK_ID, {
+      workflow_id: FEATURE_WORKFLOW_ID,
+      workflow_step_id: "implement",
+      position: 0,
+      entry_options: undefined,
+    });
+  });
+});
+
+describe("useNextWorkflowStep snapshot readiness", () => {
+  beforeEach(setUpPlanActionsState);
+
+  // @covers AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-002.6
+  it("waits for the task workflow snapshot instead of borrowing selected-board steps", () => {
+    const featureTask = {
+      id: TASK_ID,
+      workflowId: FEATURE_WORKFLOW_ID,
+      workflowStepId: "analysis",
+    };
+    const kanbanSteps = [
+      { id: "analysis", title: "Analysis", position: 0 },
+      { id: "kanban-next", title: "Wrong next step", position: 1 },
+    ];
+
+    mockAppState.value = {
+      ...mockAppState.value,
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: kanbanSteps,
+        tasks: [featureTask],
+      },
+      kanbanMulti: { snapshots: {} },
+    };
+
+    const { result, rerender } = renderHook(() => useNextWorkflowStep(TASK_ID));
+
+    expect(result.current.proceedStepName).toBeNull();
+    expect(result.current.proceedPreviewTarget).toBeUndefined();
+
+    mockAppState.value = {
+      ...mockAppState.value,
+      kanbanMulti: {
+        snapshots: {
+          [FEATURE_WORKFLOW_ID]: {
+            workflowId: FEATURE_WORKFLOW_ID,
+            workflowName: "Feature",
+            isPlaceholder: true,
+            steps: [],
+            tasks: [featureTask],
+          },
+        },
+      },
+    };
+    rerender();
+
+    expect(result.current.proceedStepName).toBeNull();
+    expect(result.current.proceedPreviewTarget).toBeUndefined();
+
+    mockAppState.value = {
+      ...mockAppState.value,
+      kanbanMulti: {
+        snapshots: {
+          [FEATURE_WORKFLOW_ID]: {
+            workflowId: FEATURE_WORKFLOW_ID,
+            workflowName: "Feature",
+            isPlaceholder: false,
+            steps: [
+              { id: "analysis", title: "Analysis", position: 0 },
+              { id: "implement", title: "Implement", position: 1 },
+            ],
+            tasks: [featureTask],
+          },
+        },
+      },
+    };
+    rerender();
+
+    expect(result.current.proceedStepName).toBe("Implement");
+    expect(result.current.proceedPreviewTarget).toEqual({
+      taskId: TASK_ID,
+      workflowId: FEATURE_WORKFLOW_ID,
+      workflowStepId: "implement",
+    });
   });
 });
 
@@ -277,7 +425,7 @@ describe("useNextWorkflowStep gated move destinations", () => {
             events: { on_enter: [{ type: "auto_start_agent" }] },
           },
         ],
-        tasks: [{ id: TASK_ID, workflowStepId: "plan-step" }],
+        tasks: [{ id: TASK_ID, workflowId: WORKFLOW_ID, workflowStepId: "plan-step" }],
       },
     };
 
@@ -308,7 +456,7 @@ describe("useNextWorkflowStep gated move destinations", () => {
             events: { on_enter: [{ type: "auto_start_agent" }] },
           },
         ],
-        tasks: [{ id: TASK_ID, workflowStepId: "plan-step" }],
+        tasks: [{ id: TASK_ID, workflowId: WORKFLOW_ID, workflowStepId: "plan-step" }],
       },
     };
 
@@ -336,7 +484,7 @@ describe("useNextWorkflowStep gated move destinations", () => {
             events: { on_enter: [{ type: "auto_start_agent" }] },
           },
         ],
-        tasks: [{ id: TASK_ID, workflowStepId: "plan-step" }],
+        tasks: [{ id: TASK_ID, workflowId: WORKFLOW_ID, workflowStepId: "plan-step" }],
       },
     };
 
@@ -392,6 +540,33 @@ describe("usePlanActions", () => {
       position: 0,
     });
     expect(mockAppState.value.setPlanMode).toHaveBeenCalledWith(SESSION_ID, false);
+  });
+
+  // @covers AC-TASKS-PROMPT-ATTACHMENTS-001.17
+  it("does not advance from plan mode while a file lacks its uploaded descriptor", async () => {
+    const { result } = renderHook(() =>
+      usePlanActions({
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
+        planModeEnabled: true,
+        handlePlanModeChange: vi.fn(),
+        chatInputRef: {
+          current: {
+            getValue: () => "",
+            getAttachments: () => [
+              { type: "resource", data: "cGVuZGluZw==", mime_type: "text/plain" },
+            ],
+            clear: vi.fn(),
+          },
+        } as never,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.implementPlanHandler?.(false);
+    });
+
+    expect(mockMoveTask).not.toHaveBeenCalled();
   });
 
   it("keeps plan mode enabled when moving to the work step fails", async () => {

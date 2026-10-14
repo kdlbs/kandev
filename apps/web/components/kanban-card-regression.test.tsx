@@ -208,6 +208,21 @@ describe("KanbanCard — title-preview disclosure widening (AC-UI-PIPELINE-ROW-0
   });
 });
 
+describe("KanbanCard — title preview in multi-select mode", () => {
+  // @covers AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.2
+  it.each([
+    ["unselected", false],
+    ["selected", true],
+  ] as const)("does not mount a title preview for a %s card", (_label, isSelected) => {
+    renderCard(baseTask({ description: "Some description content" }), [], {
+      isMultiSelectMode: true,
+      isSelected,
+    });
+
+    expect(screen.queryByTestId("task-title-preview-trigger")).toBeNull();
+  });
+});
+
 // @covers AC-TASKS-MOBILE-KANBAN-SCROLL-001.1, AC-TASKS-MOBILE-KANBAN-SCROLL-001.4
 it.each(["Enter", " "])(
   "phone cards open with %j without exposing or invoking drag pickup",

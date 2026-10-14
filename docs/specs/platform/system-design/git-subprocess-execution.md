@@ -24,6 +24,7 @@ This design applies the accepted transport ADR; it does not select a new credent
 | .1, .2 | Final preparation |
 | .3, .4 | Execution and cleanup |
 | .5, .6 | Failure and recovery |
+| .7 | Executable resolution |
 
 ## Final preparation
 
@@ -62,6 +63,14 @@ Resolve direct `GIT_SSH` executables without silently discarding their path when
 Unsupported shell wrappers retain the ADR's safe-default behavior. Do not build another general shell parser.
 Do not disable host-key verification or accept unknown hosts automatically.
 
+## Executable resolution
+
+`NewGitCommand` and `GitExecutablePath` share one process-wide record of the resolved Git path and the `PATH` and `PATHEXT` values it was resolved under.
+A command under the same lookup environment validates the remembered path directly with `exec.LookPath`; on Windows this replaces a directory-by-extension search per command.
+A changed lookup environment, removed file, directory replacement, or lost Unix execute permission resolves Git again and replaces the record. A failed resolution clears it.
+The command keeps `argv[0]` as `git`, and an unresolvable Git still builds the command for `git` so exec reports the same not-found error.
+The remembered value is a resolved executable path, never caller input; callers still supply only tokenized arguments.
+
 ## Execution and cleanup
 
 Operation owners select finite budgets. Existing AfterAcquire budgets remain authoritative.
@@ -79,6 +88,7 @@ Windows uses a kill-on-close Job Object installed while Git is suspended, before
 Reuse the implementation in `internal/agentctl/server/winproc` by moving the required generic lifecycle code to a common package.
 Keep compatibility wrappers for existing agentctl consumers. The shared layer must not import the agentctl server.
 Job installation failure kills the owned suspended process and returns an error; it cannot leave a suspended orphan.
+Managed Git also starts without a console window; see [Windows background process console](windows-background-process-console.md).
 
 Use a maximum 500 ms pipe WaitDelay, preserving a shorter caller value.
 Bound owned-tree termination/reaping to two seconds, then return any cleanup failure.
@@ -117,5 +127,6 @@ Logs and returned errors must exclude fixture credentials and real tokens.
 - [Deterministic noninteractive transport](../../../decisions/2026-08-31-deterministic-noninteractive-git-transport.md)
 - [Class-aware admission](../../../decisions/2026-08-02-class-aware-git-subprocess-admission.md)
 - [Implementation plan](../../../plans/noninteractive-git-execution/plan.md)
+- [Executable resolution plan](../../../plans/git-polling-overhead/plan.md)
 
 - [Merged host bridge contract at PR #3635](https://github.com/kdlbs/kandev/blob/9cc146ee21c296d553ae684531219a5c711a4213/docs/specs/integrations/system-design/github-authentication-02.md#executor-host-cli-bridge)

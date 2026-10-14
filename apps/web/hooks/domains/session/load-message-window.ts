@@ -1,3 +1,4 @@
+import { captureActiveTurnWindowObservation } from "@/lib/state/slices/session/turn-actions";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { listTaskSessionMessages } from "@/lib/api/domains/session-api";
@@ -24,8 +25,11 @@ function mergeWindowRows(existing: Message[], window: Message[]): Message[] {
   const byID = new Map(existing.map((message) => [message.id, message]));
   for (const message of window) {
     const current = byID.get(message.id);
-    if (!current || isIncomingMessageAtLeastAsFresh(current, message))
+    if (!current || isIncomingMessageAtLeastAsFresh(current, message)) {
       byID.set(message.id, message);
+    } else if (current.prompt_index === undefined && message.prompt_index !== undefined) {
+      byID.set(message.id, { ...current, prompt_index: message.prompt_index });
+    }
   }
   return [...byID.values()].sort((left, right) => {
     const timeDelta = compareMessageTimestamps(left.created_at, right.created_at);
@@ -40,17 +44,31 @@ export async function loadMessageWindowAround(
   guard: () => boolean,
   store: SessionStore,
 ): Promise<LoadMessageWindowResult> {
+  const turnWindowObservation = captureActiveTurnWindowObservation(store.getState(), sessionId);
+  const turnHydrationEpoch = turnWindowObservation.reconcileEpoch;
   const response = await listTaskSessionMessages(sessionId, {
     around: targetMessageId,
     limit: 100,
     sort: "desc",
+    include_turns: true,
   });
   if (!guard()) return { kind: "stale", merged: false, current: false, targetFound: false };
-  const window = response.messages ?? [];
+  const window = (response.messages ?? []).filter((message) => message.session_id === sessionId);
   if (!window.some((message) => message.id === targetMessageId)) {
     return { kind: "deleted-target", merged: false, current: true, targetFound: false };
   }
   const existing = store.getState().messages.bySession[sessionId] ?? [];
   store.getState().mergeMessages(sessionId, mergeWindowRows(existing, window));
+  if (response.turn_coverage) {
+    store
+      .getState()
+      .mergeTurnsWindow(
+        sessionId,
+        response.turns ?? [],
+        response.turn_coverage,
+        turnHydrationEpoch,
+        turnWindowObservation,
+      );
+  }
   return { kind: "merged", merged: true, current: true, targetFound: true };
 }

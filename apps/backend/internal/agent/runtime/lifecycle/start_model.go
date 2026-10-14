@@ -2,13 +2,41 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
+
+func modelSelectionBootstrapFailure(
+	policy StartModelPolicy,
+	state *CachedModelState,
+	effectiveModel, reason, attemptedModel string,
+	cause error,
+) *BootstrapFailure {
+	code := models.AgentErrorCauseCodeModelSelectionFailed
+	if reason == ModelSelectionReasonRequestedNotAdvertised {
+		code = models.AgentErrorCauseCodeModelUnavailable
+	}
+	if effectiveModel == "" && state != nil {
+		effectiveModel = state.CurrentModelID
+	}
+	promptNotSent := true
+	return &BootstrapFailure{
+		Code:           code,
+		Reason:         reason,
+		Detail:         bootstrapFailureDetail(code),
+		RequestedModel: policy.Model,
+		EffectiveModel: effectiveModel,
+		AttemptedModel: attemptedModel,
+		PromptNotSent:  &promptNotSent,
+		Cause:          cause,
+	}
+}
 
 // StartModelPolicy carries the profile's model-selection settings for the
 // executor-authoritative policy applied at session start and when a fresh ACP
@@ -144,7 +172,10 @@ func applyStartModelPolicy(
 ) (ModelSelectionDecision, error) {
 	if strings.TrimSpace(policy.Model) == "" {
 		if policy.RequireExactModel {
-			return ModelSelectionDecision{}, fmt.Errorf("exact model is required when RequireExactModel is enabled")
+			cause := fmt.Errorf("exact model is required when RequireExactModel is enabled")
+			return ModelSelectionDecision{}, modelSelectionBootstrapFailure(
+				policy, state, "", models.AgentErrorCauseReasonSelectionMissing, "", cause,
+			)
 		}
 		return ModelSelectionDecision{Outcome: ModelSelectionOutcomeNone}, nil
 	}
@@ -204,7 +235,13 @@ func applyStartModelPolicy(
 			decision.SetModelCalled = true
 			return decision, nil
 		}
-		return decision, fmt.Errorf("failed to set start model %q: %w", policy.Model, err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return decision, err
+		}
+		return decision, modelSelectionBootstrapFailure(
+			policy, state, "", models.AgentErrorCauseReasonApplicationFailed, policy.Model,
+			fmt.Errorf("failed to set start model %q: %w", policy.Model, err),
+		)
 	}
 
 	decision.EffectiveModel = policy.Model
@@ -224,12 +261,16 @@ func unavailableStartModel(
 	if !policy.RequireExactModel {
 		return decision, nil
 	}
+	causeText := fmt.Sprintf("requested model %q is unavailable (reason: %s)", policy.Model, reason)
 	if decision.EffectiveModel == "" {
-		return decision, fmt.Errorf("requested model %q is unavailable (reason: %s)", policy.Model, reason)
+		return decision, modelSelectionBootstrapFailure(
+			policy, state, "", reason, "", fmt.Errorf("%s", causeText),
+		)
 	}
-	return decision, fmt.Errorf(
-		"requested model %q is unavailable (reason: %s, effective model: %q)",
-		policy.Model, reason, decision.EffectiveModel,
+	return decision, modelSelectionBootstrapFailure(
+		policy, state, decision.EffectiveModel, reason, "",
+		fmt.Errorf("requested model %q is unavailable (reason: %s, effective model: %q)",
+			policy.Model, reason, decision.EffectiveModel),
 	)
 }
 
@@ -250,7 +291,13 @@ func applyUniqueAdvertisedVariation(
 			decision.SetModelCalled = true
 			return decision, nil
 		}
-		return decision, fmt.Errorf("failed to set unique model variation %q: %w", variation, err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return decision, err
+		}
+		return decision, modelSelectionBootstrapFailure(
+			policy, state, "", models.AgentErrorCauseReasonApplicationFailed, variation,
+			fmt.Errorf("failed to set unique model variation %q: %w", variation, err),
+		)
 	}
 	decision.EffectiveModel = variation
 	decision.Outcome = ModelSelectionOutcomeUniqueVariation
@@ -280,7 +327,13 @@ func applyAdvertisedFallback(
 			}
 			return providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported), nil
 		}
-		return decision, fmt.Errorf("failed to set fallback model %q: %w", policy.FallbackModel, err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return decision, err
+		}
+		return decision, modelSelectionBootstrapFailure(
+			policy, state, "", models.AgentErrorCauseReasonApplicationFailed, policy.FallbackModel,
+			fmt.Errorf("failed to set fallback model %q: %w", policy.FallbackModel, err),
+		)
 	}
 	decision.EffectiveModel = policy.FallbackModel
 	decision.Outcome = ModelSelectionOutcomeExplicitFallback

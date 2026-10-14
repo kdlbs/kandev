@@ -22,7 +22,7 @@ import {
   FallbackOptionHelp,
   ModelFallbackSettingsShell,
 } from "@/components/settings/model-fallback-settings-shell";
-import type { ModelConfig, ModeEntry, ModelEntry } from "@/lib/types/http";
+import type { ModelConfig, ModeEntry, ModelEntry, ModelDiscovery } from "@/lib/types/http";
 import type { PermissionKey } from "@/lib/agent-permissions";
 import type { CLIFlag } from "@/lib/types/http";
 import {
@@ -43,8 +43,25 @@ export type ProfileFormData = {
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
   command_prefix?: string;
+  env_vars?: { key: string; value?: string; secret_id?: string }[];
   provider_kind?: string;
+  cursor_mcp_auth_enabled?: boolean;
+  cursor_plugins_mcp_enabled?: boolean;
 } & Record<PermissionKey, boolean>;
+
+// A configured model that is no longer advertised ("gone") stays visible in
+// the list so the user sees what was configured instead of it silently
+// vanishing. For an agent type that allows a custom model ID, it stays
+// selectable with its own identifier; otherwise it is greyed out and
+// unselectable, as before.
+function goneModelOption(
+  modelId: string,
+  allowCustomModel: boolean,
+  goneModelLabel: string,
+): ModelSelectorOption {
+  if (allowCustomModel) return { id: modelId, name: modelId };
+  return { id: modelId, name: modelId, disabled: true, disabledReason: goneModelLabel };
+}
 
 function CustomProviderModelInput({
   profile,
@@ -86,6 +103,7 @@ export function ModelPicker({
   disabled,
   configOptionsLoading,
   keepOpenOnModelChange,
+  discovery,
 }: {
   profile: ProfileFormData;
   models: ModelEntry[];
@@ -98,6 +116,8 @@ export function ModelPicker({
   disabled?: boolean;
   configOptionsLoading?: boolean;
   keepOpenOnModelChange?: boolean;
+  /** Present only for host-CLI agent types; enables the custom model entry. */
+  discovery?: ModelDiscovery;
 }) {
   const { t } = useTranslation();
   if (profile.provider_kind === "openai_compatible") {
@@ -120,30 +140,25 @@ export function ModelPicker({
       .filter((model) => typeof model.meta?.copilotUsage === "string")
       .map((model) => [model.id, model.meta!.copilotUsage as string]),
   );
-  const modelOptions: ModelSelectorOption[] = modelConfig
-    ? configOptionToModelOptions(modelConfig).map((option) => ({
-        ...option,
-        usageMultiplier: option.usageMultiplier ?? usageByModelId.get(option.id),
-      }))
-    : models.map((model) => ({
-        id: model.id,
-        name: model.name,
-        description: model.description || (model.id !== model.name ? model.id : undefined),
-        usageMultiplier:
-          typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
-      }));
+  const modelOptions: ModelSelectorOption[] =
+    modelConfig && !discovery
+      ? configOptionToModelOptions(modelConfig).map((option) => ({
+          ...option,
+          usageMultiplier: option.usageMultiplier ?? usageByModelId.get(option.id),
+        }))
+      : models.map((model) => ({
+          id: model.id,
+          name: model.name,
+          description: model.description || (model.id !== model.name ? model.id : undefined),
+          source: model.source,
+          usageMultiplier:
+            typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
+        }));
   const currentModel = profile.model || modelConfig?.currentValue || currentModelId || null;
-  // A configured model that is no longer advertised ("gone") stays visible
-  // in the list, greyed out and unselectable, so the user sees what was
-  // configured instead of it silently vanishing.
+  const allowCustomModel = Boolean(discovery?.allows_custom_model);
   const modelIsGone = Boolean(profile.model && !modelOptions.some((m) => m.id === profile.model));
   if (modelIsGone) {
-    modelOptions.unshift({
-      id: profile.model!,
-      name: profile.model!,
-      disabled: true,
-      disabledReason: goneModelLabel,
-    });
+    modelOptions.unshift(goneModelOption(profile.model, allowCustomModel, goneModelLabel));
   }
   const selectedConfigOptions = configOptions.map((option) => ({
     ...option,
@@ -151,6 +166,8 @@ export function ModelPicker({
       ? profile.model || option.currentValue
       : profile.config_options?.[option.id] || option.currentValue,
   }));
+
+  const modelIsUnavailable = modelIsGone && !allowCustomModel;
 
   return (
     <div className="space-y-1.5">
@@ -168,7 +185,8 @@ export function ModelPicker({
         disabled={disabled}
         configOptionsLoading={configOptionsLoading}
         keepOpenOnModelChange={keepOpenOnModelChange}
-        triggerClassName={modelIsGone ? "text-destructive" : undefined}
+        triggerClassName={modelIsUnavailable ? "text-destructive" : undefined}
+        allowCustomModel={allowCustomModel}
       />
     </div>
   );
@@ -179,11 +197,13 @@ export function ModePicker({
   modes,
   currentModeId,
   onChange,
+  disabled,
 }: {
   profile: ProfileFormData;
   modes: ModeEntry[];
   currentModeId: string | undefined;
   onChange: (patch: Partial<ProfileFormData>) => void;
+  disabled?: boolean;
 }) {
   return (
     <ModeCombobox
@@ -191,6 +211,7 @@ export function ModePicker({
       onChange={(value) => onChange({ mode: value })}
       modes={modes}
       currentModeId={currentModeId}
+      disabled={disabled}
     />
   );
 }
@@ -316,6 +337,7 @@ export function ModelFallbackSection({
   models,
   configOptions,
   baselineProfile,
+  disabled = false,
   labelCls,
   gapCls,
   onChange,
@@ -324,6 +346,7 @@ export function ModelFallbackSection({
   models: ModelEntry[];
   configOptions: SelectConfigOption[];
   baselineProfile?: ProfileFormData;
+  disabled?: boolean;
   labelCls?: string;
   gapCls: string;
   onChange: (patch: Partial<ProfileFormData>) => void;
@@ -394,7 +417,7 @@ export function ModelFallbackSection({
           baselineProfile={baselineProfile}
           labelCls={labelCls}
           gapCls={gapCls}
-          disabled={autoFallback || requireExactModel}
+          disabled={disabled || autoFallback || requireExactModel}
           onChange={onChange}
         />
       }

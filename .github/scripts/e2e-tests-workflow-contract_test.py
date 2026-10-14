@@ -179,6 +179,8 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("options: --ipc=host", desktop_job)
         self.assertIn("git config --global --add safe.directory", desktop_job)
         self.assertIn("path: ~/.local/share/pnpm/store", desktop_job)
+        self.assertIn("actions/setup-go@", desktop_job)
+        self.assertIn("go-version-file: apps/backend/go.mod", desktop_job)
         self.assertIn("pnpm install --frozen-lockfile", desktop_job)
         self.assertIn("pnpm --filter @kandev/desktop e2e", desktop_job)
 
@@ -204,10 +206,10 @@ cat "${FAKE_DOCKER_MANIFEST}"
         normal_job = job_block(workflow, "e2e", "playwright_image")
 
         self.assertIn(
-            "# 35 min covers the serial count-fallback tail and setup overhead",
+            "# 45 min covers the serial count-fallback tail and setup overhead",
             normal_job,
         )
-        self.assertIn("timeout-minutes: 35", normal_job)
+        self.assertIn("timeout-minutes: 45", normal_job)
         self.assertNotIn("timeout-minutes: 25", normal_job)
 
     # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.1
@@ -221,29 +223,14 @@ cat "${FAKE_DOCKER_MANIFEST}"
     def test_external_runner_tiers_are_toggleable_for_eligible_jobs(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
 
-        light_jobs = {
-            "changes": ("build", "changes_runner"),
-            "e2e-gate": (None, "e2e_gate_runner"),
-        }
-
-        for job, (next_job, output_name) in light_jobs.items():
-            if next_job is None:
-                job_text = workflow.partition("  e2e-gate:\n")[2]
-            else:
-                job_text = job_block(workflow, job, next_job)
-            expected = (
-                "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan)."
-                f"{output_name} }}}}"
-            )
-            self.assertIn(
-                expected,
-                job_text,
-                f"{job} must select its configured tier",
-            )
+        changes = job_block(workflow, "changes", "build")
+        self.assertIn("runs-on: ubuntu-latest", changes)
+        self.assertNotIn("    needs:", changes)
+        self.assertNotIn("  e2e-gate:\n", workflow)
         e2e_job = job_block(workflow, "e2e", "playwright_image")
         self.assertIn("runs-on: ${{ matrix.runner }}", e2e_job)
         self.assertIn(
-            "matrix: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_matrix }}",
+            "matrix: ${{ fromJSON(needs.changes.outputs.plan).e2e_matrix }}",
             e2e_job,
         )
 
@@ -345,7 +332,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
             "digest: ${{ steps.resolve.outputs.digest }}",
             resolver_job,
         )
-        gate_job = workflow.partition("  e2e-gate:\n")[2]
+        gate_job = workflow.partition("  e2e-report:\n")[2]
         self.assertIn("PLAYWRIGHT_IMAGE_RESULT", gate_job)
         self.assertIn('"playwright-image:${PLAYWRIGHT_IMAGE_RESULT}"', gate_job)
         self.assertIn(

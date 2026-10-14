@@ -22,6 +22,7 @@ async function seedTaskWithPR(
   seedData: SeedData,
   title: string,
   prOverrides: Partial<Parameters<ApiClient["mockGitHubAssociateTaskPR"]>[0]> = {},
+  taskDescription = "/e2e:simple-message",
 ) {
   // The task-mode MCP catalog is derived from the providers attached to the
   // task repository before the agent session starts. Keep this fixture's
@@ -40,7 +41,7 @@ async function seedTaskWithPR(
     title,
     seedData.agentProfileId,
     {
-      description: "/e2e:simple-message",
+      description: taskDescription,
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
@@ -490,18 +491,24 @@ test.describe("mobile PR CI automation options", () => {
     test.setTimeout(120_000);
     const queuedHead = "head-queued-mobile";
     const replacementHead = "head-replacement-mobile";
-    const taskId = await seedTaskWithPR(apiClient, seedData, "CI mobile merge queue recovery", {
-      head_sha: queuedHead,
-      checks_state: "success",
-      checks_total: 1,
-      checks_passing: 1,
-      unresolved_review_threads: 0,
-      mergeable_state: "clean",
-      merge_queue_state: "queued",
-      merge_queue_position: 1,
-      merge_queue_entry_id: "entry-mobile-a",
-      merge_queue_entry_head_sha: queuedHead,
-    });
+    const taskId = await seedTaskWithPR(
+      apiClient,
+      seedData,
+      "CI mobile merge queue recovery",
+      {
+        head_sha: queuedHead,
+        checks_state: "success",
+        checks_total: 1,
+        checks_passing: 1,
+        unresolved_review_threads: 0,
+        mergeable_state: "clean",
+        merge_queue_state: "queued",
+        merge_queue_position: 1,
+        merge_queue_entry_id: "entry-mobile-a",
+        merge_queue_entry_head_sha: queuedHead,
+      },
+      'e2e:delay(60000)\ne2e:message("queue recovery fixture still running")',
+    );
     await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
     await interceptTallPRFeedback(testPage);
 

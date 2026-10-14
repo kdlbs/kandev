@@ -259,16 +259,41 @@ func (r *Repository) UpdateRepositorySet(
 	set *models.RepositorySet,
 	repositoryItems *[]models.RepositorySetItem,
 ) error {
+	return r.patchRepositorySet(ctx, set.ID, &models.RepositorySetPatch{
+		Name: &set.Name, Description: &set.Description, Items: repositoryItems,
+	}, &set.UpdatedAt)
+}
+
+// PatchRepositorySet changes supplied fields without rewriting omitted values
+// from a prior read. The parent UPDATE locks the row before item replacement.
+func (r *Repository) PatchRepositorySet(ctx context.Context, id string, patch *models.RepositorySetPatch) error {
+	var updatedAt time.Time
+	return r.patchRepositorySet(ctx, id, patch, &updatedAt)
+}
+
+func (r *Repository) patchRepositorySet(
+	ctx context.Context, id string, patch *models.RepositorySetPatch, updatedAt *time.Time,
+) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	set.UpdatedAt = time.Now().UTC()
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE repository_sets SET name = ?, description = ?, updated_at = ? WHERE id = ?
-	`), set.Name, set.Description, set.UpdatedAt, set.ID)
+	*updatedAt = time.Now().UTC()
+	assignments := []string{"updated_at = ?"}
+	args := []any{*updatedAt}
+	if patch.Name != nil {
+		assignments = append(assignments, "name = ?")
+		args = append(args, *patch.Name)
+	}
+	if patch.Description != nil {
+		assignments = append(assignments, "description = ?")
+		args = append(args, *patch.Description)
+	}
+	args = append(args, id)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(
+		`UPDATE repository_sets SET `+strings.Join(assignments, ", ")+` WHERE id = ?`), args...)
 	if err != nil {
 		return err
 	}
@@ -282,8 +307,8 @@ func (r *Repository) UpdateRepositorySet(
 		return repoerrors.ErrRepositorySetNotFound
 	}
 
-	if repositoryItems != nil {
-		if err := r.replaceItemsTx(ctx, tx, set.ID, *repositoryItems, set.UpdatedAt); err != nil {
+	if patch.Items != nil {
+		if err := r.replaceItemsTx(ctx, tx, id, *patch.Items, *updatedAt); err != nil {
 			return err
 		}
 	}

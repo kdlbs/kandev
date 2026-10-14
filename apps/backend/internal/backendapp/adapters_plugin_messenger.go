@@ -19,6 +19,7 @@ import (
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 // messengerTaskSvc / messengerOrch are the narrow slices of the task service
@@ -26,6 +27,8 @@ import (
 // unit-tested with fakes. *taskservice.Service and *orchestrator.Service
 // satisfy them structurally.
 type messengerTaskSvc interface {
+	GetTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
+	GetTaskManagementClaim(ctx context.Context, taskID string) (*taskmodels.TaskManagementClaim, error)
 	GetTaskSession(ctx context.Context, sessionID string) (*taskmodels.TaskSession, error)
 	GetPrimarySession(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)
 	CreateMessage(ctx context.Context, req *taskservice.CreateMessageRequest) (*taskmodels.Message, error)
@@ -43,6 +46,46 @@ type messengerOrch interface {
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*orchexecutor.TaskExecution, error)
 }
 
+type exactMessageAdmissionQueue interface {
+	ResolveSessionIdentity(ctx context.Context, taskID, sessionID string) (messagequeue.QueueSessionIdentity, error)
+	LifecycleGeneration(ctx context.Context, taskID string) (int64, error)
+	TakeQueuedEntryForSession(ctx context.Context, identity messagequeue.QueueSessionIdentity, entryID string) (*messagequeue.QueuedMessage, bool, error)
+	QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry(
+		ctx context.Context,
+		identity messagequeue.QueueSessionIdentity,
+		entry messagequeue.WorkflowEntryIdentity,
+		clientQueueID, content, model, userID string,
+		planMode bool,
+		attachments []messagequeue.MessageAttachment,
+		metadata map[string]interface{},
+	) (*messagequeue.QueuedMessage, bool, error)
+}
+
+type pluginsPendingTaskTransitionAdapter struct {
+	queue *messagequeue.Service
+}
+
+func (a pluginsPendingTaskTransitionAdapter) ListPendingTaskTransitions(
+	ctx context.Context,
+) ([]plugins.PendingTaskTransitionRecord, error) {
+	if a.queue == nil {
+		return nil, fmt.Errorf("message queue is unavailable")
+	}
+	records, err := a.queue.ListPendingMoves(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list pending workflow moves: %w", err)
+	}
+	out := make([]plugins.PendingTaskTransitionRecord, 0, len(records))
+	for _, record := range records {
+		out = append(out, plugins.PendingTaskTransitionRecord{
+			ID: record.Move.MoveID, TaskID: record.Move.TaskID, SessionID: record.SessionID,
+			WorkflowID: record.Move.WorkflowID, WorkflowStepID: record.Move.WorkflowStepID,
+			QueuedAt: record.Move.QueuedAt,
+		})
+	}
+	return out, nil
+}
+
 // pluginsTaskMessengerAdapter adapts the task service + orchestrator to the
 // plugins package's taskMessenger interface (Host data API SendMessage RPC, ADR
 // 0043 phase 2). It delivers a plugin's prompt to a task session through the
@@ -55,9 +98,10 @@ type messengerOrch interface {
 // needs both the task service and the orchestrator, which no single service
 // owns; internal/plugins can't reach either without an import cycle.
 type pluginsTaskMessengerAdapter struct {
-	tasks messengerTaskSvc
-	orch  messengerOrch
-	log   *logger.Logger
+	tasks      messengerTaskSvc
+	orch       messengerOrch
+	exactQueue exactMessageAdmissionQueue
+	log        *logger.Logger
 }
 
 func (a pluginsTaskMessengerAdapter) SendMessage(ctx context.Context, taskID, sessionID, text, source string) (plugins.PluginMessageResult, error) {
@@ -65,15 +109,67 @@ func (a pluginsTaskMessengerAdapter) SendMessage(ctx context.Context, taskID, se
 	if err != nil {
 		return plugins.PluginMessageResult{}, err
 	}
-	metadata := map[string]interface{}{"source": source}
-	switch session.State {
-	case taskmodels.TaskSessionStateFailed, taskmodels.TaskSessionStateCancelled:
+	if session.State == taskmodels.TaskSessionStateFailed || session.State == taskmodels.TaskSessionStateCancelled {
 		return plugins.PluginMessageResult{}, status.Errorf(codes.FailedPrecondition, "session is %s — cannot send message", session.State)
-	case taskmodels.TaskSessionStateRunning, taskmodels.TaskSessionStateStarting:
-		return a.queueMessage(ctx, taskID, session, text, metadata)
-	default:
-		return a.startOrPromptSession(ctx, taskID, session, text, metadata)
 	}
+	task, err := a.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return plugins.PluginMessageResult{}, err
+	}
+	if task == nil || task.ID != taskID || task.ArchivedAt != nil {
+		return plugins.PluginMessageResult{}, status.Error(codes.FailedPrecondition, "task is no longer active")
+	}
+	claim, err := a.tasks.GetTaskManagementClaim(ctx, taskID)
+	if err != nil {
+		return plugins.PluginMessageResult{}, status.Error(codes.Unavailable, "task management claim state is unavailable")
+	}
+	if claim != nil && claim.OwnerKind != "" {
+		return plugins.PluginMessageResult{}, status.Error(codes.Aborted, "task is managed by another owner")
+	}
+	claimFence := taskmodels.TaskManagementClaimFence{}
+	if claim != nil {
+		claimFence.Generation = claim.Generation
+	}
+	operationID, payloadDigest, err := pluginLegacyCommandIdentity("task-message", map[string]string{
+		"task_id": taskID, "session_id": session.ID, "content": text, "source": source,
+	})
+	if err != nil {
+		return plugins.PluginMessageResult{}, status.Error(codes.InvalidArgument, "invalid task message")
+	}
+	queueID, _, err := a.SendMessageExact(ctx, plugins.ExactTaskMessageInput{
+		WorkspaceID: task.WorkspaceID, TaskID: taskID, SessionID: session.ID,
+		ExpectedTaskResourceVersion:    task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		ExpectedSessionResourceVersion: session.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Content:                        text, Source: source, OperationID: operationID, PayloadDigest: payloadDigest,
+		ClaimFence: claimFence,
+	})
+	if err != nil {
+		return plugins.PluginMessageResult{}, err
+	}
+	if session.State == taskmodels.TaskSessionStateRunning || session.State == taskmodels.TaskSessionStateStarting {
+		return plugins.PluginMessageResult{SessionID: session.ID, Status: "queued"}, nil
+	}
+	queue := a.exactQueue
+	if queue == nil {
+		queue = a.orch.GetMessageQueue()
+	}
+	identity, err := queue.ResolveSessionIdentity(ctx, taskID, session.ID)
+	if err != nil {
+		return plugins.PluginMessageResult{}, mapExactTaskMessageQueueError(err)
+	}
+	taken, found, err := queue.TakeQueuedEntryForSession(ctx, identity, queueID)
+	if err != nil {
+		return plugins.PluginMessageResult{}, mapExactTaskMessageQueueError(err)
+	}
+	if !found || taken == nil {
+		return plugins.PluginMessageResult{}, status.Error(codes.Aborted, "task manager changed before message dispatch")
+	}
+	result, err := a.startOrPromptSession(ctx, taskID, session, text, map[string]interface{}{"source": source})
+	if err != nil {
+		return plugins.PluginMessageResult{}, err
+	}
+	a.orch.PublishQueueStatusEvent(context.WithoutCancel(ctx), session.ID)
+	return result, nil
 }
 
 // resolveSession returns the session a message targets: the explicit session
@@ -190,6 +286,84 @@ func (a pluginsTaskMessengerAdapter) StartOrPromptIdempotent(ctx context.Context
 		return "", err
 	}
 	return "sent", nil
+}
+
+// DispatchImmediate rechecks the current session and queue at the effect
+// boundary. It never falls back to queue admission: a competing turn returns
+// busy, and other dispatch failures remain visible to the caller.
+//
+//nolint:cyclop // Dispatch validates the exact conversation and task scope before any queue effect.
+func (a pluginsTaskMessengerAdapter) DispatchImmediate(
+	ctx context.Context,
+	taskID string,
+	session *taskmodels.TaskSession,
+	text, source, idempotencyID string,
+) (pluginsdk.ManagedAgentDispatchStatus, error) {
+	if session == nil || session.ID == "" || taskID == "" || idempotencyID == "" {
+		return "", status.Error(codes.InvalidArgument, "immediate dispatch identity is incomplete")
+	}
+	current, err := a.tasks.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		return "", fmt.Errorf("reload session before immediate dispatch: %w", err)
+	}
+	if current == nil || current.ID != session.ID || current.TaskID != taskID {
+		return "", status.Error(codes.Aborted, "immediate dispatch session identity changed")
+	}
+	if dispatchStatus, stateErr := immediateDispatchSessionState(current); stateErr != nil || dispatchStatus != "" {
+		return dispatchStatus, stateErr
+	}
+	queue := a.orch.GetMessageQueue()
+	if queue == nil {
+		return "", status.Error(codes.Unavailable, "message queue is unavailable")
+	}
+	busy, err := immediateDispatchQueueBusy(ctx, queue, taskID, current)
+	if err != nil {
+		return "", err
+	}
+	if busy {
+		return pluginsdk.ManagedAgentDispatchBusy, nil
+	}
+	result, err := a.StartOrPromptIdempotent(ctx, taskID, current, text, source, idempotencyID)
+	if errors.Is(err, orchestrator.ErrAgentPromptInProgress) || errors.Is(err, orchestrator.ErrSessionNotPromptable) {
+		return pluginsdk.ManagedAgentDispatchBusy, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	switch result {
+	case "started":
+		return pluginsdk.ManagedAgentDispatchStarted, nil
+	case "sent":
+		return pluginsdk.ManagedAgentDispatchSent, nil
+	default:
+		return "", fmt.Errorf("unexpected immediate dispatch result %q", result)
+	}
+}
+
+func immediateDispatchSessionState(session *taskmodels.TaskSession) (pluginsdk.ManagedAgentDispatchStatus, error) {
+	if session.State == taskmodels.TaskSessionStateRunning || session.State == taskmodels.TaskSessionStateStarting {
+		return pluginsdk.ManagedAgentDispatchBusy, nil
+	}
+	if session.State == taskmodels.TaskSessionStateFailed || session.State == taskmodels.TaskSessionStateCancelled {
+		return "", status.Errorf(codes.FailedPrecondition, "session is %s", session.State)
+	}
+	return "", nil
+}
+
+func immediateDispatchQueueBusy(ctx context.Context, queue *messagequeue.Service, taskID string, session *taskmodels.TaskSession) (bool, error) {
+	identity, err := queue.ResolveSessionIdentity(ctx, taskID, session.ID)
+	if err != nil {
+		return false, fmt.Errorf("resolve immediate dispatch queue identity: %w", err)
+	}
+	if identity.TaskID != taskID || identity.SessionID != session.ID ||
+		identity.SessionIncarnationID == "" || identity.SessionIncarnationID != session.QueueIncarnationID {
+		return false, status.Error(codes.Aborted, "immediate dispatch session identity changed")
+	}
+	queueStatus, err := queue.Snapshot(ctx, identity)
+	if err != nil {
+		return false, fmt.Errorf("read immediate dispatch queue: %w", err)
+	}
+	return queueStatus.Count > 0, nil
 }
 
 // promptWithResume dispatches the prompt, resuming the agent process first when

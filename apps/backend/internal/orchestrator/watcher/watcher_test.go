@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -19,6 +20,74 @@ type mockSubscription struct {
 	valid        bool
 	mu           sync.Mutex
 	unsubscribed bool
+}
+
+func TestAgentLifecycleSettingsPolicyReachesWatcher(t *testing.T) {
+	w := &Watcher{}
+	payload := lifecycle.AgentEventPayload{
+		TaskID:                    "task-1",
+		SessionID:                 "session-1",
+		AgentExecutionID:          "execution-1",
+		AttemptID:                 "resume-3",
+		Status:                    string(v1.AgentStatusReady),
+		SessionSettingsPolicy:     streams.SessionSettingsPolicyProviderRestored,
+		RecoveredAvailabilityOnly: true,
+	}
+	var got AgentEventData
+	if err := w.parseEventData(payload, &got); err != nil {
+		t.Fatalf("parse lifecycle event: %v", err)
+	}
+	if got.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("settings policy = %q, want provider_restored", got.SessionSettingsPolicy)
+	}
+	if !got.RecoveredAvailabilityOnly {
+		t.Fatal("recovered availability marker was lost while decoding lifecycle event")
+	}
+	if got.Status != string(v1.AgentStatusReady) {
+		t.Fatalf("agent status = %q, want ready", got.Status)
+	}
+	if got.AttemptID != payload.AttemptID || got.AgentExecutionID != payload.AgentExecutionID {
+		t.Fatalf("attempt/execution identity changed in watcher: %#v", got)
+	}
+}
+
+func TestAgentTurnFailedEventReachesHandlerWithFailureIdentity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	eventBus := newMockEventBus()
+	received := make(chan AgentEventData, 1)
+	w := NewWatcher(eventBus, EventHandlers{
+		OnAgentTurnFailed: func(_ context.Context, data AgentEventData) { received <- data },
+	}, "turn-failure-test", createTestLogger())
+	if err := w.Start(ctx); err != nil {
+		t.Fatalf("start watcher: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Stop() })
+
+	payload := lifecycle.AgentEventPayload{
+		TaskID: "task-1", SessionID: "session-1", AgentExecutionID: "execution-1",
+		TurnID: "turn-1", PromptGeneration: 9, ErrorMessage: "capacity",
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+		CapacityContinuation: &streams.CapacityContinuationSnapshot{
+			Support: streams.CapacityContinuationCodexLiveSessionV1, PromptGeneration: 9,
+			EvidenceComplete: true, CompletedTools: 1,
+		},
+	}
+	if err := eventBus.Publish(ctx, events.AgentTurnFailed, bus.NewEvent(events.AgentTurnFailed, "test", payload)); err != nil {
+		t.Fatalf("publish retained failure: %v", err)
+	}
+	select {
+	case got := <-received:
+		if got.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime ||
+			got.PromptGeneration != 9 || got.TurnID != "turn-1" || got.ErrorMessage != "capacity" {
+			t.Fatalf("watcher changed retained failure identity: %+v", got)
+		}
+		if got.CapacityContinuation == nil || got.CapacityContinuation.PromptGeneration != 9 || got.CapacityContinuation.CompletedTools != 1 {
+			t.Fatalf("watcher changed capacity continuation evidence: %+v", got.CapacityContinuation)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("watcher did not dispatch agent.turn_failed")
+	}
 }
 
 func (s *mockSubscription) Unsubscribe() error {
@@ -278,10 +347,16 @@ func TestAgentEventHandling(t *testing.T) {
 		// Simulate publishing an agent completed event
 		exitCode := 0
 		event := bus.NewEvent(events.AgentCompleted, "test", map[string]interface{}{
-			"task_id":            "task-123",
-			"agent_execution_id": "agent-456",
-			"agent_type":         "test-agent",
-			"exit_code":          exitCode,
+			"task_id":                     "task-123",
+			"agent_execution_id":          "agent-456",
+			"agent_type":                  "test-agent",
+			"exit_code":                   exitCode,
+			"turn_id":                     "turn-123",
+			"delivery_stream_id":          "stream-123",
+			"delivery_incarnation_id":     "incarnation-123",
+			"delivery_harness_generation": uint64(7),
+			"delivery_sequence":           uint64(11),
+			"delivery_submission_id":      "submission-123",
 		})
 
 		_ = eventBus.Publish(context.Background(), events.AgentCompleted, event)
@@ -299,6 +374,52 @@ func TestAgentEventHandling(t *testing.T) {
 		}
 		if receivedData.AgentExecutionID != "agent-456" {
 			t.Errorf("expected agent_execution_id = 'agent-456', got %s", receivedData.AgentExecutionID)
+		}
+		if receivedData.TurnID != "turn-123" || receivedData.DeliveryStreamID != "stream-123" ||
+			receivedData.DeliveryIncarnationID != "incarnation-123" || receivedData.DeliveryHarnessGeneration != 7 ||
+			receivedData.DeliverySequence != 11 || receivedData.DeliverySubmissionID != "submission-123" {
+			t.Errorf("agent event lost durable terminal identity: %+v", receivedData)
+		}
+	})
+}
+
+func TestAgentctlErrorRecoveryEventIsRoutedWithImmutableIdentity(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := newMockEventBus()
+		var received lifecycle.AgentctlEventPayload
+		handled := false
+		watch := NewWatcher(eventBus, EventHandlers{
+			OnAgentctlError: func(_ context.Context, payload lifecycle.AgentctlEventPayload) {
+				received = payload
+				handled = true
+			},
+		}, "orchestrator-test", createTestLogger())
+		if err := watch.Start(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = watch.Stop() }()
+
+		payload := lifecycle.AgentctlEventPayload{
+			TaskID: "task-1", SessionID: "session-1", AgentExecutionID: "exec-1",
+			DeliveryRecoveryPhase: "uncertain", DeliverySubmissionID: "submission-1",
+			DeliveryStreamID: "stream-1", DeliveryIncarnationID: "inc-1",
+			DeliveryHarnessGeneration: 3, PromptGeneration: 8,
+		}
+		if err := eventBus.Publish(context.Background(), events.AgentctlError,
+			bus.NewEvent(events.AgentctlError, "test", payload)); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if !handled {
+			t.Fatal("agentctl error event was not routed")
+		}
+		if received.DeliveryRecoveryPhase != payload.DeliveryRecoveryPhase ||
+			received.DeliverySubmissionID != payload.DeliverySubmissionID ||
+			received.DeliveryStreamID != payload.DeliveryStreamID ||
+			received.DeliveryIncarnationID != payload.DeliveryIncarnationID ||
+			received.DeliveryHarnessGeneration != payload.DeliveryHarnessGeneration ||
+			received.PromptGeneration != payload.PromptGeneration {
+			t.Fatalf("received recovery identity = %+v, want %+v", received, payload)
 		}
 	})
 }

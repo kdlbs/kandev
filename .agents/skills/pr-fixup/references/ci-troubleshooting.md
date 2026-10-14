@@ -257,16 +257,16 @@ scripts/pr-state --summary <PR>
 
 Only debug code if the rerun fails with an actual lint, test, or build error.
 
-**E2E container setup failures:** If an E2E Containers shard fails during setup
-before tests run, check for dependency or registry failures. Patterns such as
-`packages.microsoft.com ... 403 Forbidden`, `docker/login-action@v3`,
-`Error response from daemon: Get "https://ghcr.io/v2/"`, `ghcr.io/token`,
-`docker buildx imagetools inspect`, `Could not resolve an immutable digest`,
-`ghcr.io/kdlbs/kandev-ci:runtime-latest`, `context deadline exceeded`, or
-`Client.Timeout exceeded while awaiting headers` are infrastructure/package-
-registry issues, not app or test failures.
-If GitHub rejects `gh run rerun <run-id> --failed` while the workflow is still
-active, wait for the workflow/report job to finish and retry.
+**E2E setup failures:** If an E2E job fails before Playwright, inspect the exact
+job endpoint/annotations and verify named artifacts with
+`gh api repos/<owner>/<repo>/actions/runs/<run-id>/artifacts` and
+`gh run download <run-id> --name <artifact> --dir <tmp>`. `Failed to
+ListArtifacts` or intermediary HTTP 403 is artifact transport/setup failure,
+not a test flake; inspect the workflow download retry contract and keep a
+persistent failure blocked. After a workflow fix, require a fresh exact-head
+run. Container setup errors such as `packages.microsoft.com ... 403`,
+`ghcr.io/token`, or daemon timeouts are likewise infrastructure; wait for an
+active workflow to finish before retrying a rejected `gh run rerun --failed`.
 
 **Third-party action pnpm auto-install failures:** If an action detects pnpm
 and fails with `ERR_PNPM_ADDING_TO_ROOT`, inspect the pinned action bundle and
@@ -381,20 +381,20 @@ gh run view <run-id> --json status,conclusion,jobs \
   --jq '{status, conclusion, remaining: [.jobs[] | select(.status != "completed" or .conclusion != "success") | {name, status, conclusion}]}'
 ```
 
-For an explicit user requirement that an E2E run contain no flakes or retries,
-run the deterministic blob audit after the exact-head E2E merge report
-completes. Download the matching artifacts first:
+For an explicit E2E quality requirement, download the exact-head retry summary
+and matching blob reports:
 
 ```bash
 gh run download <run-id> --pattern 'blob-report-*' --dir <tmp>
+gh run download <run-id> --name e2e-retry-summary --dir <tmp>
 python3 scripts/playwright-blob-audit <tmp>
+jq '{counts, flake, flaky_or_retried: [.tests[] | select(.outcome == "flaky" or .attempts > 1) | {key, attempts, statuses, outcome}]}' \
+  <tmp>/e2e-retry-summary/retry-summary.json
 ```
 
-It recursively reads `report-*.zip` and `report.jsonl` artifacts, reports
-attempts, retry attempts, `onTestEnd` status counts, and results with errors,
-and exits nonzero for retries, errors, parse failures, or unexpected statuses.
-Do not make this extra artifact audit part of ordinary PR fixup; a normal green
-aggregate check is sufficient unless the no-flakes requirement is explicit. A
-nonzero audit keeps the PR from being called clean or flake-free. When a
-comparable baseline audit exists, report the PR-versus-baseline retry/error delta;
-shared baseline flakes are evidence, not permission to call the PR flake-free.
+The blob audit reports retries, errors, parse failures, and unexpected statuses.
+Use `flake.flaky` and per-test `outcome` for flaky verdicts; `attempts > 1` alone
+does not prove a flake. For “no flakes,” require zero flaky verdicts; for “no
+retries,” require one attempt per test. Missing or invalid required artifacts
+are incomplete evidence. Ordinary PR fixup needs no extra audit unless the user
+sets one of these requirements. Report any comparable baseline delta separately.

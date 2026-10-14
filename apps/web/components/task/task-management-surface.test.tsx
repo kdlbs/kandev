@@ -126,6 +126,7 @@ it("a late link result for A cannot close or populate a newer link flow for B", 
 
 // @covers AC-TASKS-THREADS-ACTIONS-002.3
 it("discarding an inaccessible target also discards its provider form state", async () => {
+  const snapshot = store.getState().kanbanMulti.snapshots.workflow;
   render(<Harness />);
   fireEvent.click(screen.getByText("Open A"));
   openIssue();
@@ -136,6 +137,7 @@ it("discarding an inaccessible target also discards its provider form state", as
   act(() =>
     store.setState((state) => ({ workspaces: { ...state.workspaces, activeId: "workspace" } })),
   );
+  act(() => store.getState().setWorkflowSnapshot("workflow", snapshot));
   act(() => flow.open("B"));
   fireEvent.click(screen.getByRole("button", { name: "Link" }));
   fireEvent.click(screen.getByRole("button", { name: "GitHub Pull Request" }));
@@ -193,7 +195,7 @@ it("allows moves within the current hidden workflow without offering other hidde
   }));
   render(<Harness />);
   fireEvent.click(screen.getByText("Open A"));
-  expect(screen.queryByRole("button", { name: "Send to workflow" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Change workflow..." })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Move to" }));
   fireEvent.click(screen.getByRole("button", { name: "next" }));
   await waitFor(() =>

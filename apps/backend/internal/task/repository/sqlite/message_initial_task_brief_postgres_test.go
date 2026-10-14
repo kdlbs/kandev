@@ -26,6 +26,9 @@ func TestInitialTaskBriefAdmissionPostgres(t *testing.T) {
 		brief     = "Postgres initial task brief"
 	)
 	seedPostgresSession(t, repo, taskID, sessionID, turnID, time.Now().UTC())
+	if err := repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
+		t.Fatalf("set PostgreSQL session ready: %v", err)
+	}
 	setInitialTaskBriefDescription(t, repo, taskID, brief)
 	writer := requireInitialTaskBriefMessageWriter(t, repo)
 

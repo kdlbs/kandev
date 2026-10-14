@@ -14,7 +14,7 @@
 // JSON-encoded string; we parse that inner JSON so the renderers see plain JS.
 
 const NAMESPACE_SEP = /\/|__|\./;
-const KANDEV_NAMESPACES = ["mcp__kandev__", "mcp.kandev.", "kandev/"] as const;
+const KANDEV_NAMESPACES = ["mcp__kandev__", "mcp.kandev.", "kandev/", "kandev: "] as const;
 const KANDEV_SUFFIX = "_kandev";
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -29,7 +29,7 @@ export function extractKandevArgs(value: unknown): Record<string, unknown> | und
   const input = asRecord(value);
   if (!input) return undefined;
   const rawInput = asRecord(input.raw_input);
-  return asRecord(rawInput?.arguments) ?? rawInput ?? input;
+  return asRecord(rawInput?.arguments) ?? asRecord(rawInput?.args) ?? rawInput ?? input;
 }
 
 export function extractKandevStem(toolName: string | undefined): string | null {

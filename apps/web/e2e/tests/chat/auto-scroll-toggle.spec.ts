@@ -9,10 +9,54 @@ import { dwell } from "../../helpers/causal-waits";
 import { waitForStableActiveSession } from "../../helpers/session-store";
 import { routeMainWebSocketWithMessageListResponseHold } from "../../helpers/ws-response-hold";
 
+async function holdTranscriptAfterMarker(page: Page, marker: string) {
+  let tailHeld = false;
+  const releases = new Set<() => void>();
+  let released = false;
+  await page.routeWebSocket(/\/ws$/, (client) => {
+    const server = client.connectToServer();
+    let holding = false;
+    const frames: Array<string | Buffer> = [];
+    releases.add(() => {
+      holding = false;
+      for (const frame of frames.splice(0)) client.send(frame);
+    });
+    server.onMessage((message) => {
+      for (const part of message.toString().split("\n")) {
+        if (!part.trim()) continue;
+        const frame = JSON.parse(part) as { type?: string };
+        const response = frame.type === "response";
+        if (holding && !response) {
+          if (part.includes("LIVE-FOLLOW-TAIL")) tailHeld = true;
+          frames.push(part);
+          continue;
+        }
+        client.send(part);
+        if (
+          !released &&
+          !response &&
+          part.includes(marker) &&
+          /"author_type"\s*:\s*"agent"/.test(part)
+        ) {
+          holding = true;
+        }
+      }
+    });
+  });
+  return {
+    tailIsHeld: () => tailHeld,
+    release: () => {
+      released = true;
+      for (const release of releases) release();
+    },
+  };
+}
+
 type E2EMessageStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {
       messages: { bySession: Record<string, Array<{ content: string }>> };
+      transcriptAutoScroll?: { scrollTopBySessionId: Record<string, number> };
     };
   };
 };
@@ -358,8 +402,8 @@ test.describe("Transcript auto-scroll toggle", () => {
       .toBeLessThan(10);
 
     // Deliver new content while that bottom-following transcript is hidden.
-    // Wait for the store event before switching back so the assertion proves
-    // activation reconciliation, not a delayed initial fetch.
+    // Hidden transcripts release rich demand. Activation must hydrate the
+    // persisted message and reconcile auto-follow without a hidden stream.
     await refreshedSession.sessionTabBySessionId(secondSessionId).click();
     await waitForStableActiveSession(testPage, secondSessionId);
     await apiClient.seedSessionMessage(firstSessionId, {
@@ -367,24 +411,22 @@ test.describe("Transcript auto-scroll toggle", () => {
       content: INACTIVE_SESSION_MARKER,
       authorType: "agent",
     });
-    await expect
-      .poll(
-        async () =>
-          testPage.evaluate(
-            ({ sid, marker }) => {
-              const store = (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__;
-              return store
-                ?.getState()
-                .messages.bySession[sid]?.some((message) => message.content === marker);
-            },
-            { sid: firstSessionId, marker: INACTIVE_SESSION_MARKER },
-          ),
-        {
-          timeout: 15_000,
-          message: "hidden message should arrive in the inactive transcript cache",
+    expect(
+      (await apiClient.listSessionMessages(firstSessionId)).messages.some(
+        (message) => message.content === INACTIVE_SESSION_MARKER,
+      ),
+    ).toBe(true);
+    expect(
+      await testPage.evaluate(
+        ({ sid, marker }) => {
+          const store = (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__;
+          return store
+            ?.getState()
+            .messages.bySession[sid]?.some((message) => message.content === marker);
         },
-      )
-      .toBe(true);
+        { sid: firstSessionId, marker: INACTIVE_SESSION_MARKER },
+      ),
+    ).toBe(false);
 
     await refreshedSession.sessionTabBySessionId(firstSessionId).click();
     await waitForStableActiveSession(testPage, firstSessionId);
@@ -401,24 +443,56 @@ test.describe("Transcript auto-scroll toggle", () => {
       )
       .toBeLessThan(10);
 
-    // A reader-owned position must survive the same tab round trip. Dispatch
-    // a native scroll event so both the transcript coordinator and the
-    // generic panel restorer capture the exact reader position.
-    const targetScrollTop = await firstList.evaluate((el) => {
-      const target = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-      el.scrollTop = target;
-      el.dispatchEvent(new Event("scroll"));
-      return el.scrollTop;
-    });
+    // A reader-owned position must survive the same tab round trip. Use a real
+    // wheel event so the active auto-follow motion yields to reader intent.
+    const initialScrollTop = await firstList.evaluate((el) => el.scrollTop);
+    await firstList.hover();
+    await testPage.mouse.wheel(0, -1000);
+    await expect
+      .poll(() => firstList.evaluate((el) => el.scrollTop))
+      .toBeLessThan(initialScrollTop - 100);
+    const targetScrollTop = await firstList.evaluate((el) => el.scrollTop);
     expect(targetScrollTop).toBeGreaterThan(100);
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate(
+            (sessionId) =>
+              (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__?.getState()
+                .transcriptAutoScroll?.scrollTopBySessionId[sessionId],
+            firstSessionId,
+          ),
+        { message: "reader-owned scroll position should persist before disabling follow mode" },
+      )
+      .toBe(targetScrollTop);
     const toggle = firstChat.getByTestId("auto-scroll-toggle-button");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect
+      .poll(
+        async () =>
+          testPage.evaluate(
+            ({ sessionId, expectedScrollTop }) => {
+              const saved = (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__?.getState()
+                .transcriptAutoScroll.scrollTopBySessionId[sessionId];
+              return saved !== undefined && Math.abs(saved - expectedScrollTop) <= 20;
+            },
+            { sessionId: firstSessionId, expectedScrollTop: targetScrollTop },
+          ),
+        {
+          timeout: 15_000,
+          message: "disabled transcript position should be persisted before switching sessions",
+        },
+      )
+      .toBe(true);
 
     await refreshedSession.sessionTabBySessionId(secondSessionId).click();
     await waitForStableActiveSession(testPage, secondSessionId);
     await refreshedSession.sessionTabBySessionId(firstSessionId).click();
     await waitForStableActiveSession(testPage, firstSessionId);
+    await expect(firstChat).toBeVisible({ timeout: 15_000 });
+    await expect(firstList).toBeVisible({ timeout: 15_000 });
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
     await expect
       .poll(
         async () =>
@@ -816,9 +890,10 @@ test.describe("Transcript auto-scroll toggle", () => {
     // Genuinely new content arrives now, after the remount, while still disabled.
     await sessionAfter.sendMessage('e2e:message("New content after remount while disabled")');
     await expect(
-      sessionAfter.chat.getByText("New content after remount while disabled").last(),
+      sessionAfter.chat.getByText("New content after remount while disabled", { exact: true }),
     ).toBeVisible({ timeout: 15_000 });
 
+    await sessionAfter.waitForChatIdle({ timeout: 30_000 });
     const listAfter = chatList(testPage);
     await toggleAfter.click();
     await expect(toggleAfter).toHaveAttribute("aria-pressed", "true");
@@ -828,5 +903,90 @@ test.describe("Transcript auto-scroll toggle", () => {
         { timeout: 5_000, message: "re-enabling should catch up to the genuinely new content" },
       )
       .toBeLessThan(10);
+  });
+
+  test("follows a live turn from the bottom, then pauses after a small upward wheel", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const output = await holdTranscriptAfterMarker(testPage, "LIVE-FOLLOW-START");
+    const releaseOutput = output.release;
+    try {
+      await testPage.emulateMedia({ reducedMotion: "reduce" });
+      const session = await seedOverflowingTask(
+        testPage,
+        apiClient,
+        seedData,
+        "Transcript live follow intent",
+      );
+      const list = chatList(testPage);
+      await expect
+        .poll(async () =>
+          list.evaluate(
+            (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+          ),
+        )
+        .toBeLessThan(5);
+
+      await session.sendMessageViaButton(
+        'e2e:message("LIVE-FOLLOW-START")\ne2e:delay(2500)\ne2e:message("LIVE-FOLLOW-TAIL")',
+      );
+      await expect(
+        session.activeChat().getByText("LIVE-FOLLOW-START", { exact: false }),
+      ).toBeVisible();
+      const runningStatus = list.getByRole("status", { name: "Agent is running" });
+      await expect(runningStatus).toBeVisible({ timeout: 10_000 });
+      await expect
+        .poll(async () =>
+          list.evaluate(
+            (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+          ),
+        )
+        .toBeLessThan(5);
+      const listBox = await list.boundingBox();
+      const statusBox = await runningStatus.boundingBox();
+      expect(listBox).not.toBeNull();
+      expect(statusBox).not.toBeNull();
+      expect(statusBox!.y).toBeGreaterThanOrEqual(listBox!.y - 1);
+      expect(statusBox!.y + statusBox!.height).toBeLessThanOrEqual(
+        listBox!.y + listBox!.height + 1,
+      );
+
+      await list.hover();
+      // Hover can scroll an actionable locator into view. Measure the wheel's
+      // starting position after that action and the resulting browser layout.
+      await list.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      await expect.poll(output.tailIsHeld).toBe(true);
+      const startTop = await list.evaluate((element) => element.scrollTop);
+      await testPage.mouse.wheel(0, -30);
+      await expect
+        .poll(async () => startTop - (await list.evaluate((element) => element.scrollTop)))
+        .toBeGreaterThan(5);
+      const readerTop = await list.evaluate((element) => element.scrollTop);
+      releaseOutput();
+
+      await expect(
+        session.activeChat().getByText("LIVE-FOLLOW-TAIL", { exact: false }),
+      ).toBeVisible({
+        timeout: 10_000,
+      });
+      await expect
+        .poll(
+          async () => Math.abs((await list.evaluate((element) => element.scrollTop)) - readerTop),
+          {
+            timeout: 2_000,
+            message: "new live output must not pull a reader back to the latest message",
+          },
+        )
+        .toBeLessThanOrEqual(3);
+    } finally {
+      releaseOutput();
+    }
   });
 });

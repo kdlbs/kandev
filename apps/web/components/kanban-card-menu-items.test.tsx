@@ -10,11 +10,11 @@ import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import {
   buildCardPluginEntries,
-  buildKanbanCardMenuEntries,
   KanbanCardDropdownMenuItems,
   useKanbanCardMoveTargets,
   type KanbanCardMenuEntry,
 } from "./kanban-card-menu-items";
+import { buildKanbanCardMenuEntries } from "./kanban-card-menu-builder";
 
 function renderNodeText(node: ReactNode): string {
   return render(<>{node}</>).container.textContent ?? "";
@@ -323,20 +323,20 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
         ],
         "wf-2": [{ id: "s3", title: "Step 3" }],
       },
-      onSendToWorkflow: vi.fn(),
+      onChangeWorkflow: vi.fn(),
       onLinkPullRequest: vi.fn(),
       onArchive: vi.fn(),
     });
 
     const keys = entryKeys(entries);
-    const sendToIndex = keys.indexOf("send-to-workflow");
+    const changeWorkflowIndex = keys.indexOf("change-workflow");
     const primaryIndex = keys.indexOf(`plugin-primary-${PLUGIN_ID}:quick-tag`);
     const archiveIndex = keys.indexOf("archive");
 
-    expect(sendToIndex).toBeGreaterThanOrEqual(0);
+    expect(changeWorkflowIndex).toBeGreaterThanOrEqual(0);
     expect(primaryIndex).toBeGreaterThanOrEqual(0);
     expect(archiveIndex).toBeGreaterThanOrEqual(0);
-    expect(sendToIndex).toBeLessThan(primaryIndex);
+    expect(changeWorkflowIndex).toBeLessThan(primaryIndex);
     expect(primaryIndex).toBeLessThan(archiveIndex);
 
     const primaryEntry = entries[primaryIndex];
@@ -666,7 +666,7 @@ describe("buildKanbanCardMenuEntries — move-only disabled state", () => {
       onEdit: vi.fn(),
       onSelectPriority: vi.fn(),
       onMoveToStep: vi.fn(),
-      onSendToWorkflow: vi.fn(),
+      onChangeWorkflow: vi.fn(),
       onLinkPullRequest: vi.fn(),
       onArchive: vi.fn(),
       onDelete: vi.fn(),
@@ -682,7 +682,7 @@ describe("buildKanbanCardMenuEntries — move-only disabled state", () => {
     expect(disabled("edit")).toBe(false);
     expect(disabled("priority")).toBe(false);
     expect(disabled("move-to")).toBe(true);
-    expect(disabled("send-to-workflow")).toBe(true);
+    expect(disabled("change-workflow")).toBe(true);
     expect(disabled("link")).toBe(false);
     expect(disabled("archive")).toBe(false);
     expect(disabled("delete")).toBe(false);

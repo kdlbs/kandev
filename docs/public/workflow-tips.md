@@ -41,6 +41,13 @@ The template prompts are product behavior, not merely sample text. Review them b
 
 Choose this for short implementation work with a simple run-and-review loop.
 
+## Reorder workflow steps
+
+Saving a changed step order preserves each step's saved prompt, profile, and
+completion settings, including settings saved concurrently by another caller.
+If the reorder fails, the previous order is preserved. This guarantee applies
+to the reorder operation; saving multiple workflow settings uses separate writes.
+
 ## Duplicate a workflow
 
 Use **Duplicate** to create a new workflow from a saved workflow. The copy starts as a local draft.
@@ -193,6 +200,16 @@ Workflow and step prompt fields use the inline prompt editor. Type `@` after whi
 
 The workflow-level prompt supports saved-prompt references but does not expand step-only variables. `{{task_prompt}}` is available in a step prompt because it is replaced with the task description when that step runs.
 
+Both step prompts and the workflow-level prompt also accept these single-brace placeholders. Type them directly; the completion menu does not offer them.
+
+| Placeholder | Replaced with |
+|-------------|---------------|
+| `{task_id}` | The task's ID. |
+| `{task_title}` | The task's title. Useful when task descriptions are short. |
+| `{step_entry_number}` | How many times the task has entered the current step, starting at 1. |
+
+Each placeholder is replaced everywhere it appears in the prompt you write. Text that arrives through `{{task_prompt}}` is never scanned, so a task description that happens to contain one of these tokens is sent unchanged.
+
 ## Events and actions
 
 <details>
@@ -241,6 +258,7 @@ A step's Prompt field accepts `@name` references to [saved prompts](developer-to
 
 - The reference is resolved when the step prompt runs, not when it is saved. Editing the saved prompt's content later automatically changes what every step referencing it sends next time: there is nothing to update on the step itself.
 - The `@name` mention stays visible in the prompt/chat. Kandev attaches the referenced prompt's content as hidden context for the agent; it is not shown as part of the visible conversation.
+- Workflow entries keep that hidden context when they start a new profile session, reset the agent context, or recover with a fresh runtime. The saved message and agent prompt retain the same definition once for that entry.
 - `{{task_prompt}}` is only interpolated in the step prompt field itself. If a referenced saved prompt's content contains `{{task_prompt}}`, it is **not** expanded; it is sent to the agent as literal text.
 
 The same `@name` syntax and resolution apply to a GitHub Review Watch's prompt field. See [Integrations](integrations.md#configure-and-use-the-workspace).

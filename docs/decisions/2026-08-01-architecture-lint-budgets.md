@@ -1,6 +1,6 @@
 # ADR-2026-08-01-architecture-lint-budgets: Architecture Lint Budgets and Compatibility Expiry
 
-**Status:** accepted (amended 2026-08-02)
+**Status:** accepted (amended 2026-08-03)
 **Date:** 2026-08-01
 **Area:** infra
 
@@ -15,6 +15,9 @@ This is internal CI and repository-process behavior. It changes no product behav
 spec is needed.
 
 ## Decision
+
+The per-rule scanner, test, baseline, registry, and entrypoint structure below defines the Python
+architecture-lint engine.
 
 Accepted architecture boundaries may be enforced with deterministic, dependency-free repository
 checks backed by explicit reviewed finding allowlists under `config/architecture-lint/`.
@@ -35,18 +38,32 @@ The file under `.github/workflows/` is only a CI adapter that invokes the same c
 entrypoint used by Make and pre-commit. GitHub-specific directories do not own the linter's
 implementation or policy data.
 
-The initial checks enforce the documented agent-runtime import seam, the rule that shared task code
-must not depend on Office models, and the narrow root Zustand composition boundary. Diagnostics
-must identify the rule, source location, and intended replacement seam.
+The enforced checks cover the documented agent-runtime import seam, the rule that shared task code
+must not depend on Office models, the narrow root Zustand composition boundary, backend-wide run
+scheduler ownership, the generic-runs-over-Office dependency direction, and the frontend state
+dependency direction below UI and route modules. `ARCH-DEPRECATION-LEDGER` additionally tracks
+canonical handwritten Go and TypeScript deprecation annotations under the contract in
+[`2026-09-26-architecture-deprecation-ledger.md`](2026-09-26-architecture-deprecation-ledger.md).
+Diagnostics must identify the rule, source location, and intended replacement seam.
 
 Intentional compatibility exceptions are registered in
 `config/architecture-lint/compatibility-ledger.json`. Every entry requires a stable identifier and
 source locator, reason, owner, introduction date or version, removal condition, and target removal
-date or version. Date-based entries fail after expiry, and entries fail when their tracked path or
-marker disappears. New compatibility behavior must register explicitly; broad keyword discovery
-is not part of this foundation.
+date or version. A declaration-level locator may add `declaration` to bind the path and marker to a
+specific source symbol. Date-based entries fail after expiry, and entries fail when their tracked
+path or marker disappears. Declaration registrations also fail when the matching declaration
+disappears. New compatibility behavior must register explicitly; broad keyword discovery is not
+part of this foundation.
 
 ## Consequences
+
+The scanner-module, Python-test, central-registry, and baseline contract in this ADR describes the
+Python architecture-lint engine. The bounded migrated System Query owner guard uses the existing
+frontend ESLint AST path as a complementary check; it does not change the Python registry,
+baselines, shrink-only comparison, or `make lint-architecture` entry point. Its exact scope and
+limitations are recorded in the accepted
+[frontend ESLint architecture guard decision](2026-10-08-bounded-frontend-eslint-architecture-guard.md)
+and [system design](../specs/architecture-lint/system-design/migrated-system-query-owner.md).
 
 Pull requests cannot silently increase these known forms of architecture debt, while existing
 cleanup can land incrementally. Baseline and ledger edits become visible review decisions, and
@@ -55,8 +72,9 @@ allowed finding or compatibility marker require an intentional metadata update, 
 maintenance but prevents dead exemptions from accumulating.
 
 Additional rules should be added only after their canonical contract is accepted. This decision
-does not establish an aggregate architecture score or speculative checks for transport catalogs,
-typed events, or generic compatibility keywords.
+does not establish an aggregate architecture score or speculative checks for TanStack Query,
+typed events, WebSocket contract catalogs, broad compatibility keywords, or backend composition
+and setter budgets.
 
 ## Alternatives Considered
 

@@ -66,7 +66,8 @@ starts and ends, so repeated stages use the intended context.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.4:** When a source step selects
   **Park the session**, Kandev shall stop its runtime and keep the session
   nonterminal. The conversation shall remain available for reuse or manual
-  follow-up.
+  follow-up. If the deliberate stop closes the agent stream, Kandev shall not
+  present the parked session as a failed recovery.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.5:** For existing profile-only steps,
   consecutive steps with the active session's profile shall keep that session
   when the destination uses the default or **Reuse an available session** start
@@ -106,6 +107,8 @@ starts and ends, so repeated stages use the intended context.
   selector shall use a touch-sized trigger and an inset bottom drawer. The
   drawer shall have one scroll region, safe-area spacing, keyboard-safe
   navigation, and no document-level horizontal overflow.
+
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.14:** If destination validation rejects an automatic transition after a turn completes, the current conversation shall accept another message without cancellation. The workflow step and primary session shall remain unchanged. This recovery shall not stop a newer turn or reopen a terminal session. Desktop and phone shall receive the recovered session state through the existing update channel.
 
 ### REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-002: Explicit workflow session recipients
 
@@ -185,6 +188,8 @@ requiring its profile to be known when the workflow is authored.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-003.5:** A failed move shall preserve the selected conversation and show the existing error. A queued entry without a committed recipient shall preserve selection until its recipient becomes available, subject to criterion 003.3. A step with no recipient shall not create one for navigation.
 
 ## Implementation plans
+
+- [Dynamic workflow completion repair](../../../plans/dynamic-workflow-completion/plan.md)
 
 - [Manual workflow session focus](../../../plans/workflow-session-focus/plan.md)
 

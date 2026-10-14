@@ -131,7 +131,7 @@ func TestStderrBufferSurvivesConcurrentUse(t *testing.T) {
 
 // @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.6
 func TestProbeClassifiesTrustedManagedRuntimeETarget(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsGOOS {
 		t.Skip("test uses a POSIX npx fixture")
 	}
 
@@ -355,7 +355,7 @@ func TestResolveProbeCommand_ExecutableSuffix(t *testing.T) {
 			// Only Windows trims, and only ".exe" — any other suffix, and any
 			// suffix at all on Unix, leaves the name unmatched.
 			want := ""
-			if runtime.GOOS == "windows" {
+			if runtime.GOOS == windowsGOOS {
 				want = tc.wantWindows
 			}
 			if got != want {

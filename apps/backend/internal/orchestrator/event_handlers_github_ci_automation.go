@@ -120,7 +120,7 @@ func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *g
 	}
 	options = resolvePRScopedCIOptions(options, pr)
 	freshlySynced := ciAutomationHasFreshPRStatus(pr)
-	if refresh && (options.AutoFixEnabled || options.AutoMergeEnabled) {
+	if refresh && !freshlySynced && (options.AutoFixEnabled || options.AutoMergeEnabled) {
 		refreshed, synced, syncErr := s.refreshTaskPRForCIAutomation(ctx, pr)
 		if syncErr != nil {
 			s.handleTaskPRLifecycleAutomation(ctx, pr, options)
@@ -239,6 +239,9 @@ func (s *Service) evalTaskPRLifecycle(
 	}
 	sessionID, err := s.dispatchTaskPRAgentPrompt(ctx, pr, prompt, decision.Event)
 	if errors.Is(err, errTaskPRAgentInactive) {
+		return false, nil
+	}
+	if isSessionRecoveryRequiredError(err) {
 		return false, nil
 	}
 	if err != nil {
@@ -439,6 +442,9 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 		s.markCIAutoFixExhausted(ctx, pr)
 		return true, ""
 	}
+	if isSessionRecoveryRequiredError(err) {
+		return true, ""
+	}
 	if err != nil {
 		return true, err.Error()
 	}
@@ -502,6 +508,9 @@ func (s *Service) handleTaskPRCIAutoFixLegacyAttempt(
 	result, err := s.dispatchCIAutomationPromptForPR(ctx, session, pr, prompt, signature, allowNewRound)
 	if errors.Is(err, errCIAutoFixRoundCapReached) {
 		s.markCIAutoFixExhausted(ctx, pr)
+		return true, ""
+	}
+	if isSessionRecoveryRequiredError(err) {
 		return true, ""
 	}
 	if err != nil {
@@ -915,7 +924,6 @@ func ciAutomationBuildDeltaForPR(pr *github.TaskPR, feedback *github.PRFeedback,
 func ciAutomationCheckConclusionNeedsFix(conclusion string) bool {
 	return conclusion == ciAutomationCheckFailure ||
 		conclusion == "timed_out" ||
-		conclusion == "cancelled" ||
 		conclusion == "action_required"
 }
 

@@ -200,7 +200,7 @@ case "$*" in
   *check-runs*)
     case "$*" in
       *--slurp*) printf '%s\n' 'unsupported slurp' >&2; exit 1 ;;
-      *--paginate*) printf '%s\n' '{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}' '{"name":"lint","status":"completed","conclusion":"failure","html_url":"https://ci/lint"}' ;;
+      *--paginate*) printf '%s\n' '{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}' '{"id":42,"name":"lint","status":"completed","conclusion":"failure","html_url":"https://ci/lint","app":{"id":17,"slug":"github-actions"},"check_suite":{"id":99}}' ;;
       *) printf '%s\n' '[{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}]' ;;
     esac
     ;;
@@ -228,7 +228,7 @@ esac
 			break
 		}
 	}
-	if lint == nil || lint.Conclusion != "failure" {
+	if lint == nil || lint.Conclusion != "failure" || lint.ID != 42 || lint.AppID != 17 || lint.AppSlug != "github-actions" || lint.CheckSuiteID != 99 {
 		t.Fatalf("expected failed lint check from paginated output, got %+v", checks)
 	}
 	logged, err := os.ReadFile(logPath)

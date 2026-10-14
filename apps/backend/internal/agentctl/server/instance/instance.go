@@ -37,6 +37,11 @@ type Instance struct {
 	// Port is the HTTP port this instance is listening on
 	Port int
 
+	lease PortLease
+
+	listenerActive atomic.Bool
+	listenerDone   chan struct{}
+
 	// Status is the current status of the instance (e.g., "running", "stopped", "error")
 	Status string
 
@@ -148,6 +153,11 @@ type CreateRequest struct {
 	// Protocol is the protocol adapter to use (acp). If empty, default is used.
 	Protocol string `json:"protocol,omitempty"`
 
+	// CodexAppServerEnabled is an explicit backend decision for native Codex
+	// instances. The control API defaults to disabled so callers cannot select
+	// this protocol by supplying only a protocol string.
+	CodexAppServerEnabled bool `json:"codex_app_server_enabled,omitempty"`
+
 	// AgentType identifies the agent (e.g., "auggie", "codex", "claude-code").
 	// Required for debug file naming. Typically matches the agent ID from the registry.
 	AgentType string `json:"agent_type,omitempty"`
@@ -215,11 +225,15 @@ type CreateRequest struct {
 	// Each WorkspaceTracker reads its entry at startup and uses it as the
 	// first candidate when resolving BaseCommit / Ahead / Behind. Empty
 	// disables the override.
-	BaseBranches             map[string]string                         `json:"base_branches,omitempty"`
-	ComparisonTargets        map[string]models.ComparisonTarget        `json:"comparison_targets,omitempty"`
-	RemoteContributions      map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
-	ContributionDestinations map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
-	WorkspaceSourceRoots     []string                                  `json:"workspace_source_roots,omitempty"`
+	BaseBranches              map[string]string                         `json:"base_branches,omitempty"`
+	ComparisonTargets         map[string]models.ComparisonTarget        `json:"comparison_targets,omitempty"`
+	RemoteContributions       map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
+	ContributionDestinations  map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
+	WorkspaceSourceRoots      []string                                  `json:"workspace_source_roots,omitempty"`
+	DurableJournalPath        string                                    `json:"durable_journal_path,omitempty"`
+	DeliveryStreamID          string                                    `json:"delivery_stream_id,omitempty"`
+	DeliveryIncarnationID     string                                    `json:"delivery_incarnation_id,omitempty"`
+	DeliveryHarnessGeneration uint64                                    `json:"delivery_harness_generation,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.
@@ -239,6 +253,12 @@ type InstanceInfo struct {
 
 	// Port is the HTTP port this instance is listening on
 	Port int `json:"port"`
+
+	// LeaseGeneration is the allocator-local generation for this instance's port.
+	LeaseGeneration uint64 `json:"lease_generation"`
+
+	// ListenerActive reports whether the instance HTTP server's Serve call is active.
+	ListenerActive bool `json:"listener_active"`
 
 	// Status is the current status of the instance
 	Status string `json:"status"`
@@ -301,6 +321,8 @@ func (i *Instance) Info() *InstanceInfo {
 	return &InstanceInfo{
 		ID:                   i.ID,
 		Port:                 i.Port,
+		LeaseGeneration:      i.lease.Generation,
+		ListenerActive:       i.listenerActive.Load(),
 		Status:               i.Status,
 		WorkspacePath:        i.WorkspacePath,
 		AgentCommand:         i.AgentCommand,

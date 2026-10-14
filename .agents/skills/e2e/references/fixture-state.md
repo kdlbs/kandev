@@ -1,7 +1,8 @@
 # E2E Fixture State
 
-Load this reference for tests that depend on asynchronous capability discovery or
-remembered workflow selection.
+Load this reference for tests that depend on asynchronous capability discovery,
+remembered workflow selection, correlation of asynchronous records, restart
+persistence, or provider-backed GitHub PR review/check eligibility.
 
 ## Asynchronous capability readiness
 
@@ -27,3 +28,29 @@ After seeding tasks in multiple workflows, set
 workflow, or clear it to test filter fallback. Assert the selector before
 downstream checks: the remembered workflow outranks `workflow_filter_id`.
 Verify the focused test with `--retries=0`.
+
+## Correlate asynchronous records
+
+When one action creates related persisted records and runtime objects, match
+them by a stable shared request, causation, or correlation ID. A workspace-wide
+list can contain unrelated concurrent work; do not associate records by taking
+the first, newest, or merely unseen item. If no correlation ID is available,
+filter by the full relation and assert that exactly one candidate matches.
+
+## Restart and reconnect persistence
+
+When restart or reconnect recovery promises to restore client or agent
+configuration, set a non-default value before the restart and assert that the
+reconnected consumer receives that value. A task/session row or transcript
+reappearing proves stored records survived, but does not prove the effective
+configuration was replayed. When possible, verify the value through a
+post-reconnect interaction as well as the restored client state.
+
+## GitHub PR review and check state
+
+When refreshed PR eligibility depends on reviews or check runs, seed the mock
+provider's feedback records as well as aggregate PR counts. Refresh recomputes
+those counts from provider state, so aggregate-only fixtures can revert to
+ineligible results. Use `ApiClient.mockGitHubSeedPRFeedback` for the required
+approvals and passing checks, then assert the refreshed UI. Verify the focused
+desktop and mobile tests with `--retries=0`.

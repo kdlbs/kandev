@@ -298,6 +298,7 @@
   "limitsGithubPullRequestsAndIssues": "Limits GitHub pull requests and issues shown or imported in this workspace.",
   "loadingAccounts": "Loading accounts...",
   "loadingOrganizations": "Loading organizations...",
+  "loadingPullRequests": "Loading pull requests...",
   "loadingRegisteredApps": "Loading registered Apps...",
   "loadingTaskAccess": "Loading task access…",
   "localAndWorktreeTasksUseHost": "Local and Worktree tasks use host-visible Git or SSH credentials. Docker, SSH, and cloud tasks use credentials configured in that executor.",

@@ -145,8 +145,6 @@ func TestPrepareTaskSession_OfficeFlagUsesAssigneeForSessionIdentity(t *testing.
 		State:       v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
-	svc.config.OfficeSessionIdentity = true
-
 	sessionID, err := svc.PrepareTaskSession(
 		ctx, "t-office", "execution-profile", "", "", "", false,
 	)

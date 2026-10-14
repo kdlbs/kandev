@@ -293,6 +293,46 @@ func TestSchedulerIntegration_NonSeatRunDoesNotReceiveDecisionSkill(t *testing.T
 	}
 }
 
+// TestSchedulerIntegration_DynamicBoundAgentSkipsRoutingDispatch asserts a
+// dynamic-bound Office agent is not routed through the legacy workspace-routing
+// dispatcher: the binding owns provider order, so the run falls through to the
+// legacy concrete-profile launch path.
+func TestSchedulerIntegration_DynamicBoundAgentSkipsRoutingDispatch(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	dispatcher := &captureDispatcher{launched: true}
+	svc.SetRoutingDispatcher(dispatcher)
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                      "dynamic-bound-1",
+		WorkspaceID:             "ws-1",
+		Name:                    "bound-worker",
+		Role:                    models.AgentRoleWorker,
+		Status:                  models.AgentStatusIdle,
+		ExecutorPreference:      `{"type":"worktree"}`,
+		ExecutionAgentProfileID: "dynamic-profile",
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
+		VALUES ('task-bound-1', 'ws-1', 'Bound Task', 'desc', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-bound-1"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	if dispatcher.callCount() != 0 {
+		t.Fatalf("routing dispatcher was consulted for a dynamic-bound agent; got %d calls", dispatcher.callCount())
+	}
+	if mock.callCount() != 1 {
+		t.Fatalf("legacy StartTask must run after skipping routing; got %d calls", mock.callCount())
+	}
+}
+
 // TestSchedulerIntegration_RoutingFallThrough_FallsBackToLegacy asserts
 // the routing seam preserves the legacy fall-through behavior: when the
 // dispatcher returns (launched=false, parked=false, err=nil), the

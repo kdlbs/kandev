@@ -16,16 +16,19 @@ const (
 	dynamicPolicyOutcomeSkip = "skip"
 	dynamicPolicyOutcomeStop = "stop"
 
-	dynamicPolicyMaxRetries             int64 = 10
-	dynamicPolicyMaxInitialIntervalSecs int64 = 3600
-	dynamicPolicyMaxWaitSecs            int64 = 7 * 24 * 60 * 60
+	dynamicPolicyMaxRetries               int64 = 10
+	dynamicPolicyMaxInitialIntervalSecs   int64 = 3600
+	dynamicPolicyMaxWaitSecs              int64 = 7 * 24 * 60 * 60
+	dynamicPolicyMinUnclassifiedThreshold int64 = 2
+	dynamicPolicyMaxUnclassifiedThreshold int64 = 10
 )
 
 func defaultDynamicPolicyDocument() dto.DynamicAgentPolicyDTO {
 	return dto.DynamicAgentPolicyDTO{
-		Version:   dynamicPolicyVersion,
-		Transient: defaultDynamicErrorPolicy(),
-		Hard:      defaultDynamicErrorPolicy(),
+		Version:      dynamicPolicyVersion,
+		Transient:    defaultDynamicErrorPolicy(),
+		Hard:         defaultDynamicErrorPolicy(),
+		Unclassified: &dto.DynamicUnclassifiedPolicyDTO{},
 	}
 }
 
@@ -71,6 +74,9 @@ func normalizeCanonicalDynamicPolicy(candidate *dto.DynamicAgentCandidateDTO) er
 		return fmt.Errorf("%w: candidates[%d].policies cannot be combined with legacy rules", ErrDynamicProfileRule, candidate.Position)
 	}
 	policy := *candidate.Policies
+	if policy.Unclassified == nil {
+		policy.Unclassified = &dto.DynamicUnclassifiedPolicyDTO{}
+	}
 	if err := validateDynamicPolicyDocument(policy, candidate.Position); err != nil {
 		return err
 	}
@@ -143,6 +149,17 @@ func validateDynamicPolicyDocument(policy dto.DynamicAgentPolicyDTO, position in
 	if err := validateDynamicErrorPolicy(policy.Hard, position, "hard"); err != nil {
 		return err
 	}
+	if policy.Unclassified != nil {
+		field := fmt.Sprintf("candidates[%d].policies.unclassified", position)
+		if policy.Unclassified.Enabled {
+			threshold := policy.Unclassified.ConsecutiveFailureThreshold
+			if threshold < dynamicPolicyMinUnclassifiedThreshold || threshold > dynamicPolicyMaxUnclassifiedThreshold {
+				return fmt.Errorf("%w: %s.consecutive_failure_threshold must be between %d and %d", ErrDynamicProfileRule, field, dynamicPolicyMinUnclassifiedThreshold, dynamicPolicyMaxUnclassifiedThreshold)
+			}
+		} else if policy.Unclassified.ConsecutiveFailureThreshold != 0 {
+			return fmt.Errorf("%w: %s disabled threshold must be zero", ErrDynamicProfileRule, field)
+		}
+	}
 	return nil
 }
 
@@ -193,6 +210,9 @@ func decodeDynamicPolicyDocument(raw string, position int) (dto.DynamicAgentPoli
 		var policy dto.DynamicAgentPolicyDTO
 		if err := json.Unmarshal([]byte(raw), &policy); err != nil {
 			return dto.DynamicAgentPolicyDTO{}, fmt.Errorf("decode dynamic route policy: %w", err)
+		}
+		if policy.Unclassified == nil {
+			policy.Unclassified = &dto.DynamicUnclassifiedPolicyDTO{}
 		}
 		if err := validateDynamicPolicyDocument(policy, position); err != nil {
 			return dto.DynamicAgentPolicyDTO{}, err

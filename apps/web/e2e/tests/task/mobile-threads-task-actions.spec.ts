@@ -1,4 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import {
   allTaskActionOutcomes,
   seedActionThreads,
@@ -55,7 +57,7 @@ test("completes all six task actions by touch and cancels destructive choices", 
 });
 
 // @covers AC-TASKS-THREADS-ACTIONS-004.2 through AC-TASKS-THREADS-ACTIONS-004.7
-test("contains nested choices with long labels and preserves native swiping after dismissal", async ({
+test("contains the mobile change form and preserves native swiping after dismissal", async ({
   testPage,
   apiClient,
   seedData,
@@ -65,8 +67,18 @@ test("contains nested choices with long labels and preserves native swiping afte
   const destinationName = "Workflow".repeat(12);
   await apiClient.updateWorkflow(destination.id, { name: destinationName });
   const longName = "A deliberately long workflow step " + "unbroken".repeat(24);
-  for (let index = 0; index < 18; index++)
-    await apiClient.createWorkflowStep(destination.id, `${index} ${longName}`, index + 1);
+  let finalStepId = "";
+  for (let index = 0; index < 18; index++) {
+    const step = await apiClient.createWorkflowStep(
+      destination.id,
+      `${index} ${longName}`,
+      index + 1,
+      {
+        session_target: { kind: "initial" },
+      },
+    );
+    if (index === 17) finalStepId = step.id;
+  }
   await apiClient.updateTaskTitle(a.id, "Task".repeat(15));
   await testPage.setViewportSize({ width: 360, height: 780 });
   await testPage.goto(`/threads?workspace=${seedData.workspaceId}`);
@@ -85,32 +97,45 @@ test("contains nested choices with long labels and preserves native swiping afte
   await ui.contained(drawer);
   await expect(ui.choice("Close")).toHaveCSS("cursor", "pointer");
   await testPage.screenshot({ path: testInfo.outputPath("phone-root-360.png") });
-  await ui.nested("Send to workflow");
-  await expect(ui.choice("Back")).toHaveCSS("cursor", "pointer");
-  await ui.nested(destinationName);
-  await ui.contained(drawer);
-  await expect(testPage.getByRole("dialog")).toHaveCount(1);
-  const scroll = testPage.getByTestId("task-management-scroll");
-  expect(await scroll.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
-    true,
-  );
+  await ui.pick("Change workflow...");
+  const form = new ChangeWorkflowPage(testPage, true);
+  await expect(form.phoneDrawer).toBeVisible();
+  await ui.contained(form.phoneDrawer);
+  await form.chooseWorkflow(destination.id);
+  const scroll = form.form.getByTestId("change-workflow-scroll");
+  expect(await scroll.evaluate((element) => getComputedStyle(element).overflowY)).toBe("auto");
   expect(
-    await drawer.evaluate(
-      (element) =>
-        [element, ...element.querySelectorAll("*")].filter(
+    await form.phoneDrawer.evaluate((element) =>
+      [element, ...element.querySelectorAll("*")]
+        .filter(
           (node) =>
             /auto|scroll/.test(getComputedStyle(node).overflowY) &&
             node.scrollHeight > node.clientHeight,
-        ).length,
+        )
+        .map((node) => node.getAttribute("data-testid")),
     ),
-  ).toBe(1);
-  await ui.choice(`17 ${longName}`).scrollIntoViewIfNeeded();
-  await expect(ui.choice(`17 ${longName}`)).toBeVisible();
+  ).toEqual(["change-workflow-scroll"]);
+  await form.form.getByTestId("change-workflow-step").tap();
+  const finalStep = testPage.locator(`[role="option"][data-value="${finalStepId}"]`);
+  await finalStep.scrollIntoViewIfNeeded();
+  await expect(finalStep).toBeVisible();
+  await expect(finalStep.locator("xpath=ancestor::*[@data-slot='popover-content']")).toHaveCSS(
+    "opacity",
+    "1",
+  );
+  expect(
+    await finalStep.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const topmost = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return topmost === element || element.contains(topmost);
+    }),
+  ).toBe(true);
+  await assertNoDocumentHorizontalOverflow(testPage, "mobile change workflow form");
   await testPage.screenshot({ path: testInfo.outputPath("phone-deep-360.png") });
-  await ui.press(ui.choice("Back"));
-  await expect(ui.choice(destinationName)).toBeFocused();
   await testPage.keyboard.press("Escape");
-  await expect(ui.choice("Send to workflow")).toBeFocused();
+  await ui.press(form.form.getByTestId("change-workflow-cancel"));
+  await expect(ui.trigger(firstId)).toBeFocused();
+  await ui.open(firstId);
   await ui.pick("Delete");
   await ui.contained(testPage.getByRole("alertdialog"));
   await testPage.screenshot({ path: testInfo.outputPath("phone-delete-360.png") });

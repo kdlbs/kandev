@@ -16,7 +16,7 @@ import (
 const (
 	spriteUploadTimeout  = 10 * time.Minute // bundles can be large
 	spriteStepTimeout    = 2 * time.Minute
-	spriteControlRetries = 3
+	spriteControlRetries = 5
 	spriteUploadRetries  = 3
 	spriteBackoffInit    = 700 * time.Millisecond
 	spriteRetryMaxDelay  = 30 * time.Second

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
@@ -24,12 +25,14 @@ const claudeACPPackage = "@agentclientprotocol/claude-agent-acp"
 // there goes through agentctl's auto-approve channel.
 var claudeACPPermSettings = map[string]PermissionSetting{
 	PermissionKeyDangerouslySkipPermissions: {
-		Supported:   true,
-		Default:     false,
-		Label:       "Skip permission prompts",
-		Description: "Pass --dangerously-skip-permissions so Claude Code does not prompt for tool approvals.",
-		ApplyMethod: PermissionApplyMethodCLIFlag,
-		CLIFlag:     "--dangerously-skip-permissions",
+		Supported:       true,
+		Default:         false,
+		Label:           "Skip permission prompts",
+		Description:     "Pass --dangerously-skip-permissions so Claude Code does not prompt for tool approvals.",
+		ApplyMethod:     PermissionApplyMethodCLIFlag,
+		CLIFlag:         "--dangerously-skip-permissions",
+		PassthroughOnly: true,
+		ACPEquivalent:   "the profile's permission mode (Bypass permissions)",
 	},
 }
 
@@ -115,6 +118,15 @@ func (a *ClaudeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
 	return newManagedNPMRuntimeSpec(claudeACPPackage)
 }
 
+func (a *ClaudeACP) RuntimeProviderObservation() RuntimeComponentDescriptor {
+	return RuntimeComponentDescriptor{
+		Name:    "Claude Agent SDK",
+		Package: "@anthropic-ai/claude-agent-sdk",
+		Source:  RuntimeComponentBundled,
+		Owner:   RuntimeComponentOwnerKandev,
+	}
+}
+
 func (a *ClaudeACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
@@ -131,6 +143,12 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 			// docs/specs/agents/system-design/mcp-timeout-budgets.md.
 			"MCP_TIMEOUT":      "30000",
 			"MCP_TOOL_TIMEOUT": "7200000",
+		},
+		ContainerEnv: map[string]string{
+			// Claude's ACP bridge limits bypass mode for root unless the process
+			// runs in a declared sandbox. Executor isolation makes this available;
+			// it does not select a session mode.
+			"IS_SANDBOX": "1",
 		},
 		Mounts: []MountTemplate{
 			{Source: "{workspace}", Target: "/workspace"},
@@ -155,14 +173,16 @@ func (a *ClaudeACP) RemoteAuth() *RemoteAuth {
 				Type:      "env",
 				EnvVar:    "CLAUDE_CODE_OAUTH_TOKEN",
 				SetupHint: "Run `claude setup-token` to generate a long-lived OAuth token",
-				SetupScript: `mkdir -p "${HOME}/.claude"
-cat > "${HOME}/.claude/.credentials.json" <<CREDS
+				SetupScript: `config_dir="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
+mkdir -p "$config_dir"
+umask 077
+cat > "$config_dir/.credentials.json" <<CREDS
 {"claudeAiOauth":{"accessToken":"${CLAUDE_CODE_OAUTH_TOKEN}","expiresAt":4102444800000}}
 CREDS
 cat > "${HOME}/.claude.json" <<'JSON'
 {"hasCompletedOnboarding":true}
 JSON
-chmod 600 "${HOME}/.claude/.credentials.json"
+chmod 600 "$config_dir/.credentials.json"
 chmod 600 "${HOME}/.claude.json"`,
 			},
 		},
@@ -212,5 +232,19 @@ func (a *ClaudeACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
 		Command:   a.ManagedNPMRuntime().CachedACPCommand(),
+	}
+}
+
+// HostCLI describes the Claude Code CLI on the Kandev host. Claude Code has
+// no documented model listing on the CLI itself (the Agent SDK's
+// supportedModels() is a Node API), so ModelSource stays empty: the bridge
+// list remains the catalogue and operators may type any model identifier.
+// InstallScript installs and updates this CLI.
+func (a *ClaudeACP) HostCLI() hostcli.Spec {
+	return hostcli.Spec{
+		DisplayName: "Claude Code",
+		Executable:  "claude",
+		VersionArgs: []string{"--version"},
+		ModelSource: hostcli.ModelSourceNone,
 	}
 }

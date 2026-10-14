@@ -10,7 +10,7 @@ func TestCatalog(t *testing.T) {
 
 	wantIDs := map[string]struct{}{
 		"agent-settings": {}, "analytics": {}, "auth": {}, "auth-hostnames": {}, "automation": {},
-		"azure-devops": {}, "canvas": {}, "delivery": {}, "editor": {},
+		"azure-devops": {}, "canvas": {}, "coordinator": {}, "delivery": {}, "editor": {},
 		"github": {}, "gitlab": {}, "jira": {}, "linear": {}, "message-queue": {},
 		"notification": {}, "office": {}, "office-config-sync": {}, "organization-units": {},
 		"organizations": {}, "plugin-instance-state": {}, "plugin-instances": {},
@@ -53,6 +53,51 @@ func TestCatalog(t *testing.T) {
 	second := Catalog()
 	if second[0].ID == "changed" || second[0].RequiredTables[0] == "changed" {
 		t.Fatal("Catalog() exposes mutable internal data")
+	}
+}
+
+func TestAgentSettingsRequiresProfileOrderTables(t *testing.T) {
+	for _, descriptor := range Catalog() {
+		if descriptor.ID != "agent-settings" {
+			continue
+		}
+		required := map[string]bool{}
+		for _, table := range descriptor.RequiredTables {
+			required[table] = true
+		}
+		for _, table := range []string{"agents", "agent_profiles", "agent_profile_orders"} {
+			if !required[table] {
+				t.Errorf("agent-settings required tables omit %q", table)
+			}
+		}
+		return
+	}
+	t.Fatal("agent-settings descriptor not found")
+}
+
+func TestTaskCatalogIncludesDurableSessionTables(t *testing.T) {
+	var task Descriptor
+	for _, descriptor := range Catalog() {
+		if descriptor.ID == "task" {
+			task = descriptor
+			break
+		}
+	}
+	if task.ID == "" {
+		t.Fatal("task descriptor is missing")
+	}
+	want := map[string]struct{}{
+		"harness_session_generations": {}, "session_restore_attempts": {},
+		"session_continuation_snapshots": {}, "session_recovery_blocks": {},
+		"agent_delivery_submissions": {}, "agent_delivery_inbox": {},
+		"agent_delivery_cursors": {}, "agent_delivery_effects": {},
+		"agent_delivery_cleanup_jobs": {}, "agent_delivery_retention_state": {},
+	}
+	for _, table := range task.RequiredTables {
+		delete(want, table)
+	}
+	if len(want) != 0 {
+		t.Fatalf("task descriptor is missing durable tables: %v", want)
 	}
 }
 
@@ -108,4 +153,27 @@ func TestValidateCatalogRejectsInvalidDescriptors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCatalogCoordinatorListsPhase3Tables(t *testing.T) {
+	want := []string{
+		"coordinator_wakes", "coordinator_unattended_turns", "coordinator_unattended_denials",
+		"coordinator_class_changes", "coordinator_class_reviews", "coordinator_pending_changes",
+	}
+	for _, d := range Catalog() {
+		if d.ID != "coordinator" {
+			continue
+		}
+		have := map[string]bool{}
+		for _, table := range d.RequiredTables {
+			have[table] = true
+		}
+		for _, table := range want {
+			if !have[table] {
+				t.Errorf("coordinator entry is missing required table %q", table)
+			}
+		}
+		return
+	}
+	t.Fatal("coordinator entry not found in the catalog")
 }

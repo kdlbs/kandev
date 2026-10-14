@@ -1381,27 +1381,29 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 	// failure must not leave a partially restored tree that cannot be retried
 	// from its archived root.
 	cancelledCleanupOperations := make([]string, 0, len(all))
-	restoreCancelledCleanup := func() error {
-		restorer, ok := s.resourceCleaner.(taskResourceCleanupRestorer)
-		if !ok {
-			return nil
-		}
-		recoveryCtx, cancel := archivecascade.ContinuationContext(context.WithoutCancel(ctx))
-		defer cancel()
-		var errs []error
-		for _, operationID := range cancelledCleanupOperations {
-			if err := restorer.RestoreCancelledTaskResourceCleanup(recoveryCtx, operationID); err != nil {
-				errs = append(errs, fmt.Errorf("restore archive cleanup %s: %w", operationID, err))
+	cancelledCleanupOperationSet := make(map[string]struct{}, len(all))
+	rememberCancelledCleanupOperations := func(operationIDs []string) {
+		for _, operationID := range operationIDs {
+			if operationID == "" {
+				continue
 			}
+			if _, found := cancelledCleanupOperationSet[operationID]; found {
+				continue
+			}
+			cancelledCleanupOperationSet[operationID] = struct{}{}
+			cancelledCleanupOperations = append(cancelledCleanupOperations, operationID)
 		}
-		return errors.Join(errs...)
+	}
+	restoreCancelledCleanup := func() error {
+		return s.restoreCancelledCleanupOperations(ctx, cancelledCleanupOperations)
 	}
 	var restorationErrors []error
 	for _, id := range all {
 		operationID := string(models.TaskResourceCleanupTriggerCascadeArchive) + ":" + cascadeID + ":" + id
-		cancelledCleanupOperations = append(cancelledCleanupOperations, operationID)
-		if err := s.cancelArchiveResourceCleanup(operationCtx, id, operationID); err != nil {
-			return out, errors.Join(fmt.Errorf("cancel archive cleanup %s: %w", id, err), restoreCancelledCleanup())
+		cancelled, cancelErr := s.cancelArchiveResourceCleanup(operationCtx, id, operationID)
+		rememberCancelledCleanupOperations(cancelled)
+		if cancelErr != nil {
+			return out, errors.Join(fmt.Errorf("cancel archive cleanup %s: %w", id, cancelErr), restoreCancelledCleanup())
 		}
 	}
 	// Unarchive deep→shallow so a partial failure leaves the root archived
@@ -1411,6 +1413,9 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 		id := all[i]
 		ok, err := s.tasks.UnarchiveTaskByCascade(operationCtx, id, cascadeID)
 		if err != nil {
+			if errors.Is(err, taskrepo.ErrArchiveCleanupInProgress) {
+				err = fmt.Errorf("%w: %w", ErrCleanupCancellationRace, err)
+			}
 			mutationErr = fmt.Errorf("unarchive %s: %w", id, err)
 			break
 		}
@@ -1557,12 +1562,18 @@ func (s *HandoffService) unarchiveManualRoot(ctx context.Context, root *models.T
 	}
 	out := &CascadeOutcome{}
 	var restorationErrors []error
-	if err := s.cancelArchiveResourceCleanup(ctx, root.ID, ""); err != nil {
-		return out, fmt.Errorf("cancel archive cleanup %s: %w", root.ID, err)
+	cancelledCleanupOperations, err := s.cancelArchiveResourceCleanup(ctx, root.ID, "")
+	if err != nil {
+		return out, errors.Join(fmt.Errorf("cancel archive cleanup %s: %w", root.ID, err),
+			s.restoreCancelledCleanupOperations(ctx, cancelledCleanupOperations))
 	}
 	ok, err := s.tasks.UnarchiveTask(ctx, root.ID)
 	if err != nil {
-		return out, fmt.Errorf("unarchive %s: %w", root.ID, err)
+		if errors.Is(err, taskrepo.ErrArchiveCleanupInProgress) {
+			err = fmt.Errorf("%w: %w", ErrCleanupCancellationRace, err)
+		}
+		return out, errors.Join(fmt.Errorf("unarchive %s: %w", root.ID, err),
+			s.restoreCancelledCleanupOperations(ctx, cancelledCleanupOperations))
 	}
 
 	if !ok {
@@ -1594,15 +1605,34 @@ func (s *HandoffService) unarchiveManualRoot(ctx context.Context, root *models.T
 	return out, cascadePostCommitError(out, errors.Join(restorationErrors...))
 }
 
-func (s *HandoffService) cancelArchiveResourceCleanup(ctx context.Context, taskID, operationID string) error {
+func (s *HandoffService) restoreCancelledCleanupOperations(ctx context.Context, operationIDs []string) error {
+	restorer, ok := s.resourceCleaner.(taskResourceCleanupRestorer)
+	if !ok || len(operationIDs) == 0 {
+		return nil
+	}
+	recoveryCtx, cancel := archivecascade.ContinuationContext(context.WithoutCancel(ctx))
+	defer cancel()
+	var errs []error
+	for _, operationID := range operationIDs {
+		if err := restorer.RestoreCancelledTaskResourceCleanup(recoveryCtx, operationID); err != nil {
+			errs = append(errs, fmt.Errorf("restore archive cleanup %s: %w", operationID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s *HandoffService) cancelArchiveResourceCleanup(ctx context.Context, taskID, operationID string) ([]string, error) {
+	if canceller, ok := s.resourceCleaner.(archiveTaskResourceCleanupOperationsCanceller); ok {
+		return canceller.CancelArchiveTaskResourceCleanupWithOperations(ctx, taskID)
+	}
 	if coordinator, ok := s.resourceCleaner.(taskResourceCleanupCoordinator); ok && operationID != "" {
-		return coordinator.CancelPreparedTaskResourceCleanup(ctx, operationID)
+		return []string{operationID}, coordinator.CancelPreparedTaskResourceCleanup(ctx, operationID)
 	}
 	canceller, ok := s.resourceCleaner.(archiveTaskResourceCleanupCanceller)
 	if !ok {
-		return nil
+		return nil, nil
 	}
-	return canceller.CancelArchiveTaskResourceCleanup(ctx, taskID)
+	return nil, canceller.CancelArchiveTaskResourceCleanup(ctx, taskID)
 }
 
 // resolveDeleteSet returns the set of task IDs DeleteTaskTree should

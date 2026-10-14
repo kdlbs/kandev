@@ -648,9 +648,16 @@ func TestLSPContinuityReconnectsToSameTaskHostStream(t *testing.T) {
 		logger:       testLogger(),
 	}
 	var fenceHeld atomic.Bool
+	fenceReleased := make(chan struct{}, 1)
 	handler.EnableContinuity(func(string) func() {
 		fenceHeld.Store(true)
-		return func() { fenceHeld.Store(false) }
+		return func() {
+			fenceHeld.Store(false)
+			select {
+			case fenceReleased <- struct{}{}:
+			default:
+			}
+		}
 	}, nil)
 	t.Cleanup(func() { _ = handler.Close() })
 
@@ -659,6 +666,11 @@ func TestLSPContinuityReconnectsToSameTaskHostStream(t *testing.T) {
 	leaseID, _ := ready["leaseId"].(string)
 	if leaseID == "" || ready["resumed"] != false {
 		t.Fatalf("first ready status = %v, want an initial lease ID and resumed=false", ready)
+	}
+	select {
+	case <-fenceReleased:
+	case <-time.After(wsTestTimeout):
+		t.Fatal("session lifecycle fence remained held after lease admission")
 	}
 	if fenceHeld.Load() {
 		t.Fatal("session lifecycle fence remained held after lease admission")
@@ -716,12 +728,14 @@ func TestLSPContinuityReconnectsToSameTaskHostStream(t *testing.T) {
 		t.Fatalf("independent window Stop acknowledgement = %v", ack)
 	}
 	joinWithin(t, thirdServed, "independent continuity browser attachment")
+	waitForLSPLeaseRemoval(t, handler.leases, independentLeaseID)
 	handler.leases.mu.Lock()
 	originalLease := handler.leases.leases[leaseID]
 	remainingLeases := len(handler.leases.leases)
 	handler.leases.mu.Unlock()
-	if originalLease == nil || originalLease.isClosed() || remainingLeases != 1 {
-		t.Fatalf("stopping independent window affected retained lease: original=%v count=%d", originalLease, remainingLeases)
+	originalLeaseRetained := originalLease != nil && !originalLease.isClosed()
+	if !originalLeaseRetained || remainingLeases != 1 {
+		t.Fatalf("stopping independent window affected retained lease: retained=%t count=%d", originalLeaseRetained, remainingLeases)
 	}
 
 	if err := second.WriteMessage(gorillaws.TextMessage, []byte(`{"kandev":"lsp","action":"release","reason":"stop","requestId":"stop-1"}`)); err != nil {

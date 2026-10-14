@@ -24,6 +24,7 @@ import type { BulkTaskActionSelection } from "@/hooks/use-task-multi-select";
 type BulkTaskActionOptions = {
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
+  confirmationId?: string;
 };
 
 interface TaskMultiSelectToolbarProps {
@@ -147,7 +148,7 @@ function BulkDeleteDialog({
   getEligibleSelectedIds: (ids: string[]) => string[];
   isProcessing: boolean;
   onConfirm: (
-    opts: { cascade: boolean; discardWorktreeChanges: boolean },
+    opts: { cascade: boolean; discardWorktreeChanges: boolean; confirmationId: string },
     selection: BulkTaskActionSelection,
   ) => void;
 }) {
@@ -271,9 +272,7 @@ export function TaskMultiSelectToolbar({
           taskIds={taskIds}
           getEligibleSelectedIds={getEligibleSelectedIds}
           isProcessing={isProcessing}
-          onConfirm={({ cascade, discardWorktreeChanges }, selection) =>
-            onBulkDelete({ cascade, discardWorktreeChanges }, selection)
-          }
+          onConfirm={(opts, selection) => onBulkDelete(opts, selection)}
         />
       </BulkActionsSurface>
       <Button

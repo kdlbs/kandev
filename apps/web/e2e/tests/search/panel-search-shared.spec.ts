@@ -33,7 +33,7 @@ test.describe("@search panel search bar — shared contract", () => {
         const { session } = await seedTask(testPage, apiClient, seedData, `shared-${kind}-S1`, {
           description: description,
         });
-        await preparePanel(session, kind, testPage);
+        await preparePanel(session, kind);
 
         await openPanelSearch(testPage, kind);
 
@@ -50,7 +50,7 @@ test.describe("@search panel search bar — shared contract", () => {
         const { session } = await seedTask(testPage, apiClient, seedData, `shared-${kind}-S3`, {
           description: description,
         });
-        await preparePanel(session, kind, testPage);
+        await preparePanel(session, kind);
 
         await openPanelSearch(testPage, kind);
         await closePanelSearch(testPage);
@@ -64,7 +64,7 @@ test.describe("@search panel search bar — shared contract", () => {
         const { session } = await seedTask(testPage, apiClient, seedData, `shared-${kind}-S4`, {
           description: description,
         });
-        await preparePanel(session, kind, testPage);
+        await preparePanel(session, kind);
 
         await openPanelSearch(testPage, kind);
         // Button by title="Close (Esc)"
@@ -82,7 +82,7 @@ test.describe("@search panel search bar — shared contract", () => {
         const { session } = await seedTask(testPage, apiClient, seedData, `shared-${kind}-S5`, {
           description: description,
         });
-        await preparePanel(session, kind, testPage);
+        await preparePanel(session, kind);
 
         await openPanelSearch(testPage, kind);
         await panelSearchInput(testPage).fill("Alpha");
@@ -97,15 +97,11 @@ test.describe("@search panel search bar — shared contract", () => {
 });
 
 /**
- * Ensure the given panel is rendered, visible, and ready to receive keyboard focus.
- * For the terminal panel we additionally wait for the xterm buffer to have some
- * content (indicates the shell has connected).
+ * Ensure the given panel is rendered and ready for shared keyboard interactions.
+ * For the terminal panel, send a command and verify its output so readiness
+ * covers the input path this search behavior uses.
  */
-async function preparePanel(
-  session: SessionPage,
-  kind: PanelKind,
-  page: import("@playwright/test").Page,
-): Promise<void> {
+async function preparePanel(session: SessionPage, kind: PanelKind): Promise<void> {
   if (kind === "session") {
     await expect(session.chat).toBeVisible({ timeout: 10_000 });
     return;
@@ -120,17 +116,6 @@ async function preparePanel(
   }
   // terminal
   await expect(session.terminal).toBeVisible({ timeout: 15_000 });
-  await expect
-    .poll(
-      async () =>
-        page.evaluate(() => {
-          const panel = document.querySelector('[data-testid="terminal-panel"]');
-          const xtermEl = panel?.querySelector(".xterm");
-          type XC = HTMLElement & { __xtermReadBuffer?: () => string };
-          const container = xtermEl?.parentElement as XC | null | undefined;
-          return (container?.__xtermReadBuffer?.() ?? "").length > 0;
-        }),
-      { timeout: 20_000, message: "Waiting for terminal shell buffer" },
-    )
-    .toBe(true);
+  await session.typeInTerminal('printf "panel-search-shell-%s\\n" ready');
+  await session.expectTerminalHasText("panel-search-shell-ready");
 }

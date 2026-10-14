@@ -2,7 +2,6 @@ package plugins
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -244,238 +243,42 @@ func TestPluginHost_Interactions_GetUnknownIsNotFound(t *testing.T) {
 	assertCode(t, err, codes.InvalidArgument)
 }
 
-// ── permission writes ───────────────────────────────────────────────────
-
-func TestPluginHost_Interactions_RespondToPermissionDerivesOutcomeFromOptionKind(t *testing.T) {
-	cases := []struct {
-		name      string
-		optionID  string
-		cancelled bool
-	}{
-		{"allow option is forwarded", "allow", false},
-		{"reject option is forwarded", "deny", false},
-		{"dismissal carries no option", "", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			d := newTestDataHost(readWriteCaps())
-			withInteraction(d, pendingPermissionInteraction())
-			resolved := pendingPermissionInteraction()
-			resolved.Status = taskmodels.InteractionStatusApproved
-			d.interactions.afterWrite = resolved
-
-			got, err := d.host.Interactions().RespondToPermission(context.Background(),
-				pluginsdk.PermissionResponse{InteractionID: "pending-1", OptionID: tc.optionID, Cancelled: tc.cancelled})
-			if err != nil {
-				t.Fatalf("RespondToPermission: %v", err)
-			}
-			if d.responder.permission == nil {
-				t.Fatal("responder not called")
-			}
-			if d.responder.permission.in.OptionID != tc.optionID {
-				t.Fatalf("option = %q, want %q", d.responder.permission.in.OptionID, tc.optionID)
-			}
-			if d.responder.permission.in.Cancelled != tc.cancelled {
-				t.Fatalf("cancelled = %v, want %v", d.responder.permission.in.Cancelled, tc.cancelled)
-			}
-			// Identity always comes from the durable record, never from the
-			// plugin: kandev's resolution is keyed on all four ids.
-			if d.responder.permission.in.SessionID != "session-1" ||
-				d.responder.permission.in.TaskID != "task-1" ||
-				d.responder.permission.in.RequestID != "request-1" ||
-				d.responder.permission.in.PendingID != "pending-1" {
-				t.Fatalf("identity = %+v, want it taken from the durable record", d.responder.permission.in)
-			}
-			if got.Status != pluginsdk.InteractionStatusApproved {
-				t.Fatalf("returned status = %q, want the post-write state", got.Status)
-			}
-		})
-	}
-}
-
-func TestPluginHost_Interactions_RespondToPermissionValidatesOption(t *testing.T) {
-	cases := []struct {
+// Legacy write methods cannot carry an observed resource version or human
+// response receipt. They remain in the v1 interface for source compatibility,
+// but all responses must use the exact Host v2 commands.
+func TestPluginHost_Interactions_LegacyResponsesRequireHumanReceipt(t *testing.T) {
+	tests := []struct {
 		name string
-		in   pluginsdk.PermissionResponse
+		run  func(*testDataHost) error
 	}{
-		{"option the agent never offered", pluginsdk.PermissionResponse{InteractionID: "pending-1", OptionID: "sudo"}},
-		{"no option and no cancel", pluginsdk.PermissionResponse{InteractionID: "pending-1"}},
-		{"option together with cancel", pluginsdk.PermissionResponse{
-			InteractionID: "pending-1", OptionID: "allow", Cancelled: true,
+		{"permission", func(d *testDataHost) error {
+			_, err := d.host.Interactions().RespondToPermission(context.Background(), pluginsdk.PermissionResponse{InteractionID: "pending-1", OptionID: "allow"})
+			return err
+		}},
+		{"clarification", func(d *testDataHost) error {
+			_, err := d.host.Interactions().AnswerClarification(context.Background(), pluginsdk.ClarificationResponse{InteractionID: "pending-2", Answers: []pluginsdk.ClarificationAnswer{{QuestionID: "q1"}}})
+			return err
+		}},
+		{"clarification cancellation", func(d *testDataHost) error {
+			_, err := d.host.Interactions().CancelClarification(context.Background(), "pending-2", "cancel")
+			return err
 		}},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			d := newTestDataHost(readWriteCaps())
 			withInteraction(d, pendingPermissionInteraction())
-
-			_, err := d.host.Interactions().RespondToPermission(context.Background(), tc.in)
-			assertCode(t, err, codes.InvalidArgument)
+			assertCode(t, test.run(d), codes.PermissionDenied)
 			if d.responder.writeCalled {
-				t.Fatal("responder reached with an invalid choice")
+				t.Fatal("legacy response reached the agent interaction responder")
 			}
 		})
 	}
-}
-
-// TestPluginHost_Interactions_TerminalOnce pins the idempotency contract: the
-// first terminal response wins, and a replay reports FailedPrecondition rather
-// than dispatching a second response — which would either fail deep in the
-// agent transport or answer whatever request reused the pending slot.
-func TestPluginHost_Interactions_TerminalOnce(t *testing.T) {
-	resolved := pendingPermissionInteraction()
-	resolved.Status = taskmodels.InteractionStatusRejected
-	d := newTestDataHost(readWriteCaps())
-	withInteraction(d, resolved)
-
-	_, err := d.host.Interactions().RespondToPermission(context.Background(),
-		pluginsdk.PermissionResponse{InteractionID: "pending-1", OptionID: "allow"})
-	assertCode(t, err, codes.FailedPrecondition)
-	if d.responder.writeCalled {
-		t.Fatal("responder reached for an already-resolved interaction")
-	}
-
-	answeredBundle := pendingClarificationInteraction()
-	answeredBundle.Status = taskmodels.InteractionStatusAnswered
-	d2 := newTestDataHost(readWriteCaps())
-	withInteraction(d2, answeredBundle)
-	_, err = d2.host.Interactions().AnswerClarification(context.Background(), pluginsdk.ClarificationResponse{
-		InteractionID: "pending-2", Answers: []pluginsdk.ClarificationAnswer{{QuestionID: "q1"}},
-	})
-	assertCode(t, err, codes.FailedPrecondition)
-}
-
-func TestPluginHost_Interactions_KindMismatchIsRefused(t *testing.T) {
-	d := newTestDataHost(readWriteCaps())
-	withInteraction(d, pendingPermissionInteraction())
-
-	_, err := d.host.Interactions().AnswerClarification(context.Background(), pluginsdk.ClarificationResponse{
-		InteractionID: "pending-1", Answers: []pluginsdk.ClarificationAnswer{{QuestionID: "q1"}},
-	})
-	assertCode(t, err, codes.FailedPrecondition)
-
-	d2 := newTestDataHost(readWriteCaps())
-	withInteraction(d2, pendingClarificationInteraction())
-	_, err = d2.host.Interactions().RespondToPermission(context.Background(),
-		pluginsdk.PermissionResponse{InteractionID: "pending-2", Cancelled: true})
-	assertCode(t, err, codes.FailedPrecondition)
-}
-
-// ── clarification writes ────────────────────────────────────────────────
-
-func TestPluginHost_Interactions_AnswerAndCancelClarification(t *testing.T) {
-	d := newTestDataHost(readWriteCaps())
-	withInteraction(d, pendingClarificationInteraction())
-	answered := pendingClarificationInteraction()
-	answered.Status = taskmodels.InteractionStatusAnswered
-	d.interactions.afterWrite = answered
-
-	got, err := d.host.Interactions().AnswerClarification(context.Background(), pluginsdk.ClarificationResponse{
-		InteractionID: "pending-2",
-		Answers:       []pluginsdk.ClarificationAnswer{{QuestionID: "q1", SelectedOptions: []string{"a"}, CustomText: "why not"}},
-	})
-	if err != nil {
-		t.Fatalf("AnswerClarification: %v", err)
-	}
-	if d.responder.answered != "pending-2" || len(d.responder.answers) != 1 ||
-		d.responder.answers[0].QuestionID != "q1" || d.responder.answers[0].CustomText != "why not" {
-		t.Fatalf("responder saw %q / %+v", d.responder.answered, d.responder.answers)
-	}
-	if got.Status != pluginsdk.InteractionStatusAnswered {
-		t.Fatalf("status = %q, want answered", got.Status)
-	}
-
-	d2 := newTestDataHost(readWriteCaps())
-	withInteraction(d2, pendingClarificationInteraction())
-	if _, err := d2.host.Interactions().CancelClarification(context.Background(), "pending-2", "user went away"); err != nil {
-		t.Fatalf("CancelClarification: %v", err)
-	}
-	if d2.responder.declined != "pending-2" || d2.responder.reason != "user went away" {
-		t.Fatalf("decline recorded as %q / %q", d2.responder.declined, d2.responder.reason)
-	}
-}
-
-func TestPluginHost_Interactions_AnswerClarificationValidatesAnswers(t *testing.T) {
-	cases := []struct {
-		name string
-		in   pluginsdk.ClarificationResponse
-	}{
-		{"no answers", pluginsdk.ClarificationResponse{InteractionID: "pending-2"}},
-		{"answer without a question id", pluginsdk.ClarificationResponse{
-			InteractionID: "pending-2", Answers: []pluginsdk.ClarificationAnswer{{CustomText: "yes"}},
-		}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			d := newTestDataHost(readWriteCaps())
-			withInteraction(d, pendingClarificationInteraction())
-			_, err := d.host.Interactions().AnswerClarification(context.Background(), tc.in)
-			assertCode(t, err, codes.InvalidArgument)
-			if d.responder.writeCalled {
-				t.Fatal("responder reached with an invalid answer set")
-			}
-		})
-	}
-}
-
-// TestPluginHost_Interactions_WriteSurvivesFailedReread proves a delivered
-// response is never reported as an error: the re-read is only there to report
-// the new state, so its failure falls back to the pre-write snapshot instead
-// of inviting a retry that would double-answer.
-func TestPluginHost_Interactions_WriteSurvivesFailedReread(t *testing.T) {
-	d := newTestDataHost(readWriteCaps())
-	withInteraction(d, pendingClarificationInteraction())
-	d.responder.writeCalled = false
-
-	first := true
-	source := d.interactions
-	source.getErr = nil
-	d.host.interactionData = &rereadFailingSource{inner: source, failAfter: &first}
-
-	got, err := d.host.Interactions().CancelClarification(context.Background(), "pending-2", "gone")
-	if err != nil {
-		t.Fatalf("CancelClarification: %v", err)
-	}
-	if got.ID != "pending-2" {
-		t.Fatalf("interaction = %+v, want the pre-write snapshot", got)
-	}
-	// The response contract says every write returns the interaction in its NEW
-	// terminal state. Handing back the pre-write snapshot verbatim would report
-	// "pending" for a response the agent already received, inviting the retry
-	// terminal-once exists to prevent. A cancel is delivered as a decline of the
-	// bundle, so its terminal status is rejected.
-	if got.Status != pluginsdk.InteractionStatusRejected {
-		t.Fatalf("status = %q, want the resolved status stamped on the fallback", got.Status)
-	}
-	if !d.responder.writeCalled {
-		t.Fatal("write never happened")
-	}
-}
-
-type rereadFailingSource struct {
-	inner     *fakeInteractionDataSource
-	failAfter *bool
-}
-
-func (s *rereadFailingSource) ListPendingInteractions(
-	ctx context.Context, filter taskmodels.PendingInteractionFilter,
-) ([]*taskmodels.Interaction, error) {
-	return s.inner.ListPendingInteractions(ctx, filter)
-}
-
-func (s *rereadFailingSource) GetInteraction(
-	ctx context.Context, pendingID string,
-) (*taskmodels.Interaction, error) {
-	if *s.failAfter {
-		*s.failAfter = false
-		return s.inner.GetInteraction(ctx, pendingID)
-	}
-	return nil, errors.New("database went away")
 }
 
 // ── unwired host ────────────────────────────────────────────────────────
 
-func TestPluginHost_Interactions_UnimplementedWithoutDependencies(t *testing.T) {
+func TestPluginHost_Interactions_UnimplementedReadAndReceiptRequiredWrite(t *testing.T) {
 	host := &pluginHost{pluginID: "p1", capabilities: readWriteCaps()}
 	ctx := context.Background()
 
@@ -483,7 +286,7 @@ func TestPluginHost_Interactions_UnimplementedWithoutDependencies(t *testing.T) 
 	assertCode(t, err, codes.Unimplemented)
 
 	_, err = host.Interactions().RespondToPermission(ctx, pluginsdk.PermissionResponse{InteractionID: "x", Cancelled: true})
-	assertCode(t, err, codes.Unimplemented)
+	assertCode(t, err, codes.PermissionDenied)
 }
 
 // TestServiceHostCarriesInteractionDependencies pins the wiring hop between

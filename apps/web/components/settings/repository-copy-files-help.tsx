@@ -71,6 +71,9 @@ export function CopyFilesField({
       <p data-testid="copy-files-remote-fallback" className="text-xs text-muted-foreground">
         {t("workspaces:copyFilesRemoteFallback")}
       </p>
+      <p data-testid="copy-files-destination" className="text-xs text-muted-foreground">
+        {t("workspaces:copyFilesDestination")}
+      </p>
       <CopyFilesDetails />
     </div>
   );

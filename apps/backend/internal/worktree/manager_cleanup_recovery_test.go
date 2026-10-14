@@ -88,6 +88,30 @@ func TestCleanupWorktreesPreservingBranches_RetainsBranchWhenReleaseFails(t *tes
 	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
 }
 
+func TestCleanupWorktreesPreservingBranchesChecksCleanlinessUnderCleanupLock(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-archive-final-gate", "session-archive-final-gate", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-archive-final-gate", "session-archive-final-gate")
+	const contents = "keep this change"
+	if err := os.WriteFile(filepath.Join(wt.Path, "uncommitted.txt"), []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := mgr.CleanupWorktreesPreservingBranches(ctx, []*Worktree{wt})
+	if !errors.Is(err, ErrDirtyWorktreeCleanup) {
+		t.Fatalf("CleanupWorktreesPreservingBranches error = %v, want ErrDirtyWorktreeCleanup", err)
+	}
+	got, err := os.ReadFile(filepath.Join(wt.Path, "uncommitted.txt"))
+	if err != nil || string(got) != contents {
+		t.Fatalf("uncommitted file = %q, %v, want preserved contents", got, err)
+	}
+	if _, err := mgr.GetByID(ctx, wt.ID); err != nil {
+		t.Fatalf("active worktree record was removed: %v", err)
+	}
+	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
+}
+
 type swappingCleanupScriptHandler struct{}
 
 func (h *swappingCleanupScriptHandler) ExecuteSetupScript(context.Context, ScriptExecutionRequest) error {
@@ -145,6 +169,28 @@ func TestCleanupWorktrees_RejectsPathlessRetryWithoutImmutableHead(t *testing.T)
 	}
 	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
 	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
+}
+
+func TestCleanupArchivedWorktreeRevalidatesOwnerBeforeRemoval(t *testing.T) {
+	ctx := context.Background()
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-archive-owner-check", "session-archive-owner-check", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-archive-owner-check", "session-archive-owner-check")
+
+	err := mgr.CleanupArchivedWorktree(ctx, wt, "task-transferred", wt.Path, wt.RepositoryPath)
+	if !errors.Is(err, ErrArchivedWorktreeIdentityChanged) {
+		t.Fatalf("CleanupArchivedWorktree error = %v, want identity-changed", err)
+	}
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Fatalf("worktree directory was removed after owner mismatch: %v", err)
+	}
+	persisted, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load worktree after rejected cleanup: %v", err)
+	}
+	if persisted.Status != StatusActive || persisted.TaskID != "task-archive-owner-check" {
+		t.Fatalf("worktree after rejected cleanup = %+v, want original active owner", persisted)
+	}
 }
 
 func TestCleanupWorktreesPreservingBranches_RetriesAfterReleaseFailure(t *testing.T) {

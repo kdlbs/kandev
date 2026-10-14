@@ -196,6 +196,17 @@ type messageDataSource interface {
 	ListMessagesForPlugin(ctx context.Context, filter taskmodels.PluginMessageFilter) ([]*taskmodels.Message, error)
 }
 
+// PendingTaskTransitionRecord is a bounded adapter projection of a pending
+// workflow move. It carries no agent prompt or executor data.
+type PendingTaskTransitionRecord struct {
+	ID, TaskID, SessionID, WorkflowID, WorkflowStepID string
+	QueuedAt                                          time.Time
+}
+
+type pendingTaskTransitionSource interface {
+	ListPendingTaskTransitions(context.Context) ([]PendingTaskTransitionRecord, error)
+}
+
 // ── pluginHost accessors ────────────────────────────────────────────────
 //
 // These shadow the Unimplemented* defaults embedded via

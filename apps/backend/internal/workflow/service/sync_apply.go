@@ -369,6 +369,7 @@ func stepMatchesDefinition(existing, desired *models.WorkflowStep) bool {
 		existing.AgentProfileID == desired.AgentProfileID &&
 		existing.ProfileSessionStartPolicy == desired.ProfileSessionStartPolicy &&
 		existing.ProfileSessionEndPolicy == desired.ProfileSessionEndPolicy &&
+		existing.DisableUnclassifiedFallback == desired.DisableUnclassifiedFallback &&
 		models.EqualWorkflowSessionTarget(existing.SessionTarget, desired.SessionTarget) &&
 		existing.WIPLimit == desired.WIPLimit &&
 		existing.PullFromStepID == desired.PullFromStepID &&

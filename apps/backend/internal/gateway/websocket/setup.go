@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
 	"github.com/kandev/kandev/internal/plugins"
+	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -49,6 +50,14 @@ func (g *Gateway) SetPluginConversationService(service *plugins.Service) {
 // This must be called before SetupRoutes if terminal passthrough is needed.
 func (g *Gateway) SetLifecycleManager(lifecycleMgr *lifecycle.Manager, userService UserService, scriptService scripts.ScriptService) {
 	g.TerminalHandler = NewTerminalHandler(lifecycleMgr, userService, scriptService, g.logger)
+}
+
+// SetTerminalService wires persisted ordinary-shell launch metadata into the
+// WebSocket handler after storage services are constructed.
+func (g *Gateway) SetTerminalService(terminals *terminalservice.Service) {
+	if g.TerminalHandler != nil {
+		g.TerminalHandler.SetTerminalService(terminals)
+	}
 }
 
 // SetLSPHandler enables the LSP WebSocket handler.

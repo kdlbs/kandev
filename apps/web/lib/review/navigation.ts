@@ -27,10 +27,10 @@ export function findingSelector(findingId: string): string {
 }
 
 const FLASH_DURATION_MS = 1400;
-// A file section renders lazily once selected + scrolled into view; poll a few
-// animation frames so navigation still lands after that render, then give up
-// rather than leak a running loop.
-const MAX_SCROLL_ATTEMPTS = 60;
+// A file section renders lazily once selected + scrolled into view; poll for
+// up to five seconds so navigation still lands after that render, then give
+// up rather than leak a running loop.
+const MAX_SCROLL_ATTEMPTS = 300;
 
 /** Emits the navigate event so a mounted stale-findings banner can expand. */
 export function emitNavigateFinding(findingId: string) {
@@ -55,14 +55,6 @@ function findingScope(): ParentNode {
   return dialogs.length > 0 ? dialogs[dialogs.length - 1] : document;
 }
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
-
 /**
  * Scrolls a finding card into view and flashes it, retrying across frames while
  * its file section renders. Resolves true once the card was found, false if it
@@ -85,7 +77,10 @@ export function scrollToFinding(
       const el = findingScope().querySelector<HTMLElement>(findingSelector(findingId));
       if (el) {
         el.scrollIntoView({
-          behavior: prefersReducedMotion() ? "auto" : "smooth",
+          // The target can mount while the diff is still re-rendering. An
+          // immediate scroll is deterministic in that window; smooth
+          // scrolling can be interrupted before the card reaches the viewport.
+          behavior: "auto",
           block: "center",
         });
         flashFinding(el);

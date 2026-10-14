@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { resolveTaskMenuTarget, type TaskMenuIdentity } from "@/lib/tasks/task-menu-target";
 
-export type TaskManagementStage = "closed" | "menu" | "archive" | "delete" | "link";
+export type TaskManagementStage =
+  | "closed"
+  | "menu"
+  | "change-workflow"
+  | "archive"
+  | "delete"
+  | "link";
 
 export function useTaskManagementFlow() {
   const store = useAppStoreApi();

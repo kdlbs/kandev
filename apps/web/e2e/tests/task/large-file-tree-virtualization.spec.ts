@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { watchWs } from "../../helpers/causal-waits";
 import {
   LARGE_FILE_TREE_FOLDER,
   LARGE_FILE_TREE_COUNT,
@@ -19,6 +20,7 @@ test.describe("Large file tree virtualization", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
+    const gateway = watchWs(testPage);
     const session = await setupLargeFileTreeTask({
       testPage,
       apiClient,
@@ -27,13 +29,19 @@ test.describe("Large file tree virtualization", () => {
       title: "Large file tree virtualization",
     });
 
+    // The first page load can race the executor's initial checkout. Reload
+    // after the seeded task has finished preparation so the tree request reads
+    // the complete workspace, and arm before navigation starts it.
+    const treeResponse = gateway.waitForResponse("workspace.tree.get");
+    await testPage.reload();
+    await session.waitForLoad();
+    await treeResponse;
     await session.clickTab("Files");
-    const folder = session.fileTreeNode(LARGE_FILE_TREE_FOLDER);
-    await expect(folder).toBeVisible({ timeout: 15_000 });
+    const folder = await session.fileTree.waitForFileTreeNode(LARGE_FILE_TREE_FOLDER);
     await expect(session.fileTreeNode(largeFileTreePath(0))).toHaveCount(0);
 
     await folder.click();
-    await expect(session.fileTreeNode(largeFileTreePath(0))).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode(largeFileTreePath(0));
     await expect
       .poll(() => session.visibleFileTreeNodes().count(), { timeout: 5_000 })
       .toBeLessThan(80);
@@ -67,10 +75,9 @@ test.describe("Large file tree virtualization", () => {
     });
 
     await session.clickTab("Files");
-    const folder = session.fileTreeNode(LARGE_FILE_TREE_FOLDER);
-    await expect(folder).toBeVisible({ timeout: 15_000 });
+    const folder = await session.fileTree.waitForFileTreeNode(LARGE_FILE_TREE_FOLDER);
     await folder.click();
-    await expect(session.fileTreeNode(largeFileTreePath(0))).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode(largeFileTreePath(0));
 
     const viewport = session.fileTreeScrollViewport();
     await viewport.evaluate((element) => {
@@ -103,9 +110,8 @@ test.describe("Large file tree virtualization", () => {
     });
 
     await session.clickTab("Files");
-    const folder = session.fileTreeNode(LARGE_FILE_TREE_FOLDER);
+    const folder = await session.fileTree.waitForFileTreeNode(LARGE_FILE_TREE_FOLDER);
     const viewport = session.fileTreeScrollViewport();
-    await expect(folder).toBeVisible({ timeout: 15_000 });
     await expect(viewport).toBeVisible({ timeout: 15_000 });
     await waitForFileTreeLayoutSettle(testPage);
     await expectContiguousVisibleFileTreeRows(viewport);
@@ -116,13 +122,13 @@ test.describe("Large file tree virtualization", () => {
     await waitForFileTreeLayoutSettle(testPage);
     await session.clickTab("Files");
     await expect(viewport).toBeVisible({ timeout: 15_000 });
-    await expect(folder).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode(LARGE_FILE_TREE_FOLDER);
     await expectContiguousVisibleFileTreeRows(viewport);
     await expectVisibleFileTreePaths(viewport, collapsedPaths);
 
     await folder.click();
     const firstFile = largeFileTreePath(0);
-    await expect(session.fileTreeNode(firstFile)).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode(firstFile);
     await expectContiguousVisibleFileTreeRows(viewport);
     const expandedTopPaths = await visibleFileTreePaths(viewport);
 
@@ -130,7 +136,7 @@ test.describe("Large file tree virtualization", () => {
     await expect(session.files).toBeHidden();
     await waitForFileTreeLayoutSettle(testPage);
     await session.clickTab("Files");
-    await expect(session.fileTreeNode(firstFile)).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode(firstFile);
     await expectContiguousVisibleFileTreeRows(viewport);
     await expectVisibleFileTreePaths(viewport, expandedTopPaths);
 

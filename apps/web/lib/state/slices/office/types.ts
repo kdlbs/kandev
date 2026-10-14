@@ -251,6 +251,11 @@ export type CreateRoutineInput = {
   catchUpPolicy?: string;
   catchUpMax?: number;
   variables?: Record<string, unknown> | string;
+  /**
+   * Optional trigger created in the same request as the routine, so a
+   * rejected trigger creates no routine at all.
+   */
+  trigger?: CreateTriggerInput;
 };
 
 /**

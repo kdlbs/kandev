@@ -52,6 +52,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateProviderRouting(); err != nil {
 		return err
 	}
+	if err := r.migrateSessionRecoveryColumns(); err != nil {
+		return err
+	}
 	if err := r.migrateContinuationScope(); err != nil {
 		return err
 	}
@@ -70,6 +73,7 @@ func (r *Repository) runMigrations() error {
 	r.migrateRoutineCatchUp()
 	r.migrateBudgetPolicyRevision()
 	r.migrateWorkspacePauseSkipAttribution()
+	r.migrateDeferredAssignmentActor()
 	r.migrateLoopLivenessCausationID()
 	if err := r.migrateRetentionIndexes(); err != nil {
 		return err
@@ -84,6 +88,22 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	return nil
+}
+
+// migrateDeferredAssignmentActor adds the actor snapshot needed to replay a
+// paused assignment with the same priority and assignment-rate semantics as
+// the live scheduler path. The fresh table definition includes these columns;
+// these idempotent ALTERs converge databases created by the first replay
+// implementation before the actor snapshot was added.
+func (r *Repository) migrateDeferredAssignmentActor() {
+	_ = r.migrate.Apply(
+		"office_deferred_assignments.actor_type",
+		`ALTER TABLE office_deferred_assignments ADD COLUMN actor_type TEXT NOT NULL DEFAULT ''`,
+	)
+	_ = r.migrate.Apply(
+		"office_deferred_assignments.actor_id",
+		`ALTER TABLE office_deferred_assignments ADD COLUMN actor_id TEXT NOT NULL DEFAULT ''`,
+	)
 }
 
 // migrateRunSkillLabels adds the captured labels used by run history. The
@@ -321,8 +341,37 @@ func (r *Repository) migrateAssignmentWakeRateIndexes() error {
 	return r.migrate.Apply(
 		"idx_runs_assignment_rate_reason_requested",
 		`CREATE INDEX IF NOT EXISTS idx_runs_assignment_rate_reason_requested
-			ON runs(reason, requested_at)`,
+		ON runs(reason, requested_at)`,
 	)
+}
+
+// migrateSessionRecoveryColumns adds the indexed reference from an Office run
+// to the task-owned recovery block. Existing routing rows remain unchanged and
+// the columns stay NULL until a launch actually requires recovery.
+func (r *Repository) migrateSessionRecoveryColumns() error {
+	for _, migration := range []struct {
+		name   string
+		column string
+		stmt   string
+	}{
+		{name: "runs.session_recovery_block_id", column: "session_recovery_block_id", stmt: "ALTER TABLE runs ADD COLUMN session_recovery_block_id TEXT"},
+		{name: "runs.session_recovery_reason", column: "session_recovery_reason", stmt: "ALTER TABLE runs ADD COLUMN session_recovery_reason TEXT"},
+	} {
+		exists, err := db.ColumnExists(r.db, "runs", migration.column)
+		if err != nil {
+			return fmt.Errorf("inspect runs.%s: %w", migration.column, err)
+		}
+		if !exists {
+			if err := r.migrate.Apply(migration.name, migration.stmt); err != nil {
+				return err
+			}
+		}
+	}
+	if err := r.migrate.Apply("runs.session_recovery_block_index",
+		`CREATE INDEX IF NOT EXISTS idx_runs_session_recovery_block ON runs(session_recovery_block_id) WHERE session_recovery_block_id IS NOT NULL`); err != nil {
+		return err
+	}
+	return nil
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases

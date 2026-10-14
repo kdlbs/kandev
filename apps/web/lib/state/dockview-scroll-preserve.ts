@@ -1,5 +1,7 @@
 import { useDockviewStore } from "./dockview-store";
 
+let nextRestoreToken = 0;
+
 /**
  * Capture the current chat scroll position and restore it after the next
  * layout rebuild completes (isRestoringLayout transitions to false).
@@ -8,8 +10,14 @@ import { useDockviewStore } from "./dockview-store";
 export function preserveChatScrollDuringLayout(): void {
   const scrollEl = document.querySelector<HTMLElement>(".chat-message-list");
   const savedScrollTop = scrollEl?.scrollTop ?? 0;
+  const sessionId = scrollEl?.dataset.sessionId ?? null;
+  const token = ++nextRestoreToken;
 
-  useDockviewStore.getState().setPendingChatScrollTop(savedScrollTop);
+  useDockviewStore.getState().setPendingChatScrollTop({
+    scrollTop: savedScrollTop,
+    sessionId,
+    token,
+  });
 
   // Wait for the full isRestoringLayout transition (false → true → false).
   // Callers may emit non-layout updates (e.g. pinnedWidths) before flipping
@@ -24,9 +32,12 @@ export function preserveChatScrollDuringLayout(): void {
     if (!sawRestoring) return;
     unsub();
     requestAnimationFrame(() => {
+      const state = useDockviewStore.getState();
+      if (state.pendingChatScrollTop?.token !== token) return;
       const el = document.querySelector<HTMLElement>(".chat-message-list");
-      if (el) el.scrollTop = savedScrollTop;
-      useDockviewStore.getState().setPendingChatScrollTop(null);
+      const applied = (el?.dataset.sessionId ?? null) === sessionId;
+      if (el && applied) el.scrollTop = savedScrollTop;
+      state.completePendingChatScrollTop(token, applied);
     });
   });
 }

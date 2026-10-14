@@ -1,6 +1,6 @@
 # ADR-2026-08-14-kandev-native-agent-rich-output: Keep Agent Rich Output Host Native
 
-**Status:** accepted (amended 2026-08-15)
+**Status:** accepted (amended 2026-08-15; composition extended 2026-10-08)
 **Date:** 2026-08-14
 **Area:** backend, frontend, protocol, security
 
@@ -16,9 +16,10 @@ consistency, persistence, and security costs.
 
 1. The first rich-output surface is a built-in task and Office MCP tool,
    `show_rich_output_kandev`, with a versioned, closed semantic schema.
-2. Kandev owns rendering. Agent input contains data and workspace-relative
-   references only; it cannot provide HTML, JavaScript, CSS, remote resources,
-   colors, animations, or arbitrary layout.
+2. Kandev owns native rendering. Agent input cannot provide HTML, JavaScript,
+   CSS, remote resources, colors, animations, or unrestricted layout. The
+   [json-render decision](2026-10-08-json-render-native-rich-output.md) extends
+   this boundary with a versioned catalog of approved native compositions.
 3. Version 1 supports file, chart, and metrics blocks. Ordinary Markdown owns
    small tables and prose.
 4. Existing tool-call arguments at `metadata.normalized.generic.input` are the
@@ -67,11 +68,13 @@ capabilities, iframe lifecycle, CSP, permissions, origins, message bridging,
 accessibility, and theming policy. That flexibility is justified for true
 mini-apps, not for the three common display primitives in version 1.
 
-### Allow arbitrary HTML or a generic component schema
+### Allow arbitrary HTML or an unrestricted component schema
 
 Rejected because sanitization does not create visual consistency, mobile
-quality, accessibility, or bounded interaction. A generic component escape
-hatch would turn agent output into an unreviewed UI framework.
+quality, accessibility, or bounded interaction. An unrestricted component
+escape hatch would turn agent output into an unreviewed UI framework. The
+2026-10-08 decision permits a closed, bounded native catalog instead; the
+version 1 contract and persistence boundaries remain compatibility guarantees.
 
 ### Store file bytes in message metadata
 

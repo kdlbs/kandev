@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
@@ -152,7 +153,6 @@ func TestHandleReorderWorkflowSteps_MissingStepIDs(t *testing.T) {
 	h := &Handlers{}
 	msg := makeWSMessage(t, ws.ActionMCPReorderWorkflowStep, map[string]interface{}{
 		"workflow_id": "wf-123",
-		"step_ids":    []string{},
 	})
 
 	resp, err := h.handleReorderWorkflowSteps(context.Background(), msg)
@@ -1221,6 +1221,10 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	}))
 	require.NoError(t, wfRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
 		ID: "dst-step3", WorkflowID: "wf-defer3", Name: "Dest", Position: 1, CreatedAt: now, UpdatedAt: now,
+		// The target must start work on entry to receive one-shot entry options.
+		Events: workflowmodels.StepEvents{
+			OnEnter: []workflowmodels.OnEnterAction{{Type: workflowmodels.OnEnterAutoStartAgent}},
+		},
 	}))
 
 	queue := &pendingMoveRecordingQueuer{}
@@ -1255,11 +1259,15 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	assert.Empty(t, queue.calls)
 }
 
+// AC-TASKS-WORKFLOW-STAGE-MOVES-004.3: known reasons reach the agent without
+// internal identifiers; anything else keeps the generic text.
 func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {
+	wipMessage := moveTaskErrorMessage(fmt.Errorf("WIP limit exceeded for workflow step secret-step"))
 	assert.Equal(t,
-		"Move task conflicts with the current task or workflow state",
-		moveTaskErrorMessage(fmt.Errorf("WIP limit exceeded for workflow step secret-step")),
+		"Move task conflicts with the current task or workflow state: the target workflow step's WIP limit is exceeded",
+		wipMessage,
 	)
+	assert.NotContains(t, wipMessage, "secret-step")
 	assert.Equal(t,
 		"Invalid move_task request",
 		moveTaskErrorMessage(fmt.Errorf("workflow_step_id is required")),
@@ -1267,6 +1275,19 @@ func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {
 	assert.Equal(t,
 		"Failed to move task",
 		moveTaskErrorMessage(fmt.Errorf("database path /tmp/private failed")),
+	)
+}
+
+func TestMoveTaskErrorMessage_CoversPendingMoveSentinels(t *testing.T) {
+	assert.Equal(t, ws.ErrorCodeConflict, classifyMoveTaskError(workflowmove.ErrPendingMoveActiveSession))
+	assert.Equal(t, ws.ErrorCodeConflict, classifyMoveTaskError(workflowmove.ErrPermanentPendingMoveMismatch))
+	assert.Equal(t,
+		"Move task conflicts with the current task or workflow state: "+workflowmove.ErrPendingMoveActiveSession.Error(),
+		moveTaskErrorMessage(workflowmove.ErrPendingMoveActiveSession),
+	)
+	assert.Equal(t,
+		"Move task conflicts with the current task or workflow state: "+workflowmove.ErrPermanentPendingMoveMismatch.Error(),
+		moveTaskErrorMessage(workflowmove.ErrPermanentPendingMoveMismatch),
 	)
 }
 

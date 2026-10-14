@@ -25,7 +25,52 @@ sessions use existing turn-start, prompt, and resume operations. An explicit
 interrupt remains restricted to the target task's direct parent and uses
 `QueueAndInterruptForPeerMessage`; ordinary queue admission must never invoke it.
 
-## Readiness after admission
+## Initial launch ownership
+
+An accepted initial launch can still have a `CREATED` session during workspace
+preparation. That row does not authorize a peer message to start another agent.
+An execution identifier alone also does not distinguish workspace preparation
+from an admitted agent start.
+
+Serialize the peer-message start-or-queue decision with the existing
+orchestrator session lifecycle admission. Re-read the selected session inside
+that boundary. If an initial launch owns admission, retain the peer message in
+the existing queue. Preserve the original brief, turn, profile, and recipient.
+Do not run `prepareSessionForTaskMessage` or its rollback against that launch.
+
+Cover admission before workspace preparation and the asynchronous bootstrap
+interval after `LaunchPreparedSession` returns. Reuse current launch ownership
+and runtime startup evidence. Do not use the passthrough-only initial-prompt
+marker as ordinary ACP ownership. If a narrow internal admission token is
+necessary, bind it to the session incarnation and retire it on every outcome.
+It must not become a second scheduler or a persisted session state.
+
+Queue insertion and lifecycle notifications must not run under a lock that
+their synchronous callbacks acquire. Return a typed busy/start-owned outcome
+from the guarded decision, then use existing identity-aware queue admission.
+Revalidate incarnation at insertion. Keep the post-admission readiness check.
+While the original prompt owns the turn, boot readiness cannot dispatch the
+follow-up. The normal turn boundary makes it eligible under Auto-run policy.
+
+At the executor boundary, `startAgentOnExistingWorkspaceWithRequest` must
+recheck agent startup/running evidence before changing description, turn binding,
+configuration, or session state. An active agent returns a non-destructive
+busy outcome. A prepared workspace without an agent remains startable.
+Treat a lost start claim as contention, not a provider startup failure.
+Do not classify errors by matching their message text.
+
+Failure and rollback writes must prove ownership at the mutation boundary.
+Reuse the existing execution, startup-attempt, session-incarnation, and conditional
+write mechanisms. An execution ID alone is insufficient when the same workspace
+hosts multiple startup attempts. Only the failed attempt can change its error,
+turn, task state, or runtime. Missing ownership fails closed for cleanup.
+Never restore an old `CREATED` snapshot over a launch that advanced independently.
+Keep genuine owned failures and explicit cancellation behavior intact.
+
+This correction applies the existing lifecycle ownership and queue contracts.
+It adds no public parameter, schema, timer, or parent-side retry requirement.
+
+## Readiness after queue insertion
 
 The session snapshot used for routing can become stale before queue insertion.
 Every successful ordinary peer-message queue admission requests an automatic
@@ -86,3 +131,4 @@ queue count or a recorded method call.
 ## Implementation plans
 
 - [MCP queued-message wakeup](../../../plans/mcp-queued-message-wakeup/plan.md)
+- [Peer messages during initial launch](../../../plans/peer-message-initial-launch/plan.md)

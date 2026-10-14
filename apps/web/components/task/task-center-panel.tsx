@@ -33,7 +33,11 @@ import { useToast } from "@/components/toast-provider";
 import { useFileTabRestoration, useFileSaveDelete } from "./task-center-panel-restoration";
 import { useNormalizedTaskReviews } from "./review-panel-provider";
 import { useReviewItemSelection } from "./review-selection";
-import { getFileTabKey, upsertOpenFileTab } from "./task-center-panel-file-tabs";
+import {
+  getFileTabKey,
+  upsertOpenFileTab,
+  type FileEditorTab,
+} from "./task-center-panel-file-tabs";
 import { TaskCenterReviewContent } from "./task-center-review-content";
 import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
 import { getFilePreviewKind } from "@/lib/utils/file-types";
@@ -125,7 +129,6 @@ type FileTabOperationsOptions = {
   activeSessionId: string | null;
   openFileTabs: OpenFileTab[];
   setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
-  setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
   setLeftTab: (tab: string) => void;
   handleTabChange: (tab: string) => void;
   leftTab: string;
@@ -135,7 +138,6 @@ function useFileTabOperations({
   activeSessionId,
   openFileTabs,
   setOpenFileTabs,
-  setSavingFiles,
   setLeftTab,
   handleTabChange,
   leftTab,
@@ -157,8 +159,14 @@ function useFileTabOperations({
   });
 
   const handleCloseFileTab = useCallback(
-    (fileKey: string) => {
-      setOpenFileTabs((prev) => prev.filter((tab) => getFileTabKey(tab) !== fileKey));
+    (fileKey: string, instanceId?: symbol) => {
+      setOpenFileTabs((prev) =>
+        prev.filter(
+          (tab: FileEditorTab) =>
+            getFileTabKey(tab) !== fileKey ||
+            (instanceId !== undefined && tab.instanceId !== instanceId),
+        ),
+      );
       if (leftTab === `file:${fileKey}`) handleTabChange("chat");
     },
     [leftTab, handleTabChange, setOpenFileTabs],
@@ -189,11 +197,10 @@ function useFileTabOperations({
     [setOpenFileTabs],
   );
 
-  const { handleFileSave, handleFileDelete } = useFileSaveDelete({
+  const { handleFileSave, handleFileDelete, savingFiles } = useFileSaveDelete({
     activeSessionId,
     openFileTabs,
     setOpenFileTabs,
-    setSavingFiles,
     handleCloseFileTab,
   });
 
@@ -204,6 +211,7 @@ function useFileTabOperations({
     handleRenderedPreviewToggle,
     handleFileSave,
     handleFileDelete,
+    savingFiles,
     addFileTab,
   };
 }
@@ -303,7 +311,6 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
   );
   const { reviews, selectedReview, selectReview, reviewLabel } = useTaskReview(activeTaskId);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
-  const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const {
     leftTab,
@@ -319,7 +326,6 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     activeSessionId,
     openFileTabs,
     setOpenFileTabs,
-    setSavingFiles,
     setLeftTab,
     handleTabChange,
     leftTab,
@@ -366,7 +372,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     selectedReview,
     selectReview,
     openFileTabs,
-    savingFiles,
+    savingFiles: fileTabOps.savingFiles,
     selectedDiff,
     setSelectedDiff,
     leftTab,

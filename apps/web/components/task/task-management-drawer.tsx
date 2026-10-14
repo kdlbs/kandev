@@ -34,7 +34,7 @@ import {
 export type TaskManagementDrawerProps = TaskManagementMenuProps & {
   onCloseAutoFocus: (event: Event) => void;
 };
-type Page = "root" | "priority" | "steps" | "workflows" | "links" | { workflowId: string };
+type Page = "root" | "priority" | "steps" | "links";
 
 export function TaskManagementSheet({
   title,
@@ -256,7 +256,7 @@ function DrawerChoices({
 }) {
   const { t } = useTranslation();
   const { task, workflows, stepsByWorkflowId, disabled, onMove, linkActions, closeMenu } = props;
-  const { currentSteps, targets } = taskMoveOptions(task.workflowId, workflows, stepsByWorkflowId);
+  const { currentSteps } = taskMoveOptions(task.workflowId, workflows, stepsByWorkflowId);
   const links = taskLinkMenuOptions(linkActions);
   const plugins = useTaskPluginLinkActions(task.id, task.repositoryLinks ?? []);
   if (page === "priority") return <PriorityChoices {...props} />;
@@ -273,31 +273,6 @@ function DrawerChoices({
         }}
       />
     );
-  if (typeof page === "object")
-    return (
-      <StepChoices
-        steps={stepsByWorkflowId[page.workflowId] ?? []}
-        disabled={disabled}
-        progressByStepId={progressByStepId}
-        agentLabelsByProfileId={agentLabelsByProfileId}
-        onSelect={(stepId) => onMove(page.workflowId, stepId)}
-      />
-    );
-  if (page === "workflows")
-    return targets.map((workflow) => (
-      <Choice
-        key={workflow.id}
-        testId={`task-context-workflow-${workflow.id}`}
-        nested
-        disabled={disabled || !stepsByWorkflowId[workflow.id]?.length}
-        onClick={() => setPage({ workflowId: workflow.id })}
-      >
-        {workflow.name}
-        {!stepsByWorkflowId[workflow.id]?.length && (
-          <span className="ml-2 text-xs">{t("task:noSteps")}</span>
-        )}
-      </Choice>
-    ));
   if (page === "links")
     return (
       <>
@@ -345,7 +320,8 @@ function RootChoices({
   hasLinks: boolean;
 }) {
   const { t } = useTranslation();
-  const { task, workflows, stepsByWorkflowId, disabled, onArchive, onDelete } = props;
+  const { task, workflows, stepsByWorkflowId, disabled, onArchive, onDelete, onChangeWorkflow } =
+    props;
   const { canMove, canSend } = taskMoveOptions(task.workflowId, workflows, stepsByWorkflowId);
   return (
     <>
@@ -372,12 +348,11 @@ function RootChoices({
       {canSend && (
         <Choice
           testId="task-management-page-workflows"
-          nested
           disabled={disabled}
           icon={<IconLogicBuffer className="size-4" />}
-          onClick={() => setPage("workflows")}
+          onClick={onChangeWorkflow}
         >
-          {t("task:sendToWorkflow")}
+          {t("task:changeWorkflow")}
         </Choice>
       )}
       {hasLinks && (
@@ -430,26 +405,17 @@ export function TaskManagementDrawer(props: TaskManagementDrawerProps) {
     setPage(next);
   };
   const back = () => {
-    setFocusChoiceId(
-      typeof page === "object"
-        ? `task-context-workflow-${page.workflowId}`
-        : `task-management-page-${page}`,
-    );
-    setPage(typeof page === "object" ? "workflows" : "root");
+    setFocusChoiceId(`task-management-page-${page}`);
+    setPage("root");
   };
-  const title =
-    typeof page === "object"
-      ? (props.workflows.find((workflow) => workflow.id === page.workflowId)?.name ??
-        t("task:sendToWorkflow"))
-      : t(
-          {
-            root: "task:taskActions",
-            priority: "kanban:priority",
-            steps: "task:moveTo",
-            workflows: "task:sendToWorkflow",
-            links: "task:link",
-          }[page],
-        );
+  const title = t(
+    {
+      root: "task:taskActions",
+      priority: "kanban:priority",
+      steps: "task:moveTo",
+      links: "task:link",
+    }[page],
+  );
   return (
     <TaskManagementSheet
       title={title}

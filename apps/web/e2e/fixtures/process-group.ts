@@ -37,21 +37,16 @@ export function killProcessGroup(
     const pid = proc.pid;
 
     if (platform === "win32") {
+      const resolveOnExit = () => resolve();
+      proc.once("exit", resolveOnExit);
       killWindowsTree(pid, (error) => {
         if (error && processIsAlive(pid)) {
+          proc.off("exit", resolveOnExit);
           reject(error);
           return;
         }
-        resolve();
+        resolveOnExit();
       });
-      return;
-    }
-
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch {
-      // Process group may already be gone
-      resolve();
       return;
     }
 
@@ -60,13 +55,20 @@ export function killProcessGroup(
         process.kill(-pid, "SIGKILL");
       } catch {
         // Already dead
+        resolve();
       }
-      resolve();
     }, 7_000);
-
-    proc.on("exit", () => {
+    proc.once("exit", () => {
       clearTimeout(timeout);
       resolve();
     });
+
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch {
+      // Process group may already be gone
+      clearTimeout(timeout);
+      resolve();
+    }
   });
 }

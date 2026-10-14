@@ -348,6 +348,116 @@ repository_providers: [" bitbucket "]
 	}
 }
 
+func TestValidateExecutorProvidersRequireCapability(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+executor_providers:
+  - key: example
+    display_name: Example
+    description: Example remote runtime
+    contract_version: 1
+    supported_state_versions: [1]
+    profile_schema: {type: object, properties: {region: {type: string}}}
+    resource_state_schema: {type: object, properties: {handle: {type: string}}}
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "executor_provider") {
+		t.Fatalf("Validate() error = %v, want executor-provider capability rejection", err)
+	}
+}
+
+func TestValidateExecutorProvidersAcceptBoundedScalarSchemas(t *testing.T) {
+	m, err := Parse([]byte(validExecutorProviderManifest(`handle: {type: string}`)))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+	if len(m.ExecutorProviders) != 1 || m.ExecutorProviders[0].Capabilities.Retention != "bounded" {
+		t.Fatalf("ExecutorProviders = %+v, want one bounded provider", m.ExecutorProviders)
+	}
+}
+
+func TestValidateExecutorProvidersRejectSecretResourceState(t *testing.T) {
+	m, err := Parse([]byte(validExecutorProviderManifest(`token: {type: string, secret: true}`)))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "cannot declare secret state") {
+		t.Fatalf("Validate() error = %v, want secret resource-state rejection", err)
+	}
+}
+
+func TestValidateExecutorProvidersRejectDuplicateKeys(t *testing.T) {
+	m, err := Parse([]byte(validExecutorProviderManifest(`handle: {type: string}`)))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	m.ExecutorProviders = append(m.ExecutorProviders, m.ExecutorProviders[0])
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate executor provider key") {
+		t.Fatalf("Validate() error = %v, want duplicate provider identity rejection", err)
+	}
+}
+
+func TestValidateExecutorProvidersRejectUnsupportedContractVersion(t *testing.T) {
+	m, err := Parse([]byte(validExecutorProviderManifest(`handle: {type: string}`)))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	m.ExecutorProviders[0].ContractVersion++
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "is unsupported") {
+		t.Fatalf("Validate() error = %v, want unsupported contract version rejection", err)
+	}
+}
+
+func TestValidateExecutorProvidersRejectOversizedSchema(t *testing.T) {
+	manifest := validExecutorProviderManifest(`handle: {type: string}`)
+	manifest = strings.Replace(manifest, "profile_schema: {type: object, properties: {region: {type: string, enum: [eu-west-1, us-east-1]}}}",
+		"profile_schema:\n      type: object\n      description: \""+strings.Repeat("x", MaxExecutorProviderSchemaBytes)+"\"\n      properties: {region: {type: string}}", 1)
+	m, err := Parse([]byte(manifest))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "at most") {
+		t.Fatalf("Validate() error = %v, want schema size rejection", err)
+	}
+}
+
+func validExecutorProviderManifest(resourceProperties string) string {
+	return `
+id: example.remote
+api_version: 2
+version: 1.0.0
+display_name: Example remote provider
+description: Test provider manifest
+author: kandev
+categories: [tools]
+runtime:
+  type: binary
+  executables: {linux-amd64: server/plugin}
+capabilities:
+  executor_provider: true
+executor_providers:
+  - key: microvm
+    display_name: MicroVM
+    description: Isolated remote execution environment
+    localized_messages: {expired: provider.environment.expired}
+    contract_version: 1
+    supported_state_versions: [1, 2]
+    profile_schema: {type: object, properties: {region: {type: string, enum: [eu-west-1, us-east-1]}}}
+    resource_state_schema: {type: object, additionalProperties: false, properties: {` + resourceProperties + `}}
+    capabilities:
+      files: true
+      git: true
+      reattach: true
+      retention: bounded
+      maximum_lifetime_seconds: 28800
+`
+}
+
 func TestValidate_RejectsDuplicateReferenceSource(t *testing.T) {
 	m, err := Parse([]byte(validManifestYAML + `
 reference_sources:
@@ -491,6 +601,21 @@ func TestValidate_AgentToolContract(t *testing.T) {
 	}}
 	if err := m.Validate(); err != nil {
 		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ManagedAgentToolRequiresExplicitWorkspaceCapability(t *testing.T) {
+	m := managedManifest(t)
+	m.AgentTools = []AgentTool{{
+		Name: "read_task", Description: "Read one task.",
+		Surfaces: []string{AgentToolSurfaceManaged}, InputSchema: map[string]any{"type": "object"},
+	}}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "managed_agent_tools") {
+		t.Fatalf("Validate() error = %v, want managed_agent_tools capability requirement", err)
+	}
+	m.Capabilities.APIWrite = append(m.Capabilities.APIWrite, "managed_agent_tools")
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() with explicit capability: %v", err)
 	}
 }
 

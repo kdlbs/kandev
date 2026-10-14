@@ -2,6 +2,7 @@
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForAgentMessage } from "../../helpers/session";
 import {
   waitForActiveQuickChatForegroundActivity,
   waitForActiveQuickChatSupportsSteering,
@@ -19,7 +20,7 @@ function commandDialog(page: Page) {
 }
 
 test.describe.serial("Mobile Quick Chat cancellation", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test.beforeAll(async ({ backend }) => {
     await backend.restart({
@@ -62,6 +63,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
 
   test("mobile Quick Chat exposes one touch cancellation command", async ({
     testPage,
+    apiClient,
     prCapture,
   }) => {
     test.setTimeout(120_000);
@@ -70,7 +72,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await testPage.getByTestId("mobile-quick-chat-button").tap();
 
     const quickChat = testPage.getByRole("dialog", { name: "Quick Chat" });
-    await startQuickChatFromSetup(quickChat, testPage);
+    const { session_id: quickSessionId } = await startQuickChatFromSetup(quickChat, testPage);
     await sendQuickChatMessage(quickChat, testPage, "/slow 30s");
     await expect(
       quickChat.getByRole("status", { name: /Agent is (starting|running)/ }),
@@ -89,6 +91,9 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
 
     await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
     await waitForQuickChatDirectInput(quickChat);
+    await sendQuickChatMessage(quickChat, testPage, "/e2e:bulk:2");
+    await waitForAgentMessage(apiClient, quickSessionId, "Done. Emitted 2 messages", 30_000);
+    await expect(quickChat.getByText("Done. Emitted 2 messages", { exact: false })).toBeVisible();
     await prCapture.screenshot("mobile-quick-chat-cancel-palette", {
       caption: "Quick Chat cancellation remains available through the touch-sized command palette",
     });

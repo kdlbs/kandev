@@ -9,12 +9,12 @@ owners:
 
 ## Overview
 
-Prompt History can move to an external plugin only when the Host exposes the
-narrow browser contracts that the existing core panel currently obtains from
-private stores, task services, WebSocket reconciliation, task-panel context,
-native navigation, custom-prompt rendering, and browser-local favorites. This
-package inventories those contact points and defines the additive boundary. It
-does not extract or remove the shipped core panel.
+Prompt History moved to an external plugin, which needs narrow browser
+contracts from the Host instead of the private stores, task services, WebSocket
+reconciliation, task-panel context, native navigation, custom-prompt rendering,
+and browser-local favorites the removed core panel used. This package
+inventories those contact points and defines the additive boundary;
+[Prompt History Leaves Core](prompt-history-extraction.md) owns the removal.
 
 ## Requirements
 
@@ -145,18 +145,19 @@ The following text records the prior contract and does not govern new implementa
 
 ## Source inventory
 
-The implementation plan and system design record the current contact-point
-inventory. The public browser contract is canonical in
+The public browser contract is canonical in
 [`docs/plans/plugins/PLUGIN-API.md`](../../../plans/plugins/PLUGIN-API.md). The
-existing UI prompt-history requirements remain authoritative for shipped
-product behavior; this document is authoritative only for Host prerequisites.
+[UI panel requirements](../../ui/requirements/prompt-history-panel.md) record
+the removed panel's behavior; this document owns Host prerequisites only.
 
 ## Decision and implementation boundary
 
-The original prerequisite package and storage replacement are implemented.
-The linked plans track remaining validation and remediation.
-Plugin extraction requires a separate approved package. Any implementation must preserve the Host-owned security,
-lifecycle, and transport invariants above.
+Plugin extraction is owned by [Prompt History Leaves Core](prompt-history-extraction.md),
+which supersedes AC-PLUGINS-PROMPT-HISTORY-HOST-005.4, the saved-layout-ID
+migration clause of AC-PLUGINS-PROMPT-HISTORY-HOST-001.5, the core-ownership
+clause of AC-PLUGINS-PROMPT-HISTORY-HOST-006.7, and the removed core panel in
+005.3's parity comparison (re-anchored to the fixture suites). Any implementation
+must preserve the Host-owned security, lifecycle, and transport invariants above.
 
 See [the system design](../system-design/prompt-history-extraction-host.md) and
 [the implementation plan](../../../plans/prompt-history-plugin-host/plan.md).

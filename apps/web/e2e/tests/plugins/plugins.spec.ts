@@ -49,8 +49,8 @@ import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { holdPluginInstallResponse } from "../../helpers/plugin-install";
-import { dwell } from "../../helpers/causal-waits";
-import { MAX_INLINE_PLUGIN_FOOTER_ITEMS } from "@/lib/navigation/plugin-footer-budget";
+import { PluginMarketplaceReleaseFixture } from "../../helpers/plugin-marketplace-release";
+import { dwell, waitForHttp } from "../../helpers/causal-waits";
 import {
   openInstallDialog,
   PACKAGE_PATH,
@@ -392,97 +392,58 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(globalToggle).toHaveAttribute("aria-checked", "false");
   });
 
-  /**
-   * Deliberate scope limit (see docs/plans/plugins/task-*): there is no
-   * fixture package for a *second* signed version, so this proves the
-   * operator-triggered check surfaces a highlighted Update button via a
-   * route-mocked catalog, and that a manual update failing against a
-   * (deliberately unreachable) mocked `package_url` renders inline without
-   * disturbing the rest of the row. The real, successful reinstall path is
-   * covered at the unit level (use-plugin-update-action.test.tsx).
-   */
-  test("marketplace update check highlights the Update button, and a failing manual update shows an inline error", async ({
-    testPage,
-  }) => {
-    test.setTimeout(60_000);
+  test("curated release becomes an installable update", async ({ testPage, apiClient }) => {
+    test.setTimeout(120_000);
+    const releaseFixture = await PluginMarketplaceReleaseFixture.start();
+    let sourceId = "";
+    try {
+      await openInstallDialog(testPage);
+      await uploadPackage(testPage, PACKAGE_PATH);
+      const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+      await expect(pluginRow).toBeVisible({ timeout: 15_000 });
 
-    await openInstallDialog(testPage);
-    await uploadPackage(testPage, PACKAGE_PATH);
-    const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
-    await expect(pluginRow).toBeVisible({ timeout: 15_000 });
-
-    const newerVersion = "9.9.9";
-    await testPage.route("**/api/plugins/marketplace", async (route) => {
-      if (route.request().method() !== "GET") return route.fallback();
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          plugins: [
-            {
-              id: PLUGIN_ID,
-              name: "E2E Hello",
-              description: "",
-              author: "kandev",
-              categories: [],
-              icon_url: "",
-              repo_url: "",
-              version: newerVersion,
-              min_kandev_version: "",
-              package_url: "https://example.invalid/kandev-plugin-e2e-9.9.9.tar.gz",
-              package_sha256: "",
-              stars: 0,
-              updated_at: new Date(0).toISOString(),
-              install_state: "update_available",
-              installed_version: "1.0.0",
-              source_id: "official",
-              source_name: "Kandev Official",
-            },
-          ],
-          sources: [
-            {
-              id: "official",
-              name: "Kandev Official",
-              url: "https://example.invalid",
-              enabled: true,
-              builtin: true,
-              healthy: true,
-            },
-          ],
-        }),
+      const addSource = await apiClient.rawRequest("POST", "/api/plugins/marketplace/sources", {
+        name: "Curated release fixture",
+        url: releaseFixture.indexUrl,
       });
-    });
-    await testPage.route("**/api/plugins/marketplace/refresh", (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ refreshed: true }),
-      }),
-    );
+      expect(addSource.ok).toBe(true);
+      sourceId = ((await addSource.json()) as { id: string }).id;
 
-    await testPage.getByTestId("plugins-check-updates-button").click();
+      expect(await releaseFixture.detectRelease()).toBe(false);
+      await testPage.getByTestId("plugins-check-updates-button").click();
+      const latestVersion = pluginRow.getByTestId(`plugin-latest-version-${PLUGIN_ID}`);
+      await expect(latestVersion).toContainText("1.0.0", { timeout: 15_000 });
+      await expect(pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`)).toHaveCount(0);
 
-    const latestVersion = pluginRow.getByTestId(`plugin-latest-version-${PLUGIN_ID}`);
-    const updateButton = pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`);
-    await expect(latestVersion).toContainText(newerVersion, { timeout: 15_000 });
-    await expect(updateButton).toBeVisible();
-    await expect(updateButton).toHaveAttribute("data-variant", "default");
-    await expect(testPage.getByTestId("plugins-updates-last-checked")).toBeVisible();
+      releaseFixture.publishRelease("1.5.0");
+      expect(await releaseFixture.detectRelease()).toBe(true);
+      await expect(releaseFixture.rebuildIndex()).rejects.toThrow();
+      await testPage.getByTestId("plugins-check-updates-button").click();
+      await expect(latestVersion).toContainText("1.0.0", { timeout: 15_000 });
+      await expect(pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`)).toHaveCount(0);
 
-    // The update tries to install from the (deliberately unreachable) mocked
-    // package_url and fails — the row surfaces the error inline, keeps the
-    // old version, and keeps the button clickable, without disturbing
-    // enable/disable/uninstall or the rest of the row.
-    await updateButton.click();
-    await expect(pluginRow.getByTestId(`plugin-update-error-${PLUGIN_ID}`)).toBeVisible({
-      timeout: 15_000,
-    });
-    await expect(updateButton).toBeEnabled();
-    await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible();
-    await expect(pluginRow.getByRole("button", { name: "Disable" })).toBeEnabled();
+      releaseFixture.publishRelease("2.0.0");
+      expect(await releaseFixture.detectRelease()).toBe(true);
+      await releaseFixture.rebuildIndex();
 
-    await testPage.unroute("**/api/plugins/marketplace");
-    await testPage.unroute("**/api/plugins/marketplace/refresh");
+      await testPage.getByTestId("plugins-check-updates-button").click();
+      const updateButton = pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`);
+      await expect(latestVersion).toContainText("2.0.0", { timeout: 15_000 });
+      await expect(updateButton).toBeVisible();
+      await expect(updateButton).toHaveAttribute("data-variant", "default");
+
+      await updateButton.click();
+      await expect(pluginRow.getByText("v2.0.0", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible();
+      await expect(updateButton).toHaveCount(0);
+    } finally {
+      if (sourceId) {
+        await apiClient.rawRequest("DELETE", `/api/plugins/marketplace/sources/${sourceId}`);
+      }
+      await releaseFixture.close();
+    }
   });
 
   test("row and detail uninstall confirmations stay local to their initiating controls", async ({
@@ -617,10 +578,10 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await waitForPluginBundleReady(testPage);
 
     // --- manifest.yaml declares `ui.keybindings: [{ id: open-demo, default:
-    // mod+shift+j }]`; bundle.js binds it to host.openModal(...). "mod"
+    // mod+alt+shift+j }]`; bundle.js binds it to host.openModal(...). "mod"
     // resolves to Ctrl/Cmd per-platform, matching Playwright's
     // "ControlOrMeta" pseudo-modifier. ---
-    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
     const modal = testPage.getByTestId("hello-demo-modal");
     await expect(modal).toBeVisible();
     // toContainText, not toHaveText: the modal body also carries the tooltip
@@ -650,7 +611,7 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.goto("/");
     await testPage.reload();
     await waitForPluginBundleReady(testPage);
-    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
 
     const dialog = testPage.getByRole("dialog", { name: "Demo Modal" });
     const body = dialog.locator('[data-testid^="plugin-modal-body-"]');
@@ -736,7 +697,7 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.reload();
     await waitForPluginBundleReady(testPage);
 
-    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
     const modal = testPage.getByTestId("hello-demo-modal");
     await expect(modal).toBeVisible();
 
@@ -748,7 +709,9 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
 
     await trigger.hover();
     await expect(
-      testPage.getByRole("tooltip").filter({ hasText: "Tooltip inside a plugin modal" }),
+      testPage
+        .locator('[data-slot="tooltip-content"]')
+        .filter({ hasText: "Tooltip inside a plugin modal" }),
     ).toBeVisible();
   });
 
@@ -1010,8 +973,10 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     });
   });
 
-  test("registers a sidebar-footer-section item as a footer icon, not a rail row", async ({
+  test("projects a sidebar-footer destination into layout navigation without a footer duplicate", async ({
     testPage,
+    apiClient,
+    seedData,
   }) => {
     test.setTimeout(60_000);
 
@@ -1022,58 +987,54 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.goto("/");
     await testPage.reload();
 
-    const footerButton = testPage.getByTestId(
-      `sidebar-plugin:${PLUGIN_ID}:e2e-insights-tools-button`,
-    );
-    await expect(footerButton).toBeVisible({ timeout: 15_000 });
-    await expect(footerButton).toHaveAttribute("aria-label", "E2E Insights Tools");
-    await footerButton.click();
-    await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
+    const navItem = testPage.getByTestId("plugin-nav-item-e2e-insights-tools");
+    await expect(navItem).toBeVisible({ timeout: 15_000 });
+    const baseline = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+      seedData.workspaceId
+    ];
+    try {
+      const expand = testPage.getByTestId("sidebar-navigation-expand");
+      if ((await expand.getAttribute("aria-expanded")) === "true") {
+        const collapsed = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+        await expand.click();
+        expect((await collapsed).ok()).toBeTruthy();
+      }
+      await expect(expand).toHaveAttribute("aria-expanded", "false");
+      const saved = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+      await expand.click();
+      expect((await saved).ok()).toBeTruthy();
+      await expect(expand).toHaveAttribute("aria-expanded", "true");
+      await navItem.click();
+      await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
 
-    // Moves, does not add: the same item never also renders in the rail.
-    await expect(testPage.getByTestId("plugin-nav-item-e2e-insights-tools")).toHaveCount(0);
+      await testPage.getByTestId("sidebar-footer-more-button").click();
+      await expect(
+        testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:e2e-insights-tools-button`),
+      ).toHaveCount(0);
+    } finally {
+      const current = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+        seedData.workspaceId
+      ];
+      await apiClient.saveUserSettings({
+        sidebar_layout_state: {
+          workspace_id: seedData.workspaceId,
+          expected_revision: current?.revision ?? 0,
+          layout: baseline ?? null,
+        },
+      });
+    }
   });
 
-  test("routes the over-budget sidebar-footer item through the overflow menu, hidden until opened", async ({
-    testPage,
-  }) => {
+  test("projects every sidebar-footer destination into layout navigation", async ({ testPage }) => {
     test.setTimeout(60_000);
 
-    // The fixture registers 4 sidebar-footer items, in registration order:
-    // e2e-insights-tools (id/label "E2E Insights Tools"), then
-    // -2/-3/-4 ("E2E Overflow Item 2/3/4"). Deliberately one more than the
-    // desktop footer's exported MAX_INLINE_PLUGIN_FOOTER_ITEMS budget, so
-    // this single install drives the real overflow trigger/menu with the
-    // actual Radix DropdownMenu (spec.md#Capacity-and-overflow,
-    // spec.md#The-guarantee). Unit coverage in app-sidebar-footer.test.tsx
-    // mocks DropdownMenu as a pass-through, so it cannot prove the real
-    // component opens on click or hides its content while closed; this is
-    // the test that does.
-    //
-    // Per spec.md#Capacity-and-overflow, conformance tests derive their
-    // expectations from the exported constant rather than hard-coding the
-    // digits — which item lands inline vs. in the overflow menu is computed
-    // below from MAX_INLINE_PLUGIN_FOOTER_ITEMS, not hard-coded as 3/4.
+    // Every footer destination is reachable through the shared utilities menu.
     const fixtureItemIds = [
       "e2e-insights-tools",
       "e2e-insights-tools-2",
       "e2e-insights-tools-3",
       "e2e-insights-tools-4",
     ];
-    const fixtureItemLabels: Record<string, string> = {
-      "e2e-insights-tools": "E2E Insights Tools",
-      "e2e-insights-tools-2": "E2E Overflow Item 2",
-      "e2e-insights-tools-3": "E2E Overflow Item 3",
-      "e2e-insights-tools-4": "E2E Overflow Item 4",
-    };
-    const inlineIds = fixtureItemIds.slice(0, MAX_INLINE_PLUGIN_FOOTER_ITEMS);
-    const overflowIds = fixtureItemIds.slice(MAX_INLINE_PLUGIN_FOOTER_ITEMS);
-    // The fixture must register more items than the budget for this test to
-    // exercise the overflow menu at all — fail loudly here rather than
-    // silently degrading to an all-inline run if the budget is ever raised
-    // to meet or exceed the fixture's fixed item count.
-    expect(overflowIds.length).toBeGreaterThan(0);
-
     await openInstallDialog(testPage);
     await uploadPackage(testPage, PACKAGE_PATH);
     await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
@@ -1081,29 +1042,17 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.goto("/");
     await testPage.reload();
 
-    for (const id of inlineIds) {
-      await expect(testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:${id}-button`)).toBeVisible({
-        timeout: 15_000,
-      });
-    }
-
-    const overBudgetId = overflowIds[0];
-    const overBudgetTestId = `sidebar-plugin:${PLUGIN_ID}:${overBudgetId}-button`;
-    const overflowTrigger = testPage.getByTestId("sidebar-plugin-overflow-button");
+    const overflowTrigger = testPage.getByTestId("sidebar-footer-more-button");
     await expect(overflowTrigger).toBeVisible();
 
-    // Closed-menu guarantee: the over-budget item's button carries the same
-    // testid an inline button would use (spec.md#Rendered-identity), so it
-    // must be entirely absent from the DOM while the menu is closed, not
-    // merely hidden — a real DropdownMenu unmounts its content when closed.
-    await expect(testPage.getByTestId(overBudgetTestId)).toHaveCount(0);
+    for (const id of fixtureItemIds) {
+      await expect(testPage.getByTestId(`plugin-nav-item-${id}`)).toBeVisible();
+    }
 
     await overflowTrigger.click();
 
-    const menuItem = testPage.getByTestId(overBudgetTestId);
-    await expect(menuItem).toBeVisible();
-    await expect(menuItem).toHaveText(fixtureItemLabels[overBudgetId]);
-    await menuItem.click();
-    await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
+    for (const id of fixtureItemIds) {
+      await expect(testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:${id}-button`)).toHaveCount(0);
+    }
   });
 });

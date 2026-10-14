@@ -5,6 +5,11 @@ import { reconcileAgentProfileSnapshot, sameEditableProfile } from "./agent-prof
 const BASE_UPDATED_AT = "2026-09-01T00:00:00Z";
 const UPDATED_AT = "2026-09-01T01:00:00Z";
 const LATEST_UPDATED_AT = "2026-09-01T02:00:00Z";
+const TEST_SERVER_ID = "plugin-atlassian-jira";
+const LOCAL_DRAFT_NAME = "Local draft";
+const SUBMITTED_NAME = "Submitted";
+const ASSISTANT_NAME = "Assistant";
+const EXTERNAL_CONFLICT = "external-conflict";
 
 function profile(overrides: Partial<AgentProfile> = {}): AgentProfile {
   return {
@@ -41,12 +46,53 @@ describe("sameEditableProfile", () => {
       ),
     ).toBe(false);
   });
+
+  it("treats Cursor MCP auth preference as an editable change", () => {
+    expect(
+      sameEditableProfile(
+        profile({ cursorMcpAuthEnabled: true }),
+        profile({ cursorMcpAuthEnabled: false }),
+      ),
+    ).toBe(false);
+  });
+
+  it("treats Cursor plugin MCP import preference as an editable change", () => {
+    expect(
+      sameEditableProfile(
+        profile({ cursorPluginsMcpEnabled: true }),
+        profile({ cursorPluginsMcpEnabled: false }),
+      ),
+    ).toBe(false);
+  });
+
+  it("treats profile MCP selection fields as editable changes", () => {
+    const inherited = profile({ mcpSelectionMode: "inherit" } as Partial<AgentProfile>);
+    const selected = profile({
+      mcpSelectionMode: "selected",
+      mcpSelectedServers: [TEST_SERVER_ID],
+    } as Partial<AgentProfile>);
+
+    expect(sameEditableProfile(inherited, selected)).toBe(false);
+  });
+
+  it("treats selected server IDs as an order-independent set", () => {
+    const first = profile({
+      mcpSelectionMode: "selected",
+      mcpSelectedServers: [TEST_SERVER_ID, "filesystem"],
+    } as Partial<AgentProfile>);
+    const reordered = profile({
+      mcpSelectionMode: "selected",
+      mcpSelectedServers: ["filesystem", TEST_SERVER_ID],
+    } as Partial<AgentProfile>);
+
+    expect(sameEditableProfile(first, reordered)).toBe(true);
+  });
 });
 
-describe("reconcileAgentProfileSnapshot", () => {
+describe("reconcileAgentProfileSnapshot clean and conflict", () => {
   it("adopts a newer update when the editor is clean", () => {
     const previous = profile();
-    const incoming = profile({ name: "Assistant", updatedAt: UPDATED_AT });
+    const incoming = profile({ name: ASSISTANT_NAME, updatedAt: UPDATED_AT });
     const result = reconcileAgentProfileSnapshot({
       previous,
       incoming,
@@ -56,14 +102,14 @@ describe("reconcileAgentProfileSnapshot", () => {
     });
 
     expect(result.kind).toBe("clean-adopted");
-    expect(result.draft.name).toBe("Assistant");
+    expect(result.draft.name).toBe(ASSISTANT_NAME);
     expect(result.conflicted).toBe(false);
   });
 
   it("preserves a dirty draft and records a recoverable conflict", () => {
     const previous = profile();
-    const draft = profile({ name: "Local draft" });
-    const incoming = profile({ name: "Assistant", updatedAt: UPDATED_AT });
+    const draft = profile({ name: LOCAL_DRAFT_NAME });
+    const incoming = profile({ name: ASSISTANT_NAME, updatedAt: UPDATED_AT });
     const result = reconcileAgentProfileSnapshot({
       previous,
       incoming,
@@ -72,16 +118,18 @@ describe("reconcileAgentProfileSnapshot", () => {
       conflicted: false,
     });
 
-    expect(result.kind).toBe("external-conflict");
-    expect(result.draft.name).toBe("Local draft");
-    expect(result.saved.name).toBe("Assistant");
+    expect(result.kind).toBe(EXTERNAL_CONFLICT);
+    expect(result.draft.name).toBe(LOCAL_DRAFT_NAME);
+    expect(result.saved.name).toBe(ASSISTANT_NAME);
     expect(result.conflicted).toBe(true);
   });
+});
 
+describe("reconcileAgentProfileSnapshot submission acknowledgements", () => {
   it("treats the matching submitted snapshot as its own acknowledgement", () => {
     const previous = profile();
-    const submitted = profile({ name: "Submitted" });
-    const incoming = profile({ name: "Submitted", updatedAt: UPDATED_AT });
+    const submitted = profile({ name: SUBMITTED_NAME });
+    const incoming = profile({ name: SUBMITTED_NAME, updatedAt: UPDATED_AT });
     const result = reconcileAgentProfileSnapshot({
       previous,
       incoming,
@@ -98,9 +146,9 @@ describe("reconcileAgentProfileSnapshot", () => {
 
   it("keeps edits made after submission when the acknowledgement arrives", () => {
     const previous = profile();
-    const submitted = profile({ name: "Submitted" });
+    const submitted = profile({ name: SUBMITTED_NAME });
     const newerDraft = profile({ name: "Edited again" });
-    const incoming = profile({ name: "Submitted", updatedAt: UPDATED_AT });
+    const incoming = profile({ name: SUBMITTED_NAME, updatedAt: UPDATED_AT });
     const result = reconcileAgentProfileSnapshot({
       previous,
       incoming,
@@ -112,7 +160,55 @@ describe("reconcileAgentProfileSnapshot", () => {
 
     expect(result.kind).toBe("own-acknowledgement");
     expect(result.draft.name).toBe("Edited again");
-    expect(result.saved.name).toBe("Submitted");
+    expect(result.saved.name).toBe(SUBMITTED_NAME);
+  });
+});
+
+describe("reconcileAgentProfileSnapshot MCP preferences", () => {
+  it("keeps a local Cursor MCP auth choice when a newer server snapshot conflicts", () => {
+    const previous = profile({ cursorMcpAuthEnabled: true });
+    const draft = profile({ cursorMcpAuthEnabled: false });
+    const incoming = profile({ cursorMcpAuthEnabled: true, updatedAt: UPDATED_AT });
+    const result = reconcileAgentProfileSnapshot({
+      previous,
+      incoming,
+      draft,
+      saved: previous,
+      conflicted: false,
+    });
+
+    expect(result.kind).toBe(EXTERNAL_CONFLICT);
+    expect(result.draft.cursorMcpAuthEnabled).toBe(false);
+    expect(result.saved.cursorMcpAuthEnabled).toBe(true);
+  });
+
+  it("keeps local MCP selection edits when a newer server snapshot conflicts", () => {
+    const previous = profile({
+      mcpSelectionMode: "inherit",
+      mcpSelectedServers: [],
+    } as Partial<AgentProfile>);
+    const draft = profile({
+      mcpSelectionMode: "selected",
+      mcpSelectedServers: [TEST_SERVER_ID],
+    } as Partial<AgentProfile>);
+    const incoming = profile({
+      mcpSelectionMode: "inherit",
+      mcpSelectedServers: [],
+      updatedAt: UPDATED_AT,
+    } as Partial<AgentProfile>);
+    const result = reconcileAgentProfileSnapshot({
+      previous,
+      incoming,
+      draft,
+      saved: previous,
+      conflicted: false,
+    });
+
+    expect(result.kind).toBe(EXTERNAL_CONFLICT);
+    expect(
+      (result.draft as AgentProfile & { mcpSelectedServers?: string[] }).mcpSelectedServers,
+    ).toEqual([TEST_SERVER_ID]);
+    expect(result.saved.updatedAt).toBe(UPDATED_AT);
   });
 });
 
@@ -186,6 +282,7 @@ describe("reconcileAgentProfileSnapshot dynamic drafts", () => {
           waitForReset: { enabled: false, maxWaitSeconds: 0 },
           onExhausted: "skip" as const,
         },
+        unclassified: { enabled: false, consecutiveFailureThreshold: 0 },
       },
     };
     const previous = profile({ kind: "dynamic", dynamic: { version: 1, candidates: [] } });
@@ -204,7 +301,7 @@ describe("reconcileAgentProfileSnapshot dynamic drafts", () => {
       conflicted: false,
     });
 
-    expect(result.kind).toBe("external-conflict");
+    expect(result.kind).toBe(EXTERNAL_CONFLICT);
     expect(result.draft.dynamic?.candidates).toHaveLength(1);
     expect(result.saved.dynamic?.version).toBe(2);
   });

@@ -19,6 +19,7 @@ import { PluginManifestCard } from "./plugin-manifest-card";
 import { PluginShortcutsCard } from "./plugin-shortcuts-card";
 import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
+import { PluginCapabilityApproval } from "./plugin-capability-approval";
 import { PluginErrorDiagnostic } from "./plugin-error-diagnostic";
 import { PluginUninstallConfirmation } from "./uninstall-plugin-dialog";
 import { usePluginActions } from "./use-plugin-actions";
@@ -81,6 +82,7 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
         </>
       )}
       <PluginShortcutsCard plugin={plugin} plugins={items} />
+      <PluginCapabilityApproval pluginId={plugin.id} />
       <PluginManifestCard plugin={plugin} />
 
       {canManage && (

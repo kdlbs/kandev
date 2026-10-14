@@ -431,6 +431,29 @@ func (c *CloudClient) DoTransition(ctx context.Context, ticketKey, transitionID 
 	return c.do(ctx, http.MethodPost, path, body, nil)
 }
 
+// AddComment adds a plain-text comment to one issue. Cloud REST v3 requires
+// Atlassian Document Format; Server/Data Center REST v2 accepts a string body.
+func (c *CloudClient) AddComment(ctx context.Context, ticketKey, text string) (string, error) {
+	body := map[string]interface{}{"body": text}
+	if strings.HasSuffix(c.apiBase, "/3") {
+		body["body"] = map[string]interface{}{
+			"type": "doc", "version": 1,
+			"content": []interface{}{map[string]interface{}{
+				"type":    "paragraph",
+				"content": []interface{}{map[string]interface{}{"type": "text", "text": text}},
+			}},
+		}
+	}
+	var response struct {
+		ID string `json:"id"`
+	}
+	path := c.apiBase + "/issue/" + url.PathEscape(ticketKey) + "/comment"
+	if err := c.do(ctx, http.MethodPost, path, body, &response); err != nil {
+		return "", err
+	}
+	return response.ID, nil
+}
+
 // ListProjects returns up to 200 projects (the Jira max per page for this
 // endpoint). Fine for the settings dropdown; pagination can be added later if
 // it ever becomes a problem.
@@ -669,7 +692,8 @@ func extractDescription(raw interface{}) string {
 		return ""
 	}
 	var b strings.Builder
-	walkADF(m, &b)
+	paragraphBreak := false
+	walkADF(m, &b, &paragraphBreak)
 	return strings.TrimSpace(b.String())
 }
 
@@ -677,14 +701,15 @@ func extractDescription(raw interface{}) string {
 // nodes, hard/soft breaks, and paragraphs; other node types (code blocks,
 // tables, mentions) collapse to their text content. Good enough for task
 // descriptions — we don't try to preserve rich formatting.
-func walkADF(node map[string]interface{}, b *strings.Builder) {
+func walkADF(node map[string]interface{}, b *strings.Builder, paragraphBreak *bool) {
+	start := b.Len()
 	switch node["type"] {
 	case "text":
 		if s, ok := node["text"].(string); ok {
-			b.WriteString(s)
+			writeADFText(s, b, paragraphBreak)
 		}
 	case "hardBreak", "softBreak":
-		b.WriteString("\n")
+		writeADFText("\n", b, paragraphBreak)
 	}
 	content, ok := node["content"].([]interface{})
 	if !ok {
@@ -692,11 +717,27 @@ func walkADF(node map[string]interface{}, b *strings.Builder) {
 	}
 	for i, c := range content {
 		if child, ok := c.(map[string]interface{}); ok {
-			walkADF(child, b)
+			walkADF(child, b, paragraphBreak)
 		}
 		// Insert paragraph breaks between top-level siblings.
 		if t, _ := node["type"].(string); t == "doc" && i < len(content)-1 {
 			b.WriteString("\n\n")
+			*paragraphBreak = false
 		}
 	}
+	if node["type"] == "paragraph" && b.Len() > start {
+		*paragraphBreak = true
+	}
+}
+
+// Paragraph boundaries follow their descendants through any enclosing container.
+func writeADFText(text string, b *strings.Builder, paragraphBreak *bool) {
+	if text == "" {
+		return
+	}
+	if *paragraphBreak && b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	*paragraphBreak = false
+	b.WriteString(text)
 }

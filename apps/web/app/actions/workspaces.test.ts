@@ -185,6 +185,18 @@ describe("workflow step WIP fields", () => {
       pull_from_step_id: "",
     });
   });
+
+  it("preserves omitted and explicit workflow fallback veto updates", async () => {
+    await updateWorkflowStepAction("step-1", { name: "Review" });
+    await updateWorkflowStepAction("step-1", { disable_unclassified_fallback: false });
+    await updateWorkflowStepAction("step-1", { disable_unclassified_fallback: true });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body as string));
+    expect("disable_unclassified_fallback" in bodies[0]).toBe(false);
+    expect(bodies[1]).toMatchObject({ disable_unclassified_fallback: false });
+    expect(bodies[2]).toMatchObject({ disable_unclassified_fallback: true });
+  });
 });
 
 describe("workflow step cancellation fields", () => {

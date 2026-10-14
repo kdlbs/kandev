@@ -16,5 +16,6 @@ type Repository interface {
 	GetPromptByName(ctx context.Context, name string) (*models.Prompt, error)
 	CreatePrompt(ctx context.Context, prompt *models.Prompt) error
 	UpdatePrompt(ctx context.Context, prompt *models.Prompt) error
+	UpdatePromptForAgent(ctx context.Context, prompt *models.Prompt, expectedName string) error
 	DeletePrompt(ctx context.Context, id string) error
 }

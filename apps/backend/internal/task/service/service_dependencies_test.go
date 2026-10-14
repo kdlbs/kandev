@@ -9,11 +9,75 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
+
+func TestExactTaskRelationCommandsAreIdempotentAndPreserveCycleRules(t *testing.T) {
+	ctx := context.Background()
+	svc, _, repo := createTestService(t)
+	setupTestTask(t, repo)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-relation-peer", WorkspaceID: "ws-1", WorkflowID: "wf-123",
+		WorkflowStepID: "step-123", Title: "Peer", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("create peer task: %v", err)
+	}
+	blockers := &mockBlockerRepo{}
+	svc.SetBlockerRepository(blockers)
+	task, err := svc.tasks.GetTask(ctx, "task-123")
+	if err != nil {
+		t.Fatalf("get dependent task: %v", err)
+	}
+	peer, err := svc.tasks.GetTask(ctx, "task-relation-peer")
+	if err != nil {
+		t.Fatalf("get related task: %v", err)
+	}
+	request := ExactTaskRelationRequest{
+		WorkspaceID: "ws-1", TaskID: task.ID, RelatedTaskID: peer.ID,
+		ExpectedTaskResourceVersion:    task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		ExpectedRelatedResourceVersion: peer.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}
+
+	already, err := svc.AddTaskRelationExact(ctx, request)
+	if err != nil || already {
+		t.Fatalf("first AddTaskRelationExact = already:%t err:%v", already, err)
+	}
+	already, err = svc.AddTaskRelationExact(ctx, request)
+	if err != nil || !already || len(blockers.blockers) != 1 {
+		t.Fatalf("replayed AddTaskRelationExact = already:%t edges:%d err:%v", already, len(blockers.blockers), err)
+	}
+	stale := request
+	stale.ExpectedTaskResourceVersion = "2000-01-01T00:00:00Z"
+	if _, err := svc.AddTaskRelationExact(ctx, stale); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("stale AddTaskRelationExact = %v, want task resource version conflict", err)
+	}
+
+	cycle := ExactTaskRelationRequest{
+		WorkspaceID: "ws-1", TaskID: request.RelatedTaskID, RelatedTaskID: request.TaskID,
+		ExpectedTaskResourceVersion:    request.ExpectedRelatedResourceVersion,
+		ExpectedRelatedResourceVersion: request.ExpectedTaskResourceVersion,
+	}
+	if _, err := svc.AddTaskRelationExact(ctx, cycle); err == nil {
+		t.Fatal("reverse relation unexpectedly created a dependency cycle")
+	}
+
+	already, err = svc.RemoveTaskRelationExact(ctx, request)
+	if err != nil || already || len(blockers.blockers) != 0 {
+		t.Fatalf("first RemoveTaskRelationExact = already:%t edges:%d err:%v", already, len(blockers.blockers), err)
+	}
+	already, err = svc.RemoveTaskRelationExact(ctx, request)
+	if err != nil || !already || len(blockers.blockers) != 0 {
+		t.Fatalf("replayed RemoveTaskRelationExact = already:%t edges:%d err:%v", already, len(blockers.blockers), err)
+	}
+}
 
 // errBlockerRepo wraps a working repo and fails the forward read on demand, so
 // the fail-closed contract can be proven by breaking the store rather than by
@@ -22,6 +86,7 @@ type errBlockerRepo struct {
 	*mockBlockerRepo
 	failList       bool
 	failDependents bool
+	readBlockers   func(context.Context) (map[string][]string, error)
 }
 
 func (e *errBlockerRepo) ListTaskBlockers(ctx context.Context, taskID string) ([]*orchmodels.TaskBlocker, error) {
@@ -32,10 +97,83 @@ func (e *errBlockerRepo) ListTaskBlockers(ctx context.Context, taskID string) ([
 }
 
 func (e *errBlockerRepo) ListBlockersForTasks(ctx context.Context, ids []string) (map[string][]string, error) {
+	if e.readBlockers != nil {
+		return e.readBlockers(ctx)
+	}
 	if e.failList {
 		return nil, errors.New("boom")
 	}
 	return e.mockBlockerRepo.ListBlockersForTasks(ctx, ids)
+}
+
+func TestBuildDependencyViewsPreservesNonCancellationReadDiagnostics(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		deadline  bool
+		readError func(context.Context, context.CancelFunc) error
+		wantWarn  int
+	}{
+		{
+			name:     "wrapped deadline remains a warning",
+			deadline: true,
+			readError: func(ctx context.Context, _ context.CancelFunc) error {
+				<-ctx.Done()
+				return fmt.Errorf("list blockers deadline: %w", ctx.Err())
+			},
+			wantWarn: 1,
+		},
+		{
+			name: "database failure concurrent with cancellation remains a warning",
+			readError: func(_ context.Context, cancel context.CancelFunc) error {
+				cancel()
+				return errors.New("sqlite busy")
+			},
+			wantWarn: 1,
+		},
+		{
+			name: "wrapped request cancellation stays quiet",
+			readError: func(_ context.Context, cancel context.CancelFunc) error {
+				cancel()
+				return fmt.Errorf("list blockers: %w", context.Canceled)
+			},
+			wantWarn: 0,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			core, observed := observer.New(zapcore.DebugLevel)
+			log, err := logger.NewFromZap(zap.New(core))
+			if err != nil {
+				t.Fatalf("create observer logger: %v", err)
+			}
+			svc, _, _ := createTestService(t)
+			svc.logger = log
+			ctx, cancel := context.WithCancel(context.Background())
+			if testCase.deadline {
+				cancel()
+				ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(time.Second))
+			}
+			defer cancel()
+			readCalls := 0
+			svc.SetBlockerRepository(&errBlockerRepo{
+				mockBlockerRepo: &mockBlockerRepo{},
+				readBlockers: func(readCtx context.Context) (map[string][]string, error) {
+					readCalls++
+					return nil, testCase.readError(readCtx, cancel)
+				},
+			})
+
+			views := svc.BuildDependencyViews(ctx, []*models.Task{{ID: "task-cancel-log"}})
+			if len(views) != 1 {
+				t.Fatalf("BuildDependencyViews returned %d task views, want 1", len(views))
+			}
+			if readCalls != 1 {
+				t.Fatalf("blocker read count = %d, want 1", readCalls)
+			}
+			if got := observed.FilterLevelExact(zapcore.WarnLevel).Len(); got != testCase.wantWarn {
+				t.Fatalf("warning count = %d, want %d", got, testCase.wantWarn)
+			}
+		})
+	}
 }
 
 func (e *errBlockerRepo) ListDependentsForTasks(ctx context.Context, ids []string) (map[string][]string, error) {

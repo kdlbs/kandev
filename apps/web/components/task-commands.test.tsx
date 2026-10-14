@@ -43,7 +43,7 @@ describe("sidebar task command parity", () => {
       "task-link",
       "task-detach",
       "task-move",
-      "task-send-workflow",
+      "task-change-workflow",
       PLUGIN_ACTION,
       "task-delete",
     ]);
@@ -93,5 +93,18 @@ describe("sidebar task command parity", () => {
     const ctx = context({ plugins: [], links: [], steps: [], workflows: [] });
     expect(buildSidebarTaskCommands(ctx).map((c) => c.id)).not.toContain(PLUGIN_ACTION);
     expect(buildSidebarTaskCommands(ctx).map((c) => c.id)).not.toContain("task-move");
+  });
+
+  it("does not offer workflow moves for Office-owned tasks", () => {
+    const commands = buildSidebarTaskCommands(
+      context({
+        task: {
+          ...context().task,
+          isFromOffice: true,
+        },
+      }),
+    );
+    expect(commands.map((command) => command.id)).not.toContain("task-move");
+    expect(commands.map((command) => command.id)).not.toContain("task-change-workflow");
   });
 });

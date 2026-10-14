@@ -298,6 +298,7 @@
   "limitsGithubPullRequestsAndIssues": "この workspace で表示または import される GitHub pull request と issue を制限する。",
   "loadingAccounts": "アカウントを読み込み中...",
   "loadingOrganizations": "organization を読み込み中...",
+  "loadingPullRequests": "プルリクエストを読み込み中…",
   "loadingRegisteredApps": "登録済み App を読み込み中...",
   "loadingTaskAccess": "task access を読み込み中…",
   "localAndWorktreeTasksUseHost": "Local と Worktree の task は host から見える Git または SSH credentials を使う。Docker, SSH, cloud task は、その executor で設定された credentials を使う。",

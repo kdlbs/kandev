@@ -30,6 +30,7 @@ function stepFromPayload(step: any) {
     profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
       step.profile_session_end_policy,
     ),
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     wip_limit: step.wip_limit,
     pull_from_step_id: step.pull_from_step_id ?? null,
     stage_type: step.stage_type,

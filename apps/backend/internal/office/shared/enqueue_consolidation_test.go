@@ -50,6 +50,8 @@ import (
 //     causation, never production). AC-OFFICE-ENQUEUE-CONSOLIDATION-001.6's
 //     full removal is tracked separately; not attempted this round (see
 //     the task plan's "Investigated: enqueue consolidation" note).
+//     queueRunInlineAsActor is the actor-preserving variant used by the
+//     deferred-assignment replay fallback in the same no-runs-service path.
 //     internal/office/scheduler/run.go's equivalent legacy fallback was
 //     removed entirely (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.6), so it no
 //     longer needs an entry here.
@@ -66,7 +68,8 @@ var runInsertAllowlist = map[string]map[string]bool{
 		"insertRun": true,
 	},
 	"internal/office/service/run.go": {
-		"queueRunInline": true,
+		"queueRunInline":        true,
+		"queueRunInlineAsActor": true,
 	},
 	"internal/office/testharness/routes_office.go": {
 		"seedAgentFailureHandler": true,

@@ -1,15 +1,15 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SidebarTasksPage } from "../../pages/sidebar-tasks-page";
 import { SessionPage } from "../../pages/session-page";
-import { openBlockedTaskLoadingState } from "./task-loading-state-helpers";
+import { openTaskWithStaleGlobalSelection } from "./task-loading-state-helpers";
 
 test.describe("Task loading state", () => {
-  test("shows a spinner instead of a blank task detail pane while task data loads", async ({
+  test("keeps the routed task visible when the global task selection changes", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    const unblockTaskDetailRequest = await openBlockedTaskLoadingState({
+    const { task, blockedTaskDetailRequest } = await openTaskWithStaleGlobalSelection({
       testPage,
       apiClient,
       seedData,
@@ -18,10 +18,17 @@ test.describe("Task loading state", () => {
     });
 
     try {
-      await expect(testPage.getByTestId("task-loading-state")).toBeVisible({ timeout: 10_000 });
-      await expect(testPage.getByText("Loading task...")).toBeVisible();
+      await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}$`));
+      await expect(
+        testPage
+          .getByRole("navigation", { name: "breadcrumb" })
+          .getByRole("button", { name: "Task Loading State Anchor", exact: true }),
+      ).toBeVisible();
+      await expect(testPage.getByTestId("task-loading-state")).toHaveCount(0);
+      await expect(testPage.getByTestId("task-load-error-state")).toHaveCount(0);
+      expect(blockedTaskDetailRequest.requestStarted).toBe(true);
     } finally {
-      await unblockTaskDetailRequest();
+      await blockedTaskDetailRequest.unblock();
     }
   });
 
@@ -160,7 +167,10 @@ test.describe("Task loading state", () => {
     });
 
     await session.clickTaskInSidebar("Session route sync task A");
-    await expect(testPage).toHaveURL(new RegExp(`/t/${taskA.id}$`), { timeout: 15_000 });
+    await expect(testPage).toHaveURL(
+      new RegExp(`/t/${taskA.id}\\?sessionId=${secondarySessionId}$`),
+      { timeout: 15_000 },
+    );
     await session.waitForLoad();
     await expect
       .poll(async () =>

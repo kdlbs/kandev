@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -90,14 +89,11 @@ test.describe("Multi-session", () => {
     const env = await apiClient.getTaskEnvironment(task.id);
     expect(env).not.toBeNull();
 
-    // 4. Navigate to task and verify first session is visible
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Multi Session Task");
-    await expect(card).toBeVisible({ timeout: 30_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // 4. Open the task directly. Its completed state can move it out of the
+    // default Kanban lanes before the board query observes it, while its
+    // session remains valid.
+    await testPage.goto(`/t/${task.id}`);
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}(?:[?]|$)`), { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();

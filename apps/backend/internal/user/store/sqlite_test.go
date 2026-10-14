@@ -20,6 +20,28 @@ type settingsScanner struct {
 	revision int64
 }
 
+// @covers AC-UI-LIST-STEP-GROUPING-001.5
+func TestTasksListGroupLegacySettingsRoundTrip(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: `{"tasks_list_group":"state","tasks_list_sort":"title_asc"}`, revision: 7}, DefaultUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.TasksListGroup != "workflow_step" || settings.Revision != 7 || settings.TasksListSort != "title_asc" {
+		t.Fatalf("legacy settings = (%q, %d, %q)", settings.TasksListGroup, settings.Revision, settings.TasksListSort)
+	}
+	raw, err := marshalUserSettingsPayload(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["tasks_list_group"] != "workflow_step" {
+		t.Fatalf("persisted group = %v", payload["tasks_list_group"])
+	}
+}
+
 // upsertUserSettingsForTest writes settings via UpsertUserSettingsPreservingTaskCreateLastUsed at the current stored revision.
 func upsertUserSettingsForTest(t *testing.T, repo *sqliteRepository, ctx context.Context, settings *models.UserSettings) {
 	t.Helper()
@@ -95,8 +117,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("read migrated settings: %v", err)
 	}
-	if settings.Revision != 0 {
-		t.Fatalf("migrated revision = %d, want 0", settings.Revision)
+	if settings.Revision != 1 {
+		t.Fatalf("migrated revision = %d, want 1", settings.Revision)
 	}
 	settings.AppStatusBarEnabled = true
 	settings.UpdatedAt = now.Add(time.Second)
@@ -104,8 +126,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("write migrated settings: %v", err)
 	}
-	if updated.Revision != 1 {
-		t.Fatalf("updated revision = %d, want 1", updated.Revision)
+	if updated.Revision != 2 {
+		t.Fatalf("updated revision = %d, want 2", updated.Revision)
 	}
 
 	replayedRepo, err := newSQLiteRepositoryWithDB(conn, conn)
@@ -116,8 +138,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("read settings after migration replay: %v", err)
 	}
-	if replayed.Revision != 1 {
-		t.Fatalf("revision after migration replay = %d, want 1", replayed.Revision)
+	if replayed.Revision != 2 {
+		t.Fatalf("revision after migration replay = %d, want 2", replayed.Revision)
 	}
 	if !replayed.AppStatusBarEnabled {
 		t.Fatal("status bar preference was not preserved across migration replay")
@@ -161,12 +183,14 @@ func TestScanUserSettingsStartupPage(t *testing.T) {
 
 // TestScanUserSettingsSidebarDefaults verifies the canonical default sidebar view and that explicit sidebar settings are preserved.
 func TestScanUserSettingsSidebarDefaults(t *testing.T) {
+	groupIndent := true
 	defaultView := models.SidebarView{
 		ID:              "view-all-tasks",
 		Name:            "All tasks",
 		Filters:         []models.SidebarViewClause{},
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
 		Group:           "repository",
+		GroupIndent:     &groupIndent,
 		CollapsedGroups: []string{},
 		TaskRow:         models.DefaultSidebarTaskRowPresentation(),
 	}
@@ -1452,6 +1476,7 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 		ExecutorProfileID: "exec-1",
 	}
 	settings.JiraSavedViews = json.RawMessage(`[{"id":"view-1"}]`)
+	settings.JiraDefaultViewID = "view-1"
 	settings.GitLabSavedPresets = json.RawMessage(`[{"id":"preset-1"}]`)
 	settings.SidebarDraft = &models.SidebarViewDraft{
 		BaseViewID: "view-1",
@@ -1486,6 +1511,9 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 	}
 	if string(got.JiraSavedViews) != `[{"id":"view-1"}]` {
 		t.Fatalf("expected Jira saved views to round-trip, got %s", string(got.JiraSavedViews))
+	}
+	if got.JiraDefaultViewID != "view-1" {
+		t.Fatalf("expected Jira default view ID to round-trip, got %q", got.JiraDefaultViewID)
 	}
 	if string(got.GitLabSavedPresets) != `[{"id":"preset-1"}]` {
 		t.Fatalf("expected GitLab presets to round-trip, got %s", string(got.GitLabSavedPresets))

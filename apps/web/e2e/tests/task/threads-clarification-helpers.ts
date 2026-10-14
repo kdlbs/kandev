@@ -17,9 +17,10 @@ export async function attachQuestionRecord(info: TestInfo, name: string, record:
 
 export async function seedLongThreadQuestion(api: ApiClient, seed: SeedData) {
   const tasks = [];
+  // Start the question under test last so neighboring startup cannot consume its MCP deadline.
   for (const [title, scenario] of [
-    ["A long required question", "clarification-multi"],
     ["B neighboring question", "clarification"],
+    ["A long required question", "clarification-multi"],
   ]) {
     const task = await api.createTaskWithAgent(seed.workspaceId, title, seed.agentProfileId, {
       description: `/e2e:${scenario}`,
@@ -38,7 +39,7 @@ export async function seedLongThreadQuestion(api: ApiClient, seed: SeedData) {
     });
     tasks.push(task);
   }
-  return { task: tasks[0], sibling: tasks[1] };
+  return { task: tasks[1], sibling: tasks[0] };
 }
 
 /** Native tab zoom, with neither viewport/device-scale emulation nor CSS zoom. */

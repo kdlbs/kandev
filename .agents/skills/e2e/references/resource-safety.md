@@ -15,6 +15,17 @@ verification. Reserve direct Playwright commands, all-worker overrides, and
 overlapping full suites for deliberate pressure or guard reproduction. Keep
 those experiments to one worker or shard by default and record the reason.
 
+Run verbose managed E2E commands through `scripts/run-quiet e2e --summary`.
+Preserve the command's exit code and log path.
+On success, read the bounded test counts in the tool output.
+If the summary is unavailable, inspect the saved log before recording test evidence.
+On failure, inspect focused failure context from that log.
+From the repository root, replace the example spec path before running:
+
+```bash
+scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --project mobile-chrome e2e/tests/path/mobile-example.spec.ts
+```
+
 Start with the default single shard; use two or three only when the host has
 capacity for separate Go backends, SPA processes, Chromium instances, and mock
 agents. If a command is rejected, reduce its shard or worker count. Do not

@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 )
 
 const taskEnvironmentOwnershipQuery = `SELECT task_id, ownership_generation FROM task_environments WHERE id = ?`
@@ -658,6 +659,10 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	if incoming.WorktreeIntegrationRef != "" || incoming.WorktreeID == "" || replacePhysical {
 		row.WorktreeIntegrationRef = incoming.WorktreeIntegrationRef
 	}
+	if incoming.WorktreeSourceClonePath != "" {
+		row.WorktreeSourceClonePath = incoming.WorktreeSourceClonePath
+		row.WorktreeSourceCommonDir = incoming.WorktreeSourceCommonDir
+	}
 	row.Position = position
 	row.ErrorMessage = incoming.ErrorMessage
 	// A later successful transition can recreate a slot that an earlier
@@ -675,12 +680,13 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 		UPDATE task_environment_repos SET
 			branch_slug = ?, worktree_id = ?, worktree_path = ?, worktree_branch = ?,
 			worktree_branch_owner = ?, worktree_integration_ref = ?,
-			worktree_recovery_head_sha = ?, worktree_branch_compacted_at = ?,
+			worktree_recovery_head_sha = ?, worktree_source_clone_path = ?, worktree_source_common_dir = ?,
+			worktree_branch_compacted_at = ?,
 			position = ?, error_message = ?, status = ?, deleted_at = ?, updated_at = ?
 		WHERE id = ?
 	`), row.BranchSlug, row.WorktreeID, row.WorktreePath, row.WorktreeBranch,
 		row.WorktreeBranchOwner, row.WorktreeIntegrationRef,
-		row.WorktreeRecoveryHeadSHA, row.WorktreeBranchCompactedAt,
+		row.WorktreeRecoveryHeadSHA, row.WorktreeSourceClonePath, row.WorktreeSourceCommonDir, row.WorktreeBranchCompactedAt,
 		row.Position, row.ErrorMessage, row.Status, row.DeletedAt, row.UpdatedAt, row.ID)
 	return err
 }
@@ -729,7 +735,7 @@ func (r *Repository) TransferTaskEnvironmentOwnership(
 	expectedGeneration int64,
 	taskID string,
 ) error {
-	return r.transferTaskEnvironmentOwnership(ctx, envID, expectedTaskID, expectedGeneration, taskID)
+	return r.transferTaskEnvironmentOwnershipWithDeletion(ctx, envID, expectedTaskID, expectedGeneration, taskID, nil)
 }
 
 func (r *Repository) transferTaskEnvironmentOwnership(
@@ -738,6 +744,17 @@ func (r *Repository) transferTaskEnvironmentOwnership(
 	expectedGeneration int64,
 	taskID string,
 ) error {
+	return r.transferTaskEnvironmentOwnershipWithDeletion(ctx, envID, expectedTaskID, expectedGeneration, taskID, nil)
+}
+
+func (r *Repository) TransferManagedDeletionEnvironment(ctx context.Context, claim managed.DeleteClaim, envID, expectedTaskID string, expectedGeneration int64, taskID string) error {
+	if claim.TaskID != expectedTaskID {
+		return managed.ErrDeletionOwned
+	}
+	return r.transferTaskEnvironmentOwnershipWithDeletion(ctx, envID, expectedTaskID, expectedGeneration, taskID, &claim)
+}
+
+func (r *Repository) transferTaskEnvironmentOwnershipWithDeletion(ctx context.Context, envID, expectedTaskID string, expectedGeneration int64, taskID string, claim *managed.DeleteClaim) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -770,7 +787,7 @@ func (r *Repository) transferTaskEnvironmentOwnership(
 	if currentTaskID == taskID {
 		return tx.Commit()
 	}
-	if err := r.taskCleanupBarrierLocked(ctx, tx, currentTaskID); err != nil {
+	if err := r.validateEnvironmentTransferCleanupTx(ctx, tx, currentTaskID, claim); err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -788,6 +805,16 @@ func (r *Repository) transferTaskEnvironmentOwnership(
 		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, envID)
 	}
 	return tx.Commit()
+}
+
+func (r *Repository) validateEnvironmentTransferCleanupTx(ctx context.Context, tx *sqlx.Tx, taskID string, claim *managed.DeleteClaim) error {
+	if claim == nil {
+		return r.taskCleanupBarrierLocked(ctx, tx, taskID)
+	}
+	if _, _, err := r.validateDeletionOwnerTx(ctx, tx, *claim); err != nil {
+		return err
+	}
+	return r.rejectOtherCleanupJobsTx(ctx, tx, taskID, claim.JobID)
 }
 
 // ClaimTaskEnvironmentReset reserves destructive environment reset behind the
@@ -978,13 +1005,15 @@ func (r *Repository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch,
 			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
+			worktree_source_clone_path, worktree_source_common_dir,
 			worktree_branch_compacted_at,
 			position, error_message, status, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID, repo.BranchSlug,
 		repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
 		repo.WorktreeBranchOwner, repo.WorktreeIntegrationRef, repo.WorktreeRecoveryHeadSHA,
+		repo.WorktreeSourceClonePath, repo.WorktreeSourceCommonDir,
 		repo.WorktreeBranchCompactedAt,
 		repo.Position, repo.ErrorMessage, repo.Status, repo.CreatedAt, repo.UpdatedAt,
 	); err != nil {
@@ -1013,13 +1042,15 @@ func (r *Repository) insertTaskEnvironmentRepoTx(ctx context.Context, tx *sqlx.T
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch,
 			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
+			worktree_source_clone_path, worktree_source_common_dir,
 			worktree_branch_compacted_at,
 			position, error_message, status, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID, repo.BranchSlug,
 		repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
 		repo.WorktreeBranchOwner, repo.WorktreeIntegrationRef, repo.WorktreeRecoveryHeadSHA,
+		repo.WorktreeSourceClonePath, repo.WorktreeSourceCommonDir,
 		repo.WorktreeBranchCompactedAt,
 		repo.Position, repo.ErrorMessage, repo.Status, repo.CreatedAt, repo.UpdatedAt,
 	)
@@ -1035,6 +1066,8 @@ func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string)
 			COALESCE(worktree_branch_owner, 'unknown'),
 			COALESCE(worktree_integration_ref, ''),
 			COALESCE(worktree_recovery_head_sha, ''),
+			COALESCE(worktree_source_clone_path, ''),
+			COALESCE(worktree_source_common_dir, ''),
 			worktree_branch_compacted_at,
 			position, error_message, COALESCE(status, ''),
 			created_at, updated_at, merged_at, deleted_at
@@ -1056,6 +1089,7 @@ func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string)
 			&repo.BranchSlug,
 			&repo.WorktreeID, &repo.WorktreePath, &repo.WorktreeBranch,
 			&repo.WorktreeBranchOwner, &repo.WorktreeIntegrationRef, &repo.WorktreeRecoveryHeadSHA,
+			&repo.WorktreeSourceClonePath, &repo.WorktreeSourceCommonDir,
 			&compactedAt,
 			&repo.Position, &repo.ErrorMessage, &repo.Status,
 			&repo.CreatedAt, &repo.UpdatedAt, &mergedAt, &deletedAt,
@@ -1103,6 +1137,7 @@ func (r *Repository) UpdateTaskEnvironmentRepo(ctx context.Context, repo *models
 			branch_slug = ?,
 			worktree_id = ?, worktree_path = ?, worktree_branch = ?,
 			worktree_branch_owner = ?, worktree_integration_ref = ?, worktree_recovery_head_sha = ?,
+			worktree_source_clone_path = ?, worktree_source_common_dir = ?,
 			worktree_branch_compacted_at = ?,
 			position = ?, error_message = ?, status = ?,
 			merged_at = ?, deleted_at = ?, updated_at = ?
@@ -1110,6 +1145,7 @@ func (r *Repository) UpdateTaskEnvironmentRepo(ctx context.Context, repo *models
 	`),
 		repo.BranchSlug, repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
 		repo.WorktreeBranchOwner, repo.WorktreeIntegrationRef, repo.WorktreeRecoveryHeadSHA,
+		repo.WorktreeSourceClonePath, repo.WorktreeSourceCommonDir,
 		repo.WorktreeBranchCompactedAt,
 		repo.Position, repo.ErrorMessage, repo.Status,
 		repo.MergedAt, repo.DeletedAt, repo.UpdatedAt,

@@ -50,6 +50,7 @@ vi.mock("@/components/state-provider", () => ({
 
 afterEach(() => {
   cleanup();
+  vi.runOnlyPendingTimers();
   vi.useRealTimers();
   touchMocks.enabled = false;
   previewRevisionMock.mockReturnValue("revision-1");

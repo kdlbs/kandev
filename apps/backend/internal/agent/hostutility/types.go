@@ -8,7 +8,11 @@
 // real workspace or task session.
 package hostutility
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/agent/agents"
+)
 
 // Status reports the state of a host utility instance for a given agent type.
 type Status string
@@ -20,13 +24,15 @@ const (
 	StatusNotInstalled  Status = "not_installed"
 	StatusFailed        Status = "failed"
 	StatusNotConfigured Status = "not_configured"
+	StatusUnsupported   Status = "unsupported"
 )
 
 // AgentCapabilities is the cached result of probing an agent type.
 type AgentCapabilities struct {
-	AgentType    string `json:"agent_type"`
-	AgentName    string `json:"agent_name,omitempty"`
-	AgentVersion string `json:"agent_version,omitempty"`
+	AgentType    string              `json:"agent_type"`
+	AgentName    string              `json:"agent_name,omitempty"`
+	AgentVersion string              `json:"agent_version,omitempty"`
+	RuntimeInfo  *agents.RuntimeInfo `json:"runtime_info,omitempty"`
 
 	Status Status `json:"status"`
 	Error  string `json:"error,omitempty"`
@@ -113,20 +119,42 @@ type ConfigOptionChoice struct {
 // Model is required. Mode and ConfigOptions are optional future-dependent
 // inputs for providers whose options depend on more than the model.
 type ModelConfigResolutionRequest struct {
-	Model         string
-	Mode          string
-	ConfigOptions map[string]string
-	Refresh       bool
+	Model          string
+	Mode           string
+	ConfigOptions  map[string]string
+	Refresh        bool
+	ProfileContext *ProfileProbeContext
+}
+
+// ProfileProbeContext is a validated, server-resolved launch snapshot. Scope
+// includes the authorization principal and profile identity; secret values
+// stay in Env only for the bounded subprocess lifetime.
+type ProfileProbeContext struct {
+	Scope         string
+	Env           map[string]string
+	CLIFlags      []string
+	CommandPrefix []string
+}
+
+type ProfileCapabilityRequest struct {
+	Context ProfileProbeContext
+	Refresh bool
+}
+
+type ProfileCapabilityResult struct {
+	Capabilities    AgentCapabilities
+	ContextRevision string
 }
 
 // ModelConfigResolution is the provider's complete option snapshot for one
 // model-resolution context.
 type ModelConfigResolution struct {
-	AgentType     string
-	Model         string
-	Status        Status
-	ConfigOptions []ConfigOption
-	Error         string
+	AgentType       string
+	Model           string
+	Status          Status
+	ConfigOptions   []ConfigOption
+	Error           string
+	ContextRevision string
 }
 
 // PromptResult is returned from ExecutePrompt and RawPrompt calls.

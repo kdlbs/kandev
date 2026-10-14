@@ -15,7 +15,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
-	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -74,6 +73,22 @@ type resumeAndPromptOrchestrator interface {
 	) (*orchestrator.PromptResult, error)
 }
 
+type deliverySubmissionPromptOrchestrator = orchestrator.DeliverySubmissionPromptStarter
+
+type resumeAndPromptWithPromptContextOrchestrator interface {
+	ResumeTaskSessionAndPromptWithPromptContext(
+		ctx context.Context,
+		taskID, sessionID, prompt, model string,
+		planMode bool,
+		attachments []v1.MessageAttachment,
+		promptReferenceContext string,
+		promptReferencesPrepared bool,
+		references []v1.EntityReference,
+		initialTaskBriefDispatchOwner bool,
+		submissionIDs ...string,
+	) (*orchestrator.PromptResult, error)
+}
+
 // AtomicQueuedPromptCoordinator exposes admission limits and committed prompt delivery.
 type AtomicQueuedPromptCoordinator interface {
 	MaxQueuedPromptsPerSession() int
@@ -88,11 +103,47 @@ type taskCanvasGuidanceResolver interface {
 	TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
+type promptTaskWithPromptContext interface {
+	PromptTaskWithPromptContext(
+		ctx context.Context,
+		taskID, sessionID, prompt, model string,
+		planMode bool,
+		attachments []v1.MessageAttachment,
+		promptReferenceContext string,
+		promptReferencesPrepared bool,
+		references []v1.EntityReference,
+		dispatchOnly bool,
+	) (*orchestrator.PromptResult, error)
+}
+
+type promptTaskWithPromptContextAndDispatchOwnership interface {
+	PromptTaskWithPromptContextAndDispatchOwnership(
+		ctx context.Context,
+		taskID, sessionID, prompt, model string,
+		planMode bool,
+		attachments []v1.MessageAttachment,
+		promptReferenceContext string,
+		promptReferencesPrepared bool,
+		references []v1.EntityReference,
+		dispatchOnly bool,
+		initialTaskBriefDispatchOwner bool,
+	) (*orchestrator.PromptResult, error)
+}
+
+type initialTaskBriefDispatchCoordinator interface {
+	WithInitialTaskBriefAdmission(ctx context.Context, sessionID string, fn func(context.Context) error) error
+	MarkInitialTaskBriefDispatchPending(sessionID string)
+	InitialTaskBriefDispatchPending(sessionID string) bool
+	CompleteInitialTaskBriefDispatch(ctx context.Context, taskID, sessionID string)
+}
+
 type canvasGuidanceProjection struct {
-	resolved                 bool
-	include                  bool
-	preserveDirectPrompt     bool
-	promptReferencesPrepared bool
+	resolved                      bool
+	include                       bool
+	preserveDirectPrompt          bool
+	promptReferencesPrepared      bool
+	initialTaskBriefDispatchOwner bool
+	deliverySubmissionID          string
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -336,17 +387,19 @@ func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 
 func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionMessageAdd, h.wsAddMessage)
+	dispatcher.RegisterFunc(ws.ActionMessageDismissGitPushError, h.wsDismissGitPushErrorMessage)
 	dispatcher.RegisterFunc(ws.ActionMessageList, h.wsListMessages)
 	dispatcher.RegisterFunc(ws.ActionMessageSearch, h.wsSearchMessages)
 }
 
 type listMessagesParams struct {
-	before     string
-	after      string
-	around     string
-	sort       string
-	authorType string
-	limit      int
+	before       string
+	after        string
+	around       string
+	sort         string
+	authorType   string
+	limit        int
+	includeTurns bool
 }
 
 const (
@@ -364,6 +417,15 @@ func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesPa
 	authorType, authorTypeProvided := c.GetQuery("author_type")
 	authorType = strings.TrimSpace(authorType)
 	rawLimit, limitProvided := c.GetQuery("limit")
+	includeTurns := false
+	if raw, provided := c.GetQuery("include_turns"); provided {
+		parsed, err := strconv.ParseBool(strings.TrimSpace(raw))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "include_turns must be a boolean"})
+			return listMessagesParams{}, false
+		}
+		includeTurns = parsed
+	}
 	if before != "" && after != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "only one of before or after can be set"})
 		return listMessagesParams{}, false
@@ -409,12 +471,13 @@ func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesPa
 		limit = service.DefaultMessagesPageSize
 	}
 	return listMessagesParams{
-		before:     before,
-		after:      after,
-		around:     around,
-		sort:       sort,
-		authorType: authorType,
-		limit:      limit,
+		before:       before,
+		after:        after,
+		around:       around,
+		sort:         sort,
+		authorType:   authorType,
+		limit:        limit,
+		includeTurns: includeTurns,
 	}, true
 }
 
@@ -432,6 +495,25 @@ func (h *MessageHandlers) fetchMessagesPaginated(
 	sessionID string,
 	params listMessagesParams,
 ) (dto.ListMessagesResponse, error) {
+	if params.includeTurns {
+		window, err := h.service.ListMessagesWithTurnWindow(ctx, service.ListMessagesRequest{
+			TaskSessionID: sessionID,
+			Limit:         params.limit,
+			Before:        params.before,
+			After:         params.after,
+			Around:        params.around,
+			Sort:          params.sort,
+			AuthorType:    params.authorType,
+			IncludeTurns:  true,
+		})
+		if err != nil {
+			return dto.ListMessagesResponse{}, err
+		}
+		if params.around != "" {
+			window.HasMore = false
+		}
+		return messageTurnWindowResponse(window), nil
+	}
 	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{
 		TaskSessionID: sessionID,
 		Limit:         params.limit,
@@ -458,6 +540,39 @@ func (h *MessageHandlers) fetchMessagesPaginated(
 		HasMore:  hasMore,
 		Cursor:   cursor,
 	}, nil
+}
+
+func messageTurnWindowResponse(window models.MessageTurnWindow) dto.ListMessagesResponse {
+	messages := messagesToAPI(window.Messages)
+	cursor := ""
+	if len(messages) > 0 {
+		cursor = messages[len(messages)-1].ID
+	}
+	response := dto.ListMessagesResponse{
+		Messages: messages,
+		Total:    len(messages),
+		HasMore:  window.HasMore,
+		Cursor:   cursor,
+	}
+	if window.Coverage == nil {
+		return response
+	}
+	response.Turns = make([]dto.TurnDTO, 0, len(window.Turns))
+	for _, turn := range window.Turns {
+		if turn != nil {
+			response.Turns = append(response.Turns, dto.FromTurn(turn))
+		}
+	}
+	var activeTurnID *string
+	if window.Coverage.ActiveTurnID != "" {
+		activeID := window.Coverage.ActiveTurnID
+		activeTurnID = &activeID
+	}
+	response.TurnCoverage = &dto.MessageTurnCoverageDTO{
+		MessageIDs:   append([]string{}, window.Coverage.MessageIDs...),
+		ActiveTurnID: activeTurnID,
+	}
+	return response
 }
 
 func messagesToAPI(messages []*models.Message) []*v1.Message {
@@ -511,10 +626,12 @@ type wsAddMessageRequest struct {
 	RequirePrimarySession bool                            `json:"require_primary_session,omitempty"`
 	// These fields are server-owned and are carried only from message admission
 	// to the created-session dispatch. They are intentionally not JSON fields.
-	canvasGuidanceResolved   bool
-	includeCanvasGuidance    bool
-	initialTaskBriefSelected bool
-	promptReferencesPrepared bool
+	canvasGuidanceResolved          bool
+	includeCanvasGuidance           bool
+	initialTaskBriefSelected        bool
+	promptReferencesPrepared        bool
+	initialTaskBriefDispatchPending bool
+	deliverySubmissionID            string
 }
 
 type addMessageReplayIdentity struct {
@@ -778,6 +895,20 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	titleOwner := false
 	hasMessageContent := req.Content != "" || len(req.Attachments) > 0 ||
 		len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0
+	initialTaskBriefEligible := eligibleForInitialTaskBrief(
+		task, sessionResp, configMode, startCreatedSession, hasMessageContent,
+	)
+	if initialTaskBriefEligible && sessionResp.Session.State == models.TaskSessionStateWaitingForInput {
+		hasPromptHistory, historyErr := h.service.HasUserPromptHistory(admissionCtx, req.TaskSessionID)
+		if historyErr != nil {
+			h.logger.Error("failed to check initial task brief prompt history",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(historyErr))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to check session prompt history", nil)
+		}
+		initialTaskBriefEligible = !hasPromptHistory
+	}
 	task, titleOwner, wsErr = h.resolveMessageTaskAndTitleOwner(
 		ctx, msg, task, req.TaskID, req.TaskSessionID, configMode, startCreatedSession, hasMessageContent,
 	)
@@ -815,6 +946,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 	initialTaskBrief := h.prepareInitialTaskBriefCandidate(
 		ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+		initialTaskBriefEligible,
 	)
 	req.Content = storedContent
 	if planCommentAttachmentClaim == nil {
@@ -858,7 +990,18 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queued prompt admission is unavailable", nil)
 		}
 	}
-	createMessage := func() (*models.Message, error) {
+	var initialBriefCoordinator initialTaskBriefDispatchCoordinator
+	if h.orchestrator != nil {
+		initialBriefCoordinator, _ = h.orchestrator.(initialTaskBriefDispatchCoordinator)
+	}
+	initialBriefDispatchMarked := false
+	queueBehindInitialBriefDispatch := false
+	defer func() {
+		if initialBriefDispatchMarked && initialBriefCoordinator != nil {
+			initialBriefCoordinator.CompleteInitialTaskBriefDispatch(ctx, req.TaskID, req.TaskSessionID)
+		}
+	}()
+	createMessage := func(messageCtx context.Context) (*models.Message, error) {
 		if atomicQueuedTaskFeedback {
 			queueMetadata := make(map[string]interface{}, len(createRequest.Metadata)+1)
 			for key, value := range createRequest.Metadata {
@@ -874,21 +1017,46 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				QueuedBy: messagequeue.QueuedByUser,
 			}
 			created, createErr := h.service.CreateQueuedMessageIdempotent(
-				admissionCtx, req.ClientMessageID, createRequest, queued, queuedCoordinator.MaxQueuedPromptsPerSession(),
+				messageCtx, req.ClientMessageID, createRequest, queued, queuedCoordinator.MaxQueuedPromptsPerSession(),
 			)
 			if createErr == nil && (createRequest.InitialTaskBrief == nil ||
 				createRequest.InitialTaskBrief.Selected || (created != nil && created.PromptIndex == 1)) {
-				queuedCoordinator.NotifyQueuedUserPrompt(ctx, req.TaskID, req.TaskSessionID)
+				queuedCoordinator.NotifyQueuedUserPrompt(messageCtx, req.TaskID, req.TaskSessionID)
 			}
 			return created, createErr
 		}
 		if req.ClientMessageID != "" {
-			return h.service.CreateMessageIdempotent(admissionCtx, req.ClientMessageID, createRequest)
+			return h.service.CreateMessageIdempotent(messageCtx, req.ClientMessageID, createRequest)
 		}
-		return h.service.CreateMessage(admissionCtx, createRequest)
+		return h.service.CreateMessage(messageCtx, createRequest)
 	}
 	for refreshAttempt := 0; ; refreshAttempt++ {
-		message, err = createMessage()
+		createAndTrackInitialBrief := func(messageCtx context.Context) error {
+			ownerPending := initialBriefCoordinator != nil &&
+				initialBriefCoordinator.InitialTaskBriefDispatchPending(req.TaskSessionID)
+			message, err = createMessage(messageCtx)
+			if err == nil && message != nil {
+				selectedInitialBrief := initialTaskBrief != nil && initialTaskBrief.Selected &&
+					message.PromptIndex == 1 && message.Content == initialTaskBrief.Content
+				if ownerPending && !selectedInitialBrief {
+					queueBehindInitialBriefDispatch = true
+				}
+				if selectedInitialBrief && !turnStartResult.Queued &&
+					!atomicQueuedTaskFeedback && initialBriefCoordinator != nil {
+					initialBriefCoordinator.MarkInitialTaskBriefDispatchPending(req.TaskSessionID)
+					initialBriefDispatchMarked = true
+					req.initialTaskBriefDispatchPending = true
+				}
+			}
+			return err
+		}
+		if initialBriefCoordinator != nil {
+			err = initialBriefCoordinator.WithInitialTaskBriefAdmission(
+				admissionCtx, req.TaskSessionID, createAndTrackInitialBrief,
+			)
+		} else {
+			err = createAndTrackInitialBrief(admissionCtx)
+		}
 		if !errors.Is(err, repoerrors.ErrInitialTaskBriefStale) || initialTaskBrief == nil || refreshAttempt > 0 {
 			break
 		}
@@ -904,6 +1072,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		task = freshTask
 		initialTaskBrief = h.prepareInitialTaskBriefCandidate(
 			admissionCtx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+			initialTaskBriefEligible,
 		)
 		createRequest.InitialTaskBrief = initialTaskBrief
 	}
@@ -921,7 +1090,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
 	req.Content = message.Content
-	initialTaskBriefQueued := initialTaskBrief != nil && !initialTaskBrief.Selected
+	req.deliverySubmissionID = message.ID
+	initialTaskBriefQueued := (initialTaskBrief != nil && !initialTaskBrief.Selected) || queueBehindInitialBriefDispatch
 	// An idempotent create can return a row committed by another process, so
 	// the candidate pointer is not necessarily the object that selected the
 	// first slot. Recover that result from the committed row before deciding who
@@ -994,6 +1164,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		h.dispatchPromptAsync(
 			ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer, trustedPromptContext,
 		)
+		// The async delivery now owns completion of the selected first dispatch.
+		initialBriefDispatchMarked = false
 	}
 
 	return response, nil
@@ -1017,9 +1189,7 @@ func (h *MessageHandlers) addMessageReplayResponse(
 			)
 			return response, true
 		}
-		if authErr := h.service.AuthorizeSessionScope(
-			ctx, existing.TaskSessionID, authz.ScopeSessionPrompt,
-		); authErr != nil {
+		if authErr := h.service.AuthorizeSessionPromptAccess(ctx, existing.TaskSessionID); authErr != nil {
 			if service.IsForbidden(authErr) {
 				response, _ := ws.NewError(
 					msg.ID, msg.Action, ws.ErrorCodeForbidden, "Cannot send messages to this session", nil,
@@ -1131,6 +1301,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 		sessionDTO := dto.FromTaskSession(reloaded)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
+		h.enrichWorkspaceRecovery(ctx, reloaded, &sessionDTO)
 		return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 	}
 	primary, err := h.service.GetPrimarySession(ctx, taskID)
@@ -1149,7 +1320,25 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	sessionDTO := dto.FromTaskSession(primary)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
+	h.enrichWorkspaceRecovery(ctx, primary, &sessionDTO)
 	return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
+}
+
+func (h *MessageHandlers) enrichWorkspaceRecovery(
+	ctx context.Context,
+	session *models.TaskSession,
+	projection *dto.TaskSessionDTO,
+) {
+	if h == nil || h.service == nil || session == nil || session.TaskEnvironmentID == "" {
+		return
+	}
+	operation, runnerLive, err := h.service.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
+	if err != nil {
+		h.logger.Warn("get task session workspace recovery projection failed",
+			zap.String("session_id", session.ID), zap.Error(err))
+		return
+	}
+	dto.EnrichWorkspaceRecovery(projection, operation, runnerLive)
 }
 
 func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, sessionID string, state models.TaskSessionState) *ws.Message {
@@ -1308,6 +1497,7 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 	sessionDTO := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
+	h.enrichWorkspaceRecovery(ctx, session, &sessionDTO)
 	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
 	// A steer-eligible generating RUNNING session must pass this first guard:
 	// otherwise the busy error is returned here, before the steer branch in
@@ -1474,18 +1664,27 @@ func (h *MessageHandlers) dispatchPromptAsync(
 	attachments := req.Attachments
 	go func() {
 		promptCtx := context.WithoutCancel(ctx)
+		if req.initialTaskBriefDispatchPending {
+			if coordinator, ok := h.orchestrator.(initialTaskBriefDispatchCoordinator); ok {
+				defer coordinator.CompleteInitialTaskBriefDispatch(promptCtx, taskID, sessionID)
+			}
+		}
 		if steer {
-			h.forwardMessageAsSteer(promptCtx, taskID, sessionID, content, model, planMode, attachments)
+			h.forwardMessageAsSteer(
+				promptCtx, taskID, sessionID, content, model, planMode, attachments, req.deliverySubmissionID,
+			)
 			return
 		}
 		h.forwardMessageAsPrompt(
 			promptCtx, taskID, sessionID, agentProfileID,
 			content, model, planMode, attachments, req.EntityReferences, isCreatedSession,
 			trustedPromptContext, canvasGuidanceProjection{
-				resolved:                 req.canvasGuidanceResolved,
-				include:                  req.includeCanvasGuidance,
-				preserveDirectPrompt:     req.initialTaskBriefSelected,
-				promptReferencesPrepared: req.promptReferencesPrepared,
+				resolved:                      req.canvasGuidanceResolved,
+				include:                       req.includeCanvasGuidance,
+				preserveDirectPrompt:          req.initialTaskBriefSelected,
+				promptReferencesPrepared:      req.promptReferencesPrepared,
+				initialTaskBriefDispatchOwner: req.initialTaskBriefDispatchPending,
+				deliverySubmissionID:          req.deliverySubmissionID,
 			},
 		)
 	}()
@@ -1497,7 +1696,8 @@ func eligibleForInitialTaskBrief(
 	configMode, startCreatedSession, hasMessageContent bool,
 ) bool {
 	return task != nil && sessionResp != nil &&
-		startCreatedSession && hasMessageContent &&
+		(startCreatedSession ||
+			sessionResp.Session.State == models.TaskSessionStateWaitingForInput) && hasMessageContent &&
 		!task.IsEphemeral && !task.IsFromOffice && !configMode &&
 		strings.TrimSpace(task.Description) != ""
 }
@@ -1523,6 +1723,7 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 	taskID, sessionID, content, model string,
 	planMode bool,
 	attachments []v1.MessageAttachment,
+	deliverySubmissionID string,
 ) {
 	var err error
 	if steerer, ok := h.orchestrator.(recordedMessageSteerer); ok {
@@ -1541,7 +1742,12 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 		// agentProfileID/references/startCreated are irrelevant: a steer only
 		// targets a RUNNING session, never a CREATED one, so this takes the
 		// ordinary prompt branch (PromptTask + resume + error handling).
-		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false, "")
+		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false, "",
+			canvasGuidanceProjection{deliverySubmissionID: deliverySubmissionID})
+		return
+	}
+	if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+		h.markDeliveryMessageBlocked(ctx, deliverySubmissionID)
 		return
 	}
 	if !isAgentReportedError(err) {
@@ -1569,7 +1775,28 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		if len(canvasGuidance) > 0 {
 			projection = canvasGuidance[0]
 		}
-		if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt); ok &&
+		if projection.deliverySubmissionID != "" {
+			starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithDeliverySubmission)
+			if !ok {
+				err = errors.New("orchestrator cannot preserve the direct prompt delivery identity")
+			} else {
+				_, err = starter.StartCreatedSessionWithDeliverySubmission(
+					ctx, taskID, sessionID, agentProfileID, content,
+					orchestrator.DirectPromptStartOptions{
+						SkipMessageRecord:        true,
+						PlanMode:                 planMode,
+						Attachments:              attachments,
+						References:               references,
+						PromptReferenceContext:   trustedPromptContext,
+						PromptReferencesPrepared: projection.promptReferencesPrepared,
+						CanvasGuidanceResolved:   projection.resolved,
+						IncludeCanvasGuidance:    projection.include,
+						PreserveDirectPrompt:     projection.preserveDirectPrompt,
+						DeliverySubmissionID:     projection.deliverySubmissionID,
+					},
+				)
+			}
+		} else if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt); ok &&
 			projection.preserveDirectPrompt && len(canvasGuidance) > 0 {
 			_, err = starter.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
 				ctx, taskID, sessionID, agentProfileID,
@@ -1597,6 +1824,13 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 			)
 		}
 		if err != nil {
+			if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+				h.markDeliveryMessageBlocked(ctx, projection.deliverySubmissionID)
+				return
+			}
+			if isPromptErrorOwnedByRecovery(err) {
+				return
+			}
 			h.logger.Warn("failed to start created session from message",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -1622,11 +1856,52 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		return
 	}
 
-	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
-	if err != nil {
-		err = h.handlePromptWithResume(ctx, taskID, sessionID, content, model, planMode, attachments, err)
+	var err error
+	promptReferencesPrepared := false
+	initialTaskBriefDispatchOwner := false
+	deliverySubmissionID := ""
+	if len(canvasGuidance) > 0 {
+		promptReferencesPrepared = canvasGuidance[0].promptReferencesPrepared
+		initialTaskBriefDispatchOwner = canvasGuidance[0].initialTaskBriefDispatchOwner
+		deliverySubmissionID = canvasGuidance[0].deliverySubmissionID
+	}
+	if deliveryPrompt, ok := h.orchestrator.(deliverySubmissionPromptOrchestrator); ok && len(canvasGuidance) > 0 && canvasGuidance[0].deliverySubmissionID != "" {
+		_, err = deliveryPrompt.PromptTaskWithDeliverySubmissionID(
+			ctx, taskID, sessionID, content, model, planMode, attachments, false,
+			canvasGuidance[0].deliverySubmissionID,
+			orchestrator.DirectPromptStartOptions{
+				PromptReferenceContext:        trustedPromptContext,
+				PromptReferencesPrepared:      promptReferencesPrepared,
+				References:                    references,
+				InitialTaskBriefDispatchOwner: initialTaskBriefDispatchOwner,
+			},
+		)
+	} else if promptWithContext, ok := h.orchestrator.(promptTaskWithPromptContext); ok {
+		if promptWithOwnership, hasOwnership := h.orchestrator.(promptTaskWithPromptContextAndDispatchOwnership); hasOwnership {
+			_, err = promptWithOwnership.PromptTaskWithPromptContextAndDispatchOwnership(
+				ctx, taskID, sessionID, content, model, planMode, attachments,
+				trustedPromptContext, promptReferencesPrepared, references, false, initialTaskBriefDispatchOwner,
+			)
+		} else {
+			_, err = promptWithContext.PromptTaskWithPromptContext(
+				ctx, taskID, sessionID, content, model, planMode, attachments,
+				trustedPromptContext, promptReferencesPrepared, references, false,
+			)
+		}
+	} else {
+		_, err = h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
 	}
 	if err != nil {
+		err = h.handlePromptWithResume(
+			ctx, taskID, sessionID, content, model, planMode, attachments,
+			trustedPromptContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner, deliverySubmissionID, err,
+		)
+	}
+	if err != nil {
+		if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+			h.markDeliveryMessageBlocked(ctx, deliverySubmissionID)
+			return
+		}
 		// Don't create a prompt error message if the agent itself reported the error.
 		// The agent failure path (handleAgentFailed) already sets the session to FAILED
 		// with the error_message, which the UI displays via agent-status.
@@ -1645,6 +1920,34 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 // delivery once the runtime comes up instead of being reported as failed.
 // Returns true when the message was queued, so the caller must not also
 // report promptErr as an error.
+func (h *MessageHandlers) markDeliveryMessageBlocked(ctx context.Context, messageID string) {
+	if messageID == "" || h.service == nil {
+		return
+	}
+	message, err := h.service.GetMessage(ctx, messageID)
+	if err != nil || message == nil {
+		h.logger.Warn("failed to load saved prompt for delivery recovery status",
+			zap.String("message_id", messageID), zap.Error(err))
+		return
+	}
+	if message.AuthorType != models.MessageAuthorUser {
+		return
+	}
+	metadata := make(map[string]interface{}, len(message.Metadata)+1)
+	for key, value := range message.Metadata {
+		metadata[key] = value
+	}
+	if metadata[models.MessageMetaKeyDeliveryStatus] == models.MessageDeliveryStatusBlocked {
+		return
+	}
+	metadata[models.MessageMetaKeyDeliveryStatus] = models.MessageDeliveryStatusBlocked
+	message.Metadata = metadata
+	if err := h.service.UpdateMessage(ctx, message); err != nil {
+		h.logger.Warn("failed to persist saved prompt delivery recovery status",
+			zap.String("message_id", messageID), zap.Error(err))
+	}
+}
+
 func (h *MessageHandlers) queuePromptIfRuntimeUnavailable(
 	ctx context.Context,
 	taskID, sessionID, content, model string,
@@ -1701,7 +2004,9 @@ func isAgentReportedError(err error) bool {
 var errPromptRecoveryCardOwnsFailure = errors.New("session recovery owns prompt failure")
 
 func isPromptErrorOwnedByRecovery(err error) bool {
-	return errors.Is(err, orchestrator.ErrResumeAttemptCancelled) || errors.Is(err, errPromptRecoveryCardOwnsFailure)
+	return errors.Is(err, orchestrator.ErrResumeAttemptCancelled) ||
+		errors.Is(err, orchestrator.ErrSessionRecoveryRequired) ||
+		errors.Is(err, errPromptRecoveryCardOwnsFailure)
 }
 
 func (h *MessageHandlers) hasActiveSessionRecovery(ctx context.Context, taskID, sessionID string, failure error) bool {
@@ -1762,10 +2067,37 @@ func (h *MessageHandlers) handlePromptWithResume(
 	taskID, sessionID, content, model string,
 	planMode bool,
 	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	initialTaskBriefDispatchOwner bool,
+	deliverySubmissionID string,
 	origErr error,
 ) error {
 	if !errors.Is(origErr, executor.ErrExecutionNotFound) &&
 		!errors.Is(origErr, orchestrator.ErrAgentNotReadyForPrompt) {
+		return origErr
+	}
+	if runner, ok := h.orchestrator.(resumeAndPromptWithPromptContextOrchestrator); ok {
+		if _, retryErr := runner.ResumeTaskSessionAndPromptWithPromptContext(
+			ctx, taskID, sessionID, content, model, planMode, attachments,
+			promptReferenceContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner, deliverySubmissionID,
+		); retryErr != nil {
+			h.logger.Warn("resume and prompt retry failed",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(retryErr))
+			if errors.Is(retryErr, orchestrator.ErrResumeAttemptCancelled) ||
+				h.hasActiveSessionRecovery(ctx, taskID, sessionID, retryErr) {
+				return fmt.Errorf("%w: %w", errPromptRecoveryCardOwnsFailure, retryErr)
+			}
+			return retryErr
+		}
+		return nil
+	}
+	if deliverySubmissionID != "" || promptReferencesPrepared || promptReferenceContext != "" || len(references) > 0 || initialTaskBriefDispatchOwner {
+		h.logger.Warn("prompt context cannot be preserved by the available recovery adapter",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID))
 		return origErr
 	}
 	if runner, ok := h.orchestrator.(resumeAndPromptOrchestrator); ok {
@@ -1847,12 +2179,53 @@ type wsListMessagesRequest struct {
 	Before        string `json:"before"`
 	After         string `json:"after"`
 	Sort          string `json:"sort"`
+	IncludeTurns  bool   `json:"include_turns"`
 }
 
 type wsSearchMessagesRequest struct {
 	TaskSessionID string `json:"session_id"`
 	Query         string `json:"query"`
 	Limit         int    `json:"limit"`
+}
+
+type wsDismissGitPushErrorMessageRequest struct {
+	MessageID string `json:"message_id"`
+}
+
+type wsDismissGitPushErrorMessageResponse struct {
+	MessageID   string `json:"message_id"`
+	DismissedAt string `json:"dismissed_at"`
+}
+
+func (h *MessageHandlers) wsDismissGitPushErrorMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsDismissGitPushErrorMessageRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload", nil)
+	}
+	messageID := strings.TrimSpace(req.MessageID)
+	if messageID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "message_id is required", nil)
+	}
+
+	dismissedAt, err := h.service.DismissGitPushErrorMessage(ctx, messageID)
+	if err != nil {
+		code := ws.ErrorCodeInternalError
+		publicMessage := "Failed to dismiss Git push error message"
+		switch {
+		case errors.Is(err, repoerrors.ErrTaskNotFound), errors.Is(err, sql.ErrNoRows):
+			code = ws.ErrorCodeNotFound
+			publicMessage = "Message not found"
+		case errors.Is(err, service.ErrNotGitPushErrorMessage):
+			code = ws.ErrorCodeValidation
+			publicMessage = "Message is not a Git push error"
+		}
+		h.logger.Warn("failed to dismiss Git push error message", zap.String("message_id", messageID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, code, publicMessage, nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, wsDismissGitPushErrorMessageResponse{
+		MessageID: messageID, DismissedAt: dismissedAt,
+	})
 }
 
 const messageSnippetRadius = 60
@@ -1976,30 +2349,38 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 		req.Limit = service.DefaultMessagesPageSize
 	}
 
-	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{
+	request := service.ListMessagesRequest{
 		TaskSessionID: req.TaskSessionID,
 		Limit:         req.Limit,
 		Before:        req.Before,
 		After:         req.After,
 		Sort:          req.Sort,
-	})
+	}
+	request.IncludeTurns = req.IncludeTurns
+	resp, err := h.listMessagesResponse(ctx, request)
 	if err != nil {
 		h.logger.Error("failed to list messages", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list messages", nil)
 	}
-	result := make([]*v1.Message, 0, len(messages))
-	for _, message := range messages {
-		result = append(result, message.ToAPI())
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+func (h *MessageHandlers) listMessagesResponse(ctx context.Context, request service.ListMessagesRequest) (dto.ListMessagesResponse, error) {
+	if request.IncludeTurns {
+		window, err := h.service.ListMessagesWithTurnWindow(ctx, request)
+		if err != nil {
+			return dto.ListMessagesResponse{}, err
+		}
+		return messageTurnWindowResponse(window), nil
 	}
+	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, request)
+	if err != nil {
+		return dto.ListMessagesResponse{}, err
+	}
+	result := messagesToAPI(messages)
 	cursor := ""
 	if len(result) > 0 {
 		cursor = result[len(result)-1].ID
 	}
-	resp := dto.ListMessagesResponse{
-		Messages: result,
-		Total:    len(result),
-		HasMore:  hasMore,
-		Cursor:   cursor,
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return dto.ListMessagesResponse{Messages: result, Total: len(result), HasMore: hasMore, Cursor: cursor}, nil
 }

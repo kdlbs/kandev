@@ -42,13 +42,20 @@ func TestTaskEnvironmentRepoUpdateDeleteAndBulkCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	for index, repositoryID := range []string{"environment-repo-one", "environment-repo-two"} {
-		if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{ID: "env-link-" + repositoryID, TaskEnvironmentID: environment.ID, RepositoryID: repositoryID, Position: index, WorktreeBranch: "main"}); err != nil {
+		if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+			ID: "env-link-" + repositoryID, TaskEnvironmentID: environment.ID, RepositoryID: repositoryID,
+			Position: index, WorktreeBranch: "main", WorktreeSourceClonePath: "/managed/source",
+			WorktreeSourceCommonDir: "/managed/source/.git",
+		}); err != nil {
 			t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
 		}
 	}
 	links, err := repo.ListTaskEnvironmentRepos(ctx, environment.ID)
 	if err != nil || len(links) != 2 {
 		t.Fatalf("ListTaskEnvironmentRepos = %+v, %v", links, err)
+	}
+	if links[0].WorktreeSourceClonePath != "/managed/source" || links[0].WorktreeSourceCommonDir != "/managed/source/.git" {
+		t.Fatalf("source clone metadata was not persisted: %+v", links[0])
 	}
 	mergedAt := time.Date(2026, time.July, 8, 9, 10, 11, 0, time.UTC)
 	links[0].BranchSlug = "feature"
@@ -635,6 +642,10 @@ func TestCreateTaskSessionWithWorkspaceBindingElectsAndAttaches(t *testing.T) {
 	if !errors.Is(err, models.ErrWorkspacePreparing) {
 		t.Fatalf("second bind error = %v, want preparing", err)
 	}
+	var preparing *models.WorkspacePreparingError
+	if !errors.As(err, &preparing) || preparing.EnvironmentID != first.TaskEnvironmentID {
+		t.Fatalf("second bind error = %#v, want the elected environment %q", err, first.TaskEnvironmentID)
+	}
 	sessions, err := repo.ListTaskSessions(ctx, "task-binding")
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("sessions after blocked bind = %+v, %v", sessions, err)
@@ -745,12 +756,14 @@ func TestCreateTaskSessionWithSharedGroupWorkspaceBindingElectsOneMaterializer(t
 	close(errs)
 
 	var succeeded, preparing int
+	var preparingErr error
 	for err := range errs {
 		switch {
 		case err == nil:
 			succeeded++
 		case errors.Is(err, models.ErrWorkspacePreparing):
 			preparing++
+			preparingErr = err
 		default:
 			t.Fatalf("concurrent group binding error = %v", err)
 		}
@@ -764,6 +777,12 @@ func TestCreateTaskSessionWithSharedGroupWorkspaceBindingElectsOneMaterializer(t
 	}
 	if environmentID == "" {
 		t.Fatal("shared group has no elected environment")
+	}
+	// The losing member's refusal names the environment elected for the group,
+	// which belongs to the other member task.
+	var refusal *models.WorkspacePreparingError
+	if !errors.As(preparingErr, &refusal) || refusal.EnvironmentID != environmentID {
+		t.Fatalf("losing group bind error = %#v, want the elected environment %q", preparingErr, environmentID)
 	}
 	var sessionCount int
 	if err := repo.db.Get(&sessionCount, `SELECT COUNT(*) FROM task_sessions WHERE task_id IN ('task-group-a', 'task-group-b')`); err != nil {

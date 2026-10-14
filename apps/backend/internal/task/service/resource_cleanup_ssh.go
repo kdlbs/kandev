@@ -18,6 +18,7 @@ import (
 // lifecycle package, the same way buildSSHLiveStatus already reads them.
 const (
 	sshMetaHost            = "ssh_host"
+	sshMetaHostAlias       = "ssh_host_alias"
 	sshMetaPort            = "ssh_port"
 	sshMetaUser            = "ssh_user"
 	sshMetaHostFingerprint = "ssh_host_fingerprint"

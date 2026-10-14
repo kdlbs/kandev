@@ -101,6 +101,46 @@ func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 	}
 }
 
+func TestHasTaskSessionsByAgentProfileIncludesCompletedSessions(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-opencode-evidence", Title: "OpenCode evidence"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:             "session-opencode-evidence",
+		TaskID:         "task-opencode-evidence",
+		AgentProfileID: "profile-opencode-evidence",
+		State:          models.TaskSessionStateCompleted,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-opencode-execution-evidence", Title: "OpenCode execution profile evidence"}); err != nil {
+		t.Fatalf("CreateTask for execution profile evidence: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                 "session-opencode-execution-evidence",
+		TaskID:             "task-opencode-execution-evidence",
+		ExecutionProfileID: "profile-opencode-execution-evidence",
+		State:              models.TaskSessionStateCompleted,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession for execution profile evidence: %v", err)
+	}
+
+	got, err := repo.HasTaskSessionsByAgentProfile(ctx, "profile-opencode-evidence")
+	if err != nil || !got {
+		t.Fatalf("HasTaskSessionsByAgentProfile = %v, %v; want true, nil", got, err)
+	}
+	got, err = repo.HasTaskSessionsByAgentProfile(ctx, "profile-unused")
+	if err != nil || got {
+		t.Fatalf("HasTaskSessionsByAgentProfile for unused profile = %v, %v; want false, nil", got, err)
+	}
+	got, err = repo.HasTaskSessionsByAgentProfile(ctx, "profile-opencode-execution-evidence")
+	if err != nil || !got {
+		t.Fatalf("HasTaskSessionsByAgentProfile for execution profile = %v, %v; want true, nil", got, err)
+	}
+}
+
 // ListLiveWorkspaceSessions backs the orphan-reap ownership check's other-task
 // path resolution. It must report the same effective (environment-overridden)
 // workspace_path as GetTaskSession/ListTaskSessions above, never the stale
@@ -1829,6 +1869,36 @@ func TestUpdateTaskSessionIfCurrentStateRejectsStaleFullRowWriter(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateCancelled, stored.State)
 	require.Empty(t, stored.ExecutorID)
+}
+
+func TestUpdateTaskSessionIfCurrentSnapshotRejectsSameStateProgress(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-snapshot-cas", "session-snapshot-cas", "turn-snapshot-cas")
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, "session-snapshot-cas", map[string]interface{}{"owner": "original"}))
+	stale, err := repo.GetTaskSession(ctx, "session-snapshot-cas")
+	require.NoError(t, err)
+	expectedUpdatedAt := stale.UpdatedAt
+	require.False(t, expectedUpdatedAt.IsZero())
+
+	winner, err := repo.GetTaskSession(ctx, stale.ID)
+	require.NoError(t, err)
+	winner.AgentProfileID = "winning-profile"
+	require.NoError(t, repo.UpdateTaskSession(ctx, winner))
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, stale.ID, map[string]interface{}{"owner": "winning-launch"}))
+
+	stale.AgentProfileID = "original-profile"
+	changed, err := repo.UpdateTaskSessionIfCurrentSnapshot(
+		ctx, stale, stale.State, expectedUpdatedAt, map[string]interface{}{"owner": "original"},
+	)
+	require.NoError(t, err)
+	require.False(t, changed, "a same-state row update must supersede snapshot rollback")
+
+	stored, err := repo.GetTaskSession(ctx, stale.ID)
+	require.NoError(t, err)
+	require.Equal(t, stale.State, stored.State)
+	require.Equal(t, "winning-profile", stored.AgentProfileID)
+	require.Equal(t, "winning-launch", stored.Metadata["owner"])
 }
 
 func TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite(t *testing.T) {

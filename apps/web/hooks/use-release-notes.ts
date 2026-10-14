@@ -86,10 +86,10 @@ export function useReleaseNotes() {
   }, [changelog, latestRelease.version, storeApi]);
 
   const openDialog = useCallback(() => {
-    setDialogEntries(unseenEntries);
+    setDialogEntries(unseenEntries.length > 0 ? unseenEntries : [latestRelease]);
     setDialogOpen(true);
     markAsSeen();
-  }, [markAsSeen, unseenEntries]);
+  }, [latestRelease, markAsSeen, unseenEntries]);
 
   const closeDialog = useCallback(() => {
     setDialogOpen(false);

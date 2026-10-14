@@ -5,6 +5,7 @@ import type {
   SSHSession,
   SSHAgentReadinessResponse,
   SSHProbeShellsResponse,
+  SSHIdentitiesResponse,
   SSHReachabilityRecord,
 } from "@/lib/types/http-ssh";
 
@@ -72,6 +73,17 @@ export async function probeSSHShells(
       },
     },
   );
+}
+
+/**
+ * Lists the private key files the backend host could use as a `file` identity
+ * source. Admin-only: callers must treat a rejection as "no picker" rather
+ * than as an error worth surfacing, because the free-text path still works.
+ */
+export async function listSSHIdentities(
+  options?: ApiRequestOptions,
+): Promise<SSHIdentitiesResponse> {
+  return fetchJson<SSHIdentitiesResponse>("/api/v1/ssh/identities", options);
 }
 
 export async function getSSHReachability(

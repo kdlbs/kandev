@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -15,18 +14,18 @@ import (
 const repositoryBranchPolicyColumns = `id, repository_id, name, description, base_branch, branch_template, pull_request_target, created_at, updated_at`
 
 func (r *Repository) CreateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error {
-	if policy.ID == "" {
-		policy.ID = uuid.New().String()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	now := time.Now().UTC()
-	policy.CreatedAt = now
-	policy.UpdatedAt = now
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO repository_branch_policies (`+repositoryBranchPolicyColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), policy.ID, policy.RepositoryID, policy.Name, policy.Description, policy.BaseBranch,
-		policy.BranchTemplate, policy.PullRequestTarget, policy.CreatedAt, policy.UpdatedAt)
-	return err
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockRepositoryBranchPolicyAdmission(ctx, tx, policy.RepositoryID); err != nil {
+		return err
+	}
+	if err := r.insertRepositoryBranchPolicy(ctx, tx, policy); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) scanRepositoryBranchPolicy(row *sql.Row) (*models.RepositoryBranchPolicy, error) {
@@ -145,6 +144,9 @@ func (r *Repository) CreateRepositoryBranchPoliciesIfEmpty(ctx context.Context, 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockRepositoryBranchPolicyAdmission(ctx, tx, repositoryID); err != nil {
+		return err
+	}
 	var count int
 	if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM repository_branch_policies WHERE repository_id = ?`), repositoryID); err != nil {
 		return err
@@ -153,18 +155,8 @@ func (r *Repository) CreateRepositoryBranchPoliciesIfEmpty(ctx context.Context, 
 		return repoerrors.ErrRepositoryBranchPoliciesExist
 	}
 	for _, policy := range policies {
-		if policy.ID == "" {
-			policy.ID = uuid.New().String()
-		}
-		now := time.Now().UTC()
 		policy.RepositoryID = repositoryID
-		policy.CreatedAt = now
-		policy.UpdatedAt = now
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-			INSERT INTO repository_branch_policies (`+repositoryBranchPolicyColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`), policy.ID, policy.RepositoryID, policy.Name, policy.Description, policy.BaseBranch,
-			policy.BranchTemplate, policy.PullRequestTarget, policy.CreatedAt, policy.UpdatedAt); err != nil {
+		if err := r.insertRepositoryBranchPolicy(ctx, tx, policy); err != nil {
 			return err
 		}
 	}

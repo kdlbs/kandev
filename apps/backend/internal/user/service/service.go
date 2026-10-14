@@ -91,6 +91,7 @@ type UpdateUserSettingsRequest struct {
 	SidebarTaskColorPatch             *models.SidebarTaskColorPatch
 	TaskCreateLastUsed                *models.TaskCreateLastUsed
 	JiraSavedViews                    **json.RawMessage
+	JiraDefaultViewID                 *string
 	JiraTaskPresets                   **json.RawMessage
 	GitHubSavedPresets                **json.RawMessage
 	GitHubDefaultQueryPresets         **json.RawMessage
@@ -105,8 +106,12 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontSize                  *int
 	ChangesPanelLayout                *string
 	LastSeenDisplay                   *string
+	MessageTimeDisplay                *string
+	AgentTabCloseBehavior             *string
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
+	SidebarFastActionsEnabled         *bool
+	SidebarNewTaskStyle               *string
 	SidebarHoverEnabled               *bool
 	SidebarHoverDelayMs               *int
 	ResolveSessionHostnames           *bool
@@ -401,6 +406,12 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.JiraDefaultViewID != nil {
+		settings.JiraDefaultViewID = strings.TrimSpace(*req.JiraDefaultViewID)
+	}
+	if err := applySidebarPresentationSettings(settings, req); err != nil {
+		return err
+	}
 	if err := applySidebarHoverSettings(settings, req); err != nil {
 		return err
 	}
@@ -421,6 +432,12 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	if err := applyLastSeenDisplay(settings, req.LastSeenDisplay); err != nil {
+		return err
+	}
+	if err := applyMessageTimeDisplay(settings, req.MessageTimeDisplay); err != nil {
+		return err
+	}
+	if err := applyAgentTabCloseBehavior(settings, req.AgentTabCloseBehavior); err != nil {
 		return err
 	}
 	applySystemMetricsDisplay(settings, req.SystemMetricsDisplay)
@@ -813,7 +830,7 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 		if !models.IsValidTasksListGroup(v) {
 			return fmt.Errorf("tasks_list_group must be one of %s", strings.Join(models.TasksListGroupValues(), ", "))
 		}
-		settings.TasksListGroup = v
+		settings.TasksListGroup = models.NormalizeTasksListGroup(v)
 	}
 	return nil
 }
@@ -902,6 +919,29 @@ func applyLastSeenDisplay(settings *models.UserSettings, value *string) error {
 		return errors.New("last_seen_display must be 'absolute' or 'relative'")
 	}
 	settings.LastSeenDisplay = v
+	return nil
+}
+func applyMessageTimeDisplay(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != models.MessageTimeDisplayRelative && v != models.MessageTimeDisplayAbsoluteShort && v != models.MessageTimeDisplayAbsoluteLong {
+		return errors.New("message_time_display must be 'relative', 'absolute_short', or 'absolute_long'")
+	}
+	settings.MessageTimeDisplay = v
+	return nil
+}
+
+func applyAgentTabCloseBehavior(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != models.AgentTabCloseBehaviorDeleteSession && v != models.AgentTabCloseBehaviorHidePanel {
+		return errors.New("agent_tab_close_behavior must be 'delete_session' or 'hide_panel'")
+	}
+	settings.AgentTabCloseBehavior = v
 	return nil
 }
 
@@ -1189,6 +1229,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"sidebar_task_colors":                      models.CloneSidebarTaskColors(settings.SidebarTaskColors),
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
+		"jira_default_view_id":                     settings.JiraDefaultViewID,
 		"jira_task_presets":                        settings.JiraTaskPresets,
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
@@ -1203,8 +1244,11 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"terminal_font_size":                       settings.TerminalFontSize,
 		"changes_panel_layout":                     settings.ChangesPanelLayout,
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
+		"message_time_display":                     models.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"sidebar_fast_actions_enabled":             settings.SidebarFastActionsEnabled,
+		"sidebar_new_task_style":                   settings.SidebarNewTaskStyle,
 		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
 		"sidebar_hover_delay_ms":                   settings.SidebarHoverDelayMs,
 		"resolve_session_hostnames":                settings.ResolveSessionHostnames,

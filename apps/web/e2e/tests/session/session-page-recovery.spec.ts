@@ -1,8 +1,8 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect } from "@playwright/test";
 import { SessionPage } from "../../pages/session-page";
 
 test("idle recovery ignores background controls and observes an in-flight resume", async ({
-  testPage,
+  page: testPage,
 }) => {
   await testPage.setContent(`
     <div data-testid="session-chat" hidden>

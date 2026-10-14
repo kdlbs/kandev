@@ -11,7 +11,9 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins/state"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 // agentConversationTaskAdapter wraps the shared repository to satisfy the
@@ -20,6 +22,7 @@ import (
 // exact method signatures we need.
 type agentConversationTaskAdapter struct {
 	repo interface {
+		managed.Repository
 		GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 		ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
 		ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*taskmodels.Task, error)
@@ -51,6 +54,14 @@ func (a agentConversationTaskAdapter) UpdateTask(ctx context.Context, task *task
 
 func (a agentConversationTaskAdapter) DeleteTask(ctx context.Context, taskID string) error {
 	return a.repo.DeleteTask(ctx, taskID)
+}
+
+func (a agentConversationTaskAdapter) EnsureManagedConversation(ctx context.Context, input managed.EnsureRequest) (managed.Result, error) {
+	return a.repo.EnsureManagedConversation(ctx, input)
+}
+
+func (a agentConversationTaskAdapter) ChangeManagedConversationState(ctx context.Context, input managed.StateRequest) (managed.Result, error) {
+	return a.repo.ChangeManagedConversationState(ctx, input)
 }
 
 // agentConversationSessionAdapter wraps the shared repository to satisfy the
@@ -142,6 +153,15 @@ func (a agentConversationDispatcherAdapter) Deliver(ctx context.Context, taskID 
 	return a.messenger.StartOrPromptIdempotent(ctx, taskID, session, text, source, idempotencyID)
 }
 
+func (a agentConversationDispatcherAdapter) DispatchImmediate(
+	ctx context.Context,
+	taskID string,
+	session *taskmodels.TaskSession,
+	text, source, idempotencyID string,
+) (pluginsdk.ManagedAgentDispatchStatus, error) {
+	return a.messenger.DispatchImmediate(ctx, taskID, session, text, source, idempotencyID)
+}
+
 // NewAgentConversationService creates the managed conversation service wired
 // to the shared repository, agent settings repository, plugin state store,
 // and event bus. Called during boot after the task service, repository, and
@@ -149,6 +169,7 @@ func (a agentConversationDispatcherAdapter) Deliver(ctx context.Context, taskID 
 // the orchestrator exists — see SetAgentConversationsDispatcher.
 func NewAgentConversationService(
 	taskRepo interface {
+		managed.Repository
 		GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 		ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
 		ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*taskmodels.Task, error)

@@ -2,6 +2,10 @@ package worktree
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -51,5 +55,40 @@ func TestInspectDirtyWorktreesFailsClosedWhenRequiredMetadataIsMissing(t *testin
 				t.Fatalf("inspection error = %v, want worktree id %q", err, id)
 			}
 		})
+	}
+}
+
+func TestInspectDirtyWorktreesAllowsCheckoutRemovedDuringGitStatus(t *testing.T) {
+	mgr, _ := newReferenceCleanupTestManager(t)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-inspect-race", "session-inspect-race")
+
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("find git: %v", err)
+	}
+	shimDir := t.TempDir()
+	gitShim := filepath.Join(shimDir, "git")
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$3" = "status" ]; then
+  /bin/rm -rf -- "$KDEV_TEST_REMOVE_WORKTREE"
+  exit 128
+fi
+exec %q "$@"
+`, gitPath)
+	if err := os.WriteFile(gitShim, []byte(script), 0o755); err != nil {
+		t.Fatalf("write git shim: %v", err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("KDEV_TEST_REMOVE_WORKTREE", wt.Path)
+
+	dirty, err := mgr.InspectDirtyWorktrees(context.Background(), []*Worktree{wt})
+	if err != nil {
+		t.Fatalf("inspection should tolerate a checkout removed by concurrent cleanup: %v", err)
+	}
+	if len(dirty) != 0 {
+		t.Fatalf("dirty worktrees = %#v, want none for a removed checkout", dirty)
+	}
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("git shim did not remove checkout, stat error = %v", err)
 	}
 }

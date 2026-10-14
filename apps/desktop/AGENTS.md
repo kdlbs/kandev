@@ -7,8 +7,10 @@
 Run from `apps/` unless noted:
 
 - `pnpm --filter @kandev/desktop build:vite` builds the startup surface.
-- `pnpm --filter @kandev/desktop build` builds the Linux desktop bundle locally.
+- `pnpm --filter @kandev/desktop build` builds Linux `deb` and `rpm` bundles only.
 - `pnpm --filter @kandev/desktop e2e` builds the app and runs the Linux smoke harness under Xvfb when needed.
+- From the repository root, `make desktop-dev` prepares the native runtime and starts Tauri dev; `make desktop-build` prepares the runtime and builds the macOS app bundle/DMG; `make desktop-open` builds and opens the `.app`.
+- Running the lower-level Tauri dev command directly requires prepared runtime resources or `KANDEV_DESKTOP_RUNTIME_DIR` pointing to them.
 - From `apps/desktop/src-tauri`, `cargo test --features desktop-runtime` runs the complete Rust
   suite, including native command/plugin integration.
 
@@ -19,11 +21,11 @@ Release builds prepare `src-tauri/resources/kandev/` with:
 ```text
 bin/kandev[.exe]
 bin/agentctl[.exe]
-bin/agentctl-linux-amd64
-bin/agentctl-linux-arm64
-bin/agentctl-darwin-arm64
-bin/agentctl-darwin-amd64
+remote-helpers.json (Stable standard resources)
 ```
+
+Legacy complete resources without `remote-helpers.json` still require all four
+cross-platform helper binaries under `bin/` during update/start validation.
 
 Use `scripts/release/prepare-desktop-runtime.sh` and `scripts/release/verify-desktop-runtime.sh`; do not commit runtime binaries. The tracked `.gitignore` files only keep the resource directory present for Tauri config validation.
 
@@ -31,9 +33,12 @@ Use `scripts/release/prepare-desktop-runtime.sh` and `scripts/release/verify-des
 
 - Frontend code in `src/` is only the startup/error surface. The real product UI is still served by the Go backend after `/ready` succeeds.
 - Rust code owns backend process spawning and cleanup. Do not expose broad shell or filesystem permissions to frontend JavaScript.
+- Auxiliary children started outside `BackendState` use the private `child_process::spawn_managed` helper. It allocates a named wait worker before spawning and reaps only the exact child; do not discard auxiliary `Child` handles or add a global reaper.
 - Native menus emit versioned `kandev-desktop-v1-*` events for SPA-owned context and navigation.
   Updater, notification, and external-link operations use narrow generated Tauri commands scoped
   to the owned loopback WebView; do not grant the SPA direct plugin permissions.
+- Release developer tools are enabled by the `desktop-runtime` Tauri feature and the main webview
+  builder. The native View menu opens the inspector; do not expose it through the SPA bridge.
 - Desktop launches force `KANDEV_SERVER_HOST=127.0.0.1`, prefer a stable desktop port with random fallback, and pass `KANDEV_BUNDLE_DIR` to the native launcher.
 - Desktop launches set `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS=true` so the owned backend suppresses
   only its duplicate System notification provider.

@@ -14,6 +14,7 @@ export function useTaskMenuDialogState() {
   const [showPRDialog, setShowPRDialog] = useState(false);
   const [showIssueDialog, setShowIssueDialog] = useState(false);
   const [showMRDialog, setShowMRDialog] = useState(false);
+  const [showChangeWorkflow, setShowChangeWorkflow] = useState(false);
   const [externalLinkProvider, setExternalLinkProvider] = useState<ExternalLinkProvider | null>(
     null,
   );
@@ -24,6 +25,7 @@ export function useTaskMenuDialogState() {
     setShowPRDialog(false);
     setShowIssueDialog(false);
     setShowMRDialog(false);
+    setShowChangeWorkflow(false);
     setExternalLinkProvider(null);
   }, []);
   return {
@@ -39,6 +41,8 @@ export function useTaskMenuDialogState() {
     setShowIssueDialog,
     showMRDialog,
     setShowMRDialog,
+    showChangeWorkflow,
+    setShowChangeWorkflow,
     externalLinkProvider,
     setExternalLinkProvider,
     closeAll,

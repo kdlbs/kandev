@@ -25,6 +25,13 @@ driven by `SchedulerIntegration.tick`
 (`internal/office/service/scheduler_integration.go`). Every control in this design
 attaches either to that transition or to the enqueue that precedes it.
 
+This design owns the Office launch policy attached to enqueue and claim. The
+shared `Run` and `RunEvent` data contracts live in `internal/runs/models`, per
+[the run contract ownership decision](../../../decisions/2026-09-26-run-contract-ownership.md).
+Office requirements continue to own the meaning and derivation of Office policy
+fields carried by those records. This boundary does not change persistence or
+wire behavior.
+
 Adjacent contracts this design uses but does not own:
 
 - `agent_profiles` and its `max_concurrent_sessions` column belong to the agent

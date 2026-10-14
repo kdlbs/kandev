@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { expect, type Locator } from "@playwright/test";
 import type { Page } from "@playwright/test";
@@ -101,17 +102,23 @@ export async function scrollToLastLargeFile(lastFile: Locator, viewport: Locator
   throw new Error("last large file row did not enter the virtualized window");
 }
 
-export function seedLargeFileTree(backend: BackendContext): void {
+export function seedLargeFileTree(backend: BackendContext, branch: string): void {
   const git = new GitHelper(
     path.join(backend.tmpDir, "repos", "e2e-repo"),
     makeGitEnv(backend.tmpDir),
   );
-  for (let index = 0; index < LARGE_FILE_TREE_COUNT; index += 1) {
-    git.createFile(largeFileTreePath(index), `large tree entry ${index}\n`);
-  }
-  git.stageAll();
-  if (git.exec("git status --short").trim()) {
-    git.commit("seed large file tree");
+  git.exec(`git checkout -b ${branch} main`);
+  try {
+    for (let index = 0; index < LARGE_FILE_TREE_COUNT; index += 1) {
+      git.createFile(largeFileTreePath(index), `large tree entry ${index}\n`);
+    }
+    git.stageAll();
+    if (git.exec("git status --short").trim()) {
+      git.commit("seed large file tree");
+    }
+    git.exec(`git push origin ${branch}`);
+  } finally {
+    git.exec("git checkout main");
   }
 }
 
@@ -128,21 +135,38 @@ export async function setupLargeFileTreeTask({
   backend: BackendContext;
   title: string;
 }): Promise<SessionPage> {
-  seedLargeFileTree(backend);
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
+  const branch = `e2e-large-file-tree-${randomUUID()}`;
+  seedLargeFileTree(backend, branch);
+  const response = await apiClient.rawRequest(
+    "GET",
+    `/api/v1/repositories/${seedData.repositoryId}`,
   );
-  await testPage.goto(`/t/${task.id}`);
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 45_000 });
-  return session;
+  if (!response.ok) throw new Error("could not read repository before large-tree fixture");
+  const repository = (await response.json()) as { default_branch: string };
+  await apiClient.updateRepository(seedData.repositoryId, { default_branch: branch });
+  try {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      title,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    return session;
+  } finally {
+    await apiClient.updateRepository(seedData.repositoryId, {
+      default_branch: repository.default_branch,
+    });
+  }
 }

@@ -2,6 +2,7 @@
 status: active
 system: system-page
 created: 2026-09-14
+updated: 2026-10-12
 owners:
   - kandev
 ---
@@ -95,6 +96,21 @@ rules, so that I understand the first cleanup and its recovery limits.
 - **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.7:** Backup recovery shall use the
   existing database restore process. The page shall explain that restore affects
   the whole database and can replace newer data. No per-message undo is promised.
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.8:** Backup verification shall run
+  its integrity check on the backup file at its native absolute path through a
+  read-only connection. This includes a Windows drive-letter path and a path
+  containing a space, `#`, `%`, or, where file names allow it, `?`. Verification
+  shall not create or check any other file.
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.9:** When backup preparation
+  fails, the backend shall keep the underlying error message as
+  valid UTF-8, cut to at most 1,024 bytes after replacing invalid byte sequences,
+  in the stored retention record. The backend shall log the original error
+  only after committing the failure for the matching policy revision and
+  operation. Cancellation, stale completions, and failed state writes shall
+  not produce a current-preparation failure log. The status response
+  shall still report only the failure code. A later successful preparation, a
+  disable, a new pending preparation, or an interrupted preparation shall
+  clear the stored message.
 
 ### REQ-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003: Background operation and access
 
@@ -126,6 +142,11 @@ rules, so that I understand the first cleanup and its recovery limits.
 - **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003.8:** A successful status request
   shall not dismiss an unresolved user-action error or a recorded failed operation.
   Recovery shall not retry mutations or enable compaction automatically.
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003.9:** A failed status read shall say
+  that current status is unavailable while retaining the last known analysis
+  and its timestamp. It shall not describe a still-running analysis as a failed
+  operation. A persisted failed operation and a failed user action shall retain
+  their distinct failure feedback.
 
 ## Out of scope
 
@@ -138,4 +159,6 @@ rules, so that I understand the first cleanup and its recovery limits.
 
 - [System design](../system-design/tool-payload-retention.md)
 - [Implementation plan](../../../plans/tool-payload-retention/plan.md)
+- [Preparation failure diagnostics plan](../../../plans/database-hygiene/plan.md)
 - [Vacuum and status recovery fix](../../../plans/vacuum-compaction-status/plan.md)
+- [Database statistics resilience plan](../../../plans/database-statistics-resilience/plan.md)

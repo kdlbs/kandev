@@ -106,14 +106,14 @@ expect git-bash Windows_NT MINGW64 deadcode \
 # assert it in full across all three shells: Git Bash carries LC_ALL=C, Unix and
 # native cmd do not.
 expect git-bash Windows_NT MINGW64 test \
-	'LC_ALL=C CGO_ENABLED=1 go test -tags fts5 ./...' \
-	'go test -tags fts5'
+	'LC_ALL=C CGO_ENABLED=1 go test -trimpath -tags fts5 ./...' \
+	'go test -trimpath -tags fts5'
 expect unix '' '' test \
-	'CGO_ENABLED=1 go test -tags fts5 ./...' \
-	'go test -tags fts5'
+	'CGO_ENABLED=1 go test -trimpath -tags fts5 ./...' \
+	'go test -trimpath -tags fts5'
 expect windows-native Windows_NT '' test \
-	'set CGO_ENABLED=1& go test -tags fts5 ./...' \
-	'go test -tags fts5'
+	'set CGO_ENABLED=1& go test -trimpath -tags fts5 ./...' \
+	'go test -trimpath -tags fts5'
 
 # mkdir — the Windows branch must check for the directory before calling cmd's
 # mkdir, so rebuilding over an existing bin/ stays quiet while other errors stay

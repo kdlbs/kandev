@@ -100,14 +100,16 @@ func TestSQLiteStore_ProjectsStableTaskDirName(t *testing.T) {
 	}
 
 	wt := &Worktree{
-		ID:           "wt-stable-root",
-		SessionID:    "session-stable-root",
-		RepositoryID: "repo-stable-root",
-		Path:         "/tmp/stable-root/repo",
-		Branch:       "feature/stable-root",
-		Status:       StatusActive,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:              "wt-stable-root",
+		SessionID:       "session-stable-root",
+		RepositoryID:    "repo-stable-root",
+		Path:            "/tmp/stable-root/repo",
+		Branch:          "feature/stable-root",
+		SourceClonePath: "/managed/workspaces/workspace-1/github/acme/repo",
+		SourceCommonDir: "/managed/workspaces/workspace-1/github/acme/repo/.git",
+		Status:          StatusActive,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 	if err := store.CreateWorktree(ctx, wt); err != nil {
 		t.Fatalf("create worktree: %v", err)
@@ -122,6 +124,102 @@ func TestSQLiteStore_ProjectsStableTaskDirName(t *testing.T) {
 	}
 	if got.TaskDirName != "original-task-root_abc" {
 		t.Fatalf("TaskDirName = %q, want original-task-root_abc", got.TaskDirName)
+	}
+	if got.SourceClonePath != wt.SourceClonePath || got.SourceCommonDir != wt.SourceCommonDir {
+		t.Fatalf("source clone identity = (%q, %q), want (%q, %q)", got.SourceClonePath, got.SourceCommonDir, wt.SourceClonePath, wt.SourceCommonDir)
+	}
+}
+
+func TestSQLiteStore_ReadRecoverySelectionSnapshotIncludesCompleteActiveInventory(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	store.seedSessionWithEnvironment(t, "session-recovery-selection", "task-recovery-selection")
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('workspace', 'Workspace', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO repositories (
+			id, workspace_id, name, source_type, local_path, provider, provider_host,
+			provider_owner, provider_name, remote_url, created_at, updated_at
+		) VALUES
+			('repo-selection-a', 'workspace', 'widget-a', 'github', '/repos/widget-a', 'github', 'github.com', 'acme', 'widget-a', 'https://github.com/acme/widget-a.git', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			('repo-selection-b', 'workspace', 'widget-b', 'local', '/repos/widget-b', '', '', '', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed repositories: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO task_environment_repos (
+			id, task_environment_id, repository_id, branch_slug, worktree_id, worktree_path,
+			worktree_branch, worktree_source_clone_path, worktree_source_common_dir,
+			position, status, created_at, updated_at
+		) VALUES
+			('slot-selection-a', 'env-session-recovery-selection', 'repo-selection-a', 'main', 'wt-selection-a', '/tasks/widget-a', 'feature/a', '/repos/old-a', '/repos/old-a/.git', 0, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			('slot-selection-b', 'env-session-recovery-selection', 'repo-selection-b', 'main', '', '', '', '', '', 1, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			('slot-selection-deleted', 'env-session-recovery-selection', 'repo-selection-b', 'deleted', 'wt-deleted', '/tasks/deleted', 'feature/deleted', '', '', 2, 'deleted', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed environment inventory: %v", err)
+	}
+
+	expected := models.WorkspaceRecoverySelectionSnapshot{
+		TaskID: "task-recovery-selection", SessionID: "session-recovery-selection",
+		SessionPersisted: true, SessionTaskEnvironmentID: "env-session-recovery-selection",
+		TaskEnvironmentID: "env-session-recovery-selection",
+	}
+	snapshot, err := store.ReadRecoverySelectionSnapshot(ctx, expected)
+	if err != nil {
+		t.Fatalf("read selected inventory: %v", err)
+	}
+	if snapshot.TaskID != "task-recovery-selection" || snapshot.SessionID != "session-recovery-selection" || !snapshot.SessionPersisted ||
+		snapshot.SessionTaskEnvironmentID != "env-session-recovery-selection" ||
+		snapshot.TaskEnvironmentID != "env-session-recovery-selection" || snapshot.OwnershipGeneration != 1 {
+		t.Fatalf("selection identity = %+v", snapshot)
+	}
+	if len(snapshot.Slots) != 2 {
+		t.Fatalf("active slot count = %d, want 2 including unmaterialized sibling", len(snapshot.Slots))
+	}
+	if snapshot.Slots[0].EnvironmentRepoID != "slot-selection-a" ||
+		snapshot.Slots[0].WorktreeID != "wt-selection-a" || snapshot.Slots[0].RepositoryLocalPath != "/repos/widget-a" ||
+		!snapshot.Slots[0].RepositoryPresent {
+		t.Fatalf("materialized slot identity = %+v", snapshot.Slots[0])
+	}
+	if snapshot.Slots[1].EnvironmentRepoID != "slot-selection-b" || snapshot.Slots[1].WorktreeID != "" ||
+		snapshot.Slots[1].RepositoryLocalPath != "/repos/widget-b" || !snapshot.Slots[1].RepositoryPresent ||
+		snapshot.Slots[1].Status != "active" {
+		t.Fatalf("unmaterialized active slot identity = %+v", snapshot.Slots[1])
+	}
+}
+
+func TestSQLiteStore_ReadRecoverySelectionSnapshotTracksProspectiveSessionAbsence(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	store.seedSessionWithEnvironment(t, "session-existing", "task-prospective-session")
+	expected := models.WorkspaceRecoverySelectionSnapshot{
+		TaskID: "task-prospective-session", SessionID: "session-prospective",
+		SessionTaskEnvironmentID: "env-session-existing", TaskEnvironmentID: "env-session-existing",
+	}
+	before, err := store.ReadRecoverySelectionSnapshot(ctx, expected)
+	if err != nil {
+		t.Fatalf("read absent prospective session: %v", err)
+	}
+	if before.SessionPersisted || before.SessionID != expected.SessionID ||
+		before.SessionTaskEnvironmentID != expected.SessionTaskEnvironmentID {
+		t.Fatalf("prospective session snapshot = %+v, want selected session absent", before)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO task_sessions (id, task_id, state, task_environment_id, started_at, updated_at)
+		VALUES (?, ?, 'CREATED', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, expected.SessionID, expected.TaskID, expected.TaskEnvironmentID); err != nil {
+		t.Fatalf("insert prospective session: %v", err)
+	}
+	after, err := store.ReadRecoverySelectionSnapshot(ctx, expected)
+	if err != nil {
+		t.Fatalf("read newly persisted session: %v", err)
+	}
+	if !after.SessionPersisted || before.Equal(after) {
+		t.Fatalf("newly persisted session was not detected: before=%+v after=%+v", before, after)
 	}
 }
 
@@ -427,12 +525,14 @@ func TestSQLiteStore_IgnoresInventoryOnlyRows(t *testing.T) {
 	}
 
 	physical := &Worktree{
-		ID:           "wt-physical",
-		SessionID:    "session-inventory",
-		RepositoryID: "repo-physical",
-		Path:         "/tmp/physical-worktree",
-		Branch:       "feature/task",
-		Status:       StatusActive,
+		ID:              "wt-physical",
+		SessionID:       "session-inventory",
+		RepositoryID:    "repo-physical",
+		SourceClonePath: "/managed/source/repo",
+		SourceCommonDir: "/managed/source/repo/.git",
+		Path:            "/tmp/physical-worktree",
+		Branch:          "feature/task",
+		Status:          StatusActive,
 	}
 	if err := store.CreateWorktree(ctx, physical); err != nil {
 		t.Fatalf("create physical worktree: %v", err)
@@ -444,6 +544,10 @@ func TestSQLiteStore_IgnoresInventoryOnlyRows(t *testing.T) {
 	}
 	if len(byTask) != 1 || byTask[0].ID != physical.ID {
 		t.Fatalf("task worktrees = %+v, want only %q", byTask, physical.ID)
+	}
+	if byTask[0].SourceClonePath != physical.SourceClonePath || byTask[0].SourceCommonDir != physical.SourceCommonDir {
+		t.Fatalf("task worktree source identity = (%q, %q), want (%q, %q)",
+			byTask[0].SourceClonePath, byTask[0].SourceCommonDir, physical.SourceClonePath, physical.SourceCommonDir)
 	}
 
 	paths, err := store.ListActiveWorktreePaths(ctx)

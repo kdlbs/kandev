@@ -64,7 +64,18 @@ type TasksConfig struct {
 	// session reconciliation sweep classifies an active session with no live
 	// execution as stalled (issue #3712). The orphaned-session healing grace
 	// window is twice this value.
-	StallDetectionThreshold time.Duration `mapstructure:"stallDetectionThreshold"`
+	StallDetectionThreshold time.Duration           `mapstructure:"stallDetectionThreshold"`
+	DeliveryRetention       DeliveryRetentionConfig `mapstructure:"deliveryRetention"`
+}
+
+// DeliveryRetentionConfig bounds the backend's redundant durable-delivery evidence.
+type DeliveryRetentionConfig struct {
+	PayloadGrace time.Duration `mapstructure:"payloadGrace"`
+	ReplayAge    time.Duration `mapstructure:"replayAge"`
+	ReplayEvents int           `mapstructure:"replayEvents"`
+	Interval     time.Duration `mapstructure:"interval"`
+	BatchRows    int           `mapstructure:"batchRows"`
+	BatchBytes   int           `mapstructure:"batchBytes"`
 }
 
 // CredentialsConfig contains operator-managed credential file settings.
@@ -405,6 +416,12 @@ type EventsConfig struct {
 }
 
 // DockerConfig holds Docker client configuration.
+//
+// Every field here configures Kandev as a Docker *client*, driving the daemon
+// it creates task containers on. None of them configures the container Kandev
+// itself runs in: when Kandev runs from the published image, its own network,
+// volumes, and ports come from the `docker run` or Compose invocation that
+// started it, which Kandev never reads.
 type DockerConfig struct {
 	// Enabled controls whether the Docker runtime is available for task execution.
 	// When true and Docker is accessible, tasks can use Docker-based executors.
@@ -413,7 +430,6 @@ type DockerConfig struct {
 	Host           string `mapstructure:"host"`
 	APIVersion     string `mapstructure:"apiVersion"`
 	TLSVerify      bool   `mapstructure:"tlsVerify"`
-	DefaultNetwork string `mapstructure:"defaultNetwork"`
 	VolumeBasePath string `mapstructure:"volumeBasePath"`
 }
 
@@ -488,6 +504,7 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+
 	// LSPBrowserContinuity gates runtime-owned language-server leases that stay
 	// connected across browser attachment loss. Off in every embedded profile.
 	LSPBrowserContinuity bool `mapstructure:"lsp_browser_continuity" json:"lspBrowserContinuity"`
@@ -538,18 +555,6 @@ type FeaturesConfig struct {
 	// can regress without notice.
 	ClaudeMidTurnSteering bool `mapstructure:"claude_mid_turn_steering" json:"claudeMidTurnSteering"`
 
-	// OfficeSessionIdentity keys an Office task's session identity on the run's
-	// own agent instead of the task's runner seat, and binds an agent's
-	// decision re-evaluation to its own calling session instead of the task's
-	// most-recently-started session. On in every embedded profile; it remains a
-	// high-risk, path-scoped change to durable session identity. A live
-	// (task_id, agent_profile_id) pair is guarded in-transaction on the office
-	// session creation path, not by a table-level constraint, and pre-existing
-	// duplicate rows stay safe by selection, not migration. The toggle remains a
-	// kill switch that restores runner-seat binding and task-active-session
-	// decision re-evaluation when disabled.
-	OfficeSessionIdentity bool `mapstructure:"office_session_identity" json:"officeSessionIdentity"`
-
 	// NeedsYouInbox gates the Needs-you Inbox: a workspace-scoped sidebar
 	// destination, independent of Office, listing exactly the answerable
 	// clarification bundles for the active workspace. Off in prod until the
@@ -562,6 +567,37 @@ type FeaturesConfig struct {
 	// Windows (survival trades the platform's kill-on-job-close safeguard for
 	// an adoption handshake, which is untested there).
 	AgentSurvival bool `mapstructure:"agent_survival" json:"agentSurvival"`
+
+	// Coordinator gates workspace coordinators: a per-workspace agent
+	// configuration whose copilot conversation proposes ordinary, unstarted
+	// tasks for a human to approve. Off in prod/dev until the feature is
+	// user-ready; on in e2e so tests exercise it.
+	Coordinator bool `mapstructure:"coordinator" json:"coordinator"`
+
+	// CoordinatorPhase2 gates the coordinator control surface (policy,
+	// watches, standing orders, goals, activity log and the new proposal
+	// kinds). It only takes effect together with Coordinator.
+	CoordinatorPhase2 bool `mapstructure:"coordinator_phase2" json:"coordinatorPhase2"`
+
+	// CoordinatorPhase3 gates coordinator autonomy (unattended wakes, the
+	// spend ceiling, automatic decisions). It only takes effect together
+	// with Coordinator and CoordinatorPhase2.
+	CoordinatorPhase3 bool `mapstructure:"coordinator_phase3" json:"coordinatorPhase3"`
+
+	// CoordinatorPhase31 gates the phase 3.1 surfaces: pausing a coordinator,
+	// the Projects scope editor, and everything that reads or acts on the
+	// recorded turn ledger. Recording itself runs without it. It only takes
+	// effect together with Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
+	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
+
+	// CodexAppServer enables the separate native Codex app-server agent. It is
+	// off in every shipped profile and requires a restart because its protocol
+	// adapter and profile catalogue are composed at startup.
+	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
+
+	// AgentBackgroundWork enables normalized background work tracking,
+	// interactive controls, and subagent observation.
+	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`
 }
 
 // LoggingConfig holds logging configuration.
@@ -706,7 +742,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docker.host", DefaultDockerHost())
 	v.SetDefault("docker.apiVersion", "") // Empty = auto-negotiate with daemon
 	v.SetDefault("docker.tlsVerify", false)
-	v.SetDefault("docker.defaultNetwork", "kandev-network")
 	v.SetDefault("docker.volumeBasePath", defaultDockerVolumePath())
 
 	// Agent defaults (runtime selection is now per-task based on executor type)
@@ -875,6 +910,9 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
+	if err := applyDeliveryRetentionEnvironment(&cfg, envSnapshot, sources); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
 	if err := applySurvivalRecoveryEnv(&cfg, envSnapshot, sources); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}

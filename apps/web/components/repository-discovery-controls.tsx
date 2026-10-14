@@ -11,7 +11,8 @@ type RepositoryDiscoveryControlsProps = {
   workspaceId: string | null;
   enabled?: boolean;
   className?: string;
-  presentation?: "card" | "picker";
+  presentation?: "card" | "picker" | "dialog";
+  isInitialLoading?: boolean;
 };
 
 /**
@@ -24,6 +25,7 @@ export function RepositoryDiscoveryControls({
   enabled = true,
   className,
   presentation = "card",
+  isInitialLoading = false,
 }: RepositoryDiscoveryControlsProps) {
   const discovery = useRepositoryDiscovery(workspaceId, enabled);
   const { toast } = useToast();
@@ -36,9 +38,13 @@ export function RepositoryDiscoveryControls({
     <RepositoryDiscoveryRootControls
       className={cn("w-full", className)}
       presentation={presentation}
-      isLoading={discovery.isLoading || discovery.isRefreshing}
+      isLoading={
+        discovery.isLoading || discovery.isRefreshing || actions.isMutating || isInitialLoading
+      }
       discoveryRoots={discovery.rootStates.filter((root) => Boolean(root.id))}
       homeConfirmationRequired={discovery.homeConfirmationRequired}
+      onConfirmHomeDiscovery={actions.handleConfirmHomeDiscovery}
+      isConfirmingHomeDiscovery={actions.isConfirmingHomeDiscovery}
       onChooseDiscoveryRoot={actions.handleChooseDiscoveryRoot}
       onRefreshDiscovery={actions.refreshDiscovery}
       onReconnectDiscoveryRoot={actions.handleReconnectDiscoveryRoot}

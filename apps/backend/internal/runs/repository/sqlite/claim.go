@@ -12,8 +12,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db/dialect"
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/runs/models"
 )
 
 // claimCandidatePageSize is how many queued rows one page of the

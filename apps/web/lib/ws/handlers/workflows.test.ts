@@ -207,6 +207,38 @@ describe("workflow.updated handler — hidden flag reconciles activeId", () => {
 });
 
 describe("workflow step handlers", () => {
+  it("retains the unclassified fallback veto from step events", () => {
+    const store = makeStore([{ id: "wf-1", workspaceId: "ws-1", name: "Workflow" }], "wf-1");
+    store.setState({
+      ...store.getState(),
+      kanban: {
+        workflowId: "wf-1",
+        steps: [
+          { id: REVIEW_STEP_ID, title: REVIEW_STEP_NAME, color: REVIEW_STEP_COLOR, position: 1 },
+        ],
+        tasks: [],
+      },
+    } as AppState);
+    const handlers = registerWorkflowsHandlers(store);
+    const step = Object.assign(
+      {
+        id: REVIEW_STEP_ID,
+        workflow_id: "wf-1",
+        name: REVIEW_STEP_NAME,
+        state: "review",
+        position: 1,
+        color: REVIEW_STEP_COLOR,
+      },
+      { disable_unclassified_fallback: true },
+    );
+
+    handlers["workflow.step.updated"]?.(stepUpdatedMessage(step));
+
+    expect(store.getState().kanban.steps[0]).toMatchObject({
+      disable_unclassified_fallback: true,
+    });
+  });
+
   it("preserves WIP fields from step update payloads", () => {
     const store = makeStore([{ id: "wf-1", workspaceId: "ws-1", name: "Workflow" }], "wf-1");
     store.setState({
@@ -241,7 +273,9 @@ describe("workflow step handlers", () => {
       auto_advance_requires_signal: true,
     });
   });
+});
 
+describe("workflow step snapshot handlers", () => {
   it("keeps cached workflow snapshots in sync for step changes", () => {
     const store = makeStore([{ id: "wf-1", workspaceId: "ws-1", name: "Workflow" }], null);
     const initialStep = {

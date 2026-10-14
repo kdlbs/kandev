@@ -3,6 +3,8 @@
 import { useEffect, useMemo } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useTranslation } from "react-i18next";
+import { toast } from "@/lib/toast/sonner";
 import { createDesktopV1Adapter, type DesktopV1Adapter } from "@/lib/desktop/adapter";
 import {
   createDesktopCommandActions,
@@ -16,6 +18,9 @@ import {
 } from "@/lib/desktop/external-links";
 import { requestNewTaskCreation } from "@/lib/desktop/new-task-request";
 import { createTauriEventTransport } from "@/lib/desktop/tauri-event-transport";
+import { listenForDesktopDownloadReady } from "@/lib/desktop/download-ready";
+import { desktopDownloadToastStatus } from "@/lib/desktop/download-feedback";
+import { completeNativeBlobDownload } from "@/lib/utils/native-blob-download";
 import { desktopUpdater } from "@/lib/desktop/updater-client";
 import type { DesktopUpdaterAdapter } from "@/lib/desktop/updater-adapter";
 
@@ -31,6 +36,7 @@ export function DesktopCommandHost({
   updater?: DesktopUpdaterAdapter;
 }) {
   const router = useRouter();
+  const { t } = useTranslation();
   const actions = useMemo(
     () =>
       createDesktopCommandActions({
@@ -79,6 +85,47 @@ export function DesktopCommandHost({
       stop?.();
     };
   }, [adapter, router, updater]);
+
+  useEffect(() => {
+    if (!adapter.isAvailable()) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void adapter
+      .listen("download", (feedback) => {
+        completeNativeBlobDownload(feedback);
+        const status = desktopDownloadToastStatus(feedback);
+        if (status === "saved") toast.success(t("settings:desktopDownloadSaved"));
+        if (status === "failed") toast.error(t("settings:desktopDownloadFailed"));
+      })
+      .then(
+        (unlisten) => {
+          if (disposed) unlisten();
+          else stop = unlisten;
+        },
+        () => undefined,
+      );
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, [adapter, t]);
+
+  useEffect(() => {
+    if (!adapter.isAvailable()) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listenForDesktopDownloadReady(adapter).then(
+      (unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      },
+      () => undefined,
+    );
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, [adapter]);
 
   useEffect(() => subscribeDesktopExternalLinks(document, externalLinks), [externalLinks]);
 

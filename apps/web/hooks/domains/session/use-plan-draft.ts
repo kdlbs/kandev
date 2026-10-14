@@ -6,6 +6,7 @@ import type { PlanSaveError } from "./use-task-plan";
 const AUTO_SAVE_DELAY = 1500;
 
 type PlanDraft = { content?: string; title?: string };
+type PlanSaveAttempt = { content: string; taskId: string | null; view: number };
 
 type UsePlanDraftOptions<T> = {
   plan: PlanDraft | null | undefined;
@@ -36,7 +37,12 @@ export function usePlanDraft<T>({
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Content of the most recent save attempt. A size rejection suppresses
   // only an unchanged retry; a generic failure remains eligible for retry.
-  const lastAttemptContentRef = useRef<string | null>(null);
+  const lastAttemptRef = useRef<PlanSaveAttempt | null>(null);
+  const ownSaveRef = useRef<PlanSaveAttempt | null>(null);
+  const taskViewRef = useRef({ taskId, generation: 0 });
+  if (taskViewRef.current.taskId !== taskId) {
+    taskViewRef.current = { taskId, generation: taskViewRef.current.generation + 1 };
+  }
 
   // Single entry point for dispatching a savePlan call, used by both the
   // autosave timer and the explicit Ctrl/Cmd+S shortcut. Record the content
@@ -44,17 +50,25 @@ export function usePlanDraft<T>({
   // saving-state transition.
   const attemptSave = useCallback(
     (content: string, title?: string) => {
-      lastAttemptContentRef.current = content;
+      const attempt = { content, taskId, view: taskViewRef.current.generation };
+      lastAttemptRef.current = attempt;
+      ownSaveRef.current = attempt;
       return savePlan(content, title).then((saved) => {
-        // Two attempts can overlap. Only a success for the currently tracked
-        // content may clear the suppression set by the latest attempt.
-        if (saved && lastAttemptContentRef.current === content) {
-          lastAttemptContentRef.current = null;
+        const sameView =
+          taskViewRef.current.taskId === attempt.taskId &&
+          taskViewRef.current.generation === attempt.view;
+        if (saved && sameView && lastAttemptRef.current === attempt) {
+          lastAttemptRef.current = null;
+        }
+        // Changed-content publication consumes ownership in the sync effect.
+        // Failure or equal-baseline success has no publication left to consume.
+        if (ownSaveRef.current === attempt && (!saved || content === lastPlanContentRef.current)) {
+          ownSaveRef.current = null;
         }
         return saved;
       });
     },
-    [savePlan],
+    [savePlan, taskId],
   );
 
   const handleEmptyStateClick = useCallback(() => {
@@ -95,7 +109,8 @@ export function usePlanDraft<T>({
 
     if (taskChanged) {
       const resolved = newContent ?? "";
-      lastAttemptContentRef.current = null;
+      lastAttemptRef.current = null;
+      ownSaveRef.current = null;
       isExternalUpdateRef.current = true;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing task-scoped editor data
       setDraftContent(resolved);
@@ -104,6 +119,15 @@ export function usePlanDraft<T>({
     }
 
     if (newContent !== prevContent) {
+      const ownSave = ownSaveRef.current;
+      ownSaveRef.current = null;
+      if (
+        ownSave?.taskId === taskId &&
+        ownSave.view === taskViewRef.current.generation &&
+        ownSave.content === newContent
+      ) {
+        return;
+      }
       const resolved = newContent ?? "";
       if (resolved === draftContentRef.current) return;
       isExternalUpdateRef.current = true;
@@ -123,7 +147,10 @@ export function usePlanDraft<T>({
     if (!hasChanges || isSaving) return;
     // Only a known size rejection suppresses an unchanged retry. Generic
     // transport/server failures can be transient and must remain retryable.
-    if (saveError?.kind === "content-too-large" && draftContent === lastAttemptContentRef.current) {
+    if (
+      saveError?.kind === "content-too-large" &&
+      draftContent === lastAttemptRef.current?.content
+    ) {
       return;
     }
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);

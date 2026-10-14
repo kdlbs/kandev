@@ -26,8 +26,10 @@ go and which launches a budget applies to, and operability, which needs one
 identifier traceable from a wake through its run and session to any run that
 session spawns.
 
-Office owns this contract because Office owns the run row and the enqueue path
-where causation is decided.
+Office owns the causation semantics because its enqueue paths decide how each
+Office run is attributed. The shared run-row data contract belongs to the runs
+system; this requirement defines the Office meaning and rules for its causation
+fields.
 
 ## Terminology
 

@@ -99,9 +99,9 @@ const MetadataDeliveryReservationToken = "delivery_reservation_token"
 // expired owner can be replaced, but its stale token can no longer dispatch.
 const MetadataDeliveryReservationExpiresAt = "delivery_reservation_expires_at"
 
-// MetadataDeliveryAttempted is the durable at-most-once boundary for a
-// comment-bearing queue receipt. Once set, restart recovery removes the row
-// instead of risking a second external prompt delivery.
+// MetadataDeliveryAttempted records that external prompt delivery may have
+// started. Plan-comment recovery removes an attempted row; managed-input
+// recovery retains it so the owner can reconcile its receipt.
 const MetadataDeliveryAttempted = "delivery_attempted"
 
 // MetadataDurableTranscriptMessageID marks workflow-deferred prompts whose
@@ -161,6 +161,9 @@ var (
 	// ErrWorkflowEntryMismatch means a workflow prompt was admitted after its
 	// captured task-step entry had been superseded.
 	ErrWorkflowEntryMismatch = errors.New("queue workflow entry identity mismatch")
+	// ErrTaskManagementClaimChanged means an exact plugin effect was admitted
+	// after its observed task manager claim had changed.
+	ErrTaskManagementClaimChanged = errors.New("task management claim changed")
 	// ErrLifecycleCancelled means an archive/delete purge invalidated a
 	// previously accepted lifecycle entry before it could be retried.
 	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
@@ -221,10 +224,17 @@ type QueueSessionIdentity struct {
 // re-entry to the same step; LifecycleGeneration fences archive/delete purge
 // work that was captured before the destructive mutation.
 type WorkflowEntryIdentity struct {
-	WorkflowID          string
-	WorkflowStepID      string
-	TransitionID        int64
-	LifecycleGeneration int64
+	WorkflowID                     string
+	WorkflowStepID                 string
+	TransitionID                   int64
+	LifecycleGeneration            int64
+	ExpectedTaskResourceVersion    string
+	ExpectedSessionResourceVersion string
+	RejectPendingMove              bool
+	EnforceTaskManagementClaim     bool
+	ManagementInstallationID       string
+	ManagementInstanceKey          string
+	ExpectedClaimGeneration        int64
 }
 
 // QueueAttachmentClaim carries authenticated staged-attachment ownership into
@@ -290,6 +300,43 @@ type QueuedMessage struct {
 	reservationIdentity            QueueSessionIdentity
 	reservationToken               string
 	reservationExpiresAt           time.Time
+
+	// deliveryProtocol, deliverySubmissionID, and deliveryPayloadHash are the
+	// durable-delivery identity selected for an ordinary queue claim. They stay
+	// out of the public queue JSON and are carried by the claim record instead.
+	deliveryProtocol     string
+	deliverySubmissionID string
+	deliveryPayloadHash  string
+}
+
+const (
+	// DeliveryProtocolPending is the claim state before the active peer has
+	// completed capability negotiation.
+	DeliveryProtocolPending = "pending"
+	// DeliveryProtocolV1 identifies the retained journal protocol.
+	DeliveryProtocolV1 = "durable_v1"
+	// DeliveryProtocolLegacy identifies a peer that cannot provide retained
+	// delivery. Its uncertain crash outcome is never treated as v1 work.
+	DeliveryProtocolLegacy = "legacy"
+)
+
+// DeliverySubmission returns the claim's protocol and immutable submission
+// identity. The values are empty for queue implementations without durable
+// claim persistence.
+func (m *QueuedMessage) DeliverySubmission() (protocol, submissionID, payloadHash string) {
+	if m == nil {
+		return "", "", ""
+	}
+	return m.deliveryProtocol, m.deliverySubmissionID, m.deliveryPayloadHash
+}
+
+func (m *QueuedMessage) setDeliverySubmission(protocol, submissionID, payloadHash string) {
+	if m == nil {
+		return
+	}
+	m.deliveryProtocol = protocol
+	m.deliverySubmissionID = submissionID
+	m.deliveryPayloadHash = payloadHash
 }
 
 // QueueRemovalResult is the atomic outcome of a user-driven queue deletion.
@@ -344,10 +391,10 @@ func (m *QueuedMessage) IsDurablePlanComment() bool {
 	return messageID != "" && messageFingerprint != ""
 }
 
-// IsDurableDelivery reports whether the row must survive dequeue until a
-// transcript record or executor acknowledgement closes its replay window.
+// IsDurableDelivery reports whether the row must survive dequeue until its
+// owner records the exact accepted turn or explicitly acknowledges delivery.
 func (m *QueuedMessage) IsDurableDelivery() bool {
-	return m != nil && (m.IsDurableLifecycle() || m.IsDurablePlanComment())
+	return m != nil && (m.IsDurableLifecycle() || m.IsDurablePlanComment() || isManagedInputQueueEntry(m))
 }
 
 // IsReservedInFlight reports whether this row was retained for an in-flight
@@ -360,8 +407,8 @@ func (m *QueuedMessage) IsReservedInFlight() bool {
 	return reserved
 }
 
-// IsDeliveryAttempted reports whether external prompt delivery may already
-// have happened and therefore must never be retried automatically.
+// IsDeliveryAttempted reports whether external prompt delivery may have
+// started. Recovery behavior depends on the durable receipt type.
 func (m *QueuedMessage) IsDeliveryAttempted() bool {
 	if m == nil {
 		return false
@@ -552,13 +599,24 @@ type PendingMove struct {
 	// MoveID is the durable effect token for one deferred move request across
 	// queue snapshots. Rollback can restore a consumed snapshot, so replay uses
 	// this token to suppress a second workflow effect.
-	MoveID               string    `json:"move_id"`
-	SessionIncarnationID string    `json:"session_incarnation_id,omitempty"`
-	TaskID               string    `json:"task_id"`
-	WorkflowID           string    `json:"workflow_id"`
-	WorkflowStepID       string    `json:"workflow_step_id"`
-	Position             int       `json:"position"`
-	QueuedAt             time.Time `json:"queued_at"`
+	MoveID               string `json:"move_id"`
+	SessionIncarnationID string `json:"session_incarnation_id,omitempty"`
+	TaskID               string `json:"task_id"`
+	WorkflowID           string `json:"workflow_id"`
+	WorkflowStepID       string `json:"workflow_step_id"`
+	// FromStepID is the step the task occupied when this move was armed. Replay
+	// compares it with the task's current step so a move whose board position was
+	// superseded by a later move is dropped instead of relocating the card.
+	// Legacy rows decode as empty and fall back to the current step.
+	FromStepID string `json:"from_step_id,omitempty"`
+	// FromTransitionID is the task's latest step-transition ledger id when this
+	// move was armed. Replay compares it with the task's latest id: a later step
+	// change advances the id even when the card returns to FromStepID (A to B to A),
+	// so a move superseded by a later move is dropped instead of relocating the
+	// card. Legacy rows decode as 0 and skip the ordering guard.
+	FromTransitionID int64     `json:"from_transition_id,omitempty"`
+	Position         int       `json:"position"`
+	QueuedAt         time.Time `json:"queued_at"`
 	// Actor records provenance across the deferred move boundary. Agent is the
 	// value used by move_task_kandev; it prevents owner identity leakage.
 	Actor string `json:"actor,omitempty"`

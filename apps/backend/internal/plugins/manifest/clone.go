@@ -8,6 +8,7 @@ func (m Manifest) Clone() Manifest {
 	clone.Webhooks = cloneWebhooks(m.Webhooks)
 	clone.Actions = cloneActions(m.Actions)
 	clone.RepositoryProviders = cloneStrings(m.RepositoryProviders)
+	clone.ExecutorProviders = cloneExecutorProviders(m.ExecutorProviders)
 	clone.ReferenceSources = cloneReferenceSources(m.ReferenceSources)
 	clone.AuthProviders = cloneAuthProviders(m.AuthProviders)
 	clone.ConfigSchema = cloneMap(m.ConfigSchema)
@@ -20,6 +21,26 @@ func (m Manifest) Clone() Manifest {
 	clone.UI.Keybindings = append([]UIKeybinding(nil), m.UI.Keybindings...)
 	clone.UI.WebApps = cloneWebApps(m.UI.WebApps)
 	clone.Runtime.Executables = cloneStringMap(m.Runtime.Executables)
+	return clone
+}
+
+func cloneExecutorProviders(values []ExecutorProvider) []ExecutorProvider {
+	if values == nil {
+		return nil
+	}
+	clone := make([]ExecutorProvider, len(values))
+	for index, value := range values {
+		clone[index] = value
+		clone[index].SupportedStateVersions = append([]int(nil), value.SupportedStateVersions...)
+		clone[index].ProfileSchema = cloneMap(value.ProfileSchema)
+		clone[index].ResourceStateSchema = cloneMap(value.ResourceStateSchema)
+		if value.LocalizedMessages != nil {
+			clone[index].LocalizedMessages = make(map[string]string, len(value.LocalizedMessages))
+			for key, message := range value.LocalizedMessages {
+				clone[index].LocalizedMessages[key] = message
+			}
+		}
+	}
 	return clone
 }
 

@@ -14,6 +14,13 @@ legacy_specs: []
 
 # Implementation Plan: Sidebar Customization
 
+## Successor
+
+[Navigation hierarchy](../navigation-hierarchy/plan.md) proposes updated default
+action placement and a phone tools-before-tasks projection. Saved desktop order,
+custom groups, and persistence remain covered here. Completed results stay as
+historical evidence; the successor owns revised navigation tests.
+
 ## Overview
 
 Deliver personal workspace layouts, named collapsible shortcut sections, and

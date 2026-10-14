@@ -23,8 +23,10 @@ describe("programmatic external links", () => {
 
   it("uses the browser-owned download flow for selected Office exports", () => {
     const contents = source("../../app/office/workspace/settings/export/export-preview.tsx");
+    const downloadHelper = source("../utils/file-download.ts");
 
-    expect(contents).toContain("anchor.download");
-    expect(contents).toContain("anchor.click()");
+    expect(contents).toContain('triggerBlobDownload(blob, "kandev-config-selected.zip")');
+    expect(downloadHelper).toContain("anchor.download = fileName");
+    expect(downloadHelper).toContain("anchor.click()");
   });
 });

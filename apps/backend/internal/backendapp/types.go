@@ -2,6 +2,8 @@ package backendapp
 
 import (
 	"errors"
+	replaywire "github.com/kandev/kandev/internal/coordinator/replay/wire"
+	taskusage "github.com/kandev/kandev/internal/task/usage"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -14,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
+	"github.com/kandev/kandev/internal/coordinator"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	"github.com/kandev/kandev/internal/gitcredentials"
@@ -38,6 +41,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	"github.com/kandev/kandev/internal/task/deliveryretention"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
@@ -79,6 +83,7 @@ type Repositories struct {
 }
 
 type Services struct {
+	DeliveryRetention        *deliveryretention.Worker
 	ManagedRuntimeSelections managedruntime.SelectionStore
 	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver
 	DynamicBindingResolver   *dynamicruntime.CredentialBindingResolver
@@ -153,6 +158,16 @@ type Services struct {
 	// Mode() == ModeDisabled and the middleware injects the synthetic identity.
 	Auth                    *authservice.Service
 	SessionHostnameResolver *hostnames.Resolver
+	// Coordinator is the workspace-coordinator service (CRUD, proposals-read,
+	// stalls-read). Nil while features.coordinator is disabled; the backing
+	// store is still always constructed (requiredstores catalog entry).
+	Coordinator *coordinator.Service
+	// UsageWriter is the task usage ledger writer; the coordinator registers
+	// its post-commit spend observer on it. Nil until the writer starts.
+	UsageWriter *taskusage.Writer
+	// Pricing is the model price lookup the replay harness prices a dream's
+	// replays with. Nil until the lookup is constructed.
+	Pricing replaywire.PriceSource
 }
 
 type schedulerStopper interface {

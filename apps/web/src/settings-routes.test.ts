@@ -25,11 +25,8 @@ import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import { DEFAULT_SETTINGS_PATH } from "@/lib/settings/last-settings-page";
 import { scopedCookieName } from "@/lib/routing/route-bootstrap";
-import {
-  buildSettingsInitialStateForRoute,
-  renderSettingsRoute,
-  SETTINGS_ROUTE_PATHS,
-} from "./settings-routes";
+import { buildSettingsInitialStateForRoute } from "./settings-routes.initial-state";
+import { renderSettingsRoute, SETTINGS_ROUTE_PATHS } from "./settings-routes";
 
 vi.mock("@/components/settings/system/updates-card", () => ({ UpdatesCard: () => null }));
 
@@ -116,7 +113,8 @@ describe("buildSettingsInitialStateForRoute", () => {
 
       expect(state.workspaces).toEqual({ items: [], activeId: null });
       expect(state.executors).toEqual({ items: [] });
-      expect(state.agentProfiles).toEqual({ items: [], version: 0 });
+      expect(state.agentProfiles?.items).toEqual([]);
+      expect(state.agentProfiles?.version).toBe(0);
       expect(state.settingsAgents).toEqual({ items: [] });
       expect(state.agentDiscovery).toEqual({ items: [], loading: false, loaded: true });
       expect(state.availableAgents).toEqual({
@@ -154,6 +152,24 @@ describe("buildSettingsInitialStateForRoute", () => {
     const state = buildState({ agentProfilesVersion: 4 });
 
     expect(state.agentProfiles?.version).toBe(4);
+  });
+});
+
+describe("current tab workspace settings hydration", () => {
+  beforeEach(() => {
+    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=; path=/; max-age=0`;
+    document.cookie = `${scopedCookieName(ACTIVE_WORKSPACE_COOKIE)}=; path=/; max-age=0`;
+  });
+
+  it("keeps the current tab workspace ahead of the shared cookie and saved setting", () => {
+    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=ws-2; path=/`;
+    const state = buildState({
+      workspaces: workspaceRows(["ws-1", "ws-2"]),
+      userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-2") }),
+      currentWorkspaceId: "ws-1",
+    });
+    expect(state.workspaces?.activeId).toBe("ws-1");
+    expect(state.userSettings?.workspaceId).toBe("ws-1");
   });
 });
 
@@ -582,5 +598,17 @@ describe("settings breadcrumb coverage", () => {
       expect(parents.length, `${path} has no owning page crumb`).toBeGreaterThanOrEqual(2);
       expect(parents[0].label).toBe("common:settings");
     }
+  });
+});
+
+describe("workflow settings route", () => {
+  it("redirects the legacy workflow URL to the scoped workspace route", () => {
+    const route = renderSettingsRoute(
+      "/settings/workspace/demo-workspace/workflows",
+    ) as ReactElement<{ to: string }>;
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe("/settings/workspaces/demo-workspace/workflows");
   });
 });

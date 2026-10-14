@@ -298,6 +298,7 @@
   "limitsGithubPullRequestsAndIssues": "限制此工作区中显示或导入的 GitHub 拉取请求和议题。",
   "loadingAccounts": "正在加载账户…",
   "loadingOrganizations": "正在加载组织…",
+  "loadingPullRequests": "正在加载拉取请求…",
   "loadingRegisteredApps": "正在加载已注册应用…",
   "loadingTaskAccess": "正在加载任务访问设置…",
   "localAndWorktreeTasksUseHost": "本地和工作树任务使用主机可见的 Git 或 SSH 凭据。Docker、SSH 和云端任务使用对应执行器中配置的凭据。",
