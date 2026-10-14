@@ -26,6 +26,8 @@ macOS WebKit can collect removed chat rows and text runs.
 2. Every other `element.animate()` owner in `apps/web` and `apps/packages/ui` uses
    the same helper.
 3. Settings-search motion releases an animation when it finishes, not only on cancel.
+   It clears the owned finish callback before cancellation; queued old finish events
+   cannot release a replacement handle.
 4. Existing motion behavior and tests are unchanged.
 
 ## Verification
@@ -38,7 +40,7 @@ python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
 
-## Results
+## Historical contributor results
 
 - The new assertions failed before the change and pass after it.
 - 12 files and 123 tests pass. Typecheck and scoped ESLint pass.

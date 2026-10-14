@@ -28,7 +28,7 @@ create an ever-growing backlog of effects. No new requirement is necessary. The
 release rule. This creates no new ownership, persistence, or API boundary, so no
 ADR is needed.
 
-## Evidence and confirmed root cause
+## Contributor-reported native evidence
 
 On desktop 0.97.0 (macOS 27.0), `heap` on the WebContent process showed
 `KeyframeEffect`, `WebAnimation`, `HTMLSpanElement`, and `HTMLDivElement` growing
@@ -38,13 +38,13 @@ together and never dropping: 1,335 effects at 17 minutes, 13,527 at 4 hours, and
 A standalone WKWebView harness with no Kandev code reproduced it. Each case
 appended 2,000 spans, then applied GC pressure:
 
-| Case | Effects retained | Spans retained |
-| --- | --- | --- |
-| Removed without animation | 0 | 0 |
-| CSS animation, then removed | 0 | 0 |
-| `animate()`, `cancel()`, removed | 2,000 | 2,000 |
-| `animate()` finished, removed | 2,000 | 2,000 |
-| `cancel()`, `effect = null`, removed | 0 | 0 |
+| Case                                 | Effects retained | Spans retained |
+| ------------------------------------ | ---------------- | -------------- |
+| Removed without animation            | 0                | 0              |
+| CSS animation, then removed          | 0                | 0              |
+| `animate()`, `cancel()`, removed     | 2,000            | 2,000          |
+| `animate()` finished, removed        | 2,000            | 2,000          |
+| `cancel()`, `effect = null`, removed | 0                | 0              |
 
 Only the small `WebAnimation` objects remain in the last case. Headless Chromium
 against the same app did not retain animations.
@@ -73,13 +73,29 @@ elements and their subtrees.
 
 - [x] [Task 01: Release animation effects](task-01-release-animation-effects.md)
 
-## Verification results
+## Historical contributor verification
 
 - The two new assertions failed with only `cancel()` and pass with `releaseAnimation`.
 - The chat motion, grid spinner, compositor, motion visibility, and chat-motion
   hook suites pass (12 files, 123 tests). The settings-search finish assertion
   failed before releasing in the `finish` listener and passes after it. Web typecheck and scoped ESLint pass.
 - The WKWebView harness released all effects and spans with the same cleanup.
+
+## Review remediation
+
+Settings-search cancellation now clears the owned finish callback before
+releasing the handle. Its callback captures no DOM entry and retains the exact
+handle guard against queued finish events from a predecessor. Regression cases
+cover finish before and after replacement, row removal, unmount, and StrictMode.
+Shared grid, pulse, and spin tests assert detachment on their cleanup paths.
+The existing desktop and mobile chat scenarios check real handle detachment when
+reduced motion disables effects and verify final content opacity.
+
+A tiny Node stdlib proof evaluates the reviewed owner functions with controlled
+hooks and handles: the canceled finish-listener case fails before the fix and
+passes after it. Actual React, browser, mobile, and full-suite verification runs
+in hosted CI. These checks do not measure native heap collection; the reported
+WKWebView measurements above have not been independently reproduced by review.
 
 ## Risks
 

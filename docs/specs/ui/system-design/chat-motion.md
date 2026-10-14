@@ -91,11 +91,17 @@ marked motion spans use the motion renderer; unmarked spans retain the caller
 renderer.
 
 Every script animation owner releases its handle with `releaseAnimation` from
-`@kandev/ui/animation-utils`: cancel, then set `effect` to null. macOS WKWebView
-keeps canceled or finished script animations alive, and a live effect retains its
-target element after removal. Detaching the effect lets the removed row, span,
-and its subtree be collected. This applies to chat entrance and text motion and
-to the shared spinner, pulse, and settings-search motion owners.
+`@kandev/ui/animation-utils`: cancel, then set `effect` to null. This severs the
+handle's effect-to-target relationship for chat entrance and text motion, shared
+spinners and pulse, and settings-search motion. Settings search also clears its
+owned finish callback before cancellation or removal from the ownership map.
+The callback captures a primitive key rather than a DOM entry and checks exact
+handle identity, so a queued old finish cannot release a replacement animation.
+
+The contributor reported canceled and finished script-animation target retention
+in a macOS WKWebView reproduction. Detachment assertions establish ownership
+cleanup; they do not establish native heap collection or a browser-wide memory
+fix. Collection and long-uptime behavior require separate native-browser evidence.
 
 ## Scroll integration
 

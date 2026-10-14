@@ -1,7 +1,11 @@
 "use client";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
-import { firstAnimationListValue, parseCssTime, releaseAnimation } from "@kandev/ui/animation-utils";
+import {
+  firstAnimationListValue,
+  parseCssTime,
+  releaseAnimation,
+} from "@kandev/ui/animation-utils";
 import { createPersistentMotionVisibility } from "@kandev/ui/persistent-motion-visibility";
 
 type GridSpinnerProps = {

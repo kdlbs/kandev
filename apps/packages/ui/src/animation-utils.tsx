@@ -30,8 +30,7 @@ function parseCssTime(value: string): number | null {
 }
 
 /**
- * Cancels an animation and detaches its effect. WebKit keeps canceled
- * script animations alive, and each live effect retains its target element.
+ * Cancels owned motion and severs the effect-to-target relationship.
  */
 function releaseAnimation(animation: Animation): void {
   animation.cancel();
