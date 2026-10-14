@@ -41,7 +41,7 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 		return err
 	}
 	// Dispatch reconciliation can change SQL state; pin one fresh inventory for validation and retirement selection.
-	rows, err := activeBackendSubmissions(ctx, m.streamManager.deliveryRepository(), sessionID)
+	rows, err := nativeResumeSQLRows(ctx, execution, status, submissions, m.streamManager.deliveryRepository())
 	if err != nil {
 		return err
 	}
@@ -106,13 +106,13 @@ func nativeResumeRetirementIDs(execution *AgentExecution, status *agentctl.Deliv
 				continue
 			}
 			sqlSubmission, found := backend[submission.ID]
-			if !found || sqlSubmission.State != models.DeliverySubmissionInterruptedUnknown {
+			if !found || (sqlSubmission.State != models.DeliverySubmissionInterruptedUnknown && !peerMatchesTerminalHistory(execution, status, submission, sqlSubmission)) {
 				if submission.State == journal.SubmissionFailed || submission.State == journal.SubmissionCancelled {
 					continue
 				}
 				return nil, fmt.Errorf("%w: native resume requires uncertain SQL history", ErrDurableAdoptionBlocked)
 			}
-			if !peerMatchesUnknownHistory(execution, status, submission, sqlSubmission) {
+			if !peerMatchesUnknownHistory(execution, status, submission, sqlSubmission) && !peerMatchesTerminalHistory(execution, status, submission, sqlSubmission) {
 				return nil, fmt.Errorf("%w: native resume submission identity changed", ErrDurableAdoptionBlocked)
 			}
 			ids = append(ids, submission.ID)

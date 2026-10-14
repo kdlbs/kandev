@@ -97,10 +97,14 @@ func provideSQLite(ctx context.Context, cfg *config.Config, log *logger.Logger, 
 		return nil, nil, fmt.Errorf("inspect user tables: %w", err)
 	}
 
+	// Reclaim staging debris on every boot: a crash during a backup leaves the
+	// stored version unchanged, and later boots need not be upgrade boots.
+	backupDir := filepath.Join(filepath.Dir(dbPath), "backups")
+	SweepStaleBootStaging(backupDir, log)
+
 	if shouldBackup(storedVersion, version, userTables) {
 		startup.SetPhase(ctx, startup.BackingUpDatabase)
 		started := time.Now()
-		backupDir := filepath.Join(filepath.Dir(dbPath), "backups")
 		if err := os.MkdirAll(backupDir, 0o755); err != nil {
 			_ = pool.Close()
 			return nil, nil, fmt.Errorf("create backup dir: %w", err)
@@ -145,7 +149,7 @@ func provideSQLite(ctx context.Context, cfg *config.Config, log *logger.Logger, 
 
 func createPreMigrationBackup(ctx context.Context, writer *sqlx.DB, backupDir, storedVersion string) (string, int64, error) {
 	path := snapshotPath(backupDir, storedVersion)
-	stagingDir, err := os.MkdirTemp(backupDir, ".kandev-backup-*")
+	stagingDir, err := os.MkdirTemp(backupDir, bootStagingDirPrefix+"*")
 	if err != nil {
 		return "", 0, fmt.Errorf("create private backup staging directory: %w", err)
 	}

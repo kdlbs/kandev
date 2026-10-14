@@ -65,6 +65,17 @@ def trigger_block(workflow: str, trigger: str) -> str:
 
 
 class FrontendTestsWorkflowContractTest(unittest.TestCase):
+    def test_compiler_heap_is_scoped_to_the_full_typecheck(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        job = frontend_job(workflow)
+        step = job.partition("      - name: Run typecheck\n")[2].partition(NEXT_STEP_MARKER)[0]
+
+        self.assertIn("NODE_OPTIONS: --max-old-space-size=8192", step)
+        self.assertIn("run: pnpm --filter @kandev/web typecheck", step)
+        self.assertNotIn("NODE_OPTIONS", run_tests_step(workflow))
+        self.assertNotIn("NODE_OPTIONS", job.partition("    steps:\n")[0])
+        self.assertNotIn("NODE_OPTIONS", workflow.partition("jobs:\n")[0])
+
     def test_cache_resolves_the_container_pnpm_store_before_restore(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         job = frontend_job(workflow)

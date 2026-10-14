@@ -39,6 +39,7 @@ session-activity authority remain with Tasks and Platform.
 - [Agent Rich Output](requirements/agent-rich-output.md)
 - [Google Antigravity ACP Agent](requirements/antigravity-acp-agent.md)
 - [Agent Stall Recovery](requirements/agent-stall-recovery.md)
+- [Agent Install Detection Bounds](requirements/agent-install-detection-bounds.md)
 - [Collapsible Agent Blocks on the Agents Settings Page](requirements/collapsible-agent-blocks.md)
 - [Cursor Subagent Metadata](requirements/cursor-subagent-metadata.md)
 - [Dynamic Agent Routing Rollout Blockers](requirements/dynamic-agent-routing-rollout-blockers.md)
@@ -76,6 +77,7 @@ session-activity authority remain with Tasks and Platform.
 
 - [Agent Resume and Runtime Recovery](system-design/agent-resume-runtime-recovery.md)
 - [Google Antigravity ACP Agent](system-design/antigravity-acp-agent.md)
+- [Agent Install Detection Bounds](system-design/agent-install-detection-bounds.md)
 - [Harness session continuity](system-design/harness-session-continuity.md) (draft)
 - [Injected Skill Naming](system-design/injected-skill-naming.md)
 - [Injected Skill Naming Migration](system-design/injected-skill-naming-migration.md)

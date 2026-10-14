@@ -184,6 +184,12 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
+	// QueuePromotionEntryTransitionIDKey is the field of the
+	// MetaKeyQueuePromotionPending marker that pins the ledger row of the entry
+	// a same-step promotion admits. That promotion writes no ledger row of its
+	// own, so the delivery carries no transition id; the pinned row lets the
+	// entry guard tell the admitted entry from a later re-entry of the step.
+	QueuePromotionEntryTransitionIDKey = "entry_transition_id"
 	// MetaKeyWorkflowMovePending carries the one-shot entry options of a direct
 	// (immediately applied) workflow move whose target-step entry has not yet
 	// run. Its value records the source step, the move ID, and the encoded

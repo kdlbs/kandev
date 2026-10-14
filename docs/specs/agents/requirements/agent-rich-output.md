@@ -122,6 +122,7 @@ contracts rather than exposing a general-purpose UI library automatically.
 
 ## Implementation plans
 
+- [CSV header BOM repair](../../../plans/rich-output-csv-header-bom/plan.md)
 - [Rich-output authoring recovery](../../../plans/rich-output-authoring-recovery/plan.md)
 - [Structured evidence catalog extension](../../../plans/rich-output-evidence-components/plan.md)
 

@@ -48,7 +48,7 @@ func (m *Manager) GetNativeResumeDeliveryEvidence(ctx context.Context, sessionID
 		return nil, err
 	}
 	for _, row := range rows {
-		proof.Submissions = append(proof.Submissions, models.NativeResumeSubmissionEvidence{ID: row.ID,
+		proof.Submissions = append(proof.Submissions, models.NativeResumeSubmissionEvidence{ID: row.ID, State: row.State, Outcome: row.Outcome,
 			HarnessGeneration: row.HarnessGeneration, PayloadHash: row.PayloadHash, StreamID: streams[row.ID],
 			TerminalSequence: row.TerminalSequence, TerminalStreamID: row.TerminalStreamID})
 	}
@@ -67,7 +67,7 @@ func (m *Manager) nativeResumeProofRows(ctx context.Context, execution *AgentExe
 	if err != nil {
 		return nil, nil, err
 	}
-	rows, err := activeBackendSubmissions(ctx, repository, execution.SessionID)
+	rows, err := nativeResumeSQLRows(ctx, execution, status, peer, repository)
 	if err != nil {
 		return nil, nil, err
 	}

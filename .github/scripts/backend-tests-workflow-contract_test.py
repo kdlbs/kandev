@@ -128,6 +128,8 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
             "Test Windows copy-file glob tokenization",
             "Build", "Vet", "Test windows-sensitive packages",
             "Test Windows helper console behavior",
+            "Test Windows Git executable memo",
+            "Test Windows Hermes ACP detection",
             "Test Windows managed runtime cache repair",
             "Test Windows port collision handling",
             "Test Windows path semantics",
@@ -142,10 +144,101 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn("TEST_WINDOWS_RESULT: ${{ needs['test-windows'].result }}", gate)
         self.assertIn('"test-windows:${TEST_WINDOWS_RESULT}"', gate)
 
+    def test_windows_git_executable_memo_runs_in_native_suite(self) -> None:
+        step = step_block(self.workflow, "Test Windows Git executable memo")
+        self.assertIn("if: matrix.suite == 'native'", step)
+        self.assertNotIn("continue-on-error", step)
+        command = shlex.split(step.partition("run: ")[2].splitlines()[0])
+        self.assertEqual(command[:2], ["go", "test"])
+        self.assertIn("./internal/common/subproc", command)
+        self.assertIn("-race", command)
+        self.assertEqual(command[command.index("-tags") + 1], "fts5")
+        self.assertEqual(command[command.index("-timeout") + 1], "10m")
+        selection = command[command.index("-run") + 1]
+        source = (REPO_ROOT / "apps/backend/internal/common/subproc/git_command_test.go").read_text()
+        tests = re.findall(r"^func (TestNewGitCommand\w+)\(", source, re.MULTILINE)
+        self.assertIn("TestNewGitCommandResolvesAgainWhenPathExtChanges", tests)
+        for name in tests:
+            with self.subTest(test=name):
+                self.assertRegex(name, selection)
+        makefile = (REPO_ROOT / "apps/backend/Makefile").read_text()
+        target = makefile.partition("\ntest-windows:\n")[2].partition("\n## ")[0]
+        self.assertIn('./internal/common/subproc -run "^TestNewGitCommand"', target)
+        self.assertIn('-tags fts5 -race -v -timeout 10m ./internal/common/subproc', target)
+
+    def test_windows_hermes_detection_executes_bounded_regressions(self) -> None:
+        windows_job = self.workflow.partition("  test-windows:\n")[2]
+        step = step_block(windows_job, "Test Windows Hermes ACP detection")
+        self.assertIn("runs-on: windows-latest", windows_job)
+        self.assertIn("if: matrix.suite == 'native'", step)
+        self.assertNotIn("continue-on-error", step)
+        self.assertIn("timeout-minutes: 10", step)
+        command = shlex.split(step.partition("run: ")[2].splitlines()[0])
+        self.assertEqual(command[:2], ["go", "test"])
+        for flag in ("-race", "-v", "-count=1", "-p=1"):
+            self.assertIn(flag, command)
+        self.assertEqual(command[command.index("-timeout") + 1], "5m")
+        self.assertEqual(command[command.index("-tags") + 1], "fts5")
+        self.assertEqual([v for v in command if v.startswith("./")], ["./internal/agent/agents"])
+        selection = command[command.index("-run") + 1]
+        tests = []
+        for filename in ("hermes_acp_test.go", "detect_test.go"):
+            source = (REPO_ROOT / "apps/backend/internal/agent/agents" / filename).read_text()
+            tests.extend(re.findall(r"^func (Test(?:HermesACP|RunCommandCheck)\w+)\(", source, re.MULTILINE))
+        self.assertIn("TestHermesACP_DetectionRequiresACPCheck", tests)
+        self.assertIn("TestHermesACP_CallerCancellationDuringRetry", tests)
+        self.assertIn("TestRunCommandCheck_SeparatesTimeoutFromFailure", tests)
+        self.assertIn("TestRunCommandCheck_NonzeroExitBeforeDeadlineObservation", tests)
+        self.assertIn("TestRunCommandCheck_ExpiredBoundBeforeStart", tests)
+        self.assertIn("TestRunCommandCheck_SuccessBeforeDeadlineObservation", tests)
+        for name in tests:
+            with self.subTest(test=name):
+                self.assertRegex(name, selection)
+        self.assertIsNone(re.search(selection, "TestClaudeACP_Detection"))
+        makefile = (REPO_ROOT / "apps/backend/Makefile").read_text()
+        target = makefile.partition("\ntest-windows:\n")[2].partition("\n## ")[0]
+        lines = [line for line in target.splitlines() if "./internal/agent/agents" in line]
+        self.assertEqual(len(lines), 1)
+        command = shlex.split(lines[0])
+        self.assertEqual(command[command.index("-run") + 1].replace("$$", "$"), selection)
+        for flag in ("-race", "-v", "-count=1", "-p=1"):
+            self.assertIn(flag, command)
+        self.assertEqual(command[command.index("-timeout") + 1], "5m")
+
     def test_windows_runtime_observation_shims_run_in_native_suite(self) -> None:
         step = step_block(self.workflow, "Test Windows runtime observation command shims")
         self.assertIn("if: matrix.suite == 'native'", step)
         self.assertIn("TestRuntimeObservationRunsWindowsCommandShimWithSpaces", step)
+
+    def test_windows_loopback_listener_coverage_is_required(self) -> None:
+        step = step_block(self.workflow, "Test Windows loopback listeners")
+        makefile = (REPO_ROOT / "apps" / "backend" / "Makefile").read_text(encoding="utf-8")
+        windows_target = makefile.partition("\ntest-windows:\n")[2].partition("\n## ")[0]
+        self.assertTrue(windows_target)
+        self.assertIn("if: matrix.suite == 'native'", step)
+        self.assertIn("shell: bash", step)
+        self.assertIn("set -euo pipefail", step)
+        self.assertNotIn("continue-on-error", step)
+        for package in (
+            "./internal/common/portutil",
+            "./internal/common/netprobe",
+            "./internal/agentctl/server/config",
+            "./cmd/plugin-fixture",
+            "./internal/gateway/websocket",
+            "./internal/launcher",
+            "./internal/agentctl/server/api",
+        ):
+            with self.subTest(package=package):
+                self.assertIn(package, step)
+                self.assertIn(package, windows_target)
+        for test_name in (
+            "ConcurrentFailingStarts", "ResolveAndBind", "Tunnel", "TestCanBind",
+            "TestWaitForHealthBypassesHTTPProxyForSpecificBind",
+            "TestHandleVscodeStatus_AfterStart", "TestVscodeOpenFile_WaitsForRunning_E2E",
+        ):
+            with self.subTest(test=test_name):
+                self.assertIn(test_name, step)
+                self.assertIn(test_name, windows_target)
 
     def test_linux_shards_allow_scale_budget_only_with_retention_package(self) -> None:
         test_step = step_block(self.workflow, "Run tests")

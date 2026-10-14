@@ -28,6 +28,12 @@ func (m *Manager) ReconcileLoadedNativeDelivery(ctx context.Context, sessionID s
 	if proof, err := m.GetNativeResumeDeliveryEvidence(ctx, sessionID); err == nil && proof != nil {
 		return proof, nil
 	}
+	if settled, err := m.hasProjectedTerminalRetirement(ctx, execution); err == nil && settled {
+		if err := m.AcknowledgeNativeResumeDelivery(ctx, sessionID); err != nil {
+			return nil, err
+		}
+		return m.GetNativeResumeDeliveryEvidence(ctx, sessionID)
+	}
 	historical, err := m.readLoadedNativeHistoricalOwner(ctx, execution)
 	if err != nil {
 		return nil, err

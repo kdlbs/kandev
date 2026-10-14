@@ -1,23 +1,55 @@
 package db
 
 import (
+	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mattn/go-sqlite3"
 )
 
 const (
 	defaultBusyTimeout = 5 * time.Second
+
+	// sqliteWriterDriverName is a writer-only driver whose connections apply
+	// the writer pragmas that have no DSN parameter. Callers still pass
+	// "sqlite3" to sqlx.NewDb, which takes the dialect from that argument.
+	sqliteWriterDriverName = "sqlite3_kandev_writer"
+
+	// journalSizeLimitSQL bounds the WAL file that remains after a WAL reset.
+	// A checkpoint rewrites the WAL in place without shrinking it, so without
+	// this bound the file keeps its high-water mark for the life of the
+	// database. It is a reset-time bound, not a per-write budget: 64 MiB leaves
+	// room for a burst well over the ~4 MiB default autocheckpoint.
+	journalSizeLimitSQL = "PRAGMA journal_size_limit = 67108864"
 
 	// defaultSQLiteReaderConns is the number of concurrent read connections.
 	// SQLite WAL mode allows many readers alongside a single writer; 4 is a
 	// reasonable default for a desktop/server workload.
 	defaultSQLiteReaderConns = 4
 )
+
+func init() {
+	sql.Register(sqliteWriterDriverName, &sqlite3.SQLiteDriver{ConnectHook: applyWriterPragmas})
+}
+
+// applyWriterPragmas runs on every new writer connection. journal_size_limit
+// is per-connection state and the pool can replace its connection at any time,
+// so it cannot be set once per handle. The standard driver.ExecerContext
+// interface keeps one code path for cgo and non-cgo builds: the non-cgo
+// go-sqlite3 stub does not implement it and cannot open a database anyway.
+func applyWriterPragmas(conn *sqlite3.SQLiteConn) error {
+	execer, ok := any(conn).(driver.ExecerContext)
+	if !ok {
+		return nil
+	}
+	_, err := execer.ExecContext(context.Background(), journalSizeLimitSQL, nil)
+	return err
+}
 
 // OpenSQLite opens a SQLite database configured for writes (single connection).
 func OpenSQLite(dbPath string) (*sql.DB, error) {
@@ -36,12 +68,13 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 	// - synchronous=FULL: committed delivery receipts must survive power loss before journal pruning.
 	// - cache=shared: allow multiple connections to share a page cache.
 	// - txlock=immediate: acquire the writer before transaction predicate reads.
+	// journal_size_limit has no DSN parameter; applyWriterPragmas sets it.
 	dsn := fmt.Sprintf(
 		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=FULL&_cache=shared&_txlock=immediate",
 		normalizedPath,
 		int(defaultBusyTimeout/time.Millisecond),
 	)
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open(sqliteWriterDriverName, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +11,22 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+)
+
+const (
+	// bootStagingDirPrefix names the private directory createPreMigrationBackup
+	// reserves before the snapshot copy writes the staged backup into it.
+	bootStagingDirPrefix = ".kandev-backup-"
+
+	// staleBootStagingAge is how long a boot staging directory must show no
+	// modification before it counts as crash debris. The backups directory is
+	// shared by every database file in the same directory, so this window is
+	// what protects another process's backup that is still being written.
+	staleBootStagingAge = 6 * time.Hour
 )
 
 // snapshotPath returns the absolute path for a new backup file.
@@ -76,6 +92,75 @@ func snapshotSQLiteContext(ctx context.Context, writer *sqlx.DB, path string) (i
 	}
 	installed = true
 	return info.Size(), nil
+}
+
+// SweepStaleBootStaging removes boot backup staging directories that a process
+// left behind when it exited between MkdirTemp and the deferred cleanup. Such a
+// directory otherwise keeps a whole database copy on disk.
+//
+// Liveness is the newest modification time of the directory and its direct
+// entries, because a directory's own time does not change while the snapshot
+// copy grows a file inside it. Only names with the boot staging prefix are matched,
+// so published backups and other staging directories are never removed. A
+// failure is logged and never returned: reclaiming debris must not fail boot
+// or backup creation.
+func SweepStaleBootStaging(backupDir string, log *logger.Logger) {
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) && log != nil {
+			log.Warn("persistence: failed to list boot backup staging directories",
+				zap.String("path", backupDir), zap.Error(err))
+		}
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), bootStagingDirPrefix) {
+			continue
+		}
+		path := filepath.Join(backupDir, e.Name())
+		newest, err := newestModTime(path)
+		if err != nil {
+			// A directory, or an entry in it, that vanished while being
+			// inspected was removed by its owner or another sweep and needs
+			// nothing from this one.
+			if !errors.Is(err, os.ErrNotExist) && log != nil {
+				log.Warn("persistence: failed to inspect boot backup staging directory",
+					zap.String("path", path), zap.Error(err))
+			}
+			continue
+		}
+		if time.Since(newest) < staleBootStagingAge {
+			continue
+		}
+		if err := os.RemoveAll(path); err != nil && log != nil {
+			log.Warn("persistence: failed to reclaim stale boot backup staging directory",
+				zap.String("path", path), zap.Error(err))
+		}
+	}
+}
+
+// newestModTime returns the latest modification time among dir and its direct
+// entries. It stats each path rather than trusting directory-listing metadata.
+func newestModTime(dir string) (time.Time, error) {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return time.Time{}, err
+	}
+	newest := info.ModTime()
+	children, err := os.ReadDir(dir)
+	if err != nil {
+		return time.Time{}, err
+	}
+	for _, child := range children {
+		childInfo, err := os.Lstat(filepath.Join(dir, child.Name()))
+		if err != nil {
+			return time.Time{}, err
+		}
+		if childInfo.ModTime().After(newest) {
+			newest = childInfo.ModTime()
+		}
+	}
+	return newest, nil
 }
 
 // CopySQLiteSnapshot creates a consistent page copy without physical compaction.

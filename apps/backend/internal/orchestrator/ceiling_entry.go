@@ -822,6 +822,11 @@ func (s *Service) validateCeilingDestination(
 	// claimed RUNNING; the task-owned route and session identity remain guarded.
 	if checkDestinationState {
 		if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
+			// Bound workflow entry prompts retain their record while the
+			// destination is active. Unbound prompts remain superseded.
+			if binding.Valid() {
+				return ceilingEntryUnavailable
+			}
 			return ceilingEntrySuperseded
 		}
 	}

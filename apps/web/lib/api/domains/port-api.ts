@@ -44,9 +44,9 @@ export async function stopTunnel(sessionId: string, port: number): Promise<void>
   });
 }
 
-export async function listTunnels(sessionId: string): Promise<TunnelInfo[]> {
+export async function listTunnels(sessionId: string): Promise<TunnelInfo[] | null> {
   const client = getWebSocketClient();
-  if (!client) return [];
+  if (!client) return null;
 
   try {
     const response = (await client.request("port.tunnel.list", {
@@ -54,6 +54,6 @@ export async function listTunnels(sessionId: string): Promise<TunnelInfo[]> {
     })) as { tunnels: TunnelInfo[] };
     return response.tunnels ?? [];
   } catch {
-    return [];
+    return null;
   }
 }

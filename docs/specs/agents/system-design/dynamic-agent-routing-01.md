@@ -514,6 +514,10 @@ and never derive historical attribution from current session state.
   returns the current route snapshot. A stale generation returns a conflict
   with the authoritative snapshot. An action during an active turn returns a
   failed-precondition response.
+  The browser applies an action response against the current session row. A
+  session projection received after the request owns the same or a newer route
+  generation; a delayed action response cannot replace that projection. The
+  response must not recreate a removed session or invent a session timestamp.
 - Route events use the contracts described above. All route-scoped user actions
   include the expected generation so a stale Retry now or Skip now action cannot
   affect a successor route.

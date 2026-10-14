@@ -14,6 +14,9 @@ type NativeResumeDeliveryEvidence struct {
 }
 
 type NativeResumeSubmissionEvidence struct {
+	// Empty state denotes legacy interrupted-unknown evidence.
+	State             DeliverySubmissionState
+	Outcome           string
 	StreamID          string
 	ID                string
 	HarnessGeneration int64

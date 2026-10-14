@@ -388,6 +388,10 @@ test:
 test-windows:
 	@echo "Running Windows-sensitive packages..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+	@echo "Running Windows Git executable memo tests..."
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -v -timeout 10m ./internal/common/subproc -run "^TestNewGitCommand"
+	@echo "Running Windows Hermes ACP detection tests..."
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run "^Test(HermesACP|RunCommandCheck)"
 	@echo "Running Windows helper console-behavior tests..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg -run "^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants|TestPrepareNativeMCPProcessHidesConsoleWindow|TestWindowsACPCommandProcAttrHidesConsoleWindow|TestConfigureProcessTreeHidesConsoleWindow)$$"
 	@echo "Running Windows runtime observation command-shim tests..."
@@ -400,6 +404,11 @@ test-windows:
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/gateway/websocket -run TestResolveAndBindReportsOccupiedPort
+	@echo "Running Windows loopback listener tests..."
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v -timeout 10m ./internal/common/portutil ./internal/common/netprobe ./internal/agentctl/server/config ./cmd/plugin-fixture
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v -timeout 10m ./internal/gateway/websocket -run "Tunnel|ResolveAndBind|ConcurrentFailingStarts"
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v -timeout 10m ./internal/launcher -run "TestPickPorts|TestPickDevPorts|TestCanBind|TestWaitForHealthBypassesHTTPProxyForSpecificBind"
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v -timeout 10m ./internal/agentctl/server/api -run "^(TestHandleVscodeStart_Success|TestHandleVscodeStatus_AfterStart|TestVscodeOpenFile_WaitsForRunning_E2E)$$"
 	@echo "Running Windows SQLite database path tests..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/system/backups -run TestVerifySnapshotOpensNativeAbsolutePath
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/task/inventoryrepair -run "^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$$"

@@ -465,6 +465,18 @@ In a multi-repository task, every wire request must identify one repository with
 
 A fan-out can partially succeed. The UI continues after a failure and reports per-repository outcomes; inspect each repository before retrying a history-changing action.
 
+## Background status freshness
+
+Focused tasks keep their normal frequent status updates. Unfocused task tracking
+starts at 30 seconds and, after unchanged scans, can back off to five minutes.
+An unfocused change badge can therefore show a change up to five minutes late
+following a quiet period. Detected changes and polling-mode updates reset the
+interval. Failed reads do not advance the backoff.
+
+Focusing a task requests an immediate scan. Explicit Refresh also scans directly,
+and a completed agent turn requests a final file and Git refresh before idle
+polling is paused. These actions do not wait for the background interval.
+
 ## Commit history and reset behavior
 
 The Changes panel's session history is calculated relative to the session's recorded base commit or current merge base, so it focuses on commits created on the task branch. Kandev refreshes status and emits session Git updates after mutations, but the underlying Git repository remains authoritative.

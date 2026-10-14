@@ -40,6 +40,7 @@ No private payloads or live native conversations belong in fixtures.
 3. [State/boundary contract and delivery](task-03-recovery-contract.md).
 4. [Prepared prompt admission](task-04-prepared-prompt-admission.md).
 5. [Legacy delivery Resume controls](task-05-legacy-resume-controls.md).
+6. [Projected terminal delivery recovery](task-06-terminal-delivery-recovery.md).
 
 Each work order is executed here sequentially. Native restoration and retirement
 are never prompt authority. Historical labels, hashes, cursors and independent

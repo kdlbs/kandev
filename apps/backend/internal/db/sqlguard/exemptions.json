@@ -1,5 +1,6 @@
 {
   "exemptions": [
+    {"file": "internal/launcher/backup_sqlite.go", "symbol": "verifyProductionSnapshot", "rule": "sqlite-catalog", "reason": "Launcher production snapshots open only the sqlite3 driver read-only and require SQLite integrity verification before publication"},
     {"file": "internal/task/inventoryrepair/journal.go", "symbol": "verifyBackup", "rule": "sqlite-catalog", "reason": "Explicit SQLite-only offline repair verifies its backup before any inventory mutation"},
     {"file": "internal/system/toolretention/scan.go", "symbol": "consumeRow", "rule": "sqlite-date-function", "reason": "Tool payload retention rejects non-SQLite engines before scanning; julianday validates legacy SQLite timestamp strings"},
     {"file": "internal/task/repository/sqlite/tool_payload_retention_scan.go", "symbol": "payloadTaskEligibilityTemplate", "rule": "sqlite-date-function", "reason": "PayloadTaskEligible requires the sqlite3 driver before validating legacy timestamps with SQLite date functions"},
@@ -25,6 +26,7 @@
     {"file": "internal/db/schema.go", "symbol": "ColumnExistsContext", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware schema inspection helper"},
     {"file": "internal/db/schema.go", "symbol": "IndexExistsContext", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware schema inspection helper"},
     {"file": "internal/db/schema.go", "symbol": "IndexDefinitionContext", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware index definition inspection helper"},
+    {"file": "internal/db/sqlite.go", "symbol": "applyWriterPragmas", "rule": "sqlite-catalog", "reason": "The SQLite-only writer connection hook bounds the WAL file size"},
     {"file": "internal/delivery/store.go", "symbol": "tableExists", "rule": "sqlite-catalog", "reason": "The SQLite branch is the explicit dialect boundary for the schema probe"},
     {"file": "internal/delivery/store.go", "symbol": "tableExists", "rule": "raw-placeholder", "reason": "The placeholder is in the explicit SQLite branch of the schema probe"},
     {"file": "internal/github/store.go", "symbol": "createTablesSQL", "rule": "boolean-integer", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},

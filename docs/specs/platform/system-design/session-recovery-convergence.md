@@ -120,3 +120,21 @@ no host shutdown, production mutation or local browser testing is authorized.
 ## Delivery
 
 [Sequential work package](../../../plans/session-recovery-convergence/plan.md).
+
+## Projected terminal reconciliation
+
+Terminal `error` and `complete` events settle a dispatching journal submission in
+the same transaction as the event append. An interrupted return path or restart
+cannot downgrade those known outcomes. Nonterminal errors and previously stored
+unknown outcomes retain their existing semantics.
+
+Legacy journals can contain interrupted-unknown submissions with retained
+terminal sequence evidence already projected as a known SQL outcome. An idle,
+authenticated native successor may retire these exact submissions without
+changing either store's historical state. Eligibility requires matching session,
+incarnation, generation, stream, immutable hash, terminal sequence and fully
+projected SQL cursor. SQL admission revalidates the pinned terminal state and
+outcome along with the complete active inventory, current native execution and
+matching recovery fences. Any independent active record or projection gap
+refuses resolution. The same proof permits normal loaded-session reconciliation
+and explicit Resume; neither path dispatches an old prompt.

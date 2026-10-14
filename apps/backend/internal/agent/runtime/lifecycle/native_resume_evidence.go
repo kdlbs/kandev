@@ -25,7 +25,7 @@ func (m *Manager) validateNativeResumeSQLHistory(
 	if _, supported := repository.(agentDeliverySubmissionLister); !supported {
 		return fmt.Errorf("%w: %w: SQL submission history is unavailable", ErrDurableAdoptionBlocked, ErrDurableAdoptionEvidenceUnavailable)
 	}
-	active, err := activeBackendSubmissions(ctx, repository, execution.SessionID)
+	active, err := nativeResumeSQLRows(ctx, execution, status, peer, repository)
 	if err != nil {
 		return err
 	}
@@ -42,7 +42,7 @@ func validateNativeResumeSQLRows(execution *AgentExecution, status *agentctl.Del
 	}
 	for _, submission := range active {
 		evidence, found := retained[submission.ID]
-		if !found || !peerMatchesUnknownHistory(execution, status, evidence, submission) || retired && !evidence.Retired {
+		if !found || (!peerMatchesUnknownHistory(execution, status, evidence, submission) && !peerMatchesTerminalHistory(execution, status, evidence, submission)) || retired && !evidence.Retired {
 			return fmt.Errorf("%w: native resume peer and SQL submission evidence disagree", ErrDurableAdoptionBlocked)
 		}
 	}

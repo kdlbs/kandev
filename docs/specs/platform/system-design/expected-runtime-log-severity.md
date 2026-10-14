@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001
 created: 2026-08-28
-updated: 2026-10-12
+updated: 2026-10-13
 owners:
   - kandev
 ---
@@ -16,14 +16,14 @@ This design preserves the severity of recognized child logs. It also assigns
 non-error levels to expected task-environment and backend-restart conditions.
 
 The design does not change process control, workspace selection, restart
-detection, or returned errors. Unknown child stderr remains visible at warning
+detection, or public missing-session responses. Unknown child stderr remains visible at warning
 level.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001` | [Child log forwarding](#child-log-forwarding), [Task-environment fallback](#task-environment-fallback), [Frontend restart recovery](#frontend-restart-recovery), and [MCP observations during shutdown](#mcp-observations-during-shutdown) |
+| `REQ-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001` | [Child log forwarding](#child-log-forwarding), [Task-environment fallback](#task-environment-fallback), [Frontend restart recovery](#frontend-restart-recovery), [MCP observations during shutdown](#mcp-observations-during-shutdown), and [Session recovery projection](#session-recovery-projection) |
 
 ## Child log forwarding
 
@@ -120,6 +120,43 @@ This classification implements
 `AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.19` through `.21` and preserves
 the existing [durable delivery design](durable-agent-delivery.md).
 
+## Session recovery projection
+
+Implements acceptance criteria `.22` through `.24`.
+
+`internal/task/dto.EnrichSessionRecoveryBlocks` is the shared serialization
+boundary for HTTP, WebSocket, boot, and orchestrator session projections.
+It initializes an empty collection before querying the current persisted
+generation for the session's queue incarnation, falling back to session ID
+only when the incarnation is absent.
+
+`internal/task/repository/sqlite.GetCurrentHarnessSessionGeneration` returns
+`models.ErrTaskSessionNotFound` when its generation query has no rows. A task
+session can exist before native initialization commits its first generation.
+The projection shall recognize that typed no-generation result and return
+the empty collection without a warning. Keep the repository's strict result
+unchanged because recovery and admission consumers rely on it.
+
+Limit this handling to the generation lookup. Do not suppress an error from
+`ListOpenSessionRecoveryBlocks`, including a not-found sentinel there, or an
+unrelated generation-read error. Existing caller warning paths remain effective.
+No state is created or repaired during serialization. Public session lookup and
+authorization still occur before projection and retain their missing-session
+response. Preserve current-generation filtering after successful initialization.
+
+The frontend's `session-state-reconciler.ts` performs bounded conditional HTTP
+reads every 750 ms for busy sessions. DTO enrichment runs before ETag response
+selection, so an unchanged response can still trigger the defective warning.
+This repair does not change polling, ETags, or startup scheduling.
+
+Integration tests must use a real repository and persisted task session with
+no generation; a nil-success fake alone does not represent this repository
+contract. Pair the regression with unexpected-error and generation/block
+filtering tests. Check HTTP conditional responses and orchestrator events.
+
+See [durable harness boundaries](../../../decisions/2026-09-10-durable-harness-session-boundaries.md)
+for the existing persistence and recovery-admission guarantees.
+
 ## Failure and recovery
 
 An unknown child record remains a warning. This rule prevents a parser change
@@ -163,3 +200,4 @@ to release teardown without waiting for ACK.
 ## Implementation records
 
 - [MCP attachment shutdown log classification](../../../plans/mcp-attachment-shutdown-logging/plan.md).
+- [Fresh-session recovery projection](../../../plans/fresh-session-recovery-projection/plan.md).

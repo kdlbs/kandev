@@ -140,6 +140,13 @@ environment guard, test isolation, and complete identity set. The current
 frontend workflow remains unsharded until hosted timing and occupancy evidence
 satisfy the [CI performance plan](plans/ci-performance/plan.md).
 
+Frontend typechecking has a step-scoped 8 GiB Node old-space limit. The full
+program exceeds Node 24's default heap on the 16 GiB hosted runner; this limit
+leaves room for native memory and runner/container overhead. The command still
+checks the complete TypeScript program, and unit tests and builds retain their
+own settings. Verify physical and container memory capacity when changing the
+standard runner tier.
+
 ### External CI runner capacity
 
 The normal Linux CI workflows have one activation switch, one percentage

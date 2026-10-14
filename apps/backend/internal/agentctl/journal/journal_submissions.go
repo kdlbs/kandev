@@ -378,10 +378,15 @@ func markSubmissionTerminalTx(ctx context.Context, tx *bolt.Tx, event Event, max
 		}
 		return nil
 	}
-	// A definitive completion must release admission in the same commit that
-	// makes its terminal event replayable. Preserve other recorded outcomes.
-	if event.Type == "complete" && submission.State == SubmissionDispatching && !submission.Retired {
-		submission.State = SubmissionCompleted
+	// Terminal outcomes release admission in the same commit that makes the
+	// event replayable. Preserve outcomes recorded before terminal persistence.
+	if submission.State == SubmissionDispatching && !submission.Retired {
+		switch event.Type {
+		case "complete":
+			submission.State = SubmissionCompleted
+		case "error":
+			submission.State = SubmissionFailed
+		}
 	}
 	submission.TerminalEventRetained = true
 	submission.TerminalSequence = event.Sequence

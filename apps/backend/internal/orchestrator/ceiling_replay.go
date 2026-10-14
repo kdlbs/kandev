@@ -61,8 +61,8 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 	tasks, err := lister.ListTasksWithCeilingDeferred(ctx)
 	if err != nil {
 		s.logger.Zap().Warn("could not list ceiling-deferred tasks for the retry sweep", zap.Error(err))
-		return
 	}
+	s.refreshCeilingLaunchQueueSummaries(ctx, tasks)
 	for _, task := range tasks {
 		s.retryOneDeferredCeilingLaunch(ctx, task)
 	}

@@ -286,3 +286,98 @@ latest-main build with no retries/skips. Eight launcher/integration tests,
 changed-file lint/formatting, primary and merged typechecks and documentation
 checks pass. This selects the candidate for hosted measurement; it does not
 close the full-suite 50% acceptance gate.
+
+
+### Complete launcher trial and coverage correction
+
+Hosted run 38485034609 at 0b248b18 completes with a longest normal E2E step of
+1,142 seconds (19m02), 47.11% below the fixed 2,159-second reference. Summed
+normal execution is 13,298 seconds; workflow elapsed is 2,292 seconds. Eight
+normal shards and all six container shards pass. Eight final cases fail and
+17 retry attempts occur. This failed run is not an accepted speed result, and
+its longest step remains 62.5 seconds above the 50% target.
+
+The complete 34-blob audit accounts for 3,938 executed cases: 3,890 passed,
+eight failed and the same 40 skipped identities. Comparing the complete list
+with CLI selection exposes a pre-existing planner defect: 30 helper-declared
+cases are attributed to helper definition files rather than their root spec
+files and therefore never selected for execution. The planner now carries the
+owning root spec through nested suites. The real Playwright listing regression
+fails before the correction; all 35 planner, runner and subshard tests pass
+with it. Restoring those 30 cases is required before final timing acceptance.
+
+CI remediation preserves the legacy multi-repository manual-recovery branch by
+holding background Git reads until the real recovery response, while disabling
+automatic session start for that fixture. Both mobile and desktop journeys
+pass three repetitions each (12 cases, zero retries). The routing failure is a
+real browser race: a delayed action response overwrites a newer failure in the
+same route generation. Six component regressions and both real desktop/mobile
+fallback journeys pass after preserving the newer session projection.
+
+The startup-retry case retains persisted state, launch counts, file survival
+and final UI assertions; transient banner rendering is already asserted by its
+component test. All four browser cases pass. PR automation fixtures now declare
+the mock repository visible to their automation account. The markdown comment
+journey waits for the actual new-file Changes update before selecting Files.
+Remaining browser validation and full hosted acceptance are still in progress.
+
+
+All 30 restored helper-declared browser cases pass on desktop and mobile with
+one worker and no retries or skips. A separate real CLI listing of every
+planned shard selects exactly 3,816 normal and 152 container identities, with
+no missing or duplicate cases relative to the full catalog.
+
+
+The live tool-completion regression exposes a database timestamp defect rather
+than a slow render: the turn-end completion sweep writes SQLite
+`CURRENT_TIMESTAMP`, truncating the new tool revision to whole seconds. History
+recovery then treats completed rows as older than their pending live revisions.
+A repository regression fails before changing the sweep to a UTC application
+timestamp and passes afterward with the race detector. SQL guard and the
+persistence conformance suite pass. PostgreSQL and fresh-build browser checks
+are recorded with the final validation below.
+
+Main advanced to 8d163e959a62a5766a0e6922473bef99f0157c82. The two Quick Chat
+cancellation test conflicts retain the new main-side causal message waits and
+this PR's independent desktop test execution with normal configured retries.
+The focused checks below validate the resolved merge before its normal hooked commit.
+
+
+The timestamp regression now passes against both SQLite and isolated real
+PostgreSQL with the race detector. The live browser completion case also passes
+on the rebuilt merged source. The PR automation fixture additionally keeps its
+initial turn active, matching the existing mobile fixture, so the browser
+journey tests queued repair and provider transitions without an undispositioned
+mock repair completing and triggering another auto-fix round. The markdown,
+completion and desktop/mobile requeue cases pass three repetitions each:
+12 passed, zero retries/skips. All 53 focused component/helper/planner/runner
+unit tests pass. Public docs need no change: the existing timestamp and routing
+contracts are preserved; their implementation invariants are clarified in the
+owning system designs.
+
+
+The unchanged backend storage test passes its single targeted hosted retry;
+the completed old-head CI snapshot has 44 passed, 15 skipped and seven failed
+checks, all failures belonging to the E2E workflow already under remediation.
+The previous waiter exits 1 after 26m35s with those known failures and the base
+conflict; it is not left polling. Main then advances to 2f501583ff through the
+native first-prompt readiness fix. Fresh hosted validation must use the actual
+new-head merge with that current base; old passing checks are not reused.
+
+
+The complete affected PR/Quick Chat file run passes 17 of 18 cases and exposes
+a missing mock-provider check in the mobile automatic-merge retry fixture.
+Seeding the actual successful provider check makes that case pass three times
+without retries. The subsequent six-case mobile file passes five cases and
+exposes an existing conflict-repair fixture race: a mock repair completes
+without an outcome and legitimately starts another round. Both desktop and
+mobile cases now keep the repair active while checking duplicate feedback;
+all six repeated cases pass without retries. Assertions and test budgets stay
+unchanged. All seven desktop PR cases and five resolved Quick Chat cases
+already passed in the complete-file run. These results are focused validation,
+not a claim that one complete hosted suite passed.
+
+Web typecheck, zero-warning focused ESLint, formatting, changed-Go lint,
+SQL guard, persistence conformance, specification validation, and harness
+validation pass. The next acceptance gate remains the complete hosted run,
+including restored helper-declared cases and current-base integration.

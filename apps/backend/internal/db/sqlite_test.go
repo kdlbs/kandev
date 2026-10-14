@@ -355,3 +355,35 @@ func TestSQLiteReaderProgressDuringWriterTransaction(t *testing.T) {
 	require.Equal(t, 3, revision)
 	require.Zero(t, f.reader.Stats().InUse)
 }
+
+func sqliteJournalSizeLimit(t *testing.T, ctx context.Context, database *sql.DB) int64 {
+	t.Helper()
+	var limit int64
+	require.NoError(t, database.QueryRowContext(ctx, `PRAGMA journal_size_limit`).Scan(&limit))
+	return limit
+}
+
+// @covers AC-PLATFORM-SQLITE-FILE-HYGIENE-001.1, AC-PLATFORM-SQLITE-FILE-HYGIENE-001.3
+func TestSQLiteWriterJournalSizeLimit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	path := filepath.Join(t.TempDir(), "wal-limit.db")
+	writer, err := internaldb.OpenSQLite(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+	reader, err := internaldb.OpenSQLiteReader(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reader.Close()) })
+
+	require.Equal(t, int64(64<<20), sqliteJournalSizeLimit(t, ctx, writer))
+
+	// Discard the pooled writer connection so the next query opens a new one.
+	conn, err := writer.Conn(ctx)
+	require.NoError(t, err)
+	require.ErrorIs(t, conn.Raw(func(any) error { return driver.ErrBadConn }), driver.ErrBadConn)
+	require.ErrorIs(t, conn.Close(), sql.ErrConnDone)
+	require.Zero(t, writer.Stats().OpenConnections, "bad writer connection must be discarded")
+	require.Equal(t, int64(64<<20), sqliteJournalSizeLimit(t, ctx, writer), "replacement writer connection")
+
+	require.Equal(t, int64(-1), sqliteJournalSizeLimit(t, ctx, reader), "reader keeps the SQLite default")
+}

@@ -49,10 +49,7 @@ test.describe("managed runtime startup retry", () => {
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
-      await expect(
-        session.activeChat().getByText("Retrying agent startup (attempt 2 of 2)", { exact: true }),
-      ).toBeVisible({ timeout: 30_000 });
-
+      // The transient retry can finish before navigation. Assert its durable outcomes.
       await waitForSessionDone(
         apiClient,
         task.id,

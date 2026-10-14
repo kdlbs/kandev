@@ -1,7 +1,7 @@
 ---
 id: "05-legacy-resume-controls"
 title: "Expose guarded Resume for legacy delivery fences"
-status: in_progress
+status: completed
 wave: 5
 depends_on:
   - 04-prepared-prompt-admission
@@ -65,3 +65,6 @@ after canonical record reconstruction and checks Retry visibility alongside
 Resume and Stop in the legacy browser scenario. All seven translated catalogs
 and pseudo pass i18n checks. The exact PR documentation evaluator now passes
 after linking requirements 006 and 008 in the parent plan and design metadata.
+
+PR #4443 merged as ed56b752e18e with 49 passing checks, 19 skipped checks,
+no failed or pending checks, and all three review threads resolved.

@@ -168,9 +168,8 @@ test.describe("Quick Chat cancellation palette and composer", () => {
     await waitForQuickChatSessionSettled(testPage, quickSessionId, 75_000);
     await waitForQuickChatDirectInput(quickChat);
     await sendQuickChatMessage(quickChat, testPage, "/e2e:bulk:2");
-    await expect(quickChat.getByText("Done. Emitted 2 messages", { exact: false })).toBeVisible({
-      timeout: 30_000,
-    });
+    await waitForAgentMessage(apiClient, quickSessionId, "Done. Emitted 2 messages", 30_000);
+    await expect(quickChat.getByText("Done. Emitted 2 messages", { exact: false })).toBeVisible();
     await waitForActiveSessionForegroundActivity(testPage, "generating");
 
     await testPage.keyboard.press("Escape");
