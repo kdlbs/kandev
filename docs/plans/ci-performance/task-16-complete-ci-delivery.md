@@ -63,7 +63,17 @@ Current-main enumeration adds only two workspace-adoption scenarios, for
 Backend passes in 865 seconds including queue/reporting, with 802 seconds
 execution critical path and 245.6 runner-minutes. The single primary waiter
 preserves this full attempt while local queue/cache follow-ups are prepared.
-Frontend and E2E outcomes remain pending; full acceptance is still unmet.
+Frontend passes in 1,001 seconds (696 execution critical path; 26.75
+runner-minutes). E2E passes in 1,921 seconds (1,037 execution critical path;
+303.7833 runner-minutes). The complete set therefore takes 32m01s and fails
+the fifteen-minute timing target. Its 34 reports account for all 3,963 E2E
+tests: 3,916 first-attempt passes, seven retry-only passes and 40 existing skips.
+Hosted native IDs, hashes and counts match the locally verified current-main
+catalog; its actual timing profile is successful main run 38599930486, rather
+than the older local planning profile. Preserve that scheduling difference.
+The primary waiter confirms 85 passed/14 skipped, zero failed/pending and no
+file conflict; its exit 1 reports base drift, separately checked on the same
+hosted merge tree. Local queue/cache/tracing follow-ups remain unmeasured on CI.
 
 Second candidate head `e2a66b8536` runs backend 38581852307, frontend
 38581852072 and E2E 38581852055. Its tested merge is

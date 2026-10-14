@@ -355,3 +355,32 @@ guard, artifact and gate. The real installed-toolchain identity enables caching;
 a real Go source change in the same native cache produces the changed binary.
 The new workflow contract fails before integration and passes afterward.
 Hosted daily-generation population/reuse and full timing remain pending.
+
+### Avoid discarded protocol serialization (ninth candidate)
+
+Sixth-run ordinary backend cohort 3 takes 779 seconds. Its full native JSON
+attributes 285.60 seconds to `TestShellSnapshotCoalescingStorageBound` and
+62.67 seconds to `TestShellSnapshotDurableStorage`. The tests retain 10,000
+and 2,000 source updates with a 256 KiB output window. Protocol tracing currently
+marshals every normalized event even when its newly created span records nothing.
+
+Profile those unchanged tests with CI's race/atomic coverage flags. If the
+profile confirms discarded serialization as a material cost, return after span
+creation when `IsRecording` is false, still ending the span. This is an internal
+performance change: preserve every enabled trace attribute/event, truncation,
+sampling decision and source update. First prove disabled and sampled-out spans
+skip a real JSON marshaler, and recording spans retain the same payloads.
+Keep all stress iterations and storage/correctness assertions, then repeat the
+exact native workload and run the affected tracing/adapter tests and Go lint.
+
+The race/atomic-coverage CPU profile confirms repeated JSON marshaling through
+`TraceProtocolEvent` while debug tracing is disabled. The same two unchanged
+stress tests pass in 153.702 seconds before the guard and 9.095 afterward
+(94.1% lower), with the same 10.6% ACP statement coverage. Three further
+repetitions pass all six cases: 41 coalesced snapshots and 11 durable events
+remain within the original budgets, preserving complete output and retirement.
+Disabled, sampled-out, sampled and record-only trace regression tests pass ten
+repetitions; the disabled/sampled-out checks fail before the guard. All shared,
+ACP and tracing package race tests pass; strict changed-package lint finds zero
+issues. Fresh native and support builds pass four desktop queue/restart and two
+mobile queue browser cases, retries disabled. Hosted impact remains unmeasured.
