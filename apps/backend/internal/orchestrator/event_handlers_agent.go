@@ -4648,7 +4648,7 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 // runs in a goroutine so it doesn't block the event handler.
 func (s *Service) cleanupAgentExecution(executionID, taskID, sessionID string) {
 	ctx := context.Background()
-	if executionID != "" && s.cleanupAgentExecutionWithReason(ctx, executionID, taskID, sessionID, "agent completed") {
+	if executionID != "" && s.cleanupAgentExecutionWithReason(ctx, executionID, taskID, sessionID, completedExecutionCleanupReason) {
 		s.settleBackgroundWork(ctx, sessionID, executionID)
 	}
 }

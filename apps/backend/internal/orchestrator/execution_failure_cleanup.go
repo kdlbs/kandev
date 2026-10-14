@@ -8,6 +8,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const completedExecutionCleanupReason = "agent completed"
+
 // cleanupAgentExecutionWithReason reports whether teardown is complete and
 // workflow recovery may proceed, including a previously completed exact claim.
 func (s *Service) cleanupAgentExecutionWithReason(ctx context.Context, executionID, taskID, sessionID, reason string) bool {
@@ -17,7 +19,7 @@ func (s *Service) cleanupAgentExecutionWithReason(ctx context.Context, execution
 	if executionID == "" {
 		return true
 	}
-	if reason == "agent completed" && s.lspLeases != nil && s.lspLeases.HasActiveLSPLeaseForExecution(executionID) {
+	if reason == completedExecutionCleanupReason && s.lspLeases != nil && s.lspLeases.HasActiveLSPLeaseForExecution(executionID) {
 		s.logger.Debug("deferring execution teardown while its language server lease is active",
 			zap.String("execution_id", executionID),
 			zap.String("task_id", taskID),
@@ -60,7 +62,7 @@ func (s *Service) cleanupAgentExecutionWithReason(ctx context.Context, execution
 	if claimed {
 		s.completeExecutionTeardownClaim(sessionID, executionID, claim)
 	}
-	if reason != "agent completed" {
+	if reason != completedExecutionCleanupReason {
 		s.settleOpenBackgroundWork(ctx, sessionID)
 	}
 	return true
