@@ -383,7 +383,10 @@ Disabled, sampled-out, sampled and record-only trace regression tests pass ten
 repetitions; the disabled/sampled-out checks fail before the guard. All shared,
 ACP and tracing package race tests pass; strict changed-package lint finds zero
 issues. Fresh native and support builds pass four desktop queue/restart and two
-mobile queue browser cases, retries disabled. Hosted impact remains unmeasured.
+mobile queue browser cases, retries disabled. Ninth hosted evidence confirms
+the unchanged stress pair falls from 348.27 to 16.78 seconds and the ACP package
+from 375.557 to 42.322 seconds. Whole-backend runner-minutes fall 14.0%, but
+full-pipeline elapsed remains above fifteen minutes; do not claim completion.
 
 ### Preserve sidebar action state across reveal (tenth candidate)
 

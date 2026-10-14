@@ -53,14 +53,27 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
-Ninth candidate `5f47945b531` is running as backend 38620159334, frontend
+Ninth candidate `5f47945b531` succeeds as backend 38620159334, frontend
 38620159244 and E2E 38620159182. Backend succeeds in 1,181 seconds including
 queue/reporting (796 seconds execution critical path; 211.2 runner-minutes).
 Frontend succeeds in 1,002 seconds (949 seconds execution critical path;
-28.1333 runner-minutes). E2E remains incomplete, so the full set has no final
-timing and cannot establish acceptance. Its first daily-cache population build
-takes 487 seconds, including 85 seconds of cache publication; retain that cold
-cost in the complete sample. PR #4489 is ready and mergeable, not merged.
+28.1333 runner-minutes). E2E succeeds in 2,112 seconds (1,244 seconds execution
+critical path; 308.1667 runner-minutes). The complete set therefore takes
+35m12s, slower than the sixth set, and fails timing acceptance. All 3,963
+selected E2E identities remain: 3,916 first-attempt passes, seven retry-only
+passes, 40 existing skips and zero final failures. Its first daily-cache
+population build takes 487 seconds, including 85 seconds of cache publication;
+retain that cold cost in the complete sample. Logs prove successful module and
+build-cache publication. Exact-key reuse is still unmeasured. PR #4489 is ready
+and mergeable, not merged.
+
+Ninth frontend artifacts preserve all sixth-set identities, adding only the
+new mock-turn release helper test: 2,953 files, 26,447 tests, 26,443 passes and
+four skips. The actual hosted ACP package falls from 375.557 to 42.322 seconds;
+its two unchanged shell-snapshot stress cases fall from 348.27 to 16.78 seconds
+combined. Backend runner-minutes fall 14.0%; the complete workflow still misses
+fifteen minutes. The E2E manifest uses the same successful-main timing profile
+38599930486, and retains every selected native unit and count.
 
 The tenth candidate's sidebar retry repair has a deterministic browser red
 before the fix and three passing repetitions afterward. The complete affected
