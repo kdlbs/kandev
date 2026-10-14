@@ -90,6 +90,11 @@ classification, preventing stale bindings from falling into clone recovery.
 The native preparer reports the validated worktree's source common directory
 in its launch result. Resume therefore retains the independent checkout's
 published provenance instead of projecting the registered clone back over it.
+Native resume and workspace-only execution validate the durable adoption receipt
+and filesystem proof before accepting independent Git administration. The check
+binds the selected environment, repository, logical worktree, branch identity and
+physical checkout. Ordinary registered-source comparison remains in place when
+no current adoption is present.
 
 Receipt validation binds the original session incarnation, owner generation,
 workspace, complete branch-driving attachment set, selected slot branch identity

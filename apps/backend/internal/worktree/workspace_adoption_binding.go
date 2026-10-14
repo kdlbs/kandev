@@ -16,6 +16,27 @@ type workspaceAdoptionReader interface {
 	GetCurrentWorkspaceAdoption(context.Context, string) (*models.WorkspaceAdoptionReceipt, error)
 }
 
+// ValidateWorkspaceAdoptionForReuse checks persisted provenance for one selected checkout.
+// It does not grant task or workspace access.
+func (m *Manager) ValidateWorkspaceAdoptionForReuse(ctx context.Context, req CreateRequest, path string) (bool, error) {
+	if req.WorktreeID == "" || req.TaskEnvironmentID == "" {
+		return false, nil
+	}
+	wt, err := m.GetByID(ctx, req.WorktreeID)
+	if err != nil || wt == nil {
+		return false, err
+	}
+	slug := requestBranchIdentitySlug(req)
+	if (req.BranchSlug != "" || req.BranchIdentitySlug != "") && slug == "" {
+		return false, models.ErrWorkspaceAdoptionStale
+	}
+	if wt.Path != path || wt.RepositoryID != req.RepositoryID || wt.TaskEnvironmentID != req.TaskEnvironmentID ||
+		(slug != "" && slug != SanitizeBranchSlug(wt.BranchSlug)) {
+		return false, models.ErrWorkspaceAdoptionStale
+	}
+	return m.validateWorkspaceAdoptionBinding(ctx, wt)
+}
+
 func (m *Manager) validateWorkspaceAdoptionBinding(ctx context.Context, wt *Worktree) (bool, error) {
 	reader, ok := m.store.(workspaceAdoptionReader)
 	if !ok {

@@ -33,6 +33,35 @@ func TestWorkspaceAdoptionReuseInvalidatesCachedBindingAndRetiredMarker(t *testi
 	require.Error(t, f.manager.AdmitTaskRecovery(ctx, "task-adoption"))
 }
 
+func TestWorkspaceAdoptionReuseRequiresExactSelectedCheckout(t *testing.T) {
+	f := newAdoptionHTTPFixture(t)
+	p := adoptionPreview(t, f)
+	rec := adoptionRequest(f.router, "/api/v1/tasks/task-adoption/workspace-adoption/apply", map[string]any{"preview": p, "operation_id": "11111111-1111-4111-8111-111111111111"})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	req := worktree.CreateRequest{TaskEnvironmentID: "env-adoption", RepositoryID: "repo-adoption", WorktreeID: "wt-adoption", BranchIdentitySlug: "feature-adoption"}
+	adopted, err := f.manager.ValidateWorkspaceAdoptionForReuse(context.Background(), req, f.clone)
+	require.NoError(t, err)
+	require.True(t, adopted)
+	for _, path := range []string{f.old, f.source, filepath.Join(f.root, "foreign")} {
+		_, err := f.manager.ValidateWorkspaceAdoptionForReuse(context.Background(), req, path)
+		require.ErrorIs(t, err, models.ErrWorkspaceAdoptionStale)
+	}
+	for _, mutate := range []func(*worktree.CreateRequest){
+		func(r *worktree.CreateRequest) { r.TaskEnvironmentID = "foreign-env" },
+		func(r *worktree.CreateRequest) { r.RepositoryID = "foreign-repo" },
+		func(r *worktree.CreateRequest) { r.BranchIdentitySlug = "foreign-branch" },
+	} {
+		foreign := req
+		mutate(&foreign)
+		_, err := f.manager.ValidateWorkspaceAdoptionForReuse(context.Background(), foreign, f.clone)
+		require.ErrorIs(t, err, models.ErrWorkspaceAdoptionStale)
+	}
+	_, err = f.db.Exec(`UPDATE task_repositories SET metadata='{"pr_number":17}' WHERE id='attachment-adoption'`)
+	require.NoError(t, err)
+	_, err = f.manager.ValidateWorkspaceAdoptionForReuse(context.Background(), req, f.clone)
+	require.ErrorIs(t, err, models.ErrWorkspaceAdoptionStale)
+}
+
 func TestWorkspaceAdoptionSelectedRecoveryRefusesDamagedAdoptedMetadata(t *testing.T) {
 	f := newAdoptionHTTPFixture(t)
 	ctx := context.Background()
