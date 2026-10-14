@@ -48,3 +48,35 @@ None required to complete this slice. Ordinary admission #4057 is superseded.
 ## UI screenshots for PR/MR
 
 Not applicable: operator HTTP API only. No PR was created in this phase.
+
+## PR repair verification
+
+The Git repository-selection finding is fixed by sanitizing inherited Git
+variables and specifying the inspected metadata directory on every raw proof
+read. A real HTTP regression failed before the fix and passes for inherited
+GIT_DIR and GIT_OBJECT_DIRECTORY at preview/apply/reuse. Operator rejection
+coverage now includes all three routes. The adoption table is included in the
+task store readiness descriptor.
+
+The trusted PR documentation evaluator reproduced invalid work-order metadata.
+Work orders and the manifest now link requirement IDs, acceptance criteria and
+one task-owned system design. The evaluator reports covered with no errors.
+Public prerequisites are a list; the static decision index no longer includes a
+manual catalog entry. CodeRabbit's duplicate-traversal suggestion is declined:
+the two passes bracket Git subprocess reads and detect intervening mutations.
+
+Stale-receipt replacement is a valid open lifecycle issue. The original API
+accepts a different clone only when the selected original path has a broken Git
+pointer; it cannot re-attest the already adopted path, and the receipt is unique
+per slot. Weakening validation would violate authority requirements. MAIN sent
+explicit re-attestation, automatic refresh and retained-refusal options to the
+Coordinator; no new public/schema contract is implemented without that scope
+decision. Ordinary reviewer notification remains gated on findings and required
+checks. Error-status differentiation remains an optional follow-up requiring
+consistent inspector/service error classification; the existing 409 behavior is
+not claimed to distinguish infrastructure failures.
+
+Original Human test artifacts and the PostgreSQL fixture remain intact. New
+repair candidate SHA, exact tests and independent targeted Review/QA receipts
+are recorded in task metadata; the original verification does not establish
+acceptance of a new candidate. No deployment or integration occurred.

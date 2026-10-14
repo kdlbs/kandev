@@ -1,7 +1,12 @@
 ---
-spec: docs/specs/tasks/requirements/portable-workspace-adoption.md
 created: 2026-10-11
 status: complete
+requirements:
+  - REQ-TASKS-PORTABLE-ADOPTION-001
+  - REQ-TASKS-PORTABLE-ADOPTION-002
+  - REQ-TASKS-PORTABLE-ADOPTION-003
+system_design:
+  - ../../specs/tasks/system-design/portable-workspace-adoption.md
 ---
 
 # Portable workspace adoption implementation
@@ -57,3 +62,18 @@ Acceptance is synthetic HTTP/Git/SQLite/PostgreSQL and manager-level continuity.
 Real agent resume, process kill/restart, full auth-enabled service, unsupported
 platforms, release binary and deployment acceptance remain unverified.
 No submodules or live deployment involved. No PR or overlay retirement claim.
+
+## PR repair round
+
+Inherited Git repository selectors could redirect adoption proof reads after
+checkout health inspection. The correction uses the same sanitized environment
+and explicit metadata selection as healthy-checkout inspection, retaining raw
+object ancestry. HTTP regression coverage includes preview/apply/reuse and every
+operator route. The adoption persistence table is registered for readiness.
+Delivery documentation now has valid work-order and system-design relationships;
+the trusted PR evaluator reports covered. Targeted independent revalidation for
+this repair is recorded in Kandev task metadata before any new acceptance claim.
+
+Receipt re-attestation is an unresolved contract decision sent to the Coordinator.
+The current fail-closed validation and immutable one-per-slot receipt are
+retained; no automatic refresh or stale authority relaxation is introduced.

@@ -5,7 +5,24 @@ status: done
 wave: 2
 depends_on: [1]
 plan: "plan.md"
-spec: "../../specs/tasks/requirements/portable-workspace-adoption.md"
+requirements:
+  - REQ-TASKS-PORTABLE-ADOPTION-001
+  - REQ-TASKS-PORTABLE-ADOPTION-002
+  - REQ-TASKS-PORTABLE-ADOPTION-003
+system_design:
+  - ../../specs/tasks/system-design/portable-workspace-adoption.md
+acceptance_criteria:
+  - AC-TASKS-PORTABLE-ADOPTION-001.1
+  - AC-TASKS-PORTABLE-ADOPTION-001.2
+  - AC-TASKS-PORTABLE-ADOPTION-001.3
+  - AC-TASKS-PORTABLE-ADOPTION-002.1
+  - AC-TASKS-PORTABLE-ADOPTION-002.2
+  - AC-TASKS-PORTABLE-ADOPTION-002.3
+  - AC-TASKS-PORTABLE-ADOPTION-002.4
+  - AC-TASKS-PORTABLE-ADOPTION-003.1
+  - AC-TASKS-PORTABLE-ADOPTION-003.2
+  - AC-TASKS-PORTABLE-ADOPTION-003.3
+  - AC-TASKS-PORTABLE-ADOPTION-003.4
 ---
 
 # Task 02: publication

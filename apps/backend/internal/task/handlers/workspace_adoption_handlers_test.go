@@ -283,11 +283,17 @@ func TestWorkspaceAdoptionHTTPReplayAndProvenance(t *testing.T) {
 func TestWorkspaceAdoptionHTTPOperatorBoundary(t *testing.T) {
 	f := newAdoptionHTTPFixture(t)
 	for _, header := range []string{"X-Fixture-Member", "X-Fixture-Agent"} {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/task-adoption/workspace-adoption/preview", strings.NewReader(`{}`))
-		req.Header.Set(header, "true")
-		f.router.ServeHTTP(rec, req)
-		require.Equal(t, http.StatusForbidden, rec.Code)
+		for _, endpoint := range []struct{ method, suffix string }{
+			{http.MethodPost, "preview"},
+			{http.MethodPost, "apply"},
+			{http.MethodGet, "11111111-1111-4111-8111-111111111111"},
+		} {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(endpoint.method, "/api/v1/tasks/task-adoption/workspace-adoption/"+endpoint.suffix, strings.NewReader(`{}`))
+			req.Header.Set(header, "true")
+			f.router.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusForbidden, rec.Code, endpoint.suffix)
+		}
 	}
 	for _, body := range []string{`{"unexpected":"field"}`, `{} {}`, strings.Repeat("x", 256*1024+1)} {
 		rec := httptest.NewRecorder()

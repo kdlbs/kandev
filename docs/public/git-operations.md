@@ -610,14 +610,17 @@ from ordinary healthy-checkout admission and automatic metadata recovery. The
 server may run in Docker; the action still concerns a host Worktree environment,
 not a task using the Docker executor.
 
-Stop every runtime that consumes the selected environment through its normal
-lifecycle. The existing session must be waiting for input. The prepared clone must
-be a direct child of the same owned task root, with independent Git metadata,
-the registered origin and the slot's selected branch on an existing commit. The
-candidate history must contain the registered source branch commit as a real ancestor.
-Replacement refs cannot provide that proof. Escaped ref/object metadata, legacy grafts
-and external alternate object storage are refused; ordinary packed refs are supported.
-The original pointer must identify missing administration in the registered source.
+Before you preview an adoption, confirm these prerequisites:
+
+- Every runtime consuming the environment is stopped through its normal lifecycle.
+- The existing session is waiting for input.
+- The prepared clone is a direct child of the same owned task root with independent Git metadata.
+- The clone uses the registered origin and the selected branch on an existing commit.
+- Its history contains the registered source branch commit as a real ancestor; replacement refs cannot provide proof.
+- The original pointer identifies missing administration in the registered source.
+
+Escaped ref/object metadata, legacy grafts and external alternate object storage
+are refused. Ordinary packed refs are supported.
 
 Use the operator HTTP API:
 

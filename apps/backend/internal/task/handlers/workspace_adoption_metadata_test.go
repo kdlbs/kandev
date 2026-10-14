@@ -29,6 +29,20 @@ func adoptionPreviewResponse(f adoptionHTTPFixture) int {
 	return adoptionRequest(f.router, "/api/v1/tasks/task-adoption/workspace-adoption/preview", map[string]any{"session_id": "session-adoption", "slot_id": "slot-adoption", "checkout_path": f.clone}).Code
 }
 
+func TestWorkspaceAdoptionIgnoresInheritedGitRepositorySelection(t *testing.T) {
+	for _, key := range []string{"GIT_DIR", "GIT_OBJECT_DIRECTORY"} {
+		t.Run(key, func(t *testing.T) {
+			f := newAdoptionHTTPFixture(t)
+			foreign := filepath.Join(f.root, "unrelated-metadata")
+			t.Setenv(key, foreign)
+			p := adoptionPreview(t, f)
+			rec := adoptionRequest(f.router, "/api/v1/tasks/task-adoption/workspace-adoption/apply", map[string]any{"preview": p, "operation_id": "11111111-1111-4111-8111-111111111111"})
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.NoError(t, f.manager.AdmitTaskRecovery(context.Background(), "task-adoption"))
+		})
+	}
+}
+
 func TestWorkspaceAdoptionRefusesReplacementAncestryAndLegacyGrafts(t *testing.T) {
 	for _, kind := range []string{"replacement", "legacy graft"} {
 		t.Run(kind, func(t *testing.T) {

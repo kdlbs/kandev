@@ -350,5 +350,6 @@ func validWorkspaceAdoptionPaths(selection models.WorkspaceAdoptionSelection, sl
 
 // All adoption identity/history reads use the actual objects, not refs/replace.
 func (i *WorkspaceAdoptionInspection) rawGitInspect(ctx context.Context, path string, args ...string) (string, error) {
-	return i.manager.runBoundedGitInspect(ctx, path, append([]string{"--no-replace-objects"}, args...)...)
+	explicit := []string{"--no-replace-objects", "--git-dir=" + filepath.Join(path, ".git")}
+	return i.manager.runBoundedGitInspectWithEnvironment(ctx, path, mainCheckoutInspectionEnvironment, append(explicit, args...)...)
 }
