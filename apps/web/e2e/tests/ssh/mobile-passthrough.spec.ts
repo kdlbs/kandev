@@ -67,7 +67,7 @@ test("phone input and reconnect use the same remote passthrough process", async 
   await apiClient.stopSession({ session_id: state.task.session_id!, force: true });
   await expect(state.session.recoveryResumeButton()).toBeVisible();
   await expect(keybar.root).toBeHidden();
-  const resumed = ws.waitForResponse("session.launch", { timeout: 60_000 });
+  const resumed = ws.waitForResponse("session.recover", { timeout: 60_000 });
   await state.session.recoveryResumeButton().tap();
   await resumed;
   await state.session.waitForPassthroughLoaded();

@@ -83,7 +83,7 @@ test("Stop ends the remote CLI and Resume preserves its workspace", async ({
     .toBe("stopped");
   execInContainer(seedData.sshTarget, ["test", "-d", state.workspace]);
   await expect(state.session.recoveryResumeButton()).toBeVisible();
-  const resumed = ws.waitForResponse("session.launch", { timeout: 60_000 });
+  const resumed = ws.waitForResponse("session.recover", { timeout: 60_000 });
   await state.session.recoveryResumeButton().click();
   await resumed;
   await state.session.waitForPassthroughLoaded();
