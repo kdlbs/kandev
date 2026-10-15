@@ -124,13 +124,21 @@ Structural YAML comparison preserves all original jobs, commands, permissions,
 gates and artifacts apart from the guarded request and optional observations.
 Normal commit hooks pass without bypass.
 
-Current main `c3831c5bd057` adds session-scoped launch credentials. The exact
+Main revision `c3831c5bd057` adds session-scoped launch credentials. The exact
 conflict-free synthetic merge with source candidate `dff3d4d82ba` passes its
 five new Office/orchestrator credential regressions under race detection and
 the existing readiness regression in its actual agent/runtime/agentctl package.
 The initial backendapp selector compiled that package but ran no tests; retain
 that limitation and the corrected explicit PASS. No incoming product code is
 modified by this candidate. Hosted actual-merge identity remains to be checked.
+
+Main then advances to `8c6f4b800b12` with background-work settlement. Its exact
+synthetic merge with documentation head `2605ff4e75d7` passes all 45 selected
+ordinary/race regressions across seven packages, with zero skipped cases.
+These include the credential and readiness keepers as well as the new
+background-work contracts. PostgreSQL execution stays required in hosted CI;
+no local PostgreSQL execution is claimed. Frontend/E2E source and all 3,957
+identities are unchanged by these incoming Go-only changes.
 
 A separate temporary CDP probe passes all three navigation/idle/busy cases,
 then removes its source byte-for-byte. Task navigation consumes approximately
