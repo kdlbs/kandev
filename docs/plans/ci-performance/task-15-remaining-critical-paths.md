@@ -61,6 +61,77 @@ git diff --check
 
 ## Results
 
+### Retain the open portable-config accordion
+
+Candidate 27's only final E2E failure is the portable-agent configuration case.
+Its original native steps record two clicks on the same Mock Codex accordion
+trigger: first the regex opener, then the Not Configured title after selecting
+the config bundle. The second click closes that group. A visibility assertion
+can still see the exiting content; three attempts then spend 51-55 seconds
+trying to click its disappearing auth checkbox, and the remaining attempt
+observes unchecked before disappearance. Preserve the four failed attempts;
+the final outcome is a timeout. The keyboard-shortcut scenario also retries
+but passes finally and requires separate readiness investigation.
+
+Remove only that duplicate accordion toggle. Require the original opener to
+remain aria-expanded=true before interacting with the auth checkbox. Retain
+all config/auth independence, persisted values, reload and original timeout/
+retry assertions. This is a correction to scenario actions, not a product
+change or an assertion deletion. Verify the original native identity and the
+focused browser case with retries disabled after the Kubernetes run ends.
+Do not overlap local runner ports or rebuild its inputs during that run.
+
+### Bound disposal grace for fixture-owned Kubernetes leftovers
+
+Candidate 26's container shard 1 takes 707 seconds without any container retry.
+Native steps attribute 169.627 seconds to the Kubernetes cleanup fixture;
+four hooks above 25 seconds account for 153.228 seconds. These hooks include
+both backend reset and kubectl disposal, so do not attribute every second to
+Pod grace. Cluster setup separately takes 174.270 seconds.
+
+The cleanup helper deletes only its disposable Kind cluster's workload
+namespace. Its callers are per-test reset and finally blocks after the
+in-cluster and causal-failure assertions. Product stop/resume, Pod/PVC identity,
+retention, label/UID deletion protection and causal-error checks run before
+this disposal. They retain production Pod templates and deletion behavior.
+
+Use only `--grace-period=1` for this cleanup kubectl command. Keep synchronous
+`--wait=true`, its 90-second timeout and the following empty-namespace check.
+Do not use force deletion or bypass finalizers. This is a command-option change;
+prove it through the existing real Kind lifecycle cases instead of adding a
+source-string test or test-only export. All assertions, test IDs, worker limits,
+retries and deadlines remain fixed.
+
+The first local baseline is invalid: an old generated build source marker
+causes remote-helper identity mismatch. It stops with one failure, one
+interruption and ten unrun cases; both owned clusters are removed. Preserve
+that sample. Rebuild backend/helpers, regenerate the canonical six-artifact
+identity for the exact compiled commit and repeat unchanged. The corrected
+baseline passes all twelve executor cases in 6.8 minutes with retries disabled.
+Native blobs retain the cleanup-step profile and exact outcomes.
+
+Next measure the one-option candidate across all six Kubernetes shard-1 specs
+under the managed single-worker guard, including the same four existing gated
+Docker-workload skips. Compare its twelve executor cases directly with the
+corrected baseline; preserve all other scenarios and source-bound native
+inventory. Require lint/format/docs, focused real Kind validation and the next
+complete hosted set before accepting any full-workflow improvement.
+
+
+Local verification retains all six Kubernetes shard-1 specs: seventeen pass
+and exactly the same four existing gated cases skip, with retries disabled.
+For the identical twelve executor cases, native cleanup-step time falls from
+137.231 to 109.062 seconds: 28.169 seconds saved (20.53%). The foreign-UID
+case's cleanup falls from 61.047 to 32.744 seconds; other thirty-second waits
+remain. Do not claim the full 153 seconds identified in hosted cleanup as
+saved. The full six-spec run takes 7.6 minutes; it has a different scope from
+the twelve-case 6.8-minute baseline, so those totals are not a speed comparison.
+
+The corrected portable-config case passes locally in 8.4 seconds with retries
+disabled. Native collection retains all 3,957 E2E IDs; strict lint/format pass.
+Both changes leave production and unit-test inventories unchanged. Full hosted
+coverage/timing and current-head review evidence remain required.
+
 ### Remove duplicate remote-repository layout cleanup
 
 Candidate 26's full E2E fails remote repository creation's pasted-issue case in

@@ -53,6 +53,69 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+### Twenty-eighth candidate: bounded fixture disposal and retained accordion state
+
+Use a one-second deletion grace only for disposable Kind workload cleanup,
+retaining synchronous deletion, the original timeout and explicit empty-resource
+confirmation. Product Pod templates, lifecycle calls, ownership/UID protection,
+PVC retention and every test body remain fixed. The full six-spec Kubernetes
+group passes seventeen cases with the same four existing skips and no retries.
+The twelve matching executor cases retain identical passed IDs/outcomes;
+cleanup steps fall from 137.231 to 109.062 seconds (28.169 seconds, 20.53%).
+Other thirty-second reset waits remain. No full-workflow gain is claimed from
+these component timings or from the differently scoped local run totals.
+
+Replace the portable-config scenario's duplicate accordion-closing click with
+an assertion that the original opener remains expanded. Preserve independent
+auth/config selection, persisted values, reload, retries and deadlines. The
+focused case passes in 8.4 seconds without retries. All 3,957 native E2E IDs,
+26,553 frontend cases and 35,581 expected backend executions remain selected;
+no product or unit-inventory changes accompany these two test-support edits.
+Strict lint/format pass. Full hosted validation remains pending; acceptance 1/3.
+
+The first local Kubernetes attempt is invalid: an old generated source marker
+mismatches newly compiled binaries. It is interrupted after one failure, with
+one interrupted case and ten unrun cases; both owned clusters are removed.
+After a canonical fresh backend/helper build and six-artifact marker refresh,
+the unchanged twelve-case baseline passes in 6.8 minutes with retries disabled.
+Keep that setup failure separate from the valid before/after comparison.
+
+### Twenty-seventh complete hosted result: portable-config timeout
+
+Head `9576aed18de4` passes backend `38690664361` in 19m01s (214.42
+runner-minutes) and frontend `38690664433` in 12m27s (29.77). Full E2E
+`38690664202` fails in 16m02s (286.03), with an 855-second execution critical
+path. Complete elapsed time is 19m01s and occupancy is 530.22 runner-minutes.
+All 75 core jobs are selected. This failed, over-budget sample does not count;
+acceptance remains 1/3. Backend Postgres cohort 2 runs for 1,114 seconds with
+two seconds dependency-ready delay; do not attribute that execution to queueing.
+
+Exact source/run/producer reports retain all 3,957 E2E identities: 3,907 first
+passes, nine retry passes, one final timeout and forty existing skips. All ten
+remote-picker cases pass first attempt. Native raw audit covers 118 reports,
+3,972 attempts, fifteen retry attempts and sixteen error results with no parse
+errors. Ten backend native cohorts retain all 35,581 expected executions and
+outcomes. Frontend retains 26,553 cases in 2,956 files. One backend artifact
+arrives after the initial download; collecting that missing named cohort then
+completes the exact identity audit without replacing any existing evidence.
+
+Only the portable-config case fails finally, on four attempts. Its second
+click on the already-open Mock Codex accordion closes the target; native steps
+record 51-55-second waits on the disappearing auth checkbox in three attempts.
+The keyboard integration scenario retries but passes finally; no zero-flake
+claim is made. Normal E2E tail shards incur 216-223 seconds scheduling/provisioning
+delay of unknown cause. The report takes 68 seconds and correctly preserves
+the failed test result.
+
+Twenty-seven normal resource artifacts show four CPUs, 7.93-9.75 GiB lifetime
+peaks and zero observed swap/memory events. Shard 18's optional artifact is
+absent from the complete 72-artifact listing despite successful capture/upload
+steps; its resource outcome is unknown, never zero. All mandatory tests and
+native reports remain accounted for. Fresh exact-head evidence has 89 passed
+checks, two failed E2E contexts, eleven ancillary skips and zero pending, with
+no evidence errors or unresolved/hidden threads/current-head review bodies.
+No hosted set or PR monitor remains live before candidate 28.
+
 ### Twenty-seventh candidate: remove duplicate sidebar restoration
 
 Candidate 26's only test failure is the remote-picker pasted-issue case's
