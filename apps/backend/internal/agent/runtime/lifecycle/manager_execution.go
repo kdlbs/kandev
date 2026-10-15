@@ -598,7 +598,7 @@ func (m *Manager) HasLiveAgentExecution(sessionID string) bool {
 	if passthroughProcessID == "" {
 		return false
 	}
-	runner := m.GetInteractiveRunner()
+	runner := m.passthroughRunnerForExecution(execution)
 	if runner == nil {
 		// The process handle is evidence of agent ownership, but an unavailable
 		// runner cannot prove that the process is gone. Keep the session safe
@@ -639,7 +639,7 @@ func (m *Manager) EnsurePassthroughExecution(ctx context.Context, sessionID stri
 	// and the WS handler's IsProcessReadyOrPending check would 503 forever.
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
 		if execution.PassthroughProcessID != "" {
-			if runner := m.GetInteractiveRunner(); runner != nil && runner.IsProcessReadyOrPending(execution.PassthroughProcessID) {
+			if runner := m.passthroughRunnerForExecution(execution); runner != nil && runner.IsProcessReadyOrPending(execution.PassthroughProcessID) {
 				return execution, nil
 			}
 			m.logger.Info("execution has stale passthrough process ID, relaunching",
@@ -661,7 +661,14 @@ func (m *Manager) resumeExistingExecution(ctx context.Context, sessionID string,
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID))
 
-	if err := m.ResumePassthroughSession(ctx, sessionID); err != nil {
+	var err error
+	if isSSHPassthrough(execution) && execution.PassthroughProcessID == "" {
+		// Terminal attachment shares the first launch's admission and prompt.
+		err = m.StartAgentProcess(ctx, execution.ID)
+	} else {
+		err = m.ResumePassthroughSession(ctx, sessionID)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("resume passthrough session %s: %w", sessionID, err)
 	}
 
@@ -699,6 +706,9 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 
 	if info.TaskID == "" {
 		return nil, fmt.Errorf("session %s has no associated task ID", sessionID)
+	}
+	if info.ExecutorType == executorTypeSSH || info.RuntimeName == agentruntime.RuntimeSSH {
+		return nil, fmt.Errorf("%w: SSH passthrough awaits lifecycle launch", ErrSessionWorkspaceNotReady)
 	}
 	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
 		return nil, err

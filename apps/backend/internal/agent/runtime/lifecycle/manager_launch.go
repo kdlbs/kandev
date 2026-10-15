@@ -1437,6 +1437,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 
 	execReq := &ExecutorCreateRequest{
 		InstanceID:                     executionID,
+		IsPassthrough:                  reqWithWorktree.IsPassthrough,
 		ExecutorType:                   reqWithWorktree.ExecutorType,
 		TaskID:                         reqWithWorktree.TaskID,
 		TaskTitle:                      reqWithWorktree.TaskTitle,
@@ -1981,7 +1982,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if req.ACPSessionID != "" && execution.ACPSessionID == "" {
 			execution.ACPSessionID = req.ACPSessionID
 		}
-		if req.PreviousExecutionID != "" {
+		if req.PreviousExecutionID != "" || req.IsPassthrough && req.ResumePassthrough {
 			execution.isResumedSession = true
 		}
 		execution.IsPassthrough = req.IsPassthrough
@@ -2390,7 +2391,7 @@ func (m *Manager) buildExecutionFromInstance(
 		execution.ACPSessionID = req.ACPSessionID
 	}
 	execution.PrepareResult = prepResult
-	if req.PreviousExecutionID != "" {
+	if req.PreviousExecutionID != "" || req.IsPassthrough && req.ResumePassthrough {
 		execution.isResumedSession = true
 	}
 	execution.IsPassthrough = req.IsPassthrough

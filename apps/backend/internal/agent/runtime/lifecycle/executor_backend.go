@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"strings"
 	"time"
 
@@ -344,6 +345,7 @@ const (
 // (e.g., task_description, session_id) are treated as launch-time-only and
 // are NOT copied on resume.
 var persistentMetadataKeys = map[string]bool{
+	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
 	// Sprites runtime
 	MetadataKeySpriteName:      true,
@@ -453,6 +455,7 @@ var persistentMetadataPrefixes = []string{
 // the second session would try to attach to the first session's agentctl
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
+	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
 	// Project MCP ownership belongs to the execution that materialized the
 	// workspace file. It survives same-session recovery but must not be copied
@@ -636,7 +639,8 @@ type RemoteInstanceRefresher interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID string
+	InstanceID    string
+	IsPassthrough bool
 	// ExecutorType is retained in execution metadata so recovered sessions can
 	// safely re-check host-local filesystem eligibility.
 	ExecutorType      string
@@ -747,7 +751,8 @@ type ExecutorInstance struct {
 	RuntimeName agentruntime.Runtime
 
 	// Agentctl client for communicating with this instance
-	Client *agentctl.Client
+	Client                    *agentctl.Client
+	remotePassthroughSnapshot *agentctltypes.PassthroughSnapshot
 
 	// DiscardRecovery closes only host-side resources allocated for this
 	// recovery attempt. It must never stop the remote process or resource. The
@@ -902,6 +907,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		promptDoneCh:              make(chan PromptCompletionSignal, 1),
 	}
 	execution.setRuntimeEnvironment(req.Env)
+	execution.sshApprovedEnvKeys = append([]string(nil), req.ApprovedSecretEnvKeys...)
 	return execution
 }
 

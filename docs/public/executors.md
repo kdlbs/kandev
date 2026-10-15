@@ -520,6 +520,29 @@ These transfers write sensitive material under the remote user's home and are be
 
 </details>
 
+### CLI passthrough
+
+Enable **CLI passthrough** on the selected agent profile to use its terminal UI
+on the SSH target. The CLI runs in the remote task workspace. Install and
+authenticate that CLI on the target before starting the session. A custom
+prepare script is not required. Environment variables follow the same SSH
+credential forwarding policy as ACP sessions.
+
+The agent terminal sends input, resize, and interrupt actions to the remote
+PTY. Closing a browser tab preserves the process. Reconnecting restores recent
+output and keeps the same process. Desktop and phone use their existing agent
+terminal controls.
+
+Kandev prepares MCP files on the target and uses the remote controller's
+loopback address. It preserves existing user configuration and files claimed
+by another session. It does not write global agent configuration.
+
+After a backend interruption, **Resume** reconnects to a verified live remote
+CLI. If that process is absent, Resume uses the preserved workspace and the
+agent's conversation resume options. Missing authentication or uncertain
+ownership blocks replacement. If the retained helper lacks passthrough
+support, update Kandev and start a fresh session.
+
 ### Repository sources and cleanup
 
 > **Cleanup:** SSH task directories, session-runtime data, and cached helpers may remain after disconnect. Audit remote processes and paths before deleting anything.

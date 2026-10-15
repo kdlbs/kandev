@@ -2101,7 +2101,7 @@ func (m *Manager) ProbeAgentRunningForSession(ctx context.Context, sessionID str
 	// Passthrough sessions run as direct PTY processes via InteractiveRunner,
 	// bypassing agentctl's ACP protocol. Check the process directly.
 	if execution.PassthroughProcessID != "" {
-		if runner := m.GetInteractiveRunner(); runner != nil {
+		if runner := m.passthroughRunnerForExecution(execution); runner != nil {
 			return runner.IsProcessReadyOrPending(execution.PassthroughProcessID), nil
 		}
 		return false, fmt.Errorf("interactive runner is unavailable")
@@ -3204,7 +3204,7 @@ func (m *Manager) stopPassthroughProcess(ctx context.Context, executionID string
 	if execution.PassthroughProcessID == "" {
 		return
 	}
-	interactiveRunner := rt.GetInteractiveRunner()
+	interactiveRunner := m.passthroughRunnerForExecution(execution)
 	if interactiveRunner == nil {
 		return
 	}

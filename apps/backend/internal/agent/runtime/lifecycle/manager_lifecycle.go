@@ -1047,11 +1047,9 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	}
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
-	execution.agentctlLifecycleMu.Lock()
 	sessionID := execution.SessionID
 	retired := m.isRetiredLocalExecution(execution)
 	if retired && !retiredExecutionProcessTerminated(execution) {
-		execution.agentctlLifecycleMu.Unlock()
 		return fmt.Errorf("stale runtime owner termination is unproven: %w", agentctl.ErrRuntimeStopUnconfirmed)
 	}
 
@@ -1065,7 +1063,6 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	// This is idempotent — returns success if the instance is already gone.
 	if !retired {
 		if err := m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false); err != nil {
-			execution.agentctlLifecycleMu.Unlock()
 			return fmt.Errorf("stop stale runtime %s: %w", execution.ID, err)
 		}
 	}
@@ -1075,6 +1072,7 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	execution.EndSessionSpan()
 
 	// Close agentctl connection if it exists
+	execution.agentctlLifecycleMu.Lock()
 	if client := execution.currentAgentCtlClient(); client != nil { // protected by agentctlLifecycleMu
 		client.Close()
 	}

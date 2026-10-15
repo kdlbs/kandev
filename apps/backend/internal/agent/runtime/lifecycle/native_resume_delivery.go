@@ -18,6 +18,9 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if !exists || execution == nil {
 		return fmt.Errorf("native resume execution is unavailable")
 	}
+	if execution.IsPassthrough {
+		return m.checkNativeResumeLegacyHistory(ctx, sessionID)
+	}
 	client, release := execution.AcquireAgentCtlClient()
 	defer release()
 	if client == nil {

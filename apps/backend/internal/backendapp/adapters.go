@@ -495,6 +495,7 @@ func buildLifecycleLaunchRequest(
 		McpProfile:                    req.McpProfile,
 		IsEphemeral:                   req.IsEphemeral,
 		IsPassthrough:                 req.IsPassthrough,
+		ResumePassthrough:             req.ResumePassthrough,
 		SetupScript:                   req.SetupScript,
 		CopyFiles:                     req.CopyFiles,
 		UseWorktree:                   req.UseWorktree,
