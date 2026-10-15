@@ -116,6 +116,31 @@ report; preserve both logs and do not claim a complete 59-case structured
 report. The planned-parent control uses distinct per-process blob directories
 and retains all 122 native identities.
 
+Four-process request validation passes 57 focused guard, partition, supervision,
+cancellation and manifest cases, plus 25 workflow contracts, full web typecheck,
+strict changed-file lint/format, native discovery, required-gate/action-pinning
+and documentation checks. All 3,957 native identities remain unchanged.
+Structural YAML comparison preserves all original jobs, commands, permissions,
+gates and artifacts apart from the guarded request and optional observations.
+Normal commit hooks pass without bypass.
+
+Current main `c3831c5bd057` adds session-scoped launch credentials. The exact
+conflict-free synthetic merge with source candidate `dff3d4d82ba` passes its
+five new Office/orchestrator credential regressions under race detection and
+the existing readiness regression in its actual agent/runtime/agentctl package.
+The initial backendapp selector compiled that package but ran no tests; retain
+that limitation and the corrected explicit PASS. No incoming product code is
+modified by this candidate. Hosted actual-merge identity remains to be checked.
+
+A separate temporary CDP probe passes all three navigation/idle/busy cases,
+then removes its source byte-for-byte. Task navigation consumes approximately
+6.7-6.9 cgroup CPU-seconds, mostly Chromium, versus 3.1 for the settings page.
+Settled static pages consume 0.35-0.60 CPU-seconds over approximately three
+seconds, while the busy page consumes 2.4. Sampling adds overhead; these are
+investigation data, not an adopted speedup. If process density is insufficient,
+inspect cold task-route mounting and loaded JavaScript next. Do not disable
+animations, renderer/isolation behavior or unique browser assertions.
+
 ### Measure existing E2E runner headroom
 
 Candidate G is observation only, before selecting another process budget.
