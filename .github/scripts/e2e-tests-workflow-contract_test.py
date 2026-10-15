@@ -44,6 +44,19 @@ def job_block(workflow: str, job: str, next_job: str) -> str:
 
 
 class E2EWorkflowContractTest(unittest.TestCase):
+    def test_required_report_reconciles_the_build_catalog(self) -> None:
+        workflow = E2E_WORKFLOW.read_text()
+        report = workflow.partition("  e2e-report:\n")[2]
+        collection = report.partition("      - name: Collect timing and retry diagnostics\n")[2].partition("      - name:")[0]
+        self.assertIn('--catalog "$GITHUB_WORKSPACE/e2e-manifests/native-catalog.json"', collection)
+        manifest_download = report.partition("      - name: Download E2E shard manifests\n")[2].partition("      - name:")[0]
+        self.assertNotIn("continue-on-error", manifest_download)
+        for job in (job_block(workflow, "e2e", "playwright_image"), job_block(workflow, "e2e-containers", "e2e-kubernetes-compatibility"), report):
+            self.assertIn("KANDEV_E2E_CATALOG_PRODUCER_ATTEMPT: ${{ needs.build.outputs.catalog_attempt }}", job)
+        build = job_block(workflow, "build", "e2e")
+        self.assertIn("catalog_attempt: ${{ steps.e2e_catalog.outputs.attempt }}", build)
+        self.assertIn('"$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"', build)
+
     def test_browser_free_jobs_bootstrap_host_tools_and_share_one_store_writer(self) -> None:
         workflow = E2E_WORKFLOW.read_text()
         build = job_block(workflow, "build", "e2e")

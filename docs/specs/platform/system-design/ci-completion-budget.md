@@ -194,6 +194,29 @@ provider activation or matrix growth is part of the experiment. Shell timing
 preserves native exits; scoped cgroup counters are the CPU authority and missing
 counters remain unknown. Resource artifacts never replace native blob evidence.
 
+### One native E2E catalog producer
+
+Build collects the complete configured Playwright inventory once using the
+public reporter suite/test API. Each row retains the native test ID, project
+and owning file suite rather than a helper declaration location. Both cohort
+manifests derive their units and counts from those same rows. The existing
+manifest artifact carries the catalog with checkout SHA, run ID and Build attempt.
+Build publishes its producer attempt as a job output, so rerunning a consumer
+can reuse that successful Build without accepting an unrelated artifact.
+CI consumers require matching provenance and an unchanged checkout, validate
+the full manifest against the catalog and current spec hashes, and fail closed
+on missing, foreign or stale inputs. Local working-tree runs retain fresh native
+discovery, including uncommitted tests.
+
+The required report job compares the complete actual native identity multiset
+with this catalog. Every selected case must appear exactly once after retry
+aggregation, including existing skips; missing, extra, duplicate or unidentified
+cases fail the report. Preserve test failures, retry policy and all required
+job gates. This removes repeated imports rather than removing coverage. No new
+provider, privilege or cache trust is introduced. Keep the original native
+discovery path for local work and rollback; do not silently use it to conceal
+an invalid CI catalog.
+
 ## Evidence, acceptance and rollback
 
 Use one bounded hosted candidate at a time. Collect attempt-specific run/job/step

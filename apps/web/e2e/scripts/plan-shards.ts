@@ -1,7 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -10,6 +8,8 @@ import {
   readTimingProfile,
   type TimingProfile,
 } from "./e2e-timings";
+
+import { discoverNativeCases, writeCatalogSnapshot, type CatalogCase } from "./native-catalog";
 
 const WORKER_PRESETS_FILE = "tests/kubernetes/kubernetes-worker-presets.spec.ts";
 
@@ -78,98 +78,29 @@ export type ShardManifest = {
   shards: Shard[];
 };
 
-type PlaywrightListTest = { projectName?: unknown };
-type PlaywrightListSpec = { file?: unknown; tests?: unknown };
-type PlaywrightListSuite = { file?: unknown; specs?: unknown; suites?: unknown };
-type PlaywrightListReport = { suites: PlaywrightListSuite[] };
-
-const playwrightReportCache = new Map<string, PlaywrightListReport>();
-
-function asSuites(value: unknown): PlaywrightListSuite[] {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is PlaywrightListSuite =>
-        Boolean(entry && typeof entry === "object"),
-      )
-    : [];
-}
-
-function readPlaywrightListReport(webRoot: string): PlaywrightListReport {
-  const resolvedRoot = path.resolve(webRoot);
-  const cached = playwrightReportCache.get(resolvedRoot);
-  if (cached) return cached;
-
-  const playwrightCli = createRequire(import.meta.url).resolve("@playwright/test/cli");
-  const output = execFileSync(
-    process.execPath,
-    [
-      playwrightCli,
-      "test",
-      "--config",
-      path.join(resolvedRoot, "e2e", "playwright.config.ts"),
-      "--project=chromium",
-      "--project=mobile-chrome",
-      "--project=containers",
-      "--list",
-      "--reporter=json",
-    ],
-    { cwd: resolvedRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
-  );
-  const parsed = JSON.parse(output) as { suites?: unknown };
-  const report = { suites: asSuites(parsed.suites) };
-  playwrightReportCache.set(resolvedRoot, report);
-  return report;
-}
-
-function collectSpecCounts(
-  specs: unknown,
-  suiteFile: unknown,
-  allowedProjects: ReadonlySet<string>,
-  counts: Map<string, { project: string; file: string; testCount: number }>,
-): void {
-  if (!Array.isArray(specs)) return;
-  for (const rawSpec of specs) {
-    if (!rawSpec || typeof rawSpec !== "object") continue;
-    const spec = rawSpec as PlaywrightListSpec;
-    const fileValue = typeof suiteFile === "string" ? suiteFile : spec.file;
-    if (typeof fileValue !== "string") continue;
-    const file = normalizeReportPath(fileValue);
-    const tests = Array.isArray(spec.tests) ? spec.tests : [];
-    for (const rawTest of tests) {
-      if (!rawTest || typeof rawTest !== "object") continue;
-      const project = (rawTest as PlaywrightListTest).projectName;
-      if (typeof project !== "string" || !allowedProjects.has(project)) continue;
-      const id = `${project}::${file}`;
-      const current = counts.get(id);
-      counts.set(id, { project, file, testCount: (current?.testCount ?? 0) + 1 });
-    }
-  }
-}
-
-function collectPlaywrightCounts(
-  suites: PlaywrightListSuite[],
-  allowedProjects: ReadonlySet<string>,
-  counts: Map<string, { project: string; file: string; testCount: number }>,
-  owningFile?: unknown,
-): void {
-  for (const suite of suites) {
-    // CLI file filters select the root spec, even when a helper declares its tests.
-    const file = owningFile ?? suite.file;
-    collectSpecCounts(suite.specs, file, allowedProjects, counts);
-    collectPlaywrightCounts(asSuites(suite.suites), allowedProjects, counts, file);
-  }
-}
-
-export function discoverTestCatalog(webRoot: string, cohort: Cohort): CatalogUnit[] {
+export function catalogUnitsFromCases(
+  webRoot: string,
+  cohort: Cohort,
+  cases: CatalogCase[],
+): CatalogUnit[] {
   const allowedProjects = new Set(
     cohort === "containers" ? ["containers"] : ["chromium", "mobile-chrome"],
   );
   const counts = new Map<string, { project: string; file: string; testCount: number }>();
-  collectPlaywrightCounts(readPlaywrightListReport(webRoot).suites, allowedProjects, counts);
+  for (const { project, file } of cases) {
+    if (!allowedProjects.has(project)) continue;
+    const id = `${project}::${file}`;
+    counts.set(id, { project, file, testCount: (counts.get(id)?.testCount ?? 0) + 1 });
+  }
   return [...counts.values()]
     .map((unit) => ({ ...unit, fileHash: hashSourceFile(webRoot, unit.file) }))
     .sort((left, right) =>
       `${left.project}::${left.file}`.localeCompare(`${right.project}::${right.file}`),
     );
+}
+
+export function discoverTestCatalog(webRoot: string, cohort: Cohort): CatalogUnit[] {
+  return catalogUnitsFromCases(webRoot, cohort, discoverNativeCases(webRoot));
 }
 
 function unitId(unit: Pick<CatalogUnit, "project" | "file">): string {
@@ -501,6 +432,9 @@ function runCli(): void {
   });
   validateShardManifest(normal, normalCatalog);
   validateShardManifest(containers, containerCatalog);
+  if (process.env.GITHUB_ACTIONS === "true") {
+    writeCatalogSnapshot(path.join(outputDir, "native-catalog.json"), webRoot);
+  }
   writePlans(outputDir, [normal, containers]);
   console.log(
     JSON.stringify(

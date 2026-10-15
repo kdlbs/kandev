@@ -53,6 +53,26 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+### Seventeenth complete hosted result
+
+All three fully selected workflows pass at `d7aba03e20a3`: backend run
+`38659682573` takes 16m05s, frontend `38659682488` takes 12m53s and full E2E
+`38659682719` takes 17m20s. E2E includes 4m01s to Build readiness, 12m00s to
+the final shard, then 1m19s reporting. All 3,957 native identities match:
+3,905 first passes, twelve retry-only passes, forty existing skips and no
+final failures. Required checks finish with 89 passes and nine skips; no
+unresolved/hidden threads or exact-head review bodies are present.
+
+The 8m29s elapsed improvement from the sixteenth run is not evidence of less
+work: E2E occupancy is 296.28 versus 295.30 runner-minutes, and execution
+critical path is 963 versus 872 seconds. Build is ready earlier and the final
+shard waits 3m45s rather than 9m07s; its execution is 8m15s rather than 8m24s.
+Retain the queue variation, twelve retries and unchanged occupancy alongside
+the favorable elapsed result. All 28 normal jobs actually use four processes;
+their cgroup lifetime peaks are 7.80-8.89 GiB, with zero swap or memory events.
+The complete trio consumes 557.83 runner-minutes. Fifteen-minute acceptance
+remains zero of three, and the PR remains open.
+
 ### Sixteenth complete hosted result
 
 Head `dc4d1c4f7f4` passes all three complete workflows: backend 38652558394

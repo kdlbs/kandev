@@ -192,6 +192,8 @@ jobs:
     # Keep this credential-bearing path on the GitHub-hosted boundary.
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      catalog_attempt: ${{ steps.e2e_catalog.outputs.attempt }}
     env:
       COREPACK_HOME: /tmp/kandev-corepack
     defaults:
@@ -411,6 +413,7 @@ jobs:
           retention-days: 3
 
       - name: Generate duration-aware E2E shard manifests
+        id: e2e_catalog
         working-directory: apps/web
         run: |
           set -euo pipefail
@@ -427,6 +430,7 @@ jobs:
               --web-root "$GITHUB_WORKSPACE/apps/web" \
               --output-dir "$GITHUB_WORKSPACE/e2e-manifests"
           fi
+          printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
       - name: Upload E2E shard manifests
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -494,6 +498,7 @@ jobs:
     # Playwright fixtures and backend readiness polling.
     env:
       NODE_OPTIONS: --dns-result-order=ipv4first
+      KANDEV_E2E_CATALOG_PRODUCER_ATTEMPT: ${{ needs.build.outputs.catalog_attempt }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.plan).e2e_matrix }}
@@ -666,6 +671,8 @@ jobs:
     # browsers out of the kandev-ci image — see the extract step below.
     runs-on: ubuntu-latest
     timeout-minutes: 50
+    env:
+      KANDEV_E2E_CATALOG_PRODUCER_ATTEMPT: ${{ needs.build.outputs.catalog_attempt }}
     strategy:
       fail-fast: false
       matrix:
@@ -1252,6 +1259,7 @@ jobs:
     timeout-minutes: 8
     env:
       COREPACK_HOME: /tmp/kandev-corepack
+      KANDEV_E2E_CATALOG_PRODUCER_ATTEMPT: ${{ needs.build.outputs.catalog_attempt }}
     defaults:
       run:
         shell: bash
@@ -1310,7 +1318,6 @@ jobs:
       - name: Download E2E shard manifests
         if: needs.changes.outputs.run == 'true'
         uses: ./.github/actions/download-artifact-retry
-        continue-on-error: true
         with:
           name: e2e-shard-manifests
           path: e2e-manifests
@@ -1350,6 +1357,7 @@ jobs:
             --input e2e/blob-reports \
             --output e2e/retry-summary.json \
             --manifest-dir "$GITHUB_WORKSPACE/e2e-manifests" \
+            --catalog "$GITHUB_WORKSPACE/e2e-manifests/native-catalog.json" \
             --attachment-output e2e/retry-artifacts \
             --artifact-name e2e-timing-diagnostics \
             --artifact-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts"

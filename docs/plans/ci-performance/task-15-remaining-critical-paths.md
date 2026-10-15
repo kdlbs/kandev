@@ -61,6 +61,48 @@ git diff --check
 
 ## Results
 
+### Produce the native E2E catalog once per workflow
+
+Candidate I removes repeated whole-suite discovery from the 34 planned parents.
+Candidate H's full successful E2E result is 17m20s, versus 25m49s previously,
+but occupancy is effectively unchanged (296.28 versus 295.30 runner-minutes).
+All 3,957 identities remain selected. Earlier completed shard logs measure
+23.4-25.8 seconds before dispatch, including repeated discovery and wrappers.
+Do not attribute that entire interval to discovery or claim a hosted saving yet.
+
+Build performs native Playwright collection once through its public reporter
+API. Retain each project's actual TestCase.id and owning file suite, including
+helper-declared, generated and skipped cases. Derive both cohort unit inventories
+from those same rows. Publish the catalog in the existing manifest artifact,
+bound to checkout SHA, workflow run ID and attempt. Planned CI parents require
+that catalog, matching identity and a clean checkout, then validate the same
+complete manifest and source hashes without importing all specs again. Local
+runs continue to discover the working tree natively. No stale/missing snapshot
+fallback is allowed in CI.
+
+The required report step reconciles every actual project, owning spec and native
+test ID against the published catalog. Missing, extra, duplicate or unidentified
+cases fail the report; existing skips and retries retain their current policies.
+Inspect native reporter types and exercise real multi-project/helper collection,
+source/run/attempt mismatches, dirty or added spec files, missing catalogs and
+report omissions before adoption. Keep jobs, process limits, browser isolation,
+assertions, deadlines, permissions and required gates unchanged. Own
+e2e/scripts catalog/planning/report consumers, their tests, E2E workflow and
+this design record. Run focused Vitest, typecheck, strict changed-file lint,
+workflow contracts, native identity comparison and full hosted measurement.
+
+Local verification passes 63 focused catalog/planner/runner/report cases and
+26 workflow contracts, including a real three-project Playwright collection
+and no-browser execution. The actual retry-summary CLI accepts complete blobs,
+rejects a duplicate blob and requires its catalog in CI. Replacing raw-attempt
+reconciliation with aggregated cases makes the duplicate assertion fail;
+restore source byte for byte afterward. A rerun consumer remains bound to the
+successful Build's published producer attempt. Full web typecheck, strict
+changed-file lint, required-gate/action-pinning and documentation checks pass.
+The new native collector matches all 3,957 identities of the seventeenth
+hosted run exactly. This is local correctness evidence; hosted timing and
+occupancy for the single-producer change remain unmeasured.
+
 ### Compare four guarded processes within each existing normal job
 
 Candidate H follows G's resource observation, without more GitHub jobs or a

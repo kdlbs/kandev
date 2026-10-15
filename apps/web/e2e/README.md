@@ -273,6 +273,15 @@ The runner validates the manifest against the checkout before launching
 Playwright. A missing, stale, overlapping, or incomplete manifest is a hard
 failure; it cannot silently fall back to ordinal sharding.
 
+Build collects the native inventory once and includes `native-catalog.json`
+in the manifest artifact. CI parents verify its checkout, run and successful
+Build attempt, then validate their complete manifest without importing every
+spec again. Rerunning a consumer retains the original successful producer
+attempt. Local runs still collect the current working tree natively.
+The required report compares every actual project, owning spec and native test
+ID with that catalog, retaining skips and retries while rejecting missing,
+extra or duplicated attempts. A missing or stale CI catalog fails the run.
+
 To dry-run the planner locally:
 
 ```bash
