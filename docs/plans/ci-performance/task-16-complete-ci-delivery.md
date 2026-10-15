@@ -53,6 +53,54 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+### Next candidate: causal startup, queue and persistence checkpoints
+
+The shared Quick Chat baseline now requires both a completed opening turn and
+the existing addressed-session settled state. Preview uses the existing real
+mock-turn gate until the queue chip appears, then releases it for delivery and
+again on cleanup. Sidebar compact text is checked separately from its retained
+screen-reader label; selection persistence is observed before testing reload.
+There are no application changes, retry increases or longer deadlines.
+
+Local verification passes four session-helper unit cases, both phone
+cancellation cases, the complete preview case and the sidebar presentation
+case, with browser retries disabled. Native collection preserves all 3,957 E2E
+identities. Exactly three readiness unit cases join the prior nine gesture
+additions, for 26,553 frontend cases in 2,956 files. Full type/lint/format and
+docs checks pass. The complete hosted set and current-head gates/reviews remain
+required; accepted fifteen-minute sets are still 1/3.
+
+### Twenty-second complete hosted result: failed execution and report transport
+
+Head `eaf927ca2136` passes backend `38674620312` in 11m35s (199.90
+runner-minutes) and frontend `38674620360` in 12m22s (27.05). Full E2E
+`38674620296` fails in 18m11s (285.00), including 140 seconds in a blob
+download step that exhausts its existing retry policy. Complete occupancy is
+511.95 runner-minutes; E2E execution critical path is 877 seconds. Acceptance
+remains 1/3. Do not count the failed set or a locally reconstructed report.
+
+All 34 uploaded blob artifacts are recovered read-only and their raw attempts
+reconciled against the actual merge/run/producer-attempt catalog. All 3,957
+identities remain: 3,905 first passes, nine retry passes, two final failures
+and forty-one skips. The extra skip is the dependent second Quick Chat case
+after its serial predecessor fails, not an intentional coverage exemption.
+The hosted retry summary is missing because artifact download failed; this
+local recovery does not change the hosted gate or its elapsed time.
+
+Both preceding repairs pass first-attempt: settled tool completion in 11.257
+seconds and delayed native drag release in 23.507 seconds. Final failures are
+Quick Chat startup/cancellation and preview queueing. The sidebar presentation
+case passes after two failures, exposing save-before-reload and compact versus
+accessible-text assumptions. Task 15 records the causal fixture repairs.
+
+Frontend preserves all previous identities/outcomes plus exactly nine approved
+component cases (26,550 total, 2,956 files), bound to their tested source hash.
+All ten backend native-report cohorts preserve 35,580 identities/outcomes.
+Normal resource snapshots retain four CPUs, zero swap or memory events, and
+7.85-8.98 GiB lifetime peaks. Exact-head checks finish with 86 passes, three
+failed contexts, ten ancillary skips and no pending checks or evidence errors.
+The three required contexts preserve the two shard failures and report failure.
+
 ### Next candidate: preserve the two failing browser contracts
 
 Task 15's bounded repair suppresses a drag's residual native click across

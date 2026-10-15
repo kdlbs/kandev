@@ -61,6 +61,51 @@ git diff --check
 
 ## Results
 
+### Make the twenty-second run's setup checkpoints causal
+
+Keep the two previous repairs: their hosted tool-completion and native lane
+cancellation cases both pass on their first attempt. The next bounded change
+addresses two final failures and a retrying sidebar case, without production
+behavior changes, longer deadlines or more retries.
+
+Quick Chat's baseline currently accepts an initial settled session before its
+opening turn has completed. The failure screenshot shows the next slow prompt
+before the opening response and a failed-send notice. Require a completed
+persisted turn as well as the existing addressed-session settled state. First
+prove that an empty/pending turn ledger cannot satisfy the baseline, and retain
+active-session and session-identity checks. Keep both phone cancellation cases,
+their original slow turn, touch controls, pending/disabled state and follow-up
+send assertions. Opening-prompt behavior remains covered by its existing suite.
+
+Preview feedback currently allows a five-second mock turn to finish while the
+test opens a browser panel and captures feedback. Use the existing mock-turn
+file gate to keep that real turn busy until the queue chip is observed. Release
+it before checking delivery, and release again during cleanup. Preserve every
+capture, persistence, attachment, queued-payload and settled-composer oracle.
+
+The sidebar case's retry reads verbose accessibility text when checking the
+compact visual label. Scope that check to the existing aria-hidden compact
+span and keep the screen-reader-text assertion. Before reload, verify the
+selected saved view has actually persisted through the existing settings API;
+retain the reload and task-row assertions. This changes test checkpoints,
+not settings synchronization or accessible output.
+
+The three new readiness cases fail against the original helper, then all four
+session-helper cases pass with the completed-turn fence. The pre-existing
+localhost connection warning also occurs with the unchanged HEAD test; that
+probe restores the edited file byte for byte. It is not a new test failure.
+
+Both phone cancellation cases pass in 39.5 seconds without retries. The full
+preview feedback case passes in 20.0 seconds with the gate, and the sidebar
+presentation case passes without retries. An intermediate preview marker
+assertion used a nonexistent test ID; the corrected exact visible agent text
+establishes the same causal marker. No queue/capture or accessibility oracle
+is removed. Full web typecheck, strict affected-file lint/format and all 3,957
+native E2E identities pass. Frontend adds exactly three named readiness cases
+in the existing session-helper file, for 26,553 expected cases and 2,956 files.
+The prior nine gesture cases remain. Each approved addition list is checked
+against its actual source hash. Hosted timing/coverage acceptance is pending.
+
 ### Repair the twenty-first run's settled-tool and drag-release failures
 
 Full E2E retains all 3,957 identities but fails two existing cases. The tool
