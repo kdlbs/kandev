@@ -32,7 +32,7 @@ func (o *PassthroughOwner) Input(ctx context.Context, req types.PassthroughInput
 	if !created {
 		select {
 		case <-result.done:
-			return types.PassthroughInputResult{Outcome: result.outcome}, nil
+			return types.PassthroughInputResult{Outcome: result.outcome, Sequence: result.sequence}, nil
 		case <-ctx.Done():
 			return types.PassthroughInputResult{}, ctx.Err()
 		}
@@ -40,16 +40,17 @@ func (o *PassthroughOwner) Input(ctx context.Context, req types.PassthroughInput
 	err = o.runner.WriteStdin(req.ProcessID, req.Data)
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	result.outcome = "written"
+	result.outcome = passthroughInputWritten
 	if err != nil {
 		result.outcome = "uncertain"
 	}
-	close(result.done)
 	if err == nil && o.validateTargetLocked(req.PassthroughTarget) == nil && strings.ContainsAny(req.Data, "\r\n") {
 		o.current.WaitingForInput = false
 		o.emitLocked("submitted", nil)
 	}
-	return types.PassthroughInputResult{Outcome: result.outcome}, nil
+	result.sequence = o.current.Sequence
+	close(result.done)
+	return types.PassthroughInputResult{Outcome: result.outcome, Sequence: result.sequence}, nil
 }
 
 func (o *PassthroughOwner) reserveInput(req types.PassthroughInputRequest) (*passthroughInputResult, bool, error) {
@@ -66,8 +67,13 @@ func (o *PassthroughOwner) reserveInput(req types.PassthroughInputRequest) (*pas
 		}
 		return previous, false, nil
 	}
-	if len(req.Data) > 1024*1024 || len(req.SubmissionID) > 128 || len(o.inputs) >= 4096 {
+	if len(req.Data) > 1024*1024 || len(req.SubmissionID) > 128 {
 		return nil, false, errors.New("remote passthrough input limit reached")
+	}
+	if req.SubmissionID != "" {
+		if err := o.makeInputRoomLocked(req.SubmissionID); err != nil {
+			return nil, false, err
+		}
 	}
 	result := &passthroughInputResult{digest: digest, done: make(chan struct{})}
 	if req.SubmissionID != "" {
@@ -91,7 +97,7 @@ func (o *PassthroughOwner) LookupInput(ctx context.Context, target types.Passthr
 	case <-ctx.Done():
 		return types.PassthroughInputResult{}, ctx.Err()
 	case <-result.done:
-		return types.PassthroughInputResult{Outcome: result.outcome}, nil
+		return types.PassthroughInputResult{Outcome: result.outcome, Sequence: result.sequence}, nil
 	}
 }
 

@@ -61,8 +61,8 @@ func (m *Manager) cleanupSSHPassthroughConfig(ctx context.Context, execution *Ag
 	if cancel := execution.remotePassthrough.observerCancel; cancel != nil {
 		cancel()
 	}
-	execution.remotePassthroughMu.Unlock()
-	execution.remotePassthroughMu.Lock()
+	execution.remotePassthrough.observerTarget = types.PassthroughTarget{}
+	execution.remotePassthrough.observerCancel = nil
 	generation := execution.remotePassthrough.preparedGeneration
 	execution.remotePassthroughMu.Unlock()
 	if generation == 0 {

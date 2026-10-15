@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"go.uber.org/zap"
 )
 
 func (h *TerminalHandler) handleRemoteAgentTerminal(c *gin.Context, execution *runtimeapi.AgentExecution) {
@@ -16,6 +17,7 @@ func (h *TerminalHandler) handleRemoteAgentTerminal(c *gin.Context, execution *r
 	defer func() { _ = upstream.Close() }()
 	conn, err := terminalUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
+		h.logger.Error("failed to upgrade remote passthrough WebSocket", zap.String("session_id", execution.SessionID), zap.Error(err))
 		return
 	}
 	defer func() { _ = conn.Close() }()

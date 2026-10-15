@@ -75,3 +75,16 @@ func (r *InteractiveRunner) closeOutputSubscriptions(proc *interactiveProcess) {
 		close(ch)
 	}
 }
+
+func (r *InteractiveRunner) outputFinished(processID string) bool {
+	proc, ok := r.get(processID)
+	if !ok {
+		return true
+	}
+	select {
+	case <-proc.outputDone:
+		return true
+	default:
+		return false
+	}
+}

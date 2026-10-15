@@ -31,6 +31,7 @@ type remotePassthroughState struct {
 	preparedGeneration uint64
 	observerCancel     context.CancelFunc
 	observerTarget     types.PassthroughTarget
+	observerGeneration uint64
 }
 
 func isSSHPassthrough(execution *AgentExecution) bool {
@@ -161,17 +162,22 @@ func (r *remotePassthroughRunner) Stop(ctx context.Context, processID string) er
 }
 
 func (r *remotePassthroughRunner) WriteStdin(processID, data string) error {
-	return r.writeStdinWithID(processID, data, uuid.NewString())
+	return r.writeStdinWithID(processID, data, uuid.Must(uuid.NewV7()).String())
 }
 
 func (r *remotePassthroughRunner) writeStdinWithID(processID, data, submissionID string) error {
+	_, err := r.writeStdinReceipt(processID, data, submissionID)
+	return err
+}
+
+func (r *remotePassthroughRunner) writeStdinReceipt(processID, data, submissionID string) (types.PassthroughInputResult, error) {
 	target, err := r.target(processID)
 	if err != nil {
-		return err
+		return types.PassthroughInputResult{}, err
 	}
 	client, release, err := r.client()
 	if err != nil {
-		return err
+		return types.PassthroughInputResult{}, err
 	}
 	defer release()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -180,14 +186,14 @@ func (r *remotePassthroughRunner) writeStdinWithID(processID, data, submissionID
 	if err != nil {
 		receipt, receiptErr := client.PassthroughInputReceipt(ctx, target, submissionID)
 		if receiptErr != nil {
-			return err
+			return types.PassthroughInputResult{}, err
 		}
 		result = receipt
 	}
 	if result.Outcome != remotePromptWritten {
-		return errors.New("remote prompt delivery is uncertain. Reconnect before retrying")
+		return types.PassthroughInputResult{}, errors.New("remote prompt delivery is uncertain. Reconnect before retrying")
 	}
-	return nil
+	return *result, nil
 }
 
 func (r *remotePassthroughRunner) ResizeBySession(sessionID string, cols, rows uint16) error {
@@ -242,6 +248,7 @@ func (r *remotePassthroughRunner) IsProcessReadyOrPending(processID string) bool
 	defer cancel()
 	snapshot, err := r.snapshot(ctx)
 	if err != nil {
+		// An unavailable controller cannot prove that its process has stopped.
 		return true
 	}
 	return snapshot.ProcessID == processID && snapshot.Status == types.ProcessStatusRunning

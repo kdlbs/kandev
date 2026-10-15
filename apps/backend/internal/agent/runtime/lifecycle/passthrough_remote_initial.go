@@ -15,7 +15,7 @@ type remoteInitialPromptRunner struct {
 }
 
 func (r *remoteInitialPromptRunner) WriteStdin(processID, data string) error {
-	id := uuid.NewString()
+	id := uuid.Must(uuid.NewV7()).String()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := r.manager.updateRemotePassthroughRecord(ctx, r.execution, func(record *remotePassthroughRecord) {
@@ -24,12 +24,16 @@ func (r *remoteInitialPromptRunner) WriteStdin(processID, data string) error {
 	}); err != nil {
 		return err
 	}
-	if err := r.writeStdinWithID(processID, data, id); err != nil {
+	receipt, err := r.writeStdinReceipt(processID, data, id)
+	if err != nil {
 		return err
 	}
 	r.index++
 	if r.index == r.count {
-		return r.manager.updateRemotePassthroughRecord(ctx, r.execution, func(record *remotePassthroughRecord) { record.InitialPromptState = remotePromptWritten })
+		return r.manager.updateRemotePassthroughRecord(ctx, r.execution, func(record *remotePassthroughRecord) {
+			record.InitialPromptState = remotePromptWritten
+			record.InitialSubmissionSequence = receipt.Sequence
+		})
 	}
 	return nil
 }

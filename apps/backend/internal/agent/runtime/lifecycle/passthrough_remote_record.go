@@ -16,13 +16,14 @@ const (
 
 type remotePassthroughRecord struct {
 	types.PassthroughTarget
-	InstanceID            string   `json:"instance_id"`
-	StartOperationID      string   `json:"start_operation_id"`
-	EventSequence         uint64   `json:"event_sequence"`
-	PreparedGeneration    uint64   `json:"prepared_generation"`
-	InitialPromptState    string   `json:"initial_prompt_state,omitempty"`
-	InitialSubmissionIDs  []string `json:"initial_submission_ids,omitempty"`
-	InitialExpectedChunks int      `json:"initial_expected_chunks,omitempty"`
+	InstanceID                string   `json:"instance_id"`
+	StartOperationID          string   `json:"start_operation_id"`
+	EventSequence             uint64   `json:"event_sequence"`
+	PreparedGeneration        uint64   `json:"prepared_generation"`
+	InitialSubmissionSequence uint64   `json:"initial_submission_sequence,omitempty"`
+	InitialPromptState        string   `json:"initial_prompt_state,omitempty"`
+	InitialSubmissionIDs      []string `json:"initial_submission_ids,omitempty"`
+	InitialExpectedChunks     int      `json:"initial_expected_chunks,omitempty"`
 }
 
 func remotePassthroughRecordFor(execution *AgentExecution) remotePassthroughRecord {
@@ -64,6 +65,7 @@ func (r *remotePassthroughRunner) recordStart(ctx context.Context, snapshot *typ
 				record.InitialPromptState = remotePromptPending
 			}
 			record.InitialSubmissionIDs = nil
+			record.InitialSubmissionSequence = 0
 		}
 	}
 	if r.manager != nil {

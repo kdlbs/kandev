@@ -8,8 +8,8 @@ import (
 )
 
 func (r *InteractiveRunner) readOutput(proc *interactiveProcess) {
-	defer close(proc.outputDone)
 	defer r.closeOutputSubscriptions(proc)
+	defer close(proc.outputDone)
 	buf := make([]byte, 32768) // 32KB buffer for better throughput
 	recentOutput := ""         // Keep recent output for prompt pattern matching
 	firstRead := true

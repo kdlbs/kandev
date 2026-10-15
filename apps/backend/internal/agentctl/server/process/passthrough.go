@@ -15,6 +15,8 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
+const passthroughInputWritten = "written"
+
 var ErrPassthroughConflict = errors.New("remote passthrough ownership conflict")
 var ErrPassthroughNotFound = errors.New("remote passthrough process not found")
 
@@ -25,9 +27,10 @@ type passthroughStartResult struct {
 }
 
 type passthroughInputResult struct {
-	digest  [32]byte
-	done    chan struct{}
-	outcome string
+	digest   [32]byte
+	done     chan struct{}
+	outcome  string
+	sequence uint64
 }
 
 // PassthroughOwner serializes one instance's PTY admission against ACP startup.
@@ -38,6 +41,7 @@ type PassthroughOwner struct {
 	current         types.PassthroughSnapshot
 	starts          map[string]passthroughStartResult
 	inputs          map[string]*passthroughInputResult
+	inputFloor      string
 	events          []types.PassthroughEvent
 	wake            chan struct{}
 	limit           int
@@ -155,9 +159,12 @@ func (o *PassthroughOwner) reserveStart(req types.PassthroughStartRequest, diges
 		}
 		return "", &previous, nil
 	}
-	if o.liveLocked() || o.manager.Status() == StatusRunning || o.manager.Status() == StatusStarting || req.ExpectedGeneration != o.current.Generation || len(o.starts) >= 128 {
+	if o.liveLocked() || o.manager.Status() == StatusRunning || o.manager.Status() == StatusStarting || req.ExpectedGeneration != o.current.Generation {
 		return "", nil, ErrPassthroughConflict
 	}
+	o.starts = make(map[string]passthroughStartResult)
+	o.inputs = make(map[string]*passthroughInputResult)
+	o.inputFloor = ""
 	o.current = types.PassthroughSnapshot{
 		PassthroughTarget: types.PassthroughTarget{ProcessID: uuid.NewString(), Generation: o.current.Generation + 1},
 		OperationID:       req.OperationID, StartedAt: time.Now().UTC(), StartSequence: o.current.Sequence,

@@ -43,6 +43,14 @@ export async function openSSHPassthrough(page: Page, api: ApiClient, seed: SSHSe
   const row = rows.find((candidate) => candidate.task_id === task.id);
   expect(row?.remote_task_dir).toBeTruthy();
   const workspace = row!.remote_task_dir!;
+  await expect
+    .poll(
+      () =>
+        readPassthroughTrace(seed, workspace).filter((entry) =>
+          entry.prompt?.includes(initialPrompt),
+        ).length,
+    )
+    .toBe(1);
   const trace = readPassthroughTrace(seed, workspace);
   const started = trace.find((entry) => entry.kind === "start");
   expect(started).toBeTruthy();

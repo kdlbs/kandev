@@ -55,6 +55,9 @@ func reconcileRemoteInitialPrompt(ctx context.Context, client *agentctl.Client, 
 		if err != nil || receipt.Outcome != remotePromptWritten {
 			return record, errRemoteInitialPromptUncertain
 		}
+		if receipt.Sequence > record.InitialSubmissionSequence {
+			record.InitialSubmissionSequence = receipt.Sequence
+		}
 	}
 	record.InitialPromptState = remotePromptWritten
 	record.EventSequence = snapshot.Sequence

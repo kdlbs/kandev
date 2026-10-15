@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/events"
+	eventbus "github.com/kandev/kandev/internal/events/bus"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -379,10 +382,16 @@ func TestSSHPassthroughMissingCLIHasActionableFailure(t *testing.T) {
 func TestSSHPassthroughReplayGapRequiresAuthenticatedSnapshot(t *testing.T) {
 	mgr, _, execution := newPassthroughRunnerManager(t)
 	controller, _ := sshPassthroughTestController(t, execution)
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, agents.NewCommand("/bin/sh", "-c", "cat"), nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{IdleTimeout: 20 * time.Millisecond}, nil, agents.NewCommand("/bin/sh", "-c", "printf ready; cat"), nil)
 	require.NoError(t, err)
 	execution.PassthroughProcessID = info.ID
 	snapshot := controller.Passthrough().Snapshot()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, controller.Passthrough().FirstIdle(ctx, snapshot.PassthroughTarget))
+	snapshot = controller.Passthrough().Snapshot()
+	require.True(t, snapshot.WaitingForInput)
+	require.NoError(t, mgr.MarkPassthroughRunning(execution.SessionID))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, upgradeErr := (&websocket.Upgrader{}).Upgrade(w, r, nil)
 		if upgradeErr != nil {
@@ -399,6 +408,7 @@ func TestSSHPassthroughReplayGapRequiresAuthenticatedSnapshot(t *testing.T) {
 	require.Equal(t, snapshot.Sequence, after, "only an authenticated snapshot can establish the new cursor")
 	require.Equal(t, snapshot.Sequence, remotePassthroughRecordFor(execution).EventSequence)
 	require.Equal(t, info.ID, execution.PassthroughProcessID)
+	require.Equal(t, "RUNNING", string(execution.Status), "a gap cannot synthesize a lost turn completion")
 }
 
 func TestSSHPassthroughTerminalJoinsInitialStartup(t *testing.T) {
@@ -427,6 +437,10 @@ func TestSSHPassthroughTerminalJoinsInitialStartup(t *testing.T) {
 
 func TestSSHPassthroughFirstLaunchAlreadyStartedByTerminal(t *testing.T) {
 	mgr, _, execution := newPassthroughRunnerManager(t)
+	memoryBus := eventbus.NewMemoryEventBus(newTestRegistryLogger())
+	t.Cleanup(memoryBus.Close)
+	mgr.eventBus = memoryBus
+	mgr.eventPublisher = NewEventPublisher(memoryBus, newTestRegistryLogger())
 	controller, _ := sshPassthroughTestController(t, execution)
 	t.Cleanup(func() { _ = mgr.Stop() })
 	const agentID = "ssh-initial-launch-test"
@@ -499,4 +513,86 @@ func TestSSHPassthroughStaleCleanupDoesNotReenterClientLease(t *testing.T) {
 	require.False(t, controller.Passthrough().Live())
 	_, exists := mgr.executionStore.Get(execution.ID)
 	require.False(t, exists)
+}
+
+func TestSSHPassthroughDelayedStartupIdleCannotCompleteInitialTurn(t *testing.T) {
+	mgr, _, execution := newPassthroughRunnerManager(t)
+	controller, _ := sshPassthroughTestController(t, execution)
+	execution.setMetadataValue("task_description", "initial work")
+	pt := agents.PassthroughConfig{IdleTimeout: 20 * time.Millisecond}
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, pt, nil, agents.NewCommand("sh", "-c", "printf ready; cat"), nil)
+	require.NoError(t, err)
+	execution.PassthroughProcessID = info.ID
+	execution.passthroughInitialPromptProcessID = info.ID
+	mgr.autoInjectInitialPrompt(execution, pt, info.ID)
+	require.Empty(t, execution.passthroughInitialPromptProcessID)
+	page, err := controller.Passthrough().Events(context.Background(), 0, false)
+	require.NoError(t, err)
+	var startup agentctltypes.PassthroughEvent
+	var submitted agentctltypes.PassthroughEvent
+	for _, event := range page.Events {
+		if event.Kind == "idle" && startup.Sequence == 0 {
+			startup = event
+		}
+		if event.Kind == "submitted" {
+			submitted = event
+		}
+	}
+	require.NotZero(t, startup.Sequence)
+	require.Greater(t, submitted.Sequence, startup.Sequence)
+	mgr.handleRemotePassthroughEvent(execution, startup)
+	require.Equal(t, "RUNNING", string(execution.Status), "delayed startup idle must not release the active turn")
+	completed := startup
+	completed.Sequence = submitted.Sequence + 1
+	mgr.handleRemotePassthroughEvent(execution, completed)
+	require.Equal(t, "READY", string(execution.Status), "a later idle must still complete the turn")
+}
+
+func TestSSHPassthroughObserverReleasesTargetWhenClientIsAbsent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr, _, execution := newPassthroughRunnerManager(t)
+		execution.ExecutorType = "ssh"
+		execution.remotePassthrough.snapshot.PassthroughTarget = agentctltypes.PassthroughTarget{ProcessID: "process", Generation: 1}
+		mgr.observeRemotePassthrough(execution)
+		synctest.Wait()
+		mgr.wg.Wait()
+		execution.remotePassthroughMu.Lock()
+		defer execution.remotePassthroughMu.Unlock()
+		require.Empty(t, execution.remotePassthrough.observerTarget.ProcessID, "an exited observer must not prevent reconnection")
+		require.Nil(t, execution.remotePassthrough.observerCancel)
+	})
+}
+
+func TestSSHPassthroughReplayGapProjectsVerifiedExit(t *testing.T) {
+	mgr, _, execution := newPassthroughRunnerManager(t)
+	controller, _ := sshPassthroughTestController(t, execution)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, agents.NewCommand("sh", "-c", "cat"), nil)
+	require.NoError(t, err)
+	execution.PassthroughProcessID = info.ID
+	source := controller.Passthrough().Snapshot()
+	require.NoError(t, controller.Passthrough().Stop(context.Background(), source.PassthroughTarget))
+	require.Eventually(t, func() bool { return controller.Passthrough().Snapshot().Status != agentctltypes.ProcessStatusRunning }, time.Second, time.Millisecond)
+	bus := &MockEventBus{}
+	mgr.eventPublisher = NewEventPublisher(bus, newTestRegistryLogger())
+	mgr.shuttingDown.Store(true)
+	after := mgr.reconcileRemotePassthroughGap(execution, execution.agentctl, source, source.StartSequence)
+	require.Greater(t, after, source.StartSequence)
+	require.Len(t, bus.PublishedEvents, 1, "a verified exit must reach normal status handling")
+	require.Equal(t, events.ProcessStatus, bus.PublishedEvents[0].Type)
+}
+
+func TestSSHPassthroughStaleObserverCannotClearReplacement(t *testing.T) {
+	_, _, execution := newPassthroughRunnerManager(t)
+	target := agentctltypes.PassthroughTarget{ProcessID: "same-process", Generation: 1}
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	execution.remotePassthrough.observerGeneration = 2
+	execution.remotePassthrough.observerTarget = target
+	execution.remotePassthrough.observerCancel = cancel
+	execution.releaseRemotePassthroughObserver(1)
+	require.Equal(t, target, execution.remotePassthrough.observerTarget)
+	require.NotNil(t, execution.remotePassthrough.observerCancel)
+	execution.releaseRemotePassthroughObserver(2)
+	require.Empty(t, execution.remotePassthrough.observerTarget.ProcessID)
+	require.Nil(t, execution.remotePassthrough.observerCancel)
 }

@@ -104,20 +104,37 @@ sequence. Events include started, exited, input submitted, and raw readiness sig
 The remote owner records events before publishing them. Start returns a cursor
 from before that process starts so early exit or idle cannot disappear before
 the backend registers the process. A reader subscribes and captures its replay
-snapshot under one lock. Sequence checks suppress duplicate delivery.
+snapshot under one lock. Sequence checks suppress duplicate delivery. An exited or canceled observer
+releases its target. Observer cleanup must match its observer generation so an
+old goroutine cannot clear a replacement that follows the same process.
 Retention is bounded by the existing per-instance event limit. A replay gap
-requires a fresh snapshot. It must not synthesize a lost turn-completion event.
+requires a fresh snapshot. Apply a verified non-running process status after
+the cursor save succeeds. An idle snapshot cannot attribute a lost completion
+to the active turn, so it must not synthesize a turn-completion event.
 
 Start admission is idempotent by operation ID. The same ID with different
 parameters is a conflict. A different ID while the prior CLI is live is a
 conflict unless the caller names a verified replacement generation and stops it.
 An uncertain response is resolved by querying that operation's result before
-any second start. Stop is idempotent for the specified generation.
+any second start. Retain the current generation's start receipt. A replacement
+retires earlier start and input receipts; expected-generation checks reject
+old start requests. Stop is idempotent for the specified generation.
 
 Automatic prompt writes use a submission ID. The owner records admission and
 result before allowing a duplicate to write. A partial or interrupted write is
 `uncertain`, and cannot be replayed automatically. This deduplication is scoped
 to the retained controller. It is not an ACP delivery journal.
+
+Identified input uses canonical UUIDv7 submission IDs. Retain at most 4096
+receipts for the current process. Evict only completed receipts in ID order and
+advance an expiry floor. Reject an unknown ID at or below that floor, so an
+expired retry cannot write again. Pending receipts remain retained. Raw browser
+keystrokes do not request receipts and do not consume their capacity.
+
+Each input receipt includes the event sequence after the write and its submitted
+event. Persist the final initial-submission boundary before clearing the startup
+prompt guard. An idle event at or before that boundary cannot complete the turn,
+even when its WebSocket delivery follows the HTTP write response.
 
 Explicit passthrough Resume does not require an ACP conversation or retire ACP
 delivery records. If prior SQL delivery history remains unresolved, Resume
@@ -131,7 +148,9 @@ launch or Resume operation. It must not create a second remote controller from
 workspace information while that operation prepares the target.
 
 The binary stream keeps the existing protocol: raw input and output, plus
-`0x01` followed by resize JSON. The remote owner uses process-specific PTY
+`0x01` followed by resize JSON. If an output subscriber overflows, close the
+browser stream so it can reconnect and replay the retained buffer. Normal PTY
+output completion keeps the session stream open for deliberate replacement. The remote owner uses process-specific PTY
 access. Session-level stream attachment follows a confirmed replacement and
 resends the last size. Browser disconnect removes only its subscription.
 An old stream's cleanup must not clear a successor connection's writer.
@@ -303,3 +322,12 @@ new-session actions on desktop and phone. Resume restores terminal interaction
 when the session starts. Displaying this recovery surface does not change the
 session passthrough snapshot or select ACP execution. The phone agent keybar
 is hidden while the session has ended.
+
+
+## Preparation failure recovery
+
+Hold the ownership-registry lock through file preparation and the registry save.
+If either fails, reverse the completed writes before releasing the lock. Remove
+new files and restore prior file contents only while the written file identity,
+size, and modification time still match. Preserve an external replacement or
+edit. Return rollback errors with the preparation error.

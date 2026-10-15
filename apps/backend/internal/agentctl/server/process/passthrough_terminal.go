@@ -60,6 +60,9 @@ func (o *PassthroughOwner) followTerminal(ctx context.Context, id string, target
 		case <-wake:
 		case data, ok := <-source:
 			if !ok {
+				if !o.runner.outputFinished(target.ProcessID) {
+					return
+				}
 				source = nil
 				continue
 			}

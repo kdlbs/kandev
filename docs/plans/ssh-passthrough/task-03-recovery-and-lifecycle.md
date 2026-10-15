@@ -179,3 +179,24 @@ Final changed-package lint passed with zero issues. The managed SSH browser
 suite passed all 14 tests, including desktop and phone Stop/Resume, after these
 changes. No provider conversation resume is inferred from an invented runtime
 owner, and attachment no longer creates a competing SSH controller.
+
+
+PR review regressions reproduced delayed startup-idle completion, output queue
+closure without browser reconnect, config writes surviving a failed registry
+save, and receipt limits accumulating across generations. The fix persists the
+initial-submission event boundary, disconnects overflowed streams, rolls back
+failed preparation, and bounds current-generation receipts without replaying
+expired input. Focused controller, API, client, config, and lifecycle tests pass
+with race detection. Additional regressions preserve pending receipts, the
+expiry floor, process replacement, and external config replacements.
+
+The follow-up review regressions also cover observer target release and verified
+exit projection after a replay gap. Idle snapshots cannot fabricate completion,
+and a failed remote probe preserves process ownership. The first-launch test
+now uses the synchronized memory event bus after race detection exposed
+concurrent writes to its test-only mock. All six packages passed the final
+review-remediation race command:
+
+```bash
+GOCACHE=/home/zeval/.cache/kandev-ssh-ee8214d6-go go test -C apps/backend -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/agentctl ./internal/common/passthroughconfig ./internal/gateway/websocket -run 'Test.*Passthrough|TestPrepare|TestWaitForFirstIdle|TestEmitTurnComplete|TestHandleTerminal|TestBridge' -count=1
+```

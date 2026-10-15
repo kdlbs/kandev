@@ -9,6 +9,8 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
+const remotePassthroughSubmitted = "submitted"
+
 func (m *Manager) observeRemotePassthrough(execution *AgentExecution) {
 	if !isSSHPassthrough(execution) || m.IsShuttingDown() {
 		return
@@ -27,6 +29,8 @@ func (m *Manager) observeRemotePassthrough(execution *AgentExecution) {
 		parent = context.Background()
 	}
 	ctx, cancel := context.WithCancel(parent)
+	execution.remotePassthrough.observerGeneration++
+	generation := execution.remotePassthrough.observerGeneration
 	execution.remotePassthrough.observerCancel = cancel
 	execution.remotePassthrough.observerTarget = snapshot.PassthroughTarget
 	execution.remotePassthroughMu.Unlock()
@@ -34,6 +38,7 @@ func (m *Manager) observeRemotePassthrough(execution *AgentExecution) {
 	go func() {
 		defer m.wg.Done()
 		defer cancel()
+		defer execution.releaseRemotePassthroughObserver(generation)
 		m.runRemotePassthroughEvents(ctx, execution, snapshot)
 	}()
 }
@@ -100,13 +105,18 @@ func (m *Manager) reconcileRemotePassthroughGap(execution *AgentExecution, clien
 			return
 		}
 		if err := m.updateRemotePassthroughRecord(ctx, execution, func(record *remotePassthroughRecord) {
-			if record.PassthroughTarget == fresh.PassthroughTarget && record.InstanceID == fresh.InstanceID && fresh.Sequence > record.EventSequence {
+			if record.PassthroughTarget == fresh.PassthroughTarget && record.InstanceID == fresh.InstanceID && fresh.Sequence >= record.EventSequence {
 				record.EventSequence = fresh.Sequence
 				accepted = fresh.Sequence
 			}
 		}); err != nil {
 			accepted = after
+			return
 		}
+		if accepted == fresh.Sequence && fresh.Status != types.ProcessStatusRunning {
+			m.handlePassthroughStatus(&types.ProcessStatusUpdate{SessionID: fresh.SessionID, ProcessID: fresh.ProcessID, Status: fresh.Status, ExitCode: fresh.ExitCode, Timestamp: time.Now().UTC()})
+		}
+		// An idle snapshot cannot attribute a lost completion to the active turn.
 	})
 	return accepted
 }
@@ -122,8 +132,8 @@ func (m *Manager) handleRemotePassthroughEvent(execution *AgentExecution, event 
 	}
 	switch event.Kind {
 	case "idle":
-		m.handlePassthroughTurnComplete(event.SessionID, event.ProcessID)
-	case "submitted":
+		m.handlePassthroughTurnCompleteAfter(event.SessionID, event.ProcessID, event.Sequence)
+	case remotePassthroughSubmitted:
 		_ = m.MarkPassthroughRunning(event.SessionID)
 	case "status":
 		m.handlePassthroughStatus(&types.ProcessStatusUpdate{SessionID: event.SessionID, ProcessID: event.ProcessID, Status: event.Status, ExitCode: event.ExitCode, Timestamp: event.Timestamp})
@@ -135,4 +145,13 @@ func (m *Manager) handleRemotePassthroughEvent(execution *AgentExecution, event 
 			current.EventSequence = event.Sequence
 		}
 	})
+}
+
+func (execution *AgentExecution) releaseRemotePassthroughObserver(generation uint64) {
+	execution.remotePassthroughMu.Lock()
+	defer execution.remotePassthroughMu.Unlock()
+	if execution.remotePassthrough.observerGeneration == generation {
+		execution.remotePassthrough.observerTarget = types.PassthroughTarget{}
+		execution.remotePassthrough.observerCancel = nil
+	}
 }

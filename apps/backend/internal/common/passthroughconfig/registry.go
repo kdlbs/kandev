@@ -22,18 +22,24 @@ type registryEntry struct {
 type registry map[string]*registryEntry
 
 func Prepare(ctx context.Context, workspace, privateRoot, owner string, files []File) error {
+	var changes []remoteFileChange
 	return withRegistry(ctx, workspace, func(root *os.Root, entries registry) error {
 		for _, file := range files {
 			relative, err := relativeConfigPath(workspace, privateRoot, file)
 			if err != nil {
 				return err
 			}
-			if err := materializeRemoteFile(root, relative, owner, file, entries); err != nil {
+			change, err := captureRemoteFile(root, relative)
+			if err != nil {
 				return err
 			}
+			if err := materializeRemoteFile(root, relative, owner, file, entries, &change); err != nil {
+				return err
+			}
+			changes = append(changes, change)
 		}
 		return nil
-	})
+	}, func(root *os.Root) error { return rollbackRemoteFiles(root, changes) })
 }
 
 func Cleanup(ctx context.Context, workspace, owner string, prefix bool) error {
@@ -56,10 +62,10 @@ func Cleanup(ctx context.Context, workspace, owner string, prefix bool) error {
 			delete(entries, relative)
 		}
 		return nil
-	})
+	}, nil)
 }
 
-func withRegistry(ctx context.Context, workspace string, operation func(*os.Root, registry) error) error {
+func withRegistry(ctx context.Context, workspace string, operation func(*os.Root, registry) error, rollback func(*os.Root) error) (result error) {
 	lock, err := Acquire(ctx, filepath.Join(workspace, registryPath))
 	if err != nil {
 		return err
@@ -70,6 +76,11 @@ func withRegistry(ctx context.Context, workspace string, operation func(*os.Root
 		return err
 	}
 	defer func() { _ = root.Close() }()
+	defer func() {
+		if result != nil && rollback != nil {
+			result = errors.Join(result, rollback(root))
+		}
+	}()
 	if err := checkRelativePath(root, registryPath); err != nil {
 		return err
 	}
@@ -127,15 +138,13 @@ func relativeConfigPath(workspace, privateRoot string, file File) (string, error
 	return relative, nil
 }
 
-func materializeRemoteFile(root *os.Root, relative, owner string, file File, entries registry) error {
+func materializeRemoteFile(root *os.Root, relative, owner string, file File, entries registry, change *remoteFileChange) error {
 	if err := checkRelativePath(root, relative); err != nil {
 		return err
 	}
-	info, err := root.Lstat(relative)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	exists := err == nil
+	info := change.before
+	var err error
+	exists := info != nil
 	owned := !exists
 	content := file.Content
 	previous := entries[relative]
@@ -145,7 +154,8 @@ func materializeRemoteFile(root *os.Root, relative, owner string, file File, ent
 			return err
 		}
 	}
-	if err := atomicRootWrite(root, relative, content, info); err != nil {
+	change.written, err = atomicRootWriteInfo(root, relative, content, info)
+	if err != nil {
 		return err
 	}
 	owners := map[string]bool{}
@@ -238,34 +248,43 @@ func checkRelativePath(root *os.Root, relative string) error {
 }
 
 func atomicRootWrite(root *os.Root, relative string, data []byte, original os.FileInfo) error {
+	_, err := atomicRootWriteInfo(root, relative, data, original)
+	return err
+}
+
+func atomicRootWriteInfo(root *os.Root, relative string, data []byte, original os.FileInfo) (os.FileInfo, error) {
 	if err := root.MkdirAll(filepath.Dir(relative), 0o700); err != nil {
-		return err
+		return nil, err
 	}
 	temporary := relative + ".kandev-" + uuid.NewString() + ".tmp"
 	file, err := root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = file.Close(); _ = root.Remove(temporary) }()
 	if _, err := file.Write(data); err != nil {
-		return err
+		return nil, err
 	}
 	if err := file.Sync(); err != nil {
-		return err
+		return nil, err
+	}
+	written, err := file.Stat()
+	if err != nil {
+		return nil, err
 	}
 	if err := file.Close(); err != nil {
-		return err
+		return nil, err
 	}
 	if original != nil {
 		current, err := root.Lstat(relative)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !os.SameFile(original, current) || original.ModTime() != current.ModTime() || original.Size() != current.Size() {
-			return fmt.Errorf("MCP file changed during preparation")
+			return nil, fmt.Errorf("MCP file changed during preparation")
 		}
 	} else {
-		return root.Link(temporary, relative)
+		return written, root.Link(temporary, relative)
 	}
-	return root.Rename(temporary, relative)
+	return written, root.Rename(temporary, relative)
 }

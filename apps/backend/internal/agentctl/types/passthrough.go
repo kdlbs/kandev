@@ -83,5 +83,6 @@ type PassthroughEventPage struct {
 }
 
 type PassthroughInputResult struct {
-	Outcome string `json:"outcome"`
+	Outcome  string `json:"outcome"`
+	Sequence uint64 `json:"sequence"`
 }

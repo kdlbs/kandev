@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -97,7 +98,7 @@ func remoteStart(t *testing.T, srv *Server, command string) map[string]any {
 func TestRemotePassthroughInputDedup(t *testing.T) {
 	srv := newPassthroughAPIServer(t)
 	snapshot := remoteStart(t, srv, "stty -echo; while read line; do printf '%s\\n' \"$line\" >> accepted-lines; done")
-	body := map[string]any{"process_id": snapshot["process_id"], "generation": snapshot["generation"], "submission_id": "input-1", "data": "once\n"}
+	body := map[string]any{"process_id": snapshot["process_id"], "generation": snapshot["generation"], "submission_id": uuid.Must(uuid.NewV7()).String(), "data": "once\n"}
 	for range 2 {
 		rec := shellTerminalRequest(t, srv, http.MethodPost, "/api/v1/passthrough/input", body)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())

@@ -1432,6 +1432,10 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 // reject that stale callback so it cannot mark the replacement execution ready
 // and suppress the replacement process's real completion event.
 func (m *Manager) handlePassthroughTurnComplete(sessionID, processID string) {
+	m.handlePassthroughTurnCompleteAfter(sessionID, processID, 0)
+}
+
+func (m *Manager) handlePassthroughTurnCompleteAfter(sessionID, processID string, sequence uint64) {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		m.logger.Debug("turn complete for unknown session (may have ended)",
@@ -1441,7 +1445,11 @@ func (m *Manager) handlePassthroughTurnComplete(sessionID, processID string) {
 	execution.passthroughLifecycleMu.Lock()
 	activeProcessID := execution.PassthroughProcessID
 	initialPromptPending := execution.passthroughInitialPromptProcessID == processID
+	staleInitialIdle := sequence != 0 && sequence <= remotePassthroughRecordFor(execution).InitialSubmissionSequence
 	execution.passthroughLifecycleMu.Unlock()
+	if staleInitialIdle {
+		return
+	}
 	if activeProcessID != processID {
 		m.logger.Debug("ignoring stale passthrough turn complete",
 			zap.String("session_id", sessionID),

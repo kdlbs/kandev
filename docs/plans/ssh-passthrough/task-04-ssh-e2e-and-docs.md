@@ -230,3 +230,19 @@ runtime facade's existing execution alias. Focused gateway race tests passed
 Evidence uses disposable Linux SSH targets and the mock CLI. The reporter's
 Proxmox LXC, Tailscale transport, and authenticated provider CLIs were not
 available. The reporter-specific missing-token cause remains unconfirmed.
+
+
+PR review remediation: the SSH helper now polls the remote initial-prompt trace
+before asserting its count. After rebuilding backend, helper, and frontend
+artifacts, the focused managed SSH suite passed all 14 tests in 4.2 minutes,
+including phone input, passthrough reconnect, remote MCP, Stop/Resume, backend
+recovery, and agent readiness:
+
+```bash
+PATH=/tmp/kandev-pr-ee8214d6-tools-bumju97b/bin:$PATH GOCACHE=/home/zeval/.cache/kandev-ssh-ee8214d6-go KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --no-build --shards 1 --project containers tests/ssh/passthrough.spec.ts tests/ssh/mobile-passthrough.spec.ts tests/ssh/recovery.spec.ts tests/ssh/agent-readiness.spec.ts
+```
+
+The preceding broad SSH-folder run passed eight cases before an intentional
+interrupt to narrow the selection. It is not counted as a full-suite pass.
+Go race checks passed for all six affected packages; Go lint, targeted web lint,
+documentation catalog validation, and specification lint also passed.
