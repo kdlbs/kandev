@@ -53,6 +53,48 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+### Twenty-seventh candidate: remove duplicate sidebar restoration
+
+Candidate 26's only test failure is the remote-picker pasted-issue case's
+layout-restoration hook, which races the live browser's revisioned layout write.
+Task 15 records the shared page fixture as the single owner of per-test reset.
+Remove only this suite's layout snapshot and afterEach restore. All ten test
+bodies, assertions, zero retries and deadlines are byte-identical. The unchanged
+baseline passes ten cases in 32.9s against a fresh managed build; after cleanup
+removal they pass in 31.0s with retries disabled. Strict lint/format and native
+collection pass, preserving all 3,957 E2E identities. No production or unit-test
+inventory changes are made. Full hosted timing/coverage remain pending.
+
+### Twenty-sixth complete hosted result: bootstrap restored, cleanup failure
+
+Head `ad685333e05e` passes backend `38688697619` in 11m46s (194.32
+runner-minutes) and frontend `38688697677` in 11m04s (25.30). Every Windows
+job executes and passes. Full E2E `38688697738` fails in 15m49s (283.63),
+with a 938-second execution critical path. All 75 core jobs are selected;
+complete occupancy is 503.25 runner-minutes. This failed, over-budget set does
+not qualify; acceptance stays 1/3.
+
+Exact source/run/producer reports retain 3,957 E2E identities: 3,909 first
+passes, seven retry passes, one final failure and forty existing skips. Raw
+audit covers 118 native reports and 3,967 attempts, with zero parse errors;
+ten retry attempts and eleven failed/timed-out attempt results reconcile with
+the final outcomes. All ten native backend cohorts retain 35,581 expected
+executions/outcomes. Frontend retains 26,553 cases in 2,956 files. All 28 normal
+resource snapshots retain four CPUs, zero swap/memory events and 7.98-9.12 GiB
+lifetime peaks.
+
+The failed remote-picker case reaches an afterEach layout restore and receives
+a real 409 revision conflict; its retained product assertions are unchanged.
+The suite already has zero retries. Container shard 1 passes without retry but
+finishes last: 707 seconds total, including an eighteen-second checkout,
+66-second pinned-image pull and 562-second test step. The required report takes
+65 seconds afterward. Some normal shards wait 138-212 seconds after Build;
+these scheduling causes remain unknown. Do not attribute this sample's tail to
+the previous run's managed-PVC retry: all container cases pass first attempt.
+Fresh exact-head evidence has 89 passed checks, two failed E2E contexts, eleven
+ancillary skips and zero pending, with no evidence errors or unresolved/hidden
+threads/current-head review bodies. No monitor remains live before candidate 27.
+
 ### Twenty-sixth candidate: restore the unavailable Go setup archive
 
 Replace the unavailable setup-go pin consistently in six workflows with an

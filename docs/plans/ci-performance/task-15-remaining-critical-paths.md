@@ -61,6 +61,39 @@ git diff --check
 
 ## Results
 
+### Remove duplicate remote-repository layout cleanup
+
+Candidate 26's full E2E fails remote repository creation's pasted-issue case in
+`test.afterEach`, not its title or popover assertions. The original backend log
+and error context report a real sidebar layout revision conflict from
+`restoreSidebarLayout`; this suite already disables retries. Its unchanged
+complete ten-case suite passes locally against a fresh managed build in 32.9s.
+Keep the hosted failure separate from this local baseline.
+
+Disposition D: remove only this suite's `initialLayout` snapshot and layout
+restore hook/imports. The owning `testPage` fixture already resets the layout
+before opening each fresh browser context and closes that context after use.
+The extra afterEach restore runs while that browser can still persist its own
+layout. Restoring a prior suite snapshot has no independent product oracle;
+its second settings write conflicts with the fixture's existing ownership.
+The same helper remains for its other callers. Do not add conflict retries or
+ignore settings errors.
+
+Disposition R: retain all ten native remote-picker cases and every existing
+assertion, including the first case's explicit collapsed navigation, loading
+geometry, all source selections/submissions and the pasted issue's title and
+popover bounds. Keep suite retries zero and all deadlines unchanged. Verify
+that the complete test-body suffix is byte-identical, native collection keeps
+all 3,957 IDs, and the ten-case managed browser suite passes without retries.
+No product behavior or API contract changes. Preserve the complete failed CI
+sample and rerun full hosted selection only after focused validation.
+
+
+The focused edited suite passes all ten cases in 31.0s with retries disabled,
+against the same freshly built application as its unchanged baseline. Strict
+ESLint/format pass, and native collection retains the exact 3,957 IDs. All ten
+complete test-body suffixes remain byte-identical. Hosted validation is pending.
+
 ### Restore the unavailable pinned Go setup action
 
 The twenty-fifth candidate fails two Windows jobs and the preview before
