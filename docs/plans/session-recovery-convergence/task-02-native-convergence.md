@@ -56,3 +56,36 @@ and the affected established restart/gap regressions pass with race detection.
 Final CI is pending.
 
 [Parent plan](plan.md). [Requirements](../../specs/platform/requirements/durable-restart-reconciliation.md).
+
+## Unproven dispatch reconciliation follow-up (PR #4519)
+
+The SQL dispatch reconciliation path redundantly required the journal label to
+be `interrupted_unknown`, rejecting authenticated `completed`, `failed`, and
+`cancelled` history without terminal proof. Reuse `peerMatchesUnknownHistory`
+after normalizing only the in-memory SQL candidate. This implements criterion
+AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.2 without changing identity,
+generation, payload hash, stream, replay-cursor, or SQL compare-and-set guards.
+
+The follow-up owns these files:
+
+- `apps/backend/internal/agent/runtime/lifecycle/native_resume_dispatch_reconciliation.go`
+- `apps/backend/internal/agent/runtime/lifecycle/native_resume_dispatch_reconciliation_test.go`
+- `apps/backend/internal/agent/runtime/lifecycle/native_resume_state_matrix_test.go`
+
+Real SQLite/bbolt regression cases cover each unproven terminal label, retained
+terminal evidence, conflicting hashes, live dispatches, and independent work.
+They assert unchanged journal labels and terminal metadata, preserved native
+identity, and SQL uncertainty. The cross-store matrix checks repeated recovery
+and keeps retired instructions out of current work.
+
+Validation uses resource-capped race tests for lifecycle `^TestNativeResume`
+and the journal package, plus changed-file Go lint. CI owns browser coverage;
+local E2E and production state mutation are excluded. This restores the existing
+recovery contract without changing public controls, configuration, or recovery
+instructions, so no public documentation update is needed.
+
+Follow-up local validation passed: lifecycle `^TestNativeResume` race tests,
+the complete journal race suite, changed-file Go lint (zero issues), specification
+catalog validation and full specification lint. The documentation evaluator
+reports `covered` for the complete PR delta. Current-head CI and review remain
+delivery gates; these local results do not claim production recovery.
