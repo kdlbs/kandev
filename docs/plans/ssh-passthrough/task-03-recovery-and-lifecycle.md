@@ -214,3 +214,12 @@ package also passed with race detection in 303.752 seconds. A helper resolver
 test now uses empty temporary directories so built remote helpers cannot
 invalidate its missing-binary premise. Current-head CI remains pending until
 the remediation is pushed and its checks finish.
+
+
+A Windows CI auto-shell regression exceeded its two-second deadline while
+starting native processes. The test now calls auto-shell setup under the same
+start lock with a deliberately invalid Git environment. This reaches the
+snapshot boundary and exits before shell spawning. Reintroducing the original
+recursive lock in an isolated worktree makes the test fail in two seconds.
+The corrected test and adjacent environment/shell tests pass with race detection.
+Windows native execution remains an external CI gate until the new head passes.

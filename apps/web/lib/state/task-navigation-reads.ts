@@ -3,6 +3,7 @@ import type { StoreApi } from "zustand";
 import { ApiError } from "@/lib/api/client";
 import { fetchTask, listTaskSessions } from "@/lib/api";
 import { getBackendConfig } from "@/lib/config";
+import { toKanbanTask } from "@/lib/kanban/map-task";
 import { getTaskSessionReads, type TaskSessionReads } from "@/lib/state/task-session-reads";
 import type { Task, TaskSessionsResponse } from "@/lib/types/http";
 import type { AppState } from "./store";
@@ -442,33 +443,43 @@ export function createTaskNavigationReads(
   return new TaskNavigationReads(loadIdentity, scopeIsCurrent);
 }
 
-function fetchTaskNavigationIdentity(
+async function fetchTaskNavigationIdentity(
+  store: StoreApi<AppState>,
   taskId: string,
   signal: AbortSignal,
   sessionReads?: TaskSessionReads,
 ): Promise<TaskNavigationIdentity> {
-  const taskRequest = fetchTask(taskId, { cache: "no-store", init: { signal } });
-  const sessionList = sessionReads
-    ? (() => {
-        const release = sessionReads.retain(taskId);
-        return raceAbort(
-          sessionReads.read(taskId, (readSignal) =>
-            listTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
-          ),
-          signal,
-        ).finally(release);
-      })()
-    : listTaskSessions(taskId, { cache: "no-store", init: { signal } });
-  return Promise.all([
-    taskRequest,
-    sessionList.then(
-      (allSessionsResponse) => ({ allSessionsResponse, sessionListUnavailable: false }),
-      (error) => {
-        if (isTaskNavigationAbort(error) || signal.aborted) throw abortError();
-        return { allSessionsResponse: { sessions: [], total: 0 }, sessionListUnavailable: true };
-      },
-    ),
-  ]).then(([task, sessionList]) => ({ task, ...sessionList }));
+  const scope = storeIdentity(store.getState());
+  const overviewRead = store.getState().beginTaskOverviewRead();
+  try {
+    const taskRequest = fetchTask(taskId, { cache: "no-store", init: { signal } });
+    const sessionList = sessionReads
+      ? (() => {
+          const release = sessionReads.retain(taskId);
+          return raceAbort(
+            sessionReads.read(taskId, (readSignal) =>
+              listTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
+            ),
+            signal,
+          ).finally(release);
+        })()
+      : listTaskSessions(taskId, { cache: "no-store", init: { signal } });
+    const [task, sessions] = await Promise.all([
+      taskRequest,
+      sessionList.then(
+        (allSessionsResponse) => ({ allSessionsResponse, sessionListUnavailable: false }),
+        (error) => {
+          if (isTaskNavigationAbort(error) || signal.aborted) throw abortError();
+          return { allSessionsResponse: { sessions: [], total: 0 }, sessionListUnavailable: true };
+        },
+      ),
+    ]);
+    if (signal.aborted || storeIdentity(store.getState()) !== scope) throw abortError();
+    store.getState().retainTaskOverviews("detail", [toKanbanTask(task)], overviewRead);
+    return { task, ...sessions };
+  } finally {
+    store.getState().finishTaskOverviewRead(overviewRead);
+  }
 }
 
 function storeIdentity(state: AppState) {
@@ -505,7 +516,7 @@ function getTaskNavigationOwner(store: StoreApi<AppState>): NavigationReadOwner 
     } as NavigationReadOwner;
     const sessionReads = getTaskSessionReads(store);
     nextOwner.reads = new TaskNavigationReads(
-      (taskId, signal) => fetchTaskNavigationIdentity(taskId, signal, sessionReads),
+      (taskId, signal) => fetchTaskNavigationIdentity(store, taskId, signal, sessionReads),
       () => owners.get(store) === nextOwner && storeIdentity(store.getState()) === identity,
     );
     owner = nextOwner;

@@ -251,9 +251,15 @@ documentation catalog validation, and specification lint also passed.
 CI remediation also corrects the phone diff continuity fixture. Its mutable
 version marker now stays outside the reading region, so the asserted content
 anchor survives the edit. Both Pierre and Monaco cases pass without retries.
-The toolbar failure's original CI partition passed all 34 tests without retries
-under two CPUs and 4 GiB memory. The branch-switch case also passed in its
-original partition. No product change was inferred from those passing replays.
+The initial toolbar replay passed all 34 tests without retries under two CPUs
+and 4 GiB memory. A subsequent one-CPU replay reproduced all four phone toolbar
+failures. The backend had moved the task to Review while the canonical browser
+record retained its bootstrap placement. Shared task-navigation identity reads
+now reconcile that record through the scoped overview journal. The same
+one-CPU partition passed all 34 tests in 6.2 minutes after the fix. All 159
+focused state and route tests passed, including missed movement, newer live
+placement, and workspace-change regressions. The branch-switch case passed in
+its original partition.
 
 After rebuilding the native backend, delivery fixture, and plugin fixture, the
 recovery partition passed all 33 tests in 4.4 minutes without retries under the
