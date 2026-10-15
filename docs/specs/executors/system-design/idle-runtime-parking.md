@@ -40,7 +40,14 @@ Maintain a monotonic candidate clock keyed by workspace, session, execution, and
 Settlement or an explicit focus event starts/refreshes the interval. A focus-triggered resume starts a fresh interval after readiness.
 A new prompt or known active work invalidates the old interval; settlement starts another interval after work ends.
 An unchanged open tab is not a heartbeat. Passive stream traffic and row timestamps are not semantic activity.
-After backend recovery without trustworthy idle history, start a full interval after observing a settled live session.
+After backend recovery, continue the interval from lifecycle's recorded activity for the same execution. Persist that snapshot in the existing `executors_running.metadata` during normal lifecycle upserts and restore it before recovery replay. Bind it to execution identity and keep it session-scoped; missing, malformed, or future snapshots are not trustworthy history. Do not use runtime/session/workspace row timestamps or transcript `MAX(updated_at)`: metadata edits and recovery can refresh those without real activity.
+The current execution owns removal as well as replacement of its clock snapshot. A normal persistence merge must not restore a removed clock from the prior row.
+Both local startup and remote reconstruction use the same restoration helper. Remote reconstruction reads the clock from the lifecycle-owned runtime record, even when the adapter's separate metadata contains only its connection configuration.
+
+The retained terminal outcome records its observation time in the existing event payload. Durable recovery uses the existing journal event's `CreatedAt`. Replay advances the clock only to this recorded activity time, while retaining output evidence, activity epochs, apply-before-ACK ordering, and ControlTurnID deduplication. Normal live completion continues to mark new activity. No per-event database write, new table, journal, or endpoint is needed.
+An older surviving control server may omit the retained observation time. Such an outcome cannot establish when the turn settled; use the full-interval fallback rather than substitute message or recovery timestamps.
+
+Without a trustworthy clock, represent the idle anchor as unknown and start a full interval on the first settled candidate observation. Keep the candidate stable on subsequent scans; preserve policy-change and explicit-focus floors. A snapshot from another execution cannot shorten this interval. A new prompt, live activity, or resumed settled execution still starts its normal new interval.
 
 Use the existing orchestrator maintenance owner with a scan cadence at most 30 seconds.
 Inspect durable runtime inventory independently of coarse state, then evaluate each row's workspace policy and session eligibility.

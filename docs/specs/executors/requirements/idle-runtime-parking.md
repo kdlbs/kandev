@@ -2,7 +2,7 @@
 status: active
 system: executors
 created: 2026-09-28
-updated: 2026-10-01
+updated: 2026-10-15
 owners:
   - kandev
 ---
@@ -41,6 +41,7 @@ The always-on idle reclaim of settled runtimes runs regardless of this policy. I
 - **AC-EXECUTORS-IDLE-PARKING-001.8:** Failed suspension or resume shall preserve durable ownership and conversation identity for retry. Kandev shall never replace an unrecoverable conversation silently. Missing resume identity or unsupported restore shall produce a visible diagnostic and preserve the process when suspension has not started.
 - **AC-EXECUTORS-IDLE-PARKING-001.9:** Desktop and phone workspace settings shall expose the same switch, timeout, validation, and saved state. Phone users shall use the normal touch composer and task navigation for recovery.
 - **AC-EXECUTORS-IDLE-PARKING-001.10:** Disabling the policy shall prevent new suspensions without starting every suspended process. Existing suspended sessions shall still resume on focus or messages. Diagnostics shall identify suspended instances and bounded skip/failure reasons without tokens or credentials.
+- **AC-EXECUTORS-IDLE-PARKING-001.11:** After a backend restart, a settled session with trustworthy recorded activity shall continue its existing idle interval. Recovery bookkeeping, transcript metadata updates, and replay of an already observed turn shall not start a new interval. Recovered activity shall use its recorded observation time. When trustworthy activity is absent, invalid, or in the future, the session shall receive a full interval after it is observed settled. Existing focus, policy-change, known-work, and resume-safety conditions shall remain effective.
 
 ### REQ-EXECUTORS-IDLE-PARKING-002: Resume-safe idle reclaim
 

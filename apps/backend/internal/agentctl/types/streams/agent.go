@@ -1,5 +1,7 @@
 package streams
 
+import "time"
+
 // AgentEvent type constants define the types of events streamed from the agent.
 const (
 	// EventTypeMessageChunk indicates streaming text content from the agent.
@@ -222,6 +224,18 @@ type AgentEvent struct {
 	// PromptGeneration -- travels on both observations and survives a
 	// restart that resets the backend's own in-memory generation counter.
 	ControlTurnID int64 `json:"control_turn_id,omitempty"`
+
+	// Recovered marks a terminal event that lifecycle re-applied from its
+	// retained, pre-restart turn outcome (manager_recovery_turn_outcome.go)
+	// rather than delivering it live. It is backend-internal and never part
+	// of the wire payload.
+	Recovered bool `json:"-"`
+
+	// ActivityAt is the observation time retained with a terminal outcome.
+	// Recovery uses it instead of treating replay as newly observed activity.
+	ActivityAt *time.Time `json:"activity_at,omitempty"`
+	// RecoveredActivityAt is replay context, excluded from durable payload identity.
+	RecoveredActivityAt *time.Time `json:"-"`
 
 	// CanonicalMessageID is assigned by the backend inbox projector for output
 	// events. It is stable across reconnects and is not a transport cursor.

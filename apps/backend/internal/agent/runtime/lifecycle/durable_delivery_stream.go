@@ -219,6 +219,8 @@ func (sm *StreamManager) processRecoveredDeliveryEvent(
 	event.DeliveryHarnessGeneration = committed.HarnessGeneration
 	event.DeliverySequence = committed.Sequence
 	event.DeliverySubmissionID = committed.SubmissionID
+	event.Recovered = true
+	event.RecoveredActivityAt = &committed.CreatedAt
 	prepared, err := sm.prepareAgentEvent(ctx, execution, client, delivery, event)
 	if err != nil {
 		return fmt.Errorf("durable replay event ownership check: %w", err)

@@ -23,6 +23,7 @@ At revision `adc5d67f55d19dd76161eaec5ae725e20a345acb`, attached streams keep `I
 The backend `classifyIdleReclaim` separately skips live runtimes. Existing focused tests confirmed both behaviors.
 These guards remain valid for disconnected reaping and dead-row repair; neither implements the requested workspace policy.
 Task 04 adds `REQ-EXECUTORS-IDLE-PARKING-002`: that reaping keeps a waiting session whose tokenless row lifecycle cleanup would delete.
+Task 05 carries the existing P46 restart-clock slice into current upstream source; it preserves the earlier guards and does not change workspace policy or limits.
 
 The implementation agent investigated the earlier provider gate and added no production or permanent test code.
 Its audit remains in Task 01 as historical evidence only. The user explicitly replaced that gate with a general opt-in retention policy.
@@ -48,6 +49,7 @@ This revision supersedes the previous one-hour installation policy, standalone-o
 Task 01 adds a shared runtime suspension primitive and durable suspension provenance.
 Task 02 adds workspace policy persistence, settings, scheduling, and all recovery callers as one functional slice.
 Task 03 proves complete cycles and documents the policy.
+Task 05 preserves recorded idle activity across backend recovery through [the scoped work order](task-05-preserve-restart-idle-interval.md).
 
 Use the [design](../../specs/executors/system-design/idle-runtime-parking.md) for identity claims, clock reset rules, migrations, and recovery ordering.
 Use existing workspace authorization, partial updates, and SQLite/PostgreSQL repository patterns.

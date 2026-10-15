@@ -712,6 +712,45 @@ func (e *AgentExecution) markAgentActivity() {
 	e.lastActivityAtMu.Unlock()
 }
 
+// markRecoveredAgentActivity records output and advances the activity epoch
+// using the retained observation time, never the time of replay.
+func (e *AgentExecution) markRecoveredAgentActivity(at *time.Time) {
+	e.lastActivityAtMu.Lock()
+	e.setRecoveredActivityAtLocked(at)
+	e.agentEventSincePrompt = true
+	e.promptActivityEpoch++
+	e.lastActivityAtMu.Unlock()
+}
+
+const idleActivityMetadataKey = "idle_activity"
+
+func (e *AgentExecution) restoreIdleActivity(metadata map[string]interface{}) {
+	snapshot, ok := metadata[idleActivityMetadataKey].(map[string]interface{})
+	if !ok || getMetadataString(snapshot, "execution_id") != e.ID {
+		return
+	}
+	at, err := time.Parse(time.RFC3339Nano, getMetadataString(snapshot, "activity_at"))
+	if err != nil || at.IsZero() || at.After(time.Now()) {
+		return
+	}
+	e.lastActivityAtMu.Lock()
+	e.lastActivityAt = at
+	e.promptActivityEpoch++
+	e.lastActivityAtMu.Unlock()
+}
+
+// Unknown replay time cannot establish when a turn settled. Start a full
+// interval at observation rather than trusting passive persistence timestamps.
+func (e *AgentExecution) setRecoveredActivityAtLocked(at *time.Time) {
+	if at == nil || at.IsZero() || at.After(time.Now()) {
+		e.lastActivityAt = time.Time{}
+		return
+	}
+	if at.After(e.lastActivityAt) {
+		e.lastActivityAt = *at
+	}
+}
+
 func (e *AgentExecution) markLifecycleActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()

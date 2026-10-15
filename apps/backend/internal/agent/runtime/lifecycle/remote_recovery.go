@@ -402,6 +402,7 @@ func (m *Manager) prepareRecoveredRemoteExecution(
 	if execution.TaskID == "" || execution.SessionID == "" || execution.ID == "" {
 		return nil, errors.New("remote recovery execution identity is incomplete")
 	}
+	execution.restoreIdleActivity(record.Metadata)
 	execution.setSessionInitialized(true)
 	execution.setRuntimeEnvironment(ri.Env)
 	execution.OfficeAgentProfileID = getMetadataString(metadata, MetadataKeyOfficeAgentProfileID)
