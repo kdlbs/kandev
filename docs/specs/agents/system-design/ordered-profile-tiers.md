@@ -102,3 +102,26 @@ AC-001.4: Feature/storage boundary. AC-001.6: Read-only preview. No operating
 configuration or installed-runtime change. AC-001.7 covers task/session RR and
 legacy unknown initialization. Common transient-owner RR, cross-backend choice,
 pace and keep-model remain original later increments.
+
+
+## Native owner journal bridge
+
+The existing route tables now accept either their original non-null task-session
+FK or a native route key in nullable `route_id`, never both. The logical unique
+key is COALESCE(route_id, session_id), including generation on attempts. The
+transactional cutover copies all legacy UUIDs, payloads, timestamps, marker and
+nullable selection ordinal; the task FK and delete cascade remain. There is no
+synthetic task session, second ledger or installation-state change.
+
+A native decision transaction verifies the already-created utility call, review
+run or Office run-session, then performs the same generation CAS and ordinal
+allocation. Missing/unrecognized owners fail closed. Utility callers create one
+actual call before selection and update concrete attribution on that call;
+preparation failure leaves a failed real call. Office uses its reserved actual
+run-session key. Legacy/off utility routes remain transient. Task-only startup
+and delayed recovery exclude native rows; native owners retain their recovery.
+
+This increment wires utility and taskless Office callers. Review-run ownership
+requires composition with the existing G2 review wiring and is not yet claimed
+connected. PostgreSQL runtime evidence and independent-backend unique choice,
+pace, keep-model and installed acceptance remain distinct original work.

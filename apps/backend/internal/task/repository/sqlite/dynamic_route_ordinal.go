@@ -25,6 +25,10 @@ func (r *Repository) ensureRouteSelectionOrdinal(ctx context.Context) error {
 // The profile lock serializes ordinal allocation, not cross-backend ranking.
 // A failed decision transaction consumes no ordinal.
 func (r *Repository) appendRouteAttemptTx(ctx context.Context, tx *sqlx.Tx, attempt dynamicruntime.RouteAttempt) error {
+	sessionID, routeID, ownerErr := r.routeOwnerColumns(ctx, tx, attempt.SessionID)
+	if ownerErr != nil {
+		return ownerErr
+	}
 	if dialect.IsPostgres(r.db.DriverName()) {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "dynamic-route-selection:"+attempt.LogicalProfileID); err != nil {
 			return err
@@ -39,9 +43,9 @@ func (r *Repository) appendRouteAttemptTx(ctx context.Context, tx *sqlx.Tx, atte
 		return fmt.Errorf("route selection ordinal exhausted")
 	}
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO dynamic_route_attempts (
-		id, session_id, logical_profile_id, execution_profile_id,
+		id, session_id, route_id, logical_profile_id, execution_profile_id,
 		route_generation, profile_version, reason, created_at, selection_ordinal
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`), uuid.New().String(), attempt.SessionID,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), uuid.New().String(), sessionID, routeID,
 		attempt.LogicalProfileID, attempt.ExecutionProfileID, attempt.Generation,
 		attempt.ProfileVersion, attempt.Reason, attempt.CreatedAt, last+1)
 	return err

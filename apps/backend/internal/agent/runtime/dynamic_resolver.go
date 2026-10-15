@@ -68,6 +68,12 @@ func (r *ProfileExecutionResolver) SetEnabled(enabled bool) { r.enabled.Store(en
 // do not otherwise pass through a selection method.
 func (r *ProfileExecutionResolver) Enabled() bool { return r.enabled.Load() }
 
+// NativeRouteOwnersEnabled gates durable non-task routes with the same ordered
+// tier flag as the shared selection engine.
+func (r *ProfileExecutionResolver) NativeRouteOwnersEnabled() bool {
+	return r != nil && r.enabled.Load() && r.engine.OrderedTiersEnabled()
+}
+
 // SetCredentialBindingResolver supplies the installation-scoped fingerprint
 // used to share provider health between concrete profiles that prove the same
 // credential binding. A missing or incomplete descriptor remains isolated to
@@ -161,6 +167,9 @@ func (r *ProfileExecutionResolver) ResolveExecutionDetails(ctx context.Context, 
 	// context belongs to an already-routed task session. Reusing that session
 	// would consume or fence the task's durable generation.
 	routeSessionID := "utility:" + uuid.NewString()
+	if r.NativeRouteOwnersEnabled() && strings.HasPrefix(sessionID, "native:") {
+		routeSessionID = sessionID
+	}
 	decision, err := r.Resolve(ctx, routeSessionID, profileID, 0, "")
 	if err != nil {
 		return ProfileExecution{}, err
