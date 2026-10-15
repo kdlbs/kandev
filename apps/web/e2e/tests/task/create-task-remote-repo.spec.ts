@@ -1,6 +1,4 @@
-import type { SidebarLayoutApi } from "../../../lib/types/http-user-settings";
 import { AppSidebarPage } from "../../pages/app-sidebar-page";
-import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Page } from "@playwright/test";
@@ -165,21 +163,13 @@ async function expectPopoverFitsDialog(testPage: Page): Promise<void> {
 
 test.describe("Task creation from Remote tab (chip picker)", () => {
   test.describe.configure({ retries: 0 });
-  let initialLayout: SidebarLayoutApi | undefined;
 
-  test.beforeEach(async ({ apiClient, seedData }) => {
-    initialLayout = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
-      seedData.workspaceId
-    ];
+  test.beforeEach(async ({ apiClient }) => {
     // Reset mock state so a previous test's seeded repos / 503 toggle
     // don't bleed into this one. mockGitHubReset clears the toggle and
     // mock-controller.reset on the backend additionally clears the
     // service's accessible-repos / user-orgs caches.
     await apiClient.mockGitHubReset();
-  });
-
-  test.afterEach(async ({ apiClient, seedData }) => {
-    await restoreSidebarLayout(apiClient, seedData.workspaceId, initialLayout);
   });
 
   test("keeps the unified input fixed while repositories load", async ({

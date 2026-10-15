@@ -110,6 +110,18 @@ test.describe("Coordinator answer in place: permission", () => {
     );
     if (!task.session_id) throw new Error("expected an active session for the permission task");
 
+    // Hold the application entry point until the permission arrives in the gap
+    // between the boot snapshot and the first live subscription.
+    await testPage.route("**/assets/index-*.js", async (route) => {
+      await expect
+        .poll(async () => (await apiClient.getTask(task.id)).status_summary?.pending_action, {
+          timeout: 30_000,
+          message: "permission should be pending before the coordinator mounts",
+        })
+        .toBe("permission");
+      await route.continue();
+    });
+
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
     const card = testPage.getByTestId(`needs-you-item-${task.id}`);
     await expect(card).toBeVisible({ timeout: 45_000 });

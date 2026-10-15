@@ -287,6 +287,9 @@ func (m *Manager) admitPersistedWorktreeRecovery(ctx context.Context, taskID str
 	if wt == nil {
 		return &WorktreeRecoveryError{TaskID: taskID, Checkout: stale.Path, Reason: "durable worktree identity changed during recovery admission"}
 	}
+	if _, err := m.validateWorkspaceAdoptionBinding(ctx, wt); err != nil {
+		return err
+	}
 	if _, statErr := os.Lstat(wt.Path); statErr != nil {
 		if os.IsNotExist(statErr) {
 			return nil

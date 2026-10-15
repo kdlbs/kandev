@@ -101,8 +101,8 @@ func (r *seam1Reservation) releaseIfNotConsumed() {
 // never be persisted verbatim in task metadata: a launch can sit deferred
 // longer than that, and replaying it with an expired bearer token leaves the
 // agent unable to call the Kandev API. seam1StartPayload strips them before
-// persisting; CeilingLaunchCredentialReminter re-mints fresh ones immediately
-// before replay from the durable identity fields (agent/workspace/run id)
+// persisting; LaunchCredentialReminter re-mints fresh ones immediately
+// before a launch from the durable identity fields (agent/workspace/run id)
 // that remain in the payload.
 var ceilingCredentialEnvKeys = []string{"KANDEV_API_KEY", "KANDEV_RUN_TOKEN"}
 
@@ -123,20 +123,16 @@ func redactedCeilingLaunchEnv(env map[string]string) map[string]string {
 	return redacted
 }
 
-// CeilingLaunchCredentialReminter refreshes the short-lived Office runtime
-// credentials a ceiling-deferred "start" replay needs, immediately before
-// replay, using the durable identity fields (agent/workspace/run id) that
-// redactedCeilingLaunchEnv left in the persisted env. Registered via
-// SetCeilingLaunchCredentialReminter; nil is a valid, common case (non-Office
-// launches never carry these keys, so there is nothing to re-mint).
-type CeilingLaunchCredentialReminter interface {
-	RemintCeilingLaunchCredentials(ctx context.Context, taskID string, env map[string]string) (map[string]string, error)
+// LaunchCredentialReminter refreshes Office credentials from trusted run identity
+// and the concrete launch session. Sessionless replay uses the persisted session.
+type LaunchCredentialReminter interface {
+	RemintLaunchCredentials(ctx context.Context, taskID, sessionID string, env map[string]string) (map[string]string, error)
 }
 
-// SetCeilingLaunchCredentialReminter wires the Office-side credential
-// re-minter. See CeilingLaunchCredentialReminter.
-func (s *Service) SetCeilingLaunchCredentialReminter(r CeilingLaunchCredentialReminter) {
-	s.ceilingCredentialReminter = r
+// SetLaunchCredentialReminter wires the Office-side credential re-minter.
+// See LaunchCredentialReminter.
+func (s *Service) SetLaunchCredentialReminter(r LaunchCredentialReminter) {
+	s.launchCredentialReminter = r
 }
 
 // seam1StartPayload builds the AC-42 "start" replay row from startTask's own

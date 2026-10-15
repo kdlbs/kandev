@@ -29,7 +29,10 @@ import { useMobileTaskRename } from "./use-mobile-task-rename";
 import { useSidebarTaskEdit } from "../task-session-sidebar-edit";
 import { useOptionalPortForwardingVisibility } from "../port-forwarding-visibility-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { TaskSwitcherDialogs } from "./session-task-switcher-sheet-dialogs";
+import {
+  TaskSwitcherDialogs,
+  type MobileSubtaskTarget,
+} from "./session-task-switcher-sheet-dialogs";
 import { MobileTaskList, type MobileTaskListProps } from "./mobile-task-list";
 export { MobileTaskList, type MobileTaskListProps } from "./mobile-task-list";
 type SessionTaskSwitcherSheetProps = {
@@ -395,6 +398,25 @@ function useMobileTaskQuickChat(
   }, [onOpenChange, openQuickChat]);
 }
 
+function useMobileSubtaskTarget(
+  tasks: ReturnType<typeof useSheetData>["allTasks"],
+  onOpenChange: (open: boolean) => void,
+) {
+  const [subtaskTarget, setSubtaskTarget] = useState<MobileSubtaskTarget | null>(null);
+  const handleCreateSubtask = useCallback(
+    (taskId: string, taskTitle: string) => {
+      onOpenChange(false);
+      setSubtaskTarget({
+        id: taskId,
+        title: taskTitle,
+        task: tasks.find((task) => task.id === taskId),
+      });
+    },
+    [tasks, onOpenChange],
+  );
+  return { subtaskTarget, setSubtaskTarget, handleCreateSubtask };
+}
+
 export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   open,
   onOpenChange,
@@ -411,7 +433,6 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const [expanded, setExpanded] = useState(true);
   const opener = useTaskSheetOpener(open);
   const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks) !== false;
-  const [subtaskTarget, setSubtaskTarget] = useState<{ id: string; title: string } | null>(null);
   const data = useSheetData(workspaceId);
   const localSelection = useTaskSheetSelectionController();
   const selectionController = selection ?? localSelection;
@@ -430,12 +451,9 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const edit = useSidebarTaskEdit(data.allTasks);
   const linking = useMobileTaskLinking(workspaceId, data.allTasks);
   const handleQuickChat = useMobileTaskQuickChat(workspaceId, handleOpenChange);
-  const handleCreateSubtask = useCallback(
-    (taskId: string, taskTitle: string) => {
-      handleOpenChange(false);
-      setSubtaskTarget({ id: taskId, title: taskTitle });
-    },
-    [handleOpenChange],
+  const { subtaskTarget, setSubtaskTarget, handleCreateSubtask } = useMobileSubtaskTarget(
+    data.allTasks,
+    handleOpenChange,
   );
 
   const surfaceContent = (

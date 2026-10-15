@@ -112,19 +112,20 @@ type taskResourceCleanupSnapshot struct {
 	TaskDirectory *worktree.TaskDirectoryCleanup `json:"task_directory,omitempty"`
 	ManagedDelete *managed.DeleteClaim           `json:"managed_delete,omitempty"`
 	// InventoryRepair retains the successor's provenance through progress saves.
-	InventoryRepair        json.RawMessage                            `json:"inventory_repair,omitempty"`
-	Sessions               []*models.TaskSession                      `json:"sessions,omitempty"`
-	Worktrees              []*worktree.Worktree                       `json:"worktrees,omitempty"`
-	WorktreeHeadOIDs       map[string]string                          `json:"worktree_head_oids,omitempty"`
-	WorktreeTaskDirNames   map[string]string                          `json:"worktree_task_dir_names,omitempty"`
-	WorktreeBranchMetadata map[string]persistedWorktreeBranchMetadata `json:"worktree_branch_metadata,omitempty"`
-	DiscardWorktreeChanges bool                                       `json:"discard_worktree_changes,omitempty"`
-	StopTargets            []persistedTaskStopTarget                  `json:"stop_targets,omitempty"`
-	TaskEnvironment        *models.TaskEnvironment                    `json:"task_environment,omitempty"`
-	Attachments            []persistedTaskAttachment                  `json:"attachments,omitempty"`
-	WorkspaceID            string                                     `json:"workspace_id,omitempty"`
-	DeleteEnvironmentRow   bool                                       `json:"delete_environment_row,omitempty"`
-	LegacyWorktreeCleanup  bool                                       `json:"legacy_worktree_cleanup,omitempty"`
+	InventoryRepair        json.RawMessage                             `json:"inventory_repair,omitempty"`
+	Sessions               []*models.TaskSession                       `json:"sessions,omitempty"`
+	Worktrees              []*worktree.Worktree                        `json:"worktrees,omitempty"`
+	WorktreeHeadOIDs       map[string]string                           `json:"worktree_head_oids,omitempty"`
+	WorktreeTaskDirNames   map[string]string                           `json:"worktree_task_dir_names,omitempty"`
+	WorktreeBranchMetadata map[string]persistedWorktreeBranchMetadata  `json:"worktree_branch_metadata,omitempty"`
+	WorktreeAdoptions      map[string]*models.WorkspaceAdoptionReceipt `json:"worktree_adoptions,omitempty"`
+	DiscardWorktreeChanges bool                                        `json:"discard_worktree_changes,omitempty"`
+	StopTargets            []persistedTaskStopTarget                   `json:"stop_targets,omitempty"`
+	TaskEnvironment        *models.TaskEnvironment                     `json:"task_environment,omitempty"`
+	Attachments            []persistedTaskAttachment                   `json:"attachments,omitempty"`
+	WorkspaceID            string                                      `json:"workspace_id,omitempty"`
+	DeleteEnvironmentRow   bool                                        `json:"delete_environment_row,omitempty"`
+	LegacyWorktreeCleanup  bool                                        `json:"legacy_worktree_cleanup,omitempty"`
 	// SSHTaskDirs records the remote task directories this task launched into.
 	// Additive and absent-tolerant: a job row written by an older backend
 	// decodes with an empty list and reclaims nothing.
@@ -133,6 +134,9 @@ type taskResourceCleanupSnapshot struct {
 	// paths this job has removed and confirmed absent. A root persists for
 	// the life of the job; it is never removed from this list once added.
 	OrphanReapRoots []string `json:"orphan_reap_roots,omitempty"`
+	// AgentHistory records a deleted Quick Chat's agent history identities.
+	// Absent-tolerant: older job rows decode with none and remove nothing.
+	AgentHistory []agentHistoryTarget `json:"agent_history,omitempty"`
 	// OrphanReapRecords carries one outcome per candidate process this job
 	// has reaped or deliberately skipped, keyed by PID. A re-detected PID's
 	// record is replaced by the current attempt's outcome; a PID not
@@ -217,12 +221,17 @@ func (s *Service) persistTaskResourceCleanupWithManagedClaim(
 	persistedAttachments := persistCleanupAttachments(attachments)
 	worktreeTaskDirNames := captureWorktreeTaskDirNames(worktrees)
 	worktreeBranchMetadata := captureWorktreeBranchMetadata(worktrees)
+	worktreeAdoptions, err := s.captureCleanupAdoptions(ctx, worktrees)
+	if err != nil {
+		return nil, err
+	}
 	snapshot := taskResourceCleanupSnapshot{
 		Sessions:               sessions,
 		Worktrees:              worktrees,
 		WorktreeHeadOIDs:       worktreeHeadOIDs,
 		WorktreeTaskDirNames:   worktreeTaskDirNames,
 		WorktreeBranchMetadata: worktreeBranchMetadata,
+		WorktreeAdoptions:      worktreeAdoptions,
 		DiscardWorktreeChanges: envCleanup.discardWorktreeChanges,
 		StopTargets:            persistStopTargets(stopTargets),
 		Attachments:            persistedAttachments,
@@ -230,6 +239,7 @@ func (s *Service) persistTaskResourceCleanupWithManagedClaim(
 		TaskEnvironment:        envCleanup.env,
 		DeleteEnvironmentRow:   envCleanup.deleteRow,
 		LegacyWorktreeCleanup:  s.hasLegacyWorktreeCleanup(),
+		AgentHistory:           envCleanup.agentHistory,
 	}
 	if collectSSH {
 		sshTaskDirs, err := s.gatherSSHReclaimTargets(ctx, taskID)
@@ -1248,7 +1258,7 @@ func (s *Service) executeTaskResourceCleanupJob(
 	if snapshot == nil {
 		return errors.New("resource cleanup snapshot is nil")
 	}
-	ctx = recoveryclaim.WithTaskCleanupJob(ctx, recoveryclaim.TaskCleanupJob{ID: job.ID, TaskID: job.TaskID})
+	ctx = recoveryclaim.WithTaskCleanupJob(ctx, recoveryclaim.TaskCleanupJob{ID: job.ID, TaskID: job.TaskID, Attempts: job.Attempts})
 	var (
 		targets []taskStopTarget
 		err     error
@@ -1320,8 +1330,10 @@ func (s *Service) executeTaskResourceCleanupJob(
 			env: snapshot.TaskEnvironment, deleteRow: snapshot.DeleteEnvironmentRow,
 			preserveBranches:       job.IsArchive(),
 			discardWorktreeChanges: snapshot.DiscardWorktreeChanges,
+			agentHistory:           snapshot.AgentHistory,
 		},
 		taskCleanupPreserveRows(stopOutcome))...)
+	s.removeQuickChatAgentHistory(ctx, job.TaskID, snapshot.AgentHistory, stopOutcome.failed)
 	if job.IsArchive() && len(failedStops) == 0 && len(errs) == 0 {
 		if cancelled, err := s.cancelIfTaskUnarchived(ctx, job); err != nil || cancelled {
 			// Worktrees may already be removed even when root cleanup is cancelled.
@@ -1756,6 +1768,9 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 		LegacyWorktreeCleanup:  s.hasLegacyWorktreeCleanup(),
 		SSHTaskDirs:            sshTaskDirs,
 		WorkspaceID:            task.WorkspaceID,
+	}
+	if taskResourceCleanupDeletesTask(trigger) {
+		snapshot.AgentHistory = s.captureQuickChatAgentHistory(ctx, task, sessions)
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {

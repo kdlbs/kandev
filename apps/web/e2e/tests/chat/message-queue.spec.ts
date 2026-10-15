@@ -18,6 +18,7 @@ import {
   requestMessageQueueSettings,
 } from "../../helpers/message-queue-settings";
 import { waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { mockTurnGate } from "../../helpers/mock-turn-gate";
 
 registerSeparateQueueRows(test);
 
@@ -506,129 +507,144 @@ test.describe("Task session queue", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(120_000);
     const gateway = watchWs(testPage);
 
-    const session = await seedTaskAndWaitForIdle(
-      testPage,
-      apiClient,
-      seedData,
-      "Queue edit lease ordering test",
-    );
-    await waitForSessionAgentctlReady(testPage, session.sessionId);
-    await session.sendMessage("/sleep 10s");
-    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await waitForComposerQueueMode(testPage);
-    const queueIdentity = await apiClient.getQueueSessionIdentity(
-      session.taskId,
-      session.sessionId,
-    );
+    const turn = mockTurnGate(backend.tmpDir, "Queue predecessor complete");
+    try {
+      const session = await seedTaskAndWaitForIdle(
+        testPage,
+        apiClient,
+        seedData,
+        "Queue edit lease ordering test",
+      );
+      await waitForSessionAgentctlReady(testPage, session.sessionId);
+      await session.sendMessage(turn.prompt);
+      await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+      await waitForComposerQueueMode(testPage);
+      const queueIdentity = await apiClient.getQueueSessionIdentity(
+        session.taskId,
+        session.sessionId,
+      );
 
-    await queueMessages(apiClient, session.taskId, session.sessionId, [
-      scriptedQueueMessage("first queued"),
-      scriptedQueueMessage("second queued"),
-    ]);
-    await openQueuePanel(testPage);
+      await queueMessages(apiClient, session.taskId, session.sessionId, [
+        scriptedQueueMessage("first queued"),
+        scriptedQueueMessage("second queued"),
+      ]);
+      await openQueuePanel(testPage);
 
-    const rows = testPage.getByTestId("queue-entry");
-    await expect(rows).toHaveCount(2, { timeout: 10_000 });
-    await rows.nth(1).getByTestId("queue-entry-edit").click();
+      const rows = testPage.getByTestId("queue-entry");
+      await expect(rows).toHaveCount(2, { timeout: 10_000 });
+      await rows.nth(1).getByTestId("queue-entry-edit").click();
 
-    const textarea = testPage.getByTestId("queue-edit-textarea");
-    await expect(textarea).toBeVisible({ timeout: 5_000 });
-    await textarea.fill(scriptedQueueMessage("second edited"));
+      const textarea = testPage.getByTestId("queue-edit-textarea");
+      await expect(textarea).toBeVisible({ timeout: 5_000 });
+      await textarea.fill(scriptedQueueMessage("second edited"));
 
-    // The later entry stays leased while the earlier FIFO turn drains.
-    await waitForAgentMessage(apiClient, session.sessionId, "first queued");
-    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(1);
+      await turn.release();
 
-    const saveResponse = gateway.waitForResponse("message.queue.update");
-    await testPage.getByRole("button", { name: "Save", exact: true }).click();
-    await saveResponse;
+      // The later entry stays leased while the earlier FIFO turn drains.
+      await waitForAgentMessage(apiClient, session.sessionId, "first queued");
+      await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(1);
 
-    // Saving releases the lease and resumes Auto-run for the edited entry.
-    await waitForAgentMessage(apiClient, session.sessionId, "second edited");
-    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(0);
-    await expect(rows).toHaveCount(0);
+      const saveResponse = gateway.waitForResponse("message.queue.update");
+      await testPage.getByRole("button", { name: "Save", exact: true }).click();
+      await saveResponse;
+
+      // Saving releases the lease and resumes Auto-run for the edited entry.
+      await waitForAgentMessage(apiClient, session.sessionId, "second edited");
+      await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(0);
+      await expect(rows).toHaveCount(0);
+    } finally {
+      await turn.release();
+    }
   });
 
   test("saving the held head after its turn completes resumes Auto-run", async ({
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     const gateway = watchWs(testPage);
     test.setTimeout(120_000);
 
-    const session = await seedTaskAndWaitForIdle(
-      testPage,
-      apiClient,
-      seedData,
-      "Queue edit save dispatch test",
-    );
-    await session.sendMessage("/sleep 10s");
-    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await waitForComposerQueueMode(testPage);
-    const queueIdentity = await apiClient.getQueueSessionIdentity(
-      session.taskId,
-      session.sessionId,
-    );
-    await queueMessages(apiClient, session.taskId, session.sessionId, [
-      scriptedQueueMessage("edited head dispatched"),
-    ]);
+    const turn = mockTurnGate(backend.tmpDir, "Queue predecessor complete");
+    try {
+      const session = await seedTaskAndWaitForIdle(
+        testPage,
+        apiClient,
+        seedData,
+        "Queue edit save dispatch test",
+      );
+      await session.sendMessage(turn.prompt);
+      await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+      await waitForComposerQueueMode(testPage);
+      const queueIdentity = await apiClient.getQueueSessionIdentity(
+        session.taskId,
+        session.sessionId,
+      );
+      await queueMessages(apiClient, session.taskId, session.sessionId, [
+        scriptedQueueMessage("edited head dispatched"),
+      ]);
 
-    await openQueuePanel(testPage);
-    const row = testPage.getByTestId("queue-entry").first();
-    const editBtn = row.getByTitle("Edit queued message");
-    await expect(editBtn).toBeVisible({ timeout: 10_000 });
-    await editBtn.click();
-    await test.step("queue editor textarea scrolls when content is long", async () => {
-      const textarea = testPage.getByTestId("queue-edit-textarea");
-      await expect(textarea).toBeVisible({ timeout: 5_000 });
-      // Fill via native setter + React event so the controlled component updates.
-      const longText = Array.from(
-        { length: 30 },
-        (_, i) => `Line ${i + 1} of scroll test content`,
-      ).join("\n");
-      await textarea.evaluate((el: HTMLTextAreaElement, text: string) => {
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLTextAreaElement.prototype,
-          "value",
-        )!.set!;
-        setter.call(el, text);
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-      }, longText);
+      await openQueuePanel(testPage);
+      const row = testPage.getByTestId("queue-entry").first();
+      const editBtn = row.getByTitle("Edit queued message");
+      await expect(editBtn).toBeVisible({ timeout: 10_000 });
+      await editBtn.click();
+      await test.step("queue editor textarea scrolls when content is long", async () => {
+        const textarea = testPage.getByTestId("queue-edit-textarea");
+        await expect(textarea).toBeVisible({ timeout: 5_000 });
+        // Fill via native setter + React event so the controlled component updates.
+        const longText = Array.from(
+          { length: 30 },
+          (_, i) => `Line ${i + 1} of scroll test content`,
+        ).join("\n");
+        await textarea.evaluate((el: HTMLTextAreaElement, text: string) => {
+          const setter = Object.getOwnPropertyDescriptor(
+            HTMLTextAreaElement.prototype,
+            "value",
+          )!.set!;
+          setter.call(el, text);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        }, longText);
 
-      // Verify the textarea has a constrained max-height and is scrollable.
-      // The auto-grow effect re-measures after React commits the new value, so
-      // poll the metrics rather than sampling them once behind a fixed settle.
-      await expect
-        .poll(
-          async () =>
-            textarea.evaluate((el: HTMLTextAreaElement) => ({
-              scrollable: el.scrollHeight > el.clientHeight,
-              maxHeight: getComputedStyle(el).maxHeight,
-              overflowY: getComputedStyle(el).overflowY,
-            })),
-          { timeout: 5_000 },
-        )
-        .toEqual({ scrollable: true, maxHeight: "200px", overflowY: "auto" });
-    });
-    await testPage
-      .getByTestId("queue-edit-textarea")
-      .fill(scriptedQueueMessage("edited head dispatched after save"));
+        // Verify the textarea has a constrained max-height and is scrollable.
+        // The auto-grow effect re-measures after React commits the new value, so
+        // poll the metrics rather than sampling them once behind a fixed settle.
+        await expect
+          .poll(
+            async () =>
+              textarea.evaluate((el: HTMLTextAreaElement) => ({
+                scrollable: el.scrollHeight > el.clientHeight,
+                maxHeight: getComputedStyle(el).maxHeight,
+                overflowY: getComputedStyle(el).overflowY,
+              })),
+            { timeout: 5_000 },
+          )
+          .toEqual({ scrollable: true, maxHeight: "200px", overflowY: "auto" });
+      });
+      await testPage
+        .getByTestId("queue-edit-textarea")
+        .fill(scriptedQueueMessage("edited head dispatched after save"));
 
-    await waitForAgentMessage(apiClient, session.sessionId, "Slept for 10s.");
-    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(1);
+      await turn.release();
+      await waitForAgentMessage(apiClient, session.sessionId, "Queue predecessor complete");
+      await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(1);
 
-    const saveResponse = gateway.waitForResponse("message.queue.update");
-    await testPage.getByRole("button", { name: "Save", exact: true }).click();
-    await saveResponse;
-    await waitForAgentMessage(apiClient, session.sessionId, "edited head dispatched after save");
-    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(0);
-    await expect(testPage.getByTestId("queue-entry")).toHaveCount(0);
+      const saveResponse = gateway.waitForResponse("message.queue.update");
+      await testPage.getByRole("button", { name: "Save", exact: true }).click();
+      await saveResponse;
+      await waitForAgentMessage(apiClient, session.sessionId, "edited head dispatched after save");
+      await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(0);
+      await expect(testPage.getByTestId("queue-entry")).toHaveCount(0);
+    } finally {
+      await turn.release();
+    }
   });
 
   test("queue editor reconciles after switching sessions", async ({

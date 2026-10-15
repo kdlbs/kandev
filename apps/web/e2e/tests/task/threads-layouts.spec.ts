@@ -28,9 +28,7 @@ test("bounds both grid rows to visible streams and opens a lower-row deep link",
   await testPage.reload();
   const tasks = [];
   for (const title of ["A", "B", "C", "D", "E", "F", "G", "H"]) {
-    tasks.push(
-      await startPresentationThread(testPage, apiClient, seedData, `${title} windowed grid`),
-    );
+    tasks.push(await startPresentationThread(apiClient, seedData, `${title} windowed grid`));
   }
   await seedThreadPresentation(apiClient, { layout: "grid", maxChats: 8 });
   await testPage.setViewportSize({ width: 1100, height: 1100 });
@@ -91,7 +89,7 @@ test("lays out stable task tiles in two rows and falls back in a short window", 
   test.setTimeout(240_000);
   await testPage.setViewportSize({ width: 1440, height: 1100 });
   for (const title of ["A layout chat", "B layout chat", "C layout chat"]) {
-    await startPresentationThread(testPage, apiClient, seedData, title);
+    await startPresentationThread(apiClient, seedData, title);
   }
   await seedThreadPresentation(apiClient, { layout: "grid" });
   expect((await captureThreadSettings(apiClient)).thread_views[0].layout).toBe("grid");

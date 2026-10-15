@@ -17,7 +17,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
   api: ApiClient,
   seed: SeedData,
   tmpDir: string,
-  legacy: boolean | "readiness" = false,
+  legacy: boolean | "readiness" | "cancelled" = false,
 ) {
   const task = await api.createTaskWithAgent(
     seed.workspaceId,
@@ -67,9 +67,18 @@ export async function verifyNativeResumeClearsRecoveryNotice(
       db.prepare(
         "UPDATE agent_delivery_submissions SET state = 'dispatching', outcome = 'dispatching' WHERE id = ?",
       ).run(seeded.submissionId);
-      db.prepare(
-        "UPDATE session_recovery_blocks SET reason = 'unresolved_durable_work', delivery_submission_id = '', delivery_stream_id = '' WHERE id = ?",
-      ).run(recoveryBlockId);
+      if (legacy === "cancelled") {
+        db.prepare("UPDATE session_recovery_blocks SET delivery_stream_id = '' WHERE id = ?").run(
+          recoveryBlockId,
+        );
+        db.prepare(
+          "UPDATE agent_delivery_submissions SET state = 'interrupted_unknown', outcome = 'prompt_dispatch_failed' WHERE id = ?",
+        ).run(seeded.submissionId);
+      } else {
+        db.prepare(
+          "UPDATE session_recovery_blocks SET reason = 'unresolved_durable_work', delivery_submission_id = '', delivery_stream_id = '' WHERE id = ?",
+        ).run(recoveryBlockId);
+      }
       const row = db.prepare("SELECT metadata FROM task_sessions WHERE id = ?").get(active.id) as {
         metadata: string;
       };

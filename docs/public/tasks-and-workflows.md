@@ -1026,6 +1026,12 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 - Executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
 
+Deleting or expiring an ordinary Quick Chat also attempts to remove its Claude Code or Codex
+session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
+leaves other conversations and the agent's shared indexes and history databases in place.
+It uses the host's home and config-directory settings; overrides set only in an agent or
+executor profile are outside this cleanup.
+
 ## Troubleshooting
 
 - **A task edit fails to save:** the editor stays open so you can correct the error and retry with your current title and editable instructions. A successful save closes the editor. **Cancel** discards the current draft. If the error reports a saved task or runner change followed by another failure, that completed change remains; retry only the remaining operation.

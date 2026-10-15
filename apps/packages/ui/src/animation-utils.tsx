@@ -29,4 +29,12 @@ function parseCssTime(value: string): number | null {
   return firstValue.endsWith("ms") ? numericValue : numericValue * 1_000;
 }
 
-export { firstAnimationListValue, parseCssTime };
+/**
+ * Cancels owned motion and severs the effect-to-target relationship.
+ */
+function releaseAnimation(animation: Animation): void {
+  animation.cancel();
+  animation.effect = null;
+}
+
+export { firstAnimationListValue, parseCssTime, releaseAnimation };

@@ -308,11 +308,14 @@ test("desktop: Cancel while waiting prevents native restore", async ({
   apiClient,
   seedData,
 }) => {
-  const fixture = await createContinuationFixture(backend, apiClient, seedData, "read-hold");
+  const fixture = await createContinuationFixture(backend, apiClient, seedData, "read-hold", {
+    prepareOnly: true,
+  });
   try {
-    await testPage.goto(`/t/${fixture.taskId}`);
+    await testPage.goto(`/t/${fixture.taskId}?sessionId=${fixture.sessionId}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    await session.sendMessageViaButton("/continuation-read-hold");
     await expect(session.transientRetryCard()).toContainText("Continuing in", { timeout: 30_000 });
     await session.recoveryCancelRetryButton().click();
     const cancelled = await waitForContinuationMessage(

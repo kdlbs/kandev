@@ -27,8 +27,10 @@ const AUTO_TRANSITION_ACTIONS = ["move_to_next", "move_to_previous", "move_to_st
 export function useNextWorkflowStep(taskId: string | null) {
   const { toast } = useToast();
   const { t } = useTranslation("task");
-  const taskProjection = useAppStore((s) =>
-    resolveLatestTaskProjection(taskId, s.kanban.tasks, s.kanbanMulti.snapshots),
+  const taskProjection = useAppStore(
+    (s) =>
+      (taskId ? s.taskOverview.byId[taskId] : null) ??
+      resolveLatestTaskProjection(taskId, s.kanban.tasks, s.kanbanMulti.snapshots),
   );
   const workflowId = taskProjection?.workflowId ?? null;
   const taskStepId = taskProjection?.workflowStepId ?? null;

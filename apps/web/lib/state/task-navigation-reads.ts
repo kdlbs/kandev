@@ -447,24 +447,21 @@ async function fetchTaskNavigationIdentity(
   store: StoreApi<AppState>,
   taskId: string,
   signal: AbortSignal,
-  sessionReads?: TaskSessionReads,
+  sessionReads: TaskSessionReads,
+  scopeIsCurrent: () => boolean,
 ): Promise<TaskNavigationIdentity> {
-  const scope = storeIdentity(store.getState());
-  const overviewRead = store.getState().beginTaskOverviewRead();
+  // The HTTP attempt owns reconciliation; joined and cached callers do not publish again.
+  const overviewReadId = store.getState().beginTaskOverviewRead();
   try {
     const taskRequest = fetchTask(taskId, { cache: "no-store", init: { signal } });
-    const sessionList = sessionReads
-      ? (() => {
-          const release = sessionReads.retain(taskId);
-          return raceAbort(
-            sessionReads.read(taskId, (readSignal) =>
-              listTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
-            ),
-            signal,
-          ).finally(release);
-        })()
-      : listTaskSessions(taskId, { cache: "no-store", init: { signal } });
-    const [task, sessions] = await Promise.all([
+    const release = sessionReads.retain(taskId);
+    const sessionList = raceAbort(
+      sessionReads.read(taskId, (readSignal) =>
+        listTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
+      ),
+      signal,
+    ).finally(release);
+    const [task, sessionResponse] = await Promise.all([
       taskRequest,
       sessionList.then(
         (allSessionsResponse) => ({ allSessionsResponse, sessionListUnavailable: false }),
@@ -474,12 +471,21 @@ async function fetchTaskNavigationIdentity(
         },
       ),
     ]);
-    if (signal.aborted || storeIdentity(store.getState()) !== scope) throw abortError();
-    store.getState().retainTaskOverviews("detail", [toKanbanTask(task)], overviewRead);
-    return { task, ...sessions };
+    if (signal.aborted || !scopeIsCurrent()) throw abortError();
+    if (isCurrentTaskDetailRead(store, taskId)) {
+      store.getState().retainTaskOverviews("detail", [toKanbanTask(task)], overviewReadId);
+    }
+    return { task, ...sessionResponse };
   } finally {
-    store.getState().finishTaskOverviewRead(overviewRead);
+    store.getState().finishTaskOverviewRead(overviewReadId);
   }
+}
+
+function isCurrentTaskDetailRead(store: StoreApi<AppState>, taskId: string): boolean {
+  return (
+    store.getState().tasks.activeTaskId === taskId ||
+    owners.get(store)?.navigationContext?.taskId === taskId
+  );
 }
 
 function storeIdentity(state: AppState) {
@@ -499,6 +505,7 @@ type NavigationReadOwner = {
   navigationContext?: {
     navigationOwner: object;
     routeKey: string;
+    taskId?: string;
     context: TaskNavigationContext;
   };
 };
@@ -515,9 +522,12 @@ function getTaskNavigationOwner(store: StoreApi<AppState>): NavigationReadOwner 
       token: Object.freeze({}),
     } as NavigationReadOwner;
     const sessionReads = getTaskSessionReads(store);
+    const scopeIsCurrent = () =>
+      owners.get(store) === nextOwner && storeIdentity(store.getState()) === identity;
     nextOwner.reads = new TaskNavigationReads(
-      (taskId, signal) => fetchTaskNavigationIdentity(store, taskId, signal, sessionReads),
-      () => owners.get(store) === nextOwner && storeIdentity(store.getState()) === identity,
+      (taskId, signal) =>
+        fetchTaskNavigationIdentity(store, taskId, signal, sessionReads, scopeIsCurrent),
+      scopeIsCurrent,
     );
     owner = nextOwner;
     owners.set(store, nextOwner);
@@ -584,6 +594,10 @@ export function readTaskNavigationIdentity(
     (owner.token !== options.context.ownerToken || owner.identity !== options.context.identity)
   ) {
     return Promise.reject(abortError());
+  }
+  // Route identity can be admitted before its shell activates the task.
+  if (options.context && owner.navigationContext?.context === options.context) {
+    owner.navigationContext.taskId = taskId;
   }
   return owner.reads.read(taskId, options.context?.generation ?? options.generation, {
     refresh: options.refresh,

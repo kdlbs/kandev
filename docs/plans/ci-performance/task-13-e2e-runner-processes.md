@@ -1,7 +1,7 @@
 ---
 id: "13-e2e-runner-processes"
 title: "Reduce E2E execution within existing runners"
-status: in_progress
+status: done
 wave: 9
 depends_on: ["10-profile-e2e-fixture-costs"]
 plan: "plan.md"
@@ -455,3 +455,12 @@ reattributes 30 observations across ten owning specs; all 3,960 attempts retain
 their result, retry identity, duration and attachments. This changes timing
 collection only, with no test selection or assertion changes. Final-head CI
 and review resolution remain required before merge.
+
+## Final hosted result
+
+PR #4457 merged as `0b208ce00a0ae00955696381006364dbc3b7424a` on
+2026-10-14. Run 38510354669 retained all 3,958 selected identities (3,918 passes,
+40 unchanged skips, seven recovered retries) across fourteen normal and six
+container jobs. The longest normal test step was 1,048 seconds against 2,159
+seconds baseline: 51.46% less. Whole E2E elapsed time was 1,994 seconds; this
+result does not establish the subsequent fifteen-minute full-CI target.

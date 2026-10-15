@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionRecoveryBlockProjection } from "@/lib/types/http";
 import type { AgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
 import {
-  canResumeLegacyDeliveryBlock,
+  canResumeDeliveryBlock,
   deliveryRecoveryRequestIdentity,
   persistedDeliveryRecoveryNotice,
 } from "./session-delivery-recovery-view";
@@ -34,13 +34,13 @@ const restored: AgentDeliveryRecovery = {
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-008.5
 describe("legacy delivery Resume availability", () => {
   it("offers Resume with absent or historical restored metadata", () => {
-    expect(canResumeLegacyDeliveryBlock(null, block)).toBe(true);
-    expect(canResumeLegacyDeliveryBlock(restored, block)).toBe(true);
+    expect(canResumeDeliveryBlock(null, block)).toBe(true);
+    expect(canResumeDeliveryBlock(restored, block)).toBe(true);
   });
   it.each(["uncertain", "reconnecting"] as const)(
     "keeps %s recovery on its existing path",
     (phase) => {
-      expect(canResumeLegacyDeliveryBlock({ ...restored, phase }, block)).toBe(false);
+      expect(canResumeDeliveryBlock({ ...restored, phase }, block)).toBe(false);
     },
   );
   it.each([
@@ -49,10 +49,20 @@ describe("legacy delivery Resume availability", () => {
     { consumer_reference: "workspace" },
     { reason: "native_state_missing" },
   ])("does not offer legacy Resume for unrelated or identified blocks: %o", (override) => {
-    expect(canResumeLegacyDeliveryBlock(null, { ...block, ...override })).toBe(false);
+    expect(canResumeDeliveryBlock(null, { ...block, ...override })).toBe(false);
+  });
+  it("offers Resume for a bound cancellation block without active recovery metadata", () => {
+    const cancelled = {
+      ...block,
+      reason: "unknown_prompt_outcome",
+      delivery_submission_id: "cancelled-prompt",
+    };
+    expect(canResumeDeliveryBlock(null, cancelled)).toBe(true);
+    expect(canResumeDeliveryBlock(restored, cancelled)).toBe(true);
+    expect(canResumeDeliveryBlock({ ...restored, phase: "uncertain" }, cancelled)).toBe(false);
   });
   it("does not infer recovery from a restored snapshot alone", () => {
-    expect(canResumeLegacyDeliveryBlock(restored, undefined)).toBe(false);
+    expect(canResumeDeliveryBlock(restored, undefined)).toBe(false);
   });
   it("shows the new block cause instead of a historical reconstruction warning", () => {
     const notice = persistedDeliveryRecoveryNotice(

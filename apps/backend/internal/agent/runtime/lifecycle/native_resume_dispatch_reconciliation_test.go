@@ -11,7 +11,7 @@ import (
 )
 
 func TestNativeResumeReconcilesJournalUnknownSQLDispatch(t *testing.T) {
-	for _, scenario := range []string{"abandoned", "queue origin", "hash conflict", "peer still dispatching", "independent work"} {
+	for _, scenario := range []string{"abandoned", "queue origin", "completed without terminal", "failed without terminal", "cancelled without terminal", "completed with terminal sequence", "completed with retained terminal", "hash conflict", "completed hash conflict", "peer still dispatching", "independent work"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			store, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "delivery.bbolt")})
@@ -24,13 +24,28 @@ func TestNativeResumeReconcilesJournalUnknownSQLDispatch(t *testing.T) {
 			if scenario == "peer still dispatching" {
 				peer.State = journal.SubmissionDispatching
 			}
+			switch scenario {
+			case "completed without terminal", "completed with terminal sequence", "completed with retained terminal", "completed hash conflict":
+				peer.State = journal.SubmissionCompleted
+			case "failed without terminal":
+				peer.State = journal.SubmissionFailed
+			case "cancelled without terminal":
+				peer.State = journal.SubmissionCancelled
+			}
+			if scenario == "completed with terminal sequence" {
+				peer.TerminalSequence = 1
+			}
+			if scenario == "completed with retained terminal" {
+				peer.TerminalEventRetained = true
+			}
+			canRetire := scenario == "abandoned" || scenario == "queue origin" || scenario == "completed without terminal" || scenario == "failed without terminal" || scenario == "cancelled without terminal"
 			_, err = store.PutSubmission(ctx, peer)
 			require.NoError(t, err)
 			repo, _ := runOwnerTestRepository(t)
 			require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task", Title: "Native recovery"}))
 			require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session", TaskID: "task", QueueIncarnationID: "incarnation"}))
 			hash := peer.Hash
-			if scenario == "hash conflict" {
+			if scenario == "hash conflict" || scenario == "completed hash conflict" {
 				hash = "different-hash"
 			}
 			_, err = repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{ID: peer.ID, SessionID: peer.SessionID, IncarnationID: peer.IncarnationID, HarnessGeneration: 2, OwnerGeneration: 2, PayloadHash: hash, Payload: peer.Payload, State: models.DeliverySubmissionDispatching})
@@ -45,7 +60,7 @@ func TestNativeResumeReconcilesJournalUnknownSQLDispatch(t *testing.T) {
 			execution.setSessionInitialized(true)
 			require.NoError(t, manager.executionStore.Add(execution))
 			err = manager.AcknowledgeNativeResumeDelivery(ctx, "session")
-			if scenario == "abandoned" || scenario == "queue origin" {
+			if canRetire {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
@@ -53,7 +68,7 @@ func TestNativeResumeReconcilesJournalUnknownSQLDispatch(t *testing.T) {
 			submission, err := repo.GetAgentDeliverySubmission(ctx, peer.ID)
 			require.NoError(t, err)
 			expected := models.DeliverySubmissionDispatching
-			if scenario == "abandoned" || scenario == "queue origin" {
+			if canRetire {
 				expected = models.DeliverySubmissionInterruptedUnknown
 				require.Equal(t, "unknown", submission.Outcome)
 			}
@@ -62,7 +77,10 @@ func TestNativeResumeReconcilesJournalUnknownSQLDispatch(t *testing.T) {
 			require.Equal(t, peer.Payload, submission.Payload)
 			stored, err := store.GetSubmission(ctx, peer.ID)
 			require.NoError(t, err)
-			require.Equal(t, scenario == "abandoned" || scenario == "queue origin", stored.Retired)
+			require.Equal(t, canRetire, stored.Retired)
+			require.Equal(t, peer.State, stored.State)
+			require.Equal(t, peer.TerminalSequence, stored.TerminalSequence)
+			require.Equal(t, peer.TerminalEventRetained, stored.TerminalEventRetained)
 			require.Equal(t, "original-native", execution.ACPSessionID)
 		})
 	}

@@ -21,6 +21,7 @@ Candidate identity, attempt ownership, workflow fences, and current execution gu
 | [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn failure counting | implemented; review remediation in progress |
 | [Task 02](task-02-route-action-validation.md) | Typed route-action validation | implemented |
 | [Task 04](task-04-restart-recovery-route-activation.md) | Resume-ready activation and explicit recovery | implemented; caller/ownership verification in progress |
+| [Task 05](task-05-stranded-waiting-route-sweep.md) | Startup sweep of a stranded WAITING_FOR_INPUT route | implemented |
 
 ## Retained contract
 
@@ -40,10 +41,12 @@ A failed durable activation is returned to the actual resume caller while preser
 A later admission may reconcile that same generation once storage recovers, using the current live execution and runtime readiness; it must not activate a successor from a predecessor runtime or activate a cancelled session.
 An explicit recovery may reclaim a stranded starting route without a live runtime. Passive resumes and other non-active route states retain the route guard.
 Blocked explicit recovery returns an error; passive session open retains its waiting response.
+The startup orphan-route sweep marks `action_required` a WAITING_FOR_INPUT session on a `starting` route with no executor row; a live row, a read error, and a stale generation keep it unchanged.
 
 ## Scope and ordering
 
 Tasks 01, 02, and 04 are independent corrections, reviewed and delivered together.
+Task 05 is a later independent correction delivered on its own.
 The virtual-profile launch rejection from #4412 is already upstream and has no work order here.
 No settings UI, automatic unknown-error retries, new catalogue rules, runtime flags, or Office behavior are added.
 Existing account-hold admission from protected main remains in force.

@@ -1,8 +1,8 @@
 import type { Cohort, Shard } from "./plan-shards";
 
 function checkedCount(count: number): number {
-  if (!Number.isInteger(count) || count < 1 || count > 3) {
-    throw new Error(`E2E process count must be an integer 1-3, got: ${count}`);
+  if (!Number.isInteger(count) || count < 1 || count > 4) {
+    throw new Error(`E2E process count must be an integer 1-4, got: ${count}`);
   }
   return count;
 }
@@ -15,8 +15,8 @@ export function processCount(
 ): number {
   const count = checkedCount(Number(requested));
   const memory = Number(memoryMaximum);
-  const memoryLimit = Number.isInteger(memory) && memory >= 1 && memory <= 3 ? memory : 1;
-  const cpuLimit = Number.isFinite(cpus) ? Math.max(1, Math.floor(cpus) - 1) : 1;
+  const memoryLimit = Number.isInteger(memory) && memory >= 1 && memory <= 4 ? memory : 1;
+  const cpuLimit = Number.isFinite(cpus) ? Math.max(1, Math.floor(cpus) - (cpus >= 4 ? 0 : 1)) : 1;
   return cohort === "containers" ? 1 : Math.min(count, memoryLimit, cpuLimit);
 }
 

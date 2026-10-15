@@ -10,8 +10,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// A journal unknown state is irreversible. Only an exact authenticated match
-// can classify its stale SQL dispatch before native resume retires that work.
+// Only an exact authenticated match to unproven journal history can classify
+// a stale SQL dispatch before native resume retires that work.
 func (m *Manager) reconcileNativeResumeSQLDispatch(ctx context.Context, execution *AgentExecution, status *agentctl.DeliveryStatus, peer []journal.Submission) error {
 	repository := m.streamManager.deliveryRepository()
 	rows, err := activeBackendSubmissions(ctx, repository, execution.SessionID)
@@ -36,7 +36,7 @@ func (m *Manager) reconcileNativeResumeSQLDispatch(ctx context.Context, executio
 			abandoned = append(abandoned, row)
 		}
 		evidence, found := retained[row.ID]
-		if !found || (row.State == models.DeliverySubmissionDispatching && evidence.State != journal.SubmissionInterruptedUnknown) || !peerMatchesUnknownHistory(execution, status, evidence, &candidate) {
+		if !found || !peerMatchesUnknownHistory(execution, status, evidence, &candidate) {
 			return fmt.Errorf("%w: native resume peer and SQL submission evidence disagree", ErrDurableAdoptionBlocked)
 		}
 	}

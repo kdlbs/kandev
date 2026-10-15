@@ -250,6 +250,8 @@ func (a *Adapter) handleACPUpdate(
 			}
 		}
 	}
+	a.stampUpdateTurnIdentity(leadingEvent, promptGeneration)
+	a.stampUpdateTurnIdentity(event, promptGeneration)
 	a.stampSessionSettingsReports(sessionID, leadingEvent, event)
 	if leadingEvent != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, leadingEvent)

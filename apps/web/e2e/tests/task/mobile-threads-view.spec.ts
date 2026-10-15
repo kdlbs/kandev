@@ -79,7 +79,7 @@ test.describe("Mobile Threads view", () => {
     try {
       const tasks = [];
       for (const title of ["A responsive grid", "B responsive grid", "C responsive grid"]) {
-        tasks.push(await startPresentationThread(testPage, apiClient, seedData, title));
+        tasks.push(await startPresentationThread(apiClient, seedData, title));
       }
       await seedThreadPresentation(apiClient, { layout: "grid" });
       await testPage.goto("/threads");

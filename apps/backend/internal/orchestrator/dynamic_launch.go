@@ -1604,7 +1604,8 @@ func (s *Service) relaunchDynamicTaskAfterFailureOutcome(
 	executionProfileID string,
 	origin launchOrigin,
 ) (outcome dynamicRelaunchOutcome) {
-	return s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(ctx, data, executionProfileID, origin, ceilingEntryBindingFromContext(ctx))
+	outcome, _ = s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(ctx, data, executionProfileID, origin, ceilingEntryBindingFromContext(ctx))
+	return outcome
 }
 
 //nolint:cyclop // Dynamic relaunch keeps admission, failure recovery, and generation fencing in one boundary.
@@ -1614,13 +1615,13 @@ func (s *Service) relaunchDynamicTaskAfterFailureOutcomeWithBinding(
 	executionProfileID string,
 	origin launchOrigin,
 	binding *models.CeilingWorkflowEntryBinding,
-) (outcome dynamicRelaunchOutcome) {
+) (outcome dynamicRelaunchOutcome, launchErr error) {
 	if binding != nil {
 		if err := s.validateClaimedCeilingBinding(ctx, data.TaskID, binding); err != nil {
 			if errors.Is(err, ErrCeilingLaunchSuperseded) {
-				return dynamicRelaunchSuperseded
+				return dynamicRelaunchSuperseded, err
 			}
-			return dynamicRelaunchFailed
+			return dynamicRelaunchFailed, err
 		}
 		ctx = withCeilingEntryBinding(ctx, binding)
 	}
@@ -1628,10 +1629,10 @@ func (s *Service) relaunchDynamicTaskAfterFailureOutcomeWithBinding(
 	if err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the dynamic relaunch could not be admitted or recorded",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
-		return dynamicRelaunchFailed
+		return dynamicRelaunchFailed, err
 	}
 	if deferredLaunch {
-		return dynamicRelaunchDeferred
+		return dynamicRelaunchDeferred, nil
 	}
 	defer seam5Res.releaseIfNotConsumed()
 	s.recordManualOverrideIfAdmitted(ctx, data.TaskID, data.SessionID, seam5Res.manualOverride, seam5Res.population, seam5Res.populationKnown, seam5Res.ceiling)
@@ -1660,14 +1661,14 @@ func (s *Service) relaunchDynamicTaskAfterFailureOutcomeWithBinding(
 
 	task, session, prompt, launchMode, ok := s.prepareDynamicRelaunchAfterFailure(ctx, data, origin)
 	if !ok {
-		return dynamicRelaunchFailed
+		return dynamicRelaunchFailed, nil
 	}
 	if binding != nil {
 		if err := s.validateClaimedCeilingBinding(ctx, data.TaskID, binding); err != nil {
 			if errors.Is(err, ErrCeilingLaunchSuperseded) {
-				return dynamicRelaunchSuperseded
+				return dynamicRelaunchSuperseded, err
 			}
-			return dynamicRelaunchFailed
+			return dynamicRelaunchFailed, err
 		}
 	}
 	return s.launchPreparedDynamicRelaunch(
@@ -1764,7 +1765,7 @@ func (s *Service) launchPreparedDynamicRelaunch(
 	launchMode dynamicRelaunchLaunchMode,
 	origin launchOrigin,
 	seam5Res *sessionKeyedCeilingReservation,
-) dynamicRelaunchOutcome {
+) (dynamicRelaunchOutcome, error) {
 	switch launchMode {
 	case dynamicRelaunchLaunchModePrompt:
 		_, err := s.promptTask(
@@ -1780,22 +1781,22 @@ func (s *Service) launchPreparedDynamicRelaunch(
 			promptTaskOptions{allowRouteActionPrompt: true},
 		)
 		if err != nil {
-			return dynamicRelaunchFailed
+			return dynamicRelaunchFailed, err
 		}
 		if session != nil {
 			_ = s.markDynamicRouteActive(context.WithoutCancel(ctx), data.SessionID, session.RouteGeneration)
 		}
 		seam5Res.consume()
-		return dynamicRelaunchSucceeded
+		return dynamicRelaunchSucceeded, nil
 	case dynamicRelaunchLaunchModeCreated:
 		_, err := s.startDynamicRelaunchCreatedSession(
 			ctx, data.TaskID, session, prompt,
 		)
 		if err != nil {
-			return dynamicRelaunchFailed
+			return dynamicRelaunchFailed, err
 		}
 		seam5Res.consume()
-		return dynamicRelaunchSucceeded
+		return dynamicRelaunchSucceeded, nil
 	case dynamicRelaunchLaunchModePrepared:
 		officeAgentProfileID := data.AgentProfileID
 		if officeAgentProfileID == "" {
@@ -1810,12 +1811,12 @@ func (s *Service) launchPreparedDynamicRelaunch(
 			McpMode:              executor.McpModeOffice,
 		})
 		if err != nil {
-			return dynamicRelaunchFailed
+			return dynamicRelaunchFailed, err
 		}
 		seam5Res.consume()
-		return dynamicRelaunchSucceeded
+		return dynamicRelaunchSucceeded, nil
 	default:
-		return dynamicRelaunchFailed
+		return dynamicRelaunchFailed, nil
 	}
 }
 
@@ -1866,12 +1867,12 @@ func (s *Service) startDynamicRelaunchCreatedSession(
 	} else {
 		registry.releaseInitialPromptHold(attempt)
 	}
-	if err != nil {
-		registry.abortInitialPromptHold(attempt)
-	}
 	if attemptErr := s.validateResumeAttempt(attempt); attemptErr != nil {
 		s.cleanupCancelledResumeAttempt(attempt)
 		return nil, attemptErr
+	}
+	if err != nil {
+		registry.abortInitialPromptHold(attempt)
 	}
 	return execution, err
 }

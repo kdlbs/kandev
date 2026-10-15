@@ -9,7 +9,7 @@ import { createGitEnrichmentGate, routeGitStatusRefresh } from "./git-status-ref
 import path from "node:path";
 
 test.describe("Changes panel Git refresh recovery", () => {
-  test.describe.configure({ timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000, retries: 0 });
 
   test("keeps initial pending feedback in a narrow toolbar until refresh completes", async ({
     testPage,
@@ -70,6 +70,8 @@ test.describe("Changes panel Git refresh recovery", () => {
 
       const priorFreshResponses = bridge.responseCount("fresh");
       gate.release();
+      await bridge.waitForReadyNotification();
+      gate.dispose();
       bridge.releaseReadyGitStatusNotifications();
       bridge.releaseFreshGitRefreshRequests();
       const response = await bridge.waitForResponse("fresh", priorFreshResponses);

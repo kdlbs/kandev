@@ -1,7 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -11,8 +9,12 @@ import {
   type TimingProfile,
 } from "./e2e-timings";
 
+import { discoverNativeCases, writeCatalogSnapshot, type CatalogCase } from "./native-catalog";
+
+const WORKER_PRESETS_FILE = "tests/kubernetes/kubernetes-worker-presets.spec.ts";
+
 export const SHARD_MANIFEST_VERSION = 1;
-export const NORMAL_SHARD_COUNT = 14;
+export const NORMAL_SHARD_COUNT = 28;
 export const CONTAINER_SHARD_COUNT = 6;
 export const DEFAULT_NORMAL_TEST_SECONDS = 10;
 export const DEFAULT_CONTAINER_TEST_SECONDS = 20;
@@ -76,98 +78,29 @@ export type ShardManifest = {
   shards: Shard[];
 };
 
-type PlaywrightListTest = { projectName?: unknown };
-type PlaywrightListSpec = { file?: unknown; tests?: unknown };
-type PlaywrightListSuite = { file?: unknown; specs?: unknown; suites?: unknown };
-type PlaywrightListReport = { suites: PlaywrightListSuite[] };
-
-const playwrightReportCache = new Map<string, PlaywrightListReport>();
-
-function asSuites(value: unknown): PlaywrightListSuite[] {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is PlaywrightListSuite =>
-        Boolean(entry && typeof entry === "object"),
-      )
-    : [];
-}
-
-function readPlaywrightListReport(webRoot: string): PlaywrightListReport {
-  const resolvedRoot = path.resolve(webRoot);
-  const cached = playwrightReportCache.get(resolvedRoot);
-  if (cached) return cached;
-
-  const playwrightCli = createRequire(import.meta.url).resolve("@playwright/test/cli");
-  const output = execFileSync(
-    process.execPath,
-    [
-      playwrightCli,
-      "test",
-      "--config",
-      path.join(resolvedRoot, "e2e", "playwright.config.ts"),
-      "--project=chromium",
-      "--project=mobile-chrome",
-      "--project=containers",
-      "--list",
-      "--reporter=json",
-    ],
-    { cwd: resolvedRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
-  );
-  const parsed = JSON.parse(output) as { suites?: unknown };
-  const report = { suites: asSuites(parsed.suites) };
-  playwrightReportCache.set(resolvedRoot, report);
-  return report;
-}
-
-function collectSpecCounts(
-  specs: unknown,
-  suiteFile: unknown,
-  allowedProjects: ReadonlySet<string>,
-  counts: Map<string, { project: string; file: string; testCount: number }>,
-): void {
-  if (!Array.isArray(specs)) return;
-  for (const rawSpec of specs) {
-    if (!rawSpec || typeof rawSpec !== "object") continue;
-    const spec = rawSpec as PlaywrightListSpec;
-    const fileValue = typeof suiteFile === "string" ? suiteFile : spec.file;
-    if (typeof fileValue !== "string") continue;
-    const file = normalizeReportPath(fileValue);
-    const tests = Array.isArray(spec.tests) ? spec.tests : [];
-    for (const rawTest of tests) {
-      if (!rawTest || typeof rawTest !== "object") continue;
-      const project = (rawTest as PlaywrightListTest).projectName;
-      if (typeof project !== "string" || !allowedProjects.has(project)) continue;
-      const id = `${project}::${file}`;
-      const current = counts.get(id);
-      counts.set(id, { project, file, testCount: (current?.testCount ?? 0) + 1 });
-    }
-  }
-}
-
-function collectPlaywrightCounts(
-  suites: PlaywrightListSuite[],
-  allowedProjects: ReadonlySet<string>,
-  counts: Map<string, { project: string; file: string; testCount: number }>,
-  owningFile?: unknown,
-): void {
-  for (const suite of suites) {
-    // CLI file filters select the root spec, even when a helper declares its tests.
-    const file = owningFile ?? suite.file;
-    collectSpecCounts(suite.specs, file, allowedProjects, counts);
-    collectPlaywrightCounts(asSuites(suite.suites), allowedProjects, counts, file);
-  }
-}
-
-export function discoverTestCatalog(webRoot: string, cohort: Cohort): CatalogUnit[] {
+export function catalogUnitsFromCases(
+  webRoot: string,
+  cohort: Cohort,
+  cases: CatalogCase[],
+): CatalogUnit[] {
   const allowedProjects = new Set(
     cohort === "containers" ? ["containers"] : ["chromium", "mobile-chrome"],
   );
   const counts = new Map<string, { project: string; file: string; testCount: number }>();
-  collectPlaywrightCounts(readPlaywrightListReport(webRoot).suites, allowedProjects, counts);
+  for (const { project, file } of cases) {
+    if (!allowedProjects.has(project)) continue;
+    const id = `${project}::${file}`;
+    counts.set(id, { project, file, testCount: (counts.get(id)?.testCount ?? 0) + 1 });
+  }
   return [...counts.values()]
     .map((unit) => ({ ...unit, fileHash: hashSourceFile(webRoot, unit.file) }))
     .sort((left, right) =>
       `${left.project}::${left.file}`.localeCompare(`${right.project}::${right.file}`),
     );
+}
+
+export function discoverTestCatalog(webRoot: string, cohort: Cohort): CatalogUnit[] {
+  return catalogUnitsFromCases(webRoot, cohort, discoverNativeCases(webRoot));
 }
 
 function unitId(unit: Pick<CatalogUnit, "project" | "file">): string {
@@ -238,6 +171,71 @@ function estimateUnit(
   };
 }
 
+function schedulingGroups(units: PlannedUnit[], cohort: Cohort): PlannedUnit[][] {
+  const kind: PlannedUnit[] = [];
+  const groups: PlannedUnit[][] = [];
+  for (const unit of units) {
+    if (
+      cohort === "containers" &&
+      unit.project === "containers" &&
+      unit.file.startsWith("tests/kubernetes/") &&
+      unit.file !== WORKER_PRESETS_FILE
+    ) {
+      kind.push(unit);
+    } else {
+      groups.push([unit]);
+    }
+  }
+  if (kind.length) groups.push(kind.sort((left, right) => left.id.localeCompare(right.id)));
+  return groups.sort(
+    (left, right) =>
+      groupSeconds(right) - groupSeconds(left) || left[0]!.id.localeCompare(right[0]!.id),
+  );
+}
+
+function groupSeconds(units: PlannedUnit[]): number {
+  return units.reduce((total, unit) => total + unit.estimatedSeconds, 0);
+}
+
+function allocateShards(plannedUnits: PlannedUnit[], cohort: Cohort, shardCount: number): Shard[] {
+  const shards: Shard[] = Array.from({ length: shardCount }, (_, index) => ({
+    index: index + 1,
+    predictedSeconds: 0,
+    files: [],
+    units: [],
+  }));
+
+  // Worker image setup is measured outside native test-body durations.
+  const workerUnit =
+    cohort === "containers"
+      ? plannedUnits.find(
+          (unit) => unit.project === "containers" && unit.file === WORKER_PRESETS_FILE,
+        )
+      : undefined;
+  const workerShard = workerUnit && shardCount > 1 ? shards.at(-1) : undefined;
+  for (const group of schedulingGroups(plannedUnits, cohort)) {
+    const candidates =
+      workerShard && group[0] === workerUnit
+        ? [workerShard]
+        : shards.filter((shard) => shard !== workerShard);
+    const shard = candidates.reduce((lightest, candidate) => {
+      if (candidate.predictedSeconds < lightest.predictedSeconds) return candidate;
+      return candidate.index < lightest.index ? candidate : lightest;
+    }, candidates[0]!);
+    shard.units.push(...group);
+    shard.predictedSeconds += groupSeconds(group);
+    for (const unit of group) {
+      if (!shard.files.includes(unit.file)) shard.files.push(unit.file);
+    }
+  }
+  for (const shard of shards) {
+    shard.units.sort((left, right) => left.id.localeCompare(right.id));
+    shard.files.sort();
+  }
+
+  return shards;
+}
+
 export function createShardPlan(
   units: CatalogUnit[],
   options: {
@@ -259,30 +257,7 @@ export function createShardPlan(
       options.changedFileMultiplier ?? CHANGED_FILE_MULTIPLIER,
     ),
   );
-  const shards: Shard[] = Array.from({ length: options.shardCount }, (_, index) => ({
-    index: index + 1,
-    predictedSeconds: 0,
-    files: [],
-    units: [],
-  }));
-
-  const sortedUnits = [...plannedUnits].sort(
-    (left, right) =>
-      right.estimatedSeconds - left.estimatedSeconds || left.id.localeCompare(right.id),
-  );
-  for (const unit of sortedUnits) {
-    const shard = shards.reduce((lightest, candidate) => {
-      if (candidate.predictedSeconds < lightest.predictedSeconds) return candidate;
-      return candidate.index < lightest.index ? candidate : lightest;
-    }, shards[0]!);
-    shard.units.push(unit);
-    shard.predictedSeconds += unit.estimatedSeconds;
-    if (!shard.files.includes(unit.file)) shard.files.push(unit.file);
-  }
-  for (const shard of shards) {
-    shard.units.sort((left, right) => left.id.localeCompare(right.id));
-    shard.files.sort();
-  }
+  const shards = allocateShards(plannedUnits, options.cohort, options.shardCount);
 
   const predictedSeconds = shards.reduce((total, shard) => total + shard.predictedSeconds, 0);
   const targetSeconds = options.shardCount > 0 ? predictedSeconds / options.shardCount : 0;
@@ -457,6 +432,9 @@ function runCli(): void {
   });
   validateShardManifest(normal, normalCatalog);
   validateShardManifest(containers, containerCatalog);
+  if (process.env.GITHUB_ACTIONS === "true") {
+    writeCatalogSnapshot(path.join(outputDir, "native-catalog.json"), webRoot);
+  }
   writePlans(outputDir, [normal, containers]);
   console.log(
     JSON.stringify(

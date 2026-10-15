@@ -175,6 +175,26 @@ async function seedTwoSessionOverflowingTask(
   };
 }
 
+async function moveReaderIntoHistory(page: Page): Promise<number> {
+  const list = chatList(page);
+  await list.hover();
+  const initial = await list.evaluate((el) => el.scrollTop);
+  await page.mouse.wheel(0, -Math.floor(initial / 2));
+  let previous = initial;
+  await expect
+    .poll(
+      async () => {
+        const current = await list.evaluate((el) => el.scrollTop);
+        const settled = current < initial - 100 && current === previous;
+        previous = current;
+        return settled;
+      },
+      { message: "reader wheel should interrupt catch-up and settle in history" },
+    )
+    .toBe(true);
+  return previous;
+}
+
 function chatList(testPage: Page) {
   return testPage.locator(".chat-message-list:visible").first();
 }
@@ -654,7 +674,9 @@ test.describe("Transcript auto-scroll toggle", () => {
       await expect(toggle).toHaveAttribute("aria-pressed", "true");
 
       await session.sendMessage('e2e:message("New content while enabled")');
-      await expect(session.chat.getByText("New content while enabled").last()).toBeVisible({
+      await expect(
+        session.chat.getByText("New content while enabled", { exact: true }),
+      ).toBeVisible({
         timeout: 15_000,
       });
       await expect
@@ -696,7 +718,7 @@ test.describe("Transcript auto-scroll toggle", () => {
       // the viewport, dragging scrollTop down to chase the new content.
       await session.sendMessage('e2e:message("New content while disabled at bottom")');
       await expect(
-        session.chat.getByText("New content while disabled at bottom").last(),
+        session.chat.getByText("New content while disabled at bottom", { exact: true }),
       ).toBeVisible({ timeout: 15_000 });
 
       await expect
@@ -724,10 +746,7 @@ test.describe("Transcript auto-scroll toggle", () => {
       .toBeLessThan(10);
     await test.step("disabling freezes the position and suppresses auto-scroll for new messages", async () => {
       const list = chatList(testPage);
-      const targetScrollTop = await list.evaluate((el) => {
-        el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-        return el.scrollTop;
-      });
+      const targetScrollTop = await moveReaderIntoHistory(testPage);
       expect(targetScrollTop).toBeGreaterThan(100);
 
       const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
@@ -737,7 +756,9 @@ test.describe("Transcript auto-scroll toggle", () => {
       // A brand-new message arrives (a real follow-up turn over the live WS
       // pipeline) while scrolled away from the bottom and disabled.
       await session.sendMessage('e2e:message("New content while disabled")');
-      await expect(session.chat.getByText("New content while disabled").last()).toBeVisible({
+      await expect(
+        session.chat.getByText("New content while disabled", { exact: true }),
+      ).toBeVisible({
         timeout: 15_000,
       });
 
@@ -761,11 +782,7 @@ test.describe("Transcript auto-scroll toggle", () => {
       )
       .toBeLessThan(10);
     await test.step("preserves the frozen scroll position across navigating away and back", async () => {
-      const list = chatList(testPage);
-      const targetScrollTop = await list.evaluate((el) => {
-        el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-        return el.scrollTop;
-      });
+      const targetScrollTop = await moveReaderIntoHistory(testPage);
       expect(targetScrollTop).toBeGreaterThan(100);
 
       const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
@@ -812,11 +829,7 @@ test.describe("Transcript auto-scroll toggle", () => {
       expect(await listAfter.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 20);
     });
     await test.step("catches up on re-enable when content arrives after remounting while already disabled", async () => {
-      const list = chatList(testPage);
-      const targetScrollTop = await list.evaluate((el) => {
-        el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-        return el.scrollTop;
-      });
+      const targetScrollTop = await moveReaderIntoHistory(testPage);
       expect(targetScrollTop).toBeGreaterThan(100);
 
       const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
@@ -894,7 +907,7 @@ test.describe("Transcript auto-scroll toggle", () => {
         'e2e:message("LIVE-FOLLOW-START")\ne2e:delay(2500)\ne2e:message("LIVE-FOLLOW-TAIL")',
       );
       await expect(
-        session.activeChat().getByText("LIVE-FOLLOW-START", { exact: false }),
+        session.activeChat().locator("[data-agent-message-body]").getByText("LIVE-FOLLOW-START"),
       ).toBeVisible();
       const runningStatus = list.getByRole("status", { name: "Agent is running" });
       await expect(runningStatus).toBeVisible({ timeout: 10_000 });
@@ -933,7 +946,7 @@ test.describe("Transcript auto-scroll toggle", () => {
       releaseOutput();
 
       await expect(
-        session.activeChat().getByText("LIVE-FOLLOW-TAIL", { exact: false }),
+        session.activeChat().locator("[data-agent-message-body]").getByText("LIVE-FOLLOW-TAIL"),
       ).toBeVisible({
         timeout: 10_000,
       });

@@ -325,6 +325,7 @@ real provider support. Existing subagent E2E remains part of Task 05 regression.
 - [ ] [07: Native same-turn steering and delivery receipts](task-07-native-turn-steering.md)
 - [ ] [08: Explicit composer delivery on desktop and phone](task-08-steering-composer.md)
 - [ ] [06: Executor conformance fixtures and public guidance](task-06-executor-conformance-and-docs.md)
+- [x] [09: Settle workloads whose owning agent process is gone](task-09-settle-orphaned-workloads.md)
 
 Execute sequentially in the order above: 01, 02, 03, 04, 05, 07, 08, 06.
 Existing work-order IDs remain stable; Task 06 now follows the steering UI. No delegation or implementation is authorized by this plan.

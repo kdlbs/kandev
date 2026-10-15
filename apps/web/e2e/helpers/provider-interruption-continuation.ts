@@ -20,7 +20,7 @@ export async function createContinuationFixture(
   apiClient: ApiClient,
   seedData: SeedData,
   scenario: string,
-  options: { env?: Record<string, string>; executorProfileId?: string } = {},
+  options: { env?: Record<string, string>; executorProfileId?: string; prepareOnly?: boolean } = {},
 ) {
   const tracePath = path.join(backend.tmpDir, `continuation-${Date.now()}.jsonl`);
   let profileId = "";
@@ -53,16 +53,28 @@ export async function createContinuationFixture(
       `Continuation ${scenario}`,
       profile.id,
       {
-        description: `/continuation-${scenario}`,
+        description: options.prepareOnly ? "" : `/continuation-${scenario}`,
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
         executor_profile_id: options.executorProfileId,
+        start_agent: !options.prepareOnly,
       },
     );
     taskId = task.id;
-    if (!task.session_id) throw new Error("created task has no session ID");
-    return { taskId, sessionId: task.session_id, tracePath, dispose };
+    const sessionId = options.prepareOnly
+      ? (
+          await apiClient.launchSession({
+            task_id: taskId,
+            agent_profile_id: profileId,
+            executor_profile_id: options.executorProfileId,
+            intent: "prepare",
+            launch_workspace: true,
+          })
+        ).session_id
+      : task.session_id;
+    if (!sessionId) throw new Error("created task has no session ID");
+    return { taskId, sessionId, tracePath, dispose };
   } catch (error) {
     try {
       await dispose();

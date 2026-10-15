@@ -4,6 +4,7 @@ import { availableParallelism } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  catalogUnitsFromCases,
   CONTAINER_SHARD_COUNT,
   discoverTestCatalog,
   NORMAL_SHARD_COUNT,
@@ -14,6 +15,8 @@ import {
 import { processCount } from "./planned-subshards";
 import { buildPlaywrightArgs, writeShardMetadata, executeSubshards } from "./planned-processes";
 export { buildPlaywrightArgs, writeShardMetadata } from "./planned-processes";
+
+import { readCatalogSnapshot } from "./native-catalog";
 
 export type { ShardManifest } from "./plan-shards";
 
@@ -34,7 +37,19 @@ export function readManifest(filePath: string): ShardManifest {
       `Invalid ${manifest.cohort} shard count: expected ${expectedShardCount}, got ${manifest.shardCount}`,
     );
   }
-  validateShardManifest(manifest, discoverTestCatalog(process.cwd(), manifest.cohort));
+  const webRoot = process.cwd();
+  const catalog =
+    process.env.GITHUB_ACTIONS === "true"
+      ? catalogUnitsFromCases(
+          webRoot,
+          manifest.cohort,
+          readCatalogSnapshot(
+            path.resolve(path.dirname(filePath), "../native-catalog.json"),
+            webRoot,
+          ),
+        )
+      : discoverTestCatalog(webRoot, manifest.cohort);
+  validateShardManifest(manifest, catalog);
   return manifest;
 }
 

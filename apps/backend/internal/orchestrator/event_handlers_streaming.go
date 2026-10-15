@@ -1364,6 +1364,9 @@ func (s *Service) updateTaskSessionStateWithHook(
 	// first sample, AC-21) and leaving it (immediate clear, AC-68) regardless
 	// of which of this function's many call sites drove the transition.
 	s.onSessionStateChangedForParkedProjection(ctx, taskID, sessionID, oldState, nextState)
+	if isTerminalSessionState(nextState) {
+		s.settleOpenBackgroundWork(ctx, sessionID)
+	}
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)

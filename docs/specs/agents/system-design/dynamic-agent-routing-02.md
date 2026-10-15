@@ -162,6 +162,13 @@ require the current exclusive probe lease.
   `dynamic_route_pending` guard. An explicit recovery that is still blocked
   returns that error to its caller instead of a success response with no
   execution; a passive session open keeps its waiting response.
+- At startup the orphan-route sweep treats a session parked in
+  WAITING_FOR_INPUT whose route is still `starting` and which has no
+  `executors_running` row as a stranded launch owner, and marks it
+  `action_required`: no launch reached `MarkActive`, the ordinary session UI
+  cannot release the route while no runtime backs it, and no other pass
+  recovers it. A live executor row, an unreadable row, a stale generation, and
+  any other parked state keep the existing exclusion.
 - If the backend restarts during `switching`, it reconciles the persisted route
   generation and downstream ownership before launching. An ambiguous launch is
   not duplicated.

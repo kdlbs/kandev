@@ -8,10 +8,12 @@ requirements:
   - REQ-PLATFORM-CI-PERFORMANCE-004
   - REQ-PLATFORM-CI-PERFORMANCE-005
   - REQ-PLATFORM-CI-PERFORMANCE-006
+  - REQ-PLATFORM-CI-PERFORMANCE-007
   - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-001
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
   - REQ-TASKS-TASK-ACTIONS-MENU-004
 system_design:
+  - ../../specs/platform/system-design/ci-completion-budget.md
   - ../../specs/platform/system-design/ci-performance.md
   - ../../specs/platform/system-design/e2e-duration-aware-sharding.md
   - ../../specs/platform/system-design/durable-agent-delivery.md
@@ -26,11 +28,25 @@ legacy_specs: []
 Reduce CI runner-minutes and PR feedback time within approximately 60 shared concurrent jobs.
 Continue the existing package instead of repeating its completed review-budget, setup-framework, and capacity-procedure work.
 The October continuation reduces frontend setup, avoids independent Go-test-only E2E runs, and removes redundant scheduling stages.
-Frontend sharding follows measurement of the cheaper setup. Additional E2E shards and paid capacity are not required.
+The earlier October stage measured frontend sharding after cheaper setup and kept E2E fan-out fixed. The October 14 continuation below replaces that fixed fan-out while retaining the existing hosted fleet.
 
 The user authorized implementation after planning. The October changes passed
 local validation; hosted performance acceptance remains open. Historical
 September results remain separate from the current experiment.
+
+## October 14 complete-CI continuation
+
+The maintainer now requires fifteen-minute complete CI and continuous execution
+through measurement, fixes and merge. Tasks 14–16 follow the
+[complete-CI design](../../specs/platform/system-design/ci-completion-budget.md).
+Earlier fixed E2E fan-out limits describe Task 13, whose separate 50% test-step
+target passed and merged in PR #4457. Do not reopen that PR. All work remains in
+the primary session. No new paid capacity is authorized.
+
+1. Task 14: preserve full frontend/Windows selections while removing serial work.
+2. Task 15: use measured package/fixture evidence to shorten remaining backend/E2E paths.
+3. Task 16: account for all test identities, full elapsed time and occupancy;
+   revise candidates, resolve reviews, and merge only after the full target passes.
 
 ## October delivery sequence
 
@@ -113,9 +129,7 @@ Task 01 uses job-level timeout fields and existing Claude workflow contract test
 Task 02 resolves the pnpm store in the actual frontend container.
 Task 03 separates Node-compatible files from browser tests and isolates multilingual setup.
 Task 04 uses native Vitest shards and the existing external-runner family schema.
-The `frontend` job keeps static checks, the unsharded unit suite, and build until
-the hosted adoption gate passes. A measured test matrix remains a candidate for
-the unchanged public `Frontend Tests Passed` gate.
+The baseline `frontend` job combines static checks, the unsharded unit suite and build. Task 14 measures two native unit-test shards alongside static checks; adoption still requires the hosted coverage and occupancy gates behind the unchanged public `Frontend Tests Passed` gate.
 Tasks 05 and 06 produce bounded reports and procedures. They do not invent unmeasured code changes.
 See the system design for candidate-retention thresholds and failure behavior.
 
@@ -129,7 +143,7 @@ Task 09 adds an explicit test-only reason after a valid, mode-aware diff. Unknow
 Task 04 preserves all static checks and measures native Vitest partitions after setup optimization.
 Task 10 profiles the existing reset, Git, browser, and container boundaries before proposing further changes.
 
-The Windows process-cohort implementation and its first-commit Unstage companion stay unchanged.
+Task 14 preserves the Windows native process inventory and completion validation while allowing each existing cohort to run in its own hosted job. The first-commit Unstage companion stays unchanged.
 The external-runner package remains implemented. Only its job inventory changes when Task 08 lands.
 The E2E browser-cache package retains its separate three-main-run and forced-miss evidence requirements.
 No public application behavior or rendered UI changes; this package needs no UI preview.
@@ -142,7 +156,7 @@ No public application behavior or rendered UI changes; this package needs no UI 
 | 002.1–002.2 | `frontend-tests-workflow-contract_test.py`: resolved store wiring and lockfile install; hosted cache miss/save/hit evidence remains pending. |
 | 003.1 | `apps/web/scripts/vitest-project-selection.test.ts`: complete, disjoint file selection; unsharded versus merged two-shard identities. |
 | 003.2 | `vitest-environment.test.tsx`, focused `lib/i18n` tests, worker-budget tests, production-mode focused run, typecheck, and full unit suite. |
-| 003.3 | Frontend workflow contract cases for unsharded production-mode test placement, result handling, and deliberate skips. |
+| 003.3 | Frontend workflow contract cases for production-mode shard placement, required result artifacts, complete joins and deliberate skips. |
 | 004.1–004.2 | [Curated report](evidence.md) with attempt-specific timestamps and local two-shard identity evidence; hosted comparable performance remains pending. |
 | 004.3 | Existing runner planner and placement tests plus the runbook procedure with protected jobs, cost assumptions, and rollback. |
 | 005.1 | `ci-efficiency_test.py`: overlap, timestamps, attempts, cancellation, incomplete evidence, and workflow identity fixtures. |
@@ -169,7 +183,11 @@ No browser E2E is needed for CI-only behavior. Existing application E2E coverage
 - [x] [Task 10: Attribute E2E fixture and planner costs](task-10-profile-e2e-fixture-costs.md)
 - [x] [Task 11: Reject journal operations after shutdown](task-11-journal-shutdown.md)
 - [x] [Task 12: Keep closed task menus closed during processing](task-12-task-menu-recovery.md)
-- [ ] [Task 13: Reduce E2E execution within existing runners](task-13-e2e-runner-processes.md)
+- [x] [Task 13: Reduce E2E execution within existing runners](task-13-e2e-runner-processes.md)
+
+- [ ] [Task 14: Partition frontend and Windows verification](task-14-partition-independent-checks.md)
+- [ ] [Task 15: Shorten remaining critical paths](task-15-remaining-critical-paths.md)
+- [ ] [Task 16: Measure and deliver complete CI](task-16-complete-ci-delivery.md)
 
 ## Execution and evidence
 

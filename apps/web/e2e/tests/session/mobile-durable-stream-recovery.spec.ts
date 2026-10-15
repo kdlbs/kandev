@@ -143,3 +143,23 @@ test("ordinary native resume surfaces recovery before first send and retains the
     "readiness",
   );
 });
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
+test("mobile: cancelled prompt recovery remains reachable without an error record", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.skip(
+    process.platform !== "linux",
+    "isolated original-process death proof is Linux-specific",
+  );
+  await verifyNativeResumeClearsRecoveryNotice(
+    testPage,
+    apiClient,
+    seedData,
+    backend.tmpDir,
+    "cancelled",
+  );
+});

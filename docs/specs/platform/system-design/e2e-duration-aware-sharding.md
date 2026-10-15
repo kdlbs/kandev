@@ -5,7 +5,7 @@ requirements:
   - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-001
   - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-002
 created: 2026-08-30
-updated: 2026-10-13
+updated: 2026-10-14
 owners:
   - kandev
 ---
@@ -21,8 +21,8 @@ actionable.
 The design covers GitHub Actions workflow orchestration, E2E planning and
 reporting, browser provisioning, and the synchronization contract of the
 affected regression test. It does not change application behavior, the
-worker-scoped backend fixture model, the required E2E gate, or the normal
-matrix shape.
+worker-scoped backend fixture model or the required E2E gate. The full-CI
+continuation changes the normal matrix size under its measured adoption gate.
 
 ## Requirement mapping
 
@@ -33,7 +33,7 @@ matrix shape.
 
 ## Design invariants
 
-- The normal cohort remains fourteen shards covering Chromium and mobile
+- The normal cohort has twenty-eight shards covering Chromium and mobile
   Chrome, and the container cohort remains six shards covering Docker and SSH.
 - Each shard remains single-worker until a measured concurrency change passes
   the existing isolation and retry criteria.
@@ -81,10 +81,10 @@ A successful irrelevant-change verdict skips report processing and passes the ch
 
 ### Bounded processes within a normal job
 
-The October E2E candidate retains fourteen normal jobs and six container jobs.
+The October 14 full-CI candidate has twenty-eight normal jobs and six container jobs.
 A normal job may subdivide its validated manifest selection into at most three
 independent Playwright processes, each with `workers: 1`. The current workflow
-requests two processes. Container jobs retain one process. The existing memory
+requests three processes. Container jobs retain one process. The existing memory
 guard caps the process count using the lower
 of host-available memory and cgroup headroom: one below 6 GiB or when unknown,
 two below 12 GiB, and three otherwise. CPU availability also caps the count.
@@ -93,8 +93,8 @@ No unsafe-parallelism override participates in this CI decision.
 Sum the selected project costs for each file, sort files by descending cost
 with a lexical tie-break, and assign each whole file to the lightest local
 partition. Every original project/file identity must occur exactly once.
-The global manifest and its fourteen/six parent metadata identities stay
-unchanged; these local partitions are execution details, not new runner jobs.
+The global manifest and its twenty-eight/six parent metadata identities remain
+authoritative; local partitions are execution details, not new runner jobs.
 Serial groups, project-specific backend options, retries and timeouts retain
 their existing Playwright behavior.
 
@@ -264,7 +264,7 @@ failures.
 
 ## Out of scope
 
-- changing the fourteen normal or six container shards;
+- changing the six container shards;
 - enabling `workers: 2` by default;
 - splitting the normal matrix into separate mobile and desktop cohorts;
 - changing the Playwright retry count, test timeout, or required gate;
@@ -277,3 +277,9 @@ failures.
 - [Duration-aware E2E sharding uses rolling `main` timings](../../../decisions/2026-08-10-duration-aware-e2e-sharding.md)
 - [Browser cache for host-runner E2E provisioning](../../../decisions/2026-08-30-e2e-browser-cache.md)
 - [E2E CI efficiency plan](../../../plans/e2e-ci-efficiency/plan.md)
+
+The [complete CI continuation](ci-completion-budget.md) and its
+[budget decision](../../../decisions/2026-10-14-complete-ci-latency-budget.md)
+own the measured 28-job candidate. The earlier fourteen-job process experiment
+met its separate 50% test-step target in PR #4457. The new target includes build,
+waiting and reporting; more jobs do not imply reduced runner-minutes.

@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
@@ -45,8 +46,45 @@ func isAsyncTurnContentEvent(event AgentEvent) bool {
 	}
 }
 
+// stampUpdateTurnIdentity preserves enqueue-time prompt ownership before
+// journaling. Unowned native chunks receive a replay-stable message scope.
+func (a *Adapter) stampUpdateTurnIdentity(event *AgentEvent, promptGeneration uint64) {
+	if event == nil {
+		return
+	}
+	if event.PromptGeneration == 0 && (isAsyncTurnContentEvent(*event) || isAsyncToolTerminal(*event)) {
+		event.PromptGeneration = promptGeneration
+	}
+	if event.SessionID == "" || event.ProtocolMessageID != "" || event.PromptGeneration != 0 {
+		return
+	}
+	if event.Type != streams.EventTypeMessageChunk && event.Type != streams.EventTypeReasoning {
+		return
+	}
+	if a.currentPromptTurn() != nil {
+		return
+	}
+	a.asyncTurnMu.Lock()
+	defer a.asyncTurnMu.Unlock()
+	finalizer := a.asyncTurnFinalizerLocked(event.SessionID)
+	if finalizer.messageID == "" {
+		finalizer.messageID = "native-async-" + uuid.NewString()
+	}
+	event.ProtocolMessageID = finalizer.messageID
+}
+
+func (a *Adapter) asyncTurnFinalizerLocked(sessionID string) *asyncTurnFinalizer {
+	finalizer := a.asyncTurnFinalizers[sessionID]
+	if finalizer == nil {
+		finalizer = &asyncTurnFinalizer{activeTools: make(map[string]struct{})}
+		a.asyncTurnFinalizers[sessionID] = finalizer
+	}
+	return finalizer
+}
+
 func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
-	if !isAsyncTurnContentEvent(event) || event.SessionID == "" {
+	if event.PromptGeneration != 0 || event.SessionID == "" ||
+		(!isAsyncTurnContentEvent(event) && !isAsyncToolTerminal(event)) {
 		return
 	}
 	if a.currentPromptTurn() != nil {
@@ -55,17 +93,31 @@ func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
 
 	delay := currentAsyncTurnCompleteIdle()
 	a.asyncTurnMu.Lock()
+	defer a.asyncTurnMu.Unlock()
 	finalizer := a.asyncTurnFinalizers[event.SessionID]
-	if finalizer == nil {
-		finalizer = &asyncTurnFinalizer{}
-		a.asyncTurnFinalizers[event.SessionID] = finalizer
+	if isAsyncToolTerminal(event) {
+		if finalizer == nil {
+			return
+		}
+		if _, tracked := finalizer.activeTools[event.ToolCallID]; !tracked {
+			return
+		}
 	}
+	if finalizer == nil {
+		finalizer = a.asyncTurnFinalizerLocked(event.SessionID)
+	}
+	finalizer.trackTool(event)
 	finalizer.seq++
 	seq := finalizer.seq
 	finalizer.promptEpoch = a.asyncTurnEpochs[event.SessionID]
 	promptEpoch := finalizer.promptEpoch
 	if finalizer.timer != nil {
 		finalizer.timer.Stop()
+	}
+	// Silence is not completion while a foreground tool is known to be active.
+	// Keep its finalizer until terminal evidence or a real prompt boundary.
+	if len(finalizer.activeTools) != 0 {
+		return
 	}
 	// time.AfterFunc goroutines are not tracked by workerWg. A timer that fires
 	// concurrently with Close may call emitAsyncTurnComplete after
@@ -74,7 +126,29 @@ func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
 	finalizer.timer = time.AfterFunc(delay, func() {
 		a.emitAsyncTurnComplete(event.SessionID, seq, promptEpoch)
 	})
-	a.asyncTurnMu.Unlock()
+}
+
+func isAsyncToolTerminal(event AgentEvent) bool {
+	if event.Type != streams.EventTypeToolCall && event.Type != streams.EventTypeToolUpdate {
+		return false
+	}
+	switch event.ToolStatus {
+	case toolStatusComplete, toolStatusError, toolStatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func (f *asyncTurnFinalizer) trackTool(event AgentEvent) {
+	if (event.Type != streams.EventTypeToolCall && event.Type != streams.EventTypeToolUpdate) || event.ToolCallID == "" {
+		return
+	}
+	if isAsyncToolTerminal(event) || event.ParentToolCallID != "" || event.NormalizedPayload.IsActiveBackgroundWork() {
+		delete(f.activeTools, event.ToolCallID)
+		return
+	}
+	f.activeTools[event.ToolCallID] = struct{}{}
 }
 
 func (a *Adapter) emitAsyncTurnComplete(sessionID string, seq uint64, promptEpoch uint64) {
@@ -125,7 +199,7 @@ func (a *Adapter) emitCurrentAsyncTurnComplete(sessionID string, seq uint64, pro
 	a.asyncTurnMu.Lock()
 	defer a.asyncTurnMu.Unlock()
 	finalizer := a.asyncTurnFinalizers[sessionID]
-	if finalizer == nil ||
+	if finalizer == nil || len(finalizer.activeTools) != 0 ||
 		finalizer.seq != seq ||
 		finalizer.promptEpoch != promptEpoch ||
 		a.asyncTurnEpochs[sessionID] != promptEpoch {

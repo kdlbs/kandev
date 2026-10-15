@@ -495,6 +495,9 @@ func (m *Manager) removeWorktreeWithReceipt(
 		return receipt, fmt.Errorf("audit worktree cleanup %s: %w", wt.ID, err)
 	}
 	defer func() {
+		if audit.adoption != nil {
+			audit.adoption.Close()
+		}
 		if audit.pathHandle != nil {
 			_ = audit.pathHandle.Close()
 		}
@@ -503,7 +506,9 @@ func (m *Manager) removeWorktreeWithReceipt(
 	// Run the repository script only after the path, Git registration, checkout
 	// contents, and branch identity pass the audit. A script such as `git clean`
 	// must never erase changes before the audit can reject the cleanup.
-	m.runWorktreeCleanupScript(ctx, wt)
+	if !audit.adoptionAbsent {
+		m.runWorktreeCleanupScript(ctx, wt)
+	}
 	if options.RequireCleanCheckout && audit.pathPresent {
 		if err := m.verifyCheckoutClean(ctx, wt); err != nil {
 			return receipt, fmt.Errorf("verify worktree cleanliness after cleanup script %s: %w", wt.ID, err)
@@ -516,7 +521,7 @@ func (m *Manager) removeWorktreeWithReceipt(
 	if err := m.finalizeRemovedWorktree(ctx, wt); err != nil {
 		return receipt, err
 	}
-	if !removeBranch {
+	if !removeBranch && !audit.hasAdoption() {
 		receipt = m.compactManagedBranch(ctx, wt)
 	}
 

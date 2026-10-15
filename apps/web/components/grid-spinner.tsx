@@ -1,7 +1,11 @@
 "use client";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
-import { firstAnimationListValue, parseCssTime } from "@kandev/ui/animation-utils";
+import {
+  firstAnimationListValue,
+  parseCssTime,
+  releaseAnimation,
+} from "@kandev/ui/animation-utils";
 import { createPersistentMotionVisibility } from "@kandev/ui/persistent-motion-visibility";
 
 type GridSpinnerProps = {
@@ -48,7 +52,7 @@ export function GridSpinner({ className, ariaLabel }: GridSpinnerProps) {
     return () => {
       cancelAnimationFrame(frame);
       clearTimeout(timer);
-      for (const animation of animations ?? []) animation.cancel();
+      for (const animation of animations ?? []) releaseAnimation(animation);
       for (const registration of registrations) registration.unregister();
       visibility.dispose();
       for (const cube of cubes) cube.style.removeProperty("animation");
@@ -89,7 +93,7 @@ function startGridAnimations(cubes: HTMLElement[]): Animation[] | null {
     }
     return animations;
   } catch {
-    for (const animation of animations) animation.cancel();
+    for (const animation of animations) releaseAnimation(animation);
     return null;
   }
 }

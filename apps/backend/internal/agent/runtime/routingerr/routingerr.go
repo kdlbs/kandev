@@ -70,9 +70,8 @@ func HoldsUntilRelease(code Code) bool {
 // RemediationStartFreshSession is the symbolic RemediationPath value for
 // CodeResumeCorrupted. Unlike CodeNpxCacheCorrupted (whose RemediationPath is
 // a filesystem path to delete), this is a remediation *token* the UI maps to
-// the "start a fresh session" recovery action — there is nothing on disk to
-// clean; the agent's persisted reasoning state is corrupted and only a brand
-// new session recovers.
+// the "start a fresh session" recovery action. It authorizes no disk cleanup
+// and does not establish the underlying cause of a reasoning-history error.
 const RemediationStartFreshSession = "start_fresh_session"
 
 // ModelUnavailableMessage renders the actionable user-facing message for a
@@ -393,9 +392,8 @@ func applyInvariants(e *Error) *Error {
 		e.AutoRetryable = false
 		e.FallbackAllowed = false
 	case CodeResumeCorrupted:
-		// The agent's persisted reasoning state is poisoned. Retrying the
-		// resume hits the same 400, and falling back to another provider
-		// can't fix a session-state problem — only a fresh session does.
+		// Reasoning-history diagnostics require manual recovery. Their
+		// classification does not authorize automatic retry or fallback.
 		e.UserAction = true
 		e.AutoRetryable = false
 		e.FallbackAllowed = false

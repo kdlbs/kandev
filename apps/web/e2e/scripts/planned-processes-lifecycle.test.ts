@@ -26,11 +26,11 @@ import path from "node:path";
 import { createRequire } from "node:module";
 const { executeSubshards } = createRequire(import.meta.url)(${JSON.stringify(modulePath)});
 const directory = ${JSON.stringify(directory)};
-const units = ["first.spec.ts", "second.spec.ts"].map(file => ({
+const units = ["first.spec.ts", "second.spec.ts", "third.spec.ts", "fourth.spec.ts"].map(file => ({
   id: file, file, project: "chromium", fileHash: "hash", testCount: 1,
   estimatedSeconds: 1, classification: "profile"
 }));
-const shard = { index: 1, files: units.map(unit => unit.file), units, predictedSeconds: 2 };
+const shard = { index: 1, files: units.map(unit => unit.file), units, predictedSeconds: 4 };
 const children = [];
 const launch = (_command, _args, options) => {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
@@ -43,7 +43,7 @@ const launch = (_command, _args, options) => {
   fs.writeFileSync(path.join(output, "report.zip"), "test report");
   return child;
 };
-const pending = executeSubshards({cohort: "normal", projects: ["chromium"], shardCount: 14}, shard, 2, { spawn: launch, outputDir: path.join(directory, "reports") });
+const pending = executeSubshards({cohort: "normal", projects: ["chromium"], shardCount: 14}, shard, 4, { spawn: launch, outputDir: path.join(directory, "reports") });
 fs.writeFileSync(path.join(directory, "ready"), "ready");
 process.exitCode = await pending;
 `,
@@ -71,7 +71,7 @@ it.skipIf(process.platform === "win32")(
       const pids = JSON.parse(
         fs.readFileSync(path.join(directory, "children.json"), "utf8"),
       ) as number[];
-      expect(pids).toHaveLength(2);
+      expect(pids).toHaveLength(4);
       expect(pids.every(running)).toBe(true);
       child.kill("SIGTERM");
       const [code] = await closed;
@@ -81,6 +81,7 @@ it.skipIf(process.platform === "win32")(
         fs.readFileSync(path.join(directory, "reports/shard-normal-1-metadata.json"), "utf8"),
       );
       expect(metadata.exitCode).toBe(143);
+      expect(metadata.processCount).toBe(4);
     } catch (error) {
       throw new Error(diagnostics || "No child stderr", { cause: error });
     } finally {

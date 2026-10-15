@@ -191,12 +191,19 @@ describe("e2e timing collection", () => {
       unitIds: [],
     });
     const complete = [
-      ...Array.from({ length: 14 }, (_, index) => metadata("normal", index + 1, 14)),
+      ...Array.from({ length: 28 }, (_, index) => metadata("normal", index + 1, 28)),
       ...Array.from({ length: 6 }, (_, index) => metadata("containers", index + 1, 6)),
     ];
 
     expect(hasCompleteShardSet(complete)).toBe(true);
     expect(hasCompleteShardSet(complete.slice(0, -1))).toBe(false);
+    expect(hasCompleteShardSet([...complete, complete[0]!])).toBe(false);
+    expect(
+      hasCompleteShardSet([
+        ...Array.from({ length: 14 }, (_, index) => metadata("normal", index + 1, 14)),
+        ...complete.filter((entry) => entry.cohort === "containers"),
+      ]),
+    ).toBe(false);
   });
 
   it("merges and bounds timing history", () => {

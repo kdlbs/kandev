@@ -579,6 +579,7 @@
   "pauseAgent": "エージェントを一時停止",
   "pauseReasonPlaceholder": "このワークスペースを一時停止する理由は何ですか？",
   "pauseRequestFailed": "一時停止状態の更新に失敗しました。もう一度お試しください。",
+  "pauseStateLoading": "一時停止状態を読み込み中...",
   "pauseStateStale": "古い可能性があります",
   "pauseStateUnavailable": "一時停止状態を取得できません。ワークスペースが一時停止中かどうかは不明です。",
   "pauseUnavailable": "ワークスペースが選択されていません。",

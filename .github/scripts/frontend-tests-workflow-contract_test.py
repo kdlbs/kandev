@@ -45,7 +45,7 @@ def frontend_job(workflow: str) -> str:
     _, separator, remainder = workflow.partition("  frontend:\n")
     if not separator:
         raise AssertionError("frontend-tests.yml has no frontend job")
-    return remainder.partition("\n  frontend-gate:")[0]
+    return re.split(r"\n  [\w-]+:\n", remainder)[0]
 
 
 def frontend_gate_job(workflow: str) -> str:
@@ -117,36 +117,49 @@ class FrontendTestsWorkflowContractTest(unittest.TestCase):
         self.assertLess(cache_index, install_index)
         self.assertIn("pnpm install --frozen-lockfile", install_step)
 
-    def test_frontend_job_keeps_unsharded_unit_tests_and_static_checks(self) -> None:
+    def test_static_checks_and_unit_shards_are_independent(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         job = frontend_job(workflow)
+        for name in ("Run lint", "Run typecheck", "Build"):
+            self.assertIn(f"- name: {name}\n", job)
+        self.assertNotIn("- name: Run tests\n", job)
+        shards = workflow.split("  frontend_tests:\n", 1)[1].split("  frontend-gate:", 1)[0]
+        self.assertIn("needs: [changes]", shards)
+        self.assertIn("fail-fast: false", shards)
+        self.assertIn("matrix: ${{ fromJSON(needs.changes.outputs.plan).frontend_tests_matrix }}", shards)
+        self.assertIn("pnpm --filter @kandev/web run test --shard=", shards)
+        self.assertIn("NODE_ENV: production", shards)
+        self.assertIn("pnpm install --frozen-lockfile", shards)
+        self.assertNotIn("continue-on-error", run_tests_step(workflow))
 
-        self.assertIn("- name: Run tests\n", job)
-        self.assertIn("NODE_ENV: production", job)
-        self.assertIn("pnpm --filter @kandev/web test", job)
-        self.assertIn("- name: Run lint\n", job)
-        self.assertIn("- name: Run typecheck\n", job)
-        self.assertIn("- name: Build\n", job)
-        self.assertNotIn("FRONTEND_TEST_SHARD", job)
-        self.assertNotIn("matrix:", job)
-
-    def test_frontend_tests_remain_outside_the_planner_until_adoption_evidence(self) -> None:
+    def test_frontend_planner_covers_every_shard_once(self) -> None:
+        import json
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        planner = workflow.partition("  changes:\n")[0]
+        families = workflow.split("families: >-\n", 1)[1].split("burst:", 1)[0]
+        family = next(f for f in json.loads(families) if f["name"] == "frontend_tests")
+        self.assertEqual(family["tier"], "standard")
+        self.assertEqual(family["instances"], [{"shard": n} for n in range(1, 3)])
+        step = run_tests_step(workflow)
+        self.assertIn('FRONTEND_TEST_SHARD: ${{ matrix.shard }}', step)
+        self.assertIn('--shard="${FRONTEND_TEST_SHARD}/2"', step)
 
-        self.assertNotIn('"name":"frontend_tests"', planner)
-        self.assertNotIn("  frontend_tests:\n", workflow)
+    def test_reports_are_required_and_partitioned(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        step = run_tests_step(workflow)
+        self.assertIn('--reporter=json', step)
+        self.assertIn('--outputFile="test-results-${FRONTEND_TEST_SHARD}.json"', step)
+        upload = workflow.split("      - name: Upload frontend test report\n", 1)[1].split("\n  frontend-gate:", 1)[0]
+        self.assertIn("if: always()", upload)
+        self.assertIn("if-no-files-found: error", upload)
+        self.assertIn("name: frontend-test-results-${{ matrix.shard }}", upload)
+        self.assertIn("path: apps/web/test-results-${{ matrix.shard }}.json", upload)
+        self.assertNotIn("continue-on-error", upload)
 
     def test_required_gate_requires_every_frontend_verification_result(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        gate = frontend_gate_job(workflow)
-
-        self.assertIn(
-            "needs: [changes, frontend]",
-            gate,
-        )
-        self.assertNotIn("FRONTEND_TESTS_RESULT:", gate)
-        self.assertNotIn("Frontend test matrix finished with result:", gate)
+        gate = frontend_gate_job(WORKFLOW.read_text(encoding="utf-8"))
+        self.assertIn("needs: [changes, frontend, frontend_tests]", gate)
+        self.assertIn("FRONTEND_TESTS_RESULT: ${{ needs.frontend_tests.result }}", gate)
+        self.assertIn('"frontend_tests:${FRONTEND_TESTS_RESULT}"', gate)
 
     def test_test_step_reproduces_the_production_environment(self) -> None:
         step = run_tests_step(WORKFLOW.read_text(encoding="utf-8"))
@@ -159,7 +172,7 @@ class FrontendTestsWorkflowContractTest(unittest.TestCase):
             "CI image sets no NODE_ENV, Vitest defaults it to 'test', and the "
             "suite passes with or without the pin.",
         )
-        self.assertIn("pnpm --filter @kandev/web test", step)
+        self.assertIn("pnpm --filter @kandev/web run test", step)
 
     def test_vitest_config_still_pins_the_mode(self) -> None:
         config = VITEST_CONFIG.read_text(encoding="utf-8")
