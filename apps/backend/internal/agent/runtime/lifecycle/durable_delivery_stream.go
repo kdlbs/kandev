@@ -621,7 +621,7 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 	}
 	payloadEvent := event
 	if payloadEvent.TurnID == "" && execution != nil {
-		payloadEvent.TurnID = execution.promptTurnIDSnapshot()
+		payloadEvent.TurnID = execution.promptTurnIDForEvent(event)
 	}
 	payloadEvent.CanonicalMessageID = canonicalAgentMessageID(execution, event)
 	payloadEvent.CanonicalProjection = false
@@ -701,7 +701,7 @@ func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEven
 	}
 	turnID := event.TurnID
 	if turnID == "" && execution != nil {
-		turnID = execution.promptTurnIDSnapshot()
+		turnID = execution.promptTurnIDForEvent(event)
 	}
 	scope := event.ProtocolMessageID
 	if scope == "" {

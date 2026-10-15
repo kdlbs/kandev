@@ -46,7 +46,7 @@ func isAsyncTurnContentEvent(event AgentEvent) bool {
 }
 
 func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
-	if !isAsyncTurnContentEvent(event) || event.SessionID == "" {
+	if (!isAsyncTurnContentEvent(event) && !isAsyncToolTerminal(event)) || event.SessionID == "" {
 		return
 	}
 	if a.currentPromptTurn() != nil {
@@ -55,17 +55,32 @@ func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
 
 	delay := currentAsyncTurnCompleteIdle()
 	a.asyncTurnMu.Lock()
+	defer a.asyncTurnMu.Unlock()
 	finalizer := a.asyncTurnFinalizers[event.SessionID]
+	if isAsyncToolTerminal(event) {
+		if finalizer == nil {
+			return
+		}
+		if _, tracked := finalizer.activeTools[event.ToolCallID]; !tracked {
+			return
+		}
+	}
 	if finalizer == nil {
-		finalizer = &asyncTurnFinalizer{}
+		finalizer = &asyncTurnFinalizer{activeTools: make(map[string]struct{})}
 		a.asyncTurnFinalizers[event.SessionID] = finalizer
 	}
+	finalizer.trackTool(event)
 	finalizer.seq++
 	seq := finalizer.seq
 	finalizer.promptEpoch = a.asyncTurnEpochs[event.SessionID]
 	promptEpoch := finalizer.promptEpoch
 	if finalizer.timer != nil {
 		finalizer.timer.Stop()
+	}
+	// Silence is not completion while a foreground tool is known to be active.
+	// Keep its finalizer until terminal evidence or a real prompt boundary.
+	if len(finalizer.activeTools) != 0 {
+		return
 	}
 	// time.AfterFunc goroutines are not tracked by workerWg. A timer that fires
 	// concurrently with Close may call emitAsyncTurnComplete after
@@ -74,7 +89,29 @@ func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
 	finalizer.timer = time.AfterFunc(delay, func() {
 		a.emitAsyncTurnComplete(event.SessionID, seq, promptEpoch)
 	})
-	a.asyncTurnMu.Unlock()
+}
+
+func isAsyncToolTerminal(event AgentEvent) bool {
+	if event.Type != streams.EventTypeToolCall && event.Type != streams.EventTypeToolUpdate {
+		return false
+	}
+	switch event.ToolStatus {
+	case toolStatusComplete, toolStatusError, toolStatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func (f *asyncTurnFinalizer) trackTool(event AgentEvent) {
+	if (event.Type != streams.EventTypeToolCall && event.Type != streams.EventTypeToolUpdate) || event.ToolCallID == "" {
+		return
+	}
+	if isAsyncToolTerminal(event) || event.ParentToolCallID != "" || event.NormalizedPayload.IsActiveBackgroundWork() {
+		delete(f.activeTools, event.ToolCallID)
+		return
+	}
+	f.activeTools[event.ToolCallID] = struct{}{}
 }
 
 func (a *Adapter) emitAsyncTurnComplete(sessionID string, seq uint64, promptEpoch uint64) {
@@ -125,7 +162,7 @@ func (a *Adapter) emitCurrentAsyncTurnComplete(sessionID string, seq uint64, pro
 	a.asyncTurnMu.Lock()
 	defer a.asyncTurnMu.Unlock()
 	finalizer := a.asyncTurnFinalizers[sessionID]
-	if finalizer == nil ||
+	if finalizer == nil || len(finalizer.activeTools) != 0 ||
 		finalizer.seq != seq ||
 		finalizer.promptEpoch != promptEpoch ||
 		a.asyncTurnEpochs[sessionID] != promptEpoch {

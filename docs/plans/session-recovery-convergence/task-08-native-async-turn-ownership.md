@@ -1,0 +1,49 @@
+---
+id: "08-native-async-turn-ownership"
+title: "Preserve native async turn ownership"
+status: in_progress
+wave: 8
+depends_on:
+  - 07-native-prompt-readiness
+plan: plan.md
+requirements:
+  - REQ-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001
+acceptance_criteria:
+  - AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.12
+system_design:
+  - ../../specs/platform/system-design/session-recovery-convergence.md
+---
+
+# Task 08: Native async turn ownership
+
+## Evidence and scope
+
+Retained inbox events show generation-less synthetic `async_turn_idle`
+completions carrying a previously completed dispatched turn. The successor
+check correctly rejected them. One completion preceded a still-active foreground
+tool's terminal update. The affected session remains active and is not a repair
+target for live mutation.
+
+Preserve explicit/numbered ownership, leave unowned native event turn IDs unset,
+and publish matching generation-less readiness so the existing orchestrator
+snapshot identifies the async turn before a queued successor starts. Track
+foreground tools in the ACP idle finalizer; wait for their terminal updates,
+preserve recognized background monitors, and cancel on real prompt boundaries.
+No UI changes, old prompt replay, historical rewrites, or successor-guard bypass.
+
+## Validation and delivery
+
+Red tests reproduce both premature completion and stale turn injection. Verify
+foreground terminal statuses, multiple tools, background/nested controls, prompt
+epoch cancellation, durable payload identity, readiness identity and successor
+protection. Use focused resource-capped Go tests and race checks. All browser
+execution stays in CI. Commit, push, open a follow-up PR promptly, address CI and
+reviews, and lead through merge in the existing session.
+
+## Results
+
+Focused adapter and lifecycle race checks pass after reproducing both failures.
+Documentation catalog and specification lint pass. Orchestrator generation-less readiness/successor integration also passes under
+the race detector. Commit checks, CI and review remain pending.
+Public session controls, commands, and recovery instructions are unchanged, so
+no public documentation update or screenshots are required.

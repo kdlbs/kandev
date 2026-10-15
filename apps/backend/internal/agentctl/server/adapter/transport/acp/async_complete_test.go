@@ -10,6 +10,81 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
+// @covers AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.12
+func TestAsyncTurnCompleteWaitsForForegroundToolTerminal(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		setAsyncTurnCompleteIdleForTest(t, 10*time.Millisecond)
+		a := newTestAdapter()
+		defer func() { _ = a.Close() }()
+		a.maybeScheduleAsyncTurnComplete(AgentEvent{Type: streams.EventTypeToolCall,
+			SessionID: "session", ToolCallID: "foreground", ToolStatus: "in_progress"})
+		a.maybeScheduleAsyncTurnComplete(AgentEvent{Type: streams.EventTypeMessageChunk,
+			SessionID: "session", Text: "Tool is still working"})
+		time.Sleep(50 * time.Millisecond)
+		synctest.Wait()
+		assertNoAdapterEvent(t, a, "while foreground tool remains active")
+		a.maybeScheduleAsyncTurnComplete(AgentEvent{Type: streams.EventTypeToolUpdate,
+			SessionID: "session", ToolCallID: "foreground", ToolStatus: toolStatusComplete})
+		time.Sleep(50 * time.Millisecond)
+		synctest.Wait()
+		complete := readAdapterEvent(t, a, 100*time.Millisecond)
+		if complete.Type != streams.EventTypeComplete {
+			t.Fatalf("event = %q, want complete after foreground terminal", complete.Type)
+		}
+	})
+}
+
+func TestAsyncTurnCompleteWaitsForAllForegroundTools(t *testing.T) {
+	for _, terminal := range []string{toolStatusComplete, toolStatusError, toolStatusCancelled} {
+		t.Run(terminal, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				setAsyncTurnCompleteIdleForTest(t, 10*time.Millisecond)
+				a := newTestAdapter()
+				defer func() { _ = a.Close() }()
+				for _, id := range []string{"one", "two"} {
+					a.maybeScheduleAsyncTurnComplete(AgentEvent{Type: streams.EventTypeToolUpdate,
+						SessionID: "session", ToolCallID: id, ToolStatus: toolStatusInProgress})
+				}
+				a.maybeScheduleAsyncTurnComplete(AgentEvent{Type: streams.EventTypeToolUpdate,
+					SessionID: "session", ToolCallID: "one", ToolStatus: terminal})
+				time.Sleep(50 * time.Millisecond)
+				synctest.Wait()
+				assertNoAdapterEvent(t, a, "while the second tool is active")
+				a.maybeScheduleAsyncTurnComplete(AgentEvent{Type: streams.EventTypeToolUpdate,
+					SessionID: "session", ToolCallID: "two", ToolStatus: terminal})
+				time.Sleep(50 * time.Millisecond)
+				synctest.Wait()
+				if event := readAdapterEvent(t, a, 100*time.Millisecond); event.Type != streams.EventTypeComplete {
+					t.Fatalf("event = %q, want complete", event.Type)
+				}
+				assertNoAdapterEvent(t, a, "after the single completion")
+			})
+		})
+	}
+}
+
+func TestAsyncTurnCompleteBackgroundHandoffDoesNotBlockIdle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		setAsyncTurnCompleteIdleForTest(t, 10*time.Millisecond)
+		a := newTestAdapter()
+		defer func() { _ = a.Close() }()
+		event := AgentEvent{Type: streams.EventTypeToolCall, SessionID: "session",
+			ToolCallID: "tool", ToolStatus: toolStatusInProgress}
+		a.maybeScheduleAsyncTurnComplete(event)
+		payload := streams.NewGeneric("other", nil)
+		payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "work", true, false)
+		event.Type, event.NormalizedPayload = streams.EventTypeToolUpdate, payload
+		a.maybeScheduleAsyncTurnComplete(event)
+		a.maybeScheduleAsyncTurnComplete(AgentEvent{Type: streams.EventTypeToolCall, SessionID: "session",
+			ToolCallID: "nested", ParentToolCallID: "tool", ToolStatus: toolStatusInProgress})
+		time.Sleep(50 * time.Millisecond)
+		synctest.Wait()
+		if got := readAdapterEvent(t, a, 100*time.Millisecond); got.Type != streams.EventTypeComplete {
+			t.Fatalf("event = %q, want complete", got.Type)
+		}
+	})
+}
+
 func TestHandleACPUpdate_AsyncMonitorTextWithoutPromptEmitsIdleComplete(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		setAsyncTurnCompleteIdleForTest(t, 10*time.Millisecond)

@@ -2531,7 +2531,7 @@ func (m *Manager) markReadyEventWithStartupGeneration(
 			before(execution)
 		}
 		readyErr = m.markReadyEventForExecution(
-			ctx, execution, eventType, asyncPublish, attemptID,
+			ctx, execution, eventType, asyncPublish, attemptID, nil,
 		)
 		if readyErr == nil && after != nil {
 			after(execution)
@@ -2549,6 +2549,7 @@ func (m *Manager) markReadyEventForExecution(
 	eventType string,
 	asyncPublish bool,
 	attemptID string,
+	completion *agentctlclient.AgentEvent,
 ) error {
 	executionID := execution.ID
 	var payload AgentEventPayload
@@ -2565,6 +2566,10 @@ func (m *Manager) markReadyEventForExecution(
 		execution.Status = v1.AgentStatusReady
 		payload = newAgentEventPayloadPromptLocked(execution)
 		payload.AttemptID = attemptID
+		if completion != nil {
+			payload.TurnID = completion.TurnID
+			payload.PromptGeneration = completion.PromptGeneration
+		}
 		updated = execution
 	}); err != nil {
 		if errors.Is(err, ErrExecutionNotFound) {

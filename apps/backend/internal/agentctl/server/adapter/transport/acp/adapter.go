@@ -489,6 +489,7 @@ func (t *promptTurnState) cursorRetriableFailureDetails() (bool, string, time.Ti
 }
 
 type asyncTurnFinalizer struct {
+	activeTools map[string]struct{}
 	timer       *time.Timer
 	seq         uint64
 	promptEpoch uint64
