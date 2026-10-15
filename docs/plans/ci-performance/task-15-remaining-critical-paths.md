@@ -61,6 +61,38 @@ git diff --check
 
 ## Results
 
+### Restore the unavailable pinned Go setup action
+
+The twenty-fifth candidate fails two Windows jobs and the preview before
+checkout/tests: GitHub cannot download setup-go commit
+`924ae3a1cded613372ab5595356fb5720e22ba16`. Both archive formats return 404,
+although the official v6/v6.5.0 refs and commit API still identify that SHA.
+Do not classify those missing executions as coverage or a fast pipeline.
+
+Use official setup-go commit `5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14`,
+whose ZIP and tar archives are available. It follows stable v7.0.0 by one
+upstream commit and includes bundled dependency refreshes. It is not runtime-
+identical to the old pin. The official v6.5.0/v7.0.0 action definitions retain
+the same input defaults, outputs and Node 24 main/post entry points; v7's ESM
+migration is supported by the already-used Node 24 runners. The observed Windows
+runner is 2.337.0. Do not select the old pin's parent: its bundled dependencies
+would roll back. The latest main contains additional unreleased behavior and
+is outside this bounded change.
+
+Replace the unavailable pin consistently in its six workflows. Keep Go version
+files, cache options, permissions, matrices, commands and deadlines fixed.
+Prove that exact structured delta and rerun affected workflow/pinning contracts.
+Download and validate the new official archive before pushing. Actual Windows
+compile/process execution and the full hosted set remain mandatory; no SDK
+version override, release action or unpinned ref is introduced.
+
+Local checks pass: backend workflow 25 cases, E2E workflow 27, preview seven,
+release 65, pinning nine, and all 27 workflows SHA-pinned. The release suite's
+first invocation lacked Node on PATH; the corrected existing Node 24 invocation
+passes every case. Both official archive formats validate, and parsed workflow
+comparison proves only fifteen setup-go references change across six files.
+No application or test selection changes are introduced.
+
 ### Keep native blob evidence while replacing its failing transfer path
 
 The twenty-fourth full set passes every test job but fails its reporter after

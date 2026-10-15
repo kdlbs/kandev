@@ -53,6 +53,46 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+### Twenty-sixth candidate: restore the unavailable Go setup archive
+
+Replace the unavailable setup-go pin consistently in six workflows with an
+available official v7 commit. Task 15 records its exact compatibility boundary:
+the Go SDK versions, inputs, cache settings, matrices, permissions, test commands
+and deadlines remain fixed. The new action includes upstream runtime dependency
+updates; it is not claimed byte-identical. ZIP and tar downloads validate, and
+structured workflow comparison permits only the fifteen action-reference edits.
+Backend (25), E2E (27), preview (7), release (65) and action-pinning (9) contract
+cases pass, together with the full 27-workflow pinning scan. Release contracts
+initially ran without Node on PATH; all 65 pass with the existing Node 24 toolchain.
+Actual Windows compile/process execution and the complete hosted set remain
+required. No application or test inventory changes accompany this repair.
+
+### Twenty-fifth complete hosted result: E2E passes, Go bootstrap fails
+
+Head `4ff6b68b448a` completes full E2E `38684915750` successfully in 15m31s
+(289.33 runner-minutes), with a 923-second execution critical path. Its repaired
+blob transfer takes fourteen seconds and all native reports and required gates
+pass. The exact source/run/producer catalog retains all 3,957 E2E identities:
+3,907 first passes, ten retry passes, zero final failures and the same forty
+existing skips. Frontend `38684915678` passes in 12m52s (25.65 runner-minutes),
+preserving 26,553 cases in 2,956 files.
+
+Backend `38684915704` fails in 17m08s (205.70 runner-minutes). Windows compile
+and process 4/4 cannot download the pinned setup-go archive before checkout or
+tests. The ancillary preview fails at the same bootstrap. Those Windows
+executions are missing and cannot count as retained coverage. All ten Linux
+native-report cohorts retain 35,581 expected executions and outcomes, including
+only the approved Office regression addition. Normal E2E resource snapshots
+retain four CPUs, zero swap/memory events and 7.98-9.05 GiB lifetime peaks.
+
+All 75 core jobs are selected; complete occupancy is 520.68 runner-minutes.
+The full set takes 17m08s, fails and exceeds 900 seconds; acceptance stays 1/3.
+Fresh exact-head evidence has 84 passed checks, four failed contexts, eleven
+ancillary skips and zero pending, with no evidence errors or unresolved/hidden
+threads. The next candidate repairs only the demonstrated archive failure;
+performance work on otherwise acceptable jobs near seventeen minutes is out
+of scope for this iteration, following the user's latest direction.
+
 ### Next candidate: native CLI blob transfer
 
 Replace only the failing reporter blob download with the existing GitHub CLI.
