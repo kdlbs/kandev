@@ -47,3 +47,15 @@ Documentation catalog and specification lint pass. Orchestrator generation-less 
 the race detector. Commit checks, CI and review remain pending.
 Public session controls, commands, and recovery instructions are unchanged, so
 no public documentation update or screenshots are required.
+
+Review reproduced two additional boundaries: native replies without provider
+message IDs merged across completed human prompts, and child updates without
+repeated parent metadata became foreground blockers. Add journal-retained native
+message IDs, retain a distinct legacy message scope without dispatch ownership,
+and reuse remembered tool lineage. A real SQLite projection/reopen/replay test
+checks separate native transcript rows and turn associations. The documentation
+coverage failure was a missing requirement declaration in design frontmatter.
+
+The review regressions passed under the race detector after correction, including
+real SQLite projection, reopen and idempotent replay for legacy and journaled
+message identities. The documentation coverage evaluator now reports covered.

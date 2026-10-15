@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
@@ -45,6 +46,37 @@ func isAsyncTurnContentEvent(event AgentEvent) bool {
 	}
 }
 
+// stampAsyncTurnMessageID gives native chunks without provider IDs a message
+// scope before journaling. Replay uses that retained ID, never a new owner or
+// the backend's most recently dispatched turn.
+func (a *Adapter) stampAsyncTurnMessageID(event *AgentEvent) {
+	if event == nil || event.SessionID == "" || event.ProtocolMessageID != "" || event.PromptGeneration != 0 {
+		return
+	}
+	if event.Type != streams.EventTypeMessageChunk && event.Type != streams.EventTypeReasoning {
+		return
+	}
+	if a.currentPromptTurn() != nil {
+		return
+	}
+	a.asyncTurnMu.Lock()
+	defer a.asyncTurnMu.Unlock()
+	finalizer := a.asyncTurnFinalizerLocked(event.SessionID)
+	if finalizer.messageID == "" {
+		finalizer.messageID = "native-async-" + uuid.NewString()
+	}
+	event.ProtocolMessageID = finalizer.messageID
+}
+
+func (a *Adapter) asyncTurnFinalizerLocked(sessionID string) *asyncTurnFinalizer {
+	finalizer := a.asyncTurnFinalizers[sessionID]
+	if finalizer == nil {
+		finalizer = &asyncTurnFinalizer{activeTools: make(map[string]struct{})}
+		a.asyncTurnFinalizers[sessionID] = finalizer
+	}
+	return finalizer
+}
+
 func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
 	if (!isAsyncTurnContentEvent(event) && !isAsyncToolTerminal(event)) || event.SessionID == "" {
 		return
@@ -66,8 +98,7 @@ func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
 		}
 	}
 	if finalizer == nil {
-		finalizer = &asyncTurnFinalizer{activeTools: make(map[string]struct{})}
-		a.asyncTurnFinalizers[event.SessionID] = finalizer
+		finalizer = a.asyncTurnFinalizerLocked(event.SessionID)
 	}
 	finalizer.trackTool(event)
 	finalizer.seq++

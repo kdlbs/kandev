@@ -2,6 +2,7 @@
 status: current
 system: platform
 requirements:
+  - REQ-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-008
   - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-001
@@ -174,3 +175,10 @@ Adapter-attested background workloads and nested child tools retain their own
 lifecycles. A real prompt boundary cancels the async finalizer. Terminal tool
 updates alone do not create a new async turn. No historical events, outcomes,
 live sessions, or recovery cursors are rewritten by this correction.
+
+Native ACP chunks without provider message IDs receive an adapter-issued ID
+before journal append. Chunks within the async reply share it; idle completion
+or a real prompt boundary ends that scope. Replay retains the journaled ID.
+Legacy peers use a separate opaque message scope for each preceding dispatch,
+without assigning that dispatched turn as the native event owner. Tool updates
+reuse adapter-recorded child lineage even when incremental metadata omits it.

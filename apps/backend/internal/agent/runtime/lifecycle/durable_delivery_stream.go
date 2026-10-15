@@ -710,6 +710,13 @@ func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEven
 	if scope == "" {
 		scope = event.DeliverySubmissionID
 	}
+	if scope == "" && event.PromptGeneration == 0 && execution != nil {
+		// Older peers lack native message IDs. Keep separate dispatch eras as
+		// an opaque message scope without assigning that old turn as owner.
+		if precedingTurn := execution.promptTurnIDSnapshot(); precedingTurn != "" {
+			scope = "native-after:" + precedingTurn
+		}
+	}
 	if scope == "" {
 		scope = "prompt:" + strconv.FormatUint(event.PromptGeneration, 10)
 	}

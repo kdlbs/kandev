@@ -2,10 +2,13 @@ package lifecycle
 
 import (
 	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -76,5 +79,76 @@ func TestDurableEventKeepsExplicitDispatchOwnership(t *testing.T) {
 			require.NoError(t, json.Unmarshal(stored.Payload, &payload))
 			require.Equal(t, tc.want, payload.TurnID)
 		})
+	}
+}
+
+func TestNativeRepliesProjectSeparatelyAcrossCompletedHumanPrompts(t *testing.T) {
+	for _, protocolIDs := range []bool{false, true} {
+		t.Run(fmt.Sprintf("protocol_ids_%t", protocolIDs), func(t *testing.T) {
+			testNativeReplyProjection(t, protocolIDs)
+		})
+	}
+}
+
+func testNativeReplyProjection(t *testing.T, protocolIDs bool) {
+	t.Helper()
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "delivery.db")
+	repo, database := openRetentionLifecycleRepository(t, path)
+	retained := openRetentionLifecycleJournal(t, filepath.Join(t.TempDir(), "journal.bbolt"))
+	seed := seedRetentionIntegrationOutput(t, repo, database, retained)
+	execution := &AgentExecution{ID: seed.ExecutionID, TaskID: seed.TaskID, SessionID: seed.SessionID,
+		DeliveryIncarnationID: seed.IncarnationID, DeliveryHarnessGeneration: uint64(seed.HarnessGeneration),
+		DeliveryStreamID: seed.StreamID}
+	messages, err := repo.ListMessages(ctx, seed.SessionID)
+	require.NoError(t, err)
+	require.NoError(t, repo.CompleteTurn(ctx, messages[0].TurnID))
+	var admitted []*models.AgentDeliveryEvent
+	for reply := range 2 {
+		human := fmt.Sprintf("human-%d", reply)
+		native := fmt.Sprintf("native-%d", reply)
+		require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: human, TaskSessionID: seed.SessionID, TaskID: seed.TaskID}))
+		require.NoError(t, repo.CompleteTurn(ctx, human))
+		execution.setPromptTurnID(human)
+		require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: native, TaskSessionID: seed.SessionID, TaskID: seed.TaskID}))
+		for range 2 {
+			source := agentctl.AgentEvent{Type: "message_chunk", Text: native,
+				DeliveryStreamID: seed.StreamID, DeliverySequence: uint64(len(admitted) + 2)}
+			if protocolIDs {
+				source.ProtocolMessageID = "journaled-" + native
+			}
+			event := durableAgentEvent(execution, source)
+			var payload agentctl.AgentEvent
+			require.NoError(t, json.Unmarshal(event.Payload, &payload))
+			require.Empty(t, payload.TurnID)
+			_, err := repo.ReceiveAgentDeliveryEvent(ctx, event, event.Sequence)
+			require.NoError(t, err)
+			_, err = repo.ProjectCanonicalAgentDeliveryEvent(ctx, event, nil)
+			require.NoError(t, err)
+			admitted = append(admitted, event)
+		}
+		require.NoError(t, repo.CompleteTurn(ctx, native))
+	}
+	require.NoError(t, database.Close())
+	repo, _ = openRetentionLifecycleRepository(t, path)
+	for _, event := range admitted {
+		_, err := repo.ReceiveAgentDeliveryEvent(ctx, event, event.Sequence)
+		require.NoError(t, err)
+		_, err = repo.ProjectCanonicalAgentDeliveryEvent(ctx, event, nil)
+		require.NoError(t, err)
+	}
+	messages, err = repo.ListMessages(ctx, seed.SessionID)
+	require.NoError(t, err)
+	require.Len(t, messages, 3, "separate native replies must not append to one historical row")
+	for reply := range 2 {
+		want := fmt.Sprintf("native-%d", reply)
+		var found bool
+		for _, message := range messages {
+			if message.Content == want+want {
+				require.Equal(t, want, message.TurnID)
+				found = true
+			}
+		}
+		require.True(t, found, "missing native reply %d", reply)
 	}
 }
