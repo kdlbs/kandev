@@ -53,6 +53,86 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+### Twentieth complete hosted result: successful repeat above budget
+
+Head `330685e321c58` and actual PR merge `61c9e46c2995` have exactly the
+same source tree as the accepted nineteenth run. All three complete
+workflows pass: backend `38668854073` in 12m19s (208.73 runner-minutes),
+frontend `38668853861` in 12m40s (26.55), and E2E `38668853888` in 16m05s
+(277.62). Complete elapsed is 965 seconds and occupancy is 512.90
+runner-minutes. Every one of the 75 core jobs succeeds. This repeat exceeds
+900 seconds, so acceptance remains 1/3. Do not report only the favorable
+14m17s sample or claim a sustained fifteen-minute ceiling.
+
+The Build catalog binds the actual merge, run and producer attempt one.
+All 3,957 E2E identities remain: 3,907 first passes, ten retry passes, forty
+existing skips and zero final failures/timeouts. Frontend preserves all
+26,541 case identities/outcomes and 2,956 files. The ten backend native-report
+cohorts preserve all 35,580 top-level executions and outcomes exactly from
+run 19: 34,956 passes and 624 existing skips. Both repository modes retain
+all 1,932 native names, disjoint complete selection and source provenance.
+Other mandatory Windows/PostgreSQL18/resource checks also succeed.
+
+Build readiness is 158 seconds; the final-finishing normal shard 13 waits
+132 seconds, runs 605 seconds, then reporting/completion adds 70 seconds.
+E2E execution critical path is 826 seconds versus 802 previously. E2E
+occupancy decreases by 1.85 runner-minutes while full elapsed increases by
+108 seconds. Retain that scheduling/retry variation rather than attributing
+all elapsed movement to code or inferring an account quota. All 28 resource
+outcomes have four available CPUs, zero swap or memory events, and lifetime
+cgroup peaks of 7.72-9.11 GiB. The preceding accepted run's range is
+8.00-9.19 GiB, also without swap or memory events.
+
+Continue sequential complete measurements on the retained implementation.
+The maintainer accepts jobs around seventeen minutes and asks to focus on
+full E2E; this repeat adds no new optimization of those close jobs. Required
+final-head checks/reviews and the authorized merge remain outstanding.
+
+### Nineteenth complete hosted result: first accepted set
+
+The full current-main merge at `5d6ac7137d2e` (PR head `7877b26ecbf5`)
+passes all three complete workflows: backend run `38666763988` in 12m46s,
+frontend `38666764000` in 12m16s, and full E2E `38666763963` in 14m17s.
+All 75 selected core jobs succeed, including PostgreSQL 16/18, every native
+Windows cohort, both frontend shards, all 28 normal and six container E2E
+shards, desktop smoke and both Kubernetes compatibility checks. Complete-set
+elapsed is 857 seconds; occupancy is 200.65, 29.65 and 279.47 runner-minutes
+respectively (509.77 total). Execution critical paths are 758, 730 and 802
+seconds. Accepted complete sets are now 1/3; this is not final delivery.
+
+Every one of the 3,957 native E2E identities matches the previous catalog:
+3,910 first passes, seven retry passes, forty existing skips and zero final
+failures/timeouts. Frontend retains all 26,540 prior case identities/outcomes
+plus the deliberate continuation fixture regression case (26,541 total,
+2,956 file identities). All 612 top-level ACP identities remain and pass;
+the bounded storage case takes 7.58 seconds. The complete-set acceptance
+receipt checks native source/run/producer-attempt provenance, job-name
+multisets, mandatory outcomes and reports, not just a green status rollup.
+
+The four ordinary Linux, three SQLite repository and three PostgreSQL16
+repository artifacts contain 35,580 top-level executions: 34,956 passes
+and 624 existing skips. Both repository modes enumerate the same 1,932
+native names, select them exactly once across their three cohorts and
+validate complete outcomes against that selection. All six manifests bind
+to the actual tested merge. Other mandatory platform/resource jobs remain
+covered by successful required outcomes and selector contracts.
+
+E2E Build is ready after 2m41s. The final-finishing normal shard 26 waits
+3m29s after Build and runs 7m14s; reporting/completion then adds 53 seconds.
+The previous successful full E2E was 17m20s, so this sample is 3m03s (17.6%)
+faster. E2E occupancy falls 16.82 runner-minutes (5.7%), with queue and retry
+variation retained. This comparison does not establish a sustained ceiling.
+The failed eighteenth sample remains visible and does not count.
+
+The sole PR monitor finishes after matching terminal snapshots: 89 passed,
+nine ancillary skipped, zero failed/pending, with complete evidence. The
+post-wait exact-head snapshot has no unresolved/hidden threads or errors.
+Exact-head review bodies are empty; that is not substantive review approval.
+A normal integration of main into the PR branch produces head
+`330685e321c58` with exactly the same source tree as this accepted PR merge,
+so fresh measurements also cover the current-main source. No new speed
+change, paid capacity, skipped coverage or retry increase accompanies it.
+
 ### Eighteenth complete hosted result
 
 The complete set at `86ab60445c37` is not accepted: backend run

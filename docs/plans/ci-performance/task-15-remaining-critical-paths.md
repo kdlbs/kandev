@@ -61,6 +61,17 @@ git diff --check
 
 ## Results
 
+### Hosted validation of the retained implementation
+
+The nineteenth full current-main set passes all 75 core jobs in 14m17s,
+including all 3,957 E2E identities and 612 ACP top-level tests. Both repaired
+leaf scenarios pass. A source-identical twentieth set also passes every
+core job and preserves native identities/outcomes, but takes 16m05s. Keep
+both results; one sub-fifteen-minute sample is not repeatability acceptance.
+Task 16 records complete run IDs, queue/setup/report intervals, runner
+occupancy and native report reconciliation. Further delivery measurements
+retain this implementation and the existing capacity/resource boundaries.
+
 ### Repair the eighteenth run's fixture failures
 
 Keep the single-producer implementation while repairing its two exposed leaf
