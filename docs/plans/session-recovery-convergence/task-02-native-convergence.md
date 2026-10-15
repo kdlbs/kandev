@@ -89,3 +89,11 @@ the complete journal race suite, changed-file Go lint (zero issues), specificati
 catalog validation and full specification lint. The documentation evaluator
 reports `covered` for the complete PR delta. Current-head CI and review remain
 delivery gates; these local results do not claim production recovery.
+
+CI shard 11 exposed a test synchronization issue in
+`apps/web/e2e/tests/chat/mobile-agent-goal.spec.ts`: the goal drawer's close
+button measured 43.999969px while its opening animation was still active.
+Wait for the drawer's finite animations before measuring its touch targets,
+using the existing helper already used later in the same test. Preserve the
+strict 44px minimum and retries-disabled setting. CI supplies browser validation;
+this test-only correction does not change the goal UI or recovery behavior.
