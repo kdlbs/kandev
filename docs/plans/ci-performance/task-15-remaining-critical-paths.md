@@ -61,6 +61,47 @@ git diff --check
 
 ## Results
 
+### Repair the eighteenth run's fixture failures
+
+Keep the single-producer implementation while repairing its two exposed leaf
+failures. The cancellation fixture currently starts its interruption during task
+creation, before page loading, so a loaded browser can miss the five-second
+waiting phase. Add a prepared-session mode through the existing
+`start_agent: false` and `session.launch` prepare APIs; load the page before submitting the
+original interruption through the composer. Preserve the waiting-phase check,
+zero started attempts, retained runtime, no native restore/replay, terminal
+state and usable composer. Other scenarios keep their immediate-start mode.
+
+The storage test checks persistence through bounded retention, rather than
+requiring every batch to fit a loaded host's 250ms work budget. Expire the first
+existing batch slot deliberately, then drive the same three-times-event-count
+call bound. Expected budget exhaustion must retain a live outer context;
+unexpected errors fail. Acquire the writer lease before observing settled
+cursor/deletion state so an expired acknowledgement cannot hide a commit.
+Check actual remaining inbox rows, completed-prefix accounting and acknowledged
+result deltas. Preserve journal restart equality, canonical stdout/stderr/exit,
+retired cursor and replay-expired fencing. Keep 2,000/10,000 updates, the 256-KiB
+window, byte/event ceilings, existing loop bound, production deadlines and CI
+retry policies.
+
+The prepared-session unit first fails against the old fixture, then all four
+helper cases pass. The original desktop cancellation case passes twice in
+19.9 seconds with retries disabled; the existing phone running-cancellation
+case passes in 13.6 seconds. No application UI changes. These browser checks
+use current-branch production assets; complete hosted checks still validate
+the actual current-base merge.
+
+On the exact incoming-base backend source, the unchanged storage test first
+passes three ordinary repetitions; this is not a natural local reproduction.
+A deliberately exhausted batch then reproduces its original deadline assertion.
+The repaired two stress cases pass three repetitions. A production mutation
+advancing the retired cursor without deleting receipts fails the independent
+row-count assertion (eleven expected versus twelve accounted), then both
+scratch files are restored byte for byte. The final complete ACP package
+passes all 612 top-level cases under race and atomic coverage in 30.539 seconds,
+with no skipped cases. Scoped Go lint, full web typecheck, strict changed-file
+lint and all 3,957 unchanged E2E identities pass. Hosted timing remains pending.
+
 ### Produce the native E2E catalog once per workflow
 
 Candidate I removes repeated whole-suite discovery from the 34 planned parents.

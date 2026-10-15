@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strconv"
@@ -48,24 +49,13 @@ func TestShellSnapshotDurableStorage(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, committed, replayed, "committed snapshots must survive journal restart unchanged")
 	require.Equal(t, uint64(len(events)), stream.HighWater)
-	repo := snapshotStorageRepository(t, dir)
+	repo, writer := snapshotStorageRepository(t, dir)
 	projectStorageSnapshots(t, repo, replayed, events)
 	before := readStorageShellOutput(t, repo)
 	require.Equal(t, want, before.Stdout)
 	require.Equal(t, "warning", before.Stderr)
 	require.Equal(t, 0, *before.ExitCode)
-	var retired int
-	for range len(events) * 3 {
-		result, batchErr := repo.RunAgentDeliveryRetentionBatch(t.Context(), models.AgentDeliveryRetentionBatchOptions{
-			PayloadGrace: time.Nanosecond, ReplayAge: time.Nanosecond, MaxCandidates: 1,
-		})
-		require.NoError(t, batchErr)
-		retired += result.EventRowsRetired
-		if retired == len(events) {
-			break
-		}
-	}
-	require.Equal(t, len(events), retired)
+	retireStorageSnapshots(t, repo, writer, len(events))
 	require.Equal(t, before, readStorageShellOutput(t, repo), "transport cleanup must preserve canonical command output")
 	cursor, err := repo.GetAgentDeliveryCursor(t.Context(), "snapshot-stream")
 	require.NoError(t, err)
@@ -73,7 +63,59 @@ func TestShellSnapshotDurableStorage(t *testing.T) {
 	old := storageInboxEvent(replayed[0])
 	_, err = repo.ReceiveAgentDeliveryEvent(t.Context(), old, int64(stream.HighWater))
 	require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryReplayExpired)
-	t.Logf("source_updates=2000 persisted_events=%d persisted_bytes=%d retired_events=%d", len(events), bytes, retired)
+	t.Logf("source_updates=2000 persisted_events=%d persisted_bytes=%d retired_events=%d", len(events), bytes, cursor.RetiredSequence)
+}
+
+func retireStorageSnapshots(t *testing.T, repo *sqlite.Repository, writer *sqlx.DB, count int) {
+	t.Helper()
+	var retired int64
+	for index := range count * 3 {
+		options := models.AgentDeliveryRetentionBatchOptions{
+			PayloadGrace: time.Nanosecond, ReplayAge: time.Nanosecond, MaxCandidates: 1,
+		}
+		if index == 0 {
+			options.WorkTimeout = time.Nanosecond
+		}
+		result, batchErr := repo.RunAgentDeliveryRetentionBatch(t.Context(), options)
+		if index == 0 {
+			require.ErrorIs(t, batchErr, context.DeadlineExceeded)
+			require.Zero(t, result.EventRowsRetired)
+		}
+		if batchErr != nil {
+			require.ErrorIs(t, batchErr, context.DeadlineExceeded)
+			require.NoError(t, t.Context().Err())
+		}
+		previous := retired
+		var remaining int
+		retired, remaining = settledStorageRetirement(t, writer)
+		require.Equal(t, int64(count), retired+int64(remaining))
+		if index == 0 {
+			require.Zero(t, retired)
+		}
+		if batchErr == nil {
+			require.Equal(t, retired-previous, int64(result.EventRowsRetired))
+		}
+		if retired == int64(count) {
+			break
+		}
+	}
+	require.Equal(t, int64(count), retired)
+}
+
+func settledStorageRetirement(t *testing.T, writer *sqlx.DB) (int64, int) {
+	t.Helper()
+	tx, err := writer.BeginTxx(t.Context(), nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	// The writer lease settles a possible commit whose acknowledgement expired.
+	_, err = tx.ExecContext(t.Context(), `UPDATE agent_delivery_retention_state SET updated_at=updated_at WHERE id=1`)
+	require.NoError(t, err)
+	var retired int64
+	var remaining int
+	require.NoError(t, tx.GetContext(t.Context(), &retired, `SELECT retired_sequence FROM agent_delivery_cursors WHERE stream_id='snapshot-stream'`))
+	require.NoError(t, tx.GetContext(t.Context(), &remaining, `SELECT COUNT(*) FROM agent_delivery_inbox WHERE stream_id='snapshot-stream'`))
+	require.NoError(t, tx.Rollback())
+	return retired, remaining
 }
 
 func collectStorageSnapshots(t *testing.T) ([]AgentEvent, string) {
@@ -101,7 +143,7 @@ func collectStorageSnapshots(t *testing.T) ([]AgentEvent, string) {
 	return events, want
 }
 
-func snapshotStorageRepository(t *testing.T, dir string) *sqlite.Repository {
+func snapshotStorageRepository(t *testing.T, dir string) (*sqlite.Repository, *sqlx.DB) {
 	t.Helper()
 	w, err := db.OpenSQLite(filepath.Join(dir, "backend.db"))
 	require.NoError(t, err)
@@ -109,14 +151,15 @@ func snapshotStorageRepository(t *testing.T, dir string) *sqlite.Repository {
 	r, err := db.OpenSQLiteReader(filepath.Join(dir, "backend.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = r.Close() })
-	repo, err := sqlite.NewWithDB(sqlx.NewDb(w, "sqlite3"), sqlx.NewDb(r, "sqlite3"), nil)
+	writer := sqlx.NewDb(w, "sqlite3")
+	repo, err := sqlite.NewWithDB(writer, sqlx.NewDb(r, "sqlite3"), nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = repo.Close() })
 	require.NoError(t, repo.CreateWorkspace(t.Context(), &models.Workspace{ID: "snapshot-workspace", Name: "Snapshot fixture"}))
 	require.NoError(t, repo.CreateTask(t.Context(), &models.Task{ID: "snapshot-task", WorkspaceID: "snapshot-workspace", Title: "Snapshot fixture"}))
 	require.NoError(t, repo.CreateTaskSession(t.Context(), &models.TaskSession{ID: "snapshot-session", TaskID: "snapshot-task", QueueIncarnationID: "snapshot-incarnation"}))
 	require.NoError(t, repo.CreateTurn(t.Context(), &models.Turn{ID: "snapshot-turn", TaskID: "snapshot-task", TaskSessionID: "snapshot-session"}))
-	return repo
+	return repo, writer
 }
 
 func projectStorageSnapshots(t *testing.T, repo *sqlite.Repository, entries []journal.Event, events []AgentEvent) {

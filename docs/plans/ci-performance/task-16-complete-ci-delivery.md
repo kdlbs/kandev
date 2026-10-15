@@ -53,6 +53,32 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+### Eighteenth complete hosted result
+
+The complete set at `86ab60445c37` is not accepted: backend run
+`38663231645` fails in 13m37s, frontend `38663231641` passes in 8m54s and
+E2E `38663231680` fails in exactly 15m00s. Occupancy is 204.83, 21.57 and
+286.38 runner-minutes respectively (512.78 total). E2E includes 2m20s to
+Build readiness, 11m33s to the final container shard and 1m07s reporting.
+All 3,957 selected native identities match: 3,906 first passes, ten retry-only
+passes, one final failure and forty existing skips. Acceptance remains 0/3.
+
+The catalog producer artifact is bound to actual merge
+`c8b1ee07abab72633425b46f161efd9bb5b2cfc9`, this run and producer attempt one.
+Normal shard nine dispatches in 2.155 seconds after its test step starts;
+earlier observed parent setup took 23.4-25.8 seconds. E2E occupancy falls
+9.90 runner-minutes from the preceding candidate, with workload/retry/queue
+variation retained. All 28 normal resource snapshots show zero swap and memory
+events, with a maximum lifetime cgroup peak of 9.13 GiB.
+
+The two leaf failures are a storage fixture requiring success from every
+250ms retention batch, and cancellation missing its waiting phase because the
+fixture launches before browser startup. Their aggregates preserve failure.
+The new report's exact native-attempt reconciliation succeeds. Current-head
+checks finish with 85 passes, four failures and nine skips, no pending checks,
+review threads or exact-head review bodies. Both leaf failures require repair
+before another complete measurement; the failed timing is not delivery.
+
 ### Seventeenth complete hosted result
 
 All three fully selected workflows pass at `d7aba03e20a3`: backend run
