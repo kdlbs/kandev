@@ -44,6 +44,7 @@ No private payloads or live native conversations belong in fixtures.
 6. [Projected terminal delivery recovery](task-06-terminal-delivery-recovery.md).
 7. [Native resume prompt readiness](task-07-native-prompt-readiness.md).
 8. [Native async turn ownership](task-08-native-async-turn-ownership.md).
+9. [Cancellation recovery visibility](task-09-cancel-recovery-visibility.md).
 
 Each work order is executed here sequentially. Native restoration and retirement
 are never prompt authority. Historical labels, hashes, cursors and independent

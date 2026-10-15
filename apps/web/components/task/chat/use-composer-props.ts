@@ -60,10 +60,7 @@ function deliveryRecoveryBlockPresentation(session: ChatPanelState["session"]) {
   );
   return {
     requiresRecovery: Boolean(blocks?.length),
-    hasDeliveryRecoveryBlock:
-      blocks?.some(
-        (block) => block.reason !== "unknown_prompt_outcome" || !block.delivery_submission_id,
-      ) ?? false,
+    hasDeliveryRecoveryBlock: Boolean(blocks?.length),
   };
 }
 

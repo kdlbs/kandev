@@ -200,21 +200,41 @@ describe("canonical interrupted prompt recovery", () => {
     expect(result.current.needsRecovery).toBe(true);
   });
 
-  it("keeps existing Resume available for canonical interrupted work without a recovery record", () => {
-    const args = composerArgs();
-    args.panelState.needsRecovery = false;
-    args.panelState.session = {
-      session_recovery_blocks: [
-        {
-          id: "block-1",
-          reason: "unknown_prompt_outcome",
-          consumer_reference: "agent_delivery",
-          delivery_submission_id: "canonical-submission",
-        },
-      ],
-    } as never;
-    const { result } = renderHook(() => useComposerProps(args));
-    expect(result.current.uncertainDelivery).toBe(false);
-    expect(result.current.needsRecovery).toBe(true);
-  });
+  it.each([undefined, "restored", "settled"])(
+    "shows interrupted delivery recovery after cancel with %s historical metadata",
+    (phase) => {
+      const args = composerArgs();
+      args.panelState.needsRecovery = false;
+      args.panelState.session = {
+        session_recovery_blocks: [
+          {
+            id: "block-1",
+            reason: "unknown_prompt_outcome",
+            consumer_reference: "agent_delivery",
+            delivery_submission_id: "canonical-submission",
+            delivery_stream_id: "",
+          },
+        ],
+      } as NonNullable<ChatPanelState["session"]>;
+      args.panelState.isWorking = false;
+      args.panelState.session.metadata = phase
+        ? {
+            agent_delivery_recovery: {
+              ...deliveryIdentity,
+              phase,
+              revision: 4,
+              harness_generation: 2,
+            },
+          }
+        : undefined;
+      const { result, rerender } = renderHook(() => useComposerProps(args));
+      expect(result.current.uncertainDelivery).toBe(true);
+      expect(result.current.deliveryRecoveryPhase).toBe("uncertain");
+      expect(result.current.needsRecovery).toBe(true);
+      args.panelState.session.session_recovery_blocks = [];
+      rerender();
+      expect(result.current.uncertainDelivery).toBe(false);
+      expect(result.current.needsRecovery).toBe(false);
+    },
+  );
 });

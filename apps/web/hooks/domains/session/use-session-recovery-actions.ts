@@ -7,7 +7,7 @@ import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery
 import { isProviderRestoredResumeEligible } from "./session-recovery-eligibility";
 import {
   deliveryRecoveryRequestIdentity,
-  canResumeLegacyDeliveryBlock,
+  canResumeDeliveryBlock,
   isDeliveryRecoveryResultCurrent,
   persistedDeliveryRecoveryNotice,
 } from "./session-delivery-recovery-view";
@@ -533,7 +533,7 @@ export function useSessionRecoveryActions({
 
   return {
     busyAction: sharedBusyAction ?? busyAction,
-    deliveryResumeAvailable: canResumeLegacyDeliveryBlock(
+    deliveryResumeAvailable: canResumeDeliveryBlock(
       persistedDeliveryRecovery,
       deliveryRecoveryBlock,
     ),
