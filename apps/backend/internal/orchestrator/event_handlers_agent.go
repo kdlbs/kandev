@@ -4647,5 +4647,8 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 // terminal state unless an active LSP lease still owns that execution. This
 // runs in a goroutine so it doesn't block the event handler.
 func (s *Service) cleanupAgentExecution(executionID, taskID, sessionID string) {
-	s.cleanupAgentExecutionWithReason(context.Background(), executionID, taskID, sessionID, "agent completed")
+	ctx := context.Background()
+	if executionID != "" && s.cleanupAgentExecutionWithReason(ctx, executionID, taskID, sessionID, completedExecutionCleanupReason) {
+		s.settleBackgroundWorkAfterTeardown(ctx, sessionID, executionID)
+	}
 }

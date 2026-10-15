@@ -91,6 +91,17 @@ A later failure keeps its own recovery controls.
 
 <a id="experimental-interruption-continuation"></a>
 
+### Background workload cleanup
+
+Kandev marks open background workloads as **Ended** once it confirms that their
+owning agent process is gone. This also cleans up stale entries after a backend
+restart. Ended means that the process stopped without a reported outcome; it does
+not mean the work succeeded.
+
+A live process, failed liveness probe, or unresolved retained-agent recovery keeps
+work open. A terminal session state alone does not prove that teardown finished.
+If a delayed provider completion arrives, Kandev retains its actual outcome.
+
 ### Interruption continuation
 
 Interrupted conversation continuation is supported by default for eligible

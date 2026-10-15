@@ -4040,6 +4040,8 @@ func (s *Service) completeAndStopSession(ctx context.Context, taskID string, ses
 			s.logger.Warn("failed to stop agent for session switch",
 				zap.String("session_id", session.ID),
 				zap.Error(stopErr))
+		} else {
+			s.settleBackgroundWork(ctx, session.ID, execID)
 		}
 	}
 }
