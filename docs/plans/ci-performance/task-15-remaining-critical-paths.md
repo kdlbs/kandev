@@ -61,6 +61,51 @@ git diff --check
 
 ## Results
 
+### Preserve the winning Office execution on duplicate start refusal
+
+The twenty-third full set's remaining file-panel failure exposes an existing
+launch-ownership defect. Its native trace changes the Office session from
+`IDLE` to `FAILED` with `execution already running`. A focused real
+`StartTaskWithEnv`/SQLite reproduction confirms the general start caller fails
+an already-running Office session after the executor refuses a duplicate
+dispatch. No second agent is dispatched. The prepared-session start caller
+already handles this sentinel without recording a failed launch.
+
+Under Task 16's demonstrated-existing-contract repair scope, apply that same
+refusal handling to the general start caller after settling only a turn owned
+by the losing call. Return the original typed refusal. Preserve the live
+session, execution identity, environment and existing failure handling for
+genuine launch errors. Do not alter Office scheduling, retries, recovery UI,
+credentials, lifecycle deadlines or CI selection. Keep the original native
+file-panel scenario and all its assertions.
+
+Remove that file-panel case's generic fresh-agent recovery fallback. It is
+invalid for scheduler-owned Office tasks and masks the launch failure with
+another launch attempt. The case retains its original navigation, visible
+Files panel and exact `.gitkeep` tree-row assertion. Office onboarding launch
+and the existing scheduler-only start/resume checks remain the launch owners;
+generic recovery-dialog behavior belongs to its dedicated recovery scenarios.
+Preserve the native case identity, original deadline and retries.
+
+Convert the reproducer to a focused regression through the real start boundary;
+assert the running state, native execution identity and single session, and
+reject any duplicate manager dispatch. Retain the existing genuine-failure
+regression. Verify both with the race detector, affected Go lint and all five
+Office advanced-mode browser cases against a fresh backend build. Then measure
+the next complete hosted set. No timing savings are claimed from local checks.
+
+The real-guard reproduction fails before the three-line caller repair. All
+three focused checks pass afterward, including the existing genuine-failure
+and sequential Office-reuse cases. The identity assertion initially populated
+only a session projection; the corrected fixture seeds the runtime ledger,
+checks its initial identity and verifies it survives the refusal. The affected
+Office/start cases pass with the race detector, and affected Go lint reports
+zero issues. All five unchanged Office scenario identities pass against a fresh
+backend/web build in 29.6 seconds with browser retries disabled. The exact
+3,957-case native E2E inventory and affected-spec lint/format pass. The new
+backend case is the only approved backend inventory addition; all prior cases
+and outcomes remain required. Hosted timing and full coverage remain pending.
+
 ### Make the twenty-second run's setup checkpoints causal
 
 Keep the two previous repairs: their hosted tool-completion and native lane
@@ -104,7 +149,10 @@ is removed. Full web typecheck, strict affected-file lint/format and all 3,957
 native E2E identities pass. Frontend adds exactly three named readiness cases
 in the existing session-helper file, for 26,553 expected cases and 2,956 files.
 The prior nine gesture cases remain. Each approved addition list is checked
-against its actual source hash. Hosted timing/coverage acceptance is pending.
+against its actual source hash. The twenty-third hosted set confirms all four
+changed browser cases pass first-attempt, preserves every native E2E identity
+and accepts exactly those frontend additions. Full E2E still fails a separate
+Office file-panel case in 15m41s; Task 16 records that rejected measurement.
 
 ### Repair the twenty-first run's settled-tool and drag-release failures
 

@@ -53,7 +53,63 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
-### Next candidate: causal startup, queue and persistence checkpoints
+### Next candidate: preserve a live Office session on duplicate launch
+
+The real executor-guard reproduction fails before the repair: the losing
+Office start changes the live session to `FAILED` without dispatching another
+agent. The general start caller now returns that typed refusal before failed
+launch bookkeeping, matching the prepared-session caller. Three focused checks
+pass afterward, including actual persisted execution identity, genuine failure
+settlement and ordinary Office session reuse. The identity check initially
+seeded only the session projection; the corrected fixture uses the canonical
+runtime ledger and verifies its initial state before exercising the start.
+
+Remove the file-panel case's unsupported generic fresh-agent recovery fallback.
+Retain its native identity, navigation, visible Files panel, exact `.gitkeep`
+row assertion, original timeout and retries. All five Office advanced-mode
+cases remain, and native collection retains all 3,957 E2E identities. Strict
+affected-spec lint/format pass. The temporary reproduction is replaced by one
+permanent Go regression, for 35,581 expected top-level backend executions;
+frontend remains 26,553 cases. The hosted comparison permits only this named
+passed addition in its existing ordinary cohort, bound to the test-source hash.
+The affected Office/start cases pass with the race detector, and affected Go
+lint reports zero issues. All five Office browser cases pass against a fresh
+backend/web build in 29.6 seconds with retries disabled. Documentation catalog,
+spec lint and diff checks pass. Hosted timing and full coverage remain pending;
+acceptance remains 1/3 and no next hosted set is running yet.
+
+### Twenty-third complete hosted result: one Office failure
+
+Head `aae902e2468e` passes backend `38678701709` in 12m35s (207.43
+runner-minutes) and frontend `38678701852` in 12m40s (27.00). Full E2E
+`38678701770` fails in 15m41s (278.93), with an execution critical path of
+823 seconds. Complete occupancy is 513.37 runner-minutes. All 75 core jobs
+are selected. The failed set exceeds 900 seconds and does not count;
+accepted complete sets remain 1/3.
+
+The source/run/producer-attempt-bound native reports retain all 3,957 E2E
+identities: 3,906 first passes, ten retry passes, one final failure and the
+same forty existing skips. Frontend preserves all previous identities and
+outcomes plus exactly the approved nine gesture and three readiness cases:
+26,553 cases in 2,956 files. All ten backend native-report cohorts preserve
+35,580 identities/outcomes. Normal resource snapshots retain four CPUs,
+zero swap or memory events and 7.93-9.24 GiB lifetime peaks.
+
+All four browser cases changed in this candidate pass on their first attempts:
+both phone cancellation cases, preview queueing and sidebar presentation.
+The remaining failure is Office advanced mode's workspace-files case, on
+both attempts. Its trace shows the existing session changing from `IDLE`
+to `FAILED` with `execution already running`; the generic fresh-session
+fallback then fails the scheduler-owned Office launch-context check. The
+unchanged case passes locally in seven seconds. Diagnose the losing-launch
+failure path before changing product code or replacing the file-tree oracle.
+
+Exact-head checks are terminal: 87 passed, two failed contexts (the leaf and
+required aggregate), ten ancillary skips and zero pending. Evidence is complete,
+with no unresolved or hidden threads, current-head review bodies, or errors.
+No new hosted set is active while the remaining failure is investigated.
+
+### Twenty-third candidate: causal startup, queue and persistence checkpoints
 
 The shared Quick Chat baseline now requires both a completed opening turn and
 the existing addressed-session settled state. Preview uses the existing real
