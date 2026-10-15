@@ -58,3 +58,18 @@ Extend native-resume-notice fixtures for the exact bound block with an empty
 stream and no error metadata; desktop/mobile CI must verify Resume, retirement,
 same native identity, no old prompt replay, reload and a new prompt.
 No local browser or E2E execution, per user instruction. CI and review pending.
+
+## CI remediation
+
+CI caught the fallback banner displacing an existing crash recovery card and
+hiding Start fresh session. Preserve the current card for a bound submission;
+use the fallback when no card exists. Persisted active delivery recovery retains
+priority. Three regression cases reproduced this failure locally.
+
+The phone toolbar tests also exposed a stale workflow placement after startup:
+the task detail refresh returned Review, but the canonical task used by Proceed
+still held the boot-time In Progress step. Reconcile accepted detail reads into
+the canonical overview using its existing read journal and timestamp guards.
+The focused regression reproduces the missing action and preserves a newer live
+move while the refresh is in flight. Existing desktop crash and phone toolbar
+E2E assertions remain intact; CI owns execution.

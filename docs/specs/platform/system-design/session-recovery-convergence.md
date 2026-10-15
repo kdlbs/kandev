@@ -102,8 +102,11 @@ block without active recovery metadata, the composer offers explicit Resume thro
 transaction. Retry remains available for missing-record reconstruction, alongside
 Stop. An open block outranks a historical restored snapshot; changing that block
 invalidates pending UI results. A cancellation status or idle session state cannot
-hide an open delivery block when no error card exists. Desktop and phone expose
-the same guarded actions.
+hide an open delivery block when no error card exists. If a current error card
+already owns the bound submission, preserve its recovery choices rather than
+replacing it with the fallback banner. Active uncertain/reconnecting protocol
+metadata retains precedence over that card. Desktop and phone expose the same
+guarded actions.
 
 ## Verification
 

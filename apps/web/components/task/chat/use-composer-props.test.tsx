@@ -1,7 +1,15 @@
 import { renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useComposerProps } from "./use-composer-props";
 import type { ChatPanelState } from "./use-chat-panel-state";
+
+const recovery = vi.hoisted(() => ({ hasCard: false }));
+vi.mock("./session-recovery-context", () => ({
+  useSessionComposerRecovery: () => ({ model: recovery.hasCard ? { kind: "generic" } : null }),
+}));
+afterEach(() => {
+  recovery.hasCard = false;
+});
 
 function composerArgs(): Parameters<typeof useComposerProps>[0] {
   return {
@@ -170,6 +178,57 @@ describe("useComposerProps", () => {
 
     expect(result.current.uncertainDelivery).toBe(false);
     expect(result.current.deliveryRecoveryPhase).toBeUndefined();
+  });
+});
+
+describe("recovery card ownership", () => {
+  it.each([undefined, "restored", "settled"])(
+    "preserves the existing recovery card for a bound crash with %s metadata",
+    (phase) => {
+      recovery.hasCard = true;
+      const args = composerArgs();
+      args.panelState.session = {
+        session_recovery_blocks: [
+          {
+            id: "block-1",
+            reason: "unknown_prompt_outcome",
+            consumer_reference: "agent_delivery",
+            delivery_submission_id: "canonical-submission",
+            delivery_stream_id: "stream-1",
+          },
+        ],
+        metadata: phase
+          ? {
+              agent_delivery_recovery: {
+                ...deliveryIdentity,
+                phase,
+                revision: 4,
+                harness_generation: 2,
+              },
+            }
+          : {},
+      } as NonNullable<ChatPanelState["session"]>;
+      const { result } = renderHook(() => useComposerProps(args));
+      expect(result.current.uncertainDelivery).toBe(false);
+      expect(result.current.needsRecovery).toBe(true);
+    },
+  );
+
+  it("keeps active delivery recovery in control even with an existing error card", () => {
+    recovery.hasCard = true;
+    const args = composerArgs();
+    args.panelState.session = {
+      metadata: {
+        agent_delivery_recovery: {
+          ...deliveryIdentity,
+          phase: "uncertain",
+          revision: 1,
+          harness_generation: 2,
+        },
+      },
+    } as NonNullable<ChatPanelState["session"]>;
+    const { result } = renderHook(() => useComposerProps(args));
+    expect(result.current.uncertainDelivery).toBe(true);
   });
 });
 
