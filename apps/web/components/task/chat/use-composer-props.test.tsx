@@ -4,12 +4,15 @@ import { useComposerProps } from "./use-composer-props";
 import type { ChatPanelState } from "./use-chat-panel-state";
 import { sessionId, taskId } from "@/lib/types/http";
 
-const recovery = vi.hoisted(() => ({ hasCard: false }));
+const recovery = vi.hoisted(() => ({ hasCard: false, requestLocal: false }));
 vi.mock("./session-recovery-context", () => ({
-  useSessionComposerRecovery: () => ({ model: recovery.hasCard ? { kind: "generic" } : null }),
+  useSessionComposerRecovery: () => ({
+    model: recovery.hasCard ? { kind: "generic", requestLocal: recovery.requestLocal } : null,
+  }),
 }));
 afterEach(() => {
   recovery.hasCard = false;
+  recovery.requestLocal = false;
 });
 
 function composerArgs(): Parameters<typeof useComposerProps>[0] {
@@ -62,6 +65,8 @@ function composerArgs(): Parameters<typeof useComposerProps>[0] {
     onClarificationResolved: vi.fn(),
   };
 }
+
+const FIXTURE_TIME = "2026-10-15T10:00:00Z";
 
 const deliveryIdentity = {
   session_id: "session-1",
@@ -222,8 +227,8 @@ describe("recovery card ownership", () => {
       id: sessionId("session-1"),
       task_id: taskId("task-1"),
       state: "WAITING_FOR_INPUT",
-      started_at: "2026-10-15T10:00:00Z",
-      updated_at: "2026-10-15T10:00:00Z",
+      started_at: FIXTURE_TIME,
+      updated_at: FIXTURE_TIME,
       metadata: {
         agent_delivery_recovery: {
           ...deliveryIdentity,
@@ -302,4 +307,36 @@ describe("canonical interrupted prompt recovery", () => {
       expect(result.current.needsRecovery).toBe(false);
     },
   );
+});
+
+it("keeps bound delivery controls when automatic launch reports a request-local failure", () => {
+  const args = composerArgs();
+  args.panelState.session = {
+    id: sessionId("session-1"),
+    task_id: taskId("task-1"),
+    state: "WAITING_FOR_INPUT",
+    started_at: FIXTURE_TIME,
+    updated_at: FIXTURE_TIME,
+    session_recovery_blocks: [
+      {
+        id: "block-1",
+        reason: "unknown_prompt_outcome",
+        consumer_reference: "agent_delivery",
+        delivery_submission_id: "canonical-submission",
+        incarnation_id: "inc-1",
+        expected_generation: 1,
+        updated_at: FIXTURE_TIME,
+      },
+    ],
+  };
+  const { result, rerender } = renderHook(() => useComposerProps(args));
+  expect(result.current.uncertainDelivery).toBe(true);
+  recovery.hasCard = true;
+  recovery.requestLocal = true;
+  rerender();
+  expect(result.current.uncertainDelivery).toBe(true);
+  expect(result.current.needsRecovery).toBe(true);
+  args.panelState.session.session_recovery_blocks = [];
+  rerender();
+  expect(result.current.uncertainDelivery).toBe(false);
 });

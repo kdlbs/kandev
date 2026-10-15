@@ -73,3 +73,11 @@ the canonical overview using its existing read journal and timestamp guards.
 The focused regression reproduces the missing action and preserves a newer live
 move while the refresh is in flight. Existing desktop crash and phone toolbar
 E2E assertions remain intact; CI owns execution.
+
+The next CI run passed the crash and phone toolbar cases, but both new cancelled
+recovery tests exposed a page-load race: rejected automatic resume and workspace
+restore requests created a request-local generic card that displaced the block's
+Resume/Retry/Stop controls. Track request-local model provenance and let persisted
+session recovery cards, not automatic request failures, displace the fallback.
+The regression failed before correction; 72 focused tests now pass. Desktop and
+mobile E2E assertions are unchanged and remain CI-only.

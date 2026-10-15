@@ -105,8 +105,9 @@ invalidates pending UI results. A cancellation status or idle session state cann
 hide an open delivery block when no error card exists. If a current error card
 already owns the bound submission, preserve its recovery choices rather than
 replacing it with the fallback banner. Active uncertain/reconnecting protocol
-metadata retains precedence over that card. Desktop and phone expose the same
-guarded actions.
+metadata retains precedence over that card. Request-local automatic launch failures
+do not displace the open block controls; they do not establish a separate persisted
+agent failure. Desktop and phone expose the same guarded actions.
 
 ## Verification
 

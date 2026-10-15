@@ -117,7 +117,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
   const composerRecovery = useSessionComposerRecovery(resolvedSessionId);
   const { hasDeliveryRecoveryBlock, requiresRecovery } = deliveryRecoveryBlockPresentation(
     panelState.session,
-    Boolean(composerRecovery?.model),
+    Boolean(composerRecovery?.model && !composerRecovery.model.requestLocal),
   );
   const legacyUncertainDelivery = panelState.lastAgentError?.code === DURABLE_DELIVERY_UNCERTAIN;
   const recoveryPresentation = deliveryRecoveryPresentation(
