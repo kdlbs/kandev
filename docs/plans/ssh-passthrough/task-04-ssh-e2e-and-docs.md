@@ -267,3 +267,11 @@ same resource limits. The previously failing read-only Resume completed in
 17.2 seconds. Both phone diff renderer cases passed in 42.6 seconds. The full
 lifecycle race suite passed in 303.752 seconds. Changed-package Go lint,
 targeted frontend lint, formatting, and documentation checks passed.
+
+
+A later CI run exhausted the shared 60-second deadline in the integration
+shortcut test. The same failure reproduced with one CPU and 4 GiB memory.
+Each of the six integration journeys now has its own test. All record, save,
+reload, navigation, reset, and default-command assertions remain. All six
+tests passed without retries in 2.2 minutes under the same resource limits.
+Targeted ESLint and formatting checks passed.

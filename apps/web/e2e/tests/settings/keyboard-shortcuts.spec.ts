@@ -253,31 +253,30 @@ test.describe("Integration navigation hotkeys", () => {
     await expect(recorder).toHaveAccessibleDescription("Tab");
   });
 
-  test("records, saves, reloads, opens and resets every integration page", async ({
-    testPage,
-    apiClient,
-  }) => {
-    const destinations = [
-      ["azure-devops", "/azure-devops"],
-      ["github", "/github"],
-      ["gitlab", "/gitlab"],
-      ["jira", "/jira"],
-      ["linear", "/linear"],
-      ["sentry", "/settings/integrations/sentry"],
-    ];
-    await testPage.goto(KEYBOARD_SETTINGS_PATH);
-    for (const [slug] of destinations) {
-      await expect(testPage.getByTestId(`shortcut-recorder-integration:${slug}`)).toContainText(
-        "Unbound",
-      );
-    }
-    for (const [slug, destination] of destinations) {
+  const destinations = [
+    ["azure-devops", "/azure-devops"],
+    ["github", "/github"],
+    ["gitlab", "/gitlab"],
+    ["jira", "/jira"],
+    ["linear", "/linear"],
+    ["sentry", "/settings/integrations/sentry"],
+  ];
+  for (const [slug, destination] of destinations) {
+    test(`records, saves, reloads, opens and resets the ${slug} integration`, async ({
+      testPage,
+      apiClient,
+    }) => {
+      await testPage.goto(KEYBOARD_SETTINGS_PATH);
+      for (const [initialSlug] of destinations) {
+        await expect(
+          testPage.getByTestId(`shortcut-recorder-integration:${initialSlug}`),
+        ).toContainText("Unbound");
+      }
       await recordIntegrationShortcut(testPage, slug);
       await saveIntegrationShortcuts(testPage);
       await testPage.reload();
       const recorder = testPage.getByTestId(`shortcut-recorder-integration:${slug}`);
       await expect(recorder).toContainText("G");
-      // Re-recording the already saved chord must stay in settings.
       await recordIntegrationShortcut(testPage, slug);
       await expect(testPage).toHaveURL(new RegExp(`${KEYBOARD_SETTINGS_PATH}$`));
       await testPage.goto("/");
@@ -291,11 +290,11 @@ test.describe("Integration navigation hotkeys", () => {
       expect(
         (await apiClient.getUserSettings()).settings.keyboard_shortcuts ?? {},
       ).not.toHaveProperty(`integration:${slug}`);
-    }
-    await testPage.goto("/");
-    await testPage.keyboard.press("Control+k");
-    await expect(testPage.getByRole("dialog")).toBeVisible();
-  });
+      await testPage.goto("/");
+      await testPage.keyboard.press("Control+k");
+      await expect(testPage.getByRole("dialog")).toBeVisible();
+    });
+  }
 
   test("warns about conflicting navigation chords and navigates once", async ({ testPage }) => {
     await testPage.goto(KEYBOARD_SETTINGS_PATH);
