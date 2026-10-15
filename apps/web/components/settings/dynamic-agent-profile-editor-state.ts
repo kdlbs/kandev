@@ -32,6 +32,7 @@ type DynamicAgentProfileEditorStateProps = {
 
 export type DynamicAgentProfileEditorState = {
   name: string;
+  dynamicVersion: number;
   profileEnabled: boolean;
   standalone: boolean;
   hasExternalConflict: boolean;
@@ -270,6 +271,7 @@ export function useDynamicAgentProfileEditorState({
     updateCandidate: draft.updateCandidate,
     updateCandidatePolicy: draft.updateCandidatePolicy,
     candidates: draft.candidates,
+    dynamicVersion: draft.dynamicVersion,
     discardDraft: draft.reset,
   };
 }

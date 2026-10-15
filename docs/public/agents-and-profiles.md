@@ -595,7 +595,7 @@ selected for new work, when dynamic routing is disabled. A new profile starts
 with its name and candidates; enable or disable it later from the profile
 editor.
 
-**Ordered candidate tiers.**
+**Candidate tiers and selection preview.**
 
 Enable **Dynamic profile tiers** in **Settings > System > Feature Toggles** and
 restart Kandev, with dynamic routing enabled. The independent toggle is off by
@@ -603,15 +603,24 @@ default. In the dynamic profile editor, select **=** between adjacent candidates
 to join or split their tier. Move and remove controls retain candidate identity
 and saved selection metadata.
 
-This first version selects candidates in order within each tier. Existing
+Each tier head offers saved order, configured cost or random selection, plus
+same-tier-next or next-tier failure direction. Configure each candidate's cost
+class separately: free sorts before subscription, then metered, then unknown;
+equal classes keep saved row order. This is configured classification, not an
+estimate of provider prices or a change to billing identity. Random chooses
+among eligible candidates in that tier. Tier order always takes precedence.
+Existing
 failure policies still decide retries, waits and whether to continue; fallback
 does not return to an earlier tier or an already tried candidate in the same
 failure chain. A verified successful turn ends that chain. Turning tiers off
 restores flat routing while retaining the saved groups.
 
-Other saved selection modes remain stored but are not executable by this
-ordered-only version. Usage-based ranking, selection previews and running-model
-reevaluation are not included in this view.
+Use **Preview new selection** to inspect the current saved or unsaved draft.
+Preview does not save, claim a runtime slot or start an agent. Its random result
+is a sample, not a reservation of the next choice; active sessions are unchanged.
+Round-robin, usage-pace ranking and keep-model reevaluation remain later
+increments. Their stored metadata is retained, and unsupported modes are not
+silently executed as saved order.
 
 Each candidate has a policy for two shared provider-error classes:
 

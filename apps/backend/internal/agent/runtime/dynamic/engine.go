@@ -73,6 +73,7 @@ type Engine struct {
 	// same generation.
 	retryClaims  map[string]int64
 	orderedTiers bool
+	tierPick     func(int) int
 }
 
 func NewEngine(options ...EngineOption) *Engine {

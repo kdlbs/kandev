@@ -24,8 +24,12 @@ join edits retain each row's model data. No new table, policy engine or queue.
 ## Runtime and chain
 
 The existing generation-CAS/probe/failure-policy pipeline owns selection.
-Candidate runtime metadata decodes only join and tier mode/direction. Ordered
-tiers use saved row order; unsupported saved modes stay stored and are not
+Candidate runtime metadata decodes join and tier mode/direction, plus the cost
+class only for cost ranking. Tiers retain saved tier order. Within a tier, order
+retains row order, cost stably orders free/subscription/metered/unknown, and random
+promotes a uniformly sampled eligible row. Availability is observed without a
+probe; the existing final candidate check owns probe acquisition and generation
+commit. Unsupported saved modes stay stored and are not
 silently executed as order while the new flag is enabled.
 
 `PolicyStateJSON.selection_chain` holds the logical profile, initial generation,
@@ -49,7 +53,26 @@ Shared draft mutations preserve source blocks on move/delete, and spread opaque
 selection data before changing joins or head ownership. The first row cannot
 join. OFF keeps the flat controls; stored metadata survives save/reload.
 
+Each head has an explicit mode/failure-direction editor; every row can edit its
+cost classification without changing billing identity or opaque model/window
+fields. The existing single draft/save/discard/conflict flow owns these edits.
+
+## Read-only new-selection preview
+
+Saved-profile and create-draft dynamic preview POSTs close before body/profile
+reads while off. Existing organization configuration permission applies; the
+edit interlock does not block a read-only preview. Controller validation and the
+resolver's shared native candidate/binding loader feed the same pure ranking as
+execution. No model probe, provider usage request, route/probe claim or circuit
+mutation is made. Results identify eligibility, original candidate IDs, derived
+tier, mode and configured cost. Preview predicts a new chain, not an active
+session switch. Random is sampled independently unless a deterministic test
+picker is supplied. Draft revision, backend/auth identity and abort ownership
+fence late responses. No timer, ledger or queue is added.
+
 ## Requirement mapping
 
-AC-001.1: Editor and storage. AC-001.2/.3: Runtime and chain. AC-001.4: Feature
-and storage boundary. No operating configuration or installed-runtime change.
+AC-001.1/.5: Editor, storage and ranking. AC-001.2/.3: Runtime and chain.
+AC-001.4: Feature/storage boundary. AC-001.6: Read-only preview. No operating
+configuration or installed-runtime change. Round-robin, pace and keep-model
+remain original later increments.

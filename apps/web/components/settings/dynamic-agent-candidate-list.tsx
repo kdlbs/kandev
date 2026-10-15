@@ -17,6 +17,7 @@ import type {
   DynamicErrorPolicy,
 } from "@/lib/types/agent-profile";
 import { settingsActionClassName, settingsControlClassName } from "./settings-control";
+import { DynamicTierSelectionControls } from "./dynamic-tier-selection-controls";
 
 type DynamicAgentCandidateListProps = {
   candidates: DynamicAgentCandidate[];
@@ -65,7 +66,11 @@ export function DynamicAgentCandidateList({
         <div>
           <h3 className="text-sm font-medium">{t("agents:dynamicCandidates")}</h3>
           <p className="text-xs text-muted-foreground">
-            {t("agents:dynamicCandidatesDescription")}
+            {t(
+              tiersEnabled
+                ? "agents:dynamicTierCandidatesDescription"
+                : "agents:dynamicCandidatesDescription",
+            )}
           </p>
         </div>
         <AgentProfilePicker
@@ -159,6 +164,13 @@ export function DynamicAgentCandidateList({
                   </Button>
                 </div>
               </div>
+              {tiersEnabled && (
+                <DynamicTierSelectionControls
+                  candidate={candidate}
+                  head={index === 0 || !joinsPrevious(candidate)}
+                  onChange={(next) => updateCandidate(index, next)}
+                />
+              )}
               <div className="grid min-w-0 gap-4 md:grid-cols-2">
                 <DynamicPolicyEditor
                   errorClass="transient"

@@ -883,6 +883,9 @@ func startAgentInfrastructure(
 	if services.DynamicProfileResolver != nil {
 		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
 		agentSettingsController.SetRoutingCircuitReader(newRoutingCircuitReader(services.DynamicProfileResolver))
+		if cfg.Features.DynamicProfileTiers {
+			agentSettingsController.SetDynamicTierPreviewer(services.DynamicProfileResolver)
+		}
 	}
 	// An enabled automation is a standing instruction to launch against a
 	// profile. Nothing is running, so it never reaches the active-session list,

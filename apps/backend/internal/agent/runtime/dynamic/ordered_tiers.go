@@ -34,6 +34,7 @@ type orderedSelection struct {
 
 type orderedTier struct {
 	head      string
+	mode      string
 	direction string
 	rows      []Candidate
 }
@@ -70,10 +71,10 @@ func deriveOrderedTiers(candidates []Candidate) ([]orderedTier, error) {
 				direction = selection.Tier.OnFailure
 			}
 		}
-		if mode != orderedTierMode || (direction != orderedSameTier && direction != orderedNextTier) {
+		if (mode != orderedTierMode && mode != tierModeCost && mode != tierModeRandom) || (direction != orderedSameTier && direction != orderedNextTier) {
 			return nil, fmt.Errorf("dynamic tier selection mode or direction is not supported by this increment")
 		}
-		tiers = append(tiers, orderedTier{head: candidate.ID, direction: direction, rows: []Candidate{candidate}})
+		tiers = append(tiers, orderedTier{head: candidate.ID, mode: mode, direction: direction, rows: []Candidate{candidate}})
 	}
 	return tiers, nil
 }
@@ -110,21 +111,22 @@ func (e *Engine) prepareOrderedPlan(state RouteState, profile Profile, generatio
 	if continuing || fallback {
 		start = orderedStartIndex(tiers, current, excluded != "")
 	}
-	return orderedPlan{chain: chain, rows: orderedRemainingRows(tiers[start:], chain.TriedCandidateIDs, preferred)}, nil
+	unavailable := e.tierAvailability(profile, e.now())
+	return orderedPlan{chain: chain, rows: orderedRemainingRows(tiers[start:], chain.TriedCandidateIDs, preferred, unavailable, e.tierPick)}, nil
 }
 
-func orderedRemainingRows(tiers []orderedTier, triedIDs []string, preferred string) []Candidate {
+func orderedRemainingRows(tiers []orderedTier, triedIDs []string, preferred string, unavailable map[string]string, pick func(int) int) []Candidate {
 	tried := make(map[string]bool, len(triedIDs))
 	for _, id := range triedIDs {
 		tried[id] = true
 	}
 	var rows []Candidate
-	for _, tier := range tiers {
-		for _, candidate := range tier.rows {
-			if tried[candidate.ID] && candidate.ID != preferred {
+	for index, tier := range tiers {
+		for _, row := range rankTierRows(tier, index+1, tried, preferred, unavailable, pick) {
+			if !row.entry.Eligible {
 				continue
 			}
-			rows = append(rows, candidate)
+			rows = append(rows, row.candidate)
 		}
 	}
 	return rows
