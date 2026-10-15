@@ -14,6 +14,8 @@
   "providerUsageWindow": "{{window}}: {{percent}}% (reset {{reset}})",
   "providerUsageReadAt": "Read {{time}}",
   "providerUsageLimitReached": "Limit reached",
+  "orderedTierNumber": "Tier {{tier}}",
+  "orderedTierJoin": "Join the previous tier",
   "actionCannotBeUndone": "This action cannot be undone.",
   "add": "Add",
   "addProfile": "Add profile",

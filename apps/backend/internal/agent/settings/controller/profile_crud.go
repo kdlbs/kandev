@@ -235,6 +235,9 @@ func (c *Controller) createDynamicProfile(
 	if !c.dynamicAgentRoutingEnabled {
 		return nil, ErrDynamicAgentRoutingDisabled
 	}
+	if err := c.prepareTierSelections(nil, req.Dynamic); err != nil {
+		return nil, err
+	}
 	dynamicRepo, err := c.dynamicProfileRepository()
 	if err != nil {
 		return nil, err
@@ -393,6 +396,9 @@ func validateDynamicAgentProfile(profile *dto.DynamicAgentProfileDTO) error {
 		if err := normalizeDynamicCandidatePolicy(&profile.Candidates[position]); err != nil {
 			return err
 		}
+		if err := validateTierSelection(profile.Candidates[position].Policies.Selection, position); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -525,6 +531,17 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	if isDynamic && req.Dynamic != nil {
 		if req.Dynamic.Version <= 0 {
 			return nil, fmt.Errorf("dynamic profile version is required")
+		}
+		dynamicRepo, err = c.dynamicProfileRepository()
+		if err != nil {
+			return nil, err
+		}
+		_, storedRoutes, loadErr := dynamicRepo.GetDynamicAgentProfile(ctx, profile.ID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if err := c.prepareTierSelections(storedRoutes, req.Dynamic); err != nil {
+			return nil, err
 		}
 		dynamicRoutes, err = c.validateDynamicCandidates(ctx, profile.ID, req.Dynamic)
 		if err != nil {

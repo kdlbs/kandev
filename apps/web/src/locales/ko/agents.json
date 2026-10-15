@@ -14,6 +14,8 @@
   "providerUsageWindow": "{{window}}: {{percent}}% (초기화 {{reset}})",
   "providerUsageReadAt": "조회 시각 {{time}}",
   "providerUsageLimitReached": "한도 도달",
+  "orderedTierNumber": "등급 {{tier}}",
+  "orderedTierJoin": "이전 등급에 합치기",
   "actionCannotBeUndone": "이 작업은 되돌릴 수 없습니다.",
   "add": "추가",
   "addProfile": "프로필 추가",

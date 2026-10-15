@@ -854,6 +854,13 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
 		}
 		if route.RulesJSON != "" {
+			var selection struct {
+				Selection json.RawMessage `json:"selection"`
+			}
+			if err := json.Unmarshal([]byte(route.RulesJSON), &selection); err != nil {
+				return dynamic.Profile{}, err
+			}
+			candidate.SelectionJSON = selection.Selection
 			policy, legacyRules, policyErr := decodeDynamicRoutePolicy(route.RulesJSON)
 			if policyErr != nil {
 				return dynamic.Profile{}, fmt.Errorf("decode dynamic route %s: %w", route.ExecutionProfileID, policyErr)

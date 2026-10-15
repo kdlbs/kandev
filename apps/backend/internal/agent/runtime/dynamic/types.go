@@ -5,6 +5,7 @@ package dynamic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -41,11 +42,12 @@ var (
 )
 
 type Candidate struct {
-	ID         string
-	Enabled    bool
-	BindingKey string
-	Rules      map[string]Action
-	Policies   routingpolicy.Document
+	ID            string
+	Enabled       bool
+	BindingKey    string
+	Rules         map[string]Action
+	Policies      routingpolicy.Document
+	SelectionJSON json.RawMessage
 }
 
 type Profile struct {
@@ -80,6 +82,7 @@ type PolicyState struct {
 	Deadline         *time.Time                `json:"deadline,omitempty"`
 	PendingOutcome   routingpolicy.Outcome     `json:"pending_outcome"`
 	Unclassified     *UnclassifiedStreak       `json:"unclassified_streak,omitempty"`
+	SelectionChain   *SelectionChain           `json:"selection_chain,omitempty"`
 }
 
 // UnclassifiedStreak is the bounded durable identity for one sequence of

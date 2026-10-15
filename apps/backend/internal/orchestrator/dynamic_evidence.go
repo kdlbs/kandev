@@ -871,6 +871,7 @@ func (s *Service) clearDynamicUnclassifiedStreakForCompletion(
 	if s.consumeCountedEmptyTurn(data.SessionID, data.AgentExecutionID, data.PromptGeneration) {
 		return false
 	}
+	s.clearTierChainForCurrentSuccess(ctx, data)
 	if !s.clearDynamicUnclassifiedStreakForEvent(ctx, data, false) {
 		return false
 	}

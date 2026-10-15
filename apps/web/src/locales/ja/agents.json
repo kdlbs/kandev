@@ -14,6 +14,8 @@
   "providerUsageWindow": "{{window}}: {{percent}}% (リセット {{reset}})",
   "providerUsageReadAt": "取得時刻 {{time}}",
   "providerUsageLimitReached": "上限に到達",
+  "orderedTierNumber": "階層 {{tier}}",
+  "orderedTierJoin": "前の階層に結合",
   "actionCannotBeUndone": "この操作は元に戻せません。",
   "add": "追加",
   "addProfile": "プロファイルを追加",

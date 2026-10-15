@@ -71,7 +71,8 @@ type Engine struct {
 	// "retrying" state can survive a restart without its in-memory owner, so
 	// manual recovery may reclaim it only when this map does not contain the
 	// same generation.
-	retryClaims map[string]int64
+	retryClaims  map[string]int64
+	orderedTiers bool
 }
 
 func NewEngine(options ...EngineOption) *Engine {
@@ -178,7 +179,11 @@ func (e *Engine) selectContext(
 	}
 	generation := currentGeneration + 1
 	now := e.now()
-	for _, candidate := range profile.Candidates {
+	plan, err := e.prepareOrderedPlan(state, profile, generation, excludeProfileID, preferredProfileID, reason)
+	if err != nil {
+		return RouteDecision{}, err
+	}
+	for _, candidate := range plan.rows {
 		if !e.candidateSelectable(candidate, sessionID, generation, excludeProfileID, preferredProfileID, now) {
 			continue
 		}
@@ -205,6 +210,7 @@ func (e *Engine) selectContext(
 			state.ProfileVersion == profile.Version {
 			nextState.PolicyStateJSON = carryUnclassifiedStreak(state.PolicyStateJSON, profile.ID, candidate.ID, profile.Version, candidate.Policies.Unclassified)
 		}
+		nextState.PolicyStateJSON = e.orderedPolicyState(nextState.PolicyStateJSON, plan.chain.withCandidate(candidate.ID))
 		if err := e.claimAndPersist(ctx, expectedGeneration, decision, nextState); err != nil {
 			delete(e.states, sessionID)
 			return RouteDecision{}, err
@@ -218,15 +224,20 @@ func (e *Engine) selectContext(
 		Generation:       generation,
 		ProfileVersion:   profile.Version,
 		Status:           "waiting",
+		PolicyStateJSON:  e.orderedPolicyState("", plan.chain),
 		UpdatedAt:        now,
 	}
+	return e.persistNoEligibleDecision(ctx, expectedGeneration, nextState)
+}
+
+func (e *Engine) persistNoEligibleDecision(ctx context.Context, expectedGeneration int64, nextState RouteState) (RouteDecision, error) {
 	if err := e.persistNoEligible(ctx, expectedGeneration, nextState); err != nil {
-		delete(e.states, sessionID)
+		delete(e.states, nextState.SessionID)
 		return RouteDecision{}, err
 	}
-	e.states[sessionID] = nextState
+	e.states[nextState.SessionID] = nextState
 	return RouteDecision{}, &NoEligibleCandidateError{
-		SessionID: sessionID, LogicalProfile: profile.ID, Generation: generation,
+		SessionID: nextState.SessionID, LogicalProfile: nextState.LogicalProfileID, Generation: nextState.Generation,
 	}
 }
 
@@ -617,6 +628,13 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 		return e.persistUnclassifiedManual(ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_candidates_exhausted")
 	}
 	decision, nextState := unclassifiedSuccessorRoute(state, profile, successor, expectedGeneration, failure, e.now())
+	if e.orderedTiers {
+		plan, err := e.prepareOrderedPlan(state, profile, expectedGeneration+1, currentCandidateID, "", "policy_skip")
+		if err != nil {
+			return RouteDecision{}, err
+		}
+		nextState.PolicyStateJSON = e.orderedPolicyState(nextState.PolicyStateJSON, plan.chain.withCandidate(successor.ID))
+	}
 	if persistedDecision, err := e.recordUnclassifiedSuccessor(
 		ctx, expectedGeneration, decision, nextState, evidence, &policyState, state, failure,
 	); err != nil {
@@ -632,6 +650,19 @@ func (e *Engine) firstSelectableUnclassifiedSuccessor(
 	currentCandidateID, sessionID string,
 	generation int64,
 ) (Candidate, bool) {
+	if e.orderedTiers {
+		state := e.states[sessionID]
+		plan, err := e.prepareOrderedPlan(state, profile, generation+1, currentCandidateID, "", "policy_skip")
+		if err != nil {
+			return Candidate{}, false
+		}
+		for _, candidate := range plan.rows {
+			if e.candidateSelectable(candidate, sessionID, generation+1, currentCandidateID, "", e.now()) {
+				return candidate, true
+			}
+		}
+		return Candidate{}, false
+	}
 	for index, item := range profile.Candidates {
 		if item.ID != currentCandidateID {
 			continue

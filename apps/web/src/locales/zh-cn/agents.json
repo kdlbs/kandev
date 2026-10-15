@@ -14,6 +14,8 @@
   "providerUsageWindow": "{{window}}：{{percent}}%（重置时间 {{reset}}）",
   "providerUsageReadAt": "读取时间 {{time}}",
   "providerUsageLimitReached": "已达到上限",
+  "orderedTierNumber": "层级 {{tier}}",
+  "orderedTierJoin": "合并到上一层级",
   "actionCannotBeUndone": "此操作无法撤销。",
   "activeRuntimeVersion": "活动版本：{{version}}",
   "activeRuntimeVersionMarker": "活动",

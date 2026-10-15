@@ -1,6 +1,8 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
+import { useAppStore } from "@/components/state-provider";
+import { joinsPrevious, tierNumbers } from "./ordered-dynamic-tiers";
 import { IconArrowDown, IconArrowUp, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -24,6 +26,7 @@ type DynamicAgentCandidateListProps = {
   addCandidate: (executionProfileId: string) => void;
   moveCandidate: (index: number, direction: -1 | 1) => void;
   removeCandidate: (index: number) => void;
+  toggleJoin?: (index: number) => void;
   updateCandidate: (index: number, patch: Partial<DynamicAgentCandidate>) => void;
   updateCandidatePolicy: (
     index: number,
@@ -48,10 +51,13 @@ export function DynamicAgentCandidateList({
   addCandidate,
   moveCandidate,
   removeCandidate,
+  toggleJoin,
   updateCandidate,
   updateCandidatePolicy,
 }: DynamicAgentCandidateListProps) {
   const { t } = useTranslation();
+  const tiersEnabled = useAppStore((state) => state.features?.dynamicProfileTiers ?? false);
+  const numbers = tierNumbers(candidates);
 
   return (
     <div className="space-y-3" data-testid="dynamic-profile-candidates">
@@ -90,7 +96,11 @@ export function DynamicAgentCandidateList({
             >
               <div className="flex min-w-0 flex-wrap items-center gap-3">
                 <div className="flex min-w-0 basis-full items-center gap-3 sm:basis-auto sm:flex-1">
-                  <Badge variant="outline">{index + 1}</Badge>
+                  <Badge variant="outline">
+                    {tiersEnabled
+                      ? t("agents:orderedTierNumber", { tier: numbers[index] })
+                      : index + 1}
+                  </Badge>
                   <span className="min-w-0 truncate text-sm font-medium">
                     {candidateLabel(candidate, concreteProfiles)}
                   </span>
@@ -114,6 +124,20 @@ export function DynamicAgentCandidateList({
                   >
                     <IconArrowUp className="h-4 w-4" />
                   </Button>
+                  {tiersEnabled && (
+                    <Button
+                      type="button"
+                      variant={joinsPrevious(candidate) ? "secondary" : "ghost"}
+                      size="icon"
+                      className={settingsActionClassName("shrink-0 cursor-pointer")}
+                      disabled={index === 0}
+                      aria-label={t("agents:orderedTierJoin")}
+                      aria-pressed={index > 0 && joinsPrevious(candidate)}
+                      onClick={() => toggleJoin?.(index)}
+                    >
+                      <span aria-hidden>{"="}</span>
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"

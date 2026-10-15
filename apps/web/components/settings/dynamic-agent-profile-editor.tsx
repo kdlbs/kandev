@@ -121,6 +121,7 @@ export function DynamicAgentProfileEditor({
         addCandidate={state.addCandidate}
         moveCandidate={state.moveCandidate}
         removeCandidate={state.removeCandidate}
+        toggleJoin={state.toggleJoin}
         updateCandidate={state.updateCandidate}
         updateCandidatePolicy={state.updateCandidatePolicy}
       />

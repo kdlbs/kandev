@@ -595,6 +595,24 @@ selected for new work, when dynamic routing is disabled. A new profile starts
 with its name and candidates; enable or disable it later from the profile
 editor.
 
+**Ordered candidate tiers.**
+
+Enable **Dynamic profile tiers** in **Settings > System > Feature Toggles** and
+restart Kandev, with dynamic routing enabled. The independent toggle is off by
+default. In the dynamic profile editor, select **=** between adjacent candidates
+to join or split their tier. Move and remove controls retain candidate identity
+and saved selection metadata.
+
+This first version selects candidates in order within each tier. Existing
+failure policies still decide retries, waits and whether to continue; fallback
+does not return to an earlier tier or an already tried candidate in the same
+failure chain. A verified successful turn ends that chain. Turning tiers off
+restores flat routing while retaining the saved groups.
+
+Other saved selection modes remain stored but are not executable by this
+ordered-only version. Usage-based ranking, selection previews and running-model
+reevaluation are not included in this view.
+
 Each candidate has a policy for two shared provider-error classes:
 
 - **Transient errors** include capacity, overload, network, timeout, rate, and

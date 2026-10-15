@@ -44,6 +44,7 @@ export type DynamicAgentProfileEditorState = {
   addCandidate: (executionProfileId: string) => void;
   moveCandidate: (index: number, direction: -1 | 1) => void;
   removeCandidate: (index: number) => void;
+  toggleJoin: (index: number) => void;
   updateCandidate: (index: number, patch: Partial<DynamicAgentCandidate>) => void;
   updateCandidatePolicy: (
     index: number,
@@ -70,6 +71,7 @@ export function dynamicProfilePayload(
         execution_profile_id: candidate.executionProfileId,
         enabled: candidate.enabled,
         policies: {
+          ...(candidate.policies.selection ? { selection: candidate.policies.selection } : {}),
           version: candidate.policies.version,
           transient: {
             retry: {
@@ -264,6 +266,7 @@ export function useDynamicAgentProfileEditorState({
     addCandidate: draft.addCandidate,
     moveCandidate: draft.moveCandidate,
     removeCandidate: draft.removeCandidate,
+    toggleJoin: draft.toggleJoin,
     updateCandidate: draft.updateCandidate,
     updateCandidatePolicy: draft.updateCandidatePolicy,
     candidates: draft.candidates,

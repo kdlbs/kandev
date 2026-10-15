@@ -111,6 +111,18 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key: "features.dynamicProfileTiers", EnvVar: "KANDEV_FEATURES_DYNAMIC_PROFILE_TIERS",
+			Kind: KindFeature, Label: "Dynamic profile tiers",
+			Description: "Enables adjacent ordered candidate tiers and durable no-revisit fallback chains.",
+			Stability:   StabilityExperimental, RiskLevel: RiskMedium,
+			RiskDescription: "Changes candidate traversal when enabled. This increment supports ordered tiers; other saved selection modes remain preserved.",
+			RestartRequired: true, Mutable: true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicProfileTiers },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicProfileTiers = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.lspBrowserContinuity",
 			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
 			Kind:            KindFeature,

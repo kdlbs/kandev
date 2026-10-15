@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"encoding/json"
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"time"
@@ -85,6 +86,9 @@ type DynamicAgentPolicyDTO struct {
 	Transient    DynamicErrorPolicyDTO         `json:"transient"`
 	Hard         DynamicErrorPolicyDTO         `json:"hard"`
 	Unclassified *DynamicUnclassifiedPolicyDTO `json:"unclassified,omitempty"`
+	// Selection remains opaque outside its owning tier codec. Partial editors
+	// preserve model, usage and future metadata they do not understand.
+	Selection json.RawMessage `json:"selection,omitempty"`
 }
 
 type DynamicUnclassifiedPolicyDTO struct {
