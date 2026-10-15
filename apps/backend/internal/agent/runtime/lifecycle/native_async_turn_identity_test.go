@@ -152,3 +152,12 @@ func testNativeReplyProjection(t *testing.T, protocolIDs bool) {
 		require.True(t, found, "missing native reply %d", reply)
 	}
 }
+
+func TestNativeMessageWithoutAnyGroupingIdentityUsesReplaySequence(t *testing.T) {
+	execution := &AgentExecution{SessionID: "session", DeliveryStreamID: "stream"}
+	first := agentctl.AgentEvent{Type: "message_chunk", DeliveryStreamID: "stream", DeliverySequence: 1}
+	second := first
+	second.DeliverySequence = 2
+	require.NotEqual(t, canonicalAgentMessageID(execution, first), canonicalAgentMessageID(execution, second))
+	require.Equal(t, canonicalAgentMessageID(execution, first), canonicalAgentMessageID(nil, first))
+}

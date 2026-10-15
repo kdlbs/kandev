@@ -182,3 +182,7 @@ or a real prompt boundary ends that scope. Replay retains the journaled ID.
 Legacy peers use a separate opaque message scope for each preceding dispatch,
 without assigning that dispatched turn as the native event owner. Tool updates
 reuse adapter-recorded child lineage even when incremental metadata omits it.
+
+When even the legacy dispatch scope is unavailable, the durable event sequence
+is the replay-stable message scope. Without grouping evidence, separate chunks
+remain separate rows rather than merging unrelated replies.

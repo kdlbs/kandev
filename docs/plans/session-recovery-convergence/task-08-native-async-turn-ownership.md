@@ -59,3 +59,8 @@ coverage failure was a missing requirement declaration in design frontmatter.
 The review regressions passed under the race detector after correction, including
 real SQLite projection, reopen and idempotent replay for legacy and journaled
 message identities. The documentation coverage evaluator now reports covered.
+
+Later review also covered events with neither a provider message ID nor any
+preceding dispatch identity: use their durable sequence as the conservative
+replay-stable scope. Missing foreground terminals intentionally keep completion
+blocked; adapter shutdown does not fabricate a terminal or release queued work.

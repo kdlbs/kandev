@@ -721,7 +721,9 @@ func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEven
 		scope = "prompt:" + strconv.FormatUint(event.PromptGeneration, 10)
 	}
 	if scope == "prompt:0" {
-		scope = "stream"
+		// With no grouping evidence, keep durable chunks distinct rather than
+		// merging unrelated native replies into one stream-wide transcript row.
+		scope = "sequence:" + strconv.FormatUint(event.DeliverySequence, 10)
 	}
 	digest := sha256.Sum256([]byte(streamID + ":" + event.Type + ":" + scope))
 	return "agent-delivery-" + fmt.Sprintf("%x", digest[:16])
