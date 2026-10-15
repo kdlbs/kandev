@@ -169,6 +169,14 @@ activity without the stale turn binding; use the existing orchestrator readiness
 snapshot to bind its completion before queued successors can start. Numbered
 completions and explicit turn identities retain their ownership checks.
 
+ACP activity retains the prompt generation captured when its notification was
+enqueued, including output drained after the prompt's control response. Buffered
+human output cannot become native async activity when the current prompt clears.
+A surviving prompt retains its restored turn while recovery adopts the first
+live completion's generation. That generation-to-turn association remains valid
+for delayed output after a successor dispatch, without allowing its completion
+to settle the successor.
+
 The ACP async idle finalizer waits for all observed foreground tools to become
 terminal. Silence while a foreground tool is active is not terminal evidence.
 Adapter-attested background workloads and nested child tools retain their own

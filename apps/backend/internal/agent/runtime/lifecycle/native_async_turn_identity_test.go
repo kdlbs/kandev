@@ -9,6 +9,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,6 +55,62 @@ func TestNativeAsyncCompletionDoesNotPublishCompletedPromptOwner(t *testing.T) {
 	}
 	require.True(t, ready)
 	require.True(t, complete)
+}
+
+func TestRecoveredLiveCompletionKeepsRestoredTurnOwnership(t *testing.T) {
+	manager, bus := createTestManagerWithTracking()
+	execution := createTestExecution("execution", "task", "session")
+	execution.setPromptTurnID("surviving-turn")
+	require.NoError(t, manager.executionStore.Add(execution))
+	manager.publishRecoveredExecutionRunning(t.Context(), execution)
+	event := agentctl.AgentEvent{Type: "complete", SessionID: "session", PromptGeneration: 5}
+	stored := durableAgentEvent(execution, event)
+	var payload agentctl.AgentEvent
+	require.NoError(t, json.Unmarshal(stored.Payload, &payload))
+	require.Equal(t, "surviving-turn", payload.TurnID)
+	manager.handleAgentEvent(execution, event)
+	ready := false
+	for _, recorded := range bus.PublishedEvents {
+		if recorded.Event != nil && recorded.Event.Type == events.AgentReady {
+			payload := recorded.Event.Data.(AgentEventPayload)
+			require.Equal(t, "surviving-turn", payload.TurnID)
+			require.Equal(t, uint64(5), payload.PromptGeneration)
+			ready = true
+		}
+	}
+	require.True(t, ready)
+	require.False(t, execution.recoveredPromptGenerationPending.Load())
+	execution.setPromptTurnID("successor")
+	require.Equal(t, uint64(6), beginExecutionPrompt(execution))
+	require.Equal(t, "surviving-turn", execution.promptTurnIDForEvent(event), "retained old output must keep its original owner")
+	before := len(bus.PublishedEvents)
+	manager.handleAgentEvent(execution, event)
+	require.Len(t, bus.PublishedEvents, before, "late old completion must not settle the successor")
+}
+
+func TestNumberedOutputKeepsMessageScopeAfterControlCompletion(t *testing.T) {
+	for _, kind := range []string{"message_chunk", "reasoning"} {
+		t.Run(kind, func(t *testing.T) {
+			manager, _ := createTestManagerWithTracking()
+			execution := createTestExecution("execution", "task", "session")
+			execution.setPromptTurnID("original-turn")
+			require.NoError(t, manager.executionStore.Add(execution))
+			generation := beginExecutionPrompt(execution)
+			execution.dispatchedPromptPending.Store(true)
+			event := agentctl.AgentEvent{Type: kind, PromptGeneration: generation, DeliveryStreamID: "stream", DeliverySequence: 1}
+			before := durableAgentEvent(execution, event)
+			manager.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete", PromptGeneration: generation})
+			event.DeliverySequence++
+			after := durableAgentEvent(execution, event)
+			var first, last agentctl.AgentEvent
+			require.NoError(t, json.Unmarshal(before.Payload, &first))
+			require.NoError(t, json.Unmarshal(after.Payload, &last))
+			require.Equal(t, first.CanonicalMessageID, last.CanonicalMessageID)
+			require.Equal(t, "original-turn", last.TurnID)
+			manager.handleAgentEvent(execution, event)
+			require.Equal(t, v1.AgentStatusReady, execution.Status, "retained output must not revive a completed prompt")
+		})
+	}
 }
 
 func TestDurableEventKeepsExplicitDispatchOwnership(t *testing.T) {

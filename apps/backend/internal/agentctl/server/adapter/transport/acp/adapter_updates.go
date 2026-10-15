@@ -250,8 +250,8 @@ func (a *Adapter) handleACPUpdate(
 			}
 		}
 	}
-	a.stampAsyncTurnMessageID(leadingEvent)
-	a.stampAsyncTurnMessageID(event)
+	a.stampUpdateTurnIdentity(leadingEvent, promptGeneration)
+	a.stampUpdateTurnIdentity(event, promptGeneration)
 	a.stampSessionSettingsReports(sessionID, leadingEvent, event)
 	if leadingEvent != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, leadingEvent)

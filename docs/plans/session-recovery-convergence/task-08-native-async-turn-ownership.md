@@ -64,3 +64,12 @@ Later review also covered events with neither a provider message ID nor any
 preceding dispatch identity: use their durable sequence as the conservative
 replay-stable scope. Missing foreground terminals intentionally keep completion
 blocked; adapter shutdown does not fabricate a terminal or release queued work.
+
+CI exposed surviving-turn completion and buffered-output ownership gaps. Desktop,
+phone, and SSH restart checks remained running; the overload trace persisted all
+2,000 reasoning chunks but split them at chunk 1,907 when the pending flag cleared.
+Focused regressions reproduce the missing restored turn and lost enqueue-time
+generation. Preserve the recovered generation-to-turn binding and stamp ACP
+activity before journaling, so draining output neither changes message scope nor
+revives a completed prompt. Local E2E remains prohibited; CI validates browser
+and executor restart behavior.

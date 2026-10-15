@@ -46,11 +46,16 @@ func isAsyncTurnContentEvent(event AgentEvent) bool {
 	}
 }
 
-// stampAsyncTurnMessageID gives native chunks without provider IDs a message
-// scope before journaling. Replay uses that retained ID, never a new owner or
-// the backend's most recently dispatched turn.
-func (a *Adapter) stampAsyncTurnMessageID(event *AgentEvent) {
-	if event == nil || event.SessionID == "" || event.ProtocolMessageID != "" || event.PromptGeneration != 0 {
+// stampUpdateTurnIdentity preserves enqueue-time prompt ownership before
+// journaling. Unowned native chunks receive a replay-stable message scope.
+func (a *Adapter) stampUpdateTurnIdentity(event *AgentEvent, promptGeneration uint64) {
+	if event == nil {
+		return
+	}
+	if event.PromptGeneration == 0 && (isAsyncTurnContentEvent(*event) || isAsyncToolTerminal(*event)) {
+		event.PromptGeneration = promptGeneration
+	}
+	if event.SessionID == "" || event.ProtocolMessageID != "" || event.PromptGeneration != 0 {
 		return
 	}
 	if event.Type != streams.EventTypeMessageChunk && event.Type != streams.EventTypeReasoning {
@@ -78,7 +83,8 @@ func (a *Adapter) asyncTurnFinalizerLocked(sessionID string) *asyncTurnFinalizer
 }
 
 func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
-	if (!isAsyncTurnContentEvent(event) && !isAsyncToolTerminal(event)) || event.SessionID == "" {
+	if event.PromptGeneration != 0 || event.SessionID == "" ||
+		(!isAsyncTurnContentEvent(event) && !isAsyncToolTerminal(event)) {
 		return
 	}
 	if a.currentPromptTurn() != nil {

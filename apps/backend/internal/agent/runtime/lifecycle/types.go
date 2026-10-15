@@ -1035,7 +1035,9 @@ func (e *AgentExecution) promptTurnIDForEvent(event agentctl.AgentEvent) string 
 		if turnID := e.promptTurnIDs[event.PromptGeneration]; turnID != "" {
 			return turnID
 		}
-		if event.PromptGeneration != e.promptGeneration {
+		// A surviving prompt keeps its restored turn while the first live
+		// completion adopts its generation. New dispatch clears this allowance.
+		if event.PromptGeneration != e.promptGeneration && !e.recoveredPromptGenerationPending.Load() {
 			return ""
 		}
 	}

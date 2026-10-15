@@ -311,6 +311,12 @@ func (m *Manager) claimPromptCompletion(
 		}
 		if current.recoveredPromptGenerationPending.CompareAndSwap(true, false) {
 			current.promptGeneration = event.PromptGeneration
+			if event.TurnID != "" {
+				if current.promptTurnIDs == nil {
+					current.promptTurnIDs = make(map[uint64]string)
+				}
+				current.promptTurnIDs[event.PromptGeneration] = event.TurnID
+			}
 		}
 		if current.promptGeneration != event.PromptGeneration {
 			return
