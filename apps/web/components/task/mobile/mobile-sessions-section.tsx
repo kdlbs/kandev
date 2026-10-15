@@ -151,6 +151,8 @@ function SessionActionsMenu({
   onSetPrimary,
   onStop,
   onResume,
+  onRestart,
+  isRestarting,
   onAskDelete,
   onHandoffProfile,
 }: {
@@ -161,6 +163,8 @@ function SessionActionsMenu({
   onSetPrimary: () => void;
   onStop: () => void;
   onResume: () => void;
+  onRestart: () => void;
+  isRestarting: boolean;
   onAskDelete: () => void;
   onHandoffProfile: (profileId: string) => void;
 }) {
@@ -178,7 +182,7 @@ function SessionActionsMenu({
           ref={triggerRef}
           variant="ghost"
           size="icon-sm"
-          className="cursor-pointer h-11 w-11 md:h-7 md:w-7"
+          className="cursor-pointer h-11 w-11 md:h-7 md:w-7 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
           onClick={(e) => e.stopPropagation()}
           aria-label={t("task:sessionActions")}
         >
@@ -204,18 +208,28 @@ function SessionActionsMenu({
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {state && isSessionStoppable(state) && (
-          <DropdownMenuItem className="cursor-pointer" onSelect={onStop}>
+          <DropdownMenuItem className="cursor-pointer" onSelect={onStop} disabled={isRestarting}>
             {t("task:stop")}
           </DropdownMenuItem>
         )}
+        {(isRestarting || (state && isSessionStoppable(state))) && (
+          <DropdownMenuItem
+            className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+            onSelect={onRestart}
+            disabled={isRestarting}
+          >
+            {t("task:restartSession")}
+          </DropdownMenuItem>
+        )}
         {state && isSessionResumable(state) && (
-          <DropdownMenuItem className="cursor-pointer" onSelect={onResume}>
+          <DropdownMenuItem className="cursor-pointer" onSelect={onResume} disabled={isRestarting}>
             {t("task:resume")}
           </DropdownMenuItem>
         )}
         {state && isSessionDeletable(state) && (
           <DropdownMenuItem
             className="cursor-pointer text-destructive focus:text-destructive"
+            disabled={isRestarting}
             onSelect={() => {
               if (isMobile) pendingDelete.current = true;
               else onAskDelete();
@@ -290,6 +304,8 @@ function SessionRowTrailingActions({
           onSetPrimary={() => void actions.setPrimary()}
           onStop={() => void actions.stop()}
           onResume={() => void actions.resume()}
+          onRestart={() => void actions.restart()}
+          isRestarting={actions.isRestarting}
           onAskDelete={onAskDelete}
           onHandoffProfile={onHandoffProfile}
         />

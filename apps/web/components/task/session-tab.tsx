@@ -135,6 +135,8 @@ function useSessionTabActions(
     setPrimary: handleSetPrimary,
     stop: handleStop,
     resume: handleResume,
+    restart: handleRestart,
+    isRestarting,
     remove: handleDelete,
   } = useSessionActions({ sessionId, taskId, onDeleted });
   const handleCloseOthers = useCallback(() => {
@@ -148,6 +150,8 @@ function useSessionTabActions(
     handleSetPrimary,
     handleStop,
     handleResume,
+    handleRestart,
+    isRestarting,
     handleDelete,
     handleCloseOthers,
     handleHide,

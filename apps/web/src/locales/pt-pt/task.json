@@ -2774,5 +2774,11 @@
   "allPRsClosedNotice_one": "O {{count}} PR foi fechado sem integração. Pode arquivar esta tarefa.",
   "allPRsClosedNotice_other": "Todos os {{count}} PRs foram fechados sem integração. Pode arquivar esta tarefa.",
   "turnOffTranscriptAutoScroll": "Desativar o deslocamento automático da transcrição",
-  "turnOnTranscriptAutoScroll": "Ativar o deslocamento automático da transcrição"
+  "turnOnTranscriptAutoScroll": "Ativar o deslocamento automático da transcrição",
+  "restartSession": "Reiniciar sessão",
+  "sessionActionRestart": "A reiniciar a sessão...",
+  "sessionRestartRequested": "Reinício da sessão solicitado",
+  "sessionRestartFailed": "Falha ao reiniciar a sessão",
+  "sessionRestartUnavailable": "Não é possível reiniciar esta sessão no estado atual.",
+  "sessionRestartConnectionUnavailable": "A ligação não está disponível. Volte a ligar e tente novamente."
 }

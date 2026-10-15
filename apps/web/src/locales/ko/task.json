@@ -2774,5 +2774,11 @@
   "allPRsClosedNotice_one": "PR {{count}}개가 모두 병합 없이 종료되었습니다. 이 작업을 보관할 수 있습니다.",
   "allPRsClosedNotice_other": "PR {{count}}개가 모두 병합 없이 종료되었습니다. 이 작업을 보관할 수 있습니다.",
   "turnOffTranscriptAutoScroll": "대화 기록 자동 스크롤 끄기",
-  "turnOnTranscriptAutoScroll": "대화 기록 자동 스크롤 켜기"
+  "turnOnTranscriptAutoScroll": "대화 기록 자동 스크롤 켜기",
+  "restartSession": "세션 다시 시작",
+  "sessionActionRestart": "세션을 다시 시작하는 중...",
+  "sessionRestartRequested": "세션 다시 시작을 요청했습니다",
+  "sessionRestartFailed": "세션 다시 시작에 실패했습니다",
+  "sessionRestartUnavailable": "현재 상태에서는 이 세션을 다시 시작할 수 없습니다.",
+  "sessionRestartConnectionUnavailable": "연결을 사용할 수 없습니다. 다시 연결한 후 다시 시도하세요."
 }

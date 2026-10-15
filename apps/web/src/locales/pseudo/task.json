@@ -2774,5 +2774,11 @@
   "allPRsClosedNotice_one": "Àĺĺ {{count}} ƤŔ ŵàś ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ. Ŷōũ ćàń àŕćĥĩvē ţĥĩś ţàśķ.",
   "allPRsClosedNotice_other": "Àĺĺ {{count}} ƤŔś ŵēŕē ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ. Ŷōũ ćàń àŕćĥĩvē ţĥĩś ţàśķ.",
   "turnOffTranscriptAutoScroll": "Ţũŕń ōƒƒ ţŕàńśćŕĩƥţ àũţō-śćŕōĺĺ",
-  "turnOnTranscriptAutoScroll": "Ţũŕń ōń ţŕàńśćŕĩƥţ àũţō-śćŕōĺĺ"
+  "turnOnTranscriptAutoScroll": "Ţũŕń ōń ţŕàńśćŕĩƥţ àũţō-śćŕōĺĺ",
+  "restartSession": "Ŕēśţàŕţ śēśśĩōń",
+  "sessionActionRestart": "Ŕēśţàŕţĩńĝ śēśśĩōń...",
+  "sessionRestartRequested": "Śēśśĩōń ŕēśţàŕţ ŕēqũēśţēď",
+  "sessionRestartFailed": "Śēśśĩōń ŕēśţàŕţ ƒàĩĺēď",
+  "sessionRestartUnavailable": "Ţĥĩś śēśśĩōń ćàńńōţ ƀē ŕēśţàŕţēď ĩń ĩţś ćũŕŕēńţ śţàţē.",
+  "sessionRestartConnectionUnavailable": "Ţĥē ćōńńēćţĩōń ĩś ũńàvàĩĺàƀĺē. Ŕēćōńńēćţ, ţĥēń ţŕŷ àĝàĩń."
 }
