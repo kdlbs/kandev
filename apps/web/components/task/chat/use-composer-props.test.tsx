@@ -2,6 +2,7 @@ import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useComposerProps } from "./use-composer-props";
 import type { ChatPanelState } from "./use-chat-panel-state";
+import { sessionId, taskId } from "@/lib/types/http";
 
 const recovery = vi.hoisted(() => ({ hasCard: false }));
 vi.mock("./session-recovery-context", () => ({
@@ -218,6 +219,11 @@ describe("recovery card ownership", () => {
     recovery.hasCard = true;
     const args = composerArgs();
     args.panelState.session = {
+      id: sessionId("session-1"),
+      task_id: taskId("task-1"),
+      state: "WAITING_FOR_INPUT",
+      started_at: "2026-10-15T10:00:00Z",
+      updated_at: "2026-10-15T10:00:00Z",
       metadata: {
         agent_delivery_recovery: {
           ...deliveryIdentity,
@@ -226,7 +232,7 @@ describe("recovery card ownership", () => {
           harness_generation: 2,
         },
       },
-    } as NonNullable<ChatPanelState["session"]>;
+    };
     const { result } = renderHook(() => useComposerProps(args));
     expect(result.current.uncertainDelivery).toBe(true);
   });
