@@ -61,6 +61,52 @@ git diff --check
 
 ## Results
 
+### Keep native blob evidence while replacing its failing transfer path
+
+The twenty-fourth full set passes every test job but fails its reporter after
+all three blob-download attempts fail identically. Each attempt spends about
+27 seconds in the action's five internal retries; existing outer waits add
+another forty seconds. A partial inner ZIP then fails the unchanged parser.
+The complete E2E workflow takes 16m29s. GitHub CLI downloads all 34 artifacts
+successfully, and all 118 native ZIPs pass CRC validation. Read-only local
+reconciliation proves all 3,957 identities and zero final test failures; that
+recovery does not change the failed hosted conclusion.
+
+Use the existing GitHub CLI on the hosted reporter for this blob transfer only.
+Retain three total download attempts and the existing ten/thirty-second waits,
+isolate each attempt in a fresh staging directory, and publish files only after
+the whole download succeeds. Flatten the artifact folders without overwriting
+duplicate basenames or following links, preserving every native ZIP and shard
+metadata file byte for byte. Empty, unexpected and colliding inputs fail closed.
+Leave Build/runtime downloads and their action unchanged. Do not alter report
+parsers, catalog provenance, full native identity reconciliation, HTML/JSON
+reporting, test exits, shard counts, workers, deadlines or retry policy.
+
+First fail a workflow contract that requires this transfer route and its token
+scope, then cover successful binary transfer, clean retry isolation, exhaustion,
+invalid/duplicate inputs and unchanged destination on failure. Wire the helper
+checks into the existing unfiltered required contract workflow. Exercise the
+helper against the actual twenty-fourth run, compare every resulting byte with
+the recovered artifacts, and rerun the same raw native reconciliation. Run all
+affected workflow/gate/pinning contracts and docs checks before one full hosted
+measurement. No new application logic, coverage protocol or hosted job is needed.
+
+The new workflow-route and required-test wiring checks fail before configuration
+changes, then all 27 E2E contracts pass. Eight helper checks pass, including a
+copy-interruption regression that first exposes partial publication. Publish a
+fully copied staging directory through a rename so an interrupted copy leaves
+the destination untouched. Three attempts and ten/thirty-second waits remain.
+All five gate checks, nine pinning checks and the full 27-workflow pin scan pass.
+
+The final helper downloads the actual failed run's 152 files (118 native ZIPs)
+in 23.354 local seconds. Every byte matches the independently recovered set.
+The unchanged parser reconciles all 3,957 identities with identical attempts,
+statuses, outcomes and durations. This local smoke does not establish hosted
+speed. A structured YAML comparison proves only reporter tool preflight and blob
+transfer change; all other E2E steps, jobs, selections, permissions, deadlines
+and generic artifact-action bytes remain unchanged. Application and test source
+are unchanged from the all-test-job-passing twenty-fourth candidate.
+
 ### Preserve the winning Office execution on duplicate start refusal
 
 The twenty-third full set's remaining file-panel failure exposes an existing

@@ -92,7 +92,9 @@ jobs:
         run: node --test .github/scripts/go-cache-identity.test.mjs
 
       - name: Test E2E workflow contract
-        run: python3 .github/scripts/e2e-tests-workflow-contract_test.py
+        run: |
+          python3 .github/scripts/e2e-tests-workflow-contract_test.py
+          python3 .github/scripts/download-e2e-blobs_test.py
 
       - name: Test external runner workflow contract
         run: python3 .github/scripts/external-runner-workflow-contract_test.py

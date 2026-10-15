@@ -1305,15 +1305,19 @@ jobs:
 
       - name: Verify timing report tools
         if: needs.changes.outputs.run == 'true'
-        run: command -v unzip
+        run: |
+          command -v unzip
+          command -v gh
 
       - name: Download blob reports
         if: needs.changes.outputs.run == 'true'
-        uses: ./.github/actions/download-artifact-retry
-        with:
-          path: apps/web/e2e/blob-reports
-          pattern: blob-report-*
-          merge-multiple: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/download-e2e-blobs.py \
+            --run-id "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --output apps/web/e2e/blob-reports
 
       - name: Download E2E shard manifests
         if: needs.changes.outputs.run == 'true'

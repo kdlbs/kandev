@@ -53,7 +53,52 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
-### Next candidate: preserve a live Office session on duplicate launch
+### Next candidate: native CLI blob transfer
+
+Replace only the failing reporter blob download with the existing GitHub CLI.
+Each of the same three attempts uses fresh staging and the same ten/thirty-second
+waits. Validate all inputs and publish the complete directory through a rename;
+never overwrite duplicate basenames or expose partially copied evidence.
+All native parsers, catalog checks, merged JSON/HTML reports and required gates
+remain unchanged, as do every test, retry policy, worker and selected job.
+
+Eight helper cases, 27 E2E workflow contracts, five gate checks, nine pinning
+checks and the full 27-workflow pin scan pass. The new route/wiring checks fail
+before configuration changes; the interrupted-copy case fails before atomic
+publication. The final helper retrieves all 152 actual files in 23.354 local
+seconds, preserving every byte. The unchanged parser reconciles the same 3,957
+native identities with identical attempts, outcomes and durations. This is
+local transport validation, not a successful hosted timing measurement.
+Application/native test inventories remain 26,553 frontend, 35,581 backend
+executions and 3,957 E2E cases. Full hosted validation remains pending; acceptance
+is still 1/3.
+
+### Twenty-fourth complete hosted result: all test jobs pass, blob transfer fails
+
+Head `345f440e1048` passes backend `38682043078` in 13m30s (211.85
+runner-minutes) and frontend `38682042954` in 12m08s (26.37). Full E2E
+`38682043063` fails only its required reporter in 16m29s (276.98), with
+856 seconds execution critical path. Complete occupancy is 515.20 runner-minutes.
+All 74 other core jobs pass; all 75 core jobs are selected.
+The failed set exceeds 900 seconds and does not count. Acceptance remains 1/3.
+
+The report's blob download fails all three attempts, leaving a partial ZIP.
+GitHub CLI independently recovers all 34 artifact folders and 118 native ZIPs,
+each CRC-valid. Local raw reconciliation with the exact source/run/producer
+catalog retains all 3,957 identities: 3,913 first passes, four retry passes,
+zero final failures and the same forty existing skips. This is local forensic
+evidence; no successful hosted report or pipeline is claimed. All five Office
+cases and all four mobile action-bar cases pass on their first attempts.
+
+Frontend preserves all 26,553 expected identities/outcomes in 2,956 files.
+All ten backend native-report cohorts preserve the prior 35,580 executions and
+outcomes plus exactly the new source-bound passed Office regression, for 35,581.
+The remaining required failure is report transport, not test execution. Fresh
+exact-head evidence has 88 passed checks, one failed aggregate, ten ancillary
+skips, zero pending checks, and no errors, unresolved/hidden threads or current
+review bodies. Task 15 records the bounded transfer repair; no new set is active.
+
+### Twenty-fourth candidate: preserve a live Office session on duplicate launch
 
 The real executor-guard reproduction fails before the repair: the losing
 Office start changes the live session to `FAILED` without dispatching another

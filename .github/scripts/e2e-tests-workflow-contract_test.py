@@ -447,11 +447,25 @@ cat "${FAKE_DOCKER_MANIFEST}"
             "python3 .github/scripts/e2e-tests-workflow-contract_test.py",
             workflow,
         )
+        self.assertIn("python3 .github/scripts/download-e2e-blobs_test.py", workflow)
         for trigger in ("push", "pull_request", "merge_group"):
             trigger_marker = f"  {trigger}:"
             _, separator, trigger_block_text = workflow.partition(trigger_marker)
             self.assertTrue(separator, f"Lint workflow has no {trigger} trigger")
             self.assertNotIn("    paths:", trigger_block_text.split("\n  ", 1)[0])
+
+    def test_blob_transfer_uses_cli_before_unchanged_native_reconciliation(self) -> None:
+        report = E2E_WORKFLOW.read_text().partition("  e2e-report:\n")[2]
+        download = report.partition("      - name: Download blob reports\n")[2].partition("      - name:")[0]
+        self.assertIn("python3 .github/scripts/download-e2e-blobs.py", download)
+        self.assertIn('GH_TOKEN: ${{ github.token }}', download)
+        self.assertIn('--run-id "$GITHUB_RUN_ID"', download)
+        self.assertIn('--repo "$GITHUB_REPOSITORY"', download)
+        self.assertIn('--output apps/web/e2e/blob-reports', download)
+        self.assertNotIn("continue-on-error", download)
+        self.assertIn('command -v gh', report)
+        self.assertIn('--input e2e/blob-reports', report)
+        self.assertIn('--catalog "$GITHUB_WORKSPACE/e2e-manifests/native-catalog.json"', report)
 
     def test_timing_lookup_requires_a_profile_artifact(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
