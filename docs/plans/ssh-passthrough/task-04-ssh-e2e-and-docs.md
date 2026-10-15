@@ -246,3 +246,18 @@ The preceding broad SSH-folder run passed eight cases before an intentional
 interrupt to narrow the selection. It is not counted as a full-suite pass.
 Go race checks passed for all six affected packages; Go lint, targeted web lint,
 documentation catalog validation, and specification lint also passed.
+
+
+CI remediation also corrects the phone diff continuity fixture. Its mutable
+version marker now stays outside the reading region, so the asserted content
+anchor survives the edit. Both Pierre and Monaco cases pass without retries.
+The toolbar failure's original CI partition passed all 34 tests without retries
+under two CPUs and 4 GiB memory. The branch-switch case also passed in its
+original partition. No product change was inferred from those passing replays.
+
+After rebuilding the native backend, delivery fixture, and plugin fixture, the
+recovery partition passed all 33 tests in 4.4 minutes without retries under the
+same resource limits. The previously failing read-only Resume completed in
+17.2 seconds. Both phone diff renderer cases passed in 42.6 seconds. The full
+lifecycle race suite passed in 303.752 seconds. Changed-package Go lint,
+targeted frontend lint, formatting, and documentation checks passed.

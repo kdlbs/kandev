@@ -386,12 +386,10 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		waitCtx, cancel := appctx.Detached(ctx, m.stopCh, 60*time.Second)
 		defer cancel()
 
-		client, releaseClient := execution.AcquireAgentCtlClient()
-		if client == nil {
+		err := execution.waitForAgentctlReady(waitCtx)
+		if errors.Is(err, errReadinessClientDetached) {
 			return
 		}
-		err := client.WaitForReady(waitCtx, 60*time.Second)
-		releaseClient()
 		if err != nil {
 			m.logger.Error("agentctl not ready for workspace stream connection",
 				zap.String("execution_id", execution.ID),

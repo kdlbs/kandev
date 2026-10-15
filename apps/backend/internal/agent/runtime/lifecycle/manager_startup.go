@@ -654,9 +654,12 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	m.logger.Debug("waiting for agentctl to be ready",
 		zap.String("execution_id", execution.ID),
 		zap.String("url", client.BaseURL()))
-
-	err := client.WaitForReady(ctx, 60*time.Second)
 	releaseClient()
+
+	err := execution.waitForAgentctlReady(ctx)
+	if errors.Is(err, errReadinessClientDetached) {
+		return
+	}
 	if err != nil {
 		m.logger.Error("agentctl not ready",
 			zap.String("execution_id", execution.ID),
@@ -670,11 +673,12 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	// Comparison configuration must arrive before readiness exposes workspace
 	// access or the cached poll mode starts fresh Git scans.
 	client, releaseClient = execution.AcquireAgentCtlClient()
-	if client != nil {
-		m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
-		m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
-		releaseClient()
+	if client == nil {
+		return
 	}
+	m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
+	m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
+	releaseClient()
 	execution.MarkAgentctlReady()
 
 	elapsed := time.Since(opStart)

@@ -200,3 +200,17 @@ review-remediation race command:
 ```bash
 GOCACHE=/home/zeval/.cache/kandev-ssh-ee8214d6-go go test -C apps/backend -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/agentctl ./internal/common/passthroughconfig ./internal/gateway/websocket -run 'Test.*Passthrough|TestPrepare|TestWaitForFirstIdle|TestEmitTurnComplete|TestHandleTerminal|TestBridge' -count=1
 ```
+
+
+CI remediation reproduced the read-only Resume timeout in the exact CI merge
+checkout. The shard's original partition ran in the CI runtime image with one
+worker, two CPUs, and 4 GiB memory. A goroutine capture showed stale-execution
+cleanup waiting on the client lease held by readiness polling. Readiness now
+holds the lease only during a health request, bounds each request to one
+second, and ends quietly when cleanup detaches the client. Both unavailable
+and unresponsive health checks failed the regression before the change. The
+regressions and client-lease checks pass with race detection. The full lifecycle
+package also passed with race detection in 303.752 seconds. A helper resolver
+test now uses empty temporary directories so built remote helpers cannot
+invalidate its missing-binary premise. Current-head CI remains pending until
+the remediation is pushed and its checks finish.
