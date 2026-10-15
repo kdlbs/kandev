@@ -200,7 +200,7 @@ passed. Public-doc validation and its 63 tests passed. The specification catalog
 specification lint, and its 36 tests passed after the final spec status update.
 Each work order records commands, results, and limits. Final documentation
 coverage passed for actual changes and the lifecycle trigger, with no errors.
-`git diff --check` passed. Changes remain unstaged.
+`git diff --check` passed at the initial implementation checkpoint.
 
 ### Documentation coverage preflight
 
@@ -248,3 +248,13 @@ NODE
   path without bypassing authentication or replacing a possibly live process.
 - Actual reporter logs and live Proxmox/Tailscale reproduction are unavailable.
   Current evidence identifies deterministic backend defects independent of that setup.
+
+
+## Second automated review remediation
+
+Conflicting shared MCP updates now fail before writing. Replay uses bounded
+pages, and event persistence no longer holds the client source guard needed by
+cleanup. Regressions cover these failures and retained event identity checks.
+The config, process, and lifecycle focused race tests passed. SSH terminal tests
+now use explicit terminal locators and wait for the Resume response before UI
+assertions. Browser delivery results and current CI/review status remain in the PR.

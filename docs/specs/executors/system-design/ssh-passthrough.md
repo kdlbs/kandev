@@ -107,7 +107,9 @@ the backend registers the process. A reader subscribes and captures its replay
 snapshot under one lock. Sequence checks suppress duplicate delivery. An exited or canceled observer
 releases its target. Observer cleanup must match its observer generation so an
 old goroutine cannot clear a replacement that follows the same process.
-Retention is bounded by the existing per-instance event limit. A replay gap
+Retention is bounded by the existing per-instance event limit. Each replay page
+contains at most 256 events and reports the last included sequence. The next
+page starts after that sequence, within the backend reader limit. A replay gap
 requires a fresh snapshot. Apply a verified non-running process status after
 the cursor save succeeds. An idle snapshot cannot attribute a lost completion
 to the active turn, so it must not synthesize a turn-completion event.
@@ -188,7 +190,10 @@ serialize them with a cross-process file lock. Each claim names controller,
 session, generation, and fingerprint. Separate remote controllers must see all
 claims. A last-owner cleanup deletes only an unchanged Kandev-owned generation.
 An unreadable claim registry preserves the file and reports cleanup failure.
-The claims contain no tokens or configuration bytes. Unproven stale claims
+A preparation must not change a file while another owner claims its contents.
+Identical JSON may share a claim. A conflicting controller URL fails before
+writing files or adding claims. The claims contain no tokens or configuration
+bytes. Unproven stale claims
 preserve files instead of enabling deletion.
 
 The CLI uses the existing agent passthrough command and remote environment
@@ -231,6 +236,8 @@ create extra turns.
 Remote events enter lifecycle with the execution captured by stream registration.
 Check that execution, controller, process, and generation remain current before
 calling `handlePassthroughStatus` or `handlePassthroughTurnComplete`.
+Event projection and cursor persistence do not hold the agentctl source guard.
+Cleanup must be able to detach its client while persistence is pending.
 Keep the pending initial-prompt marker in lifecycle as specified by
 [ADR-2026-09-01](../../../decisions/2026-09-01-passthrough-initial-prompt-turn-boundary.md).
 The remote runner emits raw readiness and does not decide task completion.

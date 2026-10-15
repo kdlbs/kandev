@@ -275,3 +275,12 @@ Each of the six integration journeys now has its own test. All record, save,
 reload, navigation, reset, and default-command assertions remain. All six
 tests passed without retries in 2.2 minutes under the same resource limits.
 Targeted ESLint and formatting checks passed.
+
+
+The second Greptile review identified global terminal selection and extended UI
+waits in the SSH tests. The input helper now requires the caller's terminal
+locator. Desktop and phone Resume cases arm a correlated `session.launch` wait
+before the action, await its response, and use the terminal assertion's default
+timeout. The sibling test still verifies input reaches only the selected remote
+PID. Targeted ESLint and formatting passed. The SSH browser suite is a required
+delivery check after the remediation commit; results are recorded in PR evidence.

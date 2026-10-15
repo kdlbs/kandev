@@ -1,6 +1,7 @@
 import { devices } from "@playwright/test";
 import { test, expect } from "../../fixtures/ssh-test-base";
 import { openSSHPassthrough, readPassthroughTrace } from "../../helpers/ssh-passthrough";
+import { watchWs } from "../../helpers/causal-waits";
 import { MobileTerminalKeybarPage } from "../../pages/mobile-terminal-keybar-page";
 
 test.use({ ...devices["Pixel 5"] });
@@ -11,6 +12,7 @@ test("phone input and reconnect use the same remote passthrough process", async 
   seedData,
 }, testInfo) => {
   expect(testPage.viewportSize()?.width).toBe(393);
+  const ws = watchWs(testPage);
   const state = await openSSHPassthrough(testPage, apiClient, seedData);
   const input = state.session.passthroughTerminal.locator("textarea.xterm-helper-textarea");
   await state.session.passthroughTerminal.tap();
@@ -65,9 +67,11 @@ test("phone input and reconnect use the same remote passthrough process", async 
   await apiClient.stopSession({ session_id: state.task.session_id!, force: true });
   await expect(state.session.recoveryResumeButton()).toBeVisible();
   await expect(keybar.root).toBeHidden();
+  const resumed = ws.waitForResponse("session.launch", { timeout: 60_000 });
   await state.session.recoveryResumeButton().tap();
+  await resumed;
   await state.session.waitForPassthroughLoaded();
-  await state.session.expectPassthroughHasText("Mock Agent (RESUMED)", 90_000);
+  await state.session.expectPassthroughHasText("Mock Agent (RESUMED)");
   await input.focus();
   await testPage.keyboard.type("phone after explicit resume", { delay: 20 });
   await testPage.keyboard.press("Enter");

@@ -7,6 +7,8 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
+const passthroughEventPageLimit = 256
+
 func (o *PassthroughOwner) emitLocked(kind string, exitCode *int) {
 	o.current.Sequence++
 	o.events = append(o.events, types.PassthroughEvent{
@@ -52,6 +54,10 @@ func (o *PassthroughOwner) Events(ctx context.Context, after uint64, wait bool) 
 		for _, event := range o.events {
 			if event.Sequence > after {
 				page.Events = append(page.Events, event)
+				page.Sequence = event.Sequence
+				if len(page.Events) == passthroughEventPageLimit {
+					break
+				}
 			}
 		}
 		wake := o.wake

@@ -153,3 +153,17 @@ review-remediation race command:
 ```bash
 GOCACHE=/home/zeval/.cache/kandev-ssh-ee8214d6-go go test -C apps/backend -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/agentctl ./internal/common/passthroughconfig ./internal/gateway/websocket -run 'Test.*Passthrough|TestPrepare|TestWaitForFirstIdle|TestEmitTurnComplete|TestHandleTerminal|TestBridge' -count=1
 ```
+
+
+The second Greptile review reproduced conflicting sibling MCP updates and a
+1,116,712-byte replay page exceeding the backend's 1 MiB reader. Preparation
+now rejects changed JSON while another owner has a claim. Identical JSON can
+share ownership, and the remaining owner can update after others release it.
+Replay pages contain at most 256 events and advance only to the last included
+sequence. Regressions verify rejection, file preservation, owner release, and
+complete ordered replay across all 4,096 retained events. Both packages passed
+with race detection using the command below.
+
+```bash
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/common/passthroughconfig ./internal/agentctl/server/process -run 'TestPrepare|TestPassthrough' -count=1)
+```

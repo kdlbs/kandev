@@ -537,6 +537,10 @@ Kandev prepares MCP files on the target and uses the remote controller's
 loopback address. It preserves existing user configuration and files claimed
 by another session. It does not write global agent configuration.
 
+Cursor and Pi use workspace MCP files. If another session claims a different
+controller URL in that file, preparation fails. Stop that session before
+retrying, or use a separate task.
+
 After a backend interruption, **Resume** reconnects to a verified live remote
 CLI. If that process is absent, Resume uses the preserved workspace and the
 agent's conversation resume options. Missing authentication or uncertain

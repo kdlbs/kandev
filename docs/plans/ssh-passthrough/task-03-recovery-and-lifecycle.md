@@ -223,3 +223,16 @@ snapshot boundary and exits before shell spawning. Reintroducing the original
 recursive lock in an isolated worktree makes the test fail in two seconds.
 The corrected test and adjacent environment/shell tests pass with race detection.
 Windows native execution remains an external CI gate until the new head passes.
+
+
+The second Greptile review reproduced cleanup waiting on the source guard while
+an event cursor save was pending. Remote event projection and gap reconciliation
+now run without that guard. Captured execution, controller, process, generation,
+and sequence checks continue to reject stale events. A WebSocket regression
+pauses the persistence read and proves stale cleanup finishes before that read
+returns. Separate positive and negative cases protect the identity checks.
+Focused lifecycle passthrough tests passed with race detection in 63.283 seconds.
+
+```bash
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -run 'TestSSHPassthrough|TestSSHMockPassthrough|TestPassthrough' -count=1)
+```

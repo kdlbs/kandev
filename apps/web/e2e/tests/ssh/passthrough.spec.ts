@@ -5,6 +5,7 @@ import {
   typePassthrough,
 } from "../../helpers/ssh-passthrough";
 import { execInContainer } from "../../helpers/ssh";
+import { watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 test("remote passthrough accepts input and keeps its PID after reconnect", async ({
@@ -13,7 +14,7 @@ test("remote passthrough accepts input and keeps its PID after reconnect", async
   seedData,
 }) => {
   const state = await openSSHPassthrough(testPage, apiClient, seedData);
-  await typePassthrough(testPage, "remote follow-up");
+  await typePassthrough(state.session.passthroughTerminal, "remote follow-up");
   await state.session.expectPassthroughHasText("Processed: remote follow-up");
   expect(
     readPassthroughTrace(seedData, state.workspace).filter(
@@ -46,7 +47,7 @@ test("remote passthrough survives backend interruption without another initial p
   await state.session.waitForPassthroughLoad();
   await state.session.waitForPassthroughLoaded();
   await state.session.expectPassthroughHasText("Mock Agent");
-  await typePassthrough(testPage, "after backend restart");
+  await typePassthrough(state.session.passthroughTerminal, "after backend restart");
   await state.session.expectPassthroughHasText("Processed: after backend restart");
   const trace = readPassthroughTrace(seedData, state.workspace);
   expect(trace.filter((entry) => entry.kind === "start")).toHaveLength(1);
@@ -55,7 +56,7 @@ test("remote passthrough survives backend interruption without another initial p
 
 test("remote MCP uses the active task and session", async ({ testPage, apiClient, seedData }) => {
   const state = await openSSHPassthrough(testPage, apiClient, seedData);
-  await typePassthrough(testPage, "/e2e:mcp-context");
+  await typePassthrough(state.session.passthroughTerminal, "/e2e:mcp-context");
   await state.session.expectPassthroughHasText("Remote MCP:");
   await state.session.expectPassthroughHasText(state.task.session_id!);
   await state.session.expectPassthroughHasText('"is_current": true');
@@ -66,6 +67,7 @@ test("Stop ends the remote CLI and Resume preserves its workspace", async ({
   apiClient,
   seedData,
 }) => {
+  const ws = watchWs(testPage);
   const state = await openSSHPassthrough(testPage, apiClient, seedData);
   expect(
     (await apiClient.stopSession({ session_id: state.task.session_id!, force: true })).success,
@@ -81,10 +83,12 @@ test("Stop ends the remote CLI and Resume preserves its workspace", async ({
     .toBe("stopped");
   execInContainer(seedData.sshTarget, ["test", "-d", state.workspace]);
   await expect(state.session.recoveryResumeButton()).toBeVisible();
+  const resumed = ws.waitForResponse("session.launch", { timeout: 60_000 });
   await state.session.recoveryResumeButton().click();
+  await resumed;
   await state.session.waitForPassthroughLoaded();
-  await state.session.expectPassthroughHasText("Mock Agent (RESUMED)", 90_000);
-  await typePassthrough(testPage, "after explicit resume");
+  await state.session.expectPassthroughHasText("Mock Agent (RESUMED)");
+  await typePassthrough(state.session.passthroughTerminal, "after explicit resume");
   await state.session.expectPassthroughHasText("Processed: after explicit resume");
   const trace = readPassthroughTrace(seedData, state.workspace);
   const starts = trace.filter((entry) => entry.kind === "start");
@@ -115,7 +119,7 @@ test("sibling passthrough sessions keep separate remote input", async ({
   await session.waitForPassthroughLoad();
   await session.waitForPassthroughLoaded();
   await session.expectPassthroughHasText("Mock Agent");
-  await typePassthrough(testPage, "sibling-only input");
+  await typePassthrough(session.passthroughTerminal, "sibling-only input");
   await session.expectPassthroughHasText("Processed: sibling-only input");
   const trace = readPassthroughTrace(seedData, state.workspace);
   const accepted = trace.filter((entry) => entry.prompt === "sibling-only input");
@@ -126,7 +130,7 @@ test("sibling passthrough sessions keep separate remote input", async ({
   await session.sessionTabBySessionId(state.task.session_id!).click();
   await session.waitForPassthroughLoad();
   await session.waitForPassthroughLoaded();
-  await typePassthrough(testPage, "original-only input");
+  await typePassthrough(session.passthroughTerminal, "original-only input");
   await session.expectPassthroughHasText("Processed: original-only input");
   const originalInput = readPassthroughTrace(seedData, state.workspace).filter(
     (entry) => entry.prompt === "original-only input",

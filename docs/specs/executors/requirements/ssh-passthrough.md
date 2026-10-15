@@ -52,7 +52,8 @@ interact with the CLI without executing agent work on the Kandev host.
 - **AC-EXECUTORS-SSH-PASSTHROUGH-001.5:** Kandev and profile MCP configuration
   shall use paths and addresses reachable from the remote CLI. Kandev tool calls
   shall reach the backend with the current task and session identity.
-  The system shall not modify global agent configuration.
+  The system shall not modify global agent configuration. Shared project-file
+  strategies shall reject a conflicting session context before changing the file.
 - **AC-EXECUTORS-SSH-PASSTHROUGH-001.6:** Automatic initial-prompt submission
   shall retain the existing per-agent readiness and submit behavior. Startup
   idle shall not complete work while the initial prompt is pending.

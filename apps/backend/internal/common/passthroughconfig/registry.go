@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 )
 
@@ -154,6 +155,9 @@ func materializeRemoteFile(root *os.Root, relative, owner string, file File, ent
 			return err
 		}
 	}
+	if err := validateRemoteFileClaims(previous, owner, change.original, content); err != nil {
+		return err
+	}
 	change.written, err = atomicRootWriteInfo(root, relative, content, info)
 	if err != nil {
 		return err
@@ -164,6 +168,22 @@ func materializeRemoteFile(root *os.Root, relative, owner string, file File, ent
 	}
 	owners[owner] = true
 	entries[relative] = &registryEntry{Fingerprint: Fingerprint(content), Owned: owned, Owners: owners}
+	return nil
+}
+
+func validateRemoteFileClaims(previous *registryEntry, owner string, existing, proposed []byte) error {
+	if previous == nil {
+		return nil
+	}
+	for claim := range previous.Owners {
+		if claim == owner {
+			continue
+		}
+		var before, after any
+		if json.Unmarshal(existing, &before) != nil || json.Unmarshal(proposed, &after) != nil || !reflect.DeepEqual(before, after) {
+			return errors.New("MCP configuration is in use by another session")
+		}
+	}
 	return nil
 }
 

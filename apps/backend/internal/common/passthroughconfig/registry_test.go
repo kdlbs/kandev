@@ -49,3 +49,38 @@ func TestPrepareRollbackPreservesExternalReplacement(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "user replacement", string(actual))
 }
+
+func TestPrepareRejectsConflictingSiblingMCPContext(t *testing.T) {
+	for _, mergeKey := range []string{"mcpServers", "mcp"} {
+		t.Run(mergeKey, func(t *testing.T) {
+			workspace := t.TempDir()
+			path := filepath.Join(workspace, "mcp.json")
+			file := File{Path: path, MergeKey: mergeKey, Content: []byte(`{"` + mergeKey + `":{"kandev":{"url":"http://first/mcp"}}}`)}
+			require.NoError(t, Prepare(context.Background(), workspace, workspace, "first", []File{file}))
+			original, err := os.ReadFile(path)
+			require.NoError(t, err)
+			other := file
+			other.Content = []byte(`{"` + mergeKey + `":{"kandev":{"url":"http://second/mcp"}}}`)
+			require.ErrorContains(t, Prepare(context.Background(), workspace, workspace, "second", []File{other}), "another session")
+			actual, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, original, actual)
+			require.NoError(t, Cleanup(context.Background(), workspace, "second", false))
+			require.FileExists(t, path)
+			require.NoError(t, Cleanup(context.Background(), workspace, "first", false))
+			require.NoError(t, Prepare(context.Background(), workspace, workspace, "second", []File{other}))
+		})
+	}
+}
+
+func TestPrepareSharedIdenticalMCPContextCannotChangeUntilOtherOwnersRelease(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "mcp.json")
+	file := File{Path: path, MergeKey: "mcpServers", Content: []byte(`{"mcpServers":{"kandev":{"url":"http://shared/mcp"}}}`)}
+	require.NoError(t, Prepare(context.Background(), workspace, workspace, "first", []File{file}))
+	require.NoError(t, Prepare(context.Background(), workspace, workspace, "second", []File{file}))
+	file.Content = []byte(`{"mcpServers":{"kandev":{"url":"http://changed/mcp"}}}`)
+	require.ErrorContains(t, Prepare(context.Background(), workspace, workspace, "first", []File{file}), "another session")
+	require.NoError(t, Cleanup(context.Background(), workspace, "second", false))
+	require.NoError(t, Prepare(context.Background(), workspace, workspace, "first", []File{file}))
+}

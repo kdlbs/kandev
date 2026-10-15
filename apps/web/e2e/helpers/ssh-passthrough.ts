@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type Locator } from "@playwright/test";
 import type { SSHSeedData } from "../fixtures/ssh-test-base";
 import type { ApiClient } from "./api-client";
 import { execInContainer, readRemoteFile } from "./ssh";
@@ -60,11 +60,9 @@ export async function openSSHPassthrough(page: Page, api: ApiClient, seed: SSHSe
   return { task, session, workspace, pid: started!.pid, initialPrompt, profileId: profile.id };
 }
 
-export async function typePassthrough(page: Page, text: string) {
-  const input = page
-    .locator('[data-testid="passthrough-terminal"]:visible')
-    .locator("textarea.xterm-helper-textarea");
+export async function typePassthrough(terminal: Locator, text: string) {
+  const input = terminal.locator("textarea.xterm-helper-textarea");
   await input.focus();
-  await page.keyboard.type(text, { delay: 20 });
-  await page.keyboard.press("Enter");
+  await input.pressSequentially(text, { delay: 20 });
+  await input.press("Enter");
 }

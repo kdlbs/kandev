@@ -87,7 +87,7 @@ func (m *Manager) consumeRemotePassthroughEvents(conn *websocket.Conn, execution
 			if event.InstanceID != snapshot.InstanceID || event.SessionID != snapshot.SessionID || event.PassthroughTarget != snapshot.PassthroughTarget {
 				continue
 			}
-			execution.withAgentCtlClient(client, func() { m.handleRemotePassthroughEvent(execution, event) })
+			m.handleRemotePassthroughEvent(execution, event)
 		}
 	}
 }
@@ -100,24 +100,22 @@ func (m *Manager) reconcileRemotePassthroughGap(execution *AgentExecution, clien
 		return after
 	}
 	accepted := after
-	execution.withAgentCtlClient(client, func() {
-		if !m.passthroughProcessMatches(execution, source.ProcessID) {
-			return
+	current, exists := m.executionStore.GetBySessionID(source.SessionID)
+	if !exists || current != execution || !m.passthroughProcessMatches(execution, source.ProcessID) {
+		return after
+	}
+	if err := m.updateRemotePassthroughRecord(ctx, execution, func(record *remotePassthroughRecord) {
+		if record.PassthroughTarget == fresh.PassthroughTarget && record.InstanceID == fresh.InstanceID && fresh.Sequence >= record.EventSequence {
+			record.EventSequence = fresh.Sequence
+			accepted = fresh.Sequence
 		}
-		if err := m.updateRemotePassthroughRecord(ctx, execution, func(record *remotePassthroughRecord) {
-			if record.PassthroughTarget == fresh.PassthroughTarget && record.InstanceID == fresh.InstanceID && fresh.Sequence >= record.EventSequence {
-				record.EventSequence = fresh.Sequence
-				accepted = fresh.Sequence
-			}
-		}); err != nil {
-			accepted = after
-			return
-		}
-		if accepted == fresh.Sequence && fresh.Status != types.ProcessStatusRunning {
-			m.handlePassthroughStatus(&types.ProcessStatusUpdate{SessionID: fresh.SessionID, ProcessID: fresh.ProcessID, Status: fresh.Status, ExitCode: fresh.ExitCode, Timestamp: time.Now().UTC()})
-		}
-		// An idle snapshot cannot attribute a lost completion to the active turn.
-	})
+	}); err != nil {
+		return after
+	}
+	if accepted == fresh.Sequence && fresh.Status != types.ProcessStatusRunning {
+		m.handlePassthroughStatus(&types.ProcessStatusUpdate{SessionID: fresh.SessionID, ProcessID: fresh.ProcessID, Status: fresh.Status, ExitCode: fresh.ExitCode, Timestamp: time.Now().UTC()})
+	}
+	// An idle snapshot cannot attribute a lost completion to the active turn.
 	return accepted
 }
 
