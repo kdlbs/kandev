@@ -180,11 +180,14 @@ func (e *Engine) selectContext(
 	}
 	generation := currentGeneration + 1
 	now := e.now()
-	plan, err := e.prepareOrderedPlan(state, profile, generation, excludeProfileID, preferredProfileID, reason)
+	plan, err := e.prepareOrderedPlan(ctx, state, profile, generation, excludeProfileID, preferredProfileID, reason)
 	if err != nil {
 		return RouteDecision{}, err
 	}
-	for _, candidate := range plan.rows {
+	for candidate, err := range plan.rows {
+		if err != nil {
+			return RouteDecision{}, err
+		}
 		if !e.candidateSelectable(candidate, sessionID, generation, excludeProfileID, preferredProfileID, now) {
 			continue
 		}
@@ -624,16 +627,27 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 	evidence UnclassifiedFailureEvidence,
 	policyState PolicyState,
 ) (RouteDecision, error) {
-	successor, found := e.firstSelectableUnclassifiedSuccessor(profile, currentCandidateID, state.SessionID, expectedGeneration)
+	var plan orderedPlan
+	var successor Candidate
+	var found bool
+	if e.orderedTiers {
+		var err error
+		plan, err = e.prepareOrderedPlan(ctx, state, profile, expectedGeneration+1, currentCandidateID, "", "policy_skip")
+		if err != nil {
+			return RouteDecision{}, err
+		}
+		successor, found, err = e.firstSelectableOrderedSuccessor(plan, currentCandidateID, state.SessionID, expectedGeneration)
+		if err != nil {
+			return RouteDecision{}, err
+		}
+	} else {
+		successor, found = e.firstSelectableUnclassifiedSuccessor(profile, currentCandidateID, state.SessionID, expectedGeneration)
+	}
 	if !found {
 		return e.persistUnclassifiedManual(ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_candidates_exhausted")
 	}
 	decision, nextState := unclassifiedSuccessorRoute(state, profile, successor, expectedGeneration, failure, e.now())
 	if e.orderedTiers {
-		plan, err := e.prepareOrderedPlan(state, profile, expectedGeneration+1, currentCandidateID, "", "policy_skip")
-		if err != nil {
-			return RouteDecision{}, err
-		}
 		nextState.PolicyStateJSON = e.orderedPolicyState(nextState.PolicyStateJSON, plan.chain.withCandidate(successor.ID))
 	}
 	if persistedDecision, err := e.recordUnclassifiedSuccessor(
@@ -646,24 +660,27 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 	return decision, nil
 }
 
+func (e *Engine) firstSelectableOrderedSuccessor(
+	plan orderedPlan,
+	currentCandidateID, sessionID string,
+	generation int64,
+) (Candidate, bool, error) {
+	for candidate, err := range plan.rows {
+		if err != nil {
+			return Candidate{}, false, err
+		}
+		if e.candidateSelectable(candidate, sessionID, generation+1, currentCandidateID, "", e.now()) {
+			return candidate, true, nil
+		}
+	}
+	return Candidate{}, false, nil
+}
+
 func (e *Engine) firstSelectableUnclassifiedSuccessor(
 	profile Profile,
 	currentCandidateID, sessionID string,
 	generation int64,
 ) (Candidate, bool) {
-	if e.orderedTiers {
-		state := e.states[sessionID]
-		plan, err := e.prepareOrderedPlan(state, profile, generation+1, currentCandidateID, "", "policy_skip")
-		if err != nil {
-			return Candidate{}, false
-		}
-		for _, candidate := range plan.rows {
-			if e.candidateSelectable(candidate, sessionID, generation+1, currentCandidateID, "", e.now()) {
-				return candidate, true
-			}
-		}
-		return Candidate{}, false
-	}
 	for index, item := range profile.Candidates {
 		if item.ID != currentCandidateID {
 			continue

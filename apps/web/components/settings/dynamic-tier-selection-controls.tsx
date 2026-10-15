@@ -105,6 +105,7 @@ export function DynamicTierSelectionControls({
               ["order", t("agents:tierModeOrder")],
               ["cost", t("agents:tierModeCost")],
               ["random", t("agents:tierModeRandom")],
+              ["round_robin", t("agents:tierModeRoundRobin")],
             ]}
             onChange={(value) => onChange(withTierSelection(candidate, "mode", value))}
           />
@@ -117,6 +118,11 @@ export function DynamicTierSelectionControls({
             ]}
             onChange={(value) => onChange(withTierSelection(candidate, "on_failure", value))}
           />
+          {selection?.tier?.mode === "round_robin" && (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              {t("agents:tierRoundRobinDescription")}
+            </p>
+          )}
         </>
       )}
       <SelectionField

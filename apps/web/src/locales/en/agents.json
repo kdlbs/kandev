@@ -527,5 +527,7 @@
   "tierPreviewSelected": "Selected",
   "tierPreviewEligible": "Eligible",
   "tierPreviewExcluded": "Excluded: {{reason}}",
-  "dynamicTierCandidatesDescription": "Tiers run in saved order. Within each tier, candidates use its configured selection mode. Switching candidates still follows the configured error action."
+  "dynamicTierCandidatesDescription": "Tiers run in saved order. Within each tier, candidates use its configured selection mode. Switching candidates still follows the configured error action.",
+  "tierModeRoundRobin": "Round-robin",
+  "tierRoundRobinDescription": "Task/session selections rotate within this tier after the last committed choice. Utility, review and taskless Office calls do not advance this history."
 }

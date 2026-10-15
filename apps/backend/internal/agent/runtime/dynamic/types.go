@@ -134,6 +134,13 @@ type RouteAttempt struct {
 	ProfileVersion     int64
 	Reason             string
 	CreatedAt          time.Time
+	SelectionOrdinal   *int64
+}
+
+// RouteSelectionHistoryReader returns committed positive ordinals by concrete
+// candidate. Legacy attempts without a causal ordinal do not initialize RR.
+type RouteSelectionHistoryReader interface {
+	LastRouteSelectionOrdinals(context.Context, string) (map[string]int64, error)
 }
 
 // UnclassifiedFailureOrigin names one trusted producer boundary that can

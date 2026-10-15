@@ -20,5 +20,5 @@ func (r *ProfileExecutionResolver) PreviewDynamicTiers(ctx context.Context, prof
 	if err != nil {
 		return dynamic.TierPreview{}, err
 	}
-	return r.engine.PreviewTiers(profile)
+	return r.engine.PreviewTiersContext(ctx, profile)
 }

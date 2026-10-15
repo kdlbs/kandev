@@ -32,6 +32,31 @@ probe; the existing final candidate check owns probe acquisition and generation
 commit. Unsupported saved modes stay stored and are not
 silently executed as order while the new flag is enabled.
 
+Round-robin reads committed positive `selection_ordinal` values from the existing
+task route-attempt owner. Each tier rotates saved rows after its most recently
+selected current member, then applies the same eligibility and chain rules.
+The anchor can be disabled or blocked; candidate deletion removes that member
+from the current tier, so remaining members' committed history determines its
+anchor. A tier without a valid ordinal starts at its first eligible saved row.
+Legacy NULLs are not backfilled from timestamps, UUIDs or session generations.
+All new committed task/session choices, including other modes, get an ordinal.
+
+The nullable BIGINT migration precedes the profile/ordinal index. The existing
+route-generation/attempt transaction allocates profile-local MAX+1 and inserts
+the immutable attempt after a successful CAS. A PostgreSQL transaction advisory
+lock encloses allocation; SQLite uses its existing writer owner. Failed TX and
+stale CAS do not advance. One Engine mutex encloses history read, ranking and
+commit. Independent backends can rank the same observation before committing:
+unique choice across backends is not established by ordinal allocation alone.
+An RR read failure is an error; other modes and feature OFF do not read history.
+
+Utility/review/taskless Office synthetic `utility:` routes retain their existing
+state/attempt no-op storage contract: `dynamic_route_attempts.session_id` requires
+an actual `task_sessions` FK owner. They can read task/session history but do not
+advance it. The original common RR requirement needs a subsequent native owner
+bridge preserving that FK and each domain's actual owner; no fake task session,
+FK removal or duplicate ledger is introduced here.
+
 `PolicyStateJSON.selection_chain` holds the logical profile, initial generation,
 tried concrete IDs and last selected candidate. Same-candidate retries preserve
 the chain. Permitted cross-candidate fallback starts at the failed candidate's
@@ -74,5 +99,6 @@ fence late responses. No timer, ledger or queue is added.
 
 AC-001.1/.5: Editor, storage and ranking. AC-001.2/.3: Runtime and chain.
 AC-001.4: Feature/storage boundary. AC-001.6: Read-only preview. No operating
-configuration or installed-runtime change. Round-robin, pace and keep-model
-remain original later increments.
+configuration or installed-runtime change. AC-001.7 covers task/session RR and
+legacy unknown initialization. Common transient-owner RR, cross-backend choice,
+pace and keep-model remain original later increments.

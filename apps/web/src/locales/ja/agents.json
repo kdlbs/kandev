@@ -527,5 +527,7 @@
   "tierPreviewSelected": "選択済み",
   "tierPreviewEligible": "選択可能",
   "tierPreviewExcluded": "除外: {{reason}}",
-  "dynamicTierCandidatesDescription": "グループは保存された順に進み、各グループ内では設定した選択方式を使います。候補の切り替えには、設定済みのエラー動作が適用されます。"
+  "dynamicTierCandidatesDescription": "グループは保存された順に進み、各グループ内では設定した選択方式を使います。候補の切り替えには、設定済みのエラー動作が適用されます。",
+  "tierModeRoundRobin": "ラウンドロビン",
+  "tierRoundRobinDescription": "タスクとセッションの選択は、このグループの最後に確定した候補の次から循環します。ユーティリティ、レビュー、タスクなしの Office 呼び出しは履歴を進めません。"
 }

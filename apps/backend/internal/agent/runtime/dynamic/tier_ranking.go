@@ -1,6 +1,7 @@
 package dynamic
 
 import (
+	"context"
 	"encoding/json"
 	"math/rand/v2"
 	"sort"
@@ -8,8 +9,9 @@ import (
 )
 
 const (
-	tierModeCost   = "cost"
-	tierModeRandom = "random"
+	tierModeCost       = "cost"
+	tierModeRandom     = "random"
+	tierModeRoundRobin = "round_robin"
 )
 
 // WithTierRandomPick supplies a deterministic picker without exposing a wire seed.
@@ -72,7 +74,7 @@ func configuredCostRank(cost string) int {
 
 // rankTierRows is pure: disabled/health/chain exclusions precede a random draw.
 // It never changes the source rows or probes a provider.
-func rankTierRows(tier orderedTier, number int, excluded map[string]bool, preferred string, unavailable map[string]string, pick func(int) int) []rankedTierRow {
+func rankTierRows(tier orderedTier, number int, excluded map[string]bool, preferred string, unavailable map[string]string, pick func(int) int, history map[string]int64) []rankedTierRow {
 	rows := make([]rankedTierRow, 0, len(tier.rows))
 	for _, candidate := range tier.rows {
 		reason := unavailable[candidate.ID]
@@ -95,6 +97,9 @@ func rankTierRows(tier orderedTier, number int, excluded map[string]bool, prefer
 	}
 	if tier.mode == tierModeRandom {
 		promoteRandomTierRow(rows, pick)
+	}
+	if tier.mode == tierModeRoundRobin {
+		rows = rotateRoundRobinRows(rows, history)
 	}
 	return rows
 }
@@ -156,6 +161,10 @@ func (e *Engine) tierAvailability(profile Profile, now time.Time) map[string]str
 }
 
 func (e *Engine) PreviewTiers(profile Profile) (TierPreview, error) {
+	return e.PreviewTiersContext(context.Background(), profile)
+}
+
+func (e *Engine) PreviewTiersContext(ctx context.Context, profile Profile) (TierPreview, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	preview := TierPreview{State: "disabled", ObservedAt: e.now(), Considered: []TierPreviewEntry{}}
@@ -166,10 +175,14 @@ func (e *Engine) PreviewTiers(profile Profile) (TierPreview, error) {
 	if err != nil {
 		return preview, err
 	}
+	history, err := e.tierSelectionHistory(ctx, profile.ID, tiers)
+	if err != nil {
+		return preview, err
+	}
 	preview.State = "no_candidates"
 	unavailable := e.tierAvailability(profile, preview.ObservedAt)
 	for index, tier := range tiers {
-		for _, row := range rankTierRows(tier, index+1, nil, "", unavailable, e.tierPick) {
+		for _, row := range rankTierRows(tier, index+1, nil, "", unavailable, e.tierPick, history) {
 			entry := row.entry
 			if entry.Eligible && preview.CandidateID == "" {
 				entry.Selected = true

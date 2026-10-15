@@ -527,5 +527,7 @@
   "tierPreviewSelected": "已选择",
   "tierPreviewEligible": "可用",
   "tierPreviewExcluded": "已排除：{{reason}}",
-  "dynamicTierCandidatesDescription": "候选组按保存的顺序推进，组内按配置的选择模式选择候选。候选切换仍遵循配置的错误操作。"
+  "dynamicTierCandidatesDescription": "候选组按保存的顺序推进，组内按配置的选择模式选择候选。候选切换仍遵循配置的错误操作。",
+  "tierModeRoundRobin": "轮流选择",
+  "tierRoundRobinDescription": "任务和会话从该组最后一次已提交选择的下一项开始轮换。工具、审查和无任务的 Office 调用不会推进此历史。"
 }
