@@ -97,3 +97,12 @@ Wait for the drawer's finite animations before measuring its touch targets,
 using the existing helper already used later in the same test. Preserve the
 strict 44px minimum and retries-disabled setting. CI supplies browser validation;
 this test-only correction does not change the goal UI or recovery behavior.
+
+Shard 8 also caught the queued-prompt cancellation fixture settling its 300ms
+hold before the browser inspected pending controls. Desktop and phone cases now
+use the existing queue/cancellation fixture pair: an 8s provider hold and a 12s
+join budget. All disabled-control, progress-label, queue-pause, same-execution,
+and follow-up assertions remain; both cases run with retries disabled. The
+Threads grid case in that shard passed on retry and its failure screenshot
+already shows the expected two-row layout; its startup timing remains under
+observation in the next CI run without a speculative production change.
