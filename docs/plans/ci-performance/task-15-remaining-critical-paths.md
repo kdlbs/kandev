@@ -61,6 +61,54 @@ git diff --check
 
 ## Results
 
+### Repair the twenty-first run's settled-tool and drag-release failures
+
+Full E2E retains all 3,957 identities but fails two existing cases. The tool
+completion screenshot contains the completed two-tool group; its old Terminal
+locator describes the running group and can pass before the final projection.
+Wait for the settled two-call group, retain the no-spinner oracle, and expand
+it to verify both original Terminal rows. Do not remove tool-completion coverage.
+
+The lane trace proves Escape removes the drag reserve, then mouse release
+navigates to another card. The height poll is left on a task page. The current
+sensor removes its click suppression after 50ms, while this Escape action takes
+125ms. Preserve the existing adaptive-Kanban cancellation/height contract by
+suppressing the native click belonging to the completed drag until it is
+consumed or a new pointer gesture begins. Keep keyboard/assistive activation
+and the next ordinary click/tap available; add no arbitrary suppression timer.
+First prove the cancelled-gesture click fails focused component tests. Strengthen
+the original browser case to cross the sensor's old timer boundary and assert
+that native release stays on the board; retain growth, equal heights, no inner
+overflow and shrink after deletion. Then verify the focused component suite,
+both original browser cases, type/lint and existing phone navigation.
+
+Mobile contract: the existing Kanban phone surface remains one focused column
+with native scrolling, menu-based moves and direct card-tap navigation. Its
+cards do not activate dragging. Reuse that composition, scroll owner, safe-area
+and touch targets without new UI. The shared guard changes only a drag's
+residual pointer click. Mouse/touch component cases and the existing
+mobile-kanban-navigation scenario verify that a subsequent ordinary tap still
+opens the task and phone navigation/viewport containment remain intact.
+
+The focused cancelled-gesture checks fail against the original surface,
+including release over another workflow's card. Both original browser cases
+also fail locally with retries disabled: the settled group has no Terminal
+button, and delayed mouse release navigates away from the board. The repair
+then passes all ten component checks, including ordinary mouse/touch gestures,
+keyboard activation, a missing synthetic click, secondary touch and unmount
+cleanup. A test-local PointerEvent input was corrected to mark ordinary
+pointer downs as primary; no production workaround was added for that input.
+
+All twelve desktop tool/height/scroll/drag cases pass in 47.0 seconds, and both
+existing phone navigation/scroll cases pass in 10.0 seconds, all without
+retries. Full web typecheck, strict affected-file lint/format and documentation
+checks pass. Native Playwright collection preserves all 3,957 identities across
+projects, owning root specs and native test IDs. The nine new cases extend the existing one-case
+file; expected frontend selection is 26,550 cases in the same 2,956 files.
+The explicit addition list is reconciled against its tested source hash; no
+other frontend identity or outcome change is permitted. Hosted speed and
+final-head coverage still require the next complete measurement.
+
 ### Hosted validation of the retained implementation
 
 The nineteenth full current-main set passes all 75 core jobs in 14m17s,

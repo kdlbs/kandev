@@ -53,6 +53,49 @@ git diff --check
 
 Hosted evidence remains mandatory; local contracts do not prove speed.
 
+### Next candidate: preserve the two failing browser contracts
+
+Task 15's bounded repair suppresses a drag's residual native click across
+workflow rows until it is consumed or a new primary pointer gesture starts.
+Keyboard activation remains available and unmount removes the listeners.
+The original lane test now crosses the old sensor timer boundary before
+release, then retains every growth/shrink/height/overflow assertion. The tool
+case waits for the settled two-call group, opens it, verifies both Terminal
+rows and checks no spinner before and after expansion. The script still
+omits tool results, preserving the turn-completion safety-net trigger.
+
+Local verification passes ten component checks, twelve desktop browser cases
+and two existing phone navigation/scroll cases, with browser retries disabled.
+Full type/lint/format and docs validation pass. All 3,957 E2E native identities
+remain; frontend adds exactly nine named component cases (26,550 total).
+This is a locally verified repair, not another accepted hosted measurement.
+Fifteen-minute acceptance remains 1/3 and the PR remains open.
+
+### Twenty-first complete hosted result: preserve two browser failures
+
+The evidence-only head `b3629e9a59a1` runs the same executable/config/test
+source as the preceding two samples. Backend `38670906969` passes in 12m50s,
+frontend `38670906967` passes in 12m09s, and E2E `38670906951` fails in 15m36s.
+Runner occupancy is 207.37, 29.77 and 286.13 minutes (523.27 total). E2E
+execution critical path is 773 seconds. This failed set is not accepted;
+fifteen-minute acceptance remains 1/3.
+
+All 3,957 native E2E identities match the source/run/producer-attempt-bound
+Build catalog: 3,911 first passes, four retry passes, two final failures and
+forty existing skips. Frontend preserves all 26,541 identities/outcomes and
+the ten backend native-report cohorts preserve all 35,580 executions/outcomes.
+All 28 normal resource outcomes have four available CPUs, no swap or memory
+events, and lifetime cgroup peaks of 7.98-9.11 GiB.
+
+The failures are the settled-tool locator in normal shard 22 and native drag
+release in shard nine, each exhausting its existing retries. Task 15 records
+their screenshots, trace-based cause and bounded repair scope. The required
+aggregate preserves failure. The sole monitor finishes exit one after matching
+terminal snapshots; the exact-head snapshot has 86 passes, three failed
+contexts, ten ancillary skips, zero pending checks and no evidence errors,
+unresolved/hidden threads or exact-head review bodies. Retain this failed
+measurement before publishing a repaired candidate.
+
 ### Twentieth complete hosted result: successful repeat above budget
 
 Head `330685e321c58` and actual PR merge `61c9e46c2995` have exactly the

@@ -40,9 +40,16 @@ test.describe("Tool completion on turn end", () => {
       }),
       session.sendMessageViaButton(script),
     ]);
-    const toolGroups = session.chat.getByRole("button", { name: /Terminal/ }).locator("..");
-    await expect(toolGroups).toBeVisible();
+    const groupToggle = session.chat.getByRole("button", { name: /2 tool calls/ });
+    const toolGroups = groupToggle.locator("..");
+    await expect(groupToggle).toBeVisible();
     const spinners = toolGroups.locator('[role="status"][aria-label="Loading"]');
+    await expect(spinners).toHaveCount(0);
+    await groupToggle.click();
+    const terminalTools = toolGroups.getByText("Terminal", { exact: true });
+    await expect(terminalTools).toHaveCount(2);
+    await expect(terminalTools.nth(0)).toBeVisible();
+    await expect(terminalTools.nth(1)).toBeVisible();
     await expect(spinners).toHaveCount(0);
   });
 });
