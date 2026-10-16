@@ -3,7 +3,6 @@ package github
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 )
@@ -32,7 +31,6 @@ func batchedPRProgressRefsKey(refs []graphQLPRRef) string {
 	for _, ref := range refs {
 		parts = append(parts, fmt.Sprintf("%s/%s#%d", strings.ToLower(ref.Owner), strings.ToLower(ref.Repo), ref.Number))
 	}
-	sort.Strings(parts)
 	return strings.Join(parts, "|")
 }
 
@@ -41,7 +39,6 @@ func batchedBranchProgressRefsKey(refs []graphQLBranchRef) string {
 	for _, ref := range refs {
 		parts = append(parts, fmt.Sprintf("%s/%s@%s", strings.ToLower(ref.Owner), strings.ToLower(ref.Repo), ref.Branch))
 	}
-	sort.Strings(parts)
 	return strings.Join(parts, "|")
 }
 

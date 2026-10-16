@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,31 @@ func (s *stubGraphQLExecutor) ExecuteGraphQL(_ context.Context, query string, _ 
 		s.responses = s.responses[1:]
 	}
 	return json.Unmarshal([]byte(response), out)
+}
+
+type reorderedBatchExecutor struct {
+	calls   int
+	deferAt int
+}
+
+var batchedRepoAliasPattern = regexp.MustCompile(`(?s)repo(\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{\s*pr0: pullRequest\(number: (\d+)\)`)
+
+func (e *reorderedBatchExecutor) ExecuteGraphQL(_ context.Context, query string, _ map[string]any, out any) error {
+	e.calls++
+	if e.calls == e.deferAt {
+		return &AdmissionDeferredError{Delay: time.Millisecond, Reason: "test chunk pacing"}
+	}
+	data := make(map[string]any)
+	for _, match := range batchedRepoAliasPattern.FindAllStringSubmatch(query, -1) {
+		data["repo"+match[1]] = map[string]any{
+			"pr0": batchedPRFixture("PR "+match[4], "https://x/"+match[4], 0, nil, false, ""),
+		}
+	}
+	payload, err := json.Marshal(map[string]any{"data": data})
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(payload, out)
 }
 
 func resolvedReviewThreadNodes(count int) []map[string]bool {
@@ -190,6 +216,46 @@ func TestFetchBatchedWatchStatusesDiscardsProgressWhenEffectiveRefsChange(t *tes
 	}
 	if statuses.byKey[prStatusCacheKey("o", "r", 42)] == nil {
 		t.Fatal("fresh mixed batch omitted numbered result")
+	}
+}
+
+// TestBatchedPRProgressDiscardsReorderedRefs keeps chunk continuations bound
+// to the request order they index. A reordered retry must fetch a new batch;
+// otherwise completed chunk one belongs to a different set of chunk positions.
+func TestBatchedPRProgressDiscardsReorderedRefs(t *testing.T) {
+	watches := make([]*PRWatch, graphQLBatchChunkSize+1)
+	for i := range watches {
+		watches[i] = &PRWatch{Owner: "o", Repo: fmt.Sprintf("repo-%02d", i), PRNumber: i + 1}
+	}
+	exec := &reorderedBatchExecutor{deferAt: 2}
+	service := &Service{}
+	ctx := pollerContext(context.Background())
+	const progressKey = "workspace:test:reordered-batch"
+	combined := make(map[string]*PRStatus)
+
+	progress, err := service.fetchBatchedPRStatusesWithProgress(ctx, exec, "test-scope", progressKey, watches, combined, 0)
+	if err == nil {
+		t.Fatal("first batch succeeded, want admission deferral after chunk one")
+	}
+	service.finishBatchedPRQueryProgress(progressKey, progress, true)
+
+	reordered := append(append([]*PRWatch(nil), watches[1:]...), watches[0])
+	combined = make(map[string]*PRStatus)
+	progress, err = service.fetchBatchedPRStatusesWithProgress(ctx, exec, "test-scope", progressKey, reordered, combined, 0)
+	if err != nil {
+		t.Fatalf("reordered retry: %v", err)
+	}
+	service.finishBatchedPRQueryProgress(progressKey, progress, false)
+	if exec.calls != 4 {
+		t.Fatalf("GraphQL calls = %d, want four: first chunk, deferral, and two fresh reordered chunks", exec.calls)
+	}
+	if len(combined) != len(reordered) {
+		t.Fatalf("reordered result count = %d, want %d", len(combined), len(reordered))
+	}
+	for _, watch := range reordered {
+		if combined[prStatusCacheKey(watch.Owner, watch.Repo, watch.PRNumber)] == nil {
+			t.Fatalf("reordered result omitted %s/%s#%d", watch.Owner, watch.Repo, watch.PRNumber)
+		}
 	}
 }
 
