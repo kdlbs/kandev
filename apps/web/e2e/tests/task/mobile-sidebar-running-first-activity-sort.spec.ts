@@ -22,6 +22,7 @@ import {
   waitForTaskRunningSummary,
   seedSidebarSortScenario,
   touchDragSortRule,
+  startSidebarKeyboardReorder,
 } from "./sidebar-running-first-activity-sort-helpers";
 
 test.describe.configure({ retries: 0 });
@@ -141,9 +142,7 @@ test("phone drawer edits and saves a touch-reachable sort chain and group inset"
       ]).then(([primary, secondary]) => [primary, ...secondary]);
     const drawer = testPage.getByTestId("sidebar-filter-drawer");
     const cancelHandle = savedPopover.getByTestId("sort-rule-handle-0");
-    await cancelHandle.focus();
-    await testPage.keyboard.press("Space");
-    await expect(cancelHandle).toHaveAttribute("aria-pressed", "true");
+    await startSidebarKeyboardReorder(testPage, cancelHandle);
     await testPage.keyboard.press("ArrowDown");
     await testPage.keyboard.press("Escape");
     await expect(drawer).toBeVisible();

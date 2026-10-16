@@ -42,6 +42,20 @@ export type SidebarRunningRankScenario = {
 
 export type SidebarColorPatchSnapshot = SidebarTaskColorPatchApi;
 
+export async function startSidebarKeyboardReorder(page: Page, handle: Locator): Promise<void> {
+  await handle.focus();
+  await page.keyboard.press("Space");
+  await expect(handle).toHaveAttribute("aria-pressed", "true");
+  // The sensor publishes its active state before registering its document listener.
+  // Yield through paint and the queued timer turn before sending movement or cancel keys.
+  await handle.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => window.setTimeout(resolve, 0));
+      }),
+  );
+}
+
 export async function readPreviousSidebarViewState(
   api: ApiClient,
   workspaceId: string,

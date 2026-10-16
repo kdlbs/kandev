@@ -20,6 +20,7 @@ import {
   seedSidebarRunningRankScenario,
   waitForSidebarSortSync,
   waitForTaskRunningSummary,
+  startSidebarKeyboardReorder,
 } from "./sidebar-running-first-activity-sort-helpers";
 
 test.describe.configure({ retries: 0 });
@@ -184,9 +185,7 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
       .locator("[data-testid^='sort-rule-description-']")
       .allTextContents();
     const firstHandle = reloadPopover.getByTestId("sort-rule-handle-0");
-    await firstHandle.focus();
-    await testPage.keyboard.press("Space");
-    await expect(firstHandle).toHaveAttribute("aria-pressed", "true");
+    await startSidebarKeyboardReorder(testPage, firstHandle);
     await testPage.keyboard.press("ArrowDown");
     await testPage.keyboard.press("Escape");
     await expect(reloadPopover).toBeVisible();
@@ -204,12 +203,7 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
     await reloadFilters.open();
     await reloadFilters.openSortSettings();
     const keyboardMoveHandle = reloadPopover.getByTestId("sort-rule-handle-0");
-    await keyboardMoveHandle.focus();
-    await testPage.keyboard.press("Space");
-    await expect(keyboardMoveHandle).toHaveAttribute("aria-pressed", "true");
-    await testPage.evaluate(
-      () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())),
-    );
+    await startSidebarKeyboardReorder(testPage, keyboardMoveHandle);
     await testPage.keyboard.press("ArrowDown");
     await expect(
       testPage.getByText("Running moved to position 2 of 3 items.", { exact: true }),
