@@ -1,3 +1,4 @@
+import { invalidateExecutorCatalogue } from "@/lib/api/executor-catalogue";
 import { createStore } from "zustand/vanilla";
 import { immer } from "zustand/middleware/immer";
 import { hydrateState } from "./hydration/hydrator";
@@ -113,6 +114,18 @@ export function createAppStore(initialState?: HydrationState) {
   syncQuickChatSelectionIdentity(previousAuth);
   store.subscribe((state) => {
     if (state.auth === previousAuth) return;
+    const changedUser = state.auth.user?.id !== previousAuth.user?.id;
+    const loggedOut = previousAuth.authenticated && !state.auth.authenticated;
+    const changedAuthority =
+      state.auth.user?.role !== previousAuth.user?.role ||
+      state.auth.user?.status !== previousAuth.user?.status ||
+      state.auth.mode !== previousAuth.mode;
+    if (changedUser || loggedOut || changedAuthority) {
+      invalidateExecutorCatalogue();
+      previousAuth = state.auth;
+      store.getState().setExecutors([]);
+      store.getState().setSettingsData({ executorsLoaded: false });
+    }
     previousAuth = state.auth;
     syncQuickChatSelectionIdentity(state.auth);
   });

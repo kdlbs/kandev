@@ -137,6 +137,22 @@ stores the plugin ID and instance key, not a private conversation ID; import
 requires an explicit binding to an available conversation in the destination
 workspace.
 
+### Private executor access
+
+Automations and provider watches retain the Kandev user who created them.
+Background dispatch, retries, and deferred launches check that user's current
+executor access. Editing or manually triggering a source also checks the
+caller's access, so another workspace member cannot borrow its creator's
+private compute. A disabled or missing creator cannot authorize private
+compute. Legacy sources without a recorded creator continue to use shared
+executors; recreate the source as the intended user before choosing a private
+executor.
+
+The same executor checks cover workflow execution and existing task sessions.
+A task's MCP principal uses its recorded execution actor for executor access;
+workspace ownership does not supply another user's private authority. See
+[Private executors and profiles](executors.md#private-executors-and-profiles).
+
 ## Trigger behavior
 
 The editor has two exclusive layouts:

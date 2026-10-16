@@ -2091,6 +2091,9 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err != nil {
 		return nil, err
 	}
+	if err := s.authorizeTaskExecutorMutation(ctx, task); err != nil {
+		return nil, err
+	}
 	assignee, err := s.validateTaskUpdateReferences(ctx, task, req)
 	if err != nil {
 		return nil, err

@@ -1675,6 +1675,11 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 
 	// Resolve executor configuration
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	ctx, err = e.prepareExecutorAdmission(ctx, task, session, execConfig)
+	if err != nil {
+		return "", err
+	}
+
 	if execConfig.ExecutorID != "" {
 		session.ExecutorID = execConfig.ExecutorID
 	}
@@ -2012,6 +2017,12 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 
 		if session.TaskID != task.ID {
 			return nil, fmt.Errorf("session does not belong to task")
+		}
+		if e.executorAdmission != nil {
+			ctx, err = e.executorAdmission(ctx, session.ID, executorID, session.ExecutorProfileID)
+			if err != nil {
+				return nil, err
+			}
 		}
 		sessionOwned = true
 		if strings.TrimSpace(agentProfileID) == "" {

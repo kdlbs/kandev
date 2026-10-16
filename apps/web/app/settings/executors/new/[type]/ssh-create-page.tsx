@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 import { useRouter } from "@/lib/routing/client-router";
@@ -8,6 +8,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { IconTerminal2 } from "@tabler/icons-react";
+import { ExecutorOwnerChoice } from "@/components/settings/executor-ownership";
 import { useAppStoreApi } from "@/components/state-provider";
 import { createExecutor, createExecutorProfile } from "@/lib/api/domains/settings-api";
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
@@ -34,11 +35,13 @@ const EXECUTORS_ROUTE = "/settings/executors";
 export function SSHCreatePage() {
   const router = useRouter();
   const store = useAppStoreApi();
+  const [owner, setOwner] = useState("");
 
   const handleSave = useCallback(
     async (cfg: SSHExecutorConfig) => {
       const created = await createExecutor({
         name: cfg.name,
+        ...(owner ? { owner_user_id: owner } : {}),
         type: "ssh",
         config: buildSSHExecutorConfig(cfg),
       });
@@ -57,6 +60,7 @@ export function SSHCreatePage() {
         status: "active",
         is_system: false,
         config: created.config,
+        ...(owner ? { owner_user_id: owner } : {}),
         profiles: [profile],
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -71,12 +75,13 @@ export function SSHCreatePage() {
       store.getState().setExecutors(merged);
       router.push(executorProfileSettingsPath(profile.id));
     },
-    [router, store],
+    [router, store, owner],
   );
 
   return (
     <div className="space-y-8">
       <SSHCreateHeader />
+      <ExecutorOwnerChoice value={owner} onChange={setOwner} creating baseline="" />
       <SSHConnectionCard onSave={handleSave} />
     </div>
   );

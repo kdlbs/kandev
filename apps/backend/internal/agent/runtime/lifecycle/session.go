@@ -64,6 +64,7 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
+	executorAdmission        func(context.Context, string, string, string) (context.Context, error)
 	logger                   *logger.Logger
 	eventPublisher           *EventPublisher
 	streamManager            *StreamManager
@@ -1894,6 +1895,11 @@ func (sm *SessionManager) sendPrompt(
 	callbacks sendPromptCallbacks,
 	steer bool,
 ) (*PromptResult, error) {
+	var admissionErr error
+	ctx, admissionErr = sm.admitExecutorPrompt(ctx, execution)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {
@@ -1932,6 +1938,10 @@ func (sm *SessionManager) sendPrompt(
 		defer beginPromptBarrier(execution)()
 	}
 
+	ctx, admissionErr = sm.admitExecutorPrompt(ctx, execution)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
 	preparedCtx, effectivePrompt, err := sm.preparePrompt(ctx, execution, prompt, validateStatus, attachments)
 	if err != nil {
 		sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)

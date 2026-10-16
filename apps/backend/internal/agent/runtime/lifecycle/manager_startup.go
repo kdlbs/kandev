@@ -94,6 +94,13 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	if m.executorAdmission != nil {
+		var err error
+		ctx, err = m.executorAdmission(ctx, execution.SessionID, getMetadataString(execution.MetadataSnapshot(), "executor_id"), getMetadataString(execution.MetadataSnapshot(), MetadataKeyExecutorProfileID))
+		if err != nil {
+			return err
+		}
+	}
 	if execution.SessionID == "" {
 		return m.startAgentProcess(ctx, executionID)
 	}

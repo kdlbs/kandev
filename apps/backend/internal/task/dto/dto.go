@@ -145,20 +145,22 @@ type ShellOutputSnapshotResponse struct {
 }
 
 type ExecutorDTO struct {
-	ID        string                   `json:"id"`
-	Name      string                   `json:"name"`
-	Type      models.ExecutorType      `json:"type"`
-	Status    models.ExecutorStatus    `json:"status"`
-	IsSystem  bool                     `json:"is_system"`
-	Resumable bool                     `json:"resumable"`
-	Config    map[string]string        `json:"config,omitempty"`
-	Profiles  []ExecutorProfileDTO     `json:"profiles,omitempty"`
-	Provider  *models.ExecutorProvider `json:"provider,omitempty"`
-	CreatedAt time.Time                `json:"created_at"`
-	UpdatedAt time.Time                `json:"updated_at"`
+	OwnerUserID string                   `json:"owner_user_id"`
+	ID          string                   `json:"id"`
+	Name        string                   `json:"name"`
+	Type        models.ExecutorType      `json:"type"`
+	Status      models.ExecutorStatus    `json:"status"`
+	IsSystem    bool                     `json:"is_system"`
+	Resumable   bool                     `json:"resumable"`
+	Config      map[string]string        `json:"config,omitempty"`
+	Profiles    []ExecutorProfileDTO     `json:"profiles,omitempty"`
+	Provider    *models.ExecutorProvider `json:"provider,omitempty"`
+	CreatedAt   time.Time                `json:"created_at"`
+	UpdatedAt   time.Time                `json:"updated_at"`
 }
 
 type ExecutorProfileDTO struct {
+	OwnerUserID   string                   `json:"owner_user_id"`
 	ID            string                   `json:"id"`
 	ExecutorID    string                   `json:"executor_id"`
 	ExecutorType  string                   `json:"executor_type,omitempty"`
@@ -1001,22 +1003,24 @@ func FromRepositoryScript(script *models.RepositoryScript) RepositoryScriptDTO {
 
 func FromExecutor(executor *models.Executor) ExecutorDTO {
 	return ExecutorDTO{
-		ID:        executor.ID,
-		Name:      executor.Name,
-		Type:      executor.Type,
-		Status:    executor.Status,
-		IsSystem:  executor.IsSystem,
-		Resumable: executor.Resumable,
-		Config:    executor.Config,
-		Provider:  executor.Provider,
-		CreatedAt: executor.CreatedAt,
-		UpdatedAt: executor.UpdatedAt,
+		OwnerUserID: executor.OwnerUserID,
+		ID:          executor.ID,
+		Name:        executor.Name,
+		Type:        executor.Type,
+		Status:      executor.Status,
+		IsSystem:    executor.IsSystem,
+		Resumable:   executor.Resumable,
+		Config:      executor.Config,
+		Provider:    executor.Provider,
+		CreatedAt:   executor.CreatedAt,
+		UpdatedAt:   executor.UpdatedAt,
 	}
 }
 
 func FromExecutorProfile(profile *models.ExecutorProfile) ExecutorProfileDTO {
 	config, secretFields := models.RedactExecutorProfileConfig(profile.Config)
 	return ExecutorProfileDTO{
+		OwnerUserID:   profile.OwnerUserID,
 		ID:            profile.ID,
 		ExecutorID:    profile.ExecutorID,
 		Name:          profile.Name,

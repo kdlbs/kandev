@@ -474,6 +474,13 @@ func (s *Service) handleNewReviewPR(ctx context.Context, event *bus.Event) error
 }
 
 func (s *Service) createReviewTask(ctx context.Context, evt *github.NewReviewPREvent) {
+	var err error
+	ctx, err = s.autonomousExecutorActor(models.WithExecutorWorkspace(ctx, evt.WorkspaceID), evt.CreatedByUserID, evt.ExecutorProfileID)
+	if err != nil {
+		s.logger.Warn("GitHub watcher executor access denied", zap.Error(err))
+		return
+	}
+
 	pr := evt.PR
 	repoSlug := fmt.Sprintf("%s/%s", pr.RepoOwner, pr.RepoName)
 
@@ -1821,6 +1828,13 @@ func (s *Service) handleNewIssue(ctx context.Context, event *bus.Event) error {
 }
 
 func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent) {
+	var err error
+	ctx, err = s.autonomousExecutorActor(models.WithExecutorWorkspace(ctx, evt.WorkspaceID), evt.CreatedByUserID, evt.ExecutorProfileID)
+	if err != nil {
+		s.logger.Warn("GitHub watcher executor access denied", zap.Error(err))
+		return
+	}
+
 	issue := evt.Issue
 	repoSlug := fmt.Sprintf("%s/%s", issue.RepoOwner, issue.RepoName)
 

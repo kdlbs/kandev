@@ -1840,6 +1840,13 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	if req == nil {
 		return nil, errors.New("launch request is required")
 	}
+	if m.executorAdmission != nil {
+		var err error
+		ctx, err = m.executorAdmission(ctx, req.SessionID, getMetadataString(req.Metadata, "executor_id"), getMetadataString(req.Metadata, MetadataKeyExecutorProfileID))
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := m.validateManagedToolPolicyAdmission(ctx, req); err != nil {
 		return nil, err
 	}

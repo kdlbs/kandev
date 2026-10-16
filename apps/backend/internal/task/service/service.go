@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -464,6 +465,7 @@ type Repos struct {
 
 // Service provides task business logic
 type Service struct {
+	executorIdentityResolver        func(context.Context, string) (authn.Identity, bool)
 	workspaces                      repository.WorkspaceRepository
 	userDirectory                   UserDirectory
 	unitPlacer                      UnitPlacer

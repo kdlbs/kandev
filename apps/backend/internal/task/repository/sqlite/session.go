@@ -16,6 +16,7 @@ import (
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -498,7 +499,7 @@ const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
 	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
-	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out`
+	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out, ts.executor_actor_user_id`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -1185,6 +1186,11 @@ func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *model
 
 // createTaskSession inserts a task session through the supplied database handle.
 func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExecutor, session *models.TaskSession) error {
+	if actor, bound := models.ExecutorActorFromContext(ctx); bound {
+		session.ExecutorActorUserID = actor
+	} else if identity, ok := authn.IdentityFromContext(ctx); ok && !identity.Synthetic {
+		session.ExecutorActorUserID = identity.UserID
+	}
 	if session.ID == "" {
 		session.ID = uuid.New().String()
 	}
@@ -1271,12 +1277,12 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 			repository_id, base_branch, base_commit_sha, workspace_path,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
-			is_primary, review_status, is_passthrough, task_environment_id, name
+			is_primary, review_status, is_passthrough, task_environment_id, name, executor_actor_user_id
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?
+			?, ?
 		)
 	`), session.ID, session.TaskID, session.QueueIncarnationID, agentProfileID,
 		session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
@@ -1285,7 +1291,7 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
-		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
+		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name, session.ExecutorActorUserID)
 
 	if err != nil {
 		return err
@@ -1533,7 +1539,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
-		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut,
+		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID,
 	)
 
 	if err == sql.ErrNoRows {
@@ -4438,7 +4444,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
-		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut,
+		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID,
 	)
 	if err != nil {
 		return nil, err

@@ -34,9 +34,9 @@ func (r *Repository) CreateExecutor(ctx context.Context, executor *models.Execut
 	}
 
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), executor.ID, executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt)
+		INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at, owner_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))
+	`), executor.ID, executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt, executor.OwnerUserID)
 	return err
 }
 
@@ -47,11 +47,11 @@ func (r *Repository) GetExecutor(ctx context.Context, id string) (*models.Execut
 	var resumable int
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
+		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at, COALESCE(owner_user_id, '')
 		FROM executors WHERE id = ? AND deleted_at IS NULL
 	`), id).Scan(
 		&executor.ID, &executor.Name, &executor.Type, &executor.Status,
-		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
+		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt, &executor.OwnerUserID,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("%w: %s", models.ErrExecutorNotFound, id)
@@ -78,10 +78,19 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 		return fmt.Errorf("failed to serialize executor config: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE executors SET name = ?, type = ?, status = ?, is_system = ?, resumable = ?, config = ?, updated_at = ?
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	owner, err := r.executorOwnershipForUpdateTx(ctx, tx, executor)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE executors SET name = ?, type = ?, status = ?, is_system = ?, resumable = ?, config = ?, updated_at = ?, owner_user_id = NULLIF(?, '')
 		WHERE id = ? AND deleted_at IS NULL
-	`), executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.UpdatedAt, executor.ID)
+	`), executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.UpdatedAt, owner, executor.ID)
 	if err != nil {
 		return err
 	}
@@ -89,6 +98,11 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 	if rows == 0 {
 		return fmt.Errorf("executor not found: %s", executor.ID)
 	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	executor.OwnerUserID = owner
+	executor.OwnershipIntent = nil
 	return nil
 }
 
@@ -132,7 +146,7 @@ func scanExecutorRow(scanner interface{ Scan(...any) error }) (*models.Executor,
 	var resumable int
 	if err := scanner.Scan(
 		&executor.ID, &executor.Name, &executor.Type, &executor.Status,
-		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
+		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt, &executor.OwnerUserID,
 	); err != nil {
 		return nil, err
 	}
@@ -148,7 +162,7 @@ func scanExecutorRow(scanner interface{ Scan(...any) error }) (*models.Executor,
 
 func (r *Repository) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
+		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at, COALESCE(owner_user_id, '')
 		FROM executors WHERE deleted_at IS NULL ORDER BY created_at ASC
 	`)
 	if err != nil {

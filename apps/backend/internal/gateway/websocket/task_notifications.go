@@ -205,6 +205,10 @@ func (b *TaskEventBroadcaster) broadcastEvent(ctx context.Context, event *bus.Ev
 		b.logger.Error("failed to build websocket notification", zap.String("action", action), zap.Error(err))
 		return nil
 	}
+	if isExecutorConfigurationAction(action) && (b.hub.authPolicy.ExecutorConfiguration != nil ||
+		(b.hub.authPolicy.Enforced != nil && b.hub.authPolicy.Enforced())) {
+		return b.hub.broadcastExecutorConfiguration(ctx, event.Data, msg)
+	}
 	sessionID := extractSessionID(event.Data)
 	b.logSessionStateMetadata(action, sessionID, event.Data)
 	if data, ok := event.Data.(map[string]interface{}); ok {

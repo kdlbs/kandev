@@ -521,6 +521,7 @@ func wireTaskWorkflowCrossReferences(
 	// package owns steps, templates and export/import, but a workflow's owner
 	// is its workspace's owner, which only the task service can resolve.
 	workflowSvc.SetWorkflowAccessChecker(taskSvc.AuthorizeWorkflowAccess)
+	workflowSvc.SetExecutorMutationChecker(taskSvc.AuthorizeWorkflowExecutorMutation)
 	workflowSvc.SetWorkspaceAccessChecker(taskSvc.AuthorizeWorkspaceAccess)
 	// A step's queue_run action names the task it starts work on, so the
 	// step-write API accepts task IDs as well.

@@ -738,13 +738,14 @@ type passthroughDispatchToken struct {
 
 // Service is the main orchestrator service
 type Service struct {
-	config        ServiceConfig
-	logger        *logger.Logger
-	eventBus      bus.EventBus
-	taskRepo      scheduler.TaskRepository
-	repo          sessionExecutorStore
-	promptTargets taskPullRequestTargetStore
-	agentManager  executor.AgentManagerClient
+	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
+	config                    ServiceConfig
+	logger                    *logger.Logger
+	eventBus                  bus.EventBus
+	taskRepo                  scheduler.TaskRepository
+	repo                      sessionExecutorStore
+	promptTargets             taskPullRequestTargetStore
+	agentManager              executor.AgentManagerClient
 	// ACP mode and model reports mutate one selector snapshot per session.
 	sessionSettingsSnapshotLocks [64]sync.Mutex
 

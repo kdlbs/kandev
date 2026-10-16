@@ -108,6 +108,39 @@ including a newer value saved concurrently. Supplying a script replaces it;
 supplying an empty string clears it. The profile editor submits both scripts,
 so a stale full editor draft can still replace newer script values.
 
+### Private executors and profiles
+
+With authentication enabled, use **Profile access** in the profile editor to
+choose **Shared** or **Only me**. Administrators can also choose another active
+user. A new profile is shared unless you choose an owner. Ownership changes use
+the page's Save/Discard controls; on phones the owner selector opens a drawer.
+
+A private profile is visible and usable only by its owner and configuration
+administrators. A non-system executor also has **Executor access**. A private
+executor restricts every profile beneath it, including profiles marked Shared.
+A profile's owner must match its private executor's owner. Built-in executor
+parents stay shared; their individual profiles can be private.
+
+Owners can return their resources to Shared. Administrators can reassign or
+clear ownership, including when an owner has left. Members cannot claim an
+existing shared resource or assign someone else. Existing administrator-only
+connection settings retain their restrictions.
+
+Sharing a workspace or task does not grant access to someone else's private
+compute. Task history remains readable according to workspace permissions, but
+starting, resuming, prompting, and shell access check executor eligibility.
+If a selected profile becomes unavailable, choose an accessible replacement
+before starting. Ownership changes apply to subsequent operations and do not
+terminate work already admitted.
+
+The HTTP and MCP profile APIs accept `owner_user_id`. Omit it on creation for a
+shared resource. On update, omission preserves ownership; `null` or an empty
+string clears it. Invalid users and conflicting parent/profile owners are
+rejected. Private configuration is filtered from catalogues, boot payloads, and
+live notifications. This is an application access boundary; Local and Worktree
+still use the server's OS account and its on-disk credentials. See
+[Authentication limitations](authentication.md#limitations).
+
 ### Repository environment secrets
 
 Open a workspace repository's editor to add **Environment secrets** bindings. Each binding maps a POSIX environment key to a Global secret or a Workspace secret from that same workspace. A task receives the bindings from every repository attached to it, along with its selected executor profile environment. The resolved snapshot is available to repository setup scripts, the agent, child shells, and new terminal-panel terminals on supported executors.

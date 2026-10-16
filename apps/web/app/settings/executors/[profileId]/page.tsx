@@ -15,6 +15,7 @@ import {
   listScriptPlaceholders,
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
+import { ExecutorOwnershipCard } from "@/components/settings/executor-ownership";
 import { ProfileDetailsCard } from "@/components/settings/profile-edit/profile-details-card";
 import { getExecutorDescription } from "@/components/settings/executor-description";
 import {
@@ -529,6 +530,8 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         actions={<ProfileConnectionSettingsAction executor={executor} />}
       />
       {memberReadOnly && <KubernetesReadOnlyNotice />}
+      {!executor.is_system && <ExecutorOwnershipCard executor={executor} />}
+      <ExecutorOwnershipCard executor={executor} profile={profile} />
       {form.isKubernetes && (
         <KubernetesProfileClusterSection
           executor={executor}

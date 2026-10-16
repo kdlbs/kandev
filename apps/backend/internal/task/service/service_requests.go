@@ -338,25 +338,28 @@ type UpdateRepositoryRequest struct {
 
 // CreateExecutorRequest contains the data for creating an executor
 type CreateExecutorRequest struct {
-	Name      string                `json:"name"`
-	Type      models.ExecutorType   `json:"type"`
-	Status    models.ExecutorStatus `json:"status"`
-	IsSystem  bool                  `json:"is_system"`
-	Resumable bool                  `json:"resumable"`
-	Config    map[string]string     `json:"config,omitempty"`
+	OwnerUserID string                `json:"owner_user_id,omitempty"`
+	Name        string                `json:"name"`
+	Type        models.ExecutorType   `json:"type"`
+	Status      models.ExecutorStatus `json:"status"`
+	IsSystem    bool                  `json:"is_system"`
+	Resumable   bool                  `json:"resumable"`
+	Config      map[string]string     `json:"config,omitempty"`
 }
 
 // UpdateExecutorRequest contains the data for updating an executor
 type UpdateExecutorRequest struct {
-	Name      *string                `json:"name,omitempty"`
-	Type      *models.ExecutorType   `json:"type,omitempty"`
-	Status    *models.ExecutorStatus `json:"status,omitempty"`
-	Resumable *bool                  `json:"resumable,omitempty"`
-	Config    map[string]string      `json:"config,omitempty"`
+	OwnerUserID models.OptionalOwner   `json:"owner_user_id,omitzero"`
+	Name        *string                `json:"name,omitempty"`
+	Type        *models.ExecutorType   `json:"type,omitempty"`
+	Status      *models.ExecutorStatus `json:"status,omitempty"`
+	Resumable   *bool                  `json:"resumable,omitempty"`
+	Config      map[string]string      `json:"config,omitempty"`
 }
 
 // CreateExecutorProfileRequest contains the data for creating an executor profile
 type CreateExecutorProfileRequest struct {
+	OwnerUserID   string                 `json:"owner_user_id,omitempty"`
 	ExecutorID    string                 `json:"executor_id"`
 	Name          string                 `json:"name"`
 	McpPolicy     string                 `json:"mcp_policy"`
@@ -368,6 +371,7 @@ type CreateExecutorProfileRequest struct {
 
 // UpdateExecutorProfileRequest contains the data for updating an executor profile
 type UpdateExecutorProfileRequest struct {
+	OwnerUserID       models.OptionalOwner   `json:"owner_user_id,omitzero"`
 	Name              *string                `json:"name,omitempty"`
 	McpPolicy         *string                `json:"mcp_policy,omitempty"`
 	Config            map[string]string      `json:"config,omitempty"`
