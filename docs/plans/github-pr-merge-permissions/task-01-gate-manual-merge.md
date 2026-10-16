@@ -203,7 +203,7 @@ Implementation started after the user's later `continue` request.
 - Go tests passed both normally and with `-race`. The changed-Go lint helper
   and a complete `golangci-lint run ./internal/github --timeout=5m --concurrency=2`
   each reported zero issues, including the new files.
-- Final frontend unit run: 178 tests passed across eight files. TypeScript
+- Initial focused frontend unit run: 178 tests passed across eight files. TypeScript
   was checked again after the additional regression cases and passed.
 - The commit hook caught the API test file's 600-line limit. The permission
   regression now lives in the existing focused PR API test file. The final
@@ -243,3 +243,25 @@ The managed browser commands above passed again after this correction: eight
 desktop tests and five phone tests, without retries or skips. Desktop verification
 rebuilt the runtime and web assets; the phone run reused that build. Logs:
 `/tmp/kandev-run.e2e.LwaeCxtw.log` and `/tmp/kandev-run.e2e.R1BUWPdG.log`.
+
+### CI remediation
+
+Frontend Tests (2/2), run `38887399635`, exposed an existing footer assertion
+that selected the only status region in the entire popover. The new permission
+notice is a second valid live region. The query now targets the footer and still
+requires its status role and refresh text. No product behavior or public contract
+changed, so the existing specifications and UI screenshots remain applicable.
+
+The exact failing test reproduced locally before the edit. These commands then
+passed from `apps/web`:
+
+```bash
+NODE_ENV=production pnpm run test components/github/pr-ci-popover.footer.test.tsx
+pnpm exec vitest run components/github hooks/domains/github/use-repo-merge-access.test.ts hooks/domains/github/use-repo-merge-methods.test.ts lib/api/domains/github-api.test.ts lib/api/domains/github-pr-api.test.ts lib/github-auth.test.ts
+pnpm exec eslint components/github/pr-ci-popover.footer.test.tsx --max-warnings 0
+pnpm exec prettier --check components/github/pr-ci-popover.footer.test.tsx
+```
+
+The focused footer suite passed all five tests. The expanded GitHub suite passed
+669 tests across 73 files. Logs: `/tmp/pr-4532-footer-red.log`,
+`/tmp/pr-4532-footer-green.log`, and `/tmp/pr-4532-github-consumers-green.log`.

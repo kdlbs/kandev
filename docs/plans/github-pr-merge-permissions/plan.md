@@ -210,10 +210,15 @@ Implementation and verification are complete. The initial component regression
 failed because an enabled merge button was present before access was confirmed.
 The controller regression failed with the expected missing-route response.
 After implementation, the backend GitHub package passed normally and with race
-detection. All 178 focused frontend tests and 13 desktop/phone browser tests
+detection. All 669 GitHub frontend tests and 13 desktop/phone browser tests
 passed. TypeScript, lint, translations, and documentation checks passed.
 The denied and unavailable states were inspected in four screenshots.
 See Task 01 for commands, local environment setup, logs, and capture locations.
+
+CI found a footer test that assumed the popover had only one status region.
+Its accessible-role query now targets the footer, so the permission notice can
+coexist with the refresh announcement. The test failed before this correction
+and passed afterward, along with the broader GitHub component suite.
 
 ## Risks
 
