@@ -37,6 +37,7 @@ func (h *Hub) broadcastExecutorConfiguration(ctx context.Context, data any, msg 
 	if err != nil {
 		return err
 	}
+	//ws:global All clients need this payload-free notice to remove revoked configuration.
 	h.Broadcast(invalidation)
 	return nil
 }

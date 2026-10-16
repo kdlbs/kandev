@@ -63,6 +63,10 @@ func (s *Service) AuthorizeExecutorConfiguration(ctx context.Context, executorID
 	if profileID != "" {
 		return s.AuthorizeExecutorProfile(ctx, profileID)
 	}
+	executorID, err := s.executorAdmissionID(ctx, executorID)
+	if err != nil {
+		return err
+	}
 	executor, err := s.executors.GetExecutor(ctx, executorID)
 	if err != nil {
 		return err

@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { CardContent } from "@kandev/ui/card";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
-import { listDirectoryUsers } from "@/lib/api/domains/team-access-api";
+import { useAssignablePeople } from "@/hooks/domains/users/use-assignable-people";
 import { updateExecutor, updateExecutorProfile } from "@/lib/api/domains/settings-api";
 import {
   executorOwnerChoices,
@@ -17,26 +17,6 @@ import { SettingsCard } from "./settings-card";
 import { SettingsCardHeader } from "./settings-card-header";
 import { ExecutorOwnerSelect } from "./executor-owner-select";
 import { useSettingsSaveContributor } from "./settings-save-provider";
-
-function useOwnerPeople(enabled: boolean) {
-  const userId = useAppStore((state) => state.auth.user?.id);
-  const [people, setPeople] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => {
-    setPeople([]);
-    if (!enabled) return;
-    let current = true;
-    listDirectoryUsers()
-      .then(({ users }) => {
-        if (current)
-          setPeople(users.map((user) => ({ id: user.id, name: user.display_name || user.id })));
-      })
-      .catch(() => {});
-    return () => {
-      current = false;
-    };
-  }, [enabled, userId]);
-  return people;
-}
 
 export function ExecutorOwnerChoice({
   value,
@@ -56,7 +36,7 @@ export function ExecutorOwnerChoice({
   const { t } = useTranslation();
   const manager = useIsAdmin();
   const user = useAppStore((state) => state.auth.user);
-  const people = useOwnerPeople(manager && Boolean(user));
+  const { people } = useAssignablePeople(undefined, { enabled: manager && Boolean(user) });
   const choices = executorOwnerChoices({
     userId: user?.id ?? "",
     currentOwner: baseline,

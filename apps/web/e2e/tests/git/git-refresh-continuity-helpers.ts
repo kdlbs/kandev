@@ -113,6 +113,8 @@ export async function scrollDiffIntoReadingPosition(
     )
     .not.toBeNull();
 
+  await waitForStableDiffAnchor(page, renderer, filePath);
+
   if (interaction === "touch") {
     if (renderer === "monaco") {
       await positionMonacoReadingLine(page, filePath, 40);

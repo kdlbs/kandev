@@ -55,3 +55,10 @@ func (r *Repository) GetTaskExecutorActor(ctx context.Context, taskID string) (s
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind("SELECT executor_actor_user_id FROM tasks WHERE id = ?"), taskID).Scan(&actor)
 	return actor, err
 }
+
+// HasExecutorRecord includes retired rows so an alias cannot replace a resource.
+func (r *Repository) HasExecutorRecord(ctx context.Context, id string) (bool, error) {
+	var count int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind("SELECT COUNT(*) FROM executors WHERE id = ?"), id).Scan(&count)
+	return count != 0, err
+}

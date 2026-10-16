@@ -6,8 +6,10 @@ import { executorCatalogueEpoch, invalidateExecutorCatalogue } from "@/lib/api/e
 export function refreshExecutorCatalogue(store: StoreApi<AppState>) {
   const generation = invalidateExecutorCatalogue();
   const userId = store.getState().auth.user?.id;
-  store.getState().setExecutors([]);
-  store.getState().setSettingsData({ executorsLoaded: false });
+  store.setState((state) => ({
+    executors: { items: [] },
+    settingsData: { ...state.settingsData, executorsLoaded: false },
+  }));
   void listExecutors({ cache: "no-store" })
     .then((response) => {
       if (generation !== executorCatalogueEpoch() || userId !== store.getState().auth.user?.id)

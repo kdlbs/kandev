@@ -130,7 +130,9 @@ another profile.
 
 Use transactional or version-checked writes against the observed ownership and
 `updated_at`, including ordinary partial saves, so stale edits cannot reverse a
-transfer. Parent and child consistency checks share the mutation transaction.
+transfer. Deletes also compare the parent/profile ownership snapshot under the
+same parent lock as transfers, including an expected missing parent for orphan
+cleanup. Parent and child consistency checks share the mutation transaction.
 Successful notifications use committed ownership; rejected writes publish none.
 
 ## Catalogue and events
@@ -149,7 +151,11 @@ to authenticated clients, followed by an authorized refetch that replaces the
 catalogue. An invalidation must contain no private profile configuration or owner
 identity. This also handles a formerly shared resource becoming private. Fence
 in-flight catalogue requests by generation so old responses cannot restore
-revoked entries. Clear profile caches on logout/user changes.
+revoked entries. Clear profile caches on logout/user changes. During an
+authorized catalogue refetch, retain the mounted editor draft behind a hidden,
+inert surface scoped to the same identity and profile. Restore it only when
+the refreshed catalogue still grants access; confirmed removal or an identity
+change discards it. Unrelated configuration events must not erase unsaved edits.
 
 Foreign direct reads return 404/WS-not-found and the corresponding MCP error;
 an otherwise visible resource with a forbidden management operation returns 403.
@@ -159,6 +165,12 @@ start until an eligible choice is explicitly made; do not silently change the
 workspace's saved default or pick another machine.
 
 ## Admission and execution
+
+Legacy Office `local_pc` selections resolve to the built-in local executor for
+ownership admission only when no actual executor row has that ID. Existing
+rows (including retired rows), inaccessible profiles, unknown IDs, and repository failures never fall
+back through this compatibility alias. Session and inherited-environment checks
+apply the same resolution.
 
 The request identity is the actor for interactive task creation/start, new
 session, resume/new prompt, retry, runner switch, workflow movement that starts

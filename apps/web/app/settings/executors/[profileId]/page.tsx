@@ -8,6 +8,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
+import { useExecutorProfileAccess } from "@/hooks/domains/settings/use-executor-profile-access";
 import {
   updateExecutorProfile,
   deleteExecutorProfile,
@@ -88,16 +89,6 @@ import {
 
 const EXECUTORS_ROUTE = "/settings/executors";
 
-function useProfileFromStore(profileId: string) {
-  const executor = useAppStore(
-    (state) =>
-      state.executors.items.find((e: Executor) => e.profiles?.some((p) => p.id === profileId)) ??
-      null,
-  );
-  const profile = executor?.profiles?.find((p: ExecutorProfile) => p.id === profileId) ?? null;
-  return executor && profile ? { executor, profile } : null;
-}
-
 function useRemoteAuthState(profile: ExecutorProfile) {
   const [networkPolicyRules, setNetworkPolicyRules] = useState<NetworkPolicyRule[]>(() =>
     parseNetworkPolicyRules(profile.config),
@@ -139,7 +130,7 @@ function useRemoteAuthState(profile: ExecutorProfile) {
 export default function ProfileEditPage({ profileId }: { profileId: string }) {
   const { t } = useTranslation();
   const router = useRouter();
-  const result = useProfileFromStore(profileId);
+  const { result, checking } = useExecutorProfileAccess(profileId);
 
   if (!result) {
     return (
@@ -154,14 +145,27 @@ export default function ProfileEditPage({ profileId }: { profileId: string }) {
     );
   }
 
-  return result.executor.type === "plugin_remote" ? (
-    <PluginExecutorProfilePage
-      key={result.profile.id}
-      executor={result.executor}
-      profile={result.profile}
-    />
-  ) : (
-    <ProfileEditForm key={result.profile.id} executor={result.executor} profile={result.profile} />
+  return (
+    <div
+      className={checking ? "hidden" : "contents"}
+      hidden={checking}
+      inert={checking}
+      aria-busy={checking}
+    >
+      {result.executor.type === "plugin_remote" ? (
+        <PluginExecutorProfilePage
+          key={result.profile.id}
+          executor={result.executor}
+          profile={result.profile}
+        />
+      ) : (
+        <ProfileEditForm
+          key={result.profile.id}
+          executor={result.executor}
+          profile={result.profile}
+        />
+      )}
+    </div>
   );
 }
 

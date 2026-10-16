@@ -105,3 +105,5 @@ Filtering only GET endpoints misses boot payloads, settings snapshots, and event
 Implemented authorized catalogues/getters/mutations across HTTP, WebSocket, MCP, settings descriptors, and boot projections. Configuration notifications check each recipient independently; payload-free invalidation evicts lost access and fences stale catalogue responses. Logout, identity changes, role changes, and account status changes clear client configuration. SSH reachability and SSH/Kubernetes inventory use the same configuration policy.
 
 HTTP/MCP/notification regressions, 104 focused frontend tests, and the API/boot/live-eviction browser scenarios pass. Changed-package Go lint is recorded in the plan.
+
+PR remediation: catalogue invalidation clears selectable data atomically while the identity-scoped editor remains mounted, hidden, and inert until access is revalidated. A confirmed removal still discards the form. Regenerated the settings contract snapshot and added the required global invalidation justification.

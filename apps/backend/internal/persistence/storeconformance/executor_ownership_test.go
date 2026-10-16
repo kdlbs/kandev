@@ -45,6 +45,24 @@ func TestExecutorOwnershipStoreConformance(t *testing.T) {
 			loaded, err = repo.GetExecutorProfile(t.Context(), profile.ID)
 			require.NoError(t, err)
 			require.Equal(t, "bob", loaded.OwnerUserID)
+			shared := ""
+			require.ErrorIs(t, repo.DeleteExecutorProfileIfOwnershipUnmodified(t.Context(), &stale, &shared), models.ErrExecutorOwnershipChanged)
+			executor.OwnershipIntent = &models.ExecutorOwnershipIntent{OwnerUserID: &bob}
+			require.NoError(t, repo.UpdateExecutor(t.Context(), executor))
+			require.ErrorIs(t, repo.DeleteExecutorProfileIfOwnershipUnmodified(t.Context(), loaded, &shared), models.ErrExecutorOwnershipChanged)
+			require.NoError(t, repo.DeleteExecutorProfileIfOwnershipUnmodified(t.Context(), loaded, &bob))
+			orphan := &models.ExecutorProfile{ID: "orphaned-profile", ExecutorID: executor.ID, Name: "Orphaned", OwnerUserID: "bob"}
+			require.NoError(t, repo.CreateExecutorProfile(t.Context(), orphan))
+			require.ErrorIs(t, repo.DeleteExecutorIfOwnershipUnmodified(t.Context(), executor.ID, ""), models.ErrExecutorOwnershipChanged)
+			require.NoError(t, repo.DeleteExecutorIfOwnershipUnmodified(t.Context(), executor.ID, "bob"))
+			exists, err := repo.HasExecutorRecord(t.Context(), executor.ID)
+			require.NoError(t, err)
+			require.True(t, exists)
+			exists, err = repo.HasExecutorRecord(t.Context(), "unknown-executor")
+			require.NoError(t, err)
+			require.False(t, exists)
+			require.ErrorIs(t, repo.DeleteExecutorProfileIfOwnershipUnmodified(t.Context(), orphan, &bob), models.ErrExecutorOwnershipChanged)
+			require.NoError(t, repo.DeleteExecutorProfileIfOwnershipUnmodified(t.Context(), orphan, nil))
 		})
 	}
 }

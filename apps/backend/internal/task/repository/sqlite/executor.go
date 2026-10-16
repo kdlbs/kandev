@@ -107,6 +107,10 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 }
 
 func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
+	return r.deleteExecutor(ctx, id, nil)
+}
+
+func (r *Repository) deleteExecutor(ctx context.Context, id string, expectedOwner *string) error {
 	now := time.Now().UTC()
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -114,14 +118,24 @@ func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result, err := tx.ExecContext(ctx, tx.Rebind(`
-		UPDATE executors SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
-	`), now, now, id)
+	if err := r.lockExecutorOwnershipTx(ctx, tx, id); err != nil {
+		return err
+	}
+	query := "UPDATE executors SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL"
+	args := []any{now, now, id}
+	if expectedOwner != nil {
+		query += " AND COALESCE(owner_user_id, '') = ?"
+		args = append(args, *expectedOwner)
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(query), args...)
 	if err != nil {
 		return err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		if expectedOwner != nil {
+			return models.ErrExecutorOwnershipChanged
+		}
 		return fmt.Errorf("executor not found: %s", id)
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`

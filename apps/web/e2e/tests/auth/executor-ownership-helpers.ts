@@ -105,6 +105,49 @@ export function registerExecutorOwnershipTests(mobile: boolean) {
       expect((await admin.request.get(url)).ok()).toBe(true);
     });
 
+    test("keeps unsaved profile and ownership drafts across an unrelated catalogue invalidation", async ({
+      context,
+      page,
+    }) => {
+      await login(context, baseUrl, ALICE);
+      await page.goto(`${baseUrl}/settings/executors/${profileId}`);
+      await page.getByLabel("Name", { exact: true }).fill("Unsaved personal runner");
+      await chooseOwner(page, mobile, "Shared");
+      let release!: () => void;
+      let requested!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const received = new Promise<void>((resolve) => {
+        requested = resolve;
+      });
+      await page.route("**/api/v1/executors", async (route) => {
+        requested();
+        await pending;
+        await route.continue();
+      });
+      try {
+        const created = await admin.request.post(
+          `${baseUrl}/api/v1/executors/${executorId}/profiles`,
+          { data: { name: "Unrelated shared runner" } },
+        );
+        expect(created.ok(), await created.text()).toBe(true);
+        await received;
+        await expect(page.getByLabel("Name", { exact: true })).toBeHidden();
+      } finally {
+        release();
+      }
+      await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Unsaved personal runner");
+      await expect(
+        page.getByRole(mobile ? "button" : "combobox", { name: "Profile access", exact: true }),
+      ).toHaveText("Shared");
+      await page
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: "Reset", exact: true })
+        .click();
+      await page.unroute("**/api/v1/executors");
+    });
+
     test("owner shares the profile and an ownership transfer evicts an open editor", async ({
       context,
       page,

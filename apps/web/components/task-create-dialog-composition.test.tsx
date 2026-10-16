@@ -81,7 +81,13 @@ vi.mock("@/components/task-create-dialog-state", () => ({
   useTaskCreateDialogData: () => ({
     workflows: [],
     agentProfiles: [],
-    executors: [],
+    executors: [
+      {
+        id: "executor-1",
+        type: "local",
+        profiles: [{ id: "executor-profile-1", executor_id: "executor-1" }],
+      },
+    ],
     snapshots: {},
     workspaceSnapshotRead: {},
     repositories: [],

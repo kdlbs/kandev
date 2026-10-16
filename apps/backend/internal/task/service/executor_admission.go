@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
+
+const legacyLocalExecutorID = "local_pc"
 
 type executorUseAdmitter interface {
 	AdmitExecutorUse(ctx context.Context, executorID, profileID, parentOwner, profileOwner, sessionID, actorID string) error
@@ -187,6 +190,10 @@ func (s *Service) executorAdmissionTargets(ctx context.Context, session *models.
 
 func (s *Service) executorAdmissionProfile(ctx context.Context, executorID, profileID string) (string, string, error) {
 	var profileOwner string
+	executorID, err := s.executorAdmissionID(ctx, executorID)
+	if err != nil {
+		return "", "", err
+	}
 	if profileID != "" {
 		profile, err := s.GetExecutorProfile(ctx, profileID)
 		if err != nil {
@@ -199,4 +206,33 @@ func (s *Service) executorAdmissionProfile(ctx context.Context, executorID, prof
 		executorID = profile.ExecutorID
 	}
 	return executorID, profileOwner, nil
+}
+
+// Legacy Office selections name a runtime kind, while ownership belongs to
+// the built-in row. A real row with that ID remains authoritative.
+func (s *Service) executorAdmissionID(ctx context.Context, id string) (string, error) {
+	if id != legacyLocalExecutorID {
+		return id, nil
+	}
+	_, readErr := s.executors.GetExecutor(ctx, id)
+	if readErr == nil {
+		return id, nil
+	}
+	if !errors.Is(readErr, models.ErrExecutorNotFound) {
+		return "", readErr
+	}
+	history, ok := s.executors.(interface {
+		HasExecutorRecord(context.Context, string) (bool, error)
+	})
+	if !ok {
+		return "", readErr
+	}
+	exists, err := history.HasExecutorRecord(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if exists {
+		return "", readErr
+	}
+	return models.ExecutorIDLocal, nil
 }

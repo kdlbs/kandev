@@ -95,3 +95,5 @@ Ownership-bearing resource persistence and same-owner child checks are coupled; 
 Implemented nullable executor/profile owners, presence-aware patch fields, assignment policy, compatible writers, parent/profile constraints, and serialized ownership admission. Ordinary and script-intent writes retain ownership; stale ownership saves fail. Legacy fixtures verify SQL NULL/shared defaults. Trusted task/session actors survive task and Office table rebuilds.
 
 Passed focused ownership/script regression tests and full race-enabled SQLite/PostgreSQL store conformance, including previous-stable upgrades and same-database replay. PostgreSQL used an isolated PostgreSQL 17 container via `KANDEV_TEST_POSTGRES_DSN` (no PostgreSQL skips). SQLguard and changed task/persistence/MCP Go lint passed. See the plan for the consolidated commands and results.
+
+PR remediation: conditional executor/profile deletes now compare the authorized ownership snapshot under the parent transfer lock. Service race/positive-control regressions and race-enabled SQLite/PostgreSQL ownership conformance pass.

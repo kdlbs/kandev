@@ -2124,7 +2124,7 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 			return ErrActiveTaskSessions
 		}
 	}
-	if err := s.executors.DeleteExecutor(ctx, id); err != nil {
+	if err := s.executors.DeleteExecutorIfOwnershipUnmodified(ctx, id, executor.OwnerUserID); err != nil {
 		return err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorDeleted, executor)
@@ -2477,7 +2477,11 @@ func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.executors.DeleteExecutorProfile(ctx, id); err != nil {
+	var parentOwner *string
+	if executor != nil {
+		parentOwner = &executor.OwnerUserID
+	}
+	if err := s.executors.DeleteExecutorProfileIfOwnershipUnmodified(ctx, profile, parentOwner); err != nil {
 		return err
 	}
 	cleanupProfileSecrets(ctx, s.secretStore, secretIDs)
