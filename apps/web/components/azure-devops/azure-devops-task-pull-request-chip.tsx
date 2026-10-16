@@ -4,7 +4,7 @@ import { IconBrandAzure, IconExternalLink } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskWorkspaceId } from "@/components/task/task-workspace-context";
 import { useAzureDevOpsTaskPullRequests } from "@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests";
 import { getAzureDevOpsPullRequestPresentation } from "./azure-devops-status";
 
@@ -18,7 +18,7 @@ const TONE_CLASS = {
 
 export function AzureDevOpsTaskPullRequestChip({ taskId }: { taskId: string | null }) {
   const { t } = useTranslation();
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceId = useTaskWorkspaceId(taskId);
   const pullRequests = useAzureDevOpsTaskPullRequests(workspaceId, taskId);
   const first = pullRequests[0];
   if (!first) return null;

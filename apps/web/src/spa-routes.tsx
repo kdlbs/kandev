@@ -68,6 +68,12 @@ import { NeedsYouInboxRoute } from "./needs-you-inbox-route";
 import { AuthRouteRedirect, RouteLoading } from "./spa-route-chrome";
 import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
 import { generateUUID } from "@/lib/utils";
+import { isIntegratedControlPath } from "@/lib/navigation/integrated-control";
+const IntegratedControlPage = lazy(() =>
+  import("@/components/integrated-control/integrated-control-page").then((mod) => ({
+    default: mod.IntegratedControlPage,
+  })),
+);
 
 const OfficeRoutes = lazy(() =>
   import("./office-routes").then((mod) => ({ default: mod.OfficeRoutes })),
@@ -119,6 +125,7 @@ type SpaRoute =
       view: "needs-you" | "queue";
     }
   | { kind: "needsYouInbox" }
+  | { kind: "integratedControl" }
   | { kind: "settings"; pathname: string }
   | { kind: "office"; pathname: string }
   | { kind: "plugin"; path: string }
@@ -135,6 +142,7 @@ type DataBackedSpaRoute = Exclude<
       | "canvasSettings"
       | "coordinator"
       | "needsYouInbox"
+      | "integratedControl"
       | "settings"
       | "office"
       | "login"
@@ -155,6 +163,7 @@ type SpaRouteOptions = {
   canvasesEnabled?: boolean;
   needsYouInboxEnabled?: boolean;
   coordinatorEnabled?: boolean;
+  integratedControlEnabled?: boolean;
 };
 
 export function resolveSpaRoute(
@@ -164,6 +173,9 @@ export function resolveSpaRoute(
 ): SpaRoute {
   const normalized = normalizePath(pathname);
   return (
+    (options.integratedControlEnabled && isIntegratedControlPath(normalized)
+      ? { kind: "integratedControl" as const }
+      : null) ??
     resolveTaskDetailRoute(normalized, searchParams) ??
     resolveRunsRoute(normalized, searchParams) ??
     resolveTopLevelRoute(normalized, searchParams) ??
@@ -348,10 +360,12 @@ export function useResolvedSpaRoute(): SpaRoute {
   const canvasesEnabled = useFeature("canvases");
   const needsYouInboxEnabled = useFeature("needsYouInbox");
   const coordinatorEnabled = useFeature("coordinator");
+  const integratedControlEnabled = useFeature("integratedControl");
   return resolveSpaRoute(pathname, searchParams, {
     canvasesEnabled,
     needsYouInboxEnabled,
     coordinatorEnabled,
+    integratedControlEnabled,
   });
 }
 
@@ -359,10 +373,27 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   // Subscribe so a plugin route registered after first paint (async bundle
   // load) re-resolves without requiring a navigation.
   usePluginRegistry();
+  const route = useResolvedSpaRoute();
+  if (route.kind === "integratedControl") {
+    return (
+      <Suspense fallback={<RouteLoading routeNameKey="sidebar:integratedControl.title" />}>
+        <IntegratedControlPage />
+      </Suspense>
+    );
+  }
+  return <StandardSpaRoutes route={route} routeData={routeData} />;
+}
+
+function StandardSpaRoutes({
+  route,
+  routeData,
+}: {
+  route: Exclude<SpaRoute, { kind: "integratedControl" }>;
+  routeData?: BootRouteData;
+}) {
   const canvasesEnabled = useFeature("canvases");
   const needsYouInboxEnabled = useFeature("needsYouInbox");
   const coordinatorEnabled = useFeature("coordinator");
-  const route = useResolvedSpaRoute();
 
   // Reaching /login, /setup, or /invite here means the pre-auth gate in
   // main.tsx already decided the app shell should render (authenticated, or

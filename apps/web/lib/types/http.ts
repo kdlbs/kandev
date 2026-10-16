@@ -529,6 +529,7 @@ export type Task = ActiveSubagentCountFields & {
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.
 export type TaskOrigin =
+  | "coordinator"
   | "manual"
   | "agent_created"
   | "routine"
