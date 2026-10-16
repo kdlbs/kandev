@@ -627,9 +627,10 @@ func (s *Service) fetchBatchedPRStatusesWithProgress(
 		refs = append(refs, graphQLPRRef{Owner: w.Owner, Repo: w.Repo, Number: w.PRNumber})
 	}
 	if len(refs) == 0 {
+		s.discardBatchedPRQueryProgress(progressKey)
 		return nil, nil
 	}
-	progress := s.batchedPRQueryProgress(progressKey)
+	progress := s.batchedPRQueryProgress(progressKey, batchedPRProgressRefsKey(refs))
 	out, err := runBatchedPRQueryWithProgress(ctx, exec, refs, progress)
 	out, err = s.absorbMissingReposErr(out, err, cacheScope, repoErrGen)
 	if err != nil {
@@ -667,9 +668,10 @@ func (s *Service) fetchBatchedBranchStatusesWithProgress(
 		refs = append(refs, graphQLBranchRef{Owner: w.Owner, Repo: w.Repo, Branch: w.Branch})
 	}
 	if len(refs) == 0 {
+		s.discardBatchedBranchQueryProgress(progressKey)
 		return nil, nil
 	}
-	progress := s.batchedBranchQueryProgress(progressKey)
+	progress := s.batchedBranchQueryProgress(progressKey, batchedBranchProgressRefsKey(refs))
 	out, err := runBatchedBranchQueryWithProgress(ctx, exec, refs, progress)
 	statuses, err := s.absorbMissingReposErr(out.Statuses, err, cacheScope, repoErrGen)
 	if err != nil {

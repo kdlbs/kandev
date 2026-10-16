@@ -16,7 +16,7 @@ func TestBatchedBranchQueryProgressExpiresAfterTTL(t *testing.T) {
 		},
 	}
 
-	current := service.batchedBranchQueryProgress("query")
+	current := service.batchedBranchQueryProgress("query", "refs")
 	if current == staleProgress {
 		t.Fatal("branch query reused an expired continuation")
 	}

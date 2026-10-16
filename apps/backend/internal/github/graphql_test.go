@@ -157,6 +157,42 @@ func TestFetchBatchedWatchStatusesKeepsCompletedPhaseAcrossAdmissionDeferral(t *
 	}
 }
 
+// TestFetchBatchedWatchStatusesDiscardsProgressWhenEffectiveRefsChange
+// prevents a completed phase retained for branch pacing from surviving a
+// negative-cache filter. Once the filter is lifted, that watch must fetch a
+// fresh numbered result instead of publishing the retained one.
+func TestFetchBatchedWatchStatusesDiscardsProgressWhenEffectiveRefsChange(t *testing.T) {
+	exec := &mixedBatchExecutor{
+		prResponse:     batchedPRReviewThreadsResponse(t, 0, nil, false, ""),
+		branchResponse: batchedBranchReviewThreadsResponse(t, 0, nil, false, ""),
+		deferBranch:    true,
+	}
+	service := &Service{repoErrorCache: newRepoErrorCache()}
+	numbered := []*PRWatch{{Owner: "o", Repo: "r", PRNumber: 42}}
+	searching := []*PRWatch{{Owner: "o", Repo: "r", Branch: "feat"}}
+	ctx := pollerContext(context.Background())
+
+	if _, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false); err == nil {
+		t.Fatal("first mixed batch succeeded, want branch admission deferral")
+	}
+	service.markRepoAsMissingForScope("test-scope", "o", "r", service.repoErrorGenSnapshot())
+	if _, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false); err != nil {
+		t.Fatalf("negative-cached mixed batch: %v", err)
+	}
+	service.repoErrorCache.clear()
+
+	statuses, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false)
+	if err != nil {
+		t.Fatalf("mixed batch after negative-cache clear: %v", err)
+	}
+	if exec.prQueries != 2 || exec.branchQueries != 2 {
+		t.Fatalf("queries after effective-ref change = PR %d, branch %d; want fresh fetches", exec.prQueries, exec.branchQueries)
+	}
+	if statuses.byKey[prStatusCacheKey("o", "r", 42)] == nil {
+		t.Fatal("fresh mixed batch omitted numbered result")
+	}
+}
+
 func TestBatchedBranchQueryResumesChunkAfterAdmissionPacing(t *testing.T) {
 	client, requests := newRecordingPATServer(t, map[string]string{
 		"/graphql": `{"data":{}}`,

@@ -2,6 +2,9 @@ package github
 
 import (
 	"errors"
+	"fmt"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -12,17 +15,37 @@ const (
 
 type batchedPRProgressEntry struct {
 	progress *batchedPRQueryProgress
+	refsKey  string
 	updated  time.Time
 	active   int
 }
 
 type batchedBranchProgressEntry struct {
 	progress *batchedBranchQueryProgress
+	refsKey  string
 	updated  time.Time
 	active   int
 }
 
-func (s *Service) batchedPRQueryProgress(key string) *batchedPRQueryProgress {
+func batchedPRProgressRefsKey(refs []graphQLPRRef) string {
+	parts := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		parts = append(parts, fmt.Sprintf("%s/%s#%d", strings.ToLower(ref.Owner), strings.ToLower(ref.Repo), ref.Number))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "|")
+}
+
+func batchedBranchProgressRefsKey(refs []graphQLBranchRef) string {
+	parts := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		parts = append(parts, fmt.Sprintf("%s/%s@%s", strings.ToLower(ref.Owner), strings.ToLower(ref.Repo), ref.Branch))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "|")
+}
+
+func (s *Service) batchedPRQueryProgress(key, refsKey string) *batchedPRQueryProgress {
 	s.batchedProgressMu.Lock()
 	defer s.batchedProgressMu.Unlock()
 	now := time.Now()
@@ -31,9 +54,13 @@ func (s *Service) batchedPRQueryProgress(key string) *batchedPRQueryProgress {
 		s.batchedPRProgress = make(map[string]*batchedPRProgressEntry)
 	}
 	entry := s.batchedPRProgress[key]
+	if entry != nil && entry.refsKey != refsKey {
+		delete(s.batchedPRProgress, key)
+		entry = nil
+	}
 	if entry == nil {
 		s.evictOldestBatchedPRProgressLocked()
-		entry = &batchedPRProgressEntry{progress: &batchedPRQueryProgress{}, updated: now}
+		entry = &batchedPRProgressEntry{progress: &batchedPRQueryProgress{}, refsKey: refsKey, updated: now}
 		s.batchedPRProgress[key] = entry
 	}
 	entry.active++
@@ -85,7 +112,13 @@ func (s *Service) clearBatchedPRProgress() {
 	s.batchedProgressMu.Unlock()
 }
 
-func (s *Service) batchedBranchQueryProgress(key string) *batchedBranchQueryProgress {
+func (s *Service) discardBatchedPRQueryProgress(key string) {
+	s.batchedProgressMu.Lock()
+	delete(s.batchedPRProgress, key)
+	s.batchedProgressMu.Unlock()
+}
+
+func (s *Service) batchedBranchQueryProgress(key, refsKey string) *batchedBranchQueryProgress {
 	s.batchedProgressMu.Lock()
 	defer s.batchedProgressMu.Unlock()
 	now := time.Now()
@@ -94,9 +127,13 @@ func (s *Service) batchedBranchQueryProgress(key string) *batchedBranchQueryProg
 		s.batchedBranchProgress = make(map[string]*batchedBranchProgressEntry)
 	}
 	entry := s.batchedBranchProgress[key]
+	if entry != nil && entry.refsKey != refsKey {
+		delete(s.batchedBranchProgress, key)
+		entry = nil
+	}
 	if entry == nil {
 		s.evictOldestBatchedBranchProgressLocked()
-		entry = &batchedBranchProgressEntry{progress: &batchedBranchQueryProgress{}, updated: now}
+		entry = &batchedBranchProgressEntry{progress: &batchedBranchQueryProgress{}, refsKey: refsKey, updated: now}
 		s.batchedBranchProgress[key] = entry
 	}
 	entry.active++
@@ -132,6 +169,12 @@ func (s *Service) finishBatchedBranchQueryProgress(key string, progress *batched
 		return
 	}
 	entry.updated = time.Now()
+}
+
+func (s *Service) discardBatchedBranchQueryProgress(key string) {
+	s.batchedProgressMu.Lock()
+	delete(s.batchedBranchProgress, key)
+	s.batchedProgressMu.Unlock()
 }
 
 func (s *Service) evictOldestBatchedBranchProgressLocked() {
