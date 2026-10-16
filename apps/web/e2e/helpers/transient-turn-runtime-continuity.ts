@@ -154,3 +154,16 @@ export function assertRetainedFailureMessage(message: SessionMessage) {
     recovery_actions: false,
   });
 }
+
+export async function expectRetainedTurnReady(session: SessionPage) {
+  const errorRow = session.activeChat().getByTestId("session-recovery-action-message");
+  await expect(errorRow).toHaveCount(1);
+  await expect(errorRow).toContainText("Selected model is at capacity.");
+  await expect(session.recoveryResumeButton()).toHaveCount(0);
+  await expect(session.recoveryFreshButton()).toHaveCount(0);
+  await expect(session.activeChat().getByTestId("session-recovery-card")).toHaveCount(0);
+  await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
+  await expect(
+    session.activeChat().getByRole("button", { name: "Session model settings" }),
+  ).toBeVisible();
+}

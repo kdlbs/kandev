@@ -9,6 +9,8 @@ import { seedIdleSession } from "../../helpers/session";
 import { holdCancellationSettlement } from "../../helpers/cancellation-observation";
 
 test.describe.serial("Mobile cancel turn availability", () => {
+  test.describe.configure({ retries: 0 });
+
   test.beforeAll(async ({ backend }) => {
     await backend.restart({ KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF: "true" });
   });
@@ -62,14 +64,13 @@ test.describe.serial("Mobile cancel turn availability", () => {
     cancellation.arm(sessionId);
     try {
       await cancel.tap();
-      await waitForActiveSessionCancellationPending(testPage, true, sessionId);
       await expect(cancel).toBeDisabled();
     } finally {
       cancellation.release();
     }
     await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
-    await waitForActiveSessionCancellationPending(testPage, false, sessionId);
-    await waitForActiveSessionForegroundActivity(testPage, null, sessionId, 75_000);
+    await waitForActiveSessionCancellationPending(testPage, false, sessionId, 2);
+    await waitForActiveSessionForegroundActivity(testPage, null, sessionId, 20_000);
     await expect(cancel).not.toBeVisible({ timeout: 15_000 });
     await assertNoDocumentHorizontalOverflow(testPage, "mobile background cancellation");
   });

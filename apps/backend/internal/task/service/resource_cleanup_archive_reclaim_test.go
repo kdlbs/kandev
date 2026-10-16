@@ -107,7 +107,7 @@ func TestResumeBackfillsAndReclaimsArchivedWorktreeWithoutArchiveJob(t *testing.
 	// reconciliation discovers the active row and the task cleanup worker
 	// performs the clean recheck without storage maintenance scheduling.
 	restarted := newServiceOverRepository(t, repo)
-	manager := newCleanupTestWorktreeManager(t, repo)
+	manager := newCleanupTestWorktreeManagerAt(t, repo, filepath.Dir(filepath.Dir(wt.Path)))
 	manager.SetRepositoryProvider(worktree.NewRepositoryAdapter(repo))
 	restarted.SetWorktreeCleanup(manager)
 	if err := restarted.ResumeTaskResourceCleanupJobs(ctx); err != nil {

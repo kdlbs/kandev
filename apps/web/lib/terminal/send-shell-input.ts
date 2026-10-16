@@ -23,7 +23,7 @@ export function sendShellInput(sessionId: string, data: string): void {
   const shiftActive = isActive(store.shift);
   const transformed = applyShellModifiers(data, { ctrl: ctrlActive, shift: shiftActive });
 
-  const activeSender = getActiveTerminalSender();
+  const activeSender = getActiveTerminalSender(sessionId);
   if (activeSender) {
     try {
       activeSender(transformed);
@@ -52,4 +52,22 @@ export function sendShellInput(sessionId: string, data: string): void {
 
   if (ctrlActive) store.consumeCtrl();
   if (shiftActive) store.consumeShift();
+}
+
+/** Send agent keys only through the registered session terminal. */
+export function sendActiveTerminalInput(sessionId: string, data: string): boolean {
+  if (!data) return false;
+  const sender = getActiveTerminalSender(sessionId);
+  if (!sender) return false;
+  const store = useShellModifiersStore.getState();
+  const ctrl = isActive(store.ctrl);
+  const shift = isActive(store.shift);
+  try {
+    if (sender(applyShellModifiers(data, { ctrl, shift })) === false) return false;
+  } catch {
+    return false;
+  }
+  if (ctrl) store.consumeCtrl();
+  if (shift) store.consumeShift();
+  return true;
 }

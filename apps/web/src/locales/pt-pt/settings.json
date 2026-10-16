@@ -673,7 +673,7 @@
   "terminalFontSizeMustBeA": "O tamanho da letra do terminal tem de ser um número entre 8 e 24.",
   "terminalLinks": "Ligações no terminal",
   "testConnection": "Testar a ligação",
-  "testNotificationBody": "Se consegue ler isto, as notificações do navegador estão a funcionar.",
+  "testNotificationBody": "Se consegue ler isto, as notificações estão a funcionar neste dispositivo.",
   "testNotificationTitle": "Notificação de teste",
   "theBuiltInDefaultLayoutWill": "O esquema Pré-definido incorporado passa a ser a pré-definição.",
   "thisAppliesWhenKandevStarts": "Esta escolha acompanha o seu utilizador em todos os dispositivos. As ligações explícitas mantêm o destino e as áreas de trabalho Office mantêm o Início do Office.",

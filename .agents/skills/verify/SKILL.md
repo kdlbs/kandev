@@ -90,7 +90,9 @@ node apps/web/scripts/generate-release-notes.mjs
 node apps/web/scripts/generate-changelog.mjs
 scripts/run-quiet typecheck -- make typecheck
 scripts/run-quiet test -- make test
-scripts/run-quiet lint -- make lint
+# Full-backend Go lint belongs to CI. Select the changed Go files locally.
+scripts/run-quiet backend-lint -- bash scripts/lint-go-changed <changed-go-files>
+scripts/run-quiet lint -- make lint-web lint-harness lint-specs lint-architecture
 ```
 
 After quiet formatting, inspect the intended diff because formatter changes
@@ -214,9 +216,13 @@ That package script runs `pretypecheck` and regenerates
 the web package directly, prefer the package-local script over workspace-filter
 forms so TypeScript runs in the intended package context.
 
-If the aggregate `make lint` wrapper stalls or does not provide useful progress, run the backend and frontend lint checks directly instead and record the substitution in your result:
+For backend lint, follow `apps/backend/AGENTS.md` for file selection, PR-base
+resolution, and resource defaults. Run lint and race/build suites sequentially.
+If lint stalls, inspect its saved log and live process before retrying; a full
+local backend scan requires explicit user authorization and OS-level resource
+limits. For direct lint troubleshooting, use:
 
 ```bash
-make lint-backend
+bash scripts/lint-go-changed <changed-go-files>
 cd apps && pnpm --filter @kandev/web lint
 ```

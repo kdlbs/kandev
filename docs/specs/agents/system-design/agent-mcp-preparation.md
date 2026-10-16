@@ -6,6 +6,7 @@ requirements:
   - REQ-AGENTS-MCP-PREP-002
   - REQ-AGENTS-MCP-PREP-003
   - REQ-AGENTS-MCP-PREP-004
+  - REQ-AGENTS-MCP-PREP-005
 ---
 
 # Agent MCP preparation system design
@@ -25,6 +26,7 @@ of automatic approval only for final eligible profile-authorized imports.
 | REQ-AGENTS-MCP-PREP-002 | Adapter; lifecycle and progress; concurrency |
 | REQ-AGENTS-MCP-PREP-003 | Recovery; credential continuity |
 | REQ-AGENTS-MCP-PREP-004 | Retained native command diagnostics |
+| REQ-AGENTS-MCP-PREP-005 | Project-local file ownership and execution generations |
 
 See [the approval boundary decision](../../../decisions/2026-09-28-profile-authorized-mcp-preparation.md).
 
@@ -133,6 +135,94 @@ trusted persisted metadata, never ordinary attached folders or credential origin
 Gate before host discovery or native commands for unsupported strategies,
 remote/container/unknown executors, different HOME and import-disabled profiles.
 Credential sharing and import enablement remain independently testable.
+
+## Project-local file ownership and execution generations
+
+Pi retains the project-local contract from [ADR 0020](../../../decisions/0020-pi-project-mcp-config-injection.md):
+Kandev writes `<workspace>/.pi/mcp.json`, merges under `mcpServers`, emits the
+current execution's Kandev URL with `streamable-http`, and marks generated
+servers `eager`. The lifecycle manager owns the shared-file lifetime; the Pi
+adapter does not write `~/.pi/agent/mcp.json`.
+
+### Shared resource model
+
+The lifecycle manager treats each canonical project MCP path as one shared
+workspace resource. A manager-scoped coordination fence serializes the full
+read/merge/write and cleanup decision for that resource. The fence covers the
+workspace-relative project file and Kandev-owned temporary files without
+changing the existing strategy-specific file format.
+
+The manager mutex is paired with an OS advisory lock derived from the canonical
+file path. The lock handle is kept in the current user's private cache
+directory, not in the shared temporary directory or workspace, so overlapping
+backend processes during restart serialize the filesystem operation without
+allowing another operating system user to block it or adding project metadata.
+
+Each participating execution has a non-secret claim record containing only the
+normalized path and a SHA-256 fingerprint of the generated file bytes. The
+in-memory resource record contains the active claim IDs, the current Kandev
+generation fingerprint, and whether Kandev has established ownership. A new
+execution claims the resource before the materialization operation is exposed
+to cleanup; this is what protects a successor that has not reached
+`executionStore.Add` yet.
+
+### Materialization
+
+`launchInternal` and `promoteWorkspaceExecution` continue to materialize
+project MCP after the agentctl port is known and before the agent process can
+start. Under the resource fence:
+
+1. A new file created with the existing no-follow/O_EXCL path becomes
+   Kandev-owned, records its fingerprint, and records the execution claim.
+2. An existing `MergeKey` file is compared with the current known Kandev
+   generation. If it is the generated file from a related execution, the new
+   execution advances the generation, rewrites only the strategy's entries,
+   records the new fingerprint, and inherits the shared claim set. If there is
+   no matching Kandev ownership evidence, the file is user-owned or unknown:
+   Kandev merges without taking deletion ownership.
+3. An existing non-merge temporary file keeps its current Kandev temporary-file
+   behavior, but its cleanup decision also uses the claim and fingerprint
+   guard.
+
+Claim registration, the file write, and execution metadata update are one
+fenced lifecycle operation. A failed write rolls back the pending claim.
+Launch rollback and duplicate-execution rollback release claims through the
+same cleanup path, so an unregistered failed launch cannot strand a generated
+project file.
+
+### Cleanup and successor protection
+
+Cleanup first releases only the ending execution's claim. It removes a file
+only when all of the following are true: no other claim remains, the resource
+is known to be Kandev-owned, the file is still a regular file at the contained
+path, and its current fingerprint equals the current generated fingerprint. A
+successor claim, a pending launch claim, a user edit, a stale/unknown
+ownership record, a symlink, or a malformed file causes cleanup to leave the
+path untouched. This makes the old-execution-after-new-materialization order
+safe without sleeping or retrying.
+
+Existing user files are never added to the deletion claim set. The existing
+`MergeJSONUnderKey` behavior remains authoritative for preserving user MCP
+servers and unrelated top-level fields; generated Kandev entries continue to
+carry the current port and eager lifecycle. A user-modified file loses
+Kandev deletion ownership through the fingerprint check, even if an older
+execution still has a historical claim.
+
+### Restart and recovery
+
+Ownership claims are included in the existing `executors_running.metadata`
+projection as path/fingerprint records and are marked session-scoped so they
+survive same-session resume/recovery but are not inherited by a sibling
+session. Recovery hydrates the shared resource record before normal cleanup or
+new materialization. If recovery cannot establish that the current bytes match
+the recorded Kandev generation, it fails closed and treats the path as
+user-owned/unknown. No URL, header, environment value, token, or full file
+content is persisted as ownership state.
+
+This scope is deliberately lifecycle-owned rather than a new filesystem
+sidecar. It keeps the user workspace free of Kandev metadata, uses the
+existing durable execution record for backend restart, and preserves the
+project-file contract for Pi.
 
 ## Authentication recovery
 

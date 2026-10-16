@@ -13,6 +13,8 @@ import { SessionMobileReviewDialog } from "./session-mobile-review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
 import { PassthroughToolbar } from "../passthrough-toolbar";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
+import { sendActiveTerminalInput } from "@/lib/terminal/send-shell-input";
+import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
 import { MobileTerminalPane } from "./mobile-terminal-pane";
 import { MobileSessionsPicker } from "./mobile-sessions-section";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
@@ -169,6 +171,7 @@ function MobileChatPanelContent({
           onOpenFile={onOpenFile}
           pendingScrollTarget={scrollTarget}
           isVisible={isVisible}
+          detailActive={isVisible}
           onPendingScrollConsumed={onScrollTargetConsumed}
           hideLaunchQueueStatus
           hideWipQueueStatus
@@ -261,7 +264,7 @@ export function MobilePanelArea({
       className="flex flex-col"
       style={{
         paddingTop: topPadding,
-        paddingBottom: `calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px))`,
+        paddingBottom: `calc(${bottomNavHeight} + ${currentMobilePanel === "chat" && isPassthroughMode ? `${KEYBAR_HEIGHT_PX}px` : "0px"} + env(safe-area-inset-bottom, 0px))`,
         height: "100%",
       }}
     >
@@ -606,11 +609,24 @@ function SessionMobileFooter({
   taskCanvases,
   onOpenCanvas,
 }: SessionMobileFooterProps) {
+  const ended = useAppStore((state) =>
+    isTerminalSessionState(sessionId ? state.taskSessions.items[sessionId]?.state : undefined),
+  );
   return (
     <>
       <MobileTerminalKeybar
         sessionId={sessionId}
-        visible={activePanel === "terminal"}
+        visible={
+          activePanel === "terminal" ||
+          (activePanel === "chat" && sessionKind === "passthrough" && !ended)
+        }
+        onSend={
+          activePanel === "chat" && sessionKind === "passthrough"
+            ? (data) => {
+                if (sessionId) sendActiveTerminalInput(sessionId, data);
+              }
+            : undefined
+        }
         baseBottomOffset={BOTTOM_NAV_HEIGHT}
       />
       <SessionMobileBottomNav

@@ -43,6 +43,8 @@ var ErrAgentDeliverySubmissionNotFound = repoerrors.ErrAgentDeliverySubmissionNo
 var ErrAgentDeliveryEventConflict = repoerrors.ErrAgentDeliveryEventConflict
 var ErrAgentDeliveryEffectConflict = repoerrors.ErrAgentDeliveryEffectConflict
 var ErrAgentDeliveryEffectNotFound = repoerrors.ErrAgentDeliveryEffectNotFound
+var ErrAgentDeliveryReconstructionConflict = repoerrors.ErrAgentDeliveryReconstructionConflict
+var ErrAgentDeliveryReconstructionStale = repoerrors.ErrAgentDeliveryReconstructionStale
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -293,6 +295,16 @@ type TaskCompletionGateRepository interface {
 	ListTaskCompletionGateHistory(ctx context.Context, taskID string) ([]*models.TaskCompletionGateHistory, error)
 }
 
+// TaskCompletionGateSummaryReader batches compact gate observations for
+// navigation and status-summary repair. It does not return criterion text or
+// audit history.
+type TaskCompletionGateSummaryReader interface {
+	GetTaskCompletionGateSummaries(
+		ctx context.Context,
+		taskIDs []string,
+	) (models.TaskCompletionGateSummaryBatch, error)
+}
+
 // ExactTaskCompletionGateRepository atomically applies plugin completion
 // commands, claim fences, task resource versions, and replay receipts.
 type ExactTaskCompletionGateRepository interface {
@@ -475,6 +487,13 @@ type ConversationSourceRepository interface {
 	ReadConversationTurnsPage(context.Context, models.ConversationTurnPageRequest) (models.ConversationTurnPage, error)
 }
 
+// MessageTurnWindowReader reads a paginated transcript and its required turn
+// context from one reader snapshot. It is optional during repository migration
+// so older implementations can retain the message-only path.
+type MessageTurnWindowReader interface {
+	ReadMessageTurnWindow(context.Context, string, models.ListMessagesOptions) (models.MessageTurnWindow, error)
+}
+
 // ConversationMutationWriter returns a transient receipt from the same
 // transaction as a source mutation. It is optional during the migration so
 // existing repository fakes and exceptional bulk writers remain operational.
@@ -592,6 +611,20 @@ type TurnRepository interface {
 }
 
 // SessionRepository handles task session lifecycle and workflow-session relationships.
+// TaskSessionSummaryObservationReader reads compact session projections for
+// navigation. It remains optional so unrelated repositories and test doubles
+// can keep their full-session capabilities without widening their contracts.
+type TaskSessionSummaryObservationReader interface {
+	BatchGetTaskSessionSummaryObservations(
+		ctx context.Context,
+		taskIDs []string,
+	) (map[string][]*models.TaskSessionSummaryObservation, error)
+	ListTaskSessionSummaryObservations(
+		ctx context.Context,
+		taskID string,
+	) ([]*models.TaskSessionSummaryObservation, error)
+}
+
 type SessionRepository interface {
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
@@ -683,12 +716,27 @@ type SessionContinuityRepository interface {
 	ResolveSessionRecoveryBlock(ctx context.Context, id, action string, resolvedAt time.Time) (bool, error)
 }
 
+// SessionRecoveryBlockListRepository reads every open cause for one session
+// so delivery recovery can bind its own block without hiding independent ones.
+type SessionRecoveryBlockListRepository interface {
+	ListOpenSessionRecoveryBlocks(ctx context.Context, sessionID, incarnationID string, expectedGeneration int64) ([]*models.SessionRecoveryBlock, error)
+}
+
 // AgentDeliveryRecoveryRepository persists the revisioned session notice for
 // an uncertain durable prompt outcome.
 type AgentDeliveryRecoveryRepository interface {
 	UpsertAgentDeliveryRecovery(ctx context.Context, recovery *models.AgentDeliveryRecovery, block *models.SessionRecoveryBlock) (bool, error)
 	ResolveAgentDeliveryRecovery(ctx context.Context, recovery *models.AgentDeliveryRecovery, action string) (bool, error)
 	ClearAgentDeliveryRecovery(ctx context.Context, sessionID, incarnationID, submissionID string, harnessGeneration int64) (bool, error)
+}
+
+// AgentDeliveryReconstructionRepository restores one verified journal-backed
+// submission, its recovery projection, and the exact admission block atomically.
+type AgentDeliveryReconstructionRepository interface {
+	ReconstructAgentDeliverySubmission(
+		ctx context.Context,
+		request *models.AgentDeliveryReconstructionRequest,
+	) (*models.AgentDeliveryReconstructionResult, error)
 }
 
 // AgentDeliveryRepository owns the backend side of the durable agentctl
@@ -705,6 +753,28 @@ type AgentDeliveryRepository interface {
 	GetAgentDeliveryEffect(ctx context.Context, effectKey string) (*models.AgentDeliveryEffect, error)
 }
 
+// AgentDeliveryRetentionRepository executes one bounded, atomic retention
+// batch against the task-owned delivery journal.
+type AgentDeliveryRetentionRepository interface {
+	RunAgentDeliveryRetentionBatch(
+		ctx context.Context,
+		options models.AgentDeliveryRetentionBatchOptions,
+	) (models.AgentDeliveryRetentionBatchResult, error)
+}
+
+// AgentDeliveryRetirementRepository purges explicitly retired identities and
+// discovers attributable orphans in bounded transactions.
+type AgentDeliveryRetirementRepository interface {
+	RunAgentDeliveryRetirementBatch(
+		ctx context.Context,
+		options models.AgentDeliveryRetirementBatchOptions,
+	) (models.AgentDeliveryRetirementBatchResult, error)
+	RunAgentDeliveryOrphanBatch(
+		ctx context.Context,
+		options models.AgentDeliveryOrphanBatchOptions,
+	) (models.AgentDeliveryOrphanBatchResult, error)
+}
+
 // AgentDeliverySettlementRepository exposes the durable outbox used to finish
 // exact terminal submissions after ordered projection. Implementations retain
 // non-completed effects until queue-claim cleanup succeeds.
@@ -712,6 +782,14 @@ type AgentDeliverySettlementRepository interface {
 	SettleAgentDeliveryTerminal(ctx context.Context, streamID string, sequence int64, outcome models.DeliverySubmissionState, settledAt time.Time) (bool, error)
 	ListPendingAgentDeliverySettlements(ctx context.Context, sessionID string) ([]*models.AgentDeliveryEffect, error)
 	CompleteAgentDeliveryTerminalSettlement(ctx context.Context, effectKey string, completedAt time.Time) (bool, error)
+}
+
+// AgentDeliveryWorkflowOutcomeRepository records a guarded workflow no-op for
+// a projected terminal. Applied transitions record their receipt in the
+// transition transaction instead.
+type AgentDeliveryWorkflowOutcomeRepository interface {
+	RecordAgentDeliveryWorkflowOutcome(ctx context.Context, taskID string, effect *models.AgentDeliveryEffect) (bool, error)
+	BackfillLegacyAgentDeliveryWorkflowEffect(ctx context.Context, effect *models.AgentDeliveryEffect) (bool, error)
 }
 
 // SessionWorktreeRepository exposes session-scoped worktree projections over
@@ -1105,12 +1183,22 @@ type UsageEventReader interface {
 	ListSessionUsageEventsByTurn(ctx context.Context, sessionID, turnID string) ([]*models.TaskUsageEvent, error)
 }
 
+// UsageSpendReader sums ledger cost for the coordinator spend measurement. It
+// is separate from UsageRepository so aggregate-only readers remain
+// compatible.
+type UsageSpendReader interface {
+	SumUsageForTasks(ctx context.Context, taskIDs []string, from, to time.Time) (models.UsageSum, error)
+	SumUsageForTurn(ctx context.Context, sessionID, turnID string, notAfter time.Time) (int64, error)
+}
+
 // BackgroundWorkRepository stores the background workload and run inspection projection.
 type BackgroundWorkRepository interface {
+	SettleBackgroundWorkloads(ctx context.Context, sessionID string, finishedAt time.Time) ([]*models.BackgroundWorkload, error)
 	UpsertBackgroundWorkload(ctx context.Context, workload *models.BackgroundWorkload) error
 	GetBackgroundWorkload(ctx context.Context, sessionID, id string) (*models.BackgroundWorkload, error)
 	ListBackgroundWorkloadsBySession(ctx context.Context, sessionID string) ([]*models.BackgroundWorkload, error)
 	DeleteBackgroundWorkloadsBySession(ctx context.Context, sessionID string) error
+	ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error)
 	UpsertBackgroundRun(ctx context.Context, run *models.BackgroundRun) error
 	GetBackgroundRun(ctx context.Context, sessionID, id string) (*models.BackgroundRun, error)
 	ListBackgroundRunsByWorkload(ctx context.Context, sessionID, workloadID string) ([]*models.BackgroundRun, error)

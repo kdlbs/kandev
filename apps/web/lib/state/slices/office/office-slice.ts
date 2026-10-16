@@ -53,7 +53,14 @@ export const defaultOfficeState: OfficeSliceState = {
     runAttempts: { byRunId: {} },
     agentRouting: { byAgentId: {} },
     taskQuorum: { byTaskId: {} },
-    pause: { record: null, status: "unknown", requestSeq: 0, appliedSeq: 0 },
+    pause: {
+      record: null,
+      status: "unknown",
+      workspaceId: null,
+      requestSeq: 0,
+      readSeq: 0,
+      appliedSeq: 0,
+    },
   },
 };
 
@@ -391,20 +398,27 @@ function createPauseActions(set: SetFn) {
     // Every issued GET or POST bumps the one shared counter and takes the
     // new value as its tag, so requests are ordered by when they were
     // issued rather than by when their response lands.
-    beginPauseRequest: (): number => {
+    beginPauseRequest: (kind: "read" | "mutate" = "read"): number => {
       let tag = 0;
       set((draft) => {
         draft.office.pause.requestSeq += 1;
         tag = draft.office.pause.requestSeq;
+        if (kind === "read") draft.office.pause.readSeq = tag;
       });
       return tag;
     },
-    // Mount, and every change of selected workspace: status `unknown`,
-    // clear the record. The caller issues the read separately.
-    resetPauseState: () =>
+    // Starting a read for the selected workspace: status `loading`.
+    // The record is cleared only when the workspace changed, so a
+    // same-workspace remount re-reads while the last state stays on screen.
+    // The caller issues the read separately.
+    beginPauseRead: (workspaceId: string) =>
       set((draft) => {
-        draft.office.pause.status = "unknown";
-        draft.office.pause.record = null;
+        const pause = draft.office.pause;
+        if (pause.workspaceId !== workspaceId) {
+          pause.workspaceId = workspaceId;
+          pause.record = null;
+        }
+        pause.status = "loading";
       }),
     applyPauseResponse: (
       tag: number,
@@ -416,21 +430,25 @@ function createPauseActions(set: SetFn) {
       set((draft) => {
         const pause = draft.office.pause;
         if (responseWorkspaceId !== activeWorkspaceId || tag <= pause.appliedSeq) return;
+        // A newer read owns the read outcome; an earlier failure
+        // must not turn its loading state into an unavailable warning.
+        if (outcome.kind === "read-failure" && tag < pause.readSeq) return;
         applied = true;
+        // A failed mutation learned no newer server state. Do not let it
+        // invalidate an outstanding read's success or failure.
+        if (outcome.kind === "mutate-failure") return;
         pause.appliedSeq = tag;
         switch (outcome.kind) {
           case "read-success":
           case "mutate-success":
+            pause.workspaceId = responseWorkspaceId;
             pause.status = "known";
             pause.record = outcome.paused ? outcome.record : null;
             return;
           case "read-failure":
-            // Status `unknown`; the record is not cleared, so a pause
+            // Status `error`; the record is not cleared, so a pause
             // already read stays on screen (marked stale by the caller).
-            pause.status = "unknown";
-            return;
-          case "mutate-failure":
-            // Status and record unchanged; the caller surfaces the failure.
+            pause.status = "error";
             return;
         }
       });

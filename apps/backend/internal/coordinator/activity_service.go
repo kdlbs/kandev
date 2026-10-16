@@ -36,6 +36,16 @@ type ActivityItem struct {
 	Undoable             bool    `json:"undoable"`
 	TargetTaskIdentifier *string `json:"target_task_identifier"`
 	FromStepID           *string `json:"from_step_id"`
+
+	// *ActivityPhase3 is nil, and its field absent from the body, while phase
+	// 3 is not effective.
+	*ActivityPhase3
+}
+
+// ActivityPhase3 carries the phase 3 activity field: the unattended turn that
+// produced the row, or null.
+type ActivityPhase3 struct {
+	UnattendedTurnID *string `json:"unattended_turn_id"`
 }
 
 // ActivityPage is one page of the list.
@@ -210,6 +220,9 @@ func (s *Service) enrichActivity(ctx context.Context, coordinatorID string, rows
 	items := make([]ActivityItem, len(rows))
 	for i := range rows {
 		item := ActivityItem{ActivityRow: rows[i], Undoable: undoReadable(&rows[i], outcomes)}
+		if s.phase3 {
+			item.ActivityPhase3 = &ActivityPhase3{UnattendedTurnID: rows[i].UnattendedTurnID}
+		}
 		if rows[i].ActionClass == ActionMove && rows[i].ProposalID != nil {
 			if o, ok := parseMoveOutcome(outcomes[*rows[i].ProposalID]); ok {
 				from := o.FromStepID

@@ -16,15 +16,13 @@ requirements:
 ## Purpose and boundaries
 
 The backend owns canonical messages, turns, and workflow authority.
-Agentctl owns a bounded delivery journal close to the harness process.
+Agentctl owns a bounded delivery journal.
 The journal is not another product transcript or a native harness checkpoint.
 
 This contract covers authenticated backend-to-agentctl traffic.
 [Browser subscription recovery](../requirements/session-subscription-recovery.md) remains separate.
 [Harness continuity](../../agents/system-design/harness-session-continuity.md) consumes submission outcomes.
 The existing task queue and environment-generation guards retain admission authority.
-The design baseline is main commit `65d64f6fa9f85b4977b8cdd62cf162380732effc`.
-Its durable queue dispatch claims are part of this design, not a parallel recovery mechanism.
 
 The guarantee starts at a successful journal commit.
 A harness can perform a tool action before agentctl observes its event.
@@ -119,12 +117,9 @@ Cancellation responses and permission responses cannot wait for the event-consum
 The implementation preserves the existing notification FIFO barrier before prompt completion.
 It replaces the unbounded client queue with bounded intake into the SQL inbox.
 
-The default logical limits are 256 MiB per stream and 2 GiB per journal.
-Each journal reserves 1 MiB for health and terminal metadata.
-Acknowledged event pruning precedes new admission.
-At the limit, agentctl refuses new prompts and requests cancellation of active owned work.
-An out-of-band health error reports a full journal if even the reserved write fails.
-The active submission then remains uncertain.
+Delivery pressure and usable-disk reserves follow AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.4.
+Persistence failure preserves uncertainty and control access rather than cancelling at fixed logical thresholds.
+[Restart reconciliation](durable-restart-reconciliation.md) defines mapping-safe accounting and abandoned dispatch classification.
 
 Files use mode 0600 inside a 0700 directory.
 The exclusive file lock prevents concurrent agentctl writers.
@@ -172,11 +167,13 @@ No time-based expiration can make an old identifier executable again.
 
 ## Submission protocol
 
-The backend allocates and persists the submission ID before the HTTP request.
-Queued submissions retain the existing queue entry and dispatch-attempt identity.
-The record contains the current turn/queue identity and final composed payload hash.
-The hash covers context, prompt text, attachment references, effective configuration, and target identity.
-The payload cannot change under the same ID.
+Bind the initial submission ID before startup; retain source intent in its
+instruction or queue claim. After context preparation and attachment
+materialization, lifecycle's final callback revalidates ownership and persists
+exact dispatch text and descriptors. Initial, direct and queued prompts use
+this boundary: SQL and agentctl hash the same prepared payload, including
+hydration and collision renaming. Preparation failure preserves source intent.
+Existing IDs and hashes remain immutable; preparation never authorizes replay.
 
 The durable states are:
 
@@ -352,9 +349,9 @@ Stop remains available during reconciliation.
 Retry reconnect queries state only.
 It does not resend the prompt.
 
-A user can inspect the workspace and submit an explicit next instruction.
-That action retains the prior uncertainty notice and creates a new submission.
-A replacement conversation additionally requires the explicit context-continuation action.
+[Interrupted prompt recovery](interrupted-prompt-recovery.md) defines workspace inspection and
+the existing explicit Resume path. It preserves historical uncertainty and native resume.
+A replacement conversation still requires explicit context continuation.
 
 This package does not change executor parent-death behavior.
 If the executor terminates the harness, recovery retains journal evidence and uses native restore or explicit context continuation.

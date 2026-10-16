@@ -423,14 +423,21 @@ export function getCostsByModel(workspaceId: string, options?: ApiRequestOptions
  * aggregations run concurrently on the backend with a snapshot-consistent
  * read, so the page reflects one moment in time.
  */
-export function getCostsBreakdown(workspaceId: string, options?: ApiRequestOptions) {
+export type CostDateRange = "mtd" | "30d";
+
+export function getCostsBreakdown(
+  workspaceId: string,
+  options?: ApiRequestOptions & { range?: CostDateRange },
+) {
+  const { range, ...requestOptions } = options ?? {};
+  const query = range ? `?range=${encodeURIComponent(range)}` : "";
   return fetchJson<{
     total_subcents: number;
     by_agent: CostBreakdownItemRaw[];
     by_project: CostBreakdownItemRaw[];
     by_model: CostBreakdownItemRaw[];
     by_provider: CostBreakdownItemRaw[];
-  }>(`${BASE}/workspaces/${workspaceId}/costs/breakdown`, options);
+  }>(`${BASE}/workspaces/${workspaceId}/costs/breakdown${query}`, requestOptions);
 }
 
 type CostBreakdownItemRaw = {

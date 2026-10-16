@@ -302,7 +302,7 @@ Before-source bytes matched HEAD; served JS matched each fresh build. After-sour
 hashes matched the final production edit. Disposable timing probes were removed
 from the product tree and retained under `probe-snapshot/` for repeatability.
 No byte divergence was observed. Final catalog/spec lint, work-order coverage and whitespace checks passed.
-No commit, push or PR was performed.
+At the initial implementation checkpoint, no commit, push or PR was performed.
 
 ## Risks
 
@@ -360,3 +360,38 @@ Required-policy recovery uses GraphQL to confirm main has no legacy protection
 rule, plus the active main ruleset (13341245) for all six required contexts. A
 local ignored read-only adapter supplies that verified policy to `pr-await`; no
 repository monitoring script or protection setting is changed.
+
+## PR CI remediation (2026-10-16)
+
+The remaining failure in run `37941755821` was the detached-background Quick
+Chat cancellation test. It passed on retry, but CI rejects flaky results.
+The test waited for a temporary cancellation projection. Main already contains
+the correction in PR #4430: assert the disabled control, release the held
+events, and require a new cancellation revision before the workload can finish
+naturally. Integrated main to reuse that correction without duplicating it.
+The merge had no conflicts and preserved the original List-only production diff.
+
+Post-merge validation passed:
+
+- The four targeted Vitest suites: 26 tests.
+- Desktop task list, search debounce, and Quick Chat cancellation: 15 tests.
+- Phone task list search and queue admission: six tests.
+- Typecheck with an 8 GB heap, focused ESLint and Prettier, both copy/sleep
+  ratchets, documentation catalog validation, and harness/specification checks.
+
+Browser tests used one worker, one shard, and no retries. The managed runner
+built the backend, web assets, and plugin fixture before execution. Initial
+setup attempts exposed inherited service configuration and missing Chromium
+library paths on this NixOS host. The successful runs removed inherited
+`KANDEV_*` variables, selected loopback, and supplied installed browser libraries
+through `LD_LIBRARY_PATH`. These were local environment corrections.
+
+```sh
+pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project chromium tests/chat/quick-chat-cancel-palette.spec.ts tests/task/task-list.spec.ts tests/task/task-search-debounce.spec.ts -- --retries=0
+pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-task-list-search.spec.ts tests/chat/mobile-queue-admission-reliability.spec.ts -- --retries=0
+```
+
+The local pre-commit framework and hooks were unavailable. Relevant checks ran
+directly. No public documentation update is needed because this remediation
+adds no user-facing behavior or contract. Fresh CI and review results for the
+pushed commit remain the delivery gate.

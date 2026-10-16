@@ -103,62 +103,30 @@ test.describe("Threads view", () => {
     // The simple workflow moves the completed task into its review step.
     await expect(column.getByTestId("thread-status-review-ready")).toBeVisible();
     await expect(testPage.getByTestId(`thread-column-${idle.task_id}`)).toHaveCount(0);
-  });
 
-  test("remembers Threads as the device listing view and reopens Home there", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(180_000);
-    const live = await startAgentTask(testPage, apiClient, seedData, "threads-remembered");
+    await test.step("remembers Threads as the device listing view and reopens Home there", async () => {
+      await expect(testPage.getByTestId("view-toggle-threads")).toHaveAttribute("data-state", "on");
+      await testPage.goto("/");
+      await expect(testPage).toHaveURL(/\/threads/);
+      await expect(column).toBeVisible();
+    });
 
-    await testPage.goto("/");
-    await expect(new KanbanPage(testPage).board).toBeVisible();
-    await testPage.getByTestId("view-toggle-threads").click();
-    await expect(testPage).toHaveURL(/\/threads/);
-    await expect(testPage.getByTestId("view-toggle-threads")).toHaveAttribute("data-state", "on");
+    await test.step("opens the full task page from a column", async () => {
+      await testPage.goto("/threads");
+      await expect(column).toBeVisible();
+      await column.getByRole("button", { name: "Open task" }).click();
+      await expect(testPage).toHaveURL(new RegExp(`/t/${live.id}`));
+    });
 
-    await testPage.goto("/");
-    await expect(testPage).toHaveURL(/\/threads/);
-    await expect(testPage.getByTestId(`thread-column-${live.id}`)).toBeVisible();
-  });
-
-  test("opens the full task page from a column", async ({ testPage, apiClient, seedData }) => {
-    test.setTimeout(180_000);
-    const live = await startAgentTask(testPage, apiClient, seedData, "threads-open-task");
-
-    await testPage.goto("/threads");
-    const column = testPage.getByTestId(`thread-column-${live.id}`);
-    await expect(column).toBeVisible();
-
-    await column.getByRole("button", { name: "Open task" }).click();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${live.id}`));
-  });
-
-  test("hands a discussion back to the deck, scrolled to its column", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(180_000);
-    const live = await startAgentTask(testPage, apiClient, seedData, "threads-round-trip");
-
-    // startAgentTask leaves the browser on the task page, which is the surface
-    // the button lives on.
-    await testPage.getByTestId("open-in-threads-button").click();
-
-    await expect(testPage).toHaveURL(new RegExp(`/threads\\?taskId=${live.id}`));
-    const column = testPage.getByTestId(`thread-column-${live.id}`);
-    await expect(column).toBeVisible();
-    await expect(column).toHaveAttribute("data-focused", "true");
-    // The deck is the round trip's destination, so it must not re-offer the jump.
-    await expect(testPage.getByTestId("open-in-threads-button")).toHaveCount(0);
-
-    // The mark answers "where is it"; once the reader starts working it has
-    // nothing left to say and must not sit on the column indefinitely.
-    await column.locator(".tiptap.ProseMirror").click();
-    await expect(column).not.toHaveAttribute("data-focused", "true");
+    await test.step("hands a discussion back to the deck, scrolled to its column", async () => {
+      await testPage.getByTestId("open-in-threads-button").click();
+      await expect(testPage).toHaveURL(new RegExp(`/threads\\?taskId=${live.id}`));
+      await expect(column).toBeVisible();
+      await expect(column).toHaveAttribute("data-focused", "true");
+      await expect(testPage.getByTestId("open-in-threads-button")).toHaveCount(0);
+      await column.locator(".tiptap.ProseMirror").click();
+      await expect(column).not.toHaveAttribute("data-focused", "true");
+    });
   });
 
   test("shares the board width between columns instead of leaving it empty", async ({

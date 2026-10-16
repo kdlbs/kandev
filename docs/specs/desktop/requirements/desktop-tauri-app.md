@@ -2,7 +2,7 @@
 status: active
 system: desktop
 created: 2026-06-23
-updated: 2026-09-30
+updated: 2026-10-14
 owners:
   - tbd
 ---
@@ -51,6 +51,24 @@ Kandev's installed desktop app should behave like a native application without d
 - **AC-DESKTOP-DESKTOP-TAURI-APP-001.12:** After a macOS external-link helper exits, the desktop app shall reap it within one second under normal scheduling. Repeated link opens shall not accumulate zombie children.
 - **AC-DESKTOP-DESKTOP-TAURI-APP-001.13:** An external-link launch shall not wait for the browser to close or block application interaction. Validation and origin checks shall still reject unauthorized destinations. A process-spawn failure shall return an error to the caller.
 - **AC-DESKTOP-DESKTOP-TAURI-APP-001.14:** External-link cleanup shall reap only the helper for that launch. It shall not consume another child process's exit status or stop the owned backend.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.15:** When the user activates Send test
+  notification in the desktop app, Kandev shall attempt native notification
+  delivery independently of browser notification availability or permission.
+  Browser-only clients, including mobile browsers, shall retain their existing
+  browser notification test behavior through the same control.
+  The test message on both targets shall describe notification delivery on the
+  current device without claiming that browser notifications work when only
+  native delivery was exercised.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.16:** The desktop test shall respect OS
+  notification permission. Only the explicit test gesture may request an
+  undecided permission; denied permission shall retain the OS settings guidance.
+  Permission-query or request failures shall use the existing permission error
+  feedback. Delivery failure shall not falsely report permission failure or
+  successful display, and shall not escape as an unhandled action rejection.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.17:** Each explicit desktop test activation
+  shall be a distinct app-scoped test occurrence, so a previous successful test
+  does not suppress a later activation. Testing shall not represent an agent
+  session or release event, change provider configuration, or require a task.
 
 ## System design
 

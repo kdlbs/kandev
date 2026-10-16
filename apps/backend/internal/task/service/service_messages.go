@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/task/previewfeedback"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -1135,6 +1136,55 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 		err = s.projectRunningNotices(ctx, messages)
 	}
 	return messages, hasMore, err
+}
+
+// ListMessagesWithTurnWindow returns a bounded message page and, when the
+// repository supports snapshot reads, only the turn rows needed by that page.
+// Older repository implementations retain the message-only response so the
+// client can use its scoped legacy turn-history fallback.
+func (s *Service) ListMessagesWithTurnWindow(
+	ctx context.Context,
+	req ListMessagesRequest,
+) (models.MessageTurnWindow, error) {
+	if err := s.AuthorizeSessionAccess(ctx, req.TaskSessionID); err != nil {
+		return models.MessageTurnWindow{}, err
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = DefaultMessagesPageSize
+	}
+	if limit > MaxMessagesPageSize {
+		limit = MaxMessagesPageSize
+	}
+	opts := models.ListMessagesOptions{
+		Limit:       limit,
+		Before:      req.Before,
+		After:       req.After,
+		Sort:        req.Sort,
+		AuthorType:  req.AuthorType,
+		AuthorTypes: req.AuthorTypes,
+		TaskID:      req.TaskID,
+		Around:      req.Around,
+	}
+	if reader, ok := s.messages.(repository.MessageTurnWindowReader); ok {
+		window, err := reader.ReadMessageTurnWindow(ctx, req.TaskSessionID, opts)
+		if err != nil {
+			return models.MessageTurnWindow{}, err
+		}
+		if err := s.projectRunningNotices(ctx, window.Messages); err != nil {
+			return models.MessageTurnWindow{}, err
+		}
+		return window, nil
+	}
+
+	messages, hasMore, err := s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, opts)
+	if err != nil {
+		return models.MessageTurnWindow{}, err
+	}
+	if err := s.projectRunningNotices(ctx, messages); err != nil {
+		return models.MessageTurnWindow{}, err
+	}
+	return models.MessageTurnWindow{Messages: messages, HasMore: hasMore}, nil
 }
 
 // ListMessagesForPlugin returns messages matching the plugin Host data API

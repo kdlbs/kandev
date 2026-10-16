@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import {
   createStandardProfile,
   GitHelper,
@@ -23,8 +23,8 @@ import path from "node:path";
 const TARGET_PATH = "z-mobile-refresh-target.txt";
 const PREFIX_PATH = "a-mobile-refresh-prefix.txt";
 const UNRELATED_PATH = "m-mobile-refresh-unrelated.txt";
-const INITIAL_MARKER = "initial-mobile-target-line-70";
-const UPDATED_MARKER = "updated-mobile-target-line-77";
+const INITIAL_MARKER = "initial-mobile-target-version";
+const UPDATED_MARKER = "updated-mobile-target-version";
 
 function targetContent(targetMarker: string, shifted = false) {
   const lines = Array.from({ length: 140 }, (_, index) => `stable-mobile-line-${index + 1}`);
@@ -36,7 +36,7 @@ function targetContent(targetMarker: string, shifted = false) {
       ...Array.from({ length: 12 }, (_, index) => `inserted-before-anchor-${index + 1}`),
     );
   }
-  lines[shifted ? 76 : 69] = targetMarker;
+  lines[4] = targetMarker;
   return `${lines.join("\n")}\n`;
 }
 
@@ -109,8 +109,7 @@ test.describe("phone Git diff refresh continuity", () => {
     }) => {
       const repositoryPath = path.join(backend.tmpDir, "repos", "e2e-repo");
       const git = new GitHelper(repositoryPath, makeGitEnv(backend.tmpDir));
-      git.exec("git reset --hard HEAD");
-      git.exec("git clean -fd");
+      resetSeedRepositoryCheckout(seedData, backend.tmpDir);
       git.createFile(PREFIX_PATH, prefixContent(16, "mobile-prefix-before"));
       git.createFile(TARGET_PATH, targetContent(INITIAL_MARKER));
 
@@ -159,8 +158,10 @@ test.describe("phone Git diff refresh continuity", () => {
           `[data-review-file-key="${encodeURIComponent(TARGET_PATH)}"]`,
         );
         await expect(targetSection).toBeVisible({ timeout: 30_000 });
+        await expect(diffRoot.locator("[data-review-file-key]")).toHaveCount(2);
         await scrollDiffIntoReadingPosition(testPage, renderer, TARGET_PATH, "touch");
         const anchorBefore = await visibleDiffAnchor(testPage, renderer, TARGET_PATH);
+        expect(anchorBefore?.content).toMatch(/^stable-mobile-line-\d+$/);
         expect(anchorBefore?.line).toBeGreaterThan(15);
         await expectDiffText(testPage, renderer, TARGET_PATH, INITIAL_MARKER, true);
         await rememberDiffViewerNode(testPage, renderer, TARGET_PATH);

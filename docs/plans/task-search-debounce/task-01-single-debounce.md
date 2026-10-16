@@ -279,7 +279,8 @@ on desktop and 320.60 ms sooner on phone. See the manifest's
 [verification results](plan.md#verification-results) for sample limits, component
 timings, provenance, raw evidence and the corrected phone clock-test sequencing.
 Screenshots were inspected; disposable probes were retained outside the product
-tree. Changes are uncommitted; no push or PR was performed.
+tree. At the initial implementation checkpoint, changes were uncommitted and
+no push or PR was performed.
 
 ### PR remediation validation
 
@@ -297,3 +298,13 @@ four phone tests with retries disabled. Commands, run logs and policy evidence a
 PATH=/usr/local/go/bin:$PATH pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/session/multi-session-ux.spec.ts -- --retries=0
 PATH=/usr/local/go/bin:$PATH pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome tests/chat/mobile-queue-admission-reliability.spec.ts -- --retries=0
 ```
+
+### Current integration validation
+
+The 2026-10-16 base integration reuses main's fix for the remaining Quick Chat
+cancellation failure. The merge had no conflicts. All 26 focused unit tests,
+15 desktop browser tests, and six phone browser tests passed. Browser retries
+were disabled. Typecheck passed with an 8 GB heap. Focused lint, formatting,
+ratchets, and harness/specification checks passed. The manifest's
+[remediation record](plan.md#pr-ci-remediation-2026-10-16) contains commands and
+local environment details. Fresh remote CI and review results remain pending.

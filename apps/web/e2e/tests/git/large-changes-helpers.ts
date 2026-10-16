@@ -152,24 +152,7 @@ export async function scrollChangesToEnd(page: Page, lastFileTestId: string): Pr
   });
   const lastFile = page.getByTestId(lastFileTestId);
   await expect(lastFile).toBeVisible({ timeout: 15_000 });
-  await lastFile.evaluate(async (row) => {
-    const owner = row.closest<HTMLElement>('[data-testid="changes-panel-scroll-owner"]');
-    if (!owner) throw new Error("Changes scroll owner missing from the final row");
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      const rowBox = row.getBoundingClientRect();
-      const ownerBox = owner.getBoundingClientRect();
-      let correction = 0;
-      if (rowBox.bottom > ownerBox.bottom) {
-        correction = rowBox.bottom - ownerBox.bottom + 1;
-      } else if (rowBox.top < ownerBox.top) {
-        correction = rowBox.top - ownerBox.top - 1;
-      }
-      if (correction === 0) return;
-      owner.scrollTop += correction;
-      owner.dispatchEvent(new Event("scroll"));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    }
-  });
+  await lastFile.scrollIntoViewIfNeeded();
   await expectBoundedTimeline(page);
   const getGeometry = async () => {
     const [ownerBox, fileBox] = await Promise.all([owner.boundingBox(), lastFile.boundingBox()]);
@@ -190,7 +173,15 @@ export async function scrollChangesToEnd(page: Page, lastFileTestId: string): Pr
     };
   };
   try {
-    await expect.poll(getGeometry).toMatchObject({ within: true });
+    await expect
+      .poll(async () => {
+        await owner.evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+          element.dispatchEvent(new Event("scroll"));
+        });
+        return getGeometry();
+      })
+      .toMatchObject({ within: true });
   } catch {
     const geometry = await getGeometry();
     expect(geometry.within, JSON.stringify(geometry)).toBe(true);

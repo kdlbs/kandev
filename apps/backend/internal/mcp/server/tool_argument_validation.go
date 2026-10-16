@@ -106,27 +106,36 @@ func (s *Server) validateToolArguments(toolName string, req mcp.CallToolRequest)
 		return req, fmt.Errorf("invalid arguments for %s: registered schema is invalid", toolName)
 	}
 	if err := validator.schema.Validate(arguments); err != nil {
-		return req, sanitizedToolArgumentError(toolName, err)
+		return req, sanitizedToolArgumentError(toolName, validator.schema, arguments, err)
 	}
 	return req, nil
 }
 
-func sanitizedToolArgumentError(toolName string, err error) error {
+func sanitizedToolArgumentError(toolName string, schema *jsonschema.Schema, arguments any, err error) error {
 	var validationErr *jsonschema.ValidationError
 	if !errors.As(err, &validationErr) {
 		return fmt.Errorf("invalid arguments for %s: validation failed", toolName)
 	}
 
+	diagnostics := &toolDiagnostics{schemas: diagnosticSchemaIndex(schema), instance: arguments}
+	validationErr = diagnostics.project(validationErr)
 	failure, keyword := firstKeywordFailure(validationErr)
 	if failure == nil {
 		failure = validationErr
 		keyword = "schema"
 	}
 	primaryPath := validationInstancePath(failure.InstanceLocation)
-	return fmt.Errorf("invalid arguments for %s: validation failed at %s (keyword: %s%s%s)",
+	message := fmt.Sprintf("invalid arguments for %s: validation failed at %s (keyword: %s%s%s)",
 		toolName, primaryPath, keyword,
 		missingRequiredProperties(validationErr, primaryPath),
 		unknownArgumentDetail(toolName, validationErr, primaryPath))
+	if len(diagnostics.details) > 0 {
+		message += "; " + strings.Join(diagnostics.details, "; ")
+	}
+	if diagnostics.omitted {
+		message += "; additional diagnostics omitted"
+	}
+	return fmt.Errorf("%s", boundedToolDiagnostic(message))
 }
 
 // sessionBoundTaskTools identifies tools whose task scope is owned by the
@@ -300,6 +309,11 @@ func validationInstancePath(tokens []string) string {
 }
 
 func normalizeToolArguments(toolName string, arguments any) (any, error) {
+	if toolName == richOutputToolName {
+		if args, ok := arguments.(map[string]any); ok && (args["version"] == float64(1) || args["version"] == 1) {
+			return nil, fmt.Errorf("%s", richOutputStaleAuthoringError)
+		}
+	}
 	if toolName != "create_task_kandev" {
 		return arguments, nil
 	}

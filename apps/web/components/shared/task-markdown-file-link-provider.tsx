@@ -35,6 +35,7 @@ type TaskMarkdownFileLinkProviderProps = {
   taskId?: string | null;
   sessionId?: string | null;
   worktreePath?: string | null;
+  detailActive?: boolean;
   onOpenFile?: (path: string) => void;
   children: ReactNode;
 };
@@ -86,17 +87,18 @@ export function TaskMarkdownFileLinkProvider({
   taskId,
   sessionId,
   worktreePath,
+  detailActive = true,
   onOpenFile,
   children,
 }: TaskMarkdownFileLinkProviderProps) {
-  const task = useTask(taskId ?? null) as TaskLinkSource | null;
+  const task = useTask(taskId ?? null, detailActive) as TaskLinkSource | null;
   const officeTask = useAppStore((state) =>
     taskId ? (state.office.tasks.items.find((item) => item.id === taskId) ?? null) : null,
   ) as TaskLinkSource | null;
   const session = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
-  const sessionWorktrees = useSessionWorktrees(sessionId ?? null);
+  const sessionWorktrees = useSessionWorktrees(sessionId ?? null, detailActive);
   const inheritedContext = useContext(MarkdownFileLinkContext);
 
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
@@ -107,7 +109,7 @@ export function TaskMarkdownFileLinkProvider({
   );
   const { repositories: workspaceRepositories } = useRepositories(
     workspaceId,
-    Boolean(workspaceId),
+    detailActive && Boolean(workspaceId),
     true,
   );
   const effectiveWorkspacePath = worktreePath ?? getSessionWorkspacePath(session);

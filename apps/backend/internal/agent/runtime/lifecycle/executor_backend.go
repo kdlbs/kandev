@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"strings"
 	"time"
 
@@ -305,6 +306,7 @@ const (
 	MetadataKeySSHRemoteTaskDir        = "ssh_remote_task_dir"
 	MetadataKeySSHRemoteSessionDir     = "ssh_remote_session_dir"
 	MetadataKeySSHRemoteAgentctlPort   = "ssh_remote_agentctl_port"
+	MetadataKeySSHRemoteControlPort    = "ssh_remote_control_port"
 	MetadataKeySSHRemoteAgentctlPID    = "ssh_remote_agentctl_pid"
 	MetadataKeySSHAgentctlInstanceID   = "ssh_remote_agentctl_instance_id"
 	MetadataKeySSHLocalForwardPort     = "ssh_local_forward_port"
@@ -343,6 +345,8 @@ const (
 // (e.g., task_description, session_id) are treated as launch-time-only and
 // are NOT copied on resume.
 var persistentMetadataKeys = map[string]bool{
+	metadataKeySSHPassthroughState:       true,
+	deliveryPromptTurnBindingMetadataKey: true,
 	// Sprites runtime
 	MetadataKeySpriteName:      true,
 	MetadataKeySpriteState:     true,
@@ -357,6 +361,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHRemoteTaskDir:        true,
 	MetadataKeySSHRemoteSessionDir:     true,
 	MetadataKeySSHRemoteAgentctlPort:   true,
+	MetadataKeySSHRemoteControlPort:    true,
 	MetadataKeySSHRemoteAgentctlPID:    true,
 	MetadataKeySSHAgentctlInstanceID:   true,
 	MetadataKeySSHLocalForwardPort:     true,
@@ -432,6 +437,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyOfficeAgentProfileID:     true,
 	MetadataKeyOriginalWorkspacePath:    true,
+	metadataKeyPassthroughMCPClaims:     true,
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.
@@ -449,6 +455,13 @@ var persistentMetadataPrefixes = []string{
 // the second session would try to attach to the first session's agentctl
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
+	metadataKeySSHPassthroughState:       true,
+	deliveryPromptTurnBindingMetadataKey: true,
+	// Project MCP ownership belongs to the execution that materialized the
+	// workspace file. It survives same-session recovery but must not be copied
+	// into a sibling session's launch request.
+	metadataKeyPassthroughMCPClaims: true,
+
 	// Office identity belongs to the session that produced the runtime row and
 	// must not be inherited by a sibling session sharing the environment.
 	MetadataKeyOfficeAgentProfileID:  true,
@@ -626,7 +639,8 @@ type RemoteInstanceRefresher interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID string
+	InstanceID    string
+	IsPassthrough bool
 	// ExecutorType is retained in execution metadata so recovered sessions can
 	// safely re-check host-local filesystem eligibility.
 	ExecutorType      string
@@ -737,7 +751,14 @@ type ExecutorInstance struct {
 	RuntimeName agentruntime.Runtime
 
 	// Agentctl client for communicating with this instance
-	Client *agentctl.Client
+	Client                    *agentctl.Client
+	remotePassthroughSnapshot *agentctltypes.PassthroughSnapshot
+
+	// DiscardRecovery closes only host-side resources allocated for this
+	// recovery attempt. It must never stop the remote process or resource. The
+	// manager calls it when a candidate cannot be authenticated or tracked;
+	// successful tracking transfers ownership to the runtime backend.
+	DiscardRecovery func() `json:"-"`
 
 	// Runtime-specific identifiers (only one set is populated)
 	ContainerID          string // Docker
@@ -783,6 +804,10 @@ type ExecutorInstance struct {
 	// lifecycle manager. The instance remains attached so the manager can use
 	// its existing bounded stop and recovery-guard path.
 	DeliveryRecoveryError error
+	// agentSessionAssociation is the authenticated, read-only owner projection
+	// captured for this exact recovery attempt. It is process-local only.
+	agentSessionAssociation  *agentctl.AgentSessionAssociation
+	expectedDeliveryStreamID string
 
 	// AgentProfileID is a recovery-only carrier for
 	// AC-EXECUTORS-SURVIVAL-002.14's "agent profile identity" row: the
@@ -868,6 +893,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		DeliveryStreamID:          req.DeliveryStreamID,
 		DeliveryIncarnationID:     req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration: req.DeliveryHarnessGeneration,
+		ForceContextContinuation:  req.ForceContextContinuation,
 		RuntimeName:               ri.RuntimeName,
 		Status:                    v1.AgentStatusRunning,
 		StartedAt:                 time.Now(),
@@ -881,6 +907,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		promptDoneCh:              make(chan PromptCompletionSignal, 1),
 	}
 	execution.setRuntimeEnvironment(req.Env)
+	execution.sshApprovedEnvKeys = append([]string(nil), req.ApprovedSecretEnvKeys...)
 	return execution
 }
 

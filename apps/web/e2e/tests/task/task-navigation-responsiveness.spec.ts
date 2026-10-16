@@ -16,6 +16,8 @@ import { SessionPage } from "../../pages/session-page";
 import { KanbanPage } from "../../pages/kanban-page";
 import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
+test.describe.configure({ retries: 0 });
+
 // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.3 AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.4 AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5
 test.afterEach(async ({ backend }, testInfo) => {
   if (testInfo.status === testInfo.expectedStatus) return;
@@ -58,7 +60,8 @@ test("navigation branch setup leaves a dirty shared checkout untouched", async (
   );
   let seededBranch: string | undefined;
   try {
-    seededBranch = seedNavigationBranch(fixtureBackend);
+    seededBranch = seedNavigationBranch(fixtureBackend, seedData.repositoryBaselineOID);
+    expect(git.exec(`git rev-parse ${seededBranch}^`).trim()).toBe(seedData.repositoryBaselineOID);
     expect(git.exec("git branch --show-current").trim()).toBe(dirtyBranch);
     expect(git.exec("git diff -- walkthrough_base.txt")).toContain(
       "navigation fixture dirty-checkout sentinel",

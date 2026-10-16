@@ -81,6 +81,23 @@ type ListMessagesOptions struct {
 	Around      string
 }
 
+// MessageTurnCoverage identifies the message rows whose turn context was read
+// from the same database snapshot, plus the active turn observed by that read.
+type MessageTurnCoverage struct {
+	MessageIDs   []string
+	ActiveTurnID string
+}
+
+// MessageTurnWindow is a bounded transcript page and the turn rows needed to
+// render it. Turns are limited to distinct message turn IDs plus the active
+// turn, regardless of how much older turn history exists.
+type MessageTurnWindow struct {
+	Messages []*Message
+	Turns    []*Turn
+	HasMore  bool
+	Coverage *MessageTurnCoverage
+}
+
 // SearchMessagesOptions defines options for searching a session's messages.
 type SearchMessagesOptions struct {
 	Query string
@@ -134,10 +151,21 @@ const (
 	MetaKeyAutomationTaskMode       = "automation_task_mode"
 	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
 	MetaKeyDeferredLaunch           = "deferred_launch"
+	// MetaKeyAutomationStartOwned marks a task whose initial agent start is
+	// owned by the automation run that created it. It is stamped at create
+	// time, before the feeder pull can publish task.moved, so the workflow
+	// auto-start chokepoint does not launch the same task a second time; the
+	// automation dispatch (or its ceiling replay) is the single start owner.
+	// Only its exact owner can release the marker after definitive admission or termination.
+	MetaKeyAutomationStartOwned = "automation_start_owned"
 	// MetaKeyCoordinatorID records the coordinator that owns a conversation
 	// task, set at creation and read by the startup cleanup pass that
 	// archives/deletes conversation tasks whose coordinator no longer exists.
 	MetaKeyCoordinatorID = "coordinator_id"
+	// MetaKeyCoordinatorPurpose marks a coordinator-origin task that is not a
+	// conversation. CoordinatorPurposeDream is the shadow dream episode task.
+	MetaKeyCoordinatorPurpose = "coordinator_purpose"
+	CoordinatorPurposeDream   = "dream"
 	// MetaKeyWorkflowInitialSession is a write-once task-local snapshot of
 	// the first session identity used by workflow session targeting.
 	MetaKeyWorkflowInitialSession = "workflow_initial_session"
@@ -156,6 +184,12 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
+	// QueuePromotionEntryTransitionIDKey is the field of the
+	// MetaKeyQueuePromotionPending marker that pins the ledger row of the entry
+	// a same-step promotion admits. That promotion writes no ledger row of its
+	// own, so the delivery carries no transition id; the pinned row lets the
+	// entry guard tell the admitted entry from a later re-entry of the step.
+	QueuePromotionEntryTransitionIDKey = "entry_transition_id"
 	// MetaKeyWorkflowMovePending carries the one-shot entry options of a direct
 	// (immediately applied) workflow move whose target-step entry has not yet
 	// run. Its value records the source step, the move ID, and the encoded
@@ -537,6 +571,22 @@ func HasAutoStartOnCreateInFlight(metadata map[string]interface{}) bool {
 	return ok && inFlight
 }
 
+// AutomationStartOwned reports whether task metadata marks the task's initial
+// agent start as owned by the automation run that created it. Legacy boolean
+// markers remain fenced until their ownership can be established. The workflow
+// auto-start chokepoint must not
+// launch the task; the automation dispatch owns the launch and its binding.
+func AutomationStartOwned(metadata map[string]interface{}) bool {
+	switch owner := metadata[MetaKeyAutomationStartOwned].(type) {
+	case string:
+		return owner != ""
+	case bool:
+		return owner
+	default:
+		return false
+	}
+}
+
 // TaskSession.Metadata key that records how the session came into existence.
 // workflow_switch means the session profile was selected by workflow routing
 // rather than direct user selection.
@@ -788,6 +838,10 @@ const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
 // TurnMetaKeyWorkflowStepIDAtStart records the workflow step the turn's task
 // was in when the turn started. Absent when the task held no step.
 const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
+
+// TurnMetaKeyWorkflowStepTransitionIDAtStart identifies the accepted entry
+// observed under the same task lock as the turn's workflow-step stamp.
+const TurnMetaKeyWorkflowStepTransitionIDAtStart = "workflow_step_transition_id_at_start"
 
 // TurnMetaKeyLifecycleOnly marks a turn created only to parent a lifecycle
 // message (for example the agent_boot script_execution message on resume).
@@ -1105,24 +1159,25 @@ const SessionMetaKeyLastAgentError = "last_agent_error"
 // RemediationURL is only ever set from an adapter-validated provider
 // diagnostic; it is never reconstructed from the error message.
 type LastAgentError struct {
-	Message          string            `json:"message"`
-	OccurredAt       time.Time         `json:"occurred_at"`
-	Scope            string            `json:"scope,omitempty"`
-	AgentExecutionID string            `json:"agent_execution_id,omitempty"`
-	ExecutionID      string            `json:"execution_id,omitempty"`
-	Phase            string            `json:"phase,omitempty"`
-	AttemptID        string            `json:"attempt_id,omitempty"`
-	Causes           []AgentErrorCause `json:"causes,omitempty"`
-	RemediationURL   string            `json:"remediation_url,omitempty"`
-	Code             string            `json:"code,omitempty"`
-	Details          string            `json:"details,omitempty"`
-	StartupReason    string            `json:"startup_reason,omitempty"`
-	StartupAttempts  int               `json:"startup_attempts,omitempty"`
-	StartupNPMCode   string            `json:"startup_npm_code,omitempty"`
-	RecoveryActions  []string          `json:"recovery_actions,omitempty"`
-	TaskRepositoryID string            `json:"task_repository_id,omitempty"`
-	StampValue       string            `json:"stamp,omitempty"`
-	DismissedAt      *time.Time        `json:"dismissed_at,omitempty"`
+	Message              string            `json:"message"`
+	OccurredAt           time.Time         `json:"occurred_at"`
+	Scope                string            `json:"scope,omitempty"`
+	AgentExecutionID     string            `json:"agent_execution_id,omitempty"`
+	ExecutionID          string            `json:"execution_id,omitempty"`
+	Phase                string            `json:"phase,omitempty"`
+	AttemptID            string            `json:"attempt_id,omitempty"`
+	Causes               []AgentErrorCause `json:"causes,omitempty"`
+	RemediationURL       string            `json:"remediation_url,omitempty"`
+	Code                 string            `json:"code,omitempty"`
+	Details              string            `json:"details,omitempty"`
+	DeliverySubmissionID string            `json:"delivery_submission_id,omitempty"`
+	StartupReason        string            `json:"startup_reason,omitempty"`
+	StartupAttempts      int               `json:"startup_attempts,omitempty"`
+	StartupNPMCode       string            `json:"startup_npm_code,omitempty"`
+	RecoveryActions      []string          `json:"recovery_actions,omitempty"`
+	TaskRepositoryID     string            `json:"task_repository_id,omitempty"`
+	StampValue           string            `json:"stamp,omitempty"`
+	DismissedAt          *time.Time        `json:"dismissed_at,omitempty"`
 }
 
 func LoadLastAgentError(metadata map[string]interface{}) (LastAgentError, bool) {
@@ -1922,6 +1977,11 @@ type WorkspaceSource struct {
 type MessageAuthorType string
 
 const (
+	MessageMetaKeyDeliveryStatus = "delivery_status"
+	MessageDeliveryStatusBlocked = "blocked"
+)
+
+const (
 	// MessageAuthorUser indicates a message from a human user
 	MessageAuthorUser MessageAuthorType = "user"
 	// MessageAuthorAgent indicates a message from an AI agent
@@ -2011,6 +2071,9 @@ const (
 	PermissionActorPersonalAccessToken PermissionResolutionActorKind = "personal_access_token"
 	PermissionActorAutomation          PermissionResolutionActorKind = "automation"
 	PermissionActorSynthetic           PermissionResolutionActorKind = "synthetic"
+	// PermissionActorCoordinatorUnattended marks a denial made by the backend
+	// for a coordinator's unattended turn, where no person is present.
+	PermissionActorCoordinatorUnattended PermissionResolutionActorKind = "coordinator_unattended"
 )
 
 type PermissionResolutionSource string
@@ -2024,6 +2087,9 @@ const (
 	// fixed in-session coordinator surface. It is distinct from legacy
 	// backend automation and from the authenticated external MCP bridge.
 	PermissionSourceAutomationMCP PermissionResolutionSource = "automation_mcp"
+	// PermissionSourceCoordinatorWake identifies a denial made during a
+	// coordinator wake's unattended turn.
+	PermissionSourceCoordinatorWake PermissionResolutionSource = "coordinator_wake"
 )
 
 type PermissionResolutionResult string
@@ -2052,6 +2118,8 @@ type PermissionResolutionAudit struct {
 	SelectedAt  time.Time                     `json:"selected_at"`
 	FinalizedAt *time.Time                    `json:"finalized_at,omitempty"`
 	Result      PermissionResolutionResult    `json:"result"`
+	// UnattendedTurnID is the coordinator unattended turn row a denial belongs to.
+	UnattendedTurnID string `json:"unattended_turn_id,omitempty"`
 }
 
 type PermissionResolutionClaimOutcome string
@@ -2842,9 +2910,12 @@ type ExecutorRunning struct {
 	// lifecycle recovery inventory read and the matching remote runtime. It is
 	// excluded from JSON and database persistence.
 	TransientAuthToken string `json:"-" db:"-"`
-	ContainerID        string `json:"container_id,omitempty"`
-	AgentctlURL        string `json:"agentctl_url,omitempty"`
-	AgentctlPort       int    `json:"agentctl_port,omitempty"`
+	// TransientBootstrapNonce is a decrypted, one-time reconnect credential
+	// passed only to a remote runtime's authenticated control-client refresh.
+	TransientBootstrapNonce string `json:"-" db:"-"`
+	ContainerID             string `json:"container_id,omitempty"`
+	AgentctlURL             string `json:"agentctl_url,omitempty"`
+	AgentctlPort            int    `json:"agentctl_port,omitempty"`
 	// PID is SSH-only: the agentctl PID on the *remote* host, used by the SSH
 	// executor's remote-pid stop path. It is 0 for local/standalone rows.
 	PID int `json:"pid,omitempty"`

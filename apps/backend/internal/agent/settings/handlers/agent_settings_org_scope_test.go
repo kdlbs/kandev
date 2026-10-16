@@ -26,6 +26,7 @@ var mutatingSettingsRoutes = []struct {
 	{http.MethodPatch, "/api/v1/agents/agent-1"},
 	{http.MethodDelete, "/api/v1/agents/agent-1"},
 	{http.MethodPost, "/api/v1/agents/agent-1/profiles"},
+	{http.MethodPut, "/api/v1/agents/agent-1/profiles/order"},
 	{http.MethodPost, "/api/v1/agent-models/codex-acp/probe"},
 	{http.MethodPost, "/api/v1/agent-install/agent-1"},
 	{http.MethodPost, "/api/v1/agent-update/agent-1"},
@@ -34,6 +35,7 @@ var mutatingSettingsRoutes = []struct {
 	{http.MethodDelete, "/api/v1/agent-profiles/profile-1"},
 	{http.MethodPost, "/api/v1/agent-profiles/profile-1/duplicate"},
 	{http.MethodPost, "/api/v1/agent-profiles/profile-1/mcp-config"},
+	{http.MethodPost, "/api/v1/agent-profiles/profile-1/account-block/release"},
 }
 
 func settingsRouterAs(t *testing.T, identity authn.Identity) *gin.Engine {

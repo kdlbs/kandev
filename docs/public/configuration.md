@@ -198,6 +198,31 @@ environment value falls back to `2h`, and non-positive values from a profile
 default are ignored, leaving the `2h` default in effect. The environment
 variable overrides YAML, and changes require a backend restart.
 
+
+### Backend delivery retention
+
+These startup values apply to SQLite and PostgreSQL. Restart the backend after a change.
+Invalid durations, zero values, and values outside the ranges stop startup.
+Environment values override YAML. These values do not configure the agentctl journal.
+
+| YAML key | Environment variable | Default | Range |
+| --- | --- | --- | --- |
+| `tasks.deliveryRetention.payloadGrace` | `KANDEV_TASK_DELIVERY_RETENTION_PAYLOAD_GRACE` | `1h` | `1m` to `720h` |
+| `tasks.deliveryRetention.replayAge` | `KANDEV_TASK_DELIVERY_RETENTION_REPLAY_AGE` | `24h` | `1h` to `720h` |
+| `tasks.deliveryRetention.replayEvents` | `KANDEV_TASK_DELIVERY_RETENTION_REPLAY_EVENTS` | `10000` | 100 to 100000 |
+| `tasks.deliveryRetention.interval` | `KANDEV_TASK_DELIVERY_RETENTION_INTERVAL` | `1m` | `10s` to `1h` |
+| `tasks.deliveryRetention.batchRows` | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_ROWS` | `200` | 1 to 200 |
+| `tasks.deliveryRetention.batchBytes` | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_BYTES` | `4194304` | 1048576 to 4194304 |
+
+`interval` controls idle rechecks after work is exhausted or maintenance is busy. Productive cleanup continues immediately without inter-batch or inter-pass sleeps.
+
+`batchRows` sets a candidate ceiling. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings. Other cleanup batches can use the configured ceiling.
+
+Automatic cleanup preserves canonical history and unresolved recovery evidence.
+Grace controls eligible raw payload removal. Replay age and event count bound recent duplicate receipts.
+Safety checks apply at every configured value. Protected data has no forced expiry.
+See [delivery retention operations](operations.md#backend-delivery-retention) for backups, rollback, logs, and physical reclamation.
+
 ### Capacity and managed-process startup settings
 
 | YAML key                                   | Environment variable                              | Type and default                  | Current behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -327,6 +352,13 @@ Active and closed backend files use at most 256 MiB in total. Kandev removes the
 Normal launches write info and above to the file and warn and above to stdout. `--debug` writes debug and above to the file while stdout remains warn and above. `--verbose` writes info and above to both. The format default becomes JSON when `KUBERNETES_SERVICE_HOST` is non-empty or `KANDEV_ENV` is exactly `production`/`prod`; otherwise it is text.
 
 Debug output may contain repository paths, subprocess output, prompts, file content, and tool-call data. Treat it as sensitive.
+
+Managed agentctl children use `AGENTCTL_LOG_FORMAT=json` so their stdout
+records pass through the backend relay's privacy projection. Approved probe
+diagnostics remain in the message; unrelated structured fields are omitted. The
+backend overrides an inherited value. `AGENTCTL_LOG_FORMAT` still configures
+agentctl processes started independently; it does not change the backend's
+`logging.format` setting.
 
 ### Repository, worktree, and clone paths
 

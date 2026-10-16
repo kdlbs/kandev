@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { readQueuedTaskCreateLastUsedState } from "@/components/task-create-dialog-handlers";
-import { fetchUserSettings } from "@/lib/api/domains/settings-api";
+import { readJourneyUserSettings } from "@/hooks/journey-metadata-resources";
+import type { AppState } from "@/lib/state/store";
+import type { StoreApi } from "zustand";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { TaskCreateLastUsedState, UserSettingsState } from "@/lib/state/slices/settings/types";
 
@@ -11,22 +13,14 @@ type LoadedUserSettings = {
   settings: UserSettingsState;
 };
 
-let userSettingsFetchPromise: Promise<LoadedUserSettings | null> | null = null;
-
-function loadUserSettingsOnce() {
-  if (!userSettingsFetchPromise) {
-    userSettingsFetchPromise = fetchUserSettings({ cache: "no-store" })
-      .then((response) => {
-        if (!response?.settings) return null;
-        const mapped = mapUserSettingsResponse(response);
-        return mapped.loaded ? { settings: mapped } : null;
-      })
-      .catch(() => null)
-      .finally(() => {
-        userSettingsFetchPromise = null;
-      });
-  }
-  return userSettingsFetchPromise;
+function loadUserSettingsOnce(store: StoreApi<AppState>, signal: AbortSignal) {
+  return readJourneyUserSettings(store, { signal })
+    .then((response) => {
+      if (!response?.settings) return null;
+      const mapped = mapUserSettingsResponse(response);
+      return mapped.loaded ? { settings: mapped } : null;
+    })
+    .catch(() => null);
 }
 
 function mergeTaskCreateLastUsedOverlay(
@@ -71,11 +65,8 @@ function mergeTaskCreateLastUsedForLoadedSettings(settings: UserSettingsState): 
   return mergeTaskCreateLastUsedOverlay(settings, readQueuedTaskCreateLastUsedState());
 }
 
-export function __resetEnsureUserSettingsForTests() {
-  userSettingsFetchPromise = null;
-}
-
 export function useEnsureUserSettings(enabled = true) {
+  const store = useAppStoreApi();
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const [fetchSettled, setFetchSettled] = useState(false);
@@ -90,8 +81,9 @@ export function useEnsureUserSettings(enabled = true) {
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
     setFetchSettled(false);
-    loadUserSettingsOnce()
+    loadUserSettingsOnce(store, controller.signal)
       .then((result) => {
         if (cancelled || !result) return;
         const next = mergeTaskCreateLastUsedForFetch(result);
@@ -103,8 +95,9 @@ export function useEnsureUserSettings(enabled = true) {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [enabled, setUserSettings, userSettings.loaded]);
+  }, [enabled, setUserSettings, store, userSettings.loaded]);
 
   const effectiveUserSettings = mergeTaskCreateLastUsedForLoadedSettings(userSettings);
 

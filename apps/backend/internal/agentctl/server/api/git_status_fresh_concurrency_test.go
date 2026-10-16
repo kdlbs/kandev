@@ -65,7 +65,15 @@ func TestGitStatusMultiFreshKeepsInvalidRepoFailureLocal(t *testing.T) {
 
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error"})
 	cfg := &config.InstanceConfig{WorkDir: taskRoot}
-	server := NewServer(cfg, process.NewManager(cfg, log), nil, nil, log)
+	manager := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := manager.StopForTeardown(ctx); err != nil {
+			t.Errorf("stop multi-repo status fixture: %v", err)
+		}
+	})
+	server := NewServer(cfg, manager, nil, nil, log)
 	if err := os.Rename(brokenPath, filepath.Join(taskRoot, ".broken")); err != nil {
 		t.Fatalf("invalidate repository: %v", err)
 	}

@@ -1,5 +1,26 @@
 import { test, expect } from "../../fixtures/test-base";
+import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { attachMessageAddCapture } from "../../helpers/ws-capture";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+import {
+  captureSilentRestartSnapshot,
+  countSessionMessageAdds,
+  expectRestartConversationIdentity,
+} from "../../helpers/silent-restart-recovery";
 import { SessionPage } from "../../pages/session-page";
+function survivalTurnGate(tmpDir: string) {
+  const marker = join(tmpDir, `survival-turn-${randomUUID()}.release`);
+  return {
+    prompt: [
+      'e2e:message("Running slow response")',
+      `e2e:await_file(${JSON.stringify(marker)})`,
+      'e2e:message("Slow response complete")',
+    ].join("\n"),
+    release: () => writeFile(marker, "release"),
+  };
+}
 
 async function localExecutorProfileId(apiClient: {
   listExecutors: () => Promise<{
@@ -28,7 +49,7 @@ async function localExecutorProfileId(apiClient: {
 // the capability — what the capability controls is whether the backend's own
 // graceful-shutdown path stops it on the way down.
 test.describe("Agent survival across backend restart", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("a worktree session's in-flight turn survives a graceful backend restart", async ({
     testPage,
@@ -37,10 +58,13 @@ test.describe("Agent survival across backend restart", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
+    const traffic = attachGatewayTrafficCapture(testPage);
+    const messageAdds = attachMessageAddCapture(testPage);
 
     const releaseFeature = await backend.useEnv({
       KANDEV_FEATURES_AGENT_SURVIVAL: "true",
     });
+    const turn = survivalTurnGate(backend.tmpDir);
 
     try {
       const task = await apiClient.createTaskWithAgent(
@@ -48,7 +72,7 @@ test.describe("Agent survival across backend restart", () => {
         "Agent Survival Restart Task",
         seedData.agentProfileId,
         {
-          description: "/slow 12",
+          description: turn.prompt,
           workflow_id: seedData.workflowId,
           workflow_step_id: seedData.startStepId,
           repository_ids: [seedData.repositoryId],
@@ -65,7 +89,11 @@ test.describe("Agent survival across backend restart", () => {
       // backend out from under it.
       const bootMessage = session.chat.getByText(/Started agent|Resumed agent/i);
       await expect(bootMessage).toBeVisible({ timeout: 30_000 });
-      await expect(session.chat.getByText("Running slow response", { exact: false })).toBeVisible({
+      await expect(
+        session.chat
+          .locator("[data-agent-message-body]")
+          .getByText("Running slow response", { exact: false }),
+      ).toBeVisible({
         timeout: 30_000,
       });
       await expect(apiClient.getTask(task.id)).resolves.toMatchObject({ state: "IN_PROGRESS" });
@@ -73,6 +101,13 @@ test.describe("Agent survival across backend restart", () => {
         (item) => item.is_primary,
       )?.id;
       expect(liveSessionID).toBeTruthy();
+      const beforeRestart = await captureSilentRestartSnapshot(apiClient, task.id, liveSessionID!);
+      expect(beforeRestart.agentExecutionId).toBeTruthy();
+      const messageAddsBeforeRestart = countSessionMessageAdds(
+        messageAdds.frames,
+        task.id,
+        liveSessionID!,
+      );
 
       // Restart the backend while the turn is still running.
       await backend.restart();
@@ -89,6 +124,18 @@ test.describe("Agent survival across backend restart", () => {
       const reattachedSession = reattachedSessions.sessions.find((item) => item.is_primary);
       expect(reattachedSession?.id).toBe(liveSessionID);
       expect(reattachedSession?.state).toBe("RUNNING");
+      await expectRestartConversationIdentity({
+        page: testPage,
+        api: apiClient,
+        taskId: task.id,
+        snapshot: beforeRestart,
+        traffic: traffic.frames,
+        expectedState: "RUNNING",
+        executionDisposition: "preserved",
+      });
+      expect(countSessionMessageAdds(messageAdds.frames, task.id, liveSessionID!)).toBe(
+        messageAddsBeforeRestart,
+      );
 
       // The instance was re-tracked, not relaunched: exactly the one boot
       // message from the original launch, no second "Started agent" and no
@@ -103,13 +150,20 @@ test.describe("Agent survival across backend restart", () => {
       // The turn that was still running across the restart must complete on
       // its own and report normally, rather than being abandoned into an idle
       // waiting-for-input state by startup reconciliation.
-      await expect(session.chat.getByText("Slow response complete", { exact: false })).toBeVisible({
+      await turn.release();
+      await expect(
+        session.chat
+          .locator("[data-agent-message-body]")
+          .getByText("Slow response complete", { exact: false }),
+      ).toBeVisible({
         timeout: 30_000,
       });
       await session.waitForChatIdle({ timeout: 15_000 });
-      await expect(session.chat.getByText("Slow response complete", { exact: false })).toHaveCount(
-        1,
-      );
+      await expect(
+        session.chat
+          .locator("[data-agent-message-body]")
+          .getByText("Slow response complete", { exact: false }),
+      ).toHaveCount(1);
 
       // The turn genuinely finished, so the workflow engine's own
       // on_turn_complete transition moves the task to REVIEW exactly as it
@@ -130,6 +184,10 @@ test.describe("Agent survival across backend restart", () => {
       // response through the re-tracked, still-live instance.
       await session.sendMessage("/e2e:simple-message");
       await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
+      await session.waitForChatIdle({ timeout: 45_000 });
+      expect(countSessionMessageAdds(messageAdds.frames, task.id, liveSessionID!)).toBe(
+        messageAddsBeforeRestart + 1,
+      );
 
       // The completed Review task remains in the sidebar even when it has no
       // active board column. Its row must not advertise an interrupted turn.
@@ -137,6 +195,7 @@ test.describe("Agent survival across backend restart", () => {
       await expect(taskRow).toBeVisible();
       await expect(taskRow.getByTestId("task-state-interrupted")).toHaveCount(0);
     } finally {
+      await turn.release();
       await releaseFeature();
     }
   });
@@ -148,10 +207,13 @@ test.describe("Agent survival across backend restart", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
+    const traffic = attachGatewayTrafficCapture(testPage);
+    const messageAdds = attachMessageAddCapture(testPage);
 
     const releaseFeature = await backend.useEnv({
       KANDEV_FEATURES_AGENT_SURVIVAL: "true",
     });
+    const turn = survivalTurnGate(backend.tmpDir);
 
     try {
       const task = await apiClient.createTaskWithAgent(
@@ -159,7 +221,7 @@ test.describe("Agent survival across backend restart", () => {
         "Local PC Agent Survival Restart Task",
         seedData.agentProfileId,
         {
-          description: "/slow 12",
+          description: turn.prompt,
           workflow_id: seedData.workflowId,
           workflow_step_id: seedData.startStepId,
           repository_ids: [seedData.repositoryId],
@@ -173,13 +235,24 @@ test.describe("Agent survival across backend restart", () => {
       await expect(session.chat.getByText(/Started agent|Resumed agent/i)).toBeVisible({
         timeout: 30_000,
       });
-      await expect(session.chat.getByText("Running slow response", { exact: false })).toBeVisible({
+      await expect(
+        session.chat
+          .locator("[data-agent-message-body]")
+          .getByText("Running slow response", { exact: false }),
+      ).toBeVisible({
         timeout: 30_000,
       });
       const liveSessionID = (await apiClient.listTaskSessions(task.id)).sessions.find(
         (item) => item.is_primary,
       )?.id;
       expect(liveSessionID).toBeTruthy();
+      const beforeRestart = await captureSilentRestartSnapshot(apiClient, task.id, liveSessionID!);
+      expect(beforeRestart.agentExecutionId).toBeTruthy();
+      const messageAddsBeforeRestart = countSessionMessageAdds(
+        messageAdds.frames,
+        task.id,
+        liveSessionID!,
+      );
 
       await backend.restart();
       await testPage.reload();
@@ -191,21 +264,45 @@ test.describe("Agent survival across backend restart", () => {
       const reattachedSession = reattachedSessions.sessions.find((item) => item.is_primary);
       expect(reattachedSession?.id).toBe(liveSessionID);
       expect(reattachedSession?.state).toBe("RUNNING");
+      await expectRestartConversationIdentity({
+        page: testPage,
+        api: apiClient,
+        taskId: task.id,
+        snapshot: beforeRestart,
+        traffic: traffic.frames,
+        expectedState: "RUNNING",
+        executionDisposition: "preserved",
+      });
+      expect(countSessionMessageAdds(messageAdds.frames, task.id, liveSessionID!)).toBe(
+        messageAddsBeforeRestart,
+      );
 
       await expect(session.chat.getByText(/Started agent|Resumed agent/i)).toHaveCount(1);
       await expect(session.recoveryFreshButton()).toHaveCount(0);
       await expect(session.recoveryResumeButton()).toHaveCount(0);
-      await expect(session.chat.getByText("Slow response complete", { exact: false })).toBeVisible({
+      await turn.release();
+      await expect(
+        session.chat
+          .locator("[data-agent-message-body]")
+          .getByText("Slow response complete", { exact: false }),
+      ).toBeVisible({
         timeout: 30_000,
       });
       await session.waitForChatIdle({ timeout: 15_000 });
-      await expect(session.chat.getByText("Slow response complete", { exact: false })).toHaveCount(
-        1,
-      );
+      await expect(
+        session.chat
+          .locator("[data-agent-message-body]")
+          .getByText("Slow response complete", { exact: false }),
+      ).toHaveCount(1);
 
       await session.sendMessage("/e2e:simple-message");
       await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
+      await session.waitForChatIdle({ timeout: 45_000 });
+      expect(countSessionMessageAdds(messageAdds.frames, task.id, liveSessionID!)).toBe(
+        messageAddsBeforeRestart + 1,
+      );
     } finally {
+      await turn.release();
       await releaseFeature();
     }
   });

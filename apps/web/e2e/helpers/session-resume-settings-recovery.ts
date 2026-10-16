@@ -285,9 +285,10 @@ async function expectProviderRestoredResumeNotice(
 }
 
 function seedUnadvertisedSessionRuntimeOverrides(tmpDir: string, sessionId: string) {
-  const metadata = readTaskSessionMetadata(tmpDir, sessionId);
   const db = new DatabaseSync(path.join(tmpDir, "kandev.db")) as unknown as SqliteTestDatabase;
   try {
+    db.exec("PRAGMA busy_timeout = 5000; BEGIN IMMEDIATE");
+    const metadata = readTaskSessionMetadata(tmpDir, sessionId);
     const overrides = {
       model: "unlisted-e2e-model",
       mode: "unlisted-e2e-mode",
@@ -297,6 +298,7 @@ function seedUnadvertisedSessionRuntimeOverrides(tmpDir: string, sessionId: stri
       JSON.stringify(metadata),
       sessionId,
     );
+    db.exec("COMMIT");
     return overrides;
   } finally {
     db.close();
@@ -525,10 +527,18 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
     }
 
     if (mobile) {
-      expect((await session.recoveryResumeButton().boundingBox())?.height).toBeGreaterThanOrEqual(
-        44,
-      );
-      expect((await restoreWorkspace.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await expect(session.recoveryResumeButton()).toBeVisible();
+      await expect(restoreWorkspace).toBeVisible();
+      await expect
+        .poll(() =>
+          session
+            .recoveryResumeButton()
+            .evaluate((element) => element.getBoundingClientRect().height),
+        )
+        .toBeGreaterThanOrEqual(44);
+      await expect
+        .poll(() => restoreWorkspace.evaluate((element) => element.getBoundingClientRect().height))
+        .toBeGreaterThanOrEqual(44);
     }
 
     await apiClient.updateAgentProfile(profile.id, {

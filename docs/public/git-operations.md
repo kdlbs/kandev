@@ -64,7 +64,7 @@ literal; use `::symlink` for a filename ending in `:symlink`.
 
 ## Prerequisites and trust boundary
 
-The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials in the executor where the command runs before relying on Pull, Push, or change-request creation. Rebase and Merge use `origin` when it exists, or a local base branch when it does not. The workspace's provider automation identity does not replace the task's Git credential policy or executor-local SSH setup; see [Executors](executors.md#workspace-automation-identity-and-task-git-transport).
+The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Pull follows the current branch's configured upstream remote and source ref, even when the remote or branch name differs from `origin` or the local branch. Managed contribution tasks retain their validated source remote and branch. Configure the selected remote's URL and credentials in the executor where the command runs. Ordinary Push and change-request creation use `origin`, subject to the managed routing described below. Rebase and Merge use `origin` when it exists, or a local base branch when it does not. The workspace's provider automation identity does not replace the task's Git credential policy or executor-local SSH setup; see [Executors](executors.md#workspace-automation-identity-and-task-git-transport).
 
 Git commands from the agent shell and Git actions from the **Changes** panel use different permission paths. The Changes panel sends its Git action through Kandev to `agentctl`. It does not run the action inside the agent shell. The agent shell remains subject to the selected agent's permission mode.
 
@@ -435,7 +435,7 @@ All operations below run in the selected repository workspace.
 
 | UI operation | Effective Git behavior | Important consequence |
 |--------------|------------------------|-----------------------|
-| Pull | `git pull origin BRANCH`, optionally with `--rebase`. | Uses the current branch when any upstream exists. With no upstream it falls back to `origin/main`, then `origin/master`, then the current branch. It does not parse an upstream that points to a differently named remote branch. |
+| Pull | `git pull REMOTE SOURCE_REF`, optionally with `--rebase`. | Uses the configured upstream's remote and source ref; managed contributions retain their validated source. With no upstream it falls back to `origin/main`, then `origin/master`, then the current branch on `origin`. Pull leaves upstream configuration and push routing unchanged. |
 | Push | `git push origin CURRENT_BRANCH`; adds `--set-upstream` when requested or no upstream exists. | Force Push uses `--force-with-lease`, not unconditional `--force`. It still rewrites remote history when the lease is valid. Managed Improve Kandev tasks use the branch's prepared fork push remote instead of `origin`. |
 | Rebase | If `origin` exists, fetches `origin BASE` and rebases onto `origin/BASE`. Without `origin`, rebases onto the local `refs/heads/BASE`. | Rewrites local commits. If conflict files are detected from Git output, Kandev attempts `git rebase --abort` automatically and returns the file list. |
 | Merge | If `origin` exists, fetches `origin BASE` and merges `origin/BASE`. Without `origin`, merges the local `refs/heads/BASE`. | Conflicts are deliberately left in the worktree. Resolve and commit them, or use Abort Merge. |
@@ -464,6 +464,18 @@ In a multi-repository task, every wire request must identify one repository with
 - The multi-repository toolbar lets you select an individual repository for Commit, Push, Create PR, Pull, Rebase, Merge, or Force Push.
 
 A fan-out can partially succeed. The UI continues after a failure and reports per-repository outcomes; inspect each repository before retrying a history-changing action.
+
+## Background status freshness
+
+Focused tasks keep their normal frequent status updates. Unfocused task tracking
+starts at 30 seconds and, after unchanged scans, can back off to five minutes.
+An unfocused change badge can therefore show a change up to five minutes late
+following a quiet period. Detected changes and polling-mode updates reset the
+interval. Failed reads do not advance the backoff.
+
+Focusing a task requests an immediate scan. Explicit Refresh also scans directly,
+and a completed agent turn requests a final file and Git refresh before idle
+polling is paused. These actions do not wait for the background interval.
 
 ## Commit history and reset behavior
 
@@ -594,12 +606,69 @@ Before deleting a task or performing a hard reset, commit and push anything you 
 - **Comparison target unavailable:** local Changes and local file status remain usable while a fork comparison target is unavailable. The target's commits, diff, ahead/behind values, and numeric totals remain unavailable until authentication recovers. Refresh Changes or request fresh status to trigger the one explicit re-evaluation; Kandev does not substitute a same-named `origin` branch.
 - **Host GitHub SSH setup:** for host-based Git credentials, run `gh config set git_protocol ssh --host github.com`, restart Kandev, and retry the task. For Docker, SSH, or Sprites, configure the same Git and SSH access in that executor instead of relying on the host.
 - **Merge or Rebase without `origin`:** the selected base branch must exist locally. If it does not, Kandev returns `base branch "BASE" does not exist locally` before changing history. If `origin` exists, Kandev does not fall back to a local branch after a fetch or authentication error.
-- **Pull fetched the wrong branch:** Kandev always uses `origin` and, once any upstream exists, the current local branch name. Align local and remote branch names or use an explicit terminal command.
+- **Unexpected Pull source:** inspect the current branch's upstream with `git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}'` in the selected executor. Pull uses that upstream's configured remote and source ref. For example, local `task-local` tracking `upstream/review` pulls `review` from `upstream`. Managed contribution tasks use their validated source binding. Without an upstream, Pull uses the `origin` fallback described above.
 - **Rebase failed but no rebase remains:** detected rebase conflicts are auto-aborted. Use the returned `conflict_files`, resolve with a manual workflow, or merge instead.
 - **Merge remains conflicted:** this is expected. Resolve and commit, or choose Abort Merge. Do not start another Git operation until the repository is consistent.
 - **Change-request creation failed after push:** the branch may already be remote. Fix `gh`, `glab`, GitLab workspace-token, or `az` authentication as applicable, then retry without assuming the push was rolled back. GitLab retries reuse an existing open MR with the same source and target.
 - **Operation timed out:** inspect status before retrying. A client timeout or lost WebSocket response does not prove the underlying command did nothing.
 - **Multi-repository operation failed at workspace root:** choose the repository in the toolbar or include its exact `repo` subpath in the request.
 - **Missing work after cleanup:** inspect a retained local branch or the remote branch if it was pushed. On unarchive, Kandev recreates a safely compacted managed branch from its recorded exact head before trying remote recovery. Task deletion may already have force-deleted the local branch.
+
+## Adopt a prepared independent checkout
+
+An administrator with workspace management access can explicitly adopt an existing
+independent clone into a damaged host Worktree repository slot. This is separate
+from ordinary healthy-checkout admission and automatic metadata recovery. The
+server may run in Docker; the action still concerns a host Worktree environment,
+not a task using the Docker executor.
+
+Before you preview an adoption, confirm these prerequisites:
+
+- [Authentication](authentication.md) is enabled, and the request uses an administrator session or personal access token. Auth-disabled requests are refused (403).
+- Every runtime consuming the environment is stopped through its normal lifecycle.
+- The existing session is waiting for input.
+- The prepared clone is a direct child of the same owned task root with independent Git metadata.
+- The clone uses the registered origin and the selected branch on an existing commit.
+- Its history contains the registered source branch commit as a real ancestor; replacement refs cannot provide proof.
+- The original pointer identifies missing administration in the registered source.
+- The source Git administration parent is a real directory, or is absent; a symlinked parent is refused.
+
+Escaped ref/object metadata, symlinked Git configuration, legacy grafts,
+promisor packs and external alternate object storage are refused in both the
+registered source and the prepared clone. Ordinary packed refs are supported.
+
+After adoption, archive and deletion retain the validated checkout identity in the
+durable cleanup job, including across backend restart and task-row deletion.
+Discarding an independent task checkout requires explicit discard consent. Cleanup
+removes that task-owned clone while preserving the registered project clone and
+its branches. Changed ownership, replaced paths or missing provenance stop cleanup.
+
+Use the operator HTTP API:
+
+1. POST `/api/v1/tasks/:id/workspace-adoption/preview` with `session_id`, `slot_id`
+   and the absolute `checkout_path`. Preview is read-only and returns an exact
+   selection, filesystem proof and token.
+2. POST `/api/v1/tasks/:id/workspace-adoption/apply` with the complete response as
+   `preview` and a fresh UUID `operation_id`. Reusing that UUID with the identical
+   preview returns the original receipt while its authority remains valid.
+3. GET `/api/v1/tasks/:id/workspace-adoption/:operation_id` to validate the receipt.
+
+Apply preserves the task, session/incarnation, environment, repository attachment,
+slot and logical worktree identifiers, selected branch, task root and ordering.
+For a native single-repository session working inside the selected checkout,
+the environment and bound session working directories move to the candidate in
+the same transaction. Sessions working at the task root retain that directory.
+Both directories and their Git/file contents stay untouched. It does not clone,
+reset, copy files, reconstruct a lost index, create a session or replay a prompt.
+
+Stale selection or filesystem proof returns `WORKSPACE_ADOPTION_REFUSED` (409).
+Malformed requests return `WORKSPACE_ADOPTION_INVALID_REQUEST` (400). Administrator
+and workspace authorization still apply; agent-origin requests are refused.
+The server refuses platforms where it cannot prove stable filesystem identity.
+
+The receipt records exact obsolete marker provenance. Changed ownership, origin,
+branch, marker identity or restored administration invalidates it. It grants no
+filesystem permissions or exemption from an external guard. Deployment SQLite
+repair scripts, existing local receipts and outer guard integration stay local.
 
 Related guides: [Configuration](configuration.md), [Executors](executors.md), [Operations](operations.md), and [WebSocket API](websocket-api.md).

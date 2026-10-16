@@ -30,6 +30,11 @@ The New Session dialog does not accept a session name. Rename the session from i
 
 The empty-panel watermark has the same **New Agent** action. On mobile, open the **Sessions** picker and select **New session**.
 
+If simultaneous starts are still preparing the shared workspace, the later
+start waits for that preparation and tries to attach once. Failed or unfinished
+preparation leaves the start retryable without creating another workspace.
+Later sessions preserve the existing primary session and its initial settings.
+
 The profile picker shows only profiles compatible with the task executor. If none are available, use the link in the dialog to configure an executor or agent profile. See [Agents and profiles](agents-and-profiles.md).
 
 ### Choose starting context
@@ -86,6 +91,17 @@ A later failure keeps its own recovery controls.
 
 <a id="experimental-interruption-continuation"></a>
 
+### Background workload cleanup
+
+Kandev marks open background workloads as **Ended** once it confirms that their
+owning agent process is gone. This also cleans up stale entries after a backend
+restart. Ended means that the process stopped without a reported outcome; it does
+not mean the work succeeded.
+
+A live process, failed liveness probe, or unresolved retained-agent recovery keeps
+work open. A terminal session state alone does not prove that teardown finished.
+If a delayed provider completion arrives, Kandev retains its actual outcome.
+
 ### Interruption continuation
 
 Interrupted conversation continuation is supported by default for eligible
@@ -113,6 +129,8 @@ No exactly-once execution guarantee is implied.
 
 **Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
 
+If automatic resume restores the workspace in read-only mode, select **Resume session** in the notice to continue the saved conversation. The action stays visible while **Recovery details** is collapsed. Resume does not resend an interrupted instruction; send your next instruction after recovery succeeds. If a recovery card is already shown in Chat, use its Resume action.
+
 The recovery card places the recommended action first and shows every available alternative as an individual button, including **Restore read-only workspace** and **Start fresh session** when eligible. Buttons wrap on desktop and stack at touch size on phones. Runtime installation failures offer **Retry**; provider quota failures show reset guidance, while Archive and Delete remain in the task menu. Restoring the workspace does not restart the agent. Expand **Technical details** for wrapped, bounded diagnostics; **Copy details** copies the same redacted text you see. When a workspace pane can identify the same failure and its visible recovery entry, **View recovery** opens Chat and focuses the recovery card. Independent workspace failures retain their own retry.
 
 Failures during task or workspace preparation appear as one task error strip below the task header and above the session and Plan tabs. The strip remains visible when you switch sessions or tabs and disappears only after task recovery succeeds. Select **Show details** to open the available guarded actions in a desktop dialog or phone drawer.
@@ -121,6 +139,8 @@ If Kandev cannot prove that the native conversation is available, it keeps the
 session blocked and shows **Continue from saved context** when that action is
 safe. This action starts a new native conversation from bounded Kandev history.
 It does not restore private harness state, running tools, or old provider paths.
+This option applies to other recovery paths. Automatic restart recovery does
+not replace missing or unverified native state with a new conversation.
 Kandev does not resend a prompt when its outcome is uncertain. Resolve the
 recovery notice before sending new work.
 
@@ -138,10 +158,78 @@ not resend the prompt or start a replacement conversation. Legacy streams use
 bounded intake and can show the same uncertain state when their missing output
 cannot be replayed.
 
+An older session can already have its conversation loaded while a delivery block
+still prevents new messages. For an empty historical delivery block, the card
+also offers **Resume**. Resume checks and reconciles the saved delivery against
+the same native conversation without resending the old prompt. **Retry connection**
+and **Stop** remain available. A successful load alone cannot replace missing
+proof about the original process, so automatic recovery may leave this action
+to you. If Resume cannot verify the saved evidence, it keeps the session blocked
+and reports the cause. If the saved delivery already has a fully recorded
+terminal result, Kandev reconciles the matching stale block when the idle native
+conversation is restored. The old result remains unchanged, and no previous
+prompt is sent again.
+
+A resumed runtime checks delivery recovery before enabling new work. If the saved
+evidence needs explicit recovery, the Resume controls appear before you send a
+new instruction. An existing draft is retained while recovery runs; send it once
+after the conversation is ready.
+
+After a backend restart, Kandev uses durable evidence to verify the saved owner
+and native conversation. If they match, Kandev restores the same task session
+when its agentctl process has terminated. It does not send another prompt, add
+a user message, or create a new turn. Send your next message when the composer
+is ready. If queued messages remain, restoration turns **Auto-run** off and
+keeps those messages. You can turn **Auto-run** on when you want them to run.
+
+If the saved prompt record is missing, **Retry connection** checks the retained
+delivery record. Kandev restores it only when one saved user message matches one
+retained record. The original message stays in the conversation with a blocked
+delivery label. Retry does not send that message again, and the prompt outcome
+stays unknown. If the original agent process cannot be verified, Kandev keeps
+the session blocked and shows the reason. Record repair alone does not allow
+continuation.
+
+Automatic restoration stays blocked when Kandev cannot verify the saved owner,
+native conversation, generation, or journal. A missing native conversation,
+unknown or changed owner, or locked or corrupt journal does not start a
+replacement conversation. The session keeps its safe recovery controls, such
+as **Stop**, while other eligible sessions can recover independently.
+
+**Stop** remains available while Retry is pending. The card reports a failed
+Stop request or an unconfirmed cancellation. Retry reconnects and reconciles
+the saved delivery state; it does not create a new instruction.
+
+Agentctl saves output in a journal on the executor's disk until the backend
+confirms that it saved the output. The journal also operates while the backend
+is connected. During a disconnect, the journal grows as the agent produces
+output. After reconnection, Kandev replays the output and acknowledges saved
+records, including when the agent has no new output.
+
+The journal has no default 256 MiB stream limit or 2 GiB total limit.
+Unacknowledged output does not expire after a week or another fixed interval.
+The agent can continue independent work while usable disk space remains.
+Requests that need the Kandev backend, such as backend tools, can wait or fail
+during the outage.
+
+Memory buffers and replay batches remain bounded. Agentctl reserves disk space
+for control and recovery records. If usable space approaches that reserve,
+agentctl blocks new prompts and requests cancellation of the affected turn.
+Committed output remains available for replay. A failed cancellation does not
+prove that the agent stopped. The journal never discards unacknowledged output
+to make room.
+
+Backend delivery cleanup preserves saved conversation output on desktop and phones.
+It removes redundant transport payloads after safe projection and settlement.
+If an ACK was lost after cleanup, **Retry connection** uses the persisted cursor without resending the prompt.
+Uncertain work remains protected. **Stop** and the existing recovery actions remain available.
+See [delivery retention operations](operations.md#backend-delivery-retention) for expiry, deletion, and rollback limits.
+
 Kandev can replace the local agent runtime while the backend and browser
 connection stay active. This restores runtime service only. A session with an
-uncertain prompt outcome remains blocked until you resolve its recovery card.
-Runtime recovery does not resend that prompt or resolve its external effects.
+uncertain prompt outcome remains blocked until a safe recovery action or the
+next backend restart restores it. Runtime replacement does not resend that
+prompt or resolve its external effects.
 
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
@@ -347,6 +435,13 @@ All panels for a task point at the same task environment. In a multi-repository 
 When the repository defines a dev script, the desktop header shows a dev server control. Starting it runs the script in the task workspace, opens the browser preview, and opens a read-only **Dev Server** panel with the script's output. While the script runs, the same control becomes **Stop dev server preview** and terminates the process and its children. Kandev also stops a running dev script when its task is archived or deleted, so a preview cannot outlive the task that started it. A script that detaches itself from Kandev, for example by daemonizing or calling `setsid`, escapes that cleanup and must be stopped by hand.
 
 Structured shell-command activity keeps the command, working directory, status, and output size in the chat row. Expand **Output** to fetch the transcript; Kandev continues refreshing an open, running command and stops when it reaches a terminal state. The disclosure separates standard output and errors, reports truncation and the exit code when known, and offers **Retry** when the transcript request fails. Historical command transcripts are loaded only when opened, which keeps long conversations responsive without discarding the stored output.
+
+For foreground ACP commands, consecutive output-only updates are grouped into
+periodic snapshots, normally no more frequently than once every 250 ms while
+delivery is available. Ordered boundaries can flush sooner.
+The first output and final result remain immediate. This avoids repeatedly saving
+the accumulated transcript for every small output chunk; command state changes,
+conversation text and committed replay records keep their normal ordering.
 
 The ring in the chat-input toolbar shows the active session's context-window use
 when the agent reports a trustworthy window size. Open it to see used and total
@@ -597,7 +692,7 @@ For an eligible structured-chat session, right-click its tab and select **Share*
 
 Kandev creates a preview, applies heuristic redaction, and publishes the snapshot as a secret GitHub Gist after you confirm. GitHub authentication with Gist permission is required. The maximum snapshot size is 10 MiB. The returned viewing URL uses `gist.githack.com` to render the Gist through a third-party, Cloudflare-backed CDN and shows an anti-phishing interstitial on first visit. Publishing therefore exposes the snapshot not only to anyone with the unlisted URL but also to that rendering service.
 
-Inspect the full preview before publishing. Redaction covers common API-key patterns, environment-style secrets, command arguments, and absolute workspace paths, but it cannot recognize every credential or proprietary value. A secret Gist is unlisted, not access-controlled: anyone with the URL can view it. Do not share material that must remain confidential.
+Inspect the full preview before publishing. Redaction covers common API-key patterns, environment-style secrets, command arguments, and absolute workspace paths, including matching values in the task title and session agent, model, and executor metadata. It cannot recognize every credential or proprietary value. Published snapshots remain frozen; later redaction changes apply only to new previews and publications. A secret Gist is unlisted, not access-controlled: anyone with the URL can view it. Do not share material that must remain confidential.
 
 Use the same dialog to revoke a share. Revocation deletes the Gist and records it as revoked in Kandev.
 
@@ -636,3 +731,9 @@ Related: [Use Kandev](use-kandev.md), [Tasks and workflows](tasks-and-workflows.
 On desktop, the X on a deletable Agent tab deletes the session after confirmation by default. In **Settings > Preferences > Task Behavior > Conversation**, choose **Hide panel** when the X should only remove that panel. The conversation remains available from **+ > Agents**, where selecting it reopens the panel.
 
 Hidden panels remain hidden when you reload the same browser tab. They are local to that browser tab and task environment. Mobile Sessions controls continue to use the existing Delete action.
+
+### Resume cannot stop the previous runtime
+
+If Resume says the previous runtime could not be stopped, check the task executor's connectivity, then retry **Resume** in the same session. Kandev keeps the runtime registration until it can confirm cleanup, so this error does not mean another session started or that the previous runtime is definitely stopped.
+
+The recovery card shows the cause and keeps technical details collapsed. The explanation remains after reloading. **Start fresh** is not a connectivity repair and can encounter the same unavailable executor.

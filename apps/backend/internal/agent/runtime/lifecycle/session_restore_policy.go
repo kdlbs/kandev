@@ -179,9 +179,9 @@ func (e *RestoreRequiredError) RecoveryReason() string {
 	return string(e.Decision.Reason)
 }
 
-func newRestoreRequiredError(identity RestoreIdentity, err error) *RestoreRequiredError {
+func newRestoreRequiredError(identity RestoreIdentity, agentType string, err error) *RestoreRequiredError {
 	reason := classifyRestoreFailure(err)
-	if isMissingProviderSessionErr(err, identity.NativeSessionID) {
+	if isMissingProviderSessionErr(err, identity.NativeSessionID, agentType) {
 		reason = RestoreReasonNativeStateMissing
 	}
 	return &RestoreRequiredError{

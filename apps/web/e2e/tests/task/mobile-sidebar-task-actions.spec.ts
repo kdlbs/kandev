@@ -210,7 +210,7 @@ test.describe("Mobile sidebar task actions", () => {
     await destinationRow.tap();
 
     await expect(drawer).toBeHidden();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${destination.id}$`));
+    await expect(testPage).toHaveURL(new RegExp(`/t/${destination.id}(?:\\?sessionId=[^&]+)?$`));
     const mobileTopBar = testPage
       .getByTestId("mobile-task-picker-trigger")
       .locator("xpath=ancestor::header");
@@ -831,7 +831,7 @@ test.describe("Mobile sidebar task actions", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
-    await apiClient.createTaskWithAgent(
+    const parentTask = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile non-active parent",
       seedData.agentProfileId,
@@ -843,6 +843,9 @@ test.describe("Mobile sidebar task actions", () => {
       },
     );
 
+    // Finish before navigation so the parent must come from the drawer page,
+    // independently of whether its live creation events reach this browser.
+    await expect.poll(async () => (await apiClient.getTask(parentTask.id)).state).toBe("REVIEW");
     await testPage.goto(`/t/${activeTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();

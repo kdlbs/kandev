@@ -91,6 +91,7 @@ test.describe("mobile agent goal visibility", () => {
     await chip.tap();
     const drawer = testPage.getByTestId("agent-goal-drawer-content");
     await expect(drawer).toBeVisible();
+    await waitForFiniteAnimations(drawer);
     await expect(drawer).toContainText("Coordinate contributor PR reviews");
     await expect(drawer).toContainText("The agent may continue automatically between replies.");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile agent goal drawer");
@@ -131,9 +132,9 @@ test.describe("mobile agent goal visibility", () => {
 
     await waitForQuickChatDirectInput(dialog);
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-clear");
-    await expect(
-      dialog.getByText("The provider goal was cleared.", { exact: false }),
-    ).toBeVisible();
+    await expect(dialog.getByText("The provider goal was cleared.", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
     await waitForQuickChatDirectInput(dialog);
     await expect(dialog.getByTestId("agent-goal-chip")).toBeHidden({ timeout: 15_000 });
   });

@@ -404,7 +404,7 @@ honour.
 
 ### Passthrough scope
 
-A passthrough session's agent runs on a terminal created by an interactive runner
+A standalone passthrough session's agent runs on a terminal created by an interactive runner
 that, for standalone, is constructed inside the **backend** process, not inside
 agentctl. The terminal is a direct backend child and the runner's registry is
 backend memory, so detaching agentctl does nothing for it: the agent dies with
@@ -412,6 +412,10 @@ the backend and there is no state left to adopt. Passthrough sessions therefore
 behave as capability-disabled and are never reported as re-tracked. Making them
 survive means moving the runner into the control server, which is a separate
 capability. The same applies to user-owned terminals, which share the runner.
+
+[SSH passthrough](ssh-passthrough.md) defines remote PTY ownership and explicit
+recovery separately. Its authenticated remote process inspection does not use
+the standalone survival flag or standalone recovery inventory.
 
 ## Observability
 

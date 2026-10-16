@@ -55,6 +55,7 @@ type mockAgent struct {
 	sessions                       map[acp.SessionId]bool
 	promptCancels                  map[acp.SessionId]context.CancelFunc
 	promptCancelHolds              map[acp.SessionId]chan struct{}
+	detachedWork                   map[acp.SessionId]map[*mockDetachedWork]struct{}
 	sessionMCPServers              map[acp.SessionId]map[string]mcpServerDef
 	sessionConfig                  map[acp.SessionId][]acp.SessionConfigOption
 	sessionModes                   map[acp.SessionId]acp.SessionModeId
@@ -67,10 +68,21 @@ type mockAgent struct {
 var _ acp.Agent = (*mockAgent)(nil)
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "--delivery-journal-fixture" {
+		if err := runDeliveryJournalFixture(os.Args[2], os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--profile-probe-wrapper" {
 		os.Exit(runProfileProbeWrapper(os.Args[2:], os.Getenv(profileProbeEvidenceEnv)))
 	}
 	recordProfileProbeChildEvidence(os.Args, os.Getenv(profileProbeEvidenceEnv))
+	// Vendor-CLI shaped entry points (`--version`, `app-server`) that the hostcli package drives in E2E.
+	if runHostCLICommand(os.Args[1:], os.Stdin, os.Stdout) {
+		return
+	}
 	model := parseModelFlag()
 
 	// TUI mode: simple terminal UI for passthrough/PTY testing
@@ -495,7 +507,10 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	a.mu.Lock()
 	sessionMCPServers := cloneMCPServerDefs(a.sessionMCPServers[req.SessionId])
 	a.mu.Unlock()
-	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId, mcpServers: sessionMCPServers}
+	e := &emitter{
+		ctx: promptCtx, conn: a.conn, sid: req.SessionId, mcpServers: sessionMCPServers,
+		registerDetachedWork: a.registerDetachedWork,
+	}
 	handlePrompt(e, prompt, a.sessionModel(req.SessionId))
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
@@ -520,6 +535,7 @@ func (a *mockAgent) Cancel(_ context.Context, req acp.CancelNotification) error 
 	cancelHold := a.promptCancelHolds[req.SessionId]
 	cancelPrompt := a.promptCancels[req.SessionId]
 	a.mu.Unlock()
+	a.cancelDetachedWork(req.SessionId)
 	if cancelHold != nil {
 		select {
 		case <-cancelHold:

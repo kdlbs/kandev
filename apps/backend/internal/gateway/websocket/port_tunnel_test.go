@@ -3,6 +3,7 @@ package websocket
 import (
 	"fmt"
 	"net"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -12,6 +13,14 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"go.uber.org/zap"
 )
+
+func newTestTunnelManager(lifecycleMgr *lifecycle.Manager, log *logger.Logger) *TunnelManager {
+	mgr := NewTunnelManager(lifecycleMgr, log)
+	if runtime.GOOS == "windows" {
+		mgr.listenHost = "127.0.0.1"
+	}
+	return mgr
+}
 
 func TestResolveAndBindReportsOccupiedPort(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
@@ -38,14 +47,20 @@ func TestResolveAndBindReportsOccupiedPort(t *testing.T) {
 		t.Fatalf("add execution: %v", err)
 	}
 
-	occupied, err := net.Listen("tcp", ":0")
+	// Unix keeps the wildcard collision contract. Windows uses a loopback-only
+	// test listener so a newly built test binary does not request Firewall access.
+	listenAddress := ":0"
+	if runtime.GOOS == "windows" {
+		listenAddress = "127.0.0.1:0"
+	}
+	occupied, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		t.Fatalf("listen for occupied tunnel port: %v", err)
 	}
 	t.Cleanup(func() { _ = occupied.Close() })
 	port := occupied.Addr().(*net.TCPAddr).Port
 
-	mgr := NewTunnelManager(lifecycleMgr, log)
+	mgr := newTestTunnelManager(lifecycleMgr, log)
 	_, _, _, _, cancel, err := mgr.resolveAndBind("session", port)
 	defer cancel()
 	if err == nil {

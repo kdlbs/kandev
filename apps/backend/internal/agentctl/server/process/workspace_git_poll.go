@@ -60,6 +60,9 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	for {
 		_, gitPoll, _ := wt.pollIntervals(wt.GetPollMode())
 		timer.Reset(gitPoll)
+		if wt.pollTimerArmed != nil {
+			wt.pollTimerArmed("gitPoll", gitPoll)
+		}
 
 		select {
 		case <-ctx.Done():
@@ -130,7 +133,7 @@ func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures
 	}
 	*consecutiveFailures = 0
 
-	wt.checkGitChanges(ctx, snap)
+	noteSlowPollIdle(&wt.slowIdleGitPollTicks, wt.checkGitChanges(ctx, snap))
 	return false
 }
 
@@ -356,12 +359,13 @@ func (wt *WorkspaceTracker) compareToCachedState(snap gitPollSnapshot) gitPollDe
 
 // checkGitChanges checks if HEAD, git index, or the upstream ref has changed
 // and processes changes. It only routes: each case below owns its own cache
-// update and notifications.
-func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context, snap gitPollSnapshot) {
+// update and notifications. It reports whether any tracked value moved.
+func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context, snap gitPollSnapshot) bool {
 	delta := wt.compareToCachedState(snap)
+	changed := delta.headChanged || delta.branchChanged || delta.indexChanged || delta.upstreamChanged
 
 	switch {
-	case !delta.headChanged && !delta.branchChanged && !delta.indexChanged && !delta.upstreamChanged:
+	case !changed:
 		// Nothing moved.
 	case delta.upstreamChanged && !delta.headChanged && !delta.branchChanged && !delta.indexChanged:
 		wt.handleUpstreamOnlyChange(ctx, delta)
@@ -372,6 +376,7 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context, snap gitPollSna
 	case delta.headChanged:
 		wt.handleHeadChange(ctx, delta)
 	}
+	return changed
 }
 
 // handleUpstreamOnlyChange records a push or fetch that moved the upstream

@@ -219,6 +219,12 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 			return lockErr
 		}
 	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), running.SessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{running.SessionID}, nil); err != nil {
+		return err
+	}
 	if _, err := lockTaskSessionRow(ctx, tx, running.SessionID); err != nil {
 		return err
 	}
@@ -230,6 +236,9 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID.String); err != nil {
 			return err
 		}
+	}
+	if err := r.retainQuickChatHistoryTx(ctx, tx, running.SessionID); err != nil {
+		return err
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
@@ -305,6 +314,9 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		running.UpdatedAt,
 	)
 	if err != nil {
+		return err
+	}
+	if err := r.retainQuickChatHistoryTx(ctx, tx, running.SessionID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -557,6 +569,12 @@ func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessi
 	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
 		return err
 	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM executors_running WHERE session_id = ?`), sessionID)
 	if err != nil {
 		return err
@@ -641,6 +659,18 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
 		return err
 	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
+		return err
+	}
+	if _, err := lockTaskSessionRow(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	if err := r.retainQuickChatHistoryTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	var (
 		result sql.Result
 	)
@@ -673,6 +703,9 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 		}
 		return models.ErrExecutionRotated
 	}
+	if err := r.retainQuickChatHistoryTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -697,6 +730,12 @@ func (r *Repository) RepairExecutorRunningDead(ctx context.Context, sessionID st
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -781,6 +820,12 @@ func (r *Repository) DeleteExecutorRunningIfCurrent(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
 		return err
 	}
 	query := `DELETE FROM executors_running WHERE session_id = ? AND agent_execution_id = ?`

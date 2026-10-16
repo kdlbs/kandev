@@ -36,14 +36,15 @@ async function openSettledQuickChat(page: Page, apiClient: ApiClient, navigateHo
     30_000,
   );
   await waitForQuickChatDirectInput(dialog);
-  return dialog;
+  return { dialog, sessionId: started.session_id };
 }
 
 function commandDialog(page: Page) {
   return page.locator('[role="dialog"]:has([cmdk-input])').last();
 }
 
-test.describe.serial("Quick Chat cancellation palette and composer", () => {
+test.describe("Quick Chat cancellation palette and composer", () => {
+  test.describe.configure({ retries: 0 });
   test.afterEach(async ({ backend }, testInfo) => {
     if (testInfo.status === testInfo.expectedStatus) return;
     await testInfo.attach("quick-chat-cancellation-backend.log", {
@@ -68,10 +69,14 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
     apiClient,
   }) => {
     test.setTimeout(120_000);
-    const quickChat = await openSettledQuickChat(testPage, apiClient);
-    await sendQuickChatMessage(quickChat, testPage, "/slow 30s");
-
-    const quickSessionId = await waitForActiveQuickChatSupportsSteering(testPage);
+    const { dialog: quickChat, sessionId: quickSessionId } = await openSettledQuickChat(
+      testPage,
+      apiClient,
+    );
+    const acceptanceMarker = "Quick Chat composer cancellation accepted";
+    await sendQuickChatMessage(quickChat, testPage, `/e2e:cancel-hold ${acceptanceMarker}`);
+    await waitForAgentMessage(apiClient, quickSessionId, acceptanceMarker, 30_000);
+    expect(await waitForActiveQuickChatSupportsSteering(testPage)).toBe(quickSessionId);
     await waitForActiveQuickChatForegroundActivity(testPage, "generating");
     const editor = quickChat.locator('.tiptap.ProseMirror[contenteditable="true"]:visible');
     await expect(editor).toHaveText("");
@@ -92,21 +97,17 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
   }) => {
     test.setTimeout(120_000);
     const cancellation = await holdCancellationSettlement(testPage);
-    const quickChat = await openSettledQuickChat(testPage, apiClient);
+    const { dialog: quickChat, sessionId: quickSessionId } = await openSettledQuickChat(
+      testPage,
+      apiClient,
+    );
     await sendQuickChatMessage(quickChat, testPage, "/detached-background 60s");
-
-    const quickSessionId = await testPage.evaluate(() => {
-      const store = (
-        window as Window & {
-          __KANDEV_E2E_STORE__?: {
-            getState: () => { quickChat: { activeSessionId: string | null } };
-          };
-        }
-      ).__KANDEV_E2E_STORE__;
-      const sessionId = store?.getState().quickChat.activeSessionId;
-      if (!sessionId) throw new Error("Quick Chat has no active session");
-      return sessionId;
-    });
+    await waitForAgentMessage(
+      apiClient,
+      quickSessionId,
+      "Launching detached background work; this foreground turn is complete.",
+      30_000,
+    );
     await waitForActiveQuickChatForegroundActivity(testPage, "background");
     await expect(
       quickChat.locator('.tiptap.ProseMirror[contenteditable="true"]:visible'),
@@ -118,12 +119,13 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
     cancellation.arm(quickSessionId);
     try {
       await cancel.click();
-      await waitForQuickChatCancellationPending(testPage, quickSessionId, true);
       await expect(cancel).toBeDisabled();
     } finally {
       cancellation.release();
     }
-    await waitForQuickChatSessionSettled(testPage, quickSessionId, 75_000);
+    // A fresh session advances its projection for acceptance and settlement.
+    // Finish before the detached workload's natural 60-second completion.
+    await waitForQuickChatSessionSettled(testPage, quickSessionId, 20_000, 2);
     await expect(cancel).not.toBeVisible({ timeout: 15_000 });
   });
 
@@ -138,12 +140,19 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
       apiClient,
       seedData,
       "Quick Chat palette cancellation target",
+      { predecessorPrompt: "/e2e:cancel-hold Underlying task cancellation fixture accepted" },
     );
     const underlyingCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(underlyingCancel).toBeVisible();
 
-    const quickChat = await openSettledQuickChat(testPage, apiClient, false);
-    await sendQuickChatMessage(quickChat, testPage, "/slow 30s");
+    const { dialog: quickChat, sessionId: quickSessionId } = await openSettledQuickChat(
+      testPage,
+      apiClient,
+      false,
+    );
+    const acceptanceMarker = "Quick Chat palette cancellation accepted";
+    await sendQuickChatMessage(quickChat, testPage, `/e2e:cancel-hold ${acceptanceMarker}`);
+    await waitForAgentMessage(apiClient, quickSessionId, acceptanceMarker, 30_000);
     await expect(
       quickChat.getByRole("status", { name: /Agent is (starting|running)/ }),
     ).toBeVisible({ timeout: 15_000 });
@@ -158,7 +167,11 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
     await cancelOption.click();
 
     await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
+    await waitForQuickChatSessionSettled(testPage, quickSessionId, 75_000);
     await waitForQuickChatDirectInput(quickChat);
+    await sendQuickChatMessage(quickChat, testPage, "/e2e:bulk:2");
+    await waitForAgentMessage(apiClient, quickSessionId, "Done. Emitted 2 messages", 30_000);
+    await expect(quickChat.getByText("Done. Emitted 2 messages", { exact: false })).toBeVisible();
     await waitForActiveSessionForegroundActivity(testPage, "generating");
 
     await testPage.keyboard.press("Escape");

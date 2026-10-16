@@ -2,13 +2,14 @@ import { devices, type Page } from "@playwright/test";
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { backendFixture, type BackendContext } from "./backend";
+import { backendFixture, reportUnexpectedBackendFailure, type BackendContext } from "./backend";
 import { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
 export { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
 import { ApiClient } from "../helpers/api-client";
 import { dwell } from "../helpers/causal-waits";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
+import { restoreSidebarLayout } from "../helpers/sidebar-layout";
 import type { WorkflowStep } from "../../lib/types/http";
 
 const DEFAULT_SIDEBAR_VIEW = {
@@ -178,6 +179,7 @@ async function waitForSeedAgentProfile(
 export const test = backendFixture.extend<
   {
     testPage: Page;
+    desktopTestPage: Page;
     tabletTestPage: Page;
     coarseDesktopTestPage: Page;
     prCapture: PrAssetCapture;
@@ -366,6 +368,7 @@ export const test = backendFixture.extend<
       restoreSeedRepositoryOrigin(seedData);
       await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
       await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
+      await restoreSidebarLayout(apiClient, seedData.workspaceId, undefined);
 
       const { settings } = await apiClient.getUserSettings();
       await apiClient.saveUserSettings({
@@ -424,6 +427,7 @@ export const test = backendFixture.extend<
         // selection, and a stale selection can hide default-priority tasks in
         // unrelated tests that run later in the same worker.
         kanban_priority_filter_tokens: [],
+        kanban_hidden_step_ids: {},
         tasks_list_sort: "updated_desc",
         tasks_list_group: "state",
       });
@@ -441,6 +445,22 @@ export const test = backendFixture.extend<
     await setupPage(page, backend);
     await use(page);
     await context.close();
+  },
+
+  desktopTestPage: async ({ browser, backend, testPage }, use) => {
+    // Share the test's backend reset while observing it from a desktop context.
+    void testPage;
+    const context = await browser.newContext({
+      ...devices["Desktop Chrome"],
+      baseURL: backend.frontendUrl,
+    });
+    try {
+      const page = await context.newPage();
+      await setupPage(page, backend);
+      await use(page);
+    } finally {
+      await context.close();
+    }
   },
 
   tabletTestPage: async ({ browser, backend, testPage }, use) => {
@@ -483,7 +503,7 @@ export const test = backendFixture.extend<
   },
 
   integrationCleanup: [
-    async ({ apiClient, backend, seedData }, use) => {
+    async ({ apiClient, backend, seedData }, use, testInfo) => {
       await backend.ensureReady();
       const scoped = `workspace_id=${encodeURIComponent(seedData.workspaceId)}`;
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config?${scoped}`).catch(() => undefined);
@@ -525,6 +545,7 @@ export const test = backendFixture.extend<
       try {
         await use();
       } finally {
+        reportUnexpectedBackendFailure(backend.tmpDir, testInfo);
         await apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined);
         restoreSeedRepositoryOrigin(seedData, { refreshTrackingRefs: false });
       }
@@ -654,6 +675,7 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       // selection, and a stale selection can hide default-priority tasks in
       // unrelated tests that run later in the same worker.
       kanban_priority_filter_tokens: [],
+      kanban_hidden_step_ids: {},
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",

@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-27
-updated: 2026-09-21
+updated: 2026-10-10
 owners:
   - Kandev
 ---
@@ -49,6 +49,16 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 Additional workspace admission and single-card behavior are defined in
 [Session recovery failures](session-recovery-failures.md).
 
+#### Runtime cleanup failure amendment (October 10)
+
+Correction of the real-cause contract in .1 and .8. Delivery is tracked
+in [Resume cleanup failure feedback](../../../plans/resume-cleanup-failure-feedback/plan.md).
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.10:** When Resume cannot confirm cleanup of a previous runtime, it shall report that cleanup failure instead of claiming another agent is running. It shall not attempt a replacement launch after the failed cleanup. A genuinely live concurrent execution shall retain its existing admission behavior.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.11:** A failed cleanup shall retain runtime ownership records, workspace resources, credentials, and the saved conversation identity needed for a later retry. Unreachable transport alone shall not authorize deletion or establish that the runtime is dead.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.12:** Manual and automatic Resume shall show a short localized cleanup-failure explanation near the existing recovery controls, with guidance to check executor connectivity before retrying. They shall not claim successful recovery or prove a node is dead. The explanation and safe cause shall survive reload; independent workspace-restoration failures shall remain separately identifiable.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.13:** Desktop and phone shall expose the same explanation, eligible retry, pending feedback, and initially collapsed safe details. Visible and copied details shall exclude raw Kubernetes responses, connection addresses, credentials, paths, and private identifiers. A later owned successful retry shall retire only its matching active failure and retain history.
+
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004: Recovery across task archive transitions
 
 **Intent:** Keep archived history readable and resume eligible work after the user unarchives its task.
@@ -83,28 +93,6 @@ These criteria define session recovery eligibility and its visible outcomes.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.10:** If replacement checkout creation succeeds but persistence of the existing task-environment repository record fails, Kandev removes the replacement checkout and its newly created branch. The prior record remains authoritative for retry.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.11:** Once explicit replacement has materialized, Kandev attempts warning persistence on every terminal resume path, including provider startup and readiness failures. A later retry can recover a warning after a failed message write.
 
-## Migrated source detail
-
-## Broken behavior
-
-An agent process or ACP handshake can fail before Kandev has attempted to load
-the stored provider-native session. Kandev currently treats every such failure
-as proof that the saved session is unusable and clears the operational resume
-token. A later retry therefore starts a new provider-native conversation even
-though the original session remains valid.
-
-A failed or cancelled GitHub-backed session also requests a new scoped
-credential lease while its persisted state is still terminal. Resume assembles
-the request before persisting `STARTING`, and request assembly itself issues
-the lease; moving the transition only ahead of `LaunchAgent` therefore leaves
-the broker boundary too early. The credential broker correctly rejects the
-terminal session, so the user-visible Resume action cannot reach agent launch.
-
-Managed npm runtimes can retain a truncated or otherwise corrupt extracted
-`_npx` execution tree even when npm's content-addressable package cache is
-healthy. Re-running the current update command can reuse that tree and fail
-without repairing it.
-
 ## Persistence and security constraints
 
 - `task_sessions.metadata.acp.session_id` and
@@ -138,9 +126,6 @@ without repairing it.
 
 ## Regression scenarios
 
-- **GIVEN** a valid OpenCode resume token, **WHEN** the OpenCode child exits
-  before answering ACP `initialize`, **THEN** Kandev shows the normal recovery
-  action and retains the same token for the next Resume attempt.
 - **GIVEN** a resume attempt whose ACP transport disconnects before
   `session/load` completes, **WHEN** the attempt fails, **THEN** Kandev retains
   the token so a later healthy process can retry it.
@@ -167,9 +152,6 @@ without repairing it.
 - **GIVEN** the targeted cache repair or retry also fails, **WHEN** the update
   job becomes terminal, **THEN** it reports the bounded failure and performs no
   additional retry or broad cache deletion.
-- **GIVEN** a manual Resume request fails, **WHEN** the backend returns a
-  descriptive error, **THEN** the recovery surface keeps that message visible
-  and offers the applicable next actions.
 - **GIVEN** automatic resume fails and read-only restore succeeds, **WHEN** the
   task view loads, **THEN** it shows the resume cause and states that the
   workspace is read-only.

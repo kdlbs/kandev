@@ -67,6 +67,7 @@ const (
 	AgentErrorCauseCodeDestinationInvalid        = "destination_invalid"
 	AgentErrorCauseCodeSourceBranchMissing       = "source_branch_missing"
 	AgentErrorCauseCodeTransportUnavailable      = "transport_unavailable"
+	AgentErrorCauseCodeRuntimeCleanupFailed      = "runtime_cleanup_failed"
 	AgentErrorCauseCodeTimeout                   = "timeout"
 	AgentErrorCauseCodeUnknown                   = "unknown"
 	AgentErrorCauseCodeModelUnavailable          = "model_unavailable"
@@ -191,6 +192,10 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		cause.RequestedModel = ""
 		cause.EffectiveModel = ""
 		cause.AttemptedModel = ""
+	case AgentErrorCauseCodeRuntimeCleanupFailed:
+		promptNotSent := cause.PromptNotSent
+		clearAgentErrorCauseEvidence(cause)
+		cause.PromptNotSent = promptNotSent
 	default:
 		clearAgentErrorCauseEvidence(cause)
 	}
@@ -335,6 +340,7 @@ func isKnownAgentErrorCauseCode(code string) bool {
 		AgentErrorCauseCodeDestinationInvalid,
 		AgentErrorCauseCodeSourceBranchMissing,
 		AgentErrorCauseCodeTransportUnavailable,
+		AgentErrorCauseCodeRuntimeCleanupFailed,
 		AgentErrorCauseCodeTimeout,
 		AgentErrorCauseCodeUnknown,
 		AgentErrorCauseCodeModelUnavailable,

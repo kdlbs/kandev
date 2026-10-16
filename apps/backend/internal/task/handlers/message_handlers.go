@@ -15,7 +15,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
-	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -394,12 +393,13 @@ func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
 }
 
 type listMessagesParams struct {
-	before     string
-	after      string
-	around     string
-	sort       string
-	authorType string
-	limit      int
+	before       string
+	after        string
+	around       string
+	sort         string
+	authorType   string
+	limit        int
+	includeTurns bool
 }
 
 const (
@@ -417,6 +417,15 @@ func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesPa
 	authorType, authorTypeProvided := c.GetQuery("author_type")
 	authorType = strings.TrimSpace(authorType)
 	rawLimit, limitProvided := c.GetQuery("limit")
+	includeTurns := false
+	if raw, provided := c.GetQuery("include_turns"); provided {
+		parsed, err := strconv.ParseBool(strings.TrimSpace(raw))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "include_turns must be a boolean"})
+			return listMessagesParams{}, false
+		}
+		includeTurns = parsed
+	}
 	if before != "" && after != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "only one of before or after can be set"})
 		return listMessagesParams{}, false
@@ -462,12 +471,13 @@ func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesPa
 		limit = service.DefaultMessagesPageSize
 	}
 	return listMessagesParams{
-		before:     before,
-		after:      after,
-		around:     around,
-		sort:       sort,
-		authorType: authorType,
-		limit:      limit,
+		before:       before,
+		after:        after,
+		around:       around,
+		sort:         sort,
+		authorType:   authorType,
+		limit:        limit,
+		includeTurns: includeTurns,
 	}, true
 }
 
@@ -485,6 +495,25 @@ func (h *MessageHandlers) fetchMessagesPaginated(
 	sessionID string,
 	params listMessagesParams,
 ) (dto.ListMessagesResponse, error) {
+	if params.includeTurns {
+		window, err := h.service.ListMessagesWithTurnWindow(ctx, service.ListMessagesRequest{
+			TaskSessionID: sessionID,
+			Limit:         params.limit,
+			Before:        params.before,
+			After:         params.after,
+			Around:        params.around,
+			Sort:          params.sort,
+			AuthorType:    params.authorType,
+			IncludeTurns:  true,
+		})
+		if err != nil {
+			return dto.ListMessagesResponse{}, err
+		}
+		if params.around != "" {
+			window.HasMore = false
+		}
+		return messageTurnWindowResponse(window), nil
+	}
 	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{
 		TaskSessionID: sessionID,
 		Limit:         params.limit,
@@ -511,6 +540,39 @@ func (h *MessageHandlers) fetchMessagesPaginated(
 		HasMore:  hasMore,
 		Cursor:   cursor,
 	}, nil
+}
+
+func messageTurnWindowResponse(window models.MessageTurnWindow) dto.ListMessagesResponse {
+	messages := messagesToAPI(window.Messages)
+	cursor := ""
+	if len(messages) > 0 {
+		cursor = messages[len(messages)-1].ID
+	}
+	response := dto.ListMessagesResponse{
+		Messages: messages,
+		Total:    len(messages),
+		HasMore:  window.HasMore,
+		Cursor:   cursor,
+	}
+	if window.Coverage == nil {
+		return response
+	}
+	response.Turns = make([]dto.TurnDTO, 0, len(window.Turns))
+	for _, turn := range window.Turns {
+		if turn != nil {
+			response.Turns = append(response.Turns, dto.FromTurn(turn))
+		}
+	}
+	var activeTurnID *string
+	if window.Coverage.ActiveTurnID != "" {
+		activeID := window.Coverage.ActiveTurnID
+		activeTurnID = &activeID
+	}
+	response.TurnCoverage = &dto.MessageTurnCoverageDTO{
+		MessageIDs:   append([]string{}, window.Coverage.MessageIDs...),
+		ActiveTurnID: activeTurnID,
+	}
+	return response
 }
 
 func messagesToAPI(messages []*models.Message) []*v1.Message {
@@ -1127,9 +1189,7 @@ func (h *MessageHandlers) addMessageReplayResponse(
 			)
 			return response, true
 		}
-		if authErr := h.service.AuthorizeSessionScope(
-			ctx, existing.TaskSessionID, authz.ScopeSessionPrompt,
-		); authErr != nil {
+		if authErr := h.service.AuthorizeSessionPromptAccess(ctx, existing.TaskSessionID); authErr != nil {
 			if service.IsForbidden(authErr) {
 				response, _ := ws.NewError(
 					msg.ID, msg.Action, ws.ErrorCodeForbidden, "Cannot send messages to this session", nil,
@@ -1610,7 +1670,9 @@ func (h *MessageHandlers) dispatchPromptAsync(
 			}
 		}
 		if steer {
-			h.forwardMessageAsSteer(promptCtx, taskID, sessionID, content, model, planMode, attachments)
+			h.forwardMessageAsSteer(
+				promptCtx, taskID, sessionID, content, model, planMode, attachments, req.deliverySubmissionID,
+			)
 			return
 		}
 		h.forwardMessageAsPrompt(
@@ -1661,6 +1723,7 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 	taskID, sessionID, content, model string,
 	planMode bool,
 	attachments []v1.MessageAttachment,
+	deliverySubmissionID string,
 ) {
 	var err error
 	if steerer, ok := h.orchestrator.(recordedMessageSteerer); ok {
@@ -1679,7 +1742,12 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 		// agentProfileID/references/startCreated are irrelevant: a steer only
 		// targets a RUNNING session, never a CREATED one, so this takes the
 		// ordinary prompt branch (PromptTask + resume + error handling).
-		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false, "")
+		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false, "",
+			canvasGuidanceProjection{deliverySubmissionID: deliverySubmissionID})
+		return
+	}
+	if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+		h.markDeliveryMessageBlocked(ctx, deliverySubmissionID)
 		return
 	}
 	if !isAgentReportedError(err) {
@@ -1756,7 +1824,11 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 			)
 		}
 		if err != nil {
-			if isPromptErrorOwnedByRecovery(err) || errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+			if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+				h.markDeliveryMessageBlocked(ctx, projection.deliverySubmissionID)
+				return
+			}
+			if isPromptErrorOwnedByRecovery(err) {
 				return
 			}
 			h.logger.Warn("failed to start created session from message",
@@ -1826,6 +1898,10 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		)
 	}
 	if err != nil {
+		if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+			h.markDeliveryMessageBlocked(ctx, deliverySubmissionID)
+			return
+		}
 		// Don't create a prompt error message if the agent itself reported the error.
 		// The agent failure path (handleAgentFailed) already sets the session to FAILED
 		// with the error_message, which the UI displays via agent-status.
@@ -1844,6 +1920,34 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 // delivery once the runtime comes up instead of being reported as failed.
 // Returns true when the message was queued, so the caller must not also
 // report promptErr as an error.
+func (h *MessageHandlers) markDeliveryMessageBlocked(ctx context.Context, messageID string) {
+	if messageID == "" || h.service == nil {
+		return
+	}
+	message, err := h.service.GetMessage(ctx, messageID)
+	if err != nil || message == nil {
+		h.logger.Warn("failed to load saved prompt for delivery recovery status",
+			zap.String("message_id", messageID), zap.Error(err))
+		return
+	}
+	if message.AuthorType != models.MessageAuthorUser {
+		return
+	}
+	metadata := make(map[string]interface{}, len(message.Metadata)+1)
+	for key, value := range message.Metadata {
+		metadata[key] = value
+	}
+	if metadata[models.MessageMetaKeyDeliveryStatus] == models.MessageDeliveryStatusBlocked {
+		return
+	}
+	metadata[models.MessageMetaKeyDeliveryStatus] = models.MessageDeliveryStatusBlocked
+	message.Metadata = metadata
+	if err := h.service.UpdateMessage(ctx, message); err != nil {
+		h.logger.Warn("failed to persist saved prompt delivery recovery status",
+			zap.String("message_id", messageID), zap.Error(err))
+	}
+}
+
 func (h *MessageHandlers) queuePromptIfRuntimeUnavailable(
 	ctx context.Context,
 	taskID, sessionID, content, model string,
@@ -2075,6 +2179,7 @@ type wsListMessagesRequest struct {
 	Before        string `json:"before"`
 	After         string `json:"after"`
 	Sort          string `json:"sort"`
+	IncludeTurns  bool   `json:"include_turns"`
 }
 
 type wsSearchMessagesRequest struct {
@@ -2244,30 +2349,38 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 		req.Limit = service.DefaultMessagesPageSize
 	}
 
-	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{
+	request := service.ListMessagesRequest{
 		TaskSessionID: req.TaskSessionID,
 		Limit:         req.Limit,
 		Before:        req.Before,
 		After:         req.After,
 		Sort:          req.Sort,
-	})
+	}
+	request.IncludeTurns = req.IncludeTurns
+	resp, err := h.listMessagesResponse(ctx, request)
 	if err != nil {
 		h.logger.Error("failed to list messages", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list messages", nil)
 	}
-	result := make([]*v1.Message, 0, len(messages))
-	for _, message := range messages {
-		result = append(result, message.ToAPI())
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+func (h *MessageHandlers) listMessagesResponse(ctx context.Context, request service.ListMessagesRequest) (dto.ListMessagesResponse, error) {
+	if request.IncludeTurns {
+		window, err := h.service.ListMessagesWithTurnWindow(ctx, request)
+		if err != nil {
+			return dto.ListMessagesResponse{}, err
+		}
+		return messageTurnWindowResponse(window), nil
 	}
+	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, request)
+	if err != nil {
+		return dto.ListMessagesResponse{}, err
+	}
+	result := messagesToAPI(messages)
 	cursor := ""
 	if len(result) > 0 {
 		cursor = result[len(result)-1].ID
 	}
-	resp := dto.ListMessagesResponse{
-		Messages: result,
-		Total:    len(result),
-		HasMore:  hasMore,
-		Cursor:   cursor,
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return dto.ListMessagesResponse{Messages: result, Total: len(result), HasMore: hasMore, Cursor: cursor}, nil
 }

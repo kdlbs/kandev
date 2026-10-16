@@ -61,6 +61,8 @@ test.describe("Coordinator copilot", () => {
       name: "Copilot Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -107,6 +109,8 @@ test.describe("Coordinator copilot", () => {
       name: "Ask About Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     const title = "Ask About This Card";
@@ -186,6 +190,8 @@ test.describe("Coordinator copilot", () => {
       name: "Escape Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -237,6 +243,8 @@ test.describe("Coordinator copilot", () => {
       name: "Stop After Reopen Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -280,6 +288,8 @@ test.describe("Coordinator copilot", () => {
       name: "Layout Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -311,6 +321,8 @@ test.describe("Coordinator copilot", () => {
       name: "Header Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -336,6 +348,8 @@ test.describe("Coordinator copilot", () => {
       name: "Wide Layout Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -390,6 +404,8 @@ test.describe("Coordinator copilot", () => {
       name: "Backdrop Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -413,11 +429,15 @@ test.describe("Coordinator copilot", () => {
       name: "Persist Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     const other = await apiClient.createCoordinator(seedData.workspaceId, {
       name: "Other Persist Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -459,11 +479,15 @@ test.describe("Coordinator copilot", () => {
       name: "Draft Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     const other = await apiClient.createCoordinator(seedData.workspaceId, {
       name: "Other Draft Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     const editorOf = (panel: Locator) => panel.getByTestId("chat-input-editor");
     const typeDraft = async (panel: Locator, text: string) => {
@@ -523,6 +547,8 @@ test.describe("Coordinator copilot", () => {
       name: "Resize Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -568,6 +594,8 @@ test.describe("Coordinator copilot", () => {
       name: "Recovery Feedback Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.route(CONVERSATION_OPENED, async (route) => {
@@ -606,6 +634,8 @@ test.describe("Coordinator copilot", () => {
       name: "Ended Session Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     // An unrelated task with a blocked clarification question, so the Needs
@@ -700,6 +730,8 @@ test.describe("Coordinator copilot: permission requests", () => {
       name: "Permission Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));

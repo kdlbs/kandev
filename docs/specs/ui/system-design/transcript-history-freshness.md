@@ -54,7 +54,11 @@ transport origin: it may also represent another accepted read or local state.
 `internal/task/repository/sqlite/message.go` initializes it at creation and
 `UpdateMessage` sets it to UTC now when persisting content/metadata. Public
 live payloads preserve `updated_at` through `toMessage`. Wall-clock values are
-revision hints, not a new monotonic server-version guarantee.
+revision hints, not a new monotonic server-version guarantee. The turn-end tool
+completion sweep also writes a UTC application timestamp with subsecond
+precision. SQLite's whole-second `CURRENT_TIMESTAMP` can otherwise make a
+completed row appear older than its pending live revision from the same second,
+so authoritative recovery would correctly reject the truncated revision.
 
 ## Revision selection
 

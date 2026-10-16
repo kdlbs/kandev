@@ -2683,6 +2683,11 @@ func TestQueueAndInterruptForPeerMessageRejectsReplacementIncarnationWhileWaitin
 	coordinatorStopWaitForGuardRefs(t, svc, original.ID, 2)
 
 	require.NoError(t, repo.DeleteTaskSession(ctx, original))
+	_, err = repo.DB().ExecContext(ctx, `
+		DELETE FROM agent_delivery_cleanup_jobs
+		WHERE session_id = ? AND incarnation_id = ?
+	`, original.ID, original.QueueIncarnationID)
+	require.NoError(t, err)
 	replacement := &models.TaskSession{
 		ID: original.ID, TaskID: original.TaskID, State: models.TaskSessionStateRunning,
 		StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),

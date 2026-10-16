@@ -124,7 +124,7 @@ test.describe("Mobile chat model selector", () => {
     await expect(trigger).toContainText("Mock Smart");
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const runtime = sessions.find((item) => item.id === task.session_id)?.metadata
           ?.runtime_config as { model?: string } | undefined;
         return runtime?.model;
@@ -146,7 +146,7 @@ test.describe("Mobile chat model selector", () => {
 
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const baseline = sessions[0]?.metadata?.acp_config_baseline as
           | Record<string, string>
           | undefined;

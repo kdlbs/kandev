@@ -4,8 +4,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/stretchr/testify/require"
 )
 
 // TestReplayedTerminalIntentAdvancesOnce covers
@@ -32,7 +35,9 @@ func TestReplayedTerminalIntentAdvancesOnce(t *testing.T) {
 		ID: "step3", WorkflowID: "wf1", Name: "Step 3", Position: 2,
 	}
 	svc := createTestService(repo, stepGetter, newMockTaskRepo())
-	effect := workflowEffectForTurn("turn-delivery-replay")
+	effect := workflowEffectForEvent(watcher.AgentEventData{
+		TaskID: "task-delivery-replay", SessionID: "session-delivery-replay", TurnID: "turn-delivery-replay",
+	})
 	effectCtx := withWorkflowEffect(ctx, effect)
 
 	session, err := repo.GetTaskSession(ctx, "session-delivery-replay")
@@ -64,6 +69,44 @@ func TestReplayedTerminalIntentAdvancesOnce(t *testing.T) {
 	}
 	if stored.State != models.DeliveryEffectCompleted {
 		t.Fatalf("effect state = %q, want %q", stored.State, models.DeliveryEffectCompleted)
+	}
+}
+
+func TestPartialDeliveryWorkflowIdentityRemainsBlocked(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data watcher.AgentEventData
+	}{
+		{name: "stream", data: watcher.AgentEventData{DeliveryStreamID: "partial-stream"}},
+		{name: "incarnation", data: watcher.AgentEventData{DeliveryIncarnationID: "partial-incarnation"}},
+		{name: "generation", data: watcher.AgentEventData{DeliveryHarnessGeneration: 1}},
+		{name: "sequence", data: watcher.AgentEventData{DeliverySequence: 1}},
+		{name: "submission", data: watcher.AgentEventData{DeliverySubmissionID: "partial-submission"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "partial-task", "partial-session", "step1")
+			steps := newMockStepGetter()
+			steps.steps["step1"] = &wfmodels.WorkflowStep{
+				ID: "step1", WorkflowID: "wf1", Position: 0,
+				Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+					Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "step2"},
+				}}},
+			}
+			steps.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", Position: 1}
+			svc := createTestService(repo, steps, newMockTaskRepo())
+			session, err := repo.GetTaskSession(ctx, "partial-session")
+			require.NoError(t, err)
+			tc.data.TaskID, tc.data.SessionID, tc.data.TurnID = session.TaskID, session.ID, "partial-turn"
+			effect := workflowEffectForEvent(tc.data)
+			require.False(t, svc.processOnTurnCompleteViaEngine(withWorkflowEffect(ctx, effect), session.TaskID, session))
+			task, err := repo.GetTask(ctx, session.TaskID)
+			require.NoError(t, err)
+			require.Equal(t, "step1", task.WorkflowStepID)
+			_, err = repo.GetAgentDeliveryEffect(ctx, effect.EffectKey)
+			require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryEffectNotFound)
+		})
 	}
 }
 

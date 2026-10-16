@@ -1,7 +1,6 @@
 import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { openTaskSession } from "../../helpers/git-helper";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import type { ThreadViewApi, ThreadViewDraftApi } from "../../../lib/types/http-user-settings";
 
@@ -49,7 +48,6 @@ export async function seedThreadPresentation(
 }
 
 export async function startPresentationThread(
-  page: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
@@ -66,7 +64,6 @@ export async function startPresentationThread(
       repository_ids: [seedData.repositoryId],
     },
   );
-  await openTaskSession(page, title);
   await waitForLatestSessionDone(apiClient, task.id, 1, `presentation turn for ${title}`);
   return task;
 }

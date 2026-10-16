@@ -1603,6 +1603,8 @@ func TestHandleTaskPRCIAutomationAutoMergeUsesPartialSyncMatch(t *testing.T) {
 		HeadSHA:        "head-a",
 		LastSyncedAt:   &now,
 	}
+	stale := *pr
+	stale.LastSyncedAt = nil
 	ghSvc := &mockGitHubService{
 		ciOptionsResp: &github.TaskCIOptionsResponse{
 			TaskID:           "task-1",
@@ -1613,8 +1615,11 @@ func TestHandleTaskPRCIAutomationAutoMergeUsesPartialSyncMatch(t *testing.T) {
 	}
 	svc.SetGitHubService(ghSvc)
 
-	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
+	if err := svc.handleTaskPRCIAutomation(ctx, &stale); err != nil {
 		t.Fatalf("handle auto-merge: %v", err)
+	}
+	if ghSvc.triggerPRSyncAllCalls != 1 {
+		t.Fatalf("sync calls = %d, want 1", ghSvc.triggerPRSyncAllCalls)
 	}
 	if ghSvc.mergeCalls != 1 {
 		t.Fatalf("expected matching partial sync result to merge, got %d calls", ghSvc.mergeCalls)

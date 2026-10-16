@@ -306,7 +306,7 @@ func TestDeliveryCompletionAfterTerminalProjection(t *testing.T) {
 		t.Run(string(state), func(t *testing.T) {
 			ctx := context.Background()
 			repo := setupTestRepo(t)
-			seedSession(t, repo, "task-terminal-first", "session-terminal-first", "step-1")
+			seedSession(t, repo, "task-terminal-first", "session-terminal-first", "step-1", "session-terminal-first")
 			now := time.Now().UTC()
 			submission := &models.AgentDeliverySubmission{
 				ID: "prompt:terminal-first", SessionID: "session-terminal-first",

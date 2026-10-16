@@ -97,8 +97,12 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if execution.SessionID == "" {
 		return m.startAgentProcess(ctx, executionID)
 	}
-	_, err := m.doCoalescedExecution(ctx, execution.SessionID, func(sharedCtx context.Context) (interface{}, error) {
-		return nil, m.startAgentProcess(sharedCtx, executionID)
+	// Workspace preparation and subprocess startup have different results.
+	// Share a startup only with callers starting this exact execution.
+	_, err := m.doCoalescedExecution(ctx, "agent-start:"+executionID, func(sharedCtx context.Context) (interface{}, error) {
+		startupCtx, release := agentStartupContext(ctx, sharedCtx)
+		defer release()
+		return nil, m.startAgentProcess(startupCtx, executionID)
 	})
 	return err
 }
@@ -650,9 +654,12 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	m.logger.Debug("waiting for agentctl to be ready",
 		zap.String("execution_id", execution.ID),
 		zap.String("url", client.BaseURL()))
-
-	err := client.WaitForReady(ctx, 60*time.Second)
 	releaseClient()
+
+	err := execution.waitForAgentctlReady(ctx)
+	if errors.Is(err, errReadinessClientDetached) {
+		return
+	}
 	if err != nil {
 		m.logger.Error("agentctl not ready",
 			zap.String("execution_id", execution.ID),
@@ -666,11 +673,12 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	// Comparison configuration must arrive before readiness exposes workspace
 	// access or the cached poll mode starts fresh Git scans.
 	client, releaseClient = execution.AcquireAgentCtlClient()
-	if client != nil {
-		m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
-		m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
-		releaseClient()
+	if client == nil {
+		return
 	}
+	m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
+	m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
+	releaseClient()
 	execution.MarkAgentctlReady()
 
 	elapsed := time.Since(opStart)

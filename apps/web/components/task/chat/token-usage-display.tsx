@@ -10,6 +10,7 @@ import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-gu
 
 type TokenUsageDisplayProps = {
   sessionId: string | null;
+  detailActive?: boolean;
   className?: string;
 };
 
@@ -257,11 +258,12 @@ function ContextCompactionCount({ count }: { count: number }) {
 
 export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   sessionId,
+  detailActive = true,
   className,
 }: TokenUsageDisplayProps) {
   const { t } = useTranslation();
   const tooltip = usePinnableTooltip();
-  const contextWindow = useSessionContextWindow(sessionId);
+  const contextWindow = useSessionContextWindow(sessionId, detailActive);
 
   if (!contextWindow) return null;
 

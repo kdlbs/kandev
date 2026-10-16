@@ -275,7 +275,7 @@ kandev maintenance database [--execute] [--compact]
 | `--execute`                 | Perform retention deletes. Without it, the command is a read-only dry run (the default).                                                                   |
 | `--compact`                 | After retention deletes commit, additionally stage a compacted copy and atomically replace the live database. Only takes effect together with `--execute`. |
 | `--keep-plan-revisions <n>` | Additionally protect the `n` most recent non-HEAD plan revisions per task (default `0`).                                                                   |
-| `--candidate-limit <n>`     | Cap how many rows are reported/deleted per retention category (default: unlimited).                                                                        |
+| `--candidate-limit <n>`     | Cap legacy categories and bounded delivery samples. Delivery defaults to at most 200 candidates per batch.                                                                        |
 | `--home-dir <path>`         | Kandev home directory override (default: `$KANDEV_HOME_DIR` or `~/.kandev`).                                                                               |
 | `--help`, `-h`              | Print command help.                                                                                                                                        |
 
@@ -289,13 +289,27 @@ and orphaned message payloads (externalized tool output no message still
 references). Normal conversation rows, the current plan HEAD, revert
 ancestry, and any protected snapshot are never candidates.
 
+Delivery categories include eligible projected payloads, fully settled prompts,
+expired event receipts, retired-session evidence, and attributable orphan identities.
+Their samples use the same safety predicates as automatic cleanup.
+The report marks sample limits and unavailable retention schemas.
+A legacy-schema dry run does not migrate the database.
+Delivery samples default to at most 200 candidates, even without `--candidate-limit`.
+They are not exact database-wide totals.
+Retired-session evidence shares the candidate row budget across its sampled tables.
+
 **Execute.** `--execute` requires exclusive access to the database: it takes
 the same ownership lock a live backend takes at boot, so it refuses to run
 while `kandev` is already running against the same home/database. It always
 takes and verifies a fresh backup before deleting anything, written to
 `<database-dir>/backups/kandev-pre-maintenance-<timestamp>.db`; a failed or
-unverified backup aborts before any delete. Retention deletes run inside a
-single transaction, so partial deletion across categories cannot happen.
+unverified backup aborts before any delete. The three legacy categories use one transaction.
+Delivery cleanup uses separate bounded transactions with fresh eligibility checks.
+A run can finish partially and reports committed counts plus the backup path.
+Pending deletion jobs also produce the partial-progress notice, even when the current job removed few rows.
+Repeat the command to continue delivery cleanup.
+The configured delivery policy applies to both analysis and execution.
+This command remains SQLite-only. PostgreSQL uses automatic cleanup and operator database tools.
 
 **Compaction and rollback.** `--compact` (with `--execute`) stages a
 `VACUUM INTO` compacted copy after retention deletes commit, verifies it
@@ -307,6 +321,8 @@ alongside the live database as
 path. If compaction fails after retention deletes already committed, the
 command still reports the completed backup path and deleted-row counts; only
 the optional compaction step is aborted.
+
+See [delivery retention operations](operations.md#backend-delivery-retention) for the supported rollback boundary and backup requirements.
 
 ### PR-watch and bounded-storage diagnostics
 

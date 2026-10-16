@@ -3,13 +3,61 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ShortcutEntry } from "@/lib/keyboard/plugin-shortcuts";
 import { UNBOUND_SHORTCUT } from "@/lib/keyboard/shortcut-overrides";
-import { KeyboardShortcutsCard, ShortcutRecorder } from "./keyboard-shortcuts-card";
+import {
+  buildConflictLabels,
+  KeyboardShortcutsCard,
+  ShortcutRecorder,
+} from "./keyboard-shortcuts-card";
+import type { ShortcutConflictGroup } from "@/lib/keyboard/shortcut-conflicts";
 
 vi.mock("@kandev/ui/kbd", () => ({
   Kbd: ({ children }: { children: ReactNode }) => <kbd>{children}</kbd>,
 }));
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+// @covers AC-PLUGINS-PLUGIN-SHORTCUT-SETTINGS-001.5
+describe("direct conflict labels", () => {
+  const entries: ShortcutEntry[] = ["Mod", "Ctrl", "Meta"].map((label) => ({
+    source: "plugin",
+    id: `plugin:test:${label}`,
+    label,
+    default: { key: "q" },
+    pluginId: "test",
+    keybindingId: label,
+  }));
+
+  it("accumulates direct peers once without labeling disjoint actions", () => {
+    const groups = [
+      { entries: [entries[0], entries[1]] },
+      { entries: [entries[0], entries[2]] },
+      { entries: [entries[0], entries[1]] },
+    ] satisfies ShortcutConflictGroup[];
+    expect([...buildConflictLabels(groups)]).toEqual([
+      [entries[0].id, ["Ctrl", "Meta"]],
+      [entries[1].id, ["Mod"]],
+      [entries[2].id, ["Mod"]],
+    ]);
+  });
+
+  it("renders both true plugin peers on a core Mod row on Mac", () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    render(
+      <KeyboardShortcutsCard
+        overrides={{ SEARCH: { key: "q", modifiers: { ctrlOrCmd: true } } }}
+        onChange={vi.fn()}
+        pluginEntries={entries.slice(1).map((entry, index) => ({
+          ...entry,
+          default: { key: "q", modifiers: index === 0 ? { ctrl: true } : { cmd: true } },
+        }))}
+      />,
+    );
+    expect(screen.getByTitle("Same shortcut as: Ctrl, Meta")).toBeTruthy();
+  });
+});
 
 const GITHUB_ACTION_LABEL = "Open GitHub";
 

@@ -51,6 +51,7 @@ func TestRegisterRoutesProtectsEveryStateChangingAgentSettingsRoute(t *testing.T
 		{method: http.MethodPatch, path: "/api/v1/agents/agent-1"},
 		{method: http.MethodDelete, path: "/api/v1/agents/agent-1"},
 		{method: http.MethodPost, path: "/api/v1/agents/agent-1/profiles"},
+		{method: http.MethodPut, path: "/api/v1/agents/agent-1/profiles/order"},
 		{method: http.MethodPost, path: "/api/v1/agent-install/agent-1"},
 		{method: http.MethodPost, path: "/api/v1/agent-update/agent-1"},
 		{method: http.MethodPatch, path: "/api/v1/agent-update/agent-1/automatic"},
@@ -58,6 +59,7 @@ func TestRegisterRoutesProtectsEveryStateChangingAgentSettingsRoute(t *testing.T
 		{method: http.MethodDelete, path: "/api/v1/agent-profiles/profile-1"},
 		{method: http.MethodPost, path: "/api/v1/agent-profiles/profile-1/duplicate"},
 		{method: http.MethodPost, path: "/api/v1/agent-profiles/profile-1/mcp-config"},
+		{method: http.MethodPost, path: "/api/v1/agent-profiles/profile-1/account-block/release"},
 	}
 
 	for _, requestSpec := range requests {

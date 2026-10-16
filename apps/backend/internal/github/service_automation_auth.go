@@ -257,6 +257,21 @@ func (s *Service) GetPRFeedbackForAutomation(
 	return s.getPRFeedback(ctx, resolved.Client, resolved.CacheScope, workspaceID, owner, repo, number)
 }
 
+func (s *Service) InvalidatePRFeedbackForAutomation(
+	ctx context.Context, workspaceID, owner, repo string, number int,
+) error {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return err
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, owner, repo)
+	if err != nil {
+		return err
+	}
+	key := scopedCacheKey(resolved.CacheScope, prStatusCacheKey(owner, repo, number))
+	s.prFeedbackCache.invalidateKey(key)
+	return nil
+}
+
 func (s *Service) MergePRForAutomation(
 	ctx context.Context,
 	workspaceID, owner, repo string,

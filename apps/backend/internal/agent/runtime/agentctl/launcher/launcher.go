@@ -352,14 +352,17 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 }
 
 // childEnvOverrides returns the environment entries the launcher owns for the
-// agentctl child: the bootstrap nonce, the listen host, and the resolved
-// startup contract. The listen host is the host the backend dials (l.host), so
-// the control server and every instance server it supervises listen only there
-// rather than on every interface.
+// agentctl child: the bootstrap nonce, the listen host, a relay-parseable log
+// format, and the resolved startup contract. The listen host is the host the
+// backend dials (l.host), so the control server and every instance server it
+// supervises listen only there rather than on every interface.
 func (l *Launcher) childEnvOverrides(nonce string) ([]string, error) {
 	overrides := []string{
 		"AGENTCTL_BOOTSTRAP_NONCE=" + nonce,
 		"AGENTCTL_LISTEN_HOST=" + l.host,
+		// Managed records cross the relay's JSON envelope allowlist; keep
+		// that privacy boundary independent of inherited format settings.
+		"AGENTCTL_LOG_FORMAT=json",
 	}
 	if l.startupConfig.Configured {
 		encoded, err := commonconfig.EncodeAgentctlStartupConfig(l.startupConfig)

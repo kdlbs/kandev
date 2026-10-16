@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
@@ -36,6 +38,9 @@ type BackendClient interface {
 	// RequestPayload sends a request to the backend and unmarshals the response.
 	RequestPayload(ctx context.Context, action string, payload, result interface{}) error
 }
+
+const rejectedTransferToolAuditTimeout = 2 * time.Second
+const rejectedTransferToolAuditAttempts = 3
 
 type backendSessionSetter interface {
 	SetSessionID(sessionID string)
@@ -301,8 +306,9 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 	hooks.AddAfterInitialize(func(ctx context.Context, _ any, _ *mcp.InitializeRequest, _ *mcp.InitializeResult) {
 		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
 	})
-	hooks.AddBeforeCallTool(func(_ context.Context, _ any, request *mcp.CallToolRequest) {
+	hooks.AddBeforeCallTool(func(_ context.Context, id any, request *mcp.CallToolRequest) {
 		s.restoreCanonicalToolName(request)
+		stampTransportRequestID(request, id)
 	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
 		s.presentTransportToolNames(result)
@@ -695,6 +701,9 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 		var result *mcp.CallToolResult
 		var err error
 		if validationErr != nil {
+			if toolName == "transfer_task_kandev" {
+				s.auditRejectedTransferTool(ctx, req.GetRawArguments())
+			}
 			result = mcp.NewToolResultError(validationErr.Error())
 		} else {
 			result, err = handler(ctx, validatedReq)
@@ -741,6 +750,32 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 		}
 
 		return result, err
+	}
+}
+
+func (s *Server) auditRejectedTransferTool(ctx context.Context, arguments any) {
+	payload := make(map[string]any)
+	if provided, ok := arguments.(map[string]any); ok {
+		for key, value := range provided {
+			payload[key] = value
+		}
+	}
+	payload["audit_attempt_id"] = uuid.NewString()
+	var ignored map[string]interface{}
+	auditCtx, cancel := context.WithTimeout(mcporigin.WithTrustedInternalCall(context.WithoutCancel(ctx)), rejectedTransferToolAuditTimeout)
+	defer cancel()
+	var err error
+	for attempt := 0; attempt < rejectedTransferToolAuditAttempts; attempt++ {
+		err = s.backend.RequestPayload(auditCtx, ws.ActionMCPAuditTaskTransferAttempt, payload, &ignored)
+		if err == nil {
+			return
+		}
+		if auditCtx.Err() != nil {
+			break
+		}
+	}
+	if err != nil {
+		s.logger.Warn("failed to durably audit rejected transfer tool call", zap.Error(err))
 	}
 }
 
@@ -1164,6 +1199,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "configuration-prompts", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigPromptTools() }},
 		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
 		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
+		{name: "task-transfer", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) || office(ctx) }, register: func(s *Server) { s.registerTaskTransferTool() }},
 		{name: "configuration-settings", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigSettingsTools() }},
 		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
 		{name: "external-questions", enabled: external, register: func(s *Server) { s.registerQuestionAnsweringTools() }},
@@ -1194,6 +1230,30 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 		{name: "canvas-authoring", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityCanvas)), register: func(s *Server) { s.registerCanvasTools() }},
 	}
+}
+
+func (s *Server) registerTaskTransferTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("transfer_task_kandev",
+			mcp.WithDescription("Atomically transfer one exact task identity to an authorized workspace and equivalent workflow lane. Requires the current source placement and generation, a unique idempotency key, and the preserve-task-identity-v1 policy. Ordinary task agents cannot access this tool."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("Exact task UUID to preserve")),
+			mcp.WithString("expected_source_workspace_id", mcp.Required()),
+			mcp.WithString("expected_source_workflow_id", mcp.Required()),
+			mcp.WithString("expected_source_workflow_step_id", mcp.Required()),
+			mcp.WithString("expected_task_updated_at", mcp.Required(), mcp.Description("Current task updated_at in RFC3339Nano format")),
+			mcp.WithString("destination_workspace_id", mcp.Required()),
+			mcp.WithString("destination_workflow_id", mcp.Required()),
+			mcp.WithString("destination_workflow_step_id", mcp.Description("Stable destination lane ID; provide this or destination_workflow_step_name")),
+			mcp.WithString("destination_workflow_step_name", mcp.Description("Exact destination lane name; accepted only when uniquely mapped")),
+			mcp.WithString("idempotency_key", mcp.Required()),
+			mcp.WithString("preservation_policy", mcp.Required(), mcp.Description("Must be preserve-task-identity-v1")),
+		),
+		s.wrapHandler("transfer_task_kandev", s.transferTaskHandler()),
+	)
 }
 
 func (s *Server) registerAgentPermissionTools() {
@@ -1350,12 +1410,12 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("move_task_kandev",
-			mcp.WithDescription(`Move a task to a different workflow step. A request naming the task's current workflow and step, without entry options, returns "applied" with the stored task because the destination already holds; no retry is needed. Only an actual step change is deferred to turn-end while the source session is RUNNING or STARTING. Idle-session and admin step changes apply immediately. Returns a move-result envelope: "disposition" is "applied" for a completed move or current-step no-op, or "deferred" when a step change was recorded for turn-end; "task" is the stored or moved task. An optioned step change also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry.`),
+			mcp.WithDescription(`Move a task to a different workflow step. A request naming the task's current workflow and step, without entry options, returns "applied" with the stored task because the destination already holds; no retry is needed. Only an actual step change is deferred to turn-end while the source session is RUNNING or STARTING. Idle-session and admin step changes apply immediately. Returns a move-result envelope: "disposition" is "applied" for a completed move or current-step no-op, or "deferred" when a step change was recorded for turn-end; "task" is the stored or moved task. An optioned step change also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry. Moving to a manual step that does not start an agent on entry (for example Waiting, Blocked, or Done) must not carry a prompt or entry_options; such a call is rejected with a validation error. Record the instruction in the task description or plan instead.`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
 			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
 			mcp.WithNumber("position", mcp.Description("Requested position (0-based); the server determines arrival order, and a current-step request preserves the stored position.")),
-			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent at a new step. Only actual step changes are deferred during an active turn; non-empty prompts are invalid for a current-step request.")),
+			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent at a new step. Only actual step changes are deferred during an active turn; non-empty prompts are invalid for a current-step request. Omit it when the target step does not start an agent on entry.")),
 			moveTaskEntryOptionsToolOption(),
 		),
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),

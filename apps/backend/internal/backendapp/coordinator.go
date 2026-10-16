@@ -14,8 +14,11 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	officetestharness "github.com/kandev/kandev/internal/office/testharness"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	taskusage "github.com/kandev/kandev/internal/task/usage"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
@@ -32,7 +35,10 @@ func initCoordinatorWiring(
 	agentProfiles settingsstore.Repository,
 	enabled bool,
 	phase2 bool,
+	phase3 bool,
+	phase31 bool,
 	log *logger.Logger,
+	extra ...coordinator.ServiceOption,
 ) (*coordinator.Service, error) {
 	store, storeErr := coordinator.NewStore(dbPool.Writer(), dbPool.Reader())
 	if recordErr := recordRequiredStore(ctx, storeTracker, "coordinator", storeErr); recordErr != nil {
@@ -43,10 +49,29 @@ func initCoordinatorWiring(
 	}
 
 	validator := coordinator.NewValidator(agentProfiles, taskSvc)
-	svc := coordinator.NewService(store, validator, taskSvc, log, coordinator.WithPhase2(phase2))
+	opts := append([]coordinator.ServiceOption{coordinator.WithPhase2(phase2),
+		coordinator.WithPhase3(phase3Effective(enabled, phase2, phase3)),
+		coordinator.WithPhase31(phase31Effective(enabled, phase2, phase3, phase31))}, extra...)
+	svc := coordinator.NewService(store, validator, taskSvc, log, opts...)
 	svc.SetProposalDeps(taskSvc, taskSvc, taskSvc, workflowSvc)
+	if taskSvc != nil {
+		svc.SetProjectReader(taskSvc)
+	}
 	svc.SetUndoDeps(&coordinatorUndoSeam{tasks: taskSvc, steps: workflowSvc})
 	return svc, nil
+}
+
+// phase31Effective is the single source for the phase 3.1 gate: it needs
+// coordinator, phase 2, phase 3 and the phase 3.1 flag.
+func phase31Effective(coordinatorOn, phase2, phase3, phase31 bool) bool {
+	return phase3Effective(coordinatorOn, phase2, phase3) && phase31
+}
+
+// phase3Effective is the single source for the phase 3 gate: the autonomy
+// surface exists only when coordinator, coordinator phase 2 and coordinator
+// phase 3 are all on.
+func phase3Effective(coordinatorOn, phase2, phase3 bool) bool {
+	return coordinatorOn && phase2 && phase3
 }
 
 // coordinatorStandingInstructionsReader closes over svc to build the
@@ -81,6 +106,7 @@ func coordinatorStandingInstructionsReader(
 		} else {
 			sections = append(sections, goal)
 		}
+		sections = append(sections, svc.ImprovementInstructionSection())
 		return coordinator.StandingInstructions(workspaceName, workspaceID, name, coordinatorContext, sections...), nil
 	}
 }
@@ -107,6 +133,9 @@ func registerCoordinatorRoutes(p routeParams) {
 	t0 := time.Now().UTC()
 	svc := p.services.Coordinator
 	registerCoordinatorHTTPRoutes(p.router, svc, p.log)
+	if officetestharness.Enabled() {
+		coordinator.RegisterTestSeedRoutes(p.router, svc)
+	}
 	if p.gateway != nil {
 		gateways.RegisterCoordinatorNotifications(p.ctx, p.eventBus, p.gateway.Hub, p.log)
 	}
@@ -115,7 +144,55 @@ func registerCoordinatorRoutes(p routeParams) {
 		registerCoordinatorSubscribers(p.router, p.eventBus, svc, p.log),
 		registerCoordinatorDecisions(p.router, p.eventBus, svc, p.taskSvc, p.services.Workflow, p.log),
 	}
-	runCoordinatorBackgroundPass(p.ctx, t0, hooks)
+	if svc.Phase3Enabled() {
+		hooks = append(hooks, wireCoordinatorPhase3(p, svc)...)
+	}
+	stop := runCoordinatorBackgroundPass(p.ctx, t0, hooks)
+	if p.addCleanup != nil {
+		p.addCleanup(func() error {
+			stop()
+			svc.WaitApprovalSweepStopped()
+			svc.WaitActivityRetentionStopped()
+			svc.WaitResumeLaunchesStopped()
+			return nil
+		})
+	}
+}
+
+// wireCoordinatorPhase3 wires the phase 3 dependencies and returns their
+// background registration hooks.
+func wireCoordinatorPhase3(p routeParams, svc *coordinator.Service) []func(context.Context, time.Time) {
+	var hooks []func(context.Context, time.Time)
+	if p.taskRepo != nil && p.taskSvc != nil {
+		svc.SetRelayDeps(p.taskRepo, p.taskSvc)
+	}
+	if p.taskSvc != nil {
+		coordinatorWakeSources = &coordinatorWakeReader{tasks: p.taskSvc}
+	}
+	wireCoordinatorDelivery(svc, p.taskSvc, p.orchestratorSvc)
+	svc.LoadKnownPaused(p.ctx)
+	if p.addCleanup != nil {
+		p.addCleanup(func() error {
+			svc.StopPause()
+			svc.StopWakeRecorder()
+			svc.StopWakeBackstop()
+			svc.StopDelivery()
+			return nil
+		})
+	}
+	if p.authSvc != nil {
+		svc.SetAutomaticIdentities(p.authSvc)
+		svc.SetPauserNames(p.authSvc)
+	}
+	wireCoordinatorSpend(p.services.UsageWriter, svc, p.taskSvc, p.orchestratorSvc)
+	wireCoordinatorContainment(svc, containmentDepsFrom(p), p.orchestratorSvc, p.log)
+	if p.taskSvc != nil && p.orchestratorSvc != nil {
+		svc.SetReplyDeps(p.taskSvc, p.orchestratorSvc)
+	}
+	for _, register := range phase3Registrations() {
+		hooks = append(hooks, register(p.router, p.eventBus, svc, p.log))
+	}
+	return hooks
 }
 
 // runCoordinatorBackgroundPass is a test seam over startCoordinatorBackgroundPass:
@@ -128,12 +205,19 @@ var runCoordinatorBackgroundPass = startCoordinatorBackgroundPass
 // describes (Build decision 14): conversation (task 03), subscribers (task
 // 04), decisions (task 07). Conversation and subscribers remain no-ops until
 // their work packages land; decisions runs StartupRecoveryPass.
-func startCoordinatorBackgroundPass(ctx context.Context, t0 time.Time, hooks []func(context.Context, time.Time)) {
+func startCoordinatorBackgroundPass(ctx context.Context, t0 time.Time, hooks []func(context.Context, time.Time)) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		for _, hook := range hooks {
+			if ctx.Err() != nil {
+				return
+			}
 			hook(ctx, t0)
 		}
 	}()
+	return func() { cancel(); <-done }
 }
 
 // registerCoordinatorConversation is task 03's named registration function
@@ -184,6 +268,11 @@ func registerCoordinatorSubscribers(_ *gin.Engine, eventBus bus.EventBus, svc *c
 		} else {
 			subs = append(subs, sub)
 		}
+		projectSubs, err := coordinator.SubscribeProjectDeleted(eventBus, svc, log)
+		if err != nil {
+			log.Error("failed to subscribe coordinator to repository deletion", zap.Error(err))
+		}
+		subs = append(subs, projectSubs...)
 	}
 
 	return func(ctx context.Context, _ time.Time) {
@@ -230,5 +319,100 @@ func registerCoordinatorDecisions(
 		svc.StartupRecoveryPass(ctx, t0)
 		svc.StartApprovalSweep(ctx)
 		svc.StartActivityRetention(ctx)
+	}
+}
+
+// coordinatorRegistration is the shape shared by the phase 3 registration
+// functions: each registers its routes and subscriptions and returns the hook
+// that runs in the startup background pass.
+type coordinatorRegistration = func(*gin.Engine, bus.EventBus, *coordinator.Service, *logger.Logger) func(context.Context, time.Time)
+
+func noopCoordinatorHook(*gin.Engine, bus.EventBus, *coordinator.Service, *logger.Logger) func(context.Context, time.Time) {
+	return func(context.Context, time.Time) {}
+}
+
+// Phase 3 registration functions, one per work package. They are package
+// variables so tests can swap them; each later work package replaces its
+// no-op default.
+var (
+	registerCoordinatorContainment  coordinatorRegistration = noopCoordinatorHook
+	registerCoordinatorSpend        coordinatorRegistration = noopCoordinatorHook
+	registerCoordinatorWake         coordinatorRegistration = registerCoordinatorWakeState
+	registerCoordinatorDelivery     coordinatorRegistration = registerCoordinatorDeliveryWorker
+	registerCoordinatorRelay        coordinatorRegistration = registerCoordinatorRelayRoutes
+	registerCoordinatorReply        coordinatorRegistration = noopCoordinatorHook
+	registerCoordinatorAutomatic    coordinatorRegistration = registerCoordinatorAutomaticLowering
+	registerCoordinatorImprovements coordinatorRegistration = noopCoordinatorHook
+)
+
+func phase3Registrations() []coordinatorRegistration {
+	return []coordinatorRegistration{
+		registerCoordinatorContainment,
+		registerCoordinatorSpend,
+		registerCoordinatorWake,
+		registerCoordinatorDelivery,
+		registerCoordinatorRelay,
+		registerCoordinatorReply,
+		registerCoordinatorAutomatic,
+		registerCoordinatorImprovements,
+	}
+}
+
+// registerCoordinatorAutomaticLowering adds the undo-lowering retry to the
+// wake backstop; it runs before the backstop starts.
+func registerCoordinatorAutomaticLowering(_ *gin.Engine, _ bus.EventBus, svc *coordinator.Service, _ *logger.Logger) func(context.Context, time.Time) {
+	svc.SetBackstopHooks(coordinator.Hooks{Lowering: svc.LoweringDuty()})
+	return func(context.Context, time.Time) {}
+}
+
+// registerCoordinatorRelayRoutes mounts the answer-in-place read route. The
+// readers it serves from are set on svc by registerCoordinatorRoutes.
+func registerCoordinatorRelayRoutes(router *gin.Engine, _ bus.EventBus, svc *coordinator.Service, log *logger.Logger) func(context.Context, time.Time) {
+	coordinator.RegisterRelayRoutes(router, svc, log)
+	return func(context.Context, time.Time) {}
+}
+
+// registerCoordinatorWakeState returns the startup hook that prunes wake
+// state. A prune failure is logged and never blocks startup.
+func registerCoordinatorWakeState(_ *gin.Engine, eventBus bus.EventBus, svc *coordinator.Service, log *logger.Logger) func(context.Context, time.Time) {
+	if src := coordinatorWakeSources; src != nil && eventBus != nil {
+		svc.StartWakeRecorder(eventBus, src)
+	} else {
+		log.Warn("coordinator wake sources unavailable; event-driven wake recording is off")
+	}
+	return func(ctx context.Context, _ time.Time) {
+		turns, wakes, err := svc.PruneWakeState(ctx, time.Now().UTC())
+		if err != nil {
+			log.Warn("coordinator wake state pruning failed", zap.Error(err))
+		} else if turns > 0 || wakes > 0 {
+			log.Info("coordinator wake state pruning complete",
+				zap.Int64("turns", turns), zap.Int64("wakes", wakes))
+		}
+		svc.StartWakeBackstop(ctx)
+	}
+}
+
+// coordinatorWakeSources is the task-side read surface of the wake recorder
+// and backstop, set by registerCoordinatorRoutes before the phase 3
+// registrations run.
+var coordinatorWakeSources coordinator.WakeSources
+
+// wireCoordinatorSpend gives the coordinator its usage ledger reader, active
+// turn reader and turn canceller, and registers the ceiling check as the usage
+// writer's post-commit observer. A missing dependency leaves the operation
+// that needs it failing closed, so a nil argument is tolerated.
+func wireCoordinatorSpend(writer *taskusage.Writer, svc *coordinator.Service, taskSvc *taskservice.Service, orch *orchestrator.Service) {
+	var ledger coordinator.SpendLedger
+	var turns coordinator.ActiveTurnReader
+	if taskSvc != nil {
+		ledger, turns = taskSvc, taskSvc
+	}
+	var canceller coordinator.TurnCanceller
+	if orch != nil {
+		canceller = orch
+	}
+	svc.SetSpendDeps(ledger, turns, canceller)
+	if writer != nil {
+		writer.SetRecordedObserver(svc.ObserveUsage)
 	}
 }

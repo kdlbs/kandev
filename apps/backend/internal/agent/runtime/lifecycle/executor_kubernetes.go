@@ -656,8 +656,12 @@ func kubernetesProfileConfigFromMetadata(metadata map[string]interface{}) (kubee
 	return kubeexecutor.ParseProfileConfig(values)
 }
 
-func (r *KubernetesExecutor) RecoverInstances(context.Context, []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
-	return nil, nil
+func (r *KubernetesExecutor) RecoverInstances(
+	ctx context.Context,
+	records []*models.ExecutorRunning,
+) ([]*ExecutorInstance, error) {
+	instances, _, err := r.RecoverInstancesDetailed(ctx, records)
+	return instances, err
 }
 
 func (r *KubernetesExecutor) GetInteractiveRunner() *process.InteractiveRunner { return nil }

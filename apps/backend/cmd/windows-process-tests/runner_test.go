@@ -78,7 +78,7 @@ func sampleInventory() inventory {
 }
 
 func TestCohortPartition(t *testing.T) {
-	cohorts, err := partition(sampleInventory())
+	cohorts, err := partition(sampleInventory(), 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,12 +88,12 @@ func TestCohortPartition(t *testing.T) {
 	}
 	shuffled := sampleInventory()
 	shuffled[packageRoot] = listedPackage{Names: []string{"ExampleSample", "FuzzSeeds", "TestAlpha", "TestAlphaLong"}}
-	again, err := partition(shuffled)
+	again, err := partition(shuffled, 2)
 	if err != nil || !reflect.DeepEqual(again, cohorts) {
 		t.Fatalf("input order changes assignment: %+v, %v", again, err)
 	}
 	for _, inv := range []inventory{nil, {packageRoot: {Names: []string{"TestOnly"}}}, {packageRoot: {Names: []string{"TestA", "TestA"}}}} {
-		if _, err := partition(inv); err == nil {
+		if _, err := partition(inv, 2); err == nil {
 			t.Fatal("empty, overlapping or empty-cohort partition accepted")
 		}
 	}
@@ -110,7 +110,7 @@ func TestCohortSelectors(t *testing.T) {
 		}
 		return
 	}
-	cohorts, err := partition(sampleInventory())
+	cohorts, err := partition(sampleInventory(), 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestCohortSelectors(t *testing.T) {
 	if regexp.MustCompile(cohorts[0].Selector).MatchString("TestAlphaLong") {
 		t.Fatal("rooted selector selected a sibling by prefix")
 	}
-	fixture, err := partition(inventory{packageRoot: {Names: []string{"TestCohortSelectors", "TestExcluded"}}})
+	fixture, err := partition(inventory{packageRoot: {Names: []string{"TestCohortSelectors", "TestExcluded"}}}, 2)
 	if err != nil {
 		t.Fatal(err)
 	}

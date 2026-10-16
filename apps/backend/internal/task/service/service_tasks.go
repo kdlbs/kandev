@@ -128,6 +128,8 @@ type taskEnvironmentCleanup struct {
 	deleteRow              bool
 	preserveBranches       bool
 	discardWorktreeChanges bool
+	// agentHistory is set only for Quick Chat deletion.
+	agentHistory []agentHistoryTarget
 }
 
 type taskEnvironmentSessionUsageChecker interface {
@@ -258,13 +260,13 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	if err := refuseReservedExternalIDPrefix(externalID, req.AllowReservedExternalID); err != nil {
 		return CreateTaskResult{}, err
 	}
-	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
-		return CreateTaskResult{}, err
-	}
 	req.ExternalID = externalID
 
 	if found, result, err := s.findTaskByExternalIDIfPresent(ctx, req.WorkspaceID, externalID); found {
 		return result, err
+	}
+	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
+		return CreateTaskResult{}, err
 	}
 	if err := s.validateRequestedExecutorAdmission(ctx, req); err != nil {
 		return CreateTaskResult{}, err
@@ -1021,6 +1023,16 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 			launch[models.DeferredLaunchStartWhenUnblockedKey] = true
 		}
 		metadata[models.MetaKeyDeferredLaunch] = launch
+	}
+	if req.AutomationStartOwned {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		owner := req.AutomationStartOwner
+		if owner == "" {
+			owner = uuid.NewString()
+		}
+		metadata[models.MetaKeyAutomationStartOwned] = owner
 	}
 	if wsPath := strings.TrimSpace(req.WorkspacePath); wsPath != "" {
 		if metadata == nil {
@@ -2028,6 +2040,33 @@ func (s *Service) hydrateTaskRelations(ctx context.Context, task *models.Task) {
 		task.Repositories = repos
 	}
 	s.hydrateTaskWorkspaceFolders(ctx, task)
+}
+
+// ListTaskRepositories returns the task's repository links, surfacing the read
+// error that GetTask's hydration only logs.
+func (s *Service) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
+	return s.taskRepos.ListTaskRepositories(ctx, taskID)
+}
+
+// ListTaskRepositoryIDsByTaskIDs returns each task's repository ids in one
+// read; a task with no repository link has no key.
+func (s *Service) ListTaskRepositoryIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]string, error) {
+	if len(taskIDs) == 0 {
+		return map[string][]string{}, nil
+	}
+	links, err := s.taskRepos.ListTaskRepositoriesByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]string, len(links))
+	for taskID, rows := range links {
+		for _, row := range rows {
+			if row != nil && row.RepositoryID != "" {
+				out[taskID] = append(out[taskID], row.RepositoryID)
+			}
+		}
+	}
+	return out, nil
 }
 
 // UpdateTask updates an existing task and publishes a task.updated event
@@ -3063,6 +3102,9 @@ func (s *Service) deleteTaskWithManagedClaim(
 	envCleanup := taskEnvironmentCleanup{
 		env: taskEnv, deleteRow: false, discardWorktreeChanges: options.DiscardWorktreeChanges,
 	}
+	if claim == nil {
+		envCleanup.agentHistory = s.captureQuickChatAgentHistory(operationCtx, task, sessions)
+	}
 	cleanupJob, err := s.persistTaskResourceCleanupWithManagedClaim(
 		operationCtx, id, trigger, "", sessions, worktrees, stopTargets, attachments, envCleanup, true, true, task.WorkspaceID, claim,
 	)
@@ -3383,6 +3425,7 @@ func (s *Service) runTaskCleanup(
 
 	cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup,
 		taskCleanupPreserveRows(stopOutcome))
+	s.removeQuickChatAgentHistory(cleanupCtx, id, envCleanup.agentHistory, stopOutcome.failed)
 
 	if len(cleanupErrors) > 0 {
 		s.logger.Warn(cleanupMsg+" with errors",

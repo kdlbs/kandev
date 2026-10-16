@@ -37,7 +37,7 @@ Six workflows gained `merge_group: types: [checks_requested]`:
 
 | Workflow                 | Gate job       | Check name to require                   |
 | ------------------------ | -------------- | --------------------------------------- |
-| `e2e-tests.yml`          | `e2e-gate`     | `E2E Tests Passed`                      |
+| `e2e-tests.yml`          | `e2e-report`     | `E2E Tests Passed`                      |
 | `backend-tests.yml`      | `test`         | `Run Backend Tests`                     |
 | `frontend-tests.yml`     | `frontend-gate`| `Frontend Tests Passed`                 |
 | `architecture-lint.yml`  | `lint`         | `Architecture boundaries do not regress`|
@@ -87,7 +87,7 @@ forever -- the exact failure the shim exists to prevent, reintroduced by the
 shim. Making the inversion correct would mean hand-deriving a second pattern
 list per workflow and keeping the two in sync by eye. Worse, the shim needs a
 job whose *name* matches the real check, which for `e2e-tests.yml` would mean
-reproducing fourteen shard names and six container shard names.
+reproducing twenty-eight shard names and six container shard names.
 
 So: the trigger-level `paths:` filters are gone, and each expensive workflow
 grew a cheap `changes` job that applies the same list one level down.
@@ -106,8 +106,9 @@ workflows and still select what they used to. It rejects `+`, `[...]`, and
 
 Two properties of this shape matter:
 
-- **The gate job always runs.** It is `if: always()` and treats a `skipped`
-  dependency as a pass and a `cancelled` one as a failure. This is on purpose:
+- **The gate job always runs.** It is `if: always()` and accepts a `skipped`
+  dependency only when change detection explicitly made it unnecessary.
+  Unexpected skips, missing verdicts, failures, and cancellations block the gate:
   it means the required check never depends on how GitHub reports a
   conditionally-skipped job, only on a conclusion the workflow computes itself.
 - **The gate covers every job in its workflow.** A queue gates on check names an
@@ -122,6 +123,30 @@ simply always run: cheaper than the job that would decide whether to run them,
 and it closes the gap where a subject outside their hand-maintained lists
 changed and nothing checked it. Their contract tests were updated to assert the
 absence of a filter rather than the presence of specific entries.
+
+### Frontend test setup
+
+`apps/web/scripts/vitest-reviewed-projects.json` contains explicit Node and
+English-browser assignments. Unlisted test files retain browser and full-locale
+setup. Before adding a file, inspect its imports and indirect DOM or locale
+dependencies, then compare its assertions under the old and proposed setup.
+Keep locale-sensitive or unresolved cases on full setup. Removing or renaming
+a listed test also requires updating the manifest; the selection contract
+rejects stale, duplicated, and overlapping entries.
+
+Run `pnpm run test scripts/vitest-project-selection.test.ts` from `apps/web`
+after editing the manifest. Preserve the configured worker budget, production
+environment guard, test isolation, and complete identity set. The frontend workflow runs two built-in Vitest shards in parallel with static
+checks. Every shard retains the production environment guard and uploads its
+JSON report; the required gate joins every result. Adoption measurements and
+identity comparisons live in the [CI performance plan](plans/ci-performance/plan.md).
+
+Frontend typechecking has a step-scoped 8 GiB Node old-space limit. The full
+program exceeds Node 24's default heap on the 16 GiB hosted runner; this limit
+leaves room for native memory and runner/container overhead. The command still
+checks the complete TypeScript program, and unit tests and builds retain their
+own settings. Verify physical and container memory capacity when changing the
+standard runner tier.
 
 ### External CI runner capacity
 
@@ -143,10 +168,10 @@ level. The two tier variables stay configured between bursts, so changing the
 instance type requires only an Actions variable update.
 
 The 20% pilot sends a stable cohort of eligible instances to the configured
-tiers. For E2E this assigns two of fourteen normal shards per run because matrix
-allocation uses a floor. The frontend workflow has two unit-test instances, so
-the 20% pilot assigns zero of those instances; its singleton static and gate
-jobs still use stable hash cohorts. Backend checkout, static checks,
+tiers. For E2E this assigns five of twenty-eight normal shards per run because matrix
+allocation uses a floor. The frontend static verification and gate jobs use singleton
+hash cohorts; its two unit-test shards use matrix allocation (zero external
+shards at 20%, because allocation uses a floor). Backend checkout, static checks,
 service jobs, Windows, and the protected test shards remain on GitHub-hosted
 runners. Singleton jobs use a stable hash cohort, so their share approaches the
 percentage across workflow runs.
@@ -157,12 +182,12 @@ capacity. Malformed or out-of-range values fail closed to GitHub-hosted runners
 and emit a planner warning.
 
 The reusable `.github/actions/plan-external-runners` composite action runs on
-the planner job's `ubuntu-latest` checkout. Each workflow declares its eligible
+each workflow's hosted `changes` checkout. Each workflow declares its eligible
 families as JSON, and the action returns one JSON plan with resolved runner
 labels:
 
 ```yaml
-runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_runner }}
+runs-on: ${{ fromJSON(needs.changes.outputs.plan).frontend_runner }}
 runs-on: ${{ matrix.runner }}
 ```
 
@@ -171,10 +196,13 @@ label is unavailable, GitHub leaves the job queued or fails it. Clear the
 invalid label and rerun the workflow. Jobs already queued or running keep their
 original runner. New jobs use the current variables.
 
-The eligible families are the E2E normal-shard matrix and gate, the backend
-aggregate test gate, the frontend static verification job, the frontend unit
-test matrix, and their lightweight change-detection and gate jobs. The E2E build
-and report jobs, Docker/Kind shards, Kubernetes compatibility jobs, Playwright
+The eligible families are the E2E normal-shard matrix, the backend aggregate
+test gate, the frontend static verification job, its two unit-test shards,
+and the frontend gate.
+All change-detection jobs run allocation during their existing hosted checkout.
+The E2E report job publishes `E2E Tests Passed` after validating every dependency
+and the required report files. This removes a separate post-report queue wait.
+The E2E build and report jobs, Docker/Kind shards, Kubernetes compatibility jobs, Playwright
 image job, desktop smoke job, backend checkout/static/test shards, Postgres
 service job, architecture and harness linters, and Windows job stay on
 GitHub-hosted runners. Release, publishing, signing, deployment, and
@@ -182,7 +210,7 @@ credential-bearing jobs stay on their existing runners. The workflows do not
 add permissions, secrets, or persistent state.
 
 The same switch and tier labels apply to eligible E2E, backend-gate, frontend
-static verification, frontend unit-test matrix, and frontend gate jobs.
+verification, and frontend gate jobs.
 Architecture-lint, action-pinning, and harness-lint stay hosted and do not
 create planner jobs. The planner does not change job names, test selection,
 matrix values, artifacts, dependencies, timeouts, permissions, or required
@@ -369,3 +397,27 @@ Not verified, and not verifiable until a queue is switched on:
 
 The cheapest way to close the first gap is to enable the queue on a low-traffic
 day and watch the first merge group's check names against the table above.
+
+## Independent Go test changes
+
+On pull requests, E2E can skip when every non-Markdown change is an independent
+regular `apps/backend/**/*_test.go` file. The selector reads raw Git statuses,
+old and new modes, and both sides of renames. Embedded files, fixture/data
+paths, mixed application changes, and unverified input retain full E2E.
+Backend verification still runs. Push, merge-group, and manual selection stay
+unchanged. The required E2E check records the skip reason.
+
+## Comparing CI cost
+
+Use the read-only helper without adding another CI job:
+
+```bash
+python3 .github/scripts/ci-efficiency.py --run-id RUN_ID --attempt 1 --output /tmp/ci-cost.json
+```
+
+Saved responses can be supplied with `--run-json` and `--jobs-json`. Occupancy
+sums every executed job, including cancelled work. Elapsed time includes
+scheduling delays. Missing or unfinished execution is unknown, not free.
+An optional `--graph` accepts exact workflow identity and expanded job-name
+edges to calculate execution critical path and dependency-ready delay.
+Do not label that delay as capacity queueing without additional evidence.

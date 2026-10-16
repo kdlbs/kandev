@@ -40,6 +40,8 @@ Task workflows consume completion events but retain their own admission and tran
 - **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.10:** When a dispatch-only prompt receives no completion, a waiting successor shall return the existing bounded timeout without clearing the prompt's pending barrier.
 - **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.11:** When cancellation of a dispatch-only prompt exhausts its completion wait, recovery shall preserve the original transport or completion error when reporting escalation.
 
+- **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.12:** Native activity without dispatch ownership shall not inherit a completed prompt's turn. Completion shall settle only the turn captured before readiness releases successor work. Idle synthesis shall not complete a turn while an observed foreground tool remains active; recognized background workloads retain independent lifecycles.
+
 ## Out of scope
 
 - Provider-specific notification classification or suppression.
@@ -56,3 +58,5 @@ Task workflows consume completion events but retain their own admission and tran
 ## Implementation plans
 
 - [Dispatch completion and wakeup](../../../plans/dispatch-completion-wakeup/plan.md)
+
+- [Native async turn ownership](../../../plans/session-recovery-convergence/task-08-native-async-turn-ownership.md)

@@ -112,7 +112,7 @@ func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onD
 // StartAgentProcess.
 func (m *Manager) RegisterInitialPromptAdmissionCallbacks(
 	executionID string,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) error {
 	execution, exists := m.executionStore.Get(executionID)
@@ -202,7 +202,7 @@ func (m *Manager) PromptAgentWithAdmissionCallback(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*PromptResult, error) {
 	return m.PromptAgentWithAdmissionCallbackAndSubmissionID(
@@ -218,7 +218,7 @@ func (m *Manager) PromptAgentWithAdmissionCallbackAndSubmissionID(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 ) (*PromptResult, error) {
@@ -1318,8 +1318,39 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 
 // StopAgentWithReason stops an agent execution and passes a semantic reason to runtime teardown.
 func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, reason string, force bool) error {
+	var pendingRecovery *remoteRecoveryRetry
+	var attemptDone <-chan struct{}
+	if reason == StopReasonBackendShutdown || reason == StopReasonRecoverableAgentFailure {
+		pendingRecovery = m.remoteRecoveryForExecution(executionID)
+	} else {
+		pendingRecovery, attemptDone = m.requestPendingRemoteRecoveryStop(executionID, reason, force)
+	}
+	if attemptDone != nil {
+		select {
+		case <-attemptDone:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
+		if pendingRecovery != nil {
+			if reason == StopReasonBackendShutdown {
+				return nil
+			}
+			if !m.beginRemoteRecovery(pendingRecovery) {
+				return errors.New("pending remote recovery is already being reconciled")
+			}
+			defer m.finishRemoteRecoveryAttempt(pendingRecovery)
+			stopped, err := m.stopPendingRemoteRecovery(ctx, pendingRecovery, reason, force)
+			if err != nil {
+				return err
+			}
+			if stopped {
+				m.completeRemoteRecovery(pendingRecovery)
+			}
+			return nil
+		}
 		if handled, err := m.stopPersistedKubernetesExecution(ctx, executionID, reason, force); handled {
 			return err
 		}
@@ -1332,6 +1363,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	if pendingRecovery != nil && pendingRecovery.record.SessionID != execution.SessionID {
+		return fmt.Errorf("execution %q no longer owns the pending remote recovery", executionID)
 	}
 	if m.streamManager != nil {
 		m.streamManager.cancelDeliveryReconciliation(executionID)
@@ -1366,7 +1400,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// backend process owns, so it dies with the backend regardless, and
 	// detaching would leave an executors_running row claiming a live agent
 	// with no agent.stopped published. See isPassthroughExecution.
-	if reason == StopReasonBackendShutdown && execution.RuntimeName == executor.NamePluginRemote {
+	if reason == StopReasonBackendShutdown && isRemoteRecoveryBackendShutdown(execution.RuntimeName) {
 		return m.detachAgentExecution(executionID, execution)
 	}
 	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown &&
@@ -1432,6 +1466,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	m.RemoveExecution(executionID)
 	if execution.Owner.Kind != ExecutionOwnerRun && !preservePassthroughConversation {
 		m.deleteExecutorRunning(ctx, executionInventorySessionID(execution), execution.ID)
+	}
+	if pendingRecovery != nil {
+		m.completeRemoteRecovery(pendingRecovery)
 	}
 	m.clearRemoteStatus(execution.SessionID)
 
@@ -1524,6 +1561,9 @@ func (m *Manager) stopExecutionAgentctl(
 
 // StopBySessionID stops the agent for a specific session
 func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force bool) error {
+	if pending := m.pendingRemoteRecoveryForSession(sessionID); pending != nil && pending.record != nil {
+		return m.StopAgent(ctx, pending.record.AgentExecutionID, force)
+	}
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return fmt.Errorf("no agent running for session %q", sessionID)
@@ -2061,7 +2101,7 @@ func (m *Manager) ProbeAgentRunningForSession(ctx context.Context, sessionID str
 	// Passthrough sessions run as direct PTY processes via InteractiveRunner,
 	// bypassing agentctl's ACP protocol. Check the process directly.
 	if execution.PassthroughProcessID != "" {
-		if runner := m.GetInteractiveRunner(); runner != nil {
+		if runner := m.passthroughRunnerForExecution(execution); runner != nil {
 			return runner.IsProcessReadyOrPending(execution.PassthroughProcessID), nil
 		}
 		return false, fmt.Errorf("interactive runner is unavailable")
@@ -2491,7 +2531,7 @@ func (m *Manager) markReadyEventWithStartupGeneration(
 			before(execution)
 		}
 		readyErr = m.markReadyEventForExecution(
-			ctx, execution, eventType, asyncPublish, attemptID,
+			ctx, execution, eventType, asyncPublish, attemptID, nil,
 		)
 		if readyErr == nil && after != nil {
 			after(execution)
@@ -2509,29 +2549,13 @@ func (m *Manager) markReadyEventForExecution(
 	eventType string,
 	asyncPublish bool,
 	attemptID string,
+	completion *agentctlclient.AgentEvent,
 ) error {
-	executionID := execution.ID
-	var payload AgentEventPayload
-	var updated *AgentExecution
-	var alreadyReady bool
-	if err := m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
-		if execution.Status == v1.AgentStatusReady {
-			alreadyReady = true
-			return
-		}
-		execution.Status = v1.AgentStatusReady
-		payload = newAgentEventPayload(execution)
-		payload.AttemptID = attemptID
-		updated = execution
-	}); err != nil {
-		if errors.Is(err, ErrExecutionNotFound) {
-			return fmt.Errorf("execution %q not found", executionID)
-		}
+	updated, payload, err := m.prepareReadyEventForExecution(execution, attemptID, completion)
+	if err != nil || updated == nil {
 		return err
 	}
-	if alreadyReady {
-		return nil
-	}
+	executionID := execution.ID
 	m.persistExecutorRunning(context.WithoutCancel(ctx), updated)
 
 	m.logger.Info("execution ready",
@@ -2598,6 +2622,7 @@ func (m *Manager) markCompletedWithTurnIDAndAttempt(
 	errorMessage, turnID string,
 	failureEvidence *PromptAttemptEvidence,
 	attemptID string,
+	terminalEvents ...*agentctlclient.AgentEvent,
 ) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
@@ -2620,6 +2645,9 @@ func (m *Manager) markCompletedWithTurnIDAndAttempt(
 	// subprocess is not an agent failure. Treat the terminal error as a benign
 	// stop so the session stays resumable and the UI shows no red error banner.
 	if (exitCode != 0 || errorMessage != "") && m.IsShuttingDown() {
+		if len(terminalEvents) > 0 && terminalEvents[0] != nil {
+			return m.markStoppedDuringShutdownForEvent(execution, exitCode, errorMessage, terminalEvents[0])
+		}
 		return m.markStoppedDuringShutdown(execution, exitCode, errorMessage, turnID)
 	}
 	if (exitCode != 0 || errorMessage != "") && isUninitializedStartupExecution(execution) {
@@ -2667,9 +2695,15 @@ func (m *Manager) markCompletedWithTurnIDAndAttempt(
 		m.classifyAndMaybeRemediate(execution, exitCode, errorMessage)
 	}
 	if eventType == events.AgentFailed {
-		m.eventPublisher.publishAgentEventWithTurnIDAndEvidence(
-			WithResumeAttemptID(context.Background(), attemptID), eventType, execution, turnID, failureEvidence,
-		)
+		if len(terminalEvents) > 0 && terminalEvents[0] != nil {
+			m.eventPublisher.publishAgentEventWithTerminalEvent(
+				WithResumeAttemptID(context.Background(), attemptID), eventType, execution, terminalEvents[0], failureEvidence,
+			)
+		} else {
+			m.eventPublisher.publishAgentEventWithTurnIDAndEvidence(
+				WithResumeAttemptID(context.Background(), attemptID), eventType, execution, turnID, failureEvidence,
+			)
+		}
 		return nil
 	}
 	m.eventPublisher.publishAgentEventWithTurnID(
@@ -2733,6 +2767,7 @@ func (m *Manager) preparePromptErrorCompletion(
 		payload := cloneTerminalAgentEventPayload(
 			newAgentEventPayloadWithTurnIDAndEvidence(current, event.TurnID, failureEvidence),
 		)
+		copyDeliveryTerminalIdentity(&payload, event)
 		if event.AttemptID != "" {
 			payload.AttemptID = event.AttemptID
 		}
@@ -2841,6 +2876,31 @@ func isTerminalStatus(status v1.AgentStatus) bool {
 func (m *Manager) markStoppedDuringShutdown(
 	execution *AgentExecution, exitCode int, errorMessage string, turnIDs ...string,
 ) error {
+	turnID := ""
+	if len(turnIDs) > 0 {
+		turnID = turnIDs[0]
+	}
+	return m.markStoppedDuringShutdownWithTerminalEvent(execution, exitCode, errorMessage, turnID, nil)
+}
+
+func (m *Manager) markStoppedDuringShutdownForEvent(
+	execution *AgentExecution,
+	exitCode int,
+	errorMessage string,
+	terminal *agentctlclient.AgentEvent,
+) error {
+	if terminal == nil {
+		return m.markStoppedDuringShutdown(execution, exitCode, errorMessage)
+	}
+	return m.markStoppedDuringShutdownWithTerminalEvent(execution, exitCode, errorMessage, terminal.TurnID, terminal)
+}
+
+func (m *Manager) markStoppedDuringShutdownWithTerminalEvent(
+	execution *AgentExecution,
+	exitCode int,
+	errorMessage, turnID string,
+	terminal *agentctlclient.AgentEvent,
+) error {
 	applied := false
 	err := m.executionStore.WithLock(execution.ID, func(exec *AgentExecution) {
 		if isTerminalStatus(exec.Status) {
@@ -2871,11 +2931,11 @@ func (m *Manager) markStoppedDuringShutdown(
 	m.persistExecutorRunning(context.Background(), execution)
 	m.releaseActivity(executionActivityKey(execution.ID))
 
-	turnID := ""
-	if len(turnIDs) > 0 {
-		turnID = turnIDs[0]
+	if terminal != nil {
+		m.eventPublisher.publishAgentEventWithTerminalEvent(context.Background(), events.AgentStopped, execution, terminal, nil)
+	} else {
+		m.eventPublisher.publishAgentEventWithTurnID(context.Background(), events.AgentStopped, execution, turnID)
 	}
-	m.eventPublisher.publishAgentEventWithTurnID(context.Background(), events.AgentStopped, execution, turnID)
 
 	return nil
 }
@@ -3125,7 +3185,7 @@ func (m *Manager) stopPassthroughProcess(ctx context.Context, executionID string
 	if execution.PassthroughProcessID == "" {
 		return
 	}
-	interactiveRunner := rt.GetInteractiveRunner()
+	interactiveRunner := m.passthroughRunnerForExecution(execution)
 	if interactiveRunner == nil {
 		return
 	}

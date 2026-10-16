@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WebSocketClient, WebSocketRequestError, WebSocketRequestTimeoutError } from "./client";
+import { sendQueuedNow } from "../api/domains/queue-api";
+import { setWebSocketClient } from "./connection";
 
 type SentRequest = {
   id: string;
@@ -1220,4 +1222,52 @@ describe("ordered core session validation", () => {
       subscription.unsubscribe();
     },
   );
+});
+
+describe("Send Now cancellation acknowledgement", () => {
+  it("keeps a real queue request pending beyond the ordinary five-second deadline", async () => {
+    vi.useFakeTimers();
+    const { client, socket } = connectClient();
+    setWebSocketClient(client);
+    try {
+      const result = sendQueuedNow({
+        task_id: "task-1",
+        session_id: "session-1",
+        session_incarnation_id: "incarnation-1",
+        scope: "entry",
+        entry_id: "q-2",
+      });
+      const settled = vi.fn();
+      void result.then(settled, settled);
+      await vi.advanceTimersByTimeAsync(8_000);
+      expect(settled).not.toHaveBeenCalled();
+      const request = socket.sent.find((frame) => frame.action === "message.queue.send_now");
+      expect(request).toBeDefined();
+      const payload = { session_id: "session-1", dispatched: true, sent_count: 1 };
+      socket.receive({ id: request!.id, type: "response", payload });
+      await expect(result).resolves.toEqual(payload);
+    } finally {
+      client.disconnect();
+      setWebSocketClient(null);
+    }
+  });
+
+  it("still rejects a Send Now request whose cancellation never acknowledges", async () => {
+    vi.useFakeTimers();
+    const { client } = connectClient();
+    setWebSocketClient(client);
+    try {
+      const result = sendQueuedNow({
+        task_id: "task-1",
+        session_id: "session-1",
+        session_incarnation_id: "incarnation-1",
+        scope: "all",
+      }).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(35_001);
+      expect(await result).toBeInstanceOf(WebSocketRequestTimeoutError);
+    } finally {
+      client.disconnect();
+      setWebSocketClient(null);
+    }
+  });
 });

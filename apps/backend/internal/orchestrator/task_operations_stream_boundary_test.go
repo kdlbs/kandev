@@ -25,7 +25,7 @@ func (m *queuedStreamBoundaryAgentManager) PromptAgentWithAdmissionCallback(
 	executionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*executor.PromptResult, error) {
 	// This synchronous event takes the same session guard as the production
@@ -42,7 +42,7 @@ func (m *queuedStreamBoundaryAgentManager) PromptAgentWithAdmissionCallback(
 		}
 	}
 	if beforeAdmission != nil {
-		if err := beforeAdmission(); err != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
 			return nil, err
 		}
 	}
@@ -350,9 +350,15 @@ func newPreparedPromptFixture(t *testing.T, suffix string, alternateSession bool
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.SetSessionPrimary(ctx, sessionID); err != nil {
+		t.Fatal(err)
+	}
 	current.IsPrimary = true
 	current.AgentExecutionID = executionID
 	if err := repo.UpdateTaskSession(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetSessionPrimary(ctx, sessionID); err != nil {
 		t.Fatal(err)
 	}
 	seedExecutorRunning(t, repo, sessionID, taskID, executionID)

@@ -179,6 +179,20 @@ type taskEnvironmentMaterializationFinalizer interface {
 	FinalizeTaskEnvironmentMaterialization(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, string) error
 }
 
+// taskEnvironmentMaterializationReleaser stores failed for the creating
+// environment that a session still owns. A claim that another session took
+// over is left alone. Legacy test stores without it keep the full-row update.
+type taskEnvironmentMaterializationReleaser interface {
+	FailTaskEnvironmentMaterialization(context.Context, string) (bool, error)
+}
+
+// failedTaskEnvironmentReelector makes a session the owner of a failed task
+// environment that never created anything physical. Legacy test stores without
+// it keep refusing failed environments.
+type failedTaskEnvironmentReelector interface {
+	ReelectFailedTaskEnvironmentMaterialization(context.Context, string, string) (bool, error)
+}
+
 // taskEnvironmentTransitionPersister commits an existing environment rebind
 // and its repository inventory as one durable operation. Legacy adapters may
 // omit it and use the compatibility persistence path in executor_execute.go.
@@ -509,13 +523,21 @@ type AgentProfileInfo struct {
 
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
+	// ResumePassthrough selects conversation resume independently of runtime ownership.
+	ResumePassthrough            bool
 	RequiredNativeConversationID string
-	TaskID                       string
-	TaskScope                    lifecycle.TaskLaunchScope
-	SessionSettingsPolicy        ResumeSettingsPolicy
-	WorkspaceID                  string // Kandev workspace ID — used to build scratch dir for repo-less tasks
-	SessionID                    string
-	TaskEnvironmentID            string // Env owning this session (shared across sessions in the same task)
+	InterruptedSubmissionID      string
+	InterruptedStreamID          string
+	InterruptedHarnessGeneration uint64
+	CandidateExecutionID         string
+	OnExecutionAllocated         func(context.Context, string) error
+
+	TaskID                string
+	TaskScope             lifecycle.TaskLaunchScope
+	SessionSettingsPolicy ResumeSettingsPolicy
+	WorkspaceID           string // Kandev workspace ID — used to build scratch dir for repo-less tasks
+	SessionID             string
+	TaskEnvironmentID     string // Env owning this session (shared across sessions in the same task)
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool
@@ -563,9 +585,13 @@ type LaunchAgentRequest struct {
 	DeliveryIncarnationID       string
 	DeliveryHarnessGeneration   uint64
 	InitialDeliverySubmissionID string
+	// SuppressBootStatusMessage is set only for silent restart restore so
+	// startup does not create a lifecycle-only transcript turn.
+	SuppressBootStatusMessage bool
 	// BeforeAgentStart runs inside the executor before it starts the harness.
+	// It receives the final prompt after handover context is composed.
 	// The callback is never forwarded into the runtime request.
-	BeforeAgentStart      func(context.Context, string) error
+	BeforeAgentStart      func(context.Context, string, string) error
 	ModelOverride         string              // If set, use this model instead of the profile's model
 	ExecutorType          string              // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig        map[string]string   // Executor config (docker_host, git_token, etc.)
@@ -730,9 +756,9 @@ type LaunchOptions struct {
 	// DeliverySubmissionID binds a persisted direct first message to the
 	// initial agentctl prompt.
 	DeliverySubmissionID string
-	// BeforeAgentStart admits durable first-prompt state after the execution
-	// exists and before any harness prompt can be dispatched.
-	BeforeAgentStart func(context.Context, string) error
+	// BeforeAgentStart binds the first-prompt identity after the execution
+	// exists. Final payload admission runs after runtime preparation.
+	BeforeAgentStart func(context.Context, string, string) error
 	// OnExecutionAdmitted runs after the launch path has identified and
 	// persisted the execution that will receive this turn, but before its
 	// process is started. Callers use this boundary to bind turn-scoped
@@ -743,7 +769,7 @@ type LaunchOptions struct {
 	// closes that ownership when delivery fails before acceptance.
 	OnInitialPromptAccepted     func(executionID string)
 	OnInitialPromptFailed       func()
-	BeforeInitialPromptDispatch func(executionID string) error
+	BeforeInitialPromptDispatch func(context.Context, string, string, []v1.MessageAttachment) error
 	Prompt                      string
 	PriorACPSession             string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID              string

@@ -50,10 +50,11 @@ func isNoActiveTurnError(err error) bool {
 
 // Common errors
 var (
-	ErrServiceAlreadyRunning            = errors.New("service is already running")
-	ErrServiceNotRunning                = errors.New("service is not running")
-	ErrRouteActionActiveTurn            = errors.New("route actions require a settled turn")
-	ErrIdleSuspensionProvenanceRequired = errors.New("session is not suspended by the workspace idle policy")
+	ErrServiceAlreadyRunning             = errors.New("service is already running")
+	ErrServiceNotRunning                 = errors.New("service is not running")
+	ErrRouteActionActiveTurn             = errors.New("route actions require a settled turn")
+	ErrRouteActionRequiresDynamicProfile = errors.New("route actions are only available for sessions using a dynamic profile")
+	ErrIdleSuspensionProvenanceRequired  = errors.New("session is not suspended by the workspace idle policy")
 )
 
 const maxStartupTransferReconcileAttempts = 30
@@ -844,6 +845,10 @@ type Service struct {
 	// Nil = no block is attached. See SetCoordinatorStandingInstructionsReader.
 	coordinatorStandingInstructions func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error)
 
+	// unattendedPermissionHandler denies a permission request of a coordinator's
+	// unattended turn; nil = requests wait for a person. Set once at wiring.
+	unattendedPermissionHandler UnattendedPermissionHandler
+
 	// backgroundProbeConfig holds the validated KANDEV_PARKED_PROBE_BUDGET /
 	// KANDEV_PARKED_PROBE_INTERVAL tuning knobs for the background-workload
 	// liveness probe (spec docs/specs/disambiguate-waiting/spec.md). Loaded
@@ -885,6 +890,15 @@ type Service struct {
 	parkedLoopStopped bool
 	parkedLoopWorkers sync.WaitGroup
 
+	// silentRestore workers are bounded to the startup inventory and joined
+	// during shutdown before the repositories and runtime are torn down.
+	silentRestoreMu           sync.Mutex
+	silentRestoreCancel       context.CancelFunc
+	silentRestoreWake         chan struct{}
+	silentRestoreWorkers      sync.WaitGroup
+	silentRestoreStopped      bool
+	silentRestoreOwnerContext silentRestoreOwnerContextResolver
+
 	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, for
 	// entry points that name a task rather than a session (session.launch,
 	// session.ensure). Nil = unscoped.
@@ -893,15 +907,15 @@ type Service struct {
 	// taskLifecycleDeleter owns cleanup of automation tasks abandoned before
 	// their run was durably recorded.
 	taskLifecycleDeleter taskLifecycleDeleter
-	// retrackedSessionCheck reports whether the lifecycle manager
-	// successfully re-tracked a session during this backend's own startup
-	// recovery pass (AC-EXECUTORS-SURVIVAL-003.1). Consulted by startup
-	// reconciliation so a session whose agent survived the restart skips
-	// "backend died mid-turn" cleanup. Nil (unwired, or agent survival
-	// disabled) preserves today's behavior -- every active session is
-	// reconciled as if its agent died with the backend. See
-	// SetRetrackedSessionChecker.
+	// retrackedSessionCheck reports successful adoption only. A false result
+	// does not prove a remote owner is dead; startup reconciliation consults
+	// pendingRemoteRecoveryCheck first. See SetRetrackedSessionChecker.
 	retrackedSessionCheck func(sessionID string) bool
+	// pendingRemoteRecoveryCheck reports the exact remote execution whose
+	// retryable recovery guard is still held. Pending ownership preserves its
+	// session projection without claiming that the execution was successfully
+	// re-tracked.
+	pendingRemoteRecoveryCheck func(sessionID, executionID string) bool
 
 	// routeActionHandler is owned by the dynamic conductor composition. The
 	// orchestrator only validates/authorizes the request and returns the
@@ -1236,10 +1250,11 @@ type Service struct {
 	// startCeilingSweeper / stopCeilingSweeper no-op. See ceiling_sweep.go.
 	ceilingSweeper *ceilingSweeper
 
-	// ceilingCredentialReminter re-mints short-lived Office runtime
-	// credentials immediately before a ceiling-deferred "start" replay. Nil
-	// is the common case; see CeilingLaunchCredentialReminter.
-	ceilingCredentialReminter CeilingLaunchCredentialReminter
+	// launchCredentialReminter re-mints short-lived Office runtime
+	// credentials immediately before a launch that carries Office run
+	// identity, so the token names the session the launch actually uses.
+	// Nil is the common case; see LaunchCredentialReminter.
+	launchCredentialReminter LaunchCredentialReminter
 
 	// lifecycleSweepCancel / lifecycleSweepWorkers own the one-shot
 	// background goroutine that runs reconcileTaskLifecycleTokens and
@@ -1253,6 +1268,11 @@ type Service struct {
 	lifecycleSweepCancel  context.CancelFunc
 	lifecycleSweepStopped bool
 	lifecycleSweepWorkers sync.WaitGroup
+
+	// orphanReentryWorkers tracks detached re-entry goroutines from
+	// reenterSchedulingOrphanStep so that Stop can join them without blocking
+	// the startup sweep. See stopOrphanReentryWorkers.
+	orphanReentryWorkers sync.WaitGroup
 
 	// unreclaimedWorkspaces holds the automation runs whose workspace removal
 	// was attempted and did not actually free the directory. Retention selects
@@ -1538,6 +1558,9 @@ type Service struct {
 	// callback. Each entry retains the prompt and route identity that authorized
 	// the reset across prompt-evidence replacement.
 	pendingDynamicStreakResets sync.Map
+	// countedEmptyTurns records, per session, the execution and prompt
+	// generation whose empty end_turn was counted as an unclassified failure.
+	countedEmptyTurns sync.Map
 
 	// resumeAttempts owns process-local startup identity. It is separate from
 	// dynamicAttemptEvidence because a provider execution may be reused by
@@ -2266,24 +2289,45 @@ func (s *Service) SetTaskLifecycleDeleter(deleter taskLifecycleDeleter) {
 }
 
 // SetRetrackedSessionChecker installs the lifecycle manager's query for
-// AC-EXECUTORS-SURVIVAL-003.1: whether a session was successfully
-// re-tracked during this backend's own startup recovery pass. Wired from
-// backendapp after the lifecycle manager's synchronous Start() has already
-// completed, so every session's outcome is decided before this service's
-// own Start() runs startup reconciliation. Nil (unwired) preserves today's
-// behavior.
+// whether a session was successfully re-tracked. Remote retry attempts may
+// complete after lifecycle Start returns, so this status is read separately
+// from the exact pending-owner query.
 func (s *Service) SetRetrackedSessionChecker(check func(sessionID string) bool) {
 	s.retrackedSessionCheck = check
 }
 
-// wasSessionRetracked applies the configured retrackedSessionCheck. Nil
-// checker or empty sessionID is treated as "not retracked" -- today's
-// unconditional reconciliation, the correct default.
+// SetPendingRemoteRecoveryChecker installs the lifecycle manager's exact
+// session/execution query for a remote owner whose retryable recovery is still
+// pending. It is intentionally separate from SetRetrackedSessionChecker:
+// unknown ownership must be preserved without claiming successful adoption.
+func (s *Service) SetPendingRemoteRecoveryChecker(check func(sessionID, executionID string) bool) {
+	s.pendingRemoteRecoveryCheck = check
+}
+
+// SetStartupRecoveryOwnerContextResolver binds startup restore work to the
+// workspace's current persisted owner. Authentication-disabled deployments
+// may return the supplied context unchanged.
+func (s *Service) SetStartupRecoveryOwnerContextResolver(
+	resolver func(context.Context, string, string) (context.Context, error),
+) {
+	s.silentRestoreOwnerContext = resolver
+}
+
+// wasSessionRetracked applies the configured successful-adoption query. A
+// false result is not a liveness conclusion; callers that reconcile startup
+// state must check for the exact guarded pending remote owner first.
 func (s *Service) wasSessionRetracked(sessionID string) bool {
 	if s.retrackedSessionCheck == nil || sessionID == "" {
 		return false
 	}
 	return s.retrackedSessionCheck(sessionID)
+}
+
+func (s *Service) hasPendingRemoteRecovery(sessionID, executionID string) bool {
+	if s.pendingRemoteRecoveryCheck == nil || sessionID == "" || executionID == "" {
+		return false
+	}
+	return s.pendingRemoteRecoveryCheck(sessionID, executionID)
 }
 
 // authorizeSession applies the configured per-user session check. No-op when
@@ -2938,6 +2982,7 @@ func (s *Service) completeExpectedTurn(ctx context.Context, sessionID, expectedT
 	if err := s.turnService.CompleteTurn(ctx, expectedTurnID); err != nil {
 		return fmt.Errorf("complete captured turn %s: %w", expectedTurnID, err)
 	}
+	s.activeTurns.CompareAndDelete(sessionID, expectedTurnID)
 	active, err := s.turnService.GetActiveTurn(ctx, sessionID)
 	if err != nil {
 		if isNoActiveTurnError(err) {
@@ -3280,6 +3325,7 @@ func (s *Service) Start(ctx context.Context) (startErr error) {
 	// the already-running check so a rejected duplicate Start cannot reopen a
 	// sweep while the service is active.
 	s.resetLifecycleSweepWorkers()
+	s.resetSilentRestoreRecovery()
 	s.running = true
 	s.startedAt = time.Now()
 	recoveryLifecycleCtx, recoveryLifecycleCancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -3330,9 +3376,9 @@ func (s *Service) reconcileStartupState(ctx context.Context) error {
 		return err
 	}
 	s.resetParkedSamplingWorkers()
-	// Reconcile session state from persisted runtime state on startup.
-	// This does NOT launch any agent processes — sessions are recovered lazily
-	// when the user opens them (via task.session.status → task.session.resume).
+	// Reconcile coarse session state from persisted runtime state before the
+	// background startup recovery workers begin. This phase does not launch
+	// agent processes; eligible sessions may be reattached or restored afterward.
 	if s.turnService == nil {
 		err := errors.New("reconcile unpublished prompt turns on startup: turn service is unavailable")
 		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
@@ -3343,6 +3389,7 @@ func (s *Service) reconcileStartupState(ctx context.Context) error {
 		return err
 	}
 	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
+	s.releaseAbandonedAutomationStartOwnership(ctx)
 	// Recover routes orphaned at "starting" by a launch failure that never
 	// reached a terminal route status. Must run before
 	// reconcileExecutorSessionsOnStartup and scheduler.Start: the former
@@ -3353,6 +3400,7 @@ func (s *Service) reconcileStartupState(ctx context.Context) error {
 	// snapshot of "starting" routes.
 	s.reconcileOrphanedDynamicStartingRoutes(ctx)
 	s.reconcileExecutorSessionsOnStartup(ctx)
+	s.settleOrphanedBackgroundWorkOnStartup(ctx)
 	// Executor reconciliation abandons turns left open by a pre-crash active
 	// session. Run the CI attempt sweep again after that transition so a
 	// running auto-fix reservation can become retryable on the same startup.
@@ -3378,7 +3426,8 @@ func (s *Service) startWatcherAndScheduler(ctx context.Context) error {
 	}
 	s.reconcileDurablePlanCommentDeliveriesOnStartup(ctx)
 
-	// Run the startup lifecycle sweep (reconcileTaskLifecycleTokens, then
+	// Run the startup lifecycle sweep (reconcileSchedulingOrphansOnStartup,
+	// reconcileTaskLifecycleTokens, then
 	// reconcileDependencyLaunchesOnStartup — sequenced so an
 	// admitted-by-promotion task is already eligible for the dependency sweep
 	// when reconcileTaskLifecycleTokens returns normally) in the background,
@@ -3437,6 +3486,7 @@ func (s *Service) subscribeStartupEvents() {
 
 	// Invalidate the compiled-step cache when workflow steps change.
 	s.subscribeWorkflowStepCacheEvents()
+	s.subscribeRuntimeRecoveryEvents()
 }
 
 func (s *Service) startBackgroundRecovery(ctx context.Context) {
@@ -3452,6 +3502,9 @@ func (s *Service) startBackgroundRecovery(ctx context.Context) {
 	// before tearing down repo / agentManager.
 	s.startIdleSessionReaper(ctx)
 	s.startCeilingSweeper(ctx)
+	if lifecycleCtx := s.recoveryLifecycleContext(); lifecycleCtx != nil {
+		s.startSilentRestoreRecovery(lifecycleCtx)
+	}
 }
 
 func (s *Service) setNotRunning() {
@@ -3506,12 +3559,14 @@ func (s *Service) Stop() error {
 	// Stop owns every in-flight resume attempt. Its detached request context
 	// must not let startup callbacks outlive the service generation.
 	s.cancelResumeAttempts()
+	s.stopSilentRestoreRecovery()
 	// Stop detached dynamic successors before the scheduler and watcher. Their
 	// workers can otherwise observe the shutdown only after those components
 	// have already stopped, and may launch or recover a session during teardown.
 	s.stopDynamicSuccessorWorkers()
 	s.stopDynamicPolicyRecovery()
 	s.stopLifecycleSweepAsync()
+	s.stopOrphanReentryWorkers()
 
 	// Stop components in reverse order
 	var errs []error
@@ -3579,6 +3634,11 @@ func (s *Service) startLifecycleSweepAsync(ctx context.Context) bool {
 	s.lifecycleSweepMu.Unlock()
 	go func() {
 		defer s.lifecycleSweepWorkers.Done()
+		// Restart interrupted automatic starts before the durable-token sweep:
+		// a task a token still owns is skipped here, while a token the sweep
+		// clears would otherwise leave the task looking orphaned until its
+		// detached launch created a session.
+		s.reconcileSchedulingOrphansOnStartup(sweepCtx)
 		s.reconcileTaskLifecycleTokens(sweepCtx)
 		s.reconcileDependencyLaunchesOnStartup(sweepCtx)
 	}()
@@ -3610,6 +3670,23 @@ func (s *Service) stopLifecycleSweepAsync() {
 	case <-done:
 	case <-time.After(sendNowClaimRecoveryTimeout):
 		s.logger.Warn("timed out waiting for startup lifecycle sweep during shutdown")
+	}
+}
+
+// stopOrphanReentryWorkers waits for detached orphan re-entry goroutines
+// to complete, with a timeout. These goroutines are tracked in
+// orphanReentryWorkers and represent the re-entry of SCHEDULING tasks
+// onto their existing sessions during startup recovery.
+func (s *Service) stopOrphanReentryWorkers() {
+	done := make(chan struct{})
+	go func() {
+		s.orphanReentryWorkers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(sendNowClaimRecoveryTimeout):
+		s.logger.Warn("timed out waiting for orphan re-entry workers during shutdown")
 	}
 }
 
@@ -3804,14 +3881,21 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	session *models.TaskSession,
 	scope interface{},
 ) {
-	// AC-EXECUTORS-SURVIVAL-003.1: the lifecycle manager's re-tracking
-	// outcome for sessionID is already decided by the time this runs (its
-	// Start() is synchronous and completes before this service's own Start()
-	// is ever called). A re-tracked session's agent survived the restart and
-	// is already running under this backend, so none of the "backend died
-	// mid-turn" reconciliation below applies to it
-	// (AC-EXECUTORS-SURVIVAL-003.2/.3/.4/.5).
+	// Read the pending generation before the completed-adoption marker. If
+	// adoption completes between these snapshots, the pending read preserves
+	// the live episode and the following retracked read observes its success.
+	pendingRemote := s.hasPendingRemoteRecovery(sessionID, running.AgentExecutionID)
+	// A successful re-tracked marker means the agent survived the restart.
+	// Remote retry attempts can still be in flight after lifecycle Start, so
+	// the exact pending owner is checked first and remains distinct from this
+	// successful-adoption marker.
 	retracked := s.wasSessionRetracked(sessionID)
+	if pendingRemote {
+		s.logger.Debug("preserving session while its remote owner recovery remains pending",
+			zap.String("session_id", sessionID),
+			zap.String("execution_id", running.AgentExecutionID))
+		return
+	}
 
 	// Active states: STARTING, RUNNING, WAITING_FOR_INPUT
 	// Set session to WAITING_FOR_INPUT (idle, ready for lazy resume when user

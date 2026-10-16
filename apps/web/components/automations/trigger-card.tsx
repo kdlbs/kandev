@@ -11,6 +11,7 @@ import {
   IconClock,
   IconBrandGithub,
   IconWebhook,
+  IconPlayerPlay,
   IconTrash,
   IconChevronDown,
   IconChevronUp,
@@ -41,9 +42,10 @@ const TRIGGER_ICON: Record<TriggerType, typeof IconClock> = {
   github_pr: IconBrandGithub,
   github_pr_merged: IconBrandGithub,
   github_push: IconBrandGithub,
-  github_ci: IconBrandGithub,
   webhook: IconWebhook,
   plugin_event: IconWebhook,
+  github_ci: IconBrandGithub,
+  manual: IconPlayerPlay,
 };
 
 const GITHUB_COLOR = "text-purple-400";
@@ -56,6 +58,7 @@ const TRIGGER_COLOR: Record<TriggerType, string> = {
   github_ci: GITHUB_COLOR,
   webhook: "text-orange-400",
   plugin_event: "text-orange-400",
+  manual: "text-emerald-400",
 };
 
 // Keyed by the cron expression the backend parses — syntax, never translated.
@@ -85,6 +88,7 @@ const TRIGGER_INFO_KEYS: Record<TriggerType, string> = {
   github_ci: "automations:triggerInfoNotImplemented",
   webhook: "automations:triggerInfoWebhook",
   plugin_event: "automations:pluginWebhookHelp",
+  manual: "automations:triggerInfoManual",
 };
 
 // A plain function returning copy is invisible to `i18next/no-literal-string`,

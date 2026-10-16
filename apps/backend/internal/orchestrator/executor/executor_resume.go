@@ -1029,7 +1029,17 @@ const (
 )
 
 type ResumeOptions struct {
-	RequiredNativeConversationID     string
+	RequiredNativeConversationID string
+	InterruptedSubmissionID      string
+	InterruptedStreamID          string
+	InterruptedHarnessGeneration uint64
+	// CandidateExecutionID pins a restart-only restore process to the durable
+	// checkpoint allocated before lifecycle launch side effects.
+	CandidateExecutionID string
+	// OnExecutionAllocated is runtime-only and advances the exact restore
+	// checkpoint before lifecycle can load the native conversation.
+	OnExecutionAllocated func(context.Context, string) error
+
 	SettingsPolicy                   ResumeSettingsPolicy
 	AllowBranchReplacement           bool
 	RepairWorkspaceInventory         bool
@@ -1045,6 +1055,9 @@ type ResumeOptions struct {
 	// NoInitialPrompt keeps the task description out of a fresh recovery boot;
 	// the owning continuation delivers the captured submission after readiness.
 	NoInitialPrompt bool
+	// SuppressInitialMessageBackfill is used only by silent restart restore,
+	// which must preserve the transcript exactly until an ordinary prompt arrives.
+	SuppressInitialMessageBackfill bool
 	// HoldForInitialPrompt keeps boot-ready queue draining behind an explicit
 	// fresh-start submission until its provider admission resolves.
 	HoldForInitialPrompt bool
@@ -1286,13 +1299,14 @@ func (e *Executor) resumeSession(
 	completedResume := options.AllowCompletedSessionResume &&
 		resumeInitialState == models.TaskSessionStateCompleted
 	wasTerminalResume := isTerminalSessionState(resumeInitialState) || completedResume
-	// Terminal sessions cannot own a live agent. Remove any stale runtime row
-	// before selected-environment admission can claim the environment.
+	// A terminal session may retain an unconfirmed runtime. Stop it before
+	// selected-environment admission can claim the environment.
 	if wasTerminalResume {
 		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(ctx, session.ID); cleanupErr != nil {
 			e.logger.Warn("failed to force-cleanup stale execution before terminal-state resume",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
+			return nil, newResumeCleanupFailure(cleanupErr, session)
 		}
 	}
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
@@ -1407,13 +1421,8 @@ func (e *Executor) resumeSession(
 
 	resp, err := e.agentManager.LaunchAgent(launchCtx, req)
 	if err != nil && isAgentAlreadyRunningError(err) && options.RequiredNativeConversationID == "" {
-		// "already has an agent running" fires both for live executions (a concurrent
-		// resume raced us) and stale ones (agent never started or exited without
-		// cleanup). Probe liveness before deciding what to do — otherwise we'd kill a
-		// healthy agent mid-prompt. For terminal states the agent is dead by definition,
-		// so skip the probe and go straight to cleanup+retry — this avoids a silent
-		// regression to ErrExecutionAlreadyRunning if the preemptive cleanup above
-		// failed and agentctl still reports a stale "starting" status.
+		// A registered execution may be live or stale. Only clean up a live-state
+		// session after checking liveness; terminal sessions already passed cleanup.
 		if !wasTerminalResume && e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
 			e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
 				zap.String("task_id", task.ID),
@@ -1438,8 +1447,10 @@ func (e *Executor) resumeSession(
 			e.logger.Warn("failed to clean up stale execution",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
+			err = newResumeCleanupFailure(cleanupErr, nil)
+		} else {
+			resp, err = e.agentManager.LaunchAgent(launchCtx, req)
 		}
-		resp, err = e.agentManager.LaunchAgent(launchCtx, req)
 	}
 	if err != nil && isCancellableResumeContext(launchCtx) && launchCtx.Err() != nil {
 		// The cancellation owner reconciles the session state. Do not run the
@@ -1473,6 +1484,7 @@ func (e *Executor) resumeSession(
 				err = errors.Join(err, rollbackErr)
 			}
 		}
+		e.captureResumeCleanupFailureSnapshot(launchCtx, err, session.ID, resumeAttemptID, terminalRollbackState(resumeInitialState))
 		e.logger.Error("failed to relaunch agent for session",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
@@ -1534,14 +1546,16 @@ func (e *Executor) resumeSession(
 	if startAgent {
 		if options.StartAgentSynchronously && options.RequiredNativeConversationID == "" {
 			if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
-				e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
+				if e.claimForcedExecutionCleanup(session.ID, resp.AgentExecutionID) {
+					e.stopUnstartedExecution(ctx, session.ID, resp.AgentExecutionID)
+				}
 				if rollbackErr := e.rollbackResumeStateAfterFailure(
 					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
 					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
 				); rollbackErr != nil {
 					err = errors.Join(err, rollbackErr)
 				}
-				return nil, err
+				return execution, err
 			}
 			if terminalState, terminal := e.stopStartedExecutionIfSessionTerminal(
 				ctx, session.ID, resp.AgentExecutionID, "terminal continuation start race",
@@ -1977,7 +1991,7 @@ func (e *Executor) refreshResumeSessionState(
 func (e *Executor) rejectRunningResume(session *models.TaskSession, options ResumeOptions) error {
 	completedResume := options.AllowCompletedSessionResume &&
 		session.State == models.TaskSessionStateCompleted
-	if isTerminalSessionState(session.State) || completedResume {
+	if isTerminalSessionState(session.State) || completedResume || options.ForceContextContinuation {
 		return nil
 	}
 	if existing, ok := e.GetExecutionBySession(session.ID); ok && existing != nil {
@@ -2089,9 +2103,16 @@ func newResumeLaunchRequest(
 		executionProfileID = session.AgentProfileID
 	}
 	req := &LaunchAgentRequest{
+		ResumePassthrough:            startAgent && session.IsPassthrough && !options.ForceContextContinuation,
 		TaskID:                       task.ID,
 		SessionSettingsPolicy:        options.SettingsPolicy,
 		RequiredNativeConversationID: options.RequiredNativeConversationID,
+		ACPSessionID:                 options.RequiredNativeConversationID,
+		InterruptedSubmissionID:      options.InterruptedSubmissionID,
+		InterruptedStreamID:          options.InterruptedStreamID,
+		InterruptedHarnessGeneration: options.InterruptedHarnessGeneration,
+		CandidateExecutionID:         options.CandidateExecutionID,
+		OnExecutionAllocated:         options.OnExecutionAllocated,
 		WorkspaceID:                  task.WorkspaceID,
 		SessionID:                    session.ID,
 		TaskTitle:                    task.Title,
@@ -2107,6 +2128,7 @@ func newResumeLaunchRequest(
 		AllowBranchReplacement:       options.AllowBranchReplacement,
 		ForceContextContinuation:     options.ForceContextContinuation,
 		RecoveryAction:               options.RecoveryAction,
+		SuppressBootStatusMessage:    options.SuppressInitialMessageBackfill,
 	}
 	if options.ForceContextContinuation {
 		if options.DeferInitialPrompt {

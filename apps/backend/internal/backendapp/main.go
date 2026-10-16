@@ -38,6 +38,7 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/profiles"
 	"github.com/kandev/kandev/internal/startup"
+	"github.com/kandev/kandev/internal/task/deliveryretention"
 	"github.com/kandev/kandev/internal/task/inventoryrepair"
 
 	// Event bus
@@ -791,7 +792,7 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	sessionCapacityEnvironment := sessioncapacity.ReadEnvironment()
-	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
+	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.Auth, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
 		repos.SystemSettings, sessionCapacityEnvironment, repos.RequiredStores)
 	if err != nil {
@@ -800,9 +801,10 @@ func startAgentInfrastructure(
 	}
 	services.Task.SetWorkflowMovePreflight(orchestratorSvc)
 	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
-	// The checker is populated by lifecycleMgr.Start below before the
-	// orchestrator's startup reconciliation runs.
+	// These queries distinguish successfully re-tracked executions from remote
+	// owners whose guarded retry is still pending during startup reconciliation.
 	orchestratorSvc.SetRetrackedSessionChecker(lifecycleMgr.WasSessionRetracked)
+	orchestratorSvc.SetPendingRemoteRecoveryChecker(lifecycleMgr.HasPendingRemoteRecovery)
 	orchestratorSvc.SetRouteActionHandler(dynamicRouteActionHandler(
 		repos.Task,
 		repos.AgentSettings,
@@ -837,6 +839,9 @@ func startAgentInfrastructure(
 	agentSettingsController.SetRoutingTierDependencyChecker(&routingTierDepsAdapter{
 		repo: repos.Office,
 	})
+	if services.DynamicProfileResolver != nil {
+		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
+	}
 	// An enabled automation is a standing instruction to launch against a
 	// profile. Nothing is running, so it never reaches the active-session list,
 	// but deleting the profile would leave the schedule firing into nothing —
@@ -1021,7 +1026,12 @@ func startAgentInfrastructure(
 	// stops workers registered here, and a restore checkpoints, closes,
 	// and replaces the shared database pool. A five-minute sweep pass
 	// overlapping that would race the pool swap.
-	databaseQuiesce = addRuntimeCleanup(deliveryCleanup)
+	deliveryQuiesce := addRuntimeCleanup(deliveryCleanup)
+	databaseQuiesce = quiesceDeliveryRetention(func() {
+		if services.DeliveryRetention != nil {
+			services.DeliveryRetention.Stop()
+		}
+	}, deliveryQuiesce)
 
 	// Recovery publishes agent events synchronously. Subscribe the orchestrator
 	// after all event-handler dependencies are wired, but before lifecycle
@@ -1201,6 +1211,9 @@ func startGatewayAndServe(
 			releaseLifecycle()
 		}, nil
 	})
+	// Read each installed vendor CLI's model catalogue once, off the request
+	// path, so the first settings page load serves a discovered list.
+	go agentSettingsController.WarmHostCLIModels(ctx)
 	profileReconciler := agentsettingscontroller.NewProfileReconciler(hostUtilityMgr, agentRegistry, repos.AgentSettings, log)
 
 	// Wire Host.InvokeUtilityAgent at the first point where the sessionless
@@ -1310,6 +1323,21 @@ func startGatewayAndServe(
 	// ============================================
 	// HTTP SERVER (Router & MCP Route Registration)
 	// ============================================
+	retentionConfig := cfg.Tasks.DeliveryRetention
+	services.DeliveryRetention = deliveryretention.New(repos.Task, dbPool, deliveryretention.Options{
+		Interval:     retentionConfig.Interval,
+		BatchRows:    retentionConfig.BatchRows,
+		BatchBytes:   int64(retentionConfig.BatchBytes),
+		PayloadGrace: retentionConfig.PayloadGrace,
+		ReplayAge:    retentionConfig.ReplayAge,
+		ReplayEvents: retentionConfig.ReplayEvents,
+		Readiness:    repos.Task.CheckAgentDeliveryRetentionReady,
+		Logger:       log,
+	})
+	stopDeliveryRetention := func() error { services.DeliveryRetention.Stop(); return nil }
+	addCleanup(stopDeliveryRetention)
+	restoreCleanups = append(restoreCleanups, stopDeliveryRetention)
+
 	e2eRuntimeUpdateHooks := newE2ERuntimeUpdateHooks()
 	if e2eRuntimeUpdateHooks != nil {
 		agentSettingsController.SetRuntimeUpdateStatusResolver(e2eRuntimeUpdateHooks.resolveLatestVersion)
@@ -1470,7 +1498,6 @@ func startGatewayAndServe(
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
 	services.Task.StartSessionReconciliationLoop(ctx)
 	services.Task.StartQuickChatExpirationLoop(ctx)
-
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
 	hostUtilityReady := make(chan struct{})
 	var hostUtilityWG sync.WaitGroup
@@ -1585,6 +1612,10 @@ func startGatewayAndServe(
 			bootstrap.ready.Store(true)
 		}, func() { handler.Store(builtServer.Handler) })
 	})
+	if err := services.DeliveryRetention.Start(ctx); err != nil && ctx.Err() == nil {
+		log.Error("failed to start durable delivery retention worker", zap.Error(err))
+		return false
+	}
 	if agentRuntimeRecovery != nil {
 		agentRuntimeRecovery.Start(ctx)
 	}
@@ -1682,10 +1713,13 @@ func constructOfficeServices(
 	// The ledger writer is the sole writer of task_sessions' usage rollup
 	// columns (AC-10) and must run in every install, so it too is
 	// constructed and started before the Office early return.
-	if err := startTaskUsageWriter(repos.Task, usagePricingAdapter{lookup: pricingLookup}, eventBus, log, addCleanup); err != nil {
+	usageWriter, err := startTaskUsageWriter(repos.Task, usagePricingAdapter{lookup: pricingLookup}, eventBus, log, addCleanup)
+	if err != nil {
 		log.Error("Failed to subscribe task usage ledger writer", zap.Error(err))
 		return nil, false
 	}
+	services.UsageWriter = usageWriter
+	services.Pricing = pricingLookup
 
 	if !cfg.Features.Office {
 		log.Info("Office feature disabled; Office services skipped while global run scheduling remains enabled")
@@ -2072,10 +2106,9 @@ func startSchedulingRuntime(
 	orchScheduler := officeservice.NewSchedulerIntegration(
 		runProcessorSvc, tickInterval,
 	)
-	// A ceiling-deferred Office launch is replayed by the orchestrator's own
-	// sweep, independent of this scheduler; it needs a fresh runtime JWT
-	// rather than the one captured (and redacted) at defer time.
-	orchestratorSvc.SetCeilingLaunchCredentialReminter(orchScheduler)
+	// Bind Office credentials to the concrete launch session before dispatch.
+	// Deferred starts refresh credentials after their persisted-token redaction.
+	orchestratorSvc.SetLaunchCredentialReminter(orchScheduler)
 	// Office task-handoffs prompt enrichment. The HandoffService is
 	// constructed alongside the HTTP routes (helpers.go); we stash the
 	// scheduler reference on the Services struct so registerRoutes can

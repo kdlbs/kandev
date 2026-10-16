@@ -1,3 +1,4 @@
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Page } from "@playwright/test";
@@ -43,9 +44,7 @@ async function fetchRepoById(apiClient: ApiClient, repoId: string): Promise<Repo
 
 async function openCreateDialog(testPage: Page, kanban: KanbanPage): Promise<void> {
   await kanban.goto();
-  const divider = testPage.getByTestId("sidebar-navigation-divider");
-  await divider.focus();
-  await divider.press("End");
+  await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
   await kanban.createTaskButton.first().click();
   await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 }

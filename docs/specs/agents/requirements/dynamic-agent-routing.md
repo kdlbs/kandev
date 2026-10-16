@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-08-13
-updated: 2026-10-08
+updated: 2026-10-12
 owners:
   - cfl
 ---
@@ -30,12 +30,17 @@ Users often name profiles by the capability they want rather than a provider bra
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.8:** Dynamic profiles and their concrete candidates participate in the existing profile-in-use dependency dialog. A dependency lookup failure blocks the change. Otherwise, the user can cancel or explicitly confirm deletion or disabling. Confirmed changes keep durable bindings unchanged: stale selected profiles fail closed, while stale or disabled candidates become ineligible and another configured candidate can be selected.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.9:** When a standalone dynamic-profile save completes while other profiles change, every unrelated profile shall retain its latest accepted state, including additions, updates, and removals. Every unrelated valid picker option shall remain available with its accepted label, enabled state, and revision, including options whose owner is temporarily absent from Agent settings. Desktop and phone shall share this behavior. A failed save shall not publish a replacement profile collection.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.10:** A failure shall be charged only to the route generation and candidate that produced it. When the route has already recorded a successor while the predecessor execution still serves the session, a later failure of that predecessor execution shall not open the successor's circuit, advance the route, or change its generation or candidate.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.11:** A route action submitted for a session whose selected profile is not dynamic shall be rejected as a validation error that names the reason. It shall not change session or route state and shall not be reported as an internal failure.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.12:** When a resumed or prepared runtime for the route's claimed execution is ready and waiting for input, the claimed route generation shall become active, whether the process-start callback or the resume-ready path observes it first. A cancelled session, a different execution, or a stale generation shall leave the route unchanged. A failed durable activation shall return an error to the resume caller while preserving the ready runtime. After storage recovers, admission shall be able to complete that same generation without stopping or replacing the current ready execution. Reconciled admission shall succeed only after both the durable route and its persisted session projection are active for that generation and execution.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.13:** An explicit recovery action shall be able to resume a session whose route is still `starting` with no live runtime, re-claiming the same persisted candidate. A live launch owner, a passive resume without same-generation activation reconciliation, and every other non-active route state shall keep the existing route guard. When an explicit recovery action cannot resume, it shall return an error instead of a success response without an execution. A passive session open shall keep its waiting response.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.14:** The restart orphan-route sweep shall mark `action_required` a session parked in WAITING_FOR_INPUT whose route is still `starting` and whose `executors_running` row is absent. A live executor row, a read error, or a stale generation shall leave the session and its route unchanged.
 
 ### REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002: Repeated unclassified failure fallback
 
 An operator can enable a narrow exception to manual recovery for a task using a dynamic profile.
 A streak means consecutive qualifying failures from distinct attempts in one session, workflow step, and concrete candidate.
 A matching failure has the same trusted origin, phase, semantic code, and complete diagnostic identity.
+An empty normal turn end has no diagnostic, so its identity is a fixed, text-free origin tuple.
 
 #### Acceptance criteria
 
@@ -44,13 +49,14 @@ A matching failure has the same trusted origin, phase, semantic code, and comple
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.3:** Each qualifying failure below the threshold shall require manual recovery. The policy shall not schedule retries or reset waits.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.4:** At the threshold, Kandev shall select the next eligible configured candidate in order. The session, conversation, and logical profile shall remain unchanged. Exhaustion shall require manual recovery without wrapping to an earlier candidate.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.5:** Every counted failure shall have current, trusted evidence of no output and no effects. Stale, conflicting, duplicate, incomplete, or ambiguous evidence shall never advance the candidate.
-- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.6:** Only terminal provider failures and proven agent-process startup failures shall qualify. User denials, cancellation, task/repository errors, credential-policy denials, and corrupt resume state shall never qualify.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.6:** Only terminal provider failures, proven agent-process startup failures, and empty normal turn ends (AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.13) shall qualify. User denials, cancellation, task/repository errors, credential-policy denials, and corrupt resume state shall never qualify.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.7:** A different matching identity shall start a new streak at one. Success, output, effects, classified failure, explicit stop, or a changed step, candidate, logical profile, or profile version shall clear the streak. Repeating the same candidate manually shall preserve the streak. Stale and duplicate events shall leave current state unchanged.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.8:** A restart shall preserve committed counts but shall not schedule work from them. Only a new, independently proven safe failure shall extend a restored streak.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.9:** The optional workflow field `disable_unclassified_fallback` shall default to false. A true value shall veto fallback and clear the streak. Create, update, copy, export, import, synchronization, and step events shall preserve explicit values. An omitted update shall preserve the saved value.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.10:** Policy configuration shall survive settings API and browser read-edit-save round trips. Desktop and phone shall retain the existing recovery actions and route-change presentation.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.11:** Concurrent delivery of one failure shall count once and launch at most one successor. Persistence or workflow-context failures shall stop automatic advancement.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.12:** The exception shall apply only to Kanban/task dynamic sessions. Concrete profiles, utility invocations, and Office routing shall retain existing behavior. An unknown execution scope shall fail closed.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.13:** When the current candidate's policy is enabled and the step does not veto it, a prompt turn that ends normally (`end_turn`, no error) with current, trusted evidence of no assistant text, reasoning, or tool activity shall count as a qualifying failure. A cancelled, errored, stale, duplicate, or terminal-replay completion shall not count. With the policy absent, disabled, or vetoed, or the step unknown, the completion shall keep its existing behavior and shall not enter manual recovery. A counted empty end shall not be cleared by its own completion or process exit.
 
 #### Exclusions
 

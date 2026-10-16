@@ -28,7 +28,7 @@ type ActivityCount struct {
 // ListActivityRows returns up to limit rows of one coordinator, newest first,
 // strictly after before when set, restricted to class when non-empty.
 func (s *Store) ListActivityRows(ctx context.Context, coordinatorID string, class Action, before *ActivityCursor, limit int) ([]ActivityRow, error) {
-	query := `SELECT ` + activityColumns + ` FROM coordinator_activity WHERE coordinator_id = ?`
+	query := `SELECT ` + activityReadColumns + ` FROM coordinator_activity WHERE coordinator_id = ?`
 	args := []any{coordinatorID}
 	if class != "" {
 		query += ` AND action_class = ?`
@@ -52,10 +52,10 @@ func (s *Store) ListActivityRows(ctx context.Context, coordinatorID string, clas
 // when the row is absent or belongs to another coordinator.
 func (s *Store) GetActivityRow(ctx context.Context, exec coordinatorExec, coordinatorID, id string) (*ActivityRow, error) {
 	var row ActivityRow
-	err := exec.QueryRowContext(ctx, s.db.Rebind(`SELECT `+activityColumns+` FROM coordinator_activity WHERE id = ? AND coordinator_id = ?`), id, coordinatorID).
+	err := exec.QueryRowContext(ctx, s.db.Rebind(`SELECT `+activityReadColumns+` FROM coordinator_activity WHERE id = ? AND coordinator_id = ?`), id, coordinatorID).
 		Scan(&row.ID, &row.CoordinatorID, &row.WorkspaceID, &row.ActionClass, &row.Outcome, &row.Authorization,
 			&row.TargetTaskID, &row.ProposalID, &row.ActorUserID, &row.ReasonCode, &row.Detail, &row.Edited,
-			&row.RefusalCount, &row.UndoneAt, &row.UndoneBy, &row.UndoOfID, &row.CreatedAt, &row.UpdatedAt)
+			&row.RefusalCount, &row.UndoneAt, &row.UndoneBy, &row.UndoOfID, &row.CreatedAt, &row.UpdatedAt, &row.UnattendedTurnID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

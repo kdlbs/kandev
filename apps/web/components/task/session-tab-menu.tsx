@@ -1,6 +1,6 @@
 "use client";
 
-import type { RefObject } from "react";
+import { useRef, type RefObject } from "react";
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
 import {
   AlertDialog,
@@ -148,9 +148,22 @@ export function SessionContextMenuItems({
   onStartRename: () => void;
 }) {
   const { t } = useTranslation();
+  const renameAfterCloseRef = useRef(false);
   return (
-    <ContextMenuContent>
-      <ContextMenuItem className="cursor-pointer" onSelect={onStartRename}>
+    <ContextMenuContent
+      onCloseAutoFocus={(event) => {
+        if (!renameAfterCloseRef.current) return;
+        renameAfterCloseRef.current = false;
+        event.preventDefault();
+        queueMicrotask(onStartRename);
+      }}
+    >
+      <ContextMenuItem
+        className="cursor-pointer"
+        onSelect={() => {
+          renameAfterCloseRef.current = true;
+        }}
+      >
         {t("task:rename2")}
       </ContextMenuItem>
       <ContextMenuItem

@@ -17,11 +17,9 @@ export function useTaskRouteProjection(taskId: string, requestedSessionId?: stri
   const [projection, sessionId] = useAppStore(
     useShallow((state) => {
       if (state.auth.mode !== "disabled" && !state.auth.authenticated) return [null, null] as const;
-      const task = resolveLatestTaskProjection(
-        taskId,
-        state.kanban.tasks,
-        state.kanbanMulti.snapshots,
-      );
+      const task =
+        state.taskOverview.byId[taskId] ??
+        resolveLatestTaskProjection(taskId, state.kanban.tasks, state.kanbanMulti.snapshots);
       if (!task?.workspaceId || task.workspaceId !== state.workspaces.activeId || task.isArchived) {
         return [null, null] as const;
       }
