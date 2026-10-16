@@ -77,10 +77,11 @@ type admittedSessionLister interface {
 // keyed by a launch-scoped identifier, which is the window between admission at
 // seam 1 and the session's creation.
 type ceilingReservation struct {
-	grade      string
-	gradeKnown bool
-	sessionID  string
-	takenAt    time.Time
+	grade       string
+	gradeKnown  bool
+	sessionID   string
+	takenAt     time.Time
+	nativeOwner *NativeInferenceRoute
 }
 
 // admissionRequest is one launch asking for capacity.

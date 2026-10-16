@@ -126,6 +126,10 @@ func (c *sessionCeilingController) persistAdmissionGradeLocked(ctx context.Conte
 	if req.seam == officeRunCapacitySeam {
 		return decision
 	}
+	// Native routes have no task session to receive the admitted grade.
+	if req.seam == nativeRouteCapacitySeam {
+		return decision
+	}
 	if !decision.admitted || !req.gradeKnown || req.sessionID == "" || c.persistGrade == nil {
 		return decision
 	}

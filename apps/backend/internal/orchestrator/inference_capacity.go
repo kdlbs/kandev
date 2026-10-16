@@ -82,19 +82,30 @@ func (s *Service) ReserveInferenceCapacity(ctx context.Context, binding sessionc
 		}
 		return true, "", nil
 	}
-	if c.policy == sessioncapacity.PolicyAll {
-		req := admissionRequest{grade: binding.Grade, gradeKnown: binding.GradeKnown}
-		p, err := c.readGradedPopulationLocked(ctx, req.grade)
-		populationKnown := err == nil && !p.unknown
-		maximum, configured := c.requestedGradeLimitLocked(req)
-		if reason := c.allAdmissionRejection(p, req, configured, populationKnown); reason != "" {
-			return false, reason, nil
-		}
-		if reason := c.allCapacityLimitReason(p, maximum); reason != "" {
-			return false, reason, nil
-		}
+	if retainedNativeChild(binding, active) {
+		return false, ceilingReasonUnknownPopulation, fmt.Errorf("retained native inference owner is still active")
+	}
+	if handled, admitted, reason, err := c.transferNativeRouteLocked(ctx, binding); handled {
+		return admitted, reason, err
+	}
+	if reason := c.freshInferenceAdmissionRejectionLocked(ctx, binding); reason != "" {
+		return false, reason, nil
 	}
 	return c.persistInferenceBindingLocked(ctx, binding)
+}
+
+func (c *sessionCeilingController) freshInferenceAdmissionRejectionLocked(ctx context.Context, binding sessioncapacity.InferenceBinding) string {
+	if c.policy != sessioncapacity.PolicyAll {
+		return ""
+	}
+	req := admissionRequest{grade: binding.Grade, gradeKnown: binding.GradeKnown}
+	p, err := c.readGradedPopulationLocked(ctx, req.grade)
+	populationKnown := err == nil && !p.unknown
+	maximum, configured := c.requestedGradeLimitLocked(req)
+	if reason := c.allAdmissionRejection(p, req, configured, populationKnown); reason != "" {
+		return reason
+	}
+	return c.allCapacityLimitReason(p, maximum)
 }
 
 func (c *sessionCeilingController) persistInferenceBindingLocked(ctx context.Context, binding sessioncapacity.InferenceBinding) (bool, string, error) {

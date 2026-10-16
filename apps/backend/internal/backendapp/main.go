@@ -1229,7 +1229,8 @@ func startGatewayAndServe(
 	hostUtilityMgr.SetProfileEnvironmentResolver(lifecycleMgr.ResolveUtilityProfileEnvironment)
 	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
-	wireSharedInferenceCapacity(orchestratorSvc, repos.SystemSettings, log.Zap(), lifecycleMgr, hostUtilityMgr)
+	sharedInferenceOwner := wireSharedInferenceCapacity(orchestratorSvc, repos.SystemSettings, log.Zap(), lifecycleMgr, hostUtilityMgr)
+	wireNativeRouteCapacity(services.DynamicProfileResolver, orchestratorSvc, sharedInferenceOwner, repos.Task, repos.Utility)
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)

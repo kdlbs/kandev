@@ -48,6 +48,7 @@ type ProfileExecutionResolver struct {
 	engine          *dynamic.Engine
 	bindingResolver *dynamic.CredentialBindingResolver
 	enabled         atomic.Bool
+	nativeAdmission *nativeRouteAdmission
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -157,8 +158,11 @@ func (r *ProfileExecutionResolver) ResolveExecutionDetails(ctx context.Context, 
 	if err != nil {
 		return ProfileExecution{}, fmt.Errorf("resolve profile family %s: %w", profileID, err)
 	}
+	if err := r.admitNativeRoute(ctx, sessionID, profileID); err != nil {
+		return ProfileExecution{}, err
+	}
 	if agent.Name != agents.DynamicAgentID {
-		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profile.ID, AgentName: agent.Name, Profile: profile}, nil
+		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profile.ID, AgentName: agent.Name, Profile: profile, RouteSessionID: r.nativeStaticRouteID(sessionID)}, nil
 	}
 	if !r.enabled.Load() {
 		return ProfileExecution{}, ErrDynamicRoutingDisabled
@@ -172,6 +176,7 @@ func (r *ProfileExecutionResolver) ResolveExecutionDetails(ctx context.Context, 
 	}
 	decision, err := r.Resolve(ctx, routeSessionID, profileID, 0, "")
 	if err != nil {
+		r.ReleaseNativeRoute(routeSessionID)
 		return ProfileExecution{}, err
 	}
 	decision.RouteSessionID = routeSessionID
@@ -210,8 +215,12 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 	if err != nil {
 		return ProfileExecution{}, err
 	}
+	if err := r.admitNativeRoute(ctx, sessionID, profileID); err != nil {
+		return ProfileExecution{}, err
+	}
 	decision, err := r.engine.ApplyFailureContext(ctx, sessionID, profileConfig, expectedGeneration, currentExecutionProfileID, failure)
 	if err != nil && !errors.Is(err, dynamic.ErrRecoveryPending) {
+		r.ReleaseNativeRoute(sessionID)
 		return ProfileExecution{}, err
 	}
 	routeErr := err
@@ -608,8 +617,12 @@ func (r *ProfileExecutionResolver) ResumePendingRoute(
 	if !exists {
 		return ProfileExecution{}, dynamic.ErrRouteStateNotFound
 	}
+	if err := r.admitNativeRoute(ctx, sessionID, state.LogicalProfileID); err != nil {
+		return ProfileExecution{}, err
+	}
 	decision, err := r.engine.ResumePending(ctx, sessionID, expectedGeneration)
 	if err != nil {
+		r.ReleaseNativeRoute(sessionID)
 		return ProfileExecution{}, err
 	}
 	return r.executionFromDecisionWithRecovery(ctx, state.LogicalProfileID, sessionID, decision)
