@@ -203,7 +203,7 @@ Implementation started after the user's later `continue` request.
 - Go tests passed both normally and with `-race`. The changed-Go lint helper
   and a complete `golangci-lint run ./internal/github --timeout=5m --concurrency=2`
   each reported zero issues, including the new files.
-- Final frontend unit run: 176 tests passed across eight files. TypeScript
+- Final frontend unit run: 178 tests passed across eight files. TypeScript
   was checked again after the additional regression cases and passed.
 - The commit hook caught the API test file's 600-line limit. The permission
   regression now lives in the existing focused PR API test file. The final
@@ -224,3 +224,22 @@ Implementation started after the user's later `continue` request.
   are retained in `/tmp/kandev-merge-ui/`. All four screenshots were inspected.
   Text wraps, controls remain inside their surfaces, and the desktop popover
   capture waits for its opening animation to finish.
+
+### Review remediation
+
+The lookup now clears its snapshot when its effect ends. A readiness
+disable/enable cycle cannot restore an earlier grant in the first committed
+render. Its request ownership key updates in a layout effect, so a suspended
+render cannot invalidate the visible lookup or its refresh callback.
+
+Two focused regressions failed before this correction: re-enabling returned
+`allowed` before effects ran, and a suspended render left the committed lookup
+in `loading`. Both now pass. The hook suite passes all 15 cases, the eight-file
+frontend command above passes 178 tests, and TypeScript and targeted ESLint pass.
+These changes enforce the existing context-invalidation contract; public copy,
+API behavior, and the UI layout remain as documented.
+
+The managed browser commands above passed again after this correction: eight
+desktop tests and five phone tests, without retries or skips. Desktop verification
+rebuilt the runtime and web assets; the phone run reused that build. Logs:
+`/tmp/kandev-run.e2e.LwaeCxtw.log` and `/tmp/kandev-run.e2e.R1BUWPdG.log`.

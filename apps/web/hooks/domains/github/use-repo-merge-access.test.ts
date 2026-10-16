@@ -1,4 +1,5 @@
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, waitFor } from "@testing-library/react";
+import { createElement, startTransition, Suspense, useLayoutEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitHubStatus, RepoMergeAccess } from "@/lib/types/github";
 import { invalidateIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
@@ -135,4 +136,73 @@ describe("useRepoMergeAccess", () => {
       await waitFor(() => expect(result.current.state).toBe("unknown"));
     },
   );
+});
+
+describe("useRepoMergeAccess committed lifetime", () => {
+  // @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.18
+  it("requires fresh access in the first committed render after re-enabling", async () => {
+    const next = pendingAccess();
+    const committed: ReturnType<typeof useRepoMergeAccess>[] = [];
+    mocks.request.mockResolvedValueOnce(allowed).mockReturnValueOnce(next.promise);
+    const { result, rerender } = renderHook(
+      ({ enabled }) => {
+        const access = useRepoMergeAccess("ws-1", "upstream", "site", enabled);
+        useLayoutEffect(() => {
+          committed.push(access);
+        });
+        return access;
+      },
+      { initialProps: { enabled: true } },
+    );
+    await waitFor(() => expect(result.current.state).toBe("allowed"));
+    rerender({ enabled: false });
+    expect(result.current.state).toBe("unknown");
+    committed.length = 0;
+    rerender({ enabled: true });
+    expect(committed[0]).toMatchObject({ state: "loading", actor: null });
+    await act(async () => next.resolve(denied));
+    expect(result.current.state).toBe("denied");
+  });
+
+  // @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.18
+  it("keeps the committed lookup and retry active during a suspended render", async () => {
+    const initial = pendingAccess();
+    const retry = pendingAccess();
+    const suspension = pendingAccess();
+    mocks.request.mockReturnValueOnce(initial.promise).mockReturnValueOnce(retry.promise);
+    let select!: (owner: string) => void;
+    let current!: ReturnType<typeof useRepoMergeAccess>;
+    let suspended = false;
+    function Consumer({ owner }: { owner: string }) {
+      const access = useRepoMergeAccess("ws-1", owner, "site");
+      useLayoutEffect(() => {
+        current = access;
+      });
+      if (owner === "speculative") {
+        suspended = true;
+        throw suspension.promise;
+      }
+      return createElement("span", null, owner);
+    }
+    function Harness() {
+      const [owner, setOwner] = useState("upstream");
+      useLayoutEffect(() => {
+        select = setOwner;
+      }, []);
+      return createElement(Suspense, { fallback: null }, createElement(Consumer, { owner }));
+    }
+    const view = render(createElement(Harness));
+    act(() => startTransition(() => select("speculative")));
+    expect(suspended).toBe(true);
+    expect(view.container.textContent).toBe("upstream");
+    await act(async () => initial.resolve(allowed));
+    expect(current.state).toBe("allowed");
+    act(() => current.refresh());
+    expect(mocks.request).toHaveBeenCalledTimes(2);
+    expect(current.state).toBe("loading");
+    await act(async () => retry.resolve(denied));
+    expect(current.state).toBe("denied");
+    act(() => select("upstream"));
+    await act(async () => suspension.resolve(denied));
+  });
 });

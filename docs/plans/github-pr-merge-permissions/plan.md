@@ -210,7 +210,7 @@ Implementation and verification are complete. The initial component regression
 failed because an enabled merge button was present before access was confirmed.
 The controller regression failed with the expected missing-route response.
 After implementation, the backend GitHub package passed normally and with race
-detection. All 176 focused frontend tests and 13 desktop/phone browser tests
+detection. All 178 focused frontend tests and 13 desktop/phone browser tests
 passed. TypeScript, lint, translations, and documentation checks passed.
 The denied and unavailable states were inspected in four screenshots.
 See Task 01 for commands, local environment setup, logs, and capture locations.

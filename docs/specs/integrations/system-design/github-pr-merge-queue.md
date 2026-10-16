@@ -227,6 +227,11 @@ repository, effective mutation principal, and connection generations. Reuse
 the existing GitHub status and integration-availability notifications for
 connection changes. Do not share completed permission results across mounts.
 
+Update the request ownership key only when a render commits. A suspended or
+abandoned render must not invalidate the visible lookup or its refresh callback.
+Clear the result when the lookup effect ends, including a readiness disable/enable
+cycle. Re-enabling starts with loading in its first committed render.
+
 Refresh access on a new mount, return to the active browser window, explicit
 permission refresh, and a rejected merge. Keep merge unavailable during refresh.
 Refresh is a GET only. It never repeats a failed mutation automatically.

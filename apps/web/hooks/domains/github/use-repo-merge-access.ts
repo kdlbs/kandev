@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getRepoMergeAccess } from "@/lib/api/domains/github-api";
 import { subscribeIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
@@ -41,7 +41,9 @@ export function useRepoMergeAccess(
     credentialKey(status),
   ]);
   const currentKey = useRef(key);
-  currentKey.current = key;
+  useLayoutEffect(() => {
+    currentKey.current = key;
+  }, [key]);
   const generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const [snapshot, setSnapshot] = useState<(MergeAccessSnapshot & { key: string }) | null>(null);
@@ -80,6 +82,7 @@ export function useRepoMergeAccess(
       controller.current?.abort();
       unsubscribe();
       window.removeEventListener("focus", onFocus);
+      setSnapshot(null);
     };
   }, [refresh]);
 
