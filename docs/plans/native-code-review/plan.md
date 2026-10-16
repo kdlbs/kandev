@@ -1,5 +1,9 @@
 ---
-spec: docs/specs/agents/requirements/native-code-review.md
+requirements:
+  - REQ-AGENTS-NATIVE-CODE-REVIEW-001
+system_design:
+  - ../../specs/agents/system-design/native-code-review-recovery.md
+legacy_specs: []
 created: 2026-07-24
 status: building
 ---
@@ -158,3 +162,15 @@ Wave 9:
 Wave 10:
 - [ ] [task-13-public-docs](task-13-public-docs.md)
 ```
+
+## Follow-up: abandoned native admission
+
+- [ ] [task-14-abandoned-native-admission](task-14-abandoned-native-admission.md)
+
+This independent backend correction implements
+AC-AGENTS-NATIVE-CODE-REVIEW-001.14 and the
+[recovery design](../../specs/agents/system-design/native-code-review-recovery.md).
+It reuses the task claim and terminal-guarded service to preserve an abandoned
+native run before admitting a fresh request. Existing live workers, agent runs,
+legacy triggers and workflow-entry identities retain their ownership. Provider
+fallback and execution-capacity work remain separate.

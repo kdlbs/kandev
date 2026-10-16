@@ -113,6 +113,9 @@ type Runner struct {
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	started  bool
+	// settlementMu orders explicit cancellation with abandoned native settlement.
+	// It never protects inference or shares the worker-claim critical section.
+	settlementMu sync.Mutex
 }
 
 // inFlightRun is the live state of one review pass. The cancel handle is what
@@ -184,8 +187,8 @@ const runTimeout = 10 * time.Minute
 // Launch starts a review pass in the background and returns the pending run, so
 // the caller's request does not block on inference.
 //
-// A task that already has a pending or running pass returns that run untouched —
-// re-clicking Review must not fan out into duplicate provider calls.
+// A task with a live pass returns that run untouched. An abandoned native pass
+// is retained as failed before a fresh request starts another pass.
 func (r *Runner) Launch(ctx context.Context, req RunRequest) (*models.TaskReviewRun, error) {
 	run, _, err := r.launch(ctx, req)
 	return run, err
@@ -223,9 +226,11 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 		}
 	}()
 
-	// A pass that survived a restart has a DB row but no in-memory claim, so the
-	// claim above succeeds. Rejoin it instead of starting a second one.
-	if existing, err := r.store.ActiveRun(ctx, req.TaskID); err == nil && existing != nil {
+	// The new claim proves that no native worker owns this task in this runner.
+	// Agent-owned and legacy runs retain their existing admission behavior.
+	if existing, err := r.reconcileUnownedRun(ctx, req.TaskID); err != nil {
+		return nil, nil, err
+	} else if existing != nil {
 		return existing, nil, nil
 	}
 
@@ -301,6 +306,8 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 // with a completed one, publishing findings the user already declined.
 func (r *Runner) Cancel(ctx context.Context, runID string) (*models.TaskReviewRun, error) {
 	r.cancelInFlight(runID)
+	r.settlementMu.Lock()
+	defer r.settlementMu.Unlock()
 	return r.store.CancelRun(ctx, runID)
 }
 
