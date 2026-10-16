@@ -55,6 +55,11 @@ func (m *Manager) advanceRemotePassthroughCursor(ctx context.Context, execution 
 	// source guard is held while the database or client endpoint is read.
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
+	return m.advanceRemotePassthroughCursorLocked(ctx, execution, target, instanceID, sequence)
+}
+
+// The caller holds remoteInstanceLifecycleMu through the complete save.
+func (m *Manager) advanceRemotePassthroughCursorLocked(ctx context.Context, execution *AgentExecution, target types.PassthroughTarget, instanceID string, sequence uint64) (bool, error) {
 	current, exists := m.executionStore.GetBySessionID(execution.SessionID)
 	if !exists || current != execution || !m.passthroughProcessMatches(execution, target.ProcessID) {
 		return false, nil

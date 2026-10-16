@@ -269,3 +269,8 @@ The six affected backend packages have passing complete race results. One
 gateway marker timeout passed unchanged in isolated and complete-package
 repeats. SQLguard and store-conformance checks passed. Detailed commands and
 results are recorded in Task 03.
+
+Ready/running state writes and cursor writes now share the runtime teardown
+guard. Publication occurs after releasing runtime and startup guards. The
+12-case SQLite matrix and synchronous resume-binding/cleanup subscriber passed.
+The complete lifecycle and gateway race suites passed after this extension.

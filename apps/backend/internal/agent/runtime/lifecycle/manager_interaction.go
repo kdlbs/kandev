@@ -2551,35 +2551,11 @@ func (m *Manager) markReadyEventForExecution(
 	attemptID string,
 	completion *agentctlclient.AgentEvent,
 ) error {
-	executionID := execution.ID
-	var payload AgentEventPayload
-	var updated *AgentExecution
-	var alreadyReady bool
-	// The payload snapshots promptTurnID, so take promptLifecycleMu before the
-	// store lock. Reading it under the store lock deadlocks against a
-	// concurrent completion claim and blocks every session's store access.
-	if err := m.executionStore.WithPromptLifecycleLock(executionID, func(execution *AgentExecution) {
-		if execution.Status == v1.AgentStatusReady {
-			alreadyReady = true
-			return
-		}
-		execution.Status = v1.AgentStatusReady
-		payload = newAgentEventPayloadPromptLocked(execution)
-		payload.AttemptID = attemptID
-		if completion != nil {
-			payload.TurnID = completion.TurnID
-			payload.PromptGeneration = completion.PromptGeneration
-		}
-		updated = execution
-	}); err != nil {
-		if errors.Is(err, ErrExecutionNotFound) {
-			return fmt.Errorf("execution %q not found", executionID)
-		}
+	updated, payload, err := m.prepareReadyEventForExecution(execution, attemptID, completion)
+	if err != nil || updated == nil {
 		return err
 	}
-	if alreadyReady {
-		return nil
-	}
+	executionID := execution.ID
 	m.persistExecutorRunning(context.WithoutCancel(ctx), updated)
 
 	m.logger.Info("execution ready",

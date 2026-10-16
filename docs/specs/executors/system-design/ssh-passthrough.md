@@ -237,9 +237,9 @@ Remote events enter lifecycle with the execution captured by stream registration
 Check that execution, controller, process, and generation remain current before
 calling `handlePassthroughStatus` or `handlePassthroughTurnComplete`.
 Event projection and cursor persistence do not hold the agentctl source guard.
-Cursor saves hold the remote-instance lifecycle guard through persistence and
-revalidate the active execution and process. Teardown takes that same guard
-before a client lease, so a late save cannot restore or overwrite its successor.
+Event state writes and cursor saves share the runtime teardown guard. Recheck
+the active execution and process before writing. Publish captured lifecycle
+events after releasing the guard so subscribers can re-enter Stop or Resume.
 Keep the pending initial-prompt marker in lifecycle as specified by
 [ADR-2026-09-01](../../../decisions/2026-09-01-passthrough-initial-prompt-turn-boundary.md).
 The remote runner emits raw readiness and does not decide task completion.

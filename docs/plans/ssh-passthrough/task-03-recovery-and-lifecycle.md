@@ -230,7 +230,7 @@ an event cursor save was pending. Remote event projection and gap reconciliation
 now run without that guard. Captured execution, controller, process, generation,
 and sequence checks continue to reject stale events. A WebSocket regression
 checks that a failed persistence read releases its guards without holding the
-client source guard. Cursor saves use the runtime teardown guard and revalidate
+client source guard. Event state writes and cursor saves use the runtime teardown guard and revalidate
 the execution and target before writing. Real SQLite regressions race successful
 and not-found reads with cleanup and replacement, preserving retired state and
 the successor row. Separate positive and negative cases protect identity checks.
@@ -242,7 +242,8 @@ Focused lifecycle passthrough tests passed with race detection in 63.283 seconds
 
 
 The third review reproduced late cursor upserts with successful and not-found
-reads against SQLite. Four cases cover retirement and replacement. A separate
+reads against SQLite. Twelve cases cover started, idle, and submitted events across retirement and
+replacement. A separate
 regression changes execution, controller, generation, or cursor while the save
 waits for its runtime guard. The current owner remains writable; stale owners
 perform no write. These cases and the failed-read cursor rollback case pass
@@ -261,3 +262,15 @@ store-conformance race suite passed in 78.630s.
 (cd apps/backend && go run -trimpath ./cmd/sqlguard ./internal)
 (cd apps/backend && go test -trimpath -race -tags fts5 ./internal/persistence/storeconformance -count=1)
 ```
+
+
+Expanding the same retirement matrix to idle and submitted events reproduced
+eight additional state-write races. Their state writes now share the runtime
+guard with cursor persistence. Ready and running payloads are captured during
+preparation and published after all guards are released. A synchronous event
+subscriber successfully binds a resume attempt and performs runtime cleanup.
+The publication regression passed with race detection in 1.169 seconds.
+
+After this change, the complete lifecycle race suite passed in 239.985 seconds,
+the complete gateway race suite passed in 10.045 seconds, and SQLguard passed.
+The other four package inputs and the store-conformance inputs did not change.
