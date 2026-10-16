@@ -77,6 +77,12 @@ agents and operators.
   shall defer the next request until the conservative retry boundary elapses.
 - **AC-INTEGRATIONS-GITHUB-RATE-002.3:** When interactive and background work
   are both eligible, interactive work shall have admission priority.
+- **AC-INTEGRATIONS-GITHUB-RATE-002.4:** When multiple workspaces use the same
+  GitHub App registration and installation, their Kandev-routed requests shall
+  share one observed budget and throttle state, including across credential
+  rotation.
+- **AC-INTEGRATIONS-GITHUB-RATE-002.5:** When workspaces use distinct GitHub App
+  installations, their observed budgets and throttle states shall remain isolated.
 
 ### REQ-INTEGRATIONS-GITHUB-RATE-003: Safe workflow-sync retry
 

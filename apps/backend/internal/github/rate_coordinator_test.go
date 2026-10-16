@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -17,12 +18,14 @@ func TestRateCoordinatorAdmissionSerializesBackgroundPerPrincipalResource(t *tes
 		_, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
 			Kind: AuthPrincipalHuman, Login: "shared-user",
 		}, nil)
-		ctx := WithGitHubWorkClass(context.Background(), WorkClassBackground)
+		ctx, cancel := context.WithCancel(WithGitHubWorkClass(context.Background(), WorkClassBackground))
+		t.Cleanup(cancel)
 		firstRelease, err := admission.acquire(ctx, ResourceCore)
 		if err != nil {
 			t.Fatal(err)
 		}
 
+		t.Cleanup(firstRelease)
 		secondAdmitted := make(chan struct{})
 		go func() {
 			release, acquireErr := admission.acquire(ctx, ResourceCore)
@@ -31,6 +34,11 @@ func TestRateCoordinatorAdmissionSerializesBackgroundPerPrincipalResource(t *tes
 			}
 			close(secondAdmitted)
 		}()
+		t.Cleanup(func() {
+			cancel()
+			firstRelease()
+			<-secondAdmitted
+		})
 		synctest.Wait()
 		select {
 		case <-secondAdmitted:
@@ -285,19 +293,38 @@ func TestRateCoordinatorAdmissionGivesInteractiveWorkPriorityAfterRetryWindow(t 
 			ResourceCore, time.Now().Add(time.Hour), RetrySourceConservativeFallback, "fixture",
 		)
 
+		ctx, cancel := context.WithCancel(context.Background())
 		backgroundAdmitted := make(chan struct{})
+		backgroundDone := make(chan struct{})
+		interactiveDone := make(chan struct{})
+		interactiveRelease := make(chan func(), 1)
+		var releaseInteractive func()
+		t.Cleanup(func() {
+			cancel()
+			if releaseInteractive != nil {
+				releaseInteractive()
+			}
+			<-interactiveDone
+			select {
+			case release := <-interactiveRelease:
+				release()
+			default:
+			}
+			<-backgroundDone
+		})
 		go func() {
+			defer close(backgroundDone)
 			release, err := admission.acquire(
-				WithGitHubWorkClass(context.Background(), WorkClassBackground), ResourceCore,
+				WithGitHubWorkClass(ctx, WorkClassBackground), ResourceCore,
 			)
 			if err == nil {
 				close(backgroundAdmitted)
 				release()
 			}
 		}()
-		interactiveRelease := make(chan func(), 1)
 		go func() {
-			release, err := admission.acquire(context.Background(), ResourceCore)
+			defer close(interactiveDone)
+			release, err := admission.acquire(ctx, ResourceCore)
 			if err == nil {
 				interactiveRelease <- release
 			}
@@ -306,7 +333,6 @@ func TestRateCoordinatorAdmissionGivesInteractiveWorkPriorityAfterRetryWindow(t 
 
 		tracker.ObserveSuccess(ResourceCore)
 		synctest.Wait()
-		var releaseInteractive func()
 		select {
 		case releaseInteractive = <-interactiveRelease:
 		default:
@@ -443,5 +469,83 @@ func TestRateCoordinatorPrincipalKeysShareOnlyTheSameUpstreamIdentity(t *testing
 	}
 	if app == otherInstallation {
 		t.Fatal("different GitHub App installations unexpectedly shared rate state")
+	}
+}
+
+func TestRateCoordinatorBackgroundReleaseCannotReleaseNewOwner(t *testing.T) {
+	for _, nonBlocking := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nonblocking=%t", nonBlocking), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				coordinator := NewRateCoordinator(nil, nil)
+				_, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+					Kind: AuthPrincipalHuman, Login: "release-once-user",
+				}, nil)
+				ctx := WithGitHubWorkClass(context.Background(), WorkClassBackground)
+				if nonBlocking {
+					ctx = WithNonBlockingGitHubAdmission(ctx)
+				}
+				firstRelease, err := admission.acquire(ctx, ResourceCore)
+				if err != nil {
+					t.Fatal(err)
+				}
+				firstRelease()
+				time.Sleep(defaultBackgroundPace)
+				secondRelease, err := admission.acquire(ctx, ResourceCore)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(secondRelease)
+				firstRelease()
+				time.Sleep(defaultBackgroundPace)
+				probeCtx := WithNonBlockingGitHubAdmission(ctx)
+				thirdRelease, err := admission.acquire(probeCtx, ResourceCore)
+				if thirdRelease != nil {
+					thirdRelease()
+					t.Fatal("repeated old release admitted a third request while second owns the slot")
+				}
+				var deferred *AdmissionDeferredError
+				if !errors.As(err, &deferred) || deferred.Reason != rateLimitBlockBackgroundBusy {
+					t.Fatalf("third acquire = %v, want busy deferral", err)
+				}
+				secondRelease()
+				if err := deferred.Wait(ctx); err != nil {
+					t.Fatal(err)
+				}
+				time.Sleep(defaultBackgroundPace)
+				thirdRelease, err = admission.acquire(probeCtx, ResourceCore)
+				if err != nil {
+					t.Fatalf("request did not resume after real owner released: %v", err)
+				}
+				thirdRelease()
+			})
+		})
+	}
+}
+
+func TestRateCoordinatorAppInstallationsShareOnlyOwnQuotaState(t *testing.T) {
+	coordinator := NewRateCoordinator(nil, nil)
+	first, _ := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalApp, AppRegistrationID: "app", InstallationID: 42, WorkspaceID: "first",
+	}, nil)
+	same, _ := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalApp, AppRegistrationID: "app", InstallationID: 42, WorkspaceID: "second",
+	}, nil)
+	other, _ := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalApp, AppRegistrationID: "app", InstallationID: 43, WorkspaceID: "third",
+	}, nil)
+	first.Record(RateSnapshot{Resource: ResourceCore, Limit: 5000, Remaining: 10})
+	retryAt := time.Now().Add(time.Minute)
+	first.ObserveSecondary(ResourceCore, retryAt, RetrySourceRetryAfter, "fixture")
+	if snapshot, known := same.Snapshot(ResourceCore); !known || snapshot.Remaining != 10 {
+		t.Fatalf("same installation quota = %+v, known %t", snapshot, known)
+	}
+	if throttle := same.Secondary(ResourceCore); !throttle.Active || !throttle.RetryAt.Equal(retryAt) {
+		t.Fatalf("same installation throttle = %+v", throttle)
+	}
+	if snapshot, known := other.Snapshot(ResourceCore); known {
+		t.Fatalf("different installation inherited quota: %+v", snapshot)
+	}
+	if throttle := other.Secondary(ResourceCore); throttle.Active {
+		t.Fatalf("different installation inherited throttle: %+v", throttle)
 	}
 }

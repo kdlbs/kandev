@@ -259,8 +259,10 @@ func TestStore_PollEnabledRoundtrip(t *testing.T) {
 func TestStore_WorkflowSyncRecoveryColumnsExist(t *testing.T) {
 	store := setupTestStore(t)
 	rows, err := store.db.Query(`PRAGMA table_info(workflow_sync_configs)`)
+	if rows != nil {
+		t.Cleanup(func() { _ = rows.Close() })
+	}
 	require.NoError(t, err)
-	defer func() { _ = rows.Close() }()
 	columns := map[string]bool{}
 	for rows.Next() {
 		var cid, notNull, primaryKey int

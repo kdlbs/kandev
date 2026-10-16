@@ -250,7 +250,8 @@ func (a *RateAdmission) tryAcquireBackground(resource Resource) (func(), error) 
 	if wait <= 0 && !state.backgroundBusy && state.waitingInteractive == 0 {
 		state.backgroundBusy = true
 		a.principal.mu.Unlock()
-		return func() { a.releaseBackground(resource, state) }, nil
+		var once sync.Once
+		return func() { once.Do(func() { a.releaseBackground(resource, state) }) }, nil
 	}
 	changed := state.changed
 	waitingInteractive := state.waitingInteractive
@@ -368,7 +369,8 @@ func (a *RateAdmission) acquireBackground(ctx context.Context, resource Resource
 		if eligible {
 			state.backgroundBusy = true
 			a.principal.mu.Unlock()
-			return func() { a.releaseBackground(resource, state) }, nil
+			var once sync.Once
+			return func() { once.Do(func() { a.releaseBackground(resource, state) }) }, nil
 		}
 		var deferralReason string
 		if !deferralRecorded {

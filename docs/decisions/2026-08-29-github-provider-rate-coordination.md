@@ -6,7 +6,7 @@
 
 ## Context
 
-Six workspaces using GitHub user ID 79718216 failed in coordinated polling
+Six workspaces sharing one anonymized GitHub principal failed in coordinated polling
 bursts while `GET /rate_limit` reported full core and GraphQL primary quota.
 Existing trackers are credential/workspace local and convert rate-limit prose
 into synthetic primary exhaustion, so Kandev neither recognizes secondary

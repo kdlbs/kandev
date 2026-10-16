@@ -37,7 +37,9 @@ system_design:
 
 - Workflow Sync recovery and operation-local rate errors are documented.
 - Structured transition observability avoids repeated skipped-tick warnings.
-- Backend tests/lint, spec/docs validation, and diff hygiene pass.
+- Branch-owned backend tests and lint, spec/docs validation, and diff hygiene
+  pass. The approved historical broad-suite exceptions below remain qualified;
+  completion does not assert a passing full backend suite.
 
 ## Verification
 
@@ -87,3 +89,16 @@ validation of the repair package or a rebased head.
 Task 05 of the repair package later removed the task-bound snapshot tool and
 updated both public MCP catalogs. The "preserved" snapshot statement above is
 superseded; its original test and validation counts remain historical receipts.
+
+## Historical acceptance clarification
+
+At the reviewed revision `892084744cf17717da2cfe22452ff3d911b5ba73`, the
+recorded broad `make -C apps/backend test` run failed in four packages:
+`internal/agent/runtime/agentctl/launcher` (process-group child PID checks),
+`internal/agentctl/server/process` (parent PID and stale process-group checks),
+`internal/common/config` (injected health-timeout environment value), and
+`internal/task/service` (an externally owned failure under investigation).
+The coordinator accepted those broad-suite exceptions at that time; they were
+not full-suite passes. The later 2026-09-25 record above names a different
+three-package result. These dated historical records do not certify later
+revisions or replace their affected checks and CI results.
