@@ -429,10 +429,11 @@ func (r *Repository) CreateTurnWithStepStampConversationReceipt(ctx context.Cont
 	_, stepID, found, stepErr := r.readTaskStepInTx(ctx, tx, turn.TaskID)
 	stamped := false
 	if stepErr == nil && found && stepID != "" {
-		if turn.Metadata == nil {
-			turn.Metadata = map[string]interface{}{}
+		if err := r.stampTurnWorkflowEntryTx(ctx, tx, turn, stepID); err != nil {
+			_ = tx.Rollback()
+			receipt, insertErr := r.CreateTurnWithConversationReceipt(ctx, turn)
+			return false, receipt, insertErr
 		}
-		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
 		stamped = true
 	}
 	if err := r.insertTurnRow(ctx, tx, turn); err != nil {

@@ -358,6 +358,9 @@ func newPreparedPromptFixture(t *testing.T, suffix string, alternateSession bool
 	if err := repo.UpdateTaskSession(ctx, current); err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.SetSessionPrimary(ctx, sessionID); err != nil {
+		t.Fatal(err)
+	}
 	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
 	if alternateSession {
 		if err := repo.CreateTaskSession(ctx, &models.TaskSession{

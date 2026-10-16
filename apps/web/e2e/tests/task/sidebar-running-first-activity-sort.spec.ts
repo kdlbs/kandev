@@ -22,6 +22,8 @@ import {
   waitForTaskRunningSummary,
 } from "./sidebar-running-first-activity-sort-helpers";
 
+test.describe.configure({ retries: 0 });
+
 // @covers AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.1, .2, .3, .5, .6, .7, .10, .11, .13 AC-UI-SIDEBAR-GROUP-INDENT-001.1, .2, .3, .4, .6
 test("desktop sorts a complete paged tree by running, color, and activity", async ({
   testPage,
@@ -187,6 +189,9 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
     await expect(firstHandle).toHaveAttribute("aria-pressed", "true");
     await testPage.keyboard.press("ArrowDown");
     await testPage.keyboard.press("Escape");
+    await expect(reloadPopover).toBeVisible();
+    await expect(firstHandle).not.toHaveAttribute("aria-pressed");
+    await expect(reloadPopover.locator('[data-dragging="true"]')).toHaveCount(0);
     await expect(firstHandle).toBeFocused();
     await expect
       .poll(() =>
@@ -194,7 +199,8 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
       )
       .toEqual(originalOrder);
 
-    await reloadFilters.close();
+    await testPage.keyboard.press("Escape");
+    await expect(reloadPopover).toBeHidden();
     await reloadFilters.open();
     await reloadFilters.openSortSettings();
     const keyboardMoveHandle = reloadPopover.getByTestId("sort-rule-handle-0");

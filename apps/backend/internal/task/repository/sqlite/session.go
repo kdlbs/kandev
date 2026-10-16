@@ -38,7 +38,7 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 }
 
 // CreateTurnWithStepStamp is documented on the TurnRepository interface. It
-// reads the task's current step inside a transaction that takes the same
+// reads the task's current step and entry inside a transaction taking the same
 // readTaskStepInTx lock a step move takes, so the read and the turn insert
 // are serialized against concurrent movers of the same task row rather than
 // racing a plain unlocked GetTask against a later, separate insert. A
@@ -71,10 +71,11 @@ func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.T
 
 	stamped := false
 	if found && stepID != "" {
-		if turn.Metadata == nil {
-			turn.Metadata = map[string]interface{}{}
+		if err := r.stampTurnWorkflowEntryTx(ctx, tx, turn, stepID); err != nil {
+			_ = tx.Rollback()
+			committed = true
+			return false, r.insertTurnWithSessionLock(ctx, turn)
 		}
-		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
 		stamped = true
 	}
 
@@ -86,6 +87,23 @@ func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.T
 	}
 	committed = true
 	return stamped, nil
+}
+
+// stampTurnWorkflowEntryTx runs after the task row is locked, so the entry
+// read observes the same committed arrival as the workflow-step stamp.
+func (r *Repository) stampTurnWorkflowEntryTx(ctx context.Context, tx stepTransitionTx, turn *models.Turn, stepID string) error {
+	entryID, err := r.getLatestTaskStepTransitionIDTx(ctx, tx, turn.TaskID)
+	if err != nil {
+		return err
+	}
+	if turn.Metadata == nil {
+		turn.Metadata = map[string]interface{}{}
+	}
+	turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
+	if entryID > 0 {
+		turn.Metadata[models.TurnMetaKeyWorkflowStepTransitionIDAtStart] = entryID
+	}
+	return nil
 }
 
 // stampTurnDefaults fills in the ID/timestamp defaults CreateTurn and
@@ -2282,6 +2300,15 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 	// UpdateSessionMetadata or SetSessionMetadataKey. A full-row write here
 	// would clobber metadata set via those side-channel paths since the
 	// caller's in-memory copy may be stale.
+
+	// is_primary is never promoted here: the conditional write only releases
+	// an owned flag for a snapshot-guarded write whose copy says non-primary
+	// and keeps the stored selection otherwise, so a full-row write carrying a
+	// copy read before a promotion cannot make the demoted session primary
+	// again and leave the task with two primaries. Promotion and demotion
+	// still belong to the task-scoped SetSessionPrimary transactions. No
+	// unique index backs the column, so that single-writer guard is load
+	// bearing.
 
 	// agent_profile_id is stored as NULL when empty. No unique index
 	// constrains (task_id, agent_profile_id) at this UPDATE path — office

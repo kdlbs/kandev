@@ -1,5 +1,6 @@
 import {
   INTEGRATION_CHORD,
+  navigateHomeWithinApp,
   recordIntegrationShortcut,
   saveIntegrationShortcuts,
 } from "./integration-shortcuts-helpers";
@@ -260,41 +261,55 @@ test.describe("Integration navigation hotkeys", () => {
     ["jira", "/jira"],
     ["linear", "/linear"],
     ["sentry", "/settings/integrations/sentry"],
-  ];
-  for (const [slug, destination] of destinations) {
-    test(`records, saves, reloads, opens and resets the ${slug} integration`, async ({
-      testPage,
-      apiClient,
-    }) => {
-      await testPage.goto(KEYBOARD_SETTINGS_PATH);
-      for (const [initialSlug] of destinations) {
-        await expect(
-          testPage.getByTestId(`shortcut-recorder-integration:${initialSlug}`),
-        ).toContainText("Unbound");
-      }
-      await recordIntegrationShortcut(testPage, slug);
-      await saveIntegrationShortcuts(testPage);
-      await testPage.reload();
-      const recorder = testPage.getByTestId(`shortcut-recorder-integration:${slug}`);
-      await expect(recorder).toContainText("G");
-      await recordIntegrationShortcut(testPage, slug);
-      await expect(testPage).toHaveURL(new RegExp(`${KEYBOARD_SETTINGS_PATH}$`));
-      await testPage.goto("/");
-      await testPage.keyboard.press(INTEGRATION_CHORD);
-      await expect(testPage).toHaveURL(new RegExp(`${destination}$`));
-      await testPage.goto(KEYBOARD_SETTINGS_PATH);
-      await recorder.locator("..").getByRole("button", { name: "Reset (clear shortcut)" }).click();
-      await saveIntegrationShortcuts(testPage);
-      await testPage.reload();
-      await expect(recorder).toContainText("Unbound");
-      expect(
-        (await apiClient.getUserSettings()).settings.keyboard_shortcuts ?? {},
-      ).not.toHaveProperty(`integration:${slug}`);
-      await testPage.goto("/");
-      await testPage.keyboard.press("Control+k");
-      await expect(testPage.getByRole("dialog")).toBeVisible();
-    });
-  }
+  ] as const;
+
+  test.describe("integration-page lifecycle", () => {
+    test.describe.configure({ retries: 0 });
+
+    for (const [slug, destination] of destinations) {
+      test(`records, saves, reloads, opens and resets ${slug}`, async ({
+        testPage,
+        apiClient,
+        seedData,
+      }) => {
+        await testPage.goto(KEYBOARD_SETTINGS_PATH);
+        for (const [candidateSlug] of destinations) {
+          await expect(
+            testPage.getByTestId(`shortcut-recorder-integration:${candidateSlug}`),
+          ).toContainText("Unbound");
+        }
+        await recordIntegrationShortcut(testPage, slug);
+        await saveIntegrationShortcuts(testPage);
+        await testPage.reload();
+        const recorder = testPage.getByTestId(`shortcut-recorder-integration:${slug}`);
+        await expect(recorder).toContainText("G");
+        // Re-recording the already saved chord must stay in settings.
+        await recordIntegrationShortcut(testPage, slug);
+        await expect(testPage).toHaveURL(new RegExp(`${KEYBOARD_SETTINGS_PATH}$`));
+        await navigateHomeWithinApp(testPage);
+        await testPage.keyboard.press(INTEGRATION_CHORD);
+        const expectedDestination =
+          slug === "sentry"
+            ? `/settings/workspaces/${seedData.workspaceId}/integrations/sentry`
+            : destination;
+        await expect(testPage).toHaveURL(new RegExp(`${expectedDestination}$`));
+        await testPage.goto(KEYBOARD_SETTINGS_PATH);
+        await recorder
+          .locator("..")
+          .getByRole("button", { name: "Reset (clear shortcut)" })
+          .click();
+        await saveIntegrationShortcuts(testPage);
+        await testPage.reload();
+        await expect(recorder).toContainText("Unbound");
+        expect(
+          (await apiClient.getUserSettings()).settings.keyboard_shortcuts ?? {},
+        ).not.toHaveProperty(`integration:${slug}`);
+        await navigateHomeWithinApp(testPage);
+        await testPage.keyboard.press("Control+k");
+        await expect(testPage.getByRole("dialog")).toBeVisible();
+      });
+    }
+  });
 
   test("warns about conflicting navigation chords and navigates once", async ({ testPage }) => {
     await testPage.goto(KEYBOARD_SETTINGS_PATH);

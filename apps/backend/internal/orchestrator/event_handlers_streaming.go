@@ -2082,20 +2082,10 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 		return
 	}
 
-	// Pick the best candidate: prefer RUNNING, then STARTING, then WAITING_FOR_INPUT
-	var candidate string
-	for _, sess := range sessions {
-		if sess.ID == sessionID {
-			continue
-		}
-		if sess.State == models.TaskSessionStateRunning {
-			candidate = sess.ID
-			break
-		}
-		if candidate == "" && isActiveSessionState(sess.State) {
-			candidate = sess.ID
-		}
-	}
+	// Only an active session can inherit the role after a stop. The shared
+	// selector prefers the current step's profile and ranks a parked session
+	// last; a parked session remains eligible when no better active session exists.
+	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, sessionID, true)
 	if candidate != "" {
 		if err := s.SetPrimarySession(ctx, candidate); err != nil {
 			s.logger.Warn("failed to auto-promote primary session",

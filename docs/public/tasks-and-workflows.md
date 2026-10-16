@@ -566,6 +566,13 @@ session only after it verifies the saved owner and native conversation. If the
 owner, conversation, or delivery evidence is missing or changed, that session
 stays blocked with its available recovery controls. See [Manage session state](sessions-and-review.md#manage-session-state) for those controls and recovery details.
 
+Restart recovery also checks automatic workflow starts that were accepted but
+never delivered their step prompt. It resumes that entry through normal capacity
+and dependency admission. A hold step, deferred start, workflow queue, or Office
+owner keeps its existing control of the task. An earlier visit to the same step
+does not consume a newly accepted entry, and a prompt already accepted for the
+current entry is not replayed.
+
 The preference only gates opening a task. Choosing **Start agent** (or a
 workflow step transition) always starts the agent as usual, and a failed or
 interrupted session still shows its recovery actions.

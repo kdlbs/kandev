@@ -269,6 +269,15 @@ func isManualRecoveryPromptError(err error) bool {
 		strings.Contains(message, "you've hit your usage limit")
 }
 
+// isEnsureSessionRunningTimeout requires expiry recorded by a runtime wait
+// and the ensure-session classifier boundary. Provider deadlines retain their
+// existing disposition even when they pass through that classifier.
+func isEnsureSessionRunningTimeout(err error) bool {
+	var expiry *sessionRuntimeWaitExpiry
+	return errors.As(err, &expiry) && errors.Is(err, context.DeadlineExceeded) &&
+		strings.Contains(err.Error(), "failed to ensure session is running:")
+}
+
 func isAgentAlreadyRunningError(err error) bool {
 	return err != nil && errors.Is(err, lifecycle.ErrAgentAlreadyRunning)
 }
@@ -4341,7 +4350,7 @@ func (s *Service) waitForSharedResumeAttempt(
 	startupAttempt *resumeAttempt,
 ) (*resumeAttempt, error) {
 	waitCtx, cancelWait := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
-	waitErr := startupAttempt.wait(waitCtx)
+	waitErr := markSessionRuntimeWaitExpiry(waitCtx, startupAttempt.wait(waitCtx))
 	cancelWait()
 	if waitErr != nil {
 		return nil, waitErr
@@ -4702,13 +4711,14 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 	return nil
 }
 
-func (s *Service) waitForAgentPromptReady(ctx context.Context, sessionID string) error {
+func (s *Service) waitForAgentPromptReady(ctx context.Context, sessionID string) (waitErr error) {
 	if s.agentManager == nil {
 		return nil
 	}
 
 	readyCtx, cancel := context.WithTimeout(ctx, agentPromptReadyTimeout)
 	defer cancel()
+	defer func() { waitErr = markSessionRuntimeWaitExpiry(readyCtx, waitErr) }()
 
 	ticker := time.NewTicker(agentPromptReadyInterval)
 	defer ticker.Stop()
@@ -4808,7 +4818,7 @@ func (s *Service) startAgentOnPreparedWorkspace(
 }
 
 // waitForSessionReady polls the session state until the agent is ready for prompts.
-func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) error {
+func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) (waitErr error) {
 	const pollInterval = 500 * time.Millisecond
 	maxWait := constants.AgentLaunchTimeout
 	// Derive a bounded context so the overall wait AND each GetTaskSession query
@@ -4819,6 +4829,7 @@ func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) err
 	// wall clock between iterations). Mirrors waitForAgentPromptReady.
 	readyCtx, cancel := context.WithTimeout(ctx, maxWait)
 	defer cancel()
+	defer func() { waitErr = markSessionRuntimeWaitExpiry(readyCtx, waitErr) }()
 	// Ticker rather than time.After(pollInterval) in the loop: time.After
 	// allocates a fresh timer each iteration that lives until it fires, so a
 	// long wait would pile up ~maxWait/pollInterval live timers. Mirrors
@@ -6050,28 +6061,14 @@ func (s *Service) quiesceSessionExecutionBeforeDeletion(
 }
 
 // promoteNextPrimaryAfterRemoval picks the best remaining session as primary
-// after a session is deleted. Prefers RUNNING > active > any remaining.
+// after a session is deleted. Any nonterminal session is eligible; the shared
+// selector prefers the current step's profile and ranks a parked session last.
 func (s *Service) promoteNextPrimaryAfterRemoval(ctx context.Context, taskID, deletedSessionID string) {
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
 	if err != nil || len(sessions) == 0 {
 		return
 	}
-	var candidate string
-	for _, sess := range sessions {
-		if sess.ID == deletedSessionID {
-			continue
-		}
-		if sess.State == models.TaskSessionStateRunning {
-			candidate = sess.ID
-			break
-		}
-		if candidate == "" {
-			candidate = sess.ID
-		} else if isActiveSessionState(sess.State) {
-			// Prefer active over terminal
-			candidate = sess.ID
-		}
-	}
+	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, deletedSessionID, false)
 	if candidate != "" {
 		if err := s.SetPrimarySession(ctx, candidate); err != nil {
 			s.logger.Warn("failed to auto-promote primary after delete",

@@ -839,6 +839,10 @@ const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
 // was in when the turn started. Absent when the task held no step.
 const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
 
+// TurnMetaKeyWorkflowStepTransitionIDAtStart identifies the accepted entry
+// observed under the same task lock as the turn's workflow-step stamp.
+const TurnMetaKeyWorkflowStepTransitionIDAtStart = "workflow_step_transition_id_at_start"
+
 // TurnMetaKeyLifecycleOnly marks a turn created only to parent a lifecycle
 // message (for example the agent_boot script_execution message on resume).
 // A lifecycle turn never reflects real agent work and must never be current-

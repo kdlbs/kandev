@@ -2270,13 +2270,15 @@ func (s *Service) handleQueuedMessageExecutionError(
 		s.agentManager != nil &&
 		s.agentManager.IsPassthroughSession(ctx, queuedMsg.SessionID)
 	uncertainDelivery := errors.Is(err, lifecycle.ErrUncertainPromptDelivery)
+	ensureSessionRunningTimeout := isEnsureSessionRunningTimeout(err)
 	if passthroughAttachmentRecovery ||
 		(!uncertainDelivery && (lifecyclePrompt || queuedMsg.IsDurablePlanComment())) ||
 		errors.Is(err, errLifecyclePromptClaim) ||
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery || seam3Refusal ||
 		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
-		errors.Is(err, ErrSessionRuntimeUnavailable) {
+		errors.Is(err, ErrSessionRuntimeUnavailable) ||
+		ensureSessionRunningTimeout {
 		if userMessageRecorded {
 			markQueuedUserMessageRecorded(queuedMsg)
 		}
