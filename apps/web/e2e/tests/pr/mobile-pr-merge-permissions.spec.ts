@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow, requireBox } from "../../helpers/layout-assertions";
 import {
   MERGE_ACCESS_DENIED,
@@ -32,6 +33,9 @@ test("keeps denied and unknown merge access safe in the phone drawer and Review"
   await expect(drawer.getByTestId("pr-merge-access")).toHaveText(MERGE_ACCESS_DENIED);
   await expect(drawer.getByTestId("pr-merge-button")).toHaveCount(0);
   await assertNoDocumentHorizontalOverflow(testPage);
+  await waitForFiniteAnimations(session.prStatusChipDrawer());
+  await drawer.getByTestId("pr-merge-access").scrollIntoViewIfNeeded();
+  await expect(drawer.getByTestId("pr-merge-access")).toBeInViewport();
   await prCapture.screenshot("mobile-pr-merge-access-denied", {
     caption: "Phone PR drawer explains that the target repository is read-only",
   });

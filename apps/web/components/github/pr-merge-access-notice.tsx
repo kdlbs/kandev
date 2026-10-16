@@ -8,11 +8,13 @@ export function PRMergeAccessNotice({
   actor,
   repository,
   onRetry,
+  compact = false,
 }: {
   state: Exclude<MergeAccessSnapshot["state"], "allowed">;
   actor: string | null;
   repository: string;
   onRetry: () => void;
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const message =
@@ -25,9 +27,9 @@ export function PRMergeAccessNotice({
   return (
     <div
       data-testid="pr-merge-access"
-      className="flex min-w-0 flex-col items-start gap-2 text-xs text-muted-foreground"
+      className={`flex min-w-0 flex-col items-start gap-2 text-xs text-muted-foreground ${compact ? "px-1" : ""}`}
     >
-      <p role="status" className="max-w-full [overflow-wrap:anywhere]">
+      <p role="status" className="max-w-full first-letter:uppercase [overflow-wrap:anywhere]">
         {message}
       </p>
       {state === "unknown" && (

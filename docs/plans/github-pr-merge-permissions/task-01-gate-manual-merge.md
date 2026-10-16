@@ -265,3 +265,16 @@ pnpm exec prettier --check components/github/pr-ci-popover.footer.test.tsx
 The focused footer suite passed all five tests. The expanded GitHub suite passed
 669 tests across 73 files. Logs: `/tmp/pr-4532-footer-red.log`,
 `/tmp/pr-4532-footer-green.log`, and `/tmp/pr-4532-github-consumers-green.log`.
+
+### Notice presentation correction
+
+The displayed first letter is uppercase. Compact permission notices use the
+same horizontal inset as Review follow-up. The account identifier remains
+unchanged. Phone captures wait for the drawer animation and scroll the notice
+into view before recording it.
+
+The two merge-button and popover-footer unit suites passed all 16 tests.
+Targeted ESLint and Prettier passed. The managed permission browser suites
+passed two desktop cases and one phone case with the rebuilt web assets.
+Logs: `/tmp/pr-4532-notice-unit.log`, `/tmp/kandev-run.e2e.OLiUYpg8.log`,
+and `/tmp/kandev-run.e2e.fW1Fp0m0.log`.

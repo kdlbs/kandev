@@ -220,6 +220,12 @@ Its accessible-role query now targets the footer, so the permission notice can
 coexist with the refresh announcement. The test failed before this correction
 and passed afterward, along with the broader GitHub component suite.
 
+The permission notice now capitalizes its displayed first letter and uses the
+same horizontal inset as Review follow-up in the desktop popover and phone drawer.
+The focused 16 component tests and three permission browser tests passed after
+this correction. The phone capture waits for the drawer and scrolls the notice
+into view. Account identifiers and permission behavior are unchanged.
+
 ## Risks
 
 - GitHub can revoke access after a read. The mutation must retain provider enforcement.

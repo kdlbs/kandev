@@ -110,6 +110,7 @@ export function PRMergeButton({
         actor={mutationActor}
         repository={`${taskPR.owner}/${taskPR.repo}`}
         onRetry={access.refresh}
+        compact={compact}
       />
     );
   }
