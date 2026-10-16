@@ -274,3 +274,23 @@ The publication regression passed with race detection in 1.169 seconds.
 After this change, the complete lifecycle race suite passed in 239.985 seconds,
 the complete gateway race suite passed in 10.045 seconds, and SQLguard passed.
 The other four package inputs and the store-conformance inputs did not change.
+
+Resetting Cursor or Pi with changed profile MCP settings reproduced HTTP 400
+from the previous generation's own claim. A second API regression reproduced
+the same rejection after a confirmed Stop, including after a sibling released
+its claim. Reset now resolves credentials before Stop, then prepares the new
+configuration. The controller retires only the stopped current generation's
+claim. Pending preparation and sibling claims remain protected.
+
+Stale preparation reproduced an incorrect HTTP 200 and is now rejected with
+HTTP 409. A failed preparation after Stop also reproduced a READY execution
+with no CLI; that path now records FAILED. Regression coverage includes Cursor,
+Pi, sibling conflicts, stale cleanup, profile-secret failure, and failed Stop.
+The complete process race suite passed in 393.483 seconds and the API race
+suite passed in 175.900 seconds. After preserving the local reset preparation
+order, the final complete lifecycle race suite passed in 233.242 seconds.
+
+```bash
+(cd apps/backend && GOMEMLIMIT=3GiB GOMAXPROCS=2 GOFLAGS=-p=2 go test -trimpath -race -tags fts5 ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle -count=1)
+(cd apps/backend && GOMEMLIMIT=3GiB GOMAXPROCS=2 GOFLAGS=-p=2 go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -count=1)
+```

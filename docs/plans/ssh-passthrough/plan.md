@@ -274,3 +274,8 @@ Ready/running state writes and cursor writes now share the runtime teardown
 guard. Publication occurs after releasing runtime and startup guards. The
 12-case SQLite matrix and synchronous resume-binding/cleanup subscriber passed.
 The complete lifecycle and gateway race suites passed after this extension.
+
+Remote reset now resolves profile credentials before Stop and applies MCP
+changes after a confirmed Stop. Preparation releases only the stopped current
+generation's claims and rejects stale generations. Sibling claims remain
+protected. Task 03 records the regression and verification results.

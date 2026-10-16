@@ -541,6 +541,10 @@ Cursor and Pi use workspace MCP files. If another session claims a different
 controller URL in that file, preparation fails. Stop that session before
 retrying, or use a separate task.
 
+When you reset an SSH agent, Kandev stops its CLI before applying changed MCP
+settings. If preparation then fails, the CLI stays stopped. Resolve the
+configuration conflict before you resume the session.
+
 After a backend interruption, **Resume** reconnects to a verified live remote
 CLI. If that process is absent, Resume uses the preserved workspace and the
 agent's conversation resume options. Missing authentication or uncertain

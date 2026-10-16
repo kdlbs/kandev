@@ -22,11 +22,9 @@ func (o *PassthroughOwner) Prepare(ctx context.Context, request types.Passthroug
 		return err
 	}
 	defer release()
-	if !o.validConfigGeneration(request.Generation) {
+	snapshot := o.Snapshot()
+	if request.Generation == 0 || request.Generation != snapshot.Generation+1 {
 		return ErrPassthroughConflict
-	}
-	if len(request.Files) == 0 {
-		return nil
 	}
 	if len(request.Files) > 32 {
 		return errors.New("too many MCP configuration files")
@@ -34,6 +32,14 @@ func (o *PassthroughOwner) Prepare(ctx context.Context, request types.Passthroug
 	cfg := o.manager.cfg
 	if cfg.SessionID == "" || filepath.Base(cfg.SessionID) != cfg.SessionID {
 		return ErrPassthroughConflict
+	}
+	if snapshot.Generation > 0 && !o.Live() {
+		if err := o.CleanupConfig(ctx, snapshot.Generation); err != nil {
+			return err
+		}
+	}
+	if len(request.Files) == 0 {
+		return nil
 	}
 	privateRoot := filepath.Join(cfg.WorkDir, ".kandev", "sessions", cfg.SessionID, "passthrough")
 	return passthroughconfig.Prepare(ctx, cfg.WorkDir, privateRoot, o.fileOwnerPrefix()+strconv.FormatUint(request.Generation, 10), request.Files)

@@ -91,7 +91,7 @@ credential invalidation. No route joins the unauthenticated MCP exemption list.
 | `POST /passthrough/input` | Write bytes to the named process generation, with optional submission ID |
 | `POST /passthrough/resize` | Resize the named generation, with validated dimensions |
 | `GET /passthrough/idle` | Wait for first idle of the named generation within the caller's cancellation budget |
-| `DELETE /passthrough/:process_id` | Stop the named generation and conditionally release its config claims |
+| `DELETE /passthrough/:process_id` | Stop the named generation |
 | `GET /passthrough/stream` | Binary terminal stream for the current session process |
 | `GET /passthrough/events` | Ordered JSON events with bounded replay from a cursor |
 
@@ -195,6 +195,14 @@ Identical JSON may share a claim. A conflicting controller URL fails before
 writing files or adding claims. The claims contain no tokens or configuration
 bytes. Unproven stale claims
 preserve files instead of enabling deletion.
+
+Preparation accepts only the next process generation. Under the controller's
+startup lock, it releases the stopped current generation's claims before
+materializing replacement artifacts. It preserves pending next-generation
+claims and all other controllers' claims. A live generation retains its claims.
+An agent reset resolves profile credentials before Stop, then prepares remote
+MCP files only after Stop succeeds. Failed Stop preserves the recorded process
+identity and files. Preparation failure after Stop marks the execution failed.
 
 The CLI uses the existing agent passthrough command and remote environment
 snapshot. Native executable resolution occurs on the target. A missing remote
