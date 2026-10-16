@@ -665,6 +665,11 @@ func (c *sessionCeilingController) expireStaleReservations() int {
 	defer c.mu.Unlock()
 	released := 0
 	for key, reservation := range c.reservations {
+		// Native requests own explicit cleanup/transfer. Their live context may
+		// outlast a task launch budget; elapsed time is not ownership release.
+		if reservation.nativeOwner != nil {
+			continue
+		}
 		if now.Sub(reservation.takenAt) <= budget {
 			continue
 		}
