@@ -1,10 +1,17 @@
 ---
-spec: docs/specs/agents/requirements/native-code-review.md
+requirements:
+  - REQ-AGENTS-NATIVE-REVIEW-TIMEOUT-001
+system_design:
+  - ../../specs/agents/system-design/native-review-timeout.md
+legacy_specs:
+  - ../../specs/agents/requirements/native-code-review.md
 created: 2026-07-24
-status: building
+status: in_progress
 ---
 
 # Implementation Plan: Native Code Review
+
+Current recovery increment: [Task 15: dynamic candidate request timeout](task-15-dynamic-candidate-timeout.md).
 
 ## Overview
 
