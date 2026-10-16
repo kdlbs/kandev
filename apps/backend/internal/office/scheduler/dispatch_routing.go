@@ -47,8 +47,8 @@ const (
 	RouteAttemptOutcomeDeferredCapacity      = "deferred_capacity"
 )
 
-// MaxAttemptsPerRun caps the number of route_attempt rows a single run
-// can accumulate. A pathological cycle (provider flapping, post-start
+// MaxAttemptsPerRun caps provider attempts for a run. Unstarted taskless
+// admission waits reuse their existing row and do not consume this budget. A pathological cycle (provider flapping, post-start
 // fallback racing with re-park) could otherwise append rows forever.
 // Once the cap is reached the dispatcher parks the run as
 // blocked_provider_action_required so a human notices.
@@ -62,7 +62,8 @@ const providerFallbackPromptMarker = "[Kandev provider fallback]"
 //   - launched=false, parked=false, err=nil → routing disabled / not
 //     wired. Caller falls through to the legacy concrete-profile path.
 //   - launched=false, parked=true, err=nil → run parked under
-//     routing_blocked_status. Caller treats as handled.
+//     routing_blocked_status or retained by its Office admission owner. Caller
+//     treats both dispositions as handled.
 //   - launched=false, err!=nil → infrastructure failure; caller invokes
 //     existing HandleRunFailure.
 //
@@ -86,7 +87,7 @@ func (ss *SchedulerService) DispatchWithRouting(
 	if err != nil {
 		return false, false, fmt.Errorf("dispatch: list prior: %w", err)
 	}
-	if len(prior) >= MaxAttemptsPerRun {
+	if providerAttemptCount(run, prior) >= MaxAttemptsPerRun {
 		if perr := ss.parkRunMaxAttempts(ctx, run, agent.WorkspaceID); perr != nil {
 			return false, false, perr
 		}
@@ -273,11 +274,14 @@ func (ss *SchedulerService) tryCandidates(
 		candidateLaunch := continuationLaunchContext(
 			launch, prior, run.RouteCycleBaselineSeq, candidate,
 		)
-		seq, err := ss.recordAttemptStart(ctx, run, candidate, res.RequestedTier, res.TierSource)
+		seq, err := ss.recordDispatchAttempt(ctx, run, candidate, res.RequestedTier, res.TierSource, prior)
 		if err != nil {
 			return false, nil, err
 		}
 		sessionID, launchErr := ss.launchCandidate(ctx, run, agent, candidate, candidateLaunch)
+		if errors.Is(launchErr, service.ErrRunSessionAdmissionDeferred) {
+			return ss.deferRunSessionAdmission(ctx, run, seq)
+		}
 		if errors.Is(launchErr, service.ErrLaunchDeferredByCapacity) {
 			return ss.handleLaunchDeferred(ctx, run, agent.WorkspaceID, seq)
 		}

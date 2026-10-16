@@ -752,6 +752,11 @@ func (si *SchedulerIntegration) launchAgent(
 			zap.Int("prompt_len", len(launch.Prompt)))
 		var route *RouteOverride
 		result, err := si.svc.runSessionLauncher.StartRunSession(ctx, run, agent, launch, route)
+		if errors.Is(err, ErrRunSessionAdmissionDeferred) {
+			// The existing run/attempt owns continuation. Capacity waiting is
+			// neither a provider failure nor the task ceiling's replay handoff.
+			return false
+		}
 		if err != nil {
 			si.logger.Error("taskless agent launch failed", zap.String("run_id", runID), zap.Error(err))
 			si.svc.AppendRunEvent(ctx, runID, "error", "error", map[string]interface{}{

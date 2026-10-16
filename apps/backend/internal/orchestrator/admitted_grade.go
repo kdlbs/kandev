@@ -122,6 +122,10 @@ func (c *sessionCeilingController) resolveAdmissionGradeLocked(ctx context.Conte
 }
 
 func (c *sessionCeilingController) persistAdmissionGradeLocked(ctx context.Context, req admissionRequest, decision admissionDecision) admissionDecision {
+	// Office persists its frozen grade with its own run-session reservation.
+	if req.seam == officeRunCapacitySeam {
+		return decision
+	}
 	if !decision.admitted || !req.gradeKnown || req.sessionID == "" || c.persistGrade == nil {
 		return decision
 	}

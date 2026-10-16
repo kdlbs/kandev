@@ -64,6 +64,8 @@ func RunnerProjection(alias string) string {
 // code paths (and the office service's QueueRun delegation) keep
 // working without churn.
 type Repository struct {
+	// Installed once before Office launch/event consumers start.
+	runSessionCapacityReleased func()
 	*runssqlite.Repository
 
 	db      *sqlx.DB // writer
@@ -521,6 +523,8 @@ func (r *Repository) createRunTables() error {
 		run_id TEXT NOT NULL,
 		attempt INTEGER NOT NULL,
 		state TEXT NOT NULL,
+		admitted_execution_grade TEXT NOT NULL DEFAULT '',
+		admitted_execution_grade_known INTEGER NOT NULL DEFAULT 0,
 		execution_id TEXT NOT NULL DEFAULT '',
 		execution_profile_id TEXT NOT NULL DEFAULT '',
 		adapter TEXT NOT NULL DEFAULT '',

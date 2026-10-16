@@ -63,6 +63,9 @@ func (c *sessionCeilingController) readGradedPopulationLocked(ctx context.Contex
 		population.counted[row.ID] = struct{}{}
 		c.observeGradeLocked(&population, row.Grade, row.GradeKnown, grade)
 	}
+	if err := c.appendRunSessionGradesLocked(ctx, &population, grade); err != nil {
+		return population, err
+	}
 	if err := c.appendInferenceGradesLocked(ctx, &population, grade); err != nil {
 		return population, err
 	}

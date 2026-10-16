@@ -128,6 +128,7 @@ type SessionCeilingObservation struct {
 // the reservation set happens under its one mutex, together with the population
 // read it is compared against.
 type sessionCeilingController struct {
+	runSessions      RunSessionCapacitySource
 	inferenceStore   *sessioncapacity.Store
 	inferenceRefresh func(context.Context)
 	inferenceKnown   bool
