@@ -50,6 +50,30 @@ func (m *Manager) updateRemotePassthroughRecord(ctx context.Context, execution *
 	return m.saveRemotePassthroughRecord(ctx, execution, record)
 }
 
+func (m *Manager) advanceRemotePassthroughCursor(ctx context.Context, execution *AgentExecution, target types.PassthroughTarget, instanceID string, sequence uint64) (bool, error) {
+	// Runtime teardown and cursor persistence share this outer guard. No client
+	// source guard is held while the database or client endpoint is read.
+	execution.remoteInstanceLifecycleMu.Lock()
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	current, exists := m.executionStore.GetBySessionID(execution.SessionID)
+	if !exists || current != execution || !m.passthroughProcessMatches(execution, target.ProcessID) {
+		return false, nil
+	}
+	execution.remotePassthroughRecordMu.Lock()
+	defer execution.remotePassthroughRecordMu.Unlock()
+	previous := remotePassthroughRecordFor(execution)
+	if previous.PassthroughTarget != target || previous.InstanceID != instanceID || sequence < previous.EventSequence {
+		return false, nil
+	}
+	next := previous
+	next.EventSequence = sequence
+	if err := m.saveRemotePassthroughRecord(ctx, execution, next); err != nil {
+		execution.setMetadataValue(metadataKeySSHPassthroughState, previous)
+		return false, err
+	}
+	return true, nil
+}
+
 func (r *remotePassthroughRunner) recordStart(ctx context.Context, snapshot *types.PassthroughSnapshot, operationID string, initialChunks int) error {
 	update := func(record *remotePassthroughRecord) {
 		record.InstanceID = snapshot.InstanceID

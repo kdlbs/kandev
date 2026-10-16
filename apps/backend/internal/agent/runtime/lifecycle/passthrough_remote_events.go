@@ -99,24 +99,15 @@ func (m *Manager) reconcileRemotePassthroughGap(execution *AgentExecution, clien
 	if err != nil || fresh.InstanceID != source.InstanceID || fresh.SessionID != source.SessionID || fresh.PassthroughTarget != source.PassthroughTarget {
 		return after
 	}
-	accepted := after
-	current, exists := m.executionStore.GetBySessionID(source.SessionID)
-	if !exists || current != execution || !m.passthroughProcessMatches(execution, source.ProcessID) {
+	accepted, err := m.advanceRemotePassthroughCursor(ctx, execution, fresh.PassthroughTarget, fresh.InstanceID, fresh.Sequence)
+	if err != nil || !accepted {
 		return after
 	}
-	if err := m.updateRemotePassthroughRecord(ctx, execution, func(record *remotePassthroughRecord) {
-		if record.PassthroughTarget == fresh.PassthroughTarget && record.InstanceID == fresh.InstanceID && fresh.Sequence >= record.EventSequence {
-			record.EventSequence = fresh.Sequence
-			accepted = fresh.Sequence
-		}
-	}); err != nil {
-		return after
-	}
-	if accepted == fresh.Sequence && fresh.Status != types.ProcessStatusRunning {
+	if fresh.Status != types.ProcessStatusRunning {
 		m.handlePassthroughStatus(&types.ProcessStatusUpdate{SessionID: fresh.SessionID, ProcessID: fresh.ProcessID, Status: fresh.Status, ExitCode: fresh.ExitCode, Timestamp: time.Now().UTC()})
 	}
 	// An idle snapshot cannot attribute a lost completion to the active turn.
-	return accepted
+	return fresh.Sequence
 }
 
 func (m *Manager) handleRemotePassthroughEvent(execution *AgentExecution, event types.PassthroughEvent) {
@@ -138,11 +129,7 @@ func (m *Manager) handleRemotePassthroughEvent(execution *AgentExecution, event 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = m.updateRemotePassthroughRecord(ctx, execution, func(current *remotePassthroughRecord) {
-		if current.PassthroughTarget == event.PassthroughTarget && current.EventSequence < event.Sequence {
-			current.EventSequence = event.Sequence
-		}
-	})
+	_, _ = m.advanceRemotePassthroughCursor(ctx, execution, event.PassthroughTarget, event.InstanceID, event.Sequence)
 }
 
 func (execution *AgentExecution) releaseRemotePassthroughObserver(generation uint64) {

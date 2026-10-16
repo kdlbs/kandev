@@ -34,7 +34,7 @@ func (w *delayedRemoteCursorWriter) GetExecutorRunningBySessionID(context.Contex
 	return nil, errors.New("cursor persistence unavailable")
 }
 
-func TestSSHPassthroughCursorPersistenceDoesNotBlockStaleCleanup(t *testing.T) {
+func TestSSHPassthroughCursorPersistenceReleasesGuardsAfterReadFailure(t *testing.T) {
 	mgr, _, execution := newPassthroughRunnerManager(t)
 	sshPassthroughTestController(t, execution)
 	mgr.executorRegistry.Register(&MockExecutor{name: executor.NameSSH})
@@ -69,19 +69,14 @@ func TestSSHPassthroughCursorPersistenceDoesNotBlockStaleCleanup(t *testing.T) {
 	}
 	cleaned := make(chan error, 1)
 	go func() { cleaned <- mgr.cleanupStaleExecution(context.Background(), execution) }()
-	completed := false
-	var cleanupErr error
-	select {
-	case cleanupErr = <-cleaned:
-		completed = true
-	case <-time.After(lockOrderDeadlockGuard):
-		t.Error("stale cleanup waited for event persistence while holding the client lifecycle lock")
+	require.Eventually(t, func() bool { return goroutineParkedIn("cleanupStaleExecution") }, lockOrderDeadlockGuard, time.Millisecond)
+	sourceAvailable := execution.agentctlSourceMu.TryLock()
+	if sourceAvailable {
+		execution.agentctlSourceMu.Unlock()
 	}
 	releasePersistence()
-	if !completed {
-		require.NoError(t, <-cleaned)
-	}
-	require.NoError(t, cleanupErr)
+	require.True(t, sourceAvailable, "cursor persistence must not hold the client source guard")
+	require.NoError(t, <-cleaned)
 	select {
 	case after := <-consumed:
 		require.Equal(t, uint64(1), after)
@@ -91,6 +86,7 @@ func TestSSHPassthroughCursorPersistenceDoesNotBlockStaleCleanup(t *testing.T) {
 	_, exists := mgr.executionStore.Get(execution.ID)
 	require.False(t, exists)
 	require.Nil(t, writer.running, "failed cursor writes must not recreate a removed execution")
+	require.Zero(t, remotePassthroughRecordFor(execution).EventSequence, "failed saves must not advance the durable cursor projection")
 }
 
 func TestSSHPassthroughEventsRequireCurrentExecutionAndTarget(t *testing.T) {

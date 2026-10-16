@@ -258,3 +258,14 @@ cleanup. Regressions cover these failures and retained event identity checks.
 The config, process, and lifecycle focused race tests passed. SSH terminal tests
 now use explicit terminal locators and wait for the Resume response before UI
 assertions. Browser delivery results and current CI/review status remain in the PR.
+
+
+Cursor persistence also uses the runtime teardown guard and revalidates its
+owner before saving. Successful and not-found SQLite reads cannot restore a
+retired row or overwrite a replacement. The API ownership test covers identical
+shared JSON, rejection, and first/last-owner cleanup.
+
+The six affected backend packages have passing complete race results. One
+gateway marker timeout passed unchanged in isolated and complete-package
+repeats. SQLguard and store-conformance checks passed. Detailed commands and
+results are recorded in Task 03.

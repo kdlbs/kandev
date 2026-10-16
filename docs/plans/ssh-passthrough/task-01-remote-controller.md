@@ -167,3 +167,12 @@ with race detection using the command below.
 ```bash
 (cd apps/backend && go test -trimpath -race -tags fts5 ./internal/common/passthroughconfig ./internal/agentctl/server/process -run 'TestPrepare|TestPassthrough' -count=1)
 ```
+
+
+The API ownership regression now uses identical JSON for shared claims. It
+verifies HTTP 400 for a conflicting update, preserves the first owner's URL,
+retains the file after one owner releases it, and removes it after the final
+owner releases it. This matches the documented rejection policy.
+
+The complete API package passed with race detection in 148.365 seconds after
+this assertion update. The complete process and config packages also passed.

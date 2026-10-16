@@ -229,10 +229,35 @@ The second Greptile review reproduced cleanup waiting on the source guard while
 an event cursor save was pending. Remote event projection and gap reconciliation
 now run without that guard. Captured execution, controller, process, generation,
 and sequence checks continue to reject stale events. A WebSocket regression
-pauses the persistence read and proves stale cleanup finishes before that read
-returns. Separate positive and negative cases protect the identity checks.
+checks that a failed persistence read releases its guards without holding the
+client source guard. Cursor saves use the runtime teardown guard and revalidate
+the execution and target before writing. Real SQLite regressions race successful
+and not-found reads with cleanup and replacement, preserving retired state and
+the successor row. Separate positive and negative cases protect identity checks.
 Focused lifecycle passthrough tests passed with race detection in 63.283 seconds.
 
 ```bash
 (cd apps/backend && go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -run 'TestSSHPassthrough|TestSSHMockPassthrough|TestPassthrough' -count=1)
+```
+
+
+The third review reproduced late cursor upserts with successful and not-found
+reads against SQLite. Four cases cover retirement and replacement. A separate
+regression changes execution, controller, generation, or cursor while the save
+waits for its runtime guard. The current owner remains writable; stale owners
+perform no write. These cases and the failed-read cursor rollback case pass
+with race detection.
+
+All six affected backend packages have passing complete race results. The
+combined run passed lifecycle (238.552s), process (359.294s), API (148.365s),
+client (6.838s), and config (1.074s). A gateway terminal marker hit its
+three-second deadline once. Its isolated case and complete package passed
+unchanged; the complete gateway repeat took 9.108s. SQLguard passed, and the
+store-conformance race suite passed in 78.630s.
+
+```bash
+(cd apps/backend && GOMEMLIMIT=3GiB GOMAXPROCS=2 GOFLAGS=-p=2 go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/agentctl ./internal/common/passthroughconfig ./internal/gateway/websocket -count=1)
+(cd apps/backend && GOMEMLIMIT=3GiB GOMAXPROCS=2 GOFLAGS=-p=2 go test -trimpath -race -tags fts5 ./internal/gateway/websocket -count=1)
+(cd apps/backend && go run -trimpath ./cmd/sqlguard ./internal)
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/persistence/storeconformance -count=1)
 ```
