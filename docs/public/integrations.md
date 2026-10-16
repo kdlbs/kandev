@@ -377,6 +377,10 @@ Kandev keeps a queued or running auto-fix attempt separate from its feedback che
 
 When GitHub puts a linked pull request in a merge queue, the PR status control shows its queue state. It also shows the queue position and estimated merge time when GitHub provides them. The same status appears in the task summary, the mobile PR chip, and Review.
 
+Manual merge controls appear only after Kandev confirms that the displayed account can write to the pull request's target repository. Write access to your fork does not grant access to the target. If the account lacks access, the PR details explain which account and repository are affected.
+
+If permissions cannot be checked, select **Check again** to refresh them. This action does not submit a merge. These states apply on desktop and phones; passing checks and required reviews are still necessary, and GitHub enforces the final merge rules.
+
 The existing two automation switches also control merge-queue recovery. Auto-fix sends one actionable queue removal to the linked task agent and counts it as one auto-fix round when durable evidence from an attempted or adopted queue entry matches the current pull-request head. If Kandev sees only a retained removal and cannot prove its head, it fails closed and does not spend a repair round. Auto-merge submits an eligible pull request through GitHub's queue-aware merge action. If GitHub removes a queue attempt, Kandev records the reason and waits for a new pull-request head before it submits another attempt; it never retries the same head automatically. An active queue entry is adopted when auto-merge is enabled, so enabling the option does not submit a duplicate request. Unknown, manual, and branch-protection removals remain visible but do not start automatic repair.
 
 Each automatic merge request uses the pull-request head that passed the readiness checks. If GitHub reports a different head, Kandev stops the request. After a failed request, Kandev does not automatically repeat the same readiness state.

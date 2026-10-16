@@ -2148,6 +2148,20 @@ export class ApiClient {
     await this.request("POST", "/api/v1/github/mock/repos", { org, repos });
   }
 
+  async mockGitHubSetRepositoryDetails(
+    owner: string,
+    repo: string,
+    pushAccess: boolean | null,
+    adminAccess = false,
+  ): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/repository-details", {
+      owner,
+      repo,
+      push_access: pushAccess,
+      admin_access: adminAccess,
+    });
+  }
+
   private async seedMockGitHubRepositoryAccess(
     items: Array<{ repo_owner: string; repo_name: string }>,
   ): Promise<void> {

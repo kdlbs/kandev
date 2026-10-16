@@ -204,6 +204,11 @@ export type RepoMergeMethods = {
   rebase: boolean;
 };
 
+export type RepoMergeAccess = {
+  state: "allowed" | "denied" | "unknown";
+  actor: GitHubAuthPrincipal | null;
+};
+
 export type MergeableState =
   | "clean"
   | "blocked"
