@@ -931,7 +931,10 @@ type gistFileDTO struct {
 // switch to wrapping in `GitHubAPIError`) if the caller needs per-status
 // mapping like the merge endpoint does.
 func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) error {
-	u := githubAPIBase + endpoint
+	u, err := c.restURL(endpoint)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -939,7 +942,7 @@ func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) erro
 	c.setGitHubHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := doGitHubRequest(c.httpClient, req)
 	if err != nil {
 		return fmt.Errorf("request POST %s: %w", endpoint, err)
 	}
@@ -967,7 +970,10 @@ func (c *PATClient) requestJSON(
 	body []byte,
 	result interface{},
 ) error {
-	u := githubAPIBase + endpoint
+	u, err := c.restURL(endpoint)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -975,7 +981,7 @@ func (c *PATClient) requestJSON(
 	c.setGitHubHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := doGitHubRequest(c.httpClient, req)
 	if err != nil {
 		return fmt.Errorf("request %s %s: %w", method, endpoint, err)
 	}
@@ -996,14 +1002,17 @@ func (c *PATClient) requestJSON(
 // delete sends a DELETE request. 2xx and 404 both return nil-or-typed-error per caller intent.
 // Here we return a typed error on any non-2xx so callers can inspect for 404.
 func (c *PATClient) delete(ctx context.Context, endpoint string) error {
-	u := githubAPIBase + endpoint
+	u, err := c.restURL(endpoint)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
 	if err != nil {
 		return err
 	}
 	c.setGitHubHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := doGitHubRequest(c.httpClient, req)
 	if err != nil {
 		return fmt.Errorf("request DELETE %s: %w", endpoint, err)
 	}
@@ -1027,14 +1036,17 @@ func (c *PATClient) putJSON(ctx context.Context, endpoint string, body []byte, r
 }
 
 func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}) error {
-	url := githubAPIBase + endpoint
+	url, err := c.restURL(endpoint)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
 	c.setGitHubHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := doGitHubRequest(c.httpClient, req)
 	if err != nil {
 		return fmt.Errorf("request %s: %w", endpoint, err)
 	}
@@ -1051,14 +1063,17 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 
 // getPaginated is like get but also returns the "next" link from the Link header, if any.
 func (c *PATClient) getPaginated(ctx context.Context, endpoint string, result interface{}) (string, error) {
-	u := githubAPIBase + endpoint
+	u, err := c.restURL(endpoint)
+	if err != nil {
+		return "", err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return "", err
 	}
 	c.setGitHubHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := doGitHubRequest(c.httpClient, req)
 	if err != nil {
 		return "", fmt.Errorf("request %s: %w", endpoint, err)
 	}
@@ -1073,7 +1088,13 @@ func (c *PATClient) getPaginated(ctx context.Context, endpoint string, result in
 	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
 		return "", err
 	}
-	return parseNextLink(resp.Header.Get("Link")), nil
+	next := parseNextLink(resp.Header.Get("Link"))
+	if next != "" {
+		if _, err := c.restURL(next); err != nil {
+			return "", err
+		}
+	}
+	return next, nil
 }
 
 // parseNextLink extracts the "next" URL path+query from a GitHub Link header.

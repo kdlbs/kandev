@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/githubhost"
 )
 
 // GraphQLExecutor runs a single GraphQL query against the GitHub API. Both
@@ -457,6 +459,11 @@ func buildBatchedPRQuery(refs []graphQLPRRef) (string, map[string]any) {
 	return b.String(), nil
 }
 
+const (
+	graphQLMergeQueueEntryFields   = `mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } } `
+	graphQLMergeQueueRemovalFields = `mergeQueueRemovalEvents: timelineItems(last: 1, itemTypes: REMOVED_FROM_MERGE_QUEUE_EVENT) { nodes { ... on RemovedFromMergeQueueEvent { id createdAt reason beforeCommit { oid } } } }`
+)
+
 // prFieldsBlock is the GraphQL field selection used in every batched PR
 // query. Kept as a constant to make snapshot assertions stable and to keep
 // the batched and single-PR paths returning the same data.
@@ -464,7 +471,7 @@ func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
 		`headRefName baseRefName headRefOid baseRefOid headRepository { id name nameWithOwner url } headRepositoryOwner { login } additions deletions changedFiles ` +
 		`author { login } mergedBy { login } autoMergeRequest { enabledAt } ` +
-		`mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } } ` +
+		graphQLMergeQueueEntryFields +
 		`createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
@@ -472,7 +479,7 @@ func prFieldsBlock() string {
 			graphQLReviewThreadPageSize) +
 		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } ` +
 		`timelineItems(last: 1, itemTypes: CLOSED_EVENT) { nodes { ... on ClosedEvent { actor { login } } } } ` +
-		`mergeQueueRemovalEvents: timelineItems(last: 1, itemTypes: REMOVED_FROM_MERGE_QUEUE_EVENT) { nodes { ... on RemovedFromMergeQueueEvent { id createdAt reason beforeCommit { oid } } } }`
+		graphQLMergeQueueRemovalFields
 }
 
 // buildBatchedBranchQuery emits one aliased pullRequests(headRefName:) block
@@ -698,18 +705,22 @@ func summarizeReviewState(nodes []reviewNode) string {
 
 // PATClient.ExecuteGraphQL satisfies GraphQLExecutor by POSTing to /graphql.
 func (c *PATClient) ExecuteGraphQL(ctx context.Context, query string, variables map[string]any, out any) error {
+	if c.host.Family() == githubhost.EnterpriseFamily {
+		query = strings.ReplaceAll(query, graphQLMergeQueueEntryFields, "")
+		query = strings.ReplaceAll(query, graphQLMergeQueueRemovalFields, "")
+	}
 	body, err := json.Marshal(map[string]any{"query": query, "variables": variables})
 	if err != nil {
 		return fmt.Errorf("marshal graphql: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, githubAPIBase+"/graphql", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.host.GraphQLURL(), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	c.setGitHubHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := doGitHubRequest(c.httpClient, req)
 	if err != nil {
 		return fmt.Errorf("graphql request: %w", err)
 	}
@@ -838,6 +849,7 @@ func runBatchedPRQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQL
 		allMissing = append(allMissing, missing...)
 		allResidual = append(allResidual, residual...)
 	}
+	markUnsupportedQueueObservations(exec, result)
 	return finishBatchedQuery(ctx, exec, result, allMissing, allResidual, continuations, retryAt)
 }
 
@@ -1111,6 +1123,7 @@ func runBatchedBranchQuery(
 		allMissing = append(allMissing, missing...)
 		allResidual = append(allResidual, residual...)
 	}
+	markUnsupportedQueueObservations(exec, out.Statuses)
 	statuses, err := finishBatchedQuery(ctx, exec, out.Statuses, allMissing, allResidual, nil, retryAt)
 	if statuses == nil {
 		// finishBatchedQuery dropped the partial decode (residual errors, or a

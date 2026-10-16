@@ -74,7 +74,7 @@ post-signature processing failures produce `failing`; a later valid successful d
   repository set is shared by task configuration and credential-snapshot construction rather than
   triggering repeated materialization or origin mutation.
 - Executor-inherited Local and Worktree preparation resolves the clone protocol while it constructs
-  the desired `github.com` origin. It queries host-specific `gh` configuration before global
+  the desired origin for the repository's validated GitHub host. It queries host-specific `gh` configuration before global
   configuration and defaults to SSH when neither query returns a supported protocol. The resolver
   is called again for every launch and resume. Backend startup stores no protocol result.
 - The prepared-workspace path resolves the same repository set before it returns or starts an
@@ -276,8 +276,8 @@ Invalid or ambiguous optional bridge identities are skipped without weakening ma
 A local-source repository qualifies only when its recorded metadata establishes a GitHub identity.
 Deduplicate hosts within each preparation operation.
 
-For `github.com`, a non-empty explicit `GH_TOKEN` or `GITHUB_TOKEN` in the request bypasses probing and bridge injection for that host.
-For a non-public host, only a non-empty `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` bypasses probing and bridge injection for that host.
+For `github.com` and canonical `*.ghe.com` tenant hosts, a non-empty explicit `GH_TOKEN` or `GITHUB_TOKEN` in the request bypasses probing and bridge injection for that host.
+For a GHES host, only a non-empty `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` bypasses probing and bridge injection for that host.
 Mixed-host launches evaluate these token variables independently for each attached host.
 Later profile merges must preserve the same effective token precedence.
 The helper invokes ordinary `gh`, which selects explicit environment tokens before stored login credentials.

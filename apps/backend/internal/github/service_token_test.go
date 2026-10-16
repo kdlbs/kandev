@@ -144,7 +144,8 @@ func TestGetStatus_WithTokenConfigured(t *testing.T) {
 	svc := &Service{
 		secrets:    provider,
 		logger:     log,
-		authMethod: AuthMethodNone,
+		client:     NewMockClient(),
+		authMethod: AuthMethodPAT,
 	}
 
 	status, err := svc.GetStatus(context.Background())

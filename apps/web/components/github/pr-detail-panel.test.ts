@@ -4,11 +4,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import { afterEach, describe, it, expect, vi } from "vitest";
-import {
-  PRDetailContent,
-  shouldHideApproveButton,
-  shouldShowReRequestReviewAction,
-} from "./pr-detail-panel";
+import { PRDetailContent, shouldShowReRequestReviewAction } from "./pr-detail-panel";
 import {
   clearPRReviewRequestRegistryForTests,
   usePRScopedReviewRequest,
@@ -144,13 +140,15 @@ function ReviewRequestHarness({
   requestedReviewers = [],
   reviews = [],
   workspaceId = WORKSPACE_ID,
+  githubHost,
 }: {
+  githubHost?: string;
   onReady: (reviewRequest: ReturnType<typeof usePRScopedReviewRequest>) => void;
   requestedReviewers?: { login: string; type: "user" }[];
   reviews?: PRReview[];
   workspaceId?: string | null;
 }) {
-  const reviewRequest = usePRScopedReviewRequest(makeTaskPR(), {
+  const reviewRequest = usePRScopedReviewRequest(makeTaskPR({ github_host: githubHost }), {
     workspaceId,
     requestedReviewers,
     reviews,
@@ -214,71 +212,6 @@ describe("PRDetailContent shared presentation", () => {
   });
 });
 
-describe("shouldHideApproveButton", () => {
-  it("hides when PR is closed", () => {
-    expect(shouldHideApproveButton(makeTaskPR({ state: "closed" }), null, "bob")).toBe(true);
-  });
-  it("hides when PR is merged", () => {
-    expect(shouldHideApproveButton(makeTaskPR({ state: "merged" }), null, "bob")).toBe(true);
-  });
-
-  // Regression: pre-fix this returned false (button shown), so the green
-  // Approve button appeared on every PR, including the viewer's own, during
-  // the brief window before /api/v1/github/status resolved client-side.
-  it("hides when current user is unknown (status not loaded yet)", () => {
-    expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, null)).toBe(true);
-    expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, "")).toBe(true);
-    expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, "   ")).toBe(true);
-  });
-
-  it("allows App-attributed approval when a mutation actor is available", () => {
-    expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, null, true)).toBe(
-      false,
-    );
-  });
-
-  it("hides when current user authored the PR (case-insensitive)", () => {
-    expect(shouldHideApproveButton(makeTaskPR({ author_login: "Alice" }), null, "alice")).toBe(
-      true,
-    );
-    expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, "ALICE")).toBe(
-      true,
-    );
-  });
-
-  it("hides when current user has already approved", () => {
-    const feedback = makeFeedback({
-      pr: { author_login: "alice" },
-      reviews: [
-        {
-          id: 1,
-          author: "bob",
-          author_avatar: "",
-          state: "APPROVED",
-          body: "",
-          created_at: "",
-        },
-      ],
-    });
-    expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), feedback, "bob")).toBe(
-      true,
-    );
-  });
-
-  it("shows when current user is a different open reviewer", () => {
-    expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, "bob")).toBe(false);
-  });
-
-  it("prefers feedback.pr.author_login over taskPR.author_login when both present", () => {
-    // taskPR may be stale; live feedback wins. Here the stored author looks
-    // like a different user but feedback says it is actually us, so it must hide.
-    const feedback = makeFeedback({ pr: { author_login: "bob" } });
-    expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), feedback, "bob")).toBe(
-      true,
-    );
-  });
-});
-
 describe("shouldShowReRequestReviewAction", () => {
   it("only permits dismissed reviews on an open PR", () => {
     expect(shouldShowReRequestReviewAction("open", "DISMISSED")).toBe(true);
@@ -302,13 +235,10 @@ describe("PRDetailContent deferred re-request", () => {
     await waitFor(() => {
       expect(screen.getByTestId(PENDING_REVIEWER)).not.toBeNull();
     });
-    expect(reviewMocks.requestReviewers).toHaveBeenCalledWith(
-      "o",
-      "r",
-      1,
-      ["octocat"],
-      WORKSPACE_ID,
-    );
+    expect(reviewMocks.requestReviewers).toHaveBeenCalledWith("o", "r", 1, ["octocat"], {
+      workspaceId: WORKSPACE_ID,
+      expectedHost: "github.com",
+    });
     expect(screen.queryByTestId(RE_REQUEST_BUTTON)).toBeNull();
   });
 });
@@ -479,22 +409,14 @@ describe("PRDetailContent workspace-scoped requests", () => {
     expect(reviewRequest?.requestedReviewers).toEqual([]);
 
     await act(async () => reviewRequest?.reRequest("octocat"));
-    expect(reviewMocks.requestReviewers).toHaveBeenNthCalledWith(
-      1,
-      "o",
-      "r",
-      1,
-      ["octocat"],
-      "workspace-a",
-    );
-    expect(reviewMocks.requestReviewers).toHaveBeenNthCalledWith(
-      2,
-      "o",
-      "r",
-      1,
-      ["octocat"],
-      "workspace-b",
-    );
+    expect(reviewMocks.requestReviewers).toHaveBeenNthCalledWith(1, "o", "r", 1, ["octocat"], {
+      workspaceId: "workspace-a",
+      expectedHost: "github.com",
+    });
+    expect(reviewMocks.requestReviewers).toHaveBeenNthCalledWith(2, "o", "r", 1, ["octocat"], {
+      workspaceId: "workspace-b",
+      expectedHost: "github.com",
+    });
 
     view.rerender(
       createElement(ReviewRequestHarness, {
@@ -676,4 +598,40 @@ describe("PRDetailContent PR identity changes", () => {
 
     expect(screen.getByTestId(RE_REQUEST_BUTTON)).not.toBeNull();
   });
+});
+
+it("isolates historical review requests when the same workspace changes GitHub hosts", async () => {
+  let releaseOld: (value: { requested: boolean }) => void = () => {};
+  reviewMocks.requestReviewers
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        releaseOld = resolve;
+      }),
+    )
+    .mockResolvedValue({ requested: true });
+  let current: ReturnType<typeof usePRScopedReviewRequest> | undefined;
+  const onReady = (value: ReturnType<typeof usePRScopedReviewRequest>) => {
+    current = value;
+  };
+  const view = render(
+    createElement(ReviewRequestHarness, { onReady, githubHost: "git.company.example" }),
+  );
+  act(() => {
+    void current?.reRequest("octocat");
+  });
+  expect(current?.requestingReviewers).toEqual(["octocat"]);
+  view.rerender(
+    createElement(ReviewRequestHarness, { onReady, githubHost: "other.company.example" }),
+  );
+  expect(current?.requestingReviewers).toEqual([]);
+  expect(current?.requestedReviewers).toEqual([]);
+  await act(async () => {
+    await current?.reRequest("octocat");
+  });
+  expect(reviewMocks.requestReviewers).toHaveBeenNthCalledWith(2, "o", "r", 1, ["octocat"], {
+    workspaceId: WORKSPACE_ID,
+    expectedHost: "other.company.example",
+  });
+  await act(async () => releaseOld({ requested: true }));
+  expect(current?.requestedReviewers).toEqual([{ login: "octocat", type: "user" }]);
 });

@@ -17,6 +17,13 @@ type fakeGitHubClients struct {
 	client github.Client
 }
 
+func (f fakeGitHubClients) BindWorkspaceGitHubHost(ctx context.Context, _, _ string) (context.Context, error) {
+	return ctx, nil
+}
+func (f fakeGitHubClients) CommitWorkspaceGitHubHost(ctx context.Context, _ string, apply func(context.Context) error) error {
+	return apply(ctx)
+}
+
 func (f fakeGitHubClients) ListRepoDirectoryForWorkspace(
 	ctx context.Context, _ string, owner, repo, path, ref string,
 ) ([]github.RepoContentEntry, error) {

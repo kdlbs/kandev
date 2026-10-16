@@ -33,6 +33,8 @@ type Applier interface {
 
 // GitHubClientProvider exposes workspace-routed GitHub repository reads.
 type GitHubClientProvider interface {
+	BindWorkspaceGitHubHost(context.Context, string, string) (context.Context, error)
+	CommitWorkspaceGitHubHost(context.Context, string, func(context.Context) error) error
 	ListRepoDirectoryForWorkspace(
 		ctx context.Context, workspaceID, owner, repo, path, ref string,
 	) ([]github.RepoContentEntry, error)
@@ -178,7 +180,20 @@ func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string,
 	lock := s.workspaceLock(workspaceID)
 	lock.Lock()
 	defer lock.Unlock()
-	return s.store.UpsertConfigForWorkspace(ctx, workspaceID, req)
+	if req.Provider != ProviderGitHub || s.githubClients == nil {
+		return s.store.UpsertConfigForWorkspace(ctx, workspaceID, req)
+	}
+	bound, err := s.githubClients.BindWorkspaceGitHubHost(ctx, workspaceID, req.GitHubHost)
+	if err != nil {
+		return nil, err
+	}
+	var config *Config
+	err = s.githubClients.CommitWorkspaceGitHubHost(bound, workspaceID, func(commitCtx context.Context) error {
+		var saveErr error
+		config, saveErr = s.store.UpsertConfigForWorkspace(commitCtx, workspaceID, req)
+		return saveErr
+	})
+	return config, err
 }
 
 // DeleteConfigForWorkspace removes the workspace's config. Previously-synced
@@ -246,16 +261,40 @@ func (s *Service) syncWorkspaceLocked(ctx context.Context, workspaceID string) (
 		return nil, ErrNotConfigured
 	}
 
+	if cfg.Provider != ProviderGitLab && s.githubClients != nil {
+		ctx, err = s.githubClients.BindWorkspaceGitHubHost(ctx, workspaceID, cfg.GitHubHost)
+		if err != nil {
+			s.recordFailure(ctx, workspaceID, cfg, err)
+			return nil, err
+		}
+	}
 	files, err := s.fetchFiles(ctx, cfg)
 	if err != nil {
 		s.recordFailure(ctx, workspaceID, cfg, err)
 		return nil, err
 	}
 
+	var result *SyncResult
+	apply := func(applyCtx context.Context) error {
+		var applyErr error
+		result, applyErr = s.applyFetchedFiles(applyCtx, workspaceID, cfg, files)
+		return applyErr
+	}
+	if cfg.Provider != ProviderGitLab && s.githubClients != nil {
+		err = s.githubClients.CommitWorkspaceGitHubHost(ctx, workspaceID, apply)
+	} else {
+		err = apply(ctx)
+	}
+	if err != nil {
+		s.recordFailure(ctx, workspaceID, cfg, err)
+	}
+	return result, err
+}
+
+func (s *Service) applyFetchedFiles(ctx context.Context, workspaceID string, cfg *Config, files []fetchedFile) (*SyncResult, error) {
 	parsed, warnings := parseFiles(files)
 	applied, err := s.applier.ApplySyncedWorkflows(ctx, workspaceID, parsed)
 	if err != nil {
-		s.recordFailure(ctx, workspaceID, cfg, err)
 		return nil, err
 	}
 	warnings = append(warnings, applied.Warnings...)

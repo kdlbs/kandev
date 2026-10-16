@@ -16,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/githubauth"
+	"github.com/kandev/kandev/internal/githubhost"
 )
 
 const envGitHubCLIShimDir = githubauth.CredentialCLIShimDirEnv
@@ -66,6 +67,13 @@ func runGitHubCLIShim(
 	if err != nil {
 		return err
 	}
+	host, err := githubhost.Parse(client.request.Host)
+	if err != nil {
+		return fmt.Errorf("invalid authorized GitHub host: %w", err)
+	}
+	if err := validateGitHubCLITargets(args, getenv, client.request, host); err != nil {
+		return err
+	}
 	credential, err := client.resolveWithReissue(ctx)
 	if err != nil {
 		return err
@@ -82,11 +90,12 @@ func runGitHubCLIShim(
 	}
 	defer func() { _ = os.RemoveAll(configDir) }()
 	childEnv := replaceEnvironment(environ(), map[string]string{
-		"GH_TOKEN":            credential.Password,
+		host.TokenVariable():  credential.Password,
+		"GH_HOST":             host.String(),
 		"GH_CONFIG_DIR":       configDir,
 		"PATH":                realPath,
 		envGitHubCLIShimDepth: strconv.Itoa(depth + 1),
-	}, "GITHUB_TOKEN")
+	}, "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
 	return runner(ctx, executable, args, childEnv, stdin, stdout, stderr)
 }
 
@@ -202,7 +211,7 @@ func parseGitHubCLIRepository(raw, defaultHost string) (*githubCLIRepository, er
 		if err != nil || parsed.Hostname() == "" {
 			return nil, fmt.Errorf("GitHub CLI repository %q is invalid", raw)
 		}
-		return repositoryFromHostAndPath(parsed.Hostname(), parsed.Path, raw)
+		return repositoryFromHostAndPath(parsed.Host, parsed.Path, raw)
 	}
 	if before, path, found := strings.Cut(raw, ":"); found && strings.Contains(before, "@") {
 		host := before[strings.LastIndex(before, "@")+1:]

@@ -1,0 +1,306 @@
+---
+created: 2026-10-14
+status: complete
+requirements:
+  - REQ-INTEGRATIONS-GITHUB-ENTERPRISE-001
+  - REQ-INTEGRATIONS-GITHUB-ENTERPRISE-002
+  - REQ-INTEGRATIONS-GITHUB-ENTERPRISE-003
+  - REQ-INTEGRATIONS-GITHUB-ENTERPRISE-004
+  - REQ-INTEGRATIONS-GITHUB-ENTERPRISE-005
+system_design:
+  - ../../specs/integrations/system-design/github-enterprise-hosts.md
+legacy_specs: []
+---
+
+# Implementation plan: GitHub Enterprise hosts
+
+## Overview
+
+Make the existing Enterprise CLI account selection save and operate successfully,
+then carry the same host identity through all GitHub authentication, workflows,
+and task execution. The user confirmed GHES and GHE.com, full authentication
+parity, and confidential-client OAuth for GHES without PKCE.
+
+The original CLI picker already listed Enterprise accounts. Its Save request
+included host/login, but `resolveGHAccountToken` rejected the host, and token
+validation/API clients targeted GitHub.com. The implementation preserves the
+picker and tests the complete select/save/read path.
+
+Read the [requirements](../../specs/integrations/requirements/github-enterprise-hosts.md),
+[design](../../specs/integrations/system-design/github-enterprise-hosts.md), and
+[ADR](../../decisions/2026-10-14-github-enterprise-host-boundaries.md) first.
+Implementation and native gpt-6.1-sol subagents were explicitly authorized on
+2026-10-14. Root owns integration and verification. Delivery acceptance remains
+in dependency order; independent implementation slices may proceed as below.
+
+## Scope
+
+### In scope
+
+- GitHub.com, GHES, and GHE.com endpoint routing and exact credential destinations.
+- PAT, named CLI, App import/manifest/install, personal OAuth, and webhook lifecycle.
+- Host-bound repository/issue/PR workflows, watches, and persisted associations.
+- Managed and executor-inherited task Git/CLI behavior across launch and resume.
+- Desktop/phone setup, translations, targeted E2E evidence, and public guidance.
+
+### Out of scope
+
+- Multiple automation hosts within one workspace and cross-host forks.
+- Enterprise-owned/enterprise-level Apps beyond existing user/organization ownership.
+- Arbitrary API overrides, HTTP/TLS bypass, and path-prefix proxy deployments.
+- Automatic CA distribution and unverified SSH aliases or separate SSH-port mappings.
+- Changes to Kandev's GitHub release infrastructure or unrelated plugins.
+
+## Technical approach
+
+1. **Host-aware transport:** introduce `internal/githubhost`; add explicit host
+   constructors to `TokenClient`, `AppClient`, OAuth, and manifest conversion.
+   Keep public compatibility wrappers, central URL validation, separate GHES
+   REST/GraphQL endpoints, redirect restrictions, and TLS/network rules.
+2. **Connection lifecycle:** fix CLI token selection and validation; thread host
+   through PAT and App setup; persist flow host/OAuth policy; fence connection
+   replacement and webhook effects. This work order delivers the reported
+   backend Save regression before broader workflow/UI additions.
+3. **Provider workflows:** persist original resource hosts, isolate caches and
+   watches, validate URL/repository bindings, and remove public-host assumptions
+   from issue, PR, fork, and comparison operations. Reconcile legacy schema
+   safely and prevent host changes from reinterpreting historical records.
+4. **Task execution:** extend the GitHub broker adapter, clone protocol routing,
+   host CLI bridge, and agentctl shim. Scope environment variables and explicit
+   CLI targets to the redeemed host; preserve renewal and generation fencing.
+5. **Setup and documentation:** keep the CLI picker, add PAT/App host input,
+   implement stale-draft protection and host status, update links and host-aware
+   frontend identities, localize, and prove desktop/phone workflows.
+
+### Compatibility matrix
+
+| Provider/transport | Identity | Intended behavior | Evidence | Unsupported shape |
+| --- | --- | --- | --- | --- |
+| GitHub.com HTTPS/CLI | Public host + workspace/principal | Existing behavior and defaults | Existing suites plus regression fixtures | Existing permission/auth errors |
+| GHES HTTPS/CLI | Explicit web authority; REST `/api/v3`; GraphQL `/api/graphql` | PAT/CLI/App and confidential OAuth; version capabilities | GHES 3.20 fixture profile, TLS routing tests, provider smoke when available | Specific capability/version error; no public fallback |
+| GHE.com HTTPS/CLI | Tenant web host and derived API subdomain | Same authentication methods; public-family CLI token variable | Tenant fixtures, OAuth/manifest tests, provider smoke when available | Invalid tenant/API-host input rejected |
+| Managed Git | Verified repository origin + task/session/generation lease | HTTPS checkout and renewable scoped credentials | Real Git subprocess + fake CLI + broker tests | Host/path/generation mismatch fails |
+| Executor inheritance | Persisted attached provider host | Current per-host protocol and optional local CLI bridge | Local/Worktree launch/resume tests | Remote runtime credentials remain executor-owned |
+
+GHES 3.20 is the initial planned fixture baseline, not a claim of live validation.
+Optional capabilities such as merge queues must not make core queries fail.
+
+## ASCII UI preview
+
+Drawings specify grouping, action order, host provenance, and scroll ownership.
+Exact copy/spacing is illustrative and must use localized existing UI primitives.
+Entry point: workspace Settings > Integrations > GitHub > Change connection.
+
+### UI-01: Existing CLI account selection, successful save
+
+Desktop dialog, CLI method selected:
+
+```text
++-------------------------------------------------------+
+| Change GitHub connection                         [X]  |
+| Method: ( ) PAT  (*) GitHub CLI  ( ) GitHub App        |
+| GitHub CLI account                                    |
+| [ alice (git.company.example)                     v ] |
+| Host: git.company.example                             |
+| Task Git access: [Inherit executor credentials    v ] |
+|                                                       |
+|                                     [Save changes]    |
++-------------------------------------------------------+
+```
+
+The dropdown is existing behavior. Its host is authoritative; no duplicate
+host field appears. Save now validates on that host and returns a connected
+summary. Error state stays in the form and retains the selected account.
+Maps to AC-001.1, AC-005.1, and AC-005.2 of the feature requirements.
+
+### UI-02: PAT/App host selection and phone composition
+
+Desktop dialog, App method selected:
+
+```text
++-------------------------------------------------------+
+| Change GitHub connection                         [X]  |
+| Method: ( ) PAT  ( ) GitHub CLI  (*) GitHub App        |
+| GitHub host [ git.company.example                   ] |
+| App [ Select an App on this host                  v ] |
+| [Create App]  [Import App]                             |
+| ... existing owner, visibility and callback guide ... |
+| [Install selected App]                                |
+| Task Git access: [Managed                        v ] |
++-------------------------------------------------------+
+```
+
+PAT mode uses the same host field followed by its token field and Save action.
+App mode keeps the existing creation/import/installation actions and callback
+completion semantics; it does not imply that Save alone installs an App.
+
+Phone, full-height inset connection Drawer, PAT example:
+
+```text
++-----------------------------------+
+| Change GitHub connection     [X]  |  fixed header
+|-----------------------------------|
+| Method [Personal access token v]  |
+| GitHub host                       |
+| [git.company.example          ]   |
+| Token                             |
+| [*****************************]   |  one scroll body
+| Task Git access                   |
+| [Managed                      v]  |
+|                                   |
+| Current host: github.com          |
+| New host: git.company.example     |
+| Existing work keeps its old host. |
+| Choose repository scope next.     |
+|-----------------------------------|
+| [         Save changes          ] |  fixed safe-area footer
++-----------------------------------+
+```
+
+Phone CLI mode replaces host/token fields with the same host-labelled account
+picker; App mode exposes its existing create/import/install actions in the
+scroll body. Use the existing method selection primitive, not a new selector
+solely because of this sketch. Phone targets are >=44px; ordinary desktop
+controls remain 28px. The shared draft survives desktop/phone transitions.
+
+Changed states: loading disables dependent App choices; invalid host associates
+an error with the host field; failed authentication retains non-secret draft;
+TLS failure explains trust setup; stale-host responses are ignored. A successful
+host replacement displays an empty selected-repository scope until configured.
+The existing connection remains active until a replacement validates and commits.
+Maps to AC-001.2–001.4 and AC-005.1–005.4. Rendered evidence belongs to task 05.
+
+## Tests
+
+New test names below are planned, not existing evidence. Use TDD for changed
+logic, and extend neighboring suites rather than mirroring helper implementations.
+
+| Acceptance criteria (prefix `AC-INTEGRATIONS-GITHUB-ENTERPRISE-`) | Planned test location and test |
+| --- | --- |
+| 001.2, 001.3, 001.4, 001.5 | `internal/githubhost/host_test.go`: `TestHostNormalization`, `TestEndpointFamilies`; `internal/github/enterprise_transport_test.go`: `TestEnterpriseHostTransport` (TLS, redirects, pagination, endpoint paths, no foreign-server credential receipt) |
+| 001.1, 002.1, 001.5 | `internal/github/enterprise_connections_test.go`: `TestEnterpriseCLIConnectionSaveAndRead`, `TestEnterprisePATConnection`, with a fake CLI runner and real service/handler/HTTP client path |
+| 002.2, 002.3, 002.4 | `internal/github/enterprise_app_auth_test.go`: `TestEnterpriseAppLifecycle`, `TestEnterpriseOAuthPolicy`, `TestEnterpriseWebhookIsolation` (same IDs across hosts; replay; replacement; refresh and non-expiring tokens) |
+| 002.5 | `internal/github/enterprise_capabilities_test.go`: `TestEnterpriseOptionalCapabilities` (basic reads survive absent optional fields; auth errors remain auth errors) |
+| 003.1, 003.2, 003.3 | `internal/github/enterprise_workflows_test.go`: `TestEnterpriseResourceIsolation`, `TestEnterpriseHostReplacement`, `TestEnterpriseWorkflowURLs` |
+| 003.4 | `internal/github/enterprise_store_test.go`: `TestEnterpriseHostMigration`; extend `store_postgres_test.go` for schema replay and host round trips |
+| 004.1, 004.2 | `internal/github/credential_broker_test.go`: `TestEnterpriseBrokerScope`; `cmd/agentctl/github_cli_shim_test.go`: `TestEnterpriseCLIShimRouting` (public/GHE/GHES variables, explicit targets, reissue) |
+| 004.3, 004.4 | `internal/repoclone/enterprise_test.go`: `TestEnterpriseManagedCheckout`; `internal/orchestrator/executor/executor_host_gh_bridge_test.go`: `TestEnterpriseHostBridgeLifecycle`; lifecycle executor tests for remote prepared workspace |
+| 003.1, 005.1, 005.2 | `components/github/github-connection-settings-form.test.tsx`, `lib/github/parse-url.test.ts`, `lib/utils/github-repo-url.test.ts`, and existing remote-repository/branch/association hook tests: host in payloads/keys, stale lookup rejection, host-aware links |
+| 005.3, 005.4 | Desktop/mobile E2E below, i18n checks, and public-document validation |
+
+Every newly changed test suite must be covered by its work order's final command
+block. PostgreSQL tests require `KANDEV_TEST_POSTGRES_DSN`; a skipped test is not
+PostgreSQL evidence. Use the existing isolated database fixture.
+
+## E2E tests
+
+| File/project | Flows and criteria |
+| --- | --- |
+| `tests/integrations/github-enterprise-hosts.spec.ts`, chromium | Select an already-listed Enterprise CLI account, save, reload status, browse/import a repository; PAT host errors/recovery; host replacement and stale response; equal repo names across workspaces; App select/create/import/install and personal OAuth return. AC-001.1, 001.2, 003.1–003.3, 005.1–005.2 |
+| `tests/integrations/mobile-github-enterprise-hosts.spec.ts`, mobile-chrome | CLI save and PAT/App setup from the phone opener; failed-save correction; keyboard/touch, footer reachability, overflow, draft preservation at responsive boundaries. AC-005.1–005.4 |
+| Existing `github-authentication.spec.ts`, `mobile-github-auth-settings.spec.ts`, `settings/github-app-registration.spec.ts`, `settings/mobile-github-app-registration.spec.ts` | Public-host authentication, App callbacks, and layout regressions after shared components change |
+
+Extend the existing mock controller/API fixture to represent multiple hosts and
+capture submitted host values. UI mocks do not prove the backend unsupported-host
+guard is fixed: task 02's service/handler regression must traverse real validation
+with a fake CLI and TLS API server. Never make UI E2E depend on a real corporate
+token or external App installation.
+
+## Work orders
+
+- [x] [Task 01: Host-aware clients and transport](task-01-host-transport.md)
+- [x] [Task 02: Enterprise connection and App lifecycle](task-02-connection-lifecycle.md)
+- [x] [Task 03: Host-bound provider workflows](task-03-provider-workflows.md)
+- [x] [Task 04: Enterprise task Git and CLI access](task-04-task-git-access.md)
+- [x] [Task 05: Setup surfaces and public guidance](task-05-setup-and-guidance.md)
+
+Acceptance order: 01 -> 02 -> 03 -> 04 -> 05. No independent release is
+claimed before all five pass; task 02 provides the reported regression milestone.
+
+### Authorized implementation lanes
+
+- `host_transport` owns new githubhost and direct HTTP transport/client files.
+- `connection_lifecycle` owns auth/App services, connection/flow persistence and
+  their model fields. It consumes the pinned host constructors; oauth_flow.go
+  client edits finish before its manager edits begin.
+- `frontend` owns apps/web UI, API types, helpers, catalogs and tests; PAT/CLI
+  request `host`, App request `github_host`, and optional resource `expected_host`
+  are pinned. The App catalog remains workspace-scoped and is filtered by host.
+- `host_transport` continues with resource schema, PR pollers/actions, host routing,
+  contribution models and optional GraphQL after transport tests pass. Auth and
+  resource column migrations use separate helpers and coordinated shared hooks.
+- `connection_lifecycle` takes review/issue service and poller host fences plus
+  Enterprise mock fixtures after authentication invariants pass.
+- Root owns runtime Git/CLI access, backend clone/broker composition, public docs
+  and integration.
+
+These are parallel-safe sub-scopes with explicit file ownership, not parallel
+schema work. Subagents do not edit shared plan status or spawn children. The
+full test/build acceptance waits for dependent interfaces and fixtures to land.
+
+## Verification results
+
+Implementation verification on 2026-10-14:
+
+- Complete GitHub package with actual PostgreSQL: passed in 142.070 seconds on
+  the final cleanup/mock snapshot. Enterprise race suite: passed in 19.565 seconds;
+  final cleanup/replacement race regressions also passed in 2.910 seconds.
+- Full persistence conformance with actual PostgreSQL and race detection: passed
+  in 273.558 seconds. Workflow-sync PostgreSQL/race checks and SQL portability passed.
+- Runtime Git/CLI, clone, broker, lifecycle and affected backend composition checks
+  passed. Real Git clone/fetch/push/revocation fixtures cover all three host families.
+- Frontend: 584 tests in 44 suites, typecheck, ESLint and translations passed.
+  Browser checks passed: 12 desktop and 8 mobile cases, including Enterprise App
+  installation and personal OAuth. See task 05 for commands and rendered evidence.
+- Combined changed-Go lint passed with zero issues; final cleanup/mock changes
+  also passed coordinated narrow lint with zero issues. Public documentation: 63 tests and 48 published
+  pages validated. Specification catalog (382 decisions, 1605 specifications),
+  full specification lint and five-work-order documentation preflight passed.
+
+No live GHES or GHE.com environments were supplied. TLS/provider fixtures and
+mock browser flows are not live-provider certification. Changes remain uncommitted.
+
+Design-package checks from repository root:
+
+```bash
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check -- docs/specs docs/decisions docs/plans/github-enterprise-hosts
+git status --short -- docs/plans/github-enterprise-hosts
+```
+
+Repeat the repository PR-documentation preflight with this read-only command.
+The representative production path only activates reference checking; it does
+not claim that production code changed during planning.
+
+```bash
+node <<'JS'
+const fs = require('node:fs');
+const { validateCoverage } = require('./.github/scripts/pr-docs.cjs');
+const dir = 'docs/plans/github-enterprise-hosts';
+const paths = fs.readdirSync(dir).filter(n => n.endsWith('.md')).map(n => `${dir}/${n}`);
+paths.push('docs/specs/integrations/requirements/github-enterprise-hosts.md');
+paths.push('docs/specs/integrations/system-design/github-enterprise-hosts.md');
+const fileContents = Object.fromEntries(paths.map(p => [p, fs.readFileSync(p, 'utf8')]));
+const changedFiles = paths.map(filename => ({ filename, status: 'added' }));
+changedFiles.push({ filename: 'apps/backend/internal/github/gh_accounts.go', status: 'modified' });
+const result = validateCoverage({ changedFiles, fileContents });
+console.log(JSON.stringify({ ok: result.ok, status: result.status, errors: result.errors }, null, 2));
+process.exitCode = result.ok ? 0 : 1;
+JS
+```
+
+## Risks
+
+- GHES version/policy differences can block App manifests or optional GraphQL
+  fields. Keep failures explicit; baseline fixtures are not live certification.
+- Host replacement touches saved watches/settings and asynchronous callbacks.
+  Migrations and generation guards must land before full workflow support.
+- Private GHES needs network and certificate trust from backend and executor;
+  this work does not distribute trust roots or create network routes.
+- The existing large GitHub package has URL assumptions beyond the initial
+  inventory. Each work order must search its owned paths and classify remaining
+  public-host literals rather than replace unrelated constants indiscriminately.
+- Live GHES and GHE.com test environments have not been supplied. Record any
+  real smoke evidence separately, including version and auth method; do not
+  represent fixture-only testing as live-provider validation.

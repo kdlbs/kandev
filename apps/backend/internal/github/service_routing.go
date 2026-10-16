@@ -60,6 +60,9 @@ func (s *Service) resolveServiceClient(
 	if s == nil || s.resolver == nil {
 		return nil, ErrGitHubNotConfigured
 	}
+	if err := s.validateExpectedGitHubHost(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	resolved, err := s.resolver.Resolve(ctx, ResolveCredentialRequest{
 		WorkspaceID: workspaceID,
 		UserID:      userID,
@@ -96,7 +99,8 @@ func (r *resolvedServiceClient) cacheScopeForPurpose(purpose CredentialPurpose) 
 func credentialCacheScope(resolved *ResolvedCredential, purpose CredentialPurpose) string {
 	principal := resolved.Principal
 	return fmt.Sprintf(
-		"%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d|%d|%d:%s|%d|%d:%s",
+		"%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d|%d|%d:%s|%d|%d:%s",
+		len(resolved.GitHubHost), resolved.GitHubHost,
 		len(principal.WorkspaceID), principal.WorkspaceID,
 		len(principal.UserID), principal.UserID,
 		len(principal.Source), principal.Source,

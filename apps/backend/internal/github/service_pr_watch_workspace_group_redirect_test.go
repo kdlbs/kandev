@@ -55,8 +55,15 @@ func (m *multiTaskIssueStore) ListTaskRepositories(_ context.Context, taskID str
 	return m.repos[task.ID], nil
 }
 
-func (m *multiTaskIssueStore) GetRepository(_ context.Context, _ string) (*taskmodels.Repository, error) {
-	return nil, errors.New("not implemented")
+func (m *multiTaskIssueStore) GetRepository(_ context.Context, repositoryID string) (*taskmodels.Repository, error) {
+	for _, repositories := range m.repos {
+		for _, repository := range repositories {
+			if repository.RepositoryID == repositoryID {
+				return &taskmodels.Repository{ID: repositoryID}, nil
+			}
+		}
+	}
+	return nil, errors.New("repository not found")
 }
 
 func (m *multiTaskIssueStore) UpdateTaskGitHubIssue(

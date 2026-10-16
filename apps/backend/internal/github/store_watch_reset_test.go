@@ -37,6 +37,7 @@ func TestStore_UpdatePRWatchBranchIfSearching_PostgresDifferentSessionCollision(
 	}
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE github_pr_watches (
+ github_host TEXT NOT NULL DEFAULT 'github.com',
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
 			session_id TEXT NOT NULL DEFAULT '',
@@ -99,6 +100,7 @@ func TestStore_UpdatePRWatchPRNumber_PostgresDifferentSessionCollision(t *testin
 	}
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE github_pr_watches (
+ github_host TEXT NOT NULL DEFAULT 'github.com',
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
 			session_id TEXT NOT NULL DEFAULT '',
@@ -166,6 +168,7 @@ func TestStore_UpdatePRWatchPRNumber_PostgresUpdateCollisionKeepsTransactionUsab
 	}
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE github_pr_watches (
+ github_host TEXT NOT NULL DEFAULT 'github.com',
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
 			session_id TEXT NOT NULL DEFAULT '',

@@ -1,5 +1,6 @@
+const ENTERPRISE_HOST = "git.company.example";
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/toast-provider";
 import type { TaskGitCredentialsState } from "@/hooks/domains/github/use-task-git-credentials";
@@ -169,11 +170,75 @@ describe("GitHubConnectionDialog task access", () => {
       expect(mocks.setConnection).toHaveBeenCalledWith(WORKSPACE_ID, {
         source: "pat",
         token: "ghp_replacement",
+        host: "github.com",
       }),
     );
     expect(save).toHaveBeenCalledWith("executor");
     await waitFor(() => expect(dialog.getAttribute("data-state")).toBe("closed"));
     expect(rendered.baseElement.textContent).toContain("GitHub access settings saved");
+  });
+
+  it("preserves host and credential drafts across responsive surfaces", async () => {
+    const rendered = view();
+    fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
+    fireEvent.change(screen.getByLabelText("GitHub host"), {
+      target: { value: ENTERPRISE_HOST },
+    });
+    fireEvent.change(screen.getByLabelText(personalAccessTokenLabel), {
+      target: { value: "ghp_enterprise" },
+    });
+    mocks.mobile = true;
+    rendered.rerender(
+      <ToastProvider>
+        <GitHubConnectionDialog
+          status={status}
+          workspaceId={WORKSPACE_ID}
+          onSaved={vi.fn()}
+          taskAccess={taskAccess}
+        />
+      </ToastProvider>,
+    );
+    expect(await screen.findByTestId("github-connection-mobile")).toBeTruthy();
+    expect((screen.getByLabelText("GitHub host") as HTMLInputElement).value).toBe(ENTERPRISE_HOST);
+    expect((screen.getByLabelText(personalAccessTokenLabel) as HTMLInputElement).value).toBe(
+      "ghp_enterprise",
+    );
+    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
+    await waitFor(() =>
+      expect(mocks.setConnection).toHaveBeenCalledWith(WORKSPACE_ID, {
+        source: "pat",
+        host: ENTERPRISE_HOST,
+        token: "ghp_enterprise",
+      }),
+    );
+  });
+});
+
+describe("GitHubConnectionDialog stale save results", () => {
+  it("ignores a save result after closing and reopening the same connection draft", async () => {
+    let finish: (value: unknown) => void = () => {};
+    mocks.setConnection.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    view();
+    fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
+    fireEvent.change(screen.getByLabelText(personalAccessTokenLabel), {
+      target: { value: "ghp_pending" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
+    fireEvent.change(screen.getByLabelText(personalAccessTokenLabel), {
+      target: { value: "ghp_new_draft" },
+    });
+    await act(async () => finish(status.automation));
+    await waitFor(() => expect(screen.queryByText("GitHub access settings saved")).toBeNull());
+    expect((screen.getByLabelText(personalAccessTokenLabel) as HTMLInputElement).value).toBe(
+      "ghp_new_draft",
+    );
   });
 
   it("does not report a discarded task access save as successful", async () => {
@@ -255,6 +320,32 @@ describe("GitHubConnectionDialog", () => {
     expect(screen.queryByTestId("github-app-system-setup-link")).toBeNull();
   });
 
+  it("filters registered Apps to the proposed host and clears PAT secrets on host changes", async () => {
+    mocks.registrations = [
+      registration,
+      {
+        ...registration,
+        id: "enterprise-app",
+        github_host: ENTERPRISE_HOST,
+        display_name: "Enterprise automation",
+      },
+    ];
+    view();
+    fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
+    fireEvent.change(screen.getByLabelText(personalAccessTokenLabel), {
+      target: { value: "ghp_old" },
+    });
+    fireEvent.change(screen.getByLabelText("GitHub host"), {
+      target: { value: ENTERPRISE_HOST },
+    });
+    expect((screen.getByLabelText(personalAccessTokenLabel) as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByText(githubAppLabel, { selector: "span" }));
+    expect(await screen.findByText("Enterprise automation")).toBeTruthy();
+    expect(screen.queryByText(registrationDisplayName)).toBeNull();
+  });
+});
+
+describe("GitHubConnectionDialog responsive App setup", () => {
   it("renders one bounded mobile drawer with a single scroll body", async () => {
     mocks.mobile = true;
     view();

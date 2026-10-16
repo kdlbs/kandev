@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/kandev/kandev/internal/gitcredentials"
 )
 
 // ResolveGitCredential resolves the workspace automation credential for a
@@ -34,4 +36,29 @@ func (s *Service) ResolveGitCredential(
 		return "", "", fmt.Errorf("%w: %s", ErrGitHubCapabilityDenied, CapabilityGitRead)
 	}
 	return gitHubTokenUsername, resolved.credential, nil
+}
+
+// ResolveGitCredentialForHost resolves credentials for an explicit clone authority.
+func (s *Service) ResolveGitCredentialForHost(ctx context.Context, workspaceID, provider, host, owner, repo string) (string, string, error) {
+	if s == nil || s.resolver == nil || !strings.EqualFold(provider, githubProviderName) {
+		return "", "", ErrGitHubNotConfigured
+	}
+	scope := gitcredentials.Scope{ProviderID: githubProviderName, WorkspaceID: workspaceID, Host: host, Path: githubCredentialPath(owner, repo)}
+	resolver := &gitHubCredentialProvider{connections: s.resolver.connections, resolver: s.resolver}
+	before, err := resolver.Binding(ctx, scope)
+	if err != nil {
+		return "", "", err
+	}
+	credential, err := resolver.Resolve(ctx, scope)
+	if err != nil {
+		return "", "", err
+	}
+	after, err := resolver.Binding(ctx, scope)
+	if err != nil {
+		return "", "", err
+	}
+	if before != after {
+		return "", "", ErrCredentialLeaseRevoked
+	}
+	return credential.Username, credential.Password, nil
 }

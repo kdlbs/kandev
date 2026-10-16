@@ -56,6 +56,7 @@ type legacyTransportCredentialFactory func(ctx context.Context) (Client, string,
 type ghAccountTokenResolver func(ctx context.Context, host, login string) (string, error)
 
 type credentialCacheKey struct {
+	githubHost              string
 	workspaceID             string
 	source                  ConnectionSource
 	generation              int64
@@ -178,6 +179,9 @@ func (r *CredentialResolver) resolveAtEpoch(
 
 	if req.Purpose == CredentialPurposePersonalRead || req.Purpose == CredentialPurposePersonalWrite {
 		if personal, resolveErr := r.resolvePersonal(ctx, req, connection); personal != nil || resolveErr != nil {
+			if personal != nil {
+				personal.WorkspaceCredentialGeneration = connection.CredentialGeneration
+			}
 			return personal, resolveErr
 		}
 	}
@@ -277,6 +281,7 @@ func (r *CredentialResolver) resolveAutomation(
 	}
 	resolved.Principal.WorkspaceID = req.WorkspaceID
 	resolved.CredentialGeneration = connection.CredentialGeneration
+	resolved.WorkspaceCredentialGeneration = connection.CredentialGeneration
 	if err := applyAppCredentialMetadata(connection, resolved, &key); err != nil {
 		return nil, err
 	}
@@ -294,6 +299,7 @@ func (r *CredentialResolver) automationCacheKey(
 	req ResolveCredentialRequest,
 ) (credentialCacheKey, error) {
 	key := credentialCacheKey{
+		githubHost:  defaultAuthFlowHost(connection.GitHubHost),
 		workspaceID: req.WorkspaceID, source: connection.Source,
 		generation: connection.CredentialGeneration, appRegistrationID: connection.AppRegistrationID,
 		purpose: req.Purpose, repoOwner: strings.ToLower(strings.TrimSpace(req.RepoOwner)),
@@ -366,24 +372,30 @@ func (r *CredentialResolver) resolvePAT(ctx context.Context, connection *Workspa
 	if r.secrets == nil {
 		return nil, ErrGitHubNotConfigured
 	}
-	token, err := r.secrets.Reveal(ctx, WorkspacePATSecretKey(connection.WorkspaceID))
+	token, err := r.secrets.Reveal(ctx, WorkspacePATSecretKeyForHost(connection.WorkspaceID, connection.GitHubHost))
 	if err != nil {
 		return nil, fmt.Errorf("reveal workspace GitHub PAT: %w", err)
 	}
+	host, err := connectionHost(connection.GitHubHost)
+	if err != nil {
+		return nil, err
+	}
 	tracker := NewRateTracker(nil, nil)
-	client := NewTokenClient(token, TokenPrincipal{
+	client := NewTokenClientForHost(token, TokenPrincipal{
 		Kind:        TokenCredentialPAT,
 		PrincipalID: "login:" + connection.Login,
 		Login:       connection.Login,
-	}).WithRateTracker(tracker)
+	}, host).WithRateTracker(tracker)
 	return &ResolvedCredential{
 		Client:       client,
 		Capabilities: allTokenCapabilities(),
 		credential:   token,
+		GitHubHost:   host.String(),
 		Principal: AuthPrincipal{
-			Kind:   AuthPrincipalHuman,
-			Source: ConnectionSourcePAT,
-			Login:  connection.Login,
+			GitHubHost: host.String(),
+			Kind:       AuthPrincipalHuman,
+			Source:     ConnectionSourcePAT,
+			Login:      connection.Login,
 		},
 		RateTracker: tracker,
 	}, nil
@@ -394,20 +406,26 @@ func (r *CredentialResolver) resolveGHCLI(ctx context.Context, connection *Works
 	if err != nil {
 		return nil, err
 	}
+	host, err := connectionHost(connection.GitHubHost)
+	if err != nil {
+		return nil, err
+	}
 	tracker := NewRateTracker(nil, nil)
-	client := NewTokenClient(token, TokenPrincipal{
+	client := NewTokenClientForHost(token, TokenPrincipal{
 		Kind:        TokenCredentialCLI,
 		PrincipalID: "login:" + connection.Login,
 		Login:       connection.Login,
-	}).WithRateTracker(tracker)
+	}, host).WithRateTracker(tracker)
 	return &ResolvedCredential{
 		Client:       client,
 		Capabilities: allTokenCapabilities(),
 		credential:   token,
+		GitHubHost:   host.String(),
 		Principal: AuthPrincipal{
-			Kind:   AuthPrincipalHuman,
-			Source: ConnectionSourceGHCLI,
-			Login:  connection.Login,
+			GitHubHost: host.String(),
+			Kind:       AuthPrincipalHuman,
+			Source:     ConnectionSourceGHCLI,
+			Login:      connection.Login,
 		},
 		RateTracker: tracker,
 	}, nil
@@ -446,10 +464,12 @@ func (r *CredentialResolver) resolveLegacy(
 		Client:       client,
 		Capabilities: allTokenCapabilities(),
 		credential:   credential,
+		GitHubHost:   defaultGitHubHost,
 		Principal: AuthPrincipal{
-			Kind:   AuthPrincipalHuman,
-			Source: ConnectionSourceLegacyShared,
-			Login:  login,
+			GitHubHost: defaultGitHubHost,
+			Kind:       AuthPrincipalHuman,
+			Source:     ConnectionSourceLegacyShared,
+			Login:      login,
 		},
 		RateTracker: tracker,
 	}, nil

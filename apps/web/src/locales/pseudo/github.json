@@ -651,5 +651,10 @@
   "mergeQueueRecoveryStatusRepairRequested": "Ŕēƥàĩŕ ŕēqũēśţēď ƒōŕ ţĥĩś ŕēḿōvàĺ.",
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "Ŕēƥàĩŕ ŕēqũēśţēď. Ŵàĩţĩńĝ ƒōŕ à ńēŵ ćōḿḿĩţ ƀēƒōŕē ŕēqũēũē.",
   "mergeQueueRecoveryStatusWaitingForCommit": "Ŵàĩţĩńĝ ƒōŕ à ńēŵ ćōḿḿĩţ ƀēƒōŕē ŕēqũēũē.",
-  "mergeQueueRecoveryStatusWaitingForChecks": "Ńēŵ ĥēàď ďēţēćţēď. Ŵàĩţĩńĝ ƒōŕ ŕēqũĩŕēď ćĥēćķś."
+  "mergeQueueRecoveryStatusWaitingForChecks": "Ńēŵ ĥēàď ďēţēćţēď. Ŵàĩţĩńĝ ƒōŕ ŕēqũĩŕēď ćĥēćķś.",
+  "githubHost": "ĜĩţĤũƀ ĥōśţ",
+  "invalidGitHubHost": "Ēńţēŕ à ĜĩţĤũƀ ŵēƀ ĥōśţńàḿē ōŕ ĤŢŢƤŚ ōŕĩĝĩń ŵĩţĥōũţ à ƥàţĥ.",
+  "selectedGitHubHost": "Ĥōśţ: {{host}}",
+  "githubHostReplacement": "Ćĥàńĝĩńĝ ƒŕōḿ {{current}} ţō {{proposed}} ĩńvàĺĩďàţēś ƥēńďĩńĝ àũţĥōŕĩźàţĩōń. Ēxĩśţĩńĝ ŕēƥōśĩţōŕĩēś, ĺĩńķēď ţàśķś, ŵàţćĥēś, àńď śàvēď ƒĩĺţēŕś ķēēƥ ţĥēĩŕ ōŕĩĝĩńàĺ ĥōśţ àńď ḿàŷ ŕēqũĩŕē ŕēćōńńēćţĩōń.",
+  "createPersonalAccessToken": "Ćŕēàţē à ƥēŕśōńàĺ àććēśś ţōķēń"
 }

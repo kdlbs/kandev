@@ -110,6 +110,17 @@ func (s *Service) syncUnwatchedTaskPRGroup(
 			zap.String("workspace_id", workspaceID), zap.Error(err))
 		return
 	}
+	eligible := group[:0]
+	for _, tp := range group {
+		if tp != nil && tp.GitHubHost == resolved.host().String() {
+			eligible = append(eligible, tp)
+		}
+	}
+	group = eligible
+	if len(group) == 0 {
+		return
+	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
 	if explicitRefresh {
 		for _, tp := range group {
 			if tp == nil {
@@ -121,6 +132,12 @@ func (s *Service) syncUnwatchedTaskPRGroup(
 		}
 	}
 	live := s.fetchUnwatchedTaskPRs(ctx, resolved, group, explicitRefresh)
+	var unlock func()
+	ctx, unlock, err = s.lockResourceMutation(ctx, workspaceID)
+	if err != nil {
+		return
+	}
+	defer unlock()
 	seen := make(map[string]struct{}, len(group))
 	for _, tp := range group {
 		if tp == nil || tp.TaskID == "" {
@@ -174,6 +191,9 @@ func (s *Service) syncUnwatchedTaskPRGroup(
 // status sets ChecksPopulated/ReviewCountsPopulated with zeroed counts when
 // it has nothing to count, which SyncTaskPR then faithfully stores.
 func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, status *PRStatus) error {
+	if err := requireGitHubOperationCurrent(ctx); err != nil {
+		return err
+	}
 	pr := status.PR
 	isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt :=
 		resolveTaskPROutcomeFields(tp, status)

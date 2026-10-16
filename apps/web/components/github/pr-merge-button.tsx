@@ -94,7 +94,7 @@ export function PRMergeButton({
   // provider state catches up so a repeat click cannot submit a second request.
   const [acceptedFor, setAcceptedFor] = useState<string | null>(null);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const methods = useRepoMergeMethods(workspaceId, taskPR.owner, taskPR.repo);
+  const methods = useRepoMergeMethods(workspaceId, taskPR.owner, taskPR.repo, taskPR.github_host);
   const { status } = useGitHubStatus(workspaceId);
   const mutationActor = getGitHubMutationActor(status);
 
@@ -118,13 +118,10 @@ export function PRMergeButton({
     const submittedSignature = signature;
     setMerging(true);
     try {
-      const result = await mergePR(
-        workspaceId,
-        taskPR.owner,
-        taskPR.repo,
-        taskPR.pr_number,
-        method,
-      );
+      const result = await mergePR(workspaceId, taskPR.owner, taskPR.repo, taskPR.pr_number, {
+        mergeMethod: method,
+        expectedHost: taskPR.github_host ?? "github.com",
+      });
       setAcceptedFor(submittedSignature);
       toast({
         description: t(

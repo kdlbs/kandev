@@ -474,6 +474,7 @@ func (s *Service) handleNewReviewPR(ctx context.Context, event *bus.Event) error
 }
 
 func (s *Service) createReviewTask(ctx context.Context, evt *github.NewReviewPREvent) {
+	ctx = github.WithGitHubWatchConnection(ctx, evt.GitHubHost, evt.CredentialGeneration)
 	pr := evt.PR
 	repoSlug := fmt.Sprintf("%s/%s", pr.RepoOwner, pr.RepoName)
 
@@ -1821,6 +1822,7 @@ func (s *Service) handleNewIssue(ctx context.Context, event *bus.Event) error {
 }
 
 func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent) {
+	ctx = github.WithGitHubWatchConnection(ctx, evt.GitHubHost, evt.CredentialGeneration)
 	issue := evt.Issue
 	repoSlug := fmt.Sprintf("%s/%s", issue.RepoOwner, issue.RepoName)
 

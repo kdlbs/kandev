@@ -605,6 +605,19 @@ func (p *Poller) applyPRStatusForWatch(
 	if watch == nil || status == nil {
 		return nil
 	}
+	if status.operationFence != nil {
+		ctx = context.WithValue(ctx, githubOperationFenceKey{}, *status.operationFence)
+	}
+	var unlock func()
+	var lockErr error
+	ctx, unlock, lockErr = p.service.lockResourceMutation(ctx, watch.WorkspaceID)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
+	if err := p.service.validatePRWatchHost(ctx, watch.WorkspaceID, watch); err != nil {
+		return err
+	}
 
 	// A numbered watch found its PR before this fix existed (or before the
 	// discovering session's own group redirect took effect) keeps the
@@ -730,6 +743,20 @@ func (p *Poller) detectPRForWatchWithError(ctx context.Context, watch *PRWatch) 
 }
 
 func (p *Poller) applyDetectedPR(ctx context.Context, watch *PRWatch, pr *PR) {
+	if pr != nil && pr.operationFence != nil {
+		ctx = context.WithValue(ctx, githubOperationFenceKey{}, *pr.operationFence)
+	}
+	var unlock func()
+	var lockErr error
+	ctx, unlock, lockErr = p.service.lockResourceMutation(ctx, watch.WorkspaceID)
+	if lockErr != nil {
+		return
+	}
+	defer unlock()
+	if err := p.service.validatePRWatchHost(ctx, watch.WorkspaceID, watch); err != nil {
+		return
+	}
+
 	// Update last_checked_at regardless of result
 	now := time.Now().UTC()
 	_ = p.service.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, "", "")

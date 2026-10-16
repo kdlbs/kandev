@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 
+const hostScope = vi.hoisted(() => ({ host: undefined as string | undefined }));
+
 const fetchRepoBranchesMock = vi.fn();
 const listProjectBranchesMock = vi.fn();
 const listAzureDevOpsBranchesMock = vi.fn();
@@ -22,6 +24,7 @@ import type { RepositoryInspection } from "@/lib/plugins/types";
 
 afterEach(() => {
   cleanup();
+  hostScope.host = undefined;
   pluginRegistry.unregisterPlugin(PROVIDER_PLUGIN_ID);
   pluginRegistry.unregisterPlugin("test-coarse-provider");
   pluginRegistry.unregisterPlugin("test-exact-provider");
@@ -591,4 +594,39 @@ describe("useBranchesByURL — cache invalidation", () => {
     });
     await waitFor(() => expect(fetchRepoBranchesMock).toHaveBeenCalledTimes(2));
   });
+});
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      githubStatus: {
+        byWorkspaceId: {
+          "workspace-1": { status: { automation: { github_host: hostScope.host } } },
+        },
+      },
+    }),
+}));
+
+it("uses the configured GHES host and discards branches after host replacement", async () => {
+  hostScope.host = "git.company.example";
+  let release: (value: { branches: { name: string }[] }) => void = () => {};
+  fetchRepoBranchesMock.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  const { result, rerender } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
+  const url = "https://git.company.example/acme/site";
+  act(() => result.current.ensure(url));
+  expect(fetchRepoBranchesMock).toHaveBeenCalledWith(
+    WORKSPACE_ID,
+    "acme",
+    "site",
+    expect.objectContaining({ expectedHost: "git.company.example" }),
+  );
+  hostScope.host = "other.company.example";
+  rerender();
+  await act(async () => release({ branches: [{ name: "old-host-branch" }] }));
+  expect(result.current.branches(url)).toEqual([]);
 });

@@ -17,11 +17,14 @@ func (s *Service) verifyRemoteRepositoryOrigin(ctx context.Context, workspaceID 
 	if input.TrustedProviderDescriptor {
 		return nil
 	}
-	provider, _, _, canonicalURL, err := parseRemoteRepositoryURL(effectiveRemoteURL(*input), input.Provider)
+	provider, _, _, canonicalURL, err := parseRemoteRepositoryURL(effectiveRemoteURL(*input), effectiveRemoteProvider(*input))
 	if err != nil {
 		return NewRepositorySelectionError(RepositorySelectionErrorInvalid, err)
 	}
 	origin := remoteProviderHost(provider, canonicalURL)
+	if provider == providerGitHub {
+		return s.verifyEnterpriseGitHubOrigin(ctx, workspaceID, *input)
+	}
 	if provider != providerGitLab || origin == "https://gitlab.com" {
 		return nil
 	}

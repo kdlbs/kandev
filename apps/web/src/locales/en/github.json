@@ -651,5 +651,10 @@
   "mergeQueueRecoveryStatusRepairRequested": "Repair requested for this removal.",
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "Repair requested. Waiting for a new commit before requeue.",
   "mergeQueueRecoveryStatusWaitingForCommit": "Waiting for a new commit before requeue.",
-  "mergeQueueRecoveryStatusWaitingForChecks": "New head detected. Waiting for required checks."
+  "mergeQueueRecoveryStatusWaitingForChecks": "New head detected. Waiting for required checks.",
+  "githubHost": "GitHub host",
+  "invalidGitHubHost": "Enter a GitHub web hostname or HTTPS origin without a path.",
+  "selectedGitHubHost": "Host: {{host}}",
+  "githubHostReplacement": "Changing from {{current}} to {{proposed}} invalidates pending authorization. Existing repositories, linked tasks, watches, and saved filters keep their original host and may require reconnection.",
+  "createPersonalAccessToken": "Create a personal access token"
 }
