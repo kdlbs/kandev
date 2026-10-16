@@ -94,6 +94,69 @@ func TestBatchedPRQueryResumesChunkAfterAdmissionPacing(t *testing.T) {
 }
 
 // @covers AC-INTEGRATIONS-GITHUB-RATE-003.5
+type mixedBatchExecutor struct {
+	prResponse     string
+	branchResponse string
+	prQueries      int
+	branchQueries  int
+	deferBranch    bool
+}
+
+func (e *mixedBatchExecutor) ExecuteGraphQL(_ context.Context, query string, _ map[string]any, out any) error {
+	if strings.Contains(query, "query Branches") {
+		e.branchQueries++
+		if e.deferBranch {
+			e.deferBranch = false
+			return &AdmissionDeferredError{Delay: time.Millisecond, Reason: "test branch pacing"}
+		}
+		return json.Unmarshal([]byte(e.branchResponse), out)
+	}
+	e.prQueries++
+	return json.Unmarshal([]byte(e.prResponse), out)
+}
+
+// TestFetchBatchedWatchStatusesKeepsCompletedPhaseAcrossAdmissionDeferral
+// protects mixed numbered/searching batches. A numbered result must remain
+// available when the following branch phase is deferred, otherwise every retry
+// re-runs the numbered query and keeps re-triggering branch pacing forever.
+func TestFetchBatchedWatchStatusesKeepsCompletedPhaseAcrossAdmissionDeferral(t *testing.T) {
+	exec := &mixedBatchExecutor{
+		prResponse:     batchedPRReviewThreadsResponse(t, 0, nil, false, ""),
+		branchResponse: batchedBranchReviewThreadsResponse(t, 0, nil, false, ""),
+		deferBranch:    true,
+	}
+	service := &Service{}
+	numbered := []*PRWatch{{Owner: "o", Repo: "r", PRNumber: 42}}
+	searching := []*PRWatch{{Owner: "o", Repo: "r", Branch: "feat"}}
+	ctx := pollerContext(context.Background())
+
+	if _, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false); err == nil {
+		t.Fatal("first mixed batch succeeded, want branch admission deferral")
+	} else {
+		var deferred *AdmissionDeferredError
+		if !errors.As(err, &deferred) {
+			t.Fatalf("first mixed batch error = %v, want admission deferral", err)
+		}
+	}
+	if exec.prQueries != 1 || exec.branchQueries != 1 {
+		t.Fatalf("first mixed batch queries = PR %d, branch %d; want one each", exec.prQueries, exec.branchQueries)
+	}
+
+	statuses, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false)
+	if err != nil {
+		t.Fatalf("resume mixed batch: %v", err)
+	}
+	if exec.prQueries != 1 || exec.branchQueries != 2 {
+		t.Fatalf("resumed mixed batch queries = PR %d, branch %d; want numbered preserved and branch retried", exec.prQueries, exec.branchQueries)
+	}
+	if statuses.byKey[prStatusCacheKey("o", "r", 42)] == nil {
+		t.Fatal("resumed mixed batch omitted numbered result")
+	}
+	if statuses.byKey[graphqlBranchKey("o", "r", "feat")] == nil {
+		t.Fatal("resumed mixed batch omitted searching result")
+	}
+}
+
 func TestBatchedBranchQueryResumesChunkAfterAdmissionPacing(t *testing.T) {
 	client, requests := newRecordingPATServer(t, map[string]string{
 		"/graphql": `{"data":{}}`,
