@@ -121,6 +121,7 @@ function makeUnloadedSettings(): UserSettingsState {
     quickChatTabOrderByWorkspace: {},
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
+    lspStatusHiddenLanguages: [],
     lspServerConfigs: {},
     lspStatusLocation: "toolbar",
     hiddenWorkflowStepIds: {},

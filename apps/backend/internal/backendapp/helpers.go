@@ -62,6 +62,7 @@ import (
 	"github.com/kandev/kandev/internal/jira"
 	kuberneteshandlers "github.com/kandev/kandev/internal/kubernetes"
 	"github.com/kandev/kandev/internal/linear"
+	tasklsp "github.com/kandev/kandev/internal/lsp"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -1216,6 +1217,7 @@ func registerRoutes(p routeParams) {
 	wireOfficeProjectRepositorySources(p.taskSvc, p.officeRepo)
 	p.taskSvc.SetWorkspaceGroupMembershipReader(p.officeRepo)
 	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
+	p.taskSvc.SetTaskEnvironmentResetGuard(handoffSvc)
 	// Phase 6 wirings — materializer hook + disk cleaner. The
 	// SessionWorktreeReader and WorkspaceCleaner interfaces are both
 	// satisfied by adapters that delegate to existing services.
@@ -1722,6 +1724,9 @@ func resolveRepositoryIDForSessionSubpath(ctx context.Context, taskRepo *sqliter
 
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
 func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) {
+	if p.services != nil && p.services.TaskLSP != nil {
+		tasklsp.RegisterRoutes(p.router, p.services.TaskLSP)
+	}
 	if attachmentSvc := p.taskSvc.AttachmentService(); attachmentSvc != nil {
 		taskhandlers.RegisterAttachmentRoutes(p.router, attachmentSvc, p.log)
 	} else {

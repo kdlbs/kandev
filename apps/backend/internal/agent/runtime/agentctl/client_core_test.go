@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -35,8 +36,8 @@ func TestNewClient_BuildsBaseURLAndTimeouts(t *testing.T) {
 	if c.AuthToken() != "" {
 		t.Errorf("AuthToken = %q, want empty", c.AuthToken())
 	}
-	if c.httpClient.Transport != nil {
-		t.Error("transport installed without auth token or execution ID")
+	if c.authTransport == nil {
+		t.Error("mutable auth transport was not installed")
 	}
 }
 
@@ -73,6 +74,62 @@ func TestNewClient_OptionsInstallAuthAndInstanceHeaders(t *testing.T) {
 	// serve a stale client.
 	if gotInstance != "exec-1" {
 		t.Errorf("X-Instance-ID = %q, want exec-1", gotInstance)
+	}
+}
+
+func TestClientSetAuthTokenUpdatesHTTPAndWebSocketAuthentication(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	host, port := splitTestServerHostPort(t, srv)
+	c := NewClient(host, port, newTestLogger(), WithAuthToken("stale-token"))
+	c.SetAuthToken("rotated-token")
+
+	if err := c.Health(context.Background()); err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if gotAuth != "Bearer rotated-token" {
+		t.Fatalf("Authorization = %q, want rotated token", gotAuth)
+	}
+	if got := c.wsAuthHeaders().Get("Authorization"); got != "Bearer rotated-token" {
+		t.Fatalf("WebSocket Authorization = %q, want rotated token", got)
+	}
+	if got := c.AuthToken(); got != "rotated-token" {
+		t.Fatalf("AuthToken = %q, want rotated token", got)
+	}
+}
+
+func TestClientSetAuthTokenIsSafeWithConcurrentRequests(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	host, port := splitTestServerHostPort(t, srv)
+	c := NewClient(host, port, newTestLogger(), WithAuthToken("initial-token"))
+
+	var wg sync.WaitGroup
+	for i := range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				c.SetAuthToken("even-token")
+			} else {
+				c.SetAuthToken("odd-token")
+			}
+			if err := c.Health(context.Background()); err != nil {
+				t.Errorf("Health: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	c.SetAuthToken("final-token")
+	if got := c.AuthToken(); got != "final-token" {
+		t.Fatalf("AuthToken = %q, want final token", got)
 	}
 }
 

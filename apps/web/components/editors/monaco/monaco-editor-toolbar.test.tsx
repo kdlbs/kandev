@@ -16,7 +16,9 @@ vi.mock("@/components/editors/file-actions-dropdown", () => ({
 }));
 
 vi.mock("@/components/editors/lsp-status-button", () => ({
-  LspStatusButton: () => <span data-testid="lsp-status" />,
+  LspStatusButton: (props: Record<string, unknown>) => (
+    <span data-testid="lsp-status" data-props={JSON.stringify(props)} />
+  ),
 }));
 
 import { MonacoEditorToolbar } from "./monaco-editor-toolbar";
@@ -46,6 +48,7 @@ describe("MonacoEditorToolbar external file action", () => {
             hasReportedProgress: false,
           }}
           lspLanguage={null}
+          lspTaskId="task-a"
           onToggleLsp={vi.fn()}
           onToggleWrap={vi.fn()}
           onToggleDiffIndicators={vi.fn()}
@@ -66,6 +69,8 @@ describe("MonacoEditorToolbar external file action", () => {
       size: "sm",
     });
     expect(screen.getByTestId("file-actions-dropdown")).toBeTruthy();
+    const lspProps = JSON.parse(screen.getByTestId("lsp-status").dataset.props ?? "{}");
+    expect(lspProps.taskId).toBe("task-a");
   });
 
   it("removes the toolbar LSP trigger when the active surface is the status bar", () => {
@@ -89,6 +94,7 @@ describe("MonacoEditorToolbar external file action", () => {
             hasReportedProgress: false,
           }}
           lspLanguage="kotlin"
+          lspTaskId="task-a"
           showLspStatus={false}
           onToggleLsp={vi.fn()}
           onToggleWrap={vi.fn()}
@@ -113,6 +119,7 @@ describe("MonacoEditorToolbar preview action", () => {
     enableComments: false,
     sessionId: "session-1",
     commentCount: 0,
+    lspTaskId: "task-a",
     lspStatus: { state: "disabled" } as const,
     lspProgress: {
       initializingSince: null,
@@ -151,6 +158,7 @@ describe("MonacoEditorToolbar download action", () => {
     enableComments: false,
     sessionId: "session-1",
     commentCount: 0,
+    lspTaskId: "task-a",
     lspStatus: { state: "disabled" } as const,
     lspProgress: {
       initializingSince: null,
@@ -194,12 +202,7 @@ describe("MonacoEditorToolbar narrow action overflow", () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const originalRect = HTMLElement.prototype.getBoundingClientRect;
     class ResizeObserverStub {
-      private readonly callback: ResizeObserverCallback;
-
-      constructor(callback: ResizeObserverCallback) {
-        this.callback = callback;
-      }
-
+      constructor(private readonly callback: ResizeObserverCallback) {}
       observe(target: Element) {
         this.callback([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver);
       }
@@ -242,6 +245,7 @@ describe("MonacoEditorToolbar narrow action overflow", () => {
             enableComments={false}
             sessionId="session-1"
             commentCount={0}
+            lspTaskId="task-a"
             lspStatus={{ state: "disabled" }}
             lspProgress={{
               initializingSince: null,

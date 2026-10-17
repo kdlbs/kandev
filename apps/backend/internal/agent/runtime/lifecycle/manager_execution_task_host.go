@@ -1,0 +1,252 @@
+package lifecycle
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
+	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+const taskHostRuntimeSessionPrefix = "task-host-"
+
+// createTaskHostExecution creates the internal agentctl execution used by
+// task-owned services. It deliberately omits session identity, agent profile,
+// traces, lifecycle events, and session-owned persistence.
+func (m *Manager) createTaskHostExecution(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	requireExisting bool,
+) (*AgentExecution, error) {
+	if info == nil {
+		return nil, fmt.Errorf("workspace info is required")
+	}
+	if !requireExisting {
+		if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
+			return nil, err
+		}
+	}
+	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
+	if err != nil {
+		return nil, err
+	}
+	defer activityLease.Release()
+	activityLease.SetKind(activity.KindExecutionPreparing)
+
+	rt, err := m.getExecutorBackend(info.ExecutorType)
+	if err != nil {
+		return nil, fmt.Errorf("no runtime configured: %w", err)
+	}
+	executionID := taskHostExecutionID(info.TaskEnvironmentID)
+	request, err := m.prepareTaskHostCreateRequest(
+		ctx, taskID, info, executionID, rt.Name(), requireExisting,
+	)
+	if err != nil {
+		return nil, err
+	}
+	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
+	defer launchCancel()
+	if !requireExisting {
+		if err := resumeRemoteInstancePreflight(launchCtx, rt, request); err != nil {
+			return nil, err
+		}
+	}
+	releaseCredentials := m.lockTaskEnvironmentCredentials(info.ExecutorType, info.TaskEnvironmentID)
+	defer releaseCredentials()
+	runtimeInstance, err := rt.CreateInstance(launchCtx, request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create execution: %w", err)
+	}
+	execution := runtimeInstance.ToAgentExecution(request)
+	execution.RuntimeName = rt.Name()
+
+	if addErr := m.executionStore.Add(execution); addErr != nil {
+		if errors.Is(addErr, ErrExecutionAlreadyExistsForTaskHost) {
+			m.rollbackRacedExecution(ctx, rt, runtimeInstance, execution)
+			if existing, ok := m.executionStore.GetTaskHostByEnvironmentID(info.TaskEnvironmentID); ok {
+				return existing, nil
+			}
+		}
+		return nil, fmt.Errorf("failed to register execution: %w", addErr)
+	}
+	return m.finishTaskHostExecution(launchCtx, taskID, info, rt, runtimeInstance, execution, requireExisting)
+}
+
+func (m *Manager) prepareTaskHostCreateRequest(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	executionID string,
+	runtimeName agentruntime.Runtime,
+	requireExisting bool,
+) (*ExecutorCreateRequest, error) {
+	runtimeSessionID := taskHostRuntimeSessionPrefix + info.TaskEnvironmentID
+	hostInfo := *info
+	hostInfo.SessionID = runtimeSessionID
+	hostInfo.AgentProfileID = ""
+	hostInfo.ExecutionProfileID = ""
+	environment := &executionEnvironmentPreparation{}
+	if !requireExisting {
+		var err error
+		environment, err = m.prepareExecutionEnvironment(ctx, taskID, &hostInfo, executionID, "", nil, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	metadata := executionMetadata(info.Metadata, true)
+	metadata["task_host"] = true
+	if environment.managedGoCachePath != "" {
+		metadata[managedGoCacheMetadataKey] = environment.managedGoCachePath
+	}
+	remoteContributions, err := remoteContributionsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
+	}
+	workspacePath, workspaceSourceRoots, err := taskHostWorkspaceProjection(runtimeName, info)
+	if err != nil {
+		return nil, err
+	}
+	previousExecutionID, authToken, bootstrapNonce := m.taskHostReconnectDetails(ctx, info, executionID)
+	return &ExecutorCreateRequest{
+		InstanceID:              executionID,
+		TaskID:                  taskID,
+		SessionID:               runtimeSessionID,
+		TaskEnvironmentID:       info.TaskEnvironmentID,
+		IsTaskHost:              true,
+		RequireExistingInstance: requireExisting,
+		WorkspacePath:           workspacePath,
+		WorkspaceSourceRoots:    workspaceSourceRoots,
+		Env:                     environment.env,
+		Metadata:                metadata,
+		ApprovedSecretEnvKeys:   append([]string(nil), environment.approvedSecretEnvKeys...),
+		RemoteContributions:     remoteContributions,
+		PreviousExecutionID:     previousExecutionID,
+		AuthToken:               authToken,
+		BootstrapNonce:          bootstrapNonce,
+	}, nil
+}
+
+func (m *Manager) taskHostReconnectDetails(
+	ctx context.Context,
+	info *WorkspaceInfo,
+	executionID string,
+) (string, string, string) {
+	if info.ExecutorType != string(models.ExecutorTypeLocalDocker) {
+		return "", "", ""
+	}
+	authToken := m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret)
+	bootstrapNonce := m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret)
+	if authToken != "" && bootstrapNonce != "" {
+		return executionID, authToken, bootstrapNonce
+	}
+
+	// The environment-ready callback can run before the session execution's
+	// control-secret references have reached executors_running. The live
+	// execution already owns those transport credentials at that point. Use it
+	// only to reattach the task-owned host to the shared container; session
+	// identity does not become part of task-host ownership.
+	if live, exists := m.executionStore.GetByTaskEnvironmentID(info.TaskEnvironmentID); exists {
+		metadata := live.MetadataSnapshot()
+		if authToken == "" {
+			authToken = m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret)
+		}
+		if bootstrapNonce == "" {
+			bootstrapNonce = m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret)
+		}
+	}
+	return executionID, authToken, bootstrapNonce
+}
+
+func (m *Manager) finishTaskHostExecution(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	rt ExecutorBackend,
+	runtimeInstance *ExecutorInstance,
+	execution *AgentExecution,
+	requireExisting bool,
+) (*AgentExecution, error) {
+	if !requireExisting {
+		if err := m.ensureTaskHostTaskActive(ctx, taskID); err != nil {
+			rollbackErr := m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task cleanup won task-host registration")
+			return nil, errors.Join(err, rollbackErr)
+		}
+	}
+	if execution.agentctl == nil {
+		rollbackErr := m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task host has no control client")
+		return nil, errors.Join(fmt.Errorf("task-host execution has no agentctl client"), rollbackErr)
+	}
+	if err := execution.agentctl.WaitForReady(ctx, constants.AgentLaunchTimeout); err != nil {
+		rollbackErr := m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task host did not become ready")
+		return nil, errors.Join(fmt.Errorf("task-host agentctl not ready: %w", err), rollbackErr)
+	}
+	// A Docker re-handshake may rotate the container-wide agentctl credential.
+	// Adopt it in every live client and commit its encrypted task-environment
+	// references before exposing this task host as ready.
+	if err := m.persistRuntimeSecrets(ctx, runtimeInstance, execution); err != nil {
+		rollbackErr := m.rollbackTaskHostExecution(
+			rt, runtimeInstance, execution, "task-host runtime credential persistence failed",
+		)
+		return nil, errors.Join(fmt.Errorf("persist task-host runtime credentials: %w", err), rollbackErr)
+	}
+	execution.MarkAgentctlReady()
+	m.logger.Info("task-host execution created",
+		zap.String("execution_id", execution.ID),
+		zap.String("task_id", taskID),
+		zap.String("task_environment_id", info.TaskEnvironmentID),
+		zap.Stringer("runtime", execution.RuntimeName))
+	return execution, nil
+}
+
+func taskHostExecutionID(taskEnvironmentID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("kandev/task-host/"+taskEnvironmentID)).String()
+}
+
+func executionMetadata(source map[string]interface{}, taskHost bool) map[string]interface{} {
+	metadata := make(map[string]interface{}, len(source)+1)
+	for key, value := range source {
+		if taskHost && (strings.HasPrefix(key, "env_secret_id_") || IsSessionScopedMetadataKey(key)) {
+			continue
+		}
+		metadata[key] = value
+	}
+	return metadata
+}
+
+func (m *Manager) rollbackTaskHostExecution(
+	rt ExecutorBackend,
+	runtimeInstance *ExecutorInstance,
+	execution *AgentExecution,
+	reason string,
+) error {
+	m.logger.Warn("rolling back task-host execution",
+		zap.String("execution_id", execution.ID),
+		zap.String("task_environment_id", execution.TaskEnvironmentID),
+		zap.String("reason", reason))
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if rt != nil && runtimeInstance != nil {
+		if err := rt.StopInstance(cleanupCtx, runtimeInstance, true); err != nil {
+			m.logger.Warn("failed to stop task-host runtime during rollback",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+			// Keep the only durable in-memory handle while cleanup remains
+			// uncertain. Removing it here would make a still-live task host
+			// unreachable and allow a duplicate runtime to start.
+			return fmt.Errorf("stop task-host runtime during rollback: %w", err)
+		}
+	}
+	m.executionStore.RemoveIfSame(execution.ID, execution)
+	if execution.agentctl != nil {
+		execution.agentctl.Close()
+	}
+	return nil
+}

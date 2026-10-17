@@ -263,7 +263,6 @@ export const i18nGuardFiles = [
   "components/settings/editor-form.tsx",
   "components/settings/editors-settings-state.tsx",
   "components/settings/editors-settings.tsx",
-  "components/settings/lsp-status-location-setting.tsx",
   "components/settings/lsp-language-options.ts",
   // Sprites.dev config, now a section on the Executors page.
   "components/settings/sprites-settings.tsx",

@@ -89,6 +89,11 @@ func (r *Repository) createTaskResourceCleanupJob(
 			return false, nil
 		}
 	}
+	if job.State == models.TaskResourceCleanupStatePrepared {
+		if err := r.lockTaskCleanupReservation(ctx, tx, job.TaskID); err != nil {
+			return false, err
+		}
+	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_resource_cleanup_jobs (`+taskResourceCleanupColumns+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -105,6 +110,18 @@ func (r *Repository) createTaskResourceCleanupJob(
 	return true, nil
 }
 
+// TouchPreparedTaskResourceCleanupJob renews the durable owner lease while an
+// admitted inventory/mutation sequence is still running. A concurrent state
+// transition wins harmlessly because only prepared rows are touched.
+func (r *Repository) TouchPreparedTaskResourceCleanupJob(ctx context.Context, operationID string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_resource_cleanup_jobs
+		SET updated_at = ?
+		WHERE operation_id = ? AND state = ?
+	`), time.Now().UTC(), operationID, models.TaskResourceCleanupStatePrepared)
+	return err
+}
+
 // UpdateTaskResourceCleanupSnapshot writes the resource inventory captured
 // after the prepared barrier was reserved. The barrier row exists before the
 // inventory query so concurrent session/worktree creation is rejected while
@@ -115,7 +132,7 @@ func (r *Repository) UpdateTaskResourceCleanupSnapshot(ctx context.Context, oper
 	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
-		SET resource_snapshot = ?, updated_at = ?
+		SET resource_snapshot = ?, last_error = '', updated_at = ?
 		WHERE operation_id = ? AND state = ? AND `+r.unmarkedManagedDeletionSQL()+`
 	`), snapshot, time.Now().UTC(), operationID, models.TaskResourceCleanupStatePrepared)
 	if err != nil {

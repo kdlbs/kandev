@@ -78,6 +78,7 @@ import type {
   ConnectionState,
   KanbanSlice,
   NeedsYouInboxBootSeed,
+  LspSlice,
 } from "./slices";
 import type { TaskOverviewSlice } from "./slices/task-overview-types";
 import type { AppStateExtraActions } from "./app-state-extra-actions";
@@ -741,7 +742,8 @@ export type AppState = KanbanSlice & {
   restoreChatAnimations: UIA["restoreChatAnimations"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
-} & TaskOverviewSlice &
+} & LspSlice &
+  TaskOverviewSlice &
   AppStateExtraActions &
   Pick<
     UIA,

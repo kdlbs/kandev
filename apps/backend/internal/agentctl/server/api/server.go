@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	tasklsp "github.com/kandev/kandev/internal/agentctl/server/lsp"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
@@ -38,7 +39,7 @@ type Server struct {
 	router           *gin.Engine
 	portProxies      *portProxyCache
 	metricsCollector *metrics.Collector
-	lspInstaller     lspInstallerRegistry
+	lspManager       *tasklsp.Manager
 
 	// credentialSource, when set via SetCredentialSource, authenticates this
 	// instance's requests and streams against the control server's single
@@ -66,6 +67,7 @@ func (s *Server) SetCredentialSource(src InstanceCredentialSource) {
 func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *mcp.Server, mcpBackendClient *mcp.ChannelBackendClient, log *logger.Logger) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
+	lspRegistry := lspinstaller.NewRegistry("", log, lspinstaller.WithCommandRunner(procMgr))
 	s := &Server{
 		cfg:              cfg,
 		procMgr:          procMgr,
@@ -75,7 +77,6 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 		router:           gin.New(),
 		portProxies:      newPortProxyCache(),
 		metricsCollector: metrics.NewCollector(),
-		lspInstaller:     lspinstaller.NewRegistry("", log, lspinstaller.WithCommandRunner(procMgr)),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for container-local communication
@@ -86,6 +87,16 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 		mcpBackendClient.SetSessionID(cfg.SessionID)
 		procMgr.SetUserInputRequestHandler(newCodexUserInputRequestHandler(cfg, mcpBackendClient, s.logger))
 	}
+	ownerID := cfg.TaskID
+	if ownerID == "" {
+		ownerID = cfg.InstanceID
+	}
+	s.lspManager = tasklsp.NewManager(tasklsp.Config{
+		WorkDir:          cfg.WorkDir,
+		WorkspaceURI:     workspaceFileURI(cfg.WorkDir),
+		WorkspaceFolders: taskLSPWorkspaceFolders(cfg.WorkDir, procMgr.RepoSubpaths()...),
+		OwnerID:          ownerID,
+	}, procMgr, lspRegistry, s.logger)
 
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
 	// Exempt paths from auth:
@@ -141,7 +152,16 @@ func (s *Server) setupRoutes() {
 		api.POST("/agent/submissions/:id/retire", s.handleDeliverySubmissionRetire)
 		api.GET("/agent/delivery/stream", s.handleDeliveryReplay)
 		api.POST("/agent/delivery/stream/ack", s.handleDeliveryAcknowledgement)
-		api.GET("/lsp/stream", s.handleLSPStreamWS)
+		api.GET("/lsp/discovery", s.handleTaskLSPDiscovery)
+		api.POST("/lsp/workspace/refresh", s.handleTaskLSPWorkspaceRefresh)
+		api.GET("/lsp/languages/:language", s.handleTaskLSPSnapshot)
+		api.POST("/lsp/languages/:language/start", s.handleTaskLSPStart)
+		api.POST("/lsp/languages/:language/stop", s.handleTaskLSPStop)
+		api.POST("/lsp/languages/:language/restart", s.handleTaskLSPRestart)
+		api.POST("/lsp/languages/:language/configuration", s.handleTaskLSPConfiguration)
+		api.DELETE("/lsp/task", s.handleTaskLSPPurge)
+		api.GET("/lsp/languages/:language/watch", s.handleTaskLSPWatch)
+		api.GET("/lsp/languages/:language/attach", s.handleTaskLSPAttach)
 
 		// Unified workspace stream (git status, files, shell)
 		api.GET("/workspace/stream", s.handleWorkspaceStreamWS)

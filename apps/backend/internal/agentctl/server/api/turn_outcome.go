@@ -49,5 +49,5 @@ func (m *ControlServer) handleAckTurnOutcome(c *gin.Context) {
 	}
 
 	m.instMgr.AckTurnOutcome(id, req.TurnID)
-	c.JSON(http.StatusOK, gin.H{lspStatusKey: "acked"})
+	c.JSON(http.StatusOK, gin.H{"status": "acked"})
 }

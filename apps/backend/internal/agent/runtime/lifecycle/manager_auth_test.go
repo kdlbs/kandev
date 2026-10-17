@@ -112,6 +112,9 @@ func (s *inMemorySecretStore) Update(ctx context.Context, id string, req *secret
 	if s.rejectCanceledCalls && ctx.Err() != nil {
 		return ctx.Err()
 	}
+	if s.err != nil {
+		return s.err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	stored, ok := s.store[id]
@@ -223,7 +226,7 @@ func TestPersistAuthToken(t *testing.T) {
 
 	t.Run("stores token and sets metadata", func(t *testing.T) {
 		store := newInMemorySecretStore()
-		m := &Manager{logger: log, secretStore: store}
+		m := &Manager{logger: log, runtimeSecretStore: store}
 
 		instance := &ExecutorInstance{
 			InstanceID: "exec-123456789012",
@@ -233,7 +236,9 @@ func TestPersistAuthToken(t *testing.T) {
 			metadata: make(map[string]interface{}),
 		}
 
-		m.persistAuthToken(context.Background(), instance, execution)
+		if err := m.persistAuthToken(context.Background(), instance, execution); err != nil {
+			t.Fatal(err)
+		}
 
 		// Verify secret was stored
 		if len(store.store) != 1 {
@@ -259,7 +264,7 @@ func TestPersistAuthToken(t *testing.T) {
 
 	t.Run("no-op when auth token is empty", func(t *testing.T) {
 		store := newInMemorySecretStore()
-		m := &Manager{logger: log, secretStore: store}
+		m := &Manager{logger: log, runtimeSecretStore: store}
 
 		instance := &ExecutorInstance{InstanceID: "exec-123456789012"}
 		execution := &AgentExecution{metadata: make(map[string]interface{})}
@@ -289,7 +294,7 @@ func TestPersistAuthToken(t *testing.T) {
 
 	t.Run("handles nil metadata in execution", func(t *testing.T) {
 		store := newInMemorySecretStore()
-		m := &Manager{logger: log, secretStore: store}
+		m := &Manager{logger: log, runtimeSecretStore: store}
 
 		instance := &ExecutorInstance{
 			InstanceID: "exec-123456789012",
@@ -309,7 +314,7 @@ func TestPersistAuthToken(t *testing.T) {
 func TestPersistRuntimeSecrets(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	store := newInMemorySecretStore()
-	m := &Manager{logger: log, secretStore: store}
+	m := &Manager{logger: log, runtimeSecretStore: store}
 
 	instance := &ExecutorInstance{
 		InstanceID:     "exec-123456789012",
@@ -319,7 +324,9 @@ func TestPersistRuntimeSecrets(t *testing.T) {
 	}
 	execution := &AgentExecution{metadata: make(map[string]interface{})}
 
-	m.persistRuntimeSecrets(context.Background(), instance, execution)
+	if err := m.persistRuntimeSecrets(context.Background(), instance, execution); err != nil {
+		t.Fatal(err)
+	}
 
 	rawAuth, _ := execution.metadataValue(MetadataKeyAuthTokenSecret)
 	authSecretID, ok := rawAuth.(string)
@@ -336,6 +343,9 @@ func TestPersistRuntimeSecrets(t *testing.T) {
 	if !ok || controlSecretID == "" {
 		t.Fatalf("expected container control secret ID, got %v", rawControl)
 	}
+	if controlSecretID != authSecretID {
+		t.Fatalf("container control secret = %q, want environment auth owner %q", controlSecretID, authSecretID)
+	}
 
 	if got := m.revealRuntimeSecret(context.Background(), execution.MetadataSnapshot(), MetadataKeyAuthTokenSecret); got != "agentctl-token" {
 		t.Fatalf("revealed auth token = %q, want agentctl-token", got)
@@ -348,13 +358,21 @@ func TestPersistRuntimeSecrets(t *testing.T) {
 	if got, err := m.revealContainerControlAuthToken(context.Background(), execution.MetadataSnapshot(), false); err != nil || got != "environment-control-token" {
 		t.Fatalf("revealed container control token = %q, want environment-control-token", got)
 	}
+	if len(store.store) != 2 {
+		t.Fatalf("runtime secret count = %d, want 2", len(store.store))
+	}
+	for id := range store.store {
+		if !secrets.IsInternalID(id) {
+			t.Fatalf("runtime secret %q is not internally owned", id)
+		}
+	}
 }
 
 func TestRevealContainerControlAuthToken(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	store := newInMemorySecretStore()
 	store.store["session-auth"] = &secrets.SecretWithValue{Value: "legacy-session-token"}
-	m := &Manager{logger: log, secretStore: store}
+	m := &Manager{logger: log, runtimeSecretStore: store}
 
 	t.Run("uses the session token only when the environment control handle is absent", func(t *testing.T) {
 		got, err := m.revealContainerControlAuthToken(context.Background(), map[string]interface{}{
@@ -389,7 +407,7 @@ func TestResolveLaunchAuthToken(t *testing.T) {
 	t.Run("ssh with a session auth secret returns that token", func(t *testing.T) {
 		store := newInMemorySecretStore()
 		store.store["session-auth"] = &secrets.SecretWithValue{Value: "the-ssh-token"}
-		m := &Manager{logger: log, secretStore: store}
+		m := &Manager{logger: log, runtimeSecretStore: store}
 
 		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeSSH)}
 		metadata := map[string]interface{}{MetadataKeyAuthTokenSecret: "session-auth"}
@@ -408,7 +426,7 @@ func TestResolveLaunchAuthToken(t *testing.T) {
 		revealErr := errors.New("secret backend unavailable")
 		store.revealErr = revealErr
 		store.store["session-auth"] = &secrets.SecretWithValue{Value: "the-ssh-token"}
-		m := &Manager{logger: log, secretStore: store}
+		m := &Manager{logger: log, runtimeSecretStore: store}
 
 		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeSSH)}
 		metadata := map[string]interface{}{MetadataKeyAuthTokenSecret: "session-auth"}
@@ -424,7 +442,7 @@ func TestResolveLaunchAuthToken(t *testing.T) {
 
 	t.Run("ssh with no secret anywhere returns empty and resume still rejects it", func(t *testing.T) {
 		store := newInMemorySecretStore()
-		m := &Manager{logger: log, secretStore: store}
+		m := &Manager{logger: log, runtimeSecretStore: store}
 
 		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeSSH)}
 
@@ -443,7 +461,7 @@ func TestResolveLaunchAuthToken(t *testing.T) {
 	t.Run("docker with workspace reuse still prefers the container control token", func(t *testing.T) {
 		store := newInMemorySecretStore()
 		store.store["control-secret"] = &secrets.SecretWithValue{Value: "environment-control-token"}
-		m := &Manager{logger: log, secretStore: store}
+		m := &Manager{logger: log, runtimeSecretStore: store}
 
 		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeLocalDocker), WorkspaceReuseRequired: true}
 		metadata := map[string]interface{}{MetadataKeyContainerControlAuthSecret: "control-secret"}
@@ -460,7 +478,7 @@ func TestResolveLaunchAuthToken(t *testing.T) {
 	t.Run("docker with workspace reuse falls back to the session token when no control handle exists", func(t *testing.T) {
 		store := newInMemorySecretStore()
 		store.store["session-auth"] = &secrets.SecretWithValue{Value: "legacy-session-token"}
-		m := &Manager{logger: log, secretStore: store}
+		m := &Manager{logger: log, runtimeSecretStore: store}
 
 		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeRemoteDocker), WorkspaceReuseRequired: true}
 		metadata := map[string]interface{}{MetadataKeyAuthTokenSecret: "session-auth"}
@@ -477,7 +495,7 @@ func TestResolveLaunchAuthToken(t *testing.T) {
 	t.Run("docker without workspace reuse returns empty when no control handle exists", func(t *testing.T) {
 		store := newInMemorySecretStore()
 		store.store["session-auth"] = &secrets.SecretWithValue{Value: "legacy-session-token"}
-		m := &Manager{logger: log, secretStore: store}
+		m := &Manager{logger: log, runtimeSecretStore: store}
 
 		req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeLocalDocker), WorkspaceReuseRequired: false}
 		metadata := map[string]interface{}{MetadataKeyAuthTokenSecret: "session-auth"}
@@ -498,6 +516,7 @@ func TestRegisterKubernetesExecutionPersistsRequiredSecretReferencesBeforeSucces
 	writer := &captureExecutorRunningWriter{}
 	mgr := newTestManager(t)
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	mgr.SetExecutorRunningWriter(writer)
 	execution := &AgentExecution{
 		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
@@ -535,6 +554,7 @@ func TestRegisterNonKubernetesExecutionRollsBackWhenRuntimeSecretPersistenceFail
 	store.err = errors.New("secret store unavailable")
 	mgr := newTestManager(t)
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	execution := &AgentExecution{
 		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
 		AgentProfileID: "profile-1", RuntimeName: agentruntime.RuntimeDocker,
@@ -558,6 +578,7 @@ func TestRegisterKubernetesExecutionRollsBackCreatedSecretsOnPersistenceFailure(
 	store := &failNthCreateSecretStore{inMemorySecretStore: newInMemorySecretStore(), failAt: 2}
 	mgr := newTestManager(t)
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{})
 	execution := &AgentExecution{
 		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
@@ -590,6 +611,7 @@ func TestRegisterKubernetesExecutionRollsBackSecretsWhenDurableRowWriteFails(t *
 	store := newInMemorySecretStore()
 	mgr := newTestManager(t)
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{upsertErr: errors.New("injected row failure")})
 	execution := &AgentExecution{
 		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
@@ -629,7 +651,7 @@ func TestCreateWorkspaceKubernetesExecutionPersistsRequiredSecretReferencesBefor
 		&MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log,
 	)
 	cleanupManagerStopCh(t, mgr)
-	mgr.SetSecretStore(newInMemorySecretStore())
+	mgr.SetRuntimeSecretStore(newInMemorySecretStore())
 	writer := &captureExecutorRunningWriter{}
 	mgr.SetExecutorRunningWriter(writer)
 
@@ -670,6 +692,7 @@ func TestStopKubernetesExecutionDeletesRuntimeSecretsAfterTerminalCleanup(t *tes
 	)
 	cleanupManagerStopCh(t, mgr)
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	if err := mgr.executionStore.Add(&AgentExecution{
 		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
 		RuntimeName: agentruntime.RuntimeKubernetes, Status: v1.AgentStatusRunning,
@@ -712,6 +735,7 @@ func TestStopKubernetesExecutionDeletesRuntimeSecretsAfterRequestCancellation(t 
 	)
 	cleanupManagerStopCh(t, mgr)
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
 		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
 		RuntimeName: agentruntime.RuntimeKubernetes, Status: v1.AgentStatusRunning,
@@ -749,6 +773,7 @@ func TestForceStopKubernetesExecutionDeletesRuntimeSecretsWithoutTerminalReason(
 	)
 	cleanupManagerStopCh(t, mgr)
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
 		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
 		RuntimeName: agentruntime.RuntimeKubernetes, Status: v1.AgentStatusRunning,
@@ -785,6 +810,7 @@ func TestDeleteKubernetesRuntimeSecretsDerivesCanonicalRefsForProvisionalInvento
 			}
 			mgr := newTestManager(t)
 			mgr.SetSecretStore(store)
+			mgr.SetRuntimeSecretStore(store)
 
 			err := mgr.deleteKubernetesRuntimeSecrets(context.Background(), map[string]interface{}{
 				MetadataKeyKubernetesInventoryState:     tc.state,
@@ -816,6 +842,7 @@ func TestRegisteredKubernetesLaunchRollbackDeletesSecretsBeforeReleasingInventor
 	}
 	mgr := newTestManager(t)
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	execution := &AgentExecution{
 		ID: "execution-1", SessionID: "session-1", RuntimeName: agentruntime.RuntimeKubernetes,
 		metadata: map[string]interface{}{
@@ -948,6 +975,7 @@ func TestRegisteredKubernetesResumeRollbackPreservesRetainedRuntimeAndSecrets(t 
 	}
 	mgr := newTestManager(t)
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	execution := &AgentExecution{
 		ID: "execution-1", SessionID: "session-1", RuntimeName: agentruntime.RuntimeKubernetes,
 		isResumedSession: true,

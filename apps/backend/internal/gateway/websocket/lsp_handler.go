@@ -3,38 +3,28 @@ package websocket
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	gorillaws "github.com/gorilla/websocket"
-	"github.com/kandev/kandev/internal/auth/authn"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
-	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/events"
-	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/lsp/installer"
+	sharedlsp "github.com/kandev/kandev/internal/lsp"
 	"github.com/kandev/kandev/internal/lsp/protocol"
-	"github.com/kandev/kandev/internal/user/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
-// Custom WebSocket close codes for LSP connections.
 const (
-	lspCloseBinaryNotFound       = 4001
-	lspCloseSessionNotFound      = 4002
-	lspCloseInstallFailed        = 4003
-	lspCloseUnsupportedExecutor  = 4004
-	lspCloseCapacityExceeded     = 4005
-	lspCloseStreamError          = 4006
-	lspCloseRuntimeStopped       = 4010
-	lspCloseUnsupportedCloseText = "LSP is only supported for local_pc and local_docker tasks in this release"
-	lspCloseSessionNotFoundText  = "session not found"
-	lspProxyWriteTimeout         = 10 * time.Second
+	lspCloseStreamError    = 4006
+	lspProxyWriteTimeout   = 10 * time.Second
+	lspProxyIdleTimeout    = 90 * time.Second
+	lspProxyPingInterval   = 30 * time.Second
+	lspErrorResponseKey    = "error"
+	lspUnavailableText     = "task language server attachment unavailable"
+	lspHostUnavailableText = "task-host LSP attachment unavailable"
 )
 
 type lspMessageWriter interface {
@@ -42,62 +32,16 @@ type lspMessageWriter interface {
 	WriteMessage(int, []byte) error
 }
 
-// LSPUserService provides user settings for the LSP handler.
-type LSPUserService interface {
-	GetUserSettings(ctx context.Context) (*models.UserSettings, error)
+type LSPAttachmentResolver interface {
+	ResolveAttachment(ctx context.Context, taskID, language string) (*sharedlsp.AttachmentTarget, error)
 }
 
-type lspLifecycleManager interface {
-	CheckSessionAccess(ctx context.Context, sessionID string) error
-	ResolveSessionRuntime(ctx context.Context, sessionID string) (agentruntime.Runtime, error)
-	GetOrEnsureExecution(ctx context.Context, sessionID string) (*lifecycle.AgentExecution, error)
-}
-
-var (
-	errLSPUnsupportedExecutor = errors.New("unsupported LSP executor")
-	errLSPCapacityExceeded    = errors.New("active LSP connection cap exceeded")
-)
-
-// LSPHandler handles browser-facing LSP WebSocket connections.
-// The backend owns session/runtime policy and proxies raw LSP traffic to the
-// task host's agentctl instance, where the language server process runs.
+// LSPHandler is a thin, non-owning proxy. The task controller authorizes and
+// resolves the current task/language generation; browser disconnect only
+// closes its downstream attachment.
 type LSPHandler struct {
-	lifecycleMgr      lspLifecycleManager
-	userService       LSPUserService
-	capacity          *lspCapacityLimiter
-	logger            *logger.Logger
-	continuityEnabled bool
-	leases            *lspLeaseManager
-	sessionFence      func(string) func()
-	settingsSub       bus.Subscription
-}
-
-// EnableContinuity installs the runtime-owned lease manager. The session
-// fence serializes lease admission with idle execution reclaim.
-func (h *LSPHandler) EnableContinuity(acquireFence func(string) func(), eventBus bus.EventBus) {
-	h.continuityEnabled = true
-	h.sessionFence = acquireFence
-	h.leases = newLSPLeaseManager(h.capacity.max, h.logger)
-	if eventBus == nil {
-		return
-	}
-	subscription, err := eventBus.Subscribe(events.UserSettingsUpdated, h.handleUserSettingsUpdated)
-	if err != nil {
-		h.logger.Warn("failed to subscribe LSP leases to user settings updates", zap.Error(err))
-		return
-	}
-	h.settingsSub = subscription
-}
-
-// Close releases retained language servers and the settings subscription.
-func (h *LSPHandler) Close() error {
-	if h.settingsSub != nil && h.settingsSub.IsValid() {
-		_ = h.settingsSub.Unsubscribe()
-	}
-	if h.leases != nil {
-		h.leases.Close()
-	}
-	return nil
+	controller LSPAttachmentResolver
+	logger     *logger.Logger
 }
 
 var lspUpgrader = gorillaws.Upgrader{
@@ -106,329 +50,70 @@ var lspUpgrader = gorillaws.Upgrader{
 	CheckOrigin:     checkWebSocketOrigin,
 }
 
-// NewLSPHandler creates a new LSPHandler.
-func NewLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSPUserService, log *logger.Logger, configuredMax ...int) *LSPHandler {
-	capacity := newLSPCapacityLimiterFromEnv()
-	if len(configuredMax) > 0 {
-		capacity = newLSPCapacityLimiter(configuredMax[0])
-	}
+func NewLSPHandler(controller LSPAttachmentResolver, log *logger.Logger) *LSPHandler {
 	return &LSPHandler{
-		lifecycleMgr: lifecycleMgr,
-		userService:  userService,
-		capacity:     capacity,
-		logger:       log.WithFields(zap.String("component", "lsp_handler")),
+		controller: controller,
+		logger:     log.WithFields(zap.String("component", "lsp_attachment_handler")),
 	}
 }
 
-// HandleLSPConnection handles WebSocket connections at /lsp/:sessionId?language=...
+// HandleLSPConnection serves /lsp/tasks/:taskId/:language/attach.
 func (h *LSPHandler) HandleLSPConnection(c *gin.Context) {
-	sessionID := c.Param("sessionId")
-	if sessionID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sessionId is required"})
-		return
-	}
-
-	language := c.Query("language")
-	if language == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "language query parameter is required"})
-		return
-	}
-	if !installer.IsSupported(language) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("unsupported language: %s", language)})
-		return
-	}
-	if h.continuityEnabled {
-		h.handleContinuityConnection(c, sessionID, language)
-		return
-	}
-
-	h.logger.Info("LSP WebSocket connection request",
-		zap.String("session_id", sessionID),
-		zap.String("language", language))
-
-	execution, runtimeName, err := h.resolveLSPExecution(c.Request.Context(), sessionID)
+	taskID := c.Param("taskId")
+	language := c.Param("language")
+	target, err := h.controller.ResolveAttachment(c.Request.Context(), taskID, language)
 	if err != nil {
-		if errors.Is(err, errLSPCapacityExceeded) {
-			h.logger.Info("LSP: capacity exceeded",
-				zap.String("session_id", sessionID),
-				zap.String("language", language))
-			h.closeWithCode(c, lspCloseCapacityExceeded, errLSPCapacityExceeded.Error())
-			return
+		status := lspAttachmentHTTPStatus(err)
+		message := lspUnavailableText
+		if status == http.StatusBadRequest || status == http.StatusConflict ||
+			status == http.StatusUnprocessableEntity {
+			message = err.Error()
 		}
-		if errors.Is(err, errLSPUnsupportedExecutor) {
-			h.logger.Info("LSP: unsupported runtime",
-				zap.String("session_id", sessionID),
-				zap.Stringer("runtime", runtimeName))
-			h.closeWithCode(c, lspCloseUnsupportedExecutor, lspCloseUnsupportedCloseText)
-			return
-		}
-		h.logger.Warn("LSP: session not found in lifecycle manager",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		h.closeWithCode(c, lspCloseSessionNotFound, lspCloseSessionNotFoundText)
+		c.JSON(status, gin.H{lspErrorResponseKey: message})
 		return
 	}
-	defer h.capacity.Release()
-	agentctlClient, releaseClient := execution.AcquireAgentCtlClient()
-	if agentctlClient == nil {
-		releaseClient()
-		h.logger.Warn("LSP: execution has no agentctl client", zap.String("session_id", sessionID))
-		h.closeWithCode(c, lspCloseSessionNotFound, "agentctl unavailable")
-		return
-	}
-	browserConn, upgradeErr := lspUpgrader.Upgrade(c.Writer, c.Request, nil)
-	if upgradeErr != nil {
-		releaseClient()
-		h.logger.Error("LSP: failed to upgrade to WebSocket",
-			zap.String("session_id", sessionID),
-			zap.Error(upgradeErr))
-		return
-	}
-	browserConn.SetReadLimit(protocol.MaxMessageBytes)
 
-	autoInstall := h.shouldAutoInstall(c.Request.Context(), language)
-	upstreamConn, resp, dialErr := agentctlClient.DialLSP(c.Request.Context(), language, autoInstall)
-	releaseClient()
-	if dialErr != nil {
-		status := 0
-		if resp != nil {
-			status = resp.StatusCode
+	upstreamConn, response, err := target.Host.DialTaskLSPAttach(
+		c.Request.Context(), target.Language, target.Generation,
+	)
+	if err != nil {
+		status := http.StatusBadGateway
+		if response != nil && response.StatusCode >= http.StatusBadRequest {
+			status = response.StatusCode
 		}
-		h.logger.Warn("LSP: failed to connect to agentctl LSP stream",
-			zap.String("session_id", sessionID),
-			zap.String("language", language),
-			zap.Int("status", status),
-			zap.Error(dialErr))
-		closeLSPConnWithCode(browserConn, lspCloseSessionNotFound, "failed to connect to task host LSP stream")
+		c.JSON(status, gin.H{lspErrorResponseKey: lspHostUnavailableText})
 		return
 	}
 	upstreamConn.SetReadLimit(protocol.MaxMessageBytes)
-	defer func() { _ = upstreamConn.Close() }()
-
-	h.proxyLSPConnections(browserConn, upstreamConn, sessionID, language)
-}
-
-func (h *LSPHandler) handleContinuityConnection(c *gin.Context, sessionID, language string) {
-	releaseFence := func() {}
-	fenceHeld := true
-	if h.sessionFence != nil {
-		releaseFence = h.sessionFence(sessionID)
-	}
-	defer func() {
-		if fenceHeld {
-			releaseFence()
-		}
-	}()
-	execution, closeCode, closeMessage := h.resolveContinuityExecution(c.Request.Context(), sessionID)
-	if closeCode != 0 {
-		h.closeWithCode(c, closeCode, closeMessage)
-		return
-	}
-	userID, configuration, autoInstall := h.continuityUserSettings(c.Request.Context(), language)
 
 	browserConn, err := lspUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		h.logger.Error("LSP: failed to upgrade to WebSocket", zap.String("session_id", sessionID), zap.Error(err))
+		_ = upstreamConn.Close()
 		return
 	}
 	browserConn.SetReadLimit(protocol.MaxMessageBytes)
-	lease, generation, _, err := h.leases.attachOrCreate(
-		c.Request.Context(),
-		lspLeaseExecutionFromAgentExecution(execution),
-		language,
-		userID,
-		c.Query("leaseId"),
-		configuration,
-		autoInstall,
-		browserConn,
-	)
-	if err != nil {
-		code, message := lspLeaseAdmissionClose(err)
-		closeLSPConnWithCode(browserConn, code, message)
-		return
-	}
-	// Admission is now represented by the live lease pin. Do not hold the
-	// session lifecycle fence for the lifetime of the browser socket.
-	releaseFence()
-	fenceHeld = false
-
-	h.serveContinuityConnection(browserConn, lease, generation, sessionID, language)
+	h.proxyLSPConnections(browserConn, upstreamConn, taskID, language)
 }
 
-func (h *LSPHandler) resolveContinuityExecution(
-	ctx context.Context,
-	sessionID string,
-) (*lifecycle.AgentExecution, int, string) {
-	if h.lifecycleMgr == nil || h.leases == nil {
-		return nil, lspCloseSessionNotFound, "LSP lease manager unavailable"
+func lspAttachmentHTTPStatus(err error) int {
+	switch {
+	case errors.Is(err, sharedlsp.ErrUnsupportedLanguage):
+		return http.StatusBadRequest
+	case errors.Is(err, sharedlsp.ErrAttachmentNotReady), errors.Is(err, sharedlsp.ErrServerDisabled):
+		return http.StatusConflict
+	case errors.Is(err, sharedlsp.ErrTaskNotReady), errors.Is(err, sharedlsp.ErrExecutorUnsupported):
+		return http.StatusUnprocessableEntity
+	case errors.Is(err, repoerrors.ErrTaskNotFound):
+		return http.StatusNotFound
+	default:
+		return http.StatusInternalServerError
 	}
-	if h.lifecycleMgr.CheckSessionAccess(ctx, sessionID) != nil {
-		return nil, lspCloseSessionNotFound, lspCloseSessionNotFoundText
-	}
-	runtimeName, err := h.lifecycleMgr.ResolveSessionRuntime(ctx, sessionID)
-	if err != nil {
-		return nil, lspCloseSessionNotFound, lspCloseSessionNotFoundText
-	}
-	if !lspRuntimeSupported(runtimeName) {
-		return nil, lspCloseUnsupportedExecutor, lspCloseUnsupportedCloseText
-	}
-	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, sessionID)
-	if err != nil || execution == nil || execution.SessionID != sessionID {
-		return nil, lspCloseSessionNotFound, "agentctl unavailable"
-	}
-	if !lspRuntimeSupported(execution.RuntimeName) {
-		return nil, lspCloseUnsupportedExecutor, lspCloseUnsupportedCloseText
-	}
-	return execution, 0, ""
 }
 
-func (h *LSPHandler) continuityUserSettings(
-	ctx context.Context,
-	language string,
-) (string, map[string]any, bool) {
-	userID := ""
-	if identity, ok := authn.IdentityFromContext(ctx); ok {
-		userID = identity.UserID
-	}
-	if h.userService == nil {
-		return userID, make(map[string]any), false
-	}
-	settings, err := h.userService.GetUserSettings(ctx)
-	if err != nil || settings == nil {
-		if err != nil {
-			h.logger.Debug("LSP: failed to load settings for a retained lease", zap.Error(err))
-		}
-		return userID, make(map[string]any), false
-	}
-	if userID == "" {
-		userID = settings.UserID
-	}
-	configuration := make(map[string]any)
-	for key, value := range settings.LspServerConfigs[language] {
-		configuration[key] = value
-	}
-	return userID, configuration, h.settingsAllowAutoInstall(settings, language)
-}
-
-func lspLeaseAdmissionClose(err error) (int, string) {
-	if errors.Is(err, errLSPCapacityExceeded) {
-		return lspCloseCapacityExceeded, errLSPCapacityExceeded.Error()
-	}
-	return lspCloseSessionNotFound, "failed to connect to task host LSP stream"
-}
-
-func (h *LSPHandler) serveContinuityConnection(
-	browserConn *gorillaws.Conn,
-	lease *lspLease,
-	generation uint64,
-	sessionID, language string,
+func (h *LSPHandler) proxyLSPConnections(
+	browserConn, upstreamConn *gorillaws.Conn,
+	taskID, language string,
 ) {
-	defer lease.detach(generation)
-	for {
-		messageType, message, readErr := browserConn.ReadMessage()
-		if readErr != nil {
-			return
-		}
-		if messageType != gorillaws.TextMessage {
-			continue
-		}
-		if err := lease.handleBrowserMessage(generation, message); err != nil {
-			h.logger.Debug("LSP browser frame failed", zap.String("session_id", sessionID), zap.String("language", language), zap.Error(err))
-			return
-		}
-	}
-}
-
-func lspLeaseExecutionFromAgentExecution(execution *lifecycle.AgentExecution) lspLeaseExecution {
-	if execution == nil {
-		return lspLeaseExecution{}
-	}
-	return lspLeaseExecution{
-		ID:        execution.ID,
-		SessionID: execution.SessionID,
-		TaskID:    execution.TaskID,
-		acquireAgentCtlClient: func() (lspLeaseAgentCtlClient, func()) {
-			client, release := execution.AcquireAgentCtlClient()
-			return client, release
-		},
-	}
-}
-
-func (h *LSPHandler) resolveLSPExecution(
-	ctx context.Context,
-	sessionID string,
-) (*lifecycle.AgentExecution, agentruntime.Runtime, error) {
-	runtimeName, err := h.lifecycleMgr.ResolveSessionRuntime(ctx, sessionID)
-	if err != nil {
-		return nil, runtimeName, err
-	}
-	if !lspRuntimeSupported(runtimeName) {
-		return nil, runtimeName, errLSPUnsupportedExecutor
-	}
-	if !h.capacity.TryAcquire() {
-		return nil, runtimeName, errLSPCapacityExceeded
-	}
-	releaseCapacity := true
-	defer func() {
-		if releaseCapacity {
-			h.capacity.Release()
-		}
-	}()
-	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, sessionID)
-	if err != nil {
-		return nil, runtimeName, err
-	}
-	if execution == nil {
-		return nil, runtimeName, errors.New("lifecycle manager returned no execution")
-	}
-	if !lspRuntimeSupported(execution.RuntimeName) {
-		return nil, execution.RuntimeName, errLSPUnsupportedExecutor
-	}
-	releaseCapacity = false
-	return execution, execution.RuntimeName, nil
-}
-
-func lspRuntimeSupported(runtimeName agentruntime.Runtime) bool {
-	return runtimeName == agentruntime.RuntimeStandalone || runtimeName == agentruntime.RuntimeDocker
-}
-
-func (h *LSPHandler) shouldAutoInstall(ctx context.Context, language string) bool {
-	if h.userService == nil || !installer.SupportsAutoInstall(language) {
-		return false
-	}
-	settings, err := h.userService.GetUserSettings(ctx)
-	if err != nil || settings == nil {
-		if err != nil {
-			h.logger.Debug("LSP: failed to load user settings for auto-install", zap.Error(err))
-		}
-		return false
-	}
-	return h.settingsAllowAutoInstall(settings, language)
-}
-
-func (h *LSPHandler) settingsAllowAutoInstall(settings *models.UserSettings, language string) bool {
-	if settings == nil || !installer.SupportsAutoInstall(language) {
-		return false
-	}
-	for _, lang := range settings.LspAutoInstallLanguages {
-		if lang == language {
-			return true
-		}
-	}
-	return false
-}
-
-// closeWithCode upgrades the WebSocket and immediately closes it with the given code.
-func (h *LSPHandler) closeWithCode(c *gin.Context, code int, text string) {
-	conn, err := lspUpgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		h.logger.Error("LSP: failed to upgrade WebSocket for close", zap.Error(err))
-		return
-	}
-	closeLSPConnWithCode(conn, code, text)
-}
-
-func (h *LSPHandler) proxyLSPConnections(browserConn, upstreamConn *gorillaws.Conn, sessionID, language string) {
 	var closeOnce sync.Once
 	closeBoth := func() {
 		closeOnce.Do(func() {
@@ -436,51 +121,85 @@ func (h *LSPHandler) proxyLSPConnections(browserConn, upstreamConn *gorillaws.Co
 			_ = upstreamConn.Close()
 		})
 	}
-
+	if err := configureLSPReadKeepalive(browserConn); err != nil {
+		closeBoth()
+		return
+	}
+	if err := configureLSPReadKeepalive(upstreamConn); err != nil {
+		closeBoth()
+		return
+	}
+	stopPings := make(chan struct{})
+	pingsDone := make(chan struct{})
+	go func() {
+		defer close(pingsDone)
+		ticker := time.NewTicker(lspProxyPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				deadline := time.Now().Add(lspProxyWriteTimeout)
+				if err := browserConn.WriteControl(gorillaws.PingMessage, nil, deadline); err != nil {
+					closeBoth()
+					return
+				}
+				if err := upstreamConn.WriteControl(gorillaws.PingMessage, nil, deadline); err != nil {
+					closeBoth()
+					return
+				}
+			case <-stopPings:
+				return
+			}
+		}
+	}()
 	done := make(chan struct{}, 2)
 	go func() {
-		h.copyLSPMessages("agentctl->browser", upstreamConn, browserConn, sessionID, language)
+		h.copyLSPMessages("taskhost->browser", upstreamConn, browserConn, taskID, language)
 		done <- struct{}{}
 	}()
 	go func() {
-		h.copyLSPMessages("browser->agentctl", browserConn, upstreamConn, sessionID, language)
+		h.copyLSPMessages("browser->taskhost", browserConn, upstreamConn, taskID, language)
 		done <- struct{}{}
 	}()
-
 	<-done
+	close(stopPings)
 	closeBoth()
 	<-done
+	<-pingsDone
+	h.logger.Info("LSP attachment closed", zap.String("task_id", taskID), zap.String("language", language))
+}
 
-	h.logger.Info("LSP: connection closed",
-		zap.String("session_id", sessionID),
-		zap.String("language", language))
+func configureLSPReadKeepalive(conn *gorillaws.Conn) error {
+	if err := conn.SetReadDeadline(time.Now().Add(lspProxyIdleTimeout)); err != nil {
+		return err
+	}
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(lspProxyIdleTimeout))
+	})
+	return nil
 }
 
 func (h *LSPHandler) copyLSPMessages(
 	direction string,
 	src *gorillaws.Conn,
 	dst lspMessageWriter,
-	sessionID, language string,
+	taskID, language string,
 ) {
 	for {
-		messageType, msg, err := src.ReadMessage()
+		messageType, message, err := src.ReadMessage()
 		if err != nil {
 			h.forwardLSPClose(dst, err)
 			if !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
-				h.logger.Debug("LSP proxy read error",
-					zap.String("direction", direction),
-					zap.String("session_id", sessionID),
-					zap.String("language", language),
-					zap.Error(err))
+				h.logger.Debug("LSP attachment read error",
+					zap.String("direction", direction), zap.String("task_id", taskID),
+					zap.String("language", language), zap.Error(err))
 			}
 			return
 		}
-		if err := writeLSPProxyMessage(dst, messageType, msg); err != nil {
-			h.logger.Debug("LSP proxy write error",
-				zap.String("direction", direction),
-				zap.String("session_id", sessionID),
-				zap.String("language", language),
-				zap.Error(err))
+		if err := writeLSPProxyMessage(dst, messageType, message); err != nil {
+			h.logger.Debug("LSP attachment write error",
+				zap.String("direction", direction), zap.String("task_id", taskID),
+				zap.String("language", language), zap.Error(err))
 			return
 		}
 	}
@@ -488,25 +207,12 @@ func (h *LSPHandler) copyLSPMessages(
 
 func (h *LSPHandler) forwardLSPClose(dst lspMessageWriter, err error) {
 	if closeErr, ok := err.(*gorillaws.CloseError); ok {
-		if closeErr.Code == gorillaws.CloseNoStatusReceived || closeErr.Code == gorillaws.CloseAbnormalClosure {
-			_ = writeLSPProxyMessage(
-				dst,
-				gorillaws.CloseMessage,
-				gorillaws.FormatCloseMessage(lspCloseTransport, "LSP transport failed"),
-			)
-			return
-		}
-		_ = writeLSPProxyMessage(
-			dst,
-			gorillaws.CloseMessage,
-			gorillaws.FormatCloseMessage(closeErr.Code, closeErr.Text),
-		)
+		_ = writeLSPProxyMessage(dst, gorillaws.CloseMessage, gorillaws.FormatCloseMessage(closeErr.Code, closeErr.Text))
 		return
 	}
 	_ = writeLSPProxyMessage(
-		dst,
-		gorillaws.CloseMessage,
-		gorillaws.FormatCloseMessage(lspCloseStreamError, "LSP stream closed"),
+		dst, gorillaws.CloseMessage,
+		gorillaws.FormatCloseMessage(lspCloseStreamError, "LSP attachment closed"),
 	)
 }
 
@@ -515,9 +221,4 @@ func writeLSPProxyMessage(dst lspMessageWriter, messageType int, payload []byte)
 		return err
 	}
 	return dst.WriteMessage(messageType, payload)
-}
-
-func closeLSPConnWithCode(conn *gorillaws.Conn, code int, text string) {
-	_ = writeLSPProxyMessage(conn, gorillaws.CloseMessage, gorillaws.FormatCloseMessage(code, text))
-	_ = conn.Close()
 }

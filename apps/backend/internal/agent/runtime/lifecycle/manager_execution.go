@@ -30,6 +30,18 @@ import (
 // have a resolved workspace path (typically while worktree preparation is in progress).
 var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 
+// ErrTaskHostNotReady indicates that a task-host runtime is still starting or
+// remains tracked after an uncertain rollback. It must not be exposed to LSP
+// callers until agentctl readiness and credential persistence both commit.
+var ErrTaskHostNotReady = errors.New("task host not ready")
+
+// errTaskHostRuntimeNotFound is returned only by an existing-only physical
+// probe. It is authoritative absence: no stable task-host instance was found,
+// and the probe did not create or resume resources.
+var errTaskHostRuntimeNotFound = errors.New("task host runtime not found")
+
+const taskHostRecoveryProbeTimeout = 3 * time.Second
+
 // ErrSessionTerminal indicates that an agent-start operation reached a terminal
 // session state. Workspace-only admission deliberately does not return this
 // error because retained workspace infrastructure can remain usable after the
@@ -217,6 +229,249 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 		return nil, err
 	}
 	return value.(*AgentExecution), nil
+}
+
+// GetExecutionForEnvironment returns an already-running task-host execution
+// without creating or resuming resources. Authorization deliberately runs
+// before the in-memory cache lookup.
+func (m *Manager) GetExecutionForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*AgentExecution, bool, error) {
+	if taskEnvironmentID == "" {
+		return nil, false, fmt.Errorf("task_environment_id is required")
+	}
+	if check := m.environmentAccessCheck; check != nil {
+		if err := check(ctx, taskEnvironmentID); err != nil {
+			return nil, false, err
+		}
+	}
+	execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID)
+	return execution, exists, nil
+}
+
+// GetOrEnsureTaskHostForEnvironment returns the one internal task-host
+// execution owned by a task environment. Session executions are deliberately
+// ignored: they may stop independently while task services remain warm.
+func (m *Manager) GetOrEnsureTaskHostForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*AgentExecution, error) {
+	if err := m.authorizeTaskHostEnvironment(ctx, taskEnvironmentID); err != nil {
+		return nil, err
+	}
+	if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists &&
+		execution.IsAgentctlReady() {
+		return execution, nil
+	}
+
+	// A missing in-memory handle does not prove that the stable task-host
+	// process is gone. Probe and reattach to the physical instance first. Only
+	// an executor-specific not-found result authorizes creating a replacement.
+	existing, err := m.resolveTaskHostExecution(ctx, taskEnvironmentID, true)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil && existing.exists && existing.execution != nil {
+		return existing.execution, nil
+	}
+
+	result, err := m.resolveTaskHostExecution(ctx, taskEnvironmentID, false)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || result.execution == nil {
+		return nil, fmt.Errorf("task-host ensure returned no execution")
+	}
+	return result.execution, nil
+}
+
+type taskHostExecutionResult struct {
+	execution *AgentExecution
+	exists    bool
+}
+
+func (m *Manager) resolveTaskHostExecution(
+	ctx context.Context,
+	taskEnvironmentID string,
+	requireExisting bool,
+) (*taskHostExecutionResult, error) {
+	key := taskHostRuntimeSessionPrefix + taskEnvironmentID
+	for attempts := 0; attempts < 2; attempts++ {
+		value, err := m.doCoalescedExecution(ctx, key, func(sharedCtx context.Context) (interface{}, error) {
+			if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists {
+				if execution.IsAgentctlReady() {
+					return &taskHostExecutionResult{execution: execution, exists: true}, nil
+				}
+				return nil, fmt.Errorf("%w for environment %s", ErrTaskHostNotReady, taskEnvironmentID)
+			}
+			info, infoErr := m.taskHostWorkspaceInfo(sharedCtx, taskEnvironmentID)
+			if infoErr != nil {
+				return nil, infoErr
+			}
+			if !requireExisting {
+				if activeErr := m.ensureTaskHostTaskActive(sharedCtx, info.TaskID); activeErr != nil {
+					return nil, activeErr
+				}
+			}
+			execution, createErr := m.createTaskHostExecution(sharedCtx, info.TaskID, info, requireExisting)
+			if errors.Is(createErr, errTaskHostRuntimeNotFound) {
+				return &taskHostExecutionResult{}, nil
+			}
+			if createErr != nil {
+				return nil, createErr
+			}
+			return &taskHostExecutionResult{execution: execution, exists: true}, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		result := value.(*taskHostExecutionResult)
+		if !requireExisting && !result.exists && attempts == 0 {
+			continue
+		}
+		return result, nil
+	}
+	return nil, fmt.Errorf("task-host resolution retry exhausted")
+}
+
+func (m *Manager) taskHostWorkspaceInfo(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*WorkspaceInfo, error) {
+	if m.workspaceInfoProvider == nil {
+		return nil, fmt.Errorf("workspace info provider not configured")
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workspace info for environment %s: %w", taskEnvironmentID, err)
+	}
+	if info == nil {
+		return nil, fmt.Errorf("task environment %s not found", taskEnvironmentID)
+	}
+	if info.TaskEnvironmentID != taskEnvironmentID {
+		return nil, fmt.Errorf("workspace info resolved environment %s, want %s", info.TaskEnvironmentID, taskEnvironmentID)
+	}
+	if info.TaskID == "" {
+		return nil, fmt.Errorf("task environment %s has no task_id", taskEnvironmentID)
+	}
+	if info.WorkspacePath == "" {
+		return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
+	}
+	return info, nil
+}
+
+// GetTaskHostForEnvironment returns only a fully committed dedicated task-host
+// execution. Authorization runs first and a cache miss performs an existing-only
+// physical reattachment; it never creates or resumes resources.
+func (m *Manager) GetTaskHostForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*AgentExecution, bool, error) {
+	if err := m.authorizeTaskHostEnvironment(ctx, taskEnvironmentID); err != nil {
+		return nil, false, err
+	}
+	if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists {
+		if !execution.IsAgentctlReady() {
+			return nil, false, fmt.Errorf("%w for environment %s", ErrTaskHostNotReady, taskEnvironmentID)
+		}
+		return execution, true, nil
+	}
+	result, err := m.resolveTaskHostExecution(ctx, taskEnvironmentID, true)
+	if err != nil {
+		return nil, false, err
+	}
+	return result.execution, result.exists, nil
+}
+
+// StopTaskHostForEnvironment reaps the task-owned agentctl process tree without
+// touching any session execution sharing the same task environment.
+func (m *Manager) StopTaskHostForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID, reason string,
+) (bool, error) {
+	execution, exists, err := m.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return true, nil
+	}
+	if err := m.StopAgentWithReason(ctx, execution.ID, reason, false); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// RecoverTaskHostForEnvironment evicts a proven-dead task-host execution so
+// the next Ensure can reattach to or recreate its stable runtime instance.
+func (m *Manager) RecoverTaskHostForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (bool, error) {
+	if err := m.authorizeTaskHostEnvironment(ctx, taskEnvironmentID); err != nil {
+		return false, err
+	}
+	execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID)
+	if !exists || execution == nil {
+		return false, nil
+	}
+	if !execution.IsAgentctlReady() {
+		// Creation registered this handle before readiness so rollback could
+		// retain ownership on an uncertain stop. A later recovery must retry
+		// that physical stop rather than expose the incomplete host or launch a
+		// duplicate beside it.
+		if err := m.StopAgentWithReason(ctx, execution.ID, "incomplete_task_host_recovery", false); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	probeCtx, cancel := context.WithTimeout(ctx, taskHostRecoveryProbeTimeout)
+	defer cancel()
+	if client != nil {
+		if healthErr := client.Health(probeCtx); healthErr == nil {
+			return false, nil
+		}
+		if err := context.Cause(ctx); err != nil {
+			return false, err
+		}
+		client.Close()
+	}
+	if !m.executionStore.RemoveIfSame(execution.ID, execution) {
+		return false, nil
+	}
+	m.releaseActivity(executionActivityKey(execution.ID))
+	m.closeStreamCoalescer(execution)
+	m.logger.Debug("removed dead task host from tracking",
+		zap.String("execution_id", execution.ID),
+		zap.String("task_environment_id", taskEnvironmentID))
+	return true, nil
+}
+
+func (m *Manager) authorizeTaskHostEnvironment(ctx context.Context, taskEnvironmentID string) error {
+	if taskEnvironmentID == "" {
+		return fmt.Errorf("task_environment_id is required")
+	}
+	if check := m.environmentAccessCheck; check != nil {
+		return check(ctx, taskEnvironmentID)
+	}
+	return nil
+}
+
+func (m *Manager) ensureTaskHostTaskActive(ctx context.Context, taskID string) error {
+	if m.executorProfileReader == nil {
+		return nil
+	}
+	cleanupActive, err := m.executorProfileReader.HasActiveTaskResourceCleanupJob(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("verify task-host cleanup admission: %w", err)
+	}
+	if cleanupActive {
+		return fmt.Errorf("verify task-host cleanup admission: %w for task %q", errTaskCleanupActive, taskID)
+	}
+	return nil
 }
 
 // EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
@@ -924,6 +1179,8 @@ func (m *Manager) createExecutionWithMode(
 	if err := resumeRemoteInstancePreflight(launchCtx, inputs.runtime, inputs.preparation.request); err != nil {
 		return nil, err
 	}
+	releaseCredentials := m.lockTaskEnvironmentCredentials(info.ExecutorType, info.TaskEnvironmentID)
+	defer releaseCredentials()
 
 	runtimeInstance, err := inputs.runtime.CreateInstance(launchCtx, inputs.preparation.request)
 	if err != nil {
@@ -1527,6 +1784,8 @@ func (m *Manager) persistRuntimeSecrets(
 	if instance == nil || execution == nil {
 		return errors.New("persist runtime secrets: runtime identity is unavailable")
 	}
+	priorMetadata := execution.MetadataSnapshot()
+	liveDockerExecutions := m.propagateDockerTaskEnvironmentAuthToken(execution, instance.AuthToken)
 	secretValues := []struct {
 		metadataKey string
 		namePrefix  string
@@ -1559,7 +1818,108 @@ func (m *Manager) persistRuntimeSecrets(
 			)
 		}
 	}
+	if err := m.persistTaskEnvironmentRuntimeSecretRefs(ctx, execution); err != nil {
+		return err
+	}
+	if execution.RuntimeName == agentruntime.RuntimeDocker {
+		if err := m.deleteSupersededRuntimeSecrets(ctx, priorMetadata, execution.MetadataSnapshot()); err != nil {
+			return err
+		}
+	}
+	return m.persistDockerTaskEnvironmentAuthTokenMirrors(
+		ctx, execution, instance.AuthToken, liveDockerExecutions,
+	)
+}
+
+func (m *Manager) persistTaskEnvironmentRuntimeSecretRefs(ctx context.Context, execution *AgentExecution) error {
+	if execution == nil || execution.RuntimeName != agentruntime.RuntimeDocker ||
+		execution.TaskEnvironmentID == "" {
+		return nil
+	}
+	if m.taskEnvironmentRuntimeSecretWriter == nil {
+		return errors.New("task-environment runtime secret writer is not configured")
+	}
+	metadata := execution.MetadataSnapshot()
+	authSecretID := getMetadataString(metadata, MetadataKeyAuthTokenSecret)
+	bootstrapSecretID := getMetadataString(metadata, MetadataKeyBootstrapNonceSecret)
+	if authSecretID == "" && bootstrapSecretID == "" {
+		return nil
+	}
+	if err := m.taskEnvironmentRuntimeSecretWriter.UpdateTaskEnvironmentRuntimeSecretRefs(
+		ctx, execution.TaskEnvironmentID, authSecretID, bootstrapSecretID,
+	); err != nil {
+		return fmt.Errorf("persist task-environment runtime secret references: %w", err)
+	}
 	return nil
+}
+
+// propagateDockerTaskEnvironmentAuthToken adopts a rotated Docker control
+// credential across every live client before any durable write can fail. The
+// token is transport state shared by the container's agentctl server, not
+// session-owned lifecycle state.
+func (m *Manager) propagateDockerTaskEnvironmentAuthToken(
+	source *AgentExecution,
+	authToken string,
+) []*AgentExecution {
+	if authToken == "" || source == nil || source.RuntimeName != agentruntime.RuntimeDocker ||
+		source.TaskEnvironmentID == "" || m.executionStore == nil {
+		return nil
+	}
+	live := make([]*AgentExecution, 0)
+	for _, execution := range m.executionStore.List() {
+		if execution == nil || execution.TaskEnvironmentID != source.TaskEnvironmentID ||
+			execution.RuntimeName != agentruntime.RuntimeDocker {
+			continue
+		}
+		live = append(live, execution)
+		client, release := execution.AcquireAgentCtlClient()
+		if client != nil {
+			client.SetAuthToken(authToken)
+		}
+		release()
+	}
+	return live
+}
+
+// persistDockerTaskEnvironmentAuthTokenMirrors retains session-row compatibility
+// metadata after the task-environment credential owner has been committed.
+func (m *Manager) persistDockerTaskEnvironmentAuthTokenMirrors(
+	ctx context.Context,
+	source *AgentExecution,
+	authToken string,
+	live []*AgentExecution,
+) error {
+	sourceMetadata := source.MetadataSnapshot()
+	bootstrapSecretID := getMetadataString(sourceMetadata, MetadataKeyBootstrapNonceSecret)
+	var migrationErr error
+	for _, execution := range live {
+		priorMetadata := execution.MetadataSnapshot()
+		if execution != source {
+			if err := m.persistAuthToken(ctx, &ExecutorInstance{
+				InstanceID: execution.ID,
+				AuthToken:  authToken,
+			}, execution); err != nil {
+				m.logger.Error("failed to mirror Docker auth token to session execution",
+					zap.String("execution_id", execution.ID), zap.Error(err))
+				continue
+			}
+		}
+		if bootstrapSecretID != "" {
+			execution.setMetadataValue(MetadataKeyBootstrapNonceSecret, bootstrapSecretID)
+		}
+		if err := m.deleteSupersededRuntimeSecrets(
+			ctx, priorMetadata, execution.MetadataSnapshot(),
+		); err != nil {
+			migrationErr = errors.Join(migrationErr, fmt.Errorf(
+				"migrate Docker runtime secrets for execution %s: %w", execution.ID, err,
+			))
+		}
+		if execution.IsTaskHost {
+			continue
+		}
+		m.persistExecutorRunning(ctx, execution)
+	}
+	return migrationErr
 }
 
 func (m *Manager) persistRequiredKubernetesRuntimeSecrets(
@@ -1567,7 +1927,7 @@ func (m *Manager) persistRequiredKubernetesRuntimeSecrets(
 	instance *ExecutorInstance,
 	execution *AgentExecution,
 ) (map[string]bool, error) {
-	if m.secretStore == nil {
+	if m.runtimeSecretStore == nil {
 		return nil, errors.New("persist Kubernetes runtime secrets: secret store is unavailable")
 	}
 	if instance == nil || strings.TrimSpace(instance.AuthToken) == "" || strings.TrimSpace(instance.BootstrapNonce) == "" {
@@ -1597,19 +1957,8 @@ func (m *Manager) persistRequiredKubernetesRuntimeSecrets(
 
 // persistAuthToken stores the agentctl handshake auth token in SecretStore
 // and saves the secret ID in the execution's metadata for recovery after restart.
-func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
-	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyAuthTokenSecret, "agentctl-auth", instance.AuthToken)
-}
-
-func (m *Manager) persistBootstrapNonce(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
-	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyBootstrapNonceSecret, "agentctl-bootstrap", instance.BootstrapNonce)
-}
-
-func (m *Manager) persistContainerControlAuthToken(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
-	if instance == nil || instance.ContainerID == "" {
-		return
-	}
-	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyContainerControlAuthSecret, "agentctl-container-control", instance.AuthToken)
+func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) error {
+	return m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyAuthTokenSecret, "agentctl-auth", instance.AuthToken)
 }
 
 func (m *Manager) persistRuntimeSecret(
@@ -1619,18 +1968,15 @@ func (m *Manager) persistRuntimeSecret(
 	metadataKey string,
 	secretNamePrefix string,
 	value string,
-) {
-	if value == "" || m.secretStore == nil {
-		return
+) error {
+	if value == "" {
+		return nil
 	}
-	if _, err := m.persistRuntimeSecretResult(
-		ctx, instance, execution, metadataKey, secretNamePrefix, value,
-	); err != nil {
-		m.logger.Error("failed to persist runtime secret",
-			zap.String("instance_id", instance.InstanceID),
-			zap.String("metadata_key", metadataKey),
-			zap.Error(err))
+	if m.runtimeSecretStore == nil {
+		return errors.New("runtime secret store is not configured")
 	}
+	_, err := m.persistRuntimeSecretResult(ctx, instance, execution, metadataKey, secretNamePrefix, value)
+	return err
 }
 
 func (m *Manager) persistRuntimeSecretResult(
@@ -1641,7 +1987,7 @@ func (m *Manager) persistRuntimeSecretResult(
 	secretNamePrefix string,
 	value string,
 ) (bool, error) {
-	if instance == nil || execution == nil || m.secretStore == nil {
+	if instance == nil || execution == nil || m.runtimeSecretStore == nil {
 		return false, errors.New("runtime secret persistence is unavailable")
 	}
 	if getMetadataBool(instance.Metadata, metadataKubernetesTaskOwned) {
@@ -1651,13 +1997,16 @@ func (m *Manager) persistRuntimeSecretResult(
 		if secretID == "" {
 			return false, errors.New("kubernetes environment secret reference is missing")
 		}
-		if _, err := m.secretStore.Reveal(ctx, secretID); err != nil {
+		if _, err := m.runtimeSecretStore.Reveal(ctx, secretID); err != nil {
 			return false, err
 		}
 		execution.setMetadataValue(metadataKey, secretID)
 		return false, nil
 	}
-	secretID := execution.metadataString(metadataKey)
+	secretID := deterministicRuntimeSecretID(execution, instance.InstanceID, metadataKey)
+	if secretID == "" {
+		secretID = execution.metadataString(metadataKey)
+	}
 	if secretID == "" {
 		resourceInstanceID := execution.metadataString(MetadataKeyKubernetesResourceInstanceID)
 		if resourceInstanceID == "" {
@@ -1666,8 +2015,8 @@ func (m *Manager) persistRuntimeSecretResult(
 		secretID = kubernetesRuntimeSecretID(resourceInstanceID, secretNamePrefix)
 	}
 	name := fmt.Sprintf("%s-%s", secretNamePrefix, truncateID(instance.InstanceID, 12))
-	if _, err := m.secretStore.Get(ctx, secretID); err == nil {
-		if err := m.secretStore.Update(ctx, secretID, &secrets.UpdateSecretRequest{Name: &name, Value: &value}); err != nil {
+	if _, err := m.runtimeSecretStore.Get(ctx, secretID); err == nil {
+		if err := m.runtimeSecretStore.Update(ctx, secretID, &secrets.UpdateSecretRequest{Name: &name, Value: &value}); err != nil {
 			return false, err
 		}
 		execution.setMetadataValue(metadataKey, secretID)
@@ -1683,7 +2032,7 @@ func (m *Manager) persistRuntimeSecretResult(
 		},
 		Value: value,
 	}
-	if err := m.secretStore.Create(ctx, secret); err != nil {
+	if err := m.runtimeSecretStore.Create(ctx, secret); err != nil {
 		return false, err
 	}
 
@@ -1707,7 +2056,7 @@ func (m *Manager) deleteCreatedRuntimeSecrets(
 		}
 		secretID := execution.metadataString(metadataKey)
 		if secretID != "" {
-			if err := m.secretStore.Delete(ctx, secretID); err != nil && !errors.Is(err, secrets.ErrNotFound) {
+			if err := m.runtimeSecretStore.Delete(ctx, secretID); err != nil && !errors.Is(err, secrets.ErrNotFound) {
 				cleanupErrs = append(cleanupErrs, fmt.Errorf("delete %s: %w", metadataKey, err))
 				continue
 			}
@@ -1725,7 +2074,7 @@ func (m *Manager) deleteKubernetesRuntimeSecrets(ctx context.Context, metadata m
 	if secretIDs[0] == "" && secretIDs[1] == "" {
 		return nil
 	}
-	if m.secretStore == nil {
+	if m.runtimeSecretStore == nil {
 		return errors.New("delete Kubernetes runtime secrets: secret store is unavailable")
 	}
 	var deleteErrs []error
@@ -1733,7 +2082,7 @@ func (m *Manager) deleteKubernetesRuntimeSecrets(ctx context.Context, metadata m
 		if secretID == "" {
 			continue
 		}
-		if err := m.secretStore.Delete(ctx, secretID); err != nil && !errors.Is(err, secrets.ErrNotFound) {
+		if err := m.runtimeSecretStore.Delete(ctx, secretID); err != nil && !errors.Is(err, secrets.ErrNotFound) {
 			deleteErrs = append(deleteErrs, fmt.Errorf("delete runtime secret %q: %w", secretID, err))
 		}
 	}
@@ -1777,6 +2126,131 @@ func isProvisionalKubernetesInventory(metadata map[string]interface{}) bool {
 	}
 }
 
+func deterministicRuntimeSecretID(execution *AgentExecution, instanceID, metadataKey string) string {
+	if execution == nil {
+		return ""
+	}
+	if execution.RuntimeName == agentruntime.RuntimeDocker && execution.TaskEnvironmentID != "" {
+		return deterministicTaskEnvironmentRuntimeSecretID(execution.TaskEnvironmentID, metadataKey)
+	}
+	ownerID := execution.ID
+	if ownerID == "" {
+		ownerID = instanceID
+	}
+	if ownerID == "" {
+		return ""
+	}
+	kind := runtimeSecretKind(metadataKey)
+	if kind == "" {
+		return ""
+	}
+	return fmt.Sprintf("runtime:execution:%s:%s", ownerID, kind)
+}
+
+func deterministicTaskEnvironmentRuntimeSecretID(taskEnvironmentID, metadataKey string) string {
+	if taskEnvironmentID == "" {
+		return ""
+	}
+	kind := runtimeSecretKind(metadataKey)
+	if kind == "" {
+		return ""
+	}
+	return fmt.Sprintf("runtime:task-environment:%s:%s", taskEnvironmentID, kind)
+}
+
+func runtimeSecretKind(metadataKey string) string {
+	switch metadataKey {
+	case MetadataKeyAuthTokenSecret, MetadataKeyContainerControlAuthSecret:
+		// Docker's container-control handle and task-host auth handle point at
+		// the same task-environment-owned token after deterministic migration.
+		return "agentctl-auth"
+	case MetadataKeyBootstrapNonceSecret:
+		return "agentctl-bootstrap"
+	default:
+		return ""
+	}
+}
+
+// DeleteTaskEnvironmentRuntimeSecrets removes supplied legacy handles plus the
+// deterministic encrypted control credentials owned by a task environment.
+// It is intentionally idempotent so teardown can retry after partial cleanup
+// without retaining a stale secret or deleting any user-visible credential.
+func (m *Manager) DeleteTaskEnvironmentRuntimeSecrets(
+	ctx context.Context,
+	taskEnvironmentID, authSecretID, bootstrapSecretID string,
+) error {
+	if taskEnvironmentID == "" {
+		return errors.New("task_environment_id is required")
+	}
+	if m.runtimeSecretStore == nil {
+		return errors.New("runtime secret store is not configured")
+	}
+	return m.deleteRuntimeSecretIDs(ctx, []string{
+		authSecretID,
+		bootstrapSecretID,
+		deterministicTaskEnvironmentRuntimeSecretID(taskEnvironmentID, MetadataKeyAuthTokenSecret),
+		deterministicTaskEnvironmentRuntimeSecretID(taskEnvironmentID, MetadataKeyBootstrapNonceSecret),
+	})
+}
+
+func (m *Manager) deleteSupersededRuntimeSecrets(
+	ctx context.Context,
+	before, after map[string]interface{},
+) error {
+	var superseded []string
+	for _, key := range []string{
+		MetadataKeyAuthTokenSecret,
+		MetadataKeyBootstrapNonceSecret,
+		MetadataKeyContainerControlAuthSecret,
+	} {
+		oldID := getMetadataString(before, key)
+		if oldID != "" && oldID != getMetadataString(after, key) {
+			superseded = append(superseded, oldID)
+		}
+	}
+	if len(superseded) == 0 {
+		return nil
+	}
+	return m.deleteRuntimeSecretIDs(ctx, superseded)
+}
+
+func (m *Manager) deleteExecutionRuntimeSecrets(ctx context.Context, execution *AgentExecution) error {
+	if execution == nil || execution.RuntimeName == agentruntime.RuntimeDocker {
+		return nil
+	}
+	if m.runtimeSecretStore == nil {
+		return nil
+	}
+	metadata := execution.MetadataSnapshot()
+	return m.deleteRuntimeSecretIDs(ctx, []string{
+		getMetadataString(metadata, MetadataKeyAuthTokenSecret),
+		getMetadataString(metadata, MetadataKeyBootstrapNonceSecret),
+		deterministicRuntimeSecretID(execution, execution.ID, MetadataKeyAuthTokenSecret),
+		deterministicRuntimeSecretID(execution, execution.ID, MetadataKeyBootstrapNonceSecret),
+	})
+}
+
+func (m *Manager) deleteRuntimeSecretIDs(ctx context.Context, secretIDs []string) error {
+	if m.runtimeSecretStore == nil {
+		return errors.New("runtime secret store is not configured")
+	}
+	seen := make(map[string]struct{}, len(secretIDs))
+	var cleanupErr error
+	for _, secretID := range secretIDs {
+		if secretID == "" {
+			continue
+		}
+		if _, duplicate := seen[secretID]; duplicate {
+			continue
+		}
+		seen[secretID] = struct{}{}
+		if err := m.runtimeSecretStore.Delete(ctx, secretID); err != nil && !errors.Is(err, secrets.ErrNotFound) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete runtime secret %s: %w", secretID, err))
+		}
+	}
+	return cleanupErr
+}
+
 // revealRuntimeSecretValue reveals a configured runtime secret and preserves
 // storage errors for callers that need to report a failed launch.
 func (m *Manager) revealRuntimeSecretValue(ctx context.Context, metadata map[string]interface{}, metadataKey string) (string, error) {
@@ -1784,10 +2258,10 @@ func (m *Manager) revealRuntimeSecretValue(ctx context.Context, metadata map[str
 	if secretID == "" {
 		return "", nil
 	}
-	if m.secretStore == nil {
+	if m.runtimeSecretStore == nil {
 		return "", errors.New("runtime secret store is unavailable")
 	}
-	value, err := revealGlobalSecret(ctx, m.secretStore, secretID)
+	value, err := revealGlobalSecret(ctx, m.runtimeSecretStore, secretID)
 	if err != nil {
 		return "", fmt.Errorf("reveal runtime secret %q: %w", metadataKey, err)
 	}
@@ -1812,10 +2286,10 @@ func (m *Manager) revealContainerControlAuthToken(ctx context.Context, metadata 
 		}
 		return m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret), nil
 	}
-	if m.secretStore == nil {
+	if m.runtimeSecretStore == nil {
 		return "", errors.New("container control-token secret store is unavailable")
 	}
-	token, err := revealGlobalSecret(ctx, m.secretStore, secretID)
+	token, err := revealGlobalSecret(ctx, m.runtimeSecretStore, secretID)
 	if err != nil {
 		return "", fmt.Errorf("reveal container control token: %w", err)
 	}

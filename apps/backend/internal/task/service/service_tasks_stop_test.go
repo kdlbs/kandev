@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -61,6 +63,32 @@ type stubExecutors struct {
 	deletedSessions  []string
 	deleteErr        error
 	repairedSessions []string
+}
+
+type signalingTaskEnvironmentRepository struct {
+	repository.TaskEnvironmentRepository
+	taskID  string
+	reached chan struct{}
+	once    sync.Once
+}
+
+func (r *signalingTaskEnvironmentRepository) GetTaskEnvironmentByTaskID(
+	ctx context.Context,
+	taskID string,
+) (*models.TaskEnvironment, error) {
+	environment, err := r.TaskEnvironmentRepository.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if taskID == r.taskID {
+		r.once.Do(func() { close(r.reached) })
+	}
+	return environment, err
+}
+
+func (r *signalingTaskEnvironmentRepository) TransferTaskEnvironmentOwnership(
+	ctx context.Context,
+	environmentID, expectedOwner string, generation int64, taskID string,
+) error {
+	ownerRepository := r.TaskEnvironmentRepository.(taskEnvironmentOwnerTransferer)
+	return ownerRepository.TransferTaskEnvironmentOwnership(ctx, environmentID, expectedOwner, generation, taskID)
 }
 
 func (s *stubExecutors) ListExecutorsRunningByTaskID(_ context.Context, _ string) ([]*models.ExecutorRunning, error) {
@@ -965,6 +993,132 @@ func TestCleanupTaskResources_PreservesOwnedEnvironmentWithActiveInheritedChild(
 	}
 	if cleanedIDs := cleanup.cleanedIDs(); len(cleanedIDs) != 0 {
 		t.Fatalf("parent cleanup must not batch-clean a shared inherited worktree, got %#v", cleanedIDs)
+	}
+}
+
+func TestTerminalTaskRefreshesEnvironmentOwnershipAfterPhysicalLock(t *testing.T) {
+	actions := []struct {
+		name string
+		run  func(*Service, context.Context, string) error
+	}{
+		{name: "archive", run: func(svc *Service, ctx context.Context, taskID string) error {
+			return svc.ArchiveTask(ctx, taskID)
+		}},
+		{name: "delete", run: func(svc *Service, ctx context.Context, taskID string) error {
+			return svc.DeleteTask(ctx, taskID)
+		}},
+	}
+	for _, action := range actions {
+		t.Run(action.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			seedParentChildWorkspace(t, repo, "ws-transfer-race", "wf-transfer-race", "owner-task", "departing-task")
+			if err := repo.CreateTask(ctx, &models.Task{
+				ID: "survivor-task", WorkspaceID: "ws-transfer-race", WorkflowID: "wf-transfer-race",
+				WorkflowStepID: "step-1", ParentID: "owner-task", Title: "Survivor", Priority: "medium",
+			}); err != nil {
+				t.Fatalf("create survivor task: %v", err)
+			}
+			if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+				ID: "env-transfer-race", TaskID: "owner-task", Status: models.TaskEnvironmentStatusReady,
+			}); err != nil {
+				t.Fatalf("create shared environment: %v", err)
+			}
+			for _, taskID := range []string{"departing-task", "survivor-task"} {
+				if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+					ID: "session-" + taskID, TaskID: taskID, State: models.TaskSessionStateCompleted,
+					TaskEnvironmentID: "env-transfer-race",
+				}); err != nil {
+					t.Fatalf("create %s session: %v", taskID, err)
+				}
+			}
+
+			reached := make(chan struct{})
+			svc.taskEnvironments = &signalingTaskEnvironmentRepository{
+				TaskEnvironmentRepository: repo,
+				taskID:                    "departing-task",
+				reached:                   reached,
+			}
+			releaseEnvironment := svc.acquireTaskLSPEnvironmentMutation("env-transfer-race")
+			mutationDone := make(chan error, 1)
+			go func() { mutationDone <- action.run(svc, ctx, "departing-task") }()
+
+			select {
+			case <-reached:
+			case <-time.After(time.Second):
+				releaseEnvironment()
+				t.Fatalf("%s did not reach environment lookup", action.name)
+			}
+			if err := repo.TransferTaskEnvironmentOwnership(ctx, "env-transfer-race", "owner-task", 1, "departing-task"); err != nil {
+				releaseEnvironment()
+				t.Fatalf("transfer environment to departing task: %v", err)
+			}
+			releaseEnvironment()
+			if err := <-mutationDone; err != nil {
+				t.Fatalf("%s departing task: %v", action.name, err)
+			}
+
+			environment, err := repo.GetTaskEnvironment(ctx, "env-transfer-race")
+			if err != nil || environment == nil {
+				t.Fatalf("shared environment did not survive %s: environment=%#v err=%v",
+					action.name, environment, err)
+			}
+			if environment.TaskID != "survivor-task" {
+				t.Fatalf("shared environment owner = %q, want survivor-task", environment.TaskID)
+			}
+		})
+	}
+}
+
+func TestTerminalBorrowerKeepsEnvironmentWhenOwnerTerminates(t *testing.T) {
+	for _, action := range []struct {
+		name string
+		run  func(*Service, context.Context, string) error
+	}{
+		{name: "archive", run: func(svc *Service, ctx context.Context, taskID string) error {
+			return svc.ArchiveTask(ctx, taskID)
+		}},
+		{name: "delete", run: func(svc *Service, ctx context.Context, taskID string) error {
+			return svc.DeleteTask(ctx, taskID)
+		}},
+	} {
+		t.Run(action.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			seedParentChildWorkspace(t, repo, "ws-warm-transfer", "wf-warm-transfer", "parent-task", "child-task")
+			if action.name == "delete" {
+				// The hierarchy service promotes surviving children before deleting their parent.
+				if err := repo.ReparentDirectChildrenInWorkspace(context.Background(), "parent-task", "", "ws-warm-transfer"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+				ID: "env-parent", TaskID: "parent-task", Status: models.TaskEnvironmentStatusReady,
+			}); err != nil {
+				t.Fatalf("create parent environment: %v", err)
+			}
+			if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+				ID: "session-child", TaskID: "child-task", State: models.TaskSessionStateCompleted,
+				TaskEnvironmentID: "env-parent",
+			}); err != nil {
+				t.Fatalf("create terminal child session: %v", err)
+			}
+			svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+			if err := action.run(svc, ctx, "parent-task"); err != nil {
+				t.Fatalf("%s parent task: %v", action.name, err)
+			}
+			waitForCleanupDone(t, svc)
+
+			environment, err := repo.GetTaskEnvironment(ctx, "env-parent")
+			if err != nil || environment == nil {
+				t.Fatalf("terminal borrower's environment did not survive %s: environment=%#v err=%v",
+					action.name, environment, err)
+			}
+			if environment.TaskID != "child-task" {
+				t.Fatalf("environment owner after %s = %q, want child-task", action.name, environment.TaskID)
+			}
+		})
 	}
 }
 

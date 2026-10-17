@@ -67,6 +67,10 @@ type AgentExecution struct {
 	// ExecutorType preserves launch locality for features that must only access
 	// the backend user's host filesystem. Empty means locality is unknown.
 	ExecutorType string
+	// IsTaskHost marks an internal, task-environment-owned agentctl execution.
+	// Task hosts provide long-lived task services such as LSP and deliberately
+	// never participate in session lookup or session lifecycle events.
+	IsTaskHost bool
 	// AgentProfileID is the concrete profile used by the running CLI. The
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
@@ -1428,6 +1432,7 @@ type RepoLaunchSpec struct {
 	RepositoryPath     string
 	RepositoryURL      string // Clone URL for remote executors that need to clone
 	RepoName           string // Repository name used as subdirectory inside TaskDirName
+	Position           int    // Durable order among all task workspace sources
 	BaseBranch         string
 	IntegrationRef     string
 	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
@@ -1470,6 +1475,7 @@ type RepoLaunchSpec struct {
 type WorkspaceFolderSpec struct {
 	Name      string
 	LocalPath string
+	Position  int
 }
 
 // WorkspaceRepositorySpec is the durable host-side source needed to recreate
@@ -1497,6 +1503,11 @@ type WorkspaceRepositorySpec struct {
 	RemoteSyncHandled       bool
 	BranchSlug              string
 	BranchIdentitySlug      string
+	Position                int
+	// TaskHostPosition is the repository's persisted physical order inside an
+	// already-materialized task host. Nil means the host has not yet been
+	// materialized and launch ordering may establish the mapping.
+	TaskHostPosition *int
 }
 
 // RouteOverride carries a fully resolved provider profile for one

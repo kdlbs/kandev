@@ -77,12 +77,12 @@ func TestDeleteTaskRejectsDirtyWorktreeBeforeMutation(t *testing.T) {
 	var cleanupJobs int
 	if err := repo.DB().QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM task_resource_cleanup_jobs
-		WHERE task_id = ? AND trigger = 'delete'
+		WHERE task_id = ? AND trigger = 'delete' AND state <> 'cancelled'
 	`, taskID).Scan(&cleanupJobs); err != nil {
 		t.Fatalf("count delete cleanup jobs: %v", err)
 	}
 	if cleanupJobs != 0 {
-		t.Fatalf("dirty delete created %d cleanup jobs, want none", cleanupJobs)
+		t.Fatalf("dirty delete left %d active cleanup jobs, want none", cleanupJobs)
 	}
 	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "preserve me\n" {
 		t.Fatalf("preserved work changed: contents=%q err=%v", got, err)

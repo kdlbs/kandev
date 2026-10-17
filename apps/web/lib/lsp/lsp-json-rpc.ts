@@ -29,6 +29,7 @@ export type OpenDocument = {
   version: number;
   languageId: string;
   refCount: number;
+  sessionRefCounts: Map<string, number>;
   text: string;
   pendingClose?: boolean;
 };
@@ -37,8 +38,6 @@ export type LSPConnection = {
   ws: WebSocket;
   rpc: JsonRpcConnection | null;
   initialized: boolean;
-  refCount: number;
-  idleTimer: ReturnType<typeof setTimeout> | null;
   openDocuments: Map<string, OpenDocument>;
   providerDisposables: IDisposable[];
   serverCapabilities: Record<string, unknown> | null;

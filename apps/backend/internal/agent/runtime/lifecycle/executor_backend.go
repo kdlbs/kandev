@@ -648,9 +648,14 @@ type ExecutorCreateRequest struct {
 	TaskTitle         string
 	SessionID         string
 	TaskEnvironmentID string // Env this execution belongs to (shared across sessions in same task)
+	IsTaskHost        bool   // Internal task-environment service host; never session-owned
 	// WorkspaceReuseRequired means this runtime must attach to the supplied
 	// environment handle and must never fall back to provisioning a replacement.
 	WorkspaceReuseRequired bool
+	// RequireExistingInstance permits transport reattachment only. Executors
+	// must return errTaskHostRuntimeNotFound instead of creating or resuming a
+	// physical task-host runtime when the stable instance is absent.
+	RequireExistingInstance bool
 	// ForceContextContinuation records that the explicit recovery path started
 	// a new native conversation from a bounded Kandev context snapshot.
 	ForceContextContinuation bool
@@ -824,6 +829,11 @@ type ExecutorInstance struct {
 	// Empty for standalone, where the shared local runtime owner supplies the
 	// credential to each bound instance client, and Sprites (no agentctl auth).
 	AuthToken string
+	// ControlAuthToken is the effective Docker container-wide credential used
+	// for runtime cleanup. Unlike AuthToken, it is populated even when a
+	// reconnect reused an unchanged token and no durable secret rewrite is
+	// needed.
+	ControlAuthToken string
 
 	// BootstrapNonce is the one-time nonce injected into the remote agentctl environment.
 	// It is persisted so a restarted container can complete a fresh handshake
@@ -837,9 +847,12 @@ type ExecutorInstance struct {
 
 // ToAgentExecution converts a ExecutorInstance to an AgentExecution.
 func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentExecution {
-	metadata := make(map[string]interface{}, len(req.Metadata)+len(ri.Metadata)+1)
-	for k, v := range req.Metadata {
-		metadata[k] = v
+	// Seed from one map only. Adding two attacker-influenced lengths can wrap
+	// before make evaluates the allocation size; Go grows the map safely while
+	// the runtime metadata is merged below.
+	metadata := make(map[string]interface{}, len(req.Metadata))
+	for key, value := range req.Metadata {
+		metadata[key] = value
 	}
 	// Merge runtime metadata
 	for k, v := range ri.Metadata {
@@ -860,7 +873,9 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	if originalWorkspacePath == "" {
 		originalWorkspacePath = workspacePath
 	}
-	metadata[MetadataKeyOriginalWorkspacePath] = originalWorkspacePath
+	if originalWorkspacePath != "" {
+		metadata[MetadataKeyOriginalWorkspacePath] = originalWorkspacePath
+	}
 
 	var historyEnabled bool
 	var agentID string
@@ -880,6 +895,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		RunID:                     req.Env["KANDEV_RUN_ID"],
 		TaskID:                    req.TaskID,
 		SessionID:                 req.SessionID,
+		IsTaskHost:                req.IsTaskHost,
 		TaskEnvironmentID:         req.TaskEnvironmentID,
 		AgentProfileID:            req.AgentProfileID,
 		OfficeAgentProfileID:      req.OfficeAgentProfileID,

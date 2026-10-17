@@ -324,7 +324,7 @@ func (m *Manager) persistActiveKubernetesRefresh(
 	execution *AgentExecution,
 	instance *ExecutorInstance,
 ) (func(context.Context) error, error) {
-	if m.secretStore == nil || m.runningWriter == nil {
+	if m.runtimeSecretStore == nil || m.runningWriter == nil {
 		return nil, errors.New("persist Kubernetes remote refresh: durable stores are unavailable")
 	}
 	persistCtx, cancelPersist := kubernetesDurableContext(ctx)
@@ -336,31 +336,31 @@ func (m *Manager) persistActiveKubernetesRefresh(
 	if authID == "" || nonceID == "" || instance.AuthToken == "" || instance.BootstrapNonce == "" {
 		return nil, errors.New("persist Kubernetes remote refresh: required secret references are incomplete")
 	}
-	oldToken, err := revealGlobalSecret(ctx, m.secretStore, authID)
+	oldToken, err := revealGlobalSecret(ctx, m.runtimeSecretStore, authID)
 	if err != nil {
 		return nil, fmt.Errorf("reveal prior Kubernetes auth token: %w", err)
 	}
-	nonce, err := revealGlobalSecret(ctx, m.secretStore, nonceID)
+	nonce, err := revealGlobalSecret(ctx, m.runtimeSecretStore, nonceID)
 	if err != nil {
 		return nil, fmt.Errorf("reveal Kubernetes bootstrap nonce: %w", err)
 	}
 	if nonce != instance.BootstrapNonce {
 		return nil, errors.New("persist Kubernetes remote refresh: bootstrap nonce changed")
 	}
-	if err := m.secretStore.Update(ctx, authID, &secrets.UpdateSecretRequest{Value: &instance.AuthToken}); err != nil {
+	if err := m.runtimeSecretStore.Update(ctx, authID, &secrets.UpdateSecretRequest{Value: &instance.AuthToken}); err != nil {
 		return nil, fmt.Errorf("rotate Kubernetes auth token: %w", err)
 	}
 	rollbackMetadata := execution.mergeMetadataWithRollback(instance.Metadata)
 	if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
 		rollbackMetadata()
-		restoreErr := m.secretStore.Update(ctx, authID, &secrets.UpdateSecretRequest{Value: &oldToken})
+		restoreErr := m.runtimeSecretStore.Update(ctx, authID, &secrets.UpdateSecretRequest{Value: &oldToken})
 		return nil, errors.Join(fmt.Errorf("persist Kubernetes refreshed inventory: %w", err), restoreErr)
 	}
 	rollback := func(rollbackCtx context.Context) error {
 		rollbackMetadata()
 		durableRollbackCtx, cancelRollback := kubernetesDurableContext(rollbackCtx)
 		defer cancelRollback()
-		secretErr := m.secretStore.Update(
+		secretErr := m.runtimeSecretStore.Update(
 			durableRollbackCtx, authID, &secrets.UpdateSecretRequest{Value: &oldToken},
 		)
 		rowErr := m.persistExecutorRunningResult(durableRollbackCtx, execution)

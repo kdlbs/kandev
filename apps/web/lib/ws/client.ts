@@ -26,6 +26,10 @@ export {
   WebSocketRequestTimeoutError,
   type WebSocketRequestErrorDetails,
 } from "./request-error";
+import {
+  SubscriptionReadinessRegistry,
+  type SubscriptionReadiness,
+} from "@/lib/ws/subscription-readiness";
 
 const debugDispatch = createDebugLogger("ws:dispatch");
 
@@ -345,6 +349,10 @@ type RawWebSocketMessage = {
   id?: unknown;
   payload?: unknown;
 };
+export interface TaskSubscriptionHandle {
+  ready: Promise<void>;
+  unsubscribe: () => void;
+}
 
 const DEFAULT_RECONNECT_OPTIONS: Required<ReconnectOptions> = {
   enabled: true,
@@ -387,6 +395,7 @@ export class WebSocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose = false;
   private subscriptions = new Map<string, number>();
+  private taskSubscriptionReadiness = new SubscriptionReadinessRegistry();
   private sessionSubscriptions = new Map<string, number>();
   private sessionSubscriptionReadiness = new Map<string, SessionSubscriptionReadiness>();
   private coreSessionStreams = new Map<string, CoreSessionStream>();
@@ -461,7 +470,9 @@ export class WebSocketClient {
       this.socket = null;
     }
     this.setStatus("disconnected");
-    this.resetSessionSubscriptionReadiness(new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR));
+    const disconnectError = new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR);
+    this.taskSubscriptionReadiness.reset(this.subscriptions.keys(), disconnectError);
+    this.resetSessionSubscriptionReadiness(disconnectError);
     this.cleanupPendingRequests();
   }
 
@@ -518,18 +529,38 @@ export class WebSocketClient {
   }
 
   subscribe(taskId: string) {
+    return this.subscribeTaskWithReady(taskId).unsubscribe;
+  }
+
+  subscribeTaskWithReady(taskId: string): TaskSubscriptionHandle {
     const currentCount = this.subscriptions.get(taskId) ?? 0;
     const nextCount = currentCount + 1;
     this.subscriptions.set(taskId, nextCount);
-    if (this.status === "connected" && nextCount === 1) {
-      this.send({
-        id: generateUUID(),
-        type: "request",
-        action: "task.subscribe",
-        payload: { task_id: taskId },
-      });
+    const readiness = this.taskSubscriptionReadiness.getOrCreate(taskId);
+    if (this.status === "connected" && this.socket) {
+      this.startTaskSubscription(taskId, readiness);
     }
-    return () => this.unsubscribe(taskId);
+    return {
+      ready: readiness.promise,
+      unsubscribe: () => this.unsubscribe(taskId),
+    };
+  }
+
+  getTaskSubscriptionReadiness(taskId: string): Promise<void> {
+    if (!this.subscriptions.has(taskId)) return Promise.resolve();
+    if (
+      !this.taskSubscriptionReadiness.has(taskId) &&
+      (this.status === "disconnected" || this.status === "error")
+    ) {
+      const unavailable = Promise.reject<void>(new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR));
+      void unavailable.catch(() => undefined);
+      return unavailable;
+    }
+    const readiness = this.taskSubscriptionReadiness.getOrCreate(taskId);
+    if (this.status === "connected" && this.socket) {
+      this.startTaskSubscription(taskId, readiness);
+    }
+    return readiness.promise;
   }
 
   subscribeSession(sessionId: string) {
@@ -649,6 +680,7 @@ export class WebSocketClient {
     const nextCount = currentCount - 1;
     if (nextCount <= 0) {
       this.subscriptions.delete(taskId);
+      this.taskSubscriptionReadiness.cancel(taskId, "Task subscription released");
       if (this.status === "connected") {
         this.send({
           id: generateUUID(),
@@ -1170,13 +1202,19 @@ export class WebSocketClient {
 
   private handleDisconnect(event: CloseEvent) {
     this.setStatus("disconnected");
-    const shouldRetainSessionReadiness =
+    const shouldRetainSubscriptionReadiness =
       !this.intentionalClose &&
       this.reconnectOptions.enabled &&
       this.reconnectAttempts < this.reconnectOptions.maxAttempts;
+    const disconnectError = new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR);
+    this.taskSubscriptionReadiness.reset(
+      this.subscriptions.keys(),
+      disconnectError,
+      shouldRetainSubscriptionReadiness,
+    );
     this.resetSessionSubscriptionReadiness(
-      new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR),
-      shouldRetainSessionReadiness,
+      disconnectError,
+      shouldRetainSubscriptionReadiness,
     );
 
     // Don't reconnect if this was an intentional close
@@ -1673,15 +1711,17 @@ export class WebSocketClient {
     }
   }
 
+  private startTaskSubscription(taskId: string, readiness: SubscriptionReadiness) {
+    this.taskSubscriptionReadiness.start(taskId, readiness, () =>
+      this.request("task.subscribe", { task_id: taskId }),
+    );
+  }
+
   private resubscribe() {
     // Re-subscribe to all tasks after reconnection
     this.subscriptions.forEach((_count, taskId) => {
-      this.send({
-        id: generateUUID(),
-        type: "request",
-        action: "task.subscribe",
-        payload: { task_id: taskId },
-      });
+      const readiness = this.taskSubscriptionReadiness.getOrCreate(taskId);
+      this.startTaskSubscription(taskId, readiness);
     });
     this.sessionSubscriptions.forEach((_count, sessionId) => {
       const readiness = this.getOrCreateSessionSubscriptionReadiness(sessionId);

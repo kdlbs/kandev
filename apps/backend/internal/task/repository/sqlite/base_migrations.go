@@ -207,6 +207,14 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	r.migrate.Apply("task_environments.container_bootstrap_nonce_secret_id", `ALTER TABLE task_environments ADD COLUMN container_bootstrap_nonce_secret_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_environments.container_control_auth_token_secret_id", `ALTER TABLE task_environments ADD COLUMN container_control_auth_token_secret_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_environments.ownership_generation", `ALTER TABLE task_environments ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
+	// Add task-owned runtime credential references before the table rebuild so
+	// legacy databases preserve them through the explicit copy below.
+	if err := r.migrate.Apply("task_environments.agentctl_auth_secret_id", `ALTER TABLE task_environments ADD COLUMN agentctl_auth_secret_id TEXT DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("task_environments.agentctl_bootstrap_secret_id", `ALTER TABLE task_environments ADD COLUMN agentctl_bootstrap_secret_id TEXT DEFAULT ''`); err != nil {
+		return err
+	}
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
@@ -443,6 +451,38 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	r.migrate.Apply("task_status_summaries.workspace", `
 		CREATE INDEX IF NOT EXISTS idx_task_status_summaries_workspace
 			ON task_status_summaries(workspace_id)`)
+
+	if err := r.migrate.Apply("task_lsp_languages.table", taskLSPSchemaDDL); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("task_lsp_languages.runtime_incarnation", `
+		ALTER TABLE task_lsp_languages ADD COLUMN runtime_incarnation TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("task_lsp_languages.runtime_started_at", `
+		ALTER TABLE task_lsp_languages ADD COLUMN runtime_started_at TIMESTAMP`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("task_lsp_languages.runtime_revision", `
+		ALTER TABLE task_lsp_languages ADD COLUMN runtime_revision BIGINT NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("task_lsp_languages.process_absent_generation", `
+		ALTER TABLE task_lsp_languages ADD COLUMN process_absent_generation BIGINT NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("task_lsp_languages.process_absent_generation.backfill", `
+		UPDATE task_lsp_languages
+		SET process_absent_generation = generation
+		WHERE generation > 0 AND process_absent_generation = 0 AND (
+			phase = 'off' OR (
+				phase = 'error' AND error_code IN (
+					'binary_unavailable', 'process_start_failed', 'start_canceled', 'process_exited'
+				)
+			)
+		)`); err != nil {
+		return err
+	}
 
 	if err := r.clearRecoveredAgentErrors(); err != nil {
 		return err
@@ -1353,6 +1393,8 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 			container_bootstrap_nonce_secret_id TEXT DEFAULT '',
 			container_control_auth_token_secret_id TEXT DEFAULT '',
 			sandbox_id TEXT DEFAULT '',
+			agentctl_auth_secret_id TEXT DEFAULT '',
+			agentctl_bootstrap_secret_id TEXT DEFAULT '',
 			task_dir_name TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
@@ -1361,7 +1403,9 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		`INSERT INTO task_environments_new SELECT
 			id, task_id, ownership_generation, repository_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, '', worktree_id, worktree_path, worktree_branch,
-			workspace_path, container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
+			workspace_path, container_id,
+			COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
+			COALESCE(agentctl_auth_secret_id, ''), COALESCE(agentctl_bootstrap_secret_id, ''),
 			COALESCE(task_dir_name, ''), created_at, updated_at
 		FROM task_environments`,
 		`DROP TABLE task_environments`,

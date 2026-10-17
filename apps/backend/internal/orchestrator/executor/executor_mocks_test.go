@@ -24,6 +24,8 @@ import (
 
 // mockAgentManager implements AgentManagerClient for testing
 type mockAgentManager struct {
+	trackingMu                         sync.Mutex
+	deleteRuntimeSecretsFunc           func(ctx context.Context, taskEnvironmentID, authSecretID, bootstrapSecretID string) error
 	launchAgentFunc                    func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
 	startAgentProcessFunc              func(ctx context.Context, agentExecutionID string) error
 	startupDisposition                 lifecycle.AgentStartupDisposition
@@ -59,15 +61,28 @@ type passthroughStdinCall struct {
 }
 
 func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+	m.trackingMu.Lock()
 	m.launchAgentCallCount++
-	if m.launchAgentFunc != nil {
-		return m.launchAgentFunc(ctx, req)
+	launch := m.launchAgentFunc
+	m.trackingMu.Unlock()
+	if launch != nil {
+		return launch(ctx, req)
 	}
 	return &LaunchAgentResponse{
 		AgentExecutionID: "exec-123",
 		ContainerID:      "container-123",
 		Status:           v1.AgentStatusStarting,
 	}, nil
+}
+
+func (m *mockAgentManager) DeleteTaskEnvironmentRuntimeSecrets(
+	ctx context.Context,
+	taskEnvironmentID, authSecretID, bootstrapSecretID string,
+) error {
+	if m.deleteRuntimeSecretsFunc != nil {
+		return m.deleteRuntimeSecretsFunc(ctx, taskEnvironmentID, authSecretID, bootstrapSecretID)
+	}
+	return nil
 }
 
 func (m *mockAgentManager) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
@@ -184,9 +199,12 @@ func (m *mockAgentManager) SetSessionModeBySessionID(ctx context.Context, sessio
 }
 
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
+	m.trackingMu.Lock()
 	m.isAgentRunningForSessionCallArgs = append(m.isAgentRunningForSessionCallArgs, sessionID)
-	if m.isAgentRunningForSessionFunc != nil {
-		return m.isAgentRunningForSessionFunc(ctx, sessionID)
+	probe := m.isAgentRunningForSessionFunc
+	m.trackingMu.Unlock()
+	if probe != nil {
+		return probe(ctx, sessionID)
 	}
 	return false
 }
@@ -240,9 +258,12 @@ func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(ctx context.Context, 
 func (m *mockAgentManager) PollRemoteStatusForRecords(ctx context.Context, records []RemoteStatusPollRequest) {
 }
 func (m *mockAgentManager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
+	m.trackingMu.Lock()
 	m.cleanupStaleExecutionCallCount++
-	if m.cleanupStaleExecutionFunc != nil {
-		return m.cleanupStaleExecutionFunc(ctx, sessionID)
+	cleanup := m.cleanupStaleExecutionFunc
+	m.trackingMu.Unlock()
+	if cleanup != nil {
+		return cleanup(ctx, sessionID)
 	}
 	return nil
 }
@@ -303,6 +324,7 @@ func (m *mockAgentManager) WaitForAgentctlReady(ctx context.Context, sessionID s
 
 // mockRepository implements executorStore for testing
 type mockRepository struct {
+	createTaskEnvironmentErr error
 	// Membership is not exercised by this fake; the embedded default
 	// reports no membership, which is the narrower answer.
 	repository.UnsupportedWorkspaceMembers
@@ -1497,6 +1519,9 @@ func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID 
 	return nil, nil
 }
 func (m *mockRepository) CreateTaskEnvironment(_ context.Context, env *models.TaskEnvironment) error {
+	if m.createTaskEnvironmentErr != nil {
+		return m.createTaskEnvironmentErr
+	}
 	if env.ID == "" {
 		env.ID = "env-" + env.TaskID
 	}
@@ -1569,6 +1594,11 @@ func (m *mockRepository) FinalizeTaskEnvironmentMaterialization(_ context.Contex
 	m.finalizeTaskEnvironmentCalls = append(m.finalizeTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
 	m.taskEnvironmentRepos[env.ID] = repos
+	return nil
+}
+func (m *mockRepository) DeleteTaskEnvironment(_ context.Context, id string) error {
+	delete(m.taskEnvironments, id)
+	delete(m.taskEnvironmentRepos, id)
 	return nil
 }
 func (m *mockRepository) CreateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {

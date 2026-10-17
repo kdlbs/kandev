@@ -660,7 +660,7 @@ func startAgentInfrastructure(
 		restoreCleanups = append(restoreCleanups, stop)
 		return stop
 	}
-	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
+	agentSecrets := newAgentSecretStores(repos.Secrets)
 	mcpScopeResolver := mcpscope.NewResolver(
 		repos.Task,
 		services.Auth,
@@ -732,11 +732,13 @@ func startAgentInfrastructure(
 	})
 
 	// Session/environment-scoped HTTP surfaces (shell, files, ports, vscode,
-	// LSP, terminals) enforce per-user workspace scoping (opt-in auth). The
+	// terminals) enforce per-user workspace scoping (opt-in auth). Their
 	// GetOrEnsure* execution paths run these checks internally; the vscode and
 	// port reverse proxies (bare lookup + cache) call CheckSessionAccess at
 	// the handler, and the SSR terminal-list routes call CheckTaskAccess /
 	// CheckEnvironmentAccess / CheckTaskEnvironmentAccess in a route guard.
+	// Task-scoped LSP authorizes the task before resolving its canonical task
+	// environment through the same access-checker family.
 	wireLifecycleAccessCheckers(lifecycleMgr, services.Task)
 	wireExecutorAdmission(services.Auth, services.Task, lifecycleMgr)
 	if services.GitHub != nil {
@@ -765,6 +767,7 @@ func startAgentInfrastructure(
 	// once a real consumer (workflow-engine / cron-driven trigger handlers) exists.
 	// Allocating the facade in Phase 1 without a caller is dead code.
 
+	lifecycleMgr.SetTaskEnvironmentRuntimeSecretWriter(repos.Task)
 	// Lets user shell terminals export the executor profile's env vars, so the
 	// terminal sees the same variables the agent subprocess and the repository
 	// setup script get.
@@ -815,7 +818,7 @@ func startAgentInfrastructure(
 
 	sessionCapacityEnvironment := sessioncapacity.ReadEnvironment()
 	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.Auth, services.User,
-		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
+		lifecycleMgr, agentRegistry, services.Workflow, agentSecrets.userVisible, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
 		repos.SystemSettings, sessionCapacityEnvironment, repos.RequiredStores)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
@@ -1085,16 +1088,21 @@ func startAgentInfrastructure(
 // startOrchestratorAndAutomationConsumers establishes the startup chain in
 // dependency order: the HTTP listener must be bound (so the launcher's
 // liveness probe can succeed) before the orchestrator runs its startup
-// recovery sweeps, which can run long. The GitHub poller performs an
-// immediate sweep on start, so both downstream consumers must be ready
-// before it is started.
+// recovery sweeps, which can run long. Task-LSP capacity adoption runs first
+// after the bind so later task/environment events cannot race an empty ledger.
+// The GitHub poller performs an immediate sweep on start, so both downstream
+// consumers must be ready before it is started.
 func startOrchestratorAndAutomationConsumers(
 	bindListeners func() error,
+	startTaskLSP func() error,
 	startOrchestrator func() error,
 	startAutomation func(),
 	startGitHubPoller func(),
 ) error {
 	if err := bindListeners(); err != nil {
+		return err
+	}
+	if err := startTaskLSP(); err != nil {
 		return err
 	}
 	if err := startOrchestrator(); err != nil {
@@ -1152,6 +1160,17 @@ func startGatewayAndServe(
 	databaseQuiesce func() error,
 	sshReachabilityPoller *reachabilitypkg.Poller,
 ) bool {
+	services.TaskLSP = newTaskLSPController(
+		cfg,
+		services.Task,
+		repos.Task,
+		services.User,
+		newTaskLSPTaskHostAdapter(lifecycleMgr, services.Task),
+		eventBus,
+	)
+	if services.TaskLSP != nil {
+		configureTaskLSP(ctx, services, orchestratorSvc, eventBus, log, addCleanup)
+	}
 	// ============================================
 	// WEBSOCKET GATEWAY
 	// ============================================
@@ -1170,9 +1189,6 @@ func startGatewayAndServe(
 		services.Auth,
 		cfg.ResolvedHomeDir(),
 		func(fn func() error) { addCleanup(fn) },
-		cfg.Features.LSPBrowserContinuity,
-		orchestratorSvc.AcquireSessionLifecycleFence,
-		cfg.Limits.LSPMaxConnections,
 	)
 	if terminalSvc != nil {
 		services.Terminal = terminalSvc
@@ -1180,6 +1196,9 @@ func startGatewayAndServe(
 	if err != nil {
 		log.Error("Failed to initialize WebSocket gateway", zap.Error(err))
 		return false
+	}
+	if services.TaskLSP != nil {
+		gateway.SetLSPHandler(services.TaskLSP)
 	}
 
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
@@ -1442,6 +1461,10 @@ func startGatewayAndServe(
 	// ============================================
 	if err := startOrchestratorAndAutomationConsumers(
 		bindListeners,
+		func() error {
+			startTaskLSPReconciler(ctx, services.TaskLSP, log)
+			return nil
+		},
 		func() error { return orchestratorSvc.Start(ctx) },
 		func() {
 			if services.Automation == nil {

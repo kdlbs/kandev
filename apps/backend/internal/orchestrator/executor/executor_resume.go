@@ -1330,6 +1330,15 @@ func (e *Executor) resumeSession(
 	if err := e.prepareResumePreflight(ctx, task, session, options, requestedExecutorType, preflight); err != nil {
 		return nil, safeResumeInspectionDeferral(err)
 	}
+
+	// Resume can be the first runtime launch for a task after a backend restart
+	// or a failed initial launch. Keep environment discovery, Docker reservation,
+	// lifecycle launch, and durable finalization in the same task-scoped critical
+	// section so sibling sessions cannot create duplicate task runtimes.
+	taskEnvironmentLock := e.taskEnvLock(task.ID)
+	taskEnvironmentLock.Lock()
+	defer taskEnvironmentLock.Unlock()
+
 	resumeStatePersisted := false
 	resumeAttemptID := ""
 	var beforeCredentialLease func() error
@@ -1426,7 +1435,18 @@ func (e *Executor) resumeSession(
 
 	req.Env = e.applyPreferredShellEnv(launchCtx, req.ExecutorType, req.Env)
 
-	resp, err := e.agentManager.LaunchAgent(launchCtx, req)
+	assignLaunchTaskEnvironmentID(session, existingEnv)
+	req.TaskEnvironmentID = session.TaskEnvironmentID
+	reservedEnvironment := false
+	resolvedExecutorType, _ := taskEnvironmentExecutorIdentity(req, execCfg)
+	if existingEnv == nil && resolvedExecutorType == string(models.ExecutorTypeLocalDocker) {
+		existingEnv, err = e.createTaskEnvironmentReservation(launchCtx, task.ID, session, req, execCfg)
+		reservedEnvironment = err == nil
+	}
+	var resp *LaunchAgentResponse
+	if err == nil {
+		resp, err = e.agentManager.LaunchAgent(launchCtx, req)
+	}
 	if err != nil && isAgentAlreadyRunningError(err) && options.RequiredNativeConversationID == "" {
 		// A registered execution may be live or stale. Only clean up a live-state
 		// session after checking liveness; terminal sessions already passed cleanup.
@@ -1491,6 +1511,9 @@ func (e *Executor) resumeSession(
 				err = errors.Join(err, rollbackErr)
 			}
 		}
+		if reservedEnvironment {
+			err = errors.Join(err, e.rollbackTaskEnvironmentReservation(context.WithoutCancel(launchCtx), existingEnv, ""))
+		}
 		e.captureResumeCleanupFailureSnapshot(launchCtx, err, session.ID, resumeAttemptID, terminalRollbackState(resumeInitialState))
 		e.logger.Error("failed to relaunch agent for session",
 			zap.String("task_id", task.ID),
@@ -1501,16 +1524,20 @@ func (e *Executor) resumeSession(
 
 	if !startAgent {
 		if err := e.persistResumeState(launchCtx, task.ID, session, false); err != nil {
-			e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
+			if reservedEnvironment {
+				err = errors.Join(err, e.rollbackTaskEnvironmentReservation(
+					cleanupCtx, existingEnv, resp.AgentExecutionID,
+				))
+			} else {
+				e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
+			}
 			return nil, err
 		}
 	}
-	if err := e.persistTaskEnvironment(launchCtx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
-		e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
-		if !isCancellableResumeContext(launchCtx) || launchCtx.Err() == nil {
-			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
-		}
-		if startAgent && (!isCancellableResumeContext(launchCtx) || launchCtx.Err() == nil) {
+	canRollback := func() bool { return !isCancellableResumeContext(launchCtx) || launchCtx.Err() == nil }
+	if err := e.persistTaskEnvironmentLocked(launchCtx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
+		err = e.cleanupFailedResumeEnvironment(launchCtx, cleanupCtx, session, existingEnv, reservedEnvironment, resp.AgentExecutionID, err)
+		if startAgent && canRollback() {
 			e.rollbackResumeStateAfterFailure(launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
 				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot))
 		}
@@ -2349,7 +2376,7 @@ func (e *Executor) applyResumeWorkspaceFolders(
 	for _, folder := range folders {
 		if folder != nil {
 			req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{
-				Name: folder.DisplayName, LocalPath: folder.LocalPath,
+				Name: folder.DisplayName, LocalPath: folder.LocalPath, Position: folder.Position,
 			})
 		}
 	}

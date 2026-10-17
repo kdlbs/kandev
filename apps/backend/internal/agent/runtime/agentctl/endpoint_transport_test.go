@@ -569,11 +569,16 @@ func TestPluginExecutorTransportMatrix(t *testing.T) {
 		t.Fatalf("StreamShellTerminal: %v", err)
 	}
 	_ = terminal.Close()
-	lsp, _, err := client.DialLSP(context.Background(), "go", false)
+	lsp, _, err := client.DialTaskLSPAttach(context.Background(), "task-remote", "go", 1)
 	if err != nil {
-		t.Fatalf("DialLSP: %v", err)
+		t.Fatalf("DialTaskLSPAttach: %v", err)
 	}
 	_ = lsp.Close()
+	watchCtx, cancelWatch := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelWatch()
+	if err := client.WatchTaskLSP(watchCtx, "task-remote", "go", nil); err == nil || !strings.Contains(err.Error(), "read task LSP watch") {
+		t.Fatalf("WatchTaskLSP: %v, want peer closure after a successful routed dial", err)
+	}
 	if err := client.StreamUpdates(context.Background(), func(AgentEvent) {}, nil, nil); err != nil {
 		t.Fatalf("StreamUpdates: %v", err)
 	}
@@ -590,7 +595,8 @@ func TestPluginExecutorTransportMatrix(t *testing.T) {
 		"/api/v1/status":               false,
 		"/api/v1/shell/terminal/start": false,
 		"/api/v1/shell/terminal/terminal-1/stream": false,
-		"/api/v1/lsp/stream":                       false,
+		"/api/v1/lsp/languages/go/watch":           false,
+		"/api/v1/lsp/languages/go/attach":          false,
 		"/api/v1/agent/stream":                     false,
 		"/api/v1/workspace/stream":                 false,
 	}
@@ -605,7 +611,7 @@ func TestPluginExecutorTransportMatrix(t *testing.T) {
 			if request.authorization != "Bearer host-secret" || request.instanceID != "execution-remote" {
 				t.Errorf("host headers on %s = %q / %q", request.path, request.authorization, request.instanceID)
 			}
-			if strings.Contains(request.path, "stream") {
+			if strings.Contains(request.path, "stream") || strings.HasSuffix(request.path, "/attach") || strings.HasSuffix(request.path, "/watch") {
 				if request.wsToken != "provider-ws" || !strings.Contains(request.protocols, "provider.route") {
 					t.Errorf("WebSocket lease on %s = header %q, protocols %q", request.path, request.wsToken, request.protocols)
 				}

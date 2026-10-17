@@ -303,5 +303,5 @@ func (m *ControlServer) handleCredentialConfirm(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{lspStatusKey: "confirmed"})
+	c.JSON(http.StatusOK, gin.H{"status": "confirmed"})
 }

@@ -92,6 +92,7 @@ type executorStore interface {
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	DeleteTaskEnvironment(ctx context.Context, id string) error
 	CreateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	ListTaskEnvironmentRepos(ctx context.Context, envID string) ([]*models.TaskEnvironmentRepo, error)
 	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
@@ -671,7 +672,11 @@ type LaunchAgentRequest struct {
 	RouteOverride *RouteOverride
 }
 
-type WorkspaceFolderSpec struct{ Name, LocalPath string }
+type WorkspaceFolderSpec struct {
+	Name      string
+	LocalPath string
+	Position  int
+}
 
 // RepoSpec describes one repository for a multi-repo task launch from the
 // orchestrator. Mirrors lifecycle.RepoLaunchSpec; kept as a separate type so
@@ -683,6 +688,7 @@ type RepoSpec struct {
 	RepositoryPath          string
 	RepositoryURL           string
 	RepoName                string
+	Position                int
 	BaseBranch              string
 	IntegrationRef          string
 	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
@@ -1077,6 +1083,10 @@ type PrimarySessionSetFunc func(ctx context.Context, taskID, sessionID string)
 // and invalidates updates captured before the reset.
 type ContextWindowResetFunc func(ctx context.Context, sessionID string) error
 
+// TaskEnvironmentReadyFunc fires after the canonical task environment is
+// persisted ready. It deliberately exposes no session/execution ownership.
+type TaskEnvironmentReadyFunc func(ctx context.Context, taskID string)
+
 // ExecutorTypeCapabilities provides behavioral queries about executor types.
 // Implemented by the lifecycle manager using its backend registry.
 type ExecutorTypeCapabilities interface {
@@ -1228,6 +1238,8 @@ type Executor struct {
 	// The orchestrator owns the per-session generation guard used by this reset.
 	onContextWindowReset ContextWindowResetFunc
 
+	onTaskEnvironmentReady TaskEnvironmentReadyFunc
+
 	// Per-session locks to prevent concurrent resume/launch operations on the same session.
 	// This prevents race conditions when the backend restarts and multiple resume requests
 	// arrive simultaneously (e.g., from frontend auto-resume).
@@ -1239,7 +1251,8 @@ type Executor struct {
 	// task_environments(task_id) catches the second insert, but this lock
 	// closes the window before the constraint trips so the first launch
 	// succeeds and the second reuses its env.
-	taskEnvLocks sync.Map // map[string]*sync.Mutex
+	taskEnvLocks         sync.Map // map[string]*sync.Mutex
+	inventoryRepairLocks sync.Map // map[string]*sync.Mutex
 
 	// Per-task locks serialize Office session creation so concurrent agents
 	// cannot both observe an empty task and claim the immutable origin marker.
@@ -1663,6 +1676,11 @@ func (e *Executor) SetOnPrimarySessionSet(fn PrimarySessionSetFunc) {
 // SetOnContextWindowReset wires the guarded context-window reset callback.
 func (e *Executor) SetOnContextWindowReset(fn ContextWindowResetFunc) {
 	e.onContextWindowReset = fn
+}
+
+// SetOnTaskEnvironmentReady wires task-owned runtime reconciliation.
+func (e *Executor) SetOnTaskEnvironmentReady(fn TaskEnvironmentReadyFunc) {
+	e.onTaskEnvironmentReady = fn
 }
 
 // SetOnLaunchFailed sets a callback for launch failures that happen before

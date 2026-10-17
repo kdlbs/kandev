@@ -60,7 +60,7 @@ func TestSetupRoutesRegistersOnlyWiredSurfaces(t *testing.T) {
 	}
 	for _, unwanted := range []string{
 		"GET /terminal/*target",
-		"GET /lsp/:sessionId",
+		"GET /lsp/tasks/:taskId/:language/attach",
 		"GET /vscode/:sessionId/*path",
 		"GET /port-proxy/:sessionId/:port/*path",
 	} {
@@ -70,7 +70,7 @@ func TestSetupRoutesRegistersOnlyWiredSurfaces(t *testing.T) {
 	}
 
 	gateway.SetLifecycleManager(nil, nil, nil)
-	gateway.SetLSPHandler(nil, nil)
+	gateway.SetLSPHandler(nil)
 	gateway.SetVscodeProxy(nil)
 	gateway.SetPortProxy(nil)
 	gateway.SetPortTunnel(nil)
@@ -87,7 +87,7 @@ func TestSetupRoutesRegistersOnlyWiredSurfaces(t *testing.T) {
 	for _, want := range []string{
 		"GET /ws",
 		"GET /terminal/*target",
-		"GET /lsp/:sessionId",
+		"GET /lsp/tasks/:taskId/:language/attach",
 		"GET /vscode/:sessionId/*path",
 		"GET /port-proxy/:sessionId/:port",
 		"GET /port-proxy/:sessionId/:port/*path",
