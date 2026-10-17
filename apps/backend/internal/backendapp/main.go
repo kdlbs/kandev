@@ -79,6 +79,7 @@ import (
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
+	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	userstore "github.com/kandev/kandev/internal/user/store"
@@ -1758,7 +1759,7 @@ func constructOfficeServices(
 	// lifecycle manager. The deployer reads office's skills repo +
 	// instructions repo via small adapters; office no longer ships
 	// its own delivery code.
-	wireRuntimeSkillDeployer(lifecycleMgr, agentRegistry, repos.Office, services.Office, cfg.ResolvedHomeDir(), log)
+	wireRuntimeSkillDeployer(lifecycleMgr, agentRegistry, repos.Office, services.Office, services.Prompts, cfg.ResolvedHomeDir(), log)
 
 	// Wire office-owned repositories into the task service for cross-package
 	// operations. The blocker repository is wired above, before the Office gate,
@@ -2424,23 +2425,29 @@ func (a *runsServiceEngineAdapter) QueueRun(
 // lifecycle manager (ADR 0005 Wave E). The deployer bridges office's
 // skills repo + instructions repo to the runtime via small adapters in
 // internal/office/skills, so kanban and office launches share a single
-// skill-deploy code path. A nil officeSvc / repo leaves the manager
+// skill-deploy code path. A non-nil promptSvc expands saved-prompt
+// references in delivered skills. A nil officeSvc / repo leaves the manager
 // with the Wave A no-op deployer.
 func wireRuntimeSkillDeployer(
 	lifecycleMgr *lifecycle.Manager,
 	agentRegistry *registry.Registry,
 	officeRepo *officesqlite.Repository,
 	officeSvc *officeservice.Service,
+	promptSvc *promptservice.Service,
 	basePath string,
 	log *logger.Logger,
 ) {
 	if lifecycleMgr == nil || officeSvc == nil || officeRepo == nil {
 		return
 	}
+	skillReader := officeskills.NewSkillReaderAdapter(officeSvc)
+	if promptSvc != nil {
+		skillReader.WithPromptReferenceExpander(promptSvc, log.Zap())
+	}
 	deployer, err := runtimeskill.New(runtimeskill.Config{
 		Logger:                  log,
 		BasePath:                basePath,
-		SkillReader:             officeskills.NewSkillReaderAdapter(officeSvc),
+		SkillReader:             skillReader,
 		InstructionLister:       officeskills.NewInstructionListerAdapter(officeRepo),
 		ProjectSkillDirResolver: makeProjectSkillDirResolver(agentRegistry),
 		WorkspaceSlugFn:         makeWorkspaceSlugFn(),
