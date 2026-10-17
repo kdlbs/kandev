@@ -33,7 +33,8 @@ func wireNativeRouteCapacity(resolver *agentruntime.ProfileExecutionResolver, ca
 		return
 	}
 	owner := &nativeRouteCapacity{capacity: capacity, consumer: consumer, tasks: tasks, calls: calls}
-	resolver.SetNativeRouteAdmission(owner.admit, capacity.ReleaseNativeRouteCapacity)
+	resolver.SetNativeRouteAdmission(owner.admit, owner.release)
+	capacity.SetNativeCapacityWaiters(owner.waiters)
 }
 
 func (o *nativeRouteCapacity) route(ctx context.Context, id, profileID string) (orchestrator.NativeInferenceRoute, error) {
@@ -62,7 +63,7 @@ func (o *nativeRouteCapacity) callRoute(ctx context.Context, route orchestrator.
 		return route, err
 	}
 	if call == nil || call.ID == "" || call.Status != "pending" || call.AgentProfileID != route.LogicalProfileID {
-		return route, errors.New("utility owner is not current")
+		return route, errNativeRouteNotCurrent
 	}
 	route.CallID, route.SessionID = call.ID, call.SessionID
 	return route, nil
@@ -77,7 +78,7 @@ func (o *nativeRouteCapacity) reviewRoute(ctx context.Context, route orchestrato
 		return route, err
 	}
 	if run == nil || run.ID == "" || run.TaskID == "" || run.SessionID == "" || (run.Status != taskmodels.ReviewRunPending && run.Status != taskmodels.ReviewRunRunning) {
-		return route, errors.New("review owner is not current")
+		return route, errNativeRouteNotCurrent
 	}
 	route.ReviewRunID, route.TaskID, route.SessionID = run.ID, run.TaskID, run.SessionID
 	return route, nil
@@ -108,6 +109,13 @@ func (o *nativeRouteCapacity) admit(ctx context.Context, id, profileID string) e
 	}
 	if o.consumer == nil || o.capacity == nil {
 		return &agentruntime.InferenceCapacityError{Reason: "owner_unavailable"}
+	}
+	queuedAt, err := o.queuedAt(ctx, route)
+	if err != nil {
+		return &agentruntime.InferenceCapacityError{Reason: "native_owner_unavailable", Cause: err}
+	}
+	if err := o.consumer.registerNativeWorker(route, queuedAt); err != nil {
+		return &agentruntime.InferenceCapacityError{Reason: "native_owner_unavailable", Cause: err}
 	}
 	o.consumer.Refresh(ctx)
 	wake := o.capacity.InferenceCapacityChanged()

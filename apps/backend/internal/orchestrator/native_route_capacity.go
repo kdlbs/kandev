@@ -84,9 +84,8 @@ func (c *sessionCeilingController) reserveNativeRouteLocked(ctx context.Context,
 		if held.nativeOwner == nil || *held.nativeOwner != route {
 			return false, ceilingReasonUnknownPopulation, errors.New("native reservation owner changed")
 		}
-		return true, "", nil
-	}
-	if c.resolveGrade != nil {
+		req.grade, req.gradeKnown = held.grade, held.gradeKnown
+	} else if c.resolveGrade != nil {
 		var err error
 		req.grade, err = c.resolveGrade(ctx, admissionRequest{taskID: route.TaskID, profileID: route.LogicalProfileID})
 		req.gradeKnown = err == nil
@@ -102,6 +101,10 @@ func (c *sessionCeilingController) reserveNativeRouteLocked(ctx context.Context,
 	decision, p, maximum := c.inspectAllAdmissionLocked(ctx, req)
 	if decision.reasonCode != "" {
 		return false, decision.reasonCode, nil
+	}
+	if held != nil {
+		held.nativeQueued = false
+		return true, "", nil
 	}
 	if reason := c.allCapacityLimitReason(p, maximum); reason != "" {
 		return false, reason, nil

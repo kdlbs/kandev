@@ -77,12 +77,13 @@ type admittedSessionLister interface {
 // keyed by a launch-scoped identifier, which is the window between admission at
 // seam 1 and the session's creation.
 type ceilingReservation struct {
-	grade       string
-	gradeKnown  bool
-	sessionID   string
-	takenAt     time.Time
-	nativeOwner *NativeInferenceRoute
-	queuedTask  *queuedTaskCapacityOwner
+	grade        string
+	gradeKnown   bool
+	sessionID    string
+	takenAt      time.Time
+	nativeOwner  *NativeInferenceRoute
+	nativeQueued bool
+	queuedTask   *queuedTaskCapacityOwner
 }
 
 // admissionRequest is one launch asking for capacity.
@@ -151,6 +152,7 @@ type sessionCeilingController struct {
 	now              func() time.Time
 	newKey           func() string
 	queuedTasks      func(context.Context) ([]queuedTaskCapacityCandidate, error)
+	nativeWaiters    func(context.Context) ([]NativeCapacityWaiter, error)
 	queuedWake       func()
 }
 

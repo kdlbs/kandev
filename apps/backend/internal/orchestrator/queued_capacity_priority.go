@@ -124,13 +124,22 @@ type queuedTaskArrival struct {
 }
 
 func (c *sessionCeilingController) prepareQueuedTaskCapacityLocked(ctx context.Context, req admissionRequest) (admissionRequest, error) {
-	if c.policy != sessioncapacity.PolicyAll || c.queuedTasks == nil {
+	if c.policy != sessioncapacity.PolicyAll {
 		return req, nil
 	}
-	candidates, err := c.queuedTasks(ctx)
+	var candidates []queuedTaskCapacityCandidate
+	var err error
+	if c.queuedTasks != nil {
+		candidates, err = c.queuedTasks(ctx)
+	}
 	if err != nil {
 		return req, err
 	}
+	native, err := c.readNativeCapacityWaitersLocked(ctx)
+	if err != nil {
+		return req, err
+	}
+	c.pruneQueuedNativeCapacityLocked(native)
 	if err = c.pruneQueuedTaskCapacityLocked(candidates); err != nil {
 		return req, err
 	}
@@ -138,7 +147,8 @@ func (c *sessionCeilingController) prepareQueuedTaskCapacityLocked(ctx context.C
 	if err != nil || req.queuedGrantKey != "" {
 		return req, err
 	}
-	return req, c.grantOlderQueuedTasksLocked(ctx, arrival, candidates)
+	arrival = nativeCapacityArrival(req, arrival, native)
+	return req, c.grantOlderCapacityCandidatesLocked(ctx, arrival, candidates, native)
 }
 
 func (c *sessionCeilingController) readQueuedTaskArrivalLocked(ctx context.Context, req admissionRequest) (admissionRequest, queuedTaskArrival, error) {
@@ -161,39 +171,6 @@ func (c *sessionCeilingController) readQueuedTaskArrivalLocked(ctx context.Conte
 		req.queuedGrantKey = key
 	}
 	return req, arrival, nil
-}
-
-func (c *sessionCeilingController) grantOlderQueuedTasksLocked(ctx context.Context, arrival queuedTaskArrival, candidates []queuedTaskCapacityCandidate) error {
-	changed := false
-	for _, candidate := range candidates {
-		owner := candidate.owner
-		if !queuedTaskArrivedBefore(owner, arrival.at, arrival.taskID, arrival.claimed) {
-			continue
-		}
-		key := queuedTaskCapacityKey(owner.taskID)
-		if c.reservations[key] != nil || (candidate.request.sessionID != "" && c.reservations[candidate.request.sessionID] != nil) {
-			continue
-		}
-		reserved, err := c.reserveQueuedTaskCandidateLocked(ctx, key, candidate)
-		if err != nil {
-			return err
-		}
-		changed = changed || reserved
-	}
-	if changed && c.queuedWake != nil {
-		c.queuedWake()
-	}
-	return nil
-}
-
-func queuedTaskArrivedBefore(owner queuedTaskCapacityOwner, arrived time.Time, currentID string, claimed bool) bool {
-	if owner.deferral.QueuedAt.IsZero() {
-		return false
-	}
-	if claimed && owner.taskID == currentID {
-		return false
-	}
-	return owner.deferral.QueuedAt.Before(arrived) || (owner.deferral.QueuedAt.Equal(arrived) && owner.taskID < currentID)
 }
 
 func (c *sessionCeilingController) pruneQueuedTaskCapacityLocked(candidates []queuedTaskCapacityCandidate) error {
