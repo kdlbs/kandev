@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// @covers AC-AGENTS-MCP-PROTOCOL-001.9
 func TestExternalMCPNotification_AuthenticatesBeforeBodyRead(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Features.Auth = true
