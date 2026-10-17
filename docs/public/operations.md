@@ -887,6 +887,12 @@ Never delete a managed task directory merely because its database row looks term
 
 If a session resume reports that canonical workspace repository inventory is incomplete, first preserve the checkout exactly as it is. Record its branch and HEAD, and inspect tracked, dirty, untracked, and ignored files. Do not use **Reset Environment**, archive/delete cleanup, `git clean`, worktree removal, or a provider reset as an inventory repair.
 
+For duplicate physical-worktree claims or copied child environments, use the
+[offline inventory repair procedure](git-operations.md#repair-inconsistent-worktree-inventory).
+It requires an explicit canonical selection and preserves conversations and files.
+A successful repair does not complete a pending archive or delete cleanup.
+
+
 The task-scoped `repair_workspace_inventory` session recovery action is safe only for a Kandev-managed local Git worktree with exactly one missing or stale repository/branch slot. It performs read-only reciprocal Git inspection, hashes the checkout state, compares current database revisions, rejects another active session, changes only the proven inventory row, appends an immutable receipt identity, verifies the checkout again, durably records monotonic matching post-repair evidence on that receipt, and resumes once through the ordinary validator. Retrying the same operation requires the same idempotency key. See [WebSocket API](websocket-api.md#repair-preserved-workspace-inventory) for the request and receipt contract.
 
 Stop and investigate manually when the action returns a conflict. Common causes are multiple unmatched rows, duplicate repository/branch attachments, a moved or symlinked path, a detached or unexpected branch, a missing Git worktree registration, a user-owned local repository, a Docker/SSH/Sprites-only checkout, another active session (including a child sharing the environment), configured external Git clean/process filters, or state that changed during inspection. A conflict is intentionally preservation-first: Kandev leaves checkout files and provider resources untouched and does not fall back to rematerialization.

@@ -91,6 +91,10 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 		return err
 	}
 
+	if err := lockEnvironmentPhysicalClaims(ctx, tx, nil, env.Repos); err != nil {
+		return err
+	}
+
 	for _, repo := range env.Repos {
 		repo.TaskEnvironmentID = env.ID
 		if err := r.insertTaskEnvironmentRepoTx(ctx, tx, repo); err != nil {
@@ -356,6 +360,14 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 			return fmt.Errorf("finalize task environment: ready status requires repository inventory for repo-backed task (id=%s)", env.ID)
 		}
 	}
+	existing, err := listTaskEnvironmentReposTx(ctx, r, tx, env.ID)
+	if err != nil {
+		return err
+	}
+	if err := lockEnvironmentPhysicalClaims(ctx, tx, existing, repos); err != nil {
+		return err
+	}
+
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_repos WHERE task_environment_id = ?`), env.ID); err != nil {
 		return err
 	}
@@ -719,6 +731,10 @@ func (r *Repository) reconcileTaskEnvironmentReposTx(
 	existing, repos []*models.TaskEnvironmentRepo,
 	replacePhysical bool,
 ) error {
+	if err := lockEnvironmentPhysicalClaims(ctx, tx, existing, repos); err != nil {
+		return err
+	}
+
 	byKey, legacyFlatByRepo, soleByRepo := indexTaskEnvironmentReposTx(existing)
 	matched := make(map[string]struct{}, len(repos))
 	for position, incoming := range repos {
@@ -865,6 +881,10 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 		row.WorktreeBranchCompactedAt = nil
 	}
 	row.UpdatedAt = time.Now().UTC()
+	if err := guardTaskEnvironmentRepoTx(ctx, tx, row); err != nil {
+		return err
+	}
+
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos SET
 			branch_slug = ?, worktree_id = ?, worktree_path = ?, worktree_branch = ?,
@@ -1097,6 +1117,10 @@ func (r *Repository) DeleteTaskEnvironment(ctx context.Context, id string) error
 	if err := r.ensureKubernetesInventoryAbsent(ctx, tx, id); err != nil {
 		return err
 	}
+	if err := r.guardEnvironmentPhysicalClaims(ctx, tx, id); err != nil {
+		return err
+	}
+
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environments WHERE id = ?`), id)
 	if err != nil {
 		return err
@@ -1145,6 +1169,10 @@ func (r *Repository) DeleteTaskEnvironmentsByTask(ctx context.Context, taskID st
 			return err
 		}
 	}
+	if err := r.guardEnvironmentPhysicalClaims(ctx, tx, environmentIDs...); err != nil {
+		return err
+	}
+
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environments WHERE task_id = ?`), taskID); err != nil {
 		return err
 	}
@@ -1189,6 +1217,10 @@ func (r *Repository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models
 		repo.Status = worktreeRepoStatusActive
 	}
 
+	if err := guardTaskEnvironmentRepoTx(ctx, tx, repo); err != nil {
+		return err
+	}
+
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environment_repos (
 			id, task_environment_id, repository_id, branch_slug,
@@ -1224,6 +1256,10 @@ func (r *Repository) insertTaskEnvironmentRepoTx(ctx context.Context, tx *sqlx.T
 	repo.UpdatedAt = now
 	if repo.Status == "" {
 		repo.Status = worktreeRepoStatusActive
+	}
+
+	if err := guardTaskEnvironmentRepoTx(ctx, tx, repo); err != nil {
+		return err
 	}
 
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -1321,6 +1357,10 @@ func (r *Repository) UpdateTaskEnvironmentRepo(ctx context.Context, repo *models
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
 		return err
 	}
+	if err := guardTaskEnvironmentRepoTx(ctx, tx, repo); err != nil {
+		return err
+	}
+
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos SET
 			branch_slug = ?,
@@ -1367,6 +1407,10 @@ func (r *Repository) DeleteTaskEnvironmentRepo(ctx context.Context, id string) e
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
 		return err
 	}
+	if err := guardTaskEnvironmentRepoTx(ctx, tx, &models.TaskEnvironmentRepo{ID: id}); err != nil {
+		return err
+	}
+
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_repos WHERE id = ?`), id)
 	if err != nil {
 		return err
@@ -1388,6 +1432,10 @@ func (r *Repository) DeleteTaskEnvironmentReposByEnv(ctx context.Context, envID 
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, envID); err != nil {
 		return err
 	}
+	if err := r.guardEnvironmentPhysicalClaims(ctx, tx, envID); err != nil {
+		return err
+	}
+
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_repos WHERE task_environment_id = ?`), envID); err != nil {
 		return err
 	}

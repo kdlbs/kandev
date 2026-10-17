@@ -291,78 +291,129 @@ sensitive data.
 
 ### Repair inconsistent worktree inventory
 
-A healthy checkout can disagree with its saved branch, repository ID, or task
-root. This can produce “advanced from audited commit”, “incomplete worktree
-identity”, or “owned by another task” errors. These messages require inspection:
-they can also indicate a real ownership or commit change. Repeated resume or
-cleanup attempts do not repair inconsistent inventory.
+Use the source maintenance utility when healthy Git checkouts disagree with
+saved worktree ownership, branch, repository, or task-root records. Duplicate
+physical-worktree claims now stop normal admission and cleanup with an ambiguous
+inventory ownership error. Repeated resume or cleanup attempts do not repair them.
 
-The source maintenance command `cmd/worktree-inventory-repair` supports explicit
-repairs for local SQLite installations using the host **Worktree** executor.
-Application and rollback require Linux and permission to inspect host processes
-across all users through `/proc`. An inaccessible process blocks repair; this can
-require a privileged operator. Preview and verification only read state.
-Use a backend build containing the repair startup guard before applying a repair.
-The utility ignores inherited `GIT_*` environment settings; its plan selects the
-repository and checkout paths.
+The utility supports **local SQLite installations and the host Worktree
+executor**. Apply and rollback require Linux and permission to inspect processes
+across all users through `/proc`. PostgreSQL, remote executors, and non-Linux
+application are unsupported. Discovery, preview, and verification only read state.
+Use a backend build with the repair startup guard before applying a repair.
 
-1. Build the utility from `apps/backend`:
+1. **Build the utility** from `apps/backend`:
 
    ```bash
    go build -o worktree-inventory-repair ./cmd/worktree-inventory-repair
+   umask 077
    ```
 
-2. Prepare a private JSON input using the
-   [repair plan fields](https://github.com/kdlbs/kandev/blob/main/apps/backend/internal/task/inventoryrepair/plan.go).
-   Set `version` to `1`, `driver` to `sqlite`, a unique `operation_id`, and absolute
-   `home`, `database`, and `tasks_root` paths. Each repair names an exact worktree,
-   environment, repository, source path, destination path, attached branch, HEAD
-   commit, and source-root task. Every relocation requires a matching `workspaces`
-   entry naming the environment's canonical task root and every bound session.
-   Include an old cleanup job only when its incomplete snapshot needs a linked
-   successor. Omit `expected_rows` and `expected_git` on
-   the first preview; the command fills these observations.
-
-3. Review the preview and retain its `plan` object as the application input:
+2. **Discover duplicate claims** using the installation's absolute paths:
 
    ```bash
-   umask 077
+   ./worktree-inventory-repair --discover \
+     --home /srv/kandev --database /srv/kandev/data.db \
+     --tasks-root /srv/kandev/tasks --limit 50 > discovery.json
+   ```
+
+   Discovery reads database claims without electing an owner or changing Git.
+   Continue with `--after` set to the returned `next_after` cursor until no cursor
+   remains. The default page has 50 physical IDs, with a maximum of 100. Oversized
+   groups are reported without partial selections. Do not treat discovery as
+   authorization to remove a row.
+
+3. **Prepare an explicit private plan.** Use the
+   [repair plan fields](https://github.com/kdlbs/kandev/blob/main/apps/backend/internal/task/inventoryrepair/plan.go)
+   and a unique `operation_id`. Set `driver` to `sqlite` and provide absolute
+   `home`, `database`, and `tasks_root` paths.
+
+   Use `version: 2` for duplicate ownership. Each `repairs` entry names the exact
+   physical ID, canonical environment and repository, attached branch, HEAD,
+   repository path, checkout path, and marked root owner. Set `source_path` and
+   `path` to the same existing checkout. Each corresponding `aliases` entry names
+   its `worktree_id`, one `canonical_row_id`, and the complete `alias_row_ids` list:
+
+   ```json
+   {
+     "worktree_id": "physical-worktree-id",
+     "canonical_row_id": "canonical-inventory-row-id",
+     "alias_row_ids": ["legacy-root-alias-row-id"]
+   }
+   ```
+
+   The canonical checkout must agree with Git registration, the branch and HEAD,
+   the repository record, and the enclosing task's ownership marker. A root alias
+   must belong to that same environment and have no root `.git` metadata.
+
+   For a copied child environment, also provide `redundant_environments` with its
+   `environment_id`, `canonical_environment_id`, saved `group_id`, and complete
+   `session_ids` and `snapshot_ids` lists. Every copied slot must refer to a proven
+   canonical checkout. The saved sharing policy, group ownership, and membership
+   must agree. Include `workspaces` only for explicit workspace-path corrections.
+   Unmatched slots, unknown references, mixed active/deleted claims, and incomplete
+   selections refuse the entire repair.
+
+   Version 2 does not move files or supersede cleanup jobs. Use the existing
+   version-1 plan for a branch correction or explicit relocation. A version-1
+   relocation requires a matching `workspaces` entry with every bound session.
+   Include an old cleanup job only when its incomplete snapshot needs a linked
+   successor. Never edit the old snapshot to make cleanup pass.
+
+4. **Stop consumers and produce a fresh preview.** Stop the backend through its
+   normal service or launcher, and stop processes using the selected task roots.
+   Omit `expected_rows`, `expected_git`, and `expected_consumer_paths` from the
+   initial input. Preview supplies these exact observations:
+
+   ```bash
    ./worktree-inventory-repair --plan input.json > preview.json
    jq '.plan' preview.json > repair.json
    ```
 
-   Check the proposed changes and any `blockers`. Preview preserves tracked,
-   untracked, and ignored files, the index, refs, and ownership markers.
+   Review the selected rows, dependent records, and `blockers`. Keep the complete
+   returned plan. A version-2 repair can preserve an idle `CREATED` or
+   `WAITING_FOR_INPUT` session only after proving that no runtime or host process
+   still uses the workspace. A cleanup job must be cancelled or succeeded.
+   Changed observations require a new preview and review.
 
-4. Stop the backend through its normal service or launcher, and stop processes
-   using the selected task roots. Refresh and review the preview if state changed.
-   Then apply and verify before restarting:
+5. **Apply and verify before restarting:**
 
    ```bash
    ./worktree-inventory-repair --plan repair.json --apply
    ./worktree-inventory-repair --plan repair.json --verify
    ```
 
+   Version 2 removes only selected alias slots, rebinds proven sessions and Git
+   snapshots, and removes fully redundant environments in one transaction.
+   It preserves conversation and resume identities, session states, commits,
+   staged changes, tracked, untracked, and ignored files, refs, and root markers.
+   Existing cancelled cleanup snapshots retain their original bytes.
+
 A held backend lock means an instance still owns the installation. A process
 inspection permission error means the utility cannot establish that consumers
-are absent; use an authorized account with sufficient visibility. Neither error
+are absent. Use an authorized account with sufficient visibility. Neither error
 is a stale-lock signal. Do not delete ownership locks or bypass these checks.
 
 The command retains a private SQLite backup and journal under
-`<home>/inventory-repairs/<operation_id>/`. It moves selected checkouts with
-`git worktree move`, preserves their content and refs, and changes only the
-selected inventory. When a cleanup snapshot needs repair, its original bytes
-remain on the cancelled predecessor; the linked successor captures new source
-evidence through the normal cleanup worker.
+`<home>/inventory-repairs/<operation_id>/`. Version 1 moves explicitly selected
+checkouts with `git worktree move`. When it supersedes a cleanup job, the original
+snapshot stays on the cancelled predecessor and the linked successor captures
+new source evidence through the normal worker.
 
-If interrupted, rerun the same plan with `--apply` to finish or `--rollback` to
-reverse it. Changed inventory or checkout content prevents either operation.
-An unresolved journal blocks backend startup; retain the journal and backup
-until resolved. Startup reports the repair recovery command without suggesting
-a second instance. Verify before restarting; online verification may observe
-concurrent changes. After restart, check the cleanup job and resume the affected
-session. Metadata verification alone does not establish that those operations
-have completed. Normal dirty-checkout, branch, and ownership guards still apply.
+If interrupted, rerun the same saved plan with `--apply` to finish or
+`--rollback` to restore the original records. Rollback restores parent records
+before their dependents. Changed inventory or checkout content prevents recovery.
+An unresolved journal blocks backend startup. Retain its journal and backup,
+resolve the interrupted operation, and verify before restarting.
+
+After restart, resume the affected session or retry archive or confirmed delete
+through the normal task controls. Check the resulting cleanup job separately.
+**Metadata verification does not mean cleanup completed.** Borrowed workspaces
+remain protected, and dirty-file, branch, commit, ownership, and deletion-consent
+checks still apply. An archived borrower session can continue to protect a
+shared checkout. A cascade delete can report pending cleanup after deleting the
+task rows. Inspect the durable cleanup jobs and workspace-group status separately;
+a completed task cleanup job does not clear an older group cleanup error.
 
 ### Named branch policies
 
