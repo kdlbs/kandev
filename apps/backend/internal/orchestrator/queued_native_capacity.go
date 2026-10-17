@@ -69,7 +69,7 @@ func capacityGrantCandidates(tasks []queuedTaskCapacityCandidate, native []Nativ
 	return result
 }
 
-func (c *sessionCeilingController) grantOlderCapacityCandidatesLocked(ctx context.Context, arrival queuedTaskArrival, tasks []queuedTaskCapacityCandidate, native []NativeCapacityWaiter) error {
+func (c *sessionCeilingController) grantOlderCapacityCandidatesLocked(ctx context.Context, arrival queuedTaskArrival, tasks []queuedTaskCapacityCandidate, native []NativeCapacityWaiter, office []OfficeCapacityWaiter) error {
 	changed := false
 	for _, candidate := range capacityGrantCandidates(tasks, native) {
 		if candidate.at.IsZero() || (arrival.claimed && candidate.id == arrival.taskID) {
@@ -77,6 +77,9 @@ func (c *sessionCeilingController) grantOlderCapacityCandidatesLocked(ctx contex
 		}
 		if candidate.at.After(arrival.at) || (candidate.at.Equal(arrival.at) && candidate.id >= arrival.taskID) {
 			continue
+		}
+		if err := c.grantOfficeCapacityBeforeLocked(ctx, office, candidate.at, candidate.id); err != nil {
+			return err
 		}
 		reserved, err := c.reserveCapacityGrantLocked(ctx, candidate)
 		if err != nil {
@@ -87,7 +90,7 @@ func (c *sessionCeilingController) grantOlderCapacityCandidatesLocked(ctx contex
 	if changed && c.queuedWake != nil {
 		c.queuedWake()
 	}
-	return nil
+	return c.grantOfficeCapacityBeforeLocked(ctx, office, arrival.at, arrival.taskID)
 }
 
 func (c *sessionCeilingController) reserveCapacityGrantLocked(ctx context.Context, candidate queuedCapacityGrant) (bool, error) {

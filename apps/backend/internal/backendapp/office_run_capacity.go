@@ -17,6 +17,8 @@ func (l *officeRunSessionLauncher) SetExecutionCapacityOwner(owner *orchestrator
 	l.capacity = owner
 	if owner != nil {
 		owner.SetRunSessionCapacitySource(l.repo)
+		owner.SetOfficeCapacityWaiters(l.officeCapacityWaiters)
+		l.repo.SetClaimCapacityCandidates(owner.RunCapacityClaimCandidates)
 		l.repo.SetRunSessionCapacityReleased(owner.NotifyRunSessionCapacityReleased)
 	}
 }
@@ -44,7 +46,7 @@ func (l *officeRunSessionLauncher) reserveOfficeCapacity(ctx context.Context, se
 			return nil, l.deferOfficeCapacity(ctx, session.RunID, "logical execution grade unknown")
 		}
 	}
-	reservation, reason, err := l.capacity.ReserveRunSessionCapacity(ctx, session.ID, grade)
+	reservation, reason, err := l.capacity.ReserveQueuedRunSessionCapacity(ctx, session.RunID, session.ID, grade)
 	if err != nil || reason != "" {
 		return nil, errors.Join(l.deferOfficeCapacity(ctx, session.RunID, reason), err)
 	}

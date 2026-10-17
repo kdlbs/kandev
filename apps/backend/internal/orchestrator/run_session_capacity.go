@@ -51,6 +51,16 @@ type RunSessionCapacityReservation struct {
 // ReserveRunSessionCapacity uses the same atomic AND admission as task entries.
 // Automatic-only/environment behavior remains unchanged by this opt-in bridge.
 func (s *Service) ReserveRunSessionCapacity(ctx context.Context, id, grade string) (*RunSessionCapacityReservation, string, error) {
+	return s.reserveRunSessionCapacity(ctx, "", id, grade)
+}
+
+// ReserveQueuedRunSessionCapacity transfers only the exact already-claimed
+// original queue owner's common grant to its real immutable attempt identity.
+func (s *Service) ReserveQueuedRunSessionCapacity(ctx context.Context, runID, id, grade string) (*RunSessionCapacityReservation, string, error) {
+	return s.reserveRunSessionCapacity(ctx, runID, id, grade)
+}
+
+func (s *Service) reserveRunSessionCapacity(ctx context.Context, runID, id, grade string) (*RunSessionCapacityReservation, string, error) {
 	if s == nil || s.sessionCeiling == nil {
 		return nil, ceilingReasonUnknownPopulation, errors.New("run capacity owner unavailable")
 	}
@@ -68,12 +78,19 @@ func (s *Service) ReserveRunSessionCapacity(ctx context.Context, id, grade strin
 	}
 	key := runSessionCapacityKey(id)
 	if held := c.reservations[key]; held != nil {
+		if held.officeRunID != runID {
+			return nil, ceilingReasonUnknownPopulation, errors.New("office attempt reservation belongs to another run")
+		}
 		grade = held.grade
 	}
-	req := admissionRequest{sessionID: key, grade: grade, gradeKnown: true, origin: launchOriginAutomatic, seam: officeRunCapacitySeam}
+	req := admissionRequest{sessionID: key, officeRunID: runID, grade: grade, gradeKnown: true, origin: launchOriginAutomatic, seam: officeRunCapacitySeam}
 	decision := c.admitAllLocked(ctx, req, false)
 	if !decision.admitted {
 		return nil, decision.reasonCode, nil
+	}
+	if held := c.reservations[decision.reservationKey]; held != nil {
+		grade = held.grade
+		held.officeRunID = runID
 	}
 	return &RunSessionCapacityReservation{service: s, key: decision.reservationKey, id: id, Grade: grade}, "", nil
 }

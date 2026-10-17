@@ -139,6 +139,14 @@ func (c *sessionCeilingController) prepareQueuedTaskCapacityLocked(ctx context.C
 	if err != nil {
 		return req, err
 	}
+	office, err := c.readOfficeCapacityWaitersLocked(ctx)
+	if err != nil {
+		return req, err
+	}
+	if req.seam == officeRunCapacitySeam && req.officeRunID != "" && !claimedOfficeCapacityOwner(req.officeRunID, office) {
+		return req, fmt.Errorf("office queue owner is not eligible")
+	}
+	c.pruneQueuedOfficeCapacityLocked(office)
 	c.pruneQueuedNativeCapacityLocked(native)
 	if err = c.pruneQueuedTaskCapacityLocked(candidates); err != nil {
 		return req, err
@@ -148,7 +156,11 @@ func (c *sessionCeilingController) prepareQueuedTaskCapacityLocked(ctx context.C
 		return req, err
 	}
 	arrival = nativeCapacityArrival(req, arrival, native)
-	return req, c.grantOlderCapacityCandidatesLocked(ctx, arrival, candidates, native)
+	req, arrival = c.readOfficeCapacityArrivalLocked(req, arrival, office)
+	if req.queuedGrantKey != "" {
+		return req, nil
+	}
+	return req, c.grantOlderCapacityCandidatesLocked(ctx, arrival, candidates, native, office)
 }
 
 func (c *sessionCeilingController) readQueuedTaskArrivalLocked(ctx context.Context, req admissionRequest) (admissionRequest, queuedTaskArrival, error) {

@@ -84,6 +84,10 @@ const launchClaimLockKey int64 = 0x4c41554e434c4331
 // that clears no gate is left untouched in status='queued'; the caller
 // sees sql.ErrNoRows exactly as before this rewrite.
 func (r *Repository) ClaimNextEligibleRun(ctx context.Context) (*models.Run, error) {
+	ctx, err := r.prepareCapacityClaim(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -217,6 +221,9 @@ func (r *Repository) claimFirstEligible(
 			}
 			continue
 		}
+		if !capacityClaimAllows(ctx, candidate) {
+			continue
+		}
 		return r.commitClaim(ctx, tx, candidate)
 	}
 	return nil, nil
@@ -346,35 +353,7 @@ func isShutdownCanceled(ctx context.Context, err error) bool {
 func (r *Repository) evalAgentCeilingGate(
 	ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits,
 ) bool {
-	agentCap, err := r.agentCeiling(ctx, tx, candidate.AgentProfileID, limits)
-	if err != nil {
-		if isShutdownCanceled(ctx, err) {
-			return true
-		}
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateAgentCeiling), 1)
-		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateAgentCeiling, false)
-		return true
-	}
-	if agentCap <= 0 {
-		// No resolvable agent_profiles row: defer rather than admit an
-		// unbounded agent. AC-OFFICE-LAUNCH-SAFETY-001.8 names this
-		// alongside an unreadable ceiling input, not an ordinary
-		// saturated-pool block, so it records the same gate failure.
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateAgentCeiling), 1)
-		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateAgentCeiling, false)
-		return true
-	}
-	agentClaimed, err := r.countClaimed(ctx, tx, "agent_profile_id = ?", candidate.AgentProfileID)
-	if err != nil {
-		if isShutdownCanceled(ctx, err) {
-			return true
-		}
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateAgentCeiling), 1)
-		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateAgentCeiling, false)
-		return true
-	}
-	r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateAgentCeiling, true)
-	return agentClaimed >= agentCap
+	return r.evaluateClaimGateSnapshot(ctx, tx, candidate, limits, time.Time{}, gateAgentCeiling)
 }
 
 // evalWorkspaceCeilingGate reports whether candidate's workspace is at or
@@ -382,17 +361,7 @@ func (r *Repository) evalAgentCeilingGate(
 func (r *Repository) evalWorkspaceCeilingGate(
 	ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits,
 ) bool {
-	workspaceClaimed, err := r.countClaimed(ctx, tx, "workspace_id = ?", candidate.WorkspaceID)
-	if err != nil {
-		if isShutdownCanceled(ctx, err) {
-			return true
-		}
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateWorkspaceCeiling), 1)
-		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateWorkspaceCeiling, false)
-		return true
-	}
-	r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateWorkspaceCeiling, true)
-	return workspaceClaimed >= limits.MaxConcurrentWorkspace
+	return r.evaluateClaimGateSnapshot(ctx, tx, candidate, limits, time.Time{}, gateWorkspaceCeiling)
 }
 
 // evalInstanceCeilingGate reports whether the instance-wide concurrent
@@ -400,17 +369,7 @@ func (r *Repository) evalWorkspaceCeilingGate(
 func (r *Repository) evalInstanceCeilingGate(
 	ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits,
 ) bool {
-	instanceClaimed, err := r.countClaimed(ctx, tx, "1 = 1")
-	if err != nil {
-		if isShutdownCanceled(ctx, err) {
-			return true
-		}
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateInstanceCeiling), 1)
-		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateInstanceCeiling, false)
-		return true
-	}
-	r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateInstanceCeiling, true)
-	return instanceClaimed >= limits.MaxConcurrentInstance
+	return r.evaluateClaimGateSnapshot(ctx, tx, candidate, limits, time.Time{}, gateInstanceCeiling)
 }
 
 // evalRoutineBudgetGate reports whether candidate's routine is at or over
@@ -419,17 +378,7 @@ func (r *Repository) evalInstanceCeilingGate(
 func (r *Repository) evalRoutineBudgetGate(
 	ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits, budgetWindowStart time.Time,
 ) bool {
-	routineClaims, err := r.countLedger(ctx, tx, "routine_id = ? AND claimed_at > ?", candidate.RoutineID, budgetWindowStart)
-	if err != nil {
-		if isShutdownCanceled(ctx, err) {
-			return true
-		}
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateRoutineBudget), 1)
-		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateRoutineBudget, false)
-		return true
-	}
-	r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateRoutineBudget, true)
-	return routineClaims >= limits.RoutineBudgetPerHour
+	return r.evaluateClaimGateSnapshot(ctx, tx, candidate, limits, budgetWindowStart, gateRoutineBudget)
 }
 
 // evalWorkspaceBudgetGate reports whether candidate's workspace is at or
@@ -438,17 +387,7 @@ func (r *Repository) evalRoutineBudgetGate(
 func (r *Repository) evalWorkspaceBudgetGate(
 	ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits, budgetWindowStart time.Time,
 ) bool {
-	workspaceClaims, err := r.countLedger(ctx, tx, "workspace_id = ? AND claimed_at > ?", candidate.WorkspaceID, budgetWindowStart)
-	if err != nil {
-		if isShutdownCanceled(ctx, err) {
-			return true
-		}
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateWorkspaceBudget), 1)
-		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateWorkspaceBudget, false)
-		return true
-	}
-	r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateWorkspaceBudget, true)
-	return workspaceClaims >= limits.WorkspaceBudgetPerHour
+	return r.evaluateClaimGateSnapshot(ctx, tx, candidate, limits, budgetWindowStart, gateWorkspaceBudget)
 }
 
 // agentCeiling resolves the effective per-agent claim ceiling: the
@@ -497,4 +436,17 @@ func (r *Repository) countLedger(ctx context.Context, tx *sqlx.Tx, whereClause s
 	query := "SELECT COUNT(*) FROM office_launch_ledger WHERE " + whereClause
 	err := tx.QueryRowContext(ctx, tx.Rebind(query), args...).Scan(&count)
 	return count, err
+}
+
+func (r *Repository) evaluateClaimGateSnapshot(ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits, window time.Time, gate string) bool {
+	blocked, err := r.readClaimGateSnapshot(ctx, tx, candidate, limits, window, gate)
+	if err != nil {
+		if !isShutdownCanceled(ctx, err) {
+			shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gate), 1)
+			r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gate, false)
+		}
+		return true
+	}
+	r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gate, true)
+	return blocked
 }

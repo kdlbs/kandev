@@ -119,6 +119,9 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 	if queued, ok := c.consumeQueuedTaskCapacityLocked(ctx, req, p); ok {
 		return queued
 	}
+	if queued, ok := c.consumeQueuedOfficeCapacityLocked(req, p); ok {
+		return queued
+	}
 	if selected, ok := c.reserveSelectedStartLocked(req, p); ok {
 		return selected
 	}
