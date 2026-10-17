@@ -8,7 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
-const nativeRouteCapacitySeam = "nativeRouteCapacity"
+const nativeRouteCapacitySeam = "nativeRoute"
 
 // NativeInferenceRoute refers to an existing utility call or review run. The
 // bootstrap adapter verifies its relationships from the native repositories.
@@ -94,22 +94,21 @@ func (c *sessionCeilingController) reserveNativeRouteLocked(ctx context.Context,
 			return false, ceilingReasonUnknownPopulation, err
 		}
 	}
-	if reason := c.nativeRouteAdmissionRejectionLocked(ctx, req); reason != "" {
+	var priorityErr error
+	req, priorityErr = c.prepareQueuedTaskCapacityLocked(ctx, req)
+	if priorityErr != nil {
+		return false, ceilingReasonUnknownPopulation, priorityErr
+	}
+	decision, p, maximum := c.inspectAllAdmissionLocked(ctx, req)
+	if decision.reasonCode != "" {
+		return false, decision.reasonCode, nil
+	}
+	if reason := c.allCapacityLimitReason(p, maximum); reason != "" {
 		return false, reason, nil
 	}
 	key := c.reserveGradeLocked(req)
 	c.reservations[key].nativeOwner = &route
 	return true, "", nil
-}
-
-func (c *sessionCeilingController) nativeRouteAdmissionRejectionLocked(ctx context.Context, req admissionRequest) string {
-	p, err := c.readGradedPopulationLocked(ctx, req.grade)
-	populationKnown := err == nil && !p.unknown
-	maximum, configured := c.requestedGradeLimitLocked(req)
-	if reason := c.allAdmissionRejection(p, req, configured, populationKnown); reason != "" {
-		return reason
-	}
-	return c.allCapacityLimitReason(p, maximum)
 }
 
 func (s *Service) ReleaseNativeRouteCapacity(id string) {
@@ -142,7 +141,11 @@ func (c *sessionCeilingController) transferNativeRouteLocked(ctx context.Context
 	}
 	if c.policy == sessioncapacity.PolicyAll {
 		req := admissionRequest{grade: held.grade, gradeKnown: held.gradeKnown, seam: nativeRouteCapacitySeam}
-		if reason := c.nativeRouteAdmissionRejectionLocked(ctx, req); reason != "" {
+		decision, p, maximum := c.inspectAllAdmissionLocked(ctx, req)
+		if decision.reasonCode != "" {
+			return true, false, decision.reasonCode, nil
+		}
+		if reason := c.allCapacityLimitReason(p, maximum); reason != "" {
 			return true, false, reason, nil
 		}
 	}

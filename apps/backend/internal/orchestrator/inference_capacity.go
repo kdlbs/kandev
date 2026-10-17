@@ -88,24 +88,30 @@ func (s *Service) ReserveInferenceCapacity(ctx context.Context, binding sessionc
 	if handled, admitted, reason, err := c.transferNativeRouteLocked(ctx, binding); handled {
 		return admitted, reason, err
 	}
-	if reason := c.freshInferenceAdmissionRejectionLocked(ctx, binding); reason != "" {
-		return false, reason, nil
+	if reason, err := c.inspectFreshInferenceCapacityLocked(ctx, binding); err != nil || reason != "" {
+		return false, reason, err
 	}
 	return c.persistInferenceBindingLocked(ctx, binding)
 }
 
-func (c *sessionCeilingController) freshInferenceAdmissionRejectionLocked(ctx context.Context, binding sessioncapacity.InferenceBinding) string {
+func (c *sessionCeilingController) inspectFreshInferenceCapacityLocked(ctx context.Context, binding sessioncapacity.InferenceBinding) (string, error) {
 	if c.policy != sessioncapacity.PolicyAll {
-		return ""
+		return "", nil
 	}
-	req := admissionRequest{grade: binding.Grade, gradeKnown: binding.GradeKnown}
-	p, err := c.readGradedPopulationLocked(ctx, req.grade)
-	populationKnown := err == nil && !p.unknown
-	maximum, configured := c.requestedGradeLimitLocked(req)
-	if reason := c.allAdmissionRejection(p, req, configured, populationKnown); reason != "" {
-		return reason
+	req := admissionRequest{grade: binding.Grade, gradeKnown: binding.GradeKnown, seam: "inferenceCapacity"}
+	var priorityErr error
+	req, priorityErr = c.prepareQueuedTaskCapacityLocked(ctx, req)
+	if priorityErr != nil {
+		return ceilingReasonUnknownPopulation, priorityErr
 	}
-	return c.allCapacityLimitReason(p, maximum)
+	decision, p, maximum := c.inspectAllAdmissionLocked(ctx, req)
+	if decision.reasonCode != "" {
+		return decision.reasonCode, nil
+	}
+	if reason := c.allCapacityLimitReason(p, maximum); reason != "" {
+		return reason, nil
+	}
+	return "", nil
 }
 
 func (c *sessionCeilingController) persistInferenceBindingLocked(ctx context.Context, binding sessioncapacity.InferenceBinding) (bool, string, error) {

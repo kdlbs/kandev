@@ -1877,6 +1877,7 @@ func NewService(
 		parkedLoopCtx:                parkedLoopCtx,
 		parkedLoopCancel:             parkedLoopCancel,
 	}
+	s.wireQueuedTaskCapacityPriority()
 	if registrar, ok := repo.(interface {
 		SetTaskQueuePurgePreparer(func(context.Context, string))
 	}); ok {
