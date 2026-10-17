@@ -73,19 +73,26 @@ function ChangesPanelDialogsSection({
   );
 }
 
-function EmptyChangesPanel() {
+function EmptyChangesPanel({ loading = false }: { loading?: boolean }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-      {t("task:yourChangedFilesWillAppearHere")}
+    <div
+      role={loading ? "status" : undefined}
+      className="flex items-center justify-center h-full text-muted-foreground text-xs"
+    >
+      {loading ? t("task:loadingChanges") : t("task:yourChangedFilesWillAppearHere")}
     </div>
   );
 }
 
 function ChangesPanelTimeline(
-  props: ChangesPanelTimelineContentProps & Pick<ChangesPanelBodyProps, "gitStatus">,
+  props: ChangesPanelTimelineContentProps &
+    Pick<ChangesPanelBodyProps, "gitStatus" | "commitsInitialLoading">,
 ) {
-  if (!props.hasAnything) return props.gitStatus.membershipReady ? <EmptyChangesPanel /> : null;
+  if (!props.hasAnything) {
+    if (props.commitsInitialLoading) return <EmptyChangesPanel loading />;
+    return props.gitStatus.membershipReady ? <EmptyChangesPanel /> : null;
+  }
   return <ChangesPanelTimelineContent {...props} />;
 }
 
