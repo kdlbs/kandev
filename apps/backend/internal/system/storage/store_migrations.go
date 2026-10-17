@@ -59,6 +59,20 @@ var storageSchemaStatements = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_storage_temp_artifacts_state_created
 		ON storage_temp_artifacts (state, created_at)`,
+	`CREATE TABLE IF NOT EXISTS storage_network_ledger (
+		network_id TEXT PRIMARY KEY,
+		network_name TEXT NOT NULL,
+		first_seen_at TIMESTAMP NOT NULL,
+		last_seen_at TIMESTAMP NOT NULL,
+		state TEXT NOT NULL,
+		marked_at TIMESTAMP NULL,
+		delete_after TIMESTAMP NULL,
+		removed_at TIMESTAMP NULL,
+		last_error TEXT NOT NULL DEFAULT '',
+		metadata TEXT NOT NULL DEFAULT ''
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_storage_network_ledger_state
+		ON storage_network_ledger (state, first_seen_at)`,
 }
 
 func initStorageSchema(conn *sqlx.DB) error {

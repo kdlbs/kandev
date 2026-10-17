@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 import { settingsWithDockerAcknowledgement } from "@/hooks/domains/system/use-storage-maintenance";
 import { DedicatedDockerDialog, ExternalGoCacheDialog } from "./storage-confirmation-dialogs";
+import { DockerNetworksPolicySection } from "./docker-networks-policy-section";
 import {
   DockerSection,
   GoCacheSection,
@@ -68,6 +69,13 @@ export function StoragePolicyCard({
           onOpenAdoption={() => setAdoptionDialogOpen(true)}
         />
         <DockerSection {...sectionProps} onOpenDedicated={() => setDockerDialogOpen(true)} />
+        <DockerNetworksPolicySection
+          settings={settings}
+          savedSettings={savedSettings}
+          dockerAvailable={capabilities.docker_available}
+          pending={pending}
+          onChange={onChange}
+        />
         <QuarantineSection {...sectionProps} />
         <TemporaryArtifactsSection
           {...sectionProps}
