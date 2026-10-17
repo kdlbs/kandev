@@ -45,6 +45,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/issues", c.addIssues)
 	api.POST("/orgs", c.addOrgs)
 	api.POST("/repos", c.addRepos)
+	api.PUT("/repository-details", c.setRepositoryDetails)
 	api.POST("/reviews", c.addReviews)
 	api.POST("/comments", c.addComments)
 	api.POST("/checks", c.addCheckRuns)

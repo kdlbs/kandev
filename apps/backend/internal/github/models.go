@@ -1127,19 +1127,20 @@ type GitHubRepo struct {
 // derived parent and permission fields deliberately do not carry raw API
 // response shapes into task metadata.
 type GitHubRepository struct {
-	ID             int64
-	NodeID         string
-	FullName       string
-	Owner          string
-	Name           string
-	CloneURL       string
-	HTMLURL        string
-	DefaultBranch  string
-	Fork           bool
-	ParentID       int64
-	ParentFullName string
-	PushAccess     bool
-	AdminAccess    bool
+	ID              int64
+	NodeID          string
+	FullName        string
+	Owner           string
+	Name            string
+	CloneURL        string
+	HTMLURL         string
+	DefaultBranch   string
+	Fork            bool
+	ParentID        int64
+	ParentFullName  string
+	PushAccess      bool
+	PushAccessKnown bool
+	AdminAccess     bool
 }
 
 // RepoBranch represents a branch in a GitHub repository.

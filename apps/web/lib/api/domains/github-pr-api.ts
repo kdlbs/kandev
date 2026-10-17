@@ -1,4 +1,10 @@
-import type { GitHubPRStatus, MergeMethod, PRFeedback, RepoMergeMethods } from "@/lib/types/github";
+import type {
+  GitHubPRStatus,
+  MergeMethod,
+  PRFeedback,
+  RepoMergeAccess,
+  RepoMergeMethods,
+} from "@/lib/types/github";
 import { fetchJson, type ApiRequestOptions } from "../client";
 
 export type PRStatusRef = { owner: string; repo: string; number: number };
@@ -93,5 +99,17 @@ export async function getRepoMergeMethods(
   return fetchJson<RepoMergeMethods>(
     `/api/v1/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/merge-methods?${workspaceQuery(workspaceId)}`,
     options,
+  );
+}
+
+export async function getRepoMergeAccess(
+  workspaceId: string,
+  owner: string,
+  repo: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<RepoMergeAccess>(
+    `/api/v1/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/merge-access?${workspaceQuery(workspaceId)}`,
+    { ...options, cache: "no-store" },
   );
 }
