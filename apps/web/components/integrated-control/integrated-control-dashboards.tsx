@@ -8,6 +8,10 @@ import { ControlAggregateOverview } from "./control-aggregate-overview";
 import { ControlGroupedHistory } from "./control-grouped-history";
 import { ControlNativeComparison } from "./control-native-comparison";
 import { ControlProviderCircuits } from "./control-provider-circuits";
+import { ControlCapacityLine } from "./control-capacity-bars";
+import { capacityDashboardCounts } from "./control-capacity-waiting";
+import { useNativeDashboards } from "@/hooks/domains/coordinator/use-control-native";
+import type { SessionCapacityObservation } from "@/lib/types/system";
 
 export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   const { t } = useTranslation();
@@ -22,6 +26,14 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 md:p-6"
       data-testid={`control-dashboard-${view}`}
     >
+      <ControlCapacityFallback
+        view={view}
+        officeEnabled={control.officeEnabled}
+        observation={control.data.capacity}
+        lastConfirmed={control.data.lastConfirmedCapacity}
+        workspaces={workspaces}
+        revision={control.data}
+      />
       {view === "providers" && workspaces.length > 0 && <ControlProviderCircuits />}
       {view === "overview" && (
         <div className="grid gap-3 sm:grid-cols-3">
@@ -76,6 +88,36 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
         </p>
       )}
     </div>
+  );
+}
+
+function ControlCapacityFallback({
+  view,
+  officeEnabled,
+  observation,
+  lastConfirmed,
+  workspaces,
+  revision,
+}: {
+  view: ControlView;
+  officeEnabled: boolean;
+  observation?: SessionCapacityObservation;
+  lastConfirmed?: SessionCapacityObservation;
+  workspaces: FactWorkspaces;
+  revision: object;
+}) {
+  const active = view === "activity" && officeEnabled;
+  const ids = active ? workspaces.map((workspace) => workspace.id) : [];
+  const dashboards = useNativeDashboards(ids, active ? revision : undefined);
+  const { wipWaiting, sharedWaiting } = capacityDashboardCounts(ids, dashboards.data);
+  if (view !== "activity" && (view !== "overview" || officeEnabled)) return null;
+  return (
+    <ControlCapacityLine
+      observation={observation}
+      lastConfirmed={lastConfirmed}
+      wipWaiting={active ? wipWaiting : null}
+      sharedWaiting={sharedWaiting}
+    />
   );
 }
 

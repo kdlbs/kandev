@@ -7,6 +7,8 @@ const count = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) &
 const texts = (v: Record<string, unknown>, keys: string[]) =>
   keys.every((key) => typeof v[key] === "string");
 const time = (v: unknown) => (typeof v === "string" ? parseStrictRfc3339Timestamp(v) : null);
+const sharedCapacityWaiting = (v: unknown) =>
+  nativeRecord(v) && typeof v.known === "boolean" && count(v.grade) && count(v.total);
 function nativeWindow(v: Record<string, unknown>, id: string) {
   const end = time(v.generated_at),
     start = time(v.since);
@@ -30,6 +32,8 @@ export function nativeDashboard(v: unknown, id: string): v is NativeDashboard {
     [v.waiting_input_tasks, v.queued_messages, v.transitions_24h, v.completed_tasks_24h].every(
       count,
     ) &&
+    (v.wip_waiting_tasks === undefined || count(v.wip_waiting_tasks)) &&
+    (v.shared_capacity_waiting === undefined || sharedCapacityWaiting(v.shared_capacity_waiting)) &&
     (v.task_stages === undefined ||
       (Array.isArray(v.task_stages) &&
         v.task_stages.every(

@@ -471,3 +471,13 @@ Auto-start idempotency repair (single agent per review task):
 
 Queued task moves and queue presentation:
 [`../../plans/queued-task-moves/plan.md`](../../../plans/queued-task-moves/plan.md).
+
+The control dashboard aggregate
+(`GET /api/v1/office/workspaces/:wsId/dashboard?view=control`) reports
+`wip_waiting_tasks`: unarchived, non-ephemeral, non-automation tasks whose
+`queued_for_step_id` names their current step and whose `wip_admitted` is
+false. That is the same queued band promotion reads, with config-mode tasks
+excluded. The count is read-only; no deferral row, reason column, or table is
+stored. The same response carries `shared_capacity_waiting` from the
+session-capacity observation so the integrated control can show grade-ceiling
+waiters beside board WIP waiters.

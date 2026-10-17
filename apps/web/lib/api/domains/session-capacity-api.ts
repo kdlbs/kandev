@@ -1,6 +1,7 @@
 import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
 import type {
   SessionCapacitySettingsPatch,
+  SessionCapacityObservation,
   SessionCapacitySettingsResponse,
 } from "@/lib/types/system";
 
@@ -29,4 +30,15 @@ export async function updateSessionCapacitySettings(
       body: JSON.stringify(payload),
     },
   });
+}
+
+/** Explicit read of the live shared admission owner; ordinary settings reads are unchanged. */
+export async function fetchSessionCapacityObservation(
+  options?: ApiRequestOptions,
+): Promise<SessionCapacityObservation | undefined> {
+  const response = await fetchJson<SessionCapacitySettingsResponse>(
+    `${SESSION_CAPACITY_SETTINGS_PATH}?observation=true`,
+    { ...options, cache: "no-store" },
+  );
+  return response.observation;
 }
