@@ -226,6 +226,9 @@ func (s *Service) completeSeam1Admission(ctx context.Context, taskID string, sta
 			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
 		}, false, nil
 	}
+	if decision.officeRunID != "" {
+		return nil, false, s.deferOfficeTaskCapacity(ctx, taskID, decision.officeRunID, decision.reasonCode)
+	}
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, "", startPayload)
 
 	if err := s.deferCeilingRefusal(ctx, taskID, "", models.CeilingLaunchStart, startPayload, decision.reasonCode,

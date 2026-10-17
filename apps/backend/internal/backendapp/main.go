@@ -2099,7 +2099,7 @@ func (a *schedulerTaskStarterAdapter) startTaskWithRoute(
 	launch officescheduler.LaunchContext,
 	route officescheduler.RouteOverride,
 ) (*orchexecutor.TaskExecution, error) {
-	return a.orch.StartTaskWithRoute(ctx, taskID, agentProfileID,
+	return officeTaskCapacityResult(a.orch.StartTaskWithRoute(ctx, taskID, agentProfileID,
 		orchestratorLaunchContext(launch),
 		orchexecutor.RouteOverride{
 			ExecutionProfileID: route.ExecutionProfileID,
@@ -2109,7 +2109,7 @@ func (a *schedulerTaskStarterAdapter) startTaskWithRoute(
 			Mode:               route.Mode,
 			Flags:              route.Flags,
 			Env:                route.Env,
-		})
+		}))
 }
 
 // launchSafetyLimits bundles the boot-time-resolved
@@ -2796,9 +2796,9 @@ func (a *officeOrchestratorTaskStarter) startTaskWithEnvAndSkills(
 	executorProfileID string, priority string, prompt, workflowStepID string,
 	planMode bool, attachments []v1.MessageAttachment, env map[string]string, additionalSkillSlugs []string,
 ) (*orchexecutor.TaskExecution, error) {
-	return a.orch.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
+	return officeTaskCapacityResult(a.orch.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
 		executorID, executorProfileID, priority, prompt,
-		workflowStepID, planMode, false, attachments, env, additionalSkillSlugs)
+		workflowStepID, planMode, false, attachments, env, additionalSkillSlugs))
 }
 
 func (a *officeOrchestratorTaskStarter) GetOpenSessionRecoveryBlock(

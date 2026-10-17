@@ -10,9 +10,9 @@ import (
 )
 
 // Capacity waits are not provider attempts. Task-owned ceiling replay retains
-// its existing cap/disposition; only Office-owned taskless attempts use this.
-func providerAttemptCount(run *runmodels.Run, prior []models.RouteAttempt) int {
-	if extractRunTaskID(run.Payload) != "" {
+// its existing cap/disposition; Office-owned capacity waits do not spend it.
+func providerAttemptCount(run *runmodels.Run, prior []models.RouteAttempt, commonOwned ...bool) int {
+	if extractRunTaskID(run.Payload) != "" && (len(commonOwned) == 0 || !commonOwned[0]) {
 		return len(prior)
 	}
 	count := 0
@@ -42,7 +42,7 @@ func (ss *SchedulerService) recordDispatchAttempt(
 	ctx context.Context, run *runmodels.Run, candidate routing.Candidate,
 	tier routing.Tier, tierSource string, prior []models.RouteAttempt,
 ) (int, error) {
-	if extractRunTaskID(run.Payload) == "" && len(prior) > 0 {
+	if (extractRunTaskID(run.Payload) == "" || runmodels.MatchesTaskCapacityRun(ctx, run)) && len(prior) > 0 {
 		last := prior[len(prior)-1]
 		if sameWaitingCandidate(last, candidate, tier, tierSource) {
 			run.CurrentRouteAttemptSeq = last.Seq

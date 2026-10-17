@@ -87,7 +87,7 @@ func (ss *SchedulerService) DispatchWithRouting(
 	if err != nil {
 		return false, false, fmt.Errorf("dispatch: list prior: %w", err)
 	}
-	if providerAttemptCount(run, prior) >= MaxAttemptsPerRun {
+	if providerAttemptCount(run, prior, runsmodels.MatchesTaskCapacityRun(ctx, run)) >= MaxAttemptsPerRun {
 		if perr := ss.parkRunMaxAttempts(ctx, run, agent.WorkspaceID); perr != nil {
 			return false, false, perr
 		}

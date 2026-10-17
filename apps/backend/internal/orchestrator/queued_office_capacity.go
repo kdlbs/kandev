@@ -9,12 +9,12 @@ import (
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
-// OfficeCapacityWaiter describes an original taskless Office queue owner.
+// OfficeCapacityWaiter describes an original Office queue owner.
 // The producer retains Office local priority/age order and real claim gates.
 type OfficeCapacityWaiter struct {
-	RunID, WorkspaceID, ProfileID, Grade string
-	QueuedAt                             time.Time
-	GradeKnown, Claimed                  bool
+	RunID, TaskID, WorkspaceID, ProfileID, Grade string
+	QueuedAt                                     time.Time
+	GradeKnown, Claimed                          bool
 }
 
 func queuedOfficeCapacityKey(id string) string { return "queued-office:" + id }
@@ -26,6 +26,7 @@ func (s *Service) SetOfficeCapacityWaiters(read func(context.Context) ([]OfficeC
 	c := s.sessionCeiling
 	c.mu.Lock()
 	c.officeWaiters = read
+	c.officeTaskRequest = s.officeTaskCapacityRequest
 	c.mu.Unlock()
 }
 
@@ -37,7 +38,7 @@ func (c *sessionCeilingController) readOfficeCapacityWaitersLocked(ctx context.C
 }
 
 func sameOfficeCapacityOwner(a, b OfficeCapacityWaiter) bool {
-	return a.RunID == b.RunID && a.WorkspaceID == b.WorkspaceID && a.ProfileID == b.ProfileID && a.QueuedAt.Equal(b.QueuedAt)
+	return a.RunID == b.RunID && a.TaskID == b.TaskID && a.WorkspaceID == b.WorkspaceID && a.ProfileID == b.ProfileID && a.QueuedAt.Equal(b.QueuedAt)
 }
 
 func (c *sessionCeilingController) pruneQueuedOfficeCapacityLocked(candidates []OfficeCapacityWaiter) {
@@ -59,11 +60,11 @@ func (c *sessionCeilingController) pruneQueuedOfficeCapacityLocked(candidates []
 }
 
 func (c *sessionCeilingController) readOfficeCapacityArrivalLocked(req admissionRequest, arrival queuedTaskArrival, candidates []OfficeCapacityWaiter) (admissionRequest, queuedTaskArrival) {
-	if req.seam != officeRunCapacitySeam || req.officeRunID == "" {
+	if req.officeRunID == "" {
 		return req, arrival
 	}
 	for _, candidate := range candidates {
-		if candidate.RunID != req.officeRunID || !candidate.Claimed {
+		if candidate.RunID != req.officeRunID || !candidate.Claimed || candidate.TaskID != req.taskID {
 			continue
 		}
 		req.grade, req.gradeKnown = candidate.Grade, candidate.GradeKnown
@@ -84,15 +85,23 @@ func (c *sessionCeilingController) nextQueuedOfficeCapacityLocked(ctx context.Co
 		if candidate.RunID == "" || candidate.QueuedAt.IsZero() || c.reservations[queuedOfficeCapacityKey(candidate.RunID)] != nil {
 			continue
 		}
-		req := admissionRequest{sessionID: queuedOfficeCapacityKey(candidate.RunID), grade: candidate.Grade, gradeKnown: candidate.GradeKnown, origin: launchOriginAutomatic, seam: officeRunCapacitySeam}
-		if !req.gradeKnown {
+		// A task-bound claimed owner can only consume its existing pregrant.
+		// It is never allocated a second grant after the task handoff.
+		if candidate.TaskID != "" && candidate.Claimed {
+			continue
+		}
+		req, eligible, err := c.officeCapacityRequestLocked(ctx, candidate)
+		if err != nil {
+			return nil, req, err
+		}
+		if !eligible || !req.gradeKnown {
 			continue
 		}
 		decision, p, maximum := c.inspectAllAdmissionLocked(ctx, req)
 		if decision.reasonCode == ceilingReasonUnknownPopulation {
 			return nil, req, fmt.Errorf("office capacity population is unknown")
 		}
-		if decision.reasonCode != "" || c.allCapacityLimitReason(p, maximum) != "" {
+		if decision.reasonCode != "" || (c.allCapacityLimitReason(p, maximum) != "" && !officeTaskSelectionCounted(req, p)) {
 			continue
 		}
 		return &candidate, req, nil
@@ -117,6 +126,9 @@ func (c *sessionCeilingController) grantOfficeCapacityBeforeLocked(ctx context.C
 		}
 		key = c.reserveGradeLocked(req)
 		c.reservations[key].queuedOffice = candidate
+		if req.startSelection != nil && req.startSelection.session != nil {
+			c.reservations[key].sessionID = req.startSelection.session.ID
+		}
 		if c.queuedWake != nil {
 			c.queuedWake()
 		}
@@ -126,18 +138,22 @@ func (c *sessionCeilingController) grantOfficeCapacityBeforeLocked(ctx context.C
 
 func (c *sessionCeilingController) consumeQueuedOfficeCapacityLocked(req admissionRequest, p gradedPopulation) (admissionDecision, bool) {
 	held := c.reservations[req.queuedGrantKey]
-	if req.seam != officeRunCapacitySeam || held == nil || held.queuedOffice == nil || !held.queuedOffice.Claimed || held.queuedOffice.RunID != req.officeRunID {
+	if req.officeRunID == "" || held == nil || held.queuedOffice == nil || !held.queuedOffice.Claimed || held.queuedOffice.RunID != req.officeRunID || held.queuedOffice.TaskID != req.taskID {
 		return admissionDecision{}, false
 	}
 	if existing := c.reservations[req.sessionID]; existing != nil && existing != held {
 		return admissionDecision{ceiling: c.ceiling, reasonCode: ceilingReasonUnknownPopulation}, true
 	}
-	delete(c.reservations, req.queuedGrantKey)
-	c.reservations[req.sessionID] = held
-	held.sessionID = req.sessionID
+	key := req.queuedGrantKey
+	if req.sessionID != "" {
+		delete(c.reservations, key)
+		key = req.sessionID
+		c.reservations[key] = held
+		held.sessionID = req.sessionID
+	}
 	held.officeRunID = req.officeRunID
 	held.queuedOffice = nil
-	return admissionDecision{admitted: true, reservationKey: req.sessionID, ceiling: c.ceiling, population: p.total, populationKnown: true}, true
+	return admissionDecision{admitted: true, reservationKey: key, ceiling: c.ceiling, population: p.total, populationKnown: true}, true
 }
 
 // Office calls this before its original claim writer transaction. The IDs
@@ -166,9 +182,13 @@ func (s *Service) RunCapacityClaimCandidates(ctx context.Context) ([]string, err
 	return ids, nil
 }
 
-func claimedOfficeCapacityOwner(id string, candidates []OfficeCapacityWaiter) bool {
+func claimedOfficeCapacityOwner(id string, candidates []OfficeCapacityWaiter, taskIDs ...string) bool {
+	taskID := ""
+	if len(taskIDs) > 0 {
+		taskID = taskIDs[0]
+	}
 	for _, candidate := range candidates {
-		if candidate.RunID == id && candidate.Claimed {
+		if candidate.RunID == id && candidate.Claimed && candidate.TaskID == taskID {
 			return true
 		}
 	}

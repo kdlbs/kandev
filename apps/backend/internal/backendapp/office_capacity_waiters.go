@@ -12,11 +12,11 @@ func (l *officeRunSessionLauncher) officeCapacityWaiters(ctx context.Context) ([
 	if l.repo == nil || l.resolver == nil {
 		return nil, errors.New("office queue or logical grade reader unavailable")
 	}
-	queued, err := l.repo.ListTasklessCapacityCandidates(ctx)
+	queued, err := l.repo.ListCapacityCandidates(ctx)
 	if err != nil {
 		return nil, err
 	}
-	claimed, err := l.repo.ListUnstartedClaimedTasklessRuns(ctx)
+	claimed, err := l.repo.ListUnstartedClaimedCapacityRuns(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -26,15 +26,16 @@ func (l *officeRunSessionLauncher) officeCapacityWaiters(ctx context.Context) ([
 	rows = append(rows, queued...)
 	result := make([]orchestrator.OfficeCapacityWaiter, 0, len(rows))
 	for _, row := range rows {
-		eligible, err := l.officeQueueEligible(ctx, row)
+		workspaceID, eligible, err := l.officeQueueWorkspace(ctx, row)
 		if err != nil {
 			return nil, err
 		}
 		if !eligible {
 			continue
 		}
+		taskID := runmodels.PayloadTaskID(row.Payload)
 		grade, gradeErr := l.resolver.LogicalExecutionGrade(ctx, row.AgentProfileID)
-		result = append(result, orchestrator.OfficeCapacityWaiter{RunID: row.ID, WorkspaceID: row.WorkspaceID, ProfileID: row.AgentProfileID, QueuedAt: row.RequestedAt, Grade: grade, GradeKnown: gradeErr == nil, Claimed: row.Status == runmodels.RunStatusClaimed})
+		result = append(result, orchestrator.OfficeCapacityWaiter{RunID: row.ID, TaskID: taskID, WorkspaceID: workspaceID, ProfileID: row.AgentProfileID, QueuedAt: row.RequestedAt, Grade: grade, GradeKnown: gradeErr == nil, Claimed: row.Status == runmodels.RunStatusClaimed})
 	}
 	return result, nil
 }
@@ -42,11 +43,14 @@ func (l *officeRunSessionLauncher) officeCapacityWaiters(ctx context.Context) ([
 // Use the actual agent workspace (including legacy queue rows whose stored
 // workspace is empty), and the same persisted pause predicate as Office
 // dispatch. Read failures stay unknown; no pause/activity row is changed.
-func (l *officeRunSessionLauncher) officeQueueEligible(ctx context.Context, row runmodels.Run) (bool, error) {
+func (l *officeRunSessionLauncher) officeQueueWorkspace(ctx context.Context, row runmodels.Run) (string, bool, error) {
 	agent, err := l.repo.GetAgentInstance(ctx, row.AgentProfileID)
 	if err != nil {
-		return false, err
+		return "", false, err
+	}
+	if agent == nil || agent.WorkspaceID == "" {
+		return "", false, errors.New("office queue workspace owner unavailable")
 	}
 	pause, err := l.repo.GetActiveWorkspacePause(ctx, agent.WorkspaceID)
-	return pause == nil, err
+	return agent.WorkspaceID, pause == nil, err
 }

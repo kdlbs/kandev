@@ -147,7 +147,7 @@ func (c *sessionCeilingController) prepareQueuedTaskCapacityLocked(ctx context.C
 	if err != nil {
 		return req, err
 	}
-	if req.seam == officeRunCapacitySeam && req.officeRunID != "" && !claimedOfficeCapacityOwner(req.officeRunID, office) {
+	if req.officeRunID != "" && !claimedOfficeCapacityOwner(req.officeRunID, office, req.taskID) {
 		return req, fmt.Errorf("office queue owner is not eligible")
 	}
 	c.pruneQueuedOfficeCapacityLocked(office)
@@ -161,6 +161,9 @@ func (c *sessionCeilingController) prepareQueuedTaskCapacityLocked(ctx context.C
 	}
 	arrival = nativeCapacityArrival(req, arrival, native)
 	req, arrival = c.readOfficeCapacityArrivalLocked(req, arrival, office)
+	if req.taskID != "" && req.officeRunID != "" && req.queuedGrantKey == "" {
+		return req, fmt.Errorf("office task claim is waiting for its common queue grant")
+	}
 	if req.queuedGrantKey != "" {
 		return req, nil
 	}

@@ -11,6 +11,16 @@ import (
 // through the gap before the immutable Office attempt is registered. An active
 // attempt is counted by ListAdmittedRunExecutions instead, never twice.
 func (r *Repository) ListUnstartedClaimedTasklessRuns(ctx context.Context) ([]runmodels.Run, error) {
+	return r.listClaimedCapacityRuns(ctx, true)
+}
+
+// ListUnstartedClaimedCapacityRuns also retains a task-bound pregrant while
+// its original claimant prepares the task launch. It creates no new owner.
+func (r *Repository) ListUnstartedClaimedCapacityRuns(ctx context.Context) ([]runmodels.Run, error) {
+	return r.listClaimedCapacityRuns(ctx, false)
+}
+
+func (r *Repository) listClaimedCapacityRuns(ctx context.Context, tasklessOnly bool) ([]runmodels.Run, error) {
 	var rows []runmodels.Run
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`SELECT w.* FROM runs w JOIN agent_profiles a ON a.id=w.agent_profile_id AND (w.workspace_id='' OR a.workspace_id=w.workspace_id)
 	WHERE w.status='claimed' AND w.routing_blocked_status IS NULL AND COALESCE(a.status,'idle') NOT IN ('paused','stopped','pending_approval')
@@ -21,7 +31,7 @@ func (r *Repository) ListUnstartedClaimedTasklessRuns(ctx context.Context) ([]ru
 	}
 	result := make([]runmodels.Run, 0, len(rows))
 	for _, row := range rows {
-		if runmodels.PayloadTaskID(row.Payload) == "" {
+		if !tasklessOnly || runmodels.PayloadTaskID(row.Payload) == "" {
 			result = append(result, row)
 		}
 	}

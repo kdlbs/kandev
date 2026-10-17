@@ -44,6 +44,16 @@ func (r *Repository) readClaimGateSnapshot(ctx context.Context, tx *sqlx.Tx, can
 // real launch gates. It writes no claim, ledger, metrics or gate-failure state.
 // The existing local priority/age order and scan bound are preserved.
 func (r *Repository) ListTasklessCapacityCandidates(ctx context.Context) ([]models.Run, error) {
+	return r.listCapacityCandidates(ctx, true)
+}
+
+// ListCapacityCandidates retains the original queue order and gates for both
+// task-bound and taskless Office owners without claiming or rewriting a run.
+func (r *Repository) ListCapacityCandidates(ctx context.Context) ([]models.Run, error) {
+	return r.listCapacityCandidates(ctx, false)
+}
+
+func (r *Repository) listCapacityCandidates(ctx context.Context, tasklessOnly bool) ([]models.Run, error) {
 	if r.ro == nil {
 		return nil, errors.New("office queue reader unavailable")
 	}
@@ -54,14 +64,18 @@ func (r *Repository) ListTasklessCapacityCandidates(ctx context.Context) ([]mode
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UTC()
 	limits := r.effectiveClaimLimits()
-	return r.readTasklessCapacityPages(ctx, tx, now, limits)
+	return r.readTasklessCapacityPages(ctx, tx, now, limits, tasklessOnly)
 }
 
-func (r *Repository) readTasklessCapacityPages(ctx context.Context, tx *sqlx.Tx, now time.Time, limits ClaimSafetyLimits) ([]models.Run, error) {
+func (r *Repository) readTasklessCapacityPages(ctx context.Context, tx *sqlx.Tx, now time.Time, limits ClaimSafetyLimits, tasklessOnly bool) ([]models.Run, error) {
 	const query = `SELECT w.* FROM runs w JOIN agent_profiles a ON a.id=w.agent_profile_id AND (w.workspace_id='' OR a.workspace_id=w.workspace_id)
 	WHERE w.status='queued' AND (w.scheduled_retry_at IS NULL OR w.scheduled_retry_at <= ?)
 	AND w.routing_blocked_status IS NULL AND COALESCE(a.status,'idle') NOT IN ('paused','stopped','pending_approval')
 	ORDER BY CASE WHEN w.requested_at < ? AND w.priority_class > 1 THEN w.priority_class-1 ELSE w.priority_class END ASC,w.requested_at ASC,w.id ASC LIMIT ? OFFSET ?`
+	eligibleRead := r.claimSnapshotEligible
+	if tasklessOnly {
+		eligibleRead = r.tasklessClaimSnapshotEligible
+	}
 	var result []models.Run
 	for offset := 0; offset < claimCandidateScanCap; offset += claimCandidatePageSize {
 		var page []models.Run
@@ -69,7 +83,7 @@ func (r *Repository) readTasklessCapacityPages(ctx context.Context, tx *sqlx.Tx,
 			return nil, err
 		}
 		for i := range page {
-			eligible, err := r.tasklessClaimSnapshotEligible(ctx, tx, &page[i], limits, now.Add(-BudgetWindow))
+			eligible, err := eligibleRead(ctx, tx, &page[i], limits, now.Add(-BudgetWindow))
 			if err != nil {
 				return nil, err
 			}

@@ -32,11 +32,6 @@ func (r *Repository) prepareCapacityClaim(ctx context.Context) (context.Context,
 }
 
 func capacityClaimAllows(ctx context.Context, run *models.Run) bool {
-	// Task-bound Office runs keep their existing task-start owner. This bridge
-	// covers taskless run sessions and cannot grant a synthetic task identity.
-	if models.PayloadTaskID(run.Payload) != "" {
-		return true
-	}
 	allowed, enabled := ctx.Value(capacityClaimContextKey{}).(map[string]struct{})
 	if !enabled {
 		return true
@@ -60,6 +55,10 @@ func (r *Repository) tasklessClaimSnapshotEligible(ctx context.Context, tx *sqlx
 	if models.PayloadTaskID(candidate.Payload) != "" {
 		return false, nil
 	}
+	return r.claimSnapshotEligible(ctx, tx, candidate, limits, window)
+}
+
+func (r *Repository) claimSnapshotEligible(ctx context.Context, tx *sqlx.Tx, candidate *models.Run, limits ClaimSafetyLimits, window time.Time) (bool, error) {
 	for _, gate := range claimCapacityGates(candidate) {
 		blocked, err := r.readClaimGateSnapshot(ctx, tx, candidate, limits, window, gate)
 		if err != nil {

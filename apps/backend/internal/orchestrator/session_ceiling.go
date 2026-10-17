@@ -91,6 +91,7 @@ type ceilingReservation struct {
 
 // admissionRequest is one launch asking for capacity.
 type admissionRequest struct {
+	officeTaskID    string
 	profileExplicit bool
 	workflowStepID  string
 	startSelection  *explicitWorkflowStartSelection
@@ -108,6 +109,7 @@ type admissionRequest struct {
 
 // admissionDecision is the controller's answer.
 type admissionDecision struct {
+	officeRunID     string
 	admitted        bool
 	manualOverride  bool
 	reservationKey  string
@@ -143,22 +145,24 @@ type sessionCeilingController struct {
 	inferenceWakeMu  sync.Mutex
 	inferenceWake    chan struct{}
 
-	policy           string
-	gradeLimits      map[string]int
-	resolveGrade     func(context.Context, admissionRequest) (string, error)
-	persistGrade     func(context.Context, string, string) error
-	mu               sync.Mutex
-	ceiling          int
-	reservations     map[string]*ceilingReservation
-	lister           admittedSessionLister
-	logger           *zap.Logger
-	populationLogger *zap.Logger
-	now              func() time.Time
-	newKey           func() string
-	queuedTasks      func(context.Context) ([]queuedTaskCapacityCandidate, error)
-	nativeWaiters    func(context.Context) ([]NativeCapacityWaiter, error)
-	officeWaiters    func(context.Context) ([]OfficeCapacityWaiter, error)
-	queuedWake       func()
+	policy            string
+	gradeLimits       map[string]int
+	resolveGrade      func(context.Context, admissionRequest) (string, error)
+	persistGrade      func(context.Context, string, string) error
+	mu                sync.Mutex
+	ceiling           int
+	reservations      map[string]*ceilingReservation
+	lister            admittedSessionLister
+	logger            *zap.Logger
+	populationLogger  *zap.Logger
+	now               func() time.Time
+	newKey            func() string
+	queuedTasks       func(context.Context) ([]queuedTaskCapacityCandidate, error)
+	nativeWaiters     func(context.Context) ([]NativeCapacityWaiter, error)
+	officeWaiters     func(context.Context) ([]OfficeCapacityWaiter, error)
+	officeTaskRequest func(context.Context, OfficeCapacityWaiter) (admissionRequest, bool, error)
+	officeTaskRequeue func(context.Context, string, string) error
+	queuedWake        func()
 }
 
 func newSessionCeilingController(ceiling int, lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
@@ -375,8 +379,20 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 	return c.admitLocked(ctx, req, origin)
 }
 
-func (c *sessionCeilingController) admitLocked(ctx context.Context, req admissionRequest, origin launchOrigin) admissionDecision {
+func (c *sessionCeilingController) admitLocked(ctx context.Context, req admissionRequest, origin launchOrigin) (decision admissionDecision) {
 	req.origin = origin
+	req = taskOfficeAdmissionRequest(ctx, req)
+	if req.officeRunID != "" && req.officeTaskID != req.taskID {
+		return admissionDecision{officeRunID: req.officeRunID, ceiling: c.ceiling, reasonCode: ceilingReasonOfficeTaskOwnerMismatch}
+	}
+	if c.policy != sessioncapacity.PolicyAll {
+		c.releaseUnusedOfficeTaskGrantLocked(req)
+	}
+	defer func() {
+		if req.seam == "startTask" {
+			decision.officeRunID = req.officeRunID
+		}
+	}()
 	if c.policy == sessioncapacity.PolicyAll {
 		return c.admitAllLocked(ctx, req, false)
 	}

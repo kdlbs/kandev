@@ -18,6 +18,7 @@ func (l *officeRunSessionLauncher) SetExecutionCapacityOwner(owner *orchestrator
 	if owner != nil {
 		owner.SetRunSessionCapacitySource(l.repo)
 		owner.SetOfficeCapacityWaiters(l.officeCapacityWaiters)
+		owner.SetOfficeTaskCapacityRequeuer(l.repo.RequeueUnstartedTaskRunForCapacity)
 		l.repo.SetClaimCapacityCandidates(owner.RunCapacityClaimCandidates)
 		l.repo.SetRunSessionCapacityReleased(owner.NotifyRunSessionCapacityReleased)
 	}
