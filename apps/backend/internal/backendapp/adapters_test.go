@@ -302,6 +302,15 @@ func TestBuildLifecycleLaunchRequestCarriesPassthroughResume(t *testing.T) {
 	}
 }
 
+func TestBuildLifecycleLaunchRequestCarriesNativeConversationReplacement(t *testing.T) {
+	got := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		ReplaceNativeConversation: true,
+	}, "", "")
+	if !got.ReplaceNativeConversation {
+		t.Fatal("ReplaceNativeConversation was dropped from lifecycle launch request")
+	}
+}
+
 func TestDetectGitDefaultBranchDetachedHEADReturnsEmpty(t *testing.T) {
 	repoPath := t.TempDir()
 	gitDir := filepath.Join(repoPath, ".git")

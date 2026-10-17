@@ -57,15 +57,17 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 	if s.currentCancellation(data.SessionID) != nil || !s.resumeAttemptAllowsExecution(data.SessionID, data.AgentExecutionID, data.AttemptID) {
 		return
 	}
-	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.AgentExecutionID, data.ACPSessionID, "", data.AttemptID)
-	s.persistInitialHarnessGeneration(ctx, data)
+	tokenAccepted := s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.AgentExecutionID, data.ACPSessionID, "", data.AttemptID)
+	s.persistInitialHarnessGeneration(ctx, data, tokenAccepted)
 }
 
 // persistInitialHarnessGeneration records the first native conversation for a
-// session incarnation. Explicit context continuation owns its generation CAS;
-// this handler only fills the absent initial row and never overwrites a newer
-// generation observed from a replacement execution.
-func (s *Service) persistInitialHarnessGeneration(ctx context.Context, data watcher.ACPSessionEventData) {
+// session incarnation, or the successor created by an explicit fresh start.
+// A successor commits only when its execution still owns the session, as
+// proven by tokenAccepted. Explicit context continuation owns its generation
+// CAS; this handler never overwrites a newer generation observed from a
+// replacement execution.
+func (s *Service) persistInitialHarnessGeneration(ctx context.Context, data watcher.ACPSessionEventData, tokenAccepted bool) {
 	if data.DeliveryHarnessGeneration == 0 || s.repo == nil {
 		return
 	}
@@ -81,14 +83,11 @@ func (s *Service) persistInitialHarnessGeneration(ctx context.Context, data watc
 		}
 		return
 	}
-	incarnationID := data.DeliveryIncarnationID
-	if incarnationID == "" {
-		incarnationID = session.QueueIncarnationID
-	}
-	if incarnationID == "" {
-		incarnationID = session.ID
-	}
+	incarnationID := harnessIncarnationID(data, session)
 	if current, currentErr := store.GetCurrentHarnessSessionGeneration(ctx, session.ID, incarnationID); currentErr == nil && current != nil {
+		if tokenAccepted && isAdjacentReplacement(current, data) {
+			s.commitReplacementHarnessGeneration(ctx, store, session, current, data)
+		}
 		return
 	} else if currentErr != nil && !errors.Is(currentErr, models.ErrTaskSessionNotFound) {
 		s.logger.Warn("failed to inspect current harness generation",
@@ -116,6 +115,56 @@ func (s *Service) persistInitialHarnessGeneration(ctx context.Context, data watc
 	}
 }
 
+// harnessIncarnationID resolves the incarnation that owns the event's harness
+// generation, preferring the delivery identity carried by the event.
+func harnessIncarnationID(data watcher.ACPSessionEventData, session *models.TaskSession) string {
+	if data.DeliveryIncarnationID != "" {
+		return data.DeliveryIncarnationID
+	}
+	if session.QueueIncarnationID != "" {
+		return session.QueueIncarnationID
+	}
+	return session.ID
+}
+
+// isAdjacentReplacement reports whether the event is a fresh-start replacement
+// for the generation directly after the committed one.
+func isAdjacentReplacement(current *models.HarnessSessionGeneration, data watcher.ACPSessionEventData) bool {
+	return data.DeliveryReplacesNativeConversation && uint64(current.Generation)+1 == data.DeliveryHarnessGeneration
+}
+
+// commitReplacementHarnessGeneration records a fresh-start native conversation
+// as the direct successor of the committed generation. The compare-and-set
+// keeps a concurrent replacement or continuation authoritative.
+func (s *Service) commitReplacementHarnessGeneration(
+	ctx context.Context,
+	store sessionContinuityStore,
+	session *models.TaskSession,
+	current *models.HarnessSessionGeneration,
+	data watcher.ACPSessionEventData,
+) {
+	now := time.Now().UTC()
+	committed, err := store.CommitHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID:             session.ID,
+		IncarnationID:         current.IncarnationID,
+		Generation:            current.Generation + 1,
+		PredecessorGeneration: current.Generation,
+		NativeSessionID:       data.ACPSessionID,
+		AgentType:             session.AgentProfileID,
+		OriginalWorkspace:     session.WorkspacePath,
+		CurrentWorkspace:      session.WorkspacePath,
+		CreationReason:        "native_replaced",
+		CreatedAt:             now,
+		CommittedAt:           now,
+	}, current.Generation)
+	if err != nil || !committed {
+		s.logger.Warn("failed to persist replacement harness generation",
+			zap.String("session_id", data.SessionID),
+			zap.Int64("generation", current.Generation+1),
+			zap.Error(err))
+	}
+}
+
 // storeResumeToken stores an agent's session ID as the resume token for session recovery.
 // Called from handleACPSessionCreated, handleSessionStatusEvent, and handleCompleteStreamEvent.
 //
@@ -133,14 +182,17 @@ func (s *Service) persistInitialHarnessGeneration(ctx context.Context, data watc
 // The token is always stored when CAS succeeds. NativeSessionResume only gates ACP
 // session/load vs session/new in session.go — agents without native resume (e.g.,
 // Claude Code) use the token for their own --resume CLI flag instead.
-func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expectedExecID, acpSessionID, lastMessageUUID string, origin ...string) {
+//
+// It reports whether the token was stored, which proves that the emitting
+// execution still owns the session.
+func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expectedExecID, acpSessionID, lastMessageUUID string, origin ...string) bool {
 	if !s.resumeAttemptAllowsExecution(sessionID, expectedExecID, origin...) {
 		s.logger.Info("dropping resume token from cancelled or superseded resume attempt",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("expected_exec_id", expectedExecID),
 			zap.String("resume_token", acpSessionID))
-		return
+		return false
 	}
 	// The lifecycle manager updates its in-memory ACP session ID before it
 	// publishes reset/start events. Events from the previous ACP session can
@@ -155,7 +207,7 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expec
 			zap.String("expected_exec_id", expectedExecID),
 			zap.String("resume_token", acpSessionID),
 			zap.String("current_resume_token", currentACPSessionID))
-		return
+		return false
 	}
 
 	err := s.repo.UpdateResumeToken(ctx, sessionID, expectedExecID, acpSessionID, lastMessageUUID)
@@ -173,6 +225,7 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expec
 		// without this, the ACP session id only survives for agents that
 		// happen to emit a session_info frame (handleSessionInfoEvent).
 		s.persistACPSessionID(ctx, sessionID, acpSessionID)
+		return true
 	case errors.Is(err, models.ErrExecutionRotated):
 		// The row's agent_execution_id has rotated since the event was emitted —
 		// the token belongs to a defunct execution and must be dropped. The new
@@ -199,6 +252,7 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expec
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+	return false
 }
 
 // currentACPSessionID returns the lifecycle manager's current ACP session ID

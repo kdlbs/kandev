@@ -152,3 +152,20 @@ receipts, retired sessions and changed owners; checkpoint creation accompanies
 the real receipt.
 Preflight performs no projection, acknowledgment, prompt dispatch or block resolution.
 Subsequent replay projects retained events through the normal idempotent pipeline.
+
+## Explicit fresh start
+
+An explicit Start fresh launch is a replacement native conversation. When the
+session already has a committed harness generation, the launch uses the next
+generation and its own stream, never the predecessor's stream. Before the first
+prompt, the peer retires the predecessor's unresolved submissions as
+interrupted-unknown without dispatch. The ACP session-created event marks the
+replacement. Only when that event's resume token is accepted for the current
+execution does the backend commit the next generation with compare-and-set on
+the predecessor and creation reason `native_replaced`. Until that commit, the
+replacement's events wait under the same bounded wait as other successor
+generations; a failed or stale commit leaves them unadmitted and fails startup.
+The predecessor's retained stream, submissions and recovery block stay as
+history; current-generation admission no longer consults them. Fresh start never
+receives, projects, or acknowledges the predecessor stream.
+Delivery: [Fresh-start delivery generation](../../../plans/fresh-start-delivery-generation/plan.md).
