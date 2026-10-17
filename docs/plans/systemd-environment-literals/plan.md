@@ -177,6 +177,14 @@ Normal active hooks and publication follow these checks; their exact receipt
 belongs to the delivery session. No existing service/config/manager changes,
 physical Kandev launch, manager smoke, or private fixture replay occurred.
 
+Required-CI follow-up: ROOT authorized only the existing task-list pagination
+test's search-settlement synchronization after shard 24 exposed a pre-existing
+debounce race. The hosted failure and network trace provide RED; the focused
+guarded Chromium case passed (one worker, zero retries, 13.2s), followed by scoped
+ESLint and Prettier checks. All commands joined with known owned groups absent.
+Task 01 records the precise scope, initial zero-test selector correction, and
+evidence limits. No product pagination or service code changed in this follow-up.
+
 ## Risks
 
 - A global dollar change would break the command context; the command control

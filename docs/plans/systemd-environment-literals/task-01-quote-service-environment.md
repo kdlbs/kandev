@@ -44,6 +44,8 @@ product tests, lint, dependency installation, and hooks belong to the later phas
   consistency and lifecycle after verification; no full CLI migration.
 - `docs/plans/systemd-environment-literals/plan.md` and this file: progress and
   actual command/evidence results.
+- `apps/web/e2e/tests/task/task-list.spec.ts`: later ROOT-authorized required-CI
+  correction, limited to settling filtered page-one setup before pagination.
 
 No other production or permanent test files are owned. No public documentation
 change is planned; see the manifest's documentation judgment.
@@ -227,3 +229,25 @@ linter's already-run 36-test suite remains historical evidence only.
 
 The broad CLI requirement remains draft; only this scoped design becomes
 current. No native service changes, Kandev startup, or private fixture replay.
+
+### Required-CI correction
+
+ROOT subsequently authorized one test-only correction after E2E shard 24 failed
+the pagination case on its original attempt and three hosted retries. The trace
+shows Next requested unfiltered page two before the 300ms search debounce settled;
+filtered page two and then page one followed. The test and implicated frontend
+files were byte-identical to main. This is independent of service serialization.
+
+The existing test now registers a successful filtered page-one response wait
+before filling search, then awaits that response before its existing full page,
+row, total, and page-size assertions. No sleep, timeout increase, retry change,
+assertion weakening, or production pagination change. Test-only synchronization
+does not change mobile behavior or require a new mobile case.
+
+Hosted assertion and trace provide RED. The canonical guarded host runner passed
+exactly this one Chromium case with one worker and zero retries (13.2s; native
+16517 joined exit 0, group absent). An initial anchored selection built fresh
+artifacts but selected zero tests and exited 1; the corrected exact-one discovery
+and successful run reused those artifacts through `--no-build`. Scoped ESLint
+and Prettier checks joined exit 0. The app tsconfig excludes E2E, so its typecheck
+would not validate this spec. The already-green launcher suite was not replayed.
