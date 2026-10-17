@@ -703,22 +703,18 @@ func plistBool(value bool) string {
 }
 
 func serviceEnvLine(key, value string) string {
-	return "Environment=" + quoteForUnit(key+"="+value)
+	return "Environment=" + quoteForUnitValue(key+"="+value, false, true)
 }
 
 func serviceEnvLineAllowSpecifiers(key, value string) string {
-	return "Environment=" + quoteForUnitAllowSpecifiers(key+"="+value)
+	return "Environment=" + quoteForUnitValue(key+"="+value, false, false)
 }
 
 func quoteForUnit(value string) string {
-	return quoteForUnitValue(value, true)
+	return quoteForUnitValue(value, true, true)
 }
 
-func quoteForUnitAllowSpecifiers(value string) string {
-	return quoteForUnitValue(value, false)
-}
-
-func quoteForUnitValue(value string, escapeSystemdSpecifiers bool) string {
+func quoteForUnitValue(value string, escapeDollars, escapeSystemdSpecifiers bool) string {
 	chars := " \\\"$"
 	if escapeSystemdSpecifiers {
 		chars += "%"
@@ -726,7 +722,11 @@ func quoteForUnitValue(value string, escapeSystemdSpecifiers bool) string {
 	if !strings.ContainsAny(value, chars) {
 		return value
 	}
-	replacements := []string{"\\", "\\\\", "$", "$$", "\"", "\\\""}
+	replacements := []string{"\\", "\\\\", "\"", "\\\""}
+	// Only command lines expand dollars; Environment assignments keep them literal.
+	if escapeDollars {
+		replacements = append(replacements, "$", "$$")
+	}
 	if escapeSystemdSpecifiers {
 		replacements = append(replacements, "%", "%%")
 	}
