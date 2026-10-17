@@ -19,6 +19,9 @@ import {
   type WorkspaceItem,
 } from "@/components/workspaces/workspace-picker-content";
 import { cn } from "@kandev/ui/lib/utils";
+import { useWorkspaceClone } from "@/hooks/domains/workspace/use-workspace-clone";
+import { WorkspaceActionsMenu } from "./workspace-actions-menu";
+import { WorkspaceCloneDialog } from "./workspace-clone-dialog";
 
 // The tab table and href builder are data — see `workspace-settings-tabs.ts`,
 // which the settings menu's Workspaces branch reads too. Re-exported here so
@@ -84,10 +87,8 @@ function WorkspaceSettingsSwitcher({
             activeName={workspaceName}
             chevronTestId="workspace-settings-switcher-chevron"
             data-testid="workspace-settings-switcher"
-            // Same control, sized for a page heading rather than a sidebar
-            // row, at a fixed 240px: long names truncate, short ones leave
-            // the chevron anchored instead of the header jumping per page.
-            className="w-60 flex-none gap-2 px-3 text-base font-semibold"
+            // Phone headings share their width with the badge and actions.
+            className="min-w-0 flex-1 gap-2 px-3 text-base font-semibold md:w-60 md:flex-none"
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-72">
@@ -136,6 +137,7 @@ export function WorkspaceSettingsShell({
   const workspace = workspaces.find((item) => item.id === workspaceId);
   const tabs = getWorkspaceSettingsTabs(canvasesEnabled, coordinatorEnabled);
   const tabsRef = useRef<HTMLElement | null>(null);
+  const clone = useWorkspaceClone(t);
 
   // Each tab is its own route, so navigating remounts this shell and the
   // strip snaps back to its start — on a phone the pill you just tapped
@@ -168,6 +170,7 @@ export function WorkspaceSettingsShell({
           ) : (
             <h2 className="truncate text-2xl font-bold">{t("common:workspace")}</h2>
           )}
+          {workspace && <WorkspaceActionsMenu workspace={workspace} onClone={clone.open} />}
         </div>
       </div>
       {/* Pills on a phone, an underline rail from `md` up — the same boundary
@@ -204,6 +207,7 @@ export function WorkspaceSettingsShell({
         ))}
       </nav>
       <div>{children}</div>
+      <WorkspaceCloneDialog flow={clone} />
     </div>
   );
 }

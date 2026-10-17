@@ -547,6 +547,7 @@ type Service struct {
 	workflowStepCreator             WorkflowStepCreator
 	executorSaveObserver            ExecutorSaveObserver
 	workspaceBootstrapper           WorkspaceBootstrapper
+	workspaceCloner                 WorkspaceClonePersistence
 	workflowStepGetter              WorkflowStepGetter
 	workflowMovePreflight           WorkflowMovePreflight
 	startStepResolver               StartStepResolver
