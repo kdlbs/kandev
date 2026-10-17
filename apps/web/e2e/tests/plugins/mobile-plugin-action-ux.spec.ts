@@ -10,6 +10,11 @@ import {
   type AppStatusBarSettingsBaseline,
 } from "../../helpers/app-status-bar-settings";
 
+function expectTouchDimension(dimension: number) {
+  // Playwright reports fractional CSS pixels; allow only float-rounding noise.
+  expect(dimension + 0.01).toBeGreaterThanOrEqual(44);
+}
+
 async function assertGlyphSize(action: Locator, size: number): Promise<void> {
   const svg = action.locator('[data-slot="surface-action-icon"] > svg');
   await expect(svg).toHaveCount(1);
@@ -67,9 +72,9 @@ test.describe("Plugin action UX, composer on phone", () => {
     expect(stopBox).not.toBeNull();
     expect(attachBox).not.toBeNull();
     for (const box of [actionBox!, stopBox!, attachBox!]) {
-      expect(box.height).toBeGreaterThanOrEqual(44);
+      expectTouchDimension(box.height);
     }
-    expect(actionBox!.width).toBeGreaterThanOrEqual(44);
+    expectTouchDimension(actionBox!.width);
     expect(actionBox!.width).toBeCloseTo(actionBox!.height, 1);
 
     await action.tap();
@@ -120,8 +125,8 @@ test.describe("Plugin action UX, composer on phone", () => {
     for (const action of [taskAction, workspaceAction]) {
       const box = await action.boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expectTouchDimension(box!.height);
+      expectTouchDimension(box!.width);
       await action.tap();
       await expect(action).toHaveAttribute("aria-pressed", "true");
     }
@@ -186,8 +191,8 @@ test.describe("Plugin action UX, composer on phone", () => {
     for (const action of [wideSidebarNative, wideSidebarAction]) {
       const box = await action.boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expectTouchDimension(box!.height);
+      expectTouchDimension(box!.width);
     }
 
     await testPage.setViewportSize({ width: 800, height: 900 });
@@ -200,8 +205,8 @@ test.describe("Plugin action UX, composer on phone", () => {
     for (const action of [tabletNativeAction, tabletPluginAction]) {
       const box = await action.boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expectTouchDimension(box!.height);
+      expectTouchDimension(box!.width);
     }
   });
 
@@ -238,7 +243,7 @@ test.describe("Plugin action UX, composer on phone", () => {
     for (const control of [action, busyAction, disabledAction]) {
       const box = await control.boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expectTouchDimension(box!.height);
     }
 
     await action.tap();

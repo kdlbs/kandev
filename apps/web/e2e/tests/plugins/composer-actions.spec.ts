@@ -16,6 +16,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { SessionPage } from "../../pages/session-page";
+import { watchWs } from "../../helpers/causal-waits";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 import { KanbanPage } from "../../pages/kanban-page";
 import { openQuickChatSetup, selectAgentIfNeeded } from "../chat/quick-chat-helpers";
@@ -233,56 +234,88 @@ test.describe("Plugins — composer capability", () => {
       .toBe(true);
   });
 
-  test("new session: inserts at the selection and the native handler launches the session", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(120_000);
-    await installFixturePlugin(testPage);
+  test.describe("new-session native launch", () => {
+    test.describe.configure({ retries: 0 });
 
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Composer capability new session",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
+    test("new session: inserts at the selection and the native handler launches the session", async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(120_000);
+      const ws = watchWs(testPage);
+      await installFixturePlugin(testPage);
 
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Composer capability new session",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
 
-    const before = (await apiClient.listTaskSessions(task.id)).sessions.length;
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
 
-    await session.openNewSessionDialog();
-    const dialog = session.newSessionDialog();
-    await expect(dialog).toBeVisible();
+      const before = (await apiClient.listTaskSessions(task.id)).sessions;
 
-    const description = dialog.getByTestId("task-description-input");
-    await expect(description).toBeVisible();
+      await session.openNewSessionDialog();
+      const dialog = session.newSessionDialog();
+      await expect(dialog).toBeVisible();
 
-    const composerAction = action(dialog);
-    await expect(composerAction).toBeVisible();
-    await expect(composerAction).toHaveAttribute("data-surface", "new-session");
+      const description = dialog.getByTestId("task-description-input");
+      await expect(description).toBeVisible();
 
-    await description.fill("head tail");
-    await caretBackFromEnd(description, " tail".length);
-    await composerAction.getByTestId("e2e-composer-insert").click();
-    await expectTaskDescription(description, `head ${DICTATED} tail`);
+      const composerAction = action(dialog);
+      await expect(composerAction).toBeVisible();
+      await expect(composerAction).toHaveAttribute("data-surface", "new-session");
 
-    await composerAction.getByTestId("e2e-composer-submit").click();
-    await expect(composerAction).toHaveAttribute("data-status", "submitted");
+      await description.fill("head tail");
+      await caretBackFromEnd(description, " tail".length);
+      await composerAction.getByTestId("e2e-composer-insert").click();
+      await expectTaskDescription(description, `head ${DICTATED} tail`);
 
-    await expect
-      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
-        timeout: 45_000,
-      })
-      .toBeGreaterThan(before);
+      const launched = ws.waitForResponse("session.launch");
+      await composerAction.getByTestId("e2e-composer-submit").click();
+      const response = await launched;
+      expect(response.payload).toMatchObject({
+        success: true,
+        task_id: task.id,
+        session_id: expect.any(String),
+      });
+      const sessionId = String(response.payload.session_id);
+      expect(before.some((existing) => existing.id === sessionId)).toBe(false);
+      await expect(dialog).not.toBeVisible();
+
+      await expect
+        .poll(
+          async () => {
+            const [{ sessions }, { messages }] = await Promise.all([
+              apiClient.listTaskSessions(task.id),
+              apiClient.listSessionMessages(sessionId),
+            ]);
+            return {
+              sessions: sessions.filter(
+                (candidate) => !before.some((prior) => prior.id === candidate.id),
+              ),
+              promptCount: messages.filter(
+                (message) =>
+                  message.author_type === "user" && message.content === `head ${DICTATED} tail`,
+              ).length,
+            };
+          },
+          { timeout: 45_000 },
+        )
+        .toEqual({
+          sessions: [expect.objectContaining({ id: sessionId, task_id: task.id })],
+          promptCount: 1,
+        });
+    });
   });
 
   test("Quick Chat setup: inserts at the selection and submits through the native create path", async ({

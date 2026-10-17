@@ -118,6 +118,19 @@
       "target_removal_date": "2027-02-01"
     },
     {
+      "id": "office-run-contract-alias-const-routingblockedsessionrecoveryrequired",
+      "locator": {
+        "path": "apps/backend/internal/office/models/run_compat.go",
+        "declaration": "const:RoutingBlockedSessionRecoveryRequired#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "Office callers retain this compatibility alias while run-data consumers migrate to internal/runs/models.",
+      "owner": "backend runs maintainers",
+      "introduced_on": "2026-09-26",
+      "removal_condition": "Remove when no production or test caller depends on office/models.RoutingBlockedSessionRecoveryRequired; verify by deleting the alias and running go test ./... from apps/backend.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
       "id": "office-run-contract-alias-const-routingblockedwaitingforcapacity",
       "locator": {
         "path": "apps/backend/internal/office/models/run_compat.go",

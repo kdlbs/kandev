@@ -1,62 +1,43 @@
-/**
- * Pure conflict detection over a list of resolved (effective) keyboard
- * shortcuts — used to warn about core-vs-plugin and plugin-vs-plugin combo
- * collisions in Settings > Keyboard Shortcuts. Detection only; UI surfacing
- * is a lightweight per-row indicator (see `keyboard-shortcuts-card.tsx`).
- */
+/** Direct accepted-event overlaps between effective shortcuts used by settings warnings. */
 import type { KeyboardShortcut } from "./constants";
 import { isUnboundShortcut } from "./shortcut-overrides";
 import type { ShortcutEntry } from "./plugin-shortcuts";
+import { matchesShortcut } from "./utils";
 
-/**
- * Canonicalizes a shortcut to a comparable string, resolving `ctrlOrCmd` to
- * the concrete modifier the given platform would fire (mirrors
- * `matchesShortcut`'s runtime behavior). Returns null for an unbound
- * shortcut — unbound entries never conflict with anything.
- */
-export function comboKey(shortcut: KeyboardShortcut, isMacPlatform: boolean): string | null {
-  if (isUnboundShortcut(shortcut)) return null;
-
-  const modifiers = shortcut.modifiers;
-  const ctrl = !!modifiers?.ctrl || !!(modifiers?.ctrlOrCmd && !isMacPlatform);
-  const cmd = !!modifiers?.cmd || !!(modifiers?.ctrlOrCmd && isMacPlatform);
-  const alt = !!modifiers?.alt;
-  const shift = !!modifiers?.shift;
-
-  return [shortcut.key.toLowerCase(), ctrl, cmd, alt, shift].join("|");
-}
-
-/** A group of two or more entries whose effective combo collides. */
+/** Two entries sharing at least one accepted event; overlap is not transitive. */
 export interface ShortcutConflictGroup {
-  comboKey: string;
   entries: ShortcutEntry[];
 }
 
-/**
- * Groups `entries` (already resolved to their effective shortcut, e.g. via
- * `resolveShortcutEntry`) by collision. Only groups with 2+ members are
- * returned. Dispatch order for a colliding combo is registration order (see
- * `hooks/use-plugin-shortcuts.ts`) — this helper only detects and reports,
- * it doesn't resolve precedence.
- */
+function shortcutsOverlap(first: KeyboardShortcut, second: KeyboardShortcut): boolean {
+  if (isUnboundShortcut(first) || isUnboundShortcut(second)) return false;
+  if (first.key.toLowerCase() !== second.key.toLowerCase()) return false;
+
+  // Every accepted modifier state is evaluated by the dispatch predicate.
+  for (let mask = 0; mask < 16; mask++) {
+    const event = {
+      key: first.key,
+      ctrlKey: Boolean(mask & 1),
+      metaKey: Boolean(mask & 2),
+      altKey: Boolean(mask & 4),
+      shiftKey: Boolean(mask & 8),
+    } as KeyboardEvent;
+    if (matchesShortcut(event, first) && matchesShortcut(event, second)) return true;
+  }
+  return false;
+}
+
+/** Returns each directly overlapping pair once in input order. */
 export function findShortcutConflicts(
   resolved: { entry: ShortcutEntry; shortcut: KeyboardShortcut }[],
-  isMacPlatform: boolean,
 ): ShortcutConflictGroup[] {
-  const groups = new Map<string, ShortcutEntry[]>();
-
-  for (const { entry, shortcut } of resolved) {
-    const key = comboKey(shortcut, isMacPlatform);
-    if (key === null) continue;
-    const group = groups.get(key);
-    if (group) {
-      group.push(entry);
-    } else {
-      groups.set(key, [entry]);
+  const groups: ShortcutConflictGroup[] = [];
+  for (let left = 0; left < resolved.length; left++) {
+    for (let right = left + 1; right < resolved.length; right++) {
+      if (shortcutsOverlap(resolved[left].shortcut, resolved[right].shortcut)) {
+        groups.push({ entries: [resolved[left].entry, resolved[right].entry] });
+      }
     }
   }
-
-  return Array.from(groups.entries())
-    .filter(([, list]) => list.length > 1)
-    .map(([key, list]) => ({ comboKey: key, entries: list }));
+  return groups;
 }

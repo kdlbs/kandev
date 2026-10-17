@@ -76,6 +76,7 @@ fn main() {
             let download_app = app.handle().clone();
             let download_tracker_for_handler = download_tracker.clone();
             let window = WebviewWindowBuilder::from_config(app, &window_config)?
+                .devtools(true)
                 .on_download(move |_webview, event| {
                     downloads::handle_download_event(
                         &download_app,
@@ -188,6 +189,9 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let fullscreen = MenuItemBuilder::with_id(shell::MENU_FULLSCREEN, "Toggle Full Screen")
         .accelerator(FULLSCREEN_ACCELERATOR)
         .build(app)?;
+    let developer_tools = MenuItemBuilder::with_id(shell::MENU_DEVELOPER_TOOLS, "Developer Tools")
+        .accelerator(shell::DEVELOPER_TOOLS_ACCELERATOR)
+        .build(app)?;
     let view_menu = Submenu::with_items(
         app,
         "View",
@@ -199,6 +203,8 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &actual_size,
             &PredefinedMenuItem::separator(app)?,
             &fullscreen,
+            &PredefinedMenuItem::separator(app)?,
+            &developer_tools,
         ],
     )?;
 
@@ -301,6 +307,11 @@ fn handle_menu_event(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
                 if let Ok(fullscreen) = window.is_fullscreen() {
                     let _ = window.set_fullscreen(!fullscreen);
                 }
+            }
+        }
+        MenuAction::DeveloperTools => {
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                window.open_devtools();
             }
         }
         MenuAction::Quit => {

@@ -36,6 +36,9 @@ async function seedTaskWithPR(
   });
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser("test-user");
+  await apiClient.mockGitHubAddRepos(OWNER, [
+    { full_name: `${OWNER}/${REPO}`, owner: OWNER, name: REPO },
+  ]);
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -246,6 +249,10 @@ test.describe("mobile PR CI automation options", () => {
     );
     await testPage.keyboard.press("Escape");
 
+    // Keep the repair active while repeated provider feedback is checked for deduplication.
+    await apiClient.updateTaskCIAutomationOptions(taskId, {
+      auto_fix_prompt_override: "{{pr.feedback}}\ne2e:delay(60000)",
+    });
     await drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }).tap();
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: taskId,
@@ -435,6 +442,9 @@ test.describe("mobile PR CI automation options", () => {
       unresolved_review_threads: 0,
       mergeable_state: "clean",
     });
+    await apiClient.mockGitHubAddCheckRuns(OWNER, REPO, headSHA, [
+      { name: "CI", status: "completed", conclusion: "success" },
+    ]);
     await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "failed");
     await apiClient.updateTaskCIAutomationOptions(taskId, {
       repository_id: seedData.repositoryId,

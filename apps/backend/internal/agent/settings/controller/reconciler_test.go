@@ -414,6 +414,17 @@ func (f *fakeStore) ListAgentProfiles(_ context.Context, agentID string) ([]*mod
 	}
 	return out, nil
 }
+func (f *fakeStore) ReorderAgentProfiles(context.Context, string, []string) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (f *fakeStore) GetAgentProfileOrderSnapshots(_ context.Context, agentIDs []string) (map[string]store.AgentProfileOrderSnapshot, error) {
+	result := make(map[string]store.AgentProfileOrderSnapshot, len(agentIDs))
+	for _, id := range agentIDs {
+		result[id] = store.AgentProfileOrderSnapshot{Profiles: f.profiles[id], Revision: 0}
+	}
+	return result, nil
+}
 
 func (f *fakeStore) Close() error { return nil }
 

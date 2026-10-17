@@ -5,7 +5,7 @@ requirements:
   - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-001
   - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-002
 created: 2026-08-30
-updated: 2026-08-30
+updated: 2026-10-14
 owners:
   - kandev
 ---
@@ -21,8 +21,8 @@ actionable.
 The design covers GitHub Actions workflow orchestration, E2E planning and
 reporting, browser provisioning, and the synchronization contract of the
 affected regression test. It does not change application behavior, the
-worker-scoped backend fixture model, the required E2E gate, or the normal
-matrix shape.
+worker-scoped backend fixture model or the required E2E gate. The full-CI
+continuation changes the normal matrix size under its measured adoption gate.
 
 ## Requirement mapping
 
@@ -33,7 +33,7 @@ matrix shape.
 
 ## Design invariants
 
-- The normal cohort remains fourteen shards covering Chromium and mobile
+- The normal cohort has twenty-eight shards covering Chromium and mobile
   Chrome, and the container cohort remains six shards covering Docker and SSH.
 - Each shard remains single-worker until a measured concurrency change passes
   the existing isolation and retry criteria.
@@ -73,11 +73,63 @@ manifest fails before test execution.
 
 The report job remains responsible for merged reports, the next timing-profile
 candidate, retry summaries, and predicted-versus-actual shard diagnostics.
-The aggregate gate retains its current cancellation and failure semantics.
+The report job owns the required `E2E Tests Passed` check. It joins all required
+jobs and rejects failures, cancellations, unexpected skips, and missing reports.
+A successful irrelevant-change verdict skips report processing and passes the check.
 
 ## Execution flow
 
-1. The change-detection job decides whether the E2E workflow is required.
+### Bounded processes within a normal job
+
+The October 14 full-CI candidate has twenty-eight normal jobs and six container jobs.
+A normal job may subdivide its validated manifest selection into at most three
+independent Playwright processes, each with `workers: 1`. The current workflow
+requests three processes. Container jobs retain one process. The existing memory
+guard caps the process count using the lower
+of host-available memory and cgroup headroom: one below 6 GiB or when unknown,
+two below 12 GiB, and three otherwise. CPU availability also caps the count.
+No unsafe-parallelism override participates in this CI decision.
+
+Sum the selected project costs for each file, sort files by descending cost
+with a lexical tie-break, and assign each whole file to the lightest local
+partition. Every original project/file identity must occur exactly once.
+The global manifest and its twenty-eight/six parent metadata identities remain
+authoritative; local partitions are execution details, not new runner jobs.
+Serial groups, project-specific backend options, retries and timeouts retain
+their existing Playwright behavior.
+
+Each process owns a distinct explicit port offset, test-result directory and
+blob directory. Backend, standalone agentctl, and per-task agentctl ports use the stable `parallelIndex`
+slot, never `workerIndex`, which increases when Playwright replaces workers
+after a failure or project boundary. Teardown must complete before a replacement
+worker reuses the slot. Existing per-worker temporary HOME, database, repository
+and backend ownership remain intact.
+The standalone listener has its own allocation outside every backend and
+per-task range; parallel fixtures must not race for its production default port.
+
+Start all selected processes before waiting, join every started process even
+after a sibling fails, and propagate cancellation to owned process groups.
+Collect every child's blob under a unique top-level filename for the existing
+merge job. Missing child reports cannot produce a successful parent record.
+Write one parent metadata record only after all children finish. Preserve
+original exits and all failure diagnostics; do not retry the runner itself.
+
+Adoption requires a passing comparison on the same selected tests and resource
+budget, plus full hosted coverage and timing evidence. A draft PR can enable
+the candidate for hosted measurement when a shared development host cannot
+provide stable resources; failed local attempts remain in the evidence. The
+50% target applies to the longest normal E2E test step against
+the fixed 2,159-second baseline, independently of frontend gains and runner
+queueing. A short sample cannot establish the full-suite target.
+
+The alternative of adding matrix jobs consumes more shared runner capacity.
+Increasing Playwright workers inside one process weakens the fixture's current
+one-worker assumption. Independent processes reuse the existing guarded local
+execution model, but add report and port coordination that must be verified.
+
+### Workflow stages
+
+1. The hosted change-detection job allocates runners and decides whether E2E is required.
 2. The build job installs dependencies, builds the backend and web artifacts,
    packages the plugin fixture, resolves the eligible `main` profile, and
    creates validated manifests for both cohorts.
@@ -89,7 +141,8 @@ The aggregate gate retains its current cancellation and failure semantics.
 5. The report job merges blobs, records setup and execution diagnostics,
    creates the retry and flake summaries, and publishes a new profile only
    when the run is an eligible successful `main` result.
-6. The required gate evaluates the final job results.
+6. The same report job validates dependency results and required evidence before
+   the required check succeeds. There is no separate post-report gate job.
 
 ## Browser cache contract
 
@@ -153,7 +206,7 @@ The report preserves these distinct measurements:
 - dependency installation;
 - runtime image startup and browser provisioning;
 - Playwright test execution per shard;
-- report merge and aggregate-gate delay.
+- report merge and required-check scheduling delay.
 
 Predicted-versus-actual shard data remains keyed by cohort and shard number.
 It includes the planning mode, unknown and warm counts, target duration, and
@@ -211,7 +264,7 @@ failures.
 
 ## Out of scope
 
-- changing the fourteen normal or six container shards;
+- changing the six container shards;
 - enabling `workers: 2` by default;
 - splitting the normal matrix into separate mobile and desktop cohorts;
 - changing the Playwright retry count, test timeout, or required gate;
@@ -224,3 +277,9 @@ failures.
 - [Duration-aware E2E sharding uses rolling `main` timings](../../../decisions/2026-08-10-duration-aware-e2e-sharding.md)
 - [Browser cache for host-runner E2E provisioning](../../../decisions/2026-08-30-e2e-browser-cache.md)
 - [E2E CI efficiency plan](../../../plans/e2e-ci-efficiency/plan.md)
+
+The [complete CI continuation](ci-completion-budget.md) and its
+[budget decision](../../../decisions/2026-10-14-complete-ci-latency-budget.md)
+own the measured 28-job candidate. The earlier fourteen-job process experiment
+met its separate 50% test-step target in PR #4457. The new target includes build,
+waiting and reporting; more jobs do not imply reduced runner-minutes.

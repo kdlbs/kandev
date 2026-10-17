@@ -31,6 +31,7 @@ func protectedTaskMetadataForCreate(metadata map[string]interface{}, trustedHand
 	models.StripOfficeCarrierMetadata(created)
 	delete(created, models.MetaKeyDeferredLaunch)
 	delete(created, models.MetaKeyStepHandoffCarry)
+	delete(created, models.MetaKeyAutomationStartOwned)
 	if !trustedHandoff {
 		delete(created, models.MetaKeyHandoffSource)
 		delete(created, models.MetaKeyHandoffs)

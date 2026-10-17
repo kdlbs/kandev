@@ -134,7 +134,18 @@ KANDEV_HOME_DIR="$HOME/.kandev-desktop-dev" make desktop-dev
 
 This home persists between launches. It is separate from both your normal Kandev home and each disposable temporary test window.
 
-The application menu exposes New Task, Settings (`Cmd/Ctrl+,`), contextual Close (`Cmd/Ctrl+W`), zoom, full-screen, Help, update, and Quit actions. Contextual Close asks the web UI to close its top dialog or eligible file/diff/commit/preview tab; if nothing is closeable it does not shut down the window or backend. The desktop shell saves window geometry in its platform app-data directory and clamps restored geometry to an available display.
+The application menu exposes New Task, Settings (`Cmd/Ctrl+,`), contextual Close (`Cmd/Ctrl+W`), zoom, full-screen, Developer Tools, Help, update, and Quit actions. Contextual Close asks the web UI to close its top dialog or eligible file/diff/commit/preview tab; if nothing is closeable it does not shut down the window or backend. The desktop shell saves window geometry in its platform app-data directory and clamps restored geometry to an available display.
+
+### Inspect the desktop app
+
+Release builds include **Developer Tools**. The inspector stays closed until you open it.
+
+- On macOS, choose **View → Developer Tools** or press **Cmd+Option+I**.
+- On Windows or Linux, choose **View → Developer Tools** or press **Ctrl+Shift+I**.
+
+The inspector opens for the current Kandev page, including startup and error pages. Opening or reopening it does not reload the page or restart the backend. If it is already open, this action keeps it open.
+
+On macOS 13.3 or later, Safari can inspect the same WebView. Enable Safari's **Develop** menu in Safari settings. Open **Develop** and select this computer. Then select **Kandev**.
 
 Uninstalling the desktop application does not delete the Kandev home. Keep it to preserve workspaces and settings, or back it up and remove it separately only after all Kandev processes and executors are stopped. See [Operations](operations.md).
 
@@ -219,7 +230,7 @@ Kandev has no registered public URL scheme, file association, or command-line de
 
 External `http`, `https`, and `mailto` destinations open in the system browser or mail client. The desktop bridge blocks links with embedded credentials and unsupported schemes. It keeps `localhost` names, loopback IPs, and unspecified IPs in the WebView. It does not block all private-LAN hosts. Kandev routes, previews, and downloads stay in the WebView. Downloads that you start inside the desktop app open the system Save dialog. Kandev reports whether the transfer succeeds. The WebView transfers the file data.
 
-Native notifications are limited to selected agent-turn-finished and
+Automatic agent notifications are limited to selected agent-turn-finished and
 agent-needs-an-answer events, plus session failures. Semantic session events
 respect each provider's event selections. Session failures remain an independent
 safety alert whenever the Local provider is enabled. Delivery also respects the
@@ -227,6 +238,15 @@ application's notification preference and OS permission. Requests carry
 task/session and semantic event identifiers for validation and event
 de-duplication, but the desktop registers no notification activation/deep-link
 handler. Clicking a notification is therefore not a supported navigation path.
+
+To test delivery, open **Settings > Preferences > Notifications** and select
+**Send test notification**. Desktop tests use native notifications even when
+browser notifications are unavailable or blocked; the message confirms
+notification delivery on this device. An undecided OS permission can be
+requested from that click. If permission is denied, enable Kandev in the OS
+notification settings and refresh the permission status. With permission
+granted, each click makes a new test attempt. Browser-only clients retain
+browser notification tests through the same control.
 
 ## Troubleshooting
 

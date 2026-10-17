@@ -466,7 +466,7 @@ func sidebarPageSelectSQL(groupNone bool) string {
 		COALESCE(NULLIF(w.name, ''), 'undefined'), COALESCE(NULLIF(ws.name, ''), 'undefined'), COALESCE(ws.color, ''),
 		COALESCE(tree.parent_id, ''), COALESCE(parent.title, ''),
 		` + groupCountExpr + `, tree.depth, tree.order_path > group_start.first_order_path,
-		COALESCE(queue_status.queue_position, 0), COALESCE(queue_status.queue_total, 0),
+		0, 0,
 		COALESCE(subtask_counts.subtask_count, 0),
 		page_summary.total_tasks, page_summary.total_visible_tasks, page_summary.total_groups, page_options.page
 	FROM page_window tree
@@ -478,7 +478,6 @@ func sidebarPageSelectSQL(groupNone bool) string {
 	LEFT JOIN workflow_steps ws ON ws.id = tree.workflow_step_id
 	LEFT JOIN page_subtask_counts subtask_counts ON subtask_counts.ancestor_id = tree.id
 	` + groupCountJoin + `
-	LEFT JOIN wip_queue_ranked queue_status ON queue_status.id = tree.id
 	ORDER BY tree.group_order ASC, tree.order_path ASC`
 }
 

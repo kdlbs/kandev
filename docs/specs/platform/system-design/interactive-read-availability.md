@@ -272,3 +272,7 @@ old pending retry. Cover permanent 404 behavior separately.
 ## Implementation plans
 
 - [Task navigation availability repair](../../../plans/task-navigation-availability/plan.md) covers REQ-PLATFORM-INTERACTIVE-READS-004 and -005.
+
+## Journey loading extension
+
+[Journey data loading](journey-data-loading.md) owns the new reader-isolation, visible-detail, boot, and shared-loading work. The [delivery package](../../../plans/journey-data-efficiency/plan.md) preserves the existing completed plans and their verification history.

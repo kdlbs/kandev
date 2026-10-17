@@ -23,6 +23,7 @@ path = "src/bin/updater_signature_verifier.rs"
 default = []
 desktop-runtime = [
   "dep:tauri",
+  "tauri/devtools",
   "dep:tauri-plugin-opener",
   "dep:tauri-plugin-updater",
   "dep:tauri-plugin-notification",

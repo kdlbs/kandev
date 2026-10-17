@@ -6,8 +6,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 type fixedLifecycleProfileResolver struct {
@@ -38,6 +40,36 @@ func TestLifecycleAdapter_ResolveAgentProfileForwardsNativeSessionResume(t *test
 		"the production lifecycle adapter must preserve the capability used by recovery admission")
 }
 
+type durableDeliveryCapabilityProvider interface {
+	DurableDeliveryCapabilityForExecution(
+		context.Context,
+		string,
+	) (runtimeapi.DurableDeliveryCapability, bool)
+}
+
+type identityAwarePromptStreamRecoverer interface {
+	RecoverAgentPromptStreamWithIdentity(
+		context.Context,
+		lifecycle.AgentDeliveryRecoveryIdentity,
+	) lifecycle.DeliveryReconciliationResult
+}
+
+func TestLifecycleAdapter_SatisfiesIdentityAwareDeliveryRecoverySeam(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	var client orchestratorexecutor.AgentManagerClient = newLifecycleAdapter(mgr, nil, newTestLogger())
+
+	provider, ok := client.(identityAwarePromptStreamRecoverer)
+	if !ok {
+		t.Fatal("production lifecycleAdapter does not forward identity-aware durable delivery recovery")
+	}
+	result := provider.RecoverAgentPromptStreamWithIdentity(context.Background(), lifecycle.AgentDeliveryRecoveryIdentity{
+		TaskID: "task-1", SessionID: "missing-session",
+	})
+	if result.Outcome != lifecycle.DeliveryReconciliationBlocked || result.Reason != "recovery_identity_incomplete" {
+		t.Fatalf("adapter did not forward the manager result: outcome=%q reason=%q", result.Outcome, result.Reason)
+	}
+}
+
 // acpSessionIDProvider mirrors the unexported interface
 // orchestrator.Service.currentACPSessionID asserts s.agentManager against.
 // Declaring it independently here — instead of importing an orchestrator
@@ -52,11 +84,36 @@ type retainedPromptFailureAcknowledger interface {
 }
 
 type initialPromptAdmissionRegistrar interface {
-	RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+	RegisterInitialPromptAdmissionCallbacks(string, func(context.Context, string, []v1.MessageAttachment) error, func(), func()) error
 }
 
 type initialPromptDispatchRegistrar interface {
 	RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
+}
+
+type submissionAwarePromptProvider interface {
+	PromptAgentWithDispatchCallbackAndSubmissionID(
+		context.Context,
+		string,
+		string,
+		[]v1.MessageAttachment,
+		bool,
+		func(),
+		string,
+	) (*orchestratorexecutor.PromptResult, error)
+}
+
+type admissionSubmissionAwarePromptProvider interface {
+	PromptAgentWithAdmissionCallbackAndSubmissionID(
+		context.Context,
+		string,
+		string,
+		[]v1.MessageAttachment,
+		bool,
+		func(context.Context, string, []v1.MessageAttachment) error,
+		func(),
+		string,
+	) (*orchestratorexecutor.PromptResult, error)
 }
 
 // TestLifecycleAdapter_SatisfiesACPSessionIDSeam is the regression test for a
@@ -155,12 +212,12 @@ func TestLifecycleAdapter_RegistersInitialPromptAdmissionOnRestart(t *testing.T)
 		t.Fatal("production lifecycleAdapter cannot register the replacement startup prompt's final admission callback")
 	}
 	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
-		"exec-model-switch-restart", func() error { return nil }, func() {}, func() {},
+		"exec-model-switch-restart", func(context.Context, string, []v1.MessageAttachment) error { return nil }, func() {}, func() {},
 	); err != nil {
 		t.Fatalf("register replacement startup admission: %v", err)
 	}
 	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
-		"missing-model-switch-restart", func() error { return nil }, nil, nil,
+		"missing-model-switch-restart", func(context.Context, string, []v1.MessageAttachment) error { return nil }, nil, nil,
 	); err == nil {
 		t.Fatal("adapter did not forward lifecycle execution lookup errors")
 	}
@@ -173,4 +230,68 @@ func TestLifecycleAdapter_RegistersInitialPromptAdmissionOnRestart(t *testing.T)
 	); err != nil {
 		t.Fatalf("register replacement startup dispatch callbacks: %v", err)
 	}
+}
+
+func TestLifecycleAdapter_SatisfiesDurableDeliveryCapabilitySeam(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	var client orchestratorexecutor.AgentManagerClient = newLifecycleAdapter(mgr, nil, newTestLogger())
+
+	provider, ok := client.(durableDeliveryCapabilityProvider)
+	if !ok {
+		t.Fatal("production lifecycleAdapter, held as executor.AgentManagerClient, does not satisfy " +
+			"DurableDeliveryCapabilityForExecution(context.Context, string); orchestrator would treat " +
+			"a durable peer as legacy and omit its canonical SQL submission")
+	}
+	if _, advertised := provider.DurableDeliveryCapabilityForExecution(context.Background(), "missing-execution"); advertised {
+		t.Fatal("missing execution unexpectedly advertised durable delivery")
+	}
+}
+
+func TestLifecycleAdapter_SatisfiesSubmissionAwarePromptSeam(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	var client orchestratorexecutor.AgentManagerClient = newLifecycleAdapter(mgr, nil, newTestLogger())
+
+	if _, ok := client.(submissionAwarePromptProvider); !ok {
+		t.Fatal("production lifecycleAdapter does not forward the submission-aware prompt capability; " +
+			"the executor would fall back to a prompt call that loses the canonical delivery identity")
+	}
+	if _, ok := client.(admissionSubmissionAwarePromptProvider); !ok {
+		t.Fatal("production lifecycleAdapter does not forward the combined admission and submission capability")
+	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesInitialDeliverySubmissionID(t *testing.T) {
+	request := &orchestratorexecutor.LaunchAgentRequest{
+		TaskID:                      "task-1",
+		SessionID:                   "session-1",
+		InitialDeliverySubmissionID: "message-1",
+	}
+
+	launch := buildLifecycleLaunchRequest(request, "/workspace", "profile-1")
+	if launch.InitialDeliverySubmissionID != "message-1" {
+		t.Fatalf("initial delivery submission ID = %q, want message-1", launch.InitialDeliverySubmissionID)
+	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesBootStatusSuppression(t *testing.T) {
+	launch := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		SuppressBootStatusMessage: true,
+	}, "/workspace", "profile-1")
+
+	require.True(t, launch.SuppressBootStatusMessage)
+}
+
+func TestLifecycleAdapter_ForwardsAlreadyResumedDeliveryRecovery(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	var client orchestratorexecutor.AgentManagerClient = newLifecycleAdapter(mgr, nil, newTestLogger())
+	provider, ok := client.(interface {
+		ReconcileAlreadyResumedDelivery(context.Context, lifecycle.AgentDeliveryRecoveryIdentity, string) (bool, error)
+	})
+	require.True(t, ok, "production adapter must expose already loaded native recovery")
+	if !ok {
+		return
+	}
+	restored, err := provider.ReconcileAlreadyResumedDelivery(context.Background(), lifecycle.AgentDeliveryRecoveryIdentity{SessionID: "missing"}, "native")
+	require.NoError(t, err)
+	require.False(t, restored)
 }

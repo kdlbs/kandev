@@ -62,6 +62,25 @@ function displayEntry(store: SessionRuntimeSliceState): GitStatusDisplayEntry | 
 }
 
 describe("Git status display snapshots", () => {
+  it("keeps empty comparison targets in one display scope across status sources", () => {
+    const store = state();
+    applyGitStatus(store, "environment", entry({ comparison_target: undefined }));
+    const original = displayEntry(store)!;
+    for (const [index, comparison_target] of ["", undefined, ""].entries()) {
+      applyGitStatus(
+        store,
+        "environment",
+        entry({ comparison_target, snapshot_revision: index + 2 }),
+      );
+      expect(displayEntry(store)?.comparisonTarget).toBe(original.comparisonTarget);
+    }
+    applyGitStatus(
+      store,
+      "environment",
+      entry({ comparison_target: "origin/other", snapshot_revision: 5 }),
+    );
+    expect(displayEntry(store)?.comparisonTarget).toBe("origin/other");
+  });
   it("keeps a ready display beside an accepted pending snapshot without enriching raw state", () => {
     const store = state();
     applyGitStatus(store, "environment", entry());

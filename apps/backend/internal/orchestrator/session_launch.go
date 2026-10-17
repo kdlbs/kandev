@@ -2,14 +2,17 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -26,6 +29,7 @@ const (
 	recoveryActionResumeNewBranch          = models.RecoveryActionResumeNewBranch
 	recoveryActionFreshStart               = "fresh_start"
 	recoveryActionRuntimeRetry             = "runtime_retry"
+	recoveryActionContinueHistory          = "continue_from_history"
 )
 
 // sessionTerminalErrText mirrors lifecycle.ErrSessionTerminal's message. It is
@@ -35,6 +39,8 @@ const (
 // strings or a stringified persisted session error, so a string match is both
 // sufficient and required (see IsBenignLaunchTeardownErr).
 const sessionTerminalErrText = "session is terminal"
+
+const sessionRecoveryActionContinueFromHistory = "continue_from_history"
 
 // SessionIntent represents the type of session operation requested.
 type SessionIntent string
@@ -82,6 +88,96 @@ func isSessionOpenRecoveryContext(ctx context.Context) bool {
 	}
 	active, _ := ctx.Value(sessionOpenRecoveryContextKey{}).(bool)
 	return active
+}
+
+// sessionContinuityStore is optional so lightweight test repositories and
+// older remote repository adapters can keep the existing launch contract. The
+// production SQL repository implements the complete persistence boundary.
+type sessionContinuityStore interface {
+	CreateHarnessSessionGeneration(context.Context, *models.HarnessSessionGeneration) error
+	GetCurrentHarnessSessionGeneration(context.Context, string, string) (*models.HarnessSessionGeneration, error)
+	CommitHarnessSessionGeneration(context.Context, *models.HarnessSessionGeneration, int64) (bool, error)
+	CreateRestoreAttempt(context.Context, *models.RestoreAttempt) error
+	CompleteRestoreAttempt(context.Context, string, string, time.Time) error
+	CreateContinuationSnapshot(context.Context, *models.ContinuationSnapshot) error
+	CompleteContinuationSnapshot(context.Context, string, string, time.Time) error
+}
+
+type sessionRecoveryBlockStore interface {
+	UpsertSessionRecoveryBlock(context.Context, *models.SessionRecoveryBlock) error
+	GetOpenSessionRecoveryBlock(context.Context, string, string, int64) (*models.SessionRecoveryBlock, error)
+	ResolveSessionRecoveryBlock(context.Context, string, string, time.Time) (bool, error)
+}
+
+type sessionRecoveryBlockLookup interface {
+	GetSessionRecoveryBlock(context.Context, string) (*models.SessionRecoveryBlock, error)
+}
+
+type recoveryRequiredSignal interface {
+	RecoveryReason() string
+}
+
+// ErrSessionRecoveryRequired prevents ordinary and autonomous launch callers
+// from dispatching work while the native harness outcome is unsettled.
+var ErrSessionRecoveryRequired = errors.New("session recovery required")
+
+type sessionRecoveryRequiredError struct {
+	Block *models.SessionRecoveryBlock
+}
+
+func (e *sessionRecoveryRequiredError) Error() string {
+	if e == nil || e.Block == nil {
+		return ErrSessionRecoveryRequired.Error()
+	}
+	return fmt.Sprintf("%s: %s", ErrSessionRecoveryRequired, e.Block.Reason)
+}
+
+func (e *sessionRecoveryRequiredError) Unwrap() error { return ErrSessionRecoveryRequired }
+
+// RecoveryReason exposes the persisted classification to autonomous callers
+// that must park their own work instead of entering a generic retry loop.
+func (e *sessionRecoveryRequiredError) RecoveryReason() string {
+	if e == nil || e.Block == nil || e.Block.Reason == "" {
+		return "unknown_failure"
+	}
+	return e.Block.Reason
+}
+
+// RecoveryGeneration identifies the generation the operator is settling. It
+// is optional browser context and is omitted when no persisted block carries
+// one.
+func (e *sessionRecoveryRequiredError) RecoveryGeneration() int64 {
+	if e == nil || e.Block == nil {
+		return 0
+	}
+	return e.Block.ExpectedGeneration
+}
+
+// DispatchDeferred leaves an automation run admitted but open until the
+// operator resolves the persisted recovery block. The method satisfies the
+// automation package's generic deferred-dispatch contract without coupling
+// that package to orchestrator error types.
+func (e *sessionRecoveryRequiredError) DispatchDeferred() string {
+	return e.RecoveryReason()
+}
+
+type continuationCheckpoint struct {
+	store         sessionContinuityStore
+	attemptID     string
+	snapshotID    string
+	submissionID  string
+	sessionID     string
+	incarnationID string
+	expectedGen   int64
+	workspace     string
+	nativeID      string
+	// The candidate execution is deliberately tracked separately from the
+	// committed harness generation. A candidate must be torn down, and the
+	// pre-recovery session state restored, if the generation CAS loses after
+	// candidate initialization.
+	candidateExecutionID string
+	previousState        models.TaskSessionState
+	previousErrorMessage string
 }
 
 // LaunchSessionRequest is the unified request for session.launch.
@@ -147,6 +243,19 @@ type LaunchSessionRequest struct {
 	AllowBranchReplacement           bool   `json:"-"`
 	RepairWorkspaceInventory         bool   `json:"-"`
 	WorkspaceInventoryIdempotencyKey string `json:"-"`
+	// ForceContextContinuation is set only by RecoverSession for the explicit
+	// continue_from_history action. Clients cannot bypass native resume through
+	// the general session.launch request.
+	ForceContextContinuation bool   `json:"-"`
+	ContinuationPrompt       string `json:"-"`
+	// RecoveryAction authorizes one explicit settlement of an existing
+	// recovery block. It is populated only by RecoverSession and is consumed
+	// after a successful launch, so a failed recovery remains blocked.
+	RecoveryAction string `json:"-"`
+	// DeferRecoveryResolution keeps the existing recovery block and parked
+	// work in place until explicit continuation admission or native-resume
+	// journal acknowledgement succeeds. It is set only by RecoverSession.
+	DeferRecoveryResolution bool `json:"-"`
 	// AllowCompletedSessionResume is set only by explicit recovery or a pinned
 	// follow-up dispatcher. It is intentionally not part of the wire request:
 	// ordinary launch, ensure, and startup recovery paths must keep completed
@@ -184,6 +293,42 @@ type LaunchSessionResponse struct {
 	WorkspaceRecovery                 *taskdto.WorkspaceRecoveryDTO             `json:"workspace_recovery,omitempty"`
 	ActivationDisposition             string                                    `json:"activation_disposition,omitempty"`
 	ActivationReason                  string                                    `json:"activation_reason,omitempty"`
+}
+
+type SessionDeliveryRecoveryOutcome string
+
+const (
+	SessionDeliveryRecoveryContinued   SessionDeliveryRecoveryOutcome = "continued"
+	SessionDeliveryRecoveryAttached    SessionDeliveryRecoveryOutcome = "attached"
+	SessionDeliveryRecoverySettled     SessionDeliveryRecoveryOutcome = "settled"
+	SessionDeliveryRecoveryUncertain   SessionDeliveryRecoveryOutcome = "uncertain"
+	SessionDeliveryRecoveryBlocked     SessionDeliveryRecoveryOutcome = "blocked"
+	SessionDeliveryRecoveryUnavailable SessionDeliveryRecoveryOutcome = "unavailable"
+)
+
+type SessionDeliveryRecoveryIdentity struct {
+	SubmissionID      string `json:"submission_id"`
+	StreamID          string `json:"stream_id"`
+	IncarnationID     string `json:"incarnation_id"`
+	HarnessGeneration int64  `json:"harness_generation"`
+	PromptGeneration  uint64 `json:"prompt_generation"`
+}
+
+// SessionDeliveryRecoveryResponse is the bounded result of a state-only
+// recovery request. It contains no provider output or runtime paths.
+type SessionDeliveryRecoveryResponse struct {
+	TaskID           string                           `json:"task_id"`
+	SessionID        string                           `json:"session_id"`
+	Outcome          SessionDeliveryRecoveryOutcome   `json:"outcome"`
+	Reason           string                           `json:"reason,omitempty"`
+	RecoveryRevision int64                            `json:"recovery_revision"`
+	RecoveryIdentity *SessionDeliveryRecoveryIdentity `json:"recovery_identity,omitempty"`
+}
+
+type sessionDeliveryRecoveryAttempt struct {
+	outcome           SessionDeliveryRecoveryOutcome
+	reason            string
+	processTerminated bool
 }
 
 // ResolveIntent infers the session intent from request fields when Intent is empty.
@@ -247,6 +392,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 		return nil, errors.New("session_open activation cannot include a prompt")
 	}
 	intent := ResolveIntent(req)
+	if intent == IntentRestoreWorkspace && req.Prompt != "" {
+		return nil, errors.New("restore_workspace cannot include a prompt")
+	}
 	if err := validateFocusActivationIntent(req); err != nil {
 		return nil, err
 	}
@@ -270,25 +418,286 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	if response := s.passiveLaunchResponse(ctx, req, intent); response != nil {
 		return response, nil
 	}
+	if intent != IntentRestoreWorkspace && req.RecoveryAction == "" {
+		if err := s.checkSessionRecoveryBlock(ctx, req.SessionID); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.claimLaunchAttachments(ctx, req); err != nil {
 		return nil, fmt.Errorf("claim launch attachments: %w", err)
 	}
+
+	var (
+		response *LaunchSessionResponse
+		err      error
+	)
 	switch intent {
 	case IntentPrepare:
-		return s.launchPrepare(ctx, req)
+		response, err = s.launchPrepare(ctx, req)
 	case IntentStart:
-		return s.launchStart(ctx, req)
+		response, err = s.launchStart(ctx, req)
 	case IntentStartCreated:
-		return s.launchStartCreated(ctx, req)
+		response, err = s.launchStartCreated(ctx, req)
 	case IntentResume:
-		return s.launchResume(ctx, req)
+		response, err = s.launchResume(ctx, req)
 	case IntentWorkflowStep:
-		return s.launchWorkflowStep(ctx, req)
+		response, err = s.launchWorkflowStep(ctx, req)
 	case IntentRestoreWorkspace:
-		return s.launchRestoreWorkspace(ctx, req)
+		response, err = s.launchRestoreWorkspace(ctx, req)
 	default:
-		return nil, fmt.Errorf("unknown intent: %s", intent)
+		err = fmt.Errorf("unknown intent: %s", intent)
 	}
+	if err != nil {
+		if req.RecoveryAction == "" {
+			if blockErr := s.recordRecoveryBlockForError(ctx, req, err); blockErr != nil {
+				err = errors.Join(err, blockErr)
+			}
+		}
+		return nil, err
+	}
+	if intent != IntentRestoreWorkspace && req.RecoveryAction != "" && !req.DeferRecoveryResolution {
+		if err := s.resolveSessionRecoveryBlock(ctx, req.SessionID, req.RecoveryAction); err != nil {
+			return nil, err
+		}
+	}
+	return response, nil
+}
+
+func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return nil
+	}
+	store, ok := s.repo.(sessionRecoveryBlockStore)
+	if !ok {
+		return nil
+	}
+	incarnationID, generation, err := s.recoverySessionIdentity(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	block, err := store.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, generation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check session recovery block: %w", err)
+	}
+	if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); resolved {
+		return nil
+	}
+	return &sessionRecoveryRequiredError{Block: block}
+}
+
+// GetOpenSessionRecoveryBlock returns the canonical block for an autonomous
+// consumer that needs to retain its own pending work reference. A missing
+// block is represented by (nil, nil), matching the ordinary admission check.
+func (s *Service) GetOpenSessionRecoveryBlock(ctx context.Context, sessionID string) (*models.SessionRecoveryBlock, error) {
+	if sessionID == "" {
+		return nil, nil
+	}
+	store, ok := s.repo.(sessionRecoveryBlockStore)
+	if !ok {
+		return nil, nil
+	}
+	incarnationID, generation, err := s.recoverySessionIdentity(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	block, err := store.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, generation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load session recovery block: %w", err)
+	}
+	return block, nil
+}
+
+// GetSessionRecoveryBlock returns a block by identity for autonomous owners
+// that release parked work only after the canonical action is resolved.
+func (s *Service) GetSessionRecoveryBlock(ctx context.Context, blockID string) (*models.SessionRecoveryBlock, error) {
+	if blockID == "" {
+		return nil, nil
+	}
+	lookup, ok := s.repo.(sessionRecoveryBlockLookup)
+	if !ok {
+		return nil, nil
+	}
+	block, err := lookup.GetSessionRecoveryBlock(ctx, blockID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load session recovery block %s: %w", blockID, err)
+	}
+	return block, nil
+}
+
+func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, action string) error {
+	if sessionID == "" || action == "" {
+		return nil
+	}
+	store, ok := s.repo.(sessionRecoveryBlockStore)
+	if !ok {
+		return nil
+	}
+	incarnationID, generation, err := s.recoverySessionIdentity(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	block, err := store.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, generation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load session recovery block for resolution: %w", err)
+	}
+	completedAt := time.Now().UTC()
+	resolved, handled := false, false
+	if action == recoveryActionResume {
+		resolved, handled, err = s.resolveNativeDeliveryBlock(ctx, block, completedAt)
+	}
+	if !handled {
+		resolved, err = store.ResolveSessionRecoveryBlock(ctx, block.ID, action, completedAt)
+	}
+	if err != nil {
+		return fmt.Errorf("resolve session recovery block: %w", err)
+	}
+	if !resolved {
+		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
+	}
+	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
+	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
+		return fmt.Errorf("release parked queue work after session recovery: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) recoverySessionIdentity(ctx context.Context, sessionID string) (string, int64, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return "", 0, fmt.Errorf("load session recovery identity: %w", err)
+	}
+	if session == nil {
+		return "", 0, models.ErrTaskSessionNotFound
+	}
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	generation := int64(0)
+	if continuity, ok := s.repo.(sessionContinuityStore); ok {
+		current, generationErr := continuity.GetCurrentHarnessSessionGeneration(ctx, session.ID, incarnationID)
+		switch {
+		case generationErr == nil && current != nil:
+			generation = current.Generation
+		case generationErr == nil:
+		case errors.Is(generationErr, models.ErrTaskSessionNotFound), errors.Is(generationErr, sql.ErrNoRows):
+		default:
+			return "", 0, fmt.Errorf("load current harness generation: %w", generationErr)
+		}
+	}
+	return incarnationID, generation, nil
+}
+
+func (s *Service) recordRecoveryBlockForError(ctx context.Context, req *LaunchSessionRequest, launchErr error) error {
+	if req == nil || req.SessionID == "" || launchErr == nil {
+		return nil
+	}
+	consumer := "interactive"
+	if req.AutoStart {
+		consumer = "queue"
+	}
+	return s.recordSessionRecoveryBlock(ctx, req.SessionID, consumer, launchErr)
+}
+
+func (s *Service) recordSessionRecoveryBlock(
+	ctx context.Context, sessionID, consumer string, launchErr error,
+) error {
+	if sessionID == "" || launchErr == nil {
+		return nil
+	}
+	var signal recoveryRequiredSignal
+	if !errors.As(launchErr, &signal) {
+		return nil
+	}
+	store, ok := s.repo.(sessionRecoveryBlockStore)
+	if !ok {
+		return nil
+	}
+	incarnationID, generation, err := s.recoverySessionIdentity(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	reason := signal.RecoveryReason()
+	if reason == "" {
+		reason = "unknown_failure"
+	}
+	if consumer == "" {
+		consumer = "interactive"
+	}
+	block := &models.SessionRecoveryBlock{}
+	var detailed *sessionRecoveryRequiredError
+	if errors.As(launchErr, &detailed) && detailed.Block != nil {
+		block = detailed.Block
+	}
+	block.SessionID = sessionID
+	block.IncarnationID = incarnationID
+	block.ExpectedGeneration = generation
+	block.Reason = reason
+	block.State = models.RecoveryBlockOpen
+	if block.ConsumerReference == "" {
+		block.ConsumerReference = consumer
+		if consumer == "interactive" && reason == durableDeliveryUnresolvedReason {
+			block.ConsumerReference = agentDeliveryConsumer
+		}
+	}
+	if block.CreatedAt.IsZero() {
+		block.CreatedAt = time.Now().UTC()
+	}
+	block.UpdatedAt = time.Now().UTC()
+	if err := s.bindSessionRecoverySubmission(ctx, block, sessionID, incarnationID, generation); err != nil {
+		return err
+	}
+	if err := store.UpsertSessionRecoveryBlock(ctx, block); err != nil {
+		return fmt.Errorf("persist session recovery block: %w", err)
+	}
+	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
+	agentruntime.RecordRecoveryRequired(consumer, reason)
+	return nil
+}
+
+func (s *Service) bindSessionRecoverySubmission(
+	ctx context.Context,
+	block *models.SessionRecoveryBlock,
+	sessionID, incarnationID string,
+	generation int64,
+) error {
+	if block.DeliverySubmissionID == "" {
+		return nil
+	}
+	submissions, supported := s.repo.(taskrepo.AgentDeliveryRepository)
+	if !supported {
+		clearSessionRecoveryDeliveryBinding(block)
+		return nil
+	}
+	submission, err := submissions.GetAgentDeliverySubmission(ctx, block.DeliverySubmissionID)
+	if err != nil && !errors.Is(err, taskrepo.ErrAgentDeliverySubmissionNotFound) {
+		return fmt.Errorf("validate delivery recovery submission: %w", err)
+	}
+	if err != nil || submission.SessionID != sessionID || submission.IncarnationID != incarnationID ||
+		submission.HarnessGeneration != generation {
+		clearSessionRecoveryDeliveryBinding(block)
+	}
+	return nil
+}
+
+func clearSessionRecoveryDeliveryBinding(block *models.SessionRecoveryBlock) {
+	block.DeliverySubmissionID = ""
+	block.DeliveryStreamID = ""
+	block.DeliverySequence = 0
+	block.DeliveryTurnID = ""
+	block.DeliveryOutcome = ""
 }
 
 func validateLaunchActivationSource(source LaunchActivationSource) error {
@@ -411,6 +820,11 @@ func (s *Service) claimLaunchAttachments(ctx context.Context, req *LaunchSession
 // the prompt — eagerly launching here would spawn a promptless PTY and the
 // later start would be rejected against the now-running session.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	manualTaskID := ""
+	if launchOriginForActivation(req) == launchOriginManual && retryLaunchInContext(ctx) == nil {
+		manualTaskID = req.TaskID
+	}
+	ctx = models.WithExplicitManualCreation(ctx, manualTaskID)
 	prepareCtx := withInitialPromptPreview(ctx, req.InitialPromptPreview)
 	prepareCtx = withInitialPromptSubmission(prepareCtx, req.InitialPromptSubmission)
 	if s.shouldUpgradePassthroughPrepare(ctx, req) {
@@ -614,6 +1028,12 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		Origin:                           string(launchOriginForActivation(req)),
 		RequireIdleSuspensionProvenance:  req.RequireIdleSuspensionProvenance,
 		SettingsPolicy:                   req.SessionSettingsPolicy,
+		ForceContextContinuation:         req.ForceContextContinuation,
+		ContinuationPrompt:               req.ContinuationPrompt,
+		DeferInitialPrompt:               req.DeferRecoveryResolution,
+		RecoveryAction:                   req.RecoveryAction,
+		StartAgentSynchronously: req.DeferRecoveryResolution &&
+			(req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume),
 	}
 	var execution *executor.TaskExecution
 	var err error
@@ -643,6 +1063,12 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		}
 		var blocked *sessionOpenRecoveryBlockedError
 		if errors.As(err, &blocked) {
+			if req.RecoveryAction != "" {
+				// An explicit recovery must not report success when no runtime
+				// was launched: its caller would acknowledge delivery or commit
+				// a continuation against an execution that does not exist.
+				return nil, err
+			}
 			return s.sessionOpenRecoveryWaitingResponse(ctx, req, blocked.reason), nil
 		}
 		if req.ActivationSource == LaunchActivationSourceSessionOpen && errors.Is(err, ErrCeilingLaunchConflict) {
@@ -915,8 +1341,9 @@ type RecoverSessionOptions struct {
 	ErrorStamp     string
 }
 
-// RecoverSession handles explicit retry, branch replacement, fresh start, and
-// stamp-fenced managed clone relocation after an agent CLI failure.
+// RecoverSession handles user-initiated recovery after an agent CLI failure.
+// action may request native resume, bounded context continuation, or explicit
+// recovery from a managed-clone relocation requirement.
 func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action string, errorStamps ...string) (*LaunchSessionResponse, error) {
 	return s.RecoverSessionWithSettingsPolicy(
 		ctx, taskID, sessionID, action, executor.ResumeSettingsPolicyStrict, errorStamps...,
@@ -949,9 +1376,20 @@ func (s *Service) RecoverSessionWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	if s.automationOwnsRetrySession(ctx, taskID, sessionID) {
+		return nil, automation.ErrRetryLaunchUncertain
+	}
 	action, err = normalizeSessionRecoveryAction(ctx, sessionID, action, s.wasResumeAttempt)
 	if err != nil {
 		return nil, err
+	}
+	if action == recoveryActionResume {
+		if response, handled, err := s.resumePrunedDelivery(ctx, session); handled || err != nil {
+			return response, err
+		}
+		if err := s.checkNativeResumeDeliveryBlock(ctx, taskID, sessionID); err != nil {
+			return nil, err
+		}
 	}
 	if action == recoveryActionRepairWorkspaceInventory && strings.TrimSpace(options.IdempotencyKey) == "" {
 		return nil, models.ErrWorkspaceInventoryRecoveryInvalid
@@ -965,9 +1403,49 @@ func (s *Service) RecoverSessionWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	// Office owns autonomous run admission. An operator recovery action must
+	// settle the canonical block and let the Office scheduler perform the next
+	// launch, so budget, provenance, approval, checkout, and agent-status gates
+	// remain authoritative. Calling ResumeTaskSessionWithOptions here would
+	// bypass those gates and would also create a direct chat-style launch for a
+	// run whose identity belongs to the scheduler.
+	if action == "resume" || action == sessionRecoveryActionContinueFromHistory || action == "fresh_start" {
+		isOfficeTask, officeErr := s.lookupOfficeTask(ctx, taskID)
+		if officeErr != nil {
+			return nil, fmt.Errorf("failed to determine office task status: %w", officeErr)
+		}
+		if isOfficeTask {
+			return s.recoverOfficeSessionThroughScheduler(ctx, taskID, sessionID, action)
+		}
+	}
+	resumeOptions := executor.ResumeOptions{}
+	var checkpoint *continuationCheckpoint
+	var continuation executor.ContextContinuation
+	if action == recoveryActionContinueHistory {
+		continuation, err = s.buildContextContinuationPrompt(ctx, taskID, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build context continuation: %w", err)
+		}
+		checkpoint, err = s.persistContinuationCheckpoint(ctx, taskID, sessionID, continuation)
+		if err != nil {
+			return nil, fmt.Errorf("failed to persist context continuation: %w", err)
+		}
+		resumeOptions = executor.ResumeOptions{
+			ForceContextContinuation: true,
+			ContinuationPrompt:       continuation.Prompt,
+			DeferInitialPrompt:       true,
+			RecoveryAction:           action,
+			StartAgentSynchronously:  true,
+		}
+	}
 
 	recoveryAdmission, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
 	if err != nil {
+		if checkpoint != nil {
+			if settleErr := s.finishContinuationCheckpoint(context.WithoutCancel(ctx), checkpoint, models.ContinuitySnapshotUncertain); settleErr != nil {
+				err = errors.Join(err, settleErr)
+			}
+		}
 		if errors.Is(err, recoveryoperation.ErrInProgress) {
 			response, statusErr := s.liveWorkspaceRecoveryResponse(ctx, taskID, sessionID, session)
 			if statusErr != nil {
@@ -993,7 +1471,12 @@ func (s *Service) RecoverSessionWithOptions(
 	}
 
 	if err := s.applyRecoveryActionWithSettlement(launchCtx, recoveryAdmission, sessionID, action); err != nil {
-		return nil, err
+		if checkpoint != nil {
+			if settleErr := s.finishContinuationCheckpoint(context.WithoutCancel(ctx), checkpoint, models.ContinuitySnapshotUncertain); settleErr != nil {
+				err = errors.Join(err, settleErr)
+			}
+		}
+		return nil, normalizeRecoverSessionError(err)
 	}
 
 	resp, err := s.LaunchSession(launchCtx, &LaunchSessionRequest{
@@ -1005,19 +1488,66 @@ func (s *Service) RecoverSessionWithOptions(
 		RepairWorkspaceInventory:         action == recoveryActionRepairWorkspaceInventory,
 		WorkspaceInventoryIdempotencyKey: strings.TrimSpace(options.IdempotencyKey),
 		SessionSettingsPolicy:            options.SettingsPolicy,
+		ForceContextContinuation:         resumeOptions.ForceContextContinuation,
+		ContinuationPrompt:               resumeOptions.ContinuationPrompt,
+		RecoveryAction:                   action,
+		DeferRecoveryResolution:          checkpoint != nil || action == recoveryActionResume,
 		InitialPromptSubmission:          initialSubmission,
 	})
+	if err == nil && action == recoveryActionResume {
+		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
+	}
 	if err != nil {
-		resumeErr := normalizeRecoverSessionError(err)
 		if recoveryAdmission != nil {
 			if persistErr := recoveryAdmission.CompleteRecoveryResume(launchCtx, false, "resume_failed"); persistErr != nil {
-				return nil, fmt.Errorf("%w (workspace recovery outcome could not be saved: %v)", resumeErr, persistErr)
+				err = errors.Join(err, persistErr)
 			}
 		}
-		return nil, resumeErr
+		return s.handleContinuationLaunchError(ctx, checkpoint, err)
 	}
 	if err := completeRecoveryResumeAfterLaunch(launchCtx, recoveryAdmission, resp); err != nil {
 		return nil, err
+	}
+	if checkpoint == nil {
+		if action == recoveryActionResume {
+			if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
+				return nil, normalizeRecoverSessionError(err)
+			}
+		}
+		return resp, nil
+	}
+	checkpoint.candidateExecutionID = resp.AgentExecutionID
+	if err := s.commitContinuationGeneration(ctx, checkpoint); err != nil {
+		rollbackErr := s.rollbackContinuationCandidate(ctx, checkpoint)
+		settleErr := s.settleContinuationCheckpoint(ctx, checkpoint, models.ContinuitySnapshotUncertain)
+		if rollbackErr != nil {
+			err = errors.Join(err, rollbackErr)
+		}
+		if settleErr != nil {
+			err = errors.Join(err, settleErr)
+		}
+		return nil, normalizeRecoverSessionError(err)
+	}
+	if _, err := s.promptTask(
+		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true, launchOriginManual,
+		promptTaskOptions{
+			recoveryAction:             action,
+			preservePromptContext:      true,
+			deliverySubmissionID:       checkpoint.submissionID,
+			expectedDeliveryGeneration: checkpoint.expectedGen + 1,
+		},
+	); err != nil {
+		settleErr := s.settleContinuationCheckpoint(ctx, checkpoint, models.ContinuitySnapshotUncertain)
+		if settleErr != nil {
+			err = errors.Join(err, settleErr)
+		}
+		return nil, normalizeRecoverSessionError(err)
+	}
+	if err := s.settleContinuationCheckpoint(ctx, checkpoint, models.ContinuitySnapshotConsumed); err != nil {
+		return nil, normalizeRecoverSessionError(err)
+	}
+	if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
+		return nil, normalizeRecoverSessionError(err)
 	}
 	return resp, nil
 }
@@ -1282,7 +1812,7 @@ func normalizeSessionRecoveryAction(
 	}
 	if action != recoveryActionResume && action != recoveryActionResumeNewBranch &&
 		action != recoveryActionFreshStart && action != models.RecoveryActionRelocateAndResume &&
-		action != recoveryActionRepairWorkspaceInventory {
+		action != recoveryActionRepairWorkspaceInventory && action != recoveryActionContinueHistory {
 		return "", fmt.Errorf("invalid recovery action: %s", action)
 	}
 	return action, nil
@@ -1464,6 +1994,349 @@ func (s *Service) workspaceRecoveryExecutionID(ctx context.Context, sessionID st
 		return "", nil
 	}
 	return running.AgentExecutionID, nil
+}
+
+func (s *Service) handleContinuationLaunchError(
+	ctx context.Context,
+	checkpoint *continuationCheckpoint,
+	err error,
+) (*LaunchSessionResponse, error) {
+	if checkpoint == nil {
+		return nil, normalizeRecoverSessionError(err)
+	}
+	settleErr := s.finishContinuationCheckpoint(ctx, checkpoint, models.ContinuitySnapshotUncertain)
+	if settleErr != nil {
+		err = errors.Join(err, settleErr)
+	}
+	return nil, normalizeRecoverSessionError(err)
+}
+
+// recoverOfficeSessionThroughScheduler resolves an operator-owned recovery
+// block without launching the session in the chat/orchestrator path. The
+// resolved block is observed by Office's next scheduler tick, which releases
+// the original run and repeats its normal admission gates before calling the
+// Office task starter. Missing blocks remain an error: a scheduler-owned
+// session must never be turned into an untracked manual launch.
+func (s *Service) recoverOfficeSessionThroughScheduler(
+	ctx context.Context,
+	taskID, sessionID, action string,
+) (*LaunchSessionResponse, error) {
+	// Validate the task/session binding before mutating the recovery block. A
+	// scheduler handoff must never authorize a block and then fail while
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load Office session for recovery authorization: %w", err)
+	}
+	if session == nil || session.TaskID != taskID {
+		return nil, ErrTaskSessionPairMismatch
+	}
+	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err == nil {
+		return nil, errOfficeTaskResumeRequiresScheduler
+	} else {
+		var required *sessionRecoveryRequiredError
+		if !errors.As(err, &required) {
+			return nil, err
+		}
+	}
+	if action == "fresh_start" {
+		if err := s.clearResumeToken(ctx, sessionID); err != nil {
+			return nil, fmt.Errorf("failed to clear resume token for Office fresh start: %w", err)
+		}
+	}
+	if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
+		return nil, normalizeRecoverSessionError(err)
+	}
+	return &LaunchSessionResponse{
+		Success:   true,
+		TaskID:    taskID,
+		SessionID: sessionID,
+		State:     string(session.State),
+	}, nil
+}
+
+// buildContextContinuationPrompt composes canonical Kandev data for the
+// explicit recovery path that starts a new native conversation. Native resume
+// remains the default; this prompt is only created after the operator selects
+// continue_from_history.
+func (s *Service) buildContextContinuationPrompt(ctx context.Context, taskID, sessionID string) (executor.ContextContinuation, error) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return executor.ContextContinuation{}, fmt.Errorf("load task: %w", err)
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return executor.ContextContinuation{}, fmt.Errorf("load session: %w", err)
+	}
+	if session == nil || session.TaskID != taskID {
+		return executor.ContextContinuation{}, ErrTaskSessionPairMismatch
+	}
+	messages, err := s.repo.ListMessages(ctx, sessionID)
+	if err != nil {
+		return executor.ContextContinuation{}, fmt.Errorf("load session history: %w", err)
+	}
+	plan, err := s.repo.GetTaskPlan(ctx, taskID)
+	if err != nil {
+		return executor.ContextContinuation{}, fmt.Errorf("load task plan: %w", err)
+	}
+	planText := ""
+	if plan != nil {
+		planText = strings.TrimSpace(strings.Join([]string{plan.Title, plan.Content}, "\n"))
+	}
+	return executor.BuildContextContinuation(
+		task.Description,
+		planText,
+		session.WorkspacePath,
+		messages,
+	), nil
+}
+
+func (s *Service) persistContinuationCheckpoint(
+	ctx context.Context,
+	taskID, sessionID string,
+	continuation executor.ContextContinuation,
+) (*continuationCheckpoint, error) {
+	store, ok := s.repo.(sessionContinuityStore)
+	if !ok {
+		return nil, errors.New("continuation checkpoint store is unavailable")
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load session for checkpoint: %w", err)
+	}
+	if session == nil || session.TaskID != taskID {
+		return nil, ErrTaskSessionPairMismatch
+	}
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	var expectedGeneration int64
+	current, err := store.GetCurrentHarnessSessionGeneration(ctx, session.ID, incarnationID)
+	if err == nil && current != nil {
+		expectedGeneration = current.Generation
+	} else if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
+		return nil, fmt.Errorf("load current harness generation: %w", err)
+	}
+	now := time.Now().UTC()
+	attemptID := uuid.NewString()
+	if err := store.CreateRestoreAttempt(ctx, &models.RestoreAttempt{
+		ID:                 attemptID,
+		SessionID:          session.ID,
+		IncarnationID:      incarnationID,
+		ExpectedGeneration: expectedGeneration,
+		Action:             sessionRecoveryActionContinueFromHistory,
+		Outcome:            "blocked",
+		Reason:             "native_state_missing",
+		TargetWorkspace:    session.WorkspacePath,
+		Authorized:         true,
+		CreatedAt:          now,
+	}); err != nil {
+		return nil, err
+	}
+	snapshotID := uuid.NewString()
+	submissionID := normalizeDeliverySubmissionID(uuid.NewString())
+	if err := store.CreateContinuationSnapshot(ctx, &models.ContinuationSnapshot{
+		ID:               snapshotID,
+		AttemptID:        attemptID,
+		SessionID:        session.ID,
+		TargetGeneration: expectedGeneration + 1,
+		SubmissionID:     submissionID,
+		SourceMessageID:  continuation.SourceMessageID,
+		Content:          continuation.Prompt,
+		ByteCount:        continuation.ByteCount,
+		OmittedMessages:  continuation.OmittedMessages,
+		Truncated:        continuation.Truncated,
+		ContentHash:      continuation.ContentHash,
+		Status:           models.ContinuitySnapshotPrepared,
+		CreatedAt:        now,
+	}); err != nil {
+		return nil, err
+	}
+	if continuation.Truncated {
+		agentruntime.RecordRestoreContextTruncated(session.AgentProfileID)
+	}
+	return &continuationCheckpoint{
+		store:                store,
+		attemptID:            attemptID,
+		snapshotID:           snapshotID,
+		submissionID:         submissionID,
+		sessionID:            session.ID,
+		incarnationID:        incarnationID,
+		expectedGen:          expectedGeneration,
+		workspace:            session.WorkspacePath,
+		previousState:        session.State,
+		previousErrorMessage: session.ErrorMessage,
+	}, nil
+}
+
+// rollbackContinuationCandidate releases the promptless replacement created
+// while preparing an explicit context continuation. The candidate execution
+// is not yet a committed harness generation, so a failed generation CAS must
+// not leave it live or overwrite a concurrent successor's state.
+func (s *Service) rollbackContinuationCandidate(ctx context.Context, checkpoint *continuationCheckpoint) error {
+	if checkpoint == nil || checkpoint.candidateExecutionID == "" {
+		return nil
+	}
+	running, err := s.loadContinuationCandidate(ctx, checkpoint)
+	if err != nil {
+		return err
+	}
+	if running == nil || running.AgentExecutionID != checkpoint.candidateExecutionID {
+		// A different execution already owns the session. Never clean it up or
+		// roll its state back while settling a stale continuation candidate.
+		return nil
+	}
+	if err := s.cleanupContinuationCandidate(ctx, checkpoint, running); err != nil {
+		return err
+	}
+	return s.restoreContinuationSessionState(ctx, checkpoint)
+}
+
+func (s *Service) loadContinuationCandidate(ctx context.Context, checkpoint *continuationCheckpoint) (*models.ExecutorRunning, error) {
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, checkpoint.sessionID)
+	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return nil, fmt.Errorf("load continuation candidate execution: %w", err)
+	}
+	return running, nil
+}
+
+func (s *Service) cleanupContinuationCandidate(ctx context.Context, checkpoint *continuationCheckpoint, running *models.ExecutorRunning) error {
+	if cleaner, ok := s.agentManager.(executionIdentityCleaner); ok {
+		if err := cleaner.CleanupStaleExecutionBySessionIDIfCurrent(
+			ctx,
+			checkpoint.sessionID,
+			checkpoint.candidateExecutionID,
+			running.UpdatedAt,
+		); err != nil {
+			return fmt.Errorf("cleanup continuation candidate: %w", err)
+		}
+	} else if err := s.agentManager.CleanupStaleExecutionBySessionID(ctx, checkpoint.sessionID); err != nil {
+		return fmt.Errorf("cleanup continuation candidate: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) restoreContinuationSessionState(ctx context.Context, checkpoint *continuationCheckpoint) error {
+	// Cleanup is identity-fenced above. Re-read before restoring state so a
+	// successor that won the session after cleanup is never overwritten.
+	currentRunning, runningErr := s.repo.GetExecutorRunningBySessionID(ctx, checkpoint.sessionID)
+	if runningErr == nil && currentRunning != nil && currentRunning.AgentExecutionID != checkpoint.candidateExecutionID {
+		return nil
+	}
+	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+		return fmt.Errorf("re-read continuation execution after cleanup: %w", runningErr)
+	}
+	currentSession, err := s.repo.GetTaskSession(ctx, checkpoint.sessionID)
+	if err != nil {
+		return fmt.Errorf("load session after continuation cleanup: %w", err)
+	}
+	if currentSession == nil || isTerminalSessionState(currentSession.State) {
+		return nil
+	}
+	if currentSession.State == checkpoint.previousState {
+		return nil
+	}
+	changed, _, err := s.repo.UpdateTaskSessionStateIfCurrent(
+		ctx,
+		checkpoint.sessionID,
+		currentSession.State,
+		checkpoint.previousState,
+		checkpoint.previousErrorMessage,
+	)
+	if err != nil {
+		return fmt.Errorf("restore session state after continuation cleanup: %w", err)
+	}
+	if !changed {
+		return nil
+	}
+	return nil
+}
+
+func (s *Service) commitContinuationGeneration(ctx context.Context, checkpoint *continuationCheckpoint) error {
+	if checkpoint == nil || checkpoint.store == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	acpSessionID := s.currentACPSessionID(checkpoint.sessionID)
+	if acpSessionID == "" {
+		return errors.New("continuation candidate has no native session identity")
+	}
+	committed, err := checkpoint.store.CommitHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID:             checkpoint.sessionID,
+		IncarnationID:         checkpoint.incarnationID,
+		Generation:            checkpoint.expectedGen + 1,
+		PredecessorGeneration: checkpoint.expectedGen,
+		NativeSessionID:       acpSessionID,
+		OriginalWorkspace:     checkpoint.workspace,
+		CurrentWorkspace:      checkpoint.workspace,
+		CreationReason:        "context_continued",
+		CreatedAt:             now,
+		CommittedAt:           now,
+	}, checkpoint.expectedGen)
+	if err == nil && !committed {
+		// The ACP session-created event may have filled the absent initial row
+		// before this continuation checkpoint reaches its CAS. Treat that exact
+		// native identity as success, but never accept an unrelated generation.
+		current, currentErr := checkpoint.store.GetCurrentHarnessSessionGeneration(
+			ctx, checkpoint.sessionID, checkpoint.incarnationID,
+		)
+		if currentErr == nil && current != nil &&
+			current.Generation == checkpoint.expectedGen+1 && current.NativeSessionID == acpSessionID {
+			committed = true
+		}
+	}
+	if err != nil || !committed {
+		if err != nil {
+			return fmt.Errorf("commit continuation generation: %w", err)
+		}
+		return errors.New("commit continuation generation: stale generation")
+	}
+	checkpoint.nativeID = acpSessionID
+	return nil
+}
+
+func (s *Service) finishContinuationCheckpoint(ctx context.Context, checkpoint *continuationCheckpoint, status string) error {
+	if checkpoint == nil || checkpoint.store == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	var resultErr error
+	if err := checkpoint.store.CompleteContinuationSnapshot(ctx, checkpoint.snapshotID, status, now); err != nil {
+		resultErr = errors.Join(resultErr, fmt.Errorf("settle continuation snapshot: %w", err))
+	}
+	attemptOutcome := "blocked"
+	metricOutcome := "blocked"
+	if status == models.ContinuitySnapshotConsumed {
+		attemptOutcome = "context_continued"
+		metricOutcome = "context_continued"
+	}
+	if err := checkpoint.store.CompleteRestoreAttempt(ctx, checkpoint.attemptID, attemptOutcome, now); err != nil {
+		resultErr = errors.Join(resultErr, fmt.Errorf("settle restore attempt: %w", err))
+	}
+	if resultErr == nil {
+		agentruntime.RecordRestoreAttempt(metricOutcome, "native_state_missing", "")
+	}
+	return resultErr
+}
+
+// settleContinuationCheckpoint never reports a consumed snapshot after a
+// persistence failure. If the success settlement is ambiguous, the
+// conservative outcome is uncertain, which keeps the recovery block closed
+// and prevents a retry from replaying the same context automatically.
+func (s *Service) settleContinuationCheckpoint(
+	ctx context.Context,
+	checkpoint *continuationCheckpoint,
+	status string,
+) error {
+	err := s.finishContinuationCheckpoint(ctx, checkpoint, status)
+	if err == nil || status != models.ContinuitySnapshotConsumed {
+		return err
+	}
+	uncertainErr := s.finishContinuationCheckpoint(ctx, checkpoint, models.ContinuitySnapshotUncertain)
+	if uncertainErr != nil {
+		return errors.Join(err, uncertainErr)
+	}
+	return err
 }
 
 // normalizeRecoverSessionError maps a missing-profile resume failure to a

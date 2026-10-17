@@ -13,16 +13,13 @@ requirements:
 
 The task and workflow system owns session recipients and task-session lifecycle.
 Each step owns its recipient and two lifecycle settings. The explicit-target
-extension below is a design for implementation, dated 2026-09-09. Existing
-profile-only behavior remains the compatibility path.
+extension below is dated 2026-09-09; profile-only behavior remains compatible.
 
-The destination step owns session selection. The source step owns session
-retirement. The agent runtime still owns process launch, resume, and stop. The
-task environment remains shared across sessions.
+The destination owns selection; the source owns retirement. Runtime owns
+process launch, resume, and stop. Task environments remain shared.
 
-The workflow engine continues to select transitions and steps. This change does
-not add an action, event, or workflow state. The orchestrator integration must
-carry both source and destination step settings into the session handoff.
+The workflow engine selects transitions and steps; this change adds no action,
+event, or workflow state. The orchestrator handoff carries both step settings.
 
 Conditional original-session settings remain separate. They change one
 session's model settings without switching profiles.
@@ -49,8 +46,8 @@ session's model settings without switching profiles.
   orchestrator session handoff.
 - The destination start setting controls reusable-session lookup.
 - The source end setting controls completion or parking.
-- Completion and stopped handlers consume execution-stamped stop intents. They
-  skip ordinary workflow advancement for the retired execution.
+- Terminal callbacks consume matching stop intents, retire that execution, and
+  skip failure or workflow handling.
 - The workflow step draft and coordinated save path own the profile and both
   lifecycle settings.
 - `WorkflowStepAgentProfileSelector` shows the profile and lifecycle settings
@@ -116,8 +113,8 @@ consumed tombstone remains durable.
     Set the source to `WAITING_FOR_INPUT` and clear `CompletedAt`.
 11. Release the source lifecycle guard before runtime stop. If the caller owns
     the guard, schedule the stop after the lifecycle operation returns.
-12. When the old execution emits a callback, consume only its matching stamp.
-    Skip turn completion, transition evaluation, and task-state reconciliation.
+12. Consume only the old execution's stamped intent; treat its stream close as
+    teardown acknowledgement and skip normal terminal processing.
 
 The existing handoff accepts separate policies. Reusable-session lookup accepts
 the destination start setting. Source cleanup accepts the source end setting.
@@ -366,8 +363,12 @@ Reject an obsolete entry against the current transition/entry identity before
 replacing this record. A newer entry cannot overtake an unfinished route without
 reconciliation. Keep the committed record until a newer valid entry replaces it;
 task deletion removes it and task duplication strips it. A deleted recorded
-destination fails that entry visibly instead of creating a second destination
-under the same operation. Test prepared/committed restart and rollback on both
+destination, like a terminal one, cannot satisfy reuse: the retry logs it and
+allocates the target profile's fresh session, which replaces the record. Any
+other failure to load the destination fails that entry visibly. A user or a
+compensation path can delete the destination without leaving the step, so
+failing every later start in the entry would lock the task until it moves.
+Test prepared/committed restart and rollback on both
 databases. Extend existing task metadata transaction helpers; do not assume
 unconditional `SetTaskMetadataKey` provides compare-and-set or write-once safety.
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -433,9 +434,9 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		workflowAgentOverridesValue = workflowAgentOverrides
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
+		INSERT INTO tasks (executor_actor_user_id, id, workspace_id, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workflowCreator(ctx), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
 	if err != nil {
 		if isExternalIDUniqueViolation(err) {
 			return "", fmt.Errorf("%w: %w", ErrExternalIDConflict, err)
@@ -1519,8 +1520,30 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil)
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil)
 	return admitted, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionAndEffect atomically moves a task into a
+// workflow step and records the durable delivery effect key. A repeated effect
+// returns admitted=false, applied=false without rewriting the task row.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndEffect(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+	effect *models.AgentDeliveryEffect,
+) (admitted, applied bool, err error) {
+	if effect == nil || effect.EffectKey == "" {
+		return false, false, fmt.Errorf("effect key is required")
+	}
+	if effect.CreatedAt.IsZero() {
+		effect.CreatedAt = r.nowUTC()
+	}
+	return r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, effect,
+	)
 }
 
 // UpdateTaskWithWorkflowStepAdmissionAndState is the manual-move variant of
@@ -1544,7 +1567,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil, nil,
 	)
 	return admitted, err
 }
@@ -1590,6 +1613,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionExact(
 			queueExitPending, "", expectedWorkflowID, nil, nil,
 			&exactTaskMoveOperation{workspaceID: workspaceID, expectedVersion: expectedResourceVersion, operationID: operationID, payloadDigest: payloadDigest, claimFence: fence},
 			&alreadyApplied,
+			nil,
 		)
 		unlock()
 		var changed *admissionSourceChangedError
@@ -1617,7 +1641,7 @@ func (r *Repository) UpdateTaskWithWorkflowChangeAdmissionAndState(
 		return false, fmt.Errorf("workflow change source guard is required")
 	}
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source, nil,
 	)
 	return admitted, err
 }
@@ -1640,7 +1664,29 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 ) (applied bool, err error) {
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
-	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil)
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, nil)
+	return applied, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect is the guarded
+// transition variant that records a durable delivery effect in the same
+// transaction as the compare-and-swap task move.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID, targetStepID string,
+	limit int,
+	effect *models.AgentDeliveryEffect,
+) (applied bool, err error) {
+	if effect == nil || effect.EffectKey == "" {
+		return false, fmt.Errorf("effect key is required")
+	}
+	if effect.CreatedAt.IsZero() {
+		effect.CreatedAt = r.nowUTC()
+	}
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, effect,
+	)
 	return applied, err
 }
 
@@ -1654,7 +1700,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
 	return r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil,
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil, nil,
 	)
 }
 
@@ -1901,9 +1947,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	expectedWorkflowID string,
 	deferredMove *messagequeue.PendingMoveRecord,
 	workflowChangeSource *models.WorkflowChangeSource,
+	effect *models.AgentDeliveryEffect,
 ) (admitted bool, applied bool, err error) {
 	return r.updateTaskWithWorkflowStepAdmissionExactInner(ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending,
-		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil)
+		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect)
 }
 
 type exactTaskMoveOperation struct {
@@ -1928,6 +1975,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 	workflowChangeSource *models.WorkflowChangeSource,
 	exactOperation *exactTaskMoveOperation,
 	alreadyApplied *bool,
+	effect *models.AgentDeliveryEffect,
 ) (admitted bool, applied bool, err error) {
 	currentSourceStepID := sourceStepID
 	for attempt := 0; attempt < admissionSourceRetryLimit; attempt++ {
@@ -1946,6 +1994,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 			workflowChangeSource,
 			exactOperation,
 			alreadyApplied,
+			effect,
 		)
 		unlock()
 
@@ -1982,6 +2031,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	workflowChangeSource *models.WorkflowChangeSource,
 	exactOperation *exactTaskMoveOperation,
 	alreadyApplied *bool,
+	effect *models.AgentDeliveryEffect,
 ) (admitted bool, applied bool, err error) {
 	now := time.Now().UTC()
 	task.UpdatedAt = now
@@ -2071,6 +2121,20 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		}
 		return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
 	}
+	// A later move may have left and returned to the same source step: the step
+	// id still matches, but the transition ledger advanced. Compare the ledger id
+	// the deferred move captured when it was requested, so a move superseded by a
+	// later move is not applied against the returned-to step. A legacy row
+	// (FromTransitionID 0) skips this guard and keeps its behavior.
+	if deferredMove != nil && deferredMove.Move.FromTransitionID != 0 {
+		latestTransitionID, ledgerErr := r.getLatestTaskStepTransitionIDTx(ctx, tx, task.ID)
+		if ledgerErr != nil {
+			return false, false, ledgerErr
+		}
+		if latestTransitionID != deferredMove.Move.FromTransitionID {
+			return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
+		}
+	}
 	if exactOperation != nil {
 		currentVersion, err := r.readTaskUpdatedAtInTx(ctx, tx, task.ID)
 		if err != nil {
@@ -2117,6 +2181,40 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 			return false, false, err
 		}
 		if !casApplied {
+			return false, false, nil
+		}
+	}
+	if effect != nil {
+		if effect.WorkflowStepID != "" || effect.WorkflowPolicyUpdatedAt != nil {
+			policyMatches, err := r.workflowPolicyMatchesTx(ctx, tx, actualWorkflowID, actualSourceStepID, effect)
+			if err != nil {
+				return false, false, err
+			}
+			if !policyMatches {
+				return false, false, nil
+			}
+		}
+		if effect.TaskID != "" && effect.SessionID != "" && effect.IncarnationID != "" &&
+			effect.HarnessGeneration > 0 && effect.SubmissionID != "" && effect.StreamID != "" && effect.Sequence > 0 {
+			if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), effect.SessionID); err != nil {
+				return false, false, err
+			}
+			if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{effect.SessionID}, []string{effect.StreamID}); err != nil {
+				return false, false, err
+			}
+			terminalMatches, err := r.agentDeliveryWorkflowTerminalMatchesTx(ctx, tx, effect)
+			if err != nil {
+				return false, false, err
+			}
+			if !terminalMatches {
+				return false, false, nil
+			}
+		}
+		inserted, err := insertDeliveryEffectTx(ctx, tx, r.db.Rebind, effect)
+		if err != nil {
+			return false, false, err
+		}
+		if !inserted {
 			return false, false, nil
 		}
 	}
@@ -3368,6 +3466,11 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	if blocked {
 		return false, nil
 	}
+	if fromStepID == destinationStepID {
+		if err := r.pinSameStepPromotionEntry(ctx, tx, task); err != nil {
+			return false, err
+		}
+	}
 
 	// This is always an arrival — a promotion enters destinationStepID from a
 	// queued band, never a reorder — so the caller-supplied task.Position is
@@ -3476,6 +3579,36 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	}
 	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID, 0)
 	return true, nil
+}
+
+// pinSameStepPromotionEntry records, on the promotion marker the caller set,
+// the ledger row of the entry a same-step promotion admits. The task entered
+// the step when it was queued, so the promotion itself records no transition.
+// Reading the latest row inside the promotion transaction, after the task row
+// is locked, pins that queued entry before any later move can add a newer row.
+func (r *Repository) pinSameStepPromotionEntry(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	marker, ok := task.Metadata[models.MetaKeyQueuePromotionPending].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	var entryID int64
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT id
+		FROM task_step_transitions
+		WHERE task_id = ?
+		ORDER BY id DESC
+		LIMIT 1
+	`), task.ID).Scan(&entryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if entryID > 0 {
+		marker[models.QueuePromotionEntryTransitionIDKey] = strconv.FormatInt(entryID, 10)
+	}
+	return nil
 }
 
 func (r *Repository) lockTaskAndLoadPromotionMetadata(ctx context.Context, tx *sql.Tx, task *models.Task) error {
@@ -3619,6 +3752,9 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 		return "", err
 	}
 	if err := r.purgeTaskPromptSequenceTx(ctx, tx, id, sessions); err != nil {
+		return "", err
+	}
+	if err := r.retireAgentDeliveryTaskSessionsTx(ctx, tx, id); err != nil {
 		return "", err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
@@ -4054,6 +4190,29 @@ func (r *Repository) ListQueuedTasks(ctx context.Context) ([]*models.Task, error
 	return r.scanTasks(rows)
 }
 
+// ListSchedulingTasks returns non-archived, non-ephemeral tasks whose durable
+// state is SCHEDULING. It is used by startup reconciliation: a task left in
+// SCHEDULING by a restart during an automatic start has no deferred_launch
+// record, no queue destination, and no lifecycle token, so no other startup
+// pass lists it. Oldest update first, so recovery order is deterministic.
+func (r *Repository) ListSchedulingTasks(ctx context.Context) ([]*models.Task, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`, COALESCE((
+			SELECT id FROM task_step_transitions
+			WHERE task_id = t.id ORDER BY id DESC LIMIT 1
+		), 0)
+		FROM tasks t
+		WHERE t.state = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		ORDER BY t.updated_at ASC, t.created_at ASC, t.id ASC
+	`), string(v1.TaskStateScheduling))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	// Entry identity and task revision belong to the same statement snapshot.
+	return r.scanTaskRows(rows, true)
+}
+
 // ListTasksWithMetadataKey returns active, non-ephemeral tasks carrying a
 // named metadata key. It is used by startup lifecycle recovery, where queue
 // destination columns alone cannot find already-admitted work whose entry or
@@ -4111,6 +4270,32 @@ func (r *Repository) ListTasksWithCeilingDeferred(ctx context.Context) ([]*model
 		WHERE `+predicate+`
 		ORDER BY t.id ASC
 	`), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
+// ListTasksWithAutomationStartOwned returns every task whose metadata reserves
+// its initial start for an automation dispatch. The marker is stamped on
+// automation-origin tasks, so unlike ListTasksWithMetadataKey this includes
+// automation-origin, ephemeral and archived tasks.
+func (r *Repository) ListTasksWithAutomationStartOwned(ctx context.Context) ([]*models.Task, error) {
+	var predicate, path string
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		predicate = "jsonb_extract_path(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}'::jsonb ELSE t.metadata::jsonb END, ?) IS NOT NULL"
+		path = models.MetaKeyAutomationStartOwned
+	} else {
+		predicate = "json_type(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}' ELSE t.metadata END, ?) IS NOT NULL"
+		path = jsonPath(models.MetaKeyAutomationStartOwned)
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE `+predicate+`
+		ORDER BY t.id ASC
+	`), path)
 	if err != nil {
 		return nil, err
 	}
@@ -4430,7 +4615,8 @@ func isWordByte(b byte) bool {
 
 // searchTasks fetches tasks matching a search query for a workspace with pagination.
 func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter, workflowID, repositoryID string, pageSize, offset int, sort string) (*sql.Rows, int, error) {
-	searchPattern := "%" + query + "%"
+	escaper := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	searchPattern := "%" + escaper.Replace(query) + "%"
 	like := dialect.Like(r.ro.DriverName())
 
 	// Reuse the same archive, ephemeral, and config predicates as the
@@ -4454,10 +4640,10 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter
 		LEFT JOIN repositories r ON tr.repository_id = r.id
 		WHERE t.workspace_id = ?%s
 		AND (
-			t.title %s ? OR
-			t.description %s ? OR
-			r.name %s ? OR
-			r.local_path %s ?
+			t.title %s ? ESCAPE '\' OR
+			t.description %s ? ESCAPE '\' OR
+			r.name %s ? ESCAPE '\' OR
+			r.local_path %s ? ESCAPE '\'
 		)
 	`, tFilter, like, like, like, like)
 	countArgs := append(append([]interface{}{workspaceID}, extraArgs...), searchPattern, searchPattern, searchPattern, searchPattern)
@@ -4482,10 +4668,10 @@ func taskSearchSelectQuery(driver, tFilter, like, sort string) string {
 			LEFT JOIN repositories r ON tr.repository_id = r.id
 			WHERE t.workspace_id = ?%s
 			AND (
-				t.title %s ? OR
-				t.description %s ? OR
-				r.name %s ? OR
-				r.local_path %s ?
+				t.title %s ? ESCAPE '\' OR
+				t.description %s ? ESCAPE '\' OR
+				r.name %s ? ESCAPE '\' OR
+				r.local_path %s ? ESCAPE '\'
 			)
 		) task_search
 		ORDER BY %s
@@ -4542,6 +4728,10 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 
 // scanTasks is a helper to scan task rows
 func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
+	return r.scanTaskRows(rows, false)
+}
+
+func (r *Repository) scanTaskRows(rows *sql.Rows, includeEntryIdentity bool) ([]*models.Task, error) {
 	var result []*models.Task
 	for rows.Next() {
 		task := &models.Task{}
@@ -4552,7 +4742,7 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		var identifier sql.NullString
 		var externalID sql.NullString
 		var externalIDSettledAt sql.NullTime
-		err := rows.Scan(
+		destinations := []interface{}{
 			&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
 			&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
 			&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
@@ -4560,7 +4750,11 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 			&task.CreatedAt, &task.UpdatedAt,
 			&task.AssigneeAgentProfileID, &task.AssigneeUserID, &task.Origin, &task.ProjectID,
 			&task.Labels, &identifier, &externalID, &externalIDSettledAt, &task.IsFromOffice,
-		)
+		}
+		if includeEntryIdentity {
+			destinations = append(destinations, &task.WorkflowStepTransitionID)
+		}
+		err := rows.Scan(destinations...)
 		if err != nil {
 			return nil, err
 		}
@@ -5383,7 +5577,14 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 	if err != nil {
 		return false, err
 	}
+	identities, err := r.agentDeliverySessionIdentitiesInTx(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessions...); err != nil {
+		return false, err
+	}
+	if err := r.lockAgentDeliverySessionIdentitiesTx(ctx, tx, identities); err != nil {
 		return false, err
 	}
 	query := "WITH candidate AS (" + candidate + ") DELETE FROM tasks WHERE id = ? AND EXISTS (SELECT 1 FROM candidate)"
@@ -5397,6 +5598,9 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 		return false, err
 	}
 	if rows > 0 {
+		if err := r.insertAgentDeliveryRetirementJobsTx(ctx, tx, identities); err != nil {
+			return false, err
+		}
 		if err := r.purgePromptSequencesForSessionsTx(ctx, tx, sessions); err != nil {
 			return false, err
 		}

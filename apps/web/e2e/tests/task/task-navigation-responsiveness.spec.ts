@@ -16,7 +16,17 @@ import { SessionPage } from "../../pages/session-page";
 import { KanbanPage } from "../../pages/kanban-page";
 import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
+test.describe.configure({ retries: 0 });
+
 // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.3 AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.4 AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5
+test.afterEach(async ({ backend }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) return;
+  await testInfo.attach("task-navigation-backend.log", {
+    path: backend.logPath,
+    contentType: "text/plain",
+  });
+});
+
 test("navigation branch setup leaves a dirty shared checkout untouched", async ({
   backend,
   seedData,
@@ -50,7 +60,8 @@ test("navigation branch setup leaves a dirty shared checkout untouched", async (
   );
   let seededBranch: string | undefined;
   try {
-    seededBranch = seedNavigationBranch(fixtureBackend);
+    seededBranch = seedNavigationBranch(fixtureBackend, seedData.repositoryBaselineOID);
+    expect(git.exec(`git rev-parse ${seededBranch}^`).trim()).toBe(seedData.repositoryBaselineOID);
     expect(git.exec("git branch --show-current").trim()).toBe(dirtyBranch);
     expect(git.exec("git diff -- walkthrough_base.txt")).toContain(
       "navigation fixture dirty-checkout sentinel",
@@ -81,6 +92,23 @@ test("Files stays usable during restoration, retry, and return navigation", asyn
 }) => {
   test.setTimeout(90_000);
   await assertProgressiveNavigation(testPage, apiClient, seedData, backend, false);
+});
+
+test("navigation task setup restores a dirty fixture checkout before launch", async ({
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  const git = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
+  const original = git.exec("git show HEAD:walkthrough_base.txt");
+  git.modifyFile("walkthrough_base.txt", `${original}dirty navigation task fixture\n`);
+  try {
+    const tasks = await seedNavigationTasks(apiClient, seedData, backend);
+    expect(tasks).toHaveLength(2);
+    expect(git.exec("git diff -- walkthrough_base.txt")).toBe("");
+  } finally {
+    git.exec("git restore -- walkthrough_base.txt");
+  }
 });
 
 // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.2

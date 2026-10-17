@@ -1003,15 +1003,16 @@ func (s *Service) publishExecutorEvent(ctx context.Context, eventType string, ex
 	}
 
 	data := map[string]interface{}{
-		"id":         executor.ID,
-		"name":       executor.Name,
-		"type":       executor.Type,
-		"status":     executor.Status,
-		"is_system":  executor.IsSystem,
-		"resumable":  executor.Resumable,
-		"config":     executor.Config,
-		"created_at": executor.CreatedAt.Format(time.RFC3339),
-		"updated_at": executor.UpdatedAt.Format(time.RFC3339),
+		"owner_user_id": executor.OwnerUserID,
+		"id":            executor.ID,
+		"name":          executor.Name,
+		"type":          executor.Type,
+		"status":        executor.Status,
+		"is_system":     executor.IsSystem,
+		"resumable":     executor.Resumable,
+		"config":        executor.Config,
+		"created_at":    executor.CreatedAt.Format(time.RFC3339),
+		"updated_at":    executor.UpdatedAt.Format(time.RFC3339),
 	}
 
 	s.publishEventToBus(ctx, eventType, "executor", executor.ID, data)
@@ -1027,6 +1028,7 @@ func (s *Service) publishExecutorProfileEvent(ctx context.Context, eventType str
 		provider = executor.Provider
 	}
 	data := map[string]interface{}{
+		"owner_user_id":  profile.OwnerUserID,
 		"id":             profile.ID,
 		"executor_id":    profile.ExecutorID,
 		"name":           profile.Name,

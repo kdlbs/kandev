@@ -18,6 +18,13 @@ import {
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
 import { resolveRunningNotices } from "./running-notice-activity";
+import {
+  buildPromptMessageActions,
+  fanOutTranscriptPrompts,
+  removePromptMessage,
+  observeLivePrompt,
+  updatePromptMessage,
+} from "./prompt-message-actions";
 import { purgeSessionRuntimeState } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import { mergeTaskSession, mergeWorkspaceRecoveryProjection } from "./session-merge";
 import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
@@ -27,6 +34,7 @@ import {
   shouldReplaceMcpAttachmentHistory,
 } from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
 import { getPlanLastSeen, setPlanLastSeen } from "@/lib/local-storage";
+import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
 import {
   getWalkthroughLastSeen,
   setWalkthroughLastSeen,
@@ -74,6 +82,26 @@ function applyMessageMeta(
  * Merge message fields: only overwrite existing fields with non-undefined incoming values.
  * This handles duplicate events from multiple sources.
  */
+/** Keep an already acknowledged Git push dismissal across a delayed update without the marker. */
+function retainDismissedMetadata(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): boolean {
+  if (source.metadata === undefined) return false;
+  const targetMetadata = target.metadata as Record<string, unknown> | undefined;
+  const dismissedAt = targetMetadata?.git_operation_error_dismissed_at;
+  if (typeof dismissedAt !== "string" || dismissedAt === "") return false;
+  const sourceMetadata =
+    source.metadata !== null && typeof source.metadata === "object"
+      ? (source.metadata as Record<string, unknown>)
+      : {};
+  target.metadata = {
+    ...sourceMetadata,
+    git_operation_error_dismissed_at: dismissedAt,
+  };
+  return true;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeMessageFields(target: Record<string, unknown>, source: Record<string, any>) {
   const noticeResolved = (target.metadata as Message["metadata"])?.running_notice_resolved === true;
@@ -84,6 +112,7 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
       !payloadRetentionMarker(source.metadata)
     )
       continue;
+    if (key === "metadata" && retainDismissedMetadata(target, source)) continue;
     if (source[key] !== undefined) {
       target[key] = source[key];
     }
@@ -280,9 +309,19 @@ function reconcileActiveTurnForIdleSession(draft: SessionSliceState, session: Ta
 
 export const defaultSessionState: SessionSliceState = {
   messages: { bySession: {}, metaBySession: {} },
+  messagePrompts: {
+    bySession: {},
+    metaBySession: {},
+    generationBySession: {},
+    refreshGenerationBySession: {},
+    authoritativeBySession: {},
+    observedBySession: {},
+    deletedIdsBySession: {},
+  },
   turns: {
     bySession: {},
     activeBySession: {},
+    windowCoverageBySession: {},
     loadedBySession: {},
     reconcileEpochBySession: {},
     settledBoundaryBySession: {},
@@ -417,6 +456,17 @@ function buildSetMessagesMetadata(set: ImmerSet) {
     });
 }
 
+function pruneTurnWindowCoverage(
+  draft: Draft<SessionSlice>,
+  sessionId: string,
+  messages: Message[],
+): void {
+  const coverage = draft.turns.windowCoverageBySession?.[sessionId];
+  if (!coverage) return;
+  const retainedIds = new Set(messages.map((message) => message.id));
+  coverage.messageIds = coverage.messageIds.filter((id) => retainedIds.has(id));
+}
+
 /** Builds the transcript update action. */
 function buildUpdateMessage(set: ImmerSet) {
   return (message: Parameters<SessionSlice["updateMessage"]>[0]) =>
@@ -434,6 +484,27 @@ function buildUpdateMessage(set: ImmerSet) {
           messages[index] = merged;
         }
       }
+      updatePromptMessage(draft, message);
+    });
+}
+
+/** Builds bulk transcript updates and keeps the prompt cache in sync. */
+function buildUpdateMessages(set: ImmerSet) {
+  return (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
+    set((draft) => {
+      for (const message of messages) {
+        let sessionMessages = draft.messages.bySession[message.session_id];
+        if (!sessionMessages && isTransientRetryNotice(message)) {
+          sessionMessages = draft.messages.bySession[message.session_id] = [];
+        }
+        if (sessionMessages) {
+          resolveRunningNotices(sessionMessages, message);
+          const hasMessage = sessionMessages.some((entry) => entry.id === message.id);
+          if (hasMessage) mergeMessageAtIndex(sessionMessages, message);
+          else if (isTransientRetryNotice(message)) sessionMessages.push(message);
+        }
+        updatePromptMessage(draft, message);
+      }
     });
 }
 
@@ -449,8 +520,10 @@ function buildMessageActions(set: ImmerSet) {
           draft.messages.bySession[sessionId],
           messages,
         );
+        pruneTurnWindowCoverage(draft, sessionId, draft.messages.bySession[sessionId]);
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+        fanOutTranscriptPrompts(draft, messages);
       }),
     addMessage: (message: Parameters<SessionSlice["addMessage"]>[0]) =>
       set((draft) => {
@@ -471,23 +544,11 @@ function buildMessageActions(set: ImmerSet) {
             message as unknown as Record<string, unknown>,
           );
         }
+        observeLivePrompt(draft, message);
+        fanOutTranscriptPrompts(draft, [message]);
       }),
     updateMessage: buildUpdateMessage(set),
-    updateMessages: (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
-      set((draft) => {
-        for (const message of messages) {
-          let sessionMessages = draft.messages.bySession[message.session_id];
-          if (!sessionMessages && isTransientRetryNotice(message)) {
-            sessionMessages = draft.messages.bySession[message.session_id] = [];
-          }
-          if (sessionMessages) {
-            resolveRunningNotices(sessionMessages, message);
-            const hasMessage = sessionMessages.some((entry) => entry.id === message.id);
-            if (hasMessage) mergeMessageAtIndex(sessionMessages, message);
-            else if (isTransientRetryNotice(message)) sessionMessages.push(message);
-          }
-        }
-      }),
+    updateMessages: buildUpdateMessages(set),
     removeMessage: (
       sessionId: Parameters<SessionSlice["removeMessage"]>[0],
       messageId: Parameters<SessionSlice["removeMessage"]>[1],
@@ -495,6 +556,9 @@ function buildMessageActions(set: ImmerSet) {
       set((draft) => {
         const messages = draft.messages.bySession[sessionId];
         if (messages) draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
+        const coverage = draft.turns.windowCoverageBySession?.[sessionId];
+        if (coverage) coverage.messageIds = coverage.messageIds.filter((id) => id !== messageId);
+        removePromptMessage(draft, sessionId, messageId);
       }),
     mergeMessages: (
       sessionId: string,
@@ -512,8 +576,10 @@ function buildMessageActions(set: ImmerSet) {
         if (reconciled !== prev) {
           draft.messages.bySession[sessionId] = reconciled;
         }
+        pruneTurnWindowCoverage(draft, sessionId, draft.messages.bySession[sessionId] ?? []);
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+        fanOutTranscriptPrompts(draft, messages);
       }),
     prependMessages: (
       sessionId: string,
@@ -527,11 +593,14 @@ function buildMessageActions(set: ImmerSet) {
           ...messages.filter((m) => !existingIds.has(m.id)),
           ...existing,
         ];
+        pruneTurnWindowCoverage(draft, sessionId, draft.messages.bySession[sessionId]);
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+        fanOutTranscriptPrompts(draft, messages);
       }),
     setMessagesMetadata: buildSetMessagesMetadata(set),
     setMessagesLoading: buildSetMessagesLoading(set),
+    ...buildPromptMessageActions(set),
   };
 }
 
@@ -801,8 +870,18 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       // Drop the conversation history owned by this session.
       delete draft.messages.bySession[sessionId];
       delete draft.messages.metaBySession[sessionId];
+      delete draft.messagePrompts.bySession[sessionId];
+      delete draft.messagePrompts.metaBySession[sessionId];
+      delete draft.messagePrompts.authoritativeBySession[sessionId];
+      delete draft.messagePrompts.observedBySession[sessionId];
+      delete draft.messagePrompts.deletedIdsBySession[sessionId];
+      const generations = (draft.messagePrompts.generationBySession ??= {});
+      generations[sessionId] = (generations[sessionId] ?? 0) + 1;
       delete draft.turns.bySession[sessionId];
       delete draft.turns.activeBySession[sessionId];
+      if (draft.turns.windowCoverageBySession) {
+        delete draft.turns.windowCoverageBySession[sessionId];
+      }
       delete draft.turns.loadedBySession[sessionId];
       delete draft.turns.reconcileEpochBySession[sessionId];
       delete draft.turns.settledBoundaryBySession[sessionId];
@@ -827,6 +906,33 @@ function resetQueueStateForReincarnation(
   delete draft.queue.bySessionId[incoming.id];
   delete draft.queue.metaBySessionId[incoming.id];
   delete draft.queue.activeOperationBySessionId[incoming.id];
+}
+
+function promoteAgentctlReadyFromSessionSnapshot(
+  draft: Pick<SessionSliceState, "sessionAgentctl">,
+  session: Pick<TaskSession, "id" | "state" | "updated_at" | "agent_execution_id">,
+): void {
+  const current = draft.sessionAgentctl.itemsBySessionId[session.id];
+  if (
+    !sessionStateConfirmsAgentctlExecutionReady(
+      session.state,
+      session.agent_execution_id,
+      current?.agentExecutionId,
+    )
+  ) {
+    return;
+  }
+  if (
+    current?.status === "ready" &&
+    (!session.agent_execution_id || current.agentExecutionId === session.agent_execution_id)
+  ) {
+    return;
+  }
+  draft.sessionAgentctl.itemsBySessionId[session.id] = {
+    status: "ready",
+    agentExecutionId: session.agent_execution_id ?? current?.agentExecutionId,
+    updatedAt: session.updated_at,
+  };
 }
 
 /** Build actions that reconcile complete session snapshots with partial live events. */
@@ -867,6 +973,7 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
         (draft.taskSessionsByTask.errorByTaskId ??= {})[taskId] = null;
         for (const session of merged) {
           draft.taskSessions.items[session.id] = session;
+          promoteAgentctlReadyFromSessionSnapshot(draft, session);
           syncEnvironmentMapping(draft, session.id, session.task_environment_id);
           syncPrepareProgress(draft, session);
           reconcileMcpAttachmentHistory(
@@ -906,6 +1013,7 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
           epochs[session.id] = (epochs[session.id] ?? 0) + 1;
         }
         draft.taskSessions.items[session.id] = merged;
+        promoteAgentctlReadyFromSessionSnapshot(draft, merged);
         const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
         if (list) {
           const idx = list.findIndex((s) => s.id === session.id);
@@ -951,6 +1059,7 @@ function buildTaskSessionActions(set: ImmerSet) {
           epochs[session.id] = (epochs[session.id] ?? 0) + 1;
         }
         draft.taskSessions.items[session.id] = mergedSession;
+        promoteAgentctlReadyFromSessionSnapshot(draft, mergedSession);
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
         if (sessionsByTask) {
           const sessionIndex = sessionsByTask.findIndex((s) => s.id === session.id);
@@ -1154,7 +1263,17 @@ export const createSessionSlice: StateCreator<
   ...buildTaskSessionProjectionActions(set),
   setSessionAgentctlStatus: (sessionId, status) =>
     set((draft) => {
-      draft.sessionAgentctl.itemsBySessionId[sessionId] = status;
+      const session = draft.taskSessions.items[sessionId];
+      const sameLiveExecution =
+        status.status === "starting" &&
+        sessionStateConfirmsAgentctlExecutionReady(
+          session?.state,
+          session?.agent_execution_id,
+          status.agentExecutionId,
+        );
+      draft.sessionAgentctl.itemsBySessionId[sessionId] = sameLiveExecution
+        ? { ...status, status: "ready", startingExecutionId: status.agentExecutionId }
+        : status;
     }),
   setWorktree: (worktree) =>
     set((draft) => {

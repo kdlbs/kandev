@@ -404,6 +404,7 @@ func (s *Service) suspendWorkspaceIdleCandidate(
 	if suspendErr == nil {
 		if succeeded {
 			summary.suspended++
+			s.settleBackgroundWorkAfterTeardown(ctx, row.SessionID, identity.ExecutionID)
 		}
 		return
 	}
@@ -824,6 +825,7 @@ func (s *Service) finishRestartedIdleSuspension(
 	if err := suspender.SuspendIdle(operationCtx, identity); err != nil {
 		return false
 	}
+	s.settleBackgroundWorkAfterTeardown(ctx, row.SessionID, identity.ExecutionID)
 	return true
 }
 

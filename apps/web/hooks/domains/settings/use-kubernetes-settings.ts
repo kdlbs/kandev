@@ -126,6 +126,7 @@ export function useKubernetesSessionImpact(executorId: string, enabled = true) {
 type KubernetesExecutorRecord = Pick<Executor, "id" | "name" | "type" | "config">;
 
 export type KubernetesExecutorCreateInput = {
+  owner_user_id?: string;
   name: string;
   config: Record<string, string>;
   profileName: string;
@@ -158,6 +159,7 @@ export async function createKubernetesExecutorPair(
 ) {
   const executor = await dependencies.createExecutor({
     name: input.name,
+    ...(input.owner_user_id ? { owner_user_id: input.owner_user_id } : {}),
     type: "k8s",
     config: input.config,
   });

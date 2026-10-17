@@ -32,13 +32,27 @@ function OpenListShortcut({ workspaceId }: { workspaceId: string }) {
           href={linkToCoordinator(workspaceId)}
           aria-label={t("coordinator:openCoordinators")}
           data-testid="coordinators-open-list"
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground cursor-pointer transition-colors"
+          className="flex h-7 w-7 [@media(pointer:coarse)]:size-11 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground cursor-pointer transition-colors"
         >
           <IconListDetails className="h-3.5 w-3.5" />
         </Link>
       </TooltipTrigger>
       <TooltipContent side="right">{t("coordinator:openCoordinators")}</TooltipContent>
     </Tooltip>
+  );
+}
+
+function OpenListBodyLink({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
+  return (
+    <Link
+      href={linkToCoordinator(workspaceId)}
+      data-testid="coordinators-open-list-body"
+      className="flex min-h-8 items-center gap-2 rounded px-2.5 text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground [@media(pointer:coarse)]:min-h-11"
+    >
+      <IconListDetails className="size-3.5" aria-hidden="true" />
+      {t("coordinator:openCoordinators")}
+    </Link>
   );
 }
 
@@ -96,6 +110,7 @@ function CoordinatorsSectionBody({
 }) {
   const { t } = useTranslation();
   const pathname = usePathname();
+  const fastActions = useAppStore((state) => state.userSettings.sidebarFastActionsEnabled);
   const { coordinators, badgeByCoordinatorId } = useCoordinatorSidebarEntries(workspaceId);
 
   if (!coordinators) return null;
@@ -106,15 +121,17 @@ function CoordinatorsSectionBody({
 
   return (
     <AppSidebarSection
+      presentation="navigation"
       id={APP_SIDEBAR_SECTION_IDS.coordinators}
       label={t("coordinator:sidebarSectionLabel")}
       collapsed={collapsed}
       icon={CoordinatorIcon}
-      headerAction={<OpenListShortcut workspaceId={workspaceId} />}
+      headerAction={fastActions ? <OpenListShortcut workspaceId={workspaceId} /> : undefined}
       headerActionVisibility="always"
       defaultExpanded={true}
       collapsedSummary={summary > 0 ? summary : undefined}
     >
+      {!fastActions && <OpenListBodyLink workspaceId={workspaceId} />}
       {coordinators.length === 0 ? (
         <EmptyRow workspaceId={workspaceId} />
       ) : (

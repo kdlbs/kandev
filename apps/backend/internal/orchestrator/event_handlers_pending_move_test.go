@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -543,6 +544,7 @@ func seedReviewSession(t *testing.T, repo *sqliterepo.Repository, now time.Time)
 // wrong session too early and leave the receiving queue without its real drain.
 func wireBootReadySimulator(svc *Service, agentMgr *mockAgentManager, newExecID string) {
 	promptReady := make(chan struct{})
+	var readyOnce sync.Once
 	var preparedSessionID string
 	agentMgr.isAgentReadyFn = func(_ context.Context, _ string) bool {
 		select {
@@ -580,7 +582,7 @@ func wireBootReadySimulator(svc *Service, agentMgr *mockAgentManager, newExecID 
 		agentMgr.mu.Lock()
 		sessionID := preparedSessionID
 		agentMgr.mu.Unlock()
-		close(promptReady)
+		readyOnce.Do(func() { close(promptReady) })
 		svc.handleAgentBootReady(context.Background(), watcher.AgentEventData{
 			TaskID:           "task-1",
 			SessionID:        sessionID,

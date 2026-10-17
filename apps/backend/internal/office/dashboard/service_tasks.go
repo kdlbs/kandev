@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/taskdependencies"
@@ -1159,7 +1160,7 @@ func (s *DashboardService) publishCanonicalTaskUpdated(ctx context.Context, task
 // comment is a self-comment or the task is closed; resolves @mentions.
 // Best-effort.
 func (s *DashboardService) runReactivityForComment(
-	ctx context.Context, comment *models.TaskComment, engineHandled bool,
+	ctx context.Context, comment *models.TaskComment, skipAssigneeWake bool,
 ) {
 	if s.reactivity == nil || comment == nil || comment.ID == "" {
 		return
@@ -1173,7 +1174,7 @@ func (s *DashboardService) runReactivityForComment(
 			AuthorType: comment.AuthorType,
 			AuthorID:   comment.AuthorID,
 		},
-		SkipAssigneeCommentWake: engineHandled,
+		SkipAssigneeCommentWake: skipAssigneeWake,
 	}
 	if _, err := s.reactivity.ApplyTaskMutation(ctx, comment.TaskID, "", change); err != nil {
 		s.logger.Warn("reactivity pipeline failed (comment)",
@@ -1181,25 +1182,60 @@ func (s *DashboardService) runReactivityForComment(
 	}
 }
 
-func (s *DashboardService) dispatchCommentEngineTrigger(ctx context.Context, comment *models.TaskComment) bool {
+// commentEngineDispatchResult separates "the engine trigger ran a
+// transition/action" (handled) from "the legacy assignee wake must not
+// fire regardless" (suppressAssigneeWake). The two only diverge for a gate
+// comment fan-out failure (ErrCommentFanOutIncomplete): the trigger did not
+// finish successfully, so handled stays false, but falling back to the
+// legacy wake would wake the runner instead of the seats the fan-out was
+// trying (and partly failing) to reach, so suppressAssigneeWake is true.
+type commentEngineDispatchResult struct {
+	handled                       bool
+	suppressAssigneeWake          bool
+	suppressCommentRetry          bool
+	retryWorkflowStepID           string
+	retryWorkflowStepTransitionID int64
+}
+
+func (s *DashboardService) dispatchCommentEngineTrigger(
+	ctx context.Context, comment *models.TaskComment,
+) commentEngineDispatchResult {
 	if s.engineDispatcher == nil || comment == nil || comment.TaskID == "" || comment.ID == "" {
-		return false
+		return commentEngineDispatchResult{}
 	}
 	if s.isSelfComment(ctx, comment) {
-		return false
+		return commentEngineDispatchResult{}
 	}
 	handled, err := s.dispatchCommentEngineTriggerOnce(ctx, comment)
 	if err == nil {
-		return handled
+		return commentEngineDispatchResult{handled: handled}
 	}
 	if errors.Is(err, shared.ErrEngineNoSession) {
-		return false
+		return commentEngineDispatchResult{}
+	}
+	if errors.Is(err, engine.ErrCommentFanOutIncomplete) {
+		s.logger.Warn("gate comment fan-out incomplete, suppressing legacy assignee wake",
+			zap.String("task_id", comment.TaskID),
+			zap.String("comment_id", comment.ID),
+			zap.Error(err))
+		result := commentEngineDispatchResult{suppressAssigneeWake: true}
+		var fanOutErr *engine.CommentFanOutIncompleteError
+		if errors.As(err, &fanOutErr) && fanOutErr.WorkflowStepID != "" {
+			result.retryWorkflowStepID = fanOutErr.WorkflowStepID
+			result.retryWorkflowStepTransitionID = fanOutErr.WorkflowStepTransitionID
+		} else {
+			// An older or alternate dispatcher did not preserve the failed
+			// step identity. Do not let the event subscriber retry against the
+			// task's later current step.
+			result.suppressCommentRetry = true
+		}
+		return result
 	}
 	s.logger.Warn("engine comment trigger failed",
 		zap.String("task_id", comment.TaskID),
 		zap.String("comment_id", comment.ID),
 		zap.Error(err))
-	return false
+	return commentEngineDispatchResult{}
 }
 
 type handledWorkflowEngineDispatcher interface {
@@ -1228,7 +1264,11 @@ func (s *DashboardService) isSelfComment(ctx context.Context, comment *models.Ta
 	return err == nil && fields != nil && fields.AssigneeAgentProfileID == comment.AuthorID
 }
 
-func (s *DashboardService) publishCommentCreated(ctx context.Context, comment *models.TaskComment, engineHandled bool) {
+func (s *DashboardService) publishCommentCreated(
+	ctx context.Context,
+	comment *models.TaskComment,
+	dispatch commentEngineDispatchResult,
+) {
 	if s.eb == nil {
 		return
 	}
@@ -1238,8 +1278,15 @@ func (s *DashboardService) publishCommentCreated(ctx context.Context, comment *m
 		"author_type": comment.AuthorType,
 		"author_id":   comment.AuthorID,
 	}
-	if engineHandled {
+	if dispatch.handled {
 		data["engine_dispatched"] = commentkeys.EngineDispatchedValue
+	}
+	if dispatch.suppressCommentRetry {
+		data["engine_retry_suppressed"] = commentkeys.EngineDispatchedValue
+	}
+	if dispatch.retryWorkflowStepID != "" {
+		data["workflow_step_id"] = dispatch.retryWorkflowStepID
+		data["workflow_step_transition_id"] = strconv.FormatInt(dispatch.retryWorkflowStepTransitionID, 10)
 	}
 	event := bus.NewEvent(events.OfficeCommentCreated, "office-dashboard", data)
 	if err := s.eb.Publish(ctx, events.OfficeCommentCreated, event); err != nil {

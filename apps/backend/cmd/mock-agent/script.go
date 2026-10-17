@@ -53,6 +53,9 @@ func executeCommand(e *emitter, fullPrompt, line string, planVersion *string) {
 		ms := extractIntArg(line, "e2e:delay(")
 		waitForDelay(e.ctx, ms)
 
+	case strings.HasPrefix(line, "e2e:await_file("):
+		executeAwaitFile(e, line)
+
 	case strings.HasPrefix(line, "e2e:mcp:"):
 		executeMCPCommand(e, fullPrompt, line, planVersion)
 

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -47,6 +48,10 @@ func (r *bgWorkMockRepo) UpsertBackgroundWorkload(ctx context.Context, workload 
 
 func (r *bgWorkMockRepo) DeleteBackgroundWorkloadsBySession(ctx context.Context, sessionID string) error {
 	return nil
+}
+
+func (r *bgWorkMockRepo) ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error) {
+	return nil, nil
 }
 
 func (r *bgWorkMockRepo) UpsertBackgroundRun(ctx context.Context, run *models.BackgroundRun) error {
@@ -185,4 +190,8 @@ func TestWSBackgroundWorkHandlers(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, resp.Type)
 	})
+}
+
+func (r *bgWorkMockRepo) SettleBackgroundWorkloads(context.Context, string, time.Time) ([]*models.BackgroundWorkload, error) {
+	return nil, nil
 }

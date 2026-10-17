@@ -278,6 +278,15 @@ the launch before creating an execution until an adapter passes the complete
 restriction tests and a real provider smoke. Do not treat the manifest surface
 or an approved capability as evidence that a provider is supported.
 
+Kandev lists a plugin's tools only while the plugin is active and every field in
+its `config_schema.required` list has a value. A required field counts as unset
+when it is missing, null, or a blank string; `false` and `0` count as set. A
+connector that needs a URL or token therefore stays out of the agent tool list
+until the operator saves its settings, and its tools appear right after the
+save, without restarting the agent or task session. Saving config still restarts
+a running plugin subprocess. A plugin without required fields is listed as soon as
+it is active.
+
 Tools are not exposed to configuration or external MCP clients. Kandev validates
 the input and optional output JSON Schemas, supplies task/session/workspace/surface
 context, enforces a 30-second deadline and 1 MiB result limit, and does not retry
@@ -2010,11 +2019,17 @@ single host-wide capability check performed once at install time: it does
 not name `task-dependencies` or any other capability, unlike the
 capability-keyed `min_kandev_version` requirement on `api_read:messages`
 described above, which the host re-validates per declared capability. A dev
-or otherwise non-release build of the host always satisfies the floor check
+or otherwise non-release development build of the host always satisfies the floor check
 regardless of its actual age, so a plugin installed on such a build can still
 receive the same ambiguous zero-value bytes; do not rely on the floor check
 alone as proof the fields are populated when running against a non-release
 host.
+
+Published npm Nightlies enforce the same install-time floor as Stable hosts.
+A Nightly is a prerelease below the Stable release with the same numeric core:
+`1.2.4-nightly.sha123456789abc` accepts a minimum of `1.2.3` but rejects
+`1.2.4` or a newer minimum. The manifest minimum must still use a stable
+numeric release value; prerelease minimums are not accepted.
 
 `host.Messages().List(ctx, MessageFilter{...}, Page{...})` reads historical
 conversation content (capability `api_read:messages`). Filter by `SessionIDs`,

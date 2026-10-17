@@ -49,7 +49,7 @@ func TestContinuationNativeOnlyRestoreRejectsReplacement(t *testing.T) {
 	}
 
 	_, err := sessionManager.InitializeSessionWithSettingsPolicy(
-		context.WithValue(context.Background(), requiredNativeConversationKey{}, "saved-session"), client, agentConfig, "saved-session", "/workspace", nil,
+		context.WithValue(context.Background(), requiredNativeConversationKey{}, "saved-session"), nil, client, agentConfig, "saved-session", "/workspace", nil,
 		SessionSettingsPolicyStrict,
 	)
 	if err == nil {

@@ -17,8 +17,8 @@ export function useChartPlotVisibility() {
     if (shouldMountPlot || !plot || !canObserveIntersection) return;
 
     const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry.isIntersecting) return;
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
         setIsNearViewport(true);
         observer.disconnect();
       },

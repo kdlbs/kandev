@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-19
-updated: 2026-09-29
+updated: 2026-10-12
 owners:
   - kandev
 ---
@@ -137,18 +137,25 @@ the task and can hide or modify uncommitted work from the new agent.
 | Mode | Canonical environment | Result |
 | --- | --- | --- |
 | `new_workspace` | none | Elect one initial materializer. |
-| `new_workspace` | `creating` | Return recoverable `workspace_preparing`; do not create a session or workspace. |
+| `new_workspace` | `creating` | Wait for the elected materializer, then attach; if it fails or does not finish within the launch timeout, return recoverable `workspace_preparing` without creating a session or workspace. |
 | `new_workspace` | ready and complete | Attach with `reuse_required`. |
 | `inherit_parent` | parent/group ready and complete | Attach to that environment. |
 | `inherit_parent` | missing or unsafe | Return a reuse error; never create a child environment. |
 | `shared_group` | none | Atomically elect one group materializer. |
-| `shared_group` | creating | Return recoverable `workspace_preparing`. |
+| `shared_group` | creating | Wait for the group's elected environment, then attach; otherwise return recoverable `workspace_preparing`. |
 | `shared_group` | ready and complete | Attach to the group environment. |
 
 An executor-type transition is not an attach. It must select or materialize an
 environment owned by the requested executor before a session can start. A
 persisted session or environment workspace path from the previous executor is
 diagnostic evidence only and is never a fallback launch directory.
+
+A `failed` canonical environment is never attachable. A `creating` environment
+whose materializer abandoned it, and a `failed` environment without physical
+workspace evidence, can instead elect the requesting session as a new
+materializer, as defined by
+[REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004](task-launch-failure-recovery.md).
+That election materializes the environment; it is not an attach.
 
 An incomplete, failed, deleted, path-mismatched, branch-mismatched, or
 duplicate repository slot is `workspace_reuse_unsafe`. An executor that cannot

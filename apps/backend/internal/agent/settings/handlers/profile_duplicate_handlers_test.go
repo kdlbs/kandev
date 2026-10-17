@@ -37,30 +37,31 @@ import (
 // controller branches on both shapes: sql.ErrNoRows for agents, and an
 // "agent profile not found" message for profiles.
 type fakeSettingsRepo struct {
-	agents     map[string]*models.Agent
-	agentOrder []string
-	profiles   map[string]*models.AgentProfile
-	mcpConfigs map[string]*models.AgentProfileMcpConfig
-
+	agents          map[string]*models.Agent
+	agentOrder      []string
+	profiles        map[string]*models.AgentProfile
+	mcpConfigs      map[string]*models.AgentProfileMcpConfig
+	profileOrders   map[string][]string
+	orderRevisions  map[string]int64
 	created         []*models.AgentProfile
 	updatedProfiles []*models.AgentProfile
 	deletedProfiles []string
 	updatedAgents   []*models.Agent
 	deletedAgents   []string
 	upsertedMcp     []*models.AgentProfileMcpConfig
-
-	// errs maps a repository method name to the error it should return.
-	errs map[string]error
-	seq  int
+	errs            map[string]error
+	seq             int
 }
 
 // newFakeSettingsRepo returns an empty in-memory settings repository.
 func newFakeSettingsRepo() *fakeSettingsRepo {
 	return &fakeSettingsRepo{
-		agents:     map[string]*models.Agent{},
-		profiles:   map[string]*models.AgentProfile{},
-		mcpConfigs: map[string]*models.AgentProfileMcpConfig{},
-		errs:       map[string]error{},
+		agents:         map[string]*models.Agent{},
+		profiles:       map[string]*models.AgentProfile{},
+		mcpConfigs:     map[string]*models.AgentProfileMcpConfig{},
+		profileOrders:  map[string][]string{},
+		orderRevisions: map[string]int64{},
+		errs:           map[string]error{},
 	}
 }
 
@@ -323,8 +324,79 @@ func (r *fakeSettingsRepo) ListAgentProfiles(_ context.Context, agentID string) 
 			out = append(out, p)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.SliceStable(out, func(i, j int) bool {
+		order := r.profileOrders[agentID]
+		position := func(profileID string) (int, bool) {
+			for index, id := range order {
+				if id == profileID {
+					return index, true
+				}
+			}
+			return 0, false
+		}
+		left, leftKnown := position(out[i].ID)
+		right, rightKnown := position(out[j].ID)
+		if leftKnown != rightKnown {
+			return leftKnown
+		}
+		if leftKnown && left != right {
+			return left < right
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
+}
+func (r *fakeSettingsRepo) ReorderAgentProfiles(_ context.Context, agentID string, orderedIDs []string) (int64, bool, error) {
+	if err := r.errs["ReorderAgentProfiles"]; err != nil {
+		return 0, false, err
+	}
+	profiles, err := r.ListAgentProfiles(context.Background(), agentID)
+	if err != nil {
+		return 0, false, err
+	}
+	if len(profiles) != len(orderedIDs) {
+		return 0, false, store.ErrProfileOrderSetMismatch
+	}
+	available := make(map[string]struct{}, len(profiles))
+	for _, profile := range profiles {
+		if profile.WorkspaceID == "" {
+			available[profile.ID] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{}, len(orderedIDs))
+	for _, id := range orderedIDs {
+		if _, ok := available[id]; !ok {
+			return 0, false, store.ErrProfileOrderSetMismatch
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return 0, false, store.ErrProfileOrderSetMismatch
+		}
+		seen[id] = struct{}{}
+	}
+	current := r.profileOrders[agentID]
+	changed := len(current) != len(orderedIDs)
+	for i := range orderedIDs {
+		if !changed && current[i] != orderedIDs[i] {
+			changed = true
+		}
+	}
+	if changed {
+		r.profileOrders[agentID] = append([]string(nil), orderedIDs...)
+		r.orderRevisions[agentID]++
+	}
+	return r.orderRevisions[agentID], changed, nil
+}
+
+func (r *fakeSettingsRepo) GetAgentProfileOrderSnapshots(ctx context.Context, agentIDs []string) (map[string]store.AgentProfileOrderSnapshot, error) {
+	result := make(map[string]store.AgentProfileOrderSnapshot, len(agentIDs))
+	for _, id := range agentIDs {
+		profiles, err := r.ListAgentProfiles(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		result[id] = store.AgentProfileOrderSnapshot{Profiles: profiles, Revision: r.orderRevisions[id]}
+	}
+	return result, nil
 }
 
 // HasDeletedAgentProfiles implements the settings store interface for the handler tests.

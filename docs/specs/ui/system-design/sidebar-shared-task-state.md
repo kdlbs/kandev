@@ -146,6 +146,11 @@ Use existing task freshness and summary revision rules to reject older field upd
 Track per-entity changes since request start so a delayed HTTP response cannot replace a newer live value or known deletion.
 Do not infer task freshness from summary freshness or compare unrelated revision domains.
 
+Task-navigation identity reads register an overview read ticket before HTTP.
+They reconcile active-detail records through that ticket and release it on every outcome.
+This repairs workflow controls when movement events occurred before the socket opened.
+Aborted or replaced workspace scopes cannot commit those overview results.
+
 `recordTaskOverviewChange` coalesces each read's repeated partial patches with the
 same merge rules as `mergeTaskOverview`, including when no `byId` record exists.
 Task fields compare strict RFC3339Nano instants through
@@ -211,7 +216,7 @@ Temporary reconciliation journals and tombstones also have explicit settlement/o
 
 Desktop retains the Tasks sidebar. Phone retains `SessionTaskSwitcherSheet` and `MobileTaskList` in the existing drawer.
 Both use the same source controller and page projection. No new navigation or controls are introduced.
-Phone keeps safe-area handling, 44px touch targets, contained scrolling, and focus return.
+Phone keeps safe-area handling, 44px touch targets, contained scrolling, and focus return. The open Tasks modal retains its identity while workspace contents change; workspace generation fences data and workspace-keyed contents release their scoped state. Closing Tasks removes its content portal immediately, so Radix releases the pointer and scroll locks and restores focus without waiting for an exit animation. Entry motion and open-drawer geometry remain unchanged; Tasks dismissal is immediate.
 Shared data appears immediately; background refresh uses the existing localized nonblocking status.
 Uncovered initial loads use the existing loading state. Errors and Retry remain distinct from a successful empty list.
 Any new copy uses all six locale catalogs. Do not hardcode provisional-state text.

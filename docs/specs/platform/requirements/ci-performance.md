@@ -64,6 +64,40 @@ The existing external-runner contract retains ownership of fleet selection and t
 - **AC-PLATFORM-CI-PERFORMANCE-004.2:** Optimization comparisons shall identify source, attempts, runner class, cache state, test counts, failures, retries, and sample size.
 - **AC-PLATFORM-CI-PERFORMANCE-004.3:** Runner-capacity assessments shall preserve the existing eligible-job boundary. They shall report cost assumptions and rollback conditions before activation.
 
+### REQ-PLATFORM-CI-PERFORMANCE-005: Efficient verification within shared capacity
+
+**Intent:** Reduce runner occupancy and scheduling stages within the existing fleet.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-CI-PERFORMANCE-005.1:** Each optimization comparison shall report total runner-minutes, execution critical path, scheduling delay, and workflow elapsed time separately. Failed and cancelled attempts shall remain visible.
+- **AC-PLATFORM-CI-PERFORMANCE-005.2:** Frontend setup changes shall preserve the complete test identity multiset, outcomes, isolation, and environment guards. Their adoption shall require lower median execution and runner-minutes across three comparable samples.
+- **AC-PLATFORM-CI-PERFORMANCE-005.3:** Additional frontend partitions shall reduce median execution critical path by at least 30%. Their runner-minute increase shall not exceed 10% against the optimized unsharded baseline. Representative loaded feedback shall not regress.
+- **AC-PLATFORM-CI-PERFORMANCE-005.4:** Consolidated workflow stages shall preserve required check names and fail on mandatory failures, cancellations, missing evidence, or failed change detection. Deliberate irrelevant-change skips shall still conclude successfully.
+- **AC-PLATFORM-CI-PERFORMANCE-005.5:** Performance acceptance shall use the existing runner capacity. More capacity, fewer assertions, disabled isolation, and increased retries shall not count as execution-efficiency improvements.
+
+### REQ-PLATFORM-CI-PERFORMANCE-006: Conservative selection for test-only pull requests
+
+**Intent:** Avoid application E2E work when a pull request changes only inputs that cannot affect the application build or E2E execution.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-CI-PERFORMANCE-006.1:** A pull request containing only verified application-independent unit-test changes shall run the affected unit and static checks. It shall omit application E2E execution.
+- **AC-PLATFORM-CI-PERFORMANCE-006.2:** Runtime, shared dependency, build, E2E fixture, E2E specification, workflow, ambiguous, or mixed changes shall retain the existing applicable verification. Missing comparison evidence shall select full verification.
+- **AC-PLATFORM-CI-PERFORMANCE-006.3:** Change classification shall cover additions, modifications, deletions, and both sides of renames. An unrecognized path shall never prove that a change is test-only.
+- **AC-PLATFORM-CI-PERFORMANCE-006.4:** Required E2E checks shall report the deliberate skip and its reason. Main-branch, merge-group, and manual verification shall retain their existing selection policy.
+
+### REQ-PLATFORM-CI-PERFORMANCE-007: Fifteen-minute complete CI
+
+**Intent:** Shorten the time to complete all application verification, rather than only one test step.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-CI-PERFORMANCE-007.1:** Acceptance shall record three complete successful hosted workflow sets with at most 900 seconds from the earliest backend/frontend/E2E workflow creation to the latest completion. Report every sample and intervening failed, cancelled, or partial attempt. This is a measured delivery target, not a guarantee against future runner queues.
+- **AC-PLATFORM-CI-PERFORMANCE-007.2:** Every selected backend, PostgreSQL 16/18, native Windows, frontend, normal/container E2E, desktop and Kubernetes compatibility check shall remain required. Partitions shall preserve selected identities, assertions, platform coverage, race checks, isolation, retries and failure propagation.
+- **AC-PLATFORM-CI-PERFORMANCE-007.3:** Evidence shall distinguish full-workflow elapsed time, execution, waiting and runner-minutes. Baseline/candidate comparisons shall identify source and selection differences; path-filtered or cancelled runs shall never establish achievement.
+- **AC-PLATFORM-CI-PERFORMANCE-007.4:** Candidates may redistribute work across existing hosted jobs after measuring setup costs and available capacity. Paid capacity activation and trust-boundary expansion remain separate operator decisions. Reject coverage loss and loaded feedback regression; report any occupancy increase explicitly.
+
 ## Out of scope
 
 - Automatic approval, automatic reruns, or changes to contributor trust policy.

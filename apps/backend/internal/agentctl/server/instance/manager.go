@@ -54,18 +54,21 @@ type Manager struct {
 	reaperWG       sync.WaitGroup
 
 	// abandonWG tracks the teardown goroutines CreateInstance spawns when a
-	// caller vanishes mid-creation. They run off the creation mutex so a slow
-	// tracker stop cannot block the queue; Shutdown drains them so a process
-	// exit does not leave half-torn-down trackers behind.
+	// caller vanishes mid-creation. They run off m.mu so a slow tracker stop
+	// cannot block other operations; Shutdown drains them so a process exit
+	// does not leave half-torn-down trackers behind.
+	//
+	// activeCreations counts creations that passed admission and have not yet
+	// been published or handed to abandonWG. Startup runs without m.mu, so
+	// Shutdown waits on it before draining abandonWG and snapshotting the maps.
 	//
 	// shuttingDown, guarded by mu, closes the window where Shutdown could
-	// observe the counter at zero and a CreateInstance already past its own
-	// checks could then Add(1) behind it. Setting the flag under the same mutex
-	// CreateInstance holds means every creation either completes before the
-	// flag is set — so its Add is visible to the Wait below — or sees the flag
-	// and refuses.
-	abandonWG    sync.WaitGroup
-	shuttingDown bool
+	// observe activeCreations at zero and a creation could then Add(1) behind
+	// it: admission checks the flag and adds under m.mu, so every creation
+	// either is counted before the flag is set or sees the flag and refuses.
+	abandonWG       sync.WaitGroup
+	activeCreations sync.WaitGroup
+	shuttingDown    bool
 
 	// afterTrackerStart runs immediately after StartAllWorkspaceTrackers and is
 	// nil in production. It exists so a test can cancel the caller's context at
@@ -127,7 +130,19 @@ func (m *Manager) SetServerFactory(factory ServerFactory) {
 	m.serverFactory = factory
 }
 
+// createAdmission is an admitted creation: its ID is reserved in m.provisional
+// and its port and listener are bound. The caller must publish or abandon it.
+type createAdmission struct {
+	bundle   *provisionalInstance
+	agentEnv []string
+}
+
 // CreateInstance creates a new agent instance.
+//
+// Admission and publication hold m.mu briefly. Startup (process manager,
+// comparison targets, workspace trackers) runs without it, so concurrent
+// creations overlap and lookups of other instances do not wait for them. The
+// provisional bundle keeps the instance ID and port exclusive meanwhile.
 func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*CreateResponse, error) {
 	if req == nil {
 		return nil, errors.New("create instance request is required")
@@ -139,28 +154,81 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	if protocol == string(agent.ProtocolCodexAppServer) && !req.CodexAppServerEnabled {
 		return nil, errors.New("codex app-server feature is disabled")
 	}
-	// createStart includes the m.mu queue wait deliberately: that wait is the
-	// leak pathology described below, and the diagnostic agentctl_create_ready_ms
-	// metric (api.handleSystemMetrics) exists to make it visible.
+	// createStart spans admission, startup and publication, so the diagnostic
+	// agentctl_create_ready_ms metric (api.handleSystemMetrics) reports the
+	// whole creation, including any wait for m.mu.
 	createStart := time.Now()
 
+	admission, err := m.admitCreate(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	bundle := admission.bundle
+	cleanupPending := true
+	defer func() {
+		// Register the teardown before leaving activeCreations, so Shutdown's
+		// abandonWG.Wait, which follows its activeCreations.Wait, covers it.
+		if cleanupPending {
+			m.abandonWG.Add(1)
+			go func() {
+				defer m.abandonWG.Done()
+				if err := m.abandonPartialInstance(bundle); err != nil {
+					m.logger.Warn("error cleaning up abandoned instance",
+						zap.String("instance_id", bundle.id),
+						zap.Error(err))
+				}
+			}()
+		}
+		m.activeCreations.Done()
+	}()
+
+	inst, handler, instanceCfg, err := m.startInstance(ctx, admission, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.publishInstance(ctx, inst, bundle, handler); err != nil {
+		return nil, err
+	}
+	cleanupPending = false
+
+	// Clamp to a minimum of 1ms so a genuinely sub-millisecond creation can't
+	// be stored as 0, which CreateReadyMillis's zero value reserves to mean
+	// "not yet recorded".
+	readyMillis := time.Since(createStart).Milliseconds()
+	if readyMillis <= 0 {
+		readyMillis = 1
+	}
+	instanceCfg.CreateReadyMillis.Store(readyMillis)
+
+	m.logger.Info("created instance",
+		zap.String("instance_id", inst.ID),
+		zap.Int("port", inst.Port),
+		zap.String("workspace", req.WorkspacePath))
+
+	return &CreateResponse{
+		ID:   inst.ID,
+		Port: inst.Port,
+	}, nil
+}
+
+// admitCreate is the serialized part of creation. It refuses during shutdown
+// or for a caller that already gave up, rejects an ID that is published or
+// still provisional, binds a port, and registers the provisional bundle.
+func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createAdmission, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Refuse once Shutdown has begun, so no creation can register an
-	// abandonment teardown after Shutdown drained the wait group.
+	// Refuse once Shutdown has begun, so no creation can join activeCreations
+	// after Shutdown started waiting on it.
 	if m.shuttingDown {
 		return nil, ErrManagerShuttingDown
 	}
 
-	// The caller may already be gone. Creation is serialised on m.mu, the
-	// control client gives up after 30s, and callers that give up retry — so
-	// under load this lock grows a queue of requests nobody is waiting for any
-	// more. Building an instance for one of those leaks it: no caller holds its
-	// ID, so nothing ever stops it, and it keeps a port, an HTTP server and a
-	// full set of workspace trackers polling git. That extra polling is what
-	// makes the next creation slower, which lengthens the queue, which leaks
-	// more instances.
+	// The caller may already be gone: callers give up at their client deadline
+	// and retry. Building an instance for a caller that left leaks it: no caller
+	// holds its ID, so nothing ever stops it, and it keeps a port, an HTTP server
+	// and a full set of workspace trackers polling git. That extra polling makes
+	// the next creation slower.
 	//
 	// Seen in the field as create latency climbing 6ms -> 5.5s -> 34s -> 192s
 	// with 16 live instances and zero deletions, by which point plain
@@ -194,32 +262,103 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	}
 	bundle := &provisionalInstance{id: id, lease: lease, listener: listener}
 	m.provisional[id] = bundle
-	cleanupPending := true
-	defer func() {
-		if !cleanupPending {
-			return
-		}
-		m.abandonWG.Add(1)
-		go func() {
-			defer m.abandonWG.Done()
-			if err := m.abandonPartialInstance(bundle); err != nil {
-				m.logger.Warn("error cleaning up abandoned instance",
-					zap.String("instance_id", bundle.id),
-					zap.Error(err))
-			}
-		}()
-	}()
-	port := lease.Port
+	m.activeCreations.Add(1)
+	return &createAdmission{bundle: bundle, agentEnv: agentEnv}, nil
+}
 
+// startInstance builds an admitted instance without holding m.mu: its process
+// manager, comparison targets, workspace trackers and HTTP handler. It returns
+// the unpublished instance; publishInstance starts serving it.
+func (m *Manager) startInstance(ctx context.Context, admission *createAdmission, req *CreateRequest) (*Instance, http.Handler, *config.InstanceConfig, error) {
+	bundle := admission.bundle
+	id := bundle.id
+	port := bundle.lease.Port
 	agentCmd := m.resolveAgentCommand(req)
-	autoStart := req.AutoStart
-	mcpServers := m.buildMcpServerConfigs(req.McpServers)
 
 	m.logger.Info("CreateInstance: received request",
 		zap.String("req_protocol", req.Protocol),
 		zap.String("workspace_path", req.WorkspacePath))
 
-	overrides := &config.InstanceOverrides{
+	overrides := m.buildInstanceOverrides(id, req, agentCmd, admission.agentEnv)
+
+	m.logger.Info("CreateInstance: applying overrides",
+		zap.String("override_protocol", string(overrides.Protocol)))
+
+	// Create instance config using the unified method
+	instanceCfg := m.config.NewInstanceConfig(port, overrides)
+
+	m.logger.Info("CreateInstance: instance config created",
+		zap.String("config_protocol", string(instanceCfg.Protocol)))
+
+	// Create process manager
+	procMgr := process.NewManager(instanceCfg, m.logger)
+	bundle.setProcessManager(procMgr)
+	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
+	// anything that could reach Start(): this manager satisfies
+	// process.TurnOutcomeRecorder via RetainTurnOutcome, and nothing can start
+	// the process manager until CreateInstance publishes the instance, so
+	// setting it here happens-before any terminal event the instance could
+	// ever produce.
+	procMgr.SetTurnOutcomeRecorder(id, m)
+	// Materialize provider-qualified comparison targets before any tracker
+	// polling starts. Failures remain explicit unavailable tracker state.
+	procMgr.PrepareComparisonTargets(ctx)
+
+	// Start root + per-repo trackers so file-change events fire even in passthrough mode.
+	procMgr.StartAllWorkspaceTrackers(context.Background())
+	if m.afterTrackerStart != nil {
+		m.afterTrackerStart()
+	}
+
+	// Starting the trackers is the slow part of creation, so re-check: a caller
+	// that was still waiting at admission can time out during it.
+	if err := ctx.Err(); err != nil {
+		return nil, nil, nil, fmt.Errorf("create instance abandoned during startup: %w", err)
+	}
+
+	// Create instance up-front so the activity middleware can reference it.
+	inst := &Instance{
+		ID:            id,
+		Port:          port,
+		lease:         bundle.lease,
+		Status:        "running",
+		WorkspacePath: req.WorkspacePath,
+		AgentCommand:  agentCmd,
+		Env:           req.Env,
+		CreatedAt:     time.Now(),
+		SessionID:     req.SessionID,
+		TaskID:        req.TaskID,
+		manager:       procMgr,
+		listenerDone:  make(chan struct{}),
+	}
+	inst.MarkActivity()
+
+	handler := activityMiddleware(inst)(m.buildHTTPHandler(instanceCfg, procMgr))
+	return inst, handler, instanceCfg, nil
+}
+
+// publishInstance starts serving an admitted instance and makes it visible,
+// both under m.mu, so a published instance always has a running server and a
+// creation refused during shutdown, or whose caller gave up while it waited
+// for m.mu, never starts one.
+func (m *Manager) publishInstance(ctx context.Context, inst *Instance, bundle *provisionalInstance, handler http.Handler) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.shuttingDown {
+		return ErrManagerShuttingDown
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("create instance abandoned before publication: %w", err)
+	}
+	inst.server = m.startHTTPServer(inst, bundle.listener, handler)
+	m.instances[inst.ID] = inst
+	delete(m.provisional, inst.ID)
+	return nil
+}
+
+func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd string, agentEnv []string) *config.InstanceOverrides {
+	autoStart := req.AutoStart
+	return &config.InstanceOverrides{
 		InstanceID:                 id,
 		Protocol:                   agent.Protocol(req.Protocol),
 		AgentCommand:               agentCmd,
@@ -228,7 +367,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		Env:                        agentEnv,
 		AutoApprovePermissions:     req.AutoApprovePermissions,
 		AgentType:                  req.AgentType,
-		McpServers:                 mcpServers,
+		McpServers:                 m.buildMcpServerConfigs(req.McpServers),
 		SessionID:                  req.SessionID,
 		TaskID:                     req.TaskID,
 		DisableAskQuestion:         req.DisableAskQuestion,
@@ -246,85 +385,19 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
+		DurableJournalPath:         req.DurableJournalPath,
+		DeliveryStreamID:           req.DeliveryStreamID,
+		DeliveryIncarnationID:      req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 	}
+}
 
-	m.logger.Info("CreateInstance: applying overrides",
-		zap.String("override_protocol", string(overrides.Protocol)))
-
-	// Create instance config using the unified method
-	instanceCfg := m.config.NewInstanceConfig(port, overrides)
-
-	m.logger.Info("CreateInstance: instance config created",
-		zap.String("config_protocol", string(instanceCfg.Protocol)))
-
-	// Create process manager
-	procMgr := process.NewManager(instanceCfg, m.logger)
-	bundle.procMgr = procMgr
-	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
-	// anything that could reach Start(): this manager satisfies
-	// process.TurnOutcomeRecorder via RetainTurnOutcome above, and nothing
-	// outside this function can start the process manager until
-	// CreateInstance returns, so setting it here happens-before any
-	// terminal event the instance could ever produce.
-	procMgr.SetTurnOutcomeRecorder(id, m)
-	// Materialize provider-qualified comparison targets before any tracker
-	// polling starts. Failures remain explicit unavailable tracker state.
-	procMgr.PrepareComparisonTargets(ctx)
-
-	// Start root + per-repo trackers so file-change events fire even in passthrough mode.
-	procMgr.StartAllWorkspaceTrackers(context.Background())
-	if m.afterTrackerStart != nil {
-		m.afterTrackerStart()
-	}
-
-	// Starting the trackers is the slow part of creation, so re-check: a caller
-	// that was still waiting when we took the lock can time out during it.
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("create instance abandoned during startup: %w", err)
-	}
-
-	// Create instance up-front so the activity middleware can reference it.
-	inst := &Instance{
-		ID:            id,
-		Port:          port,
-		lease:         lease,
-		Status:        "running",
-		WorkspacePath: req.WorkspacePath,
-		AgentCommand:  agentCmd,
-		Env:           req.Env,
-		CreatedAt:     time.Now(),
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		manager:       procMgr,
-		listenerDone:  make(chan struct{}),
-	}
-	inst.MarkActivity()
-
-	handler := activityMiddleware(inst)(m.buildHTTPHandler(instanceCfg, procMgr))
-	httpServer := m.startHTTPServer(inst, listener, handler)
-	inst.server = httpServer
-	m.instances[id] = inst
-	delete(m.provisional, id)
-	cleanupPending = false
-
-	// Clamp to a minimum of 1ms so a genuinely sub-millisecond creation can't
-	// be stored as 0, which CreateReadyMillis's zero value reserves to mean
-	// "not yet recorded".
-	readyMillis := time.Since(createStart).Milliseconds()
-	if readyMillis <= 0 {
-		readyMillis = 1
-	}
-	instanceCfg.CreateReadyMillis.Store(readyMillis)
-
-	m.logger.Info("created instance",
-		zap.String("instance_id", id),
-		zap.Int("port", port),
-		zap.String("workspace", req.WorkspacePath))
-
-	return &CreateResponse{
-		ID:   id,
-		Port: port,
-	}, nil
+// setProcessManager stores the process manager under cleanupMu, the lock
+// cleanup reads it under.
+func (b *provisionalInstance) setProcessManager(mgr processManager) {
+	b.cleanupMu.Lock()
+	defer b.cleanupMu.Unlock()
+	b.procMgr = mgr
 }
 
 // abandonPartialInstanceTimeout bounds the admission wait inside
@@ -668,6 +741,11 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	m.mu.Lock()
 	m.shuttingDown = true
 	m.mu.Unlock()
+
+	// Wait for admitted creations. Each one either publishes before the
+	// snapshot below or is refused and registers its teardown on abandonWG
+	// before it finishes, so the drain that follows covers it.
+	m.activeCreations.Wait()
 
 	// Drain any in-flight abandonment teardowns. They own trackers and a port
 	// that are no longer reachable through m.instances, so nothing below would

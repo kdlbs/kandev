@@ -8,6 +8,8 @@ import (
 )
 
 func (r *InteractiveRunner) readOutput(proc *interactiveProcess) {
+	defer r.closeOutputSubscriptions(proc)
+	defer close(proc.outputDone)
 	buf := make([]byte, 32768) // 32KB buffer for better throughput
 	recentOutput := ""         // Keep recent output for prompt pattern matching
 	firstRead := true
@@ -90,6 +92,7 @@ func (r *InteractiveRunner) processOutputData(proc *interactiveProcess, ptyInsta
 	proc.directOutputMu.RLock()
 	hasDirectWriter := proc.directOutput != nil
 	proc.directOutputMu.RUnlock()
+	hasDirectWriter = hasDirectWriter || r.HasOutputSubscribers(proc.info.ID)
 
 	if !hasDirectWriter {
 		r.respondToTerminalQueries(proc, ptyInstance, data)
@@ -115,7 +118,7 @@ func (r *InteractiveRunner) processOutputData(proc *interactiveProcess, ptyInsta
 		Data:      dataStr,
 		Timestamp: time.Now().UTC(),
 	}
-	proc.buffer.append(chunk)
+	r.bufferAndPublishOutput(proc, chunk, data)
 
 	// Check if we have a direct output writer (binary WebSocket mode)
 	proc.directOutputMu.RLock()

@@ -579,6 +579,7 @@
   "pauseAgent": "エージェントを一時停止",
   "pauseReasonPlaceholder": "このワークスペースを一時停止する理由は何ですか？",
   "pauseRequestFailed": "一時停止状態の更新に失敗しました。もう一度お試しください。",
+  "pauseStateLoading": "一時停止状態を読み込み中...",
   "pauseStateStale": "古い可能性があります",
   "pauseStateUnavailable": "一時停止状態を取得できません。ワークスペースが一時停止中かどうかは不明です。",
   "pauseUnavailable": "ワークスペースが選択されていません。",
@@ -722,7 +723,6 @@
   "routeOutcomeSkippedUserAction": "ユーザー操作のためスキップ",
   "routineActivated": "ルーチンを有効化しました",
   "routineCreated": "ルーチンを作成しました",
-  "routineCreatedWithoutSchedule": "ルーチンはスケジュールなしで作成されました: {{error}}",
   "routineDeleted": "ルーチンを削除しました",
   "routineFired": "ルーチンが実行されました",
   "routineNotFiring": "実行できません。ルーチンのステータスは {{status}} です",
@@ -1018,5 +1018,9 @@
   "failedToLoadRouteAttempts": "ルート試行の読み込み失敗",
   "failedToLoadRoutingConfig": "ルーティング設定の読み込み失敗",
   "failedToLoadRoutingPreview": "ルーティングプレビューの読み込み失敗",
-  "failedToLoadTaskQuorum": "タスククオーラムの読み込み失敗"
+  "failedToLoadTaskQuorum": "タスククオーラムの読み込み失敗",
+  "openSessionRecovery": "セッション復旧を開く",
+  "sessionRecoveryDescription": "この実行はセッションが復旧されるまで保留されています。Kandev はプロンプトを自動的に再送信しません。",
+  "sessionRecoveryReason": "理由: {{reason}}",
+  "sessionRecoveryRequired": "セッションの復旧が必要"
 }

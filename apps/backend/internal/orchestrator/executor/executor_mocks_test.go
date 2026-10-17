@@ -24,30 +24,32 @@ import (
 
 // mockAgentManager implements AgentManagerClient for testing
 type mockAgentManager struct {
-	launchAgentFunc                  func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
-	startAgentProcessFunc            func(ctx context.Context, agentExecutionID string) error
-	stopAgentFunc                    func(ctx context.Context, agentExecutionID string, force bool) error
-	stopAgentWithReasonFunc          func(ctx context.Context, agentExecutionID string, reason string, force bool) error
-	resolveAgentProfileFunc          func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
-	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
-	setExecutionEnvFunc              func(ctx context.Context, agentExecutionID string, env map[string]string) error
-	executorProfileEnvFunc           func(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error)
-	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
-	listExecutionsForTaskFunc        func(taskID string) []lifecycle.ExecutionReference
-	isAgentCommandConfiguredFunc     func(agentExecutionID string) bool
-	isAgentRunningForSessionFunc     func(ctx context.Context, sessionID string) bool
-	cleanupStaleExecutionFunc        func(ctx context.Context, sessionID string) error
-	promptAgentFunc                  func(ctx context.Context, agentExecutionID, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error)
-	isPassthroughSessionFunc         func(ctx context.Context, sessionID string) bool
-	writePassthroughStdinFunc        func(ctx context.Context, sessionID, data string) error
-	markPassthroughRunningFunc       func(sessionID string) error
-	resolvePassthroughConfigFunc     func(ctx context.Context, sessionID string) (agents.PassthroughConfig, error)
-	launchAgentCallCount             int
-	cleanupStaleExecutionCallCount   int
-	isAgentRunningForSessionCallArgs []string
-	promptAgentCallCount             int
-	writePassthroughStdinCalls       []passthroughStdinCall
-	markPassthroughRunningCalls      []string
+	launchAgentFunc                    func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
+	startAgentProcessFunc              func(ctx context.Context, agentExecutionID string) error
+	startupDisposition                 lifecycle.AgentStartupDisposition
+	stopAgentFunc                      func(ctx context.Context, agentExecutionID string, force bool) error
+	stopAgentWithReasonFunc            func(ctx context.Context, agentExecutionID string, reason string, force bool) error
+	resolveAgentProfileFunc            func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+	setExecutionDescriptionFunc        func(ctx context.Context, agentExecutionID string, description string) error
+	setInitialDeliverySubmissionIDFunc func(ctx context.Context, agentExecutionID, submissionID string) error
+	setExecutionEnvFunc                func(ctx context.Context, agentExecutionID string, env map[string]string) error
+	executorProfileEnvFunc             func(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error)
+	getExecutionIDForSessionFunc       func(ctx context.Context, sessionID string) (string, error)
+	listExecutionsForTaskFunc          func(taskID string) []lifecycle.ExecutionReference
+	isAgentCommandConfiguredFunc       func(agentExecutionID string) bool
+	isAgentRunningForSessionFunc       func(ctx context.Context, sessionID string) bool
+	cleanupStaleExecutionFunc          func(ctx context.Context, sessionID string) error
+	promptAgentFunc                    func(ctx context.Context, agentExecutionID, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error)
+	isPassthroughSessionFunc           func(ctx context.Context, sessionID string) bool
+	writePassthroughStdinFunc          func(ctx context.Context, sessionID, data string) error
+	markPassthroughRunningFunc         func(sessionID string) error
+	resolvePassthroughConfigFunc       func(ctx context.Context, sessionID string) (agents.PassthroughConfig, error)
+	launchAgentCallCount               int
+	cleanupStaleExecutionCallCount     int
+	isAgentRunningForSessionCallArgs   []string
+	promptAgentCallCount               int
+	writePassthroughStdinCalls         []passthroughStdinCall
+	markPassthroughRunningCalls        []string
 }
 
 // passthroughStdinCall captures one invocation of WritePassthroughStdin for assertions.
@@ -74,6 +76,13 @@ func (m *mockAgentManager) SetExecutionDescription(ctx context.Context, agentExe
 	}
 	return nil
 }
+
+func (m *mockAgentManager) SetInitialDeliverySubmissionID(ctx context.Context, agentExecutionID, submissionID string) error {
+	if m.setInitialDeliverySubmissionIDFunc != nil {
+		return m.setInitialDeliverySubmissionIDFunc(ctx, agentExecutionID, submissionID)
+	}
+	return nil
+}
 func (m *mockAgentManager) SetExecutionEnv(ctx context.Context, executionID string, env map[string]string) error {
 	if m.setExecutionEnvFunc != nil {
 		return m.setExecutionEnvFunc(ctx, executionID, env)
@@ -97,6 +106,13 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecution
 		return m.startAgentProcessFunc(ctx, agentExecutionID)
 	}
 	return nil
+}
+
+func (m *mockAgentManager) StartupDisposition(string) lifecycle.AgentStartupDisposition {
+	if m.startupDisposition == "" {
+		return lifecycle.AgentStartupCreatedByAttempt
+	}
+	return m.startupDisposition
 }
 
 func (m *mockAgentManager) IsAgentCommandConfigured(agentExecutionID string) bool {
@@ -300,7 +316,13 @@ type mockRepository struct {
 	executorsRunning     map[string]*models.ExecutorRunning
 	taskEnvironments     map[string]*models.TaskEnvironment
 	taskEnvironmentRepos map[string][]*models.TaskEnvironmentRepo // env_id → rows
-	plans                map[string]*models.TaskPlan              // task_id → plan
+	// failMaterializationCalls records sessions whose claim release was requested.
+	failMaterializationCalls []string
+	// reelectFailedCalls records environments whose re-election was requested;
+	// reelectFailedFunc, when set, replaces the default re-election outcome.
+	reelectFailedCalls []string
+	reelectFailedFunc  func(ctx context.Context, environmentID, sessionID string) (bool, error)
+	plans              map[string]*models.TaskPlan // task_id → plan
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
@@ -1499,6 +1521,32 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	m.updateTaskEnvironmentCalls = append(m.updateTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
 	return nil
+}
+func (m *mockRepository) FailTaskEnvironmentMaterialization(_ context.Context, sessionID string) (bool, error) {
+	m.failMaterializationCalls = append(m.failMaterializationCalls, sessionID)
+	for _, env := range m.taskEnvironments {
+		if env.Status == models.TaskEnvironmentStatusCreating && env.MaterializationSessionID == sessionID {
+			env.Status = models.TaskEnvironmentStatusFailed
+			env.MaterializationSessionID = ""
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func (m *mockRepository) ReelectFailedTaskEnvironmentMaterialization(ctx context.Context, environmentID, sessionID string) (bool, error) {
+	m.reelectFailedCalls = append(m.reelectFailedCalls, environmentID)
+	if m.reelectFailedFunc != nil {
+		return m.reelectFailedFunc(ctx, environmentID, sessionID)
+	}
+	env := m.taskEnvironments[environmentID]
+	if env == nil || env.Status != models.TaskEnvironmentStatusFailed || env.MaterializationSessionID != "" ||
+		env.WorkspacePath != "" || env.ContainerID != "" || env.SandboxID != "" ||
+		len(env.Repos) > 0 || len(m.taskEnvironmentRepos[environmentID]) > 0 {
+		return false, nil
+	}
+	env.Status = models.TaskEnvironmentStatusCreating
+	env.MaterializationSessionID = sessionID
+	return true, nil
 }
 func (m *mockRepository) SetTaskEnvironmentTaskDirNameIfEmpty(_ context.Context, environmentID, taskDirName string) (bool, error) {
 	m.mu.Lock()

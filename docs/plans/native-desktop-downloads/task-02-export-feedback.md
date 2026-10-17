@@ -127,3 +127,20 @@ an anchor was clicked. Avoid leaking object URLs after failed attempts.
   before AC-001.2 is verified. This Linux host cannot run that WKWebView check.
 - Status remains blocked on the same native transfer gate as Task 01. The
   frontend and browser/mobile checks are complete; AC-001.2 is unverified.
+
+
+PR #3598 CI follow-up (2026-10-06): the file-tree download browser fixture
+failed before any download action because its shared seed checkout was behind
+the offline origin. Both seeding paths now use the existing
+`GitHelper.pushMainWithRetry`, which fetches and rebases on a non-fast-forward
+rejection rather than overwriting the remote.
+
+A temporary independent clone advanced the offline origin after the download
+fixture commit: the original push failed (`fetch first`), then the corrected
+fixture fetched, rebased, pushed, and passed its download filename/content
+assertions (1 passed, 6.6s). The temporary reproduction was removed.
+The final whole-file command and outcome are recorded below. Product download
+code and whole-test retry policy remain unchanged.
+
+- `(cd apps/web && pnpm e2e:run --host --no-build --project chromium -- tests/task/file-tree-download.spec.ts --retries=0)`: 2 passed (final fixture, no injected peer).
+- Focused ESLint and Prettier checks passed for both corrected browser files.

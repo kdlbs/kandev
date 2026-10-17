@@ -57,6 +57,13 @@ test.describe("Task creation with branch policies", () => {
         `E2E Branch Policy Local ${Date.now()}`,
       );
       await testPage.goto("/");
+      const divider = testPage.getByTestId("sidebar-navigation-divider");
+      await divider.focus();
+      await divider.press("Home");
+      const expand = testPage.getByTestId("sidebar-navigation-expand");
+      await expect(expand).toHaveAttribute("aria-expanded", "false");
+      await expand.click();
+      await expect(expand).toHaveAttribute("aria-expanded", "true");
       await testPage.getByTestId("create-task-button").first().click();
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();

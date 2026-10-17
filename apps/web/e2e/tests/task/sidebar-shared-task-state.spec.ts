@@ -5,6 +5,14 @@ import {
   exerciseSharedFirstResponse,
 } from "./sidebar-shared-task-state-fixtures";
 
+test.afterEach(async ({ backend }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) return;
+  await testInfo.attach("sidebar-shared-state-backend.log", {
+    path: backend.logPath,
+    contentType: "text/plain",
+  });
+});
+
 test("desktop pages complete shared state without queries and bounds archived ownership", async ({
   testPage,
   apiClient,

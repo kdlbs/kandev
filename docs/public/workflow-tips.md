@@ -200,6 +200,16 @@ Workflow and step prompt fields use the inline prompt editor. Type `@` after whi
 
 The workflow-level prompt supports saved-prompt references but does not expand step-only variables. `{{task_prompt}}` is available in a step prompt because it is replaced with the task description when that step runs.
 
+Both step prompts and the workflow-level prompt also accept these single-brace placeholders. Type them directly; the completion menu does not offer them.
+
+| Placeholder | Replaced with |
+|-------------|---------------|
+| `{task_id}` | The task's ID. |
+| `{task_title}` | The task's title. Useful when task descriptions are short. |
+| `{step_entry_number}` | How many times the task has entered the current step, starting at 1. |
+
+Each placeholder is replaced everywhere it appears in the prompt you write. Text that arrives through `{{task_prompt}}` is never scanned, so a task description that happens to contain one of these tokens is sent unchanged.
+
 ## Events and actions
 
 <details>

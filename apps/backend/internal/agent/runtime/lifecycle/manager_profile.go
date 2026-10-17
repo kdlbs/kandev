@@ -50,12 +50,28 @@ func (m *Manager) getAgentConfigAndProfileForExecution(ctx context.Context, exec
 	}
 
 	agentTypeName := profileInfo.AgentName
-	agentConfig, ok := m.registry.Get(agentTypeName)
-	if !ok {
-		return nil, nil, fmt.Errorf("agent type not found: %s", agentTypeName)
+	agentConfig, err := m.resolveLaunchableAgent(agentTypeName)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	return agentConfig, profileInfo, nil
+}
+
+// resolveLaunchableAgent returns the registry agent for a resolved agent type
+// name. Virtual execution families (such as the dynamic routing family) own
+// no subprocess: selecting one for a direct launch must fail closed here
+// with ErrVirtualProfile instead of reaching command building, where the
+// empty virtual command would surface only as a generic empty-command error.
+func (m *Manager) resolveLaunchableAgent(agentTypeName string) (agents.Agent, error) {
+	agentConfig, ok := m.registry.Get(agentTypeName)
+	if !ok {
+		return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
+	}
+	if agents.IsVirtualAgent(agentConfig) {
+		return nil, fmt.Errorf("agent type %q: %w", agentTypeName, ErrVirtualProfile)
+	}
+	return agentConfig, nil
 }
 
 // resolveMcpServers centralizes MCP resolution for a session:

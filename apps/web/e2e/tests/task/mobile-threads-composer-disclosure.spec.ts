@@ -78,8 +78,8 @@ test("keeps the touch composer visible and restores drafts through single-chat n
   test.setTimeout(180_000);
   const original = await captureThreadSettings(apiClient);
   try {
-    const first = await startPresentationThread(testPage, apiClient, seedData, "A touch composer");
-    const second = await startPresentationThread(testPage, apiClient, seedData, "B touch composer");
+    const first = await startPresentationThread(apiClient, seedData, "A touch composer");
+    const second = await startPresentationThread(apiClient, seedData, "B touch composer");
     await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer: true });
     await testPage.goto("/threads");
     const board = testPage.getByTestId("threads-board");
@@ -170,12 +170,7 @@ test("keeps native model, cancellation and attachment controls usable by touch",
   test.setTimeout(120_000);
   const original = await captureThreadSettings(apiClient);
   try {
-    const task = await startPresentationThread(
-      testPage,
-      apiClient,
-      seedData,
-      "Touch agent controls",
-    );
+    const task = await startPresentationThread(apiClient, seedData, "Touch agent controls");
     await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer: true });
     await testPage.goto("/threads");
     const tile = testPage.getByTestId(`thread-column-${task.id}`);

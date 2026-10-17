@@ -38,6 +38,7 @@ import {
   type WorkspaceRestorationResult,
 } from "@/hooks/domains/session/use-workspace-restoration";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
+import { isMissingTerminalEnvironment } from "./ws-reconnect";
 
 type BaseProps = {
   autoFocus?: boolean;
@@ -230,7 +231,9 @@ export function computeTerminalPaneState(
   environmentEnded: boolean,
   isConnected: boolean,
   workspaceReady = false,
+  isUnavailable = false,
 ): "connected" | "connecting" | "ended" {
+  if (isUnavailable) return "ended";
   if (mode === "shell" && environmentEnded && !workspaceReady) return "ended";
   return isConnected ? "connected" : "connecting";
 }
@@ -258,9 +261,10 @@ type PassthroughConnectionOptions = {
 type PassthroughConnectionState = {
   isTerminalReady: boolean;
   isConnected: boolean;
+  isUnavailable: boolean;
   onTerminalReady: () => void;
   onConnected: () => void;
-  onDisconnected: () => void;
+  onDisconnected: (event: CloseEvent) => void;
 };
 
 function usePassthroughConnection({
@@ -280,7 +284,9 @@ function usePassthroughConnection({
   // Track which terminal target has an active WebSocket connection. The loading
   // overlay resets on target switches without needing a separate setState effect.
   const [connectedTargetId, setConnectedTargetId] = useState<string | null>(null);
+  const [unavailableTargetId, setUnavailableTargetId] = useState<string | null>(null);
   const isConnected = connectionID != null && connectedTargetId === connectionID;
+  const isUnavailable = connectionID != null && unavailableTargetId === connectionID;
   const passthroughEscapeGuard = useCallback(
     (event: KeyboardEvent) =>
       shouldGuardPassthroughEscape(
@@ -298,12 +304,23 @@ function usePassthroughConnection({
     setConnectedTargetId(connectionID ?? null);
     if (autoFocus) xtermRef.current?.textarea?.focus({ preventScroll: true });
   }, [connectionID, autoFocus, xtermRef]);
-  const onDisconnected = useCallback(() => {
-    const disconnectedTargetId = connectionID ?? null;
-    setConnectedTargetId((current) => (current === disconnectedTargetId ? null : current));
-  }, [connectionID]);
+  const onDisconnected = useCallback(
+    (event: CloseEvent) => {
+      const disconnectedTargetId = connectionID ?? null;
+      setConnectedTargetId((current) => (current === disconnectedTargetId ? null : current));
+      if (isMissingTerminalEnvironment(event)) setUnavailableTargetId(disconnectedTargetId);
+    },
+    [connectionID],
+  );
 
-  return { isTerminalReady, isConnected, onTerminalReady, onConnected, onDisconnected };
+  return {
+    isTerminalReady,
+    isConnected,
+    isUnavailable,
+    onTerminalReady,
+    onConnected,
+    onDisconnected,
+  };
 }
 
 type PassthroughEffectsOptions = {
@@ -399,7 +416,7 @@ function usePassthroughEffects({
     taskId,
     sessionId,
     environmentId,
-    canConnect,
+    canConnect: canConnect && !connection.isUnavailable,
     isTerminalReady,
     fitAndResize,
     wsBaseUrl,
@@ -457,6 +474,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     environmentEnded,
     connection.isConnected,
     workspaceReady,
+    connection.isUnavailable,
   );
   const effectiveProps: PassthroughTerminalProps = {
     ...props,
@@ -492,6 +510,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
         paneState={paneState}
         mode={mode}
         workspaceRestoration={workspaceRestoration}
+        isUnavailable={connection.isUnavailable}
       />
     </div>
   );
@@ -505,13 +524,20 @@ function TerminalPaneOverlay({
   paneState,
   mode,
   workspaceRestoration,
+  isUnavailable,
 }: {
   paneState: ReturnType<typeof computeTerminalPaneState>;
   mode: "agent" | "shell";
   workspaceRestoration?: WorkspaceRestorationResult;
+  isUnavailable: boolean;
 }) {
   const { t } = useTranslation();
-  if (mode === "shell" && workspaceRestoration?.status && workspaceRestoration.status !== "ready") {
+  if (
+    !isUnavailable &&
+    mode === "shell" &&
+    workspaceRestoration?.status &&
+    workspaceRestoration.status !== "ready"
+  ) {
     return (
       <div className="absolute inset-0 z-10 bg-background">
         <WorkspaceUnavailable

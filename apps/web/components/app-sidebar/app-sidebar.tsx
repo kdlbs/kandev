@@ -105,10 +105,11 @@ function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffi
       {!inOffice && !hasSavedSidebarLayout && <IntegrationsSection collapsed={collapsed} />}
     </div>
   );
-  if (!inOffice && !collapsed)
+  if (!inOffice)
     return (
       <SidebarNavigationSplit
         key={workspaceId}
+        collapsed={collapsed}
         navigation={navigation}
         tasks={<TasksSection collapsed={collapsed} />}
       />

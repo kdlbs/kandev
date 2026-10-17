@@ -25,6 +25,7 @@ const draft = (over: Partial<ControlDraft> = {}): ControlDraft => ({
     stop: "denied",
   },
   watches: { scope: "all", workflowIds: [] },
+  projects: null,
   ...over,
 });
 
@@ -37,6 +38,13 @@ function control(d: ControlDraft | null, status = "ready") {
     fieldError: null,
     setAction: vi.fn(),
     setWatches: vi.fn(),
+    setProjects: vi.fn(),
+    projectsRead: {
+      sets: [{ kind: "repository_set", id: "set-1", name: "Payments", repositoryCount: 2 }],
+      loose: [],
+      status: "ready",
+      retry: vi.fn(),
+    },
     policyDirty: false,
     watchesDirty: false,
     invalid: false,
@@ -214,6 +222,31 @@ describe("WatchesSection", () => {
     boardsMock.mockReturnValue({ boards: [], status: "ready", retry: vi.fn() });
     render(<WatchesSection workspaceId="w1" canManage control={control(draft())} />);
     expect(screen.getByText("This workspace has no boards to choose from.")).toBeTruthy();
+  });
+
+  it("renders no Projects part when the draft has no projects member", () => {
+    render(<WatchesSection workspaceId="w1" canManage control={control(draft())} />);
+    expect(screen.queryByTestId("watches-projects")).toBeNull();
+  });
+
+  it("renders the Projects part for a selected scope and wires a toggle to setProjects", () => {
+    const c = control(
+      draft({
+        projects: {
+          scope: "selected",
+          entries: [{ kind: "repository_set", id: "set-1" }],
+          includeNoRepository: false,
+        },
+      }),
+    );
+    render(<WatchesSection workspaceId="w1" canManage control={c} />);
+    expect(screen.getByTestId("watches-projects")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("watches-project-toggle-set-1"));
+    expect((c as { setProjects: ReturnType<typeof vi.fn> }).setProjects).toHaveBeenCalledWith({
+      scope: "selected",
+      entries: [],
+      includeNoRepository: false,
+    });
   });
 
   it("disables the controls for a reader", () => {

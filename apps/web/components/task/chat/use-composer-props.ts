@@ -5,6 +5,11 @@ import type {
   ChatSubmitResult,
 } from "@/components/task/chat/chat-input-container";
 import type { ChatPanelState } from "./use-chat-panel-state";
+import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
+import { useSessionComposerRecovery } from "./session-recovery-context";
+
+// i18n-exempt: stable backend failure code, not user-facing copy.
+const DURABLE_DELIVERY_UNCERTAIN = "DURABLE_DELIVERY_UNCERTAIN";
 
 type ComposerPropsArgs = {
   panelState: ChatPanelState;
@@ -27,6 +32,57 @@ type ComposerPropsArgs = {
   hideAgentControls?: boolean;
   hidePlanMode?: boolean;
 };
+
+type DeliveryRecoveryPresentation = {
+  uncertainDelivery: boolean;
+  deliveryRecoveryPhase: "reconnecting" | "uncertain" | undefined;
+};
+
+function deliveryRecoveryPresentation(
+  phase: NonNullable<ReturnType<typeof readAgentDeliveryRecovery>>["phase"] | undefined,
+  legacyUncertainDelivery: boolean,
+  hasDeliveryRecoveryBlock: boolean,
+): DeliveryRecoveryPresentation {
+  if (phase === "reconnecting" || phase === "uncertain") {
+    return { uncertainDelivery: true, deliveryRecoveryPhase: phase };
+  }
+  if (hasDeliveryRecoveryBlock)
+    return { uncertainDelivery: true, deliveryRecoveryPhase: "uncertain" };
+  if (phase) return { uncertainDelivery: false, deliveryRecoveryPhase: undefined };
+  return {
+    uncertainDelivery: legacyUncertainDelivery,
+    deliveryRecoveryPhase: legacyUncertainDelivery ? "uncertain" : undefined,
+  };
+}
+
+function deliveryRecoveryBlockPresentation(
+  session: ChatPanelState["session"],
+  hasRecoveryCard: boolean,
+) {
+  const blocks = session?.session_recovery_blocks?.filter(
+    (block) => block.consumer_reference === "agent_delivery",
+  );
+  return {
+    requiresRecovery: Boolean(blocks?.length),
+    hasDeliveryRecoveryBlock:
+      blocks?.some(
+        (block) =>
+          !hasRecoveryCard ||
+          block.reason !== "unknown_prompt_outcome" ||
+          !block.delivery_submission_id,
+      ) ?? false,
+  };
+}
+
+function hasContextComments(panelState: ChatPanelState): boolean {
+  return (
+    panelState.planComments.length > 0 ||
+    (panelState.previewFeedback?.length ?? 0) > 0 ||
+    panelState.pendingPRFeedback.length > 0 ||
+    panelState.walkthroughComments.length > 0 ||
+    panelState.messageComments.length > 0
+  );
+}
 
 /**
  * Builds the (large) prop object for `ChatInputContainer` from panel state
@@ -57,17 +113,25 @@ export function useComposerProps(args: ComposerPropsArgs) {
   } = args;
   const { resolvedSessionId, taskId, isAgentBusy, isWorking, needsRecovery, planModeEnabled } =
     panelState;
+  const deliveryRecovery = readAgentDeliveryRecovery(panelState.session?.metadata);
+  const composerRecovery = useSessionComposerRecovery(resolvedSessionId);
+  const { hasDeliveryRecoveryBlock, requiresRecovery } = deliveryRecoveryBlockPresentation(
+    panelState.session,
+    Boolean(composerRecovery?.model && !composerRecovery.model.requestLocal),
+  );
+  const legacyUncertainDelivery = panelState.lastAgentError?.code === DURABLE_DELIVERY_UNCERTAIN;
+  const recoveryPresentation = deliveryRecoveryPresentation(
+    deliveryRecovery?.phase,
+    legacyUncertainDelivery,
+    hasDeliveryRecoveryBlock,
+  );
   const canQueueWhileStarting = panelState.inputMode === "queue" && panelState.isQueueReady;
   const supportsSteering = panelState.supportsSteering;
-  const hasContextComments =
-    panelState.planComments.length > 0 ||
-    (panelState.previewFeedback?.length ?? 0) > 0 ||
-    panelState.pendingPRFeedback.length > 0 ||
-    panelState.walkthroughComments.length > 0 ||
-    panelState.messageComments.length > 0;
+  const hasPendingContextComments = hasContextComments(panelState);
   return {
     onSubmit: handleSubmit,
     sessionId: resolvedSessionId,
+    detailActive: panelState.detailActive,
     taskId,
     workspaceId: composerWorkspaceId,
     workspaceResolutionFailed,
@@ -96,13 +160,14 @@ export function useComposerProps(args: ComposerPropsArgs) {
     showRequestChangesTooltip,
     onRequestChangesTooltipDismiss,
     pendingCommentsByFile: panelState.pendingCommentsByFile,
-    hasContextComments,
+    hasContextComments: hasPendingContextComments,
     submitKey: panelState.chatSubmitKey,
     hasAgentCommands: !!(panelState.agentCommands && panelState.agentCommands.length > 0),
     isFailed: panelState.isFailed,
     isCompleted: panelState.isCompleted,
     sessionErrorMessage: panelState.session?.error_message,
-    needsRecovery,
+    ...recoveryPresentation,
+    needsRecovery: needsRecovery || requiresRecovery,
     executorUnavailable: executor.unavailable,
     executorUnavailableReason: executor.reason,
     contextItems: panelState.contextItems,

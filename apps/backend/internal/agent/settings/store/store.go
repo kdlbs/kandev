@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	// ErrProfileChanged is returned by DuplicateAgentProfile when a source
-	// row changed between the caller's read and the transactional insert, so
+	ErrProfileOrderAgentNotFound = errors.New("agent not found")
+	ErrProfileOrderSetMismatch   = errors.New("profile order does not match current global profile set")
+	// ErrProfileChanged means the source profile row changed between the caller's read and the transactional insert, so
 	// the copy would not reflect a consistent snapshot. Callers retry on a
 	// fresh read.
 	ErrProfileChanged = errors.New("source profile changed during duplicate")
@@ -73,6 +74,8 @@ type Repository interface {
 	// decides what that means, not this method.
 	GetAgentProfileTx(ctx context.Context, tx *sqlx.Tx, id string) (*models.AgentProfile, bool, error)
 	ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error)
+	ReorderAgentProfiles(ctx context.Context, agentID string, orderedIDs []string) (revision int64, changed bool, err error)
+	GetAgentProfileOrderSnapshots(ctx context.Context, agentIDs []string) (map[string]AgentProfileOrderSnapshot, error)
 	// HasDeletedAgentProfiles reports whether the agent has any soft-deleted
 	// profile rows. Seeding paths use this to distinguish a fresh agent that
 	// has never been provisioned (no rows at all -> seed a default) from one

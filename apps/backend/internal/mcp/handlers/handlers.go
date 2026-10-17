@@ -153,6 +153,13 @@ type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
 }
 
+// taskStepTransitionIDReader reads a task's latest step-transition ledger id.
+// The production task repository implements it; deferMoveTask type-asserts so a
+// fake that omits it simply keeps the legacy ordering behavior.
+type taskStepTransitionIDReader interface {
+	GetLatestTaskStepTransitionID(ctx context.Context, taskID string) (int64, error)
+}
+
 // RemoteContributionService resolves provider URLs before task creation and
 // associates an already-existing PR/MR after the target task-repository row
 // exists. Implementations must return only server-authored identity data.
@@ -357,12 +364,16 @@ type Handlers struct {
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
+	taskTransferSvc    TaskTransferService
+	transferAuthorizer TaskTransferCoordinatorAuthorizer
 
 	// Optional coordinator.propose_task dependency (coordinator MCP surface
 	// only, set via SetCoordinatorService). Without it the action is not
 	// registered and a coordinator principal's propose call 404s via the
 	// guard's nil-service check.
 	coordinatorSvc *coordinator.Service
+	// coordinatorTurns reads the turn ledger; nil while phase 3.1 is off.
+	coordinatorTurns CoordinatorTurnReader
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -413,11 +424,18 @@ func NewHandlers(
 	}
 	if taskSvc != nil {
 		h.stopTaskGetter = taskSvc.GetTask
+		h.taskTransferSvc = taskSvc
 	}
 	if stopper, ok := sessionLauncher.(TaskStopper); ok {
 		h.taskStopper = stopper
 	}
 	return h
+}
+
+// SetTaskTransferCoordinatorAuthorizer wires server-side Office coordinator
+// attestation. Request payloads never supply coordinator identity.
+func (h *Handlers) SetTaskTransferCoordinatorAuthorizer(authorizer TaskTransferCoordinatorAuthorizer) {
+	h.transferAuthorizer = authorizer
 }
 
 // SetClarificationInputPauser wires the orchestrator-owned hard pause used when
@@ -560,8 +578,10 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 		d.RegisterFunc(coordinator.ActionProposeResume, h.proposeKindHandler(coordinator.ProposalKindResume))
 		d.RegisterFunc(coordinator.ActionProposeMessage, h.proposeKindHandler(coordinator.ProposalKindMessage))
 		d.RegisterFunc(coordinator.ActionProposeMove, h.proposeKindHandler(coordinator.ProposalKindMove))
+		d.RegisterFunc(coordinator.ActionProposeImprovement, h.handleProposeImprovement)
 		d.RegisterFunc(coordinator.ActionGetItem, h.handleGetCoordinatorItem)
 		d.RegisterFunc(coordinator.ActionListActivity, h.handleListCoordinatorActivity)
+		d.RegisterFunc(coordinator.ActionListTurns, h.handleListCoordinatorTurns)
 	}
 }
 
@@ -682,6 +702,8 @@ func (h *Handlers) registerAgentHandlers(d *guardedMCPDispatcher) {
 
 func (h *Handlers) registerTaskConfigMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
+	d.RegisterFunc(ws.ActionMCPTransferTask, h.handleTransferTask)
+	d.RegisterFunc(ws.ActionMCPAuditTaskTransferAttempt, h.handleAuditTaskTransferAttempt)
 	d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
 	d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
@@ -740,6 +762,9 @@ func (h *Handlers) handleListByField(
 	resp, err := fn(ctx, value)
 	if err != nil {
 		h.logger.Error(logErrMsg, zap.Error(err))
+		if errors.Is(err, errCoordinatorProjectsRead) {
+			clientErrMsg = clientErrMsg + ": " + err.Error()
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
@@ -820,6 +845,10 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 	return h.handleListByField(ctx, msg, "workflow_id", "failed to list tasks", "Failed to list tasks",
 		func(ctx context.Context, workflowID string) (any, error) {
 			tasks, err := h.taskSvc.ListTasks(ctx, workflowID)
+			if err != nil {
+				return nil, err
+			}
+			tasks, err = h.filterCoordinatorTasks(ctx, tasks)
 			if err != nil {
 				return nil, err
 			}
@@ -4799,117 +4828,6 @@ func (h *Handlers) publishQueueStatusEvent(
 		"mcp-handlers",
 		eventData,
 	))
-}
-
-// handleAskUserQuestion creates a clarification request and blocks until the user responds.
-// The agent's MCP tool call stays open (same turn) while waiting. If the agent times out,
-// the event-based fallback in the orchestrator handles resuming with a new turn.
-func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		SessionID         string                   `json:"session_id"`
-		TaskID            string                   `json:"task_id"`
-		Questions         []clarification.Question `json:"questions"`
-		Context           string                   `json:"context"`
-		AllowFreeTextOnly bool                     `json:"allow_free_text_only,omitempty"`
-	}
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-	// Single source of truth — same validator the HTTP handler uses, so
-	// duplicate IDs / bad option counts / empty prompts can't slip through
-	// either path.
-	validateQuestions := clarification.NormalizeAndValidateQuestions
-	if req.AllowFreeTextOnly {
-		validateQuestions = clarification.NormalizeAndValidateQuestionsAllowFreeTextOnly
-	}
-	if errMsg := validateQuestions(req.Questions); errMsg != "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
-	}
-
-	// Look up task ID from session if not provided
-	taskID := req.TaskID
-	if taskID == "" {
-		session, err := h.sessionRepo.GetTaskSession(ctx, req.SessionID)
-		if err != nil {
-			h.logger.Warn("failed to look up task for session",
-				zap.String("session_id", req.SessionID),
-				zap.Error(err))
-		} else if session != nil {
-			taskID = session.TaskID
-		}
-	}
-
-	// Create the clarification request
-	clarificationReq := &clarification.Request{
-		SessionID: req.SessionID,
-		TaskID:    taskID,
-		Questions: req.Questions,
-		Context:   req.Context,
-	}
-	pendingID, isNew := h.clarificationSvc.CreateRequest(clarificationReq)
-
-	// Create one chat message per question (triggers WS events to frontend).
-	// If the create fails, the in-store pending entry must be cancelled too —
-	// otherwise the agent's WaitForResponse would block for the full 2-hour
-	// timeout while the user never sees clarification cards.
-	// When dedup fires (isNew=false) the messages already exist, so skip creation.
-	if isNew && h.messageCreator != nil {
-		if _, err := h.messageCreator.CreateClarificationRequestMessages(
-			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
-		); err != nil {
-			h.logger.Error("failed to create clarification request messages",
-				zap.String("pending_id", pendingID),
-				zap.String("session_id", req.SessionID),
-				zap.Error(err))
-			h.clarificationSvc.CancelRequest(pendingID)
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-				"failed to create clarification messages: "+err.Error(), nil)
-		}
-	}
-
-	// Update session and task states to waiting for input
-	h.setSessionWaitingForInput(ctx, taskID, req.SessionID)
-
-	h.logger.Info("clarification request created, waiting for user response",
-		zap.String("pending_id", pendingID),
-		zap.String("session_id", req.SessionID),
-		zap.String("task_id", taskID))
-
-	// WaitForResponse can outlast the agent client's idle watchdog because the
-	// MCP server emits progress while this call is blocked. If the agent
-	// cancels, cleanup and the event fallback resume the interaction on a new
-	// turn.
-	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)
-	if err != nil {
-		if h.inputPauser != nil {
-			if _, pauseErr := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID); pauseErr != nil {
-				h.logger.Warn("failed to pause session after clarification ended without answer",
-					zap.String("pending_id", pendingID),
-					zap.String("session_id", req.SessionID),
-					zap.Error(pauseErr))
-			}
-		}
-		h.logger.Warn("clarification wait ended without response",
-			zap.String("pending_id", pendingID),
-			zap.String("session_id", req.SessionID),
-			zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-			"Clarification request timed out or was cancelled", nil)
-	}
-
-	// User responded — set session back to running
-	h.setSessionRunning(ctx, taskID, req.SessionID)
-
-	h.logger.Info("clarification answered, returning to agent",
-		zap.String("pending_id", pendingID),
-		zap.String("session_id", req.SessionID),
-		zap.Bool("rejected", resp.Rejected))
-
-	// Return response in format expected by agentctl's extractQuestionAnswer
-	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
 // setSessionRunning restores the session state to running after a clarification is answered.

@@ -19,7 +19,7 @@ import type { RepositoryInspection } from "@/lib/plugins/types";
  * Behavior:
  *   - `ensure(url)` triggers a PR-info fetch the first time a PR URL is
  *     seen; non-PR URLs (plain repo URLs / invalid input / empty string)
- *     are no-ops.
+ *     settle without fetching metadata.
  *   - Dedupes concurrent / repeat `ensure` calls per URL (mirrors the
  *     in-flight + loaded refs from `useBranchesByURL`).
  *   - `info(url)` returns the most-recently loaded PR info for `url`, or
@@ -448,6 +448,7 @@ export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult
         // info" so subsequent ensure() calls for the same URL no-op instead
         // of re-parsing on every call.
         loadedRef.current.add(url);
+        setState((prev) => ({ ...prev, [url]: { info: undefined, loading: false } }));
         return;
       }
       const refs = refsRef.current;

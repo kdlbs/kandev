@@ -1,3 +1,4 @@
+import { invalidateExecutorCatalogue } from "@/lib/api/executor-catalogue";
 import { createStore } from "zustand/vanilla";
 import { immer } from "zustand/middleware/immer";
 import { hydrateState } from "./hydration/hydrator";
@@ -5,8 +6,10 @@ import type { AppState, HydrationState } from "./app-state-types";
 import { mergeInitialState } from "./default-state";
 import { buildStateOverrides } from "./store-overrides";
 import { getQuickChatSelectionIdentity } from "@/lib/quick-chat/selection-storage";
+import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
 import { createTaskOverviewSlice } from "./slices/task-overview";
 import { withTaskOverviewNormalization } from "./slices/task-overview-normalize";
+import { observeSettingsAgentRemovals } from "./settings-agent-removals";
 
 import {
   createKanbanSlice,
@@ -76,7 +79,7 @@ export function createAppStore(initialState?: HydrationState) {
         ...createSystemSlice(set as any, get as any, api as any),
         setAgentRuntime: (snapshot) =>
           set((draft) => {
-            draft.agentRuntime = snapshot;
+            draft.agentRuntime = newerAgentRuntimeSnapshot(draft.agentRuntime, snapshot);
           }),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createUISlice(set as any, get as any, api as any),
@@ -100,6 +103,7 @@ export function createAppStore(initialState?: HydrationState) {
       })),
     ),
   );
+  observeSettingsAgentRemovals(store);
   let previousAuth = store.getState().auth;
   const syncQuickChatSelectionIdentity = (auth: AppState["auth"]) => {
     const identity = getQuickChatSelectionIdentity(auth);
@@ -110,6 +114,18 @@ export function createAppStore(initialState?: HydrationState) {
   syncQuickChatSelectionIdentity(previousAuth);
   store.subscribe((state) => {
     if (state.auth === previousAuth) return;
+    const changedUser = state.auth.user?.id !== previousAuth.user?.id;
+    const loggedOut = previousAuth.authenticated && !state.auth.authenticated;
+    const changedAuthority =
+      state.auth.user?.role !== previousAuth.user?.role ||
+      state.auth.user?.status !== previousAuth.user?.status ||
+      state.auth.mode !== previousAuth.mode;
+    if (changedUser || loggedOut || changedAuthority) {
+      invalidateExecutorCatalogue();
+      previousAuth = state.auth;
+      store.getState().setExecutors([]);
+      store.getState().setSettingsData({ executorsLoaded: false });
+    }
     previousAuth = state.auth;
     syncQuickChatSelectionIdentity(state.auth);
   });

@@ -4,8 +4,8 @@ import { expect } from "@playwright/test";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
-import { pollUntil } from "./poll-until";
 import type { SessionPage } from "../pages/session-page";
+import { pollUntil } from "./poll-until";
 
 type SessionMessage = Awaited<ReturnType<ApiClient["listSessionMessages"]>>["messages"][number];
 
@@ -25,6 +25,7 @@ export async function createRetainedCapacityFixture(
   apiClient: ApiClient,
   seedData: SeedData,
   scenario: string,
+  options: { initialPrompt?: string } = {},
 ) {
   const tracePath = path.join(backend.tmpDir, `retained-capacity-${Date.now()}.jsonl`);
   let profileId = "";
@@ -54,7 +55,7 @@ export async function createRetainedCapacityFixture(
       `Retained capacity ${scenario}`,
       profile.id,
       {
-        description: `/capacity-${scenario}`,
+        description: options.initialPrompt ?? `/capacity-${scenario}`,
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
@@ -152,4 +153,17 @@ export function assertRetainedFailureMessage(message: SessionMessage) {
     runtime_retained: true,
     recovery_actions: false,
   });
+}
+
+export async function expectRetainedTurnReady(session: SessionPage) {
+  const errorRow = session.activeChat().getByTestId("session-recovery-action-message");
+  await expect(errorRow).toHaveCount(1);
+  await expect(errorRow).toContainText("Selected model is at capacity.");
+  await expect(session.recoveryResumeButton()).toHaveCount(0);
+  await expect(session.recoveryFreshButton()).toHaveCount(0);
+  await expect(session.activeChat().getByTestId("session-recovery-card")).toHaveCount(0);
+  await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
+  await expect(
+    session.activeChat().getByRole("button", { name: "Session model settings" }),
+  ).toBeVisible();
 }

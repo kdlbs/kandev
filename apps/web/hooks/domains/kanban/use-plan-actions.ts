@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { setChatDraftContent } from "@/lib/local-storage";
 import { moveTask } from "@/lib/api/domains/kanban-api";
 import { getTaskMoveErrorDetail } from "@/components/task/task-move-error-message";
 import { resolveLatestTaskProjection } from "@/components/task/task-page-content-helpers";
@@ -28,8 +27,10 @@ const AUTO_TRANSITION_ACTIONS = ["move_to_next", "move_to_previous", "move_to_st
 export function useNextWorkflowStep(taskId: string | null) {
   const { toast } = useToast();
   const { t } = useTranslation("task");
-  const taskProjection = useAppStore((s) =>
-    resolveLatestTaskProjection(taskId, s.kanban.tasks, s.kanbanMulti.snapshots),
+  const taskProjection = useAppStore(
+    (s) =>
+      (taskId ? s.taskOverview.byId[taskId] : null) ??
+      resolveLatestTaskProjection(taskId, s.kanban.tasks, s.kanbanMulti.snapshots),
   );
   const workflowId = taskProjection?.workflowId ?? null;
   const taskStepId = taskProjection?.workflowStepId ?? null;
@@ -205,8 +206,10 @@ function useImplementPlan(
     const client = getWebSocketClient();
     if (!client) return false;
 
+    const chatInput = chatInputRef?.current;
+    const clearAcceptedPayload = chatInput?.clearAcceptedPayload;
     const { userText, attachments, contextFilesMeta } = collectImplementPlanInput(
-      chatInputRef?.current,
+      chatInput,
       resolvedSessionId,
     );
     if (!planAttachmentsAreReady(attachments)) return false;
@@ -233,10 +236,7 @@ function useImplementPlan(
       if (clearPlanModeAfterSend) {
         handlePlanModeChange?.(false);
       }
-      if (chatInputRef) {
-        chatInputRef.current?.clear();
-        setChatDraftContent(resolvedSessionId, null);
-      }
+      clearAcceptedPayload?.({ message: userText, attachments });
       // Authoritatively clear plan_mode in session metadata so a refresh
       // mid-implementation cannot re-hydrate plan mode from the server.
       // Run as a separate request with its own catch so a set_plan_mode

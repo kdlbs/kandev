@@ -18,11 +18,17 @@ loads older history only after upward navigation, and preserves prompt `#1` as
 the visible start even when older internal rows remain on the backend.
 
 The design changes no backend query, persistence rule, message order, or API
-field. It keeps transcript pagination separate from prompt-review pagination:
-the plugin conversation facade can request user messages with the
+field. It keeps transcript pagination separate from plugin prompt-review
+pagination: the plugin conversation facade can request user messages with the
 `author_type=user` filter, while transcript navigation can request an around
-window for a message that is not loaded. Both projections use the existing cursor metadata, message API,
-and `prompt_index` field.
+window for a message that is not loaded. The plugin and transcript projections
+use the existing message API and `prompt_index` field, but own separate caches
+and pagination state.
+
+The pinned last-prompt affordances use a separate bounded latest-prompt read
+with the same `author_type=user` filter; they do not load prompt-review pages.
+Their availability is owned by
+[pinned prompt availability](pinned-prompt-availability.md).
 
 ## Requirement mapping
 

@@ -73,7 +73,9 @@ function InlineSteps({
                 className="h-1.5 w-1.5 rounded-full shrink-0"
                 style={{ backgroundColor: s.color || "hsl(var(--muted-foreground))" }}
               />
-              <span className="min-w-0 wrap-anywhere">{s.title}</span>
+              <span className="min-w-0 wrap-anywhere" data-testid="workflow-option-step-name">
+                {s.title}
+              </span>
               {s.is_start_step && (
                 <TooltipProvider>
                   <Tooltip>

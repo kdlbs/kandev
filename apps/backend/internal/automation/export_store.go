@@ -58,6 +58,10 @@ func (s *Store) ListAutomationsForExportTx(ctx context.Context, tx *sqlx.Tx, wor
 		return nil, fmt.Errorf("hydrate repository_ids: %w", err)
 	}
 	for _, a := range automations {
+		a.RetryPolicy, err = decodeRetryPolicy(a.RetryPolicyJSON)
+		if err != nil {
+			return nil, fmt.Errorf("hydrate retry policy: %w", err)
+		}
 		a.Triggers = triggersByAutomation[a.ID]
 		a.RepositoryIDs = repoIDsByAutomation[a.ID]
 		hydrateManagedDestination(a)

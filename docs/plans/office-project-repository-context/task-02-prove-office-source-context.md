@@ -113,3 +113,19 @@ Validation passed:
 - `python3 scripts/list-docs.py validate`
 - `python3 scripts/lint-spec-files.py --all`
 - `git diff --check`
+
+Integration verification on 2026-10-07 retained the dialog suite's per-test
+`dialogSeed` fixture when adding project-source coverage. An unadapted merge
+failed discovery because that suite does not provide `officeSeed`. The corrected
+desktop test still checks returned and persisted attachments in the selected
+Office workspace. No product behavior or assertions were removed.
+
+With retries disabled, the managed desktop run of
+`tests/office/new-task-dialog.spec.ts` and
+`tests/session/provider-interruption-continuation.spec.ts` passed 18 tests.
+The matching mobile Office and provider-continuation files passed 3 tests.
+Backend race checks passed for executor, orchestrator, worktree, backendapp,
+task service, handlers and lifecycle, selecting resume, relocation, Office
+project, workspace-field and settled-disconnect regressions. Full web lint,
+typecheck, focused E2E lint, catalog/spec lint and all 62 public-doc validation
+tests passed. Hosted CI and existing native release gates remain pending.

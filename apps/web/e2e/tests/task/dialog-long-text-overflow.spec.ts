@@ -42,6 +42,13 @@ test.describe("Dialog long text layout", () => {
   }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    const divider = testPage.getByTestId("sidebar-navigation-divider");
+    await divider.focus();
+    await divider.press("Home");
+    const expand = testPage.getByTestId("sidebar-navigation-expand");
+    await expect(expand).toHaveAttribute("aria-expanded", "false");
+    await expand.click();
+    await expect(expand).toHaveAttribute("aria-expanded", "true");
 
     await kanban.createTaskButton.first().click();
     const createDialog = testPage.getByTestId("create-task-dialog");

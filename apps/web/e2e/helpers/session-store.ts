@@ -8,7 +8,7 @@ type E2EStoreWindow = Window & {
         loadingByTaskId: Record<string, boolean | undefined>;
         loadedByTaskId: Record<string, boolean | undefined>;
       };
-      tasks: { activeSessionId: string | null };
+      tasks: { activeTaskId: string | null; activeSessionId: string | null };
       connection: { status: string };
       quickChat: { activeSessionId: string | null };
       sessionModels: {
@@ -115,10 +115,41 @@ export async function waitForSessionAgentctlReady(
   );
 }
 
+export async function activeTaskSessionId(page: Page): Promise<string> {
+  await page.waitForFunction(() => {
+    return Boolean(
+      (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId,
+    );
+  });
+  const sessionId = await page.evaluate(
+    () => (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? null,
+  );
+  if (!sessionId) throw new Error("No active task session is available in the E2E store");
+  return sessionId;
+}
+
+/** Wait until the task route has selected the expected task and session. */
+export async function waitForActiveTaskSession(
+  page: Page,
+  taskId: string,
+  sessionId: string,
+  timeout = 30_000,
+): Promise<void> {
+  await page.waitForFunction(
+    ({ expectedTaskId, expectedSessionId }) => {
+      const tasks = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState().tasks;
+      return tasks?.activeTaskId === expectedTaskId && tasks.activeSessionId === expectedSessionId;
+    },
+    { expectedTaskId: taskId, expectedSessionId: sessionId },
+    { timeout, message: `task ${taskId} did not activate session ${sessionId}` },
+  );
+}
+
 export async function waitForActiveSessionForegroundActivity(
   page: Page,
   activity: "generating" | "background" | null,
   targetSessionId?: string,
+  timeoutMs = 20_000,
 ): Promise<void> {
   await page.waitForFunction(
     ({ expected, sessionId: targetSessionId }) => {
@@ -131,7 +162,10 @@ export async function waitForActiveSessionForegroundActivity(
       return expected === null ? current == null : current === expected;
     },
     { expected: activity, sessionId: targetSessionId },
-    { timeout: 20_000 },
+    {
+      timeout: timeoutMs,
+      message: `Session ${targetSessionId ?? "active"} did not reach foreground activity ${activity}`,
+    },
   );
 }
 
@@ -226,17 +260,32 @@ export async function seedActiveSessionForegroundActivity(
 export async function waitForActiveSessionCancellationPending(
   page: Page,
   pending: boolean,
+  targetSessionId?: string,
+  minimumCancellationRevision?: number,
 ): Promise<void> {
   await page.waitForFunction(
-    (expected) => {
+    ({ expected, sessionId: targetSessionId, minimumRevision }) => {
       const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
       if (!store) return false;
-      const sessionId = store.getState().tasks.activeSessionId;
+      const sessionId = targetSessionId ?? store.getState().tasks.activeSessionId;
       if (!sessionId) return false;
-      return store.getState().taskSessions.items[sessionId]?.cancellation_pending === expected;
+      const session = store.getState().taskSessions.items[sessionId];
+      return (
+        session?.cancellation_pending === expected &&
+        (minimumRevision === undefined ||
+          (typeof session.cancellation_revision === "number" &&
+            session.cancellation_revision >= minimumRevision))
+      );
     },
-    pending,
-    { timeout: 20_000 },
+    {
+      expected: pending,
+      sessionId: targetSessionId,
+      minimumRevision: minimumCancellationRevision,
+    },
+    {
+      timeout: 45_000,
+      message: `Session ${targetSessionId ?? "active"} did not reach cancellation_pending=${pending}`,
+    },
   );
 }
 
@@ -244,13 +293,16 @@ export async function waitForActiveSessionCancellationPending(
  * Wait until cancellation is backend-owned, or until the fast path has already
  * settled before the projection event can be observed by the browser.
  */
-export async function waitForActiveSessionCancellationPendingOrSettled(page: Page): Promise<void> {
+export async function waitForActiveSessionCancellationPendingOrSettled(
+  page: Page,
+  targetSessionId?: string,
+): Promise<void> {
   await page.waitForFunction(
-    () => {
+    (sessionIdOverride) => {
       const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
       if (!store) return false;
       const state = store.getState();
-      const sessionId = state.tasks.activeSessionId;
+      const sessionId = sessionIdOverride ?? state.tasks.activeSessionId;
       if (!sessionId) return false;
       const session = state.taskSessions.items[sessionId];
       if (session?.cancellation_pending === true) return true;
@@ -261,6 +313,7 @@ export async function waitForActiveSessionCancellationPendingOrSettled(page: Pag
         .filter((element) => element.offsetWidth > 0 && element.offsetHeight > 0)
         .some((element) => element.dataset.placeholder?.startsWith("Continue working on the "));
     },
+    targetSessionId,
     { timeout: 20_000 },
   );
 }
@@ -325,9 +378,14 @@ export async function waitForQuickChatCancellationPending(
   );
 }
 
-export async function waitForQuickChatSessionSettled(page: Page, sessionId: string): Promise<void> {
+export async function waitForQuickChatSessionSettled(
+  page: Page,
+  sessionId: string,
+  timeoutMs = 20_000,
+  minimumCancellationRevision?: number,
+): Promise<void> {
   await page.waitForFunction(
-    (sid) => {
+    ({ sid, minimumRevision }) => {
       const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
       const session = store?.getState().taskSessions.items[sid];
       if (!session) return false;
@@ -336,11 +394,14 @@ export async function waitForQuickChatSessionSettled(page: Page, sessionId: stri
           String(session.state),
         ) &&
         session.cancellation_pending === false &&
-        session.foreground_activity == null
+        session.foreground_activity == null &&
+        (minimumRevision === undefined ||
+          (typeof session.cancellation_revision === "number" &&
+            session.cancellation_revision >= minimumRevision))
       );
     },
-    sessionId,
-    { timeout: 20_000, message: `Quick Chat session ${sessionId} did not settle` },
+    { sid: sessionId, minimumRevision: minimumCancellationRevision },
+    { timeout: timeoutMs, message: `Quick Chat session ${sessionId} did not settle` },
   );
 }
 

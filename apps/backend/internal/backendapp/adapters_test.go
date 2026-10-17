@@ -284,6 +284,24 @@ func TestBuildLifecycleLaunchRequestCarriesSessionSettingsPolicy(t *testing.T) {
 	}
 }
 
+func TestBuildLifecycleLaunchRequestCarriesContextContinuation(t *testing.T) {
+	got := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		ForceContextContinuation: true,
+	}, "", "")
+	if !got.ForceContextContinuation {
+		t.Fatal("ForceContextContinuation was dropped from lifecycle launch request")
+	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesPassthroughResume(t *testing.T) {
+	got := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		IsPassthrough: true, ResumePassthrough: true,
+	}, "", "")
+	if !got.IsPassthrough || !got.ResumePassthrough {
+		t.Fatal("passthrough resume intent was dropped from lifecycle launch request")
+	}
+}
+
 func TestDetectGitDefaultBranchDetachedHEADReturnsEmpty(t *testing.T) {
 	repoPath := t.TempDir()
 	gitDir := filepath.Join(repoPath, ".git")

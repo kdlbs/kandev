@@ -606,11 +606,10 @@ function getTaskPRIconStatusNumber(
 
 function taskPRIconNeedsHydration(
   hasFullData: boolean,
-  automation: ReturnType<typeof getTaskPRAutomationSummary>,
   automationOptions: TaskCIAutomationOptions | null,
 ): boolean {
   if (!hasFullData) return true;
-  return (automation.autoFixEnabled || automation.autoMergeEnabled) && !automationOptions;
+  return !automationOptions;
 }
 
 function PRTaskIconView({
@@ -633,11 +632,14 @@ function PRTaskIconView({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const automation = getTaskPRAutomationSummary(prs, prInfo, automationOptions);
   const viewModel = getTaskPRIconViewModel(prs, prInfo, automation, t);
-  const needsHydration = taskPRIconNeedsHydration(hasFullData, automation, automationOptions);
+  const needsHydration = taskPRIconNeedsHydration(hasFullData, automationOptions);
   const hydrateOnDisclosure = useCallback(() => {
     if (needsHydration) void hydrate();
   }, [hydrate, needsHydration]);
-  const tooltip = useChangeRequestTaskTooltipState(hydrateOnDisclosure, { hoverable: true });
+  const tooltip = useChangeRequestTaskTooltipState(hydrateOnDisclosure, {
+    hoverable: true,
+    openDelayMs: 500,
+  });
   const {
     singlePR,
     readyToMerge,

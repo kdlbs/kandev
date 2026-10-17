@@ -374,6 +374,10 @@ type peerLaunchAgentManager struct {
 	processStarted   chan struct{}
 	followUpAccepted chan string
 	running          atomic.Bool
+	launchRequest    *executor.LaunchAgentRequest
+	beforeAdmission  func(context.Context, string, []v1.MessageAttachment) error
+	onDispatched     func()
+	onFailure        func()
 }
 
 func (m *peerLaunchAgentManager) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
@@ -394,12 +398,34 @@ func (m *peerLaunchAgentManager) LaunchAgent(ctx context.Context, req *executor.
 			return nil, err
 		}
 	}
-	m.initialAccepted <- req.TaskDescription
+	m.launchRequest = req
 	return &executor.LaunchAgentResponse{AgentExecutionID: "execution-" + req.SessionID}, nil
 }
 
-func (m *peerLaunchAgentManager) StartAgentProcess(context.Context, string) error {
+func (m *peerLaunchAgentManager) RegisterInitialPromptAdmissionCallbacks(
+	_ string, beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
+	onDispatched, onFailure func(),
+) error {
+	m.beforeAdmission = beforeAdmission
+	m.onDispatched = onDispatched
+	m.onFailure = onFailure
+	return nil
+}
+
+func (m *peerLaunchAgentManager) StartAgentProcess(ctx context.Context, _ string) error {
+	if m.beforeAdmission != nil {
+		if err := m.beforeAdmission(ctx, m.launchRequest.TaskDescription, m.launchRequest.Attachments); err != nil {
+			if m.onFailure != nil {
+				m.onFailure()
+			}
+			return err
+		}
+	}
 	m.running.Store(true)
+	m.initialAccepted <- m.launchRequest.TaskDescription
+	if m.onDispatched != nil {
+		m.onDispatched()
+	}
 	m.processStarted <- struct{}{}
 	return nil
 }

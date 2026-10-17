@@ -315,7 +315,8 @@ Named exclusions. Each is a deliberate contract, not an omission.
 
 - **Reversing the wake-reason / per-agent precedence.** Justified in
   [Deviation](#deviation-from-the-cards-stated-acceptance--read-this-first). If it is
-  wanted, it is a separate change to `docs/specs/office/requirements/routing.md`.
+  wanted, it is a separate change to
+  `docs/specs/office/requirements/office-agent-tier-routing.md`.
 - **User-defined roles.** `AgentRole` stays a fixed seven-value enum. Making roles
   extensible would give the Critic case a role-based answer, but it is a much larger
   change to Office identity and is not attempted here.

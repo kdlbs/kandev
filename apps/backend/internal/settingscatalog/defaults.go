@@ -475,6 +475,7 @@ func repositorySetDomain() DomainDescriptor {
 func executorDomain() DomainDescriptor {
 	owner := "execution"
 	return supportedDomain("execution", "executor", "Executors", "Execution target settings.", owner, ScopeResource, TargetRules{Scope: ScopeResource, RequiresResourceID: true},
+		integrationNullableWritable("executor", "owner_user_id", "Owner", "Optional personal executor owner; null shares the resource.", "string", owner, "execution.manage"),
 		domainWritable("executor", "name", "Name", "Executor name.", "string", owner, "execution.manage"),
 		domainWritable("executor", "type", "Type", "Executor runtime type.", "string", owner, "execution.manage"),
 		domainWritable("executor", "status", "Status", "Whether the executor accepts work.", "string", owner, "execution.manage"),
@@ -486,6 +487,7 @@ func executorDomain() DomainDescriptor {
 func executorProfileDomain() DomainDescriptor {
 	owner := "execution"
 	return supportedDomain("execution", "executor_profile", "Executor profiles", "Named executor presets.", owner, ScopeResource, TargetRules{Scope: ScopeResource, RequiresResourceID: true},
+		integrationNullableWritable("executor_profile", "owner_user_id", "Owner", "Optional personal executor owner; null shares the resource.", "string", owner, "execution.manage"),
 		domainWritable("executor_profile", "name", "Name", "Profile name.", "string", owner, "execution.manage"),
 		domainWritable("executor_profile", "mcp_policy", "MCP policy", "MCP policy for this executor profile.", "string", owner, "execution.manage"),
 		domainWritable("executor_profile", "config", "Configuration", "Validated executor profile configuration.", "object", owner, "execution.manage"),

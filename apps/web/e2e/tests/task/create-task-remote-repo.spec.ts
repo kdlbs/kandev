@@ -1,3 +1,4 @@
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Page } from "@playwright/test";
@@ -43,6 +44,7 @@ async function fetchRepoById(apiClient: ApiClient, repoId: string): Promise<Repo
 
 async function openCreateDialog(testPage: Page, kanban: KanbanPage): Promise<void> {
   await kanban.goto();
+  await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
   await kanban.createTaskButton.first().click();
   await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 }
@@ -160,7 +162,7 @@ async function expectPopoverFitsDialog(testPage: Page): Promise<void> {
 }
 
 test.describe("Task creation from Remote tab (chip picker)", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test.beforeEach(async ({ apiClient }) => {
     // Reset mock state so a previous test's seeded repos / 503 toggle
@@ -170,7 +172,11 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await apiClient.mockGitHubReset();
   });
 
-  test("keeps the unified input fixed while repositories load", async ({ testPage, apiClient }) => {
+  test("keeps the unified input fixed while repositories load", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     await seedAccessibleRepos(apiClient);
     let releaseRepos = () => undefined;
     const reposGate = new Promise<void>((resolve) => {
@@ -182,6 +188,18 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     });
 
     const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const divider = testPage.getByTestId("sidebar-navigation-divider");
+    await divider.focus();
+    await divider.press("Home");
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+            seedData.workspaceId
+          ]?.navigation_height,
+      )
+      .toBe(0);
     await openCreateDialog(testPage, kanban);
     await clickRemoteMode(testPage);
     await testPage.getByTestId("remote-repo-chip-trigger").first().click();

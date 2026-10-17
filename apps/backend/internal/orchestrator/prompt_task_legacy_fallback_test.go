@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -42,6 +43,12 @@ func TestPromptTask_LegacyCallerComposesSavedPromptOnFreshFallback(t *testing.T)
 		ID: taskID, Title: "Legacy caller task", Description: "Inspect the existing feature.",
 		State: v1.TaskStateInProgress,
 	}
+	simulationCtx, stopSimulation := context.WithCancel(ctx)
+	var simulations sync.WaitGroup
+	t.Cleanup(func() {
+		stopSimulation()
+		simulations.Wait()
+	})
 	var launchCalls atomic.Int32
 	launchPrompts := make(chan string, 2)
 	agentMgr := &mockAgentManager{
@@ -52,18 +59,22 @@ func TestPromptTask_LegacyCallerComposesSavedPromptOnFreshFallback(t *testing.T)
 		launchAgentFunc: func(_ context.Context, request *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 			call := launchCalls.Add(1)
 			launchPrompts <- request.TaskDescription
+			simulations.Add(1)
 			go func(launchSessionID string) {
+				defer simulations.Done()
 				tick := time.NewTicker(5 * time.Millisecond)
 				defer tick.Stop()
 				timeout := time.After(5 * time.Second)
 				for {
 					select {
+					case <-simulationCtx.Done():
+						return
 					case <-tick.C:
-						current, getErr := repo.GetTaskSession(context.Background(), launchSessionID)
+						current, getErr := repo.GetTaskSession(simulationCtx, launchSessionID)
 						if getErr == nil && current != nil && current.State == models.TaskSessionStateStarting {
 							current.State = models.TaskSessionStateWaitingForInput
 							current.UpdatedAt = time.Now().UTC()
-							_ = repo.UpdateTaskSession(context.Background(), current)
+							_ = repo.UpdateTaskSession(simulationCtx, current)
 							return
 						}
 					case <-timeout:

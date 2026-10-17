@@ -1,6 +1,10 @@
 package move
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/kandev/kandev/internal/workflow/models"
+)
 
 // NormalizeEntryOptions trims all string fields, folds the legacy top-level
 // prompt into instructions, and returns nil for an empty options object.
@@ -38,4 +42,19 @@ func ValidateEntryOptions(options *EntryOptions, change MoveChange) error {
 		return &EntryOptionsNotAllowedError{Change: change}
 	}
 	return nil
+}
+
+// ValidateEntryTarget rejects agent-facing entry options when the target step is
+// a manual step: it does not start work on entry, so a one-shot hand-off has no
+// recipient and accepting the options would silently drop them. It reuses
+// models.StepRunsOnEntry, the single repository answer for whether entering a
+// step starts work (auto_start_agent, queue_run, queue_run_for_each_participant,
+// run_code_review, or a pull source), instead of re-deriving a narrower set. A
+// nil step is treated as unknown and does not reject, so the move path reports
+// its own canonical not-found error instead.
+func ValidateEntryTarget(step *models.WorkflowStep) error {
+	if step == nil || models.StepRunsOnEntry(step) {
+		return nil
+	}
+	return ErrEntryTargetIsManual
 }

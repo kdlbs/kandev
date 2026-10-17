@@ -4,18 +4,26 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { CopilotChip } from "@/hooks/domains/coordinator/copilot-store";
+import type { CoordinatorWatchProjects } from "@/lib/api/domains/coordinator-api";
+import { ProjectsHint } from "./projects-hint";
 
 type WorkspacePageChipRowProps = {
   chip: CopilotChip;
   /** The coordinator does not watch the page's workflow. */
   notWatched: boolean;
+  projects?: CoordinatorWatchProjects;
   onRemove: () => void;
 };
 
 /** The page chip above the composer: "This task: `<identifier>`" or
  *  "This board: `<name>`", with the watched hint beside it. Only the id leaves
  *  the page; the tooltip says so. */
-export function WorkspacePageChipRow({ chip, notWatched, onRemove }: WorkspacePageChipRowProps) {
+export function WorkspacePageChipRow({
+  chip,
+  notWatched,
+  projects,
+  onRemove,
+}: WorkspacePageChipRowProps) {
   const { t } = useTranslation();
   const text =
     chip.ref.kind === "workflow"
@@ -50,6 +58,7 @@ export function WorkspacePageChipRow({ chip, notWatched, onRemove }: WorkspacePa
           {t("coordinator:copilotNotWatched")}
         </span>
       )}
+      <ProjectsHint projects={projects} />
     </div>
   );
 }

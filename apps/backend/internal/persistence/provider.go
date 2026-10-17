@@ -97,10 +97,14 @@ func provideSQLite(ctx context.Context, cfg *config.Config, log *logger.Logger, 
 		return nil, nil, fmt.Errorf("inspect user tables: %w", err)
 	}
 
+	// Reclaim staging debris on every boot: a crash during a backup leaves the
+	// stored version unchanged, and later boots need not be upgrade boots.
+	backupDir := filepath.Join(filepath.Dir(dbPath), "backups")
+	SweepStaleBootStaging(backupDir, log)
+
 	if shouldBackup(storedVersion, version, userTables) {
 		startup.SetPhase(ctx, startup.BackingUpDatabase)
 		started := time.Now()
-		backupDir := filepath.Join(filepath.Dir(dbPath), "backups")
 		if err := os.MkdirAll(backupDir, 0o755); err != nil {
 			_ = pool.Close()
 			return nil, nil, fmt.Errorf("create backup dir: %w", err)
@@ -145,7 +149,7 @@ func provideSQLite(ctx context.Context, cfg *config.Config, log *logger.Logger, 
 
 func createPreMigrationBackup(ctx context.Context, writer *sqlx.DB, backupDir, storedVersion string) (string, int64, error) {
 	path := snapshotPath(backupDir, storedVersion)
-	stagingDir, err := os.MkdirTemp(backupDir, ".kandev-backup-*")
+	stagingDir, err := os.MkdirTemp(backupDir, bootStagingDirPrefix+"*")
 	if err != nil {
 		return "", 0, fmt.Errorf("create private backup staging directory: %w", err)
 	}
@@ -153,7 +157,7 @@ func createPreMigrationBackup(ctx context.Context, writer *sqlx.DB, backupDir, s
 
 	stagedPath := filepath.Join(stagingDir, filepath.Base(path))
 	stopTracking := trackBackupProgress(ctx, stagedPath)
-	size, err := snapshotSQLiteContext(ctx, writer, stagedPath)
+	size, err := CopySQLiteSnapshotContext(ctx, writer, stagedPath)
 	stopTracking()
 	if err != nil {
 		return "", 0, fmt.Errorf("pre-migration backup failed: %w", err)
@@ -177,13 +181,12 @@ func createPreMigrationBackup(ctx context.Context, writer *sqlx.DB, backupDir, s
 }
 
 // backupProgressTickInterval is how often trackBackupProgress stats the
-// staging file. VACUUM INTO gives no row-level progress, so this is the only
-// signal the counting step has.
+// staging file to report bytes written by the snapshot copy.
 const backupProgressTickInterval = 250 * time.Millisecond
 
-// trackBackupProgress polls stagedPath's size while a VACUUM INTO writes it
-// and reports the increase to the database.backup step. VACUUM INTO creates
-// the file only once it starts writing, so ENOENT before that point is
+// trackBackupProgress polls stagedPath's size while the snapshot copy writes it
+// and reports the increase to the database.backup step. The copy creates
+// the file when admitted, so ENOENT before that point is
 // expected and not a measurement failure; any other stat error degrades the
 // step once, not on every tick. The returned stop function cancels the
 // goroutine and waits for it to exit before returning.

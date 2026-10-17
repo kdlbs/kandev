@@ -94,6 +94,26 @@ afterEach(() => {
 });
 
 describe("useSession polling ownership", () => {
+  it("keeps cached session state while detail demand is inactive", () => {
+    const unsubscribe = vi.fn();
+    mocks.subscribeSession.mockReturnValue(unsubscribe);
+    const { result, rerender } = renderHook(
+      ({ detailActive }: { detailActive: boolean }) => useSession(SESSION_ID, { detailActive }),
+      { initialProps: { detailActive: false } },
+    );
+
+    expect(result.current.session?.id).toBe(SESSION_ID);
+    expect(mocks.subscribeSession).not.toHaveBeenCalled();
+    expect(mocks.fetchTaskSessionConditional).not.toHaveBeenCalled();
+
+    rerender({ detailActive: true });
+    expect(mocks.subscribeSession).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchTaskSessionConditional).toHaveBeenCalledTimes(1);
+
+    rerender({ detailActive: false });
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
   it("shares one polling loop across simultaneous consumers of the same session", () => {
     const first = renderHook(() => useSession(SESSION_ID));
     const second = renderHook(() => useSession(SESSION_ID));

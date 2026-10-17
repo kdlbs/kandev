@@ -9,6 +9,8 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   FIRST_PROMPT_MARKER,
   LAST_PROMPT_MARKER,
+  expectPromptAlignedAtStart,
+  persistedLastPromptId,
   seedScrolledPastLastPrompt,
 } from "./last-prompt-scroll-helpers";
 
@@ -59,6 +61,22 @@ test.describe("@chat last prompt scroll affordance", () => {
     await button.click();
     await expect(marker).toBeInViewport({ timeout: 10_000 });
     await expect(button).toBeHidden({ timeout: 10_000 });
+
+    await test.step("scroll-to-start button jumps back to the first prompt", async () => {
+      await chat.getByText("filler message 50", { exact: true }).scrollIntoViewIfNeeded();
+      const firstMarker = chat.getByText(FIRST_PROMPT_MARKER, { exact: false }).first();
+      await expect(firstMarker).not.toBeInViewport();
+
+      const button = chat.getByTestId("scroll-to-start-button");
+      await expect(button).toBeVisible();
+
+      await button.click();
+      await expect(firstMarker).toBeInViewport({ timeout: 10_000 });
+
+      // Scrolling to the start hides the button again — the first message is
+      // now fully visible, so there's nothing left to jump back to.
+      await expect(button).toBeHidden({ timeout: 10_000 });
+    });
   });
 
   test("hides disabled transcript navigation controls", async ({
@@ -126,88 +144,98 @@ test.describe("@chat last prompt scroll affordance", () => {
     await expect(chat.getByText(FIRST_PROMPT_MARKER, { exact: false })).toHaveCount(0);
     await button.click();
     await expect(marker).toBeInViewport({ timeout: 10_000 });
-  });
 
-  test("scroll-to-start button jumps back to the first prompt", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(90_000);
-    const session = await seedScrolledPastLastPrompt(
-      testPage,
-      apiClient,
-      seedData,
-      "last-prompt-scroll-start",
-    );
-    const chat = session.activeChat();
-    const firstMarker = chat.getByText(FIRST_PROMPT_MARKER, { exact: false }).first();
-    await expect(firstMarker).not.toBeInViewport();
+    await test.step("scroll-to-start drains older pages until it finds the true first prompt", async () => {
+      const olderPageRequests: string[] = [];
+      testPage.on("request", (request) => {
+        const url = new URL(request.url());
+        if (
+          url.pathname.includes("/task-sessions/") &&
+          url.pathname.endsWith("/messages") &&
+          url.searchParams.has("before")
+        ) {
+          olderPageRequests.push(url.toString());
+        }
+      });
 
-    const button = chat.getByTestId("scroll-to-start-button");
-    await expect(button).toBeVisible();
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+      const chat = session.activeChat();
+      // Scoped to the transcript row itself (not `.first()` over bare text):
+      // the mock agent's reply to the seeded prompt quotes it back verbatim,
+      // so a loose text match could resolve to that echo instead of the real
+      // user message once both are loaded post-drain.
+      const firstMarker = chat
+        .locator("[id^='msg-']")
+        .filter({ has: testPage.getByText(FIRST_PROMPT_MARKER, { exact: true }) });
 
-    await button.click();
-    await expect(firstMarker).toBeInViewport({ timeout: 10_000 });
+      // The initial fetch window doesn't reach back far enough to include it.
+      await expect(firstMarker).toHaveCount(0);
+      const button = chat.getByTestId("scroll-to-start-button");
+      await expect(button).toBeVisible({ timeout: 15_000 });
 
-    // Scrolling to the start hides the button again — the first message is
-    // now fully visible, so there's nothing left to jump back to.
-    await expect(button).toBeHidden({ timeout: 10_000 });
-  });
-
-  test("scroll-to-start drains older pages until it finds the true first prompt", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(90_000);
-    // A large trailing filler pushes even the last prompt beyond the initial
-    // fetch window (see the analogous last-prompt test above) — the first
-    // prompt sits further back still, so reaching it requires draining
-    // several older pages, not just one.
-    const session = await seedScrolledPastLastPrompt(
-      testPage,
-      apiClient,
-      seedData,
-      "paginated-scroll-to-start",
-      { trailingFillerCount: 80 },
-    );
-    const olderPageRequests: string[] = [];
-    testPage.on("request", (request) => {
-      const url = new URL(request.url());
-      if (
-        url.pathname.includes("/task-sessions/") &&
-        url.pathname.endsWith("/messages") &&
-        url.searchParams.has("before")
-      ) {
-        olderPageRequests.push(url.toString());
-      }
+      // Regression: clicking used to jump straight to the oldest message in
+      // whatever page happened to be loaded — a partial-page boundary, not the
+      // transcript's real start — because `hasMore` was never consulted first.
+      await button.click();
+      await expect(firstMarker).toBeInViewport({ timeout: 20_000 });
+      expect(olderPageRequests.length).toBeGreaterThan(1);
+      await expect(button).toBeHidden({ timeout: 10_000 });
     });
+  });
 
-    await testPage.reload();
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+  test("retains an unloaded last prompt after reload and navigates from both desktop controls", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    await apiClient.saveUserSettings({ show_anchored_prompt_bar: true });
+    let sessionId = "";
+    const session = await seedScrolledPastLastPrompt(
+      testPage,
+      apiClient,
+      seedData,
+      "unloaded-last-prompt-desktop",
+      {
+        trailingFillerCount: 120,
+        onSessionId: (id) => {
+          sessionId = id;
+        },
+      },
+    );
+    const promptId = await persistedLastPromptId(apiClient, sessionId);
     const chat = session.activeChat();
-    // Scoped to the transcript row itself (not `.first()` over bare text):
-    // the mock agent's reply to the seeded prompt quotes it back verbatim,
-    // so a loose text match could resolve to that echo instead of the real
-    // user message once both are loaded post-drain.
-    const firstMarker = chat
-      .locator("[id^='msg-']")
-      .filter({ has: testPage.getByText(FIRST_PROMPT_MARKER, { exact: true }) });
+    const row = chat.locator(`#msg-${promptId}`);
+    const bar = chat.getByTestId("anchored-last-prompt-bar");
+    const control = chat.getByTestId("chat-status-bar").getByTestId("scroll-to-last-prompt-button");
+    const newestRow = chat.locator("[id^='msg-']").filter({
+      has: testPage.getByText("filler message 120", { exact: true }),
+    });
+    const reloadUnloadedWindow = async () => {
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+      await expect(row).toHaveCount(0);
+      await expect(control).toBeVisible({ timeout: 15_000 });
+      await expect(control.locator("svg")).toHaveClass(/tabler-icon-arrow-up/);
+      await expect(bar).toHaveAttribute("data-state", "open");
+      await expect(bar.getByTestId("anchored-last-prompt-text")).toContainText(LAST_PROMPT_MARKER);
+      await expect(bar.getByTestId("scroll-to-last-prompt-button")).toBeVisible();
+    };
 
-    // The initial fetch window doesn't reach back far enough to include it.
-    await expect(firstMarker).toHaveCount(0);
-    const button = chat.getByTestId("scroll-to-start-button");
-    await expect(button).toBeVisible({ timeout: 15_000 });
+    await reloadUnloadedWindow();
+    await bar.getByTestId("scroll-to-last-prompt-button").click();
+    await expect(row).toHaveCount(1);
+    await expectPromptAlignedAtStart(row);
+    await expect(newestRow).toHaveCount(1);
 
-    // Regression: clicking used to jump straight to the oldest message in
-    // whatever page happened to be loaded — a partial-page boundary, not the
-    // transcript's real start — because `hasMore` was never consulted first.
-    await button.click();
-    await expect(firstMarker).toBeInViewport({ timeout: 20_000 });
-    expect(olderPageRequests.length).toBeGreaterThan(1);
-    await expect(button).toBeHidden({ timeout: 10_000 });
+    await reloadUnloadedWindow();
+    await control.click();
+    await expect(row).toHaveCount(1);
+    await expectPromptAlignedAtStart(row);
+    await expect(newestRow).toHaveCount(1);
   });
 
   test("anchored bar shows the last prompt while scrolled past it, expands, and scrolls back up", async ({

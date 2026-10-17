@@ -295,6 +295,7 @@ test.describe("Sidebar automatic task colors", () => {
     seedData,
     prCapture,
   }) => {
+    await testPage.setViewportSize({ width: 1280, height: 1024 });
     const automation: SidebarTaskColorAutomation = {
       enabled: true,
       rules: [

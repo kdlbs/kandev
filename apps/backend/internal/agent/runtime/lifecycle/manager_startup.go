@@ -94,11 +94,22 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	if m.executorAdmission != nil {
+		var err error
+		ctx, err = m.executorAdmission(ctx, execution.SessionID, getMetadataString(execution.MetadataSnapshot(), "executor_id"), getMetadataString(execution.MetadataSnapshot(), MetadataKeyExecutorProfileID))
+		if err != nil {
+			return err
+		}
+	}
 	if execution.SessionID == "" {
 		return m.startAgentProcess(ctx, executionID)
 	}
-	_, err := m.doCoalescedExecution(ctx, execution.SessionID, func(sharedCtx context.Context) (interface{}, error) {
-		return nil, m.startAgentProcess(sharedCtx, executionID)
+	// Workspace preparation and subprocess startup have different results.
+	// Share a startup only with callers starting this exact execution.
+	_, err := m.doCoalescedExecution(ctx, "agent-start:"+executionID, func(sharedCtx context.Context) (interface{}, error) {
+		startupCtx, release := agentStartupContext(ctx, sharedCtx)
+		defer release()
+		return nil, m.startAgentProcess(startupCtx, executionID)
 	})
 	return err
 }
@@ -108,14 +119,23 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	startupDisposition := execution.startupDispositionSnapshot()
 	defer func() {
-		if retErr == nil {
-			return
+		if retErr != nil {
+			_, _, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
+			if onInitialPromptFailure != nil {
+				onInitialPromptFailure()
+			}
+			if startupDisposition == AgentStartupReattachedExisting {
+				retErr = &AgentReattachmentFailure{
+					ExecutionID:     execution.ID,
+					SessionID:       execution.SessionID,
+					ResumeAttemptID: ResumeAttemptIDFromContext(ctx),
+					Cause:           retErr,
+				}
+			}
 		}
-		_, _, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
-		if onInitialPromptFailure != nil {
-			onInitialPromptFailure()
-		}
+		retErr = wrapBootstrapFailure(execution, retErr)
 	}()
 	if err := execution.contextResetAdmissionError(); err != nil {
 		return err
@@ -126,9 +146,6 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}); err != nil {
 		return err
 	}
-	defer func() {
-		retErr = wrapBootstrapFailure(execution, retErr)
-	}()
 	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
 		return err
 	}
@@ -179,10 +196,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 
-	// Check if we're reconnecting to an existing running agent process.
-	// When the existing process is still alive inside a remote executor (e.g., Sprites),
-	// we skip subprocess launch and go directly to ACP session initialization.
-	reuseExisting := execution.metadataBool(MetadataKeyReuseExistingProcess)
+	// The executor selected this instance because its existing process already
+	// owns the task session. The immutable disposition fences all later cleanup.
+	reuseExisting := startupDisposition == AgentStartupReattachedExisting
 
 	if !reuseExisting && execution.AgentCommand == "" {
 		return fmt.Errorf("execution %q has no agent command configured", executionID)
@@ -199,14 +215,16 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
-	err = m.preflightRemoteContributionPushes(operationCtx, execution)
-	if err != nil {
-		m.updateExecutionError(executionID, "contribution push preflight failed: "+err.Error())
-		return err
+	var taskDescription, agentDisplayName string
+	if !reuseExisting {
+		err = m.preflightRemoteContributionPushes(operationCtx, execution)
+		if err != nil {
+			m.updateExecutionError(executionID, "contribution push preflight failed: "+err.Error())
+			return err
+		}
+		taskDescription = getTaskDescriptionFromMetadata(execution)
+		agentDisplayName = m.resolveAgentDisplayName(operationCtx, execution)
 	}
-
-	taskDescription := getTaskDescriptionFromMetadata(execution)
-	agentDisplayName := m.resolveAgentDisplayName(operationCtx, execution)
 
 	execution.remoteInstanceLifecycleMu.Lock()
 	if err := m.admitExecutionOwner(operationCtx, &LaunchRequest{
@@ -222,13 +240,12 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 	var bootCommand string
 	if reuseExisting {
-		// Agent subprocess is already running inside the remote executor.
-		// Skip configureAndStartAgent (which would spawn a conflicting subprocess)
-		// and go directly to ACP session initialization.
-		bootCommand = "reconnecting to running agent"
-		m.logger.Info("reusing existing agent process, skipping subprocess launch",
+		m.logger.Info("reattaching to existing agent session without ACP initialization",
 			zap.String("execution_id", executionID),
 			zap.String("task_id", execution.TaskID))
+		err := m.adoptExistingAgentSession(operationCtx, execution, client)
+		execution.remoteInstanceLifecycleMu.Unlock()
+		return err
 	} else {
 		m.logger.Info("StartAgentProcess: starting subprocess",
 			zap.String("execution_id", executionID),
@@ -644,9 +661,12 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	m.logger.Debug("waiting for agentctl to be ready",
 		zap.String("execution_id", execution.ID),
 		zap.String("url", client.BaseURL()))
-
-	err := client.WaitForReady(ctx, 60*time.Second)
 	releaseClient()
+
+	err := execution.waitForAgentctlReady(ctx)
+	if errors.Is(err, errReadinessClientDetached) {
+		return
+	}
 	if err != nil {
 		m.logger.Error("agentctl not ready",
 			zap.String("execution_id", execution.ID),
@@ -660,11 +680,12 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	// Comparison configuration must arrive before readiness exposes workspace
 	// access or the cached poll mode starts fresh Git scans.
 	client, releaseClient = execution.AcquireAgentCtlClient()
-	if client != nil {
-		m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
-		m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
-		releaseClient()
+	if client == nil {
+		return
 	}
+	m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
+	m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
+	releaseClient()
 	execution.MarkAgentctlReady()
 
 	elapsed := time.Since(opStart)

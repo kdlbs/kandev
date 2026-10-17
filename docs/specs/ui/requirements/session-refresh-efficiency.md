@@ -76,6 +76,16 @@ status without issuing duplicate reads for the same task.
 
 **Intent:** Task changes must not rebuild unrelated UI or repeatedly initialize expensive editors.
 
+The draft ownership and preservation criteria below also apply when implementation
+starts from the composer in the current session or a fresh session. Implementation
+actions use accepted-payload matching: only the initiating composer's accepted,
+matching draft may clear, and a mismatch in text or attachments shall preserve
+the whole draft. Ordinary composer submission retains `004.5`'s existing
+text-only clearing when attachments change. Starting implementation from a plan
+toolbar without submitting a composer draft confers no authority to erase saved
+composer content. Successful implementation side effects and rejected submission
+retry behavior remain unchanged.
+
 #### Acceptance criteria
 
 - **AC-UI-SESSION-REFRESH-EFFICIENCY-004.1:** Unchanged task rows and contributions shall retain render identity during unrelated session publications. A mounted editor shall not be recreated for an unchanged owner and configuration.
@@ -146,3 +156,5 @@ status without issuing duplicate reads for the same task.
 - [Session refresh efficiency](../../../plans/session-refresh-efficiency/plan.md)
 - [Composer draft settlement ownership](../../../plans/composer-draft-settlement-ownership/plan.md)
   implements the draft-preservation clarification in `004.4`–`004.6`.
+- [Plan implementation draft preservation](../../../plans/plan-implementation-draft-preservation/plan.md)
+  applies the same ownership and matching criteria to implementation actions.

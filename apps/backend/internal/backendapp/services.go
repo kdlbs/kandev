@@ -365,6 +365,7 @@ func initDynamicRuntimeResolver(
 		dynamicruntime.WithPersistence(repos.Task),
 		dynamicruntime.WithStateLoader(repos.Task),
 		dynamicruntime.WithCircuitRegistry(dynamicCircuits),
+		dynamicruntime.WithEngineLogger(log.Zap()),
 	)
 	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(ctx, repos.Task)
 	if err != nil {
@@ -477,7 +478,7 @@ func initIntegrationWiring(
 		automationComponents.Service.SetManagedConversationAutomationDelivery(managedConversationAutomationDeliveryAdapter{plugins: pluginsSvc})
 		pluginsSvc.SetManagedConversationSchedules(managedConversationScheduleAdapter{service: automationComponents.Service})
 	}
-	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, workflowSvc, repos.AgentSettings, cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, log)
+	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, workflowSvc, repos.AgentSettings, cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3, cfg.Features.CoordinatorPhase31, log)
 	if err != nil {
 		return nil, err
 	}
@@ -526,6 +527,7 @@ func wireTaskWorkflowCrossReferences(
 	// package owns steps, templates and export/import, but a workflow's owner
 	// is its workspace's owner, which only the task service can resolve.
 	workflowSvc.SetWorkflowAccessChecker(taskSvc.AuthorizeWorkflowAccess)
+	workflowSvc.SetExecutorMutationChecker(taskSvc.AuthorizeWorkflowExecutorMutation)
 	workflowSvc.SetWorkspaceAccessChecker(taskSvc.AuthorizeWorkspaceAccess)
 	// A step's queue_run action names the task it starts work on, so the
 	// step-write API accepts task IDs as well.
@@ -593,6 +595,7 @@ func initThirdPartyProviders(
 		return nil, fmt.Errorf("initialize gitlab: %w", recordErr)
 	}
 	if gitlabSvc != nil {
+		taskSvc.SetGitLabRepositoryOriginVerifier(gitLabRepositoryOriginVerifier{connections: gitlabSvc})
 		gitlabSvc.SetPromptResolver(promptSvc)
 		gitlabSvc.SetComparisonTargetObserver(taskSvc)
 	}

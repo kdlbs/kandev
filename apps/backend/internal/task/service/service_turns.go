@@ -86,6 +86,12 @@ func (s *Service) createTurn(
 		CreatedAt:          time.Now().UTC(),
 		UpdatedAt:          time.Now().UTC(),
 	}
+	if identity, reserved := models.ReservedLaunchIdentityFromContext(ctx); reserved {
+		if identity.TaskID != session.TaskID || identity.SessionID != sessionID {
+			return nil, errors.New("reserved launch belongs to another task session")
+		}
+		turn.ID = identity.TurnID
+	}
 
 	var (
 		stamped bool
@@ -902,6 +908,13 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		RuntimeConfigOptions:    runtimeConfig.ConfigOptions,
 		RuntimeConfigOptionsSet: runtimeConfigOptionsSet,
 	}
+	incarnationID, generation, err := s.workspaceDeliveryIdentity(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	info.DeliveryIncarnationID = incarnationID
+	info.DeliveryHarnessGeneration = generation
+	info.DeliveryStreamID = fmt.Sprintf("%s:g%d", incarnationID, generation)
 	// Durable folder attachments are replayed by lifecycle for both fresh
 	// launch and workspace-only session recovery.
 	if s.workspaceFolders != nil {

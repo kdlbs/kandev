@@ -146,3 +146,15 @@ func TestPostgresBackgroundWorkRepositoryRoundTrip(t *testing.T) {
 		t.Fatalf("expected 0 workloads after delete, got %d", len(afterDelete))
 	}
 }
+
+func TestPostgresListSessionIDsWithOpenBackgroundWork(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS kandev_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatalf("create kandev_meta: %v", err)
+	}
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("NewWithDB on postgres: %v", err)
+	}
+	assertListSessionIDsWithOpenBackgroundWork(t, repo)
+}

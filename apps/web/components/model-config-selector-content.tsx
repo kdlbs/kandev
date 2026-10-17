@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 
@@ -38,6 +38,7 @@ function ModelRow({
   loading: boolean;
   onSelect: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   const item = (
     <CommandItem
       value={model.id}
@@ -50,7 +51,14 @@ function ModelRow({
     >
       <div className="flex min-w-0 flex-1 items-center">
         <div className="min-w-0 flex-1">
-          <div className="truncate">{model.name}</div>
+          <div className="flex items-center gap-2">
+            <span className="truncate">{model.name}</span>
+            {(model.source === "cli" || model.source === "acp") && (
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {t(model.source === "cli" ? "agents:modelSourceCli" : "agents:modelSourceAcp")}
+              </span>
+            )}
+          </div>
           {model.description && (
             <div className="truncate text-xs text-muted-foreground" title={model.description}>
               {model.description}
@@ -89,6 +97,37 @@ function ModelRow({
     );
   }
   return item;
+}
+
+/**
+ * The last row of the model list while `allowCustomModel` is set and the
+ * typed filter text has no exact match: selects the typed text verbatim.
+ */
+function CustomModelRow({ value, onSelect }: { value: string; onSelect: (value: string) => void }) {
+  const { t } = useTranslation();
+  return (
+    <CommandItem
+      value={value}
+      data-testid="model-config-custom-row"
+      onSelect={() => onSelect(value)}
+      className={selectorOptions.selectorOptionClassName(false, false)}
+    >
+      <div className="min-w-0 flex-1 truncate">
+        {t("agents:useCustomModelId", { model: value })}
+      </div>
+    </CommandItem>
+  );
+}
+
+/** Tracks the typed filter text and whether it warrants a custom-model row. */
+function useModelCustomRow(modelOptions: ModelSelectorOption[], allowCustomModel: boolean) {
+  const [filterText, setFilterText] = useState("");
+  const trimmedFilter = filterText.trim();
+  const showCustomRow =
+    allowCustomModel &&
+    trimmedFilter.length > 0 &&
+    !modelOptions.some((model) => model.id === trimmedFilter);
+  return { filterText, setFilterText, trimmedFilter, showCustomRow };
 }
 
 function ConfigOptionTrigger({
@@ -210,9 +249,48 @@ export type ModelConfigSelectorContentProps = {
   onConfigBack: () => void;
   onConfigChange?: (configId: string, value: string) => void;
   configOptionsLoading: boolean;
+  /** Shows the filter input regardless of model count and offers a
+   *  "use this as a model ID" row for text with no exact match. */
+  allowCustomModel?: boolean;
 };
 
 /** Adds provider branding while preserving the model group label. */
+function ModelFilterInput({
+  value,
+  onValueChange,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <CommandInput
+      placeholder={t("agents:filterModels")}
+      className="h-8"
+      value={value}
+      onValueChange={onValueChange}
+    />
+  );
+}
+
+function ModelOptionsLoadingRow() {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Separator />
+      <div
+        className="flex min-h-9 items-center gap-2 px-2 text-xs text-muted-foreground"
+        data-testid="model-config-options-loading"
+        role="status"
+        aria-label={t("agents:resolvingModelOptions")}
+      >
+        <Spinner aria-hidden="true" className="h-3.5 w-3.5" />
+        <span aria-hidden="true">{t("agents:resolvingModelOptions")}</span>
+      </div>
+    </>
+  );
+}
+
 function ModelGroupHeading({ providerIcon }: { providerIcon?: ReactNode }) {
   const { t } = useTranslation();
   return (
@@ -234,12 +312,17 @@ export function ModelConfigSelectorContent({
   onConfigBack,
   onConfigChange,
   configOptionsLoading,
+  allowCustomModel = false,
 }: ModelConfigSelectorContentProps) {
   const { t } = useTranslation();
   const pendingFocusConfigId = useRef<string | null>(null);
   const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const showModelFilter = modelOptions.length > 5;
   const orderedModelOptions = selectorOptions.prioritizeIdOption(modelOptions, currentModelValue);
+  const { filterText, setFilterText, trimmedFilter, showCustomRow } = useModelCustomRow(
+    orderedModelOptions,
+    allowCustomModel,
+  );
+  const showModelFilter = modelOptions.length > 5 || allowCustomModel;
 
   useEffect(() => {
     if (activeConfig) return;
@@ -269,7 +352,7 @@ export function ModelConfigSelectorContent({
   return (
     <>
       <Command>
-        {showModelFilter && <CommandInput placeholder={t("agents:filterModels")} className="h-8" />}
+        {showModelFilter && <ModelFilterInput value={filterText} onValueChange={setFilterText} />}
         <CommandList className="max-h-60">
           <CommandEmpty>{t("agents:noModelsFound")}</CommandEmpty>
           <CommandGroup heading={<ModelGroupHeading providerIcon={providerIcon} />}>
@@ -282,22 +365,12 @@ export function ModelConfigSelectorContent({
                 onSelect={onModelSelect}
               />
             ))}
+            {showCustomRow && <CustomModelRow value={trimmedFilter} onSelect={onModelSelect} />}
           </CommandGroup>
         </CommandList>
       </Command>
       {configOptionsLoading ? (
-        <>
-          <Separator />
-          <div
-            className="flex min-h-9 items-center gap-2 px-2 text-xs text-muted-foreground"
-            data-testid="model-config-options-loading"
-            role="status"
-            aria-label={t("agents:resolvingModelOptions")}
-          >
-            <Spinner aria-hidden="true" className="h-3.5 w-3.5" />
-            <span aria-hidden="true">{t("agents:resolvingModelOptions")}</span>
-          </div>
-        </>
+        <ModelOptionsLoadingRow />
       ) : (
         extraConfigOptions.length > 0 && (
           <>

@@ -275,3 +275,83 @@ describe("ApiClient.cleanupTestProfiles", () => {
     expect(deleted).toEqual(["/api/v1/agent-profiles/test-profile"]);
   });
 });
+
+describe("ApiClient.e2eReset", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("repeats an idempotent reset while a session transfer owns cleanup", async () => {
+    const client = new ApiClient("http://backend.test");
+    const request = vi
+      .spyOn(client, "rawRequest")
+      .mockResolvedValueOnce(
+        Response.json({ error: "session transfer in progress" }, { status: 500 }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true }));
+    await expect(client.e2eReset("workspace-1", ["workflow-1"])).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenLastCalledWith(
+      "DELETE",
+      "/api/v1/e2e/reset/workspace-1?keep_workflows=workflow-1",
+    );
+  });
+
+  it("does not repeat reset for an unrelated server failure", async () => {
+    const client = new ApiClient("http://backend.test");
+    const request = vi
+      .spyOn(client, "rawRequest")
+      .mockResolvedValue(Response.json({ error: "database unavailable" }, { status: 500 }));
+    await expect(client.e2eReset("workspace-1")).rejects.toThrow("database unavailable");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the existing four-attempt reset bound for a persistent transfer", async () => {
+    const client = new ApiClient("http://backend.test");
+    const request = vi
+      .spyOn(client, "rawRequest")
+      .mockImplementation(async () =>
+        Response.json({ error: "session transfer in progress" }, { status: 500 }),
+      );
+    await expect(client.e2eReset("workspace-1")).rejects.toThrow("session transfer in progress");
+    expect(request).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("explicit session detail inspection", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("keeps list reads compact and fetches rich data only for explicit detail inspection", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/tasks/task/sessions"))
+        return Response.json({
+          sessions: [
+            {
+              id: "session",
+              task_id: "task",
+              state: "RUNNING",
+              queue_incarnation_id: "incarnation",
+            },
+          ],
+          total: 1,
+        });
+      if (url.endsWith("/task-sessions/session"))
+        return Response.json({
+          session: {
+            id: "session",
+            task_id: "task",
+            state: "RUNNING",
+            metadata: { acp: { session_id: "native" } },
+          },
+        });
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("http://backend.test");
+    expect((await client.listTaskSessions("task")).sessions[0].metadata).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((await client.listTaskSessionDetails("task")).sessions[0]).toMatchObject({
+      queue_incarnation_id: "incarnation",
+      metadata: { acp: { session_id: "native" } },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});

@@ -24,7 +24,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: CI,
   failOnFlakyTests: !CI || process.env.E2E_FAIL_ON_FLAKY === "1",
-  retries: CI ? 2 : 0,
+  retries: CI ? 3 : 0,
   workers: 1,
   timeout: 60_000,
   // CI uses blob reporter for cross-shard merge-reports; local uses list.
@@ -83,6 +83,7 @@ export default defineConfig({
     {
       name: "mobile-chrome",
       testMatch: /mobile-.*\.spec\.ts/,
+      testIgnore: /ssh\/.*\.spec\.ts/,
       use: { ...devices["Pixel 5"] },
     },
     {

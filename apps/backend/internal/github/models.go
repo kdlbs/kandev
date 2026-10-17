@@ -560,6 +560,9 @@ type PRStatus struct {
 	// mergeQueueRecoveryPopulated distinguishes a GraphQL observation of the
 	// latest removal event (including no event) from REST and gh CLI reads.
 	mergeQueueRecoveryPopulated bool
+	// feedbackOnly preserves status-sync freshness because feedback does not
+	// observe every aggregate used by automation, including review threads.
+	feedbackOnly bool
 }
 
 // PRSearchPage is a paginated slice of PR search results, with the total
@@ -1056,6 +1059,7 @@ func NormalizeCleanupPolicy(s string) string {
 // ReviewWatch configures periodic polling for PRs needing the user's review.
 // Repos holds the list of repositories to monitor. An empty list means all repos.
 type ReviewWatch struct {
+	CreatedByUserID     string       `json:"-" db:"created_by_user_id"`
 	ID                  string       `json:"id" db:"id"`
 	WorkspaceID         string       `json:"workspace_id" db:"workspace_id"`
 	WorkflowID          string       `json:"workflow_id" db:"workflow_id"`
@@ -1241,6 +1245,7 @@ type PRFeedbackEvent struct {
 
 // NewReviewPREvent is published when a new PR needing review is found.
 type NewReviewPREvent struct {
+	CreatedByUserID   string `json:"created_by_user_id,omitempty"`
 	ReviewWatchID     string `json:"review_watch_id"`
 	WorkspaceID       string `json:"workspace_id"`
 	WorkflowID        string `json:"workflow_id"`
@@ -1346,6 +1351,7 @@ type Issue struct {
 // IssueWatch configures periodic polling for GitHub issues matching a query.
 // Repos holds the list of repositories to monitor. An empty list means all repos.
 type IssueWatch struct {
+	CreatedByUserID     string       `json:"-" db:"created_by_user_id"`
 	ID                  string       `json:"id" db:"id"`
 	WorkspaceID         string       `json:"workspace_id" db:"workspace_id"`
 	WorkflowID          string       `json:"workflow_id" db:"workflow_id"`
@@ -1384,6 +1390,7 @@ type IssueWatchTask struct {
 
 // NewIssueEvent is published when a new issue matching a watch is found.
 type NewIssueEvent struct {
+	CreatedByUserID   string `json:"created_by_user_id,omitempty"`
 	IssueWatchID      string `json:"issue_watch_id"`
 	WorkspaceID       string `json:"workspace_id"`
 	WorkflowID        string `json:"workflow_id"`

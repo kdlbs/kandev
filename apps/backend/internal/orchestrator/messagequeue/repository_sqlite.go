@@ -659,6 +659,8 @@ func (r *sqliteRepository) initSchema() error {
 		task_id          TEXT NOT NULL DEFAULT '',
 		workflow_id      TEXT NOT NULL DEFAULT '',
 		workflow_step_id TEXT NOT NULL DEFAULT '',
+		from_step_id     TEXT NOT NULL DEFAULT '',
+		from_transition_id BIGINT NOT NULL DEFAULT 0,
 		step_position    INTEGER NOT NULL DEFAULT 0,
 		queued_at        TIMESTAMP NOT NULL,
 		actor            TEXT NOT NULL DEFAULT '',
@@ -711,6 +713,12 @@ func (r *sqliteRepository) initSchema() error {
 		return alterErr
 	}
 	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN session_incarnation_id TEXT NOT NULL DEFAULT ''`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
+		return alterErr
+	}
+	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN from_step_id TEXT NOT NULL DEFAULT ''`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
+		return alterErr
+	}
+	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN from_transition_id BIGINT NOT NULL DEFAULT 0`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
 		return alterErr
 	}
 	for _, migration := range []struct {
@@ -2486,17 +2494,19 @@ func (r *sqliteRepository) nextStatusGenerationTx(
 func (r *sqliteRepository) getPendingMoveTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (*PendingMove, error) {
 	var (
 		moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+		fromStepID                                                       string
+		fromTransitionID                                                 int64
 		position                                                         int
 		queuedAt                                                         time.Time
 		actor, senderSessionID, optionsJSON                              string
 	)
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
-		       step_position, queued_at, actor, sender_session_id, entry_options_json
+		       from_step_id, from_transition_id, step_position, queued_at, actor, sender_session_id, entry_options_json
 		FROM pending_moves WHERE session_id = ?
 	`), sessionID).Scan(
 		&moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
-		&position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
+		&fromStepID, &fromTransitionID, &position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -2510,8 +2520,10 @@ func (r *sqliteRepository) getPendingMoveTx(ctx context.Context, tx *sqlx.Tx, se
 	}
 	return &PendingMove{
 		MoveID: moveID, SessionIncarnationID: sessionIncarnationID, TaskID: taskID,
-		WorkflowID: workflowID, WorkflowStepID: workflowStepID, Position: position,
-		QueuedAt: queuedAt, Actor: actor, SenderSessionID: senderSessionID,
+		WorkflowID: workflowID, WorkflowStepID: workflowStepID, FromStepID: fromStepID,
+		FromTransitionID: fromTransitionID,
+		Position:         position,
+		QueuedAt:         queuedAt, Actor: actor, SenderSessionID: senderSessionID,
 		EntryOptions: entryOptions,
 	}, nil
 }
@@ -4070,6 +4082,7 @@ func (r *sqliteRepository) claimSendNow(ctx context.Context, identity *QueueSess
 		SourceGenerations: generations,
 		SessionGeneration: sessionGeneration,
 	}
+	claim.setDeliverySubmission(DeliveryProtocolPending, "send-now:"+claim.ClaimID, "")
 
 	if err := r.applySQLiteSendNowClaim(ctx, tx, identity, sessionID, sources, storedByID); err != nil {
 		return nil, err
@@ -6401,13 +6414,13 @@ func (r *sqliteRepository) restorePendingMoveTx(
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO pending_moves (
 			id, move_id, session_incarnation_id, session_id, task_id, workflow_id,
-			workflow_step_id, step_position, queued_at, actor, sender_session_id, entry_options_json
+			workflow_step_id, from_step_id, from_transition_id, step_position, queued_at, actor, sender_session_id, entry_options_json
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		uuid.New().String(), pendingMove.MoveID, pendingMove.SessionIncarnationID, sessionID,
-		pendingMove.TaskID, pendingMove.WorkflowID, pendingMove.WorkflowStepID,
-		pendingMove.Position, queuedAt, pendingMove.Actor, pendingMove.SenderSessionID,
+		pendingMove.TaskID, pendingMove.WorkflowID, pendingMove.WorkflowStepID, pendingMove.FromStepID,
+		pendingMove.FromTransitionID, pendingMove.Position, queuedAt, pendingMove.Actor, pendingMove.SenderSessionID,
 		marshalEntryOptions(pendingMove.EntryOptions),
 	); err != nil {
 		return fmt.Errorf("restore pending move: %w", err)
@@ -6535,14 +6548,16 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO pending_moves (
 			id, move_id, session_incarnation_id, session_id, task_id, workflow_id,
-			workflow_step_id, step_position, queued_at, actor, sender_session_id, entry_options_json
+			workflow_step_id, from_step_id, from_transition_id, step_position, queued_at, actor, sender_session_id, entry_options_json
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			task_id = excluded.task_id,
 			session_incarnation_id = excluded.session_incarnation_id,
 			workflow_id = excluded.workflow_id,
 			workflow_step_id = excluded.workflow_step_id,
+			from_step_id = excluded.from_step_id,
+			from_transition_id = excluded.from_transition_id,
 			step_position = excluded.step_position,
 			queued_at = excluded.queued_at,
 			actor = excluded.actor,
@@ -6551,7 +6566,7 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 			entry_options_json = excluded.entry_options_json
 	`),
 		uuid.New().String(), move.MoveID, move.SessionIncarnationID, sessionID, move.TaskID,
-		move.WorkflowID, move.WorkflowStepID, move.Position, move.QueuedAt, move.Actor,
+		move.WorkflowID, move.WorkflowStepID, move.FromStepID, move.FromTransitionID, move.Position, move.QueuedAt, move.Actor,
 		move.SenderSessionID, marshalEntryOptions(move.EntryOptions),
 	); err != nil {
 		return fmt.Errorf("upsert pending move: %w", err)
@@ -6563,17 +6578,19 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 func (r *sqliteRepository) GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, error) {
 	var (
 		moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+		fromStepID                                                       string
+		fromTransitionID                                                 int64
 		position                                                         int
 		queuedAt                                                         time.Time
 		actor, senderSessionID, optionsJSON                              string
 	)
 	if err := r.ro.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
-		       step_position, queued_at, actor, sender_session_id, entry_options_json
+		       from_step_id, from_transition_id, step_position, queued_at, actor, sender_session_id, entry_options_json
 		FROM pending_moves WHERE session_id = ?
 	`), sessionID).Scan(
 		&moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
-		&position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
+		&fromStepID, &fromTransitionID, &position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -6590,6 +6607,8 @@ func (r *sqliteRepository) GetPendingMove(ctx context.Context, sessionID string)
 		TaskID:               taskID,
 		WorkflowID:           workflowID,
 		WorkflowStepID:       workflowStepID,
+		FromStepID:           fromStepID,
+		FromTransitionID:     fromTransitionID,
 		Position:             position,
 		QueuedAt:             queuedAt,
 		Actor:                actor,
@@ -6613,17 +6632,19 @@ func (r *sqliteRepository) TakePendingMove(ctx context.Context, sessionID string
 
 	var (
 		moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+		fromStepID                                                       string
+		fromTransitionID                                                 int64
 		position                                                         int
 		queuedAt                                                         time.Time
 		actor, senderSessionID, optionsJSON                              string
 	)
 	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
-		       step_position, queued_at, actor, sender_session_id, entry_options_json
+		       from_step_id, from_transition_id, step_position, queued_at, actor, sender_session_id, entry_options_json
 		FROM pending_moves WHERE session_id = ?
 	`), sessionID).Scan(
 		&moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
-		&position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
+		&fromStepID, &fromTransitionID, &position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -6646,6 +6667,8 @@ func (r *sqliteRepository) TakePendingMove(ctx context.Context, sessionID string
 		TaskID:               taskID,
 		WorkflowID:           workflowID,
 		WorkflowStepID:       workflowStepID,
+		FromStepID:           fromStepID,
+		FromTransitionID:     fromTransitionID,
 		Position:             position,
 		QueuedAt:             queuedAt,
 		Actor:                actor,

@@ -41,6 +41,23 @@ func TestEnvironmentWithOverridesRemovesInheritedValues(t *testing.T) {
 	}
 }
 
+// The managed child must use the JSON relay envelope so private structured
+// context cannot cross into backend logs through an inherited console format.
+func TestChildEnvOverridesPinRelayParseableLogFormat(t *testing.T) {
+	launcher := &Launcher{logger: newUnexpectedExitTestLogger(t)}
+
+	overrides, err := launcher.childEnvOverrides("nonce")
+	if err != nil {
+		t.Fatalf("childEnvOverrides: %v", err)
+	}
+
+	env := environmentWithOverrides([]string{"AGENTCTL_LOG_FORMAT=console", "PATH=/bin", "AGENTCTL_LOG_FORMAT=text"}, overrides...)
+	joined := strings.Join(env, "\n")
+	if strings.Count(joined, "AGENTCTL_LOG_FORMAT=") != 1 || !strings.Contains(joined, "AGENTCTL_LOG_FORMAT=json") {
+		t.Fatalf("managed child log format = %v, want a single pinned JSON override", env)
+	}
+}
+
 func TestLauncherUnexpectedExitCallbackRunsForCleanAndFailedExit(t *testing.T) {
 	for _, exitCode := range []int{0, 7} {
 		t.Run(fmt.Sprintf("exit-%d", exitCode), func(t *testing.T) {
@@ -52,7 +69,7 @@ func TestLauncherUnexpectedExitCallbackRunsForCleanAndFailedExit(t *testing.T) {
 	}
 }
 
-func TestLauncherUnexpectedExitCallbackSkipsIntentionalStop(t *testing.T) {
+func TestRuntimeShutdownSuppressesRecovery(t *testing.T) {
 	if called := startLauncherMonitorTest(t, 7, true); called {
 		t.Fatal("unexpected-exit callback ran during intentional stop")
 	}

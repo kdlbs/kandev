@@ -13,7 +13,7 @@ import {
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import { useWebSocketClient } from "@/lib/ws/connection";
 
-const SETTLED_STATUSES = new Set(["approved", "rejected"]);
+const SETTLED_STATUSES = new Set(["approved", "rejected", "returned"]);
 const OPEN_STATUSES = new Set(["pending", "approving", "failed"]);
 
 export function isSettledProposal(proposal: Pick<StoredProposal, "status">): boolean {
@@ -38,7 +38,7 @@ function updatedAtNs(proposal: StoredProposal): bigint {
 }
 
 /**
- * Merges one incoming proposal row into the cache by the five rules in order
+ * Merges one incoming proposal row into the cache by the six rules in order
  * (docs/specs/coordinator/system-design/proposal-cards.md#client-store
  * "Merging one proposal"): no cached entry stores the incoming row; a
  * settled cached row is never replaced by an unsettled incoming one; a
@@ -58,6 +58,17 @@ export function mergeProposal(
   if (incomingNs > cachedNs) return incoming;
   if (incomingNs < cachedNs) return cached;
   if (isSettledProposal(incoming) && !isSettledProposal(cached)) return incoming;
+  // A delivery does not move `updated_at`, so an equal-time returned row that
+  // records the delivery is the newer state.
+  if (incoming.status === "returned" && cached.status === "returned") {
+    if (incoming.reply_delivered_at && !cached.reply_delivered_at) return incoming;
+  }
+  // A settings save writes no proposal row, so a refetch after it carries the
+  // same `updated_at` and a fresh `runs_with`; a null one never replaces a
+  // cached value.
+  if (incoming.runs_with && !isSettledProposal(cached) && !isSettledProposal(incoming)) {
+    return { ...cached, runs_with: incoming.runs_with };
+  }
   return cached;
 }
 

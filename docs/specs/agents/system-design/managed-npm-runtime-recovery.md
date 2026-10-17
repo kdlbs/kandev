@@ -82,8 +82,10 @@ trusted package and version checks continue to reject arbitrary commands.
 `ProbeResponse` can carry a stable managed-runtime npm-resolution failure code.
 Agentctl sets it only when bounded stderr contains npm `ETARGET` and a missing
 top-level package specification that exactly matches the trusted probe command.
-Raw stderr, npm log paths, cache paths, and registry URLs remain in agentctl
-diagnostic logs and do not cross the probe API.
+The raw bounded stderr drives classification and does not cross the probe API.
+Diagnostic logs retain a sanitized tail: likely credentials, private URL
+details, local paths, and any truncated first line are removed according to
+[Probe Failure Diagnostics](probe-failure-diagnostics.md).
 
 The host utility manager accepts this code only for an agent that implements
 `ManagedNPMRuntimeAgent`. It derives the package specification and
@@ -122,8 +124,12 @@ raw npm output.
 7. For npm-classified failures, Kandev changes `--prefer-offline` to `--prefer-online`; unexplained early exit preserves the original preference.
 8. Kandev starts the replacement child and initializes the original ACP session.
 
-The startup generation rejects delayed events from the first child. The
-existing cancellation and shutdown gates remain authoritative during recovery.
+The startup generation rejects delayed callbacks from the first child. Retained
+events replayed through the replacement stream also retain their originating
+agentctl process generation. When it is older than the authenticated client’s
+current process generation, lifecycle ignores the callback after ordinary durable
+receipt and projection. Missing or malformed process evidence never proves that
+an event is stale. Existing cancellation and shutdown gates remain authoritative.
 
 For a host capability probe, the equivalent flow is:
 

@@ -31,6 +31,11 @@ Before this work every backend restart stopped every running agent. In-flight
 work was lost and each task fell back to a cold resume. The executors system owns
 the package because it owns executor-specific failure and recovery contracts.
 
+The [durable session reconciliation package](../durable-agent-session-reconciliation/plan.md)
+extends this process-survival contract with authenticated delivery adoption,
+ordered replay, and recovery guards. Durable delivery remains independent of
+this plan's process-survival toggle.
+
 ## Scope
 
 In scope: detached agentctl lifetime across the three kill paths (parent-liveness

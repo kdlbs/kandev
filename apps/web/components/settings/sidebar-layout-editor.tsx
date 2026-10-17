@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useOfficeModeState } from "@/hooks/use-in-office";
 import { useSidebarShortcutCatalog } from "@/hooks/domains/sidebar/use-sidebar-shortcut-catalog";
 import {
   addShortcut,
@@ -16,6 +18,11 @@ import {
 } from "@/lib/sidebar/layout-projection";
 import type { ShortcutCatalogEntry } from "@/lib/sidebar/shortcut-catalog";
 import { generateUUID } from "@/lib/utils";
+import {
+  BUILTIN_LAYOUT_NODES,
+  builtinLayoutNodeLabelKey,
+  type BuiltinLayoutContext,
+} from "@/lib/sidebar/builtin-layout-nodes";
 import { FocusedSidebarGroup } from "./sidebar-layout-editor-focused-group";
 import { useSidebarLayoutSave } from "./sidebar-layout-editor-save";
 import {
@@ -25,16 +32,6 @@ import {
 } from "./sidebar-layout-editor-state";
 import { SidebarLayoutContent } from "./sidebar-layout-editor-view";
 import type { DraftOperation } from "./sidebar-layout-editor-types";
-
-const BUILTIN_LABEL_KEYS: Record<string, string> = {
-  home: "sidebar:home",
-  new_task: "sidebar:newTask",
-  automations: "common:automations",
-  canvases: "canvases:canvases",
-  integrations: "common:integrations",
-  inbox: "sidebar:inbox",
-  needs_you_inbox: "sidebar:needsYouInbox",
-};
 
 type EditorSurfaceProps = {
   draft: SidebarLayout;
@@ -95,7 +92,7 @@ function SidebarLayoutEditorSurface({
   t,
   showHeader,
 }: EditorSurfaceProps) {
-  const visibleNodes = projected.nodes.filter((node) => node.visible);
+  const visibleNodes = projected.nodes.filter((node) => node.visible && node.available !== false);
   const activeFocusedNode = projected.nodes.find((node) => node.id === focusedNodeId);
   if (isMobile && activeFocusedNode?.kind === "shortcuts") {
     return (
@@ -167,11 +164,53 @@ function SidebarLayoutEditorSurface({
   );
 }
 
+function useSidebarBuiltinContext(workspaceId?: string): BuiltinLayoutContext {
+  const coordinatorEnabled = useFeature("coordinator");
+  const needsYouInboxEnabled = useFeature("needsYouInbox");
+  const canvasesEnabled = useFeature("canvases");
+  const inOffice = useOfficeModeState() === "office";
+  return useMemo(
+    () => ({
+      hasWorkspace: Boolean(workspaceId),
+      inOffice,
+      features: {
+        coordinator: coordinatorEnabled,
+        canvases: canvasesEnabled,
+        needsYouInbox: needsYouInboxEnabled,
+      },
+    }),
+    [canvasesEnabled, coordinatorEnabled, inOffice, needsYouInboxEnabled, workspaceId],
+  );
+}
+
+function useSidebarLayoutProjection(
+  draft: SidebarLayout,
+  catalog: ShortcutCatalogEntry[],
+  builtinContext: BuiltinLayoutContext,
+  t: ReturnType<typeof useTranslation>["t"],
+): SidebarLayoutProjection {
+  return useMemo(
+    () =>
+      projectSidebarLayout(draft, catalog, {
+        unavailableLabel: t("common:unavailable"),
+        builtinLabels: Object.fromEntries(
+          BUILTIN_LAYOUT_NODES.map((node) => [
+            node.destinationId,
+            t(builtinLayoutNodeLabelKey(node, builtinContext)),
+          ]),
+        ),
+        builtinContext,
+      }),
+    [builtinContext, catalog, draft, t],
+  );
+}
+
 export function SidebarLayoutEditor({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const catalogState = useSidebarShortcutCatalog();
   const draftState = useSidebarDraft(catalogState.catalog);
+  const builtinContext = useSidebarBuiltinContext(draftState.workspaceId ?? undefined);
   const actions = useSidebarLayoutActions(draftState);
   const validation = validateSidebarLayout(draftState.draft);
   const save = useSidebarLayoutSave({
@@ -221,15 +260,11 @@ export function SidebarLayoutEditor({ embedded = false }: { embedded?: boolean }
       applyDraftOperation((current) => ({ ...defaultSidebarLayout(), revision: current.revision })),
     [applyDraftOperation],
   );
-  const projected = useMemo(
-    () =>
-      projectSidebarLayout(draftState.draft, catalogState.catalog, {
-        unavailableLabel: t("common:unavailable"),
-        builtinLabels: Object.fromEntries(
-          Object.entries(BUILTIN_LABEL_KEYS).map(([id, key]) => [id, t(key)]),
-        ),
-      }),
-    [catalogState.catalog, draftState.draft, t],
+  const projected = useSidebarLayoutProjection(
+    draftState.draft,
+    catalogState.catalog,
+    builtinContext,
+    t,
   );
 
   if (!draftState.workspaceId) {

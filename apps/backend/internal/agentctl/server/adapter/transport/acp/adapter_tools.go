@@ -782,6 +782,14 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		}
 	}
 
+	parentToolCallID := parentToolUseID(tcu.Meta)
+	if codexParentToolCallID != "" {
+		parentToolCallID = codexParentToolCallID
+	}
+	if parentToolCallID == "" {
+		parentToolCallID = a.toolCallParents[emittedToolCallID]
+	}
+
 	if isTerminal {
 		if payload == nil || !payload.IsActiveBackgroundWork() {
 			delete(a.activeToolCalls, emittedToolCallID)
@@ -837,10 +845,6 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	var title string
 	if tcu.Title != nil {
 		title = *tcu.Title
-	}
-	parentToolCallID := parentToolUseID(tcu.Meta)
-	if codexParentToolCallID != "" {
-		parentToolCallID = codexParentToolCallID
 	}
 
 	return &AgentEvent{

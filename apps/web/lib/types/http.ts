@@ -664,6 +664,18 @@ export type WorkspaceRecoveryProjection = {
   reason_code?: string;
 };
 
+/** Path-free identity and cause for one currently open session recovery block. */
+export type SessionRecoveryBlockProjection = {
+  id: string;
+  incarnation_id: string;
+  expected_generation: number;
+  reason: string;
+  consumer_reference?: string;
+  delivery_submission_id?: string;
+  delivery_stream_id?: string;
+  updated_at: string;
+};
+
 export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
@@ -694,6 +706,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   container_id?: string;
   executor_id?: string;
   environment_id?: string;
+  /** Current backend agent process execution identity for this session. */
+  agent_execution_id?: string;
   repository_id?: RepositoryId;
   base_branch?: string;
   base_commit_sha?: string;
@@ -706,6 +720,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   task_environment_id?: string;
   /** Latest path-free managed workspace recovery operation for this environment. */
   workspace_recovery?: WorkspaceRecoveryProjection | null;
+  /** Current native-generation recovery causes; an empty array clears stale blocks. */
+  session_recovery_blocks?: SessionRecoveryBlockProjection[];
   state: TaskSessionState;
   /** Backend-owned runtime cancellation projection; API responses include it explicitly. */
   cancellation_pending?: boolean;
@@ -1009,6 +1025,7 @@ export type ListWorkspacesResponse = {
 };
 
 export type Executor = {
+  owner_user_id?: string | null;
   id: string;
   name: string;
   type: ExecutorType;
@@ -1028,6 +1045,7 @@ export type ProfileEnvVar = {
 };
 
 export type ExecutorProfile = {
+  owner_user_id?: string | null;
   id: string;
   executor_id: string;
   executor_type?: ExecutorType;
@@ -1077,6 +1095,13 @@ export type ListMessagesResponse = {
   total: number;
   has_more: boolean;
   cursor: string;
+  turns?: Turn[];
+  turn_coverage?: MessageTurnCoverage;
+};
+
+export type MessageTurnCoverage = {
+  message_ids: string[];
+  active_turn_id: string | null;
 };
 
 export type MessageAuthorType = "user" | "agent";

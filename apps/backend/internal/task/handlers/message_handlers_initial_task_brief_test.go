@@ -127,6 +127,7 @@ type readySessionPromptCapture struct {
 }
 
 type readyPromptCall struct {
+	deliverySubmissionID          string
 	content                       string
 	model                         string
 	planMode                      bool
@@ -195,9 +196,15 @@ func (o *readySessionPromptCapture) promptTaskWithPromptContext(
 	references []v1.EntityReference,
 	dispatchOnly bool,
 	initialTaskBriefDispatchOwner bool,
+	submissionIDs ...string,
 ) (*orchestrator.PromptResult, error) {
+	submissionID := ""
+	if len(submissionIDs) > 0 {
+		submissionID = submissionIDs[0]
+	}
 	o.prompts <- readyPromptCall{
-		content: prompt, model: model, planMode: planMode,
+		deliverySubmissionID: submissionID,
+		content:              prompt, model: model, planMode: planMode,
 		attachments: append([]v1.MessageAttachment(nil), attachments...), dispatchOnly: dispatchOnly,
 		promptReferenceContext:        promptReferenceContext,
 		promptReferencesPrepared:      promptReferencesPrepared,
@@ -219,9 +226,15 @@ func (o *readySessionPromptCapture) ResumeTaskSessionAndPromptWithPromptContext(
 	promptReferencesPrepared bool,
 	references []v1.EntityReference,
 	initialTaskBriefDispatchOwner bool,
+	submissionIDs ...string,
 ) (*orchestrator.PromptResult, error) {
+	submissionID := ""
+	if len(submissionIDs) > 0 {
+		submissionID = submissionIDs[0]
+	}
 	o.resumeCalls <- readyPromptCall{
-		content: prompt, model: model, planMode: planMode,
+		deliverySubmissionID: submissionID,
+		content:              prompt, model: model, planMode: planMode,
 		attachments:                   append([]v1.MessageAttachment(nil), attachments...),
 		promptReferenceContext:        promptReferenceContext,
 		promptReferencesPrepared:      promptReferencesPrepared,
@@ -430,6 +443,20 @@ func (o *firstTurnCaptureOrchestrator) StartCreatedSessionWithPromptContextAndCa
 	return &executor.TaskExecution{}, nil
 }
 
+func (o *firstTurnCaptureOrchestrator) StartCreatedSessionWithDeliverySubmission(
+	_ context.Context,
+	_, _, _, content string,
+	options orchestrator.DirectPromptStartOptions,
+) (*executor.TaskExecution, error) {
+	o.started <- capturedFirstTurn{
+		content:                content,
+		references:             append([]v1.EntityReference(nil), options.References...),
+		promptReferenceContext: options.PromptReferenceContext,
+		deliverySubmissionID:   options.DeliverySubmissionID,
+	}
+	return &executor.TaskExecution{}, nil
+}
+
 // @covers AC-TASKS-INITIAL-TASK-BRIEF-001.1, AC-TASKS-INITIAL-TASK-BRIEF-001.2
 func TestWSAddMessage_InitialTaskBrief(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -494,7 +521,25 @@ func TestWSAddMessage_InitialTaskBrief(t *testing.T) {
 		require.Contains(t, dispatched.content, brief)
 		require.Contains(t, dispatched.content, instruction)
 		require.Equal(t, stored, dispatched.content)
+		require.Equal(t, "initial-brief-message", dispatched.deliverySubmissionID)
 	})
+}
+
+func (o *switchingTurnStartOrchestrator) StartCreatedSessionWithDeliverySubmission(
+	_ context.Context,
+	_, sessionID, _, _ string,
+	options orchestrator.DirectPromptStartOptions,
+) (*executor.TaskExecution, error) {
+	o.mu.Lock()
+	o.startedSession = sessionID
+	o.startedSubmission = options.DeliverySubmissionID
+	o.mu.Unlock()
+	o.startOnce.Do(func() {
+		if o.started != nil {
+			close(o.started)
+		}
+	})
+	return &executor.TaskExecution{}, nil
 }
 
 // @covers AC-TASKS-INITIAL-TASK-BRIEF-001.1, AC-TASKS-INITIAL-TASK-BRIEF-001.2, AC-TASKS-INITIAL-TASK-BRIEF-001.11, AC-TASKS-INITIAL-TASK-BRIEF-001.12
@@ -553,7 +598,10 @@ func TestWSAddMessage_InitialTaskBriefReadySession(t *testing.T) {
 		require.Equal(t, 1, strings.Count(stored, instruction))
 
 		synctest.Wait()
-		require.Equal(t, stored, (<-orch.prompts).content)
+		dispatched := <-orch.prompts
+		require.Equal(t, stored, dispatched.content)
+		require.Equal(t, "initial-brief-ready-message", dispatched.deliverySubmissionID)
+		require.True(t, dispatched.initialTaskBriefDispatchOwner)
 		select {
 		case started := <-orch.started:
 			t.Fatalf("ready session was relaunched through StartCreatedSession: %+v", started)
@@ -780,6 +828,7 @@ func TestWSAddMessage_ReadyInitialBriefRecoveryRetryPreservesAcceptedContext(t *
 	require.True(t, dispatched.initialTaskBriefDispatchOwner)
 
 	retry := <-orch.resumeCalls
+	require.Equal(t, "ready-context-retry", retry.deliverySubmissionID)
 	require.Equal(t, stored, retry.content)
 	require.Equal(t, dispatched.promptReferenceContext, retry.promptReferenceContext)
 	require.True(t, retry.promptReferencesPrepared)

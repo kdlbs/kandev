@@ -204,10 +204,10 @@ Reuse existing lifecycle and cancellation guards instead of a parallel dispatch
 queue. Keep provider execution generation distinct from startup attempt identity:
 one execution can be reused across multiple attempts.
 
-The operation context survives request disconnects but remains cancellable by
+The operation context survives request disconnects but stays cancellable by
 explicit cancellation and service shutdown. Derive it from the service lifetime
-and carry required request values. Do not use an uncancellable context for the
-whole operation. Bounded detached contexts remain valid for owned cleanup.
+and carry required request values. Coalesced startup retains this ownership.
+Bounded detached contexts serve owned cleanup.
 
 `CancelAgent` invalidates the captured attempt under the existing cancellation
 guard before runtime cancellation. It cancels startup and readiness waits, then

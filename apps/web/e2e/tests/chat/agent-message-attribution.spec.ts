@@ -2,7 +2,7 @@ import { type Page, type Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { waitForSessionState } from "../../helpers/session";
+import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
 import { waitForStableActiveSession } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
@@ -140,6 +140,35 @@ test.describe("Cross-task agent message attribution", () => {
   // target's first turn can remain RUNNING well after its message is visible.
   test.describe.configure({ timeout: 180_000 });
 
+  let longRunningTarget: { taskId: string; sessionId: string } | undefined;
+
+  test.afterEach(async ({ apiClient }) => {
+    const target = longRunningTarget;
+    longRunningTarget = undefined;
+    if (!target) return;
+
+    const readState = async () => {
+      const { sessions } = await apiClient.listTaskSessions(target.taskId);
+      return sessions.find((session) => session.id === target.sessionId)?.state ?? "MISSING";
+    };
+    const terminalStates = /^(CANCELLED|COMPLETED|FAILED|WAITING_FOR_INPUT|MISSING)$/;
+    if (terminalStates.test(await readState())) return;
+
+    await apiClient
+      .stopSession({
+        session_id: target.sessionId,
+        reason: "agent message attribution e2e cleanup",
+        force: true,
+      })
+      .catch(() => undefined);
+    await expect
+      .poll(readState, {
+        timeout: 20_000,
+        message: "The message-attribution target should stop before the next test",
+      })
+      .toMatch(terminalStates);
+  });
+
   test("full agent-origin queue supports remove, clear-all, and new admission", async ({
     testPage,
     apiClient,
@@ -153,6 +182,7 @@ test.describe("Cross-task agent message attribution", () => {
       "Target — full agent queue",
       ["e2e:delay(90000)", 'e2e:message("target finished")'].join("\n"),
     );
+    longRunningTarget = { taskId: target.id, sessionId: target.sessionId };
     const session = await openTask(testPage, target.id);
     await expect
       .poll(
@@ -238,8 +268,17 @@ test.describe("Cross-task agent message attribution", () => {
       apiClient,
       seedData,
       "Target — slow initial turn",
-      ["e2e:delay(2000)", 'e2e:message("first turn done")'].join("\n"),
+      ["e2e:delay(90000)", 'e2e:message("first turn done")'].join("\n"),
     );
+    longRunningTarget = { taskId: target.id, sessionId: target.sessionId };
+    const session = await openTask(testPage, target.id);
+    await waitForSessionState(apiClient, {
+      taskId: target.id,
+      sessionId: target.sessionId,
+      expectedState: "RUNNING",
+      message: "The target turn must be running before the sender queues its follow-up",
+      timeout: 60_000,
+    });
 
     await createSenderTaskingTarget(
       apiClient,
@@ -249,11 +288,16 @@ test.describe("Cross-task agent message attribution", () => {
       "queued follow-up",
     );
 
-    const session = await openTask(testPage, target.id);
+    await expect(session.chat.getByTestId("queue-chip")).toContainText("1 queued", {
+      timeout: 30_000,
+    });
+    // Queue delivery can begin the next turn immediately after completion.
+    // Observe the persisted first-turn result instead of sampling that brief idle state.
+    await waitForAgentMessage(apiClient, target.sessionId, "first turn done", 90_000);
+    await waitForCrossTaskMessage(apiClient, target.sessionId);
 
-    // The cross-task message eventually drains and renders. Bubble shows the
-    // raw prompt only; the kandev-system attribution block is stripped server
-    // side before the API/WS broadcast.
+    // The delivered bubble shows only the prompt; the kandev-system
+    // attribution block is stripped before the API/WS broadcast.
     await expect(session.chat).toContainText("queued follow-up", { timeout: 30_000 });
     await expect(session.chat).not.toContainText("<kandev-system>");
 

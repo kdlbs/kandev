@@ -5,19 +5,22 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { useRouter } from "@/lib/routing/client-router";
+import { useTaskPairPrefill } from "@/hooks/domains/coordinator/use-task-pair-prefill";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkspaceBoards } from "@/hooks/domains/coordinator/use-workspace-boards";
+import { useWorkspaceProjects } from "@/hooks/domains/coordinator/use-workspace-projects";
+import { useCoordinatorPhase31Effective } from "@/hooks/domains/settings/use-coordinator-phase31-effective";
 import { setupCoordinator } from "@/lib/api/domains/coordinator-api";
 import {
   resolveDefaultAgentProfileId,
   resolveDefaultExecutorProfileId,
 } from "@/lib/coordinators/coordinator-form";
 import {
+  activeSetupSteps,
   buildSetupRequest,
   gotRefusal,
   initialSetupState,
   isSetupValid,
-  SETUP_STEPS,
   setupServerError,
   skipStep,
   type SetupServerError,
@@ -25,9 +28,17 @@ import {
   type SetupStepId,
 } from "@/lib/coordinators/setup";
 import type { WorkspaceState } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { SetupStepList } from "./setup-nav";
 import { SetupReview } from "./setup-review";
-import { ContextStep, GoalStep, IdentityStep, MayDoStep, WatchesStep } from "./setup-step-bodies";
+import {
+  ContextStep,
+  GoalStep,
+  IdentityStep,
+  MayDoStep,
+  ProjectsStep,
+  WatchesStep,
+} from "./setup-step-bodies";
 import { useSetupForm } from "./use-setup-form";
 
 type Workspace = WorkspaceState["items"][number];
@@ -96,7 +107,7 @@ const BUTTON_CLASS = "min-h-11 cursor-pointer sm:min-h-9";
 function SetupFooter(props: FooterProps) {
   const { t } = useTranslation();
   const { step, index, busy } = props;
-  const skippable = step === "goal" || step === "context";
+  const skippable = step === "projects" || step === "goal" || step === "context";
   return (
     <div className="flex flex-wrap items-center gap-2">
       {index > 0 && (
@@ -147,6 +158,31 @@ function SetupFooter(props: FooterProps) {
   );
 }
 
+function useSetupTaskPairPrefill(
+  form: ReturnType<typeof useSetupForm>,
+  workspace: Workspace | null,
+  agentProfiles: readonly AgentProfileOption[],
+) {
+  const { state } = form;
+  const agentsLoaded = useAppStore((s) => s.settingsData.agentsLoaded);
+  useTaskPairPrefill({
+    workspaceDefaultAgentProfileId: workspace
+      ? (workspace.default_agent_profile_id ?? null)
+      : undefined,
+    agentProfiles: agentsLoaded ? agentProfiles : undefined,
+    ownAgent: state.agentProfileId,
+    ownExecutor: state.executorProfileId,
+    touched: state.taskPairTouched,
+    current: { agent: state.taskAgentProfileId, executor: state.taskExecutorProfileId },
+    onChange: (pair) =>
+      form.setState((prev) => ({
+        ...prev,
+        taskAgentProfileId: pair.agent,
+        taskExecutorProfileId: pair.executor,
+      })),
+  });
+}
+
 export function CoordinatorSetup({ workspaceId }: Props) {
   const { t } = useTranslation();
   useSettingsData(true);
@@ -156,6 +192,9 @@ export function CoordinatorSetup({ workspaceId }: Props) {
     (s) => s.workspaces.items.find((item: Workspace) => item.id === workspaceId) ?? null,
   );
   const boards = useWorkspaceBoards(workspaceId, true);
+  const projectsOffered = useCoordinatorPhase31Effective();
+  const projects = useWorkspaceProjects(workspaceId, projectsOffered);
+  const steps = activeSetupSteps(projectsOffered);
   const form = useSetupForm(
     initialSetupState({
       agentProfileId: resolveDefaultAgentProfileId(
@@ -166,6 +205,7 @@ export function CoordinatorSetup({ workspaceId }: Props) {
     }),
   );
   const { state } = form;
+  useSetupTaskPairPrefill(form, workspace, agentProfiles);
 
   const [step, setStep] = useState<SetupStepId>("identity");
   const [toReview, setToReview] = useState(false);
@@ -180,12 +220,12 @@ export function CoordinatorSetup({ workspaceId }: Props) {
     },
   });
 
-  const index = SETUP_STEPS.indexOf(step);
-  const marked = new Set(SETUP_STEPS.filter((s) => left.has(s) && form.valid(s)));
+  const index = steps.indexOf(step);
+  const marked = new Set(steps.filter((s) => left.has(s) && form.valid(s)));
 
   const leave = (from: SetupStepId) => {
     setLeft((prev) => new Set([...prev, from]));
-    setStep(toReview ? "review" : SETUP_STEPS[index + 1]);
+    setStep(toReview ? "review" : steps[index + 1]);
   };
   const skip = () => {
     form.skip(step, skipStep(step, state));
@@ -193,26 +233,27 @@ export function CoordinatorSetup({ workspaceId }: Props) {
   };
   const back = () => {
     setToReview(false);
-    setStep(SETUP_STEPS[index - 1]);
+    setStep(steps[index - 1]);
   };
   const change = (target: SetupStepId) => {
     setToReview(true);
     setStep(target);
   };
 
-  const canFinish = isSetupValid(state) && SETUP_STEPS.every((s) => form.valid(s)) && !busy;
+  const canFinish = isSetupValid(state) && steps.every((s) => form.valid(s)) && !busy;
   const messages = form.messages(step);
   const bodyProps = { state, messages, edit: form.edit, leave: form.leave };
 
   return (
     <div className="max-w-3xl space-y-6" data-testid="coordinator-setup">
       <h1 className="text-xl font-semibold">{t("coordinator:addCoordinator")}</h1>
-      <SetupStepList current={step} marked={marked} />
+      <SetupStepList steps={steps} current={step} marked={marked} />
       <div data-testid={`setup-body-${step}`}>
         {step === "identity" && (
           <IdentityStep {...bodyProps} agentProfiles={agentProfiles} executors={executors} />
         )}
         {step === "watches" && <WatchesStep {...bodyProps} boards={boards} />}
+        {step === "projects" && <ProjectsStep {...bodyProps} projects={projects} />}
         {step === "goal" && <GoalStep {...bodyProps} />}
         {step === "context" && (
           <ContextStep {...bodyProps} agentProfiles={agentProfiles} executors={executors} />
@@ -224,6 +265,7 @@ export function CoordinatorSetup({ workspaceId }: Props) {
             agentProfiles={agentProfiles}
             executors={executors}
             boards={boards.boards}
+            projectChoices={projectsOffered ? [...projects.sets, ...projects.loose] : undefined}
             onChange={change}
           />
         )}

@@ -461,7 +461,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		}
 	}
 	launchQueueChanged := false
-	if p.loadLaunchQueue != nil {
+	if p.loadLaunchQueue != nil && (!state.launchQueueObserved || isLaunchQueueRefreshEvent(event.Type)) {
 		nextQueue, loadErr := p.loadLaunchQueue(ctx, taskID)
 		if loadErr != nil {
 			if event.Type == events.MessageQueueStatusChanged && isMissingTaskLookupErr(loadErr) {
@@ -473,7 +473,8 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 			}
 			return fmt.Errorf("load launch queue for task status summary %q: %w", taskID, loadErr)
 		}
-		launchQueueChanged = !state.launchQueueObserved || !equalLaunchQueue(state.launchQueue, nextQueue)
+		launchQueueChanged = state.current == nil || !state.launchQueueObserved ||
+			!equalLaunchQueue(state.launchQueue, nextQueue) || !equalLaunchQueue(state.current.LaunchQueue, nextQueue)
 		state.launchQueue = cloneLaunchQueue(nextQueue)
 		state.launchQueueObserved = true
 	}

@@ -1,0 +1,45 @@
+import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
+function directGitWhenInactive(env: Record<string, string>): string {
+  const originalPath = env.KANDEV_E2E_ORIGINAL_PATH;
+  const delayFile = env.KANDEV_E2E_GIT_DELAY_FILE;
+  const pushFile = env.KANDEV_E2E_GITLAB_PUSH_FILE;
+  if (!originalPath || !delayFile || !pushFile) return "";
+  // Controls can appear after worker startup, so check them on every command.
+  // Active controls keep the cross-platform Node implementation as their owner.
+  const exports = Object.entries(env).map(([key, value]) => shellQuote(`${key}=${value}`));
+  return `if [ ! -e ${shellQuote(delayFile)} ] && [ ! -e ${shellQuote(pushFile)} ]; then
+  export ${exports.join(" ")}
+  PATH=${shellQuote(originalPath)}
+  export PATH
+  exec git "$@"
+fi
+`;
+}
+
+export function writeGitShimLauncher(
+  shimDir: string,
+  shimScript: string,
+  env: Record<string, string>,
+): void {
+  const node = process.execPath;
+  const runner = path.join(shimDir, "git-runner.mjs");
+  fs.writeFileSync(
+    runner,
+    `Object.assign(process.env, ${JSON.stringify(env)});\nawait import(${JSON.stringify(pathToFileURL(shimScript).href)});\n`,
+  );
+  if (process.platform === "win32") {
+    // %* forwards all args verbatim; extensionless files aren't executable via
+    // PATHEXT on Windows, so a .cmd wrapper is required for exec.Command("git").
+    const launcher = `@echo off\r\n"${node}" "${runner}" %*\r\n`;
+    fs.writeFileSync(path.join(shimDir, "git.cmd"), launcher);
+    return;
+  }
+  // POSIX uses a non-login shell and directly execs ordinary Git commands.
+  const launcher = `#!/bin/sh\n${directGitWhenInactive(env)}exec ${shellQuote(node)} ${shellQuote(runner)} "$@"\n`;
+  fs.writeFileSync(path.join(shimDir, "git"), launcher, { mode: 0o755 });
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/task/previewfeedback"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -30,8 +31,19 @@ const (
 )
 
 var ErrMessageIDConflict = errors.New("client message id is already used")
+var ErrNotGitPushErrorMessage = errors.New("message is not a Git push error")
 
 var agentPlanMessageIDNamespace = uuid.MustParse("138966de-88bc-49c0-b65f-cbfbac17f729")
+
+type messageMetadataFirstWriter interface {
+	SetMessageMetadataStringIfEmptyWithConversationReceipt(
+		context.Context,
+		string,
+		string,
+		string,
+		string,
+	) (*models.Message, *models.ConversationMutationReceipt, bool, error)
+}
 
 type planCommentMessageWriter interface {
 	CreateMessageWithPlanComments(
@@ -1002,10 +1014,58 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, e
 	return message, nil
 }
 
+// DismissGitPushErrorMessage records a shared acknowledgment on one eligible
+// Git push failure. The message's stored session determines read access.
+func (s *Service) DismissGitPushErrorMessage(ctx context.Context, messageID string) (string, error) {
+	message, err := s.messages.GetMessage(ctx, messageID)
+	if err != nil {
+		return "", err
+	}
+	if message == nil {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	if message.TaskSessionID == "" {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	if err := s.AuthorizeSessionAccess(ctx, message.TaskSessionID); err != nil {
+		return "", err
+	}
+	if message.Type != models.MessageTypeError || message.Metadata["git_operation_error"] != true || message.Metadata["operation"] != "push" {
+		return "", ErrNotGitPushErrorMessage
+	}
+	if dismissedAt, ok := message.Metadata["git_operation_error_dismissed_at"].(string); ok && dismissedAt != "" {
+		return dismissedAt, nil
+	}
+
+	writer, ok := s.messages.(messageMetadataFirstWriter)
+	if !ok {
+		return "", errors.New("atomic message metadata updates are unavailable")
+	}
+	candidate := time.Now().UTC().Format(time.RFC3339Nano)
+	stored, receipt, changed, err := writer.SetMessageMetadataStringIfEmptyWithConversationReceipt(
+		ctx,
+		message.ID,
+		message.TaskSessionID,
+		"git_operation_error_dismissed_at",
+		candidate,
+	)
+	if err != nil {
+		return "", err
+	}
+	dismissedAt, ok := stored.Metadata["git_operation_error_dismissed_at"].(string)
+	if !ok || dismissedAt == "" {
+		return "", errors.New("dismissed message is missing its acknowledgment timestamp")
+	}
+	if changed {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, stored, receipt)
+	}
+	return dismissedAt, nil
+}
+
 // HasUserPromptHistory reports whether a session has accepted or reserved a
 // user prompt. The prompt sequence survives message deletion and restart.
 func (s *Service) HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error) {
-	if err := s.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionPrompt); err != nil {
+	if err := s.AuthorizeSessionAccess(ctx, sessionID); err != nil {
 		return false, err
 	}
 	return s.messages.HasUserPromptHistory(ctx, sessionID)
@@ -1076,6 +1136,55 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 		err = s.projectRunningNotices(ctx, messages)
 	}
 	return messages, hasMore, err
+}
+
+// ListMessagesWithTurnWindow returns a bounded message page and, when the
+// repository supports snapshot reads, only the turn rows needed by that page.
+// Older repository implementations retain the message-only response so the
+// client can use its scoped legacy turn-history fallback.
+func (s *Service) ListMessagesWithTurnWindow(
+	ctx context.Context,
+	req ListMessagesRequest,
+) (models.MessageTurnWindow, error) {
+	if err := s.AuthorizeSessionAccess(ctx, req.TaskSessionID); err != nil {
+		return models.MessageTurnWindow{}, err
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = DefaultMessagesPageSize
+	}
+	if limit > MaxMessagesPageSize {
+		limit = MaxMessagesPageSize
+	}
+	opts := models.ListMessagesOptions{
+		Limit:       limit,
+		Before:      req.Before,
+		After:       req.After,
+		Sort:        req.Sort,
+		AuthorType:  req.AuthorType,
+		AuthorTypes: req.AuthorTypes,
+		TaskID:      req.TaskID,
+		Around:      req.Around,
+	}
+	if reader, ok := s.messages.(repository.MessageTurnWindowReader); ok {
+		window, err := reader.ReadMessageTurnWindow(ctx, req.TaskSessionID, opts)
+		if err != nil {
+			return models.MessageTurnWindow{}, err
+		}
+		if err := s.projectRunningNotices(ctx, window.Messages); err != nil {
+			return models.MessageTurnWindow{}, err
+		}
+		return window, nil
+	}
+
+	messages, hasMore, err := s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, opts)
+	if err != nil {
+		return models.MessageTurnWindow{}, err
+	}
+	if err := s.projectRunningNotices(ctx, messages); err != nil {
+		return models.MessageTurnWindow{}, err
+	}
+	return models.MessageTurnWindow{Messages: messages, HasMore: hasMore}, nil
 }
 
 // ListMessagesForPlugin returns messages matching the plugin Host data API

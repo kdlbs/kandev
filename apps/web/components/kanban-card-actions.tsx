@@ -105,7 +105,7 @@ export function KanbanCardActions({
   const [storePrimarySessionState, setStorePrimarySessionState] = useState<string | null>(null);
   const storeApi = useAppStoreApi();
   const debugEnabled = isDebug();
-  const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
+  const effectiveMenuOpen = menuOpen;
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
     taskId: task.id,
     taskPendingAction: task.taskPendingAction,

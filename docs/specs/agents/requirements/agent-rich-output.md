@@ -9,325 +9,128 @@ owners:
 
 ## Overview
 
-Agents can explain results in Markdown, but trends and workspace files often need a more direct visual treatment. Users need those results to remain calm, readable, and trustworthy inside the transcript instead of becoming arbitrary agent-designed dashboards.
+Task and Office agents present results inside the conversation using approved
+native components. Catalog composition lets an agent choose components,
+grouping, and order while Kandev controls appearance, responsive behavior, and
+interactions. Agents owns the agent-facing contract shared by task and Office
+consumers.
+
+Requirements 001 and 002 retain their completed replacement baseline. Requirement
+003's component baseline is implemented by the structured evidence package
+completed on 2026-10-10. Its authoring-feedback repair is implemented locally by the linked recovery
+package completed on 2026-10-12.
+The contract retains version 1 historical replay and uses version 2 for new
+composition.
+The user selected json-render and catalog composition on 2026-10-08. Delivery
+is tracked in the [replacement plan](../../../plans/json-render-rich-output/plan.md).
+
+## Terminology
+
+- **Presentation:** One completed rich-output tool call in the transcript.
+- **Catalog:** The versioned set of components and properties Kandev permits.
+- **Composition:** A rooted hierarchy of catalog elements with ordered children.
+- **Snapshot:** Accepted chart data or selected table cells retained with a completed message.
 
 ## Requirements
 
-### REQ-AGENTS-AGENT-RICH-OUTPUT-001: Agent Rich Output
+### REQ-AGENTS-AGENT-RICH-OUTPUT-001: Agent rich output
 
-**Intent:** Agents can explain results in Markdown, but trends and workspace files often need a more direct visual treatment. Users need those results to remain calm, readable, and trustworthy inside the transcript instead of becoming arbitrary agent-designed dashboards.
+**Intent:** Preserve the observable behavior of existing native rich output.
 
 #### Acceptance criteria
 
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.1:** Task and Office agents can call `show_rich_output_kandev` to add one native, replayable presentation to the conversation.
-- **AC-AGENTS-AGENT-RICH-OUTPUT-001.2:** A presentation has a plain-text title, an optional plain-text description, and one to four ordered blocks.
-- **AC-AGENTS-AGENT-RICH-OUTPUT-001.3:** Version 1 supports only file previews, line or bar charts, and metric groups.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.2:** A retained historical version 1 presentation has a plain-text title, an optional plain-text description, and one to four ordered blocks.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.3:** Retained historical version 1 supports only file previews, line or bar charts, and metric groups.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.4:** Line and bar charts may receive values inline or select columns from a workspace CSV. CSV-backed results persist as normalized snapshots so they do not depend on the later workspace lifecycle.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.5:** Every chart displays readable x- and y-axis values. Kandev automatically shortens ISO date/time labels and large numbers for the plot while preserving the original x value in the tooltip.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.6:** Every chart identifies its series in a legend. Multi-series legends are local keyboard- and touch-operable filters; changing them never changes the persisted presentation or sends a tool callback.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.7:** Line and bar charts retain their native Recharts entrance animation by default. Kandev defers the expensive plot until its chart is near the viewport in a visible browser tab, then mounts and animates it once.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.8:** Appearance settings provide a per-device option to disable rich-output chart animation. The operating system's reduced-motion preference also disables it, regardless of the saved option.
-- **AC-AGENTS-AGENT-RICH-OUTPUT-001.9:** When a file card's session, repository discriminator, or path changes, its preview shall become collapsed and discard the previous target's content, error, and loading state. Replacement shall request no file content; subsequent explicit expansion shall request only the new target.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.9:** When a file card's session, repository discriminator, or path changes, it shall discard the previous target's content, error, and loading state. Its disclosure shall use the new target's retained choice or default under REQ-AGENTS-IMAGE-PREVIEW-DEFAULTS-001. Non-image replacement shall request no content until explicit expansion; image replacement may automatically request only the new target.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.10:** A pending read for a replaced file target shall never publish its eventual success or failure into the replacement card, including after that card is explicitly expanded.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.11:** When session, repository discriminator, and path stay unchanged, unrelated rerenders and title or caption changes shall preserve the card's disclosure and preview state. Hiding and re-expanding a successful preview shall reuse its content; re-expanding a failed preview shall allow an explicit retry.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.12:** Each file card shall own independent preview and disclosure state, including when two cards reference the same target. Replacing or toggling one card shall not reset or expand another. These state rules shall apply equally on desktop and phone within the existing inline presentation.
 
-## Migrated source detail
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.13:** Pending calls shall show compact tool activity, failed calls shall show the normal tool error, and successfully completed calls shall appear as standalone transcript items. Unsupported or malformed completed presentations shall show a localized unavailable state without breaking adjacent messages.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.14:** Image previews shall use the default and retained-choice behavior in REQ-AGENTS-IMAGE-PREVIEW-DEFAULTS-001; other file previews shall fetch content only after explicit expansion. File cards shall open the existing desktop or mobile file viewer with the current session, path, and repository selection. Unavailable, binary, or expired files shall degrade within their own card while other content remains usable.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.15:** Rich output shall inherit the current session's authorization, accept only workspace-relative file references, and neither accept a caller-selected session nor retain raw file or CSV bytes as presentation data. Configuration and external MCP profiles shall not advertise this tool.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.16:** Charts shall accept 1 to 100 labels and 1 to 4 equally sized series of finite numbers or nulls. Metric groups shall accept 1 to 6 label/value entries. CSV chart sources shall reject binary or invalid UTF-8 data, files over 256 KiB, missing or duplicate headers, malformed rows, invalid numeric cells, and zero or more than 100 data rows; empty numeric cells shall become gaps.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.17:** Completed presentations shall survive reload, restart, and transcript replay using accepted data. Editing or deleting a CSV source shall not change its historical chart; workspace cleanup may make a referenced file preview unavailable without removing the presentation.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.18:** On phones, rich output shall remain inline in the existing transcript, keep chart and text content within the viewport, wrap metric and legend content, and expose file actions and multi-series controls with touch targets of at least 44px. The transcript shall remain the primary vertical scroll owner.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.19:** Unrelated transcript updates shall not restart chart animation or reset file disclosure. Local legend filtering shall update only that chart and shall retain its data, axis formatting, and remaining presentation state.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.20:** Small textual comparisons shall continue to use Markdown tables. Explicit requests for charts, previews, KPIs, or metric presentations with available data shall route to the native rich-output tool instead of generating a separate application or executable artifact.
 
-## Why
+### REQ-AGENTS-AGENT-RICH-OUTPUT-002: Catalog composition
 
-Agents can explain results in Markdown, but trends and workspace files often
-need a more direct visual treatment. Users need those results to remain calm,
-readable, and trustworthy inside the transcript instead of becoming arbitrary
-agent-designed dashboards.
+**Intent:** Let agents compose richer native presentations from a bounded
+catalog, replacing the fixed block-list authoring model for new output.
 
-## What
+#### Acceptance criteria
 
-- Task and Office agents can call `show_rich_output_kandev` to add one native,
-  replayable presentation to the conversation.
-- A presentation has a plain-text title, an optional plain-text description,
-  and one to four ordered blocks.
-- Version 1 supports only file previews, line or bar charts, and metric groups.
-- Line and bar charts may receive values inline or select columns from a
-  workspace CSV. CSV-backed results persist as normalized snapshots so they do
-  not depend on the later workspace lifecycle.
-- Every chart displays readable x- and y-axis values. Kandev automatically
-  shortens ISO date/time labels and large numbers for the plot while preserving
-  the original x value in the tooltip.
-- Every chart identifies its series in a legend. Multi-series legends are
-  local keyboard- and touch-operable filters; changing them never changes the
-  persisted presentation or sends a tool callback.
-- Line and bar charts retain their native Recharts entrance animation by
-  default. Kandev defers the expensive plot until its chart is near the
-  viewport in a visible browser tab, then mounts and animates it once.
-- Appearance settings provide a per-device option to disable rich-output chart
-  animation. The operating system's reduced-motion preference also disables
-  it, regardless of the saved option.
-- Unchanged completed presentations reuse their parsed payload and derived
-  chart inputs across unrelated transcript rerenders. Local legend filtering
-  rerenders only the affected chart, keeps its data/configuration objects
-  stable, and does not restart its entrance animation.
-- Kandev owns all typography, spacing, color, layout, accessibility, and
-  responsive behavior. Agent input never supplies HTML, Markdown, JavaScript,
-  CSS, remote URLs, colors, animation, or component names.
-- Completed rich-output calls remain standalone transcript items rather than
-  being collapsed into the generic tool-activity group.
-- Pending calls use the normal compact tool state. Failed calls show the normal
-  tool error. A completed call with unsupported or malformed data shows a
-  compact localized unavailable state and does not break nearby messages.
-- Small textual comparisons continue to use Markdown tables. Version 1 does
-  not provide a native data-table block.
-- Always-injected Task and Office guidance includes one exact inline-chart,
-  CSV-chart, and metric-group recipe. It tells agents to call the native tool
-  directly for explicit presentation requests instead of building ASCII, SVG,
-  HTML, or another app. The MCP description stays a focused routing summary,
-  while its schema retains complete chart examples. Kandev, rather than the
-  agent, owns axes, legends, colors, and layout; agents provide only semantic
-  blocks, inline chart values, or CSV column mappings.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-002.1:** Agents shall be able to author version 2 presentations with ordered nesting, labelled groups, plain text, and horizontal or vertical grouping of charts, metric groups, and file previews. Different valid hierarchies shall produce the corresponding grouping and order.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-002.2:** Only the advertised catalog's component names and literal properties shall be accepted. Unknown components, properties, versions, actions, expressions, remote resources, executable content, and agent-selected styling shall be rejected before rendering or reading a CSV source.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-002.3:** A composition shall contain exactly one rooted tree with unique element identities, valid child references, no cycles or reused children, and no unreachable elements. It shall contain at most 64 elements, at most 8 levels including the root, and at most 4 chart/metric/file/table/status-list content elements in total. Accepted input and chart snapshots shall each remain bounded to 64 KiB.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-002.4:** Existing valid version 1 historical presentations shall retain their content, order, chart snapshots, and local interactions through the replacement. Malformed historical data shall fail closed; compatibility shall not cause a repeated tool call, CSV-source read, or transcript rewrite. Image cards may request their preview under REQ-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-002.5:** A CSV chart snapshot shall identify its exact composition element. Missing, duplicate, unexpected, or mismatched snapshots shall make the presentation unavailable rather than attach data to another chart or re-read a file.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-002.6:** A completed version 2 presentation shall show the same accepted hierarchy and values live and after reload or restart. Browsing history shall not re-read CSV sources, execute agent actions, or contact an external service. File previews may use session-authorized workspace reads under requirement 001 and REQ-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-002.7:** Composition shall preserve all chart, motion, file-preview lifetime, authorization, and unavailable-state behavior in requirement 001. Two distinct file elements referencing the same target shall remain independent.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-002.8:** On phones, horizontal groups shall become vertical groups in their declared order. Desktop and phone views shall share content and local state; changing viewport shall not reset an expanded preview or chart filter, or overwrite a desktop preference.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-002.9:** New compositions shall work through the existing trusted Kandev tool identity in both task and Office transcripts. A foreign tool with a similar name or an incomplete provider envelope shall not select this presentation.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-002.10:** Agent-facing discovery shall identify the catalog, accepted properties, limits, and valid version 2 examples for inline charts, CSV charts, and metrics. Task and Office guidance shall direct agents to the new authoring shape and retain explicit-request routing within the existing instruction budgets.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-002.11:** Rendering a composition shall not create task mutations or agent callbacks. File disclosure, opening, and chart legend filtering shall remain host-owned. Images may expand automatically under REQ-AGENTS-IMAGE-PREVIEW-DEFAULTS-001; manual toggles, opening and filtering shall be initiated by the user.
 
-## API surface
+### REQ-AGENTS-AGENT-RICH-OUTPUT-003: Structured evidence components
 
-`show_rich_output_kandev` is present only in the Kanban-task and Office-task
-MCP profiles. It is absent from configuration and external MCP profiles.
+**Intent:** Let agents present tabular evidence, check results, and prominent
+findings through the existing native catalog without user-supplied UI recipes.
 
-The tool accepts a closed JSON object. Unknown fields fail validation.
+#### Acceptance criteria
 
-```json
-{
-  "version": 1,
-  "title": "Build health",
-  "description": "Latest local verification",
-  "blocks": [
-    {
-      "type": "metrics",
-      "items": [
-        { "label": "Passed", "value": "38" },
-        { "label": "Duration", "value": "12.4s", "detail": "Warm cache" }
-      ]
-    },
-    {
-      "type": "chart",
-      "chart_type": "line",
-      "title": "Runtime by run",
-      "summary": "Runtime fell across the last five runs.",
-      "csv": {
-        "path": "reports/build-times.csv",
-        "x_column": "started_at",
-        "series": [
-          { "column": "seconds", "label": "Seconds" }
-        ]
-      }
-    },
-    {
-      "type": "file",
-      "path": "reports/build.json",
-      "title": "Raw report",
-      "caption": "Generated by the verification run",
-      "mime_type": "application/json"
-    }
-  ]
-}
-```
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.1:** Agents shall be able to compose Table, StatusList, and Callout with the existing catalog components through the same rich-output tool and renderer. These additions shall preserve the meaning and replay of previously accepted version 1 and version 2/catalog 1 presentations.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.2:** A Table shall show ordered, labelled columns and rows supplied inline or selected from a workspace CSV. It shall accept 1 to 8 uniquely keyed columns, 0 to 100 rows, and exactly one cell per column in each row. Labels and column keys shall contain 1 to 120 Unicode code points; cells shall contain 0 to 500. Cells shall render as plain text and preserve empty values without numeric coercion or markup interpretation.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.3:** A CSV Table shall retain only the selected columns as an accepted snapshot associated with its exact element identity. Editing, deleting, or losing access to the source after completion shall not change its cells or trigger a read when viewing history or reloading.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.4:** CSV Tables shall reject non-relative sources, binary or invalid UTF-8 data, files over 256 KiB, missing, blank or duplicate headers, unavailable selected columns, malformed row widths, oversized cells, and more than 100 rows. Header-only files shall produce an empty table. Invalid composition shall fail before any source read; a source failure shall fail the tool without presenting a partially resolved report.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.5:** Desktop Tables shall associate each cell with its column header. Phone Tables shall present each row as ordered labelled fields, preserving every column and value without page-level horizontal scrolling. Empty tables shall show a localized empty state. Long content shall wrap, and the transcript shall remain the primary vertical scroll owner.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.6:** A StatusList shall display 0 to 20 ordered items with a plain-text label, optional explanation, and one of passed, failed, running, pending, or skipped. Each status shall have a visible localized label and an icon, so color alone never conveys meaning. Item labels shall contain 1 to 120 code points and explanations at most 500; an empty list shall show a localized empty state.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.7:** StatusList values shall be static findings supplied by the agent. They shall not claim backend-verified status, poll a live task or execution, mutate workflow state, or expose completion controls. Running and pending shall remain snapshot labels rather than promises of automatic updates.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.8:** A Callout shall display a plain-text message of 1 to 500 code points, optional title of at most 120, and an info, success, warning, or error kind. The kind shall have a visible localized label and icon. Historical notes shall not be announced as newly occurring live alerts or treated as tool failures.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.9:** All three additions shall remain inline in task and Office conversations, respect host theme and localization, use no agent-authored actions or styling, and preserve neighboring chart filters and file disclosures across unrelated updates or viewport changes.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.10:** Table and StatusList shall each count toward the shared four-content-element bound. Callout shall count toward the existing node, depth, and byte bounds as explanatory text. Inputs and combined CSV snapshots shall each remain within 64 KiB. Unknown properties, statuses, kinds, malformed cells, and missing, duplicate, unexpected or mismatched snapshots shall be rejected without silently repairing data.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.11:** Task and Office discovery shall expose component descriptions, limits, and valid inline-table, CSV-table, status-list and callout examples. Guidance shall explain when structured tables, check results and prominent findings are useful while retaining prose or Markdown for small textual answers. Users shall not need to supply tool names, schema fields or component names.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.12:** When rich-output arguments violate a component's declared shape, the error shall identify the offending element or field and its expected shape. For a recognized component and an unambiguously selected source form, the error shall not demand properties from other component or source forms, or label accepted properties as unknown. Missing or unknown component names and ambiguous source forms shall receive an explicit selection error or separately labelled alternatives rather than contradictory merged requirements.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.13:** Rejected rich-output calls shall retain strict validation and perform no workspace read or partial presentation. Feedback shall omit submitted property values and raw file content; schema-declared names, types, allowed values and bounded examples may explain a correction. A corrected valid call shall succeed through the same tool without a relaxed schema, new conversation or user-supplied UI recipe.
 
-Top-level limits:
+## Scope and compatibility
 
-- `version` is exactly `1`.
-- `title` is 1 to 120 characters.
-- `description`, when present, is at most 500 characters.
-- `blocks` contains 1 to 4 items.
-- The complete encoded argument object is at most 64 KiB.
-
-Block contracts:
-
-- `file`: `path` is a non-empty workspace-relative path of at most 1024
-  characters. Optional `repo`, `title`, `caption`, and `mime_type` are plain
-  strings. Absolute paths, traversal segments, URLs, data URIs, and inline
-  file bytes are rejected.
-- `chart`: `chart_type` is `line` or `bar`; `title` and `summary` are required.
-  Its data is exactly one of:
-  - inline `labels` with 1 to 100 plain strings and `series` with 1 to 4
-    entries. Every series contains the same number of finite numeric or `null`
-    values as `labels`;
-  - `csv` with a workspace-relative `.csv` `path`, optional `repo`, an exact
-    `x_column`, and 1 to 4 series mappings. Each mapping has an exact numeric
-    `column` and optional display `label`.
-  Kandev assigns visual colors, dimensions, axis formatting, tooltip behavior,
-  and legend controls in both forms. A one-series chart still names that series
-  in a non-interactive legend; a multi-series chart lets the user show or hide
-  each series locally.
-- `metrics`: `items` has 1 to 6 entries. Every item has a plain-text `label`
-  and display `value`, plus optional plain-text `detail`. Metrics carry no
-  agent-selected semantic color.
-
-Inline-only calls return a short text acknowledgement. Their canonical
-presentation payload is the tool input already stored at
-`metadata.normalized.generic.input`. Calls containing CSV charts return a
-versioned `resolved_charts` result, as both standard MCP structured content and
-an equivalent JSON text fallback. Each entry identifies its chart block index
-and stores only bounded labels plus numeric or `null` series values.
-
-Decision: [ADR-2026-08-14-kandev-native-agent-rich-output](../../../decisions/2026-08-14-kandev-native-agent-rich-output.md).
-
-## Permissions
-
-The tool inherits the current task session's existing MCP identity and message
-authorization. It does not accept a task or session identifier and performs no
-separate backend mutation. File expansion uses the current session's existing
-workspace-file authorization.
-
-The tool is advertised as a read-only presentation tool. Test and demo agent
-profiles may still choose a stricter provider permission policy, so isolated
-real-agent evaluation profiles must explicitly enable full access and automatic
-approval when the evaluation is intended to run unattended.
-
-## Failure modes
-
-- Schema or semantic validation failure rejects the tool call with a concise
-  error and produces no rich presentation.
-- CSV resolution rejects missing or binary files, files over 256 KiB, malformed
-  rows, duplicate or missing headers, zero or more than 100 data rows, blank or
-  overlong x values, and non-finite numeric cells. Errors identify the source
-  row and column when possible. Empty numeric cells become chart gaps.
-- A pending tool call does not render unvalidated agent data as a presentation.
-- A malformed historic completed payload fails closed in the frontend and
-  leaves the rest of the transcript usable.
-- File content is never fetched automatically. Expansion errors, missing
-  files, binary formats without a preview, and expired task workspaces render
-  a localized unavailable state while other blocks remain usable.
-- Unknown future versions are not guessed. They render the unavailable state.
-
-## Persistence guarantees
-
-The presentation payload follows existing tool-call message retention and
-survives WebSocket replay, page reload, and backend restart without a new
-database entity. Inline blocks replay from arguments. CSV-backed charts replay
-from their normalized result snapshot and never re-read the source. Referenced
-file-preview bytes remain owned by the task workspace and can disappear when
-that workspace is archived, deleted, reset, or cleaned; the message remains and
-its file block degrades explicitly.
-
-Codex ACP may transport MCP calls in an `execute` tool frame whose `rawInput`
-contains the MCP server, actual tool name, and `arguments`. The ACP adapter
-recognizes that provider envelope and persists a provider-neutral generic tool
-call using the actual MCP tool name, arguments, and completed MCP result. The
-shell-shaped transport category is never exposed as the presentation's stored
-tool identity.
-
-Cursor and Grok ACP may transport MCP calls in an `other` tool frame whose
-`rawInput` contains `providerIdentifier`, `toolName`, and `args`. Their ACP
-dialects recognize that complete provider envelope and persist the same
-provider-neutral identity and unwrapped arguments used by other MCP transports.
-Historic messages using this envelope remain replayable from their stored
-`kandev: <tool>_kandev` title and `raw_input.args`; no message migration or
-repeat tool call is required. Foreign providers and unrelated `other` frames
-remain generic activity.
-
-No raw CSV, file bytes, images, or other binary payloads are copied into SQLite
-for this feature.
-
-## Mobile design contract
-
-- Desktop and mobile entry point: the completed presentation appears inline at
-  its chronological location in the existing task or Office transcript.
-- Nearest mobile exemplars: the existing chat transcript supplies the inline
-  surface; `MobileFileViewerPanel` supplies focused file inspection.
-- Hierarchy: presentation title, optional description, then ordered blocks.
-  File open and chart inspection are the primary block actions.
-- Presentation remains inline because it is conversation evidence, not a new
-  primary destination. Opening a file uses the existing dedicated mobile file
-  surface rather than embedding a desktop editor in chat.
-- The transcript remains the single vertical scroll owner. Charts stay within
-  their block width, metric items reflow without horizontal page scrolling,
-  legend controls wrap within the chart, and actions have touch-safe targets.
-- Desktop and mobile share parsing, validation, data, and actions. Only block
-  composition and sizing vary with `useResponsiveBreakpoint` where needed.
-
-## Scenarios
-
-- **GIVEN** a task or Office agent, **WHEN** it lists MCP tools, **THEN**
-  `show_rich_output_kandev` is available with the closed version 1 schema.
-- **GIVEN** an agent is asked for an inline line or bar chart, **WHEN** it reads
-  Kandev's tool guidance, **THEN** it can copy the canonical `chart_type`,
-  `title`, `summary`, `labels`, and labeled `series[].values` shape without
-  inventing axis, category, or data fields.
-- **GIVEN** an agent is explicitly asked for a chart, file preview, KPI cards,
-  or a native metric summary and suitable data exists, **WHEN** it chooses a
-  response mechanism, **THEN** it calls `show_rich_output_kandev` directly
-  instead of creating an ASCII, SVG, HTML, or app-based substitute.
-- **GIVEN** an agent is asked for KPI cards or a native metric summary, **WHEN**
-  it reads Kandev's tool guidance, **THEN** it can copy the canonical metric
-  `items[].label` and `items[].value` shape without editing a workspace file.
-- **GIVEN** a configuration or external MCP client, **WHEN** it lists tools,
-  **THEN** `show_rich_output_kandev` is absent.
-- **GIVEN** a valid completed presentation, **WHEN** the transcript receives
-  the tool update, **THEN** its file, chart, and metric blocks render as one
-  standalone native transcript item.
-- **GIVEN** the same completed message after a page reload, **WHEN** history is
-  replayed, **THEN** the presentation is equivalent to its live rendering.
-- **GIVEN** Codex ACP emits an MCP invocation as an `execute` frame with
-  `_meta.is_mcp_tool_call`, **WHEN** the initial and terminal updates are
-  normalized, **THEN** the transcript stores one generic
-  `show_rich_output_kandev` tool call with unwrapped arguments and MCP result.
-- **GIVEN** a pending rich-output call, **WHEN** its arguments arrive, **THEN**
-  the transcript shows only the normal pending tool state.
-- **GIVEN** malformed input, an unknown block, or a payload over 64 KiB,
-  **WHEN** the tool is called, **THEN** validation fails closed.
-- **GIVEN** a workspace CSV with an x column and numeric columns, **WHEN** a
-  line or bar chart names those columns, **THEN** the handler resolves at most
-  100 rows and persists a normalized result snapshot.
-- **GIVEN** a completed CSV-backed chart whose workspace file is later edited
-  or removed, **WHEN** conversation history reloads, **THEN** the chart remains
-  identical to the accepted snapshot and performs no workspace read.
-- **GIVEN** a valid line or bar chart, **WHEN** it renders, **THEN** both axes
-  contain visible tick values, its tooltip exposes the original x value, and
-  every series is named in the legend.
-- **GIVEN** a multi-series chart, **WHEN** the user toggles a legend item with a
-  pointer, touch, or keyboard, **THEN** that series is filtered locally and can
-  be restored without changing the persisted payload.
-- **GIVEN** a valid line or bar chart below the viewport or in a background
-  browser tab, **WHEN** its transcript loads, **THEN** Kandev preserves the
-  chart's title, summary, and layout space without mounting or animating the
-  expensive plot.
-- **GIVEN** that deferred chart, **WHEN** it approaches the viewport in a
-  visible tab, **THEN** its plot mounts once and retains the default Recharts
-  entrance animation.
-- **GIVEN** an unchanged completed rich-output message, **WHEN** unrelated chat
-  state rerenders its parent, **THEN** Kandev reuses the parsed presentation,
-  chart data, chart configuration, and formatter callbacks instead of
-  rebuilding the chart subtree or restarting its entrance animation.
-- **GIVEN** the per-device rich-output animation option is disabled, or the
-  operating system requests reduced motion, **WHEN** a chart plot mounts,
-  **THEN** its complete series geometry appears without animation while axes,
-  tooltips, and legend filtering remain available.
-- **GIVEN** a valid presentation with a workspace file, **WHEN** the user
-  expands the file block, **THEN** Kandev requests the file once and displays
-  a bounded preview or explicit unavailable state.
-- **GIVEN** a file block in a multi-repository task, **WHEN** the user opens
-  it, **THEN** the optional repository discriminator reaches the existing file
-  viewer selection path.
-- **GIVEN** a Pixel 5-sized viewport, **WHEN** file, chart, and metric blocks
-  render, **THEN** content stays inside the viewport, actions remain touchable,
-  and file opening reaches the existing mobile viewer.
-- **GIVEN** a small row-and-column comparison, **WHEN** an agent reports it,
-  **THEN** it uses ordinary Markdown rather than a native rich table block.
+The replacement baseline includes Stack, Group, Text, Chart, Metrics, and
+FilePreview. The catalog also includes Table, StatusList, and Callout.
+Grouping and Text extend authoring; chart, metric, and file content retain the
+existing limits and semantics. Version 1 remains a historical replay input. New tool calls use version 2;
+stale version 1 calls receive an actionable error before any source read. Catalog extensions require explicit reviewed
+contracts rather than exposing a general-purpose UI library automatically.
 
 ## Out of scope
 
-- Portable rendering of every MCP or ACP content block.
-- MCP Apps, `ui://` resources, iframes, executable UI, or tool callbacks.
-- Plugin-contributed rich renderers or changes to the plugin agent-tool result
-  contract.
-- Native tables, forms, editors, maps, arbitrary dashboards, or agent-defined
-  layout.
-- Changing Recharts' default entrance style or duration for users who leave
-  rich-output animation enabled.
-- Transcript-wide virtualization, a canvas chart renderer, data sampling, or
-  lower chart payload limits. Those require separate evidence after deferred
-  mounting and referential-stability work is measured.
-- Durable raw artifact storage or a new workspace file-preview API.
+- MCP Apps, iframes, arbitrary HTML/JavaScript/CSS, and external UI resources.
+- Progress indicators, forms, agent-authored action buttons, callbacks, editors, maps,
+  plugin-contributed components, and live data subscriptions.
+- Partial tool-argument rendering, JSONL patch streaming, and post-completion
+  agent updates to an existing presentation.
+- A new agent transport, AI SDK chat runtime, artifact database, workspace file
+  API, transcript virtualization, or a change to chart animation defaults.
 
-## Implementation plan
+## Implementation plans
 
-- [Original implementation plan](../../../plans/agent-rich-output/plan.md)
-- [Chart rendering performance repair](../../../plans/rich-output-chart-performance/plan.md)
-- [File-preview target reset](../../../plans/rich-file-preview-targets/plan.md)
+- [Image preview defaults](image-preview-defaults.md) and its
+  [implementation plan](../../../plans/image-preview-defaults/plan.md) define
+  the image exception to explicit expansion.
+
+- [CSV header BOM repair](../../../plans/rich-output-csv-header-bom/plan.md)
+- [Rich-output authoring recovery](../../../plans/rich-output-authoring-recovery/plan.md)
+- [Structured evidence catalog extension](../../../plans/rich-output-evidence-components/plan.md)
+
+- [json-render replacement](../../../plans/json-render-rich-output/plan.md)
+- [Original implementation](../../../plans/agent-rich-output/plan.md)
+- [Chart performance repair](../../../plans/rich-output-chart-performance/plan.md)
+- [File-preview lifetime repair](../../../plans/rich-file-preview-targets/plan.md)

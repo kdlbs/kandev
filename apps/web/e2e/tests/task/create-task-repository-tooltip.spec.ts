@@ -11,6 +11,8 @@ import { dwell } from "../../helpers/causal-waits";
 useRegularMode();
 
 test.describe("Create task repository tooltip", () => {
+  test.describe.configure({ retries: 0 });
+
   test("contains a long path and waits for a deliberate re-hover after picker selection", async ({
     testPage,
     apiClient,

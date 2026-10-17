@@ -1,7 +1,12 @@
 ---
 status: implemented
 created: 2026-08-11
-spec: "../../specs/executors/requirements/port-collision-safety.md"
+requirements:
+  - REQ-EXECUTORS-CONTROL-OWNERSHIP-001
+  - REQ-EXECUTORS-PORT-COLLISION-SAFETY-001
+system_design:
+  - ../../specs/executors/system-design/agent-survival-across-restart-01.md
+  - ../../specs/executors/system-design/remote-executor-plugins.md
 ---
 
 # Plan: Launcher port-availability probe detects wildcard listeners
@@ -63,17 +68,21 @@ automatic selection together. No signature change, so no downstream caller updat
 
 ## Regression test
 
-`TestCanBindDetectsWildcardListener` (new, in `ports_test.go`): stand up a wildcard TCP
-listener (`net.Listen("tcp", ":0")` on the IPv6/dual wildcard, or `0.0.0.0:0`), take its
-port, and assert `canBind(port)` returns `false`. This fails before the fix (bind-only
-`canBind` returns `true` against the wildcard listener) and passes after. A companion
-assertion confirms `pickAvailablePortExcept(port, nil)` does not return the occupied port.
+`TestCanBindDetectsOccupiedListener` (new, in `ports_test.go`): stand up an occupied TCP
+listener, take its port, and assert `canBind(port)` returns `false`. This fails before the fix
+(bind-only `canBind` returns `true` against the wildcard listener) and passes after. A companion
+assertion confirms `pickAvailablePortExcept(port, nil)` does not return the occupied port. Unix
+stands up a wildcard listener (`net.Listen("tcp", ":0")`) so the specific-address bind can still
+succeed against it. Windows stands up a loopback listener (`127.0.0.1:0`) because a wildcard test
+listener would bind a non-loopback interface and prompt for Firewall access from every ephemeral
+`%TEMP%/go-build...` test binary.
 
 ## Tasks
 
 | Task | Wave | Parallel-safe | Summary |
 | --- | --- | --- | --- |
-| task-01-wildcard-port-probe | 1 | no | Add failing regression test, implement connect+bind dual-stack `canBind`. |
+| [task-01-wildcard-port-probe](task-01-wildcard-port-probe.md) | 1 | no | Add failing regression test, implement connect+bind dual-stack `canBind`. |
+| [task-02-loopback-allocation-probe](task-02-loopback-allocation-probe.md) | 1 | no | Bind the task-process port allocation probe on loopback so it opens no firewall-visible listener. |
 
 ## Validation
 

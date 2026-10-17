@@ -340,11 +340,11 @@ func (m *Manager) captureCleanupHeadOID(ctx context.Context, wt *Worktree) (stri
 		m.releaseRepoLock(wt.RepositoryPath)
 	}()
 
-	pathPresent, err := cleanupPathPresent(wt.Path)
+	checkoutPresent, err := cleanupCheckoutGitPresent(wt.Path)
 	if err != nil {
 		return "", false, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
 	}
-	if !pathPresent {
+	if !checkoutPresent {
 		oid, found, err := m.captureCleanupIdentityFromBranch(ctx, wt)
 		if err != nil {
 			return "", false, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
@@ -352,17 +352,17 @@ func (m *Manager) captureCleanupHeadOID(ctx context.Context, wt *Worktree) (stri
 		return oid, found, nil
 	}
 
-	output, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
+	output, err := m.runCheckoutLocalGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
 		// Even under our own lock, an external actor (a raw filesystem cleanup,
-		// not another Manager operation) can remove the checkout between the
-		// presence check above and this Git invocation. Fall back to the
-		// branch OID instead of failing the whole cleanup snapshot.
-		pathPresent, pathErr := cleanupPathPresent(wt.Path)
+		// not another Manager operation) can remove the checkout or its Git
+		// metadata between inspection and this invocation. Capture the branch
+		// identity when checkout-local Git metadata is confirmed absent.
+		checkoutPresent, pathErr := cleanupCheckoutGitPresent(wt.Path)
 		if pathErr != nil {
 			return "", false, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, pathErr)
 		}
-		if !pathPresent {
+		if !checkoutPresent {
 			oid, found, branchErr := m.captureCleanupIdentityFromBranch(ctx, wt)
 			if branchErr != nil {
 				return "", false, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, branchErr)
@@ -377,6 +377,34 @@ func (m *Manager) captureCleanupHeadOID(ctx context.Context, wt *Worktree) (stri
 		return "", false, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
 	}
 	return oid, true, nil
+}
+
+// runCheckoutLocalGitInspect pins Git to the checkout's own .git. The presence
+// check cannot hold off an external actor, so if that metadata disappears
+// before Git starts, the inspection fails instead of discovering an enclosing
+// repository and returning its HEAD as this worktree's identity.
+func (m *Manager) runCheckoutLocalGitInspect(ctx context.Context, path string, args ...string) (string, error) {
+	gitDir := "GIT_DIR=.git"
+	return m.runBoundedGitInspectWithEnvironment(ctx, path, func(env []string) []string {
+		return append(env, gitDir)
+	}, args...)
+}
+
+func cleanupCheckoutGitPresent(path string) (bool, error) {
+	present, err := cleanupPathPresent(path)
+	if err != nil || !present {
+		return false, err
+	}
+	// Git can discover an ancestor repository when the checkout has no .git.
+	// Only checkout-local metadata may supply this worktree's HEAD identity.
+	_, err = os.Lstat(filepath.Join(path, ".git"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, classifyCleanupInspectionError(CleanupInspectionStageCommit, err)
+	}
+	return true, nil
 }
 
 func (m *Manager) captureCleanupIdentityFromBranch(ctx context.Context, wt *Worktree) (string, bool, error) {
@@ -467,6 +495,9 @@ func (m *Manager) removeWorktreeWithReceipt(
 		return receipt, fmt.Errorf("audit worktree cleanup %s: %w", wt.ID, err)
 	}
 	defer func() {
+		if audit.adoption != nil {
+			audit.adoption.Close()
+		}
 		if audit.pathHandle != nil {
 			_ = audit.pathHandle.Close()
 		}
@@ -475,7 +506,9 @@ func (m *Manager) removeWorktreeWithReceipt(
 	// Run the repository script only after the path, Git registration, checkout
 	// contents, and branch identity pass the audit. A script such as `git clean`
 	// must never erase changes before the audit can reject the cleanup.
-	m.runWorktreeCleanupScript(ctx, wt)
+	if !audit.adoptionAbsent {
+		m.runWorktreeCleanupScript(ctx, wt)
+	}
 	if options.RequireCleanCheckout && audit.pathPresent {
 		if err := m.verifyCheckoutClean(ctx, wt); err != nil {
 			return receipt, fmt.Errorf("verify worktree cleanliness after cleanup script %s: %w", wt.ID, err)
@@ -488,7 +521,7 @@ func (m *Manager) removeWorktreeWithReceipt(
 	if err := m.finalizeRemovedWorktree(ctx, wt); err != nil {
 		return receipt, err
 	}
-	if !removeBranch {
+	if !removeBranch && !audit.hasAdoption() {
 		receipt = m.compactManagedBranch(ctx, wt)
 	}
 

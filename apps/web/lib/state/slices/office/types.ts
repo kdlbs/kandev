@@ -251,6 +251,11 @@ export type CreateRoutineInput = {
   catchUpPolicy?: string;
   catchUpMax?: number;
   variables?: Record<string, unknown> | string;
+  /**
+   * Optional trigger created in the same request as the routine, so a
+   * rejected trigger creates no routine at all.
+   */
+  trigger?: CreateTriggerInput;
 };
 
 /**
@@ -696,8 +701,9 @@ export type OfficeSliceActions = {
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
   setTaskQuorum: (taskId: string, quorum: QuorumResponseDTO) => void;
-  beginPauseRequest: () => number;
-  resetPauseState: () => void;
+  beginPauseRequest: (kind?: "read" | "mutate") => number;
+  beginPauseRead: (workspaceId: string) => void;
+
   applyPauseResponse: (
     tag: number,
     responseWorkspaceId: string,

@@ -104,7 +104,8 @@ def validate_managed_draft(data: dict[str, object]) -> set[str]:
     import build as trusted_build  # noqa: PLC0415
 
     try:
-        trusted_build.validate(data, require_impact=True, changed_paths=changed_paths)
+        trusted_build.validate(data, require_impact=True, require_feature_flags=True,
+                               changed_paths=changed_paths)
     except trusted_build.BuildError as exc:
         raise ValueError(str(exc)) from exc
     return changed_paths

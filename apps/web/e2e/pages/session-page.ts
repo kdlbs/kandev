@@ -37,7 +37,7 @@ export class SessionPage {
     this.changes = page.getByTestId("changes-panel");
     this.planPanel = page.getByTestId("plan-panel");
     this.stepper = page.getByTestId("workflow-stepper");
-    this.passthroughTerminal = page.getByTestId("passthrough-terminal");
+    this.passthroughTerminal = page.locator('[data-testid="passthrough-terminal"]:visible');
     this.fileTree = new FileTreePage(page, this.files, () => this.activeChat());
     this.newSessionDialogPage = new NewSessionDialogPage(page);
   }
@@ -51,6 +51,15 @@ export class SessionPage {
   }
   get mobileSessionMenu() {
     return this.page.getByTestId("mobile-task-picker-trigger");
+  }
+  get mobilePanels() {
+    return this.page.getByTestId("mobile-session-nav-panels");
+  }
+  get mobilePortForwardingOpen() {
+    return this.page.getByTestId("mobile-port-forwarding-open");
+  }
+  get portForwardHeaderShortcut() {
+    return this.page.getByTestId("port-forward-header-shortcut");
   }
   get mobilePortForwardingToggle() {
     return this.page.getByTestId("mobile-port-forwarding-toggle");
@@ -248,7 +257,8 @@ export class SessionPage {
     const idle = this.anyIdleInput();
     const editor = this.activeChat().locator(".tiptap.ProseMirror:visible").first();
     const isReady = async () =>
-      (await idle.isVisible()) && (!opts.requireEditable || (await editor.isEditable()));
+      (await idle.isVisible()) &&
+      (!opts.requireEditable || (await editor.getAttribute("contenteditable")) === "true");
     const start = Date.now();
     let lastReloadAt = start;
 
@@ -694,7 +704,7 @@ export class SessionPage {
 
   /** "Start fresh session" button shown after agent crash. */
   recoveryFreshButton(): Locator {
-    return this.page.getByTestId("recovery-fresh-button");
+    return this.page.getByTestId("recovery-fresh-button").last();
   }
 
   /** Terminal-state banner shown when the active session has completed. */
@@ -1243,17 +1253,30 @@ export class SessionPage {
   }
 
   /**
-   * Types a message into the TipTap chat input and sends it.
-   * Default submit key is Cmd+Enter (chatSubmitKey = "cmd_enter").
-   * TipTap maps "Mod" to Meta on macOS and Control on Linux/Windows.
+   * Enters text into the TipTap chat input without submitting it.
    */
-  async sendMessage(text: string) {
+  async fillMessage(text: string): Promise<Locator> {
     const editor = await this.composerReady();
     await this.waitForDirectInput();
     await editor.click();
     await editor.fill(text);
+    return editor;
+  }
+
+  /**
+   * Submits a prepared message with the default Cmd/Ctrl+Enter shortcut.
+   */
+  async submitMessageWithKeyboard(editor: Locator): Promise<void> {
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await editor.press(`${modifier}+Enter`);
+  }
+
+  /**
+   * Enters and sends a message with the default Cmd/Ctrl+Enter shortcut.
+   */
+  async sendMessage(text: string): Promise<void> {
+    const editor = await this.fillMessage(text);
+    await this.submitMessageWithKeyboard(editor);
   }
 
   /**
@@ -1261,10 +1284,7 @@ export class SessionPage {
    * don't submit on Ctrl/Cmd+Enter, so mobile specs use this instead.
    */
   async sendMessageViaButton(text: string) {
-    const editor = await this.composerReady();
-    await this.waitForDirectInput();
-    await editor.click();
-    await editor.fill(text);
+    await this.fillMessage(text);
     const isTouch = await this.page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
     if (isTouch) {
       await this.tapSubmitWhenReady();
@@ -1414,10 +1434,10 @@ export class SessionPage {
   /**
    * Assert the terminal buffer contains the given text.
    */
-  async expectTerminalHasText(text: string, timeout = 30_000): Promise<void> {
+  async expectTerminalHasText(text: string): Promise<void> {
     await expect
       .poll(async () => (await this.readXtermBuffer("terminal-panel")).includes(text), {
-        timeout,
+        timeout: 10_000,
         message: `Expected terminal to contain "${text}"`,
       })
       .toBe(true);

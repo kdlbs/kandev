@@ -3444,3 +3444,8 @@ INSERT INTO secrets (id, name, scope, workspace_id, encrypted_value, nonce, crea
 VALUES ('fixture-v0930-secret', 'Fixture Secret', 'global', '', '', '', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
 INSERT INTO telemetry_activations (contract_key, contract_version, activated_at)
 VALUES ('fixture.v0930.contract', 7, '2024-01-02 03:04:05+00:00');
+
+INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at) VALUES ('fixture-v0930-executor', 'Legacy shared executor', 'local_pc', 'active', 0, 1, '{}', '2026-01-01 00:00:00', '2026-01-01 00:00:00');
+INSERT INTO executor_profiles (id, executor_id, name, created_at, updated_at) VALUES ('fixture-v0930-executor-profile', 'fixture-v0930-executor', 'Legacy shared profile', '2026-01-01 00:00:00', '2026-01-01 00:00:00');
+INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at) VALUES ('exec-local', 'Local', 'local_pc', 'active', 1, 1, '{}', '2026-01-01 00:00:00', '2026-01-01 00:00:00');
+INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at) VALUES ('exec-worktree', 'Worktree', 'worktree', 'active', 1, 1, '{}', '2026-01-01 00:00:00', '2026-01-01 00:00:00');

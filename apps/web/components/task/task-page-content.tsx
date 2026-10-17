@@ -22,7 +22,6 @@ import {
   readTaskNavigationIdentity,
   useTaskNavigationReadState,
 } from "@/lib/state/task-navigation-reads";
-import { useWorkflowSnapshotById } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useWorkflowStepsById } from "@/hooks/domains/kanban/use-workflow-steps-by-id";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useFeature } from "@/hooks/domains/features/use-feature";
@@ -56,10 +55,6 @@ type TaskPageContentProps = {
 
 export function useWorkflowStepsMapped(workflowId: string | null | undefined) {
   return useWorkflowStepsById(workflowId);
-}
-
-function useTaskWorkflowSnapshot(task: Task | null) {
-  useWorkflowSnapshotById(task?.workspace_id ?? null, task?.workflow_id ?? null);
 }
 
 function getTaskArchivedState(task: Task | null): boolean | null {
@@ -279,8 +274,10 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
   effectiveTaskIdRef.current = effectiveTaskId;
   const isCurrentTaskDetailsRequest = (requestId: number, taskId: string) =>
     requestId === taskDetailsRequestIdRef.current && effectiveTaskIdRef.current === taskId;
-  const kanbanTask = useAppStore((state) =>
-    resolveLatestTaskProjection(effectiveTaskId, state.kanban.tasks, state.kanbanMulti.snapshots),
+  const kanbanTask = useAppStore(
+    (state) =>
+      (effectiveTaskId ? state.taskOverview.byId[effectiveTaskId] : null) ??
+      resolveLatestTaskProjection(effectiveTaskId, state.kanban.tasks, state.kanbanMulti.snapshots),
   );
   const task = useMemo(
     () => resolveEffectiveTask(taskDetails, initialTask, kanbanTask, effectiveTaskId),
@@ -486,7 +483,6 @@ function TaskPageContentLive({
     onTaskUnarchived,
     refreshTask,
   } = useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
-  useTaskWorkflowSnapshot(task);
   const taskCanvasesState = useTaskCanvasesStateForTask(task, canvasesEnabled);
   useExternalVcsFileLinkHydration(task, repositories);
 

@@ -947,7 +947,7 @@ func appendSessionModeMessage(sessionID string, session *models.TaskSession, lif
 	return result
 }
 
-// appendSessionModelsMessage adds session models state notification to result if cached.
+// appendSessionModelsMessage adds the current or persisted session model state to result.
 func appendSessionModelsMessage(sessionID string, session *models.TaskSession, lifecycleMgr *lifecycle.Manager, result []*ws.Message) []*ws.Message {
 	var modelState *lifecycle.CachedModelState
 	if lifecycleMgr != nil {
@@ -989,6 +989,7 @@ func appendSessionModelsMessageFromState(sessionID string, session *models.TaskS
 			}
 		}
 	}
+	applyPersistedSessionRuntimeConfigOverrides(session, &replayState)
 	replayState.ConfigOptionsSettled = replayState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled
 	if replayState.CurrentModelID == "" && len(replayState.Models) == 0 &&
 		len(replayState.ConfigOptions) == 0 && !replayState.ConfigOptionsSettled && !providerRestored && !hasAttemptSnapshot {
@@ -1009,6 +1010,74 @@ func appendSessionModelsMessageFromState(sessionID string, session *models.TaskS
 		result = append(result, notification)
 	}
 	return result
+}
+
+func applyPersistedSessionRuntimeConfigOverrides(session *models.TaskSession, state *lifecycle.CachedModelState) {
+	if session == nil || state == nil {
+		return
+	}
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
+	if !ok {
+		return
+	}
+
+	if overrides.Model != "" && sessionModelAvailable(state.Models, overrides.Model) {
+		state.CurrentModelID = overrides.Model
+	}
+	if len(state.ConfigOptions) == 0 {
+		return
+	}
+	state.ConfigOptions = append([]streams.ConfigOption(nil), state.ConfigOptions...)
+	for index := range state.ConfigOptions {
+		applyPersistedSessionConfigOption(state, &state.ConfigOptions[index], overrides)
+	}
+}
+
+func applyPersistedSessionConfigOption(
+	state *lifecycle.CachedModelState,
+	option *streams.ConfigOption,
+	overrides models.SessionRuntimeConfig,
+) {
+	if option.ID == "" || strings.EqualFold(option.ID, "mode") || strings.EqualFold(option.Category, "mode") {
+		return
+	}
+	value, exists := overrides.ConfigOptions[option.ID]
+	if isSessionModelOption(*option) && value == "" {
+		value = overrides.Model
+		exists = value != ""
+	}
+	if !exists || value == "" || !sessionConfigOptionSupportsValue(*option, value) {
+		return
+	}
+	option.CurrentValue = value
+	if isSessionModelOption(*option) {
+		state.CurrentModelID = value
+	}
+}
+
+func isSessionModelOption(option streams.ConfigOption) bool {
+	return strings.EqualFold(option.ID, "model") || strings.EqualFold(option.Category, "model")
+}
+
+func sessionModelAvailable(models []streams.SessionModelInfo, modelID string) bool {
+	for _, model := range models {
+		if model.ModelID == modelID {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionConfigOptionSupportsValue(option streams.ConfigOption, value string) bool {
+	if len(option.Options) == 0 {
+		return true
+	}
+	for _, choice := range option.Options {
+		if choice.Value == value {
+			return true
+		}
+	}
+	return false
 }
 
 func sessionSettingsProjectionPolicyFromSnapshot(
@@ -1474,6 +1543,12 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	payload.RouteData = routeData
 	payload.Plugins = bootActivePlugins(p)
 	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken
+	if err := webapp.NormalizeBootPayloadGraph(&payload); err != nil {
+		if p.log != nil {
+			p.log.Error("failed to normalize boot entities; using version 1 payload", zap.Error(err))
+		}
+		payload.Version = 1
+	}
 	return payload
 }
 
@@ -1667,6 +1742,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	workflowH.SetForegroundActivityProvider(p.orchestratorSvc)
 	workflowH.SetTaskParkedProvider(p.orchestratorSvc)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
+	configureWorkspaceAdoptionCaller(taskH)
 	taskH.SetBackgroundWorkEnabled(p.features.AgentBackgroundWork)
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
@@ -1795,7 +1871,6 @@ func registerSecondaryRoutes(
 
 	if p.features.Coordinator {
 		wireCoordinatorConversation(p)
-		registerCoordinatorRoutes(p)
 	}
 
 	failedinbox.RegisterRoutes(p.router, p.taskSvc, p.taskRepo, p.log, p.features.NeedsYouInbox)
@@ -1979,14 +2054,17 @@ func registerSecondaryRoutes(
 	}
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
+	if p.features.Coordinator {
+		registerCoordinatorRoutes(p)
+	}
 
 	var automationSvc *automation.Service
 	if p.services.Automation != nil {
 		automationSvc = p.services.Automation.Service
 	}
 	registerE2EResetRoutes(
-		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab,
-		p.services.Coordinator, p.eventBus, p.log,
+		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.services.Coordinator, p.eventBus,
+		p.agentRuntimeAvailability, p.lifecycleMgr, p.services.DeliveryRetention, p.ctx, p.log,
 	)
 	registerE2ERuntimeUpdateRoutes(
 		p.router, p.agentSettingsController, p.runtimeUpdateNotifier, p.e2eRuntimeUpdateHooks, p.log,
@@ -2488,6 +2566,11 @@ func registerMCPAndDebugRoutes(
 		mcpHandlers.SetTaskMRLister(mcpTaskMRListerAdapter{gl: p.services.GitLab})
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
+	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Agents != nil {
+		mcpHandlers.SetTaskTransferCoordinatorAuthorizer(taskTransferCoordinatorAttestor{
+			tasks: p.taskSvc, sessions: p.taskRepo, agents: p.services.OfficeSvcs.Agents,
+		})
+	}
 	mcpHandlers.SetTaskChangeRequestReadService(newTaskChangeRequestReader(
 		p.taskSvc, p.services.GitHub, p.services.GitLab,
 	))
@@ -2529,6 +2612,9 @@ func registerMCPAndDebugRoutes(
 
 	if p.services.Coordinator != nil {
 		mcpHandlers.SetCoordinatorService(p.services.Coordinator)
+		wireCoordinatorLedger(p, p.services.Coordinator, mcpHandlers)
+		wireCoordinatorOutcomes(p, p.services.Coordinator)
+		wireCoordinatorDream(p, p.services.Coordinator)
 		p.services.Coordinator.SetKindDeps(coordinator.KindDeps{
 			Tasks:     &coordinatorKindReader{tasks: p.taskSvc, liveExec: p.lifecycleMgr.HasLiveAgentExecution},
 			Resumer:   &coordinatorResumer{resume: p.orchestratorSvc.ResumeTaskSession},

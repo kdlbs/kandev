@@ -89,7 +89,7 @@ func TestDispatchInitialPromptAdmissionRejectionDoesNotFailExecutionOrPersistPro
 		deliveryFailure <- failure
 	})
 	execution.setInitialPromptDispatchCallbacks(
-		func() error { return rejection },
+		func(context.Context, string, []v1.MessageAttachment) error { return rejection },
 		nil,
 		func() { admissionCleanup <- struct{}{} },
 	)

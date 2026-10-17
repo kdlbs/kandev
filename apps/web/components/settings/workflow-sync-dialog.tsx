@@ -27,7 +27,10 @@ import type {
   WorkflowSyncFormState,
 } from "@/hooks/domains/settings/use-workflow-sync";
 import type { WorkflowSyncProvider } from "@/lib/types/workflow-sync";
-import { useWorkflowSyncLifetime } from "@/hooks/domains/settings/use-workflow-sync-lifetime";
+import {
+  useWorkflowSyncLifetime,
+  type WorkflowSyncLifetime,
+} from "@/hooks/domains/settings/use-workflow-sync-lifetime";
 import { RemoteRepoProviderTabs } from "@/components/task-create-dialog-remote-repo-provider-tabs";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
@@ -388,9 +391,22 @@ function WorkflowSyncFields({ sync }: { sync: WorkflowSyncController }) {
   );
 }
 
+async function saveCurrentDraft(
+  sync: WorkflowSyncController,
+  completion: WorkflowSyncLifetime,
+  close: () => void,
+) {
+  if (!completion.active) return;
+  let draftAccepted = false;
+  const saved = await sync.handleSave(() => {
+    draftAccepted = true;
+  });
+  if (completion.active && saved && draftAccepted) close();
+}
+
 // WorkflowSyncDialog holds the workflow sync configuration form. It closes
-// itself after a successful save or removal; failures keep it open with the
-// error surfaced via toast.
+// itself after an adopted save or successful removal. Newer drafts and failures
+// keep it open, with request feedback surfaced via toast.
 export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDialogProps) {
   const { t } = useTranslation();
   const [removeConfirming, setRemoveConfirming] = useState(false);
@@ -415,11 +431,8 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
 
   useClearWorkflowSyncRemovalConfirmation(open, sync, setRemoveConfirming);
 
-  const handleSave = async () => {
-    if (!completion.active) return;
-    const saved = await sync.handleSave();
-    if (completion.active && saved) committedOpenChange.current(false);
-  };
+  const handleSave = () =>
+    saveCurrentDraft(sync, completion, () => committedOpenChange.current(false));
   const handleRemove = async () => {
     if (!completion.active) return;
     const requestGeneration = generation.current;

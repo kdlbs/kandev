@@ -103,17 +103,17 @@ func TestHandleTerminalWSValidatesEnvironmentRouteQuery(t *testing.T) {
 	}
 }
 
-func TestHandleTerminalWSSessionRouteReportsMissingInteractiveRunner(t *testing.T) {
+func TestHandleTerminalWSSessionRouteReportsMissingExecution(t *testing.T) {
 	log, _ := observedTerminalLogger(t)
 	handler, _ := newBridgeTestHandler(t, log)
 	c, recorder := terminalContext(t, "/session/session-1", "?mode=agent")
 
 	handler.HandleTerminalWS(c)
 
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
-	if got := decodeErrorBody(t, recorder.Body.Bytes()); got != "interactive runner not available" {
+	if got := decodeErrorBody(t, recorder.Body.Bytes()); got != "cannot restore session session-1: workspace info provider not configured" {
 		t.Fatalf("error = %q", got)
 	}
 }
@@ -130,6 +130,17 @@ func TestHandleAgentTerminalRouteRequiresSessionID(t *testing.T) {
 	}
 	if got := decodeErrorBody(t, recorder.Body.Bytes()); got != "sessionId is required" {
 		t.Fatalf("error = %q", got)
+	}
+}
+
+func TestAgentTerminalChecksAccessBeforeSelectingTransport(t *testing.T) {
+	log, _ := observedTerminalLogger(t)
+	handler, manager := newBridgeTestHandler(t, log)
+	manager.SetSessionAccessChecker(func(context.Context, string) error { return errors.New("access denied") })
+	c, recorder := terminalContext(t, "/session/session-1", "?mode=agent")
+	handler.HandleTerminalWS(c)
+	if got := decodeErrorBody(t, recorder.Body.Bytes()); got != "access denied" {
+		t.Fatalf("error = %q, want access denied before transport selection", got)
 	}
 }
 

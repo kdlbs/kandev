@@ -3,6 +3,8 @@ package agents
 import (
 	"context"
 	_ "embed"
+	"github.com/kandev/kandev/internal/agent/hostcli"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/usage"
@@ -20,6 +22,7 @@ var (
 	_ Agent                         = (*MockAgent)(nil)
 	_ PassthroughAgent              = (*MockAgent)(nil)
 	_ InferenceAgent                = (*MockAgent)(nil)
+	_ HostCLIAgent                  = (*MockAgent)(nil)
 	_ OpenAICompatibleProviderAgent = (*MockAgent)(nil)
 )
 
@@ -50,6 +53,7 @@ func NewMockAgent() *MockAgent {
 	return &MockAgent{
 		StandardPassthrough: StandardPassthrough{
 			Cfg: PassthroughConfig{
+				MCPStrategy:       mcpconfig.ClaudeStrategy{},
 				Supported:         true,
 				Label:             "TUI Passthrough",
 				Description:       "Terminal UI mode for testing",
@@ -89,6 +93,13 @@ func (a *MockAgent) SetEnabled(enabled bool) { a.enabled = enabled }
 func (a *MockAgent) SetBinaryPath(path string) {
 	a.binaryPath = path
 	a.Cfg.PassthroughCmd = NewCommand(path, "--tui")
+}
+
+func (a *MockAgent) BuildPassthroughCommand(opts PassthroughOptions) Command {
+	if opts.Runtime == agentruntime.RuntimeSSH && opts.BaseCommand.IsEmpty() {
+		opts.BaseCommand = NewCommand(mockAgentDefaultID, "--tui")
+	}
+	return a.StandardPassthrough.BuildPassthroughCommand(opts)
 }
 
 // SetSupportsMCP controls whether the mock agent reports MCP support.
@@ -131,7 +142,24 @@ func (a *MockAgent) Logo(v LogoVariant) []byte {
 
 func (a *MockAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	// Mock agent is always "available" when enabled (forced by settings controller).
-	return &DiscoveryResult{Available: true, SupportsMCP: a.supportsMCP}, nil
+	// The matched path is the configured binary so host CLI detection can run
+	// `mock-agent --version` exactly like a real vendor CLI.
+	return &DiscoveryResult{Available: true, SupportsMCP: a.supportsMCP, MatchedPath: a.binaryPath}, nil
+}
+
+// HostCLI exposes the mock binary as a vendor CLI so E2E tests can exercise
+// version detection and app-server model discovery without a real vendor tool.
+func (a *MockAgent) HostCLI() hostcli.Spec {
+	executable := mockAgentDefaultID
+	if a.binaryPath != "" {
+		executable = a.binaryPath
+	}
+	return hostcli.Spec{
+		DisplayName: "Mock Agent",
+		Executable:  executable,
+		VersionArgs: []string{"--version"},
+		ModelSource: hostcli.ModelSourceCodexAppServer,
+	}
 }
 
 func (a *MockAgent) BuildCommand(opts CommandOptions) Command {

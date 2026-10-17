@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/common/subproc"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
@@ -32,8 +33,13 @@ type ControlClient struct {
 	authToken  string
 	// applyToken, when set, updates the credential on a leased endpoint transport,
 	// which must not be replaced.
-	applyToken func(string)
+	applyToken   func(string)
+	runtimeGuard *runtimeBindingGuard
 }
+
+var ErrControlCredentialsRejected = errors.New("agentctl control credentials rejected")
+
+const createInstanceHTTPTimeout = 120 * time.Second
 
 // McpServerConfig holds configuration for an MCP server.
 type McpServerConfig struct {
@@ -103,6 +109,16 @@ type CreateInstanceRequest struct {
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.
 	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	// DurableJournalPath is an owner-scoped path on retained executor storage.
+	// Empty means the instance uses legacy delivery semantics.
+	DurableJournalPath string `json:"durable_journal_path,omitempty"`
+	// DeliveryStreamID is the generation-scoped stream identity retained across
+	// replacement of the agentctl process.
+	DeliveryStreamID string `json:"delivery_stream_id,omitempty"`
+	// DeliveryIncarnationID fences events to the owning Kandev session lifetime.
+	DeliveryIncarnationID string `json:"delivery_incarnation_id,omitempty"`
+	// DeliveryHarnessGeneration fences events to one native harness conversation.
+	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.
@@ -158,15 +174,24 @@ func NewControlClient(host string, port int, log *logger.Logger, opts ...Control
 	for _, opt := range opts {
 		opt(c)
 	}
-	if c.authToken != "" {
-		c.httpClient.Transport = &authTransport{token: c.authToken}
-	}
+	c.installTransportLocked()
 	return c
 }
 
 // Close releases the client's idle connections.
 func (c *ControlClient) Close() {
 	c.httpClient.CloseIdleConnections()
+}
+
+func (c *ControlClient) installTransportLocked() {
+	var transport http.RoundTripper
+	if c.authToken != "" {
+		transport = &authTransport{token: c.authToken}
+	}
+	if c.runtimeGuard != nil {
+		transport = &runtimeBindingTransport{guard: c.runtimeGuard, base: transport}
+	}
+	c.httpClient.Transport = transport
 }
 
 // AuthToken returns the current auth token. Used to propagate the token
@@ -187,7 +212,7 @@ func (c *ControlClient) SetAuthToken(token string) {
 		c.applyToken(token)
 		return
 	}
-	c.httpClient.Transport = &authTransport{token: token}
+	c.installTransportLocked()
 }
 
 // Handshake performs the bootstrap handshake with agentctl.
@@ -298,7 +323,14 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(httpReq)
+	// Instance creation starts its process manager and workspace trackers before
+	// responding, so it needs a longer bound than ordinary control requests.
+	// Copy under c.mu: credential rotation replaces the transport under it.
+	c.mu.Lock()
+	createClient := *c.httpClient
+	c.mu.Unlock()
+	createClient.Timeout = createInstanceHTTPTimeout
+	resp, err := createClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create instance: %w", err)
 	}
@@ -405,8 +437,9 @@ type IdentityInfo struct {
 // ServerDetails carries the control-server values an adopting backend
 // records but that are withheld from the unauthenticated identity endpoint.
 type ServerDetails struct {
-	HomeDir           string `json:"home_dir"`
-	DiagnosticLogPath string `json:"diagnostic_log_path"`
+	HomeDir           string                    `json:"home_dir"`
+	DiagnosticLogPath string                    `json:"diagnostic_log_path"`
+	ProcessIdentity   *processidentity.Identity `json:"process_identity,omitempty"`
 }
 
 // GetIdentity fetches the control server's identity and capability set. It
@@ -533,6 +566,9 @@ func (c *ControlClient) GetServerDetails(ctx context.Context) (*ServerDetails, e
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return nil, fmt.Errorf("%w: status %d", ErrControlCredentialsRejected, resp.StatusCode)
+		}
 		return nil, fmt.Errorf("failed to get server details: status %d", resp.StatusCode)
 	}
 

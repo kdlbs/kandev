@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -40,7 +42,6 @@ export function prepareCompactRuntimeFixture({
   launcherPath = path.join(sourceBinDir, "kandev"),
   identity,
 }: PrepareCompactRuntimeOptions): CompactRuntimeFixture {
-  const parentDir = path.dirname(bundleDir);
   const agentctlPath = path.join(sourceBinDir, "agentctl");
   const linuxHelperPath = path.join(sourceBinDir, "agentctl-linux-amd64");
   for (const sourcePath of [launcherPath, agentctlPath, linuxHelperPath]) {
@@ -57,34 +58,9 @@ export function prepareCompactRuntimeFixture({
   fs.chmodSync(packagedLauncher, 0o755);
   fs.chmodSync(path.join(bundleDir, "bin", "agentctl"), 0o755);
 
-  const helperSourceDir = path.join(parentDir, "canonical-test-helpers");
-  const helperArtifactDir = path.join(parentDir, "canonical-test-artifact");
-  fs.mkdirSync(helperSourceDir, { recursive: true });
-  for (const name of REMOTE_HELPER_NAMES) {
-    const destination = path.join(helperSourceDir, name);
-    fs.copyFileSync(linuxHelperPath, destination);
-    fs.chmodSync(destination, 0o755);
-  }
-  execFileSync(
-    process.execPath,
-    [
-      HELPER_ASSET_TOOL,
-      "build",
-      "--bin-dir",
-      helperSourceDir,
-      "--output-dir",
-      helperArtifactDir,
-      "--version",
-      runtimeIdentity.version,
-      "--commit",
-      runtimeIdentity.commit,
-      "--stable",
-      "true",
-    ],
-    { cwd: REPO_ROOT, stdio: "pipe" },
-  );
-
-  const manifestPath = path.join(helperArtifactDir, "manifests", "standard", "remote-helpers.json");
+  const manifestPath =
+    process.env.KANDEV_E2E_COMPACT_MANIFEST ||
+    buildCanonicalManifest(path.dirname(bundleDir), linuxHelperPath, runtimeIdentity);
   fs.copyFileSync(manifestPath, path.join(bundleDir, "remote-helpers.json"));
   execFileSync(
     process.execPath,
@@ -93,10 +69,19 @@ export function prepareCompactRuntimeFixture({
   );
 
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+    version: string;
+    commit: string;
     helpers: Array<{ platform: string; sha256: string }>;
   };
+  if (manifest.version !== runtimeIdentity.version || manifest.commit !== runtimeIdentity.commit) {
+    throw new Error("Compact runtime manifest identity does not match the current build");
+  }
   const linuxRecord = manifest.helpers.find((record) => record.platform === "linux/amd64");
   if (!linuxRecord) throw new Error("Compact runtime manifest is missing linux/amd64");
+  const helperDigest = createHash("sha256").update(fs.readFileSync(linuxHelperPath)).digest("hex");
+  if (helperDigest !== linuxRecord.sha256) {
+    throw new Error("Compact runtime helper digest does not match the manifest");
+  }
   const cacheRoot = path.join(homeDir, "cache", "remote-helpers");
   const cachePath = path.join(
     cacheRoot,
@@ -108,8 +93,6 @@ export function prepareCompactRuntimeFixture({
   fs.mkdirSync(path.dirname(cachePath), { recursive: true });
   fs.copyFileSync(linuxHelperPath, cachePath);
   fs.chmodSync(cachePath, 0o755);
-  fs.rmSync(helperSourceDir, { recursive: true, force: true });
-  fs.rmSync(helperArtifactDir, { recursive: true, force: true });
 
   return {
     ...runtimeIdentity,
@@ -119,6 +102,78 @@ export function prepareCompactRuntimeFixture({
     cachePath,
     linuxHelperPath,
   };
+}
+
+/** Global setup owns this manifest; workers keep their bundles and caches private. */
+export function prepareCompactRuntimeRun({
+  sourceBinDir,
+  launcherPath = path.join(sourceBinDir, "kandev"),
+}: Pick<PrepareCompactRuntimeOptions, "sourceBinDir" | "launcherPath">): () => void {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-compact-manifest-"));
+  const previous = process.env.KANDEV_E2E_COMPACT_MANIFEST;
+  try {
+    const identity = currentBuildIdentity(launcherPath, sourceBinDir);
+    process.env.KANDEV_E2E_COMPACT_MANIFEST = buildCanonicalManifest(
+      directory,
+      path.join(sourceBinDir, "agentctl-linux-amd64"),
+      identity,
+    );
+  } catch (error) {
+    fs.rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    if (previous === undefined) delete process.env.KANDEV_E2E_COMPACT_MANIFEST;
+    else process.env.KANDEV_E2E_COMPACT_MANIFEST = previous;
+    fs.rmSync(directory, { recursive: true, force: true });
+  };
+}
+
+function buildCanonicalManifest(
+  parentDir: string,
+  linuxHelperPath: string,
+  runtimeIdentity: CompactRuntimeIdentity,
+): string {
+  const helperSourceDir = path.join(parentDir, "canonical-test-helpers");
+  const helperArtifactDir = path.join(parentDir, "canonical-test-artifact");
+  const manifestPath = path.join(parentDir, "remote-helpers.json");
+  try {
+    fs.mkdirSync(helperSourceDir, { recursive: true });
+    for (const name of REMOTE_HELPER_NAMES) {
+      const destination = path.join(helperSourceDir, name);
+      fs.copyFileSync(linuxHelperPath, destination);
+      fs.chmodSync(destination, 0o755);
+    }
+    execFileSync(
+      process.execPath,
+      [
+        HELPER_ASSET_TOOL,
+        "build",
+        "--bin-dir",
+        helperSourceDir,
+        "--output-dir",
+        helperArtifactDir,
+        "--version",
+        runtimeIdentity.version,
+        "--commit",
+        runtimeIdentity.commit,
+        "--stable",
+        "true",
+      ],
+      { cwd: REPO_ROOT, stdio: "pipe" },
+    );
+    fs.copyFileSync(
+      path.join(helperArtifactDir, "manifests", "standard", "remote-helpers.json"),
+      manifestPath,
+    );
+    return manifestPath;
+  } finally {
+    fs.rmSync(helperSourceDir, { recursive: true, force: true });
+    fs.rmSync(helperArtifactDir, { recursive: true, force: true });
+  }
 }
 
 function currentBuildIdentity(launcherPath: string, sourceBinDir: string): CompactRuntimeIdentity {

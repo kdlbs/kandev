@@ -4,7 +4,7 @@ system: office
 requirements:
   - REQ-OFFICE-COSTS-001
 created: 2026-04-25
-updated: 2026-08-18
+updated: 2026-10-14
 owners:
   - cfl
 ---
@@ -18,7 +18,41 @@ This design preserves the technical source detail for `REQ-OFFICE-COSTS-001` dur
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-OFFICE-COSTS-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-COSTS-001` | [Migrated source detail](#migrated-source-detail); [Budget policy observation](#budget-policy-observation) for AC-001.9 |
+
+## Budget policy observation
+
+`BudgetsTab` in `apps/web/app/office/workspace/costs/` consumes `listBudgets`
+through `lib/api/domains/office-budget-api.ts`. The existing
+`GET /api/v1/office/workspaces/:wsId/budgets` response and its normalization
+contain policy configuration, not a spend observation. `BudgetPolicy` stays a
+configuration model; no spend field, endpoint, polling or backend evaluation
+change is needed. The tab continues to omit the card's optional `spentSubcents`.
+
+`BudgetPolicyCard` distinguishes omitted/undefined `spentSubcents` from an
+explicit number. It must not default absence to zero or derive percentage,
+remaining or a measured status from it. For absence, use `common:unknown` in a
+neutral badge and `common:unavailable` in the observed value and the existing
+`office:remainingAmount` interpolation. The observed value has no numeric
+percentage. Keep the existing progress track at its current height, with no
+colored utilization fill for unknown observation. This is an unavailable
+measurement, not a claim that backend enforcement is healthy or exceeded.
+
+For numbers, including zero, retain the existing dollar formatting, percentage
+rounding/cap, remaining floor, status cutoffs and bar colors. Configured limit,
+scope, period, threshold, action and delete behavior remain independent of
+observation presence. Use render-time translations; existing locale keys suffice.
+
+Desktop and phone share this projection. Retain current card rows/classes,
+control geometry, two-column `md` grid, phone one-column list, navigation and
+scroll ownership. This is the mobile-parity state/data exception: real rendered
+card tests and the actual `BudgetsTab` through real API normalization, real UI
+and TooltipProvider, real translation catalogs and intercepted external HTTP
+prove the shared outcome. No copied view-model or backend re-test substitutes
+for the consumer regression. Layout/interaction changes require a revised plan
+with focused desktop and phone Playwright flows.
+
+Delivery: [unknown budget observation plan](../../../plans/unknown-budget-observation/plan.md).
 
 ## Migrated source detail
 

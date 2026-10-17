@@ -252,6 +252,7 @@ func TestApplyGitCredentialSnapshotAllowsPluginBrokerWithoutGitHubPolicy(t *test
 }
 
 func TestConfigureGitHubCredentialBrokerHelperSurvivesPathReset(t *testing.T) {
+	isolateHostCredentialEnvironment(t)
 	helperDir := filepath.Join(t.TempDir(), "managed github helper")
 	if err := os.MkdirAll(helperDir, 0o700); err != nil {
 		t.Fatalf("create helper directory: %v", err)
@@ -292,6 +293,8 @@ printf 'username=x-access-token\npassword=fake-token\n'
 	for key, value := range req.Env {
 		env[key] = value
 	}
+	env["GIT_CONFIG_GLOBAL"] = os.Getenv("GIT_CONFIG_GLOBAL")
+	env["GIT_CONFIG_NOSYSTEM"] = "1"
 	env[githubauth.CredentialBrokerURLEnv] = "https://kandev.example/api/github/credentials/resolve"
 	env["PATH"] = "/usr/bin:/bin"
 	commandEnv := make([]string, 0, len(env))

@@ -3,6 +3,7 @@ package netprobe
 import (
 	"net"
 	"net/netip"
+	"runtime"
 	"testing"
 )
 
@@ -13,6 +14,9 @@ import (
 // port is free and starts a second server on a port some durable record
 // already names.
 func TestPortAvailableReportsAWildcardListenerAsOccupied(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a wildcard test listener prompts for Windows Firewall access from each temporary test binary")
+	}
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatalf("wildcard listen: %v", err)
@@ -84,6 +88,9 @@ func TestHasListenerProbesBothLoopbackFamilies(t *testing.T) {
 }
 
 func TestPortAvailableAtHostReportsNonLoopbackListener(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a non-loopback test listener prompts for Windows Firewall access from each temporary test binary")
+	}
 	listener, host := listenOnNonLoopbackIPv4(t)
 	defer func() { _ = listener.Close() }()
 	port := listener.Addr().(*net.TCPAddr).Port

@@ -10,6 +10,10 @@ type CreateRoutineRequest struct {
 	CatchUpPolicy          string `json:"catch_up_policy"`
 	CatchUpMax             int    `json:"catch_up_max"`
 	Variables              string `json:"variables"`
+	// Trigger, when present, is created in the same transaction as the
+	// routine, so a rejected trigger leaves no routine behind. Omitted by
+	// callers that create the routine alone.
+	Trigger *CreateTriggerRequest `json:"trigger,omitempty"`
 }
 
 // UpdateRoutineRequest is the request body for updating a routine.
