@@ -1543,6 +1543,10 @@ func (m *Manager) handleAgentEventWithoutPublication(execution *AgentExecution, 
 			zap.String("execution_id", execution.ID),
 			zap.String("pending_id", event.PendingID),
 			zap.String("title", event.PermissionTitle))
+		if execution.TaskID == "" && execution.SessionID == "" {
+			m.resolveTasklessPermission(execution, *event)
+			return true
+		}
 		m.eventPublisher.PublishPermissionRequest(execution, *event)
 		return true
 	case "context_window":
