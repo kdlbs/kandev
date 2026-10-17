@@ -353,6 +353,7 @@ const (
 	SessionModelFallbackUpdated         = "session_model_fallback.updated"          // Session started on the profile's fallback model
 	SessionModelSelectionWarningUpdated = "session_model_selection_warning.updated" // Executor-authoritative model decision warning
 	SessionInfoUpdated                  = "session_info.updated"                    // ACP session info received
+	SessionPromptSuggestionUpdated      = "session_prompt_suggestion.updated"       // Native next-prompt suggestion received
 	SessionMCPStatusUpdated             = "session_mcp_status.updated"              // MCP attachment evidence changed
 	BackgroundWorkUpdated               = "background_work.updated"                 // Background workload updated
 	BackgroundWorkOutput                = "background_work.output"                  // Background workload output streamed
@@ -633,6 +634,16 @@ func BuildSessionInfoSubject(sessionID string) string {
 // BuildSessionInfoWildcardSubject creates a wildcard subscription for all session info events
 func BuildSessionInfoWildcardSubject() string {
 	return SessionInfoUpdated + ".*"
+}
+
+// BuildSessionPromptSuggestionSubject creates a prompt suggestion subject for a specific session.
+func BuildSessionPromptSuggestionSubject(sessionID string) string {
+	return SessionPromptSuggestionUpdated + "." + sessionID
+}
+
+// BuildSessionPromptSuggestionWildcardSubject subscribes to every session's prompt suggestions.
+func BuildSessionPromptSuggestionWildcardSubject() string {
+	return SessionPromptSuggestionUpdated + ".*"
 }
 
 // BuildSessionTodosSubject creates a session todos subject for a specific session

@@ -324,6 +324,9 @@ type InstanceConfig struct {
 	// Used for TUI/passthrough agents that don't need clarification tools.
 	DisableAskQuestion bool
 
+	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
+	PromptSuggestions bool
+
 	// AssumeMcpSse overrides MCP capability filtering to assume the agent supports SSE.
 	AssumeMcpSse bool
 
@@ -721,6 +724,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.DisableAskQuestion {
 		cfg.DisableAskQuestion = true
 	}
+	if overrides.PromptSuggestions {
+		cfg.PromptSuggestions = true
+	}
 	if overrides.AssumeMcpSse {
 		cfg.AssumeMcpSse = true
 	}
@@ -806,6 +812,7 @@ type InstanceOverrides struct {
 	SessionID                  string
 	TaskID                     string
 	DisableAskQuestion         bool
+	PromptSuggestions          bool
 	AssumeMcpSse               bool
 	AssumeMcpHttp              bool
 	McpMode                    string

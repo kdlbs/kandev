@@ -437,6 +437,7 @@ export {
   type SessionModelsPayload,
   type SessionMCPStatusPayload,
   type SessionInfoPayload,
+  type SessionPromptSuggestionPayload,
   type SessionTodosPayload,
 } from "./session-runtime-payloads";
 
