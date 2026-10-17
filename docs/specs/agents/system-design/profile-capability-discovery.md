@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-09-29
-updated: 2026-10-05
+updated: 2026-10-16
 requirements:
   - REQ-AGENTS-PROFILE-DISCOVERY-001
   - REQ-AGENTS-PROFILE-DISCOVERY-002
@@ -217,6 +217,7 @@ A host-only path such as `CODEX_PATH` can still be invalid on a remote executor.
 - [Profile requirements](../requirements/profile-capability-discovery.md)
 - [Implementation plan](../../../plans/profile-capability-discovery/plan.md)
 - [Compact profile refresh delivery](../../../plans/first-run-agent-setup/plan.md)
+- [Generic launch wrappers: draft investigation and design handoff](../../../plans/generic-launch-wrappers/plan.md)
 
 A global `CODEX_PATH` workaround cannot describe two differently configured profiles.
 Overwriting the agent-wide cache would leak one profile's catalog into another profile.
