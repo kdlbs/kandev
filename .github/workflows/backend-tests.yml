@@ -28,6 +28,8 @@ jobs:
         with:
           ref: d3d4ab5b41df7a3c8b164e24de3987895e8a62c7
           persist-credentials: false
+      - name: Mark hosted checkout safe for Git build metadata
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Verify exact source and record tools
         run: |
           set -euo pipefail
