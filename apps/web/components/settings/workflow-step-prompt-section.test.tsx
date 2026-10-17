@@ -34,8 +34,7 @@ describe("StepPromptSection", () => {
         step={step}
         savedStep={{ ...step, prompt: "Previous prompt" }}
         localPrompt={step.prompt ?? ""}
-        onLocalPromptChange={vi.fn()}
-        debouncedUpdatePrompt={vi.fn()}
+        onPromptChange={vi.fn()}
         readOnly={false}
       />,
     );
