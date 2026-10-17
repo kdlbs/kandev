@@ -15,10 +15,13 @@ import (
 func (s *Server) streamableHTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		version := r.Header.Get(mcp.HeaderProtocolVersion)
+		method := r.Header.Get(mcp.HeaderMethod)
 		if r.Method == http.MethodPost && r.Body != nil &&
+			(method == "" || strings.HasPrefix(method, "notifications/")) &&
 			mcp.IsModernProtocol(version) && s.httpServer.SupportsProtocolVersion(version) {
 			// Read lazily so the SDK's transport checks run before the body is consumed.
 			r.Body = &notificationBody{original: r.Body, version: version}
+			// The supplemented body's length is unknown until the SDK reads it.
 			r.ContentLength = -1
 		}
 		s.httpServer.ServeHTTP(w, r)
