@@ -2774,5 +2774,11 @@
   "allPRsClosedNotice_one": "全部 {{count}} 個 PR 已關閉但未合併。您可以歸檔此任務。",
   "allPRsClosedNotice_other": "全部 {{count}} 個 PR 已關閉但未合併。您可以歸檔此任務。",
   "turnOffTranscriptAutoScroll": "關閉對話記錄自動滾動",
-  "turnOnTranscriptAutoScroll": "開啟對話記錄自動滾動"
+  "turnOnTranscriptAutoScroll": "開啟對話記錄自動滾動",
+  "restartSession": "重啟工作階段",
+  "sessionActionRestart": "正在重啟工作階段...",
+  "sessionRestartRequested": "已請求重啟工作階段",
+  "sessionRestartFailed": "工作階段重啟失敗",
+  "sessionRestartUnavailable": "此工作階段在目前狀態下無法重啟。",
+  "sessionRestartConnectionUnavailable": "連線不可用。請重新連線後再試。"
 }

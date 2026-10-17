@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   turnsBySession: {} as Record<string, unknown[]>,
   setActiveSession: vi.fn(),
   removeSession: vi.fn(),
+  restartSession: vi.fn(),
+  isRestarting: false,
 }));
 
 vi.mock("@/hooks/use-task-sessions", () => ({
@@ -42,13 +44,16 @@ vi.mock("@/components/agent-logo", () => ({
 }));
 
 vi.mock("@/hooks/domains/session/use-session-actions", () => ({
-  useSessionActions: () => ({
+  useSessionActions: ({ sessionId }: { sessionId: string }) => ({
     setPrimary: vi.fn(),
     stop: vi.fn(),
     resume: vi.fn(),
+    restart: () => mocks.restartSession(sessionId),
+    isRestarting: mocks.isRestarting,
     remove: mocks.removeSession,
   }),
-  isSessionStoppable: () => false,
+  isSessionStoppable: (state: string) =>
+    ["RUNNING", "STARTING", "WAITING_FOR_INPUT"].includes(state),
   isSessionDeletable: () => true,
   isSessionResumable: () => false,
 }));
@@ -57,6 +62,7 @@ const PILL_TESTID = "mobile-sessions-pill";
 const ICON_CIRCLE_CHECK = "tabler-icon-circle-check";
 const SESSION_ACTIONS_LABEL = "Session actions";
 const SESSION_BG_STATE_TESTID = "mobile-session-state-session-bg";
+const SESSION_B_ROW = "mobile-session-row-session-b";
 const SESSION_A = "session-a";
 const SESSION_BG = "session-bg";
 const TASK_ID = "task-1";
@@ -130,6 +136,8 @@ beforeEach(() => {
   mocks.turnsBySession = {};
   mocks.setActiveSession.mockReset();
   mocks.removeSession.mockReset();
+  mocks.restartSession.mockReset();
+  mocks.isRestarting = false;
 });
 
 describe("MobileSessionsPicker selection", () => {
@@ -144,9 +152,7 @@ describe("MobileSessionsPicker selection", () => {
     expect(screen.getByTestId("mobile-session-row-session-a").getAttribute("aria-current")).toBe(
       null,
     );
-    expect(screen.getByTestId("mobile-session-row-session-b").getAttribute("aria-current")).toBe(
-      "true",
-    );
+    expect(screen.getByTestId(SESSION_B_ROW).getAttribute("aria-current")).toBe("true");
   });
 
   it("shows the effective session agent icon beside its label", () => {
@@ -185,11 +191,9 @@ describe("MobileSessionsPicker selection", () => {
     expect(
       within(screen.getByTestId("mobile-session-row-session-a")).getByText("Frontend"),
     ).toBeTruthy();
-    expect(
-      within(screen.getByTestId("mobile-session-row-session-b")).getByText("API"),
-    ).toBeTruthy();
+    expect(within(screen.getByTestId(SESSION_B_ROW)).getByText("API")).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId("mobile-session-row-session-b"));
+    fireEvent.click(screen.getByTestId(SESSION_B_ROW));
     expect(mocks.setActiveSession).toHaveBeenCalledWith(TASK_ID, "session-b");
   });
 });
@@ -503,5 +507,35 @@ describe("MobileSessionsPicker session delete confirmation", () => {
     fireEvent.click(screen.getByTestId("mobile-session-delete-confirm"));
 
     await vi.waitFor(() => expect(mocks.removeSession).toHaveBeenCalledTimes(1));
+  });
+});
+
+// @covers AC-TASKS-SESSION-TAB-RESTART-001.1, AC-TASKS-SESSION-TAB-RESTART-001.4
+describe("Mobile session restart", () => {
+  it("restarts the chosen row without selecting it", () => {
+    render(<MobileSessionsPicker taskId={TASK_ID} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    const row = screen.getByTestId(SESSION_B_ROW);
+    fireEvent.pointerDown(within(row).getByRole("button", { name: SESSION_ACTIONS_LABEL }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Restart session" }));
+    expect(mocks.restartSession).toHaveBeenCalledWith("session-b");
+    expect(mocks.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("disables conflicting actions while restarting", () => {
+    mocks.isRestarting = true;
+    render(<MobileSessionsPicker taskId={TASK_ID} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    const row = screen.getByTestId(SESSION_B_ROW);
+    fireEvent.pointerDown(within(row).getByRole("button", { name: SESSION_ACTIONS_LABEL }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    for (const name of ["Stop", "Restart session", "Delete"]) {
+      expect(screen.getByRole("menuitem", { name }).getAttribute("data-disabled")).not.toBeNull();
+    }
   });
 });

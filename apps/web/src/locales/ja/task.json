@@ -2774,5 +2774,11 @@
   "allPRsClosedNotice_one": "全 {{count}} 件の PR がマージされずにクローズされました。このタスクをアーカイブできます。",
   "allPRsClosedNotice_other": "全 {{count}} 件の PR がマージされずにクローズされました。このタスクをアーカイブできます。",
   "turnOffTranscriptAutoScroll": "会話の自動スクロールを無効にする",
-  "turnOnTranscriptAutoScroll": "会話の自動スクロールを有効にする"
+  "turnOnTranscriptAutoScroll": "会話の自動スクロールを有効にする",
+  "restartSession": "セッションを再起動",
+  "sessionActionRestart": "セッションを再起動しています...",
+  "sessionRestartRequested": "セッションの再起動を要求しました",
+  "sessionRestartFailed": "セッションの再起動に失敗しました",
+  "sessionRestartUnavailable": "現在の状態ではこのセッションを再起動できません。",
+  "sessionRestartConnectionUnavailable": "接続を利用できません。再接続してからもう一度お試しください。"
 }

@@ -2774,5 +2774,11 @@
   "allPRsClosedNotice_one": "All {{count}} PR was closed without merging. You can archive this task.",
   "allPRsClosedNotice_other": "All {{count}} PRs were closed without merging. You can archive this task.",
   "turnOffTranscriptAutoScroll": "Turn off transcript auto-scroll",
-  "turnOnTranscriptAutoScroll": "Turn on transcript auto-scroll"
+  "turnOnTranscriptAutoScroll": "Turn on transcript auto-scroll",
+  "restartSession": "Restart session",
+  "sessionActionRestart": "Restarting session...",
+  "sessionRestartRequested": "Session restart requested",
+  "sessionRestartFailed": "Session restart failed",
+  "sessionRestartUnavailable": "This session cannot be restarted in its current state.",
+  "sessionRestartConnectionUnavailable": "The connection is unavailable. Reconnect, then try again."
 }
