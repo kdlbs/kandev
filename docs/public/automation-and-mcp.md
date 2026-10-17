@@ -1078,6 +1078,14 @@ The `/mcp` endpoint supports protocol negotiation for modern and legacy clients.
 
 Automatic client negotiation depends on the client SDK. Some clients need an explicit option to enable discovery. Kandev does not enable modern protocol use for every client by default.
 
+For valid notifications with no `id` and no `params._meta`, Kandev can use a supported
+modern protocol header to supply the missing version metadata. Accepted
+notifications return HTTP 202 with no body. This accommodates roots-change
+notifications sent when a client restores a conversation.
+
+Tool requests still require their normal metadata. Explicitly supplied metadata,
+duplicate JSON members, and noncanonical field spellings retain SDK validation.
+
 Agent-attached MCP servers keep `/mcp`, `/sse`, and `/message` on the agentctl port. The external server keeps `/mcp`, `/mcp/sse`, and `/mcp/message`.
 
 ### Configured third-party MCP servers
