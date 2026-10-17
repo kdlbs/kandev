@@ -5,6 +5,7 @@ import {
   IconCircleDot,
   IconCurrencyDollar,
   IconHistory,
+  IconLayoutDashboard,
   IconRepeat,
   IconRoute,
   IconSettings,
@@ -24,6 +25,7 @@ type OfficeNavigationSectionProps = {
 // `labelKey`, not `label`: these tables are module scope, so a `t()` here would
 // resolve once at import and freeze at the boot locale. Resolve at render below.
 const workItems = [
+  { icon: IconLayoutDashboard, labelKey: "sidebar:overview", href: "/office/overview" },
   { icon: IconCircleDot, labelKey: "sidebar:tasks", href: "/office/tasks" },
   { icon: IconRepeat, labelKey: "sidebar:routines", href: "/office/routines" },
 ] as const;

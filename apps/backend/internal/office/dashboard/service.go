@@ -88,6 +88,10 @@ type Repository interface {
 	CountTasksByWorkspace(ctx context.Context, workspaceID string) (int, error)
 	QueryRunActivity(ctx context.Context, workspaceID string, days int) ([]sqlite.RunActivityRow, error)
 	QueryTaskBreakdown(ctx context.Context, workspaceID string) ([]sqlite.TaskBreakdownRow, error)
+	// Cross-workspace aggregate read surface (GET /workspaces/aggregate).
+	QueryWorkspaceTaskBreakdowns(ctx context.Context, workspaceIDs []string) (map[string]models.TaskBreakdown, error)
+	CountPendingApprovalsByWorkspaces(ctx context.Context, workspaceIDs []string) (map[string]int, error)
+	ListActivityEntriesForWorkspaces(ctx context.Context, workspaceIDs []string, limit int) ([]*models.ActivityEntry, error)
 	QueryRecentTasks(ctx context.Context, workspaceID string, limit int) ([]sqlite.RecentTaskRow, error)
 	QueryRecentSessions(ctx context.Context, workspaceID string, limit int) ([]sqlite.LiveSessionRow, error)
 	ListRecentSessionsByAgentBatch(ctx context.Context, agentInstanceIDs []string, perAgentLimit int) (map[string][]sqlite.AgentSessionRow, error)
@@ -438,6 +442,7 @@ type DashboardService struct {
 	runEvents             RunEventAppender                // optional; nil means a refused agent comment read is not recorded on its run
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
+	workspaceLister       WorkspaceLister                 // optional; nil disables the multi-workspace aggregate endpoint
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the
@@ -585,6 +590,13 @@ func (s *DashboardService) appendDeniedCommentReadEvent(
 // when unset, UpdateTaskProjectID does not check budgets.
 func (s *DashboardService) SetProjectBudgetEvaluator(e ProjectBudgetEvaluator) {
 	s.projectBudget = e
+}
+
+// SetWorkspaceLister wires the identity-scoped workspace lister used by the
+// multi-workspace aggregate. Optional; when nil, GET /workspaces/aggregate
+// responds 503 rather than listing anything.
+func (s *DashboardService) SetWorkspaceLister(l WorkspaceLister) {
+	s.workspaceLister = l
 }
 
 // LogActivityWithRun passes through to the wired activity logger. A no-op
