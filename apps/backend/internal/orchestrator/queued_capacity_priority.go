@@ -85,7 +85,7 @@ func (s *Service) readQueuedTaskCapacityCandidate(ctx context.Context, id string
 		return empty, false, err
 	}
 	req := admissionRequest{taskID: task.ID, sessionID: sessionIDFromCeilingPayload(deferral), profileID: stringField(deferral.Payload, metaKeyAgentProfileID),
-		profileExplicit: boolField(deferral.Payload, "profile_explicit"), workflowStepID: stringField(deferral.Payload, metaKeyWorkflowStepID), origin: launchOriginAutomatic, seam: "queuedTaskPriority"}
+		profileExplicit: boolField(deferral.Payload, "profile_explicit"), workflowStepID: stringField(deferral.Payload, metaKeyWorkflowStepID), origin: ceilingAdmissionOrigin(launchOrigin(deferral.Origin)), seam: "queuedTaskPriority"}
 	if deferral.Kind == models.CeilingLaunchStart {
 		req.startSelection = &explicitWorkflowStartSelection{entryID: int64Field(deferral.Payload, "workflow_entry_id")}
 	}
@@ -97,7 +97,11 @@ func (s *Service) validateQueuedCapacityEntrySnapshot(ctx context.Context, task 
 }
 
 func (s *Service) queuedTaskPolicySnapshot(ctx context.Context, task *models.Task, deferral models.CeilingDeferral) (bool, error) {
-	if deferral.Origin != string(launchOriginAutomatic) {
+	origin, err := ceilingStoredOrigin(deferral)
+	if err != nil {
+		return false, err
+	}
+	if origin == launchOriginManual {
 		return true, nil
 	}
 	if id := sessionIDFromCeilingPayload(deferral); id != "" {

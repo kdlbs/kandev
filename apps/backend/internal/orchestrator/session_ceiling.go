@@ -77,15 +77,16 @@ type admittedSessionLister interface {
 // keyed by a launch-scoped identifier, which is the window between admission at
 // seam 1 and the session's creation.
 type ceilingReservation struct {
-	grade        string
-	gradeKnown   bool
-	sessionID    string
-	takenAt      time.Time
-	nativeOwner  *NativeInferenceRoute
-	nativeQueued bool
-	queuedOffice *OfficeCapacityWaiter
-	officeRunID  string
-	queuedTask   *queuedTaskCapacityOwner
+	startSelection *explicitWorkflowStartSelection
+	grade          string
+	gradeKnown     bool
+	sessionID      string
+	takenAt        time.Time
+	nativeOwner    *NativeInferenceRoute
+	nativeQueued   bool
+	queuedOffice   *OfficeCapacityWaiter
+	officeRunID    string
+	queuedTask     *queuedTaskCapacityOwner
 }
 
 // admissionRequest is one launch asking for capacity.
@@ -347,6 +348,7 @@ func (c *sessionCeilingController) reserveGradeLocked(req admissionRequest) stri
 	key := c.reserveLocked(req.sessionID)
 	held := c.reservations[key]
 	held.grade, held.gradeKnown = req.grade, req.gradeKnown
+	held.startSelection = cloneAdmittedStartSelection(req.startSelection)
 	return key
 }
 

@@ -110,10 +110,12 @@ func (c *sessionCeilingController) resolveAdmissionGradeLocked(ctx context.Conte
 	}
 	if held := c.reservations[req.queuedGrantKey]; req.queuedGrantKey != "" && held != nil {
 		req.grade, req.gradeKnown, req.gradeHeld = held.grade, held.gradeKnown, true
+		carryAdmittedStartSelection(req, held)
 		return req
 	}
 	if held := c.reservations[req.sessionID]; req.sessionID != "" && held != nil {
 		req.grade, req.gradeKnown, req.gradeHeld = held.grade, held.gradeKnown, true
+		carryAdmittedStartSelection(req, held)
 		return req
 	}
 	if c.resolveGrade != nil {
