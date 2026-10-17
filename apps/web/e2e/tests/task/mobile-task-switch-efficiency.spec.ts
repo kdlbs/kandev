@@ -1,5 +1,4 @@
 import { expect, test } from "../../fixtures/test-base";
-import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
   associateNavigationPR,
   holdAgentListRead,
