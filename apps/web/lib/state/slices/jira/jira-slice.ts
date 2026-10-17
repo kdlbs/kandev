@@ -1,15 +1,13 @@
-import type { StateCreator } from "zustand";
+import type { Draft } from "immer";
 import type { JiraSlice, JiraSliceState } from "./types";
 
 export const defaultJiraState: JiraSliceState = {
   jiraIssueWatches: { items: [], loaded: false, loading: false },
 };
 
-type ImmerSet = Parameters<StateCreator<JiraSlice, [["zustand/immer", never]], [], JiraSlice>>[0];
+type ImmerSet = (updater: (draft: Draft<JiraSlice>) => void) => void;
 
-export const createJiraSlice: StateCreator<JiraSlice, [["zustand/immer", never]], [], JiraSlice> = (
-  set: ImmerSet,
-) => ({
+export const createJiraSlice = (set: ImmerSet): JiraSlice => ({
   ...defaultJiraState,
   setJiraIssueWatches: (watches) =>
     set((draft) => {

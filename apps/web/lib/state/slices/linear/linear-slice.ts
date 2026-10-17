@@ -1,20 +1,13 @@
-import type { StateCreator } from "zustand";
+import type { Draft } from "immer";
 import type { LinearSlice, LinearSliceState } from "./types";
 
 export const defaultLinearState: LinearSliceState = {
   linearIssueWatches: { items: [], loaded: false, loading: false },
 };
 
-type ImmerSet = Parameters<
-  StateCreator<LinearSlice, [["zustand/immer", never]], [], LinearSlice>
->[0];
+type ImmerSet = (updater: (draft: Draft<LinearSlice>) => void) => void;
 
-export const createLinearSlice: StateCreator<
-  LinearSlice,
-  [["zustand/immer", never]],
-  [],
-  LinearSlice
-> = (set: ImmerSet) => ({
+export const createLinearSlice = (set: ImmerSet): LinearSlice => ({
   ...defaultLinearState,
   setLinearIssueWatches: (watches) =>
     set((draft) => {

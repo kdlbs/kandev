@@ -5,10 +5,11 @@ It is a backlog, not approval to implement every proposal.
 Requirements and system designs remain authoritative under `docs/specs/`.
 Finite delivery packages remain under `docs/plans/`.
 
-**Last inventory:** 2026-09-27, main commit `359b5ffdbb6`.
+**Historical inventory:** 2026-09-27, main commit `359b5ffdbb6`.
+**Current main snapshot:** 2026-10-09, commit `3fed5570cec533f468c25ed03c84967bdc972588`.
 **Next proposed review:** 2026-10-11.
 **Coordination owner:** repository maintainers. A named assignee is required before each work item starts.
-**Umbrella issue:** not created. This documentation PR does not create tasks or start agents.
+This roadmap does not create an umbrella issue or schedule automation.
 
 ## Tracking locations
 
@@ -19,46 +20,61 @@ Finite delivery packages remain under `docs/plans/`.
 | [Dependency cleanup](dependency-cleanup.md)           | Store typing, package boundaries, and compatibility removal  | The cleanup PR                                     |
 | [Linter roadmap](lint-roadmap.md)                     | Existing protections and proposed checks                     | A rule or baseline change                          |
 | [Historical audit disposition](historical-audit.md)   | Which July findings remain useful                            | A fresh investigation changes their disposition    |
-| GitHub umbrella issue                                 | Discussion, next milestone, and links to these files         | Milestone review                                   |
 | Child issue or Kandev task                            | One assignee, bounded scope, and PR link                     | Delivery progress                                  |
 | `docs/plans/<initiative>/`                            | Approved implementation scope, work orders, and verification | The implementation PR                              |
 
 Markdown belongs on main. Each change uses a short-lived PR.
-An open draft PR is not the permanent status database.
-The umbrella issue can remain open across milestones without duplicating these tables.
+An open draft PR is not the permanent status database. PRs and their linked
+delivery packages record scoped work. A roadmap item moves to `done` only
+after its PR merges.
 
-## Next finite milestone: prove the second resource
+## Completed milestone: prove the second resource
 
-The first proposed milestone contains three independent outcomes:
+The milestone is complete. Database statistics moved to Query, a second small
+slice was typed, and the first Office alias group was retired. The later backup
+list and disk-usage snapshots also moved to Query. Remaining System resources,
+Office aliases, and architecture candidates stay individually proposed or
+deferred; this roadmap does not select another migration.
 
-1. Migrate database statistics after approval of its identity and freshness design.
-2. Remove unsafe composition casts from one additional small Zustand slice.
-3. Inventory consumers of the 31 Office aliases and select the first removable group.
+| Outcome | Merged evidence |
+| --- | --- |
+| Typed Azure DevOps slice without root-store casts | [#4009](https://github.com/kdlbs/kandev/pull/4009), `acfba523ff363096e0793045ffc94e27479e8a76` |
+| First Office run-alias retirement increment | [#4010](https://github.com/kdlbs/kandev/pull/4010), `5907a4619757254cbb645fad87b20fc3e8742489` |
+| Refreshed architecture overview | [#4011](https://github.com/kdlbs/kandev/pull/4011), `d2b66efd7e48fc518a9d62131d6d1392397b43db` |
+| Selected official TanStack Query ESLint rules | [#4012](https://github.com/kdlbs/kandev/pull/4012), `a1e2edadb9cd40a08d23a0f9b72665146ec3fea5` |
+| Database-statistics Query owner | [#4225](https://github.com/kdlbs/kandev/pull/4225), `059260b30fc68bbcbead629f7fa7e80f1ee0a5e8` |
+| Backup-list Query owner | [#4271](https://github.com/kdlbs/kandev/pull/4271), `d149627883ca74de0dde98c1900415729af44bbd` |
+| Disk-usage Query snapshot | [#4291](https://github.com/kdlbs/kandev/pull/4291), `122f52018c77b9fb3c5c93f58f52bc7ea9b76904` |
+| LINT-02 migrated-System owner guard | [#4357](https://github.com/kdlbs/kandev/pull/4357), `9ad5964ca0a6bdce1e32b462450f7ba78f9cf2b8` |
 
-The milestone is complete when those outcomes have merged evidence or an explicit deferred decision with a reason.
-Backups and disk usage follow the database result. Broad task/session migration is not part of this milestone.
+## Current main snapshot
 
-| Priority | Item                                  | Status      | Next action                                                                     |
-| -------- | ------------------------------------- | ----------- | ------------------------------------------------------------------------------- |
-| 1        | `QUERY-02`: database statistics       | In progress | Assigned to [Carlos Florêncio][query02-assignee]; complete [#4225][query02-pr]. |
-| 2        | `DEP-01`: next typed slice            | Proposed    | Select one small slice after reading its setter/getter dependencies             |
-| 3        | `DEP-02`: Office alias consumers      | Proposed    | Group consumers and record removal evidence per alias                           |
-| 4        | `LINT-01`: library Query checks       | Proposed    | Evaluate existing plugin rules before custom scanners                           |
-| 5        | `QUERY-03`: backup list and mutations | Proposed    | Inventory mutation invalidation and reload callers                              |
-| 6        | `QUERY-04`: disk usage and job events | Proposed    | Design the first bounded Query/WS reconciliation path                           |
+The measurements below are from `3fed5570cec533f468c25ed03c84967bdc972588`
+on 2026-10-09. The dated 2026-09-27 inventory remains historical.
 
-These IDs identify backlog entries, not requirements or work orders.
-`Proposed` means no implementation assignment exists.
-Use `planned` only with a reviewed delivery package, `in_progress` with an assignee, and `done` with a merged PR.
+| Inventory | Current count or owner | Evidence |
+| --- | ---: | --- |
+| `ARCH-FRONTEND-ROOT-STATE-CAST` | 45 findings | The inventory contains three Jira and three Linear creator entries; the reviewed slice-typing plan removes only those six. |
+| Compatibility ledger | 29 registrations, including 27 Office run aliases | PR #4010 removed the first four Office alias registrations from the dated count of 31. |
+| System server snapshots | Four Query-owned snapshots | About SystemInfo, database statistics, backup list, and disk-usage snapshot; the live System job stream remains in Zustand. |
 
-[query02-assignee]: https://github.com/carlosflorencio
-[query02-pr]: https://github.com/kdlbs/kandev/pull/4225
+## Remaining proposed and deferred work
 
-Use `blocked` or `deferred` with a reason and a next review date.
+| Item | Status | Next action or reason |
+| --- | --- | --- |
+| Jira and Linear issue-watch slice typing | Implementation complete, delivery pending in [PR #4375](https://github.com/kdlbs/kandev/pull/4375) | Wait for merge evidence before marking the item done. The reviewed [delivery package](../plans/architecture-maintenance-jira-linear-root-typing/plan.md) records its scope and local results. |
+| Further Office run-alias retirement | Proposed | Keep the 27 remaining registrations until each ledger removal condition and its consumers are verified. |
+| Other System resources | Deferred | Inventory each resource and its owner, identity, freshness, and event boundary before choosing another migration. |
+| Tasks, sessions, integrations, and workspaces | Deferred | Their ownership and event/data contracts need separate inventories and designs. |
+| Additional architecture rules and dependency removals | Proposed or needs design | See the [linter roadmap](lint-roadmap.md) and [dependency cleanup](dependency-cleanup.md) for item-specific evidence gaps. |
+
+`Proposed` means no implementation assignment exists. Use `planned` only with
+a reviewed delivery package, `in_progress` with an assignee, and `done` with
+a merged PR. Use `blocked` or `deferred` with a reason and review date.
 
 ## Maintenance procedure
 
-1. At the next review, assign a maintainer and select at most two small increments.
+1. At the next review, assign a maintainer and select only explicitly approved small increments.
 2. For each increment, record the assignee, task link, scope, completion conditions, and next review date.
 3. Create its requirement/design references and finite delivery package before implementation, using the repository's existing workflow.
 4. Update the matching tracker row in the implementation PR.
@@ -67,9 +83,7 @@ Use `blocked` or `deferred` with a reason and a next review date.
 7. Each month, run the linter checks and review compatibility targets from their source files.
 8. Close the finite milestone before selecting another one.
 
-No scheduled automation exists for this cadence. The assigned maintainer owns the reviews.
-The first operational follow-up is a concise umbrella issue with an assignee and the next review date.
-Its description needs only the goal, this directory's link, the current milestone, and links to active tasks.
+No scheduled automation or umbrella issue coordinates this cadence. The assigned maintainer owns each review.
 
 ## What counts as progress
 

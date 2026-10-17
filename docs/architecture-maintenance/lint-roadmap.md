@@ -1,6 +1,8 @@
 # Architecture linter roadmap
 
-[Roadmap](README.md) · Inventory at main `359b5ffdbb6`, 2026-09-27.
+[Roadmap](README.md) · Historical inventory at main `359b5ffdbb6`, 2026-09-27.
+Current root-state-cast measurement: 45 entries at main
+`3fed5570cec533f468c25ed03c84967bdc972588`, 2026-10-09.
 
 The [linter guide](../architecture-lint.md) defines enforcement and rule contribution requirements.
 The [deprecation design](../specs/architecture-lint/system-design/deprecation-ledger.md) defines declaration registration.
@@ -21,15 +23,26 @@ This page records priorities, not new enforced rules.
 
 These counts are distinct rule findings, not comparable units of complexity.
 Zero baselines remain active protections. They are not candidates for deletion.
+The 46 root-state-cast findings above remain the dated 2026-09-27 count. The
+current measurement is 45; other counts in this table have not been remeasured.
+
+## Implemented protections
+
+| ID | Protection | Merged evidence |
+| --- | --- | --- |
+| LINT-01 | Official TanStack Query rules: `@tanstack/query/exhaustive-deps` (error), `@tanstack/query/no-rest-destructuring` (warn), `@tanstack/query/no-unstable-deps` (error), and `@tanstack/query/stable-query-client` (error). | [#4012](https://github.com/kdlbs/kandev/pull/4012), `a1e2edadb9cd40a08d23a0f9b72665146ec3fea5` |
+| LINT-02 | Guard the four migrated System Query snapshots against direct Zustand mirrors ([design](../specs/architecture-lint/system-design/migrated-system-query-owner.md)). | [#4357](https://github.com/kdlbs/kandev/pull/4357), `9ad5964ca0a6bdce1e32b462450f7ba78f9cf2b8` |
+
+LINT-02 covers About SystemInfo, database statistics, the backup list, and the
+disk-usage snapshot. It does not move the System job stream or other resources
+to Query.
 
 ## Proposed additions
 
-| ID      | Candidate                                                                 | Value                                                       | Gate before implementation                                                                                 |
-| ------- | ------------------------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| LINT-01 | Existing TanStack ESLint checks for stable clients and query dependencies | Catch common library misuse without a custom scanner        | Inspect the installed Query version, plugin compatibility, and actual violations. Select only useful rules |
-| LINT-02 | Guard the four migrated System Query snapshots against direct Zustand mirrors ([design](../specs/architecture-lint/system-design/migrated-system-query-owner.md)) | Keep retired fields, defaults, actions, aliases, and explicit hydration mirrors out of their accepted owners | Review exact AST owner shapes, supported static keys, exclusions, diagnostics, tests, frontend CI integration, and the no-baseline/no-exemption contract before implementation |
-| LINT-03 | Keep Runs model contracts below service and Office layers                 | Protect the extracted low-level package                     | Review allowed dependencies and fixtures before defining an import rule                                    |
-| LINT-04 | Contract or event checks for one vertical slice                           | Detect cross-language or routing drift                      | First select the slice and executable contract. No repository-wide generator by default                    |
+| ID | Candidate | Value | Gate before implementation |
+| --- | --- | --- | --- |
+| LINT-03 | Keep Runs model contracts below service and Office layers | Protect the extracted low-level package | Review allowed dependencies and fixtures before defining an import rule |
+| LINT-04 | Contract or event checks for one vertical slice | Detect cross-language or routing drift | First select the slice and executable contract. No repository-wide generator by default |
 
 No rule in this table is approved for implementation by this tracking PR.
 The next rule must protect an accepted invariant and provide an actionable replacement.
